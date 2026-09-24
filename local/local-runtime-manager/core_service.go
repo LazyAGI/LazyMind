@@ -200,6 +200,7 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_STATE_BACKEND=sqlite",
 		"LAZYMIND_STATE_SQLITE_DIR=" + paths.CoreStateDir,
 		"LAZYMIND_RUNTIME_ROOT=" + paths.RuntimeRoot,
+		"LAZYMIND_PDF_FONT_CATALOG=" + filepath.Join(paths.ResourcesRoot, "config", "pdf-font.json"),
 		"LAZYMIND_UPLOAD_ROOT=" + paths.UploadRoot,
 		"LAZYMIND_SHARED_UPLOAD_DIR=" + paths.UploadRoot,
 		"LAZYMIND_HISTORY_INJECTION_ENABLED=" + envText("LAZYMIND_HISTORY_INJECTION_ENABLED", "true"),
@@ -243,6 +244,7 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_MODEL_PROVIDER_SECRET_KEY=" + strings.TrimSpace(os.Getenv("LAZYMIND_MODEL_PROVIDER_SECRET_KEY")),
 		"LAZYMIND_MCP_SECRET_KEY=" + envText("LAZYMIND_MCP_SECRET_KEY", "lazymind-core-mcp-default-secret"),
 	}
+	environment = append(environment, pythonComponentEnvironment(paths)...)
 	return append(environment, feishuCLIRuntimeEnv(paths)...)
 }
 

@@ -2,18 +2,23 @@
 
 Desktop mode wraps the existing host-process Local runtime in an Electron shell. Local remains a source-checkout runtime; Desktop is the distributable form.
 
+中文操作流程：[Mac 本地构建 → 验证 → 上传 ModelScope → 安装测试](INSTALL.zh-CN.md)。包含测试 ZIP / Developer ID DMG 的选择、同次构建组件的定位及上传后的校验命令。
+
 ## Build matrix
 
 | Platform | Local | Desktop |
 |----------|-------|---------|
+| macOS Intel x64 | `make local-up` / `make local-down` | `make desktop-darwin-x64` / `make desktop-darwin-x64-dmg` (native Intel validation pending) |
 | macOS arm64 | `make local-up` / `make local-down` | `make desktop-darwin-arm64` (internal ZIP) / `make desktop-darwin-arm64-dmg` (signed DMG) |
 | Windows x64 | `make local-win-up` / `make local-win-down` | `make desktop-windows-x64` (portable ZIP) / `make desktop-windows-x64-installer` (installer) |
 
-Desktop packages bundle the Go services, process-compose, Caddy, the compiled frontend, Python 3.11 runtime, auth/algorithm venvs, LazyLLM, Milvus Lite 3, and the Local dependency overlay. Model weights are not bundled.
+Desktop packages bundle the Go services, process-compose, Caddy, the compiled frontend, Python 3.11 runtime, auth/algorithm venvs, LazyLLM, and shared Local dependencies. Default builds provide RAG/Milvus dependencies as a separately installable component and fetch published workflow examples during warmup. Model weights are not bundled.
 
-Release history samples are not stored in Git. Windows and macOS build entrypoints download the URL pinned in `desktop/history-injection-package.json`, verify its size and SHA-256, and include the outer archive as `resources/runtime/history-injection.zip`. Installer/first-launch warmup verifies it again, extracts only its `history-injection/` subtree into the mutable user runtime, and then starts Core so the conversations and artifacts are injected. The signed macOS application bundle is never modified during this process.
+Release history samples remain separate ModelScope ZIP assets, described by `desktop/history-injection-package.json`. By default, Windows/macOS builds stage only their URL, size and SHA-256 into the runtime manifest. Installer/first-launch warmup downloads and verifies the archive after Python preparation, caches it under the user runtime, extracts its `history-injection/` subtree, and then starts Core to import conversations and artifacts. Matching installed samples are reused without network access. Download failures preserve existing samples, allow normal startup and retry at the next runtime launch. The signed application directory is never modified. Set `LAZYMIND_DESKTOP_DEFER_HISTORY=false` (Actions: `defer_history=false`) to restore the bundled archive for offline distribution; publishing the sample ZIP and updating its metadata remains unchanged.
 
 ## Fast Desktop development
+
+To verify a slim Python environment and its downloaded RAG bundle without building an installer, run `scripts/verify-python-components.py` with the staged algorithm Python. It checks base imports, ZIP integrity, overlay imports, and Milvus persistence across a restart using temporary data. Commands, current platform results and coverage limits are in [the package-size development notes](../docs/development/desktop-package-size-reduction.md#不打安装包先在本机复测).
 
 Use the source Electron shell for browser/UI development instead of rebuilding an installer:
 
@@ -34,7 +39,7 @@ Logs are written under `local/build/desktop-dev/`. Override the defaults with `L
 
 Run the dedicated browser connection and adapter tests with `node --test desktop/electron/tests/*.test.js` from the repository root.
 
-Platform-maintained Skill directories and installable Skill links are declared together in `skills/builtin-sources.yaml`; curated experiences keep their schema, locales, and images under `skills/featured/<id>/`. Desktop builds package or download every source into the same locked ZIP catalog under `resources/runtime/builtin-skills`, and compile the curated catalog plus content-hashed assets under `resources/runtime/featured-skills`. Bundled Caddy serves those assets through `/showcase-assets/` on both macOS and Windows. Release builds use the lock in frozen mode; users only unpack a Skill into their personal revision store when they click Install or Try.
+Platform-maintained Skill directories and installable Skill links are declared together in `skills/builtin-sources.yaml`; curated experiences keep their schema, locales, and images under `skills/featured/<id>/`. Desktop packages the locked Skill catalog, complete `SKILL.md` previews, and patch assets under `resources/runtime/builtin-skills`, plus the curated catalog and content-hashed assets under `resources/runtime/featured-skills`. Remote Skill ZIPs are downloaded and verified when the user clicks Install or Try; the installer does not include them. Bundled Caddy serves featured assets through `/showcase-assets/` on both macOS and Windows. A Skill already installed in the personal revision store remains usable offline.
 
 The frontend dependency tree is installed while building, but raw `frontend/node_modules` is not distributed. Vite compiles browser dependencies into `frontend/dist`, and Desktop serves that static output through bundled Caddy.
 

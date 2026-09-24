@@ -7,6 +7,26 @@ on:
         description: "Branch, tag, or commit SHA to build"
         required: false
         type: string
+      defer_history:
+        description: "Download published workflow examples during installation warmup"
+        required: false
+        type: boolean
+        default: true
+      defer_python:
+        description: "Package RAG as a separately downloadable ModelScope component"
+        required: false
+        type: boolean
+        default: true
+      share_python:
+        description: "Share identical pure Python wheels (opt-in; native platform acceptance required)"
+        required: false
+        type: boolean
+        default: false
+      prune_python:
+        description: "Trim unused Python SDK services and test files"
+        required: false
+        type: boolean
+        default: true
     outputs:
       installer_artifact_name:
         value: ${{ jobs.build-macos-installer.outputs.installer_artifact_name }}
@@ -18,6 +38,26 @@ on:
         description: "Branch, tag, or commit SHA to build; leave empty to build the selected workflow branch"
         required: false
         type: string
+      defer_history:
+        description: "Download published workflow examples during installation warmup"
+        required: false
+        type: boolean
+        default: true
+      defer_python:
+        description: "Package RAG as a separately downloadable ModelScope component"
+        required: false
+        type: boolean
+        default: true
+      share_python:
+        description: "Share identical pure Python wheels (opt-in; native platform acceptance required)"
+        required: false
+        type: boolean
+        default: false
+      prune_python:
+        description: "Trim Python runtime (disable for a same-commit size comparison)"
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -34,6 +74,11 @@ env:
   GOPROXY: https://proxy.golang.org,direct
   PIP_INDEX_URL: https://pypi.org/simple
   UV_DEFAULT_INDEX: https://pypi.org/simple
+  LAZYMIND_DESKTOP_DEFER_HISTORY: ${{ inputs.defer_history && 'true' || 'false' }}
+  LAZYMIND_DESKTOP_DEFER_PYTHON: ${{ inputs.defer_python && 'true' || 'false' }}
+  LAZYMIND_PYTHON_COMPONENT_BASE_URL: ${{ vars.LAZYMIND_PYTHON_COMPONENT_BASE_URL }}
+  LAZYMIND_DESKTOP_SHARE_PYTHON: ${{ inputs.share_python && 'true' || 'false' }}
+  LAZYMIND_DESKTOP_PRUNE_PYTHON: ${{ inputs.prune_python && 'true' || 'false' }}
 
 jobs:
   build-macos-installer:
@@ -557,6 +602,43 @@ jobs:
           spctl --assess --type open --context context:primary-signature --verbose=4 "${final_path}"
           echo "installer_path=${final_path}" >> "${GITHUB_OUTPUT}"
           echo "artifact_name=$(basename "${final_path}")" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload optional Python components
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-python-components
+          path: desktop/dist/python-components/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload PDF font and final runtime reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-desktop-optional-resources
+          path: |
+            desktop/dist/pdf-font/
+            desktop/build/*/final-runtime-size.json
+            desktop/build/*/runtime/config/python-sharing.json
+            desktop/dist/mac*/LazyMind.app/Contents/Resources/runtime/config/python-sharing.json
+          if-no-files-found: ignore
+
+      - name: Upload Python size report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-python-size-report
+          path: desktop/build/darwin-arm64/python-size-report.*
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Add Python size report to summary
+        if: always()
+        run: |
+          if [[ -f desktop/build/darwin-arm64/python-size-report.md ]]; then
+            cat desktop/build/darwin-arm64/python-size-report.md >> "${GITHUB_STEP_SUMMARY}"
+          fi
 
       - name: Upload final notarized installer
         if: steps.release.outputs.official_release == 'true' && steps.dmg_notarization.outputs.status == 'Accepted'

@@ -8,6 +8,7 @@ must remain free of business imports and their exit handlers.
 """
 
 import os
+import site
 import sys
 
 
@@ -21,6 +22,11 @@ def _is_resource_tracker() -> bool:
     except (ValueError, IndexError):
         return False
     return command.startswith('from multiprocessing.resource_tracker import main;main(')
+
+
+for _component_path in os.environ.get('LAZYMIND_PYTHON_COMPONENT_PATHS', '').split(os.pathsep):
+    if _component_path:
+        site.addsitedir(_component_path)
 
 
 def _uses_sqlite_proxy() -> bool:

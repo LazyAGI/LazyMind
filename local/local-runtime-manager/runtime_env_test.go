@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"strconv"
 	"testing"
 )
@@ -15,6 +16,8 @@ func TestServiceRuntimeEnvDisablesPythonBytecodeWrites(t *testing.T) {
 
 	assertEnvContains(t, serviceRuntimeEnv(paths), "PYTHONDONTWRITEBYTECODE=1")
 	assertEnvContains(t, runtimeCommandEnv(paths, cfg), "PYTHONDONTWRITEBYTECODE=1")
+	assertEnvContains(t, serviceRuntimeEnv(paths), "NUMBA_CACHE_DIR="+filepath.Join(paths.XDGCacheDir, "numba"))
+	assertEnvContains(t, runtimeCommandEnv(paths, cfg), "NUMBA_CACHE_DIR="+filepath.Join(paths.XDGCacheDir, "numba"))
 	assertEnvContains(
 		t,
 		localRuntimeEnv(cfg),

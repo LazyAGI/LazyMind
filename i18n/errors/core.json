@@ -1852,5 +1852,14 @@
   "2003112": {"en-US": "Task sources exceed the supported limit", "zh-CN": "任务来源数量或大小超过限制"},
   "2003113": {"en-US": "Task update could not be saved", "zh-CN": "暂时无法保存任务更新"},
   "2003114": {"en-US": "The summary model returned instructions instead of a summary", "zh-CN": "摘要模型返回了指令而非摘要"},
-  "2003115": {"en-US": "The summary model returned empty content", "zh-CN": "摘要模型返回内容为空"}
+  "2003115": {"en-US": "The summary model returned empty content", "zh-CN": "摘要模型返回内容为空"},
+  "2003116": {"en-US": "The Skill package could not be downloaded or verified. Retry, or update the Skill catalog if it keeps failing.", "zh-CN": "技能包下载或校验失败，请重试；若持续失败，请更新技能目录"},
+  "2003117": {"en-US": "PDF font download is only available in local mode", "zh-CN": "PDF 字体下载仅支持本地模式"},
+  "2003118": {"en-US": "PDF font preparation failed; check your network and retry", "zh-CN": "PDF 中文字体准备失败，请检查网络后重试"},
+  "2003119": {"en-US": "Dependency installation is only supported in desktop/local mode", "zh-CN": "依赖安装仅支持桌面或本地模式"},
+  "2003120": {"en-US": "Unknown Python dependency", "zh-CN": "未知的 Python 依赖组件"},
+  "2003121": {"en-US": "Dependency installation is already running", "zh-CN": "依赖组件正在安装，请稍候"},
+  "2003122": {"en-US": "Install the local knowledge component and restart local services first", "zh-CN": "请先安装本地知识库组件，并重启本地服务。"},
+  "2003123": {"en-US": "Resource download or verification failed", "zh-CN": "资源下载或校验失败"},
+  "2003124": {"en-US": "Python dependency installation failed", "zh-CN": "Python 依赖组件安装失败"}
 }

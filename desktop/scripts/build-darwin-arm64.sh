@@ -2,7 +2,20 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BUILD_ROOT="${ROOT}/desktop/build/darwin-arm64"
+TARGET_ARCH="${LAZYMIND_DESKTOP_MAC_ARCH:-arm64}"
+case "${TARGET_ARCH}" in
+  arm64) HOST_ARCH=arm64; GO_ARCH=arm64; ELECTRON_ARCH=arm64; MAC_OUT=mac-arm64 ;;
+  x64) HOST_ARCH=x86_64; GO_ARCH=amd64; ELECTRON_ARCH=x64; MAC_OUT=mac ;;
+  *) echo "Unsupported Mac target: ${TARGET_ARCH}" >&2; exit 2 ;;
+esac
+if [[ "$(uname -s)" != Darwin || "$(uname -m)" != "${HOST_ARCH}" || "$(node -p process.arch)" != "${ELECTRON_ARCH}" ]]; then
+  echo "Build on a native ${HOST_ARCH} Mac with matching Node; cross-architecture/Rosetta builds are unsupported" >&2
+  exit 2
+fi
+if [[ "$(sysctl -in sysctl.proc_translated 2>/dev/null || true)" == 1 ]]; then
+  echo "Run in a native terminal, not Rosetta" >&2; exit 2
+fi
+BUILD_ROOT="${ROOT}/desktop/build/darwin-${TARGET_ARCH}"
 RUNTIME_ROOT="${BUILD_ROOT}/runtime"
 DIST_ROOT="${ROOT}/desktop/dist"
 APP_ICON="${ROOT}/desktop/electron/assets/LazyMind.icns"
@@ -22,6 +35,9 @@ case "$("${GO_BIN}" env GOVERSION)" in
     echo "==> Using Go 1.26.5 to avoid the macOS ARM64 linker regression"
     ;;
 esac
+if [[ "$("${GO_BIN}" env GOHOSTARCH)" != "${GO_ARCH}" || "$("${GO_BIN}" env GOARCH)" != "${GO_ARCH}" || "$("${GO_BIN}" env GOOS)" != darwin ]]; then
+  echo "Go host and target must match darwin/${GO_ARCH}" >&2; exit 2
+fi
 PNPM_BIN="${PNPM:-pnpm}"
 UV_BIN="${UV:-uv}"
 GO_BUILD_FLAGS=(-trimpath -buildvcs=false -ldflags="-s -w")
@@ -67,15 +83,15 @@ remove_generated_path() {
 
 install_feishu_cli() {
   local release_values
-  release_values="$(node -e 'const r = require(process.argv[1]); console.log([r.version, r.archive_sha256["darwin-arm64"], r.license_sha256].join("\t"))' "${FEISHU_CLI_RELEASE}")"
+  release_values="$(node -e 'const r = require(process.argv[1]); console.log([r.version, r.archive_sha256[process.argv[2]], r.license_sha256].join("\t"))' "${FEISHU_CLI_RELEASE}" "darwin-${GO_ARCH}")"
   local version archive_sha256 license_sha256
   IFS=$'\t' read -r version archive_sha256 license_sha256 <<< "${release_values}"
   echo "==> Installing verified Feishu CLI ${version}"
-  local archive="${BUILD_ROOT}/lark-cli-${version}-darwin-arm64.tar.gz"
+  local archive="${BUILD_ROOT}/lark-cli-${version}-darwin-${GO_ARCH}.tar.gz"
   local unpacked
   unpacked="$(mktemp -d "${BUILD_ROOT}/lark-cli.XXXXXX")"
   curl --fail --location --retry 3 \
-    "https://github.com/larksuite/cli/releases/download/v${version}/lark-cli-${version}-darwin-arm64.tar.gz" \
+    "https://github.com/larksuite/cli/releases/download/v${version}/lark-cli-${version}-darwin-${GO_ARCH}.tar.gz" \
     --output "${archive}"
   echo "${archive_sha256}  ${archive}" | shasum -a 256 --check
   tar -xzf "${archive}" -C "${unpacked}"
@@ -84,6 +100,9 @@ install_feishu_cli() {
   if [[ -z "${binary}" ]]; then
     echo "Official Feishu CLI archive did not contain lark-cli" >&2
     exit 1
+  fi
+  if ! file -b "${binary}" | grep -q "${HOST_ARCH}"; then
+    echo "Feishu CLI does not match ${HOST_ARCH}" >&2; exit 1
   fi
   install -m 0755 "${binary}" "${RUNTIME_ROOT}/bin/lark-cli"
   shasum -a 256 "${RUNTIME_ROOT}/bin/lark-cli" | awk '{print $1}' > "${RUNTIME_ROOT}/bin/lark-cli.sha256"
@@ -112,13 +131,6 @@ make_internal_symlinks_relative() {
         ;;
     esac
   done
-}
-
-prune_python_runtime() {
-  local root="$1"
-  find "${root}" -type d -name "__pycache__" -prune -exec rm -rf {} +
-  find "${root}" -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
-  find "${root}" -type d \( -name "test" -o -name "tests" \) -prune -exec rm -rf {} +
 }
 
 assert_desktop_runtime_app() {
@@ -224,6 +236,7 @@ echo "==> Preparing Python runtime and venvs"
 export UV_PYTHON_INSTALL_DIR="${RUNTIME_ROOT}/runtimes/python"
 "${UV_BIN}" python install 3.11.15
 PYTHON="$("${UV_BIN}" python find --managed-python --no-python-downloads --resolve-links 3.11.15)"
+"${PYTHON}" -c "import platform; assert platform.machine() == '${HOST_ARCH}', platform.machine()"
 rm -rf "${RUNTIME_ROOT}/deps/python/auth-service"
 "${UV_BIN}" venv --managed-python --no-python-downloads --relocatable --seed --link-mode copy --python "${PYTHON}" "${RUNTIME_ROOT}/deps/python/auth-service"
 "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/auth-service/bin/python" --link-mode copy --strict -r "${ROOT}/backend/auth-service/requirements.txt"
@@ -232,15 +245,26 @@ rm -rf "${RUNTIME_ROOT}/deps/python/channel-gateway"
 "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/channel-gateway/bin/python" --link-mode copy --strict -r "${ROOT}/backend/channel-gateway/requirements.txt"
 rm -rf "${RUNTIME_ROOT}/deps/python/algorithm"
 "${UV_BIN}" venv --managed-python --no-python-downloads --relocatable --seed --link-mode copy --python "${PYTHON}" "${RUNTIME_ROOT}/deps/python/algorithm"
-"${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict 'setuptools<81' "lazyllm==${LAZYLLM_VERSION}"
-"${RUNTIME_ROOT}/deps/python/algorithm/bin/python" -c "import importlib.metadata as m; assert m.version('lazyllm') == '${LAZYLLM_VERSION}'"
-"${RUNTIME_ROOT}/deps/python/algorithm/bin/lazyllm" install rag
-"${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements.txt"
-"${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements-local.txt"
+if [[ "${TARGET_ARCH}" == "arm64" && "${LAZYMIND_DESKTOP_DEFER_PYTHON:-true}" != "false" ]]; then
+  echo "==> Installing frozen dependencies for the published Mac ARM64 RAG component"
+  "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict \
+    -r "${ROOT}/desktop/python-components/darwin-arm64-requirements.lock" \
+    -r "${ROOT}/algorithm/requirements.txt" -r "${ROOT}/algorithm/requirements-local.txt"
+  "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" -c "import importlib.metadata as m; assert m.version('lazyllm') == '${LAZYLLM_VERSION}'"
+else
+  "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict 'setuptools<81' "lazyllm==${LAZYLLM_VERSION}"
+  "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" -c "import importlib.metadata as m; assert m.version('lazyllm') == '${LAZYLLM_VERSION}'"
+  "${RUNTIME_ROOT}/deps/python/algorithm/bin/lazyllm" install rag
+  "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements.txt"
+  "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements-local.txt"
+fi
 make_internal_symlinks_relative "${RUNTIME_ROOT}"
-echo "==> Pruning Python runtime bytecode and test packages"
-prune_python_runtime "${RUNTIME_ROOT}/runtimes/python"
-prune_python_runtime "${RUNTIME_ROOT}/deps/python"
+echo "==> Auditing and pruning bundled Python runtime"
+python_prune_args=("${RUNTIME_ROOT}" --report "${BUILD_ROOT}/python-size-report.json" --verify-doubao)
+if [[ "${LAZYMIND_DESKTOP_PRUNE_PYTHON:-true}" == "true" ]]; then
+  python_prune_args+=(--apply)
+fi
+"${RUNTIME_ROOT}/deps/python/algorithm/bin/python" "${ROOT}/desktop/scripts/prune-python-runtime.py" "${python_prune_args[@]}"
 
 echo "==> Staging runtime app files"
 rsync -a --delete \
@@ -301,8 +325,10 @@ rsync -a --delete \
 
 prune_runtime_app "${RUNTIME_ROOT}/app"
 assert_desktop_runtime_app "${RUNTIME_ROOT}/app"
+node "${ROOT}/desktop/scripts/stage-pdf-font.mjs" "${RUNTIME_ROOT}"
 
-echo "==> Materializing offline Skill packages and featured catalog"
+echo "==> Materializing locked Skill previews and featured catalog"
+remove_generated_path "${RUNTIME_ROOT}/builtin-skills"
 BUILTIN_SKILL_BUNDLE_ARGS=(
   run ./cmd/builtin-skill-bundle
   --sources "${ROOT}/skills/builtin-sources.yaml"
@@ -311,13 +337,14 @@ BUILTIN_SKILL_BUNDLE_ARGS=(
   --output "${RUNTIME_ROOT}/builtin-skills"
   --featured-sources "${ROOT}/skills/featured"
   --featured-output "${RUNTIME_ROOT}/featured-skills"
+  --frozen-lockfile
+  --catalog-only
 )
-if [[ "${RELEASE_BUILD}" == "true" ]]; then
-  BUILTIN_SKILL_BUNDLE_ARGS+=(--frozen-lockfile)
-fi
 (cd "${ROOT}/backend/core" && "${GO_BIN}" "${BUILTIN_SKILL_BUNDLE_ARGS[@]}")
 
-echo "==> Downloading verified history injection package"
+"${RUNTIME_ROOT}/deps/python/algorithm/bin/python" "${ROOT}/desktop/scripts/stage-featured-assets.py" "${RUNTIME_ROOT}"
+
+echo "==> Preparing workflow example metadata (download during warmup by default)"
 node "${ROOT}/desktop/scripts/stage-history-injection-package.mjs" "${RUNTIME_ROOT}"
 
 TRUSTED_LOCAL_MODE=false
@@ -328,7 +355,7 @@ fi
 RUNTIME_MANIFEST_ARGS=(
   "${RUNTIME_ROOT}"
   --platform darwin
-  --arch arm64
+  --arch "${GO_ARCH}"
   --trusted-local-mode "${TRUSTED_LOCAL_MODE}"
   --build-audience "${LAZYMIND_DESKTOP_BUILD_AUDIENCE:-production}"
   --cloud-oauth-callback-mode "${LAZYMIND_CLOUD_OAUTH_CALLBACK_MODE:-direct}"
@@ -351,23 +378,23 @@ fi
 if ! (cd "${ROOT}/desktop/electron" && node -e 'require("electron")' >/dev/null 2>&1); then
   (cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" rebuild electron)
 fi
-remove_generated_path "${DIST_ROOT}/mac-arm64/LazyMind.app"
+remove_generated_path "${DIST_ROOT}/${MAC_OUT}/LazyMind.app"
 export LAZYMIND_DESKTOP_RUNTIME_STAGE="${RUNTIME_ROOT}"
 export LAZYMIND_DESKTOP_OUTPUT_DIR="${DIST_ROOT}"
 export LAZYMIND_DESKTOP_PACKAGE_KIND
 export LAZYMIND_DESKTOP_SIGNING_MODE
 if [[ "${PACKAGE_KIND}" == "dmg" ]]; then
-  (cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" run dist:mac:arm64)
+  (cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" run "dist:mac:${ELECTRON_ARCH}")
 else
-  (cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" run pack:mac:arm64)
+  (cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" run "pack:mac:${ELECTRON_ARCH}")
 fi
 
-APP_PATH="${DIST_ROOT}/mac-arm64/LazyMind.app"
-ZIP_PATH="${DIST_ROOT}/LazyMind-darwin-arm64.zip"
-DMG_PATH="${DIST_ROOT}/LazyMind-macos-arm64.dmg"
+APP_PATH="${DIST_ROOT}/${MAC_OUT}/LazyMind.app"
+ZIP_PATH="${DIST_ROOT}/LazyMind-darwin-${TARGET_ARCH}.zip"
+DMG_PATH="${DIST_ROOT}/LazyMind-macos-${TARGET_ARCH}.dmg"
 if [[ ! -d "${APP_PATH}" ]]; then
-  if [[ -d "${DIST_ROOT}/mac-arm64" ]]; then
-    APP_PATH="$(find "${DIST_ROOT}/mac-arm64" -maxdepth 3 -type d -name "LazyMind.app" -print -quit)"
+  if [[ -d "${DIST_ROOT}/${MAC_OUT}" ]]; then
+    APP_PATH="$(find "${DIST_ROOT}/${MAC_OUT}" -maxdepth 3 -type d -name "LazyMind.app" -print -quit)"
   fi
 fi
 if [[ -d "${APP_PATH}" ]]; then
@@ -396,6 +423,7 @@ if [[ -d "${APP_PATH}" ]]; then
     fi
     codesign --verify --strict --verbose=2 "${DMG_PATH}"
   fi
+  node "${ROOT}/desktop/scripts/report-runtime-size.mjs" "${APP_PATH}/Contents/Resources/runtime" "${BUILD_ROOT}/final-runtime-size.json" "${ZIP_PATH}" "${DMG_PATH}"
   echo "LazyMind.app: ${APP_PATH}"
   if [[ "${PACKAGE_KIND}" == "dmg" ]]; then
     echo "DMG: ${DMG_PATH}"

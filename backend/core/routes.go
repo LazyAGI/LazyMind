@@ -102,6 +102,7 @@ func handleAgentThreadAPI(r *mux.Router, method, path string, perms []string, h 
 
 // registerAllRoutes text OpenAPI text（text Job），text handleAPI textPermissiontext（text extract_api_permissions.py text Kong RBAC）。
 func registerAllRoutes(r *mux.Router) {
+	r.HandleFunc("/showcase-assets/{asset:.*}", showcase.ServeAsset).Methods(http.MethodGet, http.MethodHead)
 	handleAPI(r, "GET", "/local-workspaces", []string{"qa.read"}, localworkspace.List)
 	handleAPI(r, "POST", "/local-workspaces/{workspace_id}:revoke", []string{"qa.write"}, localworkspace.Revoke)
 	handleAPI(r, "GET", "/conversations/{conversation_id}:workspace", []string{"qa.read"}, localworkspace.ConversationBinding)
@@ -269,11 +270,11 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/datasets", []string{"document.read"}, doc.ListDatasets)
 	handleAPI(r, "POST", "/internal/datasets/usage:batch", nil, doc.InternalBatchDatasetUsage)
 	handleAPI(r, "POST", "/datasets", []string{"document.write"}, doc.CreateDataset)
-	handleAPI(r, "POST", "/datasets/processing/preflight", []string{"document.write"}, doc.ProcessingPreflight)
+	handleAPI(r, "POST", "/datasets/processing/preflight", []string{"document.write"}, systemdeps.RequireRAG(doc.ProcessingPreflight))
 	handleAPI(r, "GET", "/datasets/{dataset}", []string{"document.read"}, doc.GetDataset)
 	handleAPI(r, "DELETE", "/datasets/{dataset}", []string{"document.write"}, doc.DeleteDataset)
 	handleAPI(r, "PATCH", "/datasets/{dataset}", []string{"document.write"}, doc.UpdateDataset)
-	handleAPI(r, "PATCH", "/datasets/{dataset}/processing-level", []string{"document.write"}, doc.UpdateProcessingLevel)
+	handleAPI(r, "PATCH", "/datasets/{dataset}/processing-level", []string{"document.write"}, systemdeps.RequireRAG(doc.UpdateProcessingLevel))
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}:ensure-parsed", []string{"document.read"}, doc.EnsureParsed)
 	handleAPI(r, "GET", "/datasets/{dataset}/processing-status", []string{"document.read"}, doc.GetProcessingStatus)
 
@@ -292,6 +293,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/datasets/{dataset}:unsetDefault", []string{"document.write"}, doc.UnsetDefault)
 	handleAPI(r, "GET", "/data-sources/local-fs-chat-setting", []string{"document.read"}, datasource.GetLocalFSChatSetting)
 	handleAPI(r, "PUT", "/data-sources/local-fs-chat-setting", []string{"document.write"}, datasource.SetLocalFSChatSetting)
+	handleAPI(r, "GET", "/system-dependencies/pdf-font", []string{"document.read"}, systemdeps.GetPDFFont)
+	handleAPI(r, "GET", "/system-dependencies/python", []string{"document.read"}, systemdeps.GetPythonComponents)
+	handleAPI(r, "POST", "/system-dependencies/python:install", []string{"document.write"}, systemdeps.InstallPythonComponent)
 	handleAPI(r, "GET", "/system-dependencies/ffmpeg", []string{"document.read"}, systemdeps.GetFFmpegDependency)
 	handleAPI(r, "PUT", "/system-dependencies/ffmpeg", []string{"document.write"}, systemdeps.UpdateFFmpegDependency)
 	handleAPI(r, "POST", "/system-dependencies/ffmpeg:check", []string{"document.read"}, systemdeps.CheckFFmpegDependency)
@@ -333,14 +337,14 @@ func registerAllRoutes(r *mux.Router) {
 
 	// ----- DocumentService -----
 	handleAPI(r, "GET", "/datasets/{dataset}/documents", []string{"document.read"}, doc.ListDocuments)
-	handleAPI(r, "POST", "/datasets/{dataset}/documents", []string{"document.write"}, doc.CreateDocument)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents", []string{"document.write"}, systemdeps.RequireRAG(doc.CreateDocument))
 	// :content/:download text {document} text，text /documents/xxx:content text {document} text。
-	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}:content", []string{"document.read"}, doc.GetDocumentContent)
+	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}:content", []string{"document.read"}, systemdeps.RequireRAG(doc.GetDocumentContent))
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}:download", []string{"document.read"}, doc.DownloadDocument)
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}", []string{"document.read"}, doc.GetDocument)
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-capabilities", []string{"document.read"}, doc.GetPDFCapabilities)
-	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-artifacts/searchable", []string{"document.write"}, doc.CreateSearchablePDFJob)
-	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-translations", []string{"document.write"}, doc.CreateTranslationPDFJob)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-artifacts/searchable", []string{"document.write"}, systemdeps.RequireRAG(doc.CreateSearchablePDFJob))
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-translations", []string{"document.write"}, systemdeps.RequireRAG(doc.CreateTranslationPDFJob))
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-translations", []string{"document.read"}, doc.ListPDFTranslations)
 	handleAPI(r, "PATCH", "/datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}", []string{"document.write"}, doc.UpdatePDFRenderJob)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete", []string{"document.write"}, doc.CompletePDFRenderJob)
@@ -358,9 +362,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/document/creators", []string{"document.read"}, doc.AllDocumentCreators)
 	handleAPI(r, "GET", "/document/tags", []string{"document.read"}, doc.AllDocumentTags)
 	// ----- text -----
-	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/segments", []string{"document.read"}, doc.ListSegments)
-	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/segments/{segment}", []string{"document.read"}, doc.GetSegment)
-	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/segments:search", []string{"document.read"}, doc.SearchSegments)
+	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/segments", []string{"document.read"}, systemdeps.RequireRAG(doc.ListSegments))
+	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/segments/{segment}", []string{"document.read"}, systemdeps.RequireRAG(doc.GetSegment))
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/segments:search", []string{"document.read"}, systemdeps.RequireRAG(doc.SearchSegments))
 
 	// ----- DatasetMembertext -----
 	handleAPI(r, "GET", "/datasets/{dataset}/members", []string{"document.read"}, doc.ListDatasetMembers)
@@ -836,9 +840,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/knowledge-market", []string{"qa.read"}, knowledge_market.MarketList)
 	handleAPI(r, "GET", "/knowledge-market/domains", []string{"qa.read"}, knowledge_market.MarketDomains)
 	handleAPI(r, "GET", "/knowledge-market/items/{market_item_id}", []string{"qa.read"}, knowledge_market.MarketGet)
-	handleAPI(r, "POST", "/knowledge-market/items/{market_item_id}:install", []string{"qa.write"}, knowledge_market.MarketInstall)
-	handleAPI(r, "POST", "/knowledge-market/items/{market_item_id}:update", []string{"qa.write"}, knowledge_market.MarketUpdate)
-	handleAPI(r, "POST", "/knowledge-market:update-all", []string{"qa.write"}, knowledge_market.MarketUpdateAll)
+	handleAPI(r, "POST", "/knowledge-market/items/{market_item_id}:install", []string{"qa.write"}, systemdeps.RequireRAG(knowledge_market.MarketInstall))
+	handleAPI(r, "POST", "/knowledge-market/items/{market_item_id}:update", []string{"qa.write"}, systemdeps.RequireRAG(knowledge_market.MarketUpdate))
+	handleAPI(r, "POST", "/knowledge-market:update-all", []string{"qa.write"}, systemdeps.RequireRAG(knowledge_market.MarketUpdateAll))
 	handleAPI(r, "GET", "/knowledge-market/tasks", []string{"qa.read"}, knowledge_market.MarketListInstallTasks)
 	handleAPI(r, "GET", "/knowledge-market/tasks/{job_id}", []string{"qa.read"}, knowledge_market.MarketGetInstallTask)
 	handleAPI(r, "DELETE", "/knowledge-market/tasks/{job_id}", []string{"qa.write"}, knowledge_market.MarketDeleteTask)

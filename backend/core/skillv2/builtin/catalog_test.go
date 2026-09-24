@@ -13,7 +13,7 @@ import (
 	skillpackage "lazymind/core/skillv2/skillpackage"
 )
 
-func TestCatalogListsMetadataAndLoadsVerifiedArchiveOnDemand(t *testing.T) {
+func TestCatalogListsMetadataAndLoadsVerifiedLocalArchiveOnDemand(t *testing.T) {
 	root := t.TempDir()
 	archivePath := filepath.Join(root, "packages", "demo.zip")
 	files := map[string]string{
@@ -30,8 +30,8 @@ func TestCatalogListsMetadataAndLoadsVerifiedArchiveOnDemand(t *testing.T) {
 	writeCatalog(t, catalogPath, CatalogSkill{
 		UID:           "bsk_demo",
 		Key:           "demo",
-		SourceURL:     "https://example.test/demo.zip",
-		ResolvedURL:   "https://example.test/demo.zip",
+		SourceURL:     "builtin://demo",
+		ResolvedURL:   "builtin://demo",
 		Version:       "1.0.0",
 		Name:          "demo",
 		Description:   "catalog demo",

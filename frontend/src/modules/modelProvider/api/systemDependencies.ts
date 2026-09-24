@@ -176,3 +176,29 @@ export async function revokeBrowserDevice(deviceID: string) {
     `${basePath}/api/core/browser/manage/devices/${encodeURIComponent(deviceID)}`,
   );
 }
+
+export interface PythonComponentStatus {
+  id: "rag";
+  installed: boolean;
+  active: boolean;
+  restartRequired: boolean;
+  installSupported: boolean;
+  installing: boolean;
+  filename?: string;
+  url?: string;
+  sizeBytes?: number;
+  unpackedBytes?: number;
+}
+
+export async function getPythonComponents() {
+  const response = await axiosInstance.get(`${basePath}/api/core/system-dependencies/python`);
+  return unwrapApiData<PythonComponentStatus[]>(response.data);
+}
+
+export async function installPythonComponent(id: PythonComponentStatus["id"], signal?: AbortSignal) {
+  const response = await axiosInstance.post(
+    `${basePath}/api/core/system-dependencies/python:install`, { id },
+    { timeout: 40 * 60 * 1000, signal },
+  );
+  return unwrapApiData<PythonComponentStatus>(response.data);
+}

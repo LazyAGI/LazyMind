@@ -7,9 +7,8 @@ from urllib.parse import urlparse
 import lazyllm
 from lazyllm.common.globals import init_session
 
-from lazymind.chat.engine.tools.algo import search_kb
-from lazymind.chat.engine.tools.kb import _ensure_kb_search_runtime, _serialize_kb_result
 from lazymind.model_config import inject_model_config
+from lazymind.common.optional_components import ComponentRequiredError, require_component
 
 _DEFAULT_RETRIEVER_TOPK = 20
 _DEFAULT_RERANK_TOPK = 20
@@ -38,6 +37,21 @@ class KnowledgeSearchHit:
     source_url: str = ''
 
 
+def _ensure_kb_search_runtime():
+    from lazymind.chat.engine.tools.kb import _ensure_kb_search_runtime as impl
+    return impl()
+
+
+def _serialize_kb_result(raw):
+    from lazymind.chat.engine.tools.kb import _serialize_kb_result as impl
+    return impl(raw)
+
+
+def search_kb(*args, **kwargs):
+    from lazymind.chat.engine.tools.algo import search_kb as impl
+    return impl(*args, **kwargs)
+
+
 def search(user_id: str, query: str, kb_ids: List[str], top_k: int,
            llm_config: Optional[Dict[str, Any]] = None) -> List[KnowledgeSearchHit]:
     user_id = (user_id or '').strip()
@@ -60,6 +74,7 @@ def search(user_id: str, query: str, kb_ids: List[str], top_k: int,
 
     init_session()
     try:
+        require_component('rag')
         inject_model_config(llm_config)
         retrievers, reranker, image_retriever = _ensure_kb_search_runtime()
         raw = search_kb(
@@ -78,6 +93,8 @@ def search(user_id: str, query: str, kb_ids: List[str], top_k: int,
             image_topk=_DEFAULT_IMAGE_TOPK,
         )
         return _hits_from_serialized(_serialize_kb_result(raw), kb_ids, top_k)
+    except ComponentRequiredError as exc:
+        raise KnowledgeSearchError(exc.code, str(exc), exc) from exc
     except KnowledgeSearchError:
         raise
     except Exception as exc:

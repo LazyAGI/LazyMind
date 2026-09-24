@@ -264,6 +264,7 @@ help:
 	@echo "  make test-hermetic-check - Check uv, fnm/nvm, Node 20, Go 1.24.0, and the test venv"
 	@echo "  make featured-check - Strictly validate featured Skill content, locales, and assets"
 	@echo "  make skills-build - Package platform Skills, download linked Skills, and build runtime catalogs/assets"
+	@echo "  make skills-materialize - Build locked Skill previews and featured assets without downloading remote Skills"
 	@echo "  make clear      - Stop services, remove volumes, clear Python cache"
 	@echo "  make reset-kb   - Stop services, wipe KB data (Milvus, OpenSearch, uploads, lazyllm DB tables)"
 	@echo "                    Set LAZYMIND_RESET_ALGO_ON_STARTUP=true to also clear algo state on next startup"
@@ -352,7 +353,7 @@ skills-build:
 	@$(_SKILL_BUNDLER_RUN) $(_SKILL_BUNDLER_ARGS)
 
 skills-materialize:
-	@$(_SKILL_BUNDLER_RUN) $(_SKILL_BUNDLER_ARGS) --frozen-lockfile
+	@$(_SKILL_BUNDLER_RUN) $(_SKILL_BUNDLER_ARGS) --frozen-lockfile --catalog-only
 
 skills-verify-lock:
 	@$(_SKILL_BUNDLER_RUN) $(_SKILL_BUNDLER_ARGS) --verify-lock-artifacts
@@ -577,6 +578,16 @@ desktop-darwin-arm64-dmg:
 	@LAZYMIND_DESKTOP_PACKAGE_KIND=dmg \
 		LAZYMIND_DESKTOP_SIGNING_MODE=developer-id \
 		bash desktop/scripts/build-darwin-arm64.sh
+
+.PHONY: desktop-darwin-x64 desktop-darwin-x64-dmg desktop-darwin-x64-clean
+desktop-darwin-x64:
+	@bash desktop/scripts/build-darwin-x64.sh
+
+desktop-darwin-x64-dmg:
+	@LAZYMIND_DESKTOP_PACKAGE_KIND=dmg LAZYMIND_DESKTOP_SIGNING_MODE=developer-id bash desktop/scripts/build-darwin-x64.sh
+
+desktop-darwin-x64-clean:
+	@rm -rf "$(CURDIR)/desktop/build/darwin-x64" "$(CURDIR)/desktop/dist/mac" "$(CURDIR)/desktop/dist/LazyMind-darwin-x64.zip" "$(CURDIR)/desktop/dist/LazyMind-macos-x64.dmg"
 
 desktop-darwin-arm64-clean:
 	@echo "🧹 Removing Darwin arm64 Desktop generated outputs..."

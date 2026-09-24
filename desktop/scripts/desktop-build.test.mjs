@@ -52,11 +52,9 @@ function nsisMacro(source, name) {
   return match[1];
 }
 
-function writeOfflineSkillFixtures(root) {
-  const packages = path.join(root, "builtin-skills", "packages");
-  mkdirSync(packages, { recursive: true });
+function writeSkillCatalogFixtures(root) {
+  mkdirSync(path.join(root, "builtin-skills"), { recursive: true });
   writeFileSync(path.join(root, "builtin-skills", "catalog.json"), '{"schema_version":1,"skills":[]}\n');
-  writeFileSync(path.join(packages, "fixture.zip"), "fixture");
   const featured = path.join(root, "featured-skills");
   mkdirSync(featured, { recursive: true });
   mkdirSync(path.join(featured, "assets"), { recursive: true });
@@ -66,6 +64,7 @@ function writeOfflineSkillFixtures(root) {
 
 for (const target of [
   { platform: "darwin", arch: "arm64", suffix: "" },
+  { platform: "darwin", arch: "amd64", suffix: "" },
   { platform: "windows", arch: "amd64", suffix: ".exe" },
 ]) {
   test(`writes ${target.platform}/${target.arch} desktop runtime manifest`, () => {
@@ -76,7 +75,7 @@ for (const target of [
       for (const name of ["process-compose", "local-proxy", "core", "scan-control-plane", "file-watcher", "caddy"]) {
         writeFileSync(path.join(bin, `${name}${target.suffix}`), name);
       }
-      writeOfflineSkillFixtures(root);
+      writeSkillCatalogFixtures(root);
       execFileSync(process.execPath, [
         manifestScript,
         root,
@@ -88,8 +87,8 @@ for (const target of [
       assert.equal(manifest.arch, target.arch);
       assert.deepEqual(manifest.features, {
         trustedLocalMode: false,
-        offlineBuiltinSkills: true,
-        offlineFeaturedSkills: true,
+        offlineBuiltinSkills: false,
+        offlineFeaturedSkills: false,
       });
       assert.equal(manifest.binaries.core, `bin/core${target.suffix}`);
       assert.ok(manifest.checksums[`bin/core${target.suffix}`]);
@@ -107,7 +106,7 @@ for (const target of [
 test("writes trusted local mode into the desktop runtime manifest", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "lazymind-manifest-trusted-"));
   try {
-    writeOfflineSkillFixtures(root);
+    writeSkillCatalogFixtures(root);
     execFileSync(process.execPath, [
       manifestScript,
       root,
@@ -118,15 +117,31 @@ test("writes trusted local mode into the desktop runtime manifest", () => {
     const manifest = JSON.parse(readFileSync(path.join(root, "manifest.json"), "utf8"));
     assert.deepEqual(manifest.features, {
       trustedLocalMode: true,
-      offlineBuiltinSkills: true,
-      offlineFeaturedSkills: true,
+      offlineBuiltinSkills: false,
+      offlineFeaturedSkills: false,
     });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("macOS and Windows builds materialize offline assets before writing the runtime manifest", () => {
+test("desktop runtime manifest rejects a bundled remote Skill ZIP", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "lazymind-manifest-remote-skill-"));
+  try {
+    writeSkillCatalogFixtures(root);
+    mkdirSync(path.join(root, "builtin-skills", "packages"), { recursive: true });
+    writeFileSync(path.join(root, "builtin-skills", "packages", "remote.zip"), "remote");
+    writeFileSync(path.join(root, "builtin-skills", "catalog.json"), JSON.stringify({
+      schema_version: 1,
+      skills: [{ uid: "bsk_remote", source_url: "https://example.test/remote.zip", package_file: "packages/remote.zip" }],
+    }));
+    assert.throws(() => execFileSync(process.execPath, [manifestScript, root, "--platform", "windows", "--arch", "amd64"]), /remote builtin Skill package must not be bundled/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("macOS and Windows builds materialize locked catalogs before writing the runtime manifest", () => {
   const darwin = readFileSync(darwinBuildScript, "utf8");
   const windows = readFileSync(windowsBuildScript, "utf8");
   for (const source of [darwin, windows]) {
@@ -136,12 +151,16 @@ test("macOS and Windows builds materialize offline assets before writing the run
     assert.ok(bundle >= 0, "build script must invoke the shared builtin Skill bundler");
     assert.ok(historyPackage >= 0, "build script must stage the ModelScope history package");
     assert.ok(manifest > bundle, "builtin Skills must be materialized before the runtime manifest is written");
-    assert.ok(manifest > historyPackage, "history samples must be downloaded before the runtime manifest is written");
+    assert.ok(manifest > historyPackage, "history sample metadata must be staged before the runtime manifest is written");
     assert.match(source, /builtin-sources\.yaml/);
     assert.match(source, /builtin-skills\.lock\.json/);
+    assert.match(source, /--catalog-only/);
     assert.match(source, /featured-sources/);
     assert.match(source, /featured-output/);
   }
+  assert.match(darwin, /remove_generated_path "\$\{RUNTIME_ROOT\}\/builtin-skills"/);
+  assert.match(windows, /Remove-GeneratedPath \(Join-Path \$runtimeRoot 'builtin-skills'\)/);
+  assert.match(windows, /Remove-GeneratedPath \(Join-Path \$runtimeRoot 'featured-skills'\)/);
   assert.match(darwin, /--exclude "skills\/\.runtime"/);
   assert.match(darwin, /remove_generated_path "\$\{app_root\}\/skills\/\.runtime"/);
   for (const category of ["research", "review", "search"]) {
@@ -451,11 +470,13 @@ test("macOS distribution build signs packages while CI owns notarization sequenc
   assert.doesNotMatch(source, /codesign -dv[^\n]*\|\s*grep -q/);
   assert.match(source, /verify_runtime_code_signatures "\$\{APP_PATH\}\/Contents\/Resources\/runtime"/);
   assert.match(packageJson.scripts["dist:mac:arm64"], /--publish never$/);
+  assert.match(builderSource, /await splitPythonComponents\(runtimeRoot\);\s+if \(macSigningMode === "none"\) return/);
+  assert.match(builderSource, /await Promise\.all\(workers\);\s+await splitPythonComponents\(runtimeRoot\);\s+stageEmbeddedRuntime/);
   assert.match(builderSource, /afterPack:\s*signAndStageEmbeddedRuntime/);
   assert.match(builderSource, /afterSign:\s*restoreRuntimeAndFinalizeSignature/);
   assert.match(
     builderSource,
-    /context\.electronPlatformName !== "darwin" \|\| macSigningMode === "none"/,
+    /if \(context\.electronPlatformName !== "darwin"\)/,
   );
   assert.match(
     builderSource,
@@ -679,7 +700,7 @@ test("Desktop warmup reports bundled history extraction before Core starts", () 
   const source = readFileSync(electronMainScript, "utf8");
   assert.match(source, /history-injection-payload/);
   assert.match(source, /Preparing sample conversations/);
-  assert.match(source, /Verifying and unpacking the bundled sample conversations/);
+  assert.match(source, /Downloading if needed, verifying and unpacking sample conversations/);
 });
 
 test("selected Desktop folders become dynamic allowed roots without confirmation or restart", () => {
@@ -922,4 +943,24 @@ test("Desktop starts without reserving the Cloud OAuth relay and treats relay fa
     /Cloud OAuth relay failed[\s\S]{0,500}app\.exit\(1\)/,
     "an optional OAuth relay failure must not terminate Desktop",
   );
+});
+
+
+test("deferred example manifests contain download identity and no bundled ZIP reference", () => {
+  for (const target of [{ platform: "windows", arch: "amd64" }, { platform: "darwin", arch: "arm64" }]) {
+    const root = mkdtempSync(path.join(os.tmpdir(), "lazymind-deferred-manifest-"));
+    try {
+      writeSkillCatalogFixtures(root);
+      rmSync(path.join(root, "history-injection.zip"));
+      const config = JSON.parse(readFileSync(path.join(scriptsDir, "../history-injection-package.json"), "utf8"));
+      writeFileSync(path.join(root, "history-injection-package.json"), JSON.stringify(config));
+      execFileSync(process.execPath, [manifestScript, root, "--platform", target.platform, "--arch", target.arch]);
+      const manifest = JSON.parse(readFileSync(path.join(root, "manifest.json"), "utf8"));
+      assert.deepEqual(manifest.historyInjectionDownload, { url: config.url, sha256: config.sha256, size: config.size });
+      assert.equal(manifest.paths.historyInjectionArchive, undefined);
+      assert.equal(manifest.checksums["history-injection.zip"], undefined);
+      assert.ok(manifest.checksums["history-injection-package.json"]);
+      assert.equal(manifest.features.offlineBuiltinSkills, false);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
 });

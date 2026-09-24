@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "filename": "lazymind-pdf-NotoSansSC-a3041811a78c361b.ttf",
+  "sizeBytes": 17772300,
+  "sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da",
+  "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/lazymind-pdf-NotoSansSC-a3041811a78c361b.ttf",
+  "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/211752ef6607f899e94f1b01e4c0bfb7285240ac/lazymind-pdf-NotoSansSC-a3041811a78c361b.ttf"
+}

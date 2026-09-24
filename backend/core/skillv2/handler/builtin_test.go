@@ -85,6 +85,87 @@ func TestVisibleBuiltinPackagesHidesFeaturedOnlyPackages(t *testing.T) {
 	}
 }
 
+func TestEnableBuiltinSkillUsesCachedLockedPackageWithoutBundledArchive(t *testing.T) {
+	uid := "bsk_cached"
+	files := map[string]string{
+		"SKILL.md":            "---\nname: cached\ndescription: cached skill\n---\n# Cached\n",
+		"references/guide.md": "full package content\n",
+	}
+	cacheRoot := t.TempDir()
+	archivePath := filepath.Join(cacheRoot, "package.zip")
+	writeBuiltinTestZip(t, archivePath, files)
+	body, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256(body)
+	archiveSHA := hex.EncodeToString(hash[:])
+	if err := os.Rename(archivePath, filepath.Join(cacheRoot, archiveSHA+".zip")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAZYMIND_BUILTIN_SKILL_CACHE", cacheRoot)
+	useBuiltinCatalog(t, skillbuiltin.Catalog{SchemaVersion: skillbuiltin.CatalogSchemaVersion, Skills: []skillbuiltin.CatalogSkill{{
+		Key: "cached", UID: uid, SourceURL: "https://example.test/cached.zip", ResolvedURL: "https://example.test/cached.zip",
+		Version: "1.0.0", Name: "cached", Description: "cached skill", Category: "research", Content: files["SKILL.md"],
+		ArchiveSHA256: archiveSHA, TreeSHA256: skillpackage.TreeHash(stringMapBytes(files)), ArchiveSize: int64(len(body)),
+		PackageFile: "packages/cached.zip",
+	}}})
+	db := testutil.NewTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	req := httptest.NewRequest(http.MethodPost, "/api/core/builtin-skills/"+uid+":enable", nil)
+	req = mux.SetURLVars(req, map[string]string{"builtin_skill_uid": uid})
+	req.Header.Set("X-User-Id", "user_001")
+	req.Header.Set("X-User-Name", "User One")
+	rec := httptest.NewRecorder()
+	EnableBuiltinSkill(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("enable status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var row testutil.SkillRow
+	if err := db.Where("origin_builtin_skill_uid = ?", uid).Take(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	content, err := skillservice.NewSkillService(skillservice.SkillServiceDeps{DB: db.DB}).ReadFile(context.Background(), skillservice.FileRef{
+		SkillID: row.ID, RefType: "head", Path: "references/guide.md",
+	})
+	if err != nil || content.Content != files["references/guide.md"] {
+		t.Fatalf("installed reference=%#v err=%v", content, err)
+	}
+}
+
+func TestEnableBuiltinSkillDownloadFailureDoesNotCreateSkill(t *testing.T) {
+	uid := "bsk_unavailable"
+	t.Setenv("LAZYMIND_BUILTIN_SKILL_CACHE", t.TempDir())
+	useBuiltinCatalog(t, skillbuiltin.Catalog{SchemaVersion: skillbuiltin.CatalogSchemaVersion, Skills: []skillbuiltin.CatalogSkill{{
+		Key: "unavailable", UID: uid, SourceURL: "https://example.test/unavailable.zip", ResolvedURL: "http://example.test/unavailable.zip",
+		Version: "1.0.0", Name: "unavailable", Description: "unavailable skill", Category: "research", Content: "# Preview",
+		ArchiveSHA256: strings.Repeat("a", 64), TreeSHA256: strings.Repeat("b", 64), ArchiveSize: 1,
+		PackageFile: "packages/unavailable.zip",
+	}}})
+	db := testutil.NewTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	req := httptest.NewRequest(http.MethodPost, "/api/core/builtin-skills/"+uid+":enable", nil)
+	req = mux.SetURLVars(req, map[string]string{"builtin_skill_uid": uid})
+	req.Header.Set("X-User-Id", "user_001")
+	req.Header.Set("X-User-Name", "User One")
+	rec := httptest.NewRecorder()
+	EnableBuiltinSkill(rec, req)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status=%d body=%s, want 502", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Code int `json:"code"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil || response.Code != 2003116 {
+		t.Fatalf("download error code=%d decode err=%v", response.Code, err)
+	}
+	if count := testutil.CountRows(t, db, "skills", "origin_builtin_skill_uid = ?", uid); count != 0 {
+		t.Fatalf("failed install created %d skills", count)
+	}
+}
+
 func TestEnableBuiltinSkillReusesAndEnablesExistingInstall(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
@@ -233,6 +314,14 @@ func useBuiltinCatalogWithZip(t *testing.T, entry skillbuiltin.CatalogSkill, fil
 	entry.ArchiveSize = int64(len(body))
 	entry.TreeSHA256 = skillpackage.TreeHash(stringMapBytes(files))
 	entry.PackageFile = filepath.ToSlash(filepath.Join("packages", entry.Key+".zip"))
+	cacheDirectory := filepath.Join(root, "user-cache")
+	if err := os.MkdirAll(cacheDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheDirectory, entry.ArchiveSHA256+".zip"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAZYMIND_BUILTIN_SKILL_CACHE", cacheDirectory)
 	catalog := skillbuiltin.Catalog{SchemaVersion: skillbuiltin.CatalogSchemaVersion, Skills: []skillbuiltin.CatalogSkill{entry}}
 	catalogBody, err := json.Marshal(catalog)
 	if err != nil {

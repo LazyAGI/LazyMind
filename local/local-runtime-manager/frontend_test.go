@@ -55,6 +55,23 @@ func TestWriteCaddyfileProxiesLocalEndpoints(t *testing.T) {
 	if !strings.Contains(string(raw), filepath.ToSlash(desktopAssets)) {
 		t.Fatalf("desktop Caddyfile missing default featured assets path:\n%s", raw)
 	}
+	if err := os.MkdirAll(filepath.Join(paths.ResourcesRoot, "featured-skills"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(paths.ResourcesRoot, "featured-skills", "downloads.json"), []byte(`{"schemaVersion":1}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCaddyfile(paths, cfg); err != nil {
+		t.Fatal(err)
+	}
+	raw, err = os.ReadFile(paths.CaddyConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "handle /showcase-assets/*") || !strings.Contains(string(raw), "reverse_proxy http://127.0.0.1:"+strconv.Itoa(cfg.LocalProxy.CoreHostPort)) {
+		t.Fatalf("deferred assets must use Core without stripping their URL prefix: %s", raw)
+	}
+
 }
 
 func TestFrontendDownStopsPIDFileProcess(t *testing.T) {

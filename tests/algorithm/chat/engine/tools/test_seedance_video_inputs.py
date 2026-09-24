@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 from unittest import mock
-from types import SimpleNamespace
 
 
 sys.path.insert(0, str((Path(__file__).resolve().parents[5] / 'algorithm')))
@@ -34,7 +33,8 @@ def test_video_generator_prompt_names_request_selected_model():
     assert appendix['output_contract'] == tool_registry.VIDEO_MARKDOWN_OUTPUT_APPENDIX['output_contract']
 
 
-def test_video_generator_orders_seedance_first_and_last_frame_inputs():
+@mock.patch.object(multimodal, "is_model_role_available", return_value=True)
+def test_video_generator_orders_seedance_first_and_last_frame_inputs(_available):
     with mock.patch.object(
         multimodal,
         '_resolve_source_image_paths',
@@ -62,7 +62,8 @@ def test_video_generator_orders_seedance_first_and_last_frame_inputs():
     assert run.call_args.kwargs['ratio'] == 'adaptive'
 
 
-def test_video_generator_keeps_multiple_seedance_references_in_reference_mode():
+@mock.patch.object(multimodal, "is_model_role_available", return_value=True)
+def test_video_generator_keeps_multiple_seedance_references_in_reference_mode(_available):
     with mock.patch.object(
         multimodal,
         '_resolve_source_image_paths',
@@ -87,7 +88,8 @@ def test_video_generator_keeps_multiple_seedance_references_in_reference_mode():
     assert run.call_args.kwargs['ratio'] == '1:1'
 
 
-def test_video_generator_rejects_mixed_seedance_frame_and_reference_modes():
+@mock.patch.object(multimodal, "is_model_role_available", return_value=True)
+def test_video_generator_rejects_mixed_seedance_frame_and_reference_modes(_available):
     with mock.patch.object(
         multimodal,
         '_resolve_source_image_paths',
@@ -173,26 +175,15 @@ def test_doubao_seedance_preserves_first_and_last_frame_roles():
 
 
 def test_doubao_seedance_submits_render_options_as_top_level_api_fields():
-    module = object.__new__(DoubaoText2Video)
-    tasks = SimpleNamespace(
-        create=mock.Mock(return_value=SimpleNamespace(id='task-1')),
-        get=mock.Mock(return_value=SimpleNamespace(
-            status='succeeded',
-            content=SimpleNamespace(video_url='https://cdn.example.com/out.mp4'),
-        )),
-    )
-    client = SimpleNamespace(content_generation=SimpleNamespace(tasks=tasks))
-    response = SimpleNamespace(content=b'video-bytes')
-
-    with mock.patch.object(module, '_ark_client', return_value=client), mock.patch.object(
-        doubao_supplier.requests,
-        'get',
-        return_value=response,
-    ), mock.patch.object(
-        doubao_supplier,
-        'bytes_to_file',
-        return_value=['/tmp/out.mp4'],
-    ):
+    module = DoubaoText2Video(api_key='test-key')
+    with mock.patch.object(
+        doubao_supplier, '_ark_request', side_effect=[
+            {'id': 'task-1'},
+            {'status': 'succeeded', 'content': {'video_url': 'https://cdn.example.com/out.mp4'}},
+        ],
+    ) as request_http, mock.patch.object(
+        doubao_supplier, '_download_generated_file', return_value=b'video-bytes',
+    ), mock.patch.object(doubao_supplier, 'bytes_to_file', return_value=['/tmp/out.mp4']):
         module._forward(
             input='Use the supplied subject as a visual reference.',
             files=['https://cdn.example.com/reference.png'],
@@ -204,7 +195,7 @@ def test_doubao_seedance_submits_render_options_as_top_level_api_fields():
             model='doubao-seedance-2-5-260628',
         )
 
-    request = tasks.create.call_args.kwargs
+    request = request_http.call_args_list[0].kwargs['payload']
     assert request['model'] == 'doubao-seedance-2-5-260628'
     assert request['resolution'] == '720p'
     assert request['duration'] == 5

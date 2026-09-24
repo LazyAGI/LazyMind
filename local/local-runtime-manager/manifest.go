@@ -11,15 +11,16 @@ import (
 const runtimeManifestFileName = "manifest.json"
 
 type RuntimeManifest struct {
-	Version   int                        `json:"version"`
-	Profile   string                     `json:"profile"`
-	Platform  string                     `json:"platform"`
-	Arch      string                     `json:"arch"`
-	Features  RuntimeManifestFeatures    `json:"features,omitempty"`
-	Binaries  map[string]string          `json:"binaries"`
-	Paths     RuntimeManifestPaths       `json:"paths"`
-	Services  map[string]ManifestService `json:"services,omitempty"`
-	Checksums map[string]string          `json:"checksums,omitempty"`
+	HistoryInjectionDownload *HistoryInjectionDownload  `json:"historyInjectionDownload,omitempty"`
+	Version                  int                        `json:"version"`
+	Profile                  string                     `json:"profile"`
+	Platform                 string                     `json:"platform"`
+	Arch                     string                     `json:"arch"`
+	Features                 RuntimeManifestFeatures    `json:"features,omitempty"`
+	Binaries                 map[string]string          `json:"binaries"`
+	Paths                    RuntimeManifestPaths       `json:"paths"`
+	Services                 map[string]ManifestService `json:"services,omitempty"`
+	Checksums                map[string]string          `json:"checksums,omitempty"`
 }
 
 type RuntimeManifestFeatures struct {

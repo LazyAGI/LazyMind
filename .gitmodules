@@ -1,4 +1,4 @@
 [submodule "algorithm/lazyllm"]
 	path = algorithm/lazyllm
-	url = https://github.com/LazyAGI/LazyLLM.git
-	branch = main
+	url = https://github.com/CarlosShaoting/LazyLLM.git
+	branch = cst/install_opt

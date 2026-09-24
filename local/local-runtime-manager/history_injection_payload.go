@@ -23,7 +23,7 @@ const (
 	historyInjectionPayloadRenameWait = 2 * time.Minute
 )
 
-// prepareBundledHistoryInjection expands the signed Desktop release asset into
+// prepareBundledHistoryInjection downloads (when deferred) and expands the pinned Desktop asset into
 // the mutable user runtime before Core starts. Local development and older
 // Desktop packages have no archive path in their runtime manifest and keep
 // using the repository history-injection directory.
@@ -31,6 +31,20 @@ func prepareBundledHistoryInjection(ctx context.Context, paths RuntimePaths) err
 	archivePath := strings.TrimSpace(paths.HistoryInjectionArchive)
 	if archivePath == "" {
 		return nil
+	}
+	if download := paths.HistoryInjectionDownload; download != nil {
+		if err := download.validate(); err != nil {
+			return err
+		}
+		// A matching installed package takes precedence over the archive cache,
+		// so future offline launches do not need to retain the downloaded ZIP.
+		marker, err := os.ReadFile(filepath.Join(paths.HistoryInjectionRoot, historyInjectionPayloadMarkerName))
+		if err == nil && strings.TrimSpace(string(marker)) == download.SHA256 && historyInjectionBundleCount(paths.HistoryInjectionRoot) > 0 {
+			return nil
+		}
+		if err := downloadHistoryInjection(ctx, *download, archivePath); err != nil {
+			return err
+		}
 	}
 	identity, err := historyInjectionPayloadSHA256(archivePath)
 	if err != nil {
@@ -61,7 +75,7 @@ func prepareBundledHistoryInjection(ctx context.Context, paths RuntimePaths) err
 	defer os.RemoveAll(stagingRoot)
 
 	extractedRoot := filepath.Join(stagingRoot, "history-injection")
-	bundleCount, err := extractHistoryInjectionPayload(archivePath, extractedRoot)
+	bundleCount, err := extractHistoryInjectionPayload(ctx, archivePath, extractedRoot)
 	if err != nil {
 		return err
 	}
@@ -90,7 +104,7 @@ func historyInjectionPayloadSHA256(filePath string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-func extractHistoryInjectionPayload(archivePath, targetRoot string) (int, error) {
+func extractHistoryInjectionPayload(ctx context.Context, archivePath, targetRoot string) (int, error) {
 	reader, err := zip.OpenReader(archivePath)
 	if err != nil {
 		return 0, fmt.Errorf("open bundled history injection package: %w", err)
@@ -100,6 +114,9 @@ func extractHistoryInjectionPayload(archivePath, targetRoot string) (int, error)
 	var totalBytes uint64
 	bundleCount := 0
 	for _, entry := range reader.File {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
 		cleanName := path.Clean(strings.ReplaceAll(entry.Name, "\\", "/"))
 		if cleanName == "." || strings.HasPrefix(cleanName, "/") || cleanName == ".." || strings.HasPrefix(cleanName, "../") {
 			return 0, fmt.Errorf("bundled history injection package contains unsafe path %q", entry.Name)

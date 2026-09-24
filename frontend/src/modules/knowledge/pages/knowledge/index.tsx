@@ -575,10 +575,10 @@ const Detail = () => {
         if (!blocks.length) throw new Error("文档解析超时，或 Reader 未产生区域布局节点");
       }
       await updatePdfRenderJob(knowledgeBaseId, knowledgeId, job.id, { status: "RUNNING", stage: "WRITING_TEXT_LAYER", progress: 5 });
-      const blob = await buildSearchablePdf(source, blocks, ({ page, pages, progress }) => {
+      const blob = await buildSearchablePdf(source, blocks, ({ page, pages, progress, stage }) => {
         const next = 5 + Math.round(progress * 0.85);
         setPdfTask((current) => current ? { ...current, status: "RUNNING", stage: "WRITING_TEXT_LAYER", progress: next } : current);
-        setPdfTaskDetail(`${page} / ${pages} 页`);
+        setPdfTaskDetail(stage === "font" ? "正在准备 PDF 中文字体，首次导出需要联网下载…" : `${page} / ${pages} 页`);
       });
       setPdfTask((current) => current ? { ...current, stage: "VERIFYING", progress: 94 } : current);
       const filename = `${(knowledgeDetail?.display_name || "document").replace(/\.pdf$/i, "")}-searchable.pdf`;

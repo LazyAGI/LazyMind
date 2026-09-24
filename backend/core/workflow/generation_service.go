@@ -65,6 +65,9 @@ func queueWorkflowDraftGeneration(ctx context.Context, db *gorm.DB, userID, draf
 			snapshot, err = loadWorkflowSourceSkill(ctx, db, userID, body.SkillID)
 		}
 		if err != nil {
+			if isWorkflowBuiltinPackageDownload(err) {
+				return orm.WorkflowDraft{}, &workflowServiceError{http.StatusBadGateway, err.Error()}
+			}
 			status := http.StatusInternalServerError
 			if isWorkflowSourceSkillNotFound(err) {
 				status = http.StatusNotFound

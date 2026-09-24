@@ -7,6 +7,26 @@ on:
         description: "Branch, tag, or commit SHA to build"
         required: false
         type: string
+      defer_history:
+        description: "Download published workflow examples during installation warmup"
+        required: false
+        type: boolean
+        default: true
+      defer_python:
+        description: "Use the published RAG component from ModelScope (fixed version)"
+        required: false
+        type: boolean
+        default: true
+      share_python:
+        description: "Share identical pure Python wheels (opt-in; native platform acceptance required)"
+        required: false
+        type: boolean
+        default: false
+      prune_python:
+        description: "Trim unused Python SDK services and test files"
+        required: false
+        type: boolean
+        default: true
     outputs:
       artifact_name:
         value: ${{ jobs.build-windows-installer.outputs.artifact_name }}
@@ -18,6 +38,26 @@ on:
         description: "Branch, tag, or commit SHA to build; leave empty to build the selected workflow branch"
         required: false
         type: string
+      defer_history:
+        description: "Download published workflow examples during installation warmup"
+        required: false
+        type: boolean
+        default: true
+      defer_python:
+        description: "Use the published RAG component from ModelScope (fixed version)"
+        required: false
+        type: boolean
+        default: true
+      share_python:
+        description: "Share identical pure Python wheels (opt-in; native platform acceptance required)"
+        required: false
+        type: boolean
+        default: false
+      prune_python:
+        description: "Trim Python runtime (disable for a same-commit size comparison)"
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -33,6 +73,11 @@ env:
   GOPROXY: https://proxy.golang.org,direct
   PIP_INDEX_URL: https://pypi.org/simple
   UV_DEFAULT_INDEX: https://pypi.org/simple
+  LAZYMIND_DESKTOP_DEFER_HISTORY: ${{ inputs.defer_history && 'true' || 'false' }}
+  LAZYMIND_DESKTOP_DEFER_PYTHON: ${{ inputs.defer_python && 'true' || 'false' }}
+  LAZYMIND_PYTHON_COMPONENT_BASE_URL: ${{ vars.LAZYMIND_PYTHON_COMPONENT_BASE_URL }}
+  LAZYMIND_DESKTOP_SHARE_PYTHON: ${{ inputs.share_python && 'true' || 'false' }}
+  LAZYMIND_DESKTOP_PRUNE_PYTHON: ${{ inputs.prune_python && 'true' || 'false' }}
 
 jobs:
   build-windows-installer:
@@ -283,16 +328,70 @@ jobs:
           "artifact_name=$outputName" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
           "installer_sha256=$($hash.Hash.ToLowerInvariant())" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
 
-          @"
-          ## Windows installer
+          @(
+            '## Windows installer'
+            ''
+            ('- File: `{0}`' -f $outputName)
+            ('- Size: {0} MiB ({1} bytes)' -f [math]::Round($outputFile.Length / 1MB, 2), $outputFile.Length)
+            ('- SHA-256: `{0}`' -f $hash.Hash.ToLowerInvariant())
+            ('- Signature: `{0}`' -f $signature.Status)
+            ('- Python pruning: {0}' -f $env:LAZYMIND_DESKTOP_PRUNE_PYTHON)
+            ('- RAG deferred: {0}' -f $env:LAZYMIND_DESKTOP_DEFER_PYTHON)
+            ('- RAG source: {0}' -f $(if ($env:LAZYMIND_DESKTOP_DEFER_PYTHON -eq 'false') { 'bundled in installer' } else { 'fixed published ModelScope component; no new ZIP generated' }))
+            ('- Workflow examples deferred: {0}' -f $env:LAZYMIND_DESKTOP_DEFER_HISTORY)
+          ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
 
-          - File: `$outputName`
-          - Size: $([math]::Round($outputFile.Length / 1MB, 2)) MiB
-          - SHA-256: `$($hash.Hash.ToLowerInvariant())`
-          - Signature: `$($signature.Status)`
-          "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+          $catalogPath = 'desktop/build/windows-x64/runtime/config/python-components.json'
+          if (Test-Path -LiteralPath $catalogPath) {
+            $rag = (Get-Content -LiteralPath $catalogPath -Raw | ConvertFrom-Json).components.rag
+            @(
+              ('- Published RAG file: `{0}`' -f $rag.filename)
+              ('- Published RAG SHA-256: `{0}`' -f $rag.sha256)
+              ('- Published RAG download: {0}' -f $rag.url)
+            ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+          }
 
           Get-ChildItem -LiteralPath $publishDir | Format-Table Name, Length
+
+      - name: Upload published Python component catalog
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-python-components
+          path: desktop/dist/python-components/windows-amd64/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload PDF font and final runtime reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-desktop-optional-resources
+          path: |
+            desktop/dist/pdf-font/
+            desktop/build/*/final-runtime-size.json
+            desktop/build/*/runtime/config/python-sharing.json
+            desktop/build/*/runtime/config/published-python-verification.json
+            desktop/dist/mac*/LazyMind.app/Contents/Resources/runtime/config/python-sharing.json
+          if-no-files-found: ignore
+
+      - name: Upload Python size report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-python-size-report
+          path: desktop/build/windows-x64/python-size-report.*
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Add Python size report to summary
+        if: always()
+        shell: pwsh
+        run: |
+          $report = 'desktop/build/windows-x64/python-size-report.md'
+          if (Test-Path -LiteralPath $report) {
+            Get-Content -LiteralPath $report | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+          }
 
       - name: Upload installer artifact
         id: upload

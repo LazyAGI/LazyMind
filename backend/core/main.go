@@ -47,9 +47,11 @@ import (
 	"lazymind/core/recovery"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/scheduler"
+	"lazymind/core/showcase"
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/systemdeps"
 	"lazymind/core/taskcenter"
 	"lazymind/core/workflow"
 	workflowexecutor "lazymind/core/workflow/executor"
@@ -886,10 +888,17 @@ func run(ctx context.Context) error {
 	if !startBackgroundJobs {
 		log.Logger.Info().Msg("core background jobs are disabled")
 	} else {
+		// History samples have already been downloaded and imported above.
+		backgroundDone = append(backgroundDone, showcase.StartAssetPrefetch(runtimeCtx))
 		asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
+		excludedJobs := append([]string(nil), chat.ConversationTitleJobTypes...)
+		if !systemdeps.PythonComponentActive("rag") {
+			excludedJobs = append(excludedJobs, doc.MarketInstallJobType, doc.MarketUpdateJobType,
+				doc.MarketUpdateAllJobType, "document_pdf_translation")
+		}
 		runner = asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{
 			Concurrency:     asyncConfig.Concurrency,
-			ExcludeJobTypes: chat.ConversationTitleJobTypes,
+			ExcludeJobTypes: excludedJobs,
 			PollInterval:    asyncConfig.PollInterval,
 			LockTTL:         asyncConfig.LockTTL,
 		})

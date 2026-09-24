@@ -182,11 +182,62 @@ async function adhocSignAppBundle(appPath) {
   await codesignWithRetry(["--force", "--sign", "-", "--timestamp=none", appPath], appPath);
 }
 
+async function splitPythonComponents(runtimeRoot) {
+  // Running Python inside the unfinished app can trigger Gatekeeper before the
+  // outer bundle is signed. Relative runtime symlinks remain valid after moving.
+  const appOutDir = path.resolve(runtimeRoot, "../../../..");
+  const { stagedRuntime } = stageEmbeddedRuntime(appOutDir);
+  try {
+    const python = path.join(stagedRuntime, "deps/python/algorithm/bin/python");
+    const { stdout: machine } = await execFile(python, ["-I", "-B", "-c", "import platform; print(platform.machine())"]);
+    const componentArch = { arm64: "arm64", x86_64: "amd64" }[machine.trim()];
+    if (!componentArch || componentArch !== ({ x64: "amd64", arm64: "arm64" })[process.arch]) {
+      throw new Error(`Bundled Python architecture does not match native build: ${machine.trim()}`);
+    }
+    if (process.env.LAZYMIND_DESKTOP_DEFER_PYTHON !== "false") {
+      const rebuild = process.env.LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS === "true";
+      const published = componentArch === "arm64" && !rebuild;
+      const componentArgs = [
+        path.resolve(__dirname, published ? "../scripts/stage-published-python-components.py" : "../scripts/build-python-components.py"),
+        stagedRuntime, "--output", path.resolve(__dirname, `../dist/python-components/darwin-${componentArch}`),
+      ];
+      if (published) componentArgs.push(
+        "--catalog", path.resolve(__dirname, "../python-components/darwin-arm64.json"),
+        "--lock", path.resolve(__dirname, "../python-components/darwin-arm64-requirements.lock"),
+        "--cache", path.resolve(__dirname, "../cache/published-python/darwin-arm64"),
+      );
+      if (rebuild) componentArgs.push("--slim-providers");
+      const { stdout } = await execFile(python, componentArgs, { maxBuffer: 4 * 1024 * 1024 });
+      console.log(stdout);
+      if (rebuild) {
+        const { stdout: verification } = await execFile(python, [
+          path.resolve(__dirname, "../scripts/verify-python-components.py"),
+          "--runtime", stagedRuntime,
+          "--bundle-dir", path.resolve(__dirname, `../dist/python-components/darwin-${componentArch}`),
+        ], { maxBuffer: 4 * 1024 * 1024 });
+        console.log(verification);
+      }
+    }
+    const args = [path.resolve(__dirname, "../scripts/share-python-dependencies.py"), stagedRuntime];
+    if (process.env.LAZYMIND_DESKTOP_SHARE_PYTHON === "true") args.push("--apply");
+    const { stdout: sharing } = await execFile(python, args, { maxBuffer: 4 * 1024 * 1024 });
+    console.log(sharing);
+  } finally {
+    restoreEmbeddedRuntime(appOutDir);
+  }
+}
+
 async function signAndStageEmbeddedRuntime(context) {
-  if (context.electronPlatformName !== "darwin" || macSigningMode === "none") {
+  if (context.electronPlatformName !== "darwin") {
     return;
   }
 
+  // electron-builder 24 uses builder-util Arch: x64=1, arm64=3.
+  const targetMachine = { 1: "x86_64", 3: "arm64" }[context.arch];
+  const nativeMachine = { x64: "x86_64", arm64: "arm64" }[process.arch];
+  if (!targetMachine || targetMachine !== nativeMachine) {
+    throw new Error("Mac runtime packaging requires a native host matching the Electron target");
+  }
   const appPath = path.join(context.appOutDir, "LazyMind.app");
   const runtimeRoot = path.join(appPath, "Contents", "Resources", "runtime");
 
@@ -218,9 +269,13 @@ async function signAndStageEmbeddedRuntime(context) {
       }
     });
     await Promise.all(workers);
+    await splitPythonComponents(runtimeRoot);
     stageEmbeddedRuntime(context.appOutDir);
     return;
   }
+
+  await splitPythonComponents(runtimeRoot);
+  if (macSigningMode === "none") return;
 
   // electron-builder 24 treats identity "-" as a keychain name lookup and skips
   // signing when no matching identity exists. Perform ad-hoc signing ourselves

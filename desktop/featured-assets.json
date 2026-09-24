@@ -1,0 +1,1301 @@
+{
+  "bundles": {
+    "academic_research_pipeline/1.1.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-academic_research_pipeline-e58de4f73d80d71f.zip",
+      "filename": "lazymind-featured-academic_research_pipeline-e58de4f73d80d71f.zip",
+      "files": {
+        "academic_research_pipeline/1.1.0/58e05a4bbc28-academic-paper-demo.html": {
+          "sha256": "58e05a4bbc2815c5012185e898dfd7e080ac9ceb543916e8c64c569c9d910b0c",
+          "sizeBytes": 625174
+        }
+      },
+      "sha256": "bff1b4fd0d37727a161527f9d1914d497753286cf3c4d7402626013671a87e1b",
+      "sizeBytes": 162277,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-academic_research_pipeline-e58de4f73d80d71f.zip"
+    },
+    "agent-team-orchestration/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-agent-team-orchestration-9bc2a0d58717d494.zip",
+      "filename": "lazymind-featured-agent-team-orchestration-9bc2a0d58717d494.zip",
+      "files": {
+        "agent-team-orchestration/1.0.0/80d6475be1b4-incident-room.html": {
+          "sha256": "80d6475be1b4d0e08991b1902df89501d95ec75760cafafab0f73f1534686540",
+          "sizeBytes": 6029
+        },
+        "agent-team-orchestration/1.0.0/cdbe74c20937-research-sprint.html": {
+          "sha256": "cdbe74c20937101966c0fd1061f7a4c8a58042e1d88b55a6f1067e991595d01b",
+          "sizeBytes": 5402
+        },
+        "agent-team-orchestration/1.0.0/d18e763040b7-launch-team.html": {
+          "sha256": "d18e763040b71cbbfb8ea4cf1554c3e231e4fd930e8c6ec3dc937ea61e61c937",
+          "sizeBytes": 3821
+        }
+      },
+      "sha256": "d304eb893ed7946b2da6c6a35fd2bc78af1aeb5b882c6b194a9d8dfa419d61e3",
+      "sizeBytes": 7601,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-agent-team-orchestration-9bc2a0d58717d494.zip"
+    },
+    "agentic-coding/1.0.1": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-agentic-coding-7bdee53047ec5c08.zip",
+      "filename": "lazymind-featured-agentic-coding-7bdee53047ec5c08.zip",
+      "files": {
+        "agentic-coding/1.0.1/2099adff3628-pagination.html": {
+          "sha256": "2099adff36283723f89a89b10d162b320e88e7fc249b783855870be553f574b9",
+          "sizeBytes": 6927
+        },
+        "agentic-coding/1.0.1/77ee2e6bbdbd-demo.html": {
+          "sha256": "77ee2e6bbdbdef2f16209f55eff22bcd7a7c01e3323b066375137ed57ae93545",
+          "sizeBytes": 19706
+        },
+        "agentic-coding/1.0.1/fed57900b918-reservation.html": {
+          "sha256": "fed57900b91868e1cbe211262f59738a98ee72696781f09cc6d758fbd4ee0a57",
+          "sizeBytes": 6970
+        }
+      },
+      "sha256": "7e644b198fc5eed142d6b8e1bb964291633a7618c8cbf82d5c22fc5d18063833",
+      "sizeBytes": 15305,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-agentic-coding-7bdee53047ec5c08.zip"
+    },
+    "automation-workflows/0.1.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-automation-workflows-f6cdb958f669d592.zip",
+      "filename": "lazymind-featured-automation-workflows-f6cdb958f669d592.zip",
+      "files": {
+        "automation-workflows/0.1.0/0bf8b367aeed-audit-report.html": {
+          "sha256": "0bf8b367aeedd986329f1acd2d544e4d06e9516535af8aaf84a162ab73329627",
+          "sizeBytes": 11366
+        },
+        "automation-workflows/0.1.0/7e7074226ec5-blueprint-report.html": {
+          "sha256": "7e7074226ec5fbc0c2a4460c35f2152932adf5b589de05cb0ab046ec190a8235",
+          "sizeBytes": 11859
+        },
+        "automation-workflows/0.1.0/c1a1e36815cd-operations-report.html": {
+          "sha256": "c1a1e36815cd935b2138618ffc0988d905f4419e2b5c5c540581f8b8c9f4eb6a",
+          "sizeBytes": 12694
+        }
+      },
+      "sha256": "e688f5bf463292aae861ff58d40284b4d1dce4293863a07bfe20dd46736a9dc8",
+      "sizeBytes": 14042,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-automation-workflows-f6cdb958f669d592.zip"
+    },
+    "bid_tech_proposal_writer/1.1.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-bid_tech_proposal_writer-0ddbadfc3258d8ce.zip",
+      "filename": "lazymind-featured-bid_tech_proposal_writer-0ddbadfc3258d8ce.zip",
+      "files": {
+        "bid_tech_proposal_writer/1.1.0/8916621889e1-bid-proposal-demo.html": {
+          "sha256": "8916621889e1d3a54089040a7f592ebc546431db1c8b8a93107d7c8394973b06",
+          "sizeBytes": 1288157
+        }
+      },
+      "sha256": "bf46d6ab056ff5cf612d75eb992ed7976582240b206207b41829cf8e200534f4",
+      "sizeBytes": 670285,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-bid_tech_proposal_writer-0ddbadfc3258d8ce.zip"
+    },
+    "cangjie-distill/1.0.1": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-cangjie-distill-2796cd3325f4b29c.zip",
+      "filename": "lazymind-featured-cangjie-distill-2796cd3325f4b29c.zip",
+      "files": {
+        "cangjie-distill/1.0.1/3052df781580-skill-draft.html": {
+          "sha256": "3052df7815808a0f7b39300bda0d8bfe2c53f39b430d4aada542e394024068d4",
+          "sizeBytes": 2118
+        },
+        "cangjie-distill/1.0.1/f74486b87ff5-chapter-method-card.html": {
+          "sha256": "f74486b87ff5748a1bb61f7531fb59ae27fc70318bf7afe7c501ce295d49f696",
+          "sizeBytes": 1978
+        },
+        "cangjie-distill/1.0.1/f9d3bba9b623-pyramid-method-map.html": {
+          "sha256": "f9d3bba9b6236912e6dd267c5de4b39ee7d58919f743eefe222ce657aa8e458a",
+          "sizeBytes": 6583
+        }
+      },
+      "sha256": "0e60ddcab9bff418161e4f90189964b5f2ec0ccfafb42df5395ceb16caf8dad2",
+      "sizeBytes": 6116,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-cangjie-distill-2796cd3325f4b29c.zip"
+    },
+    "chat-eq-reply/1.1.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-chat-eq-reply-3b20a1cbfe42e7c7.zip",
+      "filename": "lazymind-featured-chat-eq-reply-3b20a1cbfe42e7c7.zip",
+      "files": {
+        "chat-eq-reply/1.1.0/10bf01caac25-boundary-help-demo.html": {
+          "sha256": "10bf01caac250c9ef6da0153ceff87e24192a939be2d0890ea00dc138737fdd2",
+          "sizeBytes": 4907
+        },
+        "chat-eq-reply/1.1.0/5696e18ad4c2-late-reply-demo.html": {
+          "sha256": "5696e18ad4c27f8b1f699f6141f79dd745d3101f1332c9124f24889081684374",
+          "sizeBytes": 6224
+        },
+        "chat-eq-reply/1.1.0/e8e7311d3b7c-leader-deadline-demo.html": {
+          "sha256": "e8e7311d3b7c50ea25720f13673b772a865e80f00067401441e5783742661538",
+          "sizeBytes": 6321
+        }
+      },
+      "sha256": "6f657423cda6eb691d4cfe387522568aa973eecf1f7b29d18f9ef191e6a0bdd7",
+      "sizeBytes": 7823,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-chat-eq-reply-3b20a1cbfe42e7c7.zip"
+    },
+    "conventional-commits/1.0.1": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-conventional-commits-574eb0e23e73c2d1.zip",
+      "filename": "lazymind-featured-conventional-commits-574eb0e23e73c2d1.zip",
+      "files": {
+        "conventional-commits/1.0.1/d559c3a47283-split.html": {
+          "sha256": "d559c3a47283abaa4784bac6ba40ef48be09607fe37ad76786f2235e0a699b51",
+          "sizeBytes": 6764
+        },
+        "conventional-commits/1.0.1/ec79a1a2352f-breaking.html": {
+          "sha256": "ec79a1a2352ffad93dd445651636c2bab97315c4bc4488c86ab6bc5c83713bbf",
+          "sizeBytes": 5506
+        },
+        "conventional-commits/1.0.1/eed685305043-fix.html": {
+          "sha256": "eed685305043f91b2e806f90f3c1374dd34da61a1bffda0feef579d505b3505e",
+          "sizeBytes": 5991
+        }
+      },
+      "sha256": "c5cdd1b7007c9dd53c6f9ba182351b215085e3e585b4f0abdeb90d308cf80487",
+      "sizeBytes": 9188,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-conventional-commits-574eb0e23e73c2d1.zip"
+    },
+    "data-report/0.1.1": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-data-report-652c45fcee0e3e76.zip",
+      "filename": "lazymind-featured-data-report-652c45fcee0e3e76.zip",
+      "files": {
+        "data-report/0.1.1/14919d45d890-commerce-dashboard.png": {
+          "sha256": "14919d45d89001f2bb681adaaf1806fa809c64a7d1f8a0cc2e675a2ee9754703",
+          "sizeBytes": 120668
+        },
+        "data-report/0.1.1/af38682097bd-dimension-report.html": {
+          "sha256": "af38682097bdb9e621d8faaaf87a611bd1dbacff4b8048e1555d171d990beafe",
+          "sizeBytes": 3516
+        },
+        "data-report/0.1.1/bfe577008dc0-trend-report.html": {
+          "sha256": "bfe577008dc0ca6acfaaef4136c4093334dc17f6f7e40f8ceca15cca1f27f3b0",
+          "sizeBytes": 4173
+        },
+        "data-report/0.1.1/dcc1ded2ae05-executive-cockpit.html": {
+          "sha256": "dcc1ded2ae05afe3510e2db363ad27c567ed2c4e366be5ce0a874e546160c59c",
+          "sizeBytes": 541
+        }
+      },
+      "sha256": "812dc6435d54a5c1951b94ede79a37f20b12f567568e2c7b85a397efd961da51",
+      "sizeBytes": 109139,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-data-report-652c45fcee0e3e76.zip"
+    },
+    "diagram-design/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-diagram-design-4b33e9463eb18cea.zip",
+      "filename": "lazymind-featured-diagram-design-4b33e9463eb18cea.zip",
+      "files": {
+        "diagram-design/1.0.0/4aa43c8458d9-diagram-system-architecture-demo.html": {
+          "sha256": "4aa43c8458d905b1d1774fee316e1cc340cd83342369293e0d62d3d7a12638af",
+          "sizeBytes": 20576
+        },
+        "diagram-design/1.0.0/c020ed7254ad-diagram-oauth-sequence-demo.html": {
+          "sha256": "c020ed7254ad194e162ac275610fd9c63c1e09c0c86f36f17fb19df45923ca14",
+          "sizeBytes": 20581
+        },
+        "diagram-design/1.0.0/c9be05b65887-diagram-knowledge-search-flow-demo.html": {
+          "sha256": "c9be05b65887e14e9c8ce56f43bdbc6f7c6d7ed7b2437cfc4db59ff8238c4097",
+          "sizeBytes": 20582
+        }
+      },
+      "sha256": "bd8d70d158239b51c96482baf47f7d4c300c0cdb2e918c0aa175ef6ecaa7b4c2",
+      "sizeBytes": 20987,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-diagram-design-4b33e9463eb18cea.zip"
+    },
+    "doc-coauthoring/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-doc-coauthoring-c30f45429e127ddc.zip",
+      "filename": "lazymind-featured-doc-coauthoring-c30f45429e127ddc.zip",
+      "files": {
+        "doc-coauthoring/1.0.0/42f500849058-product-proposal-scene.png": {
+          "sha256": "42f500849058c270c3f6df053a2da2ede859f345127d0ebb06af1f4dfa515508",
+          "sizeBytes": 2149354
+        },
+        "doc-coauthoring/1.0.0/5ae8b5ee61a7-technical-plan-scene.png": {
+          "sha256": "5ae8b5ee61a7a10ca2e08363a73e314390f2b96e31013fe430b33ee02a71ea47",
+          "sizeBytes": 1998858
+        },
+        "doc-coauthoring/1.0.0/b2e4e0396683-coauthor-decision-doc-demo.html": {
+          "sha256": "b2e4e039668387f3ef47bbcd186e828c28c81c3ce1c556bf8f3caaf64c63dd42",
+          "sizeBytes": 16379
+        },
+        "doc-coauthoring/1.0.0/b68c9ee1b68b-decision-record-scene.png": {
+          "sha256": "b68c9ee1b68b6a9fbbed9c699b100f4e4d9aa08f5a71bc22bb314f7b55b2edae",
+          "sizeBytes": 2574329
+        },
+        "doc-coauthoring/1.0.0/c44624d31d6e-coauthor-product-proposal-demo.html": {
+          "sha256": "c44624d31d6e465fd36c6386e4d22345aad08c0ab6fc97f6d3b8ee9432bb0be2",
+          "sizeBytes": 16350
+        },
+        "doc-coauthoring/1.0.0/d869e212f064-coauthor-technical-spec-demo.html": {
+          "sha256": "d869e212f0642915cc0222e1a82aa822daefe483e4f09fa1554921b99d984275",
+          "sizeBytes": 16370
+        }
+      },
+      "sha256": "c4e2f11cee831359015d7c369ea3598f917e9c457225d7fd2153e08fdf6a3e11",
+      "sizeBytes": 6698838,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-doc-coauthoring-c30f45429e127ddc.zip"
+    },
+    "document-refinement/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-document-refinement-f2a52d691609190b.zip",
+      "filename": "lazymind-featured-document-refinement-f2a52d691609190b.zip",
+      "files": {
+        "document-refinement/1.0.0/05c84be6aa0c-product-requirement-scene.png": {
+          "sha256": "05c84be6aa0c7f16d0bea81e416f054d1ae132dc199d3891959e0be589117cb6",
+          "sizeBytes": 2595646
+        },
+        "document-refinement/1.0.0/1e0dd396b76b-implementation-plan-scene.png": {
+          "sha256": "1e0dd396b76b5e54d0f8ae08933666d2547a801dac5b64609d5a0c7905a5b1a6",
+          "sizeBytes": 1913846
+        },
+        "document-refinement/1.0.0/aed1c00b1603-refinement-product-requirement-demo.html": {
+          "sha256": "aed1c00b1603b71ef1cd9b759606260397e50f1e1d451776d9137e1be216bb51",
+          "sizeBytes": 16948
+        },
+        "document-refinement/1.0.0/b2c78e8575d2-refinement-implementation-plan-demo.html": {
+          "sha256": "b2c78e8575d2d368ff9fd4b834741f04991219efba6d4e723a6f348af02004e7",
+          "sizeBytes": 16733
+        },
+        "document-refinement/1.0.0/c3854429fd0d-brainstorm-refinement-scene.png": {
+          "sha256": "c3854429fd0da41c51874b108e5f38e5ce872fe97485addb8045deb53868c871",
+          "sizeBytes": 2328118
+        },
+        "document-refinement/1.0.0/e49ddd6e45b0-refinement-brainstorm-demo.html": {
+          "sha256": "e49ddd6e45b0e450f060b728f88e98f495212e51a364bc8e3970cea676e67a47",
+          "sizeBytes": 16725
+        }
+      },
+      "sha256": "6753b30f0a65be5b7a7c3bb630f79d8e9e0767a11c3d11cebbba55927905282f",
+      "sizeBytes": 6820516,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-document-refinement-f2a52d691609190b.zip"
+    },
+    "game-studio/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-game-studio-e724a492b85c48a4.zip",
+      "filename": "lazymind-featured-game-studio-e724a492b85c48a4.zip",
+      "files": {
+        "game-studio/1.0.0/3d4201bf7d8a-concept.html": {
+          "sha256": "3d4201bf7d8a6e2d26e4e0d1cbf1ff33a9387f0c76dab1d3ac67b1626235320c",
+          "sizeBytes": 5096
+        },
+        "game-studio/1.0.0/8a01a26104a1-level.html": {
+          "sha256": "8a01a26104a1a28ee7b345cf1768b484022ac85fcd7d9eadcc9d34cf0601f6d5",
+          "sizeBytes": 5180
+        },
+        "game-studio/1.0.0/c89adf1d24d4-system.html": {
+          "sha256": "c89adf1d24d4aff5eebf551cd68952201382608e906a21aaa9a4293ae6019614",
+          "sizeBytes": 5381
+        }
+      },
+      "sha256": "90c9da4e66e93a4b08adac9d3a2749952cfe49800b2a127d412793b61ee9a04c",
+      "sizeBytes": 7923,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-game-studio-e724a492b85c48a4.zip"
+    },
+    "gaokao-volunteer-advisor/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-gaokao-volunteer-advisor-381c8fb9d067a22f.zip",
+      "filename": "lazymind-featured-gaokao-volunteer-advisor-381c8fb9d067a22f.zip",
+      "files": {
+        "gaokao-volunteer-advisor/1.0.0/434ac7de678d-admission-rules-demo.html": {
+          "sha256": "434ac7de678dea441657e3c1dcf6d19f56123145acaf84dd90c60441d02b6051",
+          "sizeBytes": 5844
+        },
+        "gaokao-volunteer-advisor/1.0.0/729c0f96bb32-major-selection-demo.html": {
+          "sha256": "729c0f96bb32362426e1f9f66ecad41c230933c58d7ccd77d5acae29e767dfb9",
+          "sizeBytes": 7098
+        },
+        "gaokao-volunteer-advisor/1.0.0/c49c8bc81d0b-rank-analysis-demo.html": {
+          "sha256": "c49c8bc81d0b09af76e640fe181346c844480b57cb53171367f883551e805827",
+          "sizeBytes": 6554
+        },
+        "gaokao-volunteer-advisor/1.0.0/ea81e2c39e55-volunteer-plan-demo.html": {
+          "sha256": "ea81e2c39e55bcf623eb1f7d90604d4f14cdc73e71940ef5d6242b9ac5837a7d",
+          "sizeBytes": 8164
+        }
+      },
+      "sha256": "f889523ef85d0b95bb7a9e3415d3464025a9f436941e6b1c932628ade8763998",
+      "sizeBytes": 12525,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-gaokao-volunteer-advisor-381c8fb9d067a22f.zip"
+    },
+    "graphic-design/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-graphic-design-73584601d84000bd.zip",
+      "filename": "lazymind-featured-graphic-design-73584601d84000bd.zip",
+      "files": {
+        "graphic-design/1.0.0/34dfaeb801c2-print-preflight.html": {
+          "sha256": "34dfaeb801c28cca46fb114239a2a3244adb12c87b0bc417762313cf9273be93",
+          "sizeBytes": 4514
+        },
+        "graphic-design/1.0.0/4eae11cad368-portfolio-critique.html": {
+          "sha256": "4eae11cad3686bad6b586b027d89aee95d17a64b8cf61dff66b899194ff5e565",
+          "sizeBytes": 4592
+        },
+        "graphic-design/1.0.0/d09903bb5f06-social-post.html": {
+          "sha256": "d09903bb5f06b3754f36b17997138c035ba0622c19330814e0a32987d8e21e2d",
+          "sizeBytes": 4435
+        }
+      },
+      "sha256": "33e356e2c22ac56b988d52c369645d7e4599cc03cd3ff14524a7b58a66ceb673",
+      "sizeBytes": 6875,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-graphic-design-73584601d84000bd.zip"
+    },
+    "hot-news-summary/1.0.2": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-hot-news-summary-194dd24f0bd6b7f6.zip",
+      "filename": "lazymind-featured-hot-news-summary-194dd24f0bd6b7f6.zip",
+      "files": {
+        "hot-news-summary/1.0.2/e4a018798de1-hot-news-demo.html": {
+          "sha256": "e4a018798de111dc943b350633e91a5998400139460dd1b8d15fe61675b606ea",
+          "sizeBytes": 24652
+        }
+      },
+      "sha256": "ae75470962ce7405d4a77b2f76d3fcae435d2c0a701bcd64eed1f50d936ba1d2",
+      "sizeBytes": 7692,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-hot-news-summary-194dd24f0bd6b7f6.zip"
+    },
+    "ima-skills/1.1.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-ima-skills-46b99ebbfd08cfe1.zip",
+      "filename": "lazymind-featured-ima-skills-46b99ebbfd08cfe1.zip",
+      "files": {
+        "ima-skills/1.1.0/5afb364b2195-workbuddy-trial-note.png": {
+          "sha256": "5afb364b21950336aae5faf1973d48497676e6edf1b3a040b61bb4430081fb65",
+          "sizeBytes": 296248
+        },
+        "ima-skills/1.1.0/e05df354745c-note-search-summary.html": {
+          "sha256": "e05df354745c2c09bb23276966056060862d78123d3bfaef9f38df7afb28d239",
+          "sizeBytes": 6919
+        },
+        "ima-skills/1.1.0/f87fd9ebcc26-skillhub-note.png": {
+          "sha256": "f87fd9ebcc26b1a04ec81b068698517dd9fbb1ccbbdf678f0ec5fca0d267cae6",
+          "sizeBytes": 709037
+        }
+      },
+      "sha256": "24262e3962f1384b84e8420d5d28b3e37017e249de8d8cf265b9255b614cb6cd",
+      "sizeBytes": 909289,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-ima-skills-46b99ebbfd08cfe1.zip"
+    },
+    "image-workflow/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-image-workflow-37eaf3af72a9e778.zip",
+      "filename": "lazymind-featured-image-workflow-37eaf3af72a9e778.zip",
+      "files": {
+        "image-workflow/1.0.0/094e006aded3-good.gif": {
+          "sha256": "094e006aded3f3efb7cbe913ddaec24ad5335219881c081d04ce3390a4e3b2e4",
+          "sizeBytes": 1729823
+        },
+        "image-workflow/1.0.0/096706ec764f-thanks-boss.gif": {
+          "sha256": "096706ec764fbeffad59beb848959a9473fb19d83245f7e0d599267c127bdcab",
+          "sizeBytes": 2592083
+        },
+        "image-workflow/1.0.0/09ebeba0ed84-watch-after.png": {
+          "sha256": "09ebeba0ed84a6e626b34ced29d7a5dd250180af065427d9c2ed28488d2fa7b0",
+          "sizeBytes": 1768314
+        },
+        "image-workflow/1.0.0/114cbb62539e-generate-product.png": {
+          "sha256": "114cbb62539e1b4946a644cd5c3958793ad89d51e9d6f298f24984a49fbdc3a8",
+          "sizeBytes": 240174
+        },
+        "image-workflow/1.0.0/114cbb62539e-watch-before.png": {
+          "sha256": "114cbb62539e1b4946a644cd5c3958793ad89d51e9d6f298f24984a49fbdc3a8",
+          "sizeBytes": 240174
+        },
+        "image-workflow/1.0.0/23b85f77c271-no-work.gif": {
+          "sha256": "23b85f77c271d817065b8e13676e0eb47a8084ee636216a0bbf9eebc82bf87d5",
+          "sizeBytes": 931536
+        },
+        "image-workflow/1.0.0/2e9abd0a6ade-hard-work.gif": {
+          "sha256": "2e9abd0a6ade52680d0fb62bf060e97d8e9895398980fa65e75046cac3f0edea",
+          "sizeBytes": 1530326
+        },
+        "image-workflow/1.0.0/436659b089e4-there.gif": {
+          "sha256": "436659b089e4f63544cc23eb68a34939c5ab06ec133758d7c9bf3b81fa17cf80",
+          "sizeBytes": 669564
+        },
+        "image-workflow/1.0.0/5e53fd6221e9-generate-information.png": {
+          "sha256": "5e53fd6221e9d21ce6cefa1318fa38d9309f4bafd478dd2d3c4e12f37ccf167f",
+          "sizeBytes": 1704224
+        },
+        "image-workflow/1.0.0/6c25dae931e5-eat.gif": {
+          "sha256": "6c25dae931e554b8c8054eb6bf78d3746faf52c6e71ec6dad0bd51b08f1f9eb3",
+          "sizeBytes": 1749507
+        },
+        "image-workflow/1.0.0/b875016f1485-image-edit.html": {
+          "sha256": "b875016f1485960f9a8ffba93f9a7e8ffa93d00b500286ed348269c95daf958a",
+          "sizeBytes": 3832
+        },
+        "image-workflow/1.0.0/b98841d03180-sticker-pack.html": {
+          "sha256": "b98841d03180e9e1f424a6dd0b0e70da4dbc677e8bd7ae0b66c16c05105e9904",
+          "sizeBytes": 4325
+        },
+        "image-workflow/1.0.0/c4d18603dead-generate-cinematic.png": {
+          "sha256": "c4d18603deadf8761749388e2031912e259c5eebacb7fe2699545a798ffa48f2",
+          "sizeBytes": 2016429
+        },
+        "image-workflow/1.0.0/cbadcd448b0d-generate-lifestyle.png": {
+          "sha256": "cbadcd448b0da24714c7d7d3b59a45f0bf6e682b6317efc2715ebf4d070a881e",
+          "sizeBytes": 2393369
+        },
+        "image-workflow/1.0.0/e663ed0c0979-reply.gif": {
+          "sha256": "e663ed0c09796f5c6b7e998f02a087cfcce30bbe30d878f238fd89b35a5ca12b",
+          "sizeBytes": 2181244
+        },
+        "image-workflow/1.0.0/e8b2e6fa45e6-good-night.gif": {
+          "sha256": "e8b2e6fa45e607f1d99be886699a0cb3436f9a25175cde0f8b16b43b4f671eea",
+          "sizeBytes": 1793056
+        },
+        "image-workflow/1.0.0/ea0c8842bb6f-ai-generate.html": {
+          "sha256": "ea0c8842bb6f18e41a046be5cb9b402cee3e8968b7a213113344427e044d80e4",
+          "sizeBytes": 3662
+        }
+      },
+      "sha256": "97a491c1dd21ae9b0b0cc0886f83919a37455a9fe78a23c96e7fa89df8da9957",
+      "sizeBytes": 21347370,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-image-workflow-37eaf3af72a9e778.zip"
+    },
+    "interview-simulator/1.0.1": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-interview-simulator-0595d09af8e2d290.zip",
+      "filename": "lazymind-featured-interview-simulator-0595d09af8e2d290.zip",
+      "files": {
+        "interview-simulator/1.0.1/1afb68a8b5ae-product-manager-interview.html": {
+          "sha256": "1afb68a8b5aecbbb0fa5745f79da4ae42483cca24c0bb36269fe899fff9afad9",
+          "sizeBytes": 7415
+        },
+        "interview-simulator/1.0.1/59f99b71d89c-resume-feedback.html": {
+          "sha256": "59f99b71d89c1b0babb31935e6d4daadc6bba2d625aa33ae4594a65e99f7bc82",
+          "sizeBytes": 2669
+        },
+        "interview-simulator/1.0.1/9b117871ba96-behavioral-feedback.html": {
+          "sha256": "9b117871ba96de55efbf746c22e98efc6f5d586ea2cab93a037caeeec6f45606",
+          "sizeBytes": 2843
+        }
+      },
+      "sha256": "f8f395250604eadd5ee9f6c53e7eab54d7ee1f69a46ddc1ab152f3f7fe5494c6",
+      "sizeBytes": 6911,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-interview-simulator-0595d09af8e2d290.zip"
+    },
+    "k12-smart-teacher/1.0.4": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-k12-smart-teacher-4b135260ac4c3980.zip",
+      "filename": "lazymind-featured-k12-smart-teacher-4b135260ac4c3980.zip",
+      "files": {
+        "k12-smart-teacher/1.0.4/09fe964aedec-homework-review-demo.html": {
+          "sha256": "09fe964aedec582fd9b289ecd4926ebc24151e57650832c8de5b471c874e5586",
+          "sizeBytes": 11634
+        },
+        "k12-smart-teacher/1.0.4/12e00acf85d0-graded-practice-demo.html": {
+          "sha256": "12e00acf85d0c4c2e2dbf2a2e462e6435283cc736121a68efd111cf338971f7c",
+          "sizeBytes": 8056
+        },
+        "k12-smart-teacher/1.0.4/8a39dbb27291-printable-paper-demo.html": {
+          "sha256": "8a39dbb2729120735f3c3968e5af9d5a3ada42397066b56c35b0e043039c919f",
+          "sizeBytes": 6767
+        }
+      },
+      "sha256": "6fd59e881f003c0b2deef8a61ffb867ee3290493dde36068ca3f9f22c4667fd4",
+      "sizeBytes": 10890,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-k12-smart-teacher-4b135260ac4c3980.zip"
+    },
+    "karpathy-llm-wiki/1.0.1": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-karpathy-llm-wiki-5806bd68e3a99dc5.zip",
+      "filename": "lazymind-featured-karpathy-llm-wiki-5806bd68e3a99dc5.zip",
+      "files": {
+        "karpathy-llm-wiki/1.0.1/86b2617a6cb8-project-qa.html": {
+          "sha256": "86b2617a6cb8899a7e333861714c33b8b90cf34074c48fbbbda84b5b3d0ce61e",
+          "sizeBytes": 26590
+        },
+        "karpathy-llm-wiki/1.0.1/a9e03d7c01e2-demo.html": {
+          "sha256": "a9e03d7c01e244365d982a2f0e4747a4034a417b5dd2705e7c868acae62e435a",
+          "sizeBytes": 67437
+        },
+        "karpathy-llm-wiki/1.0.1/ffa0d1118b53-wiki-audit.html": {
+          "sha256": "ffa0d1118b5310a496a8e238e3c9447a7bf5fe420f107b7df67c493ad0df65b9",
+          "sizeBytes": 17553
+        }
+      },
+      "sha256": "49fa796566be0e79dc678d165657d24e8d3c5f79c6020bc09e9671fe498afd42",
+      "sizeBytes": 32924,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-karpathy-llm-wiki-5806bd68e3a99dc5.zip"
+    },
+    "live-commerce-script-studio/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-live-commerce-script-studio-9d5d52df3eb983d4.zip",
+      "filename": "lazymind-featured-live-commerce-script-studio-9d5d52df3eb983d4.zip",
+      "files": {
+        "live-commerce-script-studio/1.0.0/8d74b6e5f1f3-clearance-session.html": {
+          "sha256": "8d74b6e5f1f318195dccd956e2bdfceb65b59f41d0b8c9b14050ffc1590602df",
+          "sizeBytes": 5684
+        },
+        "live-commerce-script-studio/1.0.0/e1d3777b29c0-blender-session.html": {
+          "sha256": "e1d3777b29c09f14fda5db351ba238e139d980037993e2c57611ffc246a6ba6a",
+          "sizeBytes": 6822
+        },
+        "live-commerce-script-studio/1.0.0/f4c532f2283b-skincare-session.html": {
+          "sha256": "f4c532f2283bc2880344f5a1b1c715a2b518f70faa6b781092ed6993d9bb7c29",
+          "sizeBytes": 5968
+        }
+      },
+      "sha256": "f8516cc0b4799260bd0daddb122f2ae82253e8d58da284b894180cc11c217f4e",
+      "sizeBytes": 8799,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-live-commerce-script-studio-9d5d52df3eb983d4.zip"
+    },
+    "market-researcher/1.0.2": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-market-researcher-436cd662ae561dff.zip",
+      "filename": "lazymind-featured-market-researcher-436cd662ae561dff.zip",
+      "files": {
+        "market-researcher/1.0.2/4106a2b27c3b-competitive-landscape-demo.html": {
+          "sha256": "4106a2b27c3bd6a9bb7f5a5a3134ccb24404818eda7db06359ec9da7c4de031f",
+          "sizeBytes": 21065
+        },
+        "market-researcher/1.0.2/5b4d256f23b4-sector-research-demo.html": {
+          "sha256": "5b4d256f23b457f673de760e16f7c088ce2a25f1aca91c258b622564d184a9fa",
+          "sizeBytes": 21069
+        }
+      },
+      "sha256": "98c263dda09d54e48a9ae72732e2da9163d9871c42591d1f8503043aee1ea235",
+      "sizeBytes": 14753,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-market-researcher-436cd662ae561dff.zip"
+    },
+    "mbti-money-personality-test/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-mbti-money-personality-test-a5f6df2898b98b2f.zip",
+      "filename": "lazymind-featured-mbti-money-personality-test-a5f6df2898b98b2f.zip",
+      "files": {
+        "mbti-money-personality-test/1.0.0/1e74af73da43-couple-budget.html": {
+          "sha256": "1e74af73da43df202d0f8cd739462c7867a73d949fdd212766aaabce83e1a1bb",
+          "sizeBytes": 55412
+        },
+        "mbti-money-personality-test/1.0.0/34c4dae5a8ff-fresh-start.html": {
+          "sha256": "34c4dae5a8ff7ce0fdd573517b6cfe59523859d18e172ff5332acda190d3f493",
+          "sizeBytes": 55357
+        },
+        "mbti-money-personality-test/1.0.0/fce3e0bf4f1b-annual-review.html": {
+          "sha256": "fce3e0bf4f1b6bcdade601f9c9f2f01764ad6d874185d20d7e62e0c8b273d358",
+          "sizeBytes": 55366
+        }
+      },
+      "sha256": "520b05aadb094dae6cef4595b3c0a1a6085c1dbbb5855b5151d7e46829873f36",
+      "sizeBytes": 54504,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-mbti-money-personality-test-a5f6df2898b98b2f.zip"
+    },
+    "n8n-workflow-automation/0.1.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-n8n-workflow-automation-0ec2fba87556608d.zip",
+      "filename": "lazymind-featured-n8n-workflow-automation-0ec2fba87556608d.zip",
+      "files": {
+        "n8n-workflow-automation/0.1.0/06567f3114e6-refund-review.html": {
+          "sha256": "06567f3114e629efe7d9ac3f2501ca04b5163b9777f38e8544fa985eaa56edc9",
+          "sizeBytes": 16211
+        },
+        "n8n-workflow-automation/0.1.0/06c81a900dd8-order-webhook.html": {
+          "sha256": "06c81a900dd883212f0d2b2a8a71d6eb44cad5bb674c6ce6e3f1c90937362fa4",
+          "sizeBytes": 18542
+        },
+        "n8n-workflow-automation/0.1.0/8d57b3c3c446-compliance-digest.html": {
+          "sha256": "8d57b3c3c446e166db246d274f50c2f060dd402574e27700d623f271bdcb93eb",
+          "sizeBytes": 17652
+        }
+      },
+      "sha256": "01aff6f8cb0618f5ff34d877522a910a51343a55d677675a94983d197883566f",
+      "sizeBytes": 16129,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-n8n-workflow-automation-0ec2fba87556608d.zip"
+    },
+    "novel-generator/1.2.1": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-novel-generator-dd9ef261433014bd.zip",
+      "filename": "lazymind-featured-novel-generator-dd9ef261433014bd.zip",
+      "files": {
+        "novel-generator/1.2.1/206d48980d89-novel-chapter-demo.html": {
+          "sha256": "206d48980d89dd499ba954db7e4cc6734ead437dea08094f5087ab824d783268",
+          "sizeBytes": 14997
+        },
+        "novel-generator/1.2.1/3a6050df6a7a-novel-outline-demo.html": {
+          "sha256": "3a6050df6a7a22fc53629a28dc1cd9eadb1b0219c23f4790ca23912dbc0d7c4f",
+          "sizeBytes": 13027
+        },
+        "novel-generator/1.2.1/daf205b1c647-novel-idea-demo.html": {
+          "sha256": "daf205b1c647f504a9f99e819dfa091e3d3024d61e9baa0ec43899c3bdffbd7b",
+          "sizeBytes": 14745
+        }
+      },
+      "sha256": "233ccab3d3c347cb65e454f71082b9b2de0a94e788e4860ea1d4acb1fdb80e3f",
+      "sizeBytes": 18436,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-novel-generator-dd9ef261433014bd.zip"
+    },
+    "oral-seeding-video-maker/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-oral-seeding-video-maker-39c9ab9fcc3ca6ce.zip",
+      "filename": "lazymind-featured-oral-seeding-video-maker-39c9ab9fcc3ca6ce.zip",
+      "files": {
+        "oral-seeding-video-maker/1.0.0/4ae9ec56f8af-saas-explainer.html": {
+          "sha256": "4ae9ec56f8af0497c078c403a9ec08f253e5d1b9f12b983600f661fb661cf732",
+          "sizeBytes": 4519
+        },
+        "oral-seeding-video-maker/1.0.0/6c750c82c92a-coffee-launch.html": {
+          "sha256": "6c750c82c92a4f0c68a713d53ccfb0a23a741bb66bf11a1d3edbe3444f7dd5e0",
+          "sizeBytes": 2601
+        },
+        "oral-seeding-video-maker/1.0.0/907fcb96df80-daily-creator.html": {
+          "sha256": "907fcb96df8074ba47f5aecdec46a90be94058c2cd41967a0559d3826131932c",
+          "sizeBytes": 4200
+        },
+        "oral-seeding-video-maker/1.0.0/a8d34fd89b95-case-visual.png": {
+          "sha256": "a8d34fd89b957a2ecfe44a9081a4abd94a9a3cfd7a40ece09d8d84c6c0964c5a",
+          "sizeBytes": 1959518
+        }
+      },
+      "sha256": "e926ea3e6c7f496ca834eb313faa78fbc04d03c2ad16ce38390b05e0af3ae75a",
+      "sizeBytes": 1953800,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-oral-seeding-video-maker-39c9ab9fcc3ca6ce.zip"
+    },
+    "poster-design/1.0.1": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-poster-design-3f144d8524cd7bd4.zip",
+      "filename": "lazymind-featured-poster-design-3f144d8524cd7bd4.zip",
+      "files": {
+        "poster-design/1.0.1/17972d68153b-poster-concept.html": {
+          "sha256": "17972d68153b475afb85479977f5ea77cb096dff2255214d2e35ccd16275920d",
+          "sizeBytes": 575
+        },
+        "poster-design/1.0.1/84bb38392dfb-poster-critique.html": {
+          "sha256": "84bb38392dfbf0e6d9fd77cfb01dda37734be0312cf02c4a7057b06b22de951e",
+          "sizeBytes": 2540
+        },
+        "poster-design/1.0.1/bb60d6bde29a-poster-ai-conference.png": {
+          "sha256": "bb60d6bde29ab574e5384d3e905b1a25a8a9a09a7866e50ceffa2923d1ed59ef",
+          "sizeBytes": 74550
+        }
+      },
+      "sha256": "18b2b9aafec4ecd0462c88fe1ad492d0e7deb1cacb381cfcef8be54ca655d3e7",
+      "sizeBytes": 32890,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-poster-design-3f144d8524cd7bd4.zip"
+    },
+    "ppt-workflow/1.1.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-ppt-workflow-350838b4df5b5757.zip",
+      "filename": "lazymind-featured-ppt-workflow-350838b4df5b5757.zip",
+      "files": {
+        "ppt-workflow/1.1.0/ed00a30482ad-AI-PPT-demo.html": {
+          "sha256": "ed00a30482ad2118f63b8ae81a95b666ed7c6fb25c80e19afa92056b5afd69ee",
+          "sizeBytes": 8192651
+        }
+      },
+      "sha256": "f14cca253934d880edc4310b4d84661b90bc5d50520eca70e93bd49084c2bfa3",
+      "sizeBytes": 6163906,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-ppt-workflow-350838b4df5b5757.zip"
+    },
+    "proactive-agent/0.1.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-proactive-agent-ca487b5562a3b834.zip",
+      "filename": "lazymind-featured-proactive-agent-ca487b5562a3b834.zip",
+      "files": {
+        "proactive-agent/0.1.0/618ecef15fb7-migration-verification.html": {
+          "sha256": "618ecef15fb79c91ca5ce430bee1e23cceed2f26e558cb6b7e7bcb5dcda6089d",
+          "sizeBytes": 15495
+        },
+        "proactive-agent/0.1.0/d005857a27a6-weekly-scan.html": {
+          "sha256": "d005857a27a6596bbcccd454a95fe80347c5ebb18ca973740bd0efeabdce6b78",
+          "sizeBytes": 13590
+        },
+        "proactive-agent/0.1.0/fd45ec9ecdcc-memory-recovery.html": {
+          "sha256": "fd45ec9ecdcce33b120ddcabccc8ba528654b20599b50b7cb52753a0086ea534",
+          "sizeBytes": 14897
+        }
+      },
+      "sha256": "6ab95d0e8578ef737900a5f2118b6746cfbade71c4655145ffaefad1bf566224",
+      "sizeBytes": 16106,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-proactive-agent-ca487b5562a3b834.zip"
+    },
+    "product_solution_delivery/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-product_solution_delivery-21ee30bbe204ddea.zip",
+      "filename": "lazymind-featured-product_solution_delivery-21ee30bbe204ddea.zip",
+      "files": {
+        "product_solution_delivery/1.0.0/350f1c5a34c6-prototype.html": {
+          "sha256": "350f1c5a34c6530467e86d09535fcf572265474c9c66a939db16c0d3c973e14f",
+          "sizeBytes": 2499114
+        },
+        "product_solution_delivery/1.0.0/3957864db1ae-direction.html": {
+          "sha256": "3957864db1aed422243340ba2ff1f4f40cf46bf9b0e8d4c399d5c3edee1cc52e",
+          "sizeBytes": 2249361
+        },
+        "product_solution_delivery/1.0.0/4663a4fbfd59-competitive.html": {
+          "sha256": "4663a4fbfd5987fdd30565adb919d525520c380a32982d51adc03ea101174a3c",
+          "sizeBytes": 54779
+        },
+        "product_solution_delivery/1.0.0/6d7ebf003e6b-design.html": {
+          "sha256": "6d7ebf003e6bf8fd14f06db444cf933a1d1ab2a5ec731b01d4c664c9f21a53f5",
+          "sizeBytes": 38565
+        },
+        "product_solution_delivery/1.0.0/9b4eed3486b8-review.html": {
+          "sha256": "9b4eed3486b8d32852a3fb0e10db7d9ec6e28615cc0d80ee417164d825e909ab",
+          "sizeBytes": 21599
+        },
+        "product_solution_delivery/1.0.0/bf0d45e9ab92-prd.html": {
+          "sha256": "bf0d45e9ab9277cadcceefad3b10ac37096e9225249b1ecd3b43c0d43e92ccdd",
+          "sizeBytes": 40672
+        },
+        "product_solution_delivery/1.0.0/e1a74a0cff89-handoff.html": {
+          "sha256": "e1a74a0cff8947c23d275b000c87651ea644532593de38efcc794c2008283c76",
+          "sizeBytes": 25003
+        }
+      },
+      "sha256": "5a3ae3297c8da6b5d9dfa575c401e3748bc38f7f4c62d3a22b3369bf8e4f183b",
+      "sizeBytes": 3382220,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-product_solution_delivery-21ee30bbe204ddea.zip"
+    },
+    "prompt-engineering-expert/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-prompt-engineering-expert-76fab3e86203a187.zip",
+      "filename": "lazymind-featured-prompt-engineering-expert-76fab3e86203a187.zip",
+      "files": {
+        "prompt-engineering-expert/1.0.0/a37631bbc6d7-agent-instructions.html": {
+          "sha256": "a37631bbc6d73d49041351b75b4e951c44e7dc905021e18371454c6236484db5",
+          "sizeBytes": 4230
+        },
+        "prompt-engineering-expert/1.0.0/c34c0b9d55fb-evaluation-plan.html": {
+          "sha256": "c34c0b9d55fb441a15e9cca2b13da0d3b074f3ab3092fcda10e3cb123fafeac1",
+          "sizeBytes": 4544
+        },
+        "prompt-engineering-expert/1.0.0/c6295afbaf36-support-prompt.html": {
+          "sha256": "c6295afbaf36f796802bbc9d7638187266c3d21ad4884bbfe7829addad7cf320",
+          "sizeBytes": 4309
+        }
+      },
+      "sha256": "6cdd08c7445354bf06392303e8598d59695f7b3404a6c6d2baed281f666e06ae",
+      "sizeBytes": 6548,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-prompt-engineering-expert-76fab3e86203a187.zip"
+    },
+    "remotion-video-toolkit/0.1.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-remotion-video-toolkit-cbcc4cc568266872.zip",
+      "filename": "lazymind-featured-remotion-video-toolkit-cbcc4cc568266872.zip",
+      "files": {
+        "remotion-video-toolkit/0.1.0/097b56d36eb1-product-launch.html": {
+          "sha256": "097b56d36eb1984995882c14d6d78c8faa0b4e17e8015a8182e70fa981d27393",
+          "sizeBytes": 13655
+        },
+        "remotion-video-toolkit/0.1.0/28a1ca8c5c53-captions-sync.html": {
+          "sha256": "28a1ca8c5c537da0a7bfbce7fa77c1464e157a9a218f4e8b7bb0e5303830268b",
+          "sizeBytes": 13451
+        },
+        "remotion-video-toolkit/0.1.0/ae8fd4038314-sales-chart.html": {
+          "sha256": "ae8fd4038314c5293f419702aa75a76d6f485428a9ec146182e6e9b5e21dbe9f",
+          "sizeBytes": 13936
+        }
+      },
+      "sha256": "13517fea2b01cdd7224e74281a0a710071b4b52dc2191434b96479e7a1fdbd89",
+      "sizeBytes": 14850,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-remotion-video-toolkit-cbcc4cc568266872.zip"
+    },
+    "short-video-script/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-short-video-script-9c73a810f856285f.zip",
+      "filename": "lazymind-featured-short-video-script-9c73a810f856285f.zip",
+      "files": {
+        "short-video-script/1.0.0/4051b6f135d6-case-visual.png": {
+          "sha256": "4051b6f135d628bf5eb1b3449705046846ba26e37e36b279cc8256afe4315be4",
+          "sizeBytes": 2214735
+        },
+        "short-video-script/1.0.0/47b8559f1aa0-knowledge-script.html": {
+          "sha256": "47b8559f1aa0f2253e80445ec4b06615eacd3ce9a018626100f13a6dfc12f0fa",
+          "sizeBytes": 2513
+        },
+        "short-video-script/1.0.0/67ad009402af-bilibili-outline.html": {
+          "sha256": "67ad009402af751b3bde858d4196bfe337555352805ed3370686075098565eca",
+          "sizeBytes": 4733
+        },
+        "short-video-script/1.0.0/e4bb9362e9dd-product-script.html": {
+          "sha256": "e4bb9362e9dd2bf333ad2ad9906206fcacd92ddaf2c62f5d3cb3efc01d0b1a85",
+          "sizeBytes": 4483
+        }
+      },
+      "sha256": "7575f637f5dc59f2ea30825389f3be4ef057835b4bfc45c83501b9e6e38052d3",
+      "sizeBytes": 2209255,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-short-video-script-9c73a810f856285f.zip"
+    },
+    "skill-creator/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-skill-creator-186b98bc2c53f35c.zip",
+      "filename": "lazymind-featured-skill-creator-186b98bc2c53f35c.zip",
+      "files": {
+        "skill-creator/1.0.0/7f84a2bda2f1-incident-skill.html": {
+          "sha256": "7f84a2bda2f195c34d4af3ecc9f4cfc0f1dc2efe910c938321a966bbd1c12489",
+          "sizeBytes": 4517
+        },
+        "skill-creator/1.0.0/8ea4a8c020d3-update-skill.html": {
+          "sha256": "8ea4a8c020d3633451676d035312895d8eefe227a8b770a7113296f5a75f7476",
+          "sizeBytes": 4275
+        },
+        "skill-creator/1.0.0/ab4f34a5a750-package-validation.html": {
+          "sha256": "ab4f34a5a75042c718402edb3370f204599346157e74ebf64ac0d9858e57a229",
+          "sizeBytes": 3127
+        }
+      },
+      "sha256": "e77221cdb50b237c1a0beedf3b7bd34b49a85ba90d81b25fe54c268c13fde6e1",
+      "sizeBytes": 6174,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-skill-creator-186b98bc2c53f35c.zip"
+    },
+    "smart-charts/7.0.1": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-smart-charts-f80e38129aafe4ed.zip",
+      "filename": "lazymind-featured-smart-charts-f80e38129aafe4ed.zip",
+      "files": {
+        "smart-charts/7.0.1/190a0e145851-revenue-trend-demo.html": {
+          "sha256": "190a0e145851041c86f61bf750741ecc4f34889ef09e9e0ec41ada42018c06a0",
+          "sizeBytes": 7176
+        },
+        "smart-charts/7.0.1/46f7069c878b-distribution-chart.html": {
+          "sha256": "46f7069c878b450e949af889f7f96fe4172e7d8af5fc8f9dadbf2d53a3988ff1",
+          "sizeBytes": 3203
+        },
+        "smart-charts/7.0.1/f84b36ccbc55-comparison-chart.html": {
+          "sha256": "f84b36ccbc5530b08c9d460f2edb7635b9e6abc06d5b1b363428d6225a7f3eac",
+          "sizeBytes": 2824
+        }
+      },
+      "sha256": "fa6ff584c7d04b15fb784d26cb8e89ba83a2ce06e0d24f7513520967ceb18b1c",
+      "sizeBytes": 5796,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-smart-charts-f80e38129aafe4ed.zip"
+    },
+    "social-media-content-calendar/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-social-media-content-calendar-67f77e7d95ad37f5.zip",
+      "filename": "lazymind-featured-social-media-content-calendar-67f77e7d95ad37f5.zip",
+      "files": {
+        "social-media-content-calendar/1.0.0/0ea72b884c01-private-domain.html": {
+          "sha256": "0ea72b884c01c13709250398928982562407d8ab2bc618d58732c73dead8de1f",
+          "sizeBytes": 4513
+        },
+        "social-media-content-calendar/1.0.0/13e1e6ac086c-private-domain.png": {
+          "sha256": "13e1e6ac086c18daf63d5f834aa884da93b2489517ab957543c809f53fabcedb",
+          "sizeBytes": 525807
+        },
+        "social-media-content-calendar/1.0.0/3d2440a671dd-seven-day-calendar.html": {
+          "sha256": "3d2440a671dd237ed74c7fe7afe59d102a7164322403782946b691379d290323",
+          "sizeBytes": 2842
+        },
+        "social-media-content-calendar/1.0.0/5db616016b10-monthly-campaign.png": {
+          "sha256": "5db616016b102e9893dd3f5bbdc407f74dd0799ccdfa7ad5f00e14c7ccb7f11f",
+          "sizeBytes": 642329
+        },
+        "social-media-content-calendar/1.0.0/7772c145bbc0-monthly-campaign.html": {
+          "sha256": "7772c145bbc081e2fe1a7092613d4162dbe9f429e8ad8a004483a1578f7178b0",
+          "sizeBytes": 4287
+        },
+        "social-media-content-calendar/1.0.0/c85ecba89d60-seven-day-calendar.png": {
+          "sha256": "c85ecba89d603a7e4a69f12d4f0341f9477d7f00e6f6646c891a56d2f6653606",
+          "sizeBytes": 536342
+        }
+      },
+      "sha256": "5d06cb13467e7b2606d4dc03a7ba70433bd7c0b159d1ee0c93ee3aa027e13a2a",
+      "sizeBytes": 1712029,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-social-media-content-calendar-67f77e7d95ad37f5.zip"
+    },
+    "social-media-operator/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-social-media-operator-4fe533cd046d2119.zip",
+      "filename": "lazymind-featured-social-media-operator-4fe533cd046d2119.zip",
+      "files": {
+        "social-media-operator/1.0.0/4c8d558e914d-launch-plan.html": {
+          "sha256": "4c8d558e914d7f1fb567bfe6b498a142423afd727358b50e61f22edba929c9b7",
+          "sizeBytes": 4699
+        },
+        "social-media-operator/1.0.0/5abe687df0c0-growth-review.html": {
+          "sha256": "5abe687df0c00532a67c605a99d04f2638741d5cf8f036a8595434beef56b896",
+          "sizeBytes": 4662
+        },
+        "social-media-operator/1.0.0/c16fcae85b1d-case-visual.png": {
+          "sha256": "c16fcae85b1da815331c27776563f9db86e32658c1246924439a36508bf95371",
+          "sizeBytes": 1654997
+        },
+        "social-media-operator/1.0.0/d1708e16549f-account-audit.html": {
+          "sha256": "d1708e16549f7ecaac401cbdf0639426a8e543295cbf0f4d20c0a35e4353083f",
+          "sizeBytes": 2693
+        }
+      },
+      "sha256": "4e225e30a4ff6515473b1f401f850ab24da2390057c4c1d52f6cd6407ae2d34b",
+      "sizeBytes": 1649513,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-social-media-operator-4fe533cd046d2119.zip"
+    },
+    "spec-workflow-guide/2.34.3": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-spec-workflow-guide-1af604902b296ece.zip",
+      "filename": "lazymind-featured-spec-workflow-guide-1af604902b296ece.zip",
+      "files": {
+        "spec-workflow-guide/2.34.3/4c7050d3d32c-design.html": {
+          "sha256": "4c7050d3d32c822ba09947e9bdbbe947433bc2c10dcf2f37f64ddce30f1c00c1",
+          "sizeBytes": 3664
+        },
+        "spec-workflow-guide/2.34.3/5e8431f918fd-tasks.html": {
+          "sha256": "5e8431f918fdbddeae35f3541a0f4046cd275394cecdcc81544ad555ced54925",
+          "sizeBytes": 4087
+        },
+        "spec-workflow-guide/2.34.3/c378ddb40d11-requirements.html": {
+          "sha256": "c378ddb40d11dde5f4a18b65d638670c42e46244a6d92c1be159fa43f8b08d1b",
+          "sizeBytes": 3594
+        }
+      },
+      "sha256": "bd88925eaf77ed28d1954d1eb8c694bfd1ff81e9e63e3eec8fe7444fd454f602",
+      "sizeBytes": 5658,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-spec-workflow-guide-1af604902b296ece.zip"
+    },
+    "summarize-meeting/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-summarize-meeting-3fb61bd020a8157a.zip",
+      "filename": "lazymind-featured-summarize-meeting-3fb61bd020a8157a.zip",
+      "files": {
+        "summarize-meeting/1.0.0/16b45073da62-meeting-product-review-demo.html": {
+          "sha256": "16b45073da624e3782bd55a0e349b87f39b067ec435ffa498b65824bd3019b6b",
+          "sizeBytes": 21046
+        },
+        "summarize-meeting/1.0.0/2212b98cc842-product-review-scene.png": {
+          "sha256": "2212b98cc84264214b0f41a0a784f991bf06c726b2ea5cfeaa432fdefa0ce2e6",
+          "sizeBytes": 1976541
+        },
+        "summarize-meeting/1.0.0/4da0b00e4dea-meeting-client-call-demo.html": {
+          "sha256": "4da0b00e4dea26b7db69e6411888c8613d474ab415294059fd454f6612627572",
+          "sizeBytes": 20756
+        },
+        "summarize-meeting/1.0.0/848d766533ed-client-call-scene.png": {
+          "sha256": "848d766533edd152b9fdaa84a184a9750da030e120ee067ea80db8c111531e96",
+          "sizeBytes": 1867488
+        },
+        "summarize-meeting/1.0.0/e51841b14232-meeting-sprint-retro-demo.html": {
+          "sha256": "e51841b142329e29bd3370dda52fb9a42cf3f0db758db91738a06d14d235029a",
+          "sizeBytes": 20833
+        },
+        "summarize-meeting/1.0.0/fae1474c859c-sprint-retro-scene.png": {
+          "sha256": "fae1474c859ce71f9e46497e6a80cb14dfd3ba71881d4929da53d67b64aacc4e",
+          "sizeBytes": 1191081
+        }
+      },
+      "sha256": "edf34c840f4de631c59dc71b2743064a16c3b8f3f71c209221d9d44b493cf8e8",
+      "sizeBytes": 5018438,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-summarize-meeting-3fb61bd020a8157a.zip"
+    },
+    "tailored-resume-generator/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-tailored-resume-generator-2f2e3b68304a199b.zip",
+      "filename": "lazymind-featured-tailored-resume-generator-2f2e3b68304a199b.zip",
+      "files": {
+        "tailored-resume-generator/1.0.0/09cce453e3f8-ats-check-scene.png": {
+          "sha256": "09cce453e3f823fff5647264b8f1379c18288f156cc8679c10cff635fb07930d",
+          "sizeBytes": 1939155
+        },
+        "tailored-resume-generator/1.0.0/29f27fd1a018-resume-career-transition-demo.html": {
+          "sha256": "29f27fd1a018f0d2b0d5d00b61be8c5ee096774ed7d6fe8caec71e161cd0fd5a",
+          "sizeBytes": 17037
+        },
+        "tailored-resume-generator/1.0.0/c6c378d54e61-career-transition-scene.png": {
+          "sha256": "c6c378d54e616467b4e6b46854bb4415d03d2f60c708be90dd58f2f075e03261",
+          "sizeBytes": 2607957
+        },
+        "tailored-resume-generator/1.0.0/d43f86e02edb-resume-job-tailoring-demo.html": {
+          "sha256": "d43f86e02edb433700eda1495ec1738166c67d1ab93e1c231ec8e628c8d5025b",
+          "sizeBytes": 16933
+        },
+        "tailored-resume-generator/1.0.0/e3fca3555fba-job-tailoring-scene.png": {
+          "sha256": "e3fca3555fba37c14861c938cd1af055a069bd5c471894dd7922480eba1ec579",
+          "sizeBytes": 2606888
+        },
+        "tailored-resume-generator/1.0.0/e5fe277403b5-resume-ats-check-demo.html": {
+          "sha256": "e5fe277403b52da44279b778963a9444272ca9ddef6094a56b774d38054904cd",
+          "sizeBytes": 17014
+        }
+      },
+      "sha256": "0cefedc1bf4e3b5013dac97069cb0af0bcc9140e36a5c5a5e4475bf847d13a3b",
+      "sizeBytes": 7041864,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-tailored-resume-generator-2f2e3b68304a199b.zip"
+    },
+    "ui-new/1.1.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-ui-new-9e49c1c83c8536af.zip",
+      "filename": "lazymind-featured-ui-new-9e49c1c83c8536af.zip",
+      "files": {
+        "ui-new/1.1.0/7e2905b40ba6-ai-learning-home.html": {
+          "sha256": "7e2905b40ba67499b35a26f9a8f8e4e35bd14e8b28b702e3394777a720f2d4e8",
+          "sizeBytes": 24992
+        },
+        "ui-new/1.1.0/eb2a07b1e602-ai-ticket-landing.html": {
+          "sha256": "eb2a07b1e602196b41d6a3fa147d8a55d807daa680695a92896633a2813ae3a8",
+          "sizeBytes": 31720
+        },
+        "ui-new/1.1.0/f86529c99b0f-crm-customer-design-spec.html": {
+          "sha256": "f86529c99b0f8c2f5aa471f903604049fc6bc7a0dc4a0047223b35288c58f740",
+          "sizeBytes": 68624
+        }
+      },
+      "sha256": "5b3a4845f45da08bc8a07669f1bbf3a1a6bbeb508e3b0639eec6e5bfa0e60548",
+      "sizeBytes": 33393,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-ui-new-9e49c1c83c8536af.zip"
+    },
+    "valuation-analysis/0.1.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-valuation-analysis-4051a0d76b9181b9.zip",
+      "filename": "lazymind-featured-valuation-analysis-4051a0d76b9181b9.zip",
+      "files": {
+        "valuation-analysis/0.1.0/45a44b1cf374-dcf-valuation.html": {
+          "sha256": "45a44b1cf37421ad8a9326feb605beb9e7877c8ac71b94a2ad182eda26e4be50",
+          "sizeBytes": 12590
+        },
+        "valuation-analysis/0.1.0/49351987b9b6-financial-health.html": {
+          "sha256": "49351987b9b682b969ac3b696b221ca07b28815fb439b697de6732742a3527e7",
+          "sizeBytes": 13946
+        },
+        "valuation-analysis/0.1.0/c55c5bf2284c-investment-decision.html": {
+          "sha256": "c55c5bf2284ccea61da780035a7da76d9a236d3255e416a6c70a9a6fcf0b01f0",
+          "sizeBytes": 14553
+        }
+      },
+      "sha256": "67fe7a4f9142b811863eb5214b2128b548368d1c7cb7290daaae0b0c6e889bff",
+      "sizeBytes": 15226,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-valuation-analysis-4051a0d76b9181b9.zip"
+    },
+    "wechat-cover/1.1.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-wechat-cover-6491de5d57eac111.zip",
+      "filename": "lazymind-featured-wechat-cover-6491de5d57eac111.zip",
+      "files": {
+        "wechat-cover/1.1.0/29e85005c74c-cognitive-compound-report.html": {
+          "sha256": "29e85005c74c144bb5caa313db2dd0af6e29fb8e85895349599c740574442301",
+          "sizeBytes": 17491
+        },
+        "wechat-cover/1.1.0/3f826d73f114-worker-meme-cover.png": {
+          "sha256": "3f826d73f114525371c6352a8209fe0086f41904873998ff0a4d212c9ad1c52c",
+          "sizeBytes": 2835321
+        },
+        "wechat-cover/1.1.0/4706fb1887d4-sensitive-skincare-1.png": {
+          "sha256": "4706fb1887d41f3352a2d60f3e66c4ab0a86224b2765e6d04c637f9bc3380a6f",
+          "sizeBytes": 730398
+        },
+        "wechat-cover/1.1.0/55baddb96d88-worker-3d-cover.png": {
+          "sha256": "55baddb96d88db584aeca21db5b697fe95b7192ac00b4cbfc1f310aba5906043",
+          "sizeBytes": 2024448
+        },
+        "wechat-cover/1.1.0/625928c39577-workplace-cover-1.png": {
+          "sha256": "625928c39577f7b690b7fdf18bf428dafaf29589d3682c3f3dd9ecfa0cecb0a2",
+          "sizeBytes": 3169301
+        },
+        "wechat-cover/1.1.0/70440faef45a-cognitive-compound-2.png": {
+          "sha256": "70440faef45ab33c72568964860ae5e44443322e01228546b02d39d9d28552e3",
+          "sizeBytes": 378928
+        },
+        "wechat-cover/1.1.0/98b6a9a8ba74-cognitive-compound-1.png": {
+          "sha256": "98b6a9a8ba74ab8100ca5ba96f631c8a425c9d95ef13393e1db32fa54f6384fe",
+          "sizeBytes": 496924
+        },
+        "wechat-cover/1.1.0/a7b40074b253-cognitive-compound-3.png": {
+          "sha256": "a7b40074b2531a1cb7d38668a5ae00062cfe3e83082165dd3515b62d0b7ef2ca",
+          "sizeBytes": 328534
+        },
+        "wechat-cover/1.1.0/b2aee0342539-wechat-cover-demo.html": {
+          "sha256": "b2aee0342539309fb71e3d4e03baab451646ed5c9e72c9e0134fd51e21661677",
+          "sizeBytes": 19974
+        },
+        "wechat-cover/1.1.0/db3b1cb31159-sensitive-skincare-3.png": {
+          "sha256": "db3b1cb311599d5af8c9efc6e6bbfecf85b633fa49629a508938b5368ad334bd",
+          "sizeBytes": 666658
+        },
+        "wechat-cover/1.1.0/e4a01c4709e2-sensitive-skincare-report.html": {
+          "sha256": "e4a01c4709e2f7c91a58179de022d7786985c98118f0e3f0432cd07755007b67",
+          "sizeBytes": 18104
+        },
+        "wechat-cover/1.1.0/f1d38c25b722-sensitive-skincare-2.png": {
+          "sha256": "f1d38c25b722e8ae1e48b33fb2661ea6c5d627529d0b5c604ff72a707751c230",
+          "sizeBytes": 486579
+        }
+      },
+      "sha256": "ef58d927eebbe0e80b68cd4207ed8a88e4c4914469aadd39ffbb02a6c1f907f8",
+      "sizeBytes": 11136312,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-wechat-cover-6491de5d57eac111.zip"
+    },
+    "writer-workflow/1.1.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-writer-workflow-0be313535ed391b1.zip",
+      "filename": "lazymind-featured-writer-workflow-0be313535ed391b1.zip",
+      "files": {
+        "writer-workflow/1.1.0/f7eef32bcabc-writer-interaction-demo.html": {
+          "sha256": "f7eef32bcabc76a72bcdd453a7f011e4a55a818cf47f2da10470c2878b86b52e",
+          "sizeBytes": 46300
+        }
+      },
+      "sha256": "d2343321f79289be87a5006000e15bf6aeadb381a01d24cf65f793d6517280bd",
+      "sizeBytes": 17660,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-writer-workflow-0be313535ed391b1.zip"
+    },
+    "xiaohongshu-copywriter/1.0.1": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-xiaohongshu-copywriter-bef7806a9892a83d.zip",
+      "filename": "lazymind-featured-xiaohongshu-copywriter-bef7806a9892a83d.zip",
+      "files": {
+        "xiaohongshu-copywriter/1.0.1/0c80b51e188d-portable-blender-output.html": {
+          "sha256": "0c80b51e188dcf70b31800e29027d76b5e03b3863598dc0acb803d2f3d9bb507",
+          "sizeBytes": 507
+        },
+        "xiaohongshu-copywriter/1.0.1/69763ca5ce5b-portable-blender-note.gif": {
+          "sha256": "69763ca5ce5b0188478691484348b7aac5ee53b57c2109b30a6d5e6bac2fda26",
+          "sizeBytes": 143398
+        },
+        "xiaohongshu-copywriter/1.0.1/75d9bc7fdb90-rewrite-note-output.html": {
+          "sha256": "75d9bc7fdb907fe0b2318fa40400d90385009e2805b39e350124cc3955ca18a4",
+          "sizeBytes": 3767
+        }
+      },
+      "sha256": "70a4bac44dd5df774af501a6cbf53f5058ac1b299b468cf765a28b9c7422b3b4",
+      "sizeBytes": 146375,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-xiaohongshu-copywriter-bef7806a9892a83d.zip"
+    }
+  },
+  "local": {
+    "academic_research_pipeline/1.1.0/28611942d57b-cover.jpg": {
+      "sha256": "28611942d57bfed0f719f8c726af9f527d846221dfa7d2be7ebcba9b5743b530",
+      "sizeBytes": 21716
+    },
+    "agent-team-orchestration/1.0.0/a2585ac26679-cover.jpg": {
+      "sha256": "a2585ac26679ab622d31cd5f12dfe6132320ef3d119e444d1e75f3cc009ba12a",
+      "sizeBytes": 44214
+    },
+    "agentic-coding/1.0.1/573025097648-cover.jpg": {
+      "sha256": "573025097648987827da2fac42d4a26c3eaa5c93a15da2fbdd8111d6934097da",
+      "sizeBytes": 21846
+    },
+    "automation-workflows/0.1.0/280d1c157f89-cover.jpg": {
+      "sha256": "280d1c157f89fb9c3bba64f793da053a228966eeccad2f473cb7e6fd60dd2f80",
+      "sizeBytes": 40536
+    },
+    "bid_tech_proposal_writer/1.1.0/f7b9dad97411-cover.jpg": {
+      "sha256": "f7b9dad97411f7c15a3ad6418e513238516ee86bd21b05690b52f3c8c8898180",
+      "sizeBytes": 22214
+    },
+    "cangjie-distill/1.0.1/e4f638c710fd-cover.jpg": {
+      "sha256": "e4f638c710fd136a8958ad242e5bfe808f2421a9795da9014dee0d1bb5d0f03d",
+      "sizeBytes": 24192
+    },
+    "chat-eq-reply/1.1.0/1df147b63c7d-cover.jpg": {
+      "sha256": "1df147b63c7d3238aec27a673ecc3c9dfda8f7048af4935b0f65d5ffc5fed248",
+      "sizeBytes": 21356
+    },
+    "conventional-commits/1.0.1/e80c15d481d8-cover.jpg": {
+      "sha256": "e80c15d481d8acdd411088f885062913df2c29b98caa6dcdce1f6b7ee9e289ea",
+      "sizeBytes": 16819
+    },
+    "data-report/0.1.1/9dc9b36d0111-cover.jpg": {
+      "sha256": "9dc9b36d0111223bee50373e01e569993008e2488811a13b90bbda3085a9b02c",
+      "sizeBytes": 27676
+    },
+    "diagram-design/1.0.0/28e10f296558-cover.jpg": {
+      "sha256": "28e10f2965585d7732f0dee5469088c05dec70cfe6a506b74b87d2eba805844a",
+      "sizeBytes": 30150
+    },
+    "doc-coauthoring/1.0.0/62cba1732efc-cover.jpg": {
+      "sha256": "62cba1732efcb6a2c29de8b8ff0ad9f68e03ba7c7f625a9de37645e09992c858",
+      "sizeBytes": 31738
+    },
+    "document-refinement/1.0.0/226e98732f16-cover.jpg": {
+      "sha256": "226e98732f16c9049c964d8732bb8eb4589680988983ff1e0622317ee6df9c1b",
+      "sizeBytes": 44378
+    },
+    "game-studio/1.0.0/5eefcaaf0e50-cover.jpg": {
+      "sha256": "5eefcaaf0e50e0978ef30b80fc056b05d19054761c9875960907fcc08845157a",
+      "sizeBytes": 58966
+    },
+    "gaokao-volunteer-advisor/1.0.0/966353c45bcf-cover.jpg": {
+      "sha256": "966353c45bcf4e6e873c7cc7a99686ad2948a20d7de66191a8e8d232ab0da36f",
+      "sizeBytes": 28693
+    },
+    "graphic-design/1.0.0/7a01e7a59fe3-cover.jpg": {
+      "sha256": "7a01e7a59fe31009cbe790247f11e25f6fd129e33221b0ec58cafa9f9cbe0ddf",
+      "sizeBytes": 30154
+    },
+    "hot-news-summary/1.0.2/41172f2118cf-cover.jpg": {
+      "sha256": "41172f2118cf3811ecfdc6454fc3b3f1a0fa94e46fc2eea520ae1365d9b1e678",
+      "sizeBytes": 34111
+    },
+    "ima-skills/1.1.0/bf55facfc724-cover.jpg": {
+      "sha256": "bf55facfc72494f9d6d769e8cce0b671db5e69883181c824d474b1a9f38fe511",
+      "sizeBytes": 18956
+    },
+    "image-workflow/1.0.0/0067bea603e3-cover.jpg": {
+      "sha256": "0067bea603e3bfc8276ad45a24f0f105bcc7b269ff5bfaa66cd7c20df7e93d4c",
+      "sizeBytes": 31176
+    },
+    "interview-simulator/1.0.1/cfef3a499646-cover.jpg": {
+      "sha256": "cfef3a49964650988e01b417b742965cbb0ec9f3b2ed1453e9068a64b6bc5883",
+      "sizeBytes": 22479
+    },
+    "k12-smart-teacher/1.0.4/9da2a2631a4c-cover.jpg": {
+      "sha256": "9da2a2631a4cadd830418a89601fdcf9601fb388d41b11ed11122a799d94de31",
+      "sizeBytes": 25986
+    },
+    "karpathy-llm-wiki/1.0.1/bea16ce3ae82-cover.jpg": {
+      "sha256": "bea16ce3ae820255168f1ef490d4ee8e83e321911f5ec5bf080137cdedf47e15",
+      "sizeBytes": 29569
+    },
+    "live-commerce-script-studio/1.0.0/726cd93ba4ea-cover.jpg": {
+      "sha256": "726cd93ba4ead44b6e8939d74756d74642b842e1be6618ef0dad9f6791b7d2a5",
+      "sizeBytes": 26074
+    },
+    "market-researcher/1.0.2/e60ddca83bd3-cover.jpg": {
+      "sha256": "e60ddca83bd374074bd26d1ae699862e8d58564e25653259df2dc7bf9e53a8e4",
+      "sizeBytes": 27364
+    },
+    "mbti-money-personality-test/1.0.0/59b534878bc3-cover.jpg": {
+      "sha256": "59b534878bc3e5bb77f572b89a6863ee6fed23f5b6ed16d43ebe517159a0306c",
+      "sizeBytes": 27132
+    },
+    "n8n-workflow-automation/0.1.0/ec56c527a72c-cover.jpg": {
+      "sha256": "ec56c527a72cd8a74a200504c544e3a8f909a68b919f01209c58336bdb24039f",
+      "sizeBytes": 16754
+    },
+    "novel-generator/1.2.1/398ca01db518-cover.jpg": {
+      "sha256": "398ca01db518712a6937c96ba314be20bd975cf8322f2d8aa54dedb0f8efd0d3",
+      "sizeBytes": 30581
+    },
+    "oral-seeding-video-maker/1.0.0/feda96fda949-cover.jpg": {
+      "sha256": "feda96fda949224cd576543f3e25b3683fa7a1b66c00e9dbc555ba846be4a0f6",
+      "sizeBytes": 23670
+    },
+    "poster-design/1.0.1/98fff15e12a2-cover.jpg": {
+      "sha256": "98fff15e12a2a72052280a340bae44a5a81487b446a069b375f95f2d35b5c21c",
+      "sizeBytes": 18849
+    },
+    "ppt-workflow/1.1.0/b742a407fc94-cover.jpg": {
+      "sha256": "b742a407fc9470a60891a46a56fa8460126e65b1aa956682cde44dc62f09556a",
+      "sizeBytes": 19871
+    },
+    "proactive-agent/0.1.0/33c6bc09bf5d-cover.jpg": {
+      "sha256": "33c6bc09bf5d3eee58c1a1a18d1f55209afd0e45e084baa8749c3d9ab7e4a462",
+      "sizeBytes": 22191
+    },
+    "product_solution_delivery/1.0.0/c262a5ec7526-cover.jpg": {
+      "sha256": "c262a5ec7526d087826cd1abad81b322280c5e71e624259f7c06b7d90168172a",
+      "sizeBytes": 23700
+    },
+    "prompt-engineering-expert/1.0.0/78131b226a17-cover.jpg": {
+      "sha256": "78131b226a17029631f60f0928693adbb878ed4221650ec712a1a340b118324e",
+      "sizeBytes": 30313
+    },
+    "remotion-video-toolkit/0.1.0/8b4c61d99bfa-cover.jpg": {
+      "sha256": "8b4c61d99bfa65f4fdfdf70fe599f33ca793d3cd282b8319d85cd4ec590a5feb",
+      "sizeBytes": 26259
+    },
+    "short-video-script/1.0.0/8ced1cf647f1-cover.jpg": {
+      "sha256": "8ced1cf647f11cf260035d2de9ea0caa3b7fefc8cd24251993a67eccd6c95b88",
+      "sizeBytes": 23604
+    },
+    "skill-creator/1.0.0/016921343f19-cover.jpg": {
+      "sha256": "016921343f19a4ccc5bf1679bf25c126c366b0c78bd16ab49b87cb9b5b27ec21",
+      "sizeBytes": 34834
+    },
+    "smart-charts/7.0.1/c14c5b9f7b8e-cover.jpg": {
+      "sha256": "c14c5b9f7b8e9dc2b2a31a481d36b92fdfe7e99b146c032d8089de624caa1b24",
+      "sizeBytes": 27517
+    },
+    "social-media-content-calendar/1.0.0/4e3df3c8b4ed-cover.jpg": {
+      "sha256": "4e3df3c8b4ed3cc472c97eb1319248fbfc8186b941c78b8a255fe7df2d960f06",
+      "sizeBytes": 28418
+    },
+    "social-media-operator/1.0.0/b0a4d4a4990f-cover.jpg": {
+      "sha256": "b0a4d4a4990ff201aac68a4233365cc5e0d72e7180ac24437747a6ccca4cbb10",
+      "sizeBytes": 24522
+    },
+    "spec-workflow-guide/2.34.3/d3ed97c23687-cover.jpg": {
+      "sha256": "d3ed97c23687408e6e2fd698379bcbbe0c213ddf536848c3cdf04d3b864b545a",
+      "sizeBytes": 36883
+    },
+    "summarize-meeting/1.0.0/d35b3d32caa2-cover.jpg": {
+      "sha256": "d35b3d32caa27082c43c369a33a18872bdc076cf5f128ff35b23780c1f6761b7",
+      "sizeBytes": 24688
+    },
+    "tailored-resume-generator/1.0.0/923c00c9b060-cover.jpg": {
+      "sha256": "923c00c9b0603d727efc3530a6cfd07d62b79b73ae73af82750fe4bddf55f48a",
+      "sizeBytes": 23003
+    },
+    "ui-new/1.1.0/4e5a47dffe85-cover.jpg": {
+      "sha256": "4e5a47dffe85a4c3c4ae5fd41d95a600ecdece5af3a8b91141c6c7c48a0e0eb3",
+      "sizeBytes": 27638
+    },
+    "valuation-analysis/0.1.0/7e19e313938e-cover.jpg": {
+      "sha256": "7e19e313938eeaa367ed107af90d270633c4eefe69ae0cb0419024e4f15f1500",
+      "sizeBytes": 30165
+    },
+    "wechat-cover/1.1.0/250e90245fae-cover.jpg": {
+      "sha256": "250e90245fae5789f672f0c229bacff9a8520e19745d4699f63d8205641d02d6",
+      "sizeBytes": 53613
+    },
+    "writer-workflow/1.1.0/55585b7adaa7-cover.jpg": {
+      "sha256": "55585b7adaa785df2e33cd31b5d4fbd8f9692e0ef81c7dcfdfc89ebb98d99a29",
+      "sizeBytes": 19778
+    },
+    "xiaohongshu-copywriter/1.0.1/570796fb1acc-cover.jpg": {
+      "sha256": "570796fb1accf0064af6e10408af24e17e68da6157963e44c81b48539d256ff6",
+      "sizeBytes": 30233
+    }
+  },
+  "schemaVersion": 1
+}

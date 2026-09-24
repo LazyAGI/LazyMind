@@ -227,6 +227,7 @@ type RuntimePaths struct {
 	AlgorithmPIDDir          string
 	HistoryInjectionRoot     string
 	HistoryInjectionArchive  string
+	HistoryInjectionDownload *HistoryInjectionDownload
 	HistoryInjectionSHA256   string
 	TrustedLocalMode         bool
 }
@@ -317,6 +318,7 @@ type VectorStoreConfig struct {
 }
 
 type AlgorithmConfig struct {
+	RAGDisabled         bool
 	PostgresPort        int
 	DocPort             int
 	ProcessorPort       int
@@ -996,6 +998,16 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 	milvusLiteDBPath := filepath.Clean(milvusDataDir)
 	watchHostDir := defaultFileWatcherWatchHostDir(pathLayout.LocalImportRoot)
 	allowedRoots := fileWatcherAllowedRoots(watchHostDir)
+	componentCatalog, err := loadPythonComponentCatalog(p)
+	if err != nil {
+		return RuntimeConfig{}, p, err
+	}
+	ragDisabled := profile == "desktop" && componentCatalog != nil &&
+		installedPythonComponentPath(p, componentCatalog.Components["rag"]) == ""
+	modeProfile := localRuntimeModeProfile(milvusPort, milvusLiteDBPath)
+	if ragDisabled {
+		modeProfile.VectorStore.ManagedProcess = false
+	}
 	return RuntimeConfig{
 		Profile:            profile,
 		MaintenanceMode:    maintenanceMode,
@@ -1004,7 +1016,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		BuildRoot:          p.BuildRoot,
 		ResourcesRoot:      p.ResourcesRoot,
 		RuntimeRoot:        runtimeRoot,
-		ModeProfile:        localRuntimeModeProfile(milvusPort, milvusLiteDBPath),
+		ModeProfile:        modeProfile,
 		ProcessComposePort: processComposePort,
 		SQLiteServerPort:   sqliteServerPort,
 		FrontendPort:       frontendPort,
@@ -1021,6 +1033,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 			EvoHostPort:     evoPort,
 		},
 		Algorithm: AlgorithmConfig{
+			RAGDisabled:         ragDisabled,
 			PostgresPort:        postgresPort,
 			DocPort:             docPort,
 			ProcessorPort:       processorPort,
@@ -1107,6 +1120,18 @@ func applyDesktopManifestPaths(paths *RuntimePaths) error {
 	if value := joinResource(manifest.Paths.AlgorithmVenv); value != "" {
 		paths.AlgorithmVenv = value
 		paths.AlgorithmPython = venvExecutable(value, "python")
+	}
+	if download := manifest.HistoryInjectionDownload; download != nil {
+		if manifest.Paths.HistoryInjectionArchive != "" {
+			return fmt.Errorf("history examples cannot be bundled and deferred at once")
+		}
+		if err := download.validate(); err != nil {
+			return err
+		}
+		paths.HistoryInjectionDownload = download
+		paths.HistoryInjectionSHA256 = download.SHA256
+		paths.HistoryInjectionArchive = filepath.Join(paths.RuntimeRoot, "cache", "history-injection", download.SHA256+".zip")
+		paths.HistoryInjectionRoot = filepath.Join(paths.DataDir, "history-injection")
 	}
 	if relativeArchive := strings.TrimSpace(manifest.Paths.HistoryInjectionArchive); relativeArchive != "" {
 		paths.HistoryInjectionArchive = joinResource(relativeArchive)

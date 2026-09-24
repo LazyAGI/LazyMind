@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { validateConfig } from "./stage-history-injection-package.mjs";
 
 const args = process.argv.slice(2);
 const runtimeRoot = args.shift();
@@ -80,7 +81,7 @@ if (!cloudBaseURL && cloudOAuthCallbackMode !== "direct") {
   process.exit(2);
 }
 
-const supportedTargets = new Set(["darwin/arm64", "windows/amd64"]);
+const supportedTargets = new Set(["darwin/arm64", "darwin/amd64", "windows/amd64"]);
 const target = `${options.platform}/${options.arch}`;
 if (!supportedTargets.has(target)) {
   console.error(`unsupported desktop runtime target: ${target}`);
@@ -94,6 +95,13 @@ if (!existsSync(builtinSkillCatalog)) {
   console.error(`builtin Skill catalog is missing: ${builtinSkillCatalog}`);
   process.exit(1);
 }
+const builtinSkills = JSON.parse(readFileSync(builtinSkillCatalog, "utf8")).skills;
+for (const skill of builtinSkills) {
+  if (!skill.source_url?.startsWith("builtin://") && existsSync(path.join(runtimeRoot, "builtin-skills", skill.package_file))) {
+    console.error(`remote builtin Skill package must not be bundled: ${skill.uid}`);
+    process.exit(1);
+  }
+}
 const featuredSkillCatalog = path.join(runtimeRoot, "featured-skills", "catalog.json");
 if (!existsSync(featuredSkillCatalog)) {
   console.error(`featured Skill catalog is missing: ${featuredSkillCatalog}`);
@@ -104,8 +112,31 @@ if (!existsSync(featuredSkillAssets)) {
   console.error(`featured Skill assets are missing: ${featuredSkillAssets}`);
   process.exit(1);
 }
+// Deferred builds must never silently retain full-size showcase assets.
+const featuredDownloadsPath = path.join(runtimeRoot, "featured-skills", "downloads.json");
+if (existsSync(featuredDownloadsPath)) {
+  const downloads = JSON.parse(readFileSync(featuredDownloadsPath, "utf8"));
+  if (downloads.schemaVersion !== 1 || !downloads.local || !downloads.bundles) {
+    throw new Error("Invalid deferred featured asset catalog");
+  }
+  for (const filename of Object.keys(walk(featuredSkillAssets, featuredSkillAssets))) {
+    if (!Object.hasOwn(downloads.local, filename.replaceAll("\\", "/"))) {
+      throw new Error(`Full-size featured asset must not be bundled: ${filename}`);
+    }
+  }
+}
 const historyInjectionArchive = path.join(runtimeRoot, "history-injection.zip");
-if (!existsSync(historyInjectionArchive)) {
+const historyInjectionDescriptor = path.join(runtimeRoot, "history-injection-package.json");
+let historyInjectionDownload;
+if (existsSync(historyInjectionDescriptor)) {
+  if (existsSync(historyInjectionArchive)) {
+    throw new Error("history examples cannot be bundled and deferred in the same runtime");
+  }
+  const config = JSON.parse(readFileSync(historyInjectionDescriptor, "utf8"));
+  validateConfig(config, historyInjectionDescriptor);
+  historyInjectionDownload = { url: config.url, size: config.size, sha256: config.sha256 };
+}
+if (!historyInjectionDownload && !existsSync(historyInjectionArchive)) {
   console.error(`history injection package is missing: ${historyInjectionArchive}`);
   process.exit(1);
 }
@@ -148,8 +179,8 @@ const manifest = {
   } : {}),
   features: {
     trustedLocalMode: trustedLocalModeOption === "true",
-    offlineBuiltinSkills: true,
-    offlineFeaturedSkills: true
+    offlineBuiltinSkills: false,
+    offlineFeaturedSkills: false
   },
   binaries: {
     "process-supervisor": executable("process-compose"),
@@ -168,7 +199,7 @@ const manifest = {
     channelGatewayVenv: "deps/python/channel-gateway",
     algorithmVenv: "deps/python/algorithm",
     localProxyConfig: "app/local/local-proxy/configs/cloud-replace-kong.yaml",
-    historyInjectionArchive: "history-injection.zip"
+    ...(historyInjectionDownload ? {} : { historyInjectionArchive: "history-injection.zip" })
   },
   services: {
     "local-proxy": { healthPath: "/_local/healthz" },
@@ -182,11 +213,14 @@ const manifest = {
     "lazyllm-algo": { healthPath: "/docs" },
     "chat": { healthPath: "/health" }
   },
+  ...(historyInjectionDownload ? { historyInjectionDownload } : {}),
   checksums: {
     ...walk(path.join(runtimeRoot, "bin"), runtimeRoot),
     ...walk(path.join(runtimeRoot, "builtin-skills"), runtimeRoot),
     ...walk(path.join(runtimeRoot, "featured-skills"), runtimeRoot),
-    "history-injection.zip": sha256(historyInjectionArchive)
+    ...(historyInjectionDownload
+      ? { "history-injection-package.json": sha256(historyInjectionDescriptor) }
+      : { "history-injection.zip": sha256(historyInjectionArchive) })
   }
 };
 

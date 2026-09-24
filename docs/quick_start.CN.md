@@ -7,6 +7,8 @@
 
 所有命令默认在仓库根目录下执行。
 
+Mac 桌面版的本地打包、RAG 依赖上传和安装测试，请看 [Mac 构建、上传与安装验证流程](../desktop/INSTALL.zh-CN.md)。该流程使用原生桌面运行环境，不需要下面的 Docker 前置条件。
+
 ## 前置条件
 
 - 已安装 Docker 和 Docker Compose
