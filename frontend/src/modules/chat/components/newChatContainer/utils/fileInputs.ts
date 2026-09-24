@@ -11,6 +11,7 @@ export function getFileUrls(
 
   return files.map((file) => ({
     uri: file.uri,
+    name: file.name,
     base64: images ? images.find((image) => image.uid === file.uid)?.base64 : "",
   }));
 }

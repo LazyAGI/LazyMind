@@ -223,8 +223,9 @@ def test_sensitive_input_is_blocked_before_model_execution(monkeypatch):
     terminal = terminal_payload['runtime_event']
     assert terminal['type'] == 'run_finished'
     assert terminal['data'] == {
-        'status': 'completed',
-        'reason': 'normal',
+        'status': 'failed',
+        'reason': 'runtime_failure',
+        'code': 'sensitive_content_blocked',
         'partial_output': True,
         'model_invoked': False,
     }

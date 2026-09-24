@@ -8,5 +8,6 @@ export const isSkillAlreadyExistsError = (error: unknown): boolean => {
   );
   const errorCode = readCode(payload?.code);
 
-  return semanticCode === "path_exists" || errorCode === "2001108";
+  return semanticCode === "skill_already_exists" ||
+    semanticCode === "path_exists" || errorCode === "2001108";
 };

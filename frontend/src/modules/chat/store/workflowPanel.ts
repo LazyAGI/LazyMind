@@ -16,6 +16,8 @@ import {
   type WorkflowEventStreamSubscription,
 } from '@/modules/chat/utils/workflowEventStream';
 import { reconcileWorkflowSessionStatus } from '@/modules/chat/store/workflowStatus';
+import type { OrdinaryTaskView, OrdinaryRunView } from '@/modules/chat/types/ordinaryTask';
+import { mergeOrdinarySnapshot, readOrdinaryTask } from '@/modules/chat/utils/ordinaryTaskState';
 
 export function buildWorkflowSearchConfig(
   chatConfig?: Pick<ChatConfig, "knowledgeBaseId" | "creators" | "tags">,
@@ -297,6 +299,10 @@ export interface WorkflowSession {
   slots?: SlotRevision[];
   /** Steps for this session, used in completed/waiting state to render rollback step list. */
   steps?: WorkflowSessionStep[];
+  ordinary_tasks?: OrdinaryTaskView[];
+  ordinary_runs?: OrdinaryRunView[];
+  ordinary_revision?: number;
+  ordinary_error?: boolean;
   /** Go-authoritative runtime projection. Never derive Ready/Past from steps locally. */
   projection?: WorkflowRuntimeProjection;
   /** Fatal runtime error that makes this conversation's pinned workflow graph unusable. */
@@ -322,12 +328,41 @@ export interface WorkflowSessionStep {
   intent_context?: string;
   created_at: string;
   updated_at: string;
+  ordinary?: OrdinaryTaskView;
+}
+
+export interface OrdinaryWorkflowSnapshot {
+  schema_version: 1;
+  session_id: string;
+  revision: number;
+  tasks: OrdinaryTaskView[];
+  runs: OrdinaryRunView[];
+}
+
+function attachOrdinarySteps(steps: WorkflowSessionStep[] | undefined, tasks: OrdinaryTaskView[]): WorkflowSessionStep[] | undefined {
+  if (!steps) return steps;
+  const latest = new Map<string, number>();
+  for (const step of steps) latest.set(step.step_id, Math.max(latest.get(step.step_id) ?? 0, step.attempt));
+  return steps.map(step => ({ ...step, ordinary: tasks.find(task => task.workflow_step_id === step.step_id
+    && (task.attempt_id === step.id || (step.attempt === latest.get(step.step_id)
+      && (!task.task_id || task.task_id === step.task_id)))) }));
+}
+
+export function applyOrdinaryWorkflowSnapshot(session: WorkflowSession, snapshot: OrdinaryWorkflowSnapshot): WorkflowSession {
+  if (snapshot?.schema_version !== 1 || snapshot.session_id !== session.session_id
+    || !Number.isSafeInteger(snapshot.revision) || snapshot.revision < (session.ordinary_revision ?? -1)
+    || !Array.isArray(snapshot.tasks) || !Array.isArray(snapshot.runs)) return session;
+  const existing = new Map((session.ordinary_tasks ?? []).map(task => [task.display_key, task]));
+  const tasks = snapshot.tasks.map(readOrdinaryTask).filter((task): task is OrdinaryTaskView => !!task)
+    .map(task => mergeOrdinarySnapshot(existing.get(task.display_key), task));
+  return { ...session, ordinary_tasks: tasks, ordinary_runs: snapshot.runs,
+    ordinary_revision: snapshot.revision, ordinary_error: false, steps: attachOrdinarySteps(session.steps, tasks) };
 }
 
 export interface WorkflowRuntimeProjection {
   status?: string;
   current_step_id?: string;
-  attempt_history?: Record<string, Array<{ attempt: number; task_id: string; status: string; validity: string; started_at: string; updated_at?: string; intent_context?: string }>>;
+  attempt_history?: Record<string, Array<{ attempt: number; attempt_id?: string; task_id: string; status: string; validity: string; started_at: string; updated_at?: string; intent_context?: string }>>;
   completed?: boolean;
   past?: string[];
   current?: string[];
@@ -351,7 +386,7 @@ export interface WorkflowRuntimeProjection {
 export function workflowSnapshotSteps(sessionId: string, history: WorkflowRuntimeProjection['attempt_history']): WorkflowSessionStep[] | undefined {
   if (!history) return undefined;
   return Object.entries(history).flatMap(([stepId, attempts]) => stepId === '__end__' ? [] : attempts.map((attempt) => ({
-    id: attempt.task_id, session_id: sessionId, step_id: stepId, task_id: attempt.task_id,
+    id: attempt.attempt_id ?? attempt.task_id, session_id: sessionId, step_id: stepId, task_id: attempt.task_id,
     attempt: attempt.attempt, status: attempt.status, validity: attempt.validity === "stale" ? "stale" as const : "effective" as const,
     created_at: attempt.started_at, updated_at: attempt.updated_at ?? attempt.started_at,
     intent_context: attempt.intent_context,
@@ -637,9 +672,12 @@ interface WorkflowStore {
   setFocusedSortOrder: (conversationId: string, sortOrder: number | undefined) => void;
   applyWorkflowEvent: (conversationId: string, sessionId: string, event: WorkflowStreamEvent) => void;
   subscribeWorkflowSession: (conversationId: string, sessionId: string) => () => void;
+  refreshOrdinarySession: (conversationId: string, sessionId: string) => Promise<void>;
 }
 
 const workflowStreams = new Map<string, { refs: number; subscription: WorkflowEventStreamSubscription }>();
+const ordinaryLoads = new Map<string, Promise<void>>();
+const ordinaryReloads = new Set<string>();
 
 export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
   sessionByConversation: {},
@@ -681,6 +719,15 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
       const previous = state.sessionByConversation[conversationId];
       if (session && previous?.session_id === session.session_id
         && (session.state_version ?? 0) < (previous.state_version ?? 0)) return state;
+      if (session && previous?.session_id === session.session_id && previous.ordinary_revision !== undefined
+        && (session.ordinary_revision ?? -1) < previous.ordinary_revision) {
+        session = { ...session, ordinary_tasks: previous.ordinary_tasks, ordinary_runs: previous.ordinary_runs,
+          ordinary_revision: previous.ordinary_revision, ordinary_error: previous.ordinary_error,
+          steps: attachOrdinarySteps(session.steps, previous.ordinary_tasks ?? []) };
+      }
+      if (session?.ordinary_tasks) {
+        session = { ...session, steps: attachOrdinarySteps(session.steps, session.ordinary_tasks) };
+      }
       const next: Partial<WorkflowStore> = {
         sessionByConversation: { ...state.sessionByConversation, [conversationId]: session },
       };
@@ -789,6 +836,7 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
         const streamed = session ? get().projectionBySession[session.session_id] : undefined;
         if (!streamed || streamed.cursor <= startCursor || (session?.state_version ?? 0) > streamed.stateVersion) {
           get().setSession(conversationId, session);
+          if (session) await get().refreshOrdinarySession(conversationId, session.session_id);
         } else {
           _queuedActiveSessionLoads.set(conversationId, { silentError: true });
         }
@@ -983,6 +1031,18 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
   },
 
   applyWorkflowEvent: (conversationId, sessionId, event) => {
+    if (event.type === 'ordinary.task_changed' || event.type === 'attempt.public_display') {
+      // These additive notifications invalidate public data only. The graph
+      // reducer deliberately rejects unknown control events.
+      set(state => {
+        const previous = state.projectionBySession[sessionId] ?? emptyWorkflowProjection();
+        if (event.cursor <= previous.cursor) return state;
+        return { projectionBySession: { ...state.projectionBySession,
+          [sessionId]: { ...previous, cursor: event.cursor } } };
+      });
+      void get().refreshOrdinarySession(conversationId, sessionId);
+      return;
+    }
     set((state) => {
       const previous = state.projectionBySession[sessionId] ?? emptyWorkflowProjection();
       const projectionState = reduceWorkflowEvent(previous, event);
@@ -996,7 +1056,7 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
         return { projectionBySession: { ...state.projectionBySession, [sessionId]: projectionState } };
       }
       const reconciledStatus = reconcileWorkflowSessionStatus(session.status, projection);
-      const steps = workflowSnapshotSteps(sessionId, projection.attempt_history) ?? session.steps;
+      const steps = attachOrdinarySteps(workflowSnapshotSteps(sessionId, projection.attempt_history) ?? session.steps, session.ordinary_tasks ?? []);
       return {
         projectionBySession: { ...state.projectionBySession, [sessionId]: projectionState },
         ...(['completed', 'failed', 'stopped'].includes(reconciledStatus) ? {
@@ -1021,6 +1081,39 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
     if (event.type === 'artifact.upsert') {
       void get().refreshSlots(conversationId, sessionId);
     }
+    void get().refreshOrdinarySession(conversationId, sessionId);
+  },
+
+  refreshOrdinarySession: async (conversationId, sessionId) => {
+    const running = ordinaryLoads.get(sessionId);
+    if (running) { ordinaryReloads.add(sessionId); await running; return; }
+    const load = (async () => {
+      try {
+        const response = await WorkflowSessionApi().getProjection(sessionId, { params: { view: 'ordinary' }, silentError: true } as never);
+        const snapshot = response?.data?.data as OrdinaryWorkflowSnapshot;
+        set(state => {
+          const session = state.sessionByConversation[conversationId];
+          if (!session || session.session_id !== sessionId) return state;
+          const next = applyOrdinaryWorkflowSnapshot(session, snapshot);
+          if (next === session) return state;
+          return { sessionByConversation: { ...state.sessionByConversation, [conversationId]: next } };
+        });
+      } catch {
+        set(state => {
+          const session = state.sessionByConversation[conversationId];
+          return session?.session_id === sessionId
+            ? { sessionByConversation: { ...state.sessionByConversation, [conversationId]: { ...session, ordinary_error: true } } }
+            : state;
+        });
+      }
+    })();
+    ordinaryLoads.set(sessionId, load);
+    try { await load; } finally {
+      ordinaryLoads.delete(sessionId);
+      if (ordinaryReloads.delete(sessionId) && get().sessionByConversation[conversationId]?.session_id === sessionId) {
+        await get().refreshOrdinarySession(conversationId, sessionId);
+      }
+    }
   },
 
   subscribeWorkflowSession: (conversationId, sessionId) => {
@@ -1039,6 +1132,7 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
             [sessionId]: markWorkflowResyncRequired(state.projectionBySession[sessionId] ?? emptyWorkflowProjection()),
           },
         })),
+        { additionalEvents: ['ordinary.task_changed', 'attempt.public_display'] },
       );
       workflowStreams.set(sessionId, { refs: 1, subscription });
     }

@@ -593,6 +593,41 @@ components:
                 allowed:
                     type: boolean
             type: object
+        Capabilities:
+            properties:
+                download:
+                    type: boolean
+                open:
+                    type: boolean
+                preview:
+                    type: boolean
+            required:
+                - download
+                - open
+                - preview
+            type: object
+        CapabilityDependency:
+            properties:
+                message:
+                    type: string
+                missing:
+                    items:
+                        $ref: '#/components/schemas/MissingCapability'
+                    type: array
+                required:
+                    items:
+                        type: string
+                    type: array
+                status:
+                    enum:
+                        - blocked
+                    type: string
+            required:
+                - message
+                - missing
+                - required
+                - status
+            type: object
         ChatChunkResponse:
             properties:
                 capability_dependency:
@@ -1408,6 +1443,21 @@ components:
                 - used_amount
                 - remaining_amount
                 - missing_usage_count
+            type: object
+        CollectionPage:
+            properties:
+                next_cursor:
+                    nullable: true
+                    type: string
+                revision:
+                    format: int64
+                    type: integer
+                total:
+                    type: integer
+            required:
+                - next_cursor
+                - revision
+                - total
             type: object
         CompleteUploadRequest:
             properties:
@@ -2827,25 +2877,6 @@ components:
                 - description
                 - group_id
                 - name
-            type: object
-        OAuthCallbackRequest:
-            properties:
-                code:
-                    type: string
-                state:
-                    type: string
-            required:
-                - code
-                - state
-            type: object
-        OAuthResponse:
-            properties:
-                authorization_url:
-                    type: string
-                status:
-                    type: string
-            required:
-                - status
             type: object
         CreateServerRequest:
             properties:
@@ -6513,6 +6544,30 @@ components:
                 - description
                 - term
             type: object
+        MissingCapability:
+            properties:
+                available:
+                    type: boolean
+                id:
+                    enum:
+                        - image_generator
+                        - image_editor
+                        - video_generator
+                        - ffmpeg
+                    type: string
+                label:
+                    type: string
+                reason:
+                    type: string
+                settings_url:
+                    type: string
+            required:
+                - available
+                - id
+                - label
+                - reason
+                - settings_url
+            type: object
         ModelFeaturesResponse:
             properties:
                 image_embed_enabled:
@@ -6522,6 +6577,170 @@ components:
             required:
                 - image_embed_enabled
                 - image_embed_required
+            type: object
+        OAuthCallbackRequest:
+            properties:
+                code:
+                    type: string
+                state:
+                    type: string
+            required:
+                - code
+                - state
+            type: object
+        OAuthResponse:
+            properties:
+                authorization_url:
+                    type: string
+                status:
+                    type: string
+            required:
+                - status
+            type: object
+        OrdinaryDisplayError:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        request_id:
+                            type: string
+                    required:
+                        - request_id
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        OrdinaryRunView:
+            properties:
+                final_artifacts:
+                    items:
+                        $ref: '#/components/schemas/PublicArtifact'
+                    type: array
+                final_output_refs:
+                    items:
+                        type: string
+                    type: array
+                revision:
+                    format: int64
+                    type: integer
+                run_id:
+                    type: string
+            required:
+                - revision
+                - run_id
+            type: object
+        OrdinaryTaskView:
+            properties:
+                agent_type:
+                    type: string
+                attempt_id:
+                    nullable: true
+                    type: string
+                capability_dependency:
+                    $ref: '#/components/schemas/CapabilityDependency'
+                conversation_id:
+                    type: string
+                display_key:
+                    type: string
+                execution_id:
+                    type: string
+                order:
+                    type: integer
+                pages:
+                    $ref: '#/components/schemas/Pages'
+                parallel_group_id:
+                    nullable: true
+                    type: string
+                plan_steps:
+                    description: Public subtask plan from scope-v2 plan events. Planned actions only; no inferred execution status or timing.
+                    items:
+                        maxLength: 100
+                        minLength: 1
+                        type: string
+                    maxItems: 5
+                    minItems: 3
+                    type: array
+                process_state:
+                    type: string
+                process_steps:
+                    items:
+                        $ref: '#/components/schemas/PublicProcessStep'
+                    type: array
+                progress_pct:
+                    description: Reported overall subtask progress, used to estimate plan position. Does not establish individual process step states. Omitted when unavailable.
+                    maximum: 100
+                    minimum: 0
+                    type: integer
+                revision:
+                    format: int64
+                    type: integer
+                run_id:
+                    type: string
+                schema_version:
+                    enum:
+                        - "1"
+                    type: integer
+                session_id:
+                    nullable: true
+                    type: string
+                sources:
+                    items:
+                        $ref: '#/components/schemas/PublicSource'
+                    type: array
+                stage_artifacts:
+                    items:
+                        $ref: '#/components/schemas/PublicArtifact'
+                    type: array
+                status:
+                    type: string
+                task_id:
+                    nullable: true
+                    type: string
+                timing:
+                    $ref: '#/components/schemas/Timing'
+                title:
+                    type: string
+                trigger_history_id:
+                    type: string
+                workflow_step_id:
+                    nullable: true
+                    type: string
+            required:
+                - attempt_id
+                - conversation_id
+                - display_key
+                - execution_id
+                - order
+                - pages
+                - parallel_group_id
+                - process_state
+                - revision
+                - run_id
+                - schema_version
+                - session_id
+                - status
+                - task_id
+                - timing
+                - title
+                - workflow_step_id
+            type: object
+        Pages:
+            properties:
+                process_steps:
+                    $ref: '#/components/schemas/CollectionPage'
+                sources:
+                    $ref: '#/components/schemas/CollectionPage'
+                stage_artifacts:
+                    $ref: '#/components/schemas/CollectionPage'
+            required:
+                - process_steps
+                - sources
+                - stage_artifacts
             type: object
         ParserConfig:
             properties:
@@ -7039,6 +7258,156 @@ components:
                 - provider
                 - session_id
                 - status
+            type: object
+        PublicArtifact:
+            properties:
+                artifact_id:
+                    type: string
+                capabilities:
+                    $ref: '#/components/schemas/Capabilities'
+                content_type:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                download_url:
+                    type: string
+                inline_content:
+                    type: string
+                name:
+                    type: string
+                open_url:
+                    type: string
+                preview_kind:
+                    nullable: true
+                    type: string
+                preview_url:
+                    type: string
+                producer_display_key:
+                    type: string
+                revision:
+                    format: int64
+                    type: integer
+                size_bytes:
+                    format: int64
+                    nullable: true
+                    type: integer
+                state:
+                    type: string
+            required:
+                - artifact_id
+                - capabilities
+                - content_type
+                - created_at
+                - name
+                - preview_kind
+                - producer_display_key
+                - revision
+                - size_bytes
+                - state
+            type: object
+        PublicDisplayProgress:
+            properties:
+                event_key:
+                    maxLength: 128
+                    minLength: 1
+                    type: string
+                process_steps:
+                    items:
+                        $ref: '#/components/schemas/PublicProcessStep'
+                    maxItems: 100
+                    type: array
+                schema_version:
+                    enum:
+                        - 1
+                    type: integer
+                sources:
+                    items:
+                        $ref: '#/components/schemas/PublicSource'
+                    maxItems: 1000
+                    type: array
+            required:
+                - schema_version
+                - event_key
+            type: object
+        PublicProcessStep:
+            properties:
+                elapsed_ms:
+                    format: int64
+                    nullable: true
+                    type: integer
+                finished_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                order:
+                    maximum: 1000
+                    minimum: 0
+                    type: integer
+                revision:
+                    format: int64
+                    minimum: 1
+                    type: integer
+                started_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                status:
+                    enum:
+                        - pending
+                        - running
+                        - succeeded
+                        - failed
+                        - interrupted
+                        - canceled
+                    type: string
+                step_id:
+                    pattern: ^[A-Za-z0-9_.:-]{1,128}$
+                    type: string
+                summary:
+                    maxLength: 300
+                    type: string
+                title:
+                    maxLength: 100
+                    minLength: 1
+                    type: string
+            required:
+                - elapsed_ms
+                - finished_at
+                - order
+                - revision
+                - started_at
+                - status
+                - step_id
+                - title
+            type: object
+        PublicSource:
+            properties:
+                dataset_id:
+                    type: string
+                domain:
+                    nullable: true
+                    type: string
+                kind:
+                    type: string
+                platform:
+                    type: string
+                resource_id:
+                    type: string
+                snippet:
+                    type: string
+                source_id:
+                    type: string
+                title:
+                    type: string
+                url:
+                    type: string
+            required:
+                - domain
+                - kind
+                - platform
+                - source_id
+                - title
             type: object
         Publication:
             properties:
@@ -7725,6 +8094,35 @@ components:
                 - session_id
                 - state_version
             type: object
+        SnapshotEvent:
+            properties:
+                data:
+                    $ref: '#/components/schemas/OrdinaryTaskView'
+                display_key:
+                    type: string
+                emitted_at:
+                    format: date-time
+                    type: string
+                event_id:
+                    type: string
+                revision:
+                    format: int64
+                    type: integer
+                schema_version:
+                    enum:
+                        - "1"
+                    type: integer
+                type:
+                    type: string
+            required:
+                - data
+                - display_key
+                - emitted_at
+                - event_id
+                - revision
+                - schema_version
+                - type
+            type: object
         StartTaskRequest:
             properties:
                 start_mode:
@@ -8050,6 +8448,34 @@ components:
                     type: string
             required:
                 - task_state
+            type: object
+        Timing:
+            properties:
+                execution_elapsed_ms:
+                    format: int64
+                    nullable: true
+                    type: integer
+                finished_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                measured_at:
+                    format: date-time
+                    type: string
+                started_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                thinking_elapsed_ms:
+                    format: int64
+                    nullable: true
+                    type: integer
+            required:
+                - execution_elapsed_ms
+                - finished_at
+                - measured_at
+                - started_at
+                - thinking_elapsed_ms
             type: object
         ToolGroup:
             properties:
@@ -10745,12 +11171,143 @@ components:
             required:
                 - id
             type: object
+        modelProviderBaseURLPresetItem:
+            properties:
+                api_key_required:
+                    type: boolean
+                key:
+                    type: string
+                label:
+                    type: string
+                value:
+                    type: string
+            required:
+                - key
+                - value
+            type: object
         okOpenAPIResponse:
             properties:
                 ok:
                     type: boolean
             required:
                 - ok
+            type: object
+        ordinaryArtifactData:
+            properties:
+                artifacts:
+                    items:
+                        $ref: '#/components/schemas/PublicArtifact'
+                    type: array
+                display_key:
+                    type: string
+                page:
+                    $ref: '#/components/schemas/CollectionPage'
+                revision:
+                    format: int64
+                    type: integer
+            required:
+                - display_key
+                - page
+                - revision
+            type: object
+        ordinaryArtifactResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/ordinaryArtifactData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        ordinaryTaskDetailData:
+            properties:
+                task:
+                    $ref: '#/components/schemas/OrdinaryTaskView'
+            required:
+                - task
+            type: object
+        ordinaryTaskDetailResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/ordinaryTaskDetailData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        ordinaryTaskListData:
+            properties:
+                runs:
+                    items:
+                        $ref: '#/components/schemas/OrdinaryRunView'
+                    type: array
+                tasks:
+                    items:
+                        $ref: '#/components/schemas/OrdinaryTaskView'
+                    type: array
+            type: object
+        ordinaryTaskListResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/ordinaryTaskListData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        ordinaryWorkflowData:
+            properties:
+                cursor:
+                    format: int64
+                    type: integer
+                revision:
+                    format: int64
+                    type: integer
+                runs:
+                    items:
+                        $ref: '#/components/schemas/OrdinaryRunView'
+                    type: array
+                schema_version:
+                    type: integer
+                session_id:
+                    type: string
+                status:
+                    type: string
+                tasks:
+                    items:
+                        $ref: '#/components/schemas/OrdinaryTaskView'
+                    type: array
+            required:
+                - cursor
+                - revision
+                - schema_version
+                - session_id
+                - status
+            type: object
+        ordinaryWorkflowResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/ordinaryWorkflowData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
             type: object
         patchConversationModelOpenAPIRequest:
             properties:
@@ -12763,6 +13320,10 @@ components:
             properties:
                 base_url:
                     type: string
+                base_url_presets:
+                    items:
+                        $ref: '#/components/schemas/modelProviderBaseURLPresetItem'
+                    type: array
                 capabilities:
                     items:
                         type: string
@@ -12777,6 +13338,10 @@ components:
                     type: string
                 is_configured:
                     type: boolean
+                model_types:
+                    items:
+                        type: string
+                    type: array
                 name:
                     type: string
             required:
@@ -16603,7 +17168,16 @@ paths:
             summary: GET /conversations/{conversation_id}/dismissed-workflow-sessions
     /api/core/conversations/{conversation_id}/events:
         get:
+            description: With view=ordinary, every task connection starts with a current durable task_snapshot; workflow connections emit snapshot events. Reconnects hydrate snapshots without replaying raw execution logs. Workflow cursor expiration emits resync_required followed by snapshot. Conversation events carry only lifecycle identity and status fields. Omitting view preserves legacy SSE.
             parameters:
+                - in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - ordinary
+                        - developer
+                    type: string
                 - in: path
                   name: conversation_id
                   required: true
@@ -16611,8 +17185,20 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /conversations/{conversation_id}/events
+                    content:
+                        text/event-stream:
+                            schema:
+                                properties:
+                                    payload:
+                                        properties: {}
+                                        type: object
+                                    replayed:
+                                        type: boolean
+                                    type:
+                                        type: string
+                                type: object
+                    description: Server-sent events
+            summary: Stream public task snapshots or lifecycle notifications
     /api/core/conversations/{conversation_id}/fork-preview:
         post:
             operationId: previewConversationFork
@@ -16773,7 +17359,21 @@ paths:
             summary: PATCH /conversations/{conversation_id}/settings
     /api/core/conversations/{conversation_id}/tasks:
         get:
+            description: view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
             parameters:
+                - in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - ordinary
+                        - developer
+                    type: string
+                - in: query
+                  name: summary_only
+                  required: false
+                  schema:
+                    type: boolean
                 - in: path
                   name: conversation_id
                   required: true
@@ -16781,8 +17381,48 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /conversations/{conversation_id}/tasks
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ordinaryTaskListResponse'
+                    description: Public snapshot when view=ordinary; omitting view preserves the legacy response
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+            summary: List public task snapshots and explicit final outputs
     /api/core/conversations/{conversation_id}/workflow-sessions:
         get:
             parameters:
@@ -22269,17 +22909,34 @@ paths:
             summary: Update MCP server
             tags:
                 - mcp_servers
+    /api/core/mcp_servers/{id}/oauth:
+        delete:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OAuthResponse'
+                    description: Authorization status
+            summary: Disconnect personal MCP authorization
+            tags:
+                - mcp_servers
     /api/core/mcp_servers/{id}/oauth/authorize:
         post:
             parameters:
-                -
-                    in: path
-                    name: id
-                    required: true
-                    schema:
-                        type: string
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
             responses:
-                '200':
+                "200":
                     content:
                         application/json:
                             schema:
@@ -22291,12 +22948,11 @@ paths:
     /api/core/mcp_servers/{id}/oauth/callback:
         post:
             parameters:
-                -
-                    in: path
-                    name: id
-                    required: true
-                    schema:
-                        type: string
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
             requestBody:
                 content:
                     application/json:
@@ -22304,32 +22960,13 @@ paths:
                             $ref: '#/components/schemas/OAuthCallbackRequest'
                 required: true
             responses:
-                '200':
+                "200":
                     content:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/OAuthResponse'
                     description: Authorization status
             summary: Complete personal MCP authorization
-            tags:
-                - mcp_servers
-    /api/core/mcp_servers/{id}/oauth:
-        delete:
-            parameters:
-                -
-                    in: path
-                    name: id
-                    required: true
-                    schema:
-                        type: string
-            responses:
-                '200':
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/OAuthResponse'
-                    description: Authorization status
-            summary: Disconnect personal MCP authorization
             tags:
                 - mcp_servers
     /api/core/mcp_servers/{id}/tools:
@@ -24334,6 +24971,12 @@ paths:
                   required: false
                   schema:
                     type: integer
+                - description: When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count.
+                  in: query
+                  name: name_only
+                  required: false
+                  schema:
+                    type: boolean
             responses:
                 "200":
                     content:
@@ -24768,6 +25411,12 @@ paths:
                   required: false
                   schema:
                     type: integer
+                - description: When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count.
+                  in: query
+                  name: name_only
+                  required: false
+                  schema:
+                    type: boolean
             responses:
                 "200":
                     content:
@@ -25727,6 +26376,12 @@ paths:
                   required: false
                   schema:
                     type: integer
+                - description: When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count.
+                  in: query
+                  name: name_only
+                  required: false
+                  schema:
+                    type: boolean
             responses:
                 "200":
                     content:
@@ -25936,7 +26591,38 @@ paths:
             summary: POST /task-center/tasks/{task_id}:remove
     /api/core/tasks/{task_id}:
         get:
+            description: view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
             parameters:
+                - in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - ordinary
+                        - developer
+                    type: string
+                - in: query
+                  name: collection
+                  required: false
+                  schema:
+                    enum:
+                        - process_steps
+                        - sources
+                        - stage_artifacts
+                    type: string
+                - in: query
+                  name: cursor
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: limit
+                  required: false
+                  schema:
+                    default: 100
+                    maximum: 100
+                    minimum: 1
+                    type: integer
                 - in: path
                   name: task_id
                   required: true
@@ -25944,11 +26630,82 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /tasks/{task_id}
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ordinaryTaskDetailResponse'
+                    description: Public snapshot when view=ordinary; omitting view preserves the legacy response
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+            summary: Read a public task snapshot
     /api/core/tasks/{task_id}/artifacts:
         get:
+            description: view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
             parameters:
+                - in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - ordinary
+                        - developer
+                    type: string
+                - in: query
+                  name: collection
+                  required: false
+                  schema:
+                    enum:
+                        - process_steps
+                        - sources
+                        - stage_artifacts
+                    type: string
+                - in: query
+                  name: cursor
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: limit
+                  required: false
+                  schema:
+                    default: 100
+                    maximum: 100
+                    minimum: 1
+                    type: integer
                 - in: path
                   name: task_id
                   required: true
@@ -25956,11 +26713,60 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /tasks/{task_id}/artifacts
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ordinaryArtifactResponse'
+                    description: Public snapshot when view=ordinary; omitting view preserves the legacy response
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+            summary: Read public stage artifacts
     /api/core/tasks/{task_id}:stream:
         get:
+            description: With view=ordinary, every task connection starts with a current durable task_snapshot; workflow connections emit snapshot events. Reconnects hydrate snapshots without replaying raw execution logs. Workflow cursor expiration emits resync_required followed by snapshot. Conversation events carry only lifecycle identity and status fields. Omitting view preserves legacy SSE.
             parameters:
+                - in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - ordinary
+                        - developer
+                    type: string
                 - in: path
                   name: task_id
                   required: true
@@ -25968,8 +26774,12 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /tasks/{task_id}:stream
+                    content:
+                        text/event-stream:
+                            schema:
+                                $ref: '#/components/schemas/SnapshotEvent'
+                    description: Server-sent events
+            summary: Stream public task snapshots or lifecycle notifications
     /api/core/temp/uploads:
         post:
             requestBody:
@@ -27379,7 +28189,16 @@ paths:
                 - workflow-control
     /api/core/workflow-sessions/{session_id}/events:
         get:
+            description: With view=ordinary, every task connection starts with a current durable task_snapshot; workflow connections emit snapshot events. Reconnects hydrate snapshots without replaying raw execution logs. Workflow cursor expiration emits resync_required followed by snapshot. Conversation events carry only lifecycle identity and status fields. Omitting view preserves legacy SSE.
             parameters:
+                - in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - ordinary
+                        - developer
+                    type: string
                 - in: path
                   name: session_id
                   required: true
@@ -27387,8 +28206,12 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /workflow-sessions/{session_id}/events
+                    content:
+                        text/event-stream:
+                            schema:
+                                $ref: '#/components/schemas/ordinaryWorkflowResponse'
+                    description: Server-sent events
+            summary: Stream public task snapshots or lifecycle notifications
     /api/core/workflow-sessions/{session_id}/executions:begin:
         post:
             parameters:
@@ -27653,7 +28476,43 @@ paths:
             summary: POST /workflow-sessions/{session_id}/input-bindings
     /api/core/workflow-sessions/{session_id}/projection:
         get:
+            description: view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
             parameters:
+                - in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - ordinary
+                        - developer
+                    type: string
+                - in: query
+                  name: collection
+                  required: false
+                  schema:
+                    enum:
+                        - process_steps
+                        - sources
+                        - stage_artifacts
+                    type: string
+                - in: query
+                  name: cursor
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: limit
+                  required: false
+                  schema:
+                    default: 100
+                    maximum: 100
+                    minimum: 1
+                    type: integer
+                - in: query
+                  name: display_key
+                  required: false
+                  schema:
+                    type: string
                 - in: path
                   name: session_id
                   required: true
@@ -27661,8 +28520,48 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /workflow-sessions/{session_id}/projection
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ordinaryWorkflowResponse'
+                    description: Public snapshot when view=ordinary; omitting view preserves the legacy response
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+            summary: Read public workflow attempts, including hosted attempts
     /api/core/workflow-sessions/{session_id}/slots:
         get:
             parameters:

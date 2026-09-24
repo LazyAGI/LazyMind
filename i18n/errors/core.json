@@ -1265,6 +1265,7 @@
   "missing_user_id": { "en-US": "User ID is required", "zh-CN": "缺少用户 ID" },
   "not_found": { "en-US": "Resource not found", "zh-CN": "资源不存在" },
   "path_exists": { "en-US": "Path already exists", "zh-CN": "路径已存在" },
+  "skill_already_exists": { "en-US": "Skill already exists", "zh-CN": "技能已存在" },
   "payload_too_large": { "en-US": "Payload is too large", "zh-CN": "请求载荷过大" },
   "persist_request_json_failed": { "en-US": "Failed to save request JSON", "zh-CN": "保存请求 JSON 失败" },
   "repair_stale_draft": { "en-US": "Draft changed before repair could be saved", "zh-CN": "修复保存前草稿已发生变化" },
@@ -1654,6 +1655,21 @@
   "2002806": {"en-US": "Failed to save repaired script audit", "zh-CN": "保存修复脚本审计失败"},
   "2002807": {"en-US": "Failed to sync Workflow capabilities", "zh-CN": "同步 Workflow 能力声明失败"},
   "2002808": {"en-US": "Failed to finalize Workflow draft", "zh-CN": "最终化 Workflow 草稿失败"},
+  "2002822": {"en-US": "Artifact not found", "zh-CN": "产物不存在"},
+  "2002823": {"en-US": "Artifact revision conflict; refresh and retry", "zh-CN": "产物版本冲突，请刷新后重试"},
+  "2002824": {"en-US": "Artifact idempotency key conflict", "zh-CN": "产物幂等键冲突"},
+  "2002825": {"en-US": "Artifact content hash mismatch", "zh-CN": "产物内容校验失败"},
+  "2002826": {"en-US": "Access denied for this artifact", "zh-CN": "无权访问该产物"},
+  "2002827": {"en-US": "Artifact quota exceeded", "zh-CN": "产物配额已用尽"},
+  "2002828": {"en-US": "Artifact v2 is disabled", "zh-CN": "产物版本功能未开启"},
+  "2002829": {"en-US": "Failed to query conversation uploads", "zh-CN": "查询会话上传文件失败"},
+  "2002830": {"en-US": "Artifact audit must not include paths or URLs", "zh-CN": "产物审计结果不能包含路径或链接"},
+  "2002831": {"en-US": "Artifact revision payload is immutable", "zh-CN": "产物历史版本不可修改"},
+  "2002832": {"en-US": "Artifact shadow copy exceeds the size limit", "zh-CN": "产物影子副本超过大小限制"},
+  "2002833": {"en-US": "File artifact path is missing", "zh-CN": "文件制品路径缺失"},
+  "2002834": {"en-US": "File artifact path is not a regular file", "zh-CN": "文件制品路径不是普通文件"},
+  "2002835": {"en-US": "Failed to query published artifacts", "zh-CN": "查询已发布产物失败"},
+  "2002836": {"en-US": "Failed to query artifact deliveries", "zh-CN": "查询产物交付记录失败"},
   "2002810": {
     "zh-CN": "项目设置无效，请检查名称和目录",
     "en-US": "Invalid project settings; check the name and directory"
@@ -1828,5 +1844,11 @@
   "2002922": {"en-US": "The artifact must be a regular file no larger than 20 MiB", "zh-CN": "产物必须是大小不超过 20 MiB 的普通文件"},
   "2002923": {"en-US": "The artifact exceeds the 20 MiB size limit", "zh-CN": "产物超过 20 MiB 大小限制"},
   "2002760": {"zh-CN": "会话与对话组的类型不一致，请选择同类型的对话组", "en-US": "Conversation and group types must match. Choose a group of the same type."},
-  "2003102": {"en-US": "Expected an HTTP service URL", "zh-CN": "服务地址必须是有效的 HTTP 或 HTTPS URL"}
+  "2003102": {"en-US": "Expected an HTTP service URL", "zh-CN": "服务地址必须是有效的 HTTP 或 HTTPS URL"},
+  "2003108": {"en-US": "Task details could not be loaded", "zh-CN": "暂时无法加载任务详情，请重试"},
+  "2003109": {"en-US": "Task details changed; reload the task", "zh-CN": "任务详情已变化，请重新加载"},
+  "2003110": {"en-US": "Task event could not be accepted", "zh-CN": "无法接收任务更新"},
+  "2003111": {"en-US": "Workflow session unavailable", "zh-CN": "工作流会话不可用"},
+  "2003112": {"en-US": "Task sources exceed the supported limit", "zh-CN": "任务来源数量或大小超过限制"},
+  "2003113": {"en-US": "Task update could not be saved", "zh-CN": "暂时无法保存任务更新"}
 }

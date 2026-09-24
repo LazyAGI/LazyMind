@@ -195,6 +195,13 @@ type ArtifactCreatedEvent struct {
 	ContentType     string          `json:"content_type"`
 	Value           json.RawMessage `json:"value"`
 	Caption         *string         `json:"caption,omitempty"`
+	SchemaVersion   int             `json:"schema_version,omitempty"`
+	LogicalKey      string          `json:"logical_key,omitempty"`
+	IdempotencyKey  string          `json:"idempotency_key,omitempty"`
+	ChangeSummary   string          `json:"change_summary,omitempty"`
+	ContentHash     string          `json:"content_hash,omitempty"`
+	Size            int64           `json:"size,omitempty"`
+	Publication     string          `json:"publication,omitempty"`
 	ReplaceExisting bool            `json:"replace_existing,omitempty"`
 }
 

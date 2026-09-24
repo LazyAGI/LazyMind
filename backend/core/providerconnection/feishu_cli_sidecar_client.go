@@ -69,6 +69,16 @@ func (client *FeishuCLISidecarClient) Execute(ctx context.Context, ownerUserID, 
 	return result, err
 }
 
+func (client *FeishuCLISidecarClient) UserAccessToken(ctx context.Context, owner, connection, profile, capability string) (ResolvedToken, error) {
+	var result ResolvedToken
+	if err := client.post(ctx, "/v1/user-access-token", map[string]string{
+		"owner_user_id": owner, "connection_id": connection, "profile_ref": profile, "required_capability": capability,
+	}, &result); err != nil {
+		return ResolvedToken{}, err
+	}
+	return result, nil
+}
+
 func (client *FeishuCLISidecarClient) post(ctx context.Context, path string, input, output any) error {
 	if client == nil || client.baseURL == nil || !strings.HasPrefix(path, "/v1/") {
 		return ErrCLIUnavailable
@@ -95,14 +105,34 @@ func (client *FeishuCLISidecarClient) post(ctx context.Context, path string, inp
 	request.Header.Set("X-LazyMind-CLI-Timestamp", timestamp)
 	request.Header.Set("X-LazyMind-CLI-Nonce", nonce)
 	request.Header.Set("X-LazyMind-CLI-Signature", signature)
-	response, err := client.httpClient.Do(request)
+	httpClient := client.httpClient
+	confidential := path == "/v1/user-access-token"
+	if confidential {
+		copy := *httpClient
+		copy.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		httpClient = &copy
+	}
+	response, err := httpClient.Do(request)
 	if err != nil {
 		return ErrCLIUnavailable
 	}
 	defer response.Body.Close()
-	payload, err := io.ReadAll(io.LimitReader(response.Body, 140<<20))
+	limit := int64(140 << 20)
+	if confidential {
+		limit = 32 << 10
+	}
+	payload, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
 	if err != nil || response.StatusCode < 200 || response.StatusCode >= 300 {
 		return ErrCLIUnavailable
+	}
+	if int64(len(payload)) > limit {
+		return ErrCLIOutputInvalid
+	}
+	if confidential {
+		payload, err = openFeishuCLIUserToken(client.hmacKey, signature, payload)
+		if err != nil {
+			return err
+		}
 	}
 	if output == nil {
 		return nil
@@ -110,6 +140,9 @@ func (client *FeishuCLISidecarClient) post(ctx context.Context, path string, inp
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(output); err != nil {
+		return ErrCLIOutputInvalid
+	}
+	if confidential && decoder.Decode(&struct{}{}) != io.EOF {
 		return ErrCLIOutputInvalid
 	}
 	return nil

@@ -295,6 +295,27 @@ class RemoteFS(LazyLLMFSBase):
         encoding = kwargs.get('encoding') or 'utf-8'
         return TextIOWrapper(body, encoding=encoding, errors=kwargs.get('errors'))
 
+    def read_limited(self, path: str, max_bytes: int) -> bytes:
+        """Read at most max_bytes + 1 decoded bytes without buffering the full response."""
+        if max_bytes < 0:
+            raise ValueError('max_bytes must be non-negative')
+        response = self._raw_request(
+            'GET', 'content', stream=True,
+            params={'path': self._normalize_path(path), 'encoding': 'raw'},
+        )
+        try:
+            # Do not consume an unbounded error body to extract a server message.
+            response.raise_for_status()
+            data = bytearray()
+            for chunk in response.iter_content(chunk_size=min(64 * 1024, max_bytes + 1)):
+                remaining = max_bytes + 1 - len(data)
+                data.extend(chunk[:remaining])
+                if len(data) > max_bytes:
+                    break
+            return bytes(data)
+        finally:
+            response.close()
+
     def read_base64(self, path: str) -> bytes:
         data = self._request_json('content', path=self._normalize_path(path), encoding='base64')
         content = data.get('content') if isinstance(data, dict) else None

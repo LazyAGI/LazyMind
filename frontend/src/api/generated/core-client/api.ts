@@ -371,6 +371,11 @@ export interface Algo {
 export interface AllDatasetTagsResponse {
     'tags'?: Array<string>;
 }
+export interface ApiCoreConversationsConversationIdEventsGet200Response {
+    'payload'?: object;
+    'replayed'?: boolean;
+    'type'?: string;
+}
 export interface ApiCoreConversationsConversationIdWorkspacePermissionPutRequest {
     'permission_mode': ApiCoreConversationsConversationIdWorkspacePermissionPutRequestPermissionModeEnum;
     'version': number;
@@ -642,6 +647,24 @@ export interface BulkUpdateServerEnabledResponse {
 export interface CanResult {
     'allowed'?: boolean;
 }
+export interface Capabilities {
+    'download': boolean;
+    'open': boolean;
+    'preview': boolean;
+}
+export interface CapabilityDependency {
+    'message': string;
+    'missing': Array<MissingCapability>;
+    'required': Array<string>;
+    'status': CapabilityDependencyStatusEnum;
+}
+
+export const CapabilityDependencyStatusEnum = {
+    Blocked: 'blocked'
+} as const;
+
+export type CapabilityDependencyStatusEnum = typeof CapabilityDependencyStatusEnum[keyof typeof CapabilityDependencyStatusEnum];
+
 export interface ChatChunkResponse {
     'capability_dependency'?: object;
     'conversation_id'?: string;
@@ -1277,6 +1300,11 @@ export interface CloudTokenPlanUsage {
     'public_model_key': string;
     'remaining_amount': number;
     'used_amount': number;
+}
+export interface CollectionPage {
+    'next_cursor': string | null;
+    'revision': number;
+    'total': number;
 }
 export interface CompleteUploadRequest {
     'auto_start'?: boolean;
@@ -4411,9 +4439,32 @@ export interface MergeWordGroupsRequest {
     'group_ids'?: Array<string>;
     'term': string;
 }
+export interface MissingCapability {
+    'available': boolean;
+    'id': MissingCapabilityIdEnum;
+    'label': string;
+    'reason': string;
+    'settings_url': string;
+}
+
+export const MissingCapabilityIdEnum = {
+    ImageGenerator: 'image_generator',
+    ImageEditor: 'image_editor',
+    VideoGenerator: 'video_generator',
+    Ffmpeg: 'ffmpeg'
+} as const;
+
+export type MissingCapabilityIdEnum = typeof MissingCapabilityIdEnum[keyof typeof MissingCapabilityIdEnum];
+
 export interface ModelFeaturesResponse {
     'image_embed_enabled': boolean;
     'image_embed_required': boolean;
+}
+export interface ModelProviderBaseURLPresetItem {
+    'api_key_required'?: boolean;
+    'key': string;
+    'label'?: string;
+    'value': string;
 }
 export interface OAuthCallbackRequest {
     'code': string;
@@ -4425,6 +4476,107 @@ export interface OAuthResponse {
 }
 export interface OkOpenAPIResponse {
     'ok': boolean;
+}
+export interface OrdinaryArtifactData {
+    'artifacts'?: Array<PublicArtifact>;
+    'display_key': string;
+    'page': CollectionPage;
+    'revision': number;
+}
+export interface OrdinaryArtifactResponse {
+    'code': number;
+    'data': OrdinaryArtifactData;
+    'message': string;
+}
+export interface OrdinaryDisplayError {
+    'code': number;
+    'data': OrdinaryDisplayErrorData;
+    'message': string;
+}
+export interface OrdinaryDisplayErrorData {
+    'request_id': string;
+}
+export interface OrdinaryRunView {
+    'final_artifacts'?: Array<PublicArtifact>;
+    'final_output_refs'?: Array<string>;
+    'revision': number;
+    'run_id': string;
+}
+export interface OrdinaryTaskDetailData {
+    'task': OrdinaryTaskView;
+}
+export interface OrdinaryTaskDetailResponse {
+    'code': number;
+    'data': OrdinaryTaskDetailData;
+    'message': string;
+}
+export interface OrdinaryTaskListData {
+    'runs'?: Array<OrdinaryRunView>;
+    'tasks'?: Array<OrdinaryTaskView>;
+}
+export interface OrdinaryTaskListResponse {
+    'code': number;
+    'data': OrdinaryTaskListData;
+    'message': string;
+}
+export interface OrdinaryTaskView {
+    'agent_type'?: string;
+    'attempt_id': string | null;
+    'capability_dependency'?: CapabilityDependency;
+    'conversation_id': string;
+    'display_key': string;
+    'execution_id': string;
+    'order': number;
+    'pages': Pages;
+    'parallel_group_id': string | null;
+    /**
+     * Public subtask plan from scope-v2 plan events. Planned actions only; no inferred execution status or timing.
+     */
+    'plan_steps'?: Array<string>;
+    'process_state': string;
+    'process_steps'?: Array<PublicProcessStep>;
+    /**
+     * Reported overall subtask progress, used to estimate plan position. Does not establish individual process step states. Omitted when unavailable.
+     */
+    'progress_pct'?: number;
+    'revision': number;
+    'run_id': string;
+    'schema_version': OrdinaryTaskViewSchemaVersionEnum;
+    'session_id': string | null;
+    'sources'?: Array<PublicSource>;
+    'stage_artifacts'?: Array<PublicArtifact>;
+    'status': string;
+    'task_id': string | null;
+    'timing': Timing;
+    'title': string;
+    'trigger_history_id'?: string;
+    'workflow_step_id': string | null;
+}
+
+export const OrdinaryTaskViewSchemaVersionEnum = {
+    NUMBER_1: 1
+} as const;
+
+export type OrdinaryTaskViewSchemaVersionEnum = typeof OrdinaryTaskViewSchemaVersionEnum[keyof typeof OrdinaryTaskViewSchemaVersionEnum];
+
+export interface OrdinaryWorkflowData {
+    'cursor': number;
+    'revision': number;
+    'runs'?: Array<OrdinaryRunView>;
+    'schema_version': number;
+    'session_id': string;
+    'status': string;
+    'tasks'?: Array<OrdinaryTaskView>;
+}
+export interface OrdinaryWorkflowResponse {
+    'code': number;
+    'data': OrdinaryWorkflowData;
+    'message': string;
+}
+export interface Pages {
+    'process_steps': CollectionPage;
+    'sources': CollectionPage;
+    'stage_artifacts': CollectionPage;
 }
 export interface ParserConfig {
     'name': string;
@@ -4758,6 +4910,69 @@ export interface ProviderConnectionSession {
     'provider': string;
     'session_id': string;
     'status': string;
+}
+export interface PublicArtifact {
+    'artifact_id': string;
+    'capabilities': Capabilities;
+    'content_type': string;
+    'created_at': string;
+    'download_url'?: string;
+    'inline_content'?: string;
+    'name': string;
+    'open_url'?: string;
+    'preview_kind': string | null;
+    'preview_url'?: string;
+    'producer_display_key': string;
+    'revision': number;
+    'size_bytes': number | null;
+    'state': string;
+}
+export interface PublicDisplayProgress {
+    'event_key': string;
+    'process_steps'?: Array<PublicProcessStep>;
+    'schema_version': PublicDisplayProgressSchemaVersionEnum;
+    'sources'?: Array<PublicSource>;
+}
+
+export const PublicDisplayProgressSchemaVersionEnum = {
+    NUMBER_1: 1
+} as const;
+
+export type PublicDisplayProgressSchemaVersionEnum = typeof PublicDisplayProgressSchemaVersionEnum[keyof typeof PublicDisplayProgressSchemaVersionEnum];
+
+export interface PublicProcessStep {
+    'elapsed_ms': number | null;
+    'finished_at': string | null;
+    'order': number;
+    'revision': number;
+    'started_at': string | null;
+    'status': PublicProcessStepStatusEnum;
+    'step_id': string;
+    'summary'?: string;
+    'title': string;
+}
+
+export const PublicProcessStepStatusEnum = {
+    Pending: 'pending',
+    Running: 'running',
+    Succeeded: 'succeeded',
+    Failed: 'failed',
+    Interrupted: 'interrupted',
+    Canceled: 'canceled'
+} as const;
+
+export type PublicProcessStepStatusEnum = typeof PublicProcessStepStatusEnum[keyof typeof PublicProcessStepStatusEnum];
+
+export interface PublicSource {
+    'dataset_id'?: string;
+    'domain': string | null;
+    'kind': string;
+    'platform': string;
+    'resource_id'?: string;
+    'snippet'?: string;
+    'source_id': string;
+    'title': string;
+    'url'?: string;
 }
 export interface Publication {
     'artifact': WorkflowExecutionArtifact;
@@ -5821,6 +6036,22 @@ export interface Snapshot {
     'session_id': string;
     'state_version': number;
 }
+export interface SnapshotEvent {
+    'data': OrdinaryTaskView;
+    'display_key': string;
+    'emitted_at': string;
+    'event_id': string;
+    'revision': number;
+    'schema_version': SnapshotEventSchemaVersionEnum;
+    'type': string;
+}
+
+export const SnapshotEventSchemaVersionEnum = {
+    NUMBER_1: 1
+} as const;
+
+export type SnapshotEventSchemaVersionEnum = typeof SnapshotEventSchemaVersionEnum[keyof typeof SnapshotEventSchemaVersionEnum];
+
 export interface StartTaskRequest {
     'start_mode'?: string;
     'task_ids': Array<string>;
@@ -5970,6 +6201,13 @@ export interface TaskResponse {
     'task_info'?: TaskInfo;
     'task_state': string;
     'task_type'?: string;
+}
+export interface Timing {
+    'execution_elapsed_ms': number | null;
+    'finished_at': string | null;
+    'measured_at': string;
+    'started_at': string | null;
+    'thinking_elapsed_ms': number | null;
 }
 export interface ToolGroup {
     'active'?: boolean;
@@ -6173,12 +6411,14 @@ export interface UserInfo {
 }
 export interface UserModelProviderOpenAPIItem {
     'base_url': string;
+    'base_url_presets'?: Array<ModelProviderBaseURLPresetItem>;
     'capabilities'?: Array<string>;
     'category': string;
     'default_model_provider_id': string;
     'description': string;
     'id': string;
     'is_configured': boolean;
+    'model_types'?: Array<string>;
     'name': string;
 }
 export interface UserUIPreferencesOpenAPIResponse {
@@ -14577,13 +14817,14 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         *
-         * @summary GET /conversations/{conversation_id}/events
+         * With view=ordinary, every task connection starts with a current durable task_snapshot; workflow connections emit snapshot events. Reconnects hydrate snapshots without replaying raw execution logs. Workflow cursor expiration emits resync_required followed by snapshot. Conversation events carry only lifecycle identity and status fields. Omitting view preserves legacy SSE.
+         * @summary Stream public task snapshots or lifecycle notifications
          * @param {string} conversationId
+         * @param {ApiCoreConversationsConversationIdEventsGetViewEnum} [view]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsConversationIdEventsGet: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreConversationsConversationIdEventsGet: async (conversationId: string, view?: ApiCoreConversationsConversationIdEventsGetViewEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdEventsGet', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}/events`
@@ -14599,6 +14840,11 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            if (view !== undefined) {
+                localVarQueryParameter['view'] = view;
+            }
+
+            localVarHeaderParameter['Accept'] = 'text/event-stream';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -14923,13 +15169,15 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         *
-         * @summary GET /conversations/{conversation_id}/tasks
+         * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
+         * @summary List public task snapshots and explicit final outputs
          * @param {string} conversationId
+         * @param {ApiCoreConversationsConversationIdTasksGetViewEnum} [view]
+         * @param {boolean} [summaryOnly]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsConversationIdTasksGet: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreConversationsConversationIdTasksGet: async (conversationId: string, view?: ApiCoreConversationsConversationIdTasksGetViewEnum, summaryOnly?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdTasksGet', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}/tasks`
@@ -14945,6 +15193,15 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            if (view !== undefined) {
+                localVarQueryParameter['view'] = view;
+            }
+
+            if (summaryOnly !== undefined) {
+                localVarQueryParameter['summary_only'] = summaryOnly;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -22092,13 +22349,17 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         *
-         * @summary GET /tasks/{task_id}/artifacts
+         * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
+         * @summary Read public stage artifacts
          * @param {string} taskId
+         * @param {ApiCoreTasksTaskIdArtifactsGetViewEnum} [view]
+         * @param {ApiCoreTasksTaskIdArtifactsGetCollectionEnum} [collection]
+         * @param {string} [cursor]
+         * @param {number} [limit]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTasksTaskIdArtifactsGet: async (taskId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreTasksTaskIdArtifactsGet: async (taskId: string, view?: ApiCoreTasksTaskIdArtifactsGetViewEnum, collection?: ApiCoreTasksTaskIdArtifactsGetCollectionEnum, cursor?: string, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'taskId' is not null or undefined
             assertParamExists('apiCoreTasksTaskIdArtifactsGet', 'taskId', taskId)
             const localVarPath = `/api/core/tasks/{task_id}/artifacts`
@@ -22114,6 +22375,23 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            if (view !== undefined) {
+                localVarQueryParameter['view'] = view;
+            }
+
+            if (collection !== undefined) {
+                localVarQueryParameter['collection'] = collection;
+            }
+
+            if (cursor !== undefined) {
+                localVarQueryParameter['cursor'] = cursor;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -22125,13 +22403,17 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         *
-         * @summary GET /tasks/{task_id}
+         * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
+         * @summary Read a public task snapshot
          * @param {string} taskId
+         * @param {ApiCoreTasksTaskIdGetViewEnum} [view]
+         * @param {ApiCoreTasksTaskIdGetCollectionEnum} [collection]
+         * @param {string} [cursor]
+         * @param {number} [limit]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTasksTaskIdGet: async (taskId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreTasksTaskIdGet: async (taskId: string, view?: ApiCoreTasksTaskIdGetViewEnum, collection?: ApiCoreTasksTaskIdGetCollectionEnum, cursor?: string, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'taskId' is not null or undefined
             assertParamExists('apiCoreTasksTaskIdGet', 'taskId', taskId)
             const localVarPath = `/api/core/tasks/{task_id}`
@@ -22147,6 +22429,23 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            if (view !== undefined) {
+                localVarQueryParameter['view'] = view;
+            }
+
+            if (collection !== undefined) {
+                localVarQueryParameter['collection'] = collection;
+            }
+
+            if (cursor !== undefined) {
+                localVarQueryParameter['cursor'] = cursor;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -22158,13 +22457,14 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         *
-         * @summary GET /tasks/{task_id}:stream
+         * With view=ordinary, every task connection starts with a current durable task_snapshot; workflow connections emit snapshot events. Reconnects hydrate snapshots without replaying raw execution logs. Workflow cursor expiration emits resync_required followed by snapshot. Conversation events carry only lifecycle identity and status fields. Omitting view preserves legacy SSE.
+         * @summary Stream public task snapshots or lifecycle notifications
          * @param {string} taskId
+         * @param {ApiCoreTasksTaskIdStreamGetViewEnum} [view]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTasksTaskIdStreamGet: async (taskId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreTasksTaskIdStreamGet: async (taskId: string, view?: ApiCoreTasksTaskIdStreamGetViewEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'taskId' is not null or undefined
             assertParamExists('apiCoreTasksTaskIdStreamGet', 'taskId', taskId)
             const localVarPath = `/api/core/tasks/{task_id}:stream`
@@ -22180,6 +22480,11 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            if (view !== undefined) {
+                localVarQueryParameter['view'] = view;
+            }
+
+            localVarHeaderParameter['Accept'] = 'text/event-stream';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -23679,13 +23984,14 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/events
+         * With view=ordinary, every task connection starts with a current durable task_snapshot; workflow connections emit snapshot events. Reconnects hydrate snapshots without replaying raw execution logs. Workflow cursor expiration emits resync_required followed by snapshot. Conversation events carry only lifecycle identity and status fields. Omitting view preserves legacy SSE.
+         * @summary Stream public task snapshots or lifecycle notifications
          * @param {string} sessionId
+         * @param {ApiCoreWorkflowSessionsSessionIdEventsGetViewEnum} [view]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreWorkflowSessionsSessionIdEventsGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreWorkflowSessionsSessionIdEventsGet: async (sessionId: string, view?: ApiCoreWorkflowSessionsSessionIdEventsGetViewEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdEventsGet', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/events`
@@ -23701,6 +24007,11 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            if (view !== undefined) {
+                localVarQueryParameter['view'] = view;
+            }
+
+            localVarHeaderParameter['Accept'] = 'text/event-stream';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -23815,13 +24126,18 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/projection
+         * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
+         * @summary Read public workflow attempts, including hosted attempts
          * @param {string} sessionId
+         * @param {ApiCoreWorkflowSessionsSessionIdProjectionGetViewEnum} [view]
+         * @param {ApiCoreWorkflowSessionsSessionIdProjectionGetCollectionEnum} [collection]
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {string} [displayKey]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreWorkflowSessionsSessionIdProjectionGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreWorkflowSessionsSessionIdProjectionGet: async (sessionId: string, view?: ApiCoreWorkflowSessionsSessionIdProjectionGetViewEnum, collection?: ApiCoreWorkflowSessionsSessionIdProjectionGetCollectionEnum, cursor?: string, limit?: number, displayKey?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdProjectionGet', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/projection`
@@ -23837,6 +24153,27 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            if (view !== undefined) {
+                localVarQueryParameter['view'] = view;
+            }
+
+            if (collection !== undefined) {
+                localVarQueryParameter['collection'] = collection;
+            }
+
+            if (cursor !== undefined) {
+                localVarQueryParameter['cursor'] = cursor;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            if (displayKey !== undefined) {
+                localVarQueryParameter['display_key'] = displayKey;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -25230,14 +25567,15 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         *
-         * @summary GET /conversations/{conversation_id}/events
+         * With view=ordinary, every task connection starts with a current durable task_snapshot; workflow connections emit snapshot events. Reconnects hydrate snapshots without replaying raw execution logs. Workflow cursor expiration emits resync_required followed by snapshot. Conversation events carry only lifecycle identity and status fields. Omitting view preserves legacy SSE.
+         * @summary Stream public task snapshots or lifecycle notifications
          * @param {string} conversationId
+         * @param {ApiCoreConversationsConversationIdEventsGetViewEnum} [view]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationsConversationIdEventsGet(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdEventsGet(conversationId, options);
+        async apiCoreConversationsConversationIdEventsGet(conversationId: string, view?: ApiCoreConversationsConversationIdEventsGetViewEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreConversationsConversationIdEventsGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdEventsGet(conversationId, view, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdEventsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -25362,14 +25700,16 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         *
-         * @summary GET /conversations/{conversation_id}/tasks
+         * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
+         * @summary List public task snapshots and explicit final outputs
          * @param {string} conversationId
+         * @param {ApiCoreConversationsConversationIdTasksGetViewEnum} [view]
+         * @param {boolean} [summaryOnly]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationsConversationIdTasksGet(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdTasksGet(conversationId, options);
+        async apiCoreConversationsConversationIdTasksGet(conversationId: string, view?: ApiCoreConversationsConversationIdTasksGetViewEnum, summaryOnly?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<OrdinaryTaskListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdTasksGet(conversationId, view, summaryOnly, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdTasksGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -28089,40 +28429,49 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         *
-         * @summary GET /tasks/{task_id}/artifacts
+         * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
+         * @summary Read public stage artifacts
          * @param {string} taskId
+         * @param {ApiCoreTasksTaskIdArtifactsGetViewEnum} [view]
+         * @param {ApiCoreTasksTaskIdArtifactsGetCollectionEnum} [collection]
+         * @param {string} [cursor]
+         * @param {number} [limit]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreTasksTaskIdArtifactsGet(taskId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTasksTaskIdArtifactsGet(taskId, options);
+        async apiCoreTasksTaskIdArtifactsGet(taskId: string, view?: ApiCoreTasksTaskIdArtifactsGetViewEnum, collection?: ApiCoreTasksTaskIdArtifactsGetCollectionEnum, cursor?: string, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<OrdinaryArtifactResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTasksTaskIdArtifactsGet(taskId, view, collection, cursor, limit, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTasksTaskIdArtifactsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         *
-         * @summary GET /tasks/{task_id}
+         * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
+         * @summary Read a public task snapshot
          * @param {string} taskId
+         * @param {ApiCoreTasksTaskIdGetViewEnum} [view]
+         * @param {ApiCoreTasksTaskIdGetCollectionEnum} [collection]
+         * @param {string} [cursor]
+         * @param {number} [limit]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreTasksTaskIdGet(taskId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTasksTaskIdGet(taskId, options);
+        async apiCoreTasksTaskIdGet(taskId: string, view?: ApiCoreTasksTaskIdGetViewEnum, collection?: ApiCoreTasksTaskIdGetCollectionEnum, cursor?: string, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<OrdinaryTaskDetailResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTasksTaskIdGet(taskId, view, collection, cursor, limit, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTasksTaskIdGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         *
-         * @summary GET /tasks/{task_id}:stream
+         * With view=ordinary, every task connection starts with a current durable task_snapshot; workflow connections emit snapshot events. Reconnects hydrate snapshots without replaying raw execution logs. Workflow cursor expiration emits resync_required followed by snapshot. Conversation events carry only lifecycle identity and status fields. Omitting view preserves legacy SSE.
+         * @summary Stream public task snapshots or lifecycle notifications
          * @param {string} taskId
+         * @param {ApiCoreTasksTaskIdStreamGetViewEnum} [view]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreTasksTaskIdStreamGet(taskId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTasksTaskIdStreamGet(taskId, options);
+        async apiCoreTasksTaskIdStreamGet(taskId: string, view?: ApiCoreTasksTaskIdStreamGetViewEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SnapshotEvent>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTasksTaskIdStreamGet(taskId, view, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTasksTaskIdStreamGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -28715,14 +29064,15 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/events
+         * With view=ordinary, every task connection starts with a current durable task_snapshot; workflow connections emit snapshot events. Reconnects hydrate snapshots without replaying raw execution logs. Workflow cursor expiration emits resync_required followed by snapshot. Conversation events carry only lifecycle identity and status fields. Omitting view preserves legacy SSE.
+         * @summary Stream public task snapshots or lifecycle notifications
          * @param {string} sessionId
+         * @param {ApiCoreWorkflowSessionsSessionIdEventsGetViewEnum} [view]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreWorkflowSessionsSessionIdEventsGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdEventsGet(sessionId, options);
+        async apiCoreWorkflowSessionsSessionIdEventsGet(sessionId: string, view?: ApiCoreWorkflowSessionsSessionIdEventsGetViewEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<OrdinaryWorkflowResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdEventsGet(sessionId, view, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdEventsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -28768,14 +29118,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/projection
+         * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
+         * @summary Read public workflow attempts, including hosted attempts
          * @param {string} sessionId
+         * @param {ApiCoreWorkflowSessionsSessionIdProjectionGetViewEnum} [view]
+         * @param {ApiCoreWorkflowSessionsSessionIdProjectionGetCollectionEnum} [collection]
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {string} [displayKey]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreWorkflowSessionsSessionIdProjectionGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdProjectionGet(sessionId, options);
+        async apiCoreWorkflowSessionsSessionIdProjectionGet(sessionId: string, view?: ApiCoreWorkflowSessionsSessionIdProjectionGetViewEnum, collection?: ApiCoreWorkflowSessionsSessionIdProjectionGetCollectionEnum, cursor?: string, limit?: number, displayKey?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<OrdinaryWorkflowResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdProjectionGet(sessionId, view, collection, cursor, limit, displayKey, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdProjectionGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -29564,14 +29919,14 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCoreConversationsConversationIdDismissedWorkflowSessionsGet(requestParameters.conversationId, options).then((request) => request(axios, basePath));
         },
         /**
-         *
-         * @summary GET /conversations/{conversation_id}/events
+         * With view=ordinary, every task connection starts with a current durable task_snapshot; workflow connections emit snapshot events. Reconnects hydrate snapshots without replaying raw execution logs. Workflow cursor expiration emits resync_required followed by snapshot. Conversation events carry only lifecycle identity and status fields. Omitting view preserves legacy SSE.
+         * @summary Stream public task snapshots or lifecycle notifications
          * @param {DefaultApiApiCoreConversationsConversationIdEventsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsConversationIdEventsGet(requestParameters: DefaultApiApiCoreConversationsConversationIdEventsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreConversationsConversationIdEventsGet(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        apiCoreConversationsConversationIdEventsGet(requestParameters: DefaultApiApiCoreConversationsConversationIdEventsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreConversationsConversationIdEventsGet200Response> {
+            return localVarFp.apiCoreConversationsConversationIdEventsGet(requestParameters.conversationId, requestParameters.view, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -29664,14 +30019,14 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCoreConversationsConversationIdStopPost(requestParameters.conversationId, options).then((request) => request(axios, basePath));
         },
         /**
-         *
-         * @summary GET /conversations/{conversation_id}/tasks
+         * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
+         * @summary List public task snapshots and explicit final outputs
          * @param {DefaultApiApiCoreConversationsConversationIdTasksGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsConversationIdTasksGet(requestParameters: DefaultApiApiCoreConversationsConversationIdTasksGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreConversationsConversationIdTasksGet(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        apiCoreConversationsConversationIdTasksGet(requestParameters: DefaultApiApiCoreConversationsConversationIdTasksGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<OrdinaryTaskListResponse> {
+            return localVarFp.apiCoreConversationsConversationIdTasksGet(requestParameters.conversationId, requestParameters.view, requestParameters.summaryOnly, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -31679,34 +32034,34 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters.taskId, options).then((request) => request(axios, basePath));
         },
         /**
-         *
-         * @summary GET /tasks/{task_id}/artifacts
+         * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
+         * @summary Read public stage artifacts
          * @param {DefaultApiApiCoreTasksTaskIdArtifactsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTasksTaskIdArtifactsGet(requestParameters: DefaultApiApiCoreTasksTaskIdArtifactsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreTasksTaskIdArtifactsGet(requestParameters.taskId, options).then((request) => request(axios, basePath));
+        apiCoreTasksTaskIdArtifactsGet(requestParameters: DefaultApiApiCoreTasksTaskIdArtifactsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<OrdinaryArtifactResponse> {
+            return localVarFp.apiCoreTasksTaskIdArtifactsGet(requestParameters.taskId, requestParameters.view, requestParameters.collection, requestParameters.cursor, requestParameters.limit, options).then((request) => request(axios, basePath));
         },
         /**
-         *
-         * @summary GET /tasks/{task_id}
+         * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
+         * @summary Read a public task snapshot
          * @param {DefaultApiApiCoreTasksTaskIdGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTasksTaskIdGet(requestParameters: DefaultApiApiCoreTasksTaskIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreTasksTaskIdGet(requestParameters.taskId, options).then((request) => request(axios, basePath));
+        apiCoreTasksTaskIdGet(requestParameters: DefaultApiApiCoreTasksTaskIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<OrdinaryTaskDetailResponse> {
+            return localVarFp.apiCoreTasksTaskIdGet(requestParameters.taskId, requestParameters.view, requestParameters.collection, requestParameters.cursor, requestParameters.limit, options).then((request) => request(axios, basePath));
         },
         /**
-         *
-         * @summary GET /tasks/{task_id}:stream
+         * With view=ordinary, every task connection starts with a current durable task_snapshot; workflow connections emit snapshot events. Reconnects hydrate snapshots without replaying raw execution logs. Workflow cursor expiration emits resync_required followed by snapshot. Conversation events carry only lifecycle identity and status fields. Omitting view preserves legacy SSE.
+         * @summary Stream public task snapshots or lifecycle notifications
          * @param {DefaultApiApiCoreTasksTaskIdStreamGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTasksTaskIdStreamGet(requestParameters: DefaultApiApiCoreTasksTaskIdStreamGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreTasksTaskIdStreamGet(requestParameters.taskId, options).then((request) => request(axios, basePath));
+        apiCoreTasksTaskIdStreamGet(requestParameters: DefaultApiApiCoreTasksTaskIdStreamGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<SnapshotEvent> {
+            return localVarFp.apiCoreTasksTaskIdStreamGet(requestParameters.taskId, requestParameters.view, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -32155,14 +32510,14 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCoreWorkflowSessionsSessionIdDismissPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
         },
         /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/events
+         * With view=ordinary, every task connection starts with a current durable task_snapshot; workflow connections emit snapshot events. Reconnects hydrate snapshots without replaying raw execution logs. Workflow cursor expiration emits resync_required followed by snapshot. Conversation events carry only lifecycle identity and status fields. Omitting view preserves legacy SSE.
+         * @summary Stream public task snapshots or lifecycle notifications
          * @param {DefaultApiApiCoreWorkflowSessionsSessionIdEventsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreWorkflowSessionsSessionIdEventsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdEventsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdEventsGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        apiCoreWorkflowSessionsSessionIdEventsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdEventsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<OrdinaryWorkflowResponse> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdEventsGet(requestParameters.sessionId, requestParameters.view, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -32195,14 +32550,14 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
         },
         /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/projection
+         * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
+         * @summary Read public workflow attempts, including hosted attempts
          * @param {DefaultApiApiCoreWorkflowSessionsSessionIdProjectionGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreWorkflowSessionsSessionIdProjectionGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdProjectionGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdProjectionGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        apiCoreWorkflowSessionsSessionIdProjectionGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdProjectionGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<OrdinaryWorkflowResponse> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdProjectionGet(requestParameters.sessionId, requestParameters.view, requestParameters.collection, requestParameters.cursor, requestParameters.limit, requestParameters.displayKey, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -32619,6 +32974,8 @@ export interface DefaultApiApiCoreConversationsConversationIdDismissedWorkflowSe
  */
 export interface DefaultApiApiCoreConversationsConversationIdEventsGetRequest {
     readonly conversationId: string
+
+    readonly view?: ApiCoreConversationsConversationIdEventsGetViewEnum
 }
 
 /**
@@ -32693,6 +33050,10 @@ export interface DefaultApiApiCoreConversationsConversationIdStopPostRequest {
  */
 export interface DefaultApiApiCoreConversationsConversationIdTasksGetRequest {
     readonly conversationId: string
+
+    readonly view?: ApiCoreConversationsConversationIdTasksGetViewEnum
+
+    readonly summaryOnly?: boolean
 }
 
 /**
@@ -33870,6 +34231,14 @@ export interface DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest {
  */
 export interface DefaultApiApiCoreTasksTaskIdArtifactsGetRequest {
     readonly taskId: string
+
+    readonly view?: ApiCoreTasksTaskIdArtifactsGetViewEnum
+
+    readonly collection?: ApiCoreTasksTaskIdArtifactsGetCollectionEnum
+
+    readonly cursor?: string
+
+    readonly limit?: number
 }
 
 /**
@@ -33877,6 +34246,14 @@ export interface DefaultApiApiCoreTasksTaskIdArtifactsGetRequest {
  */
 export interface DefaultApiApiCoreTasksTaskIdGetRequest {
     readonly taskId: string
+
+    readonly view?: ApiCoreTasksTaskIdGetViewEnum
+
+    readonly collection?: ApiCoreTasksTaskIdGetCollectionEnum
+
+    readonly cursor?: string
+
+    readonly limit?: number
 }
 
 /**
@@ -33884,6 +34261,8 @@ export interface DefaultApiApiCoreTasksTaskIdGetRequest {
  */
 export interface DefaultApiApiCoreTasksTaskIdStreamGetRequest {
     readonly taskId: string
+
+    readonly view?: ApiCoreTasksTaskIdStreamGetViewEnum
 }
 
 /**
@@ -34121,6 +34500,8 @@ export interface DefaultApiApiCoreWorkflowSessionsSessionIdDismissPostRequest {
  */
 export interface DefaultApiApiCoreWorkflowSessionsSessionIdEventsGetRequest {
     readonly sessionId: string
+
+    readonly view?: ApiCoreWorkflowSessionsSessionIdEventsGetViewEnum
 }
 
 /**
@@ -34151,6 +34532,16 @@ export interface DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsPostRequ
  */
 export interface DefaultApiApiCoreWorkflowSessionsSessionIdProjectionGetRequest {
     readonly sessionId: string
+
+    readonly view?: ApiCoreWorkflowSessionsSessionIdProjectionGetViewEnum
+
+    readonly collection?: ApiCoreWorkflowSessionsSessionIdProjectionGetCollectionEnum
+
+    readonly cursor?: string
+
+    readonly limit?: number
+
+    readonly displayKey?: string
 }
 
 /**
@@ -34865,14 +35256,14 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
-     *
-     * @summary GET /conversations/{conversation_id}/events
+     * With view=ordinary, every task connection starts with a current durable task_snapshot; workflow connections emit snapshot events. Reconnects hydrate snapshots without replaying raw execution logs. Workflow cursor expiration emits resync_required followed by snapshot. Conversation events carry only lifecycle identity and status fields. Omitting view preserves legacy SSE.
+     * @summary Stream public task snapshots or lifecycle notifications
      * @param {DefaultApiApiCoreConversationsConversationIdEventsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreConversationsConversationIdEventsGet(requestParameters: DefaultApiApiCoreConversationsConversationIdEventsGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdEventsGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdEventsGet(requestParameters.conversationId, requestParameters.view, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -34975,14 +35366,14 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
-     *
-     * @summary GET /conversations/{conversation_id}/tasks
+     * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
+     * @summary List public task snapshots and explicit final outputs
      * @param {DefaultApiApiCoreConversationsConversationIdTasksGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreConversationsConversationIdTasksGet(requestParameters: DefaultApiApiCoreConversationsConversationIdTasksGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdTasksGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdTasksGet(requestParameters.conversationId, requestParameters.view, requestParameters.summaryOnly, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -37198,36 +37589,36 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
-     *
-     * @summary GET /tasks/{task_id}/artifacts
+     * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
+     * @summary Read public stage artifacts
      * @param {DefaultApiApiCoreTasksTaskIdArtifactsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreTasksTaskIdArtifactsGet(requestParameters: DefaultApiApiCoreTasksTaskIdArtifactsGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreTasksTaskIdArtifactsGet(requestParameters.taskId, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreTasksTaskIdArtifactsGet(requestParameters.taskId, requestParameters.view, requestParameters.collection, requestParameters.cursor, requestParameters.limit, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
-     *
-     * @summary GET /tasks/{task_id}
+     * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
+     * @summary Read a public task snapshot
      * @param {DefaultApiApiCoreTasksTaskIdGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreTasksTaskIdGet(requestParameters: DefaultApiApiCoreTasksTaskIdGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreTasksTaskIdGet(requestParameters.taskId, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreTasksTaskIdGet(requestParameters.taskId, requestParameters.view, requestParameters.collection, requestParameters.cursor, requestParameters.limit, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
-     *
-     * @summary GET /tasks/{task_id}:stream
+     * With view=ordinary, every task connection starts with a current durable task_snapshot; workflow connections emit snapshot events. Reconnects hydrate snapshots without replaying raw execution logs. Workflow cursor expiration emits resync_required followed by snapshot. Conversation events carry only lifecycle identity and status fields. Omitting view preserves legacy SSE.
+     * @summary Stream public task snapshots or lifecycle notifications
      * @param {DefaultApiApiCoreTasksTaskIdStreamGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreTasksTaskIdStreamGet(requestParameters: DefaultApiApiCoreTasksTaskIdStreamGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreTasksTaskIdStreamGet(requestParameters.taskId, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreTasksTaskIdStreamGet(requestParameters.taskId, requestParameters.view, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -37723,14 +38114,14 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
-     *
-     * @summary GET /workflow-sessions/{session_id}/events
+     * With view=ordinary, every task connection starts with a current durable task_snapshot; workflow connections emit snapshot events. Reconnects hydrate snapshots without replaying raw execution logs. Workflow cursor expiration emits resync_required followed by snapshot. Conversation events carry only lifecycle identity and status fields. Omitting view preserves legacy SSE.
+     * @summary Stream public task snapshots or lifecycle notifications
      * @param {DefaultApiApiCoreWorkflowSessionsSessionIdEventsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreWorkflowSessionsSessionIdEventsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdEventsGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdEventsGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdEventsGet(requestParameters.sessionId, requestParameters.view, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -37767,14 +38158,14 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
-     *
-     * @summary GET /workflow-sessions/{session_id}/projection
+     * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
+     * @summary Read public workflow attempts, including hosted attempts
      * @param {DefaultApiApiCoreWorkflowSessionsSessionIdProjectionGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreWorkflowSessionsSessionIdProjectionGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdProjectionGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdProjectionGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdProjectionGet(requestParameters.sessionId, requestParameters.view, requestParameters.collection, requestParameters.cursor, requestParameters.limit, requestParameters.displayKey, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -38001,6 +38392,16 @@ export const ApiCoreConversationsArchivedGetKindEnum = {
     Task: 'task'
 } as const;
 export type ApiCoreConversationsArchivedGetKindEnum = typeof ApiCoreConversationsArchivedGetKindEnum[keyof typeof ApiCoreConversationsArchivedGetKindEnum];
+export const ApiCoreConversationsConversationIdEventsGetViewEnum = {
+    Ordinary: 'ordinary',
+    Developer: 'developer'
+} as const;
+export type ApiCoreConversationsConversationIdEventsGetViewEnum = typeof ApiCoreConversationsConversationIdEventsGetViewEnum[keyof typeof ApiCoreConversationsConversationIdEventsGetViewEnum];
+export const ApiCoreConversationsConversationIdTasksGetViewEnum = {
+    Ordinary: 'ordinary',
+    Developer: 'developer'
+} as const;
+export type ApiCoreConversationsConversationIdTasksGetViewEnum = typeof ApiCoreConversationsConversationIdTasksGetViewEnum[keyof typeof ApiCoreConversationsConversationIdTasksGetViewEnum];
 export const ApiCoreConversationsGetAssistantEnum = {
     Lazymind: 'lazymind',
     Codex: 'codex',
@@ -38018,6 +38419,49 @@ export const ApiCoreConversationsTrashGetKindEnum = {
     Task: 'task'
 } as const;
 export type ApiCoreConversationsTrashGetKindEnum = typeof ApiCoreConversationsTrashGetKindEnum[keyof typeof ApiCoreConversationsTrashGetKindEnum];
+export const ApiCoreTasksTaskIdArtifactsGetViewEnum = {
+    Ordinary: 'ordinary',
+    Developer: 'developer'
+} as const;
+export type ApiCoreTasksTaskIdArtifactsGetViewEnum = typeof ApiCoreTasksTaskIdArtifactsGetViewEnum[keyof typeof ApiCoreTasksTaskIdArtifactsGetViewEnum];
+export const ApiCoreTasksTaskIdArtifactsGetCollectionEnum = {
+    ProcessSteps: 'process_steps',
+    Sources: 'sources',
+    StageArtifacts: 'stage_artifacts'
+} as const;
+export type ApiCoreTasksTaskIdArtifactsGetCollectionEnum = typeof ApiCoreTasksTaskIdArtifactsGetCollectionEnum[keyof typeof ApiCoreTasksTaskIdArtifactsGetCollectionEnum];
+export const ApiCoreTasksTaskIdGetViewEnum = {
+    Ordinary: 'ordinary',
+    Developer: 'developer'
+} as const;
+export type ApiCoreTasksTaskIdGetViewEnum = typeof ApiCoreTasksTaskIdGetViewEnum[keyof typeof ApiCoreTasksTaskIdGetViewEnum];
+export const ApiCoreTasksTaskIdGetCollectionEnum = {
+    ProcessSteps: 'process_steps',
+    Sources: 'sources',
+    StageArtifacts: 'stage_artifacts'
+} as const;
+export type ApiCoreTasksTaskIdGetCollectionEnum = typeof ApiCoreTasksTaskIdGetCollectionEnum[keyof typeof ApiCoreTasksTaskIdGetCollectionEnum];
+export const ApiCoreTasksTaskIdStreamGetViewEnum = {
+    Ordinary: 'ordinary',
+    Developer: 'developer'
+} as const;
+export type ApiCoreTasksTaskIdStreamGetViewEnum = typeof ApiCoreTasksTaskIdStreamGetViewEnum[keyof typeof ApiCoreTasksTaskIdStreamGetViewEnum];
+export const ApiCoreWorkflowSessionsSessionIdEventsGetViewEnum = {
+    Ordinary: 'ordinary',
+    Developer: 'developer'
+} as const;
+export type ApiCoreWorkflowSessionsSessionIdEventsGetViewEnum = typeof ApiCoreWorkflowSessionsSessionIdEventsGetViewEnum[keyof typeof ApiCoreWorkflowSessionsSessionIdEventsGetViewEnum];
+export const ApiCoreWorkflowSessionsSessionIdProjectionGetViewEnum = {
+    Ordinary: 'ordinary',
+    Developer: 'developer'
+} as const;
+export type ApiCoreWorkflowSessionsSessionIdProjectionGetViewEnum = typeof ApiCoreWorkflowSessionsSessionIdProjectionGetViewEnum[keyof typeof ApiCoreWorkflowSessionsSessionIdProjectionGetViewEnum];
+export const ApiCoreWorkflowSessionsSessionIdProjectionGetCollectionEnum = {
+    ProcessSteps: 'process_steps',
+    Sources: 'sources',
+    StageArtifacts: 'stage_artifacts'
+} as const;
+export type ApiCoreWorkflowSessionsSessionIdProjectionGetCollectionEnum = typeof ApiCoreWorkflowSessionsSessionIdProjectionGetCollectionEnum[keyof typeof ApiCoreWorkflowSessionsSessionIdProjectionGetCollectionEnum];
 
 
 /**
@@ -48117,10 +48561,11 @@ export const SkillMarketApiAxiosParamCreator = function (configuration?: Configu
          * @param {Array<string>} [tags]
          * @param {number} [page]
          * @param {number} [pageSize]
+         * @param {boolean} [nameOnly] When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSkillMarketGet: async (keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreSkillMarketGet: async (keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, nameOnly?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/skill-market`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -48151,6 +48596,10 @@ export const SkillMarketApiAxiosParamCreator = function (configuration?: Configu
 
             if (pageSize !== undefined) {
                 localVarQueryParameter['page_size'] = pageSize;
+            }
+
+            if (nameOnly !== undefined) {
+                localVarQueryParameter['name_only'] = nameOnly;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -48420,11 +48869,12 @@ export const SkillMarketApiFp = function(configuration?: Configuration) {
          * @param {Array<string>} [tags]
          * @param {number} [page]
          * @param {number} [pageSize]
+         * @param {boolean} [nameOnly] When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreSkillMarketGet(keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<MarketListOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillMarketGet(keyword, category, tags, page, pageSize, options);
+        async apiCoreSkillMarketGet(keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, nameOnly?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<MarketListOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillMarketGet(keyword, category, tags, page, pageSize, nameOnly, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['SkillMarketApi.apiCoreSkillMarketGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -48577,7 +49027,7 @@ export const SkillMarketApiFactory = function (configuration?: Configuration, ba
          * @throws {RequiredError}
          */
         apiCoreSkillMarketGet(requestParameters: SkillMarketApiApiCoreSkillMarketGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<MarketListOpenAPIResponse> {
-            return localVarFp.apiCoreSkillMarketGet(requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreSkillMarketGet(requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, requestParameters.nameOnly, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -48694,6 +49144,11 @@ export interface SkillMarketApiApiCoreSkillMarketGetRequest {
     readonly page?: number
 
     readonly pageSize?: number
+
+    /**
+     * When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count.
+     */
+    readonly nameOnly?: boolean
 }
 
 /**
@@ -48817,7 +49272,7 @@ export class SkillMarketApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreSkillMarketGet(requestParameters: SkillMarketApiApiCoreSkillMarketGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return SkillMarketApiFp(this.configuration).apiCoreSkillMarketGet(requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
+        return SkillMarketApiFp(this.configuration).apiCoreSkillMarketGet(requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, requestParameters.nameOnly, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -50407,10 +50862,11 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
          * @param {Array<string>} [tags]
          * @param {number} [page]
          * @param {number} [pageSize]
+         * @param {boolean} [nameOnly] When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSkillsGet: async (source?: ApiCoreSkillsGetSourceEnum, keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreSkillsGet: async (source?: ApiCoreSkillsGetSourceEnum, keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, nameOnly?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/skills`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -50445,6 +50901,10 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
 
             if (pageSize !== undefined) {
                 localVarQueryParameter['page_size'] = pageSize;
+            }
+
+            if (nameOnly !== undefined) {
+                localVarQueryParameter['name_only'] = nameOnly;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -51084,10 +51544,11 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
          * @param {Array<string>} [tags]
          * @param {number} [page]
          * @param {number} [pageSize]
+         * @param {boolean} [nameOnly] When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSkillsTrashGet: async (keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreSkillsTrashGet: async (keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, nameOnly?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/skills:trash`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -51118,6 +51579,10 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
 
             if (pageSize !== undefined) {
                 localVarQueryParameter['page_size'] = pageSize;
+            }
+
+            if (nameOnly !== undefined) {
+                localVarQueryParameter['name_only'] = nameOnly;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -51227,11 +51692,12 @@ export const SkillsApiFp = function(configuration?: Configuration) {
          * @param {Array<string>} [tags]
          * @param {number} [page]
          * @param {number} [pageSize]
+         * @param {boolean} [nameOnly] When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreSkillsGet(source?: ApiCoreSkillsGetSourceEnum, keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillListOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillsGet(source, keyword, category, tags, page, pageSize, options);
+        async apiCoreSkillsGet(source?: ApiCoreSkillsGetSourceEnum, keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, nameOnly?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillListOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillsGet(source, keyword, category, tags, page, pageSize, nameOnly, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['SkillsApi.apiCoreSkillsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -51478,11 +51944,12 @@ export const SkillsApiFp = function(configuration?: Configuration) {
          * @param {Array<string>} [tags]
          * @param {number} [page]
          * @param {number} [pageSize]
+         * @param {boolean} [nameOnly] When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreSkillsTrashGet(keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillListOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillsTrashGet(keyword, category, tags, page, pageSize, options);
+        async apiCoreSkillsTrashGet(keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, nameOnly?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillListOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillsTrashGet(keyword, category, tags, page, pageSize, nameOnly, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['SkillsApi.apiCoreSkillsTrashGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -51561,7 +52028,7 @@ export const SkillsApiFactory = function (configuration?: Configuration, basePat
          * @throws {RequiredError}
          */
         apiCoreSkillsGet(requestParameters: SkillsApiApiCoreSkillsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<SkillListOpenAPIResponse> {
-            return localVarFp.apiCoreSkillsGet(requestParameters.source, requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreSkillsGet(requestParameters.source, requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, requestParameters.nameOnly, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -51748,7 +52215,7 @@ export const SkillsApiFactory = function (configuration?: Configuration, basePat
          * @throws {RequiredError}
          */
         apiCoreSkillsTrashGet(requestParameters: SkillsApiApiCoreSkillsTrashGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<SkillListOpenAPIResponse> {
-            return localVarFp.apiCoreSkillsTrashGet(requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreSkillsTrashGet(requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, requestParameters.nameOnly, options).then((request) => request(axios, basePath));
         },
     };
 };
@@ -51798,6 +52265,11 @@ export interface SkillsApiApiCoreSkillsGetRequest {
     readonly page?: number
 
     readonly pageSize?: number
+
+    /**
+     * When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count.
+     */
+    readonly nameOnly?: boolean
 }
 
 /**
@@ -51924,6 +52396,11 @@ export interface SkillsApiApiCoreSkillsTrashGetRequest {
     readonly page?: number
 
     readonly pageSize?: number
+
+    /**
+     * When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count.
+     */
+    readonly nameOnly?: boolean
 }
 
 /**
@@ -52001,7 +52478,7 @@ export class SkillsApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreSkillsGet(requestParameters: SkillsApiApiCoreSkillsGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return SkillsApiFp(this.configuration).apiCoreSkillsGet(requestParameters.source, requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
+        return SkillsApiFp(this.configuration).apiCoreSkillsGet(requestParameters.source, requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, requestParameters.nameOnly, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -52207,7 +52684,7 @@ export class SkillsApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreSkillsTrashGet(requestParameters: SkillsApiApiCoreSkillsTrashGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return SkillsApiFp(this.configuration).apiCoreSkillsTrashGet(requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
+        return SkillsApiFp(this.configuration).apiCoreSkillsTrashGet(requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, requestParameters.nameOnly, options).then((request) => request(this.axios, this.basePath));
     }
 }
 

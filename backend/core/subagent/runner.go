@@ -16,6 +16,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/common/taskdisplay"
 	"lazymind/core/localworkspace"
 	"lazymind/core/state"
 )
@@ -59,21 +60,26 @@ type RunRequest struct {
 
 // TaskEvent is one event emitted by the SubAgent SSE stream.
 type TaskEvent struct {
-	Type         string          `json:"type"`
-	Steps        []string        `json:"steps,omitempty"`
-	ScopeVersion int             `json:"scope_version,omitempty"`
-	TaskID       string          `json:"task_id,omitempty"`
-	Progress     int             `json:"progress,omitempty"`
-	CurrentPhase string          `json:"current_phase,omitempty"`
-	EstimatedSec int             `json:"estimated_sec,omitempty"`
-	ArtifactKey  string          `json:"slot,omitempty"`
-	ContentType  string          `json:"content_type,omitempty"`
-	Seq          int             `json:"seq,omitempty"`
-	Value        json.RawMessage `json:"value,omitempty"`
-	Sources      json.RawMessage `json:"sources,omitempty"`
-	Status       string          `json:"status,omitempty"`
-	Summary      string          `json:"summary,omitempty"`
-	Message      string          `json:"message,omitempty"`
+	Type         string                         `json:"type"`
+	V2ArtifactID string                         `json:"v2_artifact_id,omitempty"`
+	V2RevisionID string                         `json:"v2_revision_id,omitempty"`
+	ExecutionID  string                         `json:"execution_id,omitempty"`
+	EventID      string                         `json:"event_id,omitempty"`
+	ProcessStep  *taskdisplay.PublicProcessStep `json:"process_step,omitempty"`
+	Steps        []string                       `json:"steps,omitempty"`
+	ScopeVersion int                            `json:"scope_version,omitempty"`
+	TaskID       string                         `json:"task_id,omitempty"`
+	Progress     int                            `json:"progress,omitempty"`
+	CurrentPhase string                         `json:"current_phase,omitempty"`
+	EstimatedSec int                            `json:"estimated_sec,omitempty"`
+	ArtifactKey  string                         `json:"slot,omitempty"`
+	ContentType  string                         `json:"content_type,omitempty"`
+	Seq          int                            `json:"seq,omitempty"`
+	Value        json.RawMessage                `json:"value,omitempty"`
+	Sources      json.RawMessage                `json:"sources,omitempty"`
+	Status       string                         `json:"status,omitempty"`
+	Summary      string                         `json:"summary,omitempty"`
+	Message      string                         `json:"message,omitempty"`
 	// Tool step events forwarded from SubAgent runner for frontend display.
 	ToolCalls   json.RawMessage `json:"tool_calls,omitempty"`
 	ToolResults json.RawMessage `json:"tool_results,omitempty"`
@@ -118,10 +124,19 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 	}
 	params, _ := req.TaskSpec["params"].(map[string]any)
 	workspaceBound := localworkspace.SnapshotFromParams(params) != nil
-	generation := ""
-	routeAccepted := func(ev TaskEvent) error { return routeEvent(runCtx, db, stateStore, ev) }
+	generation := uuid.NewString()
+	routeAccepted := func(ev TaskEvent) error {
+		accepted, err := routeExecutionEvent(runCtx, db, req.TaskID, generation, ev, func(tx *gorm.DB, event TaskEvent) (bool, error) {
+			ev = event
+			return persistTaskEventWithRecord(runCtx, tx, &ev)
+		})
+		if err == nil && accepted {
+			ev.DurableToolResults = nil
+			publishTaskEvent(runCtx, db, stateStore, ev, true, true)
+		}
+		return err
+	}
 	if workspaceBound {
-		generation = uuid.NewString()
 		if stateStore == nil {
 			return fmt.Errorf("store not initialized")
 		}
@@ -137,6 +152,9 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 			}
 			if task.Status != StatusPending && task.Status != StatusRunning {
 				return ErrTaskTerminal
+			}
+			if err := beginDisplayExecution(runCtx, tx, req.TaskID, generation); err != nil {
+				return err
 			}
 			if err := stateStore.Set(runCtx, workspaceRunKey(req.TaskID), []byte(generation), subagentRunTimeout); err != nil {
 				return err
@@ -158,8 +176,10 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 				return err
 			})
 		}()
-		routeAccepted = func(ev TaskEvent) error { return routeRunEvent(runCtx, db, stateStore, generation, ev) }
+	} else if err := withWorkspaceRunUpdate(runCtx, db, req.TaskID, func(tx *gorm.DB) error { return beginDisplayExecution(runCtx, tx, req.TaskID, generation) }); err != nil {
+		return err
 	}
+	req.TaskSpec["execution_id"] = generation
 	runError := func(message string) {
 		_ = routeAccepted(TaskEvent{Type: "error", TaskID: req.TaskID, Status: StatusFailed, Message: message})
 	}
@@ -296,7 +316,7 @@ func hydrateRunRequest(ctx context.Context, db *gorm.DB, req *RunRequest) error 
 }
 
 func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore state.Store, ev TaskEvent, artifactHook, terminalHook bool) error {
-	accepted, err := persistTaskEvent(ctx, db, ev)
+	accepted, err := persistTaskEventWithRecord(ctx, db, &ev)
 	if err == nil && accepted {
 		publishTaskEvent(ctx, db, stateStore, ev, artifactHook, terminalHook)
 	}
@@ -320,7 +340,7 @@ func routeRunEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, gen
 				return fmt.Errorf("append task step task=%s role=%s: %w", ev.TaskID, role, err)
 			}
 		}
-		accepted, err = persistTaskEvent(ctx, tx, ev)
+		accepted, err = persistTaskEventWithRecord(ctx, tx, &ev)
 		return err
 	})
 	if err == nil && accepted {
@@ -330,8 +350,17 @@ func routeRunEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, gen
 }
 
 func persistTaskEvent(ctx context.Context, db *gorm.DB, ev TaskEvent) (bool, error) {
+	return persistTaskEventWithRecord(ctx, db, &ev)
+}
+
+func persistTaskEventWithRecord(ctx context.Context, db *gorm.DB, ev *TaskEvent) (bool, error) {
 	var err error
 	switch ev.Type {
+	case "process_step":
+		if ev.ProcessStep == nil {
+			return false, taskdisplay.ErrInvalidProcessStep
+		}
+		return PersistPublicProcessStep(ctx, db, ev.TaskID, ev.ExecutionID, ev.EventID, *ev.ProcessStep)
 	case "task_start":
 		return AcceptTaskStart(ctx, db, ev.TaskID)
 	case "progress":
@@ -340,7 +369,15 @@ func persistTaskEvent(ctx context.Context, db *gorm.DB, ev TaskEvent) (bool, err
 			err = UpdateWritingSubtasks(ctx, db, ev.TaskID, ev.WritingSubtasks)
 		}
 	case "artifact":
-		err = SaveArtifact(ctx, db, ev.TaskID, ev.ArtifactKey, ev.ContentType, ev.Value, max(1, ev.Seq))
+		saved, err := SaveArtifactWithRecord(ctx, db, ev.TaskID, ev.ArtifactKey, ev.ContentType, ev.Value, max(1, ev.Seq))
+		if err != nil {
+			return false, err
+		}
+		if saved.Revision != nil {
+			ev.V2ArtifactID = saved.Revision.ArtifactID
+			ev.V2RevisionID = saved.Revision.RevisionID
+		}
+		return saved.Accepted, nil
 	case "sources":
 		err = UpdateSources(ctx, db, ev.TaskID, ev.Sources)
 	case "done":
@@ -436,7 +473,7 @@ func PublishConversationTaskEvent(
 			// stream even though workflow tasks stay hidden from TaskCenter.
 			EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, "", "task_updated",
 				map[string]any{"task_id": ev.TaskID, "event": ev})
-		case "task_start", "progress", "artifact", "done", "error":
+		case "task_start", "plan", "process_step", "sources", "progress", "artifact", "done", "error":
 			EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, "",
 				"workflow_runtime_updated", map[string]any{"task_id": ev.TaskID, "change": ev.Type})
 		default:
@@ -445,7 +482,7 @@ func PublishConversationTaskEvent(
 		}
 	}
 	switch ev.Type {
-	case "task_start", "plan", "progress", "sources", "done", "error":
+	case "task_start", "plan", "process_step", "progress", "sources", "done", "error":
 	default:
 		return
 	}
@@ -561,7 +598,7 @@ func ValidateWorkspaceRun(ctx context.Context, db *gorm.DB, stateStore state.Sto
 }
 
 func withWorkspaceRunUpdate(ctx context.Context, db *gorm.DB, taskID string, update func(*gorm.DB) error) error {
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
 		if err := tx.Model(&orm.SubAgentTask{}).Where("id = ?", taskID).
 			UpdateColumn("updated_at", gorm.Expr("updated_at")).Error; err != nil {
 			return err
