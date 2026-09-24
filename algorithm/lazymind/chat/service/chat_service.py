@@ -1890,6 +1890,20 @@ async def _handle_chat_impl(
         content_kind='instruction', skip_if=lambda: not has_document_selection,
     )
     prompt_builder.runtime(
+        'chat_document_preview_contract', 'Active Document Contract', (
+            'The user is asking about the document currently open in the preview. '
+            f'Its knowledge_base_id is {document_context.get("dataset_id")!r} and its '
+            f'document_id is {document_context.get("document_id")!r}. Treat references such as '
+            '“this document”, “this paper”, or “it” as that exact document. For questions that '
+            'need document content, call KBToolkit.read_document with these exact IDs. This read '
+            'also starts on-demand parsing and works without semantic chunks or a vector index. '
+            'Do not ask the user to paste or identify the document merely because kb_search '
+            'returns no results.'
+        ),
+        'backend.document_preview', priority=38, authoritative=True,
+        content_kind='instruction', skip_if=lambda: not is_document_preview_chat,
+    )
+    prompt_builder.runtime(
         'chat_quoted_message', 'Quoted Message', cited_message_context,
         'user.quote', priority=40, content_kind='reference',
     )

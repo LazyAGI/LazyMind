@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, message } from "antd";
+import { Alert, Button, message } from "antd";
 import { CloseOutlined, MessageOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { ChatConversationsRequestActionEnum, type Query } from "@/api/generated/chatbot-client";
@@ -13,7 +13,7 @@ import {
   CHAT_STREAM_URL,
   ChatServiceApi,
 } from "@/modules/chat/utils/request";
-import { axiosInstance, BASE_URL } from "@/components/request";
+import { axiosInstance, BASE_URL, getLocalizedErrorMessage } from "@/components/request";
 import { emitConversationActivity } from "@/modules/chat/utils/conversationActivity";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import "./index.scss";
@@ -21,6 +21,7 @@ import type { DocumentChatSelection } from "./types";
 import type { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 import type { DocumentTranslationRequest } from "./types";
 import { touchCachedPdfChat } from "./cache";
+import { ensureDocumentParsed } from "@/modules/knowledge/api/pdfArtifacts";
 
 interface PdfTemporaryChatProps {
   datasetId: string;
@@ -65,6 +66,35 @@ export default function PdfTemporaryChat({
   const [saved, setSaved] = useState(false);
   const [restartKey, setRestartKey] = useState(0);
   const [chatConfig, setChatConfig] = useState<ChatConfig>({ knowledgeBaseId: [datasetId] });
+  const [parseState, setParseState] = useState<"parsing" | "parsed" | "failed">("parsing");
+  const [parseError, setParseError] = useState("");
+
+  useEffect(() => {
+    // Opening document chat is the first concrete signal that the stored file
+    // needs readable text. Parsing is idempotent, so eagerly start it while the
+    // user is composing the first question instead of waiting for retrieval to
+    // discover that no chunks exist.
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const result = await ensureDocumentParsed(datasetId, documentId);
+        if (cancelled) return;
+        setParseState(result.status);
+        setParseError("");
+        if (result.status === "parsing") timer = window.setTimeout(poll, 1000);
+      } catch (error) {
+        if (cancelled) return;
+        setParseState("failed");
+        setParseError(getLocalizedErrorMessage(error));
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [datasetId, documentId]);
 
   useEffect(() => {
     conversationIdRef.current = conversationId;
@@ -284,6 +314,12 @@ export default function PdfTemporaryChat({
         </Button>
       </div>
       <div className="pdf-temporary-chat__body">
+        {parseState === "parsing" ? (
+          <Alert className="pdf-temporary-chat__parse-status" type="info" showIcon message={t("knowledge.pdfChatParsing")} />
+        ) : null}
+        {parseState === "failed" ? (
+          <Alert className="pdf-temporary-chat__parse-status" type="error" showIcon message={t("knowledge.pdfChatParseFailed")} description={parseError} />
+        ) : null}
         <ChatContainerComponent
           ref={chatRef}
           sessionId={conversationId}

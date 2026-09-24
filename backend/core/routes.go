@@ -275,6 +275,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PATCH", "/datasets/{dataset}", []string{"document.write"}, doc.UpdateDataset)
 	handleAPI(r, "PATCH", "/datasets/{dataset}/processing-level", []string{"document.write"}, doc.UpdateProcessingLevel)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}:ensure-parsed", []string{"document.read"}, doc.EnsureParsed)
+	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}:read", []string{"document.read"}, doc.ReadDocument)
 	handleAPI(r, "GET", "/datasets/{dataset}/processing-status", []string{"document.read"}, doc.GetProcessingStatus)
 
 	// ----- Academic references and paper imports -----
@@ -346,6 +347,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete", []string{"document.write"}, doc.CompletePDFRenderJob)
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content", []string{"document.read"}, doc.GetPDFArtifact)
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:layout", []string{"document.read"}, doc.GetPDFArtifactLayout)
+	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:draft", []string{"document.read"}, doc.GetPDFTranslationDraft)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:retranslate", []string{"document.write"}, doc.RetranslatePDFDraftBlock)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:revise", []string{"document.write"}, doc.RevisePDFTranslation)
 	handleAPI(r, "DELETE", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}", []string{"document.write"}, doc.DeletePDFArtifact)
 	handleAPI(r, "DELETE", "/datasets/{dataset}/documents/{document}", []string{"document.write"}, doc.DeleteDocument)
 	handleAPI(r, "PATCH", "/datasets/{dataset}/documents/{document}", []string{"document.write"}, doc.UpdateDocument)

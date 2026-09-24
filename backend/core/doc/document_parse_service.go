@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +13,14 @@ import (
 
 const RootNodeGroup = "lazyllm_root"
 
+const (
+	// Keep the synchronous wait below the default 30-second Core client and
+	// gateway timeouts. A longer parse keeps running on the shared task and a
+	// subsequent read joins it instead of creating duplicate work.
+	documentParseWaitTimeout  = 25 * time.Second
+	documentParsePollInterval = time.Second
+)
+
 type EnsureDocumentParsedRequest struct {
 	UserID     string
 	DatasetID  string
@@ -22,6 +31,48 @@ type EnsureDocumentParsedRequest struct {
 type EnsureDocumentParsedResult struct {
 	Status string `json:"status"`
 	TaskID string `json:"task_id,omitempty"`
+}
+
+// EnsureDocumentParsedAndWait owns the complete on-demand parse lifecycle for
+// synchronous readers. Concurrent callers join the same task through
+// EnsureDocumentParsed's database latch and wait here for its terminal state.
+func (s *DocumentService) EnsureDocumentParsedAndWait(r *http.Request, req EnsureDocumentParsedRequest) error {
+	return waitForDocumentParsed(r.Context(), documentParseWaitTimeout, documentParsePollInterval, func() (EnsureDocumentParsedResult, error) {
+		return s.EnsureDocumentParsed(r, req)
+	})
+}
+
+func waitForDocumentParsed(
+	ctx context.Context,
+	timeout time.Duration,
+	pollInterval time.Duration,
+	ensure func() (EnsureDocumentParsedResult, error),
+) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		result, err := ensure()
+		if err != nil {
+			return err
+		}
+		switch strings.ToLower(strings.TrimSpace(result.Status)) {
+		case "parsed":
+			return nil
+		case "failed":
+			return &DocumentServiceError{Code: DocumentServiceUnavailable, Message: "document Reader parsing failed"}
+		}
+
+		poll := time.NewTimer(pollInterval)
+		select {
+		case <-ctx.Done():
+			poll.Stop()
+			return ctx.Err()
+		case <-deadline.C:
+			poll.Stop()
+			return &DocumentServiceError{Code: DocumentServiceUnavailable, Message: "document parsing is still running"}
+		case <-poll.C:
+		}
+	}
 }
 
 // EnsureDocumentParsed is the single on-demand entry point for features that
@@ -64,13 +115,6 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 		}
 	}
 
-	var state orm.DocumentProcessingState
-	if err := s.db.WithContext(r.Context()).Where("dataset_id = ? AND document_id = ?", req.DatasetID, req.DocumentID).Take(&state).Error; err == nil && state.ParseStatus == "running" {
-		var active orm.Task
-		_ = s.db.WithContext(r.Context()).Where("dataset_id = ? AND doc_id = ? AND deleted_at IS NULL", req.DatasetID, req.DocumentID).Order("created_at DESC").Take(&active).Error
-		return EnsureDocumentParsedResult{Status: "parsing", TaskID: active.ID}, nil
-	}
-
 	now := time.Now().UTC()
 	taskID := newTaskID()
 	filename := firstNonEmpty(rec.row.DisplayName, rec.ext.OriginalFilename, req.DocumentID)
@@ -85,16 +129,36 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 	task := orm.Task{ID: taskID, DocID: req.DocumentID, KbID: rec.dataset.KbID, AlgoID: parseDatasetAlgo(rec.dataset.Ext).AlgoID,
 		DatasetID: req.DatasetID, TaskType: string(TaskTypeParse), DisplayName: filename, Ext: mustJSON(taskMetadata),
 		BaseModel: orm.BaseModel{CreateUserID: req.UserID, CreateUserName: rec.row.CreateUserName, CreatedAt: now, UpdatedAt: now}}
+	claimed := false
 	err = s.db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		// The conditional update is the document-level parsing latch. Concurrent
+		// chats can all call this method, but only one transaction changes the
+		// state to running and creates a task; every loser joins that task below.
+		claim := tx.Model(&orm.DocumentProcessingState{}).
+			Where("dataset_id = ? AND document_id = ? AND parse_status <> ?", req.DatasetID, req.DocumentID, "running").
+			Updates(map[string]any{"parse_status": "running", "parse_error_code": "", "parse_error_message": "", "updated_at": now})
+		if claim.Error != nil {
+			return claim.Error
+		}
+		if claim.RowsAffected == 0 {
+			return nil
+		}
+		claimed = true
 		if err := tx.Create(&task).Error; err != nil {
 			return err
 		}
-		return tx.Model(&orm.DocumentProcessingState{}).
-			Where("dataset_id = ? AND document_id = ?", req.DatasetID, req.DocumentID).
-			Updates(map[string]any{"parse_status": "running", "parse_error_code": "", "parse_error_message": "", "updated_at": now}).Error
+		return nil
 	})
 	if err != nil {
 		return EnsureDocumentParsedResult{}, err
+	}
+	if !claimed {
+		var active orm.Task
+		_ = s.db.WithContext(r.Context()).Where(
+			"dataset_id = ? AND doc_id = ? AND task_type = ? AND deleted_at IS NULL",
+			req.DatasetID, req.DocumentID, string(TaskTypeParse),
+		).Order("created_at DESC").Take(&active).Error
+		return EnsureDocumentParsedResult{Status: "parsing", TaskID: active.ID}, nil
 	}
 	results, startErr := startParseTasksInternalAtLevel(r, req.DatasetID, []string{taskID}, ProcessingLevelParsed)
 	if startErr != nil || len(results) == 0 || results[0].Status != "STARTED" {

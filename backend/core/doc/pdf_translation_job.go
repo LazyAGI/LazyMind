@@ -48,12 +48,63 @@ type pdfTranslationPayload struct {
 }
 
 type translationLayoutManifest struct {
-	Version int `json:"version"`
-	Blocks  []struct {
-		ID   string `json:"id"`
-		Text string `json:"text"`
-		Type string `json:"type"`
-	} `json:"blocks"`
+	Version int                      `json:"version"`
+	Blocks  []translationLayoutBlock `json:"blocks"`
+}
+
+type translationLayoutBlock struct {
+	ID         string    `json:"id"`
+	Page       int       `json:"page"`
+	PageWidth  float64   `json:"pageWidth,omitempty"`
+	PageHeight float64   `json:"pageHeight,omitempty"`
+	BBox       []float64 `json:"bbox,omitempty"`
+	Type       string    `json:"type"`
+	Text       string    `json:"text"`
+}
+
+type pdfTranslationDraft struct {
+	Version        int                        `json:"version"`
+	ArtifactID     string                     `json:"artifact_id"`
+	BaseArtifactID string                     `json:"base_artifact_id,omitempty"`
+	TargetLanguage string                     `json:"target_language"`
+	Blocks         []pdfTranslationDraftBlock `json:"blocks"`
+	CreatedAt      string                     `json:"created_at"`
+}
+
+type pdfTranslationDraftBlock struct {
+	ID             string    `json:"id"`
+	Page           int       `json:"page"`
+	PageWidth      float64   `json:"page_width,omitempty"`
+	PageHeight     float64   `json:"page_height,omitempty"`
+	BBox           []float64 `json:"bbox,omitempty"`
+	Type           string    `json:"type,omitempty"`
+	SourceText     string    `json:"source_text"`
+	TranslatedText string    `json:"translated_text"`
+}
+
+func buildPDFTranslationDraft(artifactID, baseArtifactID, targetLanguage string, manifest translationLayoutManifest, translations map[string]string) pdfTranslationDraft {
+	blocks := make([]pdfTranslationDraftBlock, 0, len(manifest.Blocks))
+	for _, block := range manifest.Blocks {
+		translated, ok := translations[block.ID]
+		if !ok {
+			continue
+		}
+		blocks = append(blocks, pdfTranslationDraftBlock{
+			ID: block.ID, Page: block.Page, PageWidth: block.PageWidth, PageHeight: block.PageHeight,
+			BBox: append([]float64(nil), block.BBox...), Type: block.Type,
+			SourceText: block.Text, TranslatedText: translated,
+		})
+	}
+	return pdfTranslationDraft{Version: 1, ArtifactID: artifactID, BaseArtifactID: baseArtifactID,
+		TargetLanguage: targetLanguage, Blocks: blocks, CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+}
+
+func writePDFTranslationDraft(path string, draft pdfTranslationDraft) error {
+	raw, err := json.Marshal(draft)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, raw, 0o640)
 }
 
 func RegisterPDFTranslationJobs() {
@@ -111,7 +162,8 @@ func createBackendTranslationPDFJob(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, job := range ext.PDFRenderJobs {
-			if job.BackendManaged && job.Kind == pdfArtifactTranslation && job.CacheKey == key && job.Status != "FAILED" && job.Status != "CANCELLED" {
+			if job.BackendManaged && job.Kind == pdfArtifactTranslation && job.CacheKey == key &&
+				reusableBackendTranslationJob(r.Context(), job) {
 				common.ReplyOK(w, map[string]any{"cache_status": "running", "job": job})
 				return
 			}
@@ -155,15 +207,28 @@ func createBackendTranslationPDFJob(w http.ResponseWriter, r *http.Request) {
 		SourcePath: sourcePath, LayoutPath: layoutPath, TargetLanguage: req.TargetLanguage, ProviderType: req.ProviderType,
 		OutputFilename: strings.TrimSuffix(sourceHeader.Filename, extension) + "-" + req.TargetLanguage + extension}
 	queued, err := asyncjob.Enqueue(r.Context(), store.DB(), asyncjob.EnqueueRequest{JobType: pdfTranslationJobType,
-		ResourceType: "pdf_render_job", ResourceID: renderJobID, IdempotencyKey: key, Payload: payload,
-		MaxAttempts: 2, CreateUserID: store.UserID(r), SkipSucceeded: req.Force})
+		ResourceType: "pdf_render_job", ResourceID: renderJobID,
+		IdempotencyKey: pdfTranslationJobIdempotencyKey(row.DatasetID, row.ID, key), Payload: payload,
+		MaxAttempts: 2, CreateUserID: store.UserID(r),
+		// Artifact reuse is decided above from this document's persisted
+		// artifacts. A successful async job without such an artifact is not a
+		// usable cache hit and must not be returned as a new running job.
+		SkipSucceeded: true})
 	if err != nil {
 		_ = os.Remove(sourcePath)
 		_ = os.Remove(layoutPath)
 		common.ReplyErr(w, "enqueue translation job failed", http.StatusInternalServerError)
 		return
 	}
-	_ = queued
+	if queued.ResourceID != renderJobID {
+		// A concurrent request already enqueued the same document translation.
+		// Do not expose a second render ID that has no backing async job.
+		_ = os.Remove(sourcePath)
+		_ = os.Remove(layoutPath)
+		jobRecord.ID = queued.ResourceID
+		common.ReplyOK(w, map[string]any{"cache_status": "running", "job": jobRecord})
+		return
+	}
 	ext.PDFRenderJobs = append(ext.PDFRenderJobs, jobRecord)
 	if err := saveDocumentExt(r, row, ext); err != nil {
 		_, _ = asyncjob.CancelResourceJobs(r.Context(), store.DB(), pdfTranslationJobType, "pdf_render_job", renderJobID, "render job persistence failed")
@@ -171,6 +236,23 @@ func createBackendTranslationPDFJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.ReplyOK(w, map[string]any{"cache_status": "miss", "job": jobRecord})
+}
+
+func reusableBackendTranslationJob(ctx context.Context, job pdfRenderJobRecord) bool {
+	status := strings.ToUpper(strings.TrimSpace(job.Status))
+	if status == "FAILED" || status == "CANCELLED" {
+		return false
+	}
+	return backendTranslationJobActive(ctx, job.ID)
+}
+
+func backendTranslationJobActive(ctx context.Context, renderJobID string) bool {
+	var count int64
+	err := store.DB().WithContext(ctx).Model(&orm.AsyncJob{}).
+		Where("job_type = ? AND resource_type = ? AND resource_id = ? AND status IN ?",
+			pdfTranslationJobType, "pdf_render_job", renderJobID, []string{"pending", "running"}).
+		Count(&count).Error
+	return err == nil && count > 0
 }
 
 func updateTranslationRenderJob(ctx context.Context, payload pdfTranslationPayload, mutate func(*pdfRenderJobRecord, *documentExt) error) error {
@@ -338,8 +420,8 @@ func translateUnitsParallel(
 			outputMu.Lock()
 			chunksByUnit[task.unitIndex][task.chunkIndex] = value
 			outputMu.Unlock()
-			done := completed.Add(task.weight)
 			progressMu.Lock()
+			done := completed.Add(task.weight)
 			err = onProgress(done, total)
 			progressMu.Unlock()
 			if err != nil {
@@ -544,8 +626,14 @@ func handlePDFTranslationJob(ctx context.Context, job asyncjob.Job, reporter asy
 			renderResult.RenderedBlockCount, renderResult.RequestedBlockCount))
 	}
 	artifactID := uuid.NewString()
+	draftPath := strings.TrimSuffix(payload.LayoutPath, ".json") + ".draft.json"
+	draft := buildPDFTranslationDraft(artifactID, "", payload.TargetLanguage, manifest, translations)
+	if err := writePDFTranslationDraft(draftPath, draft); err != nil {
+		return fail(err)
+	}
 	err = updateTranslationRenderJob(ctx, payload, func(record *pdfRenderJobRecord, ext *documentExt) error {
 		artifact := pdfArtifactRecord{ID: artifactID, Kind: pdfArtifactTranslation, CacheKey: record.CacheKey, StoredPath: outputPath,
+			SourcePath: payload.SourcePath, LayoutPath: payload.LayoutPath, DraftPath: draftPath, HasLayout: true, HasDraft: true,
 			Filename: payload.OutputFilename, ContentType: "application/pdf", TargetLanguage: record.TargetLanguage,
 			ProviderType: record.ProviderType, Provider: record.Provider, Model: record.Model, WarningCount: renderResult.WarningCount,
 			CreatedAt: time.Now().UTC().Format(time.RFC3339)}

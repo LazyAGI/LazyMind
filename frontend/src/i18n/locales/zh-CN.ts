@@ -3920,6 +3920,8 @@ const zhCN = {
     pdfChatNew: "新建临时对话",
     pdfChatSave: "保存到 Chat",
     pdfChatSaved: "已保存到 Chat 历史",
+    pdfChatParsing: "文档解析中，请稍后",
+    pdfChatParseFailed: "文档解析失败",
     pdfChatSavedSource: "来自 PDF 预览",
     pdfChatTitle: "PDF 对话：{{fileName}}",
     pdfChatHistoryPlaceholder: "选择历史对话",

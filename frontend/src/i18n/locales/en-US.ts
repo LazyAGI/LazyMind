@@ -4001,6 +4001,8 @@ const enUS = {
     pdfChatSaved: "Saved to Chat history",
     pdfChatSavedSource: "From a PDF preview",
     pdfChatTitle: "PDF chat: {{fileName}}",
+    pdfChatParsing: "The document is being parsed. Please wait.",
+    pdfChatParseFailed: "Document parsing failed",
     pdfChatHistoryPlaceholder: "Select chat history",
     backToKnowledgeSettings: "Back to Knowledge & Data settings",
     create: "Create Knowledge Base",
