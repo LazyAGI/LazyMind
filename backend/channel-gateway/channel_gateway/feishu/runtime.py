@@ -157,6 +157,8 @@ class FeishuRuntime:
         revision: int = 0,
     ) -> None:
         account = self._credentials.load_runtime_account(account_id)
+        if account['status'] not in {'connected', 'provisioning'}:
+            return
         credentials = account['credentials']
         route = _AccountRoute(
             account_id=account_id,

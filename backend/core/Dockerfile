@@ -21,6 +21,13 @@ RUN CGO_ENABLED=0 go build -o /builtin-skill-bundle ./cmd/builtin-skill-bundle
 FROM build-base AS feishu-cli-sidecar-build
 RUN CGO_ENABLED=0 go build -o /feishu-cli-sidecar ./cmd/feishu-cli-sidecar
 
+FROM build-base AS feishu-credential-helper-build
+WORKDIR /credential-helper
+COPY backend/feishu-credential-helper/go.mod backend/feishu-credential-helper/go.sum ./
+RUN go mod download
+COPY backend/feishu-credential-helper/ ./
+RUN CGO_ENABLED=0 go build -mod=readonly -o /feishu-credential-helper .
+
 FROM ${DOCKER_MIRROR}alpine:3.19 AS skill-bundler
 ARG ALPINE_MIRROR=https://mirrors.aliyun.com/alpine
 RUN sed -i "s|https://dl-cdn.alpinelinux.org/alpine|${ALPINE_MIRROR}|g" /etc/apk/repositories \
@@ -64,8 +71,12 @@ RUN sed -i "s|https://dl-cdn.alpinelinux.org/alpine|${ALPINE_MIRROR}|g" /etc/apk
     && rm -rf /tmp/lark-cli /tmp/lark-cli.tar.gz /tmp/feishu-cli-release.json \
     && apk del jq
 COPY --from=feishu-cli-sidecar-build /feishu-cli-sidecar /usr/local/bin/feishu-cli-sidecar
+COPY --from=feishu-credential-helper-build /feishu-credential-helper /usr/local/bin/feishu-credential-helper
+RUN sha256sum /usr/local/bin/feishu-credential-helper | cut -d ' ' -f 1 > /usr/local/share/feishu-credential-helper.sha256
 ENV LAZYMIND_FEISHU_CLI_PATH=/usr/local/bin/lark-cli \
     LAZYMIND_FEISHU_CLI_SHA256_FILE=/usr/local/share/lark-cli.sha256 \
+    LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_PATH=/usr/local/bin/feishu-credential-helper \
+    LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_SHA256_FILE=/usr/local/share/feishu-credential-helper.sha256 \
     LAZYMIND_FEISHU_CLI_RUNTIME_ROOT=/var/lib/lazymind/feishu-cli \
     LAZYMIND_FEISHU_CLI_SIDECAR_LISTEN=0.0.0.0:19091
 EXPOSE 19091

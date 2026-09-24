@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   listSchedules: vi.fn(),
   navigate: vi.fn(),
   uploadFileInChunks: vi.fn(),
+  batchCreateAutomationGroup: vi.fn(),
 }));
 
 vi.mock('react-router-dom', () => ({
@@ -22,7 +23,7 @@ vi.mock('react-router-dom', () => ({
 }));
 
 vi.mock('./api', () => ({
-  batchCreateAutomationGroup: vi.fn(),
+  batchCreateAutomationGroup: mocks.batchCreateAutomationGroup,
   cancelSchedule: vi.fn(),
   createSchedule: vi.fn(),
   deleteAutomationGroup: vi.fn(),
@@ -34,6 +35,14 @@ vi.mock('./api', () => ({
   moveSchedule: vi.fn(),
   runScheduleNow: vi.fn(),
   updateSchedule: vi.fn(),
+}));
+
+vi.mock('@/modules/notifications/ScheduleNotificationPanel', () => ({
+  default: ({ title, onDraftChange }: { title?: string; onDraftChange?: (value: unknown) => void }) => (
+    <button type="button" onClick={() => onDraftChange?.({ revision: 0, clear: true })}>
+      notification:{title}
+    </button>
+  ),
 }));
 
 vi.mock('@/modules/chat/utils/request', () => ({
@@ -131,6 +140,8 @@ describe('ScheduleList English localization', () => {
     mocks.listSchedules.mockResolvedValue({ items: [], total: 0 });
     mocks.navigate.mockReset();
     mocks.uploadFileInChunks.mockReset();
+    mocks.batchCreateAutomationGroup.mockReset();
+    mocks.batchCreateAutomationGroup.mockResolvedValue({ group_id: 'group', schedule_ids: {} });
   });
 
   afterEach(() => {
@@ -169,6 +180,31 @@ describe('ScheduleList English localization', () => {
     expect(within(dialog).getByRole('button', { name: 'Delete task' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: /Add task/ })).toBeInTheDocument();
     expect(within(dialog).getByText('Task 1')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'notification:Task 1' })).toBeInTheDocument();
     expectEnglishSurface(dialog);
   });
+
+  it('stores notification drafts on the matching task inside a new group', async () => {
+    await renderEnglishScheduleList();
+    await waitForScheduleListToSettle();
+    fireEvent.click(screen.getByRole('button', { name: /New Scheduled Task/ }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: /Task group.*Create a task group/i }));
+    fireEvent.change(within(dialog).getByPlaceholderText('Enter a task group name'), { target: { value: 'Research' } });
+    fireEvent.change(within(dialog).getByPlaceholderText('Please enter a task name'), { target: { value: 'First' } });
+    fireEvent.change(within(dialog).getByPlaceholderText('Describe the task you want the system to run on a schedule'), { target: { value: 'First task' } });
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'notification:First' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /Add task/ }));
+    const taskNames = within(dialog).getAllByPlaceholderText('Please enter a task name');
+    const taskDescriptions = within(dialog).getAllByPlaceholderText('Describe the task you want the system to run on a schedule');
+    fireEvent.change(taskNames.at(-1)!, { target: { value: 'Second' } });
+    fireEvent.change(taskDescriptions.at(-1)!, { target: { value: 'Second task' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(mocks.batchCreateAutomationGroup).toHaveBeenCalledTimes(1));
+    const payload = mocks.batchCreateAutomationGroup.mock.calls[0][0];
+    expect(payload.tasks).toHaveLength(2);
+    expect(payload.tasks[0].notification).toEqual({ revision: 0, clear: true });
+    expect(payload.tasks[1].notification).toBeUndefined();
+  });
+
 });

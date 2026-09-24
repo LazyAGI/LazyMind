@@ -9,6 +9,182 @@ tags:
   - name: ConnectionSessions
     description: QR-code connection session lifecycle.
 paths:
+  /api/channel-gateway/v1/channel-accounts/{account_id}/notification-references:
+    get:
+      summary: Notification References
+      operationId: listNotificationReferences
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+            pattern: ^[^\x00-\x1f]+$
+            title: Account Id
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 512
+            default: ''
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 20
+            title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayErrorResponse'
+      tags:
+        - ChannelAccounts
+  /api/channel-gateway/v1/channel-accounts/{account_id}/notification-targets:
+    get:
+      summary: Notification Targets
+      operationId: listNotificationTargets
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+            pattern: ^[^\x00-\x1f]+$
+            title: Account Id
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 256
+            default: ''
+            title: Cursor
+        - name: recipient_id
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 256
+            default: ''
+            title: Recipient Id
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 20
+            title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayErrorResponse'
+      tags:
+        - ChannelAccounts
+  /api/channel-gateway/v1/task-notifications/{notification_id}:retry:
+    post:
+      summary: Retry Notification
+      operationId: retryTaskNotification
+      parameters:
+        - name: notification_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+            pattern: ^[^\x00-\x1f]+$
+            title: Notification Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationRetry'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayErrorResponse'
+      tags:
+        - TaskNotifications
+  /api/channel-gateway/v1/task-notifications:
+    get:
+      summary: Notification History
+      operationId: listTaskNotifications
+      parameters:
+        - name: task_id
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+            pattern: ^[^\x00-\x1f]+$
+            title: Task Id
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: ^[0-9]+$
+            description: Opaque decimal int64 cursor; keep as a string to avoid JavaScript precision loss.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 20
+            title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayErrorResponse'
+      tags:
+        - TaskNotifications
   /api/channel-gateway/v1/channel-accounts:
     get:
       tags:
@@ -36,10 +212,67 @@ paths:
         "422":
           $ref: "#/components/responses/InvalidRequest"
   /api/channel-gateway/v1/channel-accounts/{account_id}:
+    get:
+      summary: Channel Account Detail
+      operationId: getChannelAccount
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+            pattern: ^[^\x00-\x1f]+$
+            title: Account Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayErrorResponse'
+      tags:
+        - ChannelAccounts
+    patch:
+      tags: [ChannelAccounts]
+      summary: Change the remark of an existing Feishu account
+      operationId: renameChannelAccount
+      parameters:
+        - $ref: "#/components/parameters/AccountId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [label]
+              properties:
+                label:
+                  type: string
+                  minLength: 1
+                  maxLength: 80
+      responses:
+        "200":
+          description: Updated safe account view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountView"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
     delete:
       tags:
         - ChannelAccounts
-      summary: Disconnect a channel account
+      summary: Unbind a channel account and erase its stored credentials
       operationId: disconnectChannelAccount
       parameters:
         - $ref: "#/components/parameters/AccountId"
@@ -50,6 +283,135 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/channel-gateway/v1/channel-accounts/{account_id}/notification-groups:
+    get:
+      tags: [ChannelAccounts]
+      summary: List groups joined by the connected Feishu bot
+      operationId: listNotificationGroups
+      parameters:
+        - $ref: "#/components/parameters/AccountId"
+        - name: cursor
+          in: query
+          schema: {type: string, maxLength: 2048, default: ''}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 100}
+      responses:
+        "200":
+          description: Readable group names and opaque pagination cursor.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  next_cursor: {type: string}
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/NotificationTarget"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Account changed or needs reauthorization.
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
+        "503":
+          description: Feishu group permissions or service unavailable.
+  /api/channel-gateway/v1/channel-accounts/{account_id}/default-recipient:
+    put:
+      tags: [ChannelAccounts]
+      summary: Set or clear an explicit connection default without changing saved task rules
+      operationId: setDefaultRecipient
+      parameters:
+        - $ref: "#/components/parameters/AccountId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [recipient_id]
+              properties:
+                recipient_id:
+                  type: string
+                  maxLength: 256
+                  pattern: '^[^\x00-\x1f]*$'
+                  description: Known recipient of this account; empty clears the default.
+      responses:
+        "200":
+          description: Updated account.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountView"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Account changed; refresh before retrying.
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
+        "503":
+          description: Group membership verification unavailable.
+  /api/channel-gateway/v1/channel-accounts/{account_id}:archive:
+    post:
+      tags: [ChannelAccounts]
+      summary: Remove an unbound Feishu account from active lists and retain history
+      operationId: archiveChannelAccount
+      parameters:
+        - $ref: "#/components/parameters/AccountId"
+      responses:
+        "204":
+          description: Record removed; repeated requests by the owner also succeed.
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: ACCOUNT_UNBIND_REQUIRED; connected and paused accounts cannot be removed.
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
+  /api/channel-gateway/v1/channel-accounts/{account_id}:pause:
+    post:
+      tags:
+        - ChannelAccounts
+      summary: Pause an existing Feishu connection
+      operationId: pauseChannelAccount
+      parameters:
+        - $ref: "#/components/parameters/AccountId"
+      responses:
+        "204":
+          description: Feishu connection paused; original identity retained.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: ACCOUNT_STATE_CHANGED or FEISHU_REAUTHORIZATION_REQUIRED.
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
+  /api/channel-gateway/v1/channel-accounts/{account_id}:resume:
+    post:
+      tags:
+        - ChannelAccounts
+      summary: Resume an existing Feishu connection
+      operationId: resumeChannelAccount
+      parameters:
+        - $ref: "#/components/parameters/AccountId"
+      responses:
+        "200":
+          description: Feishu connection resumed; original identity retained.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: ACCOUNT_STATE_CHANGED or FEISHU_REAUTHORIZATION_REQUIRED.
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
   /api/channel-gateway/v1/connection-sessions:
     post:
       tags:
@@ -219,8 +581,25 @@ components:
           schema:
             $ref: "#/components/schemas/GatewayErrorResponse"
   schemas:
+    NotificationRetry:
+      properties:
+        idempotency_key:
+          type: string
+          maxLength: 128
+          minLength: 1
+          title: Idempotency Key
+        confirm_duplicate_risk:
+          type: boolean
+          title: Confirm Duplicate Risk
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+        - idempotency_key
+      title: NotificationRetry
     ConnectionSessionCreate:
       type: object
+      additionalProperties: false
       required:
         - provider
       properties:
@@ -229,6 +608,34 @@ components:
           minLength: 1
           maxLength: 32
           description: External chat channel provider identifier.
+        create_new:
+          type: boolean
+          default: false
+          description: Feishu only. Explicitly create another robot; incompatible with account_id and reauthorize.
+        reauthorize:
+          type: boolean
+          default: false
+          description: Feishu only. Request authorization for the required original account_id, without creating a robot.
+        account_id:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: Existing account owned by the current user.
+        credentials:
+          type: object
+          additionalProperties: false
+          required: [bot_id, secret]
+          properties:
+            bot_id:
+              type: string
+              minLength: 1
+              maxLength: 256
+            secret:
+              type: string
+              format: password
+              minLength: 1
+              maxLength: 4096
+          description: Required for WeCom; prohibited for other providers.
     ConnectionChallengeSubmit:
       type: object
       required:
@@ -270,6 +677,14 @@ components:
           type: string
         input_mode:
           type: string
+    NotificationTarget:
+      type: object
+      required: [recipient_id, label, available]
+      properties:
+        recipient_id: {type: string}
+        label: {type: string}
+        available: {type: boolean}
+        kind: {type: string}
     AccountView:
       type: object
       required:
@@ -284,6 +699,24 @@ components:
         - last_error
         - updated_at
       properties:
+        default_recipient_id:
+          type: string
+          default: ''
+          description: Explicit default; existing task recipients remain unchanged.
+        binding_status:
+          type: string
+          enum: [connected, paused, unbound]
+        identity:
+          type: object
+          properties:
+            app_id:
+              type: string
+            authorized_name:
+              type: string
+            authorized_id:
+              type: string
+          description: Non-secret Feishu application and authorizing user identifiers; unavailable legacy data is empty.
+
         id:
           type: string
         provider:

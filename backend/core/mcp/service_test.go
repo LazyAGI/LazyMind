@@ -58,6 +58,38 @@ func TestLoadRuntimeConfigHonorsMCPMasterSwitchWithoutHidingSharedServices(t *te
 	}
 }
 
+func TestDisableMCPOnlyChangesNewRuntimeConfig(t *testing.T) {
+	db := newTestDB(t)
+	now := time.Now().UTC()
+	server := orm.MCPServer{
+		ID: "msp-running", Name: "Running", Transport: "http", URL: "https://mcp.example.com",
+		HeadersJSON: []byte("{}"), AllowedToolsJSON: []byte(`["search"]`), Enabled: true, IsVerified: true,
+		BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now, UpdatedAt: now},
+	}
+	if err := db.Create(&server).Error; err != nil {
+		t.Fatalf("seed server: %v", err)
+	}
+	running, err := LoadRuntimeConfig(context.Background(), db.DB, "u1")
+	if err != nil || len(running) != 1 {
+		t.Fatalf("load running config: %#v err=%v", running, err)
+	}
+	before, err := json.Marshal(running)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SetOwnedServersEnabled(context.Background(), db.DB, "u1", false); err != nil {
+		t.Fatalf("disable MCP: %v", err)
+	}
+	next, err := LoadRuntimeConfig(context.Background(), db.DB, "u1")
+	if err != nil || len(next) != 0 {
+		t.Fatalf("new tasks must omit disabled servers: %#v err=%v", next, err)
+	}
+	after, err := json.Marshal(running)
+	if err != nil || string(after) != string(before) {
+		t.Fatalf("running config changed after disabling: %s err=%v", after, err)
+	}
+}
+
 func TestLoadRuntimeConfigCanonicalizesLegacyDiscoveredToolIDs(t *testing.T) {
 	db := newTestDB(t)
 	now := time.Now().UTC()

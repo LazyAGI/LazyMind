@@ -1,10 +1,14 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TFunction } from "i18next";
 import type { SubAgentTask } from "@/modules/chat/store/taskCenter";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import type { WorkflowSessionStep } from "@/modules/chat/store/workflowPanel";
 import TaskCenter from "./index";
+import type { OrdinaryTaskView } from "@/modules/chat/types/ordinaryTask";
+import { ordinary } from "./ordinaryTestFixtures";
+
+vi.mock("@/modules/knowledge/components/FileViewer", () => ({ default: () => <div>File viewer</div> }));
 
 vi.mock("react-i18next", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react-i18next")>()),
@@ -108,6 +112,7 @@ describe("TaskCenter display modes", () => {
       tasksByConversation: { "conversation-1": tasks },
       _loadingTasks: {},
       _taskLoadErrors: {},
+      runsByConversation: {},
     });
   });
 
@@ -117,47 +122,137 @@ describe("TaskCenter display modes", () => {
       tasksByConversation: {},
       _loadingTasks: {},
       _taskLoadErrors: {},
+      runsByConversation: {},
     });
   });
 
-  it("advances the plan highlight and percentage when task progress changes", () => {
+  it("shows the designed progress bar and estimated timeline for a completed plan", () => {
     const planned = {
-      ...task("planned", 1, "running"), agent_type: "research", progress_pct: 5,
+      ...task("planned", 1, "succeeded"), agent_type: "research", progress_pct: 100,
       plan_steps: ["Read sales data", "Compare quarters", "Write report"],
     };
     useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [planned] } });
     render(<TaskCenter sessionId="conversation-1" developerMode={false} />);
-    expect(screen.getByText("Read sales data").closest("li")).toHaveAttribute("aria-current", "step");
-    expect(screen.getByText("Compare quarters").closest("li")).toHaveClass("is-waiting");
-    expect(screen.getByRole("progressbar")).toHaveAttribute("value", "33");
-    expect(document.querySelectorAll(".ordinary-plan-active-dot")).toHaveLength(1);
-    act(() => {
-      useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{ ...planned, progress_pct: 50 }] } });
-    });
-    expect(screen.getByText("Read sales data").closest("li")).toHaveClass("is-complete");
-    expect(screen.getByText("Compare quarters").closest("li")).toHaveAttribute("aria-current", "step");
-    expect(screen.getByText("Write report").closest("li")).toHaveClass("is-waiting");
-    expect(screen.getByRole("progressbar")).toHaveAttribute("value", "67");
-    expect(screen.getByText("67%")).toBeInTheDocument();
-    act(() => {
-      useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{ ...planned, status: "succeeded", progress_pct: 100 }] } });
-    });
-    expect(document.querySelectorAll(".ordinary-thinking-item.is-complete")).toHaveLength(3);
-    expect(document.querySelector(".ordinary-plan-active-dot")).not.toBeInTheDocument();
-    expect(screen.getByRole("progressbar")).toHaveAttribute("value", "100");
+    expect(screen.queryByText("taskCenter.ordinaryNoProcessSteps")).not.toBeInTheDocument();
+    expect(screen.getByText("Read sales data")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "taskCenter.ordinaryPlan" })).toHaveAttribute("value", "100");
+    expect(screen.getByText("taskCenter.ordinaryPlanDescription")).toBeInTheDocument();
+    expect(document.querySelectorAll(".ordinary-plan-item.is-complete")).toHaveLength(3);
+    expect(document.querySelectorAll(".ordinary-process-status")).toHaveLength(0);
   });
 
-  it("stops the plan highlight at the failed position", () => {
-    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{
-      ...task("planned", 1, "failed"), agent_type: "research", progress_pct: 50,
-      plan_steps: ["Read sales data", "Compare quarters", "Write report"],
-    }] } });
-    render(<TaskCenter sessionId="conversation-1" developerMode={false} />);
-    expect(screen.getByText("Read sales data").closest("li")).toHaveClass("is-complete");
-    expect(screen.getByText("Compare quarters").closest("li")).toHaveClass("is-failed");
-    expect(screen.getByText("Write report").closest("li")).toHaveClass("is-waiting");
-    expect(document.querySelector(".ordinary-plan-active-dot")).not.toBeInTheDocument();
-    expect(screen.getByRole("progressbar")).toHaveAttribute("value", "67");
+  it("updates estimated plan progress from public snapshots and keeps failed tasks below completion", () => {
+    useTaskCenterStore.setState({ tasksByConversation: {} });
+    const initial = ordinary("progress-live", { agent_type: "research", conversation_id: "conversation-1",
+      status: "running", progress_pct: 25, plan_steps: ["Read", "Check", "Draft", "Publish"] });
+    useTaskCenterStore.getState().applyOrdinarySnapshot("conversation-1", initial);
+    render(<TaskCenter sessionId="conversation-1" />);
+    expect(screen.getByRole("progressbar")).toHaveAttribute("value", "25");
+    expect(screen.getByText("Check").closest("li")).toHaveAttribute("aria-current", "step");
+    act(() => useTaskCenterStore.getState().applyOrdinarySnapshot("conversation-1", { ...initial, revision: 2, progress_pct: 75 }));
+    expect(screen.getByRole("progressbar")).toHaveAttribute("value", "75");
+    expect(screen.getByText("Publish").closest("li")).toHaveAttribute("aria-current", "step");
+    act(() => useTaskCenterStore.getState().applyOrdinarySnapshot("conversation-1", { ...initial, revision: 3, status: "failed", progress_pct: 100 }));
+    expect(screen.getByRole("progressbar")).toHaveAttribute("value", "99");
+    expect(screen.getByText("Publish").closest("li")).toHaveClass("is-failed");
+    expect(screen.queryByText("100%")).not.toBeInTheDocument();
+  });
+
+  it("shows the current public plan after live updates and drops it on a new execution", () => {
+    useTaskCenterStore.setState({ tasksByConversation: {} });
+    const initial = ordinary("plan-live", { agent_type: "research", conversation_id: "conversation-1", status: "running" });
+    useTaskCenterStore.getState().applyOrdinarySnapshot("conversation-1", initial);
+    render(<TaskCenter sessionId="conversation-1" />);
+    expect(screen.getByText("taskCenter.ordinaryNoProcessSteps")).toBeInTheDocument();
+    act(() => useTaskCenterStore.getState().applyOrdinarySnapshot("conversation-1", {
+      ...initial, revision: 2, plan_steps: ["Read requirements", "Check constraints", "Write brief"],
+    }));
+    expect(screen.getByText("Read requirements")).toBeInTheDocument();
+    expect(screen.queryByText("taskCenter.ordinaryNoProcessSteps")).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".ordinary-thinking-item.is-complete")).toHaveLength(0);
+    expect(screen.getByRole("progressbar")).not.toHaveAttribute("value");
+    act(() => useTaskCenterStore.getState().applyOrdinarySnapshot("conversation-1", {
+      ...initial, revision: 3, display_key: "task:plan-live:next", execution_id: "next",
+    }));
+    expect(screen.queryByText("Read requirements")).not.toBeInTheDocument();
+    expect(screen.getByText("taskCenter.ordinaryNoProcessSteps")).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
+  it("uses individual public step states regardless of the task percentage", () => {
+    const process: OrdinaryTaskView = ordinary("real", {
+      title: "Prepare report",
+      process_state: "available",
+      process_steps: [
+        { step_id: "check", revision: 2, order: 2, title: "Check citations", status: "failed", started_at: null, finished_at: null, elapsed_ms: null },
+        { step_id: "read", revision: 1, order: 1, title: "Read documents", status: "succeeded", started_at: null, finished_at: null, elapsed_ms: null },
+      ],
+    });
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{ ...task("real", 1, "failed"), progress_pct: 99, ordinary: process }] } });
+    render(<TaskCenter sessionId="conversation-1" />);
+    expect(screen.getByText("Read documents").closest("li")).toHaveClass("is-complete");
+    expect(screen.getByText("Check citations").closest("li")).toHaveClass("is-failed");
+    expect([...document.querySelectorAll(".ordinary-thinking-item strong")].map(el => el.textContent)).toEqual(["Read documents", "Check citations"]);
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
+  it("retains the selected parallel task when another task receives updates", () => {
+    const a = { ...task("a", 1, "running"), ordinary: ordinary("a", { title: "Task A", status: "running", parallel_group_id: "p" }) };
+    const b = { ...task("b", 2, "succeeded"), ordinary: ordinary("b", { title: "Task B", parallel_group_id: "p" }) };
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [a, b] } });
+    render(<TaskCenter sessionId="conversation-1" />);
+    const tabB = screen.getByRole("tab", { name: /Task B/ });
+    fireEvent.click(tabB);
+    act(() => useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{ ...a, progress_pct: 50 }, b] } }));
+    expect(tabB).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("preserves cancellation and does not turn it into a completed step", () => {
+    const canceled = ordinary("cancel", { status: "canceled", process_state: "available", process_steps: [{ step_id: "s", revision: 1, order: 1, title: "Read source", status: "canceled", started_at: null, finished_at: null, elapsed_ms: null }] });
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{ ...task("cancel", 1, "canceled"), ordinary: canceled }] } });
+    render(<TaskCenter sessionId="conversation-1" />);
+    expect(screen.getByText("Read source").closest("li")).toHaveClass("is-canceled");
+    expect(screen.getAllByText("taskCenter.statusCanceled").length).toBeGreaterThan(0);
+  });
+
+  it("keeps final outputs separate and includes only explicitly bound artifact references", () => {
+    const artifact = (id: string) => ({ artifact_id: id, revision: 1, producer_display_key: "task:outputs:1", name: id, content_type: "text/plain", size_bytes: 4, state: "ready" as const, preview_kind: null, capabilities: { preview: false, open: false, download: false }, created_at: iso(0) });
+    const view = ordinary("outputs", { stage_artifacts: [artifact("draft"), artifact("final")] });
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{ ...task("outputs", 1, "succeeded"), ordinary: view }] }, runsByConversation: { "conversation-1": [{ run_id: "run-1", revision: 1, final_output_refs: ["final", "separate"], final_artifacts: [artifact("separate")] }, { run_id: "old-run", revision: 1, final_output_refs: ["old-final"], final_artifacts: [artifact("old-final")] }] } });
+    render(<TaskCenter sessionId="conversation-1" />);
+    expect(screen.getAllByText("draft")).toHaveLength(1);
+    expect(screen.getAllByText("final")).toHaveLength(2);
+    expect(screen.getByText("separate")).toBeInTheDocument();
+    expect(screen.queryByText("old-final")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: /ordinaryFinalArtifacts/ })).toBeInTheDocument();
+  });
+
+  it("previews stage artifacts without reload controls and reports metadata pagination failures", async () => {
+    const originalReload = useTaskCenterStore.getState().loadOrdinaryTask;
+    const reload = vi.fn().mockRejectedValue(new Error("Metadata unavailable"));
+    const view = ordinary("preview", { stage_artifacts: [{
+      artifact_id: "report", revision: 1, producer_display_key: "task:preview:1", name: "report.md",
+      content_type: "text/markdown", size_bytes: null, state: "ready", preview_kind: "text",
+      capabilities: { preview: true, open: false, download: false }, inline_content: "Existing public report", created_at: iso(0),
+    }] });
+    view.pages.sources.next_cursor = "next-sources";
+    useTaskCenterStore.setState({ loadOrdinaryTask: reload, tasksByConversation: {
+      "conversation-1": [{ ...task("preview", 1, "succeeded"), ordinary: view }],
+    } });
+    try {
+      render(<TaskCenter sessionId="conversation-1" />);
+      fireEvent.click(screen.getByRole("button", { name: "report.md" }));
+      const dialog = screen.getByRole("dialog");
+      expect(within(dialog).queryByRole("button", { name: "taskCenter.ordinaryReload" })).not.toBeInTheDocument();
+      expect(reload).not.toHaveBeenCalled();
+      expect(within(dialog).getByText("Existing public report")).toBeInTheDocument();
+      fireEvent.keyDown(dialog, { key: "Escape" });
+      fireEvent.click(screen.getByRole("button", { name: "taskCenter.ordinaryLoadMore" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("taskCenter.ordinaryLoadError");
+      expect(reload).toHaveBeenLastCalledWith("conversation-1", "preview", "sources", "next-sources");
+    } finally {
+      act(() => useTaskCenterStore.setState({ loadOrdinaryTask: originalReload }));
+    }
   });
 
   it("shows a logical step axis without raw traces for ordinary users", () => {
@@ -179,25 +274,14 @@ describe("TaskCenter display modes", () => {
       name: "taskCenter.ordinaryThinking",
     })).toBeInTheDocument();
     expect(document.querySelector(".ordinary-summary-list")).not.toBeInTheDocument();
-    expect(screen.getByText("Elapsed 25s")).toBeInTheDocument();
-    expect(screen.getByText("Subtasks 10s")).toBeInTheDocument();
+    expect(screen.queryByText("Elapsed 25s")).not.toBeInTheDocument();
+    expect(screen.queryByText("Subtasks 10s")).not.toBeInTheDocument();
   });
 
-  it("shows persisted workflow task names and reveals the full name on hover", async () => {
-    render(
-      <TaskCenter
-        sessionId="conversation-1"
-        developerMode={false}
-        workflowSteps={workflowSteps}
-      />,
-    );
-
-    expect(screen.getByText("image-workflow:analyze")).toBeInTheDocument();
-    const taskName = screen.getByText("image-workflow:collect-3");
-    fireEvent.mouseEnter(taskName);
-
-    expect(await screen.findByRole("tooltip"))
-      .toHaveTextContent("image-workflow:collect-3");
+  it("does not expose internal workflow identifiers as public task names", () => {
+    render(<TaskCenter sessionId="conversation-1" developerMode={false} workflowSteps={workflowSteps} />);
+    expect(screen.queryByText("image-workflow:analyze")).not.toBeInTheDocument();
+    expect(screen.getByText("Subtask 1")).toBeInTheDocument();
   });
 
   it("keeps every attempt and the full execution trace in developer mode", () => {
@@ -237,7 +321,7 @@ describe("TaskCenter display modes", () => {
     expect(screen.queryByText(/expanded workflow prompt/)).not.toBeInTheDocument();
   });
 
-  it("renders tasks with overlapping execution intervals as accessible tabs", () => {
+  it("renders explicitly grouped tasks as accessible tabs", () => {
     useTaskCenterStore.setState({
       tasksByConversation: {
         "conversation-1": [
@@ -245,6 +329,7 @@ describe("TaskCenter display modes", () => {
             ...task("research-a", 1, "succeeded"),
             agent_type: "research",
             title: "Research A",
+            ordinary: ordinary("research-a", { title: "Research A", parallel_group_id: "research" }),
             created_at: iso(0),
             updated_at: iso(20),
           },
@@ -252,6 +337,7 @@ describe("TaskCenter display modes", () => {
             ...task("research-b", 2, "succeeded"),
             agent_type: "research",
             title: "Research B",
+            ordinary: ordinary("research-b", { title: "Research B", parallel_group_id: "research" }),
             created_at: iso(2),
             updated_at: iso(18),
           },
@@ -347,7 +433,7 @@ describe("TaskCenter display modes", () => {
     );
 
     expect(document.querySelectorAll(".ordinary-task-card")).toHaveLength(1);
-    expect(document.querySelector(".ordinary-task-trigger")).toBeDisabled();
+    expect(document.querySelector(".ordinary-task-trigger")).not.toBeDisabled();
     expect(screen.queryByText("raw trace hosted-task")).not.toBeInTheDocument();
   });
 
@@ -365,7 +451,7 @@ describe("TaskCenter display modes", () => {
     render(<TaskCenter sessionId="conversation-1" developerMode={false} />);
 
     expect(screen.queryByText(/api_key|KBToolkit|secret/)).not.toBeInTheDocument();
-    expect(screen.getByText("taskCenter.ordinaryThinkingProcessingComplete"))
+    expect(screen.getByText("taskCenter.ordinaryNoProcessSteps"))
       .toBeInTheDocument();
   });
 
@@ -384,9 +470,8 @@ describe("TaskCenter display modes", () => {
       />,
     );
 
-    expect(document.querySelector(".ordinary-thinking-item:nth-child(2)"))
-      .toHaveClass("is-complete");
-    expect(screen.getByText("taskCenter.ordinaryThinkingProcessingComplete"))
+    expect(document.querySelector(".ordinary-task-card")).toHaveClass("is-complete");
+    expect(screen.getByText("taskCenter.ordinaryNoProcessSteps"))
       .toBeInTheDocument();
     expect(screen.queryByText("taskCenter.ordinarySummaryFailed"))
       .not.toBeInTheDocument();
@@ -418,8 +503,7 @@ describe("TaskCenter display modes", () => {
     expect(panel).toHaveAttribute("aria-labelledby", trigger?.id);
     expect(panel?.querySelectorAll("button")).toHaveLength(0);
     expect(panel?.querySelector(".ant-progress")).not.toBeInTheDocument();
-    expect(panel?.querySelector(".ordinary-thinking-item.is-running"))
-      .toHaveAttribute("aria-current", "step");
+    expect(panel?.querySelector(".ordinary-thinking-item.is-running")).not.toBeInTheDocument();
     expect(screen.getByText("taskCenter.ordinaryThinking")).toBeInTheDocument();
     expect(screen.getByText("taskCenter.ordinarySources")).toBeInTheDocument();
   });
@@ -438,7 +522,7 @@ describe("TaskCenter display modes", () => {
     expect(() => render(
       <TaskCenter sessionId="conversation-1" developerMode={false} />,
     )).not.toThrow();
-    expect(screen.getByText("taskCenter.ordinaryThinkingProcessingComplete"))
+    expect(screen.getByText("taskCenter.ordinaryNoProcessSteps"))
       .toBeInTheDocument();
   });
 
@@ -519,6 +603,7 @@ describe("TaskCenter display modes", () => {
       tasksByConversation: {},
       _loadingTasks: { "conversation-1": true },
       _taskLoadErrors: {},
+      runsByConversation: {},
     });
     const { rerender } = render(
       <TaskCenter sessionId="conversation-1" developerMode={false} />,

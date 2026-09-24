@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useId } from 'react';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { Alert, Breadcrumb, Button, Modal, Input, Spin, Select, Space, Tag, message, Progress } from 'antd';
-import { SyncOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { SyncOutlined, CheckCircleOutlined, ExclamationCircleOutlined, DownOutlined, CloseOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { localizeErrorCode } from '@/components/request';
 import { getWorkflowDraft, listWorkflowDrafts, updateWorkflowDraftContent, aiGenerateWorkflowDraft, cancelWorkflowDraftGeneration, repairWorkflowDraft, publishWorkflowDraft, listWorkflowVersions, getWorkflowVersion, editWorkflowVersion, getWorkflowGenerationAnalysis, confirmWorkflowWorkflow, previewWorkflowRepair, getWorkflowRepairRun, validateWorkflowDraft } from '../../workflowDraftApi';
@@ -49,15 +49,15 @@ type GenerationFailurePayload = {
   suggestions?: string[];
 };
 
-function generationPhaseLabel(raw: string): string {
-  if (/phase-?1 analysis/i.test(raw)) return '技能分析阶段';
-  if (/phase0 design_brief/i.test(raw)) return '需求理解阶段';
-  if (/phase1 skeleton|phase1 skeleton invalid/i.test(raw)) return '工作流结构阶段';
-  if (/phase2 state_machine|phase2 workflow|state_machine validation/i.test(raw)) return '执行流程阶段';
-  if (/phase3 scenario_scripts/i.test(raw)) return '说明与调试材料阶段';
-  if (/generation validation failed/i.test(raw)) return '最终校验阶段';
-  if (/resume point invalid/i.test(raw)) return '断点续跑检查';
-  return '生成过程';
+function generationPhase(raw: string): string {
+  if (/phase-?1 analysis/i.test(raw)) return 'analysis';
+  if (/phase0 design_brief/i.test(raw)) return 'design_brief';
+  if (/phase1 skeleton|phase1 skeleton invalid/i.test(raw)) return 'skeleton';
+  if (/phase2 state_machine|phase2 workflow|state_machine validation/i.test(raw)) return 'state_machine';
+  if (/phase3 scenario_scripts/i.test(raw)) return 'scenario_scripts';
+  if (/generation validation failed/i.test(raw)) return 'validation';
+  if (/resume point invalid/i.test(raw)) return 'resume';
+  return 'unknown';
 }
 
 function stripGenerationPrefix(raw: string): string {
@@ -104,6 +104,10 @@ function parseGenerationDiagnostics(raw: string): { summary: string; diagnostics
   return { summary: compact, diagnostics: [] };
 }
 
+function splitGenerationLines(raw: string): string[] {
+  return raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+}
+
 function parseGenerationFailurePayload(raw: string): GenerationFailurePayload | null {
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -123,27 +127,9 @@ function parseGenerationFailurePayload(raw: string): GenerationFailurePayload | 
   }
 }
 
-function generationFailurePhaseLabel(phase: string): string {
-  switch (phase) {
-    case 'analysis':
-      return '技能分析阶段';
-    case 'design_brief':
-      return '设计草稿阶段';
-    case 'skeleton':
-      return '工作流骨架阶段';
-    case 'state_machine':
-      return '执行流程阶段';
-    case 'scenario_scripts':
-      return '说明与调试材料阶段';
-    case 'validation':
-      return '最终校验阶段';
-    case 'resume':
-      return '断点续跑检查';
-    case 'enqueue':
-      return '任务排队阶段';
-    default:
-      return '生成过程';
-  }
+function generationFailurePhaseKey(phase: string): string {
+  const known = ['analysis', 'design_brief', 'skeleton', 'state_machine', 'scenario_scripts', 'validation', 'resume', 'enqueue'];
+  return `selfEvolutionRun.workflowDetailFailurePhases.${known.includes(phase) ? phase : 'unknown'}`;
 }
 
 function describeRepairFile(path: string): string {
@@ -259,6 +245,12 @@ export default function WorkflowDetailPage() {
   // Workflow editor opens as a Drawer over the content area; no need to collapse the sidebar.
 
   const [draft, setDraft] = useState<WorkflowDraftRecord | null>(null);
+  const failureDetailsId = useId();
+  const [failureDetailsExpanded, setFailureDetailsExpanded] = useState(false);
+  useEffect(() => { setFailureDetailsExpanded(false); }, [workflowId, draft?.generate_error]);
+  const warningDetailsId = useId();
+  const [warningDetailsExpanded, setWarningDetailsExpanded] = useState(false);
+  useEffect(() => { setWarningDetailsExpanded(false); }, [workflowId, draft?.generate_warning]);
   const draftRef = useRef<WorkflowDraftRecord | null>(null);
   // Keep ref in sync for use in handleSave (avoids stale closure over version).
   useEffect(() => { draftRef.current = draft; }, [draft]);
@@ -331,7 +323,7 @@ export default function WorkflowDetailPage() {
     for (let i = 0; i < content.length; i++) h = ((h << 5) + h) ^ content.charCodeAt(i);
     return (h >>> 0).toString(36);
   }, []);
-  const renderGenerationErrorDetails = useCallback((raw: string) => {
+  const renderGenerationErrorDetails = useCallback((raw: string, showPhase = true) => {
     const trimmed = raw.trim();
     if (!trimmed) return localizeErrorCode('2000509');
     const failurePayload = parseGenerationFailurePayload(trimmed);
@@ -340,10 +332,10 @@ export default function WorkflowDetailPage() {
       const suggestionLines = failurePayload.suggestions || [];
       return (
         <div className="workflow-generation-issue-details">
-          <div className="workflow-generation-issue-phase">
-            失败位置：{generationFailurePhaseLabel(failurePayload.phase || '')}
+          {showPhase && <div className="workflow-generation-issue-phase">
+            失败位置：{t(generationFailurePhaseKey(failurePayload.phase || ''))}
             {failurePayload.recoverable !== undefined ? `（${failurePayload.recoverable ? '可重试/续跑' : '需先处理后重试'}）` : ''}
-          </div>
+          </div>}
           {failurePayload.code && (
             <div className="workflow-generation-issue-summary">{failurePayload.code}</div>
           )}
@@ -361,7 +353,7 @@ export default function WorkflowDetailPage() {
     const fallback = localizeErrorCode('2000509');
     return (
       <div className="workflow-generation-issue-details">
-        <div className="workflow-generation-issue-phase">失败位置：{generationPhaseLabel(trimmed)}</div>
+        {showPhase && <div className="workflow-generation-issue-phase">失败位置：{t(generationFailurePhaseKey(generationPhase(trimmed)))}</div>}
         {diagnosticItems.length === 0 && <div className="workflow-generation-issue-summary">{fallback}</div>}
         {diagnosticItems.length > 0 && (
           <ul className="workflow-generation-issue-list">
@@ -385,7 +377,7 @@ export default function WorkflowDetailPage() {
   const renderGenerationWarningDetails = useCallback((raw: string, repairDetails: string[] = []) => {
     const lines = repairDetails.length > 0 ? repairDetails : parseGenerationDiagnostics(raw).diagnostics
       .map((item) => getWorkflowDiagnosticMessage(t, item));
-    if (lines.length === 0) return localizeErrorCode('2000509');
+    if (lines.length === 0) return t('selfEvolutionRun.workflowDetailWarningLogHint');
     return (
       <div className="workflow-generation-issue-details">
         <div className="workflow-generation-issue-phase">
@@ -400,7 +392,9 @@ export default function WorkflowDetailPage() {
       </div>
     );
   }, [t]);
-  const generationErrorDetails = draft?.generate_error ? renderGenerationErrorDetails(draft.generate_error) : undefined;
+  const failurePayload = draft?.generate_error ? parseGenerationFailurePayload(draft.generate_error) : null;
+  const failurePhase = failurePayload?.phase || generationPhase(draft?.generate_error || '');
+  const generationErrorDetails = draft?.generate_error ? renderGenerationErrorDetails(draft.generate_error, draft.generate_status !== 'failed') : undefined;
   const generationWarningDetails = draft?.generate_warning
     ? renderGenerationWarningDetails(draft.generate_warning, repairFailureDetails) : undefined;
   const repairFailed = draft?.generate_warning?.startsWith('[修复失败]');
@@ -721,6 +715,21 @@ export default function WorkflowDetailPage() {
     [workflowId, t],
   );
 
+  const handleRename = useCallback(async () => {
+    const name = nameValue.trim();
+    setEditingName(false);
+    if (!workflowId || !name || name === draftRef.current?.name) return;
+    const save = saveQueueRef.current.catch(() => undefined).then(async () => {
+      if (saveConflictRef.current) throw asSaveConflictError();
+      const updated = await updateWorkflowDraftContent(workflowId, { name, version: draftRef.current?.version ?? 0 });
+      draftRef.current = updated;
+      setDraft(updated);
+      setNameValue(updated.name);
+    });
+    saveQueueRef.current = save;
+    try { await save; } catch { /* The shared request interceptor reports save failures. */ }
+  }, [workflowId, nameValue]);
+
   const handleValidate = useCallback(async (): Promise<ValidationError[]> => {
     if (!workflowId) return [];
     const result = await validateWorkflowDraft(workflowId);
@@ -941,11 +950,6 @@ export default function WorkflowDetailPage() {
   if (!workflowYaml && draft.name) {
     workflowYaml = `name: "${draft.name.replace(/"/g, '\\"')}"\n`;
   }
-  // Extract workflow id from yaml for breadcrumb; fall back to draft.name.
-  const breadcrumbLabel = (() => {
-    const m = workflowYaml?.match(/^id:\s*["']?([^"'\n]+)["']?\s*$/m);
-    return m?.[1]?.trim() || draft.name;
-  })();
 
   return (
     <div className="workflow-editor-overlay">
@@ -992,20 +996,33 @@ export default function WorkflowDetailPage() {
       )}
 
       {isFailed && !dismissedBanners.has('failed') && !repairModalOpen && (
-        <Alert
-          className="workflow-detail-banner"
-          type="error"
-          showIcon
-          closable
-          onClose={() => dismissBanner('failed')}
-          message={t('selfEvolutionRun.workflowDetailFailedBanner')}
-          description={generationErrorDetails}
-          action={
-            <Button size="small" loading={isRegenerating} disabled={isRepairing} onClick={openRegenerateModal}>
-              {t('selfEvolutionRun.workflowDetailRegenerate')}
-            </Button>
-          }
-        />
+        <section className="workflow-generation-failure" aria-label={t('selfEvolutionRun.workflowDetailFailureTitle')}>
+          <div className="workflow-generation-failure-header">
+            <div className="workflow-generation-failure-main" role="alert">
+              <span className="workflow-generation-failure-icon" aria-hidden="true"><ExclamationCircleOutlined /></span>
+              <div className="workflow-generation-failure-copy">
+                <div className="workflow-generation-failure-heading">
+                  <strong>{t('selfEvolutionRun.workflowDetailFailureTitle')}</strong>
+                  <span className="workflow-generation-failure-phase">{t(generationFailurePhaseKey(failurePhase))}</span>
+                </div>
+                <p>{t(failurePayload?.recoverable === false ? 'selfEvolutionRun.workflowDetailFailureNeedsAttention' : 'selfEvolutionRun.workflowDetailFailureHint')}</p>
+              </div>
+            </div>
+            <div className="workflow-generation-failure-actions">
+              {generationErrorDetails && <Button type="text" aria-expanded={failureDetailsExpanded} aria-controls={failureDetailsId} onClick={() => setFailureDetailsExpanded((value) => !value)}>
+                {t(failureDetailsExpanded ? 'selfEvolutionRun.workflowDetailHideFailureDetails' : 'selfEvolutionRun.workflowDetailShowFailureDetails')}
+                <DownOutlined aria-hidden="true" rotate={failureDetailsExpanded ? 180 : 0} />
+              </Button>}
+              <Button type="primary" icon={<ReloadOutlined aria-hidden="true" />} loading={isRegenerating} disabled={isRepairing} onClick={openRegenerateModal}>
+                {t('selfEvolutionRun.workflowDetailRegenerate')}
+              </Button>
+              <Button type="text" className="workflow-generation-failure-dismiss" icon={<CloseOutlined />} aria-label={t('selfEvolutionRun.workflowDetailDismissFailure')} title={t('selfEvolutionRun.workflowDetailDismissFailure')} onClick={() => dismissBanner('failed')} />
+            </div>
+          </div>
+          {generationErrorDetails && <div id={failureDetailsId} className="workflow-generation-failure-details" role="region" aria-label={t('selfEvolutionRun.workflowDetailShowFailureDetails')} tabIndex={0} hidden={!failureDetailsExpanded}>
+            {generationErrorDetails}
+          </div>}
+        </section>
       )}
 
       {!isFailed && draft.generate_status === 'done' && draft.generate_error && !dismissedBanners.has('generate_error') && !repairModalOpen && (
@@ -1021,15 +1038,32 @@ export default function WorkflowDetailPage() {
       )}
 
       {showGenerationWarning && (
-        <Alert
-          className="workflow-detail-banner"
-          type={repairFailed ? 'error' : 'warning'}
-          showIcon
-          closable
-          onClose={() => dismissBanner(generationWarningKey)}
-          message={repairFailed ? t('selfEvolutionRun.workflowDetailRepairFailedBanner') : t('selfEvolutionRun.workflowDetailPartialContentBanner')}
-          description={generationWarningDetails}
-        />
+        <section className={`workflow-generation-notice${repairFailed ? ' workflow-generation-notice--error' : ''}`} aria-label={t(repairFailed ? 'selfEvolutionRun.workflowDetailRepairFailedBanner' : 'selfEvolutionRun.workflowDetailCompletedTitle')}>
+          <div className="workflow-generation-notice-header">
+            <div className="workflow-generation-notice-main" role={repairFailed ? 'alert' : 'status'}>
+              <span className="workflow-generation-notice-icon" aria-hidden="true"><ExclamationCircleOutlined /></span>
+              <div className="workflow-generation-notice-copy">
+                <div className="workflow-generation-notice-heading">
+                  <strong>{t(repairFailed ? 'selfEvolutionRun.workflowDetailRepairFailedBanner' : 'selfEvolutionRun.workflowDetailCompletedTitle')}</strong>
+                  {!repairFailed && <span className="workflow-generation-notice-label">{t('selfEvolutionRun.workflowDetailOptionalSuggestions')}</span>}
+                </div>
+                <p>{t(repairFailed ? 'selfEvolutionRun.workflowDetailWarningLogHint' : 'selfEvolutionRun.workflowDetailSuggestionsHint')}</p>
+              </div>
+            </div>
+            <div className="workflow-generation-notice-actions">
+              <Button type="text" aria-expanded={warningDetailsExpanded} aria-controls={warningDetailsId} onClick={() => setWarningDetailsExpanded((value) => !value)}>
+                {t(repairFailed
+                  ? (warningDetailsExpanded ? 'selfEvolutionRun.workflowDetailHideFailureDetails' : 'selfEvolutionRun.workflowDetailShowFailureDetails')
+                  : (warningDetailsExpanded ? 'selfEvolutionRun.workflowDetailHideSuggestions' : 'selfEvolutionRun.workflowDetailShowSuggestions'))}
+                <DownOutlined aria-hidden="true" rotate={warningDetailsExpanded ? 180 : 0} />
+              </Button>
+              <Button type="text" className="workflow-generation-notice-dismiss" icon={<CloseOutlined />} aria-label={t('selfEvolutionRun.workflowDetailDismissNotice')} title={t('selfEvolutionRun.workflowDetailDismissNotice')} onClick={() => dismissBanner(generationWarningKey)} />
+            </div>
+          </div>
+          <div id={warningDetailsId} className="workflow-generation-notice-details" role="region" aria-label={t(repairFailed ? 'selfEvolutionRun.workflowDetailShowFailureDetails' : 'selfEvolutionRun.workflowDetailShowSuggestions')} tabIndex={0} hidden={!warningDetailsExpanded}>
+            {generationWarningDetails}
+          </div>
+        </section>
       )}
 
       {/* AI generation progress Modal — users may close it to keep work running in the background or stop the job. */}
@@ -1104,20 +1138,6 @@ export default function WorkflowDetailPage() {
 
       {/* Editor area — always rendered so it's ready when generation completes */}
       <div className="workflow-detail-editor">
-          {editorReady && isPhase3Running && (
-            <div className="workflow-detail-phase-steps workflow-detail-phase-steps--inline">
-              <div className="phase-step phase-step--done">
-                <CheckCircleOutlined /> {t('selfEvolutionRun.workflowDetailPhaseLabelSkeleton')}
-              </div>
-              <div className="phase-step phase-step--done">
-                <CheckCircleOutlined /> {t('selfEvolutionRun.workflowDetailPhaseLabelStatemachine')}
-              </div>
-              <div className="phase-step active">
-                <SyncOutlined spin />
-                {' '}{t('selfEvolutionRun.workflowDetailPhaseLabelDocs')}
-              </div>
-            </div>
-          )}
           <StateGraphEditor
             key={`${draft.generate_status}:${selectedRevision}`}
             initialStateYaml={stateYaml}
@@ -1125,7 +1145,9 @@ export default function WorkflowDetailPage() {
             initialScenarioContent={(viewingHistory ? versionContent.scenario_content : draft.scenario_content) || undefined}
             initialScriptsContent={(viewingHistory ? versionContent.scripts_content : draft.scripts_content) || undefined}
             onRepair={handleOpenRepair}
-            readonly={viewingHistory || isRepairing || repairModalOpen}
+            readonly={viewingHistory || isStillGenerating || repairModalOpen}
+            readonlyReason={isStillGenerating ? t('selfEvolutionRun.workflowDetailGenerationReadonly') : undefined}
+            generationLog={[draft.generate_error, draft.generate_warning, ...repairFailureDetails].filter(Boolean).join('\n\n')}
             defaultShowArtifacts={showArtifactsRef.current}
             onArtifactsChange={(show) => { showArtifactsRef.current = show; }}
             designBriefContent={draft.design_brief_content || undefined}
@@ -1146,17 +1168,18 @@ export default function WorkflowDetailPage() {
                         value={nameValue}
                         style={{ width: 200 }}
                         onChange={(e) => setNameValue(e.target.value)}
-                        onBlur={() => setEditingName(false)}
-                        onPressEnter={() => setEditingName(false)}
+                        onBlur={() => void handleRename()}
+                        onPressEnter={() => void handleRename()}
                       />
                     ) : (
                       <button
                         type="button"
                         className="workflow-detail-name"
-                        onClick={() => setEditingName(true)}
+                        disabled={viewingHistory || isStillGenerating || repairModalOpen}
+                        onClick={() => { setNameValue(draft.name); setEditingName(true); }}
                         title={t('selfEvolutionRun.workflowDetailEditNameTitle')}
                       >
-                        {breadcrumbLabel}
+                        {draft.name}
                       </button>
                     ),
                   },
