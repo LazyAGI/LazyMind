@@ -35,10 +35,11 @@ var (
 )
 
 type FeishuCLIRunner struct {
-	binaryPath     string
-	expectedSHA256 string
-	outputLimit    int64
-	commandTimeout time.Duration
+	binaryPath       string
+	expectedSHA256   string
+	outputLimit      int64
+	commandTimeout   time.Duration
+	credentialHelper *FeishuCLIRunner
 }
 
 type FeishuCLIJSONResult struct {
@@ -451,8 +452,13 @@ func (runner *FeishuCLIRunner) environment(profileDir string) []string {
 		if index := strings.IndexByte(item, '='); index >= 0 {
 			key = item[:index]
 		}
-		switch key {
+		switch strings.ToUpper(key) {
 		case "HOME", "LARKSUITE_CLI_CONFIG_DIR", "LARKSUITE_CLI_DATA_DIR", "LARKSUITE_CLI_NO_UPDATE_NOTIFIER", "LARKSUITE_CLI_NO_SKILLS_NOTIFIER":
+			continue
+		case "LARKSUITE_CLI_APP_ID", "LARKSUITE_CLI_APP_SECRET", "LARKSUITE_CLI_USER_ACCESS_TOKEN", "LARKSUITE_CLI_TENANT_ACCESS_TOKEN",
+			"LARKSUITE_CLI_TENANT_ACCESS_TOKEN_SOURCE", "LARKSUITE_CLI_PROFILE", "LARKSUITE_CLI_DEFAULT_AS", "LARKSUITE_CLI_BRAND",
+			"LARKSUITE_CLI_STRICT_MODE", "LARKSUITE_CLI_AUTH_PROXY", "LARKSUITE_CLI_PROXY_KEY":
+			// Native profile operations must not select an inherited account.
 			continue
 		}
 		environment = append(environment, item)
