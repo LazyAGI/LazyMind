@@ -211,6 +211,8 @@ let ownerReleaseRetries = 0;
 let isQuitting = false;
 let allowWindowClose = false;
 let windowHiddenByUser = false;
+let backgroundTransitionRevision = 0;
+let schedulePresenceWrites = Promise.resolve();
 let startupLogEntries = [];
 let startupLogWriteFailed = false;
 let lastStartupError = null;
@@ -1340,11 +1342,38 @@ function clearTemporaryCredentials(reason) {
   });
 }
 
-function enterBackgroundMode(reason, { discoverable }) {
+function updateSchedulePresence(active) {
+  if (isExternalRuntimeDev || isInstallerWarmup) return Promise.resolve();
+  schedulePresenceWrites = schedulePresenceWrites.catch(() => {}).then(async () => {
+    if (active && (windowHiddenByUser || !mainWindow?.isVisible())) return;
+    const corePort = Number(currentStatus?.config?.localProxy?.CoreHostPort || 0);
+    if (!Number.isInteger(corePort) || corePort <= 0 || corePort > 65535) return;
+    const response = await fetch(`http://127.0.0.1:${corePort}/internal/desktop/schedule-presence`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-LazyMind-Internal-Token": internalServiceToken,
+      },
+      body: JSON.stringify({ active }),
+      redirect: "error",
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!response.ok) throw new Error(`schedule presence update failed (${response.status})`);
+  });
+  return schedulePresenceWrites.catch((error) => {
+    appendStartupLog("desktop", `schedule presence unavailable: ${serializeError(error)}`);
+  });
+}
+
+async function enterBackgroundMode(reason, { discoverable }) {
   if (isInstallerWarmup || isQuitting) {
     return;
   }
   windowHiddenByUser = true;
+  const revision = ++backgroundTransitionRevision;
+  desktopNotifications.suspendSession();
+  await updateSchedulePresence(false);
+  if (revision !== backgroundTransitionRevision || !windowHiddenByUser) return;
   void clearTemporaryCredentials(reason);
   finishStartupMetrics("cancelled", "frontend-closed-to-background");
   rendererReadyWait?.cancel();
@@ -1957,7 +1986,7 @@ function ensureWindowsTray() {
       {
         label: "Exit",
         click: () => {
-          beginFastQuit("tray exit");
+          void enterBackgroundMode("tray exit", { discoverable: false });
         },
       },
     ]));
@@ -1976,7 +2005,7 @@ function attachManagedClose(window) {
       return;
     }
     event.preventDefault();
-    beginFastQuit("window close");
+    void enterBackgroundMode("window close", { discoverable: true });
   });
 }
 
@@ -1991,7 +2020,9 @@ function activeWindow() {
 }
 
 function showActiveWindow() {
+  const wasHidden = windowHiddenByUser;
   windowHiddenByUser = false;
+  backgroundTransitionRevision += 1;
   if (isMac) {
     app.show();
     if (app.dock) {
@@ -2007,6 +2038,16 @@ function showActiveWindow() {
       window.restore();
     }
     window.show();
+    if (window === mainWindow) void updateSchedulePresence(true);
+    if (wasHidden && window === mainWindow) {
+      void runConnectorJSON(["internal", "session", "snapshot"], 3000)
+        .then((saved) => {
+          if (!windowHiddenByUser && !isQuitting) {
+            restoreDesktopNotificationSession(saved, notificationSession, desktopNotifications);
+          }
+        })
+        .catch(() => {});
+    }
     window.focus();
     if (window === mainWindow) {
       startupMetricsRecorder.mark("mainWindowVisible");
@@ -2168,7 +2209,9 @@ async function createWindow() {
   }
   try {
     const saved = await runConnectorJSON(["internal", "session", "snapshot"], 3000);
-    if (saved?.ok) notificationSession.hydrate(saved.session);
+    if (!isQuitting && !windowHiddenByUser) {
+      restoreDesktopNotificationSession(saved, notificationSession, desktopNotifications);
+    }
   } catch { /* Older/unavailable connector: keep the normal login path. Never log credentials. */ }
   if (isQuitting || windowHiddenByUser) return;
   const nextStartupWindow = new BrowserWindow(browserWindowOptions(true));
@@ -2231,6 +2274,7 @@ async function createWindow() {
     nextStartupWindow.removeAllListeners("close");
     nextStartupWindow.hide();
     readyRendererAttempt.window.show();
+    void updateSchedulePresence(true);
     startupMetricsRecorder.mark("mainWindowVisible");
     readyRendererAttempt.window.focus();
     appendStartupLog("desktop", "frontend window ready");
@@ -3000,6 +3044,11 @@ if (!hasSingleInstanceLock) {
       },
     });
     startupMetricsRecorder.mark("electronReady");
+    setInterval(() => {
+      if (!windowHiddenByUser && mainWindow?.isVisible()) {
+        void updateSchedulePresence(true);
+      }
+    }, 5000).unref();
     try {
       await clearFrontendCaches(session.defaultSession, (message) => appendStartupLog("desktop", message));
     } catch (error) {
@@ -3049,7 +3098,11 @@ if (!hasSingleInstanceLock) {
     );
   });
   app.on("window-all-closed", () => {
-    if (!isQuitting) app.quit();
+    if (isExternalRuntimeDev) {
+      app.quit();
+    }
+    // Normal Desktop sessions stay resident without renderer processes.
+    // Installer warmup owns its explicit app.exit lifecycle.
   });
   app.on("before-quit", (event) => {
     if (isInstallerWarmup || isExternalRuntimeDev) {
@@ -3057,7 +3110,7 @@ if (!hasSingleInstanceLock) {
     }
     if (!isQuitting) {
       event.preventDefault();
-      beginFastQuit("app quit");
+      void enterBackgroundMode("app quit", { discoverable: false });
     }
   });
 }

@@ -149,7 +149,7 @@ export default {
   "off": "已关闭",
   "on": "已开启",
   "unavailable": "当前不可用",
-  "desktopHint": "桌面应用运行时可接收系统通知；关闭应用后，本机定时任务和通知投递会停止。",
+  "desktopHint": "关闭桌面窗口后，本机定时任务与通知暂停，其他后台服务继续运行。",
   "desktopUnsupported": "当前网页无法接收原生桌面通知，请在 LazyMind 桌面应用中使用。",
   "connectTitle": "终端连接",
   "connectHint": "连接飞书、企业微信或微信，在常用通讯终端接收任务进展与结果。",

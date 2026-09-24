@@ -31,9 +31,11 @@ test("existing login and logout IPC synchronize the bridge after checking the se
   assert.match(logout, /"internal", "session", "clear"/);
 });
 
-test("Desktop shutdown stops the native notification bridge", () => {
+test("closing the Desktop window suspends the native notification bridge", () => {
   const start = source.indexOf("function beginFastQuit(");
-  const end = source.indexOf("function clearTemporaryCredentials(", start);
+  const end = source.indexOf("function enterBackgroundMode(", start);
   assert.ok(start >= 0 && end > start);
   assert.match(source.slice(start, end), /\.stop\(\)/);
+  const backgroundEnd = source.indexOf("\nfunction ", end + 1);
+  assert.match(source.slice(end, backgroundEnd), /desktopNotifications\.suspendSession\(\)/);
 });

@@ -256,6 +256,7 @@ func registerCoreRoutes(r *mux.Router) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	}).Methods(http.MethodGet)
+	r.HandleFunc("/internal/desktop/schedule-presence", setDesktopSchedulePresence).Methods(http.MethodPost)
 	handleAPI(r, "GET", "/hello", []string{"user.read"}, func(w http.ResponseWriter, r *http.Request) {
 		common.ReplyJSON(w, map[string]string{"message": "Hello from Backend"})
 	})

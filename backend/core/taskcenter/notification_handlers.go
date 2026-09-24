@@ -19,6 +19,7 @@ import (
 	"gorm.io/gorm/clause"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/schedulepresence"
 	"lazymind/core/store"
 )
 
@@ -206,6 +207,10 @@ func ClaimNotification(w http.ResponseWriter, r *http.Request) {
 		replyNotificationError(w, r, notificationProblem(401, "UNAUTHORIZED"))
 		return
 	}
+	if !schedulepresence.Active() {
+		replyNotificationError(w, r, notificationProblem(503, "NOTIFICATION_PAUSED"))
+		return
+	}
 	var req struct {
 		OutboxID string `json:"outbox_id"`
 		Retry    bool   `json:"retry"`
@@ -219,6 +224,9 @@ func ClaimNotification(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := notificationTx(r.Context(), db, func(tx *gorm.DB) error {
+		if !schedulepresence.Active() {
+			return notificationProblem(503, "NOTIFICATION_PAUSED")
+		}
 		prefs, err := LoadNotificationPreferences(r.Context(), tx, owner)
 		if err != nil {
 			return err

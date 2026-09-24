@@ -15,6 +15,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/log"
+	"lazymind/core/schedulepresence"
 )
 
 func notificationGatewayURL() string {
@@ -126,6 +127,14 @@ func RunNotificationDelivery(ctx context.Context, db *gorm.DB) <-chan struct{} {
 			defer recoveryTicker.Stop()
 			cursor := ""
 			for ctx.Err() == nil {
+				if !schedulepresence.Active() {
+					select {
+					case <-ctx.Done():
+						return
+					case <-recoveryTicker.C:
+						continue
+					}
+				}
 				var err error
 				cursor, err = ReconcileScheduledNotifications(ctx, db, cursor, time.Now().UTC())
 				if err != nil && ctx.Err() == nil {
@@ -143,9 +152,10 @@ func RunNotificationDelivery(ctx context.Context, db *gorm.DB) <-chan struct{} {
 			if ctx.Err() != nil {
 				return
 			}
-
-			if err := DispatchNotifications(ctx, db); err != nil {
-				log.Logger.Warn().Msg("task_notification_dispatch_unavailable")
+			if schedulepresence.Active() {
+				if err := DispatchNotifications(ctx, db); err != nil {
+					log.Logger.Warn().Msg("task_notification_dispatch_unavailable")
+				}
 			}
 			select {
 			case <-ctx.Done():
@@ -158,6 +168,9 @@ func RunNotificationDelivery(ctx context.Context, db *gorm.DB) <-chan struct{} {
 }
 
 func DispatchNotifications(ctx context.Context, db *gorm.DB) error {
+	if !schedulepresence.Active() {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	var notices []orm.TaskNotification
@@ -166,6 +179,9 @@ func DispatchNotifications(ctx context.Context, db *gorm.DB) error {
 		return err
 	}
 	for _, notice := range notices {
+		if !schedulepresence.Active() {
+			return nil
+		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

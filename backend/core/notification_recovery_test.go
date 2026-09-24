@@ -10,8 +10,25 @@ import (
 	"time"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/schedulepresence"
 	"lazymind/core/taskcenter"
 )
+
+func TestNotificationClaimRetriesWhileDesktopWindowIsClosed(t *testing.T) {
+	a := newNotificationAPI(t)
+	t.Setenv("LAZYMIND_RUNTIME_PROFILE", "desktop")
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "desktop-owner-token")
+	schedulepresence.SetActive(false)
+	t.Cleanup(func() { schedulepresence.SetActive(false) })
+	request := httptest.NewRequest(http.MethodPost, "/task-center/notification-events/queued:claim",
+		bytes.NewReader([]byte(`{"outbox_id":"`+strings.Repeat("a", 64)+`"}`)))
+	request.Header.Set("X-User-Id", "owner")
+	request.Header.Set("X-Request-Id", "notification-contract-request")
+	request.Header.Set("X-LazyMind-Internal-Token", "desktop-owner-token")
+	response := httptest.NewRecorder()
+	a.router.ServeHTTP(response, request)
+	notificationError(t, response, http.StatusServiceUnavailable, "NOTIFICATION_PAUSED")
+}
 
 func TestNotificationClaimRequiresServiceIdentityAndHonorsClose(t *testing.T) {
 	a := newNotificationAPI(t)

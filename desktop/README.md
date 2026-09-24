@@ -142,7 +142,7 @@ For source-based Local runs, setting the same environment variable before `make 
 
 Desktop binds only to `127.0.0.1`. It retains the normal Local/Desktop auto-login flow through `/_local/admin-session`, while LAN auto-login remains disabled.
 
-Local and Desktop share the platform LazyMind data directory so knowledge bases remain available when switching modes, but they cannot run concurrently. Stop Local before opening Desktop and close Desktop before starting Local. Closing the Desktop window now stops its local runtime, including scheduled tasks and notification delivery; it no longer leaves those services running in the background. Electron also enforces a single Desktop instance.
+Local and Desktop share the platform LazyMind data directory so knowledge bases remain available when switching modes, but they cannot run concurrently. Stop Local before opening Desktop and close Desktop before starting Local. Closing the Desktop window pauses automatic scheduled tasks and notification delivery; other local background services remain available. Reopening the window resumes them without replaying missed schedule times. Electron also enforces a single Desktop instance.
 
 On Windows, all Desktop-generated files live under `%LOCALAPPDATA%\LazyMind`:
 

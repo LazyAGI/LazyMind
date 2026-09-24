@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/schedulepresence"
 	"lazymind/core/store"
 )
 
@@ -25,6 +26,30 @@ func newDependencyRuntimeTestDB(t *testing.T) *orm.DB {
 		&orm.UserSchedule{}, &orm.ScheduleDependency{}, &orm.TaskCenterTask{}, &orm.UserUIPreferences{},
 		&orm.TaskRunInput{}, &orm.Conversation{},
 	)
+}
+
+func TestDesktopCloseDoesNotFireDueSchedule(t *testing.T) {
+	t.Setenv("LAZYMIND_RUNTIME_PROFILE", "desktop")
+	schedulepresence.SetActive(false)
+	t.Cleanup(func() { schedulepresence.SetActive(false) })
+	db := newTestSchedulerDB(t)
+	now := time.Now().UTC()
+	schedule := orm.UserSchedule{
+		ID: "closed-desktop", UserID: "owner", Name: "Daily", CronExpr: "* * * * *",
+		Timezone: "UTC", PromptTemplate: "hello", Enabled: true,
+		NextRunAt: now.Add(-time.Minute), CreatedAt: now,
+	}
+	if err := db.Create(&schedule).Error; err != nil {
+		t.Fatal(err)
+	}
+	fireSchedules(t.Context(), db.DB, "")
+	var saved orm.UserSchedule
+	if err := db.First(&saved, "id = ?", schedule.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.RunCount != 0 || !saved.NextRunAt.Equal(schedule.NextRunAt) {
+		t.Fatalf("closed Desktop fired a schedule: %#v", saved)
+	}
 }
 
 func TestCreateTaskConversationPersistsHighThinkingDepth(t *testing.T) {
