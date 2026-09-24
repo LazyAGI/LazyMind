@@ -193,6 +193,7 @@ const Detail = () => {
   const [revisionText, setRevisionText] = useState("");
   const [revisionModalOpen, setRevisionModalOpen] = useState(false);
   const [revisionLoading, setRevisionLoading] = useState(false);
+  const [revisionTranslatingWith, setRevisionTranslatingWith] = useState<"api" | "llm">();
   const cancelledPdfJobsRef = useRef(new Set<string>());
   const canShowSegments =
     developerActive && processingLevelSupportsSegments(processingLevel);
@@ -701,19 +702,21 @@ const Detail = () => {
     }
   }, [knowledgeBaseId, knowledgeId, pdfCapabilities?.translations, selectedPdfArtifact]);
 
-  const retranslateRevisionBlock = useCallback(async () => {
+  const retranslateRevisionBlock = useCallback(async (providerType: "api" | "llm") => {
     if (!selectedPdfArtifact || !revisionBlock) return;
     setRevisionLoading(true);
+    setRevisionTranslatingWith(providerType);
     try {
       const result = await retranslatePdfDraftBlock(knowledgeBaseId, knowledgeId, selectedPdfArtifact.id, {
         block_id: revisionBlock.id,
-        provider_type: selectedPdfArtifact.provider_type === "llm" ? "llm" : "api",
+        provider_type: providerType,
       });
       setRevisionText(result.translated_text);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "重新翻译失败");
     } finally {
       setRevisionLoading(false);
+      setRevisionTranslatingWith(undefined);
     }
   }, [knowledgeBaseId, knowledgeId, revisionBlock, selectedPdfArtifact]);
 
@@ -1290,7 +1293,18 @@ const Detail = () => {
             <label>新译文</label>
             <Input.TextArea value={revisionText} onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setRevisionText(event.target.value)} autoSize={{ minRows: 4, maxRows: 10 }} />
           </div>
-          <Button loading={revisionLoading} onClick={() => void retranslateRevisionBlock()}>重新翻译</Button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button
+              loading={revisionTranslatingWith === "api"}
+              disabled={revisionLoading && revisionTranslatingWith !== "api"}
+              onClick={() => void retranslateRevisionBlock("api")}
+            >翻译 API 重译</Button>
+            <Button
+              loading={revisionTranslatingWith === "llm"}
+              disabled={revisionLoading && revisionTranslatingWith !== "llm"}
+              onClick={() => void retranslateRevisionBlock("llm")}
+            >大模型重译</Button>
+          </div>
           <p>确认后会生成一个新的翻译版 PDF，其他段落和原译本保持不变。</p>
         </div>
       </Modal>
