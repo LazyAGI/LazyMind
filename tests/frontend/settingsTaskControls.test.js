@@ -28,7 +28,7 @@ describe('settings task controls contract', () => {
     expect(settingsSource).toContain('className="settings-task-controls is-schedules"');
     expect(settingsSource).toContain('switchControl("task_center_enabled"');
     expect(settingsSource).toContain('switchControl("workflows_enabled"');
-    expect(settingsSource).toContain('t("settingsPage.confirm.availableWorkflows")');
+    expect(settingsSource).toContain('settingsChange.requestChange(key, enabled)');
     expect(settingsSource).not.toContain('settingsPage.open") : t("settingsPage.paused');
     expect(settingsSource).toContain(
       '<SettingsScheduleList schedulesEnabled={schedulesEnabled}',

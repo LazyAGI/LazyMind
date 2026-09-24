@@ -35,6 +35,7 @@ from .tool_call_guard import (
     ToolExecutionMiddleware,
 )
 from .tool_limit_control import tool_limit_decision_coordinator
+from .skill_sandbox import configure_skill_sandbox
 
 
 def _sanitize_tools(tools: list[Any]) -> list[Any]:
@@ -190,6 +191,7 @@ class AgentExecutor:
             prompt=plan.prompt.system_prompt,
             **kwargs,
         )
+        configure_skill_sandbox(getattr(agent, '_skill_manager', None))
         from .tool_retrieval import configure_tool_retrieval
         configure_tool_retrieval(agent, plan)
         trusted_opaque_tools = tuple(

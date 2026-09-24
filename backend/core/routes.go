@@ -569,6 +569,16 @@ func registerAllRoutes(r *mux.Router) {
 
 	// ----- Task Center -----
 	handleAPI(r, "GET", "/task-center/tasks", []string{"qa.read"}, taskcenter.ListTasks)
+	handleAPI(r, "GET", "/user/notification-preferences", []string{"qa.read"}, taskcenter.NotificationPreferences)
+	handleAPI(r, "GET", "/notification-account-references/{account_id}", []string{"qa.read"}, taskcenter.NotificationAccountReferences)
+	handleAPI(r, "POST", "/task-center/notification-events/{notification_id}:claim", []string{"qa.write"}, taskcenter.ClaimNotification)
+	handleAPI(r, "PATCH", "/user/notification-preferences", []string{"qa.write"}, taskcenter.NotificationPreferences)
+	handleAPI(r, "GET", "/schedules/{schedule_id}/notifications", []string{"qa.read"}, taskcenter.ScheduleNotifications)
+	handleAPI(r, "PUT", "/schedules/{schedule_id}/notifications", []string{"qa.write"}, taskcenter.ScheduleNotifications)
+	handleAPI(r, "POST", "/schedules/{schedule_id}/notifications:reset", []string{"qa.write"}, taskcenter.ScheduleNotifications)
+	handleAPI(r, "GET", "/task-center/tasks/{task_id}/notifications", []string{"qa.read"}, taskcenter.TaskNotifications)
+	handleAPI(r, "GET", "/task-center/desktop-notifications", []string{"qa.read"}, taskcenter.DesktopNotifications)
+	handleAPI(r, "POST", "/task-center/desktop-notifications/{notification_id}:ack", []string{"qa.write"}, taskcenter.AcknowledgeDesktopNotification)
 	handleAPI(r, "GET", "/task-center/tasks/{task_id}", []string{"qa.read"}, taskcenter.GetTaskByID)
 	handleAPI(r, "POST", "/task-center/tasks/{task_id}:cancel", []string{"qa.write"}, taskcenter.CancelTaskByID)
 	handleAPI(r, "POST", "/task-center/tasks/{task_id}:remove", []string{"qa.write"}, taskcenter.RemoveTaskHandler)
