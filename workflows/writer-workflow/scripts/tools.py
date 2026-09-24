@@ -479,6 +479,7 @@ def writer_collect_available_media(
     writing_task_path: str,
     source_document_path: str = '',
     input_resources_path: str = '',
+    analyze_source_images: bool = True,
 ) -> dict:
     return _DOCUMENT_EXECUTION.invoke(
         globals(), '_writer_collect_available_media', locals(),
@@ -505,6 +506,7 @@ def writer_prepare_workspace(
     ] = 'create',
     source_filename: str = '',
     knowledge_text: str = '',
+    analyze_source_images: bool = False,
 ) -> dict:
     """Prepare one writing request.
 
@@ -512,6 +514,10 @@ def writer_prepare_workspace(
     document. It may identify either a document to edit or reference material for a
     new document; the authoritative request resolves that distinction. Provider
     document locators belong in ``user_input`` and are resolved as cloud documents.
+    Set ``analyze_source_images`` only when the request needs the contents of existing
+    images (explanation, visual selection, image editing, or style reference). Leave
+    it false for text edits, continuation, or generating a new image from text.
+    Independent uploaded reference images are still analyzed.
     """
     user_input = _authoritative_writer_user_input('')
     knowledge_text = _verified_knowledge_text(knowledge_text)
@@ -651,6 +657,7 @@ def writer_prepare_workspace(
         writing_task_path=writing_task,
         source_document_path=source_document if operation != 'use_outline' else '',
         input_resources_path=provider_input_resources,
+        analyze_source_images=analyze_source_images,
     )
     resource_profiles = writer_profile_resources(
         writing_task_path=writing_task,

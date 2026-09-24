@@ -1033,6 +1033,7 @@ def collect_document_media(
     input_resources: list[dict[str, Any]] | None = None,
     source_document: Any = None,
     media_store: str,
+    analyze_source_images: bool = True,
 ) -> dict[str, Any]:
     """Collect and profile available document images under shared visual policy."""
     toolkit = WriterWritingCapabilities()
@@ -1044,6 +1045,10 @@ def collect_document_media(
         [],
     )
     visual_policy = (writing_task.get('constraints') or {}).get('visual_policy') or {}
+    visual_policy = {**visual_policy, 'analyze_source_images': analyze_source_images}
+    writing_task = {**writing_task, 'constraints': {
+        **(writing_task.get('constraints') or {}), 'visual_policy': visual_policy,
+    }}
     if visual_policy.get('require_input_image_reuse'):
         for resource in resources:
             resource['meta'] = {
@@ -1433,6 +1438,9 @@ class WriterWritingCapabilities:
             resources = []
         if not isinstance(resources, list):
             raise ToolExecutionError('resources_json must be a JSON array.')
+        # Source images retained verbatim are assets, not new reference material.
+        resources = [item for item in resources
+                     if not (item.get('meta') or {}).get('source_image_preserved')]
         provider_resource_uris = {
             str(item.get('uri') or '')
             for item in resources

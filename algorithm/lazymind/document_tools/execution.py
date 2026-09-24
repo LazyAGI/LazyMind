@@ -226,6 +226,7 @@ def _writer_collect_available_media(
     writing_task_path: str,
     source_document_path: str = '',
     input_resources_path: str = '',
+    analyze_source_images: bool = True,
 ) -> dict:
     """Collect attached and source-document images into the authoritative media library."""
     ctx = require_context()
@@ -252,6 +253,7 @@ def _writer_collect_available_media(
             _read_json_file(source_document_path) if source_document_path else None
         ),
         media_store=str(media_root),
+        analyze_source_images=analyze_source_images,
     )
     media_assets_path = _save_json_artifact(
         'media_assets',

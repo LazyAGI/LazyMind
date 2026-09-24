@@ -820,3 +820,54 @@ def test_workspace_checkpoint_changes_when_outline_is_edited_in_place(tmp_path):
     assert tools._state_workspace_fingerprint(outline_document_path=str(outline)) == first
     outline.write_text('# Story\n\n## Edited\n')
     assert tools._state_workspace_fingerprint(outline_document_path=str(outline)) != first
+
+
+@pytest.mark.parametrize('analyze', [False, True])
+def test_source_image_analysis_policy_is_forwarded(monkeypatch, tmp_path, analyze):
+    from lazymind import model_config
+    from lazymind.document_tools import writing as writer
+    captured = {}
+
+    class Capabilities:
+        def build_resources(self, **kwargs):
+            return '[]'
+
+        def collect_available_media(self, **kwargs):
+            captured.update(kwargs)
+            return '{}'
+
+    monkeypatch.setattr(writer, 'WriterWritingCapabilities', Capabilities)
+    monkeypatch.setattr(model_config, 'is_model_role_available', lambda _: True)
+    task = {'constraints': {'visual_policy': {'require_input_image_reuse': True}}}
+    writer.collect_document_media(task, file_paths=[], source_document='# Document',
+                                  media_store=str(tmp_path), analyze_source_images=analyze)
+    policy = json.loads(captured['writing_task_json'])['constraints']['visual_policy']
+    assert policy == {'require_input_image_reuse': True, 'analyze_source_images': analyze}
+    assert 'analyze_source_images' not in task['constraints']['visual_policy']
+    assert captured['use_vision_model'] is True  # Independent references retain vision support.
+
+
+def test_resource_profiles_skip_preserved_images_but_keep_reference_material(monkeypatch, tmp_path):
+    from lazymind.document_tools import writing as writer
+    captured = {}
+
+    class ResourceTools:
+        def __init__(self, **kwargs):
+            pass
+
+        def profile_resources(self, **kwargs):
+            captured.update(kwargs)
+            return {}
+
+    monkeypatch.setattr(writer, 'WriterResourceTools', ResourceTools)
+    monkeypatch.setattr(writer, 'AutoModel', lambda **kwargs: None)
+    monkeypatch.setattr(writer, '_temp_root', lambda: tmp_path)
+    monkeypatch.setattr(writer, '_primary_data', lambda _: [])
+    resources = [
+        {'resource_id': 'old', 'resource_type': 'image', 'meta': {'source_image_preserved': True}},
+        {'resource_id': 'upload', 'resource_type': 'image'},
+        {'resource_id': 'short-reference', 'resource_type': 'text', 'inline_text': 'Windows'},
+        {'resource_id': 'source', 'resource_type': 'text', 'inline_text': 'Source document'},
+    ]
+    writer.WriterWritingCapabilities().profile_resources('{}', '', json.dumps(resources))
+    assert [item.resource_id for item in captured['input_resources']] == ['upload', 'short-reference', 'source']

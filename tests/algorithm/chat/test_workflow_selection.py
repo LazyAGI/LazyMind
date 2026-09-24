@@ -957,3 +957,45 @@ def test_model_frontier_omits_package_prompts_but_preserves_routing_and_approval
     frontier = _compact_model_frontier({'projection': state, 'ready_steps': ['review']})
     assert frontier['projection']['projection'] == projection
     assert 'graph' not in frontier['projection']
+
+
+@pytest.mark.parametrize('query', [
+    '请重新执行步骤 outline',
+    'Please re-run step outline',
+    '把第一章缩短到 500 字',
+])
+@pytest.mark.parametrize('handoff', [False, True])
+def test_rerun_turn_preserves_session_intent_for_downstream_steps(query, handoff):
+    from lazymind.chat.workflow import workflow_manager as workflows
+
+    lazyllm.globals['agentic_config'].update({
+        'workflow_current_query': query,
+        'query': query,
+        'focused_tab': 'result',
+    })
+    frontier = {
+        'session_id': 'session-1', 'state_version': 7,
+        'ready_steps': ['write_document'], 'retryable_steps': [],
+        'rewindable_steps': ['outline'],
+    }
+    toolkit = MagicMock()
+    toolkit.get_ready_steps.return_value = frontier
+    toolkit.advance_step.return_value = {'status': 'active'}
+    with patch.object(workflows, '_client') as client_factory:
+        client = client_factory.return_value
+        client.get_ready_steps.return_value = frontier
+        client.advance.return_value.result = {'status': 'active'}
+        if handoff:
+            tool = workflows._handoff_tool('session-1')
+        else:
+            tool = next(tool for tool in workflows._safe_session_tools(toolkit, 'session-1')
+                        if tool.__name__ == 'advance_step')
+        for step_id in ['outline', 'write_document']:
+            tool(step_id if handoff else [step_id])
+            command = (client.advance.call_args.args[0].steps[0] if handoff
+                       else toolkit.advance_step.call_args.args[2][0])
+            is_rerun = query != '把第一章缩短到 500 字'
+            assert command.user_input == ('' if is_rerun else query)
+            assert 'result' in command.runtime_instruction
+            if is_rerun:
+                assert query in command.runtime_instruction
