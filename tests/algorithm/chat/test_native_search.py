@@ -51,6 +51,7 @@ def _mock_index(monkeypatch, paths, exit_code=0):
     return commands
 
 
+@pytest.mark.skipif(sys.platform == 'win32', reason='Windows selectors cannot monitor subprocess pipes')
 def test_system_scope_accepts_outside_home_and_deduplicates(monkeypatch, tmp_path):
     home = tmp_path / 'home'
     home.mkdir()
@@ -67,6 +68,7 @@ def test_system_scope_accepts_outside_home_and_deduplicates(monkeypatch, tmp_pat
     assert '-onlyin' not in commands[0]
 
 
+@pytest.mark.skipif(sys.platform == 'win32', reason='Windows selectors cannot monitor subprocess pipes')
 def test_macos_failure_is_not_empty_success(monkeypatch):
     _mock_index(monkeypatch, [], 1)
     result = spotlight.search_spotlight('plan')
@@ -122,6 +124,7 @@ def test_bounded_subprocess_output(monkeypatch):
     assert reason == 'output_limit'
 
 
+@pytest.mark.skipif(sys.platform == 'win32', reason='Windows selectors cannot monitor subprocess pipes')
 def test_scope_limit_and_zero_results(monkeypatch, tmp_path):
     scope = tmp_path / 'scope'
     scope.mkdir()
