@@ -1957,7 +1957,7 @@ function ensureWindowsTray() {
       {
         label: "Exit",
         click: () => {
-          void enterBackgroundMode("tray exit", { discoverable: false });
+          beginFastQuit("tray exit");
         },
       },
     ]));
@@ -1976,7 +1976,7 @@ function attachManagedClose(window) {
       return;
     }
     event.preventDefault();
-    void enterBackgroundMode("window close", { discoverable: true });
+    beginFastQuit("window close");
   });
 }
 
@@ -3049,11 +3049,7 @@ if (!hasSingleInstanceLock) {
     );
   });
   app.on("window-all-closed", () => {
-    if (isExternalRuntimeDev) {
-      app.quit();
-    }
-    // Normal Desktop sessions stay resident without renderer processes.
-    // Installer warmup owns its explicit app.exit lifecycle.
+    if (!isQuitting) app.quit();
   });
   app.on("before-quit", (event) => {
     if (isInstallerWarmup || isExternalRuntimeDev) {
@@ -3061,7 +3057,7 @@ if (!hasSingleInstanceLock) {
     }
     if (!isQuitting) {
       event.preventDefault();
-      void enterBackgroundMode("app quit", { discoverable: false });
+      beginFastQuit("app quit");
     }
   });
 }

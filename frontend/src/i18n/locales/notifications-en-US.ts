@@ -149,7 +149,7 @@ export default {
   "off": "Off",
   "on": "On",
   "unavailable": "Currently unavailable",
-  "desktopHint": "Allow desktop notifications for timely reminders when tasks finish or need attention.",
+  "desktopHint": "Receive system notifications while Desktop is running. Closing the app stops local scheduled tasks and notification delivery.",
   "desktopUnsupported": "Use the LazyMind desktop app to receive native desktop notifications.",
   "connectTitle": "Channel connections",
   "connectHint": "Connect Feishu, WeCom or WeChat to receive task updates and results.",

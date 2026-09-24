@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
-import vm from "node:vm";
 import test from "node:test";
 
 const { clearTemporaryCredentials } = createRequire(import.meta.url)("../electron/src/temporary-credential-cleanup.js");
@@ -29,29 +27,4 @@ test("temporary cleanup reports HTTP and transport failures without rejecting", 
     await clearTemporaryCredentials({ cloudEnabled: true, corePort: 18000, internalToken: "fixture", fetch, reportError: () => reports++ });
     assert.equal(reports, 1);
   }
-});
-
-test("closing Desktop destroys the renderer immediately while owner cleanup is pending", async () => {
-  const source = readFileSync(new URL("../electron/src/main.js", import.meta.url), "utf8");
-  // Extract the lifecycle functions without evaluating the Electron entry point.
-  const start = source.indexOf("function clearTemporaryCredentials(reason)");
-  const end = source.indexOf("function sameRuntimePath(", start);
-  const events = [];
-  let finish;
-  const pending = new Promise((resolve) => { finish = resolve; });
-  const context = {
-    cloudBaseURL: "https://cloud.example.com", internalServiceToken: "owner-fixture",
-    currentStatus: { config: { localProxy: { CoreHostPort: 18000 } } }, fetch: () => {},
-    clearRuntimeTemporaryCredentials: (options) => { assert.equal(options.corePort, 18000); assert.equal(options.internalToken, "owner-fixture"); events.push("cleanup"); return pending; },
-    appendStartupLog: () => {}, isInstallerWarmup: false, isQuitting: false,
-    windowHiddenByUser: false, mainWindow: { isDestroyed: () => false, removeAllListeners: () => {}, destroy: () => events.push("destroy") }, startupWindow: undefined,
-    finishStartupMetrics: () => {}, rendererReadyWait: undefined,
-    ensureWindowsTray: () => {}, destroyWindowsTray: () => {}, isMac: false,
-  };
-  vm.createContext(context);
-  vm.runInContext(source.slice(start, end), context);
-  assert.equal(context.enterBackgroundMode("window close", { discoverable: true }), undefined);
-  assert.deepEqual(events, ["cleanup", "destroy"]);
-  finish();
-  await pending;
 });

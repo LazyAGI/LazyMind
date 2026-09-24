@@ -830,53 +830,35 @@ test("Desktop Agent login returns immediately and refreshes the Host when login 
   );
 });
 
-test("Desktop close and quit destroy renderers while keeping the runtime resident", () => {
+test("Desktop close and quit stop the local runtime", () => {
   const source = readFileSync(electronMainScript, "utf8");
-  const backgroundStart = source.indexOf("function enterBackgroundMode");
-  const backgroundEnd = source.indexOf("function sameRuntimePath", backgroundStart);
-  const backgroundMode = source.slice(backgroundStart, backgroundEnd);
+  const closeStart = source.indexOf("function attachManagedClose(window)");
+  const closeEnd = source.indexOf("function activeWindow()", closeStart);
+  const closeHandler = source.slice(closeStart, closeEnd);
   const windowsClosedStart = source.indexOf('app.on("window-all-closed"');
   const windowsClosedEnd = source.indexOf('app.on("before-quit"', windowsClosedStart);
   const windowsClosedHandler = source.slice(windowsClosedStart, windowsClosedEnd);
+  const beforeQuitHandler = source.slice(windowsClosedEnd);
 
   assert.match(
-    source,
-    /function attachManagedClose\(window\)[\s\S]*event\.preventDefault\(\);\s*(?:void\s+)?enterBackgroundMode\("window close", \{ discoverable: true \}\)/,
-    "window close must preserve a visible background entry on macOS and Windows",
+    closeHandler,
+    /event\.preventDefault\(\);\s*beginFastQuit\("window close"\)/,
+    "closing the window must stop Desktop instead of leaving scheduled tasks running",
   );
-  assert.match(
-    backgroundMode,
-    /rendererReadyWait\?\.cancel\(\);[\s\S]*window\.removeAllListeners\("close"\);[\s\S]*window\.destroy\(\)/,
-    "both background modes must destroy renderer windows",
-  );
-  assert.match(backgroundMode, /if \(discoverable\) \{\s*ensureWindowsTray\(\)/);
-  assert.match(backgroundMode, /app\.hide\(\);[\s\S]*app\.dock\.hide\(\);[\s\S]*destroyWindowsTray\(\)/);
-  assert.doesNotMatch(backgroundMode, /beginFastQuit|detachRuntimeMonitor|runSidecar\("down"/);
   assert.match(
     source,
-    /function showActiveWindow\(\)[\s\S]*app\.show\(\);[\s\S]*app\.dock\.show\(\)[\s\S]*const creation = sessionWrites\.catch\([\s\S]*?\.then\(\(\) => createWindow\(\)\)/,
-    "opening the resident app must restore the Dock icon and recreate its frontend",
-  );
-  assert.match(source, /app\.on\("second-instance"[\s\S]*showActiveWindow\(\)/);
-  assert.match(source, /app\.on\("activate"[\s\S]*showActiveWindow\(\)/);
-  assert.match(
-    source,
-    /app\.on\("before-quit",[\s\S]*event\.preventDefault\(\);\s*(?:void\s+)?enterBackgroundMode\("app quit", \{ discoverable: false \}\)/,
-    "Dock, menu, and keyboard quit actions must enter hidden background mode",
+    /function beginFastQuit\([\s\S]*desktopNotifications\.stop\(\)[\s\S]*spawnDetachedShutdownHelper\(reason\)[\s\S]*detachRuntimeMonitor\(\)[\s\S]*app\.quit\(\)/,
+    "shutdown must stop notifications and arrange local runtime cleanup",
   );
   assert.match(
-    windowsClosedHandler,
-    /if \(isExternalRuntimeDev\) \{\s*app\.quit\(\);\s*\}/,
-    "closing the development renderer should stop its Electron process",
+    beforeQuitHandler,
+    /app\.on\("before-quit",[\s\S]*event\.preventDefault\(\);\s*beginFastQuit\("app quit"\)/,
+    "Dock, menu, and keyboard quit actions must stop Desktop",
   );
-  assert.equal(
-    windowsClosedHandler.match(/app\.quit\(\)/g)?.length,
-    1,
-    "normal Desktop sessions must not quit when their last renderer closes",
-  );
+  assert.match(windowsClosedHandler, /if \(!isQuitting\) app\.quit\(\)/);
 });
 
-test("Windows tray reopens the frontend and Exit removes the visible background entry", () => {
+test("Windows tray Exit stops Desktop", () => {
   const source = readFileSync(electronMainScript, "utf8");
   const trayStart = source.indexOf("function ensureWindowsTray()");
   const trayEnd = source.indexOf("function attachManagedClose", trayStart);
@@ -887,7 +869,7 @@ test("Windows tray reopens the frontend and Exit removes the visible background 
   assert.match(traySource, /label: "Open LazyMind"[\s\S]*showActiveWindow\(\)/);
   assert.match(
     traySource,
-    /label: "Exit"[\s\S]*enterBackgroundMode\("tray exit", \{ discoverable: false \}\)/,
+    /label: "Exit"[\s\S]*beginFastQuit\("tray exit"\)/,
   );
   assert.match(source, /function destroyWindowsTray\(\)[\s\S]*tray\.destroy\(\);\s*tray = undefined/);
 });
