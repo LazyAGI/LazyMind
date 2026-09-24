@@ -1,5 +1,6 @@
 import importlib
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import ModuleType
 
@@ -9,8 +10,14 @@ from fastapi.testclient import TestClient
 
 
 def _load_rewrite_module():
+    importlib.import_module('lazyllm.tools.writer.data_models.context')
     fake_lazyllm = ModuleType('lazyllm')
     fake_lazyllm.AutoModel = lambda *args, **kwargs: object()
+    fake_lazyllm.enable_trace = lambda **_kwargs: lambda func: func
+    fake_lazyllm.ThreadPoolExecutor = ThreadPoolExecutor
+    fake_lazyllm.globals = {'config': {'dynamic_model_configs': {
+        'llm': {'chat': {'max_input_tokens': 48000}},
+    }}}
     fake_lazyllm.config = {}
     fake_lazyllm_configs = ModuleType('lazyllm.configs')
 
@@ -24,6 +31,10 @@ def _load_rewrite_module():
     fake_lazyllm_configs.Config = FakeConfig
 
     fake_tool_infra = ModuleType('lazymind.chat.engine.tools.infra')
+    fake_budget = ModuleType('lazymind.chat.engine.agent_runtime.budget')
+    fake_budget.resolve_max_input_tokens = lambda llm_config=None, **_kwargs: int(
+        (llm_config or {}).get('llm', {}).get('max_input_tokens', 48000)
+    )
     fake_load_config = ModuleType('lazymind.model_config')
     fake_load_config.get_config_path = lambda: ''
 
@@ -31,6 +42,8 @@ def _load_rewrite_module():
         'lazyllm': sys.modules.get('lazyllm'),
         'lazyllm.configs': sys.modules.get('lazyllm.configs'),
         'lazymind.chat.engine.tools.infra': sys.modules.get('lazymind.chat.engine.tools.infra'),
+        'lazymind.chat.engine.agent_runtime.budget': sys.modules.get(
+            'lazymind.chat.engine.agent_runtime.budget'),
         'lazymind.model_config': sys.modules.get('lazymind.model_config'),
     }
 
@@ -38,6 +51,7 @@ def _load_rewrite_module():
         sys.modules['lazyllm'] = fake_lazyllm
         sys.modules['lazyllm.configs'] = fake_lazyllm_configs
         sys.modules['lazymind.chat.engine.tools.infra'] = fake_tool_infra
+        sys.modules['lazymind.chat.engine.agent_runtime.budget'] = fake_budget
         sys.modules['lazymind.model_config'] = fake_load_config
 
         from algorithm.lazymind.rewrite import base
@@ -269,10 +283,11 @@ def test_rewrite_route_forwards_complete_editable_context(monkeypatch):
     app.include_router(rewrite_routes.router)
     client = TestClient(app)
 
-    def fake_selection_rewrite(full_content, ranges, instruction):
+    def fake_selection_rewrite(full_content, ranges, instruction, *, llm_config=None):
         assert full_content == 'asdfghjkl123'
         assert ranges == [{'start': 4, 'end': 9, 'content': 'ghjkl'}]
         assert instruction == 'make it clear'
+        assert llm_config == {'llm': {'model': 'test'}}
         return {'results': [{
             'content': 'ASDFGHJKL123',
             'target_start': 0,

@@ -185,6 +185,9 @@ func newPortableServer(t *testing.T, f portableFixture, format string, snapshot 
 	spy := &portableServer{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if serveDynamicLLMRole(w, r) {
+			return
+		}
 		if r.Method != "POST" || (r.URL.Path != "/api/document:inspect" && r.URL.Path != "/api/document/actions:invoke") {
 			t.Errorf("unexpected Algorithm/Provider call %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(404)

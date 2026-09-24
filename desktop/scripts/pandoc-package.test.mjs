@@ -4,11 +4,12 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { resolvePandocTarget, stagePandoc } from "./stage-pandoc.mjs";
 
 test("pins the executable paths used by the official Pandoc archives", async () => {
   const config = JSON.parse(await readFile(
-    path.join(path.dirname(new URL(import.meta.url).pathname), "..", "dependencies", "pandoc.json"),
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "dependencies", "pandoc.json"),
     "utf8",
   ));
   assert.equal(config.targets["darwin-arm64"].archivePath, "pandoc-3.11-arm64/bin/pandoc");

@@ -91,6 +91,9 @@ func newNumberingServer(t *testing.T, f numberingFixture, update any) *numbering
 	spy := &numberingServer{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if serveDynamicLLMRole(w, r) {
+			return
+		}
 		if r.Method != "POST" || (r.URL.Path != "/api/document:inspect" && r.URL.Path != "/api/document/actions:invoke") {
 			t.Errorf("unexpected numbering I/O: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(404)

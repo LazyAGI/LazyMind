@@ -48,7 +48,15 @@ def test_long_document_uses_local_neighbors():
     assert [item['content'] for item in request['read_only_context']['blocks']] == [
         'Before.', 'After.',
     ]
-    assert 'Unrelated appendix.' not in str(request['read_only_context'])
+    # Exclude distant full blocks, but retain budgeted section/document excerpts.
+    readonly = request['read_only_context']
+    summary, = readonly['block_summaries']
+    assert summary['content_ref']['heading_path'] == ['Report', 'Alpha']
+    expected = next(item for item in context['block_summaries']
+                    if item['content_ref'] == summary['content_ref'])
+    assert summary['summary'] == expected['summary']
+    assert summary['kind'] == 'excerpt'
+    assert readonly['document_summary']['summary'] == context['document_summary']['summary']
 
 
 def test_large_selection_is_grouped_without_losing_targets():
