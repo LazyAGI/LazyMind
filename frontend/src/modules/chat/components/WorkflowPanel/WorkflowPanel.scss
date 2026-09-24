@@ -2654,6 +2654,11 @@
         max-width: 820px;
         margin: 0 auto;
         align-self: center;
+
+        // Preserve the full 16:9 viewport plus its label and version controls.
+        &:has(> .slot-html-slide) {
+          min-height: min-content;
+        }
       }
 
       // Notes sit under the same max width as the slide.
