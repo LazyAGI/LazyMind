@@ -456,6 +456,7 @@ func TestHandleStreamChatHSetFailureReturnsHTTP503BeforeUpstream(t *testing.T) {
 		failOnCall int
 	}{
 		{name: "primary run status", failOnCall: 1},
+		{name: "primary dual run status", dualReply: true, failOnCall: 1},
 		{name: "secondary run status", dualReply: true, failOnCall: 2},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -501,14 +502,26 @@ func TestHandleStreamChatHSetFailureReturnsHTTP503BeforeUpstream(t *testing.T) {
 			if got := upstreamCalls.Load(); got != 0 {
 				t.Fatalf("upstream calls = %d, want 0", got)
 			}
+			assertFailedHistory := func(id, status string, raw json.RawMessage) {
+				t.Helper()
+				terminal, err := parseRunTerminal(raw)
+				if err != nil || status != "failed" || terminal.Status != "failed" || terminal.Code != "state_store_unavailable" {
+					t.Fatalf("history %s did not finish: status=%q terminal=%s err=%v", id, status, raw, err)
+				}
+				cached, err := getChatStatus(request.Context(), store, "conv-hset", id)
+				if err != nil || cached.Status != "failed" || cached.RunTerminal == nil || cached.RunTerminal.Code != terminal.Code {
+					t.Fatalf("history %s cache did not finish: status=%+v err=%v", id, cached, err)
+				}
+				if input, err := getChatInput(request.Context(), store, "conv-hset", id); err == nil {
+					t.Fatalf("history %s still has active input: %+v", id, input)
+				}
+			}
 			if !tt.dualReply {
 				var history orm.ChatHistory
 				if err := db.Where("id = ?", "history-hset").Take(&history).Error; err != nil {
 					t.Fatalf("load history: %v", err)
 				}
-				if history.RunStatus != "generating" || len(history.RunTerminal) != 0 {
-					t.Fatalf("unexpected history change: status=%q terminal=%s", history.RunStatus, history.RunTerminal)
-				}
+				assertFailedHistory(history.ID, history.RunStatus, history.RunTerminal)
 			} else {
 				var histories []orm.MultiAnswersChatHistory
 				if err := db.Where("conversation_id = ?", "conv-hset").Find(&histories).Error; err != nil {
@@ -518,9 +531,7 @@ func TestHandleStreamChatHSetFailureReturnsHTTP503BeforeUpstream(t *testing.T) {
 					t.Fatalf("multi-answer history count = %d, want 2", len(histories))
 				}
 				for _, history := range histories {
-					if history.RunStatus != "generating" || len(history.RunTerminal) != 0 {
-						t.Fatalf("unexpected multi-answer history change: status=%q terminal=%s", history.RunStatus, history.RunTerminal)
-					}
+					assertFailedHistory(history.ID, history.RunStatus, history.RunTerminal)
 				}
 			}
 		})

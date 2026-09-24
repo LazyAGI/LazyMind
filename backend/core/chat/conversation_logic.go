@@ -1998,6 +1998,10 @@ func handleStreamChat(
 			return
 		}
 	}
+	registeredRuns := [][2]string{{historyID, primaryRunID}}
+	if dualReply {
+		registeredRuns = append(registeredRuns, [2]string{secondaryHistoryID, secondaryRunID})
+	}
 	if stateStore != nil {
 		if target.IsRegeneration {
 			_ = clearChatData(chatCtx, stateStore, convID, historyID)
@@ -2005,6 +2009,7 @@ func handleStreamChat(
 		_ = setChatInput(chatCtx, stateStore, convID, historyID, query, target.Seq, historyExt)
 		if requestUsesRunDecision(reqBody) {
 			if err := setChatRuntimeStatus(chatCtx, stateStore, convID, historyID, "generating", "", primaryRunID, nil); err != nil {
+				failPreStreamChatRuns(chatCtx, db, stateStore, convID, dualReply, registeredRuns)
 				common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
 				return
 			}
@@ -2013,6 +2018,7 @@ func handleStreamChat(
 		if dualReply {
 			_ = setChatInput(chatCtx, stateStore, convID, secondaryHistoryID, query, target.Seq, historyExt)
 			if err := setChatRuntimeStatus(chatCtx, stateStore, convID, secondaryHistoryID, "generating", "", secondaryRunID, nil); err != nil {
+				failPreStreamChatRuns(chatCtx, db, stateStore, convID, dualReply, registeredRuns)
 				common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
 				return
 			}
@@ -2028,6 +2034,36 @@ func handleStreamChat(
 		return
 	}
 	streamDualAnswer(chatCtx, reqCtx, w, flusher, db, stateStore, baseURL, reqBody, convID, query, historyID, secondaryHistoryID, target, historyExt)
+}
+
+func failPreStreamChatRuns(ctx context.Context, db *gorm.DB, stateStore state.Store, convID string, dualReply bool, runs [][2]string) {
+	statusCtx, cancel := terminalWriteContext(ctx)
+	defer cancel()
+	for _, run := range runs {
+		historyID, runID := run[0], run[1]
+		terminal, _ := failedRunEvent(runID, "state_store_unavailable", false).Terminal()
+		values := map[string]any{
+			"run_status": "failed", "run_terminal": terminalJSON(terminal), "update_time": time.Now().UTC(),
+		}
+		var updated bool
+		var err error
+		if dualReply {
+			updated, err = updateOwnedMultiAnswerHistory(statusCtx, db, historyID, runID, values)
+		} else {
+			updated, err = updateOwnedChatHistory(statusCtx, db, historyID, runID, values)
+		}
+		if err != nil || !updated {
+			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).
+				Str("run_id", runID).Msg("failed to persist pre-stream chat run failure")
+		}
+		_ = stateStore.Del(statusCtx, chatInputKey(convID, historyID))
+		_ = stateStore.Del(statusCtx, chatStopKey(convID, historyID))
+		_ = stateStore.Del(statusCtx, chatStreamKey(convID, historyID))
+		if err := setChatRuntimeStatus(statusCtx, stateStore, convID, historyID, "failed", "", runID, terminal); err != nil {
+			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).
+				Str("run_id", runID).Msg("failed to project pre-stream chat run failure to cache")
+		}
+	}
 }
 
 func elapsedThinkingSeconds(elapsed time.Duration) int64 {
