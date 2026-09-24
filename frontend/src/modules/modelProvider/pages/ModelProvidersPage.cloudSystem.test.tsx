@@ -1,4 +1,6 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { SettingsNavigationGuard } from "@/modules/settings/SettingsNavigationGuard";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import ModelProviderPage from "./ModelProvidersPage";
@@ -24,6 +26,7 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@/components/request", () => ({
   localizeErrorCode: (code: string) => code,
+  getLocalizedErrorMessage: () => "Request failed",
 }));
 
 vi.mock("../api", () => ({
@@ -103,6 +106,20 @@ describe("Model Provider service list", () => {
     mocks.getCredentialRestoreDiscovery.mockResolvedValue({
       available: false, requiresExplicitAction: true, records: [],
     });
+  });
+
+  it("restores a provider editor from its URL and allows leaving an untouched form", async () => {
+    mocks.getProviders.mockResolvedValue({ data: { providers: [{ id: "openai", name: "OpenAI", base_url: "https://api.openai.com/v1", category: "llm" }] } });
+    const router = createMemoryRouter([{ path: "/settings", element: <SettingsNavigationGuard><ModelProviderPage /></SettingsNavigationGuard> }], {
+      initialEntries: ["/settings?section=models&view=providers", "/settings?section=models&view=providers&editor=provider&item=openai"], initialIndex: 1,
+    });
+    render(<RouterProvider router={router} />);
+    await screen.findByRole("dialog");
+    await act(async () => { await router.navigate(-1); });
+    expect(router.state.location.search).toBe("?section=models&view=providers");
+    expect(screen.queryByText("settingsPage.unsaved.title")).not.toBeInTheDocument();
+    await act(async () => { await router.navigate(1); });
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 
   it("places the read-only LazyMind Cloud card in the existing Provider service list", async () => {

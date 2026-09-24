@@ -3,7 +3,7 @@ import { requestConversationStatusRefresh } from "@/modules/chat/utils/conversat
 import { AgentAppsAuth } from "@/components/auth";
 import { axiosInstance, localizeErrorCode } from "@/components/request";
 import { Method, SSE } from "@/modules/chat/utils/sse";
-import { TaskServiceApi, convEventsUrl, taskStreamUrl } from "@/modules/chat/utils/request";
+import { TaskServiceApi, WorkflowSessionApi, convEventsUrl, taskStreamUrl } from "@/modules/chat/utils/request";
 import { resolveCoreAssetUrl } from "@/modules/knowledge/utils/imageUrl";
 import UIUtils from "@/modules/chat/utils/ui";
 import { WORKFLOW_GRAPH_REFRESH_EVENT } from "@/components/StateGraphModal";
@@ -16,6 +16,21 @@ import {
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import type { ChatSource } from "@/modules/chat/utils/sourceAdapter";
 import { parseMediaCapabilityDependency } from "@/modules/chat/utils/mediaCapabilityDependency";
+
+import type { OrdinaryCollection, OrdinaryRunView, OrdinaryTaskView } from "../types/ordinaryTask";
+import { mergeOrdinarySnapshot, readOrdinaryTask } from "../utils/ordinaryTaskState";
+
+function publicTask(task: OrdinaryTaskView, conversationId: string): SubAgentTask {
+  return {
+    task_id: task.task_id ?? task.display_key, conversation_id: conversationId,
+    trigger_history_id: task.trigger_history_id, seq_in_conversation: task.order,
+    title: task.title, agent_type: task.agent_type ?? "", mode: "auto",
+    status: task.status as TaskStatus, progress_pct: 0,
+    created_at: task.timing.started_at ?? undefined,
+    updated_at: task.timing.finished_at ?? undefined,
+    artifacts: [], sources: [], artifact_streams: [], execution_log: [], ordinary: task,
+  };
+}
 
 let convReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let workflowRefreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -134,6 +149,7 @@ export interface WritingSubtask {
 }
 
 export interface SubAgentTask {
+  ordinary?: OrdinaryTaskView;
   task_id: string;
   conversation_id?: string;
   trigger_history_id?: string;
@@ -178,6 +194,12 @@ function isWriterIRArtifact(artifact: TaskArtifact): boolean {
 }
 
 interface TaskCenterStore {
+  viewMode: "ordinary" | "developer";
+  _viewEpoch: number;
+  runsByConversation: Record<string, OrdinaryRunView[]>;
+  setViewMode: (mode: "ordinary" | "developer") => void;
+  applyOrdinarySnapshot: (conversationId: string, task: OrdinaryTaskView, collection?: OrdinaryCollection) => void;
+  loadOrdinaryTask: (conversationId: string, taskIdOrDisplayKey: string, collection?: OrdinaryCollection, cursor?: string) => Promise<void>;
   // tasks keyed by conversation_id, each an ordered list.
   tasksByConversation: Record<string, SubAgentTask[]>;
   artifactsByConversation: Record<string, ConversationArtifact[]>;
@@ -265,6 +287,73 @@ function stepsToExecutionLog(steps: any[]): TaskLogEntry[] {
 }
 
 export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
+  viewMode: "ordinary",
+  _viewEpoch: 0,
+  runsByConversation: {},
+  setViewMode: (viewMode) => {
+    if (get().viewMode === viewMode) return;
+    const conversationId = get().activeConversationId;
+    if (conversationId) get().unsubscribeConvEvents(conversationId);
+    else for (const taskId of new Set([...Object.keys(get()._taskStreams), ...taskReconnectTimers.keys()])) get().unsubscribeTask(taskId);
+    // A mode switch must not leave developer data in an ordinary task card.
+    set(state => ({ viewMode, _viewEpoch: state._viewEpoch + 1,
+      tasksByConversation: {}, runsByConversation: {}, artifactsByConversation: {}, deliveriesByConversation: {}, artifactHistoryOrderByConversation: {}, _taskLoadErrors: {} }));
+  },
+  applyOrdinarySnapshot: (conversationId, incoming, collection) => {
+    liveTaskIdsCreatedDuringLoad.get(conversationId)?.add(incoming.task_id ?? incoming.display_key);
+    set(state => {
+      const list = state.tasksByConversation[conversationId] ?? [];
+      const index = list.findIndex(task => task.task_id === (incoming.task_id ?? incoming.display_key));
+      const ordinary = mergeOrdinarySnapshot(list[index]?.ordinary, incoming, collection);
+      const next = list.slice();
+      const task = publicTask(ordinary, conversationId);
+      if (index < 0) next.push(task); else next[index] = task;
+      return { tasksByConversation: { ...state.tasksByConversation, [conversationId]: next } };
+    });
+  },
+  loadOrdinaryTask: async (conversationId, taskIdOrDisplayKey, collection, cursor) => {
+    const epoch = get()._viewEpoch;
+    const task = get().getTasks(conversationId).find(item => item.task_id === taskIdOrDisplayKey
+      || item.ordinary?.display_key === taskIdOrDisplayKey);
+    const session = useWorkflowStore.getState().sessionByConversation[conversationId];
+    const workflowTask = session?.ordinary_tasks?.find(item => item.display_key === taskIdOrDisplayKey);
+    const taskId = workflowTask ? null : task?.ordinary?.task_id ?? task?.task_id;
+    const params = { view: "ordinary", collection, cursor, limit: 100,
+      display_key: task?.ordinary?.display_key ?? workflowTask?.display_key ?? taskIdOrDisplayKey };
+    try {
+      const response = taskId
+        ? await TaskServiceApi().getTaskDetail(taskId, { params })
+        : session ? await WorkflowSessionApi().getProjection(session.session_id, { params }) : null;
+      if (!response) throw new Error("Task unavailable");
+      if (get()._viewEpoch !== epoch) return;
+      const data = response.data?.data ?? response.data;
+      if (taskId) {
+        const incoming = readOrdinaryTask(data?.task ?? data);
+        if (!incoming) throw new Error("Invalid task snapshot");
+        get().applyOrdinarySnapshot(conversationId, incoming, cursor ? collection : undefined);
+      } else {
+        const incoming = readOrdinaryTask(data?.tasks?.find((item: OrdinaryTaskView) => item.display_key === taskIdOrDisplayKey));
+        const latest = useWorkflowStore.getState().sessionByConversation[conversationId];
+        if (!incoming || !latest || latest.session_id !== session?.session_id) throw new Error("Task unavailable");
+        const merged = mergeOrdinarySnapshot(latest.ordinary_tasks?.find(item => item.display_key === incoming.display_key), incoming, cursor ? collection : undefined);
+        useWorkflowStore.getState().setSession(conversationId, { ...latest,
+          ordinary_revision: Math.max(latest.ordinary_revision ?? 0, incoming.revision), ordinary_error: false,
+          ordinary_tasks: (latest.ordinary_tasks ?? []).map(item => item.display_key === merged.display_key ? merged : item),
+          steps: latest.steps?.map(step => step.ordinary?.display_key === merged.display_key ? { ...step, ordinary: merged } : step),
+        });
+      }
+    } catch (error) {
+      if (cursor && (error as { response?: { status?: number } }).response?.status === 409) {
+        if (workflowTask && session) {
+          await useWorkflowStore.getState().refreshOrdinarySession(conversationId, session.session_id);
+          if (useWorkflowStore.getState().sessionByConversation[conversationId]?.ordinary_error) throw error;
+          return;
+        }
+        return get().loadOrdinaryTask(conversationId, taskIdOrDisplayKey);
+      }
+      throw error;
+    }
+  },
   tasksByConversation: {},
   artifactsByConversation: {},
   deliveriesByConversation: {},
@@ -377,6 +466,11 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
   },
 
   applyTaskEvent: (conversationId, taskId, event) => {
+    if (get().viewMode === "ordinary") {
+      const snapshot = event.type === "task_snapshot" ? readOrdinaryTask(event.data) : undefined;
+      if (snapshot && snapshot.task_id === taskId) get().applyOrdinarySnapshot(conversationId, snapshot);
+      return;
+    }
     if (["task_start", "done", "error", "cancelled", "canceled"].includes(event.type)) {
       requestConversationStatusRefresh(conversationId);
     }
@@ -605,7 +699,8 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
     const task = get().getTasks(conversationId).find((item) => item.task_id === taskId);
     if (task && TERMINAL_TASK_STATUSES.has(task.status)) return;
 
-    const sse = new SSE(taskStreamUrl(taskId), {
+    const epoch = get()._viewEpoch;
+    const sse = new SSE(taskStreamUrl(taskId, get().viewMode), {
       method: Method.GET,
       headers: {
         Accept: "text/event-stream",
@@ -614,13 +709,23 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
       timeout: 3600000,
       callbacks: {
         message: (e: CustomEvent) => {
-          if (get().activeConversationId !== conversationId) return;
+          if (get().activeConversationId !== conversationId || get()._viewEpoch !== epoch) return;
           const raw = (e as any).data;
           if (!raw || raw === "[DONE]") return;
           const event = UIUtils.jsonParser(raw);
           if (!event?.type) return;
 
+          if (event.type === "resync_required") {
+            void get().loadConversationTasks(conversationId);
+            return;
+          }
           get().applyTaskEvent(conversationId, taskId, event);
+          if (event.type === "task_snapshot") {
+            scheduleWorkflowSessionRefresh(conversationId);
+            const current = get().getTasks(conversationId).find(item => item.task_id === taskId);
+            if (current && TERMINAL_TASK_STATUSES.has(current.status)) get().unsubscribeTask(taskId);
+            return;
+          }
           if (event.type === "artifact") {
             const artifact: TaskArtifact = {
               slot: event.slot,
@@ -641,7 +746,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           }
         },
         error: () => {
-          if (get().activeConversationId !== conversationId) return;
+          if (get().activeConversationId !== conversationId || get()._viewEpoch !== epoch) return;
           const stream = get()._taskStreams[taskId];
           try { stream?.close(); } catch { /* ignore */ }
           set((state) => {
@@ -652,7 +757,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               _taskStreams: nextStreams,
               tasksByConversation: {
                 ...state.tasksByConversation,
-                [conversationId]: tasks.map((item) => item.task_id === taskId
+                [conversationId]: tasks.map((item) => item.task_id === taskId && get().viewMode === "developer"
                   ? { ...item, execution_log: [], artifacts: [] }
                   : item),
               },
@@ -792,10 +897,20 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           _queuedTaskLoads: { ...s._queuedTaskLoads, [conversationId]: false },
           _taskLoadErrors: { ...s._taskLoadErrors, [conversationId]: false },
         }));
+        const epoch = get()._viewEpoch;
         try {
-          const res = await TaskServiceApi().listConversationTasks(conversationId);
+          const ordinaryMode = get().viewMode === "ordinary";
+          const res = await TaskServiceApi().listConversationTasks(conversationId,
+            ordinaryMode ? { params: { view: "ordinary" } } : undefined);
+          if (get()._viewEpoch !== epoch) { continue; }
           const tasks = res?.data?.data?.tasks ?? res?.data?.tasks ?? [];
-          const normalized: SubAgentTask[] = tasks.map((t: any): SubAgentTask => ({
+          if (ordinaryMode && (!Array.isArray(tasks) || tasks.some((task: unknown) => !readOrdinaryTask(task)))) {
+            throw new Error("Invalid public task list");
+          }
+          const normalized: SubAgentTask[] = ordinaryMode
+            ? tasks.map(readOrdinaryTask).filter((task: OrdinaryTaskView | undefined): task is OrdinaryTaskView => Boolean(task))
+              .map((task: OrdinaryTaskView) => publicTask(task, conversationId))
+            : tasks.map((t: any): SubAgentTask => ({
             task_id: t.task_id,
             conversation_id: conversationId,
             trigger_history_id: t.trigger_history_id,
@@ -830,10 +945,17 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               .filter((task) => (
                 liveCreatedTaskIds.has(task.task_id) && !snapshotIds.has(task.task_id)
               ));
+            const runs: OrdinaryRunView[] = res?.data?.data?.runs ?? res?.data?.runs ?? [];
             return {
+              runsByConversation: ordinaryMode ? { ...state.runsByConversation, [conversationId]: runs.map(run => {
+                const current = state.runsByConversation[conversationId]?.find(item => item.run_id === run.run_id);
+                return current && current.revision > run.revision ? current : run;
+              }) } : state.runsByConversation,
               tasksByConversation: {
                 ...state.tasksByConversation,
-                [conversationId]: [...normalized.map((task) => ({
+                [conversationId]: [...normalized.map((task) => task.ordinary ? publicTask(mergeOrdinarySnapshot(
+                  state.tasksByConversation[conversationId]?.find(live => live.task_id === task.task_id)?.ordinary, task.ordinary,
+                ), conversationId) : ({
                   ...task,
                   plan_steps: task.plan_steps ?? state.tasksByConversation[conversationId]
                     ?.find((live) => live.task_id === task.task_id)?.plan_steps,
@@ -847,6 +969,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             }
           });
         } catch {
+          if (get()._viewEpoch !== epoch) continue;
           set((s) => ({
             _taskLoadErrors: { ...s._taskLoadErrors, [conversationId]: true },
           }));
@@ -877,11 +1000,13 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
     liveArtifactIdsCreatedDuringLoad.set(conversationId, liveCreatedArtifactIds);
     try {
       do {
+        const epoch = get()._viewEpoch;
         set((s) => ({
           _queuedArtifactLoads: { ...s._queuedArtifactLoads, [conversationId]: false },
         }));
         try {
           const res = await TaskServiceApi().listConversationArtifacts(conversationId);
+          if (get()._viewEpoch !== epoch) continue;
           const artifacts = res?.data?.data?.artifacts ?? res?.data?.artifacts ?? [];
           const deliveries = res?.data?.data?.deliveries ?? res?.data?.deliveries ?? artifacts;
           const historyOrder = res?.data?.data?.history_order ?? res?.data?.history_order ?? {};
@@ -952,6 +1077,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
     taskIds.forEach((taskId) => get().unsubscribeTask(taskId));
     get().unsubscribeConvEvents(conversationId);
     set((state) => ({
+      runsByConversation: { ...state.runsByConversation, [conversationId]: [] },
       tasksByConversation: {
         ...state.tasksByConversation,
         [conversationId]: [],
@@ -987,13 +1113,16 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
   subscribeConvEvents: (conversationId) => {
     if (!conversationId) return;
     if (get().activeConversationId === conversationId && get()._convStream) return;
+    const previousConversation = get().activeConversationId;
+    if (previousConversation && previousConversation !== conversationId) get().unsubscribeConvEvents(previousConversation);
     if (convReconnectTimer) {
       clearTimeout(convReconnectTimer);
       convReconnectTimer = null;
     }
     try { get()._convStream?.close(); } catch { /* ignore */ }
     set({ activeConversationId: conversationId, _convStream: null });
-    const sse = new SSE(convEventsUrl(conversationId), {
+    const epoch = get()._viewEpoch;
+    const sse = new SSE(convEventsUrl(conversationId, get().viewMode), {
       method: Method.GET,
       headers: {
         Accept: 'text/event-stream',
@@ -1002,12 +1131,21 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
       timeout: 3600000,
       callbacks: {
         message: (e: CustomEvent) => {
-          if (get().activeConversationId !== conversationId) return;
+          if (get().activeConversationId !== conversationId || get()._viewEpoch !== epoch) return;
           const raw = (e as any).data;
           if (!raw || raw === '[DONE]') return;
           const event = UIUtils.jsonParser(raw);
           if (!event || !event.type) return;
           const { type, payload } = event;
+          if (get().viewMode === "ordinary" && ["task_created", "task_updated"].includes(type)) {
+            if (type === "task_created" && payload?.task_id) {
+              liveTaskIdsCreatedDuringLoad.get(conversationId)?.add(payload.task_id);
+              get().subscribeTask(conversationId, payload.task_id);
+            }
+            void get().loadConversationTasks(conversationId);
+            scheduleWorkflowSessionRefresh(conversationId);
+            return;
+          }
           if (["task_created", "workflow_completed", "workflow_error", "step_waiting", "workflow_step_feedback", "workflow_runtime_updated", "auto_chat_started", "driver_input", "driver_fallback"].includes(type)) {
             requestConversationStatusRefresh(conversationId);
           }
@@ -1078,7 +1216,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               void get().loadConversationArtifacts(conversationId);
             }
           } else if (type === 'artifact_created' && payload?.artifact_id) {
-            if (replayed) {
+            if (replayed || get().viewMode === "ordinary") {
               void get().loadConversationArtifacts(conversationId);
               return;
             }
@@ -1096,7 +1234,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             }));
             useWorkflowStore.getState().setAutoRunning(conversationId, true);
           } else if (type === 'workflow_step_feedback') {
-            if (replayed || !payload?.message || !payload?.task_id) return;
+            if (replayed || !payload?.task_id || (!payload?.message && !payload?.history_id)) return;
             window.dispatchEvent(new CustomEvent(CHAT_WORKFLOW_STEP_FEEDBACK_EVENT, {
               detail: {
                 conversationId,
@@ -1177,7 +1315,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           }
         },
         error: () => {
-          if (get().activeConversationId !== conversationId) return;
+          if (get().activeConversationId !== conversationId || get()._viewEpoch !== epoch) return;
           try { get()._convStream?.close(); } catch { /* ignore */ }
           set({ _convStream: null });
           cancelWorkflowSessionRefresh();
@@ -1201,7 +1339,9 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
     if (convReconnectTimer) clearTimeout(convReconnectTimer);
     convReconnectTimer = null;
     cancelWorkflowSessionRefresh();
-    get().getTasks(conversationId).forEach((task) => get().unsubscribeTask(task.task_id));
+    // A live task notice can open its stream before the task-list request resolves.
+    // This store has one active conversation, so close subscriptions, not just rows.
+    for (const taskId of new Set([...Object.keys(get()._taskStreams), ...taskReconnectTimers.keys()])) get().unsubscribeTask(taskId);
     try { get()._convStream?.close(); } catch { /* ignore */ }
     set({ activeConversationId: '', _convStream: null });
   },

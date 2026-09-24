@@ -1844,5 +1844,11 @@
   "2002922": {"en-US": "The artifact must be a regular file no larger than 20 MiB", "zh-CN": "产物必须是大小不超过 20 MiB 的普通文件"},
   "2002923": {"en-US": "The artifact exceeds the 20 MiB size limit", "zh-CN": "产物超过 20 MiB 大小限制"},
   "2002760": {"zh-CN": "会话与对话组的类型不一致，请选择同类型的对话组", "en-US": "Conversation and group types must match. Choose a group of the same type."},
-  "2003102": {"en-US": "Expected an HTTP service URL", "zh-CN": "服务地址必须是有效的 HTTP 或 HTTPS URL"}
+  "2003102": {"en-US": "Expected an HTTP service URL", "zh-CN": "服务地址必须是有效的 HTTP 或 HTTPS URL"},
+  "2003108": {"en-US": "Task details could not be loaded", "zh-CN": "暂时无法加载任务详情，请重试"},
+  "2003109": {"en-US": "Task details changed; reload the task", "zh-CN": "任务详情已变化，请重新加载"},
+  "2003110": {"en-US": "Task event could not be accepted", "zh-CN": "无法接收任务更新"},
+  "2003111": {"en-US": "Workflow session unavailable", "zh-CN": "工作流会话不可用"},
+  "2003112": {"en-US": "Task sources exceed the supported limit", "zh-CN": "任务来源数量或大小超过限制"},
+  "2003113": {"en-US": "Task update could not be saved", "zh-CN": "暂时无法保存任务更新"}
 }

@@ -144,12 +144,12 @@ export function exportContextPrompt(payload: Record<string, unknown>) {
 
 // SubAgent task SSE endpoint. Granular execution events are streamed here so
 // they cannot crowd lifecycle events out of the conversation event channel.
-export const taskStreamUrl = (taskId: string) =>
-  `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}:stream`;
+export const taskStreamUrl = (taskId: string, view?: "ordinary" | "developer") =>
+  `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}:stream${view === "ordinary" ? "?view=ordinary" : ""}`;
 
 // Conversation-level events SSE endpoint.
-export const convEventsUrl = (conversationId: string) =>
-  `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/events`;
+export const convEventsUrl = (conversationId: string, view?: "ordinary" | "developer") =>
+  `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/events${view === "ordinary" ? "?view=ordinary" : ""}`;
 
 export function decideToolLimit(
   conversationId: string,

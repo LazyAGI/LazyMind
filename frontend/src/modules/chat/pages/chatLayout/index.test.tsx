@@ -245,6 +245,7 @@ vi.mock("@/modules/chat/store/workflowPanel", () => {
 
 vi.mock("@/modules/chat/store/taskCenter", () => {
   const state = {
+    setViewMode: vi.fn(),
     tasksByConversation: mocks.tasksByConversation,
     artifactsByConversation: mocks.artifactsByConversation,
     _loadingTasks: mocks.taskLoading,
@@ -254,7 +255,7 @@ vi.mock("@/modules/chat/store/taskCenter", () => {
     unsubscribeConvEvents: vi.fn(),
   };
   return {
-    useTaskCenterStore: (selector: (value: typeof state) => unknown) => selector(state),
+    useTaskCenterStore: Object.assign((selector: (value: typeof state) => unknown) => selector(state), { getState: () => state }),
   };
 });
 
