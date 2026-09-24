@@ -824,6 +824,29 @@ func init() {
 	} {
 		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
 	}
+	for _, source := range []string{
+		"block_id is required",
+		"at least one translation override is required",
+	} {
+		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
+	}
+	for _, source := range []string{
+		"translation artifact not found",
+		"translation draft not found; regenerate this translation first",
+		"translation draft block not found",
+	} {
+		registerAdditionalErrorAlias(source, "Resource not found", http.StatusNotFound, 2000106)
+	}
+	for _, source := range []string{
+		"read translation draft",
+		"decode translation draft",
+		"save translation overrides failed",
+		"save translation draft failed",
+		"pdf translation renderer did not render every block",
+		"register revised translation failed",
+	} {
+		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
+	}
 
 	registerAdditionalError("task_lease_lost", http.StatusConflict, 2002365)
 	registerAdditionalError("maintenance_busy", http.StatusServiceUnavailable, 2002366)
