@@ -55,6 +55,7 @@ class ChatRuntimeOptions(BaseModel):
     mail_draft_patch: Optional[Dict[str, Any]] = None
     mail_mailbox_confirm: Optional[str] = None
     mail_mailbox_confirm_draft_id: Optional[str] = None
+    user_env_vars: Dict[str, str] = Field(default_factory=dict)
 
 
 class ChatPersonalizationOptions(BaseModel):

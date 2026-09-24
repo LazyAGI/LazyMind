@@ -59,6 +59,8 @@ x-core-env: &core-env
   LAZYMIND_FILE_URL_SIGN_SECRET: changeme-in-production
   LAZYMIND_FILE_URL_EXPIRE_SECONDS: "3600"
   LAZYMIND_OFFICE_CONVERT_URL: http://office-convert-service:8080/v1/office/to-pdf
+  LAZYMIND_USER_ENV_SECRET_KEY_FILE: /run/secrets/user-env/user-env.key
+  LAZYMIND_USER_ENV_LEGACY_SECRET_KEY: ${LAZYMIND_USER_ENV_LEGACY_SECRET_KEY:-}
 
 x-llm-api-keys: &llm-api-keys
   LAZYLLM_OPENAI_API_KEY: ${LAZYLLM_OPENAI_API_KEY:-}
@@ -124,6 +126,21 @@ x-cache-env: &cache-env
   LAZYLLM_READER_USE_CACHE: ${LAZYMIND_READER_USE_CACHE:-true}
 
 services:
+  user-env-key-init:
+    image: ${DOCKER_MIRROR:-docker.m.daocloud.io/library/}alpine:3.21
+    network_mode: none
+    read_only: true
+    restart: "no"
+    environment:
+      LAZYMIND_USER_ENV_SECRET_KEY: ${LAZYMIND_USER_ENV_SECRET_KEY:-}
+      LAZYMIND_USER_ENV_SECRET_KEY_INPUT_FILE: ${LAZYMIND_USER_ENV_SECRET_KEY_FILE:+/run/secrets/user-env-key-input}
+    secrets:
+      - user-env-key-input
+    volumes:
+      - ./data/core:/run/secrets/user-env
+      - ./scripts/init-user-env-key.sh:/usr/local/bin/init-user-env-key.sh:ro
+    command: ["/bin/sh", "/usr/local/bin/init-user-env-key.sh"]
+
   internal-service-token-init:
     image: ${DOCKER_MIRROR:-docker.m.daocloud.io/library/}alpine:3.21
     network_mode: none
@@ -433,6 +450,7 @@ services:
       args:
         <<: *mirror-args
     volumes:
+      - ./data/core:/run/secrets/user-env:ro
       - internal-service-credentials:/run/secrets/internal-service:ro
       - ./api/backend:/openapi-export
       - ./data/evo:/var/lib/lazymind/evo
@@ -521,6 +539,8 @@ services:
       # progress, not an unhealthy steady-state service.
       start_period: 180s
     depends_on:
+      user-env-key-init:
+        condition: service_completed_successfully
       internal-service-token-init:
         condition: service_completed_successfully
       db:
@@ -572,12 +592,15 @@ services:
     working_dir: /app
     command: ["sleep", "infinity"]
     volumes:
+      - ./data/core:/run/secrets/user-env:ro
       - ./backend/core:/app
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./skills/.runtime:/skills/.runtime:ro
     environment:
       <<: [*core-env, *proxy-env]
     depends_on:
+      user-env-key-init:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       db-bootstrap:
@@ -1179,6 +1202,8 @@ services:
         condition: service_healthy
 
 secrets:
+  user-env-key-input:
+    file: ${LAZYMIND_USER_ENV_SECRET_KEY_FILE:-/dev/null}
   lazymind-internal-service-token-input:
     file: ${LAZYMIND_INTERNAL_SERVICE_TOKEN_FILE:-/dev/null}
   lazymind-feishu-cli-sidecar-hmac:

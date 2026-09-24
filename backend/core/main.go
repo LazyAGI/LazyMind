@@ -51,6 +51,7 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
+	"lazymind/core/userenv"
 	"lazymind/core/workflow"
 	workflowexecutor "lazymind/core/workflow/executor"
 	workflowstore "lazymind/core/workflow/store"
@@ -775,6 +776,7 @@ func run(ctx context.Context) error {
 		log.Logger.Fatal().Msg("initialize local credential key manager failed")
 	}
 	modelprovider.SetCredentialKeyManager(credentialKeys)
+	userenv.SetCredentialKeyManager(credentialKeys)
 	if err := migrate.RunUp(); err != nil {
 		return &startupError{msg: "run SQL migrations", err: err}
 	}
@@ -921,6 +923,7 @@ func run(ctx context.Context) error {
 
 	// Register plugin lifecycle hooks into the subagent EventHooks.
 	workflow.RegisterSubAgentHooks()
+	chat.RegisterTaskCenterEnvCleanup()
 	// Wire the conversation SSE hook so plugin events reach the frontend via the
 	// conversation-level events channel (history-independent real-time push).
 	subagent.EventHooks.RegisterConversationEventHook(

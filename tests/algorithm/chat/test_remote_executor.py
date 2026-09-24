@@ -172,6 +172,7 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
                 'task': {'conversation_id': 'conversation-1',
                          'input_slots': [], 'output_slots': ['workflow_routing']},
                 'workspace_path': str(tmp_path / 'task-analysis'),
+                'user_env_vars': {'Mixed_API_KEY': 'synthetic-secret'} if configured else {},
                 'params': {
                     'workflow_id': 'image-workflow', 'revision_id': 'revision-1',
                     'step_id': 'analyze_subject',
@@ -245,6 +246,11 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
             from lazymind.model_config import is_model_role_available
             assert is_model_role_available('video_generator', config_path=str(model_yaml)) == configured
             import lazyllm
+            from lazyllm.tools import get_dynamic_env_vars
+            assert get_dynamic_env_vars() == (
+                {'Mixed_API_KEY': 'synthetic-secret'} if configured else {}
+            )
+            assert lazyllm.globals['conversation_env_overrides'] == {}
             from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
             restored = lazyllm.globals['agentic_config']
             permission = WorkspaceContext.from_config(restored)
@@ -305,6 +311,8 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
     assert checks[0] == checks[1] == checks[2]
     assert runtime.completed['control'] == {'next_step': next_step}
     assert runtime.completed['artifacts'] == checkpoint['artifacts']
+    assert 'synthetic-secret' not in json.dumps(checkpoint)
+    assert 'synthetic-secret' not in json.dumps(runtime.events)
     assert runtime.events[-1]['status'] == 'succeeded'
     assert len(runtime.artifacts) == 3
 
@@ -821,7 +829,8 @@ async def test_reclaimed_attempt_resumes_durable_steps_in_workspace(monkeypatch,
             return {'task': {'input_slots': [], 'output_slots': []},
                     'workspace_path': str(workspace), 'params': {},
                     'steps': [{'seq': 0, 'role': 'text', 'content': {'content': 'checkpoint'}}],
-                    'llm_config': {}, 'tool_config': {'tavily': 'test-token'}}
+                    'llm_config': {}, 'tool_config': {'tavily': 'test-token'},
+                    'user_env_vars': {'Mixed_API_KEY': 'synthetic-secret'}}
 
         async def heartbeat(self, *_):
             return None
@@ -844,6 +853,8 @@ async def test_reclaimed_attempt_resumes_durable_steps_in_workspace(monkeypatch,
     assert runtime.completed is True
     assert captured['resume'] is True
     assert captured['tool_config'] == {'tavily': 'test-token'}
+    assert captured['user_env_vars'] == {'Mixed_API_KEY': 'synthetic-secret'}
+    assert 'synthetic-secret' not in json.dumps(captured['task_spec'])
     assert captured['task_spec']['workspace_path'] == str(workspace)
     assert captured['initial_steps'][0]['content']['content'] == 'checkpoint'
     assert workspace.exists()

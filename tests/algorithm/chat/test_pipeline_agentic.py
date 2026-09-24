@@ -33,6 +33,7 @@ async def _collect_streaming_response(response):
 def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch, mcp_failure):
     agent_calls = []
     agent_queries = []
+    agent_envs = []
 
     class FakeAgent:
         def __init__(self, llm, tools, **kwargs):
@@ -42,6 +43,7 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch, mc
 
         def forward(self, query, llm_chat_history=None):
             agent_queries.append(query)
+            agent_envs.append(dict(chat_service.lazyllm.globals.get('dynamic_env_vars', {})))
             chat_service.lazyllm.FileSystemQueue().enqueue(json.dumps({'tag': 'text', 'delta': f'answer:{query}'}))
             return {'text': f'final:{query}'}
 
@@ -110,6 +112,8 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch, mc
             mcp_config.append({'name': 'healthy', 'url': 'https://mcp.example/healthy'})
 
     async def drive():
+        chat_service.lazyllm.globals._init_sid('sid-1')
+        chat_service.lazyllm.globals['dynamic_env_vars'] = {'REMOVED_TOKEN': 'stale-secret'}
         response = await chat_service.handle_chat(ChatRequest(
             message={'query': 'hello', 'history': []},
             conversation={
@@ -118,7 +122,10 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch, mc
                 'user_id': 'user-1',
             },
             retrieval={'filters': {}},
-            runtime={'llm_config': {}, 'mcp_config': mcp_config},
+            runtime={
+                'llm_config': {}, 'mcp_config': mcp_config,
+                'user_env_vars': {'REDFOX_API_KEY': 'runtime-only-secret'},
+            },
             personalization={'use_memory': True},
             agent={
                 'disabled_tools': [
@@ -168,9 +175,13 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch, mc
     assert f'Use `{workspace}` as the single working directory' in agent_calls[0]['kwargs']['prompt']
     assert '## Attached Files' not in agent_calls[0]['kwargs']['prompt']
     query = agent_queries[0]
+    assert 'Enabled user-level variables: ["REDFOX_API_KEY"]' in query
+    assert 'runtime-only-secret' not in query
+    assert 'REMOVED_TOKEN' not in query
+    assert agent_envs == [{'REDFOX_API_KEY': 'runtime-only-secret'}]
     instruction_idx = query.index('### User Instruction\n\nhello')
     assert instruction_idx >= 0
-    assert query.index('ATTENTION — if this turn supplies an environment variable') > instruction_idx
+    assert query.index('For environment setup, call set_session_env') > instruction_idx
     assert query.index('ATTENTION — `ask_user`') > instruction_idx
     assert 'answer:### Runtime Context' in body
     assert 'hello' in body

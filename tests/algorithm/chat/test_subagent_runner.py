@@ -542,6 +542,66 @@ def test_run_subagent_stream_happy_path(monkeypatch, display_plan):
     assert raw.endswith('data: [DONE]\n\n')
 
 
+def test_subagent_runtime_env_refreshes_without_entering_plan_or_events(monkeypatch, tmp_path):
+    import lazyllm
+
+    task = {**_DEFAULT_TASK, 'workspace_path': str(tmp_path)}
+    db = _install_fake_db(monkeypatch, task)
+    monkeypatch.setattr(runner_mod, 'AutoModel', lambda model: 'fake_llm')
+    monkeypatch.setattr(runner_mod, 'inject_model_config', lambda cfg: None)
+    monkeypatch.setattr(runner_mod, 'inject_tool_config', lambda cfg: None)
+    monkeypatch.setattr(runner_mod, 'set_context', lambda ctx: ctx._artifact_counts.update(result=1))
+    _install_fake_translator(monkeypatch)
+    expected = {}
+
+    class Executor:
+        async def stream(self, llm, plan):
+            assert lazyllm.globals._sid == _DEFAULT_TASK_ID
+            assert lazyllm.globals['dynamic_env_vars'] == expected
+            assert lazyllm.globals['conversation_env_overrides'] == {}
+            assert 'synthetic-secret' not in repr(plan)
+            yield 'final', 'task done'
+
+    monkeypatch.setattr(runner_mod, 'AgentExecutor', Executor)
+
+    async def run():
+        nonlocal expected
+        for resume, values in [(False, {'Mixed_API_KEY': 'synthetic-secret-one'}),
+                               (True, {'Mixed_API_KEY': 'synthetic-secret-two'}), (True, None)]:
+            lazyllm.globals._init_sid(sid=_DEFAULT_TASK_ID)
+            lazyllm.globals['dynamic_env_vars'] = {'STALE_TOKEN': 'synthetic-secret-stale'}
+            lazyllm.globals['conversation_env_overrides'] = {'Mixed_API_KEY': 'synthetic-secret-other-chat'}
+            expected = values or {}
+            raw = await _collect(runner_mod.run_subagent_stream(
+                _DEFAULT_TASK_ID, task_spec=task, resume=resume, user_env_vars=values,
+            ))
+            assert any(event['type'] == 'done' for event in _sse_to_events(raw))
+            assert 'synthetic-secret' not in raw
+            assert 'synthetic-secret' not in repr(db.steps)
+
+    asyncio.run(run())
+
+
+@pytest.mark.asyncio
+async def test_subagent_api_forwards_private_runtime_env(monkeypatch):
+    from lazymind.chat.api.subagent_routes import run_subagent
+
+    captured = {}
+
+    async def stream(**kwargs):
+        captured.update(kwargs)
+        yield 'data: [DONE]\n\n'
+
+    monkeypatch.setattr(runner_mod, 'run_subagent_stream', stream)
+    response = await run_subagent(
+        task_id=_DEFAULT_TASK_ID, task_spec=_DEFAULT_TASK,
+        user_env_vars={'Mixed_API_KEY': 'synthetic-secret'},
+    )
+    await _collect(response.body_iterator)
+    assert captured['user_env_vars'] == {'Mixed_API_KEY': 'synthetic-secret'}
+    assert 'user_env_vars' not in captured['task_spec']
+
+
 def test_tool_result_sends_separate_resume_safe_payload(monkeypatch):
     db = _install_fake_db(monkeypatch)
     _install_fake_lazyllm(monkeypatch)

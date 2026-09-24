@@ -7,7 +7,8 @@ export interface MappedChatStreamError {
   appCode: number | string;
   httpStatus: number;
   semanticCode: ChatStreamFailureCode;
-  reason?: "model_failure" | "runtime_failure";
+  reason: "model_failure" | "runtime_failure";
+  historyId?: string;
 }
 
 export const MODEL_FAILURE_CODES: ReadonlySet<ModelFailureCode> = new Set([
@@ -99,8 +100,8 @@ function mapMessageToModelFailure(message: string): ModelFailureCode | undefined
 }
 
 /**
- * Converts a Core `{ code, message }` HTTP error into the public model-failure
- * vocabulary. Provider text is used only for classification and is never
+ * Converts a rejected Core HTTP request into a terminal failure, not a stream
+ * interruption. Provider text is used only for classification and is never
  * returned, so callers cannot accidentally render credentials or raw errors.
  */
 export function parseCoreChatStreamError(
@@ -110,7 +111,7 @@ export function parseCoreChatStreamError(
   const httpStatus = Number(eventStatus);
   // A status of zero means the browser did not receive an HTTP response. Keep
   // treating it as a recoverable transport interruption.
-  if (!Number.isInteger(httpStatus) || httpStatus < 100 || httpStatus > 599) {
+  if (!Number.isInteger(httpStatus) || httpStatus < 400 || httpStatus > 599) {
     return undefined;
   }
 
@@ -132,32 +133,32 @@ export function parseCoreChatStreamError(
     return undefined;
   }
 
+  const body = isRecord(payload.data) ? payload.data : payload;
+  const detail = isRecord(body.detail) ? body.detail : undefined;
+  if (detail?.reason === "user_env_invalid_name") {
+    return { appCode, httpStatus, semanticCode: "user_env_invalid_name", reason: "runtime_failure" };
+  }
+  if (detail?.reason === "user_env_unavailable" ||
+      message === "Unable to access user environment variables; check the credential key configuration") {
+    return { appCode, httpStatus, semanticCode: "user_env_unavailable", reason: "runtime_failure" };
+  }
+
   const directCode = String(appCode) as ModelFailureCode;
   const semanticCode = MODEL_FAILURE_CODES.has(directCode)
     ? directCode
     : CORE_MODEL_ERROR_CODE_MAP.get(String(appCode)) ??
       mapMessageToModelFailure(message);
 
-  // Only recognized model-provider failures receive the model-failure UI.
-  // Other Core errors are handled below according to whether the server
-  // actually responded to the request.
-  if (semanticCode) {
-    return { appCode, httpStatus, semanticCode };
-  }
-
-  // A structured 4xx response means the server received and rejected the
-  // request. It is not an SSE transport failure, so retrying the stream would
-  // misleadingly report a connection problem and cannot make the request valid.
-  if (httpStatus >= 400 && httpStatus < 500) {
-    return {
-      appCode,
-      httpStatus,
-      semanticCode: "request_rejected",
-      reason: "runtime_failure",
-    };
-  }
-
-  return undefined;
+  // Core rejected this request before opening SSE. Resuming by conversation id
+  // would replay an older turn; runtime failures must not suggest model changes.
+  return {
+    appCode, httpStatus,
+    semanticCode: semanticCode ?? "request_rejected",
+    reason: semanticCode ? "model_failure" : "runtime_failure",
+    ...(typeof detail?.history_id === "string" && detail.history_id.trim()
+      ? { historyId: detail.history_id.trim() }
+      : {}),
+  };
 }
 
 function hasPartialAssistantOutput(message: Record<string, unknown>): boolean {

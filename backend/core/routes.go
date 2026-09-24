@@ -601,6 +601,10 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- User Chat Settings (quick-question/new-task defaults) -----
 	handleAPI(r, "GET", "/user/chat-settings", []string{"qa.read"}, chat.GetChatSettings)
 	handleAPI(r, "PATCH", "/user/chat-settings", []string{"qa.write"}, chat.PatchChatSettings)
+	handleAPI(r, "GET", "/user/env-vars", []string{"qa.read"}, chat.ListUserEnvironmentVariables)
+	handleAPI(r, "POST", "/user/env-vars", []string{"qa.write"}, chat.CreateUserEnvironmentVariable)
+	handleAPI(r, "PATCH", "/user/env-vars/{id}", []string{"qa.write"}, chat.PatchUserEnvironmentVariable)
+	handleAPI(r, "DELETE", "/user/env-vars/{id}", []string{"qa.write"}, chat.DeleteUserEnvironmentVariable)
 	// Legal consent is a login prerequisite and must not depend on optional QA permissions.
 	// The handlers still require the gateway-injected X-User-Id identity.
 	handleAPI(r, "GET", "/user/ui-preferences", []string{}, userprefs.GetUIPreferences)
@@ -890,6 +894,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/conversations:setChatHistory", []string{"qa.write"}, chat.SetChatHistory)
 	handleAPI(r, "POST", "/conversations:feedBackChatHistory", []string{"qa.write"}, chat.FeedBackChatHistory)
 	handleAPI(r, "PATCH", "/conversations/{name}:ask-answers", []string{"qa.write"}, chat.SaveAskAnswers)
+	handleAPI(r, "POST", "/conversations/{name}:env-input", []string{"qa.write"}, chat.SubmitEnvironmentInput)
 	handleAPI(r, "PATCH", "/conversations:editable-block", []string{"qa.write"}, chat.PatchEditableBlock)
 
 	handleAPI(r, "GET", "/conversation:switchStatus", []string{"qa.read"}, chat.GetMultiAnswersSwitchStatus)

@@ -133,10 +133,11 @@ def test_stream_parallel_requests_see_isolated_config(monkeypatch):
     results = asyncio.run(drive_all())
 
     assert len(_FakeAgent.observations) == 6
+    # Each test query is one paragraph, followed by optional tool guidance.
     obs_by_query = {
         obs['query']
         .rsplit('### User Instruction\n\n', 1)[-1]
-        .split('\n\nATTENTION —', 1)[0]: obs
+        .split('\n\n', 1)[0]: obs
         for obs in _FakeAgent.observations
     }
     assert set(obs_by_query.keys()) == {f's_{i}' for i in range(6)}

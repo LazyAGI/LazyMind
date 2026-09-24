@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -8,7 +8,9 @@ import {
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import enUS from "@/i18n/locales/en-US";
 import zhCN from "@/i18n/locales/zh-CN";
+import { axiosInstance } from "@/components/request";
 import AssistantMessage, { ChatSourcePanel, externalProviderDisplayName } from "./index";
+import EnvInputCard, { type EnvironmentInputResult } from "../EnvInputCard";
 
 vi.mock("react-i18next", () => ({
   initReactI18next: {
@@ -141,7 +143,7 @@ describe("dual answer exports", () => {
 });
 
 describe("AssistantMessage cancellation", () => {
-  it("places the saved artifact action beside copy and download in the completed message toolbar", () => {
+  it("places the saved export beside copy and the artifact panel in the completed message toolbar", () => {
     useTaskCenterStore.setState({
       artifactsByConversation: { "export-toolbar": [{
         artifact_id: "export-1", history_id: "export-history", filename: "plan.md",
@@ -160,7 +162,7 @@ describe("AssistantMessage cancellation", () => {
     const toolbar = action.closest(".chat-assistant-msg-tool-actions") as HTMLElement;
     expect(toolbar).not.toBeNull();
     expect(within(toolbar).getByRole("img", { name: "copy" })).toBeInTheDocument();
-    expect(within(toolbar).getByRole("img", { name: "download" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("img", { name: "file-text" })).toBeInTheDocument();
     fireEvent.click(action);
     expect(screen.getByRole("dialog")).toBeVisible();
   });
@@ -477,6 +479,120 @@ describe("externalProviderDisplayName", () => {
   it("presents the provider ID as WorkBuddy", () => {
     expect(externalProviderDisplayName("workbuddy")).toBe("WorkBuddy");
   });
+});
+
+describe("environment deletion confirmation", () => {
+  it.each([false, true])("does not optimistically consume a card when stream startup returns %s", async (started) => {
+    const updateMessage = vi.fn();
+    const sendMessage = vi.fn().mockResolvedValue(started);
+    render(<AssistantMessage
+      index={0} length={1} renderText={() => null} regenerate={vi.fn()}
+      stopGeneration={vi.fn()} updateMessage={updateMessage} sendMessage={sendMessage}
+      item={{ role: "assistant", history_id: "delete-history", ask_pending: {
+        ask_id: "delete-card", user_env_delete: { id: "env", name: "test_api_key" },
+        questions: [{ text: "Delete?", type: "boolean", choices: ["__ask_user_yes__", "__ask_user_no__"] }],
+      } }}
+    />);
+    fireEvent.click(screen.getByRole("button", { name: "common.no" }));
+    await waitFor(() => expect(updateMessage).toHaveBeenCalled());
+    updateMessage.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "chat.askCardSubmit" }));
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByRole("button", { name: "common.no" })).toBeEnabled());
+    expect(updateMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("secure environment input", () => {
+  it.each(["unmount", "conversation", "history", "ask", "return", "disabled", "callback"] as const)(
+    "isolates pending save when %s changes",
+    async (scenario) => {
+      const receipt: EnvironmentInputResult = { name: "AWS_REGION", scope: "user", status: "configured" };
+      let resolve!: (response: { data: { data: EnvironmentInputResult } }) => void;
+      const post = vi.spyOn(axiosInstance, "post").mockImplementation(() => new Promise((done) => { resolve = done; }));
+      const onComplete = vi.fn().mockResolvedValue(undefined);
+      const latestComplete = vi.fn().mockResolvedValue(undefined);
+      const props = { conversationId: "a", historyId: "h", askId: "ask", input: receipt, disabled: false, onComplete };
+      const view = render(<EnvInputCard {...props} />);
+      try {
+        fireEvent.change(screen.getByLabelText("settingsPage.envVars.inputValue"), { target: { value: "synthetic-value" } });
+        fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+        await waitFor(() => expect(post).toHaveBeenCalledOnce());
+        if (scenario === "unmount") view.unmount();
+        else if (scenario === "conversation" || scenario === "return") {
+          view.rerender(<EnvInputCard {...props} conversationId="b" />);
+          if (scenario === "return") view.rerender(<EnvInputCard {...props} />);
+        } else if (scenario === "history") view.rerender(<EnvInputCard {...props} historyId="h2" />);
+        else if (scenario === "ask") view.rerender(<EnvInputCard {...props} askId="ask2" />);
+        else if (scenario === "disabled") view.rerender(<EnvInputCard {...props} disabled />);
+        else view.rerender(<EnvInputCard {...props} onComplete={latestComplete} />);
+        await act(async () => { resolve({ data: { data: receipt } }); });
+        expect(onComplete).not.toHaveBeenCalled();
+        expect(latestComplete).toHaveBeenCalledTimes(scenario === "callback" ? 1 : 0);
+        if (["conversation", "history", "ask", "return"].includes(scenario)) {
+          expect(screen.getByLabelText("settingsPage.envVars.inputValue")).toHaveValue("");
+          expect(screen.getByRole("button", { name: "common.save" })).toBeEnabled();
+          expect(screen.queryByText("settingsPage.envVars.inputStatus.configured")).not.toBeInTheDocument();
+        }
+      } finally { view.unmount(); post.mockRestore(); }
+    },
+  );
+
+  it.each(["user", "disabled", "conversation", "cancel", "failed"] as const)(
+    "keeps %s input out of chat messages and autosave",
+    async (scenario) => {
+      const scope = scenario === "user" || scenario === "disabled" ? "user" : "conversation";
+      const receipt = {
+        name: "AWS_REGION", scope, status: scenario === "cancel" ? "canceled" : "configured",
+        ...(scenario === "disabled" ? { enabled: false } : {}),
+      };
+      const post = vi.spyOn(axiosInstance, "post");
+      if (scenario === "failed") post.mockRejectedValue(new Error("safe failure"));
+      else post.mockResolvedValue({ data: { data: receipt } });
+      const updateMessage = vi.fn();
+      const sendMessage = vi.fn().mockResolvedValue(false);
+      try {
+        render(<AssistantMessage sessionId="input-conv" index={0} length={1}
+          renderText={() => null} regenerate={vi.fn()} stopGeneration={vi.fn()}
+          updateMessage={updateMessage} sendMessage={sendMessage}
+          item={{ role: "assistant", history_id: "input-history", run_status: "completed", ask_pending: {
+            ask_id: "input-card", questions: [], env_input: { name: "AWS_REGION", scope },
+          } }} />);
+        const input = screen.getByLabelText("settingsPage.envVars.inputValue");
+        expect(input).toHaveAttribute("type", "password");
+        fireEvent.change(input, { target: { value: " synthetic-value " } });
+        expect(updateMessage).not.toHaveBeenCalled();
+        expect(post).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole("button", { name: scenario === "cancel" ? "common.cancel" : "common.save" }));
+        await waitFor(() => expect(post).toHaveBeenCalledOnce());
+        expect(post.mock.calls[0][0]).toContain("/conversations/input-conv:env-input");
+        expect(post.mock.calls[0][1]).toEqual({
+          history_id: "input-history", ask_id: "input-card", cancel: scenario === "cancel",
+          ...(scenario !== "cancel" ? { value: " synthetic-value " } : {}),
+        });
+        if (scenario === "failed") {
+          await waitFor(() => expect(screen.getByRole("button", { name: /common.save/ })).toBeEnabled());
+          expect(sendMessage).not.toHaveBeenCalled();
+          expect(updateMessage).not.toHaveBeenCalled();
+          expect(input).toHaveValue(" synthetic-value ");
+        } else {
+          await waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+          expect(screen.queryByLabelText("settingsPage.envVars.inputValue")).not.toBeInTheDocument();
+          expect(JSON.stringify(sendMessage.mock.calls)).not.toContain("synthetic-value");
+          expect(JSON.stringify(updateMessage.mock.calls)).not.toContain("synthetic-value");
+          if (scenario === "disabled") {
+            expect(sendMessage).toHaveBeenCalledWith("settingsPage.envVars.inputContinuation.disabled");
+            expect(screen.getByText("settingsPage.envVars.inputStatus.disabled")).toBeInTheDocument();
+          }
+          expect(updateMessage).toHaveBeenCalledWith(expect.objectContaining({ ask_answered: true, env_input_result: receipt }));
+          // Resuming a failed stream retries only the status, never saves the secret twice.
+          fireEvent.click(screen.getByRole("button", { name: "settingsPage.envVars.resume" }));
+          await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2));
+          expect(post).toHaveBeenCalledOnce();
+        }
+      } finally { post.mockRestore(); }
+    },
+  );
 });
 
 describe("Fork message action", () => {

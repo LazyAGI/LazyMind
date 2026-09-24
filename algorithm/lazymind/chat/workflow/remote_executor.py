@@ -22,6 +22,7 @@ import httpx
 
 from lazymind.config import config
 from lazymind.chat.workflow.client import RemoteExecutorClient
+from lazymind.chat.engine.agent_runtime.env_runtime import inject_runtime_env
 from lazymind.chat.engine.tools.workspace_context import workflow_execution_scope
 
 LOG = logging.getLogger(__name__)
@@ -183,6 +184,7 @@ class RemoteWorkflowExecutor:
                     lazyllm.globals['config']['dynamic_model_configs'] = {}
                     inject_model_config(spec.get('llm_config'))
                     inject_tool_config(spec.get('tool_config'))
+                    inject_runtime_env(spec.get('user_env_vars'))
                     agentic_config = _build_agentic_config(task, params, 'workflow_step')
                     agentic_config['_workspace_execution'] = {
                         'task_id': task_id, 'attempt_id': attempt_id,
@@ -210,6 +212,7 @@ class RemoteWorkflowExecutor:
                         resume=bool(initial_steps),
                         model_config=spec.get('llm_config'),
                         tool_config=spec.get('tool_config'),
+                        user_env_vars=spec.get('user_env_vars'),
                         agent_type='workflow_step',
                         task_spec=task,
                         initial_steps=initial_steps,

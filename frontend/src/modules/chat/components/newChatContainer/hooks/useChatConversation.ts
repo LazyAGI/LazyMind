@@ -655,6 +655,7 @@ export function useChatConversation({
     conversationId: string,
     semanticCode: string,
     reason: "model_failure" | "runtime_failure" = "model_failure",
+    historyId?: string,
   ) {
     clearStreamRecovery(conversationId);
     const sourceList =
@@ -667,6 +668,15 @@ export function useChatConversation({
       semanticCode,
       reason,
     );
+    if (historyId) {
+      // Preflight failures can be persisted before SSE supplies a history ID.
+      for (const role of [RoleTypes.USER, RoleTypes.ASSISTANT]) {
+        const index = failedList.findLastIndex((item) => item?.role === role);
+        if (index >= 0) {
+          failedList[index] = { ...failedList[index], history_id: historyId };
+        }
+      }
+    }
     if (conversationId) {
       conversationMessagesCache.current.set(conversationId, failedList);
       streamManager.saveMessageList(conversationId, failedList);
@@ -761,7 +771,7 @@ export function useChatConversation({
     markStreamRecoveryFailed(conversationId);
   }
 
-  function onError(e: any) {
+  function onError(e: any, isResume = false) {
     if (e.type !== "error") {
       return;
     }
@@ -799,13 +809,14 @@ export function useChatConversation({
         (e as any).data,
         (e as any).status,
       );
-      if (mappedError) {
+      if (mappedError && !(isResume && mappedError.reason === "runtime_failure")) {
         confirmPendingClientConversation(errorConversationId);
         if (!conversationHasAuthoritativeTerminal(errorConversationId)) {
           markStructuredChatFailure(
             errorConversationId,
             mappedError.semanticCode,
             mappedError.reason,
+            mappedError.historyId,
           );
           return;
         }
@@ -1040,6 +1051,7 @@ export function useChatConversation({
       let assistantMessage =
         newList.length > 0 ? newList[newList.length - 1] : null;
       let assistantMessageIndex = newList.length - 1;
+      let matchesHistory = false;
       if (result.history_id) {
         const existingAssistantIndex = newList.findIndex(
           (item) =>
@@ -1047,6 +1059,7 @@ export function useChatConversation({
             item?.history_id === result.history_id,
         );
         if (existingAssistantIndex >= 0) {
+          matchesHistory = true;
           assistantMessageIndex = existingAssistantIndex;
           assistantMessage = newList[existingAssistantIndex];
         }
@@ -1080,7 +1093,7 @@ export function useChatConversation({
       if (
         !assistantMessage ||
         assistantMessage.role !== RoleTypes.ASSISTANT ||
-        isLastAssistantCompleted
+        (isLastAssistantCompleted && !matchesHistory)
       ) {
         assistantMessage = {
           role: RoleTypes.ASSISTANT,
@@ -1171,6 +1184,7 @@ export function useChatConversation({
     input: any[],
     action: ChatConversationsRequestActionEnum,
     extras?: Record<string, unknown>,
+    onSubmissionError?: (event?: CustomEvent) => Promise<void>,
   ) => {
     if (isModelSelectionSaving?.() || isWorkspacePermissionSaving?.()) {
       return false;
@@ -1204,10 +1218,20 @@ export function useChatConversation({
     setLoading(true);
     setIsStreaming(true);
 
+    let receivedMessage = false;
     const callbacks: Record<string, (e: CustomEvent) => void> = {
-      message: (e) => onMessage(e),
-      error: (e) => onError(e),
-      timeout: (e) => onTimeout(e),
+      message: (e) => {
+        receivedMessage = true;
+        onMessage(e);
+      },
+      error: (e) => {
+        if (!receivedMessage && onSubmissionError) void onSubmissionError(e);
+        else onError(e);
+      },
+      timeout: (e) => {
+        if (!receivedMessage && onSubmissionError) void onSubmissionError(e);
+        else onTimeout(e);
+      },
     };
 
     let sse: any;
@@ -1325,7 +1349,7 @@ export function useChatConversation({
 
     const callbacks: Record<string, (e: CustomEvent) => void> = {
       message: (e) => onMessage(e),
-      error: (e) => onError(e),
+      error: (e) => onError(e, true),
       timeout: (e) => onTimeout(e),
     };
     const latestAssistant = messageListRef.current.findLast(
@@ -1688,8 +1712,69 @@ export function useChatConversation({
       sources: [],
       model_mode: "value_engineering",
     };
+    const previousMessages = messageListRef.current;
+    const confirmationConversationId = currentConversationIdRef.current;
+    const isEnvConfirmation = !!params.ask_answers_structured && previousMessages.some(
+      (item) => item.ask_pending?.user_env_delete &&
+        item.ask_pending.ask_id === params.ask_answers_structured?.ask_id,
+    );
+    let restoringConfirmation = false;
+    const restoreEnvConfirmation = async (event?: CustomEvent) => {
+      if (restoringConfirmation) return;
+      restoringConfirmation = true;
+      const failedMessages = currentConversationIdRef.current === confirmationConversationId
+        ? messageListRef.current : conversationMessagesCache.current.get(confirmationConversationId);
+      const failedAssistant = failedMessages?.[failedMessages.length - 1];
+      if (!failedMessages || failedMessages[failedMessages.length - 2] !== userMessage ||
+          failedAssistant?.role !== RoleTypes.ASSISTANT) return;
+      clearStreamRecovery(confirmationConversationId);
+      stopStreamAfterReconciliation(confirmationConversationId);
+      message.error(getLocalizedErrorMessage({ response: { status: (event as any)?.status } }));
+      try {
+        // A confirmation can be consumed before a later preflight error. Never
+        // restore its old local state without checking the persisted decision.
+        const response = await ChatServiceApi().conversationServiceGetConversationHistory({
+          name: confirmationConversationId,
+        });
+        const restored = buildChatMessageListFromHistory(response.data.history ?? []);
+        if (!restored.length) return;
+        const currentMessages = currentConversationIdRef.current === confirmationConversationId
+          ? messageListRef.current : conversationMessagesCache.current.get(confirmationConversationId);
+        // Pagination may add older messages while either request is pending.
+        // Only this submission's unchanged tail may be removed; a newer turn wins.
+        if (!currentMessages || currentMessages[currentMessages.length - 2] !== userMessage ||
+            currentMessages[currentMessages.length - 1] !== failedAssistant) return;
+        const retainedMessages = currentMessages.slice(0, -2);
+        for (const item of restored) {
+          if (item.ask_pending?.ask_id === params.ask_answers_structured?.ask_id && !item.ask_answered) {
+            item.ask_saved_answers = retainedMessages.find(
+              (previous) => previous.ask_pending?.ask_id === item.ask_pending.ask_id,
+            )?.ask_saved_answers ?? item.ask_saved_answers;
+          }
+        }
+        // History is paginated. Preserve the loaded prefix and replace only
+        // refreshed records, excluding this submission's optimistic pair.
+        const refreshedHistoryIds = new Set(restored.map((item) => item.history_id).filter(Boolean));
+        const refreshedAskIds = new Set(restored.map((item) => item.ask_pending?.ask_id).filter(Boolean));
+        const merged = [
+          ...retainedMessages.filter((item) =>
+            !refreshedHistoryIds.has(item.history_id) &&
+            !refreshedAskIds.has(item.ask_pending?.ask_id),
+          ),
+          ...restored,
+        ];
+        conversationMessagesCache.current.set(confirmationConversationId, merged);
+        streamManager.saveMessageList(confirmationConversationId, merged);
+        if (currentConversationIdRef.current === confirmationConversationId) {
+          messageListRef.current = merged;
+          setMessageList(merged);
+        }
+      } catch {
+        // Leave the card locked if the server's decision cannot be verified.
+      }
+    };
     const newMessageList = [
-      ...messageListRef.current,
+      ...previousMessages,
       userMessage,
       assistantMessage,
     ];
@@ -1735,8 +1820,10 @@ export function useChatConversation({
           ? { mail_mailbox_confirm_draft_id: params.mail_mailbox_confirm_draft_id }
           : {}),
       },
+      isEnvConfirmation ? restoreEnvConfirmation : undefined,
     );
     if (!opened) {
+      if (isEnvConfirmation) await restoreEnvConfirmation();
       return false;
     }
 
@@ -1997,6 +2084,12 @@ export function useChatConversation({
     };
     const newList = [...messageListRef.current];
     const previousAssistant = newList[newList.length - 1];
+    // A rejected request may never have created a history row. Regenerating
+    // without a persisted turn would replace the previous successful answer.
+    const hasPersistedTurn = Boolean(
+      userMessage?.history_id ||
+      (previousAssistant?.history_id && !previousAssistant.archived_failure),
+    );
     const preservesFailedAttempt =
       previousAssistant?.role === RoleTypes.ASSISTANT &&
       ["failed", "interrupted"].includes(previousAssistant.run_status);
@@ -2030,7 +2123,15 @@ export function useChatConversation({
     try {
       const opened = await openSSE(
         regenerationInputs,
-        ChatConversationsRequestActionEnum.ChatActionRegeneration,
+        hasPersistedTurn
+          ? ChatConversationsRequestActionEnum.ChatActionRegeneration
+          : ChatConversationsRequestActionEnum.ChatActionNext,
+        !hasPersistedTurn ? {
+          ...(userMessage.mentions?.length ? { mentions: userMessage.mentions } : {}),
+          ...(userMessage.cite_history_ids?.length
+            ? { cite_history_ids: userMessage.cite_history_ids }
+            : {}),
+        } : undefined,
       );
       if (!opened) {
         messageListRef.current = previousMessageList;

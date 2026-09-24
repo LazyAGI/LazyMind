@@ -1,3 +1,7 @@
+DROP INDEX IF EXISTS idx_user_environment_variables_deleted_at;
+DROP INDEX IF EXISTS idx_user_env_user_enabled;
+DROP INDEX IF EXISTS idx_user_env_user_name_active;
+DROP TABLE IF EXISTS user_environment_variables;
 -- Personal MCP authentication mode. Existing encrypted headers remain compatible.
 ALTER TABLE mcp_servers DROP COLUMN auth_type;
 DROP TABLE IF EXISTS external_agent_skill_sources;

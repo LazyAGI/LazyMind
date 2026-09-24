@@ -1083,6 +1083,28 @@
 .settings-detail-row:last-child { border-bottom: 0; }
 .settings-detail-row strong { display: block; margin-bottom: 4px; color: #1f2937; font-size: 14px; }
 .settings-detail-row p { margin: 0; color: #64748b; font-size: 12px; line-height: 1.55; }
+
+.settings-env-panel {
+  overflow: hidden;
+  border: 1px solid rgba(211, 223, 239, .9);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .96);
+}
+
+.settings-env-var-name {
+  color: #334155;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.settings-env-secret-button {
+  padding-inline: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.settings-env-muted {
+  color: #94a3b8;
+}
 .settings-info-banner { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 16px; padding: 12px 14px; border: 1px solid #bdd8ff; border-radius: 8px; color: #315a89; background: #eef6ff; font-size: 13px; line-height: 1.5; }
 .settings-info-banner > span { margin-top: 1px; }
 .settings-admin-entry { display: grid; grid-template-columns: 54px minmax(0, 1fr) auto; align-items: center; gap: 18px; padding: 22px; border: 1px solid #dbe4ef; border-radius: 8px; background: rgba(255, 255, 255, .94); }

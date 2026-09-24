@@ -43,7 +43,13 @@ from lazymind.chat.engine.tools.memory import MemoryTools
 from lazymind.chat.engine.tools.lazy_kb import KBToolkit, kb_tmp_search
 from lazymind.model_config import get_model_role_runtime_identity, is_model_role_available
 from lazymind.chat.engine.tools.ask_user import ask_user
-from lazymind.chat.engine.tools.session_env import build_session_env_tool
+from lazymind.chat.engine.agent_runtime.conversation_env import ConversationEnvLease, ConversationEnvStore
+from lazymind.chat.engine.tools.session_env import (
+    build_session_env_tool,
+    build_user_env_tool,
+    build_delete_session_env_tool,
+    build_delete_user_env_tool,
+)
 from lazymind.chat.engine.subagent.tools import (
     find_user_attachment,
     read_user_attachment,
@@ -221,35 +227,19 @@ ASK_USER_QUERY_APPENDIX = (
     'do NOT call `ask_user` merely to offer optional next steps or say what the user can ask for next; '
     'write that brief follow-up in assistant prose instead.'
 )
-SESSION_ENV_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
-    'tool_policy': (
-        '# Session environment for skills (this conversation only)\n'
-        '`set_session_env` stores variables for THIS conversation only. Other conversations, '
-        'including a newly opened chat, cannot read them.\n'
-        'When a skill or `run_script` fails, use `missing_env` in the tool result when present '
-        'as the names to collect. If `missing_env` is absent, infer from stderr/stdout. Always '
-        'attempt the skill first; do not wait for credentials before the first run.\n'
-        'When a skill or `run_script` fails because an API key, token, or environment variable '
-        'is missing:\n'
-        '1. If this turn already includes the name and value (including a proactive `NAME=value` '
-        'or `NAME: value`), call `set_session_env` then immediately retry the same skill/`run_script`.\n'
-        '2. Otherwise, if `ask_user` is available, call it once with `type=text` asking only for '
-        'the missing variable(s). Name the exact env var in the question text. State that it applies '
-        'only to this conversation. Never ask for credentials in assistant prose.\n'
-        '3. After the user answers, call `set_session_env` then immediately retry. Do not ask the '
-        'user to restart the service or start a new chat.\n'
-        'The user may also proactively ask you to set a variable. Call `set_session_env` then continue '
-        'the original task.\n'
-        'Never echo secret values in the final answer.'
-    ),
-}
 SESSION_ENV_QUERY_APPENDIX = (
-    'ATTENTION — if this turn supplies an environment variable name and value (an `ask_user` '
-    'credential answer, a proactive `NAME=value` / `NAME: value`, or an explicit request to '
-    'configure a key), call `set_session_env` first for each provided variable, then immediately '
-    'retry the interrupted skill/`run_script` and continue the original task. Do not ask the user '
-    'to restart. These values apply only to this conversation. Never echo the secret value.'
+    'For environment setup, call set_session_env with the name only. It opens a secure input card. '
+    'Never request or copy values through chat, ask_user, tool arguments, scripts, or messages. '
+    'If a user has already pasted a value, do not repeat it; direct them to the secure input card. '
+    'After the backend reports configuration complete, resume the interrupted task without asking again.'
 )
+SESSION_ENV_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {'tool_policy': SESSION_ENV_QUERY_APPENDIX}
+USER_ENV_QUERY_APPENDIX = (
+    'Use set_user_env only when the user explicitly requests permanent/user-level/Settings storage. '
+    'Otherwise use set_session_env. Both tools request secure input, never accept a value, and stop the turn. '
+    'The user submits directly to the backend. Only configuration status is returned to you.'
+)
+USER_ENV_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {'tool_policy': USER_ENV_QUERY_APPENDIX}
 KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         "# Selected Knowledge Base Rules (CRITICAL — follow strictly)\n"
@@ -552,19 +542,70 @@ ASK_USER_TOOL_CONFIG = ToolConfig(
 
 
 def build_session_env_tool_config(
-    conversation_env_store: dict[str, dict[str, str]],
+    conversation_env_store: ConversationEnvStore,
     conversation_id: str,
+    lease: ConversationEnvLease | None = None,
 ) -> ToolConfig:
     return ToolConfig(
         name='set_session_env',
         label='会话环境变量',
-        description='为当前对话临时配置 skill 脚本所需环境变量，并立即对 run_script 生效',
-        tool=build_session_env_tool(conversation_env_store, conversation_id),
+        description='通过安全输入卡片配置当前会话的临时环境变量',
+        tool=build_session_env_tool(conversation_env_store, conversation_id, lease),
         module='execution',
         label_en='Session Environment',
-        description_en='Temporarily configure environment variables for skill scripts in this conversation.',
+        description_en='Request secure input of a temporary environment variable for this conversation.',
         appendix_system_prompt=SESSION_ENV_TOOL_POLICY_APPENDIX,
         appendix_query=SESSION_ENV_QUERY_APPENDIX,
+    )
+
+
+USER_ENV_TOOL_CONFIG = ToolConfig(
+    name='set_user_env',
+    label='用户环境变量',
+    description='通过安全输入卡片配置用户级环境变量，供未来对话使用',
+    tool=build_user_env_tool(),
+    module='execution',
+    label_en='User Environment',
+    description_en='Request secure input of a persistent user-level environment variable for future conversations.',
+    appendix_system_prompt=USER_ENV_TOOL_POLICY_APPENDIX,
+    appendix_query=USER_ENV_QUERY_APPENDIX,
+)
+
+
+ENV_DELETE_POLICY: SystemPromptAppendix = {
+    'tool_policy': (
+        'For environment variable deletion, default to `delete_session_env` unless the user '
+        'explicitly requests user-level/permanent/Settings deletion. Session deletion is immediate '
+        'and may expose a same-name user default again; explain the effective_source result. '
+        'Use `delete_user_env` for explicit user-level deletion: it only requests confirmation '
+        'and stops the turn. Do not claim deletion until the backend reports the confirmed outcome. '
+        'Never use shell commands, empty values, disabling, or ask_user to bypass this confirmation. '
+        'When a confirmed outcome arrives, report it without calling the deletion tool again.'
+    ),
+}
+
+
+def build_delete_session_env_tool_config(
+    store: ConversationEnvStore, conversation_id: str, lease: ConversationEnvLease,
+) -> ToolConfig:
+    return ToolConfig(
+        name='delete_session_env', label='删除会话环境变量',
+        description='删除当前会话的临时覆盖，不影响用户级配置',
+        tool=build_delete_session_env_tool(store, conversation_id, lease), module='execution',
+        label_en='Delete Session Environment Variable',
+        description_en='Remove a session override without changing user-level settings.',
+        appendix_system_prompt=ENV_DELETE_POLICY,
+    )
+
+
+def build_delete_user_env_tool_config(language: str) -> ToolConfig:
+    return ToolConfig(
+        name='delete_user_env', label='确认删除用户环境变量',
+        description='请求用户确认删除持久环境变量，确认前不执行删除',
+        tool=build_delete_user_env_tool(language), module='execution',
+        label_en='Confirm User Environment Variable Deletion',
+        description_en='Request confirmation before deleting a persistent environment variable.',
+        appendix_system_prompt=ENV_DELETE_POLICY,
     )
 
 USER_ATTACHMENT_TOOL_CONFIGS = (

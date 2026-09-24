@@ -84,6 +84,15 @@ describe("RunStatusCard", () => {
     expect(screen.getByText(/chat\.runStatus\.runtimeError/)).toBeInTheDocument();
   });
 
+  it.each(["user_env_unavailable", "user_env_invalid_name"])("explains %s without suggesting a model change", (code) => {
+    render(<RunStatusCard terminal={{
+      status: "failed", reason: "runtime_failure", code, partial_output: false,
+    }} />);
+    expect(screen.getByRole("alert")).toHaveTextContent(`chat.runStatus.codes.${code}`);
+    expect(screen.queryByRole("button", { name: "chat.changeModel" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "chat.checkModelSettings" })).not.toBeInTheDocument();
+  });
+
   it("shows the normalized failure code and diagnostic id", () => {
     render(<RunStatusCard terminal={{
       status: "failed",
