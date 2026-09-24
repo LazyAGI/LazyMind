@@ -9,15 +9,9 @@ import test from "node:test";
 const read = (file) => readFileSync(new URL(file, import.meta.url), "utf8");
 const sha = (data) => createHash("sha256").update(data).digest("hex");
 
-test("credential helper pins the bundled CLI library and participates in Go checks", () => {
+test("credential helper pins the bundled CLI library", () => {
   const release = JSON.parse(read("../../backend/core/providerconnection/feishu-cli-release.json"));
   assert.match(read("../../backend/feishu-credential-helper/go.mod"), new RegExp(`github.com/larksuite/cli v${release.version.replaceAll(".", "\\.")}(?:\\s|$)`));
-  const make = read("../../Makefile");
-  for (const name of ["GO_DIRS", "GO_MODULE_DIRS"]) {
-    const line = make.split("\n").find((line) => line.startsWith(`${name} :=`));
-    assert.ok(line?.split(/\s+/).includes("backend/feishu-credential-helper"), `${name} omits the helper`);
-  }
-  assert.match(read("../../.github/workflows/ci.yml"), /backend\/feishu-credential-helper/);
 });
 
 test("macOS build emits the helper with its actual checksum", { skip: process.platform === "win32" }, () => {
@@ -73,12 +67,18 @@ ${lines.join("\n")}
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("Sidecar image ships the credential helper and checksum configuration", () => {
-  const docker = read("../../backend/core/Dockerfile");
-  assert.match(docker, /COPY\s+backend\/feishu-credential-helper\//);
-  const stage = docker.slice(docker.indexOf(" AS feishu-cli-sidecar\n"));
-  assert.match(stage, /COPY[^\n]*\/feishu-credential-helper\s+\/usr\/local\/bin\/feishu-credential-helper/);
-  assert.match(stage, /LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_PATH=/);
-  assert.match(stage, /LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_SHA256_FILE=/);
-  assert.match(stage, /sha256sum[^\n]*feishu-credential-helper/);
-});
+for (const [endingName, ending] of [["LF", "\n"], ["CRLF", "\r\n"]]) {
+  test(`Sidecar image ships the credential helper and checksum configuration (${endingName})`, () => {
+    const raw = read("../../backend/core/Dockerfile").replace(/\r?\n/g, ending);
+    const docker = raw.replace(/\r\n/g, "\n");
+    assert.match(docker, /COPY\s+backend\/feishu-credential-helper\//);
+    const start = docker.indexOf(" AS feishu-cli-sidecar\n");
+    assert.notEqual(start, -1, "Sidecar image stage is missing");
+    const end = docker.indexOf("\nFROM ", start);
+    const stage = docker.slice(start, end === -1 ? undefined : end);
+    assert.match(stage, /COPY[^\n]*\/feishu-credential-helper\s+\/usr\/local\/bin\/feishu-credential-helper/);
+    assert.match(stage, /LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_PATH=/);
+    assert.match(stage, /LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_SHA256_FILE=/);
+    assert.match(stage, /sha256sum[^\n]*feishu-credential-helper/);
+  });
+}

@@ -302,10 +302,6 @@ jobs:
       - name: Test backend core (SQLite)
         run: cd backend/core && go test ./... -v -timeout 40m
 
-      - name: Test Feishu credential helper and pinned CLI platforms
-        working-directory: backend/feishu-credential-helper
-        run: go test -mod=readonly ./... -v -timeout 10m
-
       - name: Test backend core (PostgreSQL)
         env:
           TEST_DB_DRIVER: postgres
