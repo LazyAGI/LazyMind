@@ -17,8 +17,6 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/secretcrypto"
-	appLog "lazymind/core/log"
-	"lazymind/core/settings"
 )
 
 var (
@@ -400,67 +398,15 @@ func UpdateServerTools(ctx context.Context, db *gorm.DB, userID, id string, req 
 }
 
 func LoadRuntimeConfig(ctx context.Context, db *gorm.DB, userID string) ([]RuntimeConfig, error) {
-	if db == nil {
-		return nil, nil
-	}
-	userID = strings.TrimSpace(userID)
-	controls, err := settings.LoadFeatureControls(ctx, db, userID)
+	catalog, err := loadCapabilities(ctx, db, userID, "", false)
 	if err != nil {
 		return nil, err
 	}
-	var rows []orm.MCPServer
-	q := db.WithContext(ctx).Where("enabled = ? AND is_verified = ? AND deleted_at IS NULL AND transport IN ?", true, true, []string{transportSSE, transportHTTP})
-	if userID == "" {
-		q = q.Where("share = ?", true)
-	} else if !controls.MCPEnabled {
-		q = q.Where("share = ? AND create_user_id <> ?", true, userID)
-	} else {
-		q = q.Where("(create_user_id = ? OR share = ?)", userID, true)
-	}
-	if err := q.Order("share ASC, updated_at DESC").Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make([]RuntimeConfig, 0, len(rows))
-	for _, row := range dedupeServers(rows) {
-		if effectiveAuthType(row) == "oauth" && (userID == "" || row.CreateUserID != userID || row.Share) {
-			continue
+	out := make([]RuntimeConfig, 0, len(catalog))
+	for _, item := range catalog {
+		if item.Runtime != nil {
+			out = append(out, *item.Runtime)
 		}
-		allowedTools, err := canonicalizeAllowedToolNames(ctx, db, row.ID, parseStringJSON(row.AllowedToolsJSON))
-		if err != nil {
-			return nil, err
-		}
-		if len(allowedTools) == 0 {
-			// A verified service with no authorized tool remains configured but
-			// must not become callable until the user grants a tool explicitly.
-			continue
-		}
-		headers, err := decodeHeaders(row.HeadersJSON)
-		if err != nil {
-			return nil, err
-		}
-		var oauthRef *OAuthReference
-		if effectiveAuthType(row) == "oauth" {
-			status, err := oauthOperation(ctx, row, "status", nil)
-			if err != nil {
-				appLog.Logger.Warn().Str("server_id", row.ID).Msg("MCP OAuth service unavailable; skipping this server")
-				continue
-			}
-			if status.Status != "authorized" {
-				continue
-			}
-			oauthRef = &OAuthReference{UserID: userID, ServerID: row.ID, ServerURL: row.URL, GrantID: status.GrantID, GrantVersion: status.GrantVersion}
-			headers = nil
-		}
-		out = append(out, RuntimeConfig{
-			OAuth:        oauthRef,
-			ID:           row.ID,
-			Name:         row.Name,
-			Transport:    row.Transport,
-			URL:          row.URL,
-			Headers:      headers,
-			AllowedTools: allowedTools,
-			Timeout:      normalizedTimeout(row.Timeout),
-		})
 	}
 	return out, nil
 }

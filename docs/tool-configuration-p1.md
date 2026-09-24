@@ -36,3 +36,68 @@ MCP 现有 `enabled` 同时承担了“未经验证不可执行”和“关闭�
 - 没有启动或部署完整 8091，因此尚未验证浏览器登录后的真实聊天路径、真实账号 OAuth 和真实邮箱收发。受控授权服务与受控模型测试不能替代这些验收。8090 未修改或重启。
 
 本次没有增加自动续跑、业务调用重放、跨角色迁移或全量凭据/缓存架构改造。配置卡片完成后，若任务已经结束，仍由用户发送“继续”。
+
+## 2026-09-24：运行时职责与 MCP 修复
+
+实现基线：LazyMind `3f7f3a3a`、LazyLLM `c7bde8c3`；分支 `dya/tool-configuration-runtime-fixes`。
+本节记录本轮增量，前文是此前 P1 的历史记录。
+
+### 公共刷新边界
+
+LazyLLM 提供 `ToolManager.get_tool_group_state(name)` 与
+`refresh_tool_group(name, *, definition=None, tool_config=None, load=False, available=True)`。
+状态摘要不返回内部对象或凭据；刷新统一处理凭据缓存、provider、目录、曝光与加载状态。
+顶层和嵌套组均可刷新，保留父级名称前缀并更新祖先 gateway。
+`replace_tool_group()` 复用同一实现并保留异常传播的兼容行为。
+
+刷新结果为 `ready`、`prerequisites_unmet`、`budget_blocked` 或 `unavailable`。
+仅更新显式配置项；空值清除指定项，清除凭据不会因前置条件失败而恢复旧授权。
+普通更新先校验再原子落盘，失败恢复原目录、凭据及加载状态；取消也先回滚再传播。
+权限撤销或白名单缩减时，产品先调用 `available=False` 阻止旧工具，后续刷新失败仍保持禁用。
+无论调用来自 eager、gateway 或 retrieval，执行前的权限检查继续保留。
+
+LazyMind 只保存稳定组名，通过公共接口刷新，不再访问 SDK 凭据缓存或 provider/激活内部状态。
+配置状态与运行可用性分开；Core 返回 ready 不会抹掉本轮目录失败，也不会为连接故障创建配置卡片。
+新的 runtime 恢复工具时不恢复旧加载意图。只有 `pending_delivery=true` 且恢复成功才发送成功通知，
+并沿既有模型请求生命周期 ack；目录或预算失败不确认成功通知。
+卡片文案为“配置已完成”，任务结束后仍由用户手动继续。
+
+### MCP 加载、检查与预览
+
+初始化共用批量加载入口，单批最多 4 个并发服务，按输入顺序返回带服务标识的结果，完成后统一登记。
+服务超时沿现有 loader/transport 执行，单服务异常隔离；OAuth callable 不进入共享缓存。
+取消时停止并清理排队协程；已经进入阻塞网络调用的 Python 工作线程无法被强制终止，仍由原超时收尾。
+
+Core `check` 仅解析目标服务；初始化 capability 与 runtime 从同一请求内快照派生。
+批量 action 查询和列表刷新按服务去重探测，不跨请求缓存授权结果。
+OAuth 状态失败或单服务 header 损坏只令该服务 unavailable；归属校验及数据库错误仍使请求失败。
+内置 Notion 的发现与按需创建保留。
+
+内部 capability 增加可选 `tools`、`tools_discovered_at` 和 `tools_complete`，复用现有 MCPServerTool 表，
+按当前权限、授权与白名单裁剪。预览用不可执行适配器复用 MCP schema、身份、名称归一化和曝光流程，
+不创建 OAuth 连接、不取 token、不调用远端工具、不刷新或确认 action。
+未知目录仍保留入口；报告和 prompt 导出增加 `mcp_catalog` 的 `source`、`complete`、`missing_services`。
+该信息表示“已发现目录快照”，不承诺远端实时一致，不改变 `preview_accuracy` 的模型路由含义。
+该数据走内部动态 payload，前端本地报告类型已同步；不改变公开 OpenAPI schema。
+
+前端可见且运行时每 5 秒刷新；任务结束而 action 未就绪或暂不可用时每 30 秒刷新。
+后台暂停定时请求，重新可见或收到配置更新事件立即刷新；任务结束且所有 action ready/forbidden 时停止。
+同一卡片只保留一个在途请求，继续比较版本并清理卸载后的更新。
+
+飞书保留统一搜索新契约。已核对 supplier、双语 schema 文档、渲染调用方及 personal-document-search
+的 `source_type`、范围、1–20 分页和 `results/has_more/page_token`，未发现需要旧契约兼容的调用点。
+
+### 本轮验证与限制
+
+- LazyLLM + LazyMind 定向回归：275 项通过，另有 3 个 subtest 通过；包括嵌套组、撤权、预算失败、
+  取消清理、真实 ToolStateStore 原子落盘失败、MCP 并发和预览身份一致性。
+- Core 全量：`TMPDIR=/private/tmp GOTOOLCHAIN=go1.25.11 go test ./...` 通过。
+  默认 macOS `/var` 临时目录会触发 5 个既有项目路径校验失败，均在未修改基线复现；无需改业务代码。
+- 前端相关 4 个 suite：42 项通过；相关 TypeScript 检查通过。OpenAPI stale 检查四个服务均 fresh。
+- Chat 全量：2882 通过、30 失败、1 跳过。30 个失败与未修改基线完全相同，没有新增失败；不标记全量通过。
+- 前端全量：2838 通过、23 失败。22 个失败在未修改基线复现；剩余性能计时用例单独重跑通过。
+  全量仍不能标记通过。
+- 独立复查发现的嵌套前缀、祖先 gateway、加载路径、旧通知、取消回滚及服务隔离问题均已补回归修复。
+
+没有部署、没有重启 8090/8091，原工作区模型配置修改保留。
+真实 OAuth 与浏览器端到端尚未执行；受控目录和模型测试不替代这些结果。

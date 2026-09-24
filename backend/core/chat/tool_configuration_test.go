@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -147,5 +148,133 @@ func TestToolConfigurationStreamForwarding(t *testing.T) {
 	chunk := upstreamStreamChunkFromData(LazyChatData{ToolConfiguration: action})
 	if !hasBusinessStreamPayload(chunk) || chunk.ToolConfiguration["id"] != "a" {
 		t.Fatal("configuration event dropped")
+	}
+}
+
+func TestMCPConfigurationTargetAndBatchReuse(t *testing.T) {
+	db := newToolsTestDB(t)
+	if err := db.AutoMigrate(&ToolConfigurationAction{}); err != nil {
+		t.Fatal(err)
+	}
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "internal")
+	calls := map[string]int{}
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&request)
+		id, _ := request["server_id"].(string)
+		calls[id]++
+		_, _ = w.Write([]byte(`{"code":200,"data":{"status":"authorized","grant_id":"g","grant_version":3}}`))
+	}))
+	defer auth.Close()
+	t.Setenv("LAZYMIND_AUTH_SERVICE_URL", auth.URL)
+	for _, id := range []string{"target", "unrelated"} {
+		row := orm.MCPServer{ID: id, Name: id, Transport: "http", URL: "https://example.com/" + id, AuthType: "oauth", HeadersJSON: []byte(`{}`), Enabled: true, IsVerified: true, AllowedToolsJSON: []byte(`["search"]`), BaseModel: orm.BaseModel{CreateUserID: "owner"}}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := probeToolConfiguration(t.Context(), db.DB, "owner", "mcp:target"); err != nil {
+		t.Fatal(err)
+	}
+	if calls["target"] != 1 || calls["unrelated"] != 0 {
+		t.Fatalf("target check probes unrelated server: %v", calls)
+	}
+	if err := db.Create(&orm.Conversation{ID: "c", BaseModel: orm.BaseModel{CreateUserID: "owner"}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"a", "b"} {
+		if err := db.Create(&ToolConfigurationAction{ID: id, UserID: "owner", ConversationID: "c", Service: "mcp:target", Version: 1}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls = map[string]int{}
+	r := newSettingsRequest("POST", "/internal/conversations/c/tool-configuration-actions", `{"operation":"poll_batch","action_ids":["a","b","a"]}`, "owner", map[string]string{"conversation_id": "c"})
+	r.Header.Set("X-LazyMind-Internal-Token", "internal")
+	w := httptest.NewRecorder()
+	InternalToolConfiguration(w, r)
+	if w.Code != 200 || calls["target"] != 1 || calls["unrelated"] != 0 {
+		t.Fatalf("batch calls=%v code=%d body=%s", calls, w.Code, w.Body)
+	}
+	calls = map[string]int{}
+	w = httptest.NewRecorder()
+	ListToolConfigurations(w, newSettingsRequest("GET", "/conversations/c/tool-configuration-actions", "", "owner", map[string]string{"conversation_id": "c"}))
+	if w.Code != 200 || calls["target"] != 1 || calls["unrelated"] != 0 {
+		t.Fatalf("list calls=%v code=%d body=%s", calls, w.Code, w.Body)
+	}
+	// A missing or foreign action fails the entire batch before any auth probe.
+	calls = map[string]int{}
+	r = newSettingsRequest("POST", "/internal/conversations/c/tool-configuration-actions", `{"operation":"poll_batch","action_ids":["a","foreign"]}`, "owner", map[string]string{"conversation_id": "c"})
+	r.Header.Set("X-LazyMind-Internal-Token", "internal")
+	w = httptest.NewRecorder()
+	InternalToolConfiguration(w, r)
+	if w.Code != 404 || len(calls) != 0 {
+		t.Fatalf("invalid batch performed probes: code=%d calls=%v", w.Code, calls)
+	}
+	calls = map[string]int{}
+	body := map[string]any{}
+	applyMCPRuntimeConfig(t.Context(), db.DB, "owner", "", body)
+	if calls["target"] != 1 || calls["unrelated"] != 1 {
+		t.Fatalf("runtime snapshot resolved twice: %v", calls)
+	}
+}
+
+func TestToolConfigurationDatabaseFailureIsFatal(t *testing.T) {
+	db := newToolsTestDB(t)
+	if err := db.Migrator().DropTable(&orm.UserSelectedProvider{}); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot, err := probeToolConfiguration(t.Context(), db.DB, "owner", "web_search"); err == nil {
+		t.Fatalf("database error converted into service status: %+v", snapshot)
+	}
+}
+
+func TestConfigurationBatchAuthFailureIsolationAndRevocation(t *testing.T) {
+	db := newToolsTestDB(t)
+	if err := db.AutoMigrate(&ToolConfigurationAction{}); err != nil {
+		t.Fatal(err)
+	}
+	authorized := true
+	calls := map[string]int{}
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&request)
+		id, _ := request["server_id"].(string)
+		calls[id]++
+		if id == "broken" {
+			w.WriteHeader(503)
+			return
+		}
+		status := "needs_authorization"
+		if authorized {
+			status = "authorized"
+		}
+		_, _ = fmt.Fprintf(w, `{"code":200,"data":{"status":%q,"grant_id":"grant","grant_version":3}}`, status)
+	}))
+	defer auth.Close()
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "internal")
+	t.Setenv("LAZYMIND_AUTH_SERVICE_URL", auth.URL)
+	actions := []ToolConfigurationAction{}
+	for _, id := range []string{"broken", "healthy"} {
+		row := orm.MCPServer{ID: id, Name: id, Transport: "http", URL: "https://example.com/" + id, AuthType: "oauth", Enabled: true, IsVerified: true, HeadersJSON: []byte(`{}`), AllowedToolsJSON: []byte(`["search"]`), BaseModel: orm.BaseModel{CreateUserID: "owner"}}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+		action := ToolConfigurationAction{ID: id, UserID: "owner", ConversationID: "c", Service: "mcp:" + id, Version: 1}
+		if err := db.Create(&action).Error; err != nil {
+			t.Fatal(err)
+		}
+		actions = append(actions, action)
+	}
+	snapshots, err := refreshToolConfigurations(t.Context(), db.DB, actions)
+	if err != nil || snapshots["mcp:broken"].Status != "unavailable" || snapshots["mcp:healthy"].MCP == nil || calls["broken"] != 1 || calls["healthy"] != 1 {
+		t.Fatalf("failure isolation: %+v calls=%v err=%v", snapshots, calls, err)
+	}
+	oldVersion := actions[1].Version
+	authorized = false
+	snapshots, err = refreshToolConfigurations(t.Context(), db.DB, actions)
+	if err != nil || snapshots["mcp:healthy"].MCP != nil || snapshots["mcp:healthy"].Status != "needs_authorization" || actions[1].Version != oldVersion+1 {
+		t.Fatalf("revocation: %+v actions=%+v err=%v", snapshots, actions, err)
 	}
 }

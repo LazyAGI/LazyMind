@@ -11,7 +11,7 @@ const zhCN = {
     retryConnection: "重试连接",
     connecting: "正在连接授权服务…",
 
-    ready: "连接已就绪。若本次任务已结束，请发送“继续”。",
+    ready: "配置已完成",
     pending: "完成配置后，有下一轮时更新工具；本次任务不会等待或自动重启。",
     forbidden: "当前不允许使用此能力。",
     unavailable: "暂时无法核实连接状态，请稍后重试。",
@@ -2260,6 +2260,8 @@ const zhCN = {
     contextUsageUpdate: "更新估算",
     contextUsageError: "暂时无法计算上下文用量。",
     contextUsageRetry: "重试",
+    contextUsageMcpSnapshot: "MCP 工具目录使用已保存的发现快照。",
+    contextUsageMcpIncomplete: "部分 MCP 服务尚无工具目录快照，预估可能不完整：{{services}}。",
     contextUsageRuleOnlyWarning: "当前为规则预估",
     contextUsageRuleOnlyReason: "规则无法完全确定目标或资源约束。",
     contextUsageAgentReviewHint: "本次预估可能不准确，可主动使用模型重新预估。",

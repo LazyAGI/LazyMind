@@ -11,7 +11,7 @@ const enUS = {
     retryConnection: "Retry connection",
     connecting: "Connecting to the authorization service…",
 
-    ready: "Connection ready. If this task has ended, send “continue”.",
+    ready: "Configuration complete",
     pending: "Configure this capability to use it on the next natural turn. The task will not wait or restart automatically.",
     forbidden: "This capability is not currently allowed.",
     unavailable: "Connection status is temporarily unavailable. Please try again later.",
@@ -2311,6 +2311,8 @@ const enUS = {
     contextUsageUpdate: "Update estimate",
     contextUsageError: "Context usage is temporarily unavailable.",
     contextUsageRetry: "Retry",
+    contextUsageMcpSnapshot: "The MCP tool catalog uses a stored discovery snapshot.",
+    contextUsageMcpIncomplete: "Some MCP services have no tool catalog snapshot, so this estimate may be incomplete: {{services}}.",
     contextUsageRuleOnlyWarning: "Rule-only estimate",
     contextUsageRuleOnlyReason: "Rules cannot fully determine the goal or resource constraints.",
     contextUsageAgentReviewHint: "This estimate may be inaccurate. You can request a model-assisted estimate.",

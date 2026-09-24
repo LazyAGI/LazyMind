@@ -286,17 +286,19 @@ func applyChatFeatureControls(ctx context.Context, db *gorm.DB, userID string, b
 func applyMCPRuntimeConfig(ctx context.Context, db *gorm.DB, userID, authorization string, body map[string]any) {
 	delete(body, "mcp_config") // Never accept client-supplied OAuth identities or MCP credentials.
 	delete(body, "mcp_capabilities")
-	if db != nil {
-		if catalog, err := mcp.LoadCapabilities(ctx, db, userID); err == nil {
-			values := make([]any, len(catalog))
-			for i := range catalog {
-				values[i] = catalog[i]
+	catalog, err := mcp.LoadCapabilities(ctx, db, userID)
+	mcpConfig := make([]mcp.RuntimeConfig, 0, len(catalog))
+	if err == nil && db != nil {
+		values := make([]any, len(catalog))
+		for i := range catalog {
+			values[i] = catalog[i]
+			if catalog[i].Runtime != nil {
+				mcpConfig = append(mcpConfig, *catalog[i].Runtime)
 			}
-			body["mcp_capabilities"] = values
 		}
+		body["mcp_capabilities"] = values
 	}
 	body["user_id"] = userID
-	mcpConfig, err := mcp.LoadRuntimeConfig(ctx, db, userID)
 	if err != nil {
 		fmt.Printf("[Core] [MCP_CONFIG] failed to load for user %s: %v\n", userID, err)
 	} else {

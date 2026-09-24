@@ -99,14 +99,12 @@ func probeToolConfiguration(ctx context.Context, db *gorm.DB, userID, service st
 		}
 	}
 	if strings.HasPrefix(service, "mcp:") {
-		catalog, err := mcp.LoadCapabilities(ctx, db, userID)
+		item, err := mcp.LoadCapability(ctx, db, userID, service)
 		if err != nil {
 			return toolConfigurationSnapshot{}, err
 		}
-		for _, item := range catalog {
-			if item.Service == service {
-				return toolConfigurationSnapshot{Label: item.Label, Status: item.Status, MCP: item.Runtime}, nil
-			}
+		if item != nil {
+			return toolConfigurationSnapshot{Label: item.Label, Status: item.Status, MCP: item.Runtime}, nil
 		}
 		return toolConfigurationSnapshot{Status: "forbidden"}, nil
 	}
@@ -147,6 +145,9 @@ func probeToolConfiguration(ctx context.Context, db *gorm.DB, userID, service st
 		config = map[string]any{service: normalizeToolConfigValue(tokens)}
 	}
 	if err != nil {
+		if service == "web_search" || service == "academic_search" {
+			return toolConfigurationSnapshot{}, err
+		}
 		return toolConfigurationSnapshot{Label: label, Status: "unavailable"}, nil
 	}
 	originalConfig := config
@@ -257,20 +258,44 @@ func refreshToolConfiguration(ctx context.Context, db *gorm.DB, action *ToolConf
 	if err != nil {
 		return snapshot, err
 	}
+	return snapshot, applyToolConfigurationSnapshot(ctx, db, action, snapshot)
+}
+
+func applyToolConfigurationSnapshot(ctx context.Context, db *gorm.DB, action *ToolConfigurationAction, snapshot toolConfigurationSnapshot) error {
 	revision := snapshot.revision()
 	if action.Status != snapshot.Status || action.Revision != revision {
 		result := db.WithContext(ctx).Model(&ToolConfigurationAction{}).
 			Where("id = ? AND user_id = ? AND version = ?", action.ID, action.UserID, action.Version).
 			Updates(map[string]any{"status": snapshot.Status, "revision": revision, "version": gorm.Expr("version + 1"), "updated_at": time.Now().UTC()})
 		if result.Error != nil {
-			return snapshot, result.Error
+			return result.Error
 		}
 		if result.RowsAffected != 1 {
-			return snapshot, errors.New("configuration changed concurrently; retry")
+			return errors.New("configuration changed concurrently; retry")
 		}
 		action.Status, action.Revision, action.Version = snapshot.Status, revision, action.Version+1
 	}
-	return snapshot, nil
+	return nil
+}
+
+func refreshToolConfigurations(ctx context.Context, db *gorm.DB, actions []ToolConfigurationAction) (map[string]toolConfigurationSnapshot, error) {
+	snapshots := map[string]toolConfigurationSnapshot{}
+	for i := range actions {
+		action := &actions[i]
+		snapshot, ok := snapshots[action.Service]
+		if !ok {
+			var err error
+			snapshot, err = probeToolConfiguration(ctx, db, action.UserID, action.Service)
+			if err != nil {
+				return nil, err
+			}
+			snapshots[action.Service] = snapshot
+		}
+		if err := applyToolConfigurationSnapshot(ctx, db, action, snapshot); err != nil {
+			return nil, err
+		}
+	}
+	return snapshots, nil
 }
 
 func InternalToolConfiguration(w http.ResponseWriter, r *http.Request) {
@@ -324,18 +349,31 @@ func InternalToolConfiguration(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, "too many actions", 400)
 			return
 		}
-		results := make([]map[string]any, 0, len(req.ActionIDs))
+		var actions []ToolConfigurationAction
+		if err := db.WithContext(r.Context()).Where("id IN ? AND user_id = ? AND conversation_id = ?", req.ActionIDs, userID, conversationID).Find(&actions).Error; err != nil {
+			common.ReplyErr(w, "configuration unavailable", 503)
+			return
+		}
+		byID := map[string]int{}
+		for i := range actions {
+			byID[actions[i].ID] = i
+		}
+		// Check every requested action before any probes or updates, including foreign IDs.
 		for _, id := range req.ActionIDs {
-			var action ToolConfigurationAction
-			if db.WithContext(r.Context()).Where("id = ? AND user_id = ? AND conversation_id = ?", id, userID, conversationID).First(&action).Error != nil {
+			if _, ok := byID[id]; !ok {
 				common.ReplyErr(w, "not found", 404)
 				return
 			}
-			snapshot, err := refreshToolConfiguration(r.Context(), db, &action)
-			if err != nil {
-				common.ReplyErr(w, "configuration unavailable", 503)
-				return
-			}
+		}
+		snapshots, err := refreshToolConfigurations(r.Context(), db, actions)
+		if err != nil {
+			common.ReplyErr(w, "configuration unavailable", 503)
+			return
+		}
+		results := make([]map[string]any, 0, len(req.ActionIDs))
+		for _, id := range req.ActionIDs {
+			action := actions[byID[id]]
+			snapshot := snapshots[action.Service]
 			results = append(results, map[string]any{"action": action, "tool_config": snapshot.Config, "mcp_config": snapshot.MCP, "pending_delivery": action.DeliveredVersion < action.Version})
 		}
 		common.ReplyOK(w, map[string]any{"actions": results})
@@ -391,11 +429,9 @@ func ListToolConfigurations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Public reads return only action references and verified status, never runtime credentials.
-	for i := range actions {
-		if _, err := refreshToolConfiguration(r.Context(), db, &actions[i]); err != nil {
-			common.ReplyErr(w, "configuration unavailable", 503)
-			return
-		}
+	if _, err := refreshToolConfigurations(r.Context(), db, actions); err != nil {
+		common.ReplyErr(w, "configuration unavailable", 503)
+		return
 	}
 	common.ReplyOK(w, ToolConfigurationListResponse{Actions: actions})
 }

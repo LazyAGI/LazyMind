@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import json
 from unittest.mock import Mock
@@ -31,7 +32,7 @@ def lookup(query: str) -> str:
 
 def runtime():
     host = ToolConfigurationRuntime('u', 'c', 'h', 'r', loader=lambda _: [lookup])
-    groups = host.mcp_tools([{'service': 'mcp:one', 'label': 'Documents', 'status': 'needs_authorization'}])
+    groups = asyncio.run(host.mcp_tools([{'service': 'mcp:one', 'label': 'Documents', 'status': 'needs_authorization'}]))
     manager = ToolManager(groups)
     host.bind(manager)
     action = {'id': 'a', 'version': 2, 'service': 'mcp:one', 'label': 'Documents', 'status': 'ready'}
@@ -77,12 +78,12 @@ def test_refresh_catalog_notice_and_ack_follow_actual_model_request():
 def test_failed_refresh_preserves_old_catalog_and_pending_delivery():
     host, manager = runtime()
     retrieval = manager.enable_tool_retrieval(groups={'mcp_one'}, required=[], estimate_tokens=lambda _: 1,
-                                               threshold_tokens=100)
+                                              threshold_tokens=100)
     retrieval.validate_load = Mock(side_effect=ValueError('budget'))
     original = manager.tools_description
     host.before_request()
     assert 'lookup' not in manager.tools_info
-    assert 'could not be loaded' in host.model_context()
+    assert 'budget' in host.model_context()
     host.observe('history_ready')
     host.observe('turn_end')
     assert not any(call.args[0] == 'ack' for call in host._post.call_args_list)
@@ -95,7 +96,7 @@ def test_failed_refresh_preserves_old_catalog_and_pending_delivery():
 def test_repeated_ready_notice_does_not_reload_unloaded_retrieval_tools():
     host, manager = runtime()
     retrieval = manager.enable_tool_retrieval(groups={'mcp_one'}, required=[], estimate_tokens=lambda _: 1,
-                                               threshold_tokens=100)
+                                              threshold_tokens=100)
     host.before_request()
     assert 'lookup' in {d['function']['name'] for d in retrieval.descriptions()}
     retrieval.load([], ['lookup'])
@@ -121,8 +122,8 @@ def test_missing_configuration_blocks_execution_without_blocking_independent_cal
 def test_provider_selection_remains_pinned_after_earlier_provider_becomes_ready():
     ready = [False, True]
     manager = ToolManager([{'name': 'search', 'desc': 'search', 'pick_first_valid': True,
-                           'discoverable': True, 'tools': [(lookup, lambda: ready[0]),
-                                                        (other_lookup, lambda: ready[1])]}])
+                           'discoverable': True, 'tools': [
+                               (lookup, lambda: ready[0]), (other_lookup, lambda: ready[1])]}])
     lazyllm.locals['_lazyllm_agent']['workspace'] = {}
     assert list(manager.atomic_tool_catalog()) == ['other_lookup']
     ready[0] = True
@@ -187,8 +188,11 @@ def test_complete_natural_tool_loop_refreshes_without_replaying(exposure):
     arguments = {'query': 'first'} if exposure == 'eager' else {}
     if exposure == 'retrieval':
         first, arguments = 'load_tools', {'tool_names': ['mcp_one'], 'unload_tool_names': []}
-    call = lambda name, args, ident: {'role': 'assistant', 'content': '', 'tool_calls': [
-        {'id': ident, 'type': 'function', 'function': {'name': name, 'arguments': json.dumps(args)}}]}
+
+    def call(name, args, ident):
+        return {'role': 'assistant', 'content': '', 'tool_calls': [
+            {'id': ident, 'type': 'function', 'function': {'name': name, 'arguments': json.dumps(args)}}]}
+
     model = ScriptedModel([call(first, arguments, 'blocked'), call('lookup', {'query': 'next'}, 'business'),
                            {'role': 'assistant', 'content': 'done'}])
     agent = ReactAgent(llm=model, tools=[group], enable_builtin_tools=False, max_retries=4,
@@ -196,8 +200,8 @@ def test_complete_natural_tool_loop_refreshes_without_replaying(exposure):
                        runtime_observer=host.observe)
     host.bind(agent._tools_manager)
     if exposure == 'retrieval':
-        agent._tools_manager.enable_tool_retrieval(groups={'mcp_one'}, required=[],
-                                                  threshold_tokens=100, estimate_tokens=lambda _: 1)
+        agent._tools_manager.enable_tool_retrieval(
+            groups={'mcp_one'}, required=[], threshold_tokens=100, estimate_tokens=lambda _: 1)
     assert agent('search documents') == 'done'
     assert len(model.requests) == 3
     assert 'Connection is ready' in json.dumps(model.requests[1])
@@ -257,6 +261,7 @@ def test_explicit_provider_does_not_fall_back_to_another_ready_provider():
     lazyllm.globals.config['dynamic_tool_auth'] = {'google': 'test-key'}
     manager = ToolManager(host.native_tools([cfg for cfg in DEFAULT_TOOLS if cfg.name == 'web_search']))
     assert list(host.services) == ['web_search/bing']
+    host.bind(manager)
     assert not host._ready('web_search/bing')
     assert list(manager.atomic_tool_catalog()) == ['get_WebSearchToolkit_methods']
 
@@ -276,7 +281,7 @@ def test_new_request_recovers_configuration_without_restoring_old_load_intent():
     host.actions.clear()
     host.intents.clear()
     retrieval = manager.enable_tool_retrieval(groups={'mcp_one'}, required=[], estimate_tokens=lambda _: 1,
-                                               threshold_tokens=100)
+                                              threshold_tokens=100)
     host.before_request()
     assert host._post.call_args_list[0].args == ('list',)
     assert 'lookup' in manager.tools_info
@@ -296,7 +301,7 @@ def test_unconfigured_native_notion_does_not_compete_with_builtin_mcp(
                 'status': 'needs_authorization'}] if builtin_available else []
     groups = host.native_tools([cfg for cfg in DEFAULT_TOOLS if cfg.name == 'cloud_files'],
                                mcp_catalog=catalog)
-    manager = ToolManager([*groups, *host.mcp_tools(catalog)])
+    manager = ToolManager([*groups, *asyncio.run(host.mcp_tools(catalog))])
     assert ('notion' in host.services) == expect_native
     assert 'feishu' in host.services
     if builtin_available:
@@ -314,12 +319,86 @@ def test_initial_mcp_catalog_load_isolates_auth_failures(failure, status):
 
     host = ToolConfigurationRuntime('u', 'c', 'h', 'r', loader=load)
     issues = []
-    groups = host.mcp_tools([
+    groups = asyncio.run(host.mcp_tools([
         {'service': 'mcp:broken', 'label': 'Broken', 'status': 'ready', 'runtime': {'id': 'broken'}},
         {'service': 'mcp:healthy', 'label': 'Healthy', 'status': 'ready', 'runtime': {'id': 'healthy'}},
-    ], issues=issues)
+    ], issues=issues))
     assert len(groups) == 2
     assert host.services['mcp:broken']['status'] == status
     assert host.services['mcp:healthy']['status'] == 'ready'
-    assert host.services['mcp:healthy']['group'].get_flat_tools()
+    assert groups[1].get_flat_tools()
     assert issues == [{'server': 'Broken', 'status': status}]
+
+
+def test_ready_configuration_does_not_overwrite_catalog_failure_or_create_card():
+    host = ToolConfigurationRuntime('u', 'c', 'h', 'r', loader=lambda _: [])
+    config = {'id': 'one'}
+    groups = asyncio.run(host.mcp_tools([
+        {'service': 'mcp:one', 'label': 'Documents', 'status': 'ready', 'runtime': config}]))
+    host.bind(ToolManager(groups))
+    host._post = Mock(return_value={'status': 'ready', 'mcp_config': config})
+    result = host.prepare(['get_mcp_one_methods'])
+    assert result['status'] == 'unavailable'
+    assert host.actions == {}
+    assert [call.args[0] for call in host._post.call_args_list] == ['check']
+
+
+def test_new_runtime_restores_delivered_configuration_without_notice_or_ack():
+    host, manager = runtime()
+    host.actions.clear()
+    host.intents.clear()
+    action = {'id': 'a', 'version': 2, 'service': 'mcp:one', 'label': 'Documents', 'status': 'ready'}
+    host._post = Mock(side_effect=lambda op, **kw: {'actions': [action]} if op == 'list' else {
+        'actions': [{'action': action, 'pending_delivery': False, 'mcp_config': {'id': 'one'}}]})
+    host.before_request()
+    assert 'lookup' in manager.tools_info
+    assert host.model_context() is None
+    host.observe('history_ready')
+    host.observe('turn_end')
+    assert not any(call.args[0] == 'ack' for call in host._post.call_args_list)
+
+
+def test_restored_delivered_action_does_not_repeat_catalog_failure_notice():
+    host, _ = runtime()
+    host.actions.clear()
+    host.intents.clear()
+    host.loader = lambda _: []
+    action = {'id': 'a', 'version': 2, 'service': 'mcp:one', 'label': 'Documents', 'status': 'ready'}
+    host._post = Mock(side_effect=lambda op, **kw: {'actions': [action]} if op == 'list' else {
+        'actions': [{'action': action, 'pending_delivery': False, 'mcp_config': {'id': 'one'}}]})
+    for _ in range(2):
+        host.before_request()
+        assert host.model_context() is None
+        assert not host._ready('mcp:one')
+
+
+@pytest.mark.parametrize('retrieval', [False, True])
+def test_refresh_disk_commit_failure_preserves_real_state_store(tmp_path, monkeypatch, retrieval):
+    from lazymind.chat.engine.agent_runtime.tool_retrieval import ToolStateStore
+    import lazymind.chat.engine.agent_runtime.tool_retrieval as state_module
+
+    host, manager = runtime()
+    store = ToolStateStore(['refresh-transaction-test'])
+    store.path = tmp_path / 'state.json'
+    if retrieval:
+        manager.enable_tool_retrieval(groups={'mcp_one'}, required=[], estimate_tokens=lambda _: 1,
+                                      threshold_tokens=100, state_store=store)
+    else:
+        manager.group_state_store = store
+    host.before_request()
+    before = store.path.read_bytes()
+    description = copy.deepcopy(manager.tools_description)
+    lazyllm.globals.config['dynamic_tool_auth'] = {'bing': 'old'}
+
+    def fail_commit(*_args):
+        raise OSError('controlled atomic replace failure')
+
+    monkeypatch.setattr(state_module.os, 'replace', fail_commit)
+    result = manager.refresh_tool_group('mcp_one', definition={
+        'name': 'mcp_one', 'desc': 'Updated documents', 'prefix': False, 'lazy': False,
+        'tools': [other_lookup]}, tool_config={'bing': 'new'}, load=True)
+    assert result['status'] == 'unavailable'
+    assert store.path.read_bytes() == before
+    assert manager.tools_description == description
+    assert lazyllm.globals.config['dynamic_tool_auth'] == {'bing': 'old'}
+    assert not list(tmp_path.glob('.tools-*'))
