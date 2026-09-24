@@ -204,7 +204,13 @@ export interface ChatMessage {
       allow_other?: boolean;
     }>;
     title?: string;
+    title_i18n_key?: string;
     description?: string;
+    user_env_delete?: {
+      id: string;
+      name: string;
+      expected_updated_at?: string;
+    };
     mail_draft?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview;
     mail_drafts?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview[];
   };

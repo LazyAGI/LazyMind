@@ -27,6 +27,18 @@ describe("AskCard read-only history", () => {
     expect(submit).toBeEnabled();
   });
 
+  it("renders legacy deletion confirmations that have no questions", () => {
+    const onSubmit = vi.fn().mockResolvedValue(false);
+    render(<AskCard askPending={{
+      ask_id: "legacy-env-delete",
+      user_env_delete: { id: "env-test", name: "test_api_key", expected_updated_at: "2026-09-23T00:00:00Z" },
+      questions: [],
+    }} onSubmit={onSubmit} />);
+    expect(screen.getByText("settingsPage.envVars.deleteConfirm")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "common.yes" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "common.no" })).toBeInTheDocument();
+  });
+
   it.each(["false", "reject"])("preserves the answer and allows retry after %s", async (failure) => {
     let resolve!: (value: boolean) => void;
     let reject!: (reason: Error) => void;

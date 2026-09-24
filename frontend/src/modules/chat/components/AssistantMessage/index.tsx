@@ -1443,6 +1443,7 @@ const AssistantMessage = (props: any) => {
         );
       }
       if (!showAskCard) return null;
+      if (!askPending.user_env_delete && !askPending.questions?.length) return null;
       return (
         <AskCard
           key={askPending.ask_id}

@@ -138,6 +138,20 @@ function ChoiceLabel({ value }: { value: string }) {
   return <span className="ask-wizard__choice-label">{value}</span>;
 }
 
+function normalizedAskQuestions(
+  askPending: AskPending,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): AskQuestion[] {
+  if (askPending.questions.length > 0) return askPending.questions;
+  const target = askPending.user_env_delete?.name?.trim();
+  if (!target) return askPending.questions;
+  return [{
+    text: t("settingsPage.envVars.deleteConfirm", { name: target }),
+    type: "boolean",
+    choices: ["__ask_user_yes__", "__ask_user_no__"],
+  }];
+}
+
 export default function AskCard({
   askPending,
   onSubmit,
@@ -156,11 +170,11 @@ export default function AskCard({
   };
   const answerSeparator = t("chat.askCardAnswerSeparator");
   const {
-    questions,
     title,
     title_i18n_key: titleI18nKey,
     description,
   } = askPending;
+  const questions = normalizedAskQuestions(askPending, t);
   const displayTitle = title || (titleI18nKey ? t(titleI18nKey) : "");
   const total = questions.length;
 
