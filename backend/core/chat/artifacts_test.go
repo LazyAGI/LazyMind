@@ -8,8 +8,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"lazymind/core/artifact"
 	"lazymind/core/common/orm"
+	"lazymind/core/subagent"
 )
 
 func newArtifactTestDB(t *testing.T) *orm.DB {
@@ -384,5 +387,362 @@ func TestPersistConversationFileArtifactRejectsForeignPath(t *testing.T) {
 		context.Background(), db.DB, "conversation-1", "history-1", "user-1", event,
 	); err == nil || !strings.Contains(err.Error(), "outside its conversation workspace") {
 		t.Fatalf("expected foreign path rejection, got %v", err)
+	}
+}
+
+func TestListConversationArtifactsReadsHistoryCreateTime(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.ChatHistory{})
+	now := time.Now().UTC().Truncate(time.Second)
+	history := orm.ChatHistory{
+		ID:             "history-1",
+		Seq:            1,
+		ConversationID: "conversation-1",
+		Ext:            json.RawMessage(`{"input":[]}`),
+		TimeMixin:      orm.TimeMixin{CreateTime: now, UpdateTime: now},
+	}
+	if err := db.Create(&history).Error; err != nil {
+		t.Fatalf("create history: %v", err)
+	}
+	var got []orm.ChatHistory
+	if err := db.Select("id, conversation_id, ext, create_time").
+		Where("conversation_id = ?", "conversation-1").
+		Order("seq ASC, create_time ASC, id ASC").
+		Find(&got).Error; err != nil {
+		t.Fatalf("list histories with create_time: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != history.ID {
+		t.Fatalf("histories = %#v, want history-1", got)
+	}
+}
+
+func TestConversationSubAgentArtifactsProjectOnlyPublishedV2Outputs(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	db := orm.MigrateTestDB(t, append(v2PersistModels(),
+		&orm.SubAgentTask{}, &orm.SubAgentArtifact{},
+	)...)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	ordinary := orm.SubAgentTask{
+		ID: "task-published", ConversationID: "conversation-1", TriggerHistoryID: "history-1",
+		AgentType: "research", Title: "Research", Mode: "auto", Status: subagent.StatusSucceeded,
+		Params: json.RawMessage(`{}`), InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`),
+		CreateUserID: "user-1", LastHeartbeat: now, CreatedAt: now, UpdatedAt: now,
+	}
+	workflow := ordinary
+	workflow.ID, workflow.AgentType = "task-workflow", "workflow_step"
+	running := ordinary
+	running.ID, running.Status = "task-running", subagent.StatusRunning
+	for _, task := range []orm.SubAgentTask{ordinary, workflow, running} {
+		if err := db.Create(&task).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows := []orm.SubAgentArtifact{
+		{ID: "row-published", TaskID: ordinary.ID, Slot: "report", ContentType: "text", Value: json.RawMessage(`{"text":"visible"}`), Seq: 1, CreatedAt: now},
+		{ID: "row-hidden", TaskID: ordinary.ID, Slot: "hidden", ContentType: "text", Value: json.RawMessage(`{"text":"hidden"}`), Seq: 2, Hidden: true, CreatedAt: now},
+		{ID: "row-workflow", TaskID: workflow.ID, Slot: "workflow", ContentType: "text", Value: json.RawMessage(`{"text":"workflow"}`), Seq: 1, CreatedAt: now},
+		{ID: "row-running", TaskID: running.ID, Slot: "running", ContentType: "text", Value: json.RawMessage(`{"text":"running"}`), Seq: 1, CreatedAt: now},
+	}
+	for _, row := range rows {
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := artifact.DualWriteSubAgent(ctx, artifact.New(db.DB), artifact.SubAgentSnapshot{
+		TaskID: ordinary.ID, ConversationID: ordinary.ConversationID, TriggerHistoryID: ordinary.TriggerHistoryID,
+		OwnerUserID: ordinary.CreateUserID, AgentType: ordinary.AgentType,
+	}, artifact.SubAgentLegacyArtifact{ID: rows[0].ID, Slot: rows[0].Slot, ContentType: rows[0].ContentType, Value: rows[0].Value, Seq: rows[0].Seq}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := conversationSubAgentArtifacts(ctx, db.DB, "conversation-1", "user-1")
+	if len(got) != 1 {
+		t.Fatalf("projected artifacts = %#v, want one published ordinary SubAgent artifact", got)
+	}
+	if got[0].SourceType != "subagent" || got[0].ProducerID != ordinary.ID || got[0].V2ArtifactID == "" || got[0].RevisionCount != 1 {
+		t.Fatalf("projected artifact = %#v", got[0])
+	}
+}
+
+func TestConversationUserUploadArtifactsProjectsOnlyReadableFileInputs(t *testing.T) {
+	uploadRoot := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", uploadRoot)
+	t.Setenv("LAZYMIND_FILE_URL_SIGN_SECRET", "artifact-test-secret")
+	filePath := filepath.Join(uploadRoot, "tmp", "users", "user-1", "files", "upload-1", "brief.pdf")
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		t.Fatalf("create upload directory: %v", err)
+	}
+	if err := os.WriteFile(filePath, []byte("brief"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+
+	history := orm.ChatHistory{
+		ID: "history-1",
+		Ext: json.RawMessage(`{"input":[
+			{"input_type":"text","text":"summarize this"},
+			{"input_type":"file","uri":"` + filePath + `","filename":"brief.pdf"},
+			{"input_type":"image","uri":"data:image/png;base64,abc"},
+			{"input_type":"file","uri":"https://example.com/private.pdf"}
+		]}`),
+	}
+
+	got := conversationUserUploadArtifacts("conversation-1", "user-1", []orm.ChatHistory{history})
+	if len(got) != 1 {
+		t.Fatalf("projected uploads = %#v, want one readable file", got)
+	}
+	if got[0].SourceType != "user_upload" || got[0].ProducerType != "user" || got[0].Filename != "brief.pdf" {
+		t.Fatalf("unexpected upload projection: %#v", got[0])
+	}
+	if got[0].PublicationStatus != artifactPublicationInput {
+		t.Fatalf("upload publication_status = %q, want %q", got[0].PublicationStatus, artifactPublicationInput)
+	}
+	var value map[string]any
+	if err := json.Unmarshal(got[0].Value, &value); err != nil {
+		t.Fatalf("decode upload response value: %v", err)
+	}
+	if _, exposed := value["path"]; exposed {
+		t.Fatalf("upload projection exposed filesystem path: %#v", value)
+	}
+	url, _ := value["url"].(string)
+	if !strings.HasPrefix(url, "/static-files/") {
+		t.Fatalf("upload projection URL = %q, want signed static URL", url)
+	}
+}
+
+func TestConversationUserUploadArtifactsRejectsForeignOwner(t *testing.T) {
+	uploadRoot := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", uploadRoot)
+	t.Setenv("LAZYMIND_FILE_URL_SIGN_SECRET", "artifact-test-secret")
+	filePath := filepath.Join(uploadRoot, "tmp", "users", "user-2", "files", "upload-2", "secret.pdf")
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		t.Fatalf("create upload directory: %v", err)
+	}
+	if err := os.WriteFile(filePath, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+	history := orm.ChatHistory{
+		ID:  "history-2",
+		Ext: json.RawMessage(`{"input":[{"input_type":"file","uri":"` + filePath + `","filename":"secret.pdf"}]}`),
+	}
+	got := conversationUserUploadArtifacts("conversation-1", "user-1", []orm.ChatHistory{history})
+	if len(got) != 0 {
+		t.Fatalf("foreign upload was re-signed: %#v", got)
+	}
+}
+
+func v2PersistModels() []any {
+	return []any{
+		&orm.ConversationArtifact{},
+		&orm.ArtifactV2{}, &orm.ArtifactBlob{}, &orm.ArtifactRevision{},
+		&orm.ArtifactHead{}, &orm.ArtifactBinding{}, &orm.ArtifactDependency{},
+		&orm.ArtifactIdempotency{}, &orm.ArtifactEventOutbox{},
+	}
+}
+
+func TestPersistConversationArtifactDualWritesLogicalKeyRevisions(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", t.TempDir())
+	db := orm.MigrateTestDB(t, v2PersistModels()...)
+	_ = db.Exec(`CREATE TRIGGER IF NOT EXISTS artifact_revisions_no_update
+BEFORE UPDATE ON artifact_revisions
+BEGIN
+  SELECT RAISE(ABORT, 'artifact revision payload is immutable');
+END;`).Error
+	_ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uk_artifacts_owner_logical_key
+ON artifacts (tenant_id, owner_user_id, logical_key)
+WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key != ''`).Error
+
+	firstID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	otherID := "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+	first, err := persistConversationArtifact(context.Background(), db.DB, "c1", "h1", "u1", &ArtifactCreatedEvent{
+		ArtifactID: firstID, Filename: "report.md", ContentType: "text",
+		Value: json.RawMessage(`{"text":"one"}`), LogicalKey: "report", IdempotencyKey: "k1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.RevisionCount != 1 || first.V2ArtifactID == "" {
+		t.Fatalf("first dto = %#v", first)
+	}
+	replaced, err := persistConversationArtifact(context.Background(), db.DB, "c1", "h1", "u1", &ArtifactCreatedEvent{
+		ArtifactID: firstID, Filename: "report.md", ContentType: "text",
+		Value: json.RawMessage(`{"text":"two"}`), LogicalKey: "report", IdempotencyKey: "k2",
+		ReplaceExisting: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replaced.RevisionCount != 2 || replaced.Revision != 2 || replaced.HeadVersion == 0 {
+		t.Fatalf("replaced dto = %#v", replaced)
+	}
+	sameName, err := persistConversationArtifact(context.Background(), db.DB, "c1", "h1", "u1", &ArtifactCreatedEvent{
+		ArtifactID: otherID, Filename: "report.md", ContentType: "text",
+		Value: json.RawMessage(`{"text":"other"}`), LogicalKey: "report-alt", IdempotencyKey: "k3",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sameName.V2ArtifactID == first.V2ArtifactID {
+		t.Fatal("different logical_key merged into one artifact")
+	}
+	var original orm.ArtifactRevision
+	if err := db.Where("artifact_id = ? AND revision_no = 1", first.V2ArtifactID).First(&original).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(original.InlineJSON), "one") {
+		t.Fatalf("v1 payload = %s", original.InlineJSON)
+	}
+}
+
+func TestPersistConversationArtifactRollsBackWhenV2Conflicts(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", t.TempDir())
+	db := orm.MigrateTestDB(t, v2PersistModels()...)
+	_ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uk_artifacts_owner_logical_key
+ON artifacts (tenant_id, owner_user_id, logical_key)
+WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key != ''`).Error
+	artifactID := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	if _, err := persistConversationArtifact(context.Background(), db.DB, "c1", "h1", "u1", &ArtifactCreatedEvent{
+		ArtifactID: artifactID, Filename: "report.md", ContentType: "text",
+		Value: json.RawMessage(`{"text":"one"}`), LogicalKey: "report", IdempotencyKey: "same-key",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := persistConversationArtifact(context.Background(), db.DB, "c1", "h1", "u1", &ArtifactCreatedEvent{
+		ArtifactID: artifactID, Filename: "report.md", ContentType: "text",
+		Value: json.RawMessage(`{"text":"two"}`), LogicalKey: "report", IdempotencyKey: "same-key",
+		ReplaceExisting: true,
+	})
+	if err != artifact.ErrIdempotencyConflict || replaced != nil {
+		t.Fatalf("expected atomic rejection: dto=%#v err=%v", replaced, err)
+	}
+	var stored orm.ConversationArtifact
+	if err := db.First(&stored, "id = ?", artifactID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stored.Value), "one") {
+		t.Fatalf("legacy changed despite rollback: %s", stored.Value)
+	}
+	listed := ConversationArtifactDTO{ArtifactID: artifactID, Value: stored.Value}
+	enrichConversationArtifactDTO(context.Background(), db.DB, "u1", &listed)
+	if listed.V2ArtifactID == "" || !strings.Contains(string(listed.Value), "one") {
+		t.Fatalf("rollback lost the committed V2 binding: %#v", listed)
+	}
+}
+
+func TestEnrichRestoredTextUsesProjectionContentType(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", t.TempDir())
+	db := orm.MigrateTestDB(t, v2PersistModels()...)
+	_ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uk_artifacts_owner_logical_key
+ON artifacts (tenant_id, owner_user_id, logical_key)
+WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key != ''`).Error
+	artifactID := "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+	first, err := persistConversationArtifact(context.Background(), db.DB, "c1", "h1", "u1", &ArtifactCreatedEvent{
+		ArtifactID: artifactID, Filename: "notes.txt", ContentType: "text",
+		Value: json.RawMessage(`{"text":"v1"}`), LogicalKey: "notes", IdempotencyKey: "r1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := artifact.New(db.DB)
+	if _, err := svc.CommitRevision(context.Background(), artifact.CommitRequest{
+		TenantID: "u1", OwnerUserID: "u1", ArtifactID: first.V2ArtifactID, LogicalKey: "conv:c1:notes",
+		Title: "notes.bin", Content: []byte("binary-v2"), ContentType: "file", Channel: artifact.ChannelPublished,
+		BaseRevisionID: first.RevisionID, ExpectedHeadVer: first.HeadVersion,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.RestorePublished(context.Background(), "u1", first.V2ArtifactID, first.RevisionID, 2); err != nil {
+		t.Fatal(err)
+	}
+	dto := ConversationArtifactDTO{
+		ArtifactID: artifactID, ContentType: "file", Filename: "notes.bin", Name: "notes.bin",
+		Value: json.RawMessage(`{"path":"/tmp/notes.bin","filename":"notes.bin"}`),
+	}
+	enrichConversationArtifactDTO(context.Background(), db.DB, "u1", &dto)
+	if dto.ContentType != "text" || !strings.Contains(string(dto.Value), "v1") {
+		t.Fatalf("restored projection mixed file metadata with text bytes: %#v", dto)
+	}
+}
+
+func TestConversationSubAgentArtifactsFlagOffKeepsLegacyRows(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "")
+	db := orm.MigrateTestDB(t, &orm.SubAgentTask{}, &orm.SubAgentArtifact{})
+	now := time.Now().UTC()
+	task := orm.SubAgentTask{
+		ID: "task-1", ConversationID: "conversation-1", TriggerHistoryID: "history-1",
+		AgentType: "research", Title: "Research", Mode: "auto", Status: subagent.StatusSucceeded,
+		Params: json.RawMessage(`{}`), InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`),
+		CreateUserID: "user-1", LastHeartbeat: now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.SubAgentArtifact{
+		ID: "row-1", TaskID: task.ID, Slot: "report", ContentType: "text",
+		Value: json.RawMessage(`{"text":"visible"}`), Seq: 1, CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	got := conversationSubAgentArtifacts(context.Background(), db.DB, "conversation-1", "user-1")
+	if len(got) != 1 || got[0].ArtifactID != "row-1" || got[0].V2ArtifactID != "" {
+		t.Fatalf("flag-off projection = %#v", got)
+	}
+}
+
+func TestConversationSubAgentArtifactsKeepUnmappedLegacyRows(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	db := orm.MigrateTestDB(t, append(v2PersistModels(),
+		&orm.SubAgentTask{}, &orm.SubAgentArtifact{},
+	)...)
+	now := time.Now().UTC()
+	task := orm.SubAgentTask{
+		ID: "task-1", ConversationID: "conversation-1", TriggerHistoryID: "history-1",
+		AgentType: "research", Title: "Research", Mode: "auto", Status: subagent.StatusSucceeded,
+		Params: json.RawMessage(`{}`), InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`),
+		CreateUserID: "user-1", LastHeartbeat: now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.SubAgentArtifact{
+		ID: "row-unmapped", TaskID: task.ID, Slot: "report", ContentType: "text",
+		Value: json.RawMessage(`{"text":"legacy"}`), Seq: 1, CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	got := conversationSubAgentArtifacts(context.Background(), db.DB, "conversation-1", "user-1")
+	if len(got) != 1 || got[0].ArtifactID != "row-unmapped" || got[0].V2ArtifactID != "" {
+		t.Fatalf("unmapped dual-write row disappeared: %#v", got)
+	}
+}
+
+func TestSameLogicalKeyDoesNotCrossConversations(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", t.TempDir())
+	db := orm.MigrateTestDB(t, v2PersistModels()...)
+	_ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uk_artifacts_owner_logical_key
+ON artifacts (tenant_id, owner_user_id, logical_key)
+WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key != ''`).Error
+	left, err := persistConversationArtifact(context.Background(), db.DB, "c-left", "h1", "u1", &ArtifactCreatedEvent{
+		ArtifactID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01", Filename: "report.md", ContentType: "text",
+		Value: json.RawMessage(`{"text":"left"}`), LogicalKey: "report", IdempotencyKey: "left",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	right, err := persistConversationArtifact(context.Background(), db.DB, "c-right", "h1", "u1", &ArtifactCreatedEvent{
+		ArtifactID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa02", Filename: "report.md", ContentType: "text",
+		Value: json.RawMessage(`{"text":"right"}`), LogicalKey: "report", IdempotencyKey: "right",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if left.V2ArtifactID == "" || left.V2ArtifactID == right.V2ArtifactID {
+		t.Fatalf("conversations shared a V2 artifact: left=%#v right=%#v", left, right)
+	}
+	if left.LogicalKey != "report" || right.LogicalKey != "report" {
+		t.Fatalf("display logical_key leaked scope prefix: left=%q right=%q", left.LogicalKey, right.LogicalKey)
 	}
 }

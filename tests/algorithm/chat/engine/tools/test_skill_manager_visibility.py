@@ -51,8 +51,9 @@ def test_skill_list_filters_prompt_list_read_and_run(tmp_path, monkeypatch):
     assert 'hidden-skill' not in prompt
 
     assert manager.get_skill('visible-skill')['status'] == 'ok'
-    with pytest.raises(ToolExecutionError, match='Skill not found: hidden-skill'):
-        manager.get_skill('hidden-skill')
+    hidden_result = manager.get_skill('hidden-skill')
+    assert hidden_result['status'] == 'error'
+    assert hidden_result['code'] == 'skill_disabled'
 
     visible_reference = manager.read_reference('visible-skill', 'references/guide.md')
     assert visible_reference['status'] == 'ok'

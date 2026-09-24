@@ -17,9 +17,15 @@ _CTX_KEY = 'subagent_ctx'
 # value persisted to DB / emitted over SSE becomes a {"type": "file", "path": "..."} reference.
 LARGE_ARTIFACT_THRESHOLD = 32 * 1024  # 32 KB
 
-# Tool results larger than this are truncated before being fed back to the LLM.
-# The full content is written to a workspace file; the LLM receives the path + a size hint.
-LARGE_TOOL_RESULT_THRESHOLD = 16 * 1024  # 16 KB
+# Tool results under this UTF-8 byte size skip token estimation entirely.
+# Larger results are offloaded only when their estimated model input size reaches
+# LARGE_TOOL_RESULT_TOKEN_THRESHOLD. This avoids treating CJK text as oversized
+# merely because each character uses multiple UTF-8 bytes.
+LARGE_TOOL_RESULT_SCAN_THRESHOLD_BYTES = 64 * 1024  # 64 KiB
+LARGE_TOOL_RESULT_TOKEN_THRESHOLD = 32 * 1024  # 32K estimated tokens
+
+# Preserve the former conservative fallback if filesystem offload fails.
+LARGE_TOOL_RESULT_FALLBACK_CHARS = 16 * 1024
 
 
 @dataclass

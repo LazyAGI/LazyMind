@@ -18,6 +18,14 @@ func RebuildSubagentParams(ctx context.Context, db *gorm.DB, userID, conversatio
 	parentRuntime, _ := params["parent_agentic_config"].(map[string]any)
 	parentRuntime = cloneMap(parentRuntime)
 	parentRuntime["_core_local_runtime"] = Enabled()
+	if strings.TrimSpace(userID) != "" {
+		params["user_id"] = userID
+		parentRuntime["user_id"] = userID
+	}
+	if strings.TrimSpace(conversationID) != "" {
+		params["conversation_id"] = conversationID
+		parentRuntime["conversation_id"] = conversationID
+	}
 	params["parent_agentic_config"] = parentRuntime
 	params["_core_local_runtime"] = Enabled()
 	if db == nil || !db.Migrator().HasTable(&orm.ConversationWorkspaceBinding{}) {

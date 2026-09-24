@@ -205,6 +205,8 @@ func remoteStepContent(event TaskEvent) (string, json.RawMessage) {
 	var value any
 	role := ""
 	switch event.Type {
+	case "plan":
+		role, value = "plan", map[string]any{"steps": event.Steps, "scope_version": event.ScopeVersion}
 	case "text":
 		role, value = "text", map[string]any{"content": event.Text}
 	case "think":

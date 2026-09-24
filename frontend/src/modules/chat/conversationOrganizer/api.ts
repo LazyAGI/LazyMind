@@ -8,10 +8,10 @@ const client = new ConversationGroupsApi(new Configuration({ basePath: BASE_URL 
 export const CONVERSATION_GROUPS_CHANGED_EVENT = "lazymind:conversation-groups-changed";
 export function emitConversationGroupsChanged() { window.dispatchEvent(new Event(CONVERSATION_GROUPS_CHANGED_EVENT)); }
 
-export async function listConversationGroups(keyword?: string) { return (await client.listConversationGroups({ keyword })).data.groups; }
-export async function createConversationGroup(input: { name: string; scope?: string; kind?: "group" | "project"; workspace_id?: string }) { return (await client.createConversationGroup({ conversationGroupCreateRequest: input })).data.group; }
-export async function getConversationGroup(groupId: string, pageToken = "", keyword = "") {
-  const data = (await client.getConversationGroup({ groupId, pageSize: 50, pageToken, keyword })).data;
+export async function listConversationGroups(keyword?: string, isTaskConv?: boolean, assistants?: string) { return (await client.listConversationGroups({ keyword, isTaskConv, assistants })).data.groups; }
+export async function createConversationGroup(input: { name: string; scope?: string; is_task_conv?: boolean; kind?: "group" | "project"; workspace_id?: string }) { return (await client.createConversationGroup({ conversationGroupCreateRequest: input })).data.group; }
+export async function getConversationGroup(groupId: string, pageToken = "", keyword = "", assistants?: string) {
+  const data = (await client.getConversationGroup({ groupId, pageSize: 50, pageToken, keyword, assistants })).data;
   return { group: data.group, conversations: data.conversations ?? [], nextPageToken: data.next_page_token };
 }
 export async function updateConversationGroup(groupId: string, input: { name: string; scope?: string; organizer_run_id?: string }) { return (await client.updateConversationGroup({ groupId, conversationGroupUpdateRequest: input })).data.group; }

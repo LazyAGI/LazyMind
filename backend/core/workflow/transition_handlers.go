@@ -908,6 +908,11 @@ func workflowNodeToolConfig(ctx context.Context, db *gorm.DB, userID string, bas
 	}
 	merged := map[string]any{}
 	for key, value := range base {
+		// Cloud credentials are resolved for this execution, never inherited from
+		// a saved request after the account is disabled, expired or removed.
+		if modelconfig.IsCloudToolProvider(key) {
+			continue
+		}
 		merged[key] = value
 	}
 	for key, value := range extra {

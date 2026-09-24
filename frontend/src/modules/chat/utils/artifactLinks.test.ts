@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ConversationArtifact } from "@/modules/chat/store/taskCenter";
 import {
   appendDownloadParam,
+  deliveriesForHistory,
   conversationHasFileIdLink,
   findArtifactByFileId,
   getArtifactFilename,
@@ -29,6 +30,14 @@ function artifact(
 }
 
 describe("getFileIdFromHref", () => {
+  it("resolves earlier receipts without allowing future revisions to rewrite old links", () => {
+    const old = artifact({ artifact_id: "same", history_id: "h1", value: { text: "old" } });
+    const future = artifact({ artifact_id: "same", history_id: "h3", value: { text: "future" } });
+    const order = { h1: 0, h2: 1, h3: 2 };
+    expect(findArtifactByFileId(deliveriesForHistory([future, old], "h2", order), "same")).toBe(old);
+    expect(findArtifactByFileId(deliveriesForHistory([old, future], "h3", order), "same")).toBe(future);
+    expect(deliveriesForHistory([future], "h1", order)).toEqual([]);
+  });
   it("parses a file_id href", () => {
     expect(getFileIdFromHref("file_id:abc-123")).toBe("abc-123");
   });

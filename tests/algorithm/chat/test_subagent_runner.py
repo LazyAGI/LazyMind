@@ -64,6 +64,52 @@ def test_terminal_tools_only_filters_model_tools_without_mutating_runtime_tools(
     assert visible == [writer_prepare_workspace]
 
 
+def test_large_chinese_tool_result_below_token_limit_stays_inline(tmp_path):
+    """A byte-sized Chinese result must not be offloaded before 32K estimated tokens."""
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='task-large-zh',
+        conversation_id='conv-1',
+        agent_type='workflow_step',
+        objective='test large result',
+        params={},
+        workspace_path=str(tmp_path),
+        input_slots=[],
+        output_slots=[],
+        db=None,
+        emit=lambda _event: None,
+    )
+    result = '中' * 22_000  # 66 KB in UTF-8, but only 24,200 estimated tokens.
+
+    assert runner_mod._truncate_tool_result(ctx, result, 'read_file') == result
+    assert not (tmp_path / 'large').exists()
+
+
+def test_tool_result_at_token_limit_is_offloaded_after_byte_gate(tmp_path):
+    """A result reaching the 32K token budget must be persisted, not sent inline."""
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='task-large-en',
+        conversation_id='conv-1',
+        agent_type='workflow_step',
+        objective='test large result',
+        params={},
+        workspace_path=str(tmp_path),
+        input_slots=[],
+        output_slots=[],
+        db=None,
+        emit=lambda _event: None,
+    )
+    result = 'a' * 131_072  # 128 KB and exactly 32,768 estimated tokens.
+
+    rendered = runner_mod._truncate_tool_result(ctx, result, 'read_file')
+
+    assert rendered.startswith('[Large result offloaded to file')
+    assert list((tmp_path / 'large').glob('read_file_*.txt'))
+
+
 # ---------------------------------------------------------------------------
 # In-memory FakeDB
 # ---------------------------------------------------------------------------
@@ -305,6 +351,7 @@ def test_ordinary_subagent_enables_inherited_skill_runtime(tmp_path):
     )
 
     assert plan.execution_options.skills == ['design/image-prompt-craft']
+    assert plan.execution_options.prompt_skills == []
     assert plan.execution_options.fs is runner_mod.FS
     assert plan.execution_options.skills_dir
     assert all(
@@ -329,6 +376,7 @@ def test_workflow_step_keeps_skill_runtime_isolated(tmp_path, monkeypatch, retri
     )
 
     assert plan.execution_options.skills is None
+    assert plan.execution_options.prompt_skills is None
     assert plan.execution_options.fs is None
     assert plan.execution_options.skills_dir is None
     assert plan.execution_options.preload_all_tools is True
@@ -363,11 +411,19 @@ def test_run_subagent_stream_task_not_found(monkeypatch):
 # Test: happy path SSE sequence
 # ---------------------------------------------------------------------------
 
-def test_run_subagent_stream_happy_path(monkeypatch):
+@pytest.mark.parametrize("display_plan", [["Read inputs", "Analyze data", "Write result"], None])
+def test_run_subagent_stream_happy_path(monkeypatch, display_plan):
     db = _install_fake_db(monkeypatch)
     _install_fake_lazyllm(monkeypatch)
     _install_fake_build(monkeypatch)
     _install_fake_translator(monkeypatch)
+
+    def generate_plan(*_args):
+        if display_plan is None:
+            raise ValueError('Model returned an invalid plan')
+        return display_plan
+
+    monkeypatch.setattr(runner_mod, '_generate_display_plan', generate_plan)
 
     # Simulate: text event → tool_calls → tool_results (triggers artifact emit) → text
     tool_calls_event = {'tag': 'tool_calls', 'tool_calls': [{'id': 'c1', 'name': 'save_artifacts', 'args': {}}]}
@@ -404,6 +460,14 @@ def test_run_subagent_stream_happy_path(monkeypatch):
 
     assert types_out[0] == 'task_start'
     assert types_out[1] == 'progress'  # initial progress
+    if display_plan:
+        plan_events = [e for e in events_out if e['type'] == 'plan']
+        if plan_events:  # A very short task may finish before the optional plan.
+            assert plan_events[0]['steps'] == display_plan
+            assert next(s for s in db.steps if s['role'] == 'plan')['content']['steps'] == display_plan
+    else:
+        assert 'plan' not in types_out
+
     assert 'text' in types_out
     assert 'progress' in types_out   # tool_results progress bump
     assert 'done' in types_out
@@ -803,3 +867,92 @@ def test_fastapi_subagent_launch_identity_reaches_runner_privately(monkeypatch, 
     assert configs[0]['_workspace_execution'] == (identity or {})
     for private in ['launch-1', 'launch-2', 'later-persisted', 'parent-run', 'body-params']:
         assert private not in prompts[0] and private not in response.text
+
+
+def test_display_plan_is_model_generated_and_bounded():
+    llm = MagicMock()
+    llm.share.return_value.return_value = '```json\n["检索销售数据", "比较季度趋势", "整理分析报告"]\n```'
+    assert runner_mod._generate_display_plan(llm, '分析季度销售') == [
+        '检索销售数据', '比较季度趋势', '整理分析报告',
+    ]
+    assert '分析季度销售' in llm.share.return_value.call_args.args[0]
+    llm.share.return_value.return_value = '["one", {"text": "two"}, "three"]'
+    with pytest.raises(ValueError):
+        runner_mod._generate_display_plan(llm, 'task')
+
+
+def test_display_plan_is_not_replayed_as_private_agent_history():
+    db = FakeDB()
+    db.append_step('t', 0, 'plan', {'steps': ['a', 'b', 'c']})
+    assert runner_mod._rebuild_history_from_steps(db, 't') == []
+
+
+def test_display_plan_preserves_current_step_contract_before_overall_request():
+    llm = MagicMock()
+    llm.share.return_value.return_value = '["识别受众与演示目标", "梳理页面要求与视觉约束", "整理需求简报和能力要求"]'
+    scope = {
+        'step_id': 'analyze_requirements',
+        'prompt': 'Analyze the user requirements. Produce only the requirements brief and capability marker.',
+        'acceptance_criteria': ['Audience and visual constraints are explicit'],
+        'output_slots': ['requirement_analysis', 'ppt_capability_requirements'],
+    }
+    steps = runner_mod._generate_display_plan(llm, '制作三页 PPT，收集图片、生成底图、建立大纲。', scope)
+    prompt = llm.share.return_value.call_args.args[0]
+    payload = json.loads(prompt.split('\n', 1)[1])
+    assert payload['current_step'] == 'analyze_requirements'
+    assert payload['current_step_contract'] == scope['prompt']
+    assert payload['current_step_outputs'] == scope['output_slots']
+    assert payload['current_step_acceptance'] == scope['acceptance_criteria']
+    assert '制作三页' in payload['task_context_only']
+    assert 'CURRENT SUBTASK ONLY' in prompt
+    assert len(steps) == 3
+
+
+def test_unconfigured_retrieval_is_not_exposed_by_subagent(monkeypatch):
+    import lazyllm
+    original = lazyllm.globals.get('agentic_config')
+    lazyllm.globals['agentic_config'] = {}
+    try:
+        old_auth = lazyllm.globals.config['dynamic_tool_auth']
+        lazyllm.globals.config['dynamic_tool_auth'] = {}
+        try:
+            monkeypatch.setattr(runner_mod, 'load_workflow_tools', lambda *_: {})
+            assert runner_mod._resolve_runtime_tools(['kb', 'web_search']) == []
+            assert runner_mod.subagent_tools.list_knowledge_bases not in runner_mod._build_subagent_tools([])
+        finally:
+            lazyllm.globals.config['dynamic_tool_auth'] = old_auth
+    finally:
+        lazyllm.globals['agentic_config'] = original or {}
+
+
+def test_display_plan_does_not_delay_execution_and_is_persisted_live(monkeypatch):
+    import threading
+    db = _install_fake_db(monkeypatch)
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_build(monkeypatch)
+    _install_fake_translator(monkeypatch)
+    started = threading.Event()
+    outline = ['Read inputs', 'Analyze data', 'Write result']
+
+    def generate(*_):
+        assert started.wait(1), 'execution was blocked by display-plan generation'
+        return outline
+
+    class Executor:
+        async def stream(self, *_):
+            started.set()
+            for _ in range(100):
+                if any(s['role'] == 'plan' for s in db.steps):
+                    break
+                await asyncio.sleep(0.005)
+            yield 'final', 'done'
+
+    monkeypatch.setattr(runner_mod, '_generate_display_plan', generate)
+    monkeypatch.setattr(runner_mod, 'AgentExecutor', Executor)
+    monkeypatch.setattr(runner_mod, '_evaluate_completion', lambda *_, **__: (True, 'done'))
+    task = {**_DEFAULT_TASK, 'params': {'required_output_artifact_keys': []}, 'output_artifact_keys': []}
+    raw = asyncio.run(_collect(runner_mod.run_subagent_stream(_DEFAULT_TASK_ID, task_spec=task)))
+    events = _sse_to_events(raw)
+    assert next(e for e in events if e['type'] == 'plan')['steps'] == outline
+    assert any(e['type'] == 'done' for e in events)
+    assert len({s['seq'] for s in db.steps}) == len(db.steps)

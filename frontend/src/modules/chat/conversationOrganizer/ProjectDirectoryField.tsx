@@ -1,4 +1,5 @@
-import { Button, Form, Modal } from "antd";
+import { getLocalizedErrorMessage } from "@/components/request";
+import { Alert, Button, Form, Modal } from "antd";
 import { FolderOpenOutlined } from "@ant-design/icons";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -15,11 +16,13 @@ export default function ProjectDirectoryField() {
   const form = Form.useFormInstance();
   const { t } = useTranslation();
   const [path, setPath] = useState("");
+  const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const runtime = getRuntimeMode();
   const choose = async () => {
     if (runtime !== "local" && runtime !== "desktop") return;
     setBusy(true);
+    setError("");
     try {
       const candidate = await selectWorkspaceCandidate(runtime);
       if (candidate.canceled || !candidate.selection_token) return;
@@ -28,15 +31,18 @@ export default function ProjectDirectoryField() {
         content: <><p>{candidate.path}</p><p>{t("chat.workspace.scope")}</p></>,
         okText: t("chat.workspace.authorize"), cancelText: t("common.cancel"),
         onOk: async () => {
-          const workspace = await authorizeWorkspace(runtime, candidate.selection_token!);
-          setPath(workspace.path);
-          form.setFieldValue("workspace_id", workspace.workspace_id);
-          if (!form.getFieldValue("name")?.trim()) form.setFieldValue("name", defaultProjectName(workspace.path));
+          try {
+            const workspace = await authorizeWorkspace(runtime, candidate.selection_token!);
+            setPath(workspace.path);
+            form.setFieldValue("workspace_id", workspace.workspace_id);
+            if (!form.getFieldValue("name")?.trim()) form.setFieldValue("name", defaultProjectName(workspace.path));
+          } catch (error) { setError(getLocalizedErrorMessage(error)); throw error; }
         },
       });
-    } finally { setBusy(false); }
+    } catch (error) { setError(getLocalizedErrorMessage(error)); } finally { setBusy(false); }
   };
   return <>
+    {error && <Alert type="error" showIcon message={error} />}
     <Form.Item name="workspace_id" hidden rules={[{ required: true, message: t("conversationProject.directoryRequired") }]}><input /></Form.Item>
     <Form.Item label={t("conversationProject.directory")} required>
       <Button icon={<FolderOpenOutlined />} loading={busy} disabled={runtime !== "local" && runtime !== "desktop"} onClick={() => void choose()}>{t("chat.workspace.openFolder")}</Button>

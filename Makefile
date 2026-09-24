@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary lint-workflow-naming lint-migration-immutability lint-test-locations test test-hermetic test-hermetic-setup test-hermetic-check featured-check skills-build skills-materialize skills-verify-lock build up up-build local-runtime-manager-build lazymind-cli-build assistant-bridge-start assistant-bridge-stop local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-dev desktop-dev-down desktop-darwin-arm64 desktop-darwin-arm64-dmg desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-installer desktop-windows-x64-clean desktop-cache-clean desktop-clean
+.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary lint-workflow-naming lint-migration-immutability lint-test-locations test test-hermetic test-hermetic-setup test-hermetic-check featured-check skills-build skills-materialize skills-verify-lock build up up-build kong-refresh local-runtime-manager-build lazymind-cli-build assistant-bridge-start assistant-bridge-stop local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-dev desktop-dev-down desktop-darwin-arm64 desktop-darwin-arm64-dmg desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-installer desktop-windows-x64-clean desktop-cache-clean desktop-clean
 .DEFAULT_GOAL := help
 
 LOCAL_CONFIG_ENV ?= local/config.env
@@ -229,7 +229,8 @@ help:
 	@echo "                    file-watcher runs in compose by default"
 	@echo "                    Use LAZYMIND_FILE_WATCHER_MODE=host for host-process debugging"
 	@echo "                    Use SERVICES=svc1,svc2 to start specific services only"
-	@echo "  make up-build   - Build images, start services, and start the Assistant Bridge"
+	@echo "  make up-build   - Build images, start services, restart Kong, and start the Assistant Bridge"
+	@echo "  make kong-refresh - Restart Kong only (fixes 上游服务错误 / Kong 502 after a partial compose rebuild)"
 	@echo "                    Use SERVICES=svc1,svc2 to target specific services"
 	@echo "  make local-up - Build/start local LazyMind without containers"
 	@echo "  make local-up-lan - Build/start local LazyMind for LAN access with local admin auto-login enabled"
@@ -479,6 +480,7 @@ up: skills-materialize
 	@$(MAKE) --no-print-directory compose-host-permissions
 	@$(_COMPOSE) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) -d \
 		$(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
+	@$(MAKE) --no-print-directory kong-refresh
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-run; \
 	else \
@@ -503,12 +505,22 @@ up-build: skills-materialize
 	@$(MAKE) --no-print-directory compose-host-permissions
 	@$(_COMPOSE) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) --build -d \
 		$(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
+	@$(MAKE) --no-print-directory kong-refresh
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-run; \
 	else \
 		echo "✅ file-watcher container enabled"; \
 	fi
 	@$(MAKE) --no-print-directory assistant-bridge-start
+
+# rbac-auth keepalives the auth-service IP. Recreating auth/core/chat reuses
+# that IP for another container; Kong then POSTs /auth/authorize there, gets
+# 404, and the UI shows 上游服务错误 (2000110 / HTTP 502).
+kong-refresh:
+	@if $(_COMPOSE) $(_COMPOSE_PROFILES) ps -q kong >/dev/null 2>&1; then \
+		$(_COMPOSE) $(_COMPOSE_PROFILES) restart kong; \
+		echo "✅ restarted kong (drop stale rbac-auth sockets)"; \
+	fi
 
 local-runtime-manager-build:
 	@mkdir -p "$(dir $(LOCAL_RUNTIME_MANAGER_BIN))"

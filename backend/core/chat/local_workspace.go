@@ -95,6 +95,9 @@ func ensureConversationWithWorkspaceTx(
 	if existingErr != nil && !errors.Is(existingErr, gorm.ErrRecordNotFound) {
 		return nil, 0, existingErr
 	}
+	if exists && runInBackground && !existing.IsTaskConv {
+		return nil, 0, common.ResolveAppError("conversation group type mismatch", 409)
+	}
 	if exists && workspacePresent {
 		var binding orm.ConversationWorkspaceBinding
 		err := tx.Where("conversation_id = ?", convID).First(&binding).Error
@@ -111,6 +114,9 @@ func ensureConversationWithWorkspaceTx(
 		var group orm.ConversationGroup
 		if err := tx.Where("id=? AND user_id=? AND deleted_at IS NULL", groupID, userID).Take(&group).Error; err != nil {
 			return nil, 0, conversationgroup.ErrConversationGroupNotFound
+		}
+		if group.IsTaskConv != runInBackground {
+			return nil, 0, common.ResolveAppError("conversation group type mismatch", 409)
 		}
 		if group.Kind == conversationgroup.KindProject {
 			if group.WorkspaceID == nil || workspacePresent && workspaceID != *group.WorkspaceID {
@@ -130,7 +136,7 @@ func ensureConversationWithWorkspaceTx(
 				return nil, 0, common.ResolveAppError("conversation project invalid_name", 400)
 			}
 		}
-		project, err := conversationgroup.EnsureProject(ctx, tx, userID, workspaceID, name)
+		project, err := conversationgroup.EnsureProject(ctx, tx, userID, workspaceID, name, runInBackground)
 		if err != nil {
 			return nil, 0, err
 		}

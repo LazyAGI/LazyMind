@@ -61,7 +61,7 @@ def classify_tool(name: str) -> str:
         return 'harness'
     if lower in _EXTERNAL_TOOLS or lower.endswith('_search') or 'search' in lower:
         return 'external'
-    if lower in {'run_script', 'shell', 'terminal', 'bash', 'execute_command', 'cmd'}:
+    if lower in {'run_script', 'run_skill_script', 'shell', 'terminal', 'bash', 'execute_command', 'cmd'}:
         return 'shell'
     return 'tool'
 

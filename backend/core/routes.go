@@ -14,6 +14,7 @@ import (
 	"lazymind/core/acl"
 	"lazymind/core/agent"
 	"lazymind/core/agentinvocation"
+	"lazymind/core/artifact"
 	"lazymind/core/browser"
 	"lazymind/core/chat"
 	"lazymind/core/cloudbinding"
@@ -421,6 +422,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/mcp_servers/{id}:check", []string{"qa.write"}, mcp.Check)
 	handleAPI(r, "POST", "/mcp_servers/{id}:discover", []string{"qa.write"}, mcp.Discover)
 	handleAPI(r, "PUT", "/mcp_servers/{id}/tools", []string{"qa.write"}, mcp.UpdateTools)
+	handleAPI(r, "POST", "/mcp_servers/{id}/oauth/authorize", []string{"qa.write"}, mcp.OAuthAuthorize)
+	handleAPI(r, "POST", "/mcp_servers/{id}/oauth/callback", []string{"qa.write"}, mcp.OAuthCallback)
+	handleAPI(r, "DELETE", "/mcp_servers/{id}/oauth", []string{"qa.write"}, mcp.OAuthDisconnect)
 
 	// ----- Explicit external Agent model/tool authorization -----
 	handleAPI(r, "GET", "/external-agent-capabilities", []string{"qa.read"}, externalcapability.List)
@@ -497,6 +501,15 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- SubAgent (Task Center) -----
 	handleAPI(r, "GET", "/conversations/{conversation_id}/tasks", []string{"qa.read"}, subagent.ListConversationTasks)
 	handleAPI(r, "GET", "/conversations/{conversation_id}/artifacts", []string{"qa.read"}, chat.ListConversationArtifacts)
+	handleAPI(r, "GET", "/conversations/{conversation_id}/artifact-projection", []string{"qa.read"}, chat.ListConversationArtifactProjection)
+	handleAPI(r, "GET", "/artifacts/{id}", []string{"qa.read"}, artifact.GetArtifact)
+	handleAPI(r, "GET", "/artifacts/{id}/revisions", []string{"qa.read"}, artifact.ListRevisionsHTTP)
+	handleAPI(r, "GET", "/artifact-revisions/{id}", []string{"qa.read"}, artifact.GetRevisionHTTP)
+	handleAPI(r, "POST", "/artifacts/{id}/heads/{channel}:move", []string{"qa.write"}, artifact.MoveHeadHTTP)
+	handleAPI(r, "POST", "/artifact-revisions/{id}:download-url", []string{"qa.read"}, artifact.DownloadURLHTTP)
+	handleAPI(r, "GET", "/artifact-revisions:diff", []string{"qa.read"}, artifact.DiffHTTP)
+	handleAPI(r, "GET", "/internal/artifact-audit", []string{"qa.read"}, artifact.AuditHTTP)
+	handleAPI(r, "POST", "/conversations/{conversation_id}/artifacts", []string{"qa.write"}, chat.CreateConversationArtifact)
 	handleAPI(r, "GET", "/conversations/{conversation_id}/events", []string{"qa.read"}, chat.StreamConvEvents)
 	handleAPI(r, "GET", "/tasks/{task_id}:stream", []string{"qa.read"}, subagent.StreamTask)
 	handleAPI(r, "GET", "/tasks/{task_id}/artifacts", []string{"qa.read"}, subagent.GetTaskArtifacts)
@@ -825,6 +838,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/skill-review:summary", []string{"qa.read"}, resourceupdate.GetSkillReviewSummary)
 	handleAPI(r, "POST", "/skill-review:run", []string{"qa.write"}, resourceupdate.RunSkillReview)
 	handleAPI(r, "GET", "/skill-review/tasks", []string{"qa.read"}, resourceupdate.ListSkillReviewTasks)
+	handleAPI(r, "POST", "/skill-review:when-to-use-choice", []string{"qa.write"}, resourceupdate.ResolveWhenToUseConflicts)
 	handleAPI(r, "GET", "/skill-organize/tasks", []string{"qa.read"}, resourceupdate.ListSkillOrganizeTasks)
 	handleAPI(r, "PATCH", "/conversations/{name}:search-config", []string{"qa.write"}, chat.PatchConversationSearchConfig)
 	handleAPI(r, "GET", "/conversations/{name}:detail", []string{"qa.read"}, chat.GetConversationDetail)
@@ -1019,6 +1033,9 @@ func registerAllRoutes(r *mux.Router) {
 
 	// Algorithm service callbacks: no request-level RBAC, protected by internal service token at infra level.
 	handleAPI(r, "POST", "/skill/create", nil, skillv2handler.InternalCreate)
+	handleAPI(r, "POST", "/internal/skills:search", nil, skillv2handler.InternalSearch)
+	handleAPI(r, "POST", "/internal/skills:metadata", nil, skillv2handler.InternalMetadata)
+	handleAPI(r, "POST", "/internal/skills:metadata:update", nil, skillv2handler.InternalMetadataUpdate)
 	handleAPI(r, "GET", "/remote-fs/list", nil, remotefs.List)
 	handleAPI(r, "GET", "/remote-fs/info", nil, remotefs.Info)
 	handleAPI(r, "GET", "/remote-fs/exists", nil, remotefs.Exists)

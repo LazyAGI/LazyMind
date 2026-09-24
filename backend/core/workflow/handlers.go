@@ -936,12 +936,22 @@ func CreateSlotItem(w http.ResponseWriter, r *http.Request) {
 	}
 	// Write new list revision via WriteSlotRevisionWithHumanArtifact so that
 	// content_type is persisted correctly (required for image rendering).
-	newRev, err := WriteSlotRevisionWithHumanArtifact(ctx, db,
-		sessionID, slotID, anyRev.Slot, anyRev.StepID, attempt,
-		"list", nil,
-		body.ContentType, resolveValuePaths(body.Value), body.Caption,
-		"human", nil, nil,
-	)
+	var newRev *orm.WorkflowSlotRevision
+	err = common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+		if body.InsertBefore != nil && isPPTPreviewSlot(createItemSess, slotID) {
+			if err := carryForwardPPTPages(ctx, tx, createItemSess, slotID, anyRev.StepID, attempt); err != nil {
+				return err
+			}
+		}
+		var writeErr error
+		newRev, writeErr = WriteSlotRevisionWithHumanArtifact(ctx, tx,
+			sessionID, slotID, anyRev.Slot, anyRev.StepID, attempt,
+			"list", nil,
+			body.ContentType, resolveValuePaths(body.Value), body.Caption,
+			"human", nil, nil,
+		)
+		return writeErr
+	})
 	if err != nil {
 		common.ReplyErr(w, "create item failed", http.StatusInternalServerError)
 		return

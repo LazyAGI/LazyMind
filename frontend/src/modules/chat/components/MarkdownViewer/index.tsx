@@ -36,6 +36,7 @@ import {
 } from "@/modules/chat/store/taskCenter";
 import {
   conversationHasFileIdLink,
+  deliveriesForHistory,
   findArtifactByFileId,
   getArtifactFilename,
   getArtifactSignSource,
@@ -741,12 +742,15 @@ const MarkdownViewer = memo((props: any) => {
     (state) => state.activeConversationId,
   );
   const conversationId = conversationIdProp ?? activeConversationId;
-  const artifacts = useTaskCenterStore((state) =>
+  const deliveries = useTaskCenterStore((state) =>
     conversationId
-      ? (state.artifactsByConversation[conversationId] ??
+      ? (state.deliveriesByConversation?.[conversationId] ?? state.artifactsByConversation[conversationId] ??
         EMPTY_CONVERSATION_ARTIFACTS)
       : EMPTY_CONVERSATION_ARTIFACTS,
   );
+  const historyOrder = useTaskCenterStore(state => conversationId
+    ? state.artifactHistoryOrderByConversation?.[conversationId] : undefined);
+  const artifacts = useMemo(() => deliveriesForHistory(deliveries, historyId, historyOrder), [deliveries, historyId, historyOrder]);
   const loadConversationArtifacts = useTaskCenterStore(
     (state) => state.loadConversationArtifacts,
   );
@@ -756,7 +760,7 @@ const MarkdownViewer = memo((props: any) => {
   useEffect(() => {
     if (!conversationId || !hasFileIdLink) return;
     const existing =
-      useTaskCenterStore.getState().artifactsByConversation[conversationId];
+      useTaskCenterStore.getState().deliveriesByConversation?.[conversationId];
     if (existing && existing.length > 0) return;
     void loadConversationArtifacts(conversationId);
   }, [conversationId, hasFileIdLink, loadConversationArtifacts]);

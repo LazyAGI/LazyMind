@@ -1528,7 +1528,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 key={sessionId}
                 ref={textAreaRef}
                 initialMentions={sessionId !== undefined ? getInputMentions(sessionId) : undefined}
-                placeholder={placeholder || t("chat.inputPlaceholder")}
+                placeholder={placeholder || t(allowMentions
+                  ? "chat.inputPlaceholder"
+                  : "chat.inputPlaceholderWithoutMentions")}
                 value={value}
                 onChange={handleInputChange}
                 onMentionsChange={handleMentionsChange}
@@ -1672,6 +1674,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     </div>
                   </div>
                   {<LocalWorkspaceControl
+                    isTaskConv={runInBackground}
                     approvalContainer={approvalContainer}
                     draftWorkspace={props.draftWorkspace}
                     initialProject={initialProject}
@@ -1839,6 +1842,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                                 ? "image"
                                 : "file",
                               uri: file.uri,
+                              filename: file.name,
                             })),
                           ],
                           mentions: effectiveMentions,

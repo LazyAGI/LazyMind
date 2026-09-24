@@ -52,6 +52,7 @@ type Candidate = {
   content?: string;
   disabled?: boolean;
   disabledReason?: string;
+  disabledReasonKey?: string;
 };
 
 type QueryState = {
@@ -221,7 +222,17 @@ async function loadCandidates(type: CandidateType, keyword: string): Promise<Can
     const payload = unwrap<{ workflows?: Array<Record<string, unknown>> }>(response.data);
     return (payload.workflows || [])
       .filter((item) => !keyword || `${item.name || ""} ${item.description || ""}`.toLowerCase().includes(keyword.toLowerCase()))
-      .map((item) => ({ id: String(item.workflow_ref || item.workflow_id || ""), type, name: String(item.name || item.workflow_id || ""), description: String(item.description || "") }));
+      .map((item) => {
+        const disabled = item.enabled === false || item.call_mode === "disabled";
+        return {
+          id: String(item.workflow_ref || item.workflow_id || ""),
+          type,
+          name: String(item.name || item.workflow_id || ""),
+          description: String(item.description || ""),
+          disabled,
+          disabledReasonKey: disabled ? "chat.mentionWorkflowDisabled" : undefined,
+        };
+      });
   }
   if (type === "prompt") {
     const response = await PromptServiceApi().listPrompts({ keyword, pageSize: 100 });
@@ -477,8 +488,10 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   }, [allowMentions]);
 
   const getDisabledReason = useCallback((candidate: Candidate) => (
-    candidate.disabledReason || disabledMentionReasons?.[candidate.type as MentionType]
-  ), [disabledMentionReasons]);
+    candidate.disabledReason ||
+    (candidate.disabledReasonKey ? t(candidate.disabledReasonKey) : undefined) ||
+    disabledMentionReasons?.[candidate.type as MentionType]
+  ), [disabledMentionReasons, t]);
 
   const isCandidateDisabled = useCallback((candidate: Candidate) => (
     candidate.disabled || Boolean(getDisabledReason(candidate))

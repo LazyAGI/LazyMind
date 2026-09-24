@@ -21,6 +21,7 @@ let convReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let workflowRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 const taskReconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const liveTaskIdsCreatedDuringLoad = new Map<string, Set<string>>();
+const liveArtifactIdsCreatedDuringLoad = new Map<string, Set<string>>();
 
 function scheduleWorkflowSessionRefresh(conversationId: string, delayMs = 100): void {
   if (workflowRefreshTimer) clearTimeout(workflowRefreshTimer);
@@ -79,13 +80,23 @@ export interface TaskArtifactStream {
 
 export interface ConversationArtifact extends TaskArtifact {
   artifact_id: string;
+  revision_id?: string;
+  revision?: number;
   conversation_id: string;
   history_id: string;
-  producer_type: "main_agent" | "subagent" | string;
+  name?: string;
+  source_type?: "main_chat" | "subagent" | "workflow" | string;
+  producer_type: "main_agent" | "subagent" | "user" | string;
   producer_id?: string;
   filename?: string;
   caption?: string;
+  publication_status?: "published" | "input" | "draft" | string;
   created_at?: string;
+  v2_artifact_id?: string;
+  logical_key?: string;
+  change_summary?: string;
+  revision_count?: number;
+  head_version?: number;
 }
 
 export interface ToolCallItem {
@@ -138,6 +149,7 @@ export interface SubAgentTask {
   status: TaskStatus;
   progress_pct: number;
   current_phase?: string;
+  plan_steps?: string[];
   estimated_sec?: number;
   summary?: string;
   input_slots?: string[];
@@ -169,6 +181,8 @@ interface TaskCenterStore {
   // tasks keyed by conversation_id, each an ordered list.
   tasksByConversation: Record<string, SubAgentTask[]>;
   artifactsByConversation: Record<string, ConversationArtifact[]>;
+  deliveriesByConversation: Record<string, ConversationArtifact[]>;
+  artifactHistoryOrderByConversation: Record<string, Record<string, number>>;
   activeConversationId: string;
   // in-flight loadConversationTasks calls keyed by conversation_id.
   _loadingTasks: Record<string, boolean>;
@@ -176,6 +190,8 @@ interface TaskCenterStore {
   _queuedTaskLoads: Record<string, boolean>;
   _taskLoadErrors: Record<string, boolean>;
   _loadingArtifacts: Record<string, boolean>;
+  // A refresh requested while the current artifact snapshot is still loading.
+  _queuedArtifactLoads: Record<string, boolean>;
   // Conversation lifecycle stream plus granular execution streams keyed by task ID.
   _convStream: SSE | null;
   _taskStreams: Record<string, SSE>;
@@ -196,6 +212,12 @@ interface TaskCenterStore {
 }
 
 // Convert persisted sub_agent_steps rows back to TaskLogEntry[] for display.
+function normalizePlanSteps(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length < 3 || value.length > 5) return undefined;
+  if (value.some((step) => typeof step !== "string" || !step.trim() || step.trim().length > 100)) return undefined;
+  return value.map((step: string) => step.trim());
+}
+
 function stepsToExecutionLog(steps: any[]): TaskLogEntry[] {
   if (!steps || steps.length === 0) return [];
   const entries = steps.flatMap((s): TaskLogEntry[] => {
@@ -245,11 +267,14 @@ function stepsToExecutionLog(steps: any[]): TaskLogEntry[] {
 export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
   tasksByConversation: {},
   artifactsByConversation: {},
+  deliveriesByConversation: {},
+  artifactHistoryOrderByConversation: {},
   activeConversationId: '',
   _loadingTasks: {},
   _queuedTaskLoads: {},
   _taskLoadErrors: {},
   _loadingArtifacts: {},
+  _queuedArtifactLoads: {},
   _convStream: null,
   _taskStreams: {},
 
@@ -259,13 +284,26 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
 
   upsertConversationArtifact: (conversationId, artifact) => {
     if (!conversationId || !artifact?.artifact_id) return;
+    const delivery = artifact;
+    // Delivery events carry legacy receipt IDs; the file panel is keyed by the
+    // logical artifact, just like its published projection endpoint.
+    if (artifact.v2_artifact_id) artifact = { ...artifact, artifact_id: artifact.v2_artifact_id };
+    if (get()._loadingArtifacts[conversationId]) {
+      liveArtifactIdsCreatedDuringLoad.get(conversationId)?.add(artifact.artifact_id);
+    }
     set((state) => {
       const list = state.artifactsByConversation[conversationId] ?? [];
       const idx = list.findIndex((item) => item.artifact_id === artifact.artifact_id);
       const next = list.slice();
       if (idx >= 0) next[idx] = { ...next[idx], ...artifact };
       else next.push(artifact);
-      return { artifactsByConversation: { ...state.artifactsByConversation, [conversationId]: next } };
+      const deliveries = (state.deliveriesByConversation[conversationId] ?? []).filter(
+        item => item.artifact_id !== delivery.artifact_id || item.history_id !== delivery.history_id,
+      );
+      return {
+        artifactsByConversation: { ...state.artifactsByConversation, [conversationId]: next },
+        deliveriesByConversation: { ...state.deliveriesByConversation, [conversationId]: [...deliveries, delivery] },
+      };
     });
   },
 
@@ -277,7 +315,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
       if (idx >= 0) {
         next = list.slice();
         const current = next[idx];
-        const incoming = { ...current, ...task };
+        const incoming = { ...current, ...task, plan_steps: task.plan_steps ?? current.plan_steps };
         // Prefer the longer execution_log: DB snapshots only have completed steps,
         // while the live SSE stream may have buffered more content in memory.
         if (
@@ -313,6 +351,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             status: (task.status as TaskStatus) ?? "pending",
             progress_pct: task.progress_pct ?? 0,
             current_phase: task.current_phase,
+            plan_steps: task.plan_steps,
             estimated_sec: task.estimated_sec,
             summary: task.summary,
             output_slots: task.output_slots,
@@ -352,6 +391,9 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
       switch (event.type) {
         case "task_start":
           task.status = "running";
+          break;
+        case "plan":
+          task.plan_steps = normalizePlanSteps(event.steps) ?? task.plan_steps;
           break;
         case "progress":
           task.status = "running";
@@ -768,6 +810,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             status: t.status ?? "pending",
             progress_pct: t.progress_pct ?? 0,
             current_phase: t.current_phase,
+            plan_steps: normalizePlanSteps([...(t.steps ?? [])].reverse().find((step: any) => step.role === "plan")?.content?.steps),
             estimated_sec: t.estimated_sec,
             summary: t.summary,
             input_slots: t.input_slots,
@@ -790,7 +833,11 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             return {
               tasksByConversation: {
                 ...state.tasksByConversation,
-                [conversationId]: [...normalized, ...liveAdditions],
+                [conversationId]: [...normalized.map((task) => ({
+                  ...task,
+                  plan_steps: task.plan_steps ?? state.tasksByConversation[conversationId]
+                    ?.find((live) => live.task_id === task.task_id)?.plan_steps,
+                })), ...liveAdditions],
               },
             };
           });
@@ -815,21 +862,77 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
   },
 
   loadConversationArtifacts: async (conversationId) => {
-    if (!conversationId || get()._loadingArtifacts[conversationId]) return;
-    set((s) => ({ _loadingArtifacts: { ...s._loadingArtifacts, [conversationId]: true } }));
-    try {
-      const res = await TaskServiceApi().listConversationArtifacts(conversationId);
-      const artifacts = res?.data?.data?.artifacts ?? res?.data?.artifacts ?? [];
-      set((state) => ({
-        artifactsByConversation: {
-          ...state.artifactsByConversation,
-          [conversationId]: artifacts,
-        },
+    if (!conversationId) return;
+    if (get()._loadingArtifacts[conversationId]) {
+      set((s) => ({
+        _queuedArtifactLoads: { ...s._queuedArtifactLoads, [conversationId]: true },
       }));
-    } catch {
-      // Keep the last good snapshot when a refresh fails.
+      return;
+    }
+    set((s) => ({
+      _loadingArtifacts: { ...s._loadingArtifacts, [conversationId]: true },
+      _queuedArtifactLoads: { ...s._queuedArtifactLoads, [conversationId]: false },
+    }));
+    const liveCreatedArtifactIds = new Set<string>();
+    liveArtifactIdsCreatedDuringLoad.set(conversationId, liveCreatedArtifactIds);
+    try {
+      do {
+        set((s) => ({
+          _queuedArtifactLoads: { ...s._queuedArtifactLoads, [conversationId]: false },
+        }));
+        try {
+          const res = await TaskServiceApi().listConversationArtifacts(conversationId);
+          const artifacts = res?.data?.data?.artifacts ?? res?.data?.artifacts ?? [];
+          const deliveries = res?.data?.data?.deliveries ?? res?.data?.deliveries ?? artifacts;
+          const historyOrder = res?.data?.data?.history_order ?? res?.data?.history_order ?? {};
+          set((state) => {
+            const current = state.artifactsByConversation[conversationId] ?? [];
+            const liveById = new Map(
+              current
+                .filter((item) => liveCreatedArtifactIds.has(item.artifact_id))
+                .map((item) => [item.artifact_id, item]),
+            );
+            const snapshotIds = new Set(
+              artifacts.map((item: ConversationArtifact) => item.artifact_id).filter(Boolean),
+            );
+            const merged = artifacts.map((item: ConversationArtifact) => (
+              liveById.get(item.artifact_id) ?? item
+            ));
+            const liveAdditions = current.filter((item) => (
+              liveCreatedArtifactIds.has(item.artifact_id) && !snapshotIds.has(item.artifact_id)
+            ));
+            const liveDeliveries = (state.deliveriesByConversation[conversationId] ?? []).filter(
+              item => liveCreatedArtifactIds.has(item.v2_artifact_id || item.artifact_id),
+            );
+            for (const item of [...merged, ...liveAdditions]) {
+              if (liveCreatedArtifactIds.has(item.artifact_id)) {
+                liveCreatedArtifactIds.delete(item.artifact_id);
+              }
+            }
+            return {
+              deliveriesByConversation: {
+                ...state.deliveriesByConversation,
+                [conversationId]: [...deliveries.filter((item: ConversationArtifact) => !liveDeliveries.some(
+                  live => live.artifact_id === item.artifact_id && live.history_id === item.history_id,
+                )), ...liveDeliveries],
+              },
+              artifactHistoryOrderByConversation: { ...state.artifactHistoryOrderByConversation, [conversationId]: historyOrder },
+              artifactsByConversation: {
+                ...state.artifactsByConversation,
+                [conversationId]: [...merged, ...liveAdditions],
+              },
+            };
+          });
+        } catch {
+          // Keep the last good snapshot when a refresh fails.
+        }
+      } while (get()._queuedArtifactLoads[conversationId]);
     } finally {
-      set((s) => ({ _loadingArtifacts: { ...s._loadingArtifacts, [conversationId]: false } }));
+      liveArtifactIdsCreatedDuringLoad.delete(conversationId);
+      set((s) => ({
+        _loadingArtifacts: { ...s._loadingArtifacts, [conversationId]: false },
+        _queuedArtifactLoads: { ...s._queuedArtifactLoads, [conversationId]: false },
+      }));
     }
   },
 
@@ -857,12 +960,25 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
         ...state.artifactsByConversation,
         [conversationId]: [],
       },
+      deliveriesByConversation: {
+        ...state.deliveriesByConversation,
+        [conversationId]: [],
+      },
+      artifactHistoryOrderByConversation: { ...state.artifactHistoryOrderByConversation, [conversationId]: {} },
       _taskLoadErrors: {
         ...state._taskLoadErrors,
         [conversationId]: false,
       },
       _queuedTaskLoads: {
         ...state._queuedTaskLoads,
+        [conversationId]: false,
+      },
+      _queuedArtifactLoads: {
+        ...state._queuedArtifactLoads,
+        [conversationId]: false,
+      },
+      _loadingArtifacts: {
+        ...state._loadingArtifacts,
         [conversationId]: false,
       },
     }));
@@ -967,6 +1083,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               return;
             }
             get().upsertConversationArtifact(conversationId, payload as ConversationArtifact);
+            void get().loadConversationArtifacts(conversationId);
           } else if (type === 'driver_input') {
             if (replayed) return;
             const driverMessage = payload.message || '';

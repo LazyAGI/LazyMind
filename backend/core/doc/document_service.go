@@ -127,6 +127,7 @@ type DocumentMetadata struct {
 	ID           string
 	DatasetID    string
 	Name         string
+	RelativePath string
 	Source       string
 	Tags         []string
 	ParseStatus  string
@@ -536,17 +537,18 @@ func (r documentServiceRecord) metadata() DocumentMetadata {
 	}
 	filename := firstNonEmpty(strings.TrimSpace(ext.OriginalFilename), strings.TrimSpace(ext.StoredName), displayName)
 	return DocumentMetadata{
-		ID:          row.ID,
-		DatasetID:   row.DatasetID,
-		Name:        displayName,
-		Source:      source,
-		Tags:        append([]string(nil), tags...),
-		ParseStatus: parseStatus,
-		MIMEType:    mimeType,
-		SizeBytes:   size,
-		CreatedAt:   row.CreatedAt,
-		UpdatedAt:   row.UpdatedAt,
-		CreatedBy:   row.CreateUserName,
+		ID:           row.ID,
+		DatasetID:    row.DatasetID,
+		Name:         displayName,
+		RelativePath: ext.RelativePath,
+		Source:       source,
+		Tags:         append([]string(nil), tags...),
+		ParseStatus:  parseStatus,
+		MIMEType:     mimeType,
+		SizeBytes:    size,
+		CreatedAt:    row.CreatedAt,
+		UpdatedAt:    row.UpdatedAt,
+		CreatedBy:    row.CreateUserName,
 		OriginalFile: &DocumentFileRef{
 			FileName:    filename,
 			DownloadURL: documentDownloadPath(row.DatasetID, row.ID),

@@ -176,7 +176,7 @@ func getSharedModelDetail(ctx context.Context, db *gorm.DB, modelType string) (*
 		Joins("JOIN user_model_provider_group_models m ON m.id = usm.user_model_provider_group_model_id AND m.deleted_at IS NULL").
 		Where("usm.model_type = ? AND usm.share = ?", modelType, true).
 		Select("usm.user_id, usm.user_name, m.provider_name, m.name AS model_name").
-		First(&row).Error
+		Order("usm.updated_at DESC").Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}

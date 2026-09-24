@@ -464,13 +464,13 @@ def test_workspace_skill_capabilities_are_owned_by_skill_implementations(tmp_pat
     skills = SkillManager(dir=str(root), fs=skill_fs)
     manager = ToolManager(skills.get_skill_tools())
     metadata = {name: tool.runtime_metadata for name, tool in manager.tools_info.items()}
-    assert set(metadata) == {'get_skill', 'read_reference', 'run_script'}
+    assert set(metadata) == {'search_skill', 'get_skill', 'read_skill_resource', 'run_skill_script'}
     assert 'visible' in skills.build_prompt()
     assert skills.read_reference('visible', 'guide.md')['content'] == 'normal reference'
     from lazyllm.tools.agent.tool_runtime import HostFileAccess
     assert metadata['get_skill'].host_file_access is HostFileAccess.NONE
-    assert metadata['read_reference'].host_file_access is HostFileAccess.NONE
-    assert metadata['run_script'].host_file_access is HostFileAccess.OPAQUE
+    assert metadata['read_skill_resource'].host_file_access is HostFileAccess.NONE
+    assert metadata['run_skill_script'].host_file_access is HostFileAccess.OPAQUE
     unguarded = SkillManager(dir=str(root), fs=skill_fs)
     assert all(tool.runtime_metadata.host_file_access is not HostFileAccess.UNDECLARED
                for tool in ToolManager(unguarded.get_skill_tools()).tools_info.values())
@@ -486,8 +486,12 @@ def test_workspace_remote_skill_reader_keeps_core_http_auth(monkeypatch, tmp_pat
     from lazyllm.tools.fs.client import FS
     from lazymind.config import config
     from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolExecutionMiddleware
-    files = {'skills/system/demo/SKILL.md': b'---\nname: demo\ndescription: Remote fixture\n---\n# Demo',
-             'skills/system/demo/guide.md': b'Remote reference through Core'}
+    files = {
+        'skills/system/demo/SKILL.md': (
+            b'---\nname: demo\ndescription: Remote fixture\n---\n# Demo\n\nSee references/guide.md\n'
+        ),
+        'skills/system/demo/references/guide.md': b'Remote reference through Core',
+    }
     requests_seen = []
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -526,8 +530,12 @@ def test_workspace_remote_skill_reader_keeps_core_http_auth(monkeypatch, tmp_pat
         from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
         middleware = ToolExecutionMiddleware(
             manager, workspace_permission=WorkspaceContext.from_config(lazyllm.globals['agentic_config']))
+        loaded = middleware.execute_with_records({'id': 'load', 'function': {
+            'name': 'get_skill', 'arguments': {'name': 'demo'},
+        }})
+        assert loaded.results[0]['ok'], (loaded.results, requests_seen)
         result = middleware.execute_with_records({'id': 'read', 'function': {
-            'name': 'read_reference', 'arguments': {'name': 'demo', 'rel_path': 'guide.md'},
+            'name': 'read_skill_resource', 'arguments': {'name': 'demo', 'rel_path': 'references/guide.md'},
         }})
         assert result.results[0]['ok'], (result.results, requests_seen)
         assert result.results[0]['value']['content'] == 'Remote reference through Core'
@@ -592,23 +600,36 @@ def test_factory_captured_dependencies_cannot_read_bound_files(tmp_path, depende
     assert result.records[0].disposition is ToolExecutionDisposition.SKIPPED
 
 
+def _search_skill_tool(tmp_path, name: str = 'known'):
+    from types import SimpleNamespace
+    from lazyllm.tools.agent.skill_manager import SkillManager
+    folder = tmp_path / name
+    folder.mkdir()
+    (folder / 'SKILL.md').write_text(
+        f'---\nname: {name}\ndescription: {name}\n---\nbody\n', encoding='utf-8',
+    )
+    manager = SkillManager(
+        dir=str(tmp_path), skills=[name], prompt_skills=[name],
+        skill_search=lambda _req: {'skills': []}, sandbox=SimpleNamespace(),
+    )
+    return next(tool for tool in manager.get_skill_tools() if tool.__name__ == 'search_skill')
+
+
 def test_factory_code_with_foreign_globals_is_not_admitted(tmp_path):
     import types
     from lazyllm.tools.agent import ToolManager
-    from lazymind.chat.engine.tools.skill_listing import build_list_skills_tool
-    original = build_list_skills_tool(['known'])
+    original = _search_skill_tool(tmp_path)
     foreign = types.FunctionType(original.__code__, {**original.__globals__, 'len': lambda _: 0},
                                  original.__name__, original.__defaults__, original.__closure__)
     foreign.__doc__, foreign.__annotations__ = original.__doc__, original.__annotations__
     manager = ToolManager([foreign])
-    assert manager.tools_info['list_skills'].runtime_metadata.host_file_access is HostFileAccess.UNDECLARED
+    assert manager.tools_info['search_skill'].runtime_metadata.host_file_access is HostFileAccess.UNDECLARED
 
 
-def test_all_real_project_factories_remain_admitted_with_known_dependencies():
+def test_all_real_project_factories_remain_admitted_with_known_dependencies(tmp_path):
     from lazyllm.tools.agent import ToolManager
     from lazymind.chat.engine.tools.file_resources.tools import build_resource_read_tools
     from lazymind.chat.engine.tools.intent_writer import build_intentwrite_tool
-    from lazymind.chat.engine.tools.skill_listing import build_list_skills_tool
     from lazymind.chat.engine.tools.session_env import build_session_env_tool
     from lazymind.chat.engine.tools.calculator import calculator
     from lazymind.chat.workflow import workflow_manager as workflows
@@ -624,7 +645,7 @@ def test_all_real_project_factories_remain_admitted_with_known_dependencies():
         [{'name': 'fixture', 'desc': 'Known arithmetic tools', 'tools': [calculator], 'lazy': True}],
         build_resource_read_tools(),
         [build_intentwrite_tool(conversation_id='c', current_query='make a draft')],
-        [build_list_skills_tool(['known'])],
+        [_search_skill_tool(tmp_path)],
         [build_session_env_tool({}, 'c')],
         [workflows._handoff_tool('session', 'make a draft')],
         workflows._safe_session_tools(toolkit, 'session'),
@@ -655,3 +676,19 @@ def test_workflow_factory_rejects_unreviewed_callback_chains(callback_position):
         tool = workflows._handoff_tool('session', user_input=unreviewed)
     manager = ToolManager([tool])
     assert manager.tools_info[tool.__name__].runtime_metadata.host_file_access is HostFileAccess.UNDECLARED
+
+
+def test_kb_requires_current_conversation_configuration():
+    assert 'kb' not in _active_tool_names()
+    lazyllm.globals['agentic_config'] = {'filters': {'kb_id': ['selected-kb']}}
+    assert 'kb' in _active_tool_names()
+    lazyllm.globals['agentic_config'] = {'filters': {'kb_id': []}}
+    assert 'kb' not in _active_tool_names()
+
+
+def test_search_credentials_do_not_survive_an_unconfigured_request():
+    from lazymind.chat.engine.tool_auth import inject_tool_config
+    inject_tool_config({'tavily': 'test-token'})
+    assert 'web_search' in _active_tool_names()
+    inject_tool_config({})
+    assert 'web_search' not in _active_tool_names()

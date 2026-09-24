@@ -583,6 +583,9 @@ func createConversationForkAttempt(ctx context.Context, db *gorm.DB, caller doc.
 		if err := tx.Create(&orm.ConversationForkRequest{ActorUserID: caller.UserID, IdempotencyKey: key, RequestHash: hash, ConversationID: id, CreatedAt: now}).Error; err != nil {
 			return err
 		}
+		if err := bindForkArtifactLineage(ctx, tx, caller.UserID, id, artifacts, copiedArtifacts); err != nil {
+			return err
+		}
 		result, err = forkResultFor(ctx, tx, caller.UserID, id, false)
 		if result != nil {
 			result.Warnings = preview.Warnings

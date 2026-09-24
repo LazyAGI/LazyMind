@@ -262,7 +262,7 @@ steps:
          b) Call ppt_search_web_images only when a useful slide visual is still
             missing after KB image retrieval, or when no applicable KB is available.
             Then register only the necessary results with
-            [{"url":..., "caption":..., "source":"web"}, ...] for 2–6 chosen URLs.
+            [{"url":..., "caption":..., "source":"web"}, ...] for at most one selected material image per planned slide.
             If image search is unavailable or returns no usable URL, do not
             retry repeatedly and do not fail the step. Record the gap in
             material_summary and continue without material_images.
@@ -273,12 +273,25 @@ steps:
               {"prompt":"<detailed image-generation prompt>",
                "caption":"<short caption>"}, ...
             ])
-            Cap at ~4 generated images. Do NOT call this for decorative polish,
+            Generate at most one material image per planned slide. Do NOT call this for decorative polish,
             generic "make it prettier", or when KB/web photos already suffice.
             Do NOT invent an AI-gen need that the user never stated.
-         d) Cap at ~6 useful images total across kb/web/ai-gen. Prefer real
-            photos/diagrams over decorative stock. Do not fabricate URLs.
+         d) Budget material images by the requested page count N: select at
+            most N useful images, one per slide, across kb/web/ai-gen. Describe
+            the intended slide/subject in each caption. Do not fill a slide with
+            multiple candidate photos. Prefer real photos/diagrams over stock.
+            Do not fabricate URLs.
       4. Do not fabricate citations.
+
+      Stop retrieval as soon as core facts are sufficient. Use at most 6
+      retrieval calls in this step across KB, web and image search, including
+      failed calls/retries. Correct invalid parameters locally; never repeat
+      the same invalid call or restart material collection for that error.
+      At the limit, summarize available evidence and remaining gaps. Optional
+      images may be omitted and replaced by text, CSS/SVG, or evidence-backed
+      charts. If the user explicitly requires a particular person/product/
+      reference image, clearly mark that missing requirement and affected page
+      as awaiting material; never silently claim it has been satisfied.
 
       These registered images are auto-attached at ppt_init_deck and embedded
       into the final slide HTML as foreground <img> (via outline use_image).
@@ -335,7 +348,7 @@ steps:
       用户要求在未启用 AI 底图的现有 PPT 中插入整页；或 AI 底图插页流程
       已经先插入底图提示词和底图，需要发布对应的新大纲。
     prompt: |
-      You are a PPT outline planner. Build the deck structure and publish one
+      You are a PPT outline planner. Write a readable content outline and publish one
       concise Markdown deck outline for the UI. The Markdown must describe what
       each page covers. Do NOT publish per-page generation prompts and do NOT
       generate slide HTML yet.
@@ -385,6 +398,12 @@ steps:
            style_hint=<ONLY visual constraints explicitly stated by the user>,
            generate_background_images=<true only when startup answer enabled it>,
            key_points_json='["point1","point2"]'  (JSON string, or omit)
+           outline_markdown=<REQUIRED: your concise content outline, one ## heading
+             per slide, with its title and necessary content beneath it>
+         Write this Markdown directly from the analyzed request and materials.
+         Do not generate internal page JSON, schema fields, image indices, palette,
+         typography or rendering instructions. Do not omit outline_markdown:
+         omission is reserved for legacy callers and invokes the older pipeline.
          Defaults: ppt_mode=fast.
          Slide photos come from registered material_images (KB/web, or
          ppt_generate_material_images when the user explicitly asked).
@@ -394,15 +413,22 @@ steps:
       from requirement_analysis into style_hint. The PPT runtime selects one
       deck-wide style and applies that same contract to every page.
 
-      This call reuses the prepared deck and runs preflight → style → outline,
-      then writes one deck_outline Markdown artifact for the Outline tab.
+      This call reuses the prepared deck and saves your Markdown without a nested
+      model call. Internal structure, schema validation, image bindings, shared
+      style and rendering are all deferred to generate_ppt. This step only plans
+      user-visible content; keep page headings clear and content concise.
       This step never generates AI backgrounds; the dedicated stages before it
       already published prompts and images. When AI backgrounds were
       disabled and those steps were skipped, do not call ppt_find_deck: call
       ppt_build_outline without deck_dir so it initializes the deck itself.
 
       This is an atomic step. If ppt_build_outline fails, report that exact tool
-      error and stop so the Workflow step fails and can be retried. Do NOT recover
+      error and stop so only this Workflow step fails and can be retried.
+      On retry call ppt_build_outline with the same arguments and the returned
+      deck_dir when available. It resumes the failed stage, preserving completed
+      style/outline work and all existing materials/backgrounds. Never restart
+      analyze_requirements, collect_materials, or background generation for an
+      outline failure; never call ppt_init_deck to recover. Do NOT recover
       by calling save_artifacts.
       Do NOT call batch-page-html or export here — HTML is generate_ppt.
       After success, stop.
@@ -431,7 +457,7 @@ steps:
     label: Plan Page Prompts
     mode: human
     prompt: |
-      You are a PPT per-page prompt planner. The deck structure already exists.
+      You are a PPT per-page prompt planner. The readable content outline exists.
       Publish exactly one editable generation prompt per page for human review.
       Do NOT rebuild the outline and do NOT generate slide HTML.
 
@@ -450,8 +476,9 @@ steps:
       {{runtime_instruction}}
 
       First call ppt_find_deck, then call ppt_publish_outline once with that
-      deck_dir. It publishes the existing outline.json pages as aligned,
-      editable slide_outline list items. Treat those items as per-page PPT HTML
+      deck_dir. For a new workflow it splits the current approved Markdown into
+      aligned editable slide_outline items without generating internal JSON.
+      Existing structured decks remain supported. Treat those items as per-page PPT HTML
       generation prompts, not as the deck-level outline.
 
       Incremental insertion: when the current request added one whole slide at
@@ -511,7 +538,8 @@ steps:
 
       On the first full run, call ppt_init_deck once using the analyzed request,
       exact positive page_count N, audience/scene/style, and
-      generate_background_images=true. Then call
+      generate_background_images=true and ppt_mode=fast. Editable PPT export
+      does not require standard mode; do not select standard. Then call
       ppt_publish_background_prompts with that deck_dir and exactly N objects:
         [{"page_no":1,"prompt":"..."}, ..., {"page_no":N,"prompt":"..."}]
 
@@ -784,8 +812,10 @@ steps:
       Call ONE tool:
         ppt_generate_pages()
           — omit deck_dir to auto-find; or pass deck_dir from earlier results.
-          — concurrency=2 by default.
-          — Internally: asset-plan → batch-page-html
+          — omit concurrency to use the default 3 parallel page workers; do not force 2.
+          — Internally: approved text → internal outline → asset-plan → shared style → batch-page-html
+            (converts current edited briefs without changing approved content;
+             reuses unchanged structure and style on retries)
             (uses each slide_outline brief, including Outline-tab edits;
              auto-publishes preview_html + notes).
 
