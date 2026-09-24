@@ -699,7 +699,7 @@ func GetTaskByID(w http.ResponseWriter, r *http.Request) {
 			response.Schedule = &schedule
 			response.ScheduleName = &schedule.Name
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			common.ReplyErr(w, "unable to load schedule", http.StatusInternalServerError)
+			common.ReplyErr(w, "query task failed", http.StatusInternalServerError)
 			return
 		}
 	}
