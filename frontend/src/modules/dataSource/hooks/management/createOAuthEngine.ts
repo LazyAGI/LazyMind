@@ -627,7 +627,7 @@ export function createOAuthEngine(ctx: ManagementContext) {
     options?: StartCloudOAuthOptions,
   ) => {
     if (!options?.setup) {
-      if (provider === "feishu") {
+      if (provider === "feishu" && ctx.cloudManagedOAuthAvailable === true) {
         const connectionId = await startFeishuCLISession(
           options?.reauthorizeConnectionId,
           () => setOauthState("waiting"),
@@ -639,10 +639,16 @@ export function createOAuthEngine(ctx: ManagementContext) {
         await refreshFeishuAuthAccounts();
         return true;
       }
-	  if (ctx.cloudManagedOAuthAvailable === false) {
-		return false;
-	  }
-      return startManagedOAuth(provider, options?.reauthorizeConnectionId);
+      if (provider !== "feishu") {
+        if (ctx.cloudManagedOAuthAvailable === false) {
+          return false;
+        }
+        return startManagedOAuth(provider, options?.reauthorizeConnectionId);
+      }
+      if (!ctx.feishuAppSetup?.appId.trim() || !ctx.feishuAppSetup.appSecret.trim()) {
+        ctx.openCloudSetupModal("feishu", "create");
+        return false;
+      }
     }
     const activeSetup =
       options?.setup || (provider === "feishu" ? ctx.feishuAppSetup : ctx.notionAppSetup);

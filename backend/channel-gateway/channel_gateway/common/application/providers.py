@@ -57,6 +57,33 @@ class AccountApplicationService:
             account_id,
         )
 
+    def pause_account(self, owner_user_id: str, account_id: str) -> None:
+        self._feishu_account(owner_user_id, account_id).pause_account(owner_user_id, account_id)
+
+    def resume_account(self, owner_user_id: str, account_id: str) -> dict[str, Any]:
+        account = self._store.get_account(owner_user_id, account_id)
+        if not account:
+            raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '频道账号不存在')
+        adapter = self._adapter(str(account.get('provider') or ''))
+        resume = getattr(adapter, 'resume_account', None)
+        if resume is None:
+            raise self._unsupported(str(account.get('provider') or ''))
+        return resume(owner_user_id, account_id)
+
+    def rename_account(self, owner_user_id: str, account_id: str, label: str) -> dict[str, Any]:
+        return self._feishu_account(owner_user_id, account_id).rename_account(owner_user_id, account_id, label)
+
+    def archive_account(self, owner_user_id: str, account_id: str) -> None:
+        self._adapter('feishu').archive_account(owner_user_id, account_id)
+
+    def _feishu_account(self, owner_user_id: str, account_id: str):
+        account = self._store.get_account(owner_user_id, account_id)
+        if not account:
+            raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '频道账号不存在')
+        if account['provider'] != 'feishu':
+            raise self._unsupported(account['provider'])
+        return self._adapter('feishu')
+
     def _adapter(self, provider: str) -> AccountAdapter:
         normalized = provider.strip().lower()
         adapter = self._providers.accounts(normalized)
@@ -91,8 +118,22 @@ class ConnectionApplicationService:
         owner_user_id: str,
         provider: str,
         idempotency_key: str | None,
+        credentials: dict | None = None,
+        account_id: str | None = None,
+        create_new: bool = False,
+        reauthorize: bool = False,
     ) -> dict[str, Any]:
         adapter = self._resolve(provider)
+        if provider.strip().lower() == 'feishu':
+            return adapter.create_session(
+                owner_user_id=owner_user_id, idempotency_key=idempotency_key,
+                account_id=account_id, create_new=create_new, reauthorize=reauthorize,
+            )
+        if credentials is not None or account_id is not None:
+            return adapter.create_session(
+                owner_user_id=owner_user_id, idempotency_key=idempotency_key,
+                credentials=credentials, account_id=account_id,
+            )
         return adapter.create_session(
             owner_user_id=owner_user_id,
             idempotency_key=idempotency_key,

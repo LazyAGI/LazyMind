@@ -1,8 +1,11 @@
 package scheduler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -11,7 +14,80 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/store"
 )
+
+func TestBatchCreateStoresNotificationPerSchedule(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&orm.UserSchedule{}, &orm.AutomationGroup{}, &orm.ScheduleDependency{}, &orm.UserNotificationPreferences{}); err != nil {
+		t.Fatal(err)
+	}
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"passed":true}`))
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+	body := `{"group":{"name":"Research","timezone":"UTC"},"tasks":[` +
+		`{"client_key":"first","name":"First","cron_expr":"0 9 * * *","prompt_template":"first","notification":{"revision":0,"clear":true}},` +
+		`{"client_key":"second","name":"Second","cron_expr":"0 10 * * *","prompt_template":"second"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/automation-groups:batch-create", bytes.NewBufferString(body))
+	req.Header.Set("X-User-Id", "owner")
+	rec := httptest.NewRecorder()
+	BatchCreateHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("batch create failed: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var rows []orm.UserSchedule
+	if err := db.Order("name").Find(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].Name != "First" || rows[0].NotificationConfig != nil {
+		t.Fatalf("first task did not keep its explicit cleared notification: %#v", rows)
+	}
+	if rows[1].Name != "Second" || rows[1].NotificationConfig == nil {
+		t.Fatalf("second task did not retain the default notification snapshot: %#v", rows[1])
+	}
+}
+
+func TestBatchCreateRollsBackGroupWhenOneTaskNotificationIsInvalid(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&orm.UserSchedule{}, &orm.AutomationGroup{}, &orm.ScheduleDependency{}, &orm.UserNotificationPreferences{}); err != nil {
+		t.Fatal(err)
+	}
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"passed":true}`)) }))
+	defer server.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+	body := `{"group":{"name":"Research","timezone":"UTC"},"tasks":[` +
+		`{"client_key":"first","name":"First","cron_expr":"0 9 * * *","prompt_template":"first"},` +
+		`{"client_key":"second","name":"Second","cron_expr":"0 10 * * *","prompt_template":"second","notification":{"revision":0,"config":{"events":{},"channels":{}}}}]}`
+	req := httptest.NewRequest(http.MethodPost, "/automation-groups:batch-create", bytes.NewBufferString(body))
+	req.Header.Set("X-User-Id", "owner")
+	rec := httptest.NewRecorder()
+	BatchCreateHandler(rec, req)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected notification validation failure, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var groups, schedules int64
+	if err := db.Model(&orm.AutomationGroup{}).Count(&groups).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.UserSchedule{}).Count(&schedules).Error; err != nil {
+		t.Fatal(err)
+	}
+	if groups != 0 || schedules != 0 {
+		t.Fatalf("batch transaction was not rolled back: groups=%d schedules=%d", groups, schedules)
+	}
+}
 
 func automationTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -19,7 +95,7 @@ func automationTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&orm.UserSchedule{}, &orm.ScheduleDependency{}, &orm.TaskCenterTask{}, &orm.ChatHistory{}, &orm.ConversationArtifact{}, &orm.TaskRunOutput{}, &orm.TaskRunInput{}); err != nil {
+	if err := db.AutoMigrate(&orm.UserSchedule{}, &orm.ScheduleDependency{}, &orm.TaskCenterTask{}, &orm.ChatHistory{}, &orm.ConversationArtifact{}, &orm.TaskRunOutput{}, &orm.TaskRunInput{}, &orm.SubAgentTask{}, &orm.SubAgentArtifact{}); err != nil {
 		t.Fatal(err)
 	}
 	return db

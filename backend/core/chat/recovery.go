@@ -17,6 +17,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"lazymind/core/artifact"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/conversationgroup"
@@ -519,6 +520,9 @@ func purgeConversation(ctxDB *gorm.DB, conversationID, userID string) error {
 			if err := tx.Where(deletion.where, deletion.args...).Delete(deletion.model).Error; err != nil {
 				return err
 			}
+		}
+		if err := artifact.PurgeConversationOwned(tx, userID, conversationIDs); err != nil {
+			return err
 		}
 		if err := tx.Model(&orm.SkillV2Draft{}).
 			Where("conversation_id IN ?", conversationIDs).

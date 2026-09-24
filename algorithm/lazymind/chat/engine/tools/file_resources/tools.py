@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 from lazyllm.tools import fc_register
 from lazyllm.tools.agent import ToolExecutionError
 from .resolver import resolve_text_target
+from .remote_skill import remote_skill_uri, read_remote, list_remote, grep_remote
 from .text_window import RESULT_BYTE_BUDGET, grep_lines, load_text_lines, read_lines_window, utf8_size
 
 
@@ -47,14 +48,14 @@ def read_file_resource(
     limit: int = 2000,
     turn: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Read text from a PDF resource, attachment, or chat-workspace file.
+    """Read text from a PDF resource, attachment, workspace file, or remote Skill URI.
 
     Large files are always windowed by a UTF-8 byte budget. The footer is the
     only EOF signal: continue with next_offset when present; stop at End of file.
     After search_file_resource, pass offset near the hit line to inspect surrounding context.
 
     Args:
-        target: A file resource id, unique attachment name, or workspace path.
+        target: A file resource id, attachment name, workspace path, or remote://skills/... file URI.
         offset: 1-based first line (default 1).
         limit: Maximum lines to return (default 2000, max 4000).
         turn: Optional 1-based conversation turn used to disambiguate attachments.
@@ -69,7 +70,14 @@ def _read_file(
     turn: Optional[int] = None,
     *,
     resources_only: bool = False,
+    allow_remote_skill: bool = True,
 ) -> Dict[str, Any]:
+    if uri := remote_skill_uri(target):
+        if not allow_remote_skill:
+            raise ToolExecutionError('remote_skill_access_not_allowed: workflow isolation')
+        if resources_only:
+            raise ToolExecutionError('remote_skill_access_not_allowed: attachment-only tool')
+        return read_remote(uri, offset, limit)
     resolved = _resolve_text_target_for_tool(target, turn=turn, resources_only=resources_only)
     payload = read_lines_window(
         load_text_lines(resolved.path),
@@ -93,13 +101,13 @@ def search_file_resource(
     max_results: int = 50,
     turn: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Search a PDF resource, attachment, or chat-workspace path.
+    """Search a PDF resource, attachment, workspace path, or remote Skill URI.
 
     After a hit, call read_file_resource with offset near that line for surrounding
     context. Do not treat search_file_resource snippets as the full file.
 
     Args:
-        target: A file resource id, unique attachment name, or workspace path.
+        target: A file resource id, attachment name, workspace path, or remote://skills/... URI.
         pattern: Literal substring or regular expression.
         max_results: Maximum matches (default 50).
         turn: Optional 1-based conversation turn used to disambiguate attachments.
@@ -114,7 +122,14 @@ def _grep(
     turn: Optional[int] = None,
     *,
     resources_only: bool = False,
+    allow_remote_skill: bool = True,
 ) -> Dict[str, Any]:
+    if uri := remote_skill_uri(target):
+        if not allow_remote_skill:
+            raise ToolExecutionError('remote_skill_access_not_allowed: workflow isolation')
+        if resources_only:
+            raise ToolExecutionError('remote_skill_access_not_allowed: attachment-only tool')
+        return grep_remote(uri, pattern, max_results)
     resolved = _resolve_text_target_for_tool(
         target,
         allow_directory=True,
@@ -184,3 +199,18 @@ def _grep(
             'for surrounding context. Read footers decide EOF, not document headings.'
         ),
     }
+
+
+@fc_register(host_file='NONE', exclusive=True)
+def list_skill_files(path: str, recursive: bool = False, max_depth: int = 5) -> Dict[str, Any]:
+    """List reference files in a remote Skill directory, not the host filesystem.
+
+    Args:
+        path: remote://skills/... directory URI returned by get_skill.
+        recursive: Include descendants.
+        max_depth: Maximum recursive depth (capped at 20).
+    """
+    uri = remote_skill_uri(path)
+    if uri is None:
+        raise ToolExecutionError('invalid_skill_uri: expected remote://skills/<skill-path>')
+    return list_remote(uri, recursive, max_depth)

@@ -14,6 +14,7 @@ import (
 	"lazymind/core/acl"
 	"lazymind/core/agent"
 	"lazymind/core/agentinvocation"
+	"lazymind/core/artifact"
 	"lazymind/core/browser"
 	"lazymind/core/chat"
 	"lazymind/core/cloudbinding"
@@ -500,6 +501,14 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- SubAgent (Task Center) -----
 	handleAPI(r, "GET", "/conversations/{conversation_id}/tasks", []string{"qa.read"}, subagent.ListConversationTasks)
 	handleAPI(r, "GET", "/conversations/{conversation_id}/artifacts", []string{"qa.read"}, chat.ListConversationArtifacts)
+	handleAPI(r, "GET", "/conversations/{conversation_id}/artifact-projection", []string{"qa.read"}, chat.ListConversationArtifactProjection)
+	handleAPI(r, "GET", "/artifacts/{id}", []string{"qa.read"}, artifact.GetArtifact)
+	handleAPI(r, "GET", "/artifacts/{id}/revisions", []string{"qa.read"}, artifact.ListRevisionsHTTP)
+	handleAPI(r, "GET", "/artifact-revisions/{id}", []string{"qa.read"}, artifact.GetRevisionHTTP)
+	handleAPI(r, "POST", "/artifacts/{id}/heads/{channel}:move", []string{"qa.write"}, artifact.MoveHeadHTTP)
+	handleAPI(r, "POST", "/artifact-revisions/{id}:download-url", []string{"qa.read"}, artifact.DownloadURLHTTP)
+	handleAPI(r, "GET", "/artifact-revisions:diff", []string{"qa.read"}, artifact.DiffHTTP)
+	handleAPI(r, "GET", "/internal/artifact-audit", []string{"qa.read"}, artifact.AuditHTTP)
 	handleAPI(r, "POST", "/conversations/{conversation_id}/artifacts", []string{"qa.write"}, chat.CreateConversationArtifact)
 	handleAPI(r, "GET", "/conversations/{conversation_id}/events", []string{"qa.read"}, chat.StreamConvEvents)
 	handleAPI(r, "GET", "/tasks/{task_id}:stream", []string{"qa.read"}, subagent.StreamTask)
@@ -560,6 +569,16 @@ func registerAllRoutes(r *mux.Router) {
 
 	// ----- Task Center -----
 	handleAPI(r, "GET", "/task-center/tasks", []string{"qa.read"}, taskcenter.ListTasks)
+	handleAPI(r, "GET", "/user/notification-preferences", []string{"qa.read"}, taskcenter.NotificationPreferences)
+	handleAPI(r, "GET", "/notification-account-references/{account_id}", []string{"qa.read"}, taskcenter.NotificationAccountReferences)
+	handleAPI(r, "POST", "/task-center/notification-events/{notification_id}:claim", []string{"qa.write"}, taskcenter.ClaimNotification)
+	handleAPI(r, "PATCH", "/user/notification-preferences", []string{"qa.write"}, taskcenter.NotificationPreferences)
+	handleAPI(r, "GET", "/schedules/{schedule_id}/notifications", []string{"qa.read"}, taskcenter.ScheduleNotifications)
+	handleAPI(r, "PUT", "/schedules/{schedule_id}/notifications", []string{"qa.write"}, taskcenter.ScheduleNotifications)
+	handleAPI(r, "POST", "/schedules/{schedule_id}/notifications:reset", []string{"qa.write"}, taskcenter.ScheduleNotifications)
+	handleAPI(r, "GET", "/task-center/tasks/{task_id}/notifications", []string{"qa.read"}, taskcenter.TaskNotifications)
+	handleAPI(r, "GET", "/task-center/desktop-notifications", []string{"qa.read"}, taskcenter.DesktopNotifications)
+	handleAPI(r, "POST", "/task-center/desktop-notifications/{notification_id}:ack", []string{"qa.write"}, taskcenter.AcknowledgeDesktopNotification)
 	handleAPI(r, "GET", "/task-center/tasks/{task_id}", []string{"qa.read"}, taskcenter.GetTaskByID)
 	handleAPI(r, "POST", "/task-center/tasks/{task_id}:cancel", []string{"qa.write"}, taskcenter.CancelTaskByID)
 	handleAPI(r, "POST", "/task-center/tasks/{task_id}:remove", []string{"qa.write"}, taskcenter.RemoveTaskHandler)

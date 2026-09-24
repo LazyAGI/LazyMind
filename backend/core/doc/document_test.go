@@ -929,3 +929,62 @@ func TestRewriteCanonicalUploadPathKeepsDockerRootUnchanged(t *testing.T) {
 		t.Fatalf("rewriteCanonicalUploadPath = %q, want unchanged %q", got, dockerPath)
 	}
 }
+
+func TestStaticFileURLForUploadOwnerRejectsForeignUser(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+	t.Setenv("LAZYMIND_FILE_URL_SIGN_SECRET", "doc-test-secret")
+	owned := filepath.Join(root, "tmp", "users", "user-1", "files", "up1", "a.pdf")
+	foreign := filepath.Join(root, "tmp", "users", "user-2", "files", "up2", "b.pdf")
+	for _, path := range []string{owned, foreign} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	if got := StaticFileURLForUploadOwner(owned, "user-1"); !strings.HasPrefix(got, "/static-files/tmp/users/user-1/") {
+		t.Fatalf("owned upload URL = %q", got)
+	}
+	if got := StaticFileURLForUploadOwner(foreign, "user-1"); got != "" {
+		t.Fatalf("foreign upload was signed: %q", got)
+	}
+	if got := StaticFileURLForUploadOwner("/static-files/tmp/users/user-2/files/up2/b.pdf", "user-1"); got != "" {
+		t.Fatalf("foreign static-files upload was signed: %q", got)
+	}
+}
+
+func TestSignStaticFilesOmitsForeignTempUploads(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+	t.Setenv("LAZYMIND_FILE_URL_SIGN_SECRET", "doc-test-secret")
+	owned := filepath.Join(root, "tmp", "users", "user-1", "files", "up1", "a.pdf")
+	foreign := filepath.Join(root, "tmp", "users", "user-2", "files", "up2", "b.pdf")
+	for _, path := range []string{owned, foreign} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	body, _ := json.Marshal(signStaticFilesRequest{Paths: []string{owned, foreign}})
+	req := httptest.NewRequest(http.MethodPost, "/static-files:sign", strings.NewReader(string(body)))
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	SignStaticFiles(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp signStaticFilesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.URLs[owned] == "" {
+		t.Fatalf("owned upload missing signed URL: %#v", resp.URLs)
+	}
+	if _, signed := resp.URLs[foreign]; signed {
+		t.Fatalf("foreign upload was signed: %#v", resp.URLs)
+	}
+}

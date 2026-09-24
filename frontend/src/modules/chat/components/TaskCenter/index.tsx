@@ -12,7 +12,6 @@ import {
   DownOutlined,
   RightOutlined,
   ApiOutlined,
-  BulbOutlined,
   CheckOutlined,
   DownloadOutlined,
   GlobalOutlined,
@@ -42,6 +41,7 @@ import {
   getSourceHref,
   getSourceLabel,
   getSourceSubtitle,
+  publicSourcesToChatSources,
 } from "@/modules/chat/utils/sourceAdapter";
 import type { WorkflowSessionStep } from "@/modules/chat/store/workflowPanel";
 import {
@@ -52,6 +52,9 @@ import {
   type OrdinaryTaskState,
   type OrdinaryTaskTimeline,
 } from "./taskTimeline";
+import { TaskProcessTimeline } from "./TaskProcessTimeline";
+import { TaskArtifactList } from "./TaskArtifactList";
+import type { OrdinaryCollection, OrdinaryRunView } from "@/modules/chat/types/ordinaryTask";
 import "./index.scss";
 
 interface Props {
@@ -671,7 +674,7 @@ function TaskCard({ task }: { task: SubAgentTask }) {
 }
 
 function formatDuration(seconds: number | undefined, t: TFunction): string {
-  if (seconds === undefined) return "";
+  if (seconds === undefined) return "—";
   if (seconds < 60) {
     return t("taskCenter.durationSeconds", { seconds });
   }
@@ -685,6 +688,8 @@ function stateLabel(state: OrdinaryTaskState, t: TFunction): string {
   if (state === "complete") return t("taskCenter.statusSucceeded");
   if (state === "running") return t("taskCenter.ordinaryStatusRunning");
   if (state === "failed") return t("taskCenter.statusFailed");
+  if (state === "canceled") return t("taskCenter.statusCanceled");
+  if (state === "interrupted") return t("taskCenter.statusInterrupted");
   if (state === "outdated") return t("taskCenter.ordinaryStatusOutdated");
   return t("taskCenter.statusPending");
 }
@@ -700,222 +705,15 @@ function StateMarker({
   if (state === "running") {
     return <span className="ordinary-task-spinner" aria-hidden="true" />;
   }
-  if (state === "failed") return <CloseCircleFilled />;
+  if (["failed", "canceled", "interrupted"].includes(state)) return <CloseCircleFilled />;
   return <>{ordinal}</>;
 }
 
-function publicTaskTitle(task: SubAgentTask | undefined): string {
-  return task?.title?.trim() ?? "";
-}
-
-interface OrdinaryThinkingStep {
-  id: string;
-  title: string;
-  summary: string;
-  state: OrdinaryTaskState;
-}
-
-interface OrdinaryThinkingSnapshot {
-  planSteps?: string[];
-  progressPct: number;
-  artifactCount: number;
-  sourceCount: number;
-}
-
-function safeProgress(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(100, Math.max(0, Math.round(value)));
-}
-
-// Display-plan position is an estimate mapped from task progress, not a tool checkpoint.
-function planPosition(snapshot: OrdinaryThinkingSnapshot, state: OrdinaryTaskState): number {
-  const total = snapshot.planSteps?.length ?? 0;
-  if (!total || state === "waiting") return 0;
-  if (state === "complete") return total;
-  return Math.max(1, Math.ceil(safeProgress(snapshot.progressPct) * total / 100));
-}
-
-function thinkingSteps(
-  snapshot: OrdinaryThinkingSnapshot,
-  state: OrdinaryTaskState,
-  t: TFunction,
-): OrdinaryThinkingStep[] {
-  // Ordinary mode only exposes fixed copy derived from public status/counts.
-  // Never use current_phase, summary, or execution_log as timeline text here.
-  let processingSummary = t("taskCenter.ordinarySummaryWaiting");
-  if (state === "complete") {
-    processingSummary = t("taskCenter.ordinaryThinkingProcessingComplete");
-  } else if (state === "running") {
-    processingSummary = t("taskCenter.ordinaryThinkingRunningSummary", {
-      progress: safeProgress(snapshot.progressPct),
-    });
-  } else if (state === "failed") {
-    processingSummary = t("taskCenter.ordinarySummaryFailed");
-  } else if (state === "outdated") {
-    processingSummary = t("taskCenter.ordinaryThinkingOutdatedSummary");
-  }
-
-  const resultDetails: string[] = [];
-  if (snapshot.artifactCount > 0) {
-    resultDetails.push(
-      t("taskCenter.ordinarySummaryArtifacts", { count: snapshot.artifactCount }),
-    );
-  }
-  if (snapshot.sourceCount > 0) {
-    resultDetails.push(
-      t("taskCenter.ordinarySummarySources", { count: snapshot.sourceCount }),
-    );
-  }
-
-  const resultSummary = resultDetails.length > 0
-    ? resultDetails.join(" ")
-    : state === "complete"
-      ? t("taskCenter.ordinaryThinkingResultComplete")
-      : state === "failed"
-        ? t("taskCenter.ordinaryThinkingResultFailed")
-        : state === "outdated"
-          ? t("taskCenter.ordinaryThinkingResultOutdated")
-          : t("taskCenter.ordinaryThinkingResultPending");
-  const resultState: OrdinaryTaskState = state === "complete"
-    ? "complete"
-    : state === "failed"
-      ? "failed"
-      : state === "outdated"
-        ? "outdated"
-        : "waiting";
-
-  if (snapshot.planSteps?.length) {
-    const current = planPosition(snapshot, state);
-    return snapshot.planSteps.map((title, index) => ({
-      id: `plan-${index}`,
-      title,
-      summary: "",
-      state: state === "complete" || index < current - 1
-        ? "complete"
-        : index === current - 1 ? state : "waiting",
-    }));
-  }
-
-  return [
-    {
-      id: "accepted",
-      title: t("taskCenter.ordinaryThinkingAcceptedTitle"),
-      summary: t("taskCenter.ordinaryThinkingAcceptedSummary"),
-      state: "complete",
-    },
-    {
-      id: "processing",
-      title: t("taskCenter.ordinaryThinkingProcessingTitle"),
-      summary: processingSummary,
-      state,
-    },
-    {
-      id: "result",
-      title: t("taskCenter.ordinaryThinkingResultTitle"),
-      summary: resultSummary,
-      state: resultState,
-    },
-  ];
-}
-
-function OrdinaryThinkingMarker({ state }: { state: OrdinaryTaskState }) {
-  if (state === "complete") return <CheckOutlined />;
-  if (state === "running") {
-    return <span className="ordinary-task-spinner" aria-hidden="true" />;
-  }
-  if (state === "failed") return <CloseCircleFilled />;
-  return <span className="ordinary-thinking-dot" />;
-}
-
-function thinkingFooter(
-  state: OrdinaryTaskState,
-  durationSeconds: number | undefined,
-  t: TFunction,
-): string {
-  if (state === "complete") {
-    const duration = formatDuration(durationSeconds, t);
-    return duration
-      ? t("taskCenter.ordinaryThinkingDuration", { duration })
-      : t("taskCenter.ordinaryThinkingComplete");
-  }
-  if (state === "running") return t("taskCenter.ordinaryThinkingRunning");
-  if (state === "failed") return t("taskCenter.ordinaryThinkingFailed");
-  if (state === "outdated") return t("taskCenter.ordinaryThinkingOutdated");
-  return t("taskCenter.ordinaryThinkingWaiting");
-}
-
-function OrdinaryThinkingProcess({
-  snapshot,
-  state,
-  durationSeconds,
-}: {
-  snapshot: OrdinaryThinkingSnapshot;
-  state: OrdinaryTaskState;
-  durationSeconds?: number;
-}) {
-  const { t } = useTranslation();
-  const headingId = useId();
-  const steps = useMemo(
-    () => thinkingSteps(snapshot, state, t),
-    [snapshot, state, t],
-  );
-
-  const total = snapshot.planSteps?.length ?? 0;
-  const current = planPosition(snapshot, state);
-  const percentage = total ? Math.round(current / total * 100) : 0;
-
-  return (
-    <section
-      className="ordinary-activity-section ordinary-thinking-section"
-      aria-labelledby={headingId}
-    >
-      <h3 className="ordinary-section-heading" id={headingId}>
-        <BulbOutlined aria-hidden="true" />
-        <span>{t(snapshot.planSteps?.length ? "taskCenter.ordinaryPlan" : "taskCenter.ordinaryThinking")}</span>
-      </h3>
-      {total > 0 && <>
-        <p>{t("taskCenter.ordinaryPlanDescription")}</p>
-        <div className="ordinary-plan-progress">
-          <span>{t("taskCenter.ordinaryPlanProgress", { current, total })}</span>
-          <strong>{percentage}%</strong>
-          <progress aria-label={t("taskCenter.ordinaryPlan")} value={percentage} max={100} />
-        </div>
-      </>}
-      <ol className="ordinary-thinking-list">
-        {steps.map((step, index) => (
-          <li
-            className={`ordinary-thinking-item is-${step.state}`}
-            key={step.id}
-            aria-current={step.state === "running" ? "step" : undefined}
-          >
-            <span className="ordinary-thinking-marker" aria-hidden="true">
-              {total > 0 && step.state === "running"
-                ? <span className="ordinary-plan-active-dot" />
-                : total > 0 && (step.state === "waiting" || step.state === "outdated")
-                  ? index + 1
-                  : <OrdinaryThinkingMarker state={step.state} />}
-            </span>
-            <span className="ordinary-thinking-copy">
-              <strong>{step.title}</strong>
-              {step.summary && <span>{step.summary}</span>}
-              <span className="ordinary-visually-hidden">
-                {stateLabel(step.state, t)}
-              </span>
-            </span>
-          </li>
-        ))}
-      </ol>
-      <div className={`ordinary-thinking-terminal is-${state}`}>
-        <span className="ordinary-thinking-marker" aria-hidden="true">
-          <OrdinaryThinkingMarker state={state} />
-        </span>
-        <span className="ordinary-thinking-terminal-copy">
-          <strong>{thinkingFooter(state, durationSeconds, t)}</strong>
-          <span>{stateLabel(state, t)}</span>
-        </span>
-      </div>
-    </section>
-  );
+function publicTaskTitle(item: OrdinaryTaskItem, t: TFunction): string {
+  if (item.ordinary?.title.trim()) return item.ordinary.title;
+  const title = item.task?.title?.trim();
+  return title && !/^[\w-]+-workflow:|^[\w-]+:[\w_]+$/.test(title)
+    ? title : t("taskCenter.ordinaryTaskLabel", { index: item.ordinal });
 }
 
 function OrdinaryReferenceSources({ sources }: { sources: ChatSource[] }) {
@@ -980,32 +778,48 @@ function OrdinaryReferenceSources({ sources }: { sources: ChatSource[] }) {
   );
 }
 
-function OrdinaryTaskDetails({
-  task,
-  state,
-  durationSeconds,
-}: {
-  task: SubAgentTask;
-  state: OrdinaryTaskState;
-  durationSeconds?: number;
-}) {
-  const sourceCount = getReferenceSources(task.sources).length;
-  const snapshot = useMemo<OrdinaryThinkingSnapshot>(() => ({
-    planSteps: task.plan_steps,
-    progressPct: task.progress_pct,
-    artifactCount: task.artifacts.length,
-    sourceCount,
-  }), [sourceCount, task.artifacts.length, task.progress_pct, task.plan_steps]);
-  return (
-    <div className="ordinary-task-details">
-      <OrdinaryThinkingProcess
-        snapshot={snapshot}
-        state={state}
-        durationSeconds={durationSeconds}
-      />
-      <OrdinaryReferenceSources sources={task.sources} />
+function OrdinaryTaskDetails({ item }: { item: OrdinaryTaskItem }) {
+  const { t } = useTranslation();
+  const view = item.ordinary;
+  const loadOrdinaryTask = useTaskCenterStore(s => s.loadOrdinaryTask);
+  const [loadingCollection, setLoadingCollection] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const reload = async (collection?: OrdinaryCollection, cursor?: string) => {
+    if (!view || loadingCollection) return;
+    setLoadingCollection(collection ?? "all"); setLoadError(false);
+    try {
+      await loadOrdinaryTask(view.conversation_id ?? item.task?.conversation_id ?? "", view.session_id ? view.display_key : view.task_id ?? view.display_key, collection, cursor);
+    } catch (error) {
+      if (mounted.current) setLoadError(true);
+      throw error;
+    }
+    finally { if (mounted.current) setLoadingCollection(null); }
+  };
+  const more = (collection: OrdinaryCollection) => view?.pages[collection]?.next_cursor
+    ? <button className="ordinary-load-more" type="button" disabled={loadingCollection !== null}
+        onClick={() => void reload(collection, view.pages[collection].next_cursor ?? undefined).catch(() => undefined)}>
+        {t("taskCenter.ordinaryLoadMore")}
+      </button> : null;
+  return <div className="ordinary-task-details" aria-busy={loadingCollection !== null}>
+    <TaskProcessTimeline steps={view?.process_steps ?? []} legacyPlan={view ? view.plan_steps : item.task?.plan_steps}
+      state={item.state} progress={view ? view.progress_pct : item.task?.progress_pct} />
+    {more("process_steps")}
+    <div className={`ordinary-process-timing ordinary-thinking-terminal is-${item.state}`}>
+      <span className="ordinary-thinking-marker" aria-hidden="true"><StateMarker state={item.state} /></span>
+      <span className="ordinary-thinking-terminal-copy">
+        <strong>{t("taskCenter.ordinaryThinkingDuration", { duration: formatDuration(ordinaryTaskDurationSeconds(item), t) })}</strong>
+        <span>{stateLabel(item.state, t)}</span>
+        {view?.timing.thinking_elapsed_ms != null && <span>{t("taskCenter.ordinaryMeasuredThinkingDuration", { duration: formatDuration(Math.round(view.timing.thinking_elapsed_ms / 1000), t) })}</span>}
+      </span>
     </div>
-  );
+    <OrdinaryReferenceSources sources={view ? publicSourcesToChatSources(view.sources) : item.task?.sources ?? []} />
+    {more("sources")}
+    <TaskArtifactList artifacts={view?.stage_artifacts ?? []} onReload={() => reload()} />
+    {more("stage_artifacts")}
+    {loadError && <div role="alert" className="ordinary-stale-warning">{t("taskCenter.ordinaryLoadError")}<button type="button" onClick={() => void reload().catch(() => undefined)}>{t("taskCenter.ordinaryReload")}</button></div>}
+  </div>;
 }
 
 function OrdinaryTaskCard({
@@ -1018,8 +832,7 @@ function OrdinaryTaskCard({
   onToggle: () => void;
 }) {
   const { t } = useTranslation();
-  const disabled = item.state === "waiting" || !item.task;
-  const title = publicTaskTitle(item.task);
+  const title = publicTaskTitle(item, t);
   const panelId = `ordinary-task-panel-${item.id.replace(/[^a-z0-9_-]/gi, "-")}`;
   const triggerId = `${panelId}-trigger`;
   return (
@@ -1031,11 +844,9 @@ function OrdinaryTaskCard({
         onClick={onToggle}
         aria-expanded={expanded}
         aria-controls={panelId}
-        disabled={disabled}
       >
         <span className="ordinary-task-main">
           <span className="ordinary-task-title-row">
-            <b>{t("taskCenter.ordinaryTaskLabel", { index: item.ordinal })}</b>
             {title && (
               <Tooltip title={title} placement="topLeft">
                 <span className="ordinary-task-title">{title}</span>
@@ -1050,7 +861,7 @@ function OrdinaryTaskCard({
             )}
             <span>
               {t("taskCenter.ordinaryArtifactCount", {
-                count: item.task?.artifacts.length ?? 0,
+                count: item.ordinary?.pages.stage_artifacts.total ?? 0,
               })}
             </span>
             {(item.task?.input_slots?.length ?? 0) > 0 && (
@@ -1067,18 +878,14 @@ function OrdinaryTaskCard({
         </span>
         <DownOutlined className="ordinary-task-arrow" aria-hidden="true" />
       </button>
-      {expanded && item.task && (
+      {expanded && (
         <div
           className="ordinary-task-panel"
           id={panelId}
           role="region"
           aria-labelledby={triggerId}
         >
-          <OrdinaryTaskDetails
-            task={item.task}
-            state={item.state}
-            durationSeconds={ordinaryTaskDurationSeconds(item)}
-          />
+          <OrdinaryTaskDetails key={item.id} item={item} />
         </div>
       )}
     </article>
@@ -1088,6 +895,8 @@ function OrdinaryTaskCard({
 function groupState(group: OrdinaryTaskGroup): OrdinaryTaskState {
   const states = group.items.map((item) => item.state);
   if (states.includes("failed")) return "failed";
+  if (states.includes("interrupted")) return "interrupted";
+  if (states.includes("canceled")) return "canceled";
   if (states.includes("running")) return "running";
   if (states.every((state) => state === "complete")) return "complete";
   if (states.every((state) => state === "outdated")) return "outdated";
@@ -1096,7 +905,7 @@ function groupState(group: OrdinaryTaskGroup): OrdinaryTaskState {
 
 function OrdinaryParallelGroup({ group }: { group: OrdinaryTaskGroup }) {
   const { t } = useTranslation();
-  const [selectedId, setSelectedId] = useState(group.items[0]?.id ?? "");
+  const [selectedId, setSelectedId] = useState(group.items.find(item => item.state === "running")?.id ?? group.items[0]?.id ?? "");
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const selected = group.items.find((item) => item.id === selectedId) ?? group.items[0];
   const state = groupState(group);
@@ -1127,7 +936,7 @@ function OrdinaryParallelGroup({ group }: { group: OrdinaryTaskGroup }) {
 
   useEffect(() => {
     if (!group.items.some((item) => item.id === selectedId)) {
-      setSelectedId(group.items[0]?.id ?? "");
+      setSelectedId(group.items.find(item => item.state === "running")?.id ?? group.items[0]?.id ?? "");
     }
   }, [group.items, selectedId]);
 
@@ -1146,7 +955,8 @@ function OrdinaryParallelGroup({ group }: { group: OrdinaryTaskGroup }) {
                 ? t("taskCenter.ordinaryParallelPending")
                 : state === "outdated"
                   ? t("taskCenter.ordinaryParallelOutdated")
-                  : t("taskCenter.ordinaryParallelRunning")}
+                  : state === "canceled" || state === "interrupted" ? stateLabel(state, t)
+                    : t("taskCenter.ordinaryParallelRunning")}
         </strong>
         <span className="ordinary-parallel-status">{stateLabel(state, t)}</span>
       </div>
@@ -1159,9 +969,7 @@ function OrdinaryParallelGroup({ group }: { group: OrdinaryTaskGroup }) {
             id={`${panelId}-tab-${item.id.replace(/[^a-z0-9_-]/gi, "-")}`}
             aria-selected={item.id === selected?.id}
             aria-controls={panelId}
-            aria-label={`${t("taskCenter.ordinaryTaskLabel", {
-              index: item.ordinal,
-            })}, ${stateLabel(item.state, t)}`}
+            aria-label={`${publicTaskTitle(item, t)}, ${stateLabel(item.state, t)}`} title={publicTaskTitle(item, t)}
             tabIndex={item.id === selected?.id ? 0 : -1}
             className={item.id === selected?.id ? "is-active" : ""}
             onClick={() => setSelectedId(item.id)}
@@ -1173,7 +981,7 @@ function OrdinaryParallelGroup({ group }: { group: OrdinaryTaskGroup }) {
             <span className={`ordinary-parallel-tab-state is-${item.state}`} aria-hidden="true">
               <StateMarker state={item.state} ordinal={item.ordinal} />
             </span>
-            {t("taskCenter.ordinaryTaskLabel", { index: item.ordinal })}
+            <span className="ordinary-parallel-tab-title">{publicTaskTitle(item, t)}</span>
           </button>
         ))}
       </div>
@@ -1184,18 +992,12 @@ function OrdinaryParallelGroup({ group }: { group: OrdinaryTaskGroup }) {
           role="tabpanel"
           aria-labelledby={selectedTabId}
         >
-          {publicTaskTitle(selected.task) && (
+          {publicTaskTitle(selected, t) && (
             <strong className="ordinary-parallel-task-title">
-              {publicTaskTitle(selected.task)}
+              {publicTaskTitle(selected, t)}
             </strong>
           )}
-          {selected.task && (
-            <OrdinaryTaskDetails
-              task={selected.task}
-              state={selected.state}
-              durationSeconds={ordinaryTaskDurationSeconds(selected)}
-            />
-          )}
+          <OrdinaryTaskDetails key={selected.id} item={selected} />
         </div>
       )}
     </section>
@@ -1203,10 +1005,10 @@ function OrdinaryParallelGroup({ group }: { group: OrdinaryTaskGroup }) {
 }
 
 function defaultOrdinaryExpandedId(items: OrdinaryTaskItem[]): string | null {
-  return items.find((item) => item.state === "running" && item.task)?.id
-    ?? items.find((item) => item.state === "failed" && item.task)?.id
+  return items.find((item) => item.state === "running")?.id
+    ?? items.find((item) => item.state === "failed")?.id
     ?? [...items].reverse().find(
-      (item) => item.state !== "waiting" && Boolean(item.task),
+      (item) => item.state !== "waiting",
     )?.id
     ?? null;
 }
@@ -1218,15 +1020,24 @@ function OrdinaryTaskCenter({
   loading,
   loadError,
   onRetry,
+  onReloadArtifacts,
+  runs,
 }: {
+  runs: OrdinaryRunView[];
   timeline: OrdinaryTaskTimeline;
   onClose?: () => void;
   showHeader: boolean;
   loading: boolean;
   loadError: boolean;
   onRetry: () => void;
+  onReloadArtifacts: () => Promise<void>;
 }) {
   const { t } = useTranslation();
+  const currentRuns = new Set(timeline.items.map(item => item.ordinary?.run_id).filter(Boolean));
+  const visibleRuns = runs.filter(run => currentRuns.has(run.run_id));
+  const finalRefs = new Set(visibleRuns.flatMap(run => run.final_output_refs));
+  const finalArtifacts = [...timeline.items.flatMap(item => item.ordinary?.stage_artifacts ?? []), ...visibleRuns.flatMap(run => run.final_artifacts ?? [])]
+    .filter(artifact => finalRefs.has(artifact.artifact_id));
   const initialExpanded = defaultOrdinaryExpandedId(timeline.items);
   const [expandedId, setExpandedId] = useState<string | null>(initialExpanded);
   const hadItemsRef = useRef(timeline.items.length > 0);
@@ -1379,6 +1190,7 @@ function OrdinaryTaskCenter({
               );
             })}
           </ol>
+          <TaskArtifactList artifacts={finalArtifacts} final onReload={onReloadArtifacts} />
         </>
       )}
     </div>
@@ -1397,6 +1209,7 @@ const TaskCenter = (props: Props) => {
     plannedCount,
   } = props;
   const { t } = useTranslation();
+  const [now, setNow] = useState(Date.now());
   const [filter, setFilter] = useState<FilterKey>("all");
 
   const storedTasks = useTaskCenterStore((s) =>
@@ -1411,14 +1224,22 @@ const TaskCenter = (props: Props) => {
     sessionId ? Boolean(s._taskLoadErrors[sessionId]) : false,
   );
   const loadConversationTasks = useTaskCenterStore((s) => s.loadConversationTasks);
+  const runs = useTaskCenterStore(s => s.runsByConversation?.[sessionId]);
+  useEffect(() => {
+    if (developerMode || !tasks.some(task => task.ordinary?.status === "running") && !workflowSteps.some(step => step.ordinary?.status === "running")) return;
+    const update = () => { if (!document.hidden) setNow(Date.now()); };
+    const timer = window.setInterval(update, 1000);
+    document.addEventListener("visibilitychange", update);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", update); };
+  }, [developerMode, tasks, workflowSteps]);
   const ordinaryTimeline = useMemo(
     () => buildOrdinaryTaskTimeline(
       tasks,
       workflowSteps,
-      Date.now(),
+      now,
       plannedCount,
     ),
-    [plannedCount, tasks, workflowSteps],
+    [now, plannedCount, tasks, workflowSteps],
   );
 
   const filteredTasks = useMemo(() => {
@@ -1436,17 +1257,28 @@ const TaskCenter = (props: Props) => {
     { key: "failed", label: t("taskCenter.filterFailed") },
   ];
 
+  const reloadOrdinary = async () => {
+    if (!sessionId) return;
+    await Promise.all([
+      loadConversationTasks(sessionId),
+      workflowSession ? useWorkflowStore.getState().refreshOrdinarySession(sessionId, workflowSession.session_id) : Promise.resolve(),
+    ]);
+    if (useTaskCenterStore.getState()._taskLoadErrors[sessionId]
+      || useWorkflowStore.getState().sessionByConversation[sessionId]?.ordinary_error) throw new Error("Unable to reload artifacts");
+  };
+
   if (!developerMode) {
     return (
       <OrdinaryTaskCenter
+        key={sessionId}
+        runs={[...(runs ?? []), ...(workflowSession?.ordinary_runs ?? [])]}
         timeline={ordinaryTimeline}
         onClose={onClose}
         showHeader={showHeader}
         loading={loading}
-        loadError={loadError}
-        onRetry={() => {
-          if (sessionId) void loadConversationTasks(sessionId);
-        }}
+        loadError={loadError || Boolean(workflowSession?.ordinary_error)}
+        onRetry={() => { void reloadOrdinary().catch(() => undefined); }}
+        onReloadArtifacts={reloadOrdinary}
       />
     );
   }

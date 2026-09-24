@@ -26,6 +26,7 @@ type streamError struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`
 	Retryable bool   `json:"retryable"`
+	RequestID string `json:"request_id,omitempty"`
 }
 
 func writeEvent(w http.ResponseWriter, flusher http.Flusher, id int64, eventType string, payload any) error {
@@ -71,6 +72,10 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		after = parsed
+	}
+	if r.URL.Query().Get("view") == "ordinary" {
+		h.serveOrdinary(w, r, flusher, sessionID, owner, after)
+		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")

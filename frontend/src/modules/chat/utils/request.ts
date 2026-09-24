@@ -144,12 +144,12 @@ export function exportContextPrompt(payload: Record<string, unknown>) {
 
 // SubAgent task SSE endpoint. Granular execution events are streamed here so
 // they cannot crowd lifecycle events out of the conversation event channel.
-export const taskStreamUrl = (taskId: string) =>
-  `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}:stream`;
+export const taskStreamUrl = (taskId: string, view?: "ordinary" | "developer") =>
+  `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}:stream${view === "ordinary" ? "?view=ordinary" : ""}`;
 
 // Conversation-level events SSE endpoint.
-export const convEventsUrl = (conversationId: string) =>
-  `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/events`;
+export const convEventsUrl = (conversationId: string, view?: "ordinary" | "developer") =>
+  `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/events${view === "ordinary" ? "?view=ordinary" : ""}`;
 
 export function decideToolLimit(
   conversationId: string,
@@ -176,8 +176,9 @@ export function TaskServiceApi() {
       );
     },
     listConversationArtifacts(conversationId: string, options?: RawAxiosRequestConfig) {
+      const encodedId = encodeURIComponent(conversationId);
       return axiosInstance.get(
-        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/artifacts`,
+        `${coreApiBaseUrl}/conversations/${encodedId}/artifacts?projection=v2`,
         options,
       );
     },
@@ -192,6 +193,57 @@ export function TaskServiceApi() {
         `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}/artifacts`,
         options,
       );
+    },
+  };
+}
+
+export interface ArtifactRevisionItem {
+  artifact_id: string;
+  revision_id: string;
+  revision_no: number;
+  content_type?: string;
+  content_hash?: string;
+  size?: number;
+  caption?: string | null;
+  producer_type?: string;
+  created_at?: string;
+  published?: boolean;
+  change_summary?: string;
+  head_version?: number;
+}
+
+export function ArtifactV2Api() {
+  return {
+    listRevisions(artifactId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/artifacts/${encodeURIComponent(artifactId)}/revisions`,
+        options,
+      );
+    },
+    downloadRevisionUrl(revisionId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.post(
+        `${coreApiBaseUrl}/artifact-revisions/${encodeURIComponent(revisionId)}:download-url`,
+        {},
+        options,
+      );
+    },
+    moveHead(
+      artifactId: string,
+      channel: string,
+      body: { revision_id: string; version?: number },
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.post(
+        `${coreApiBaseUrl}/artifacts/${encodeURIComponent(artifactId)}/heads/${encodeURIComponent(channel)}:move`,
+        body,
+        options,
+      );
+    },
+    diffRevisions(fromId: string, toId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(`${coreApiBaseUrl}/artifact-revisions:diff`, {
+        ...options,
+        params: { from: fromId, to: toId, ...(options?.params || {}) },
+      });
     },
   };
 }

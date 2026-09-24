@@ -281,7 +281,9 @@ export function useChatConversation({
           new Date(left.updated_at ?? left.created_at ?? 0).getTime()
         ));
       for (const task of tasks) {
-        const detail = parseMediaCapabilityDependency(task);
+        const detail = parseMediaCapabilityDependency(
+          task.ordinary ? task.ordinary.capability_dependency : task,
+        );
         if (!detail) continue;
         showMediaCapabilityPrompt({
           ...detail,
@@ -652,6 +654,7 @@ export function useChatConversation({
   function markStructuredChatFailure(
     conversationId: string,
     semanticCode: string,
+    reason: "model_failure" | "runtime_failure" = "model_failure",
   ) {
     clearStreamRecovery(conversationId);
     const sourceList =
@@ -662,6 +665,7 @@ export function useChatConversation({
       sourceList,
       RoleTypes.ASSISTANT,
       semanticCode,
+      reason,
     );
     if (conversationId) {
       conversationMessagesCache.current.set(conversationId, failedList);
@@ -801,6 +805,7 @@ export function useChatConversation({
           markStructuredChatFailure(
             errorConversationId,
             mappedError.semanticCode,
+            mappedError.reason,
           );
           return;
         }
@@ -1454,6 +1459,7 @@ export function useChatConversation({
     if (targetIndex < 0) {
       nextList.push({
         id: `workflow-feedback:${feedbackId}`,
+        history_id: historyId,
         role: RoleTypes.ASSISTANT,
         delta: text,
         raw_delta: text,
@@ -1492,6 +1498,7 @@ export function useChatConversation({
   }
 
   useEffect(() => {
+    let disposed = false;
     const handleAutoAdvance = (event: Event) => {
       const detail = (event as CustomEvent<ChatAutoAdvanceDetail>).detail;
       if (!detail?.conversationId) return;
@@ -1520,16 +1527,39 @@ export function useChatConversation({
       }
     };
     window.addEventListener(CHAT_AUTO_ADVANCE_EVENT, handleAutoAdvance);
-    const handleWorkflowStepFeedback = (event: Event) => {
+    const handleWorkflowStepFeedback = async (event: Event) => {
       const detail = (
         event as CustomEvent<ChatWorkflowStepFeedbackDetail>
       ).detail;
-      if (!detail?.conversationId) return;
+      if (!detail?.conversationId || !detail.feedbackId) return;
+      let feedbackMessage = detail.message;
+      if (!feedbackMessage && detail.historyId) {
+        try {
+          const response = await ChatServiceApi().conversationServiceGetConversationHistory({
+            name: detail.conversationId,
+            anchorHistoryId: detail.historyId,
+          });
+          if (disposed) return;
+          const history = response.data.history?.find((item) => item.id === detail.historyId);
+          // Persisted feedback is delimited by task markers. Append only this
+          // block so a history refresh cannot overwrite in-flight chat deltas.
+          const marker = `<!-- workflow-step-feedback:${detail.feedbackId} -->`;
+          const saved = history?.result || "";
+          const start = saved.indexOf(marker);
+          if (start < 0) return;
+          const block = saved.slice(start + marker.length);
+          const end = block.indexOf("<!-- workflow-step-feedback:");
+          feedbackMessage = (end < 0 ? block : block.slice(0, end)).trim();
+        } catch {
+          // Keep current messages; reopening history can recover saved feedback.
+          return;
+        }
+      }
       appendWorkflowStepFeedback(
         detail.conversationId,
         detail.feedbackId,
         detail.historyId,
-        detail.message || "",
+        feedbackMessage || "",
       );
     };
     window.addEventListener(
@@ -1537,6 +1567,7 @@ export function useChatConversation({
       handleWorkflowStepFeedback,
     );
     return () => {
+      disposed = true;
       window.removeEventListener(CHAT_AUTO_ADVANCE_EVENT, handleAutoAdvance);
       window.removeEventListener(
         CHAT_WORKFLOW_STEP_FEEDBACK_EVENT,
@@ -1614,11 +1645,13 @@ export function useChatConversation({
       ...getFileUrls(tempFileGroup?.image, tempGroup?.image).map((image) => ({
         input_type: "image",
         uri: image.uri || "",
+        filename: image.name || "",
         input_base64: image.base64 || "",
       })),
       ...getFileUrls(tempFileGroup?.file, tempGroup?.file).map((file) => ({
         input_type: "file",
         uri: file.uri || "",
+        filename: file.name || "",
       })),
     ];
 

@@ -275,6 +275,72 @@ describe("MentionEditor", () => {
     expect(mocks.axiosGet).toHaveBeenCalledTimes(2);
   });
 
+  it("marks paused workflows unavailable instead of inserting a mention that the server will reject", async () => {
+    mocks.axiosGet.mockResolvedValue({
+      data: {
+        workflows: [
+          {
+            workflow_ref: "builtin:academic_research_pipeline",
+            workflow_id: "academic_research_pipeline",
+            name: "学术研究与论文写作",
+            description: "",
+            enabled: false,
+            call_mode: "disabled",
+          },
+          {
+            workflow_ref: "builtin:writer-workflow",
+            workflow_id: "writer-workflow",
+            name: "AI Writer",
+            description: "",
+            enabled: true,
+            call_mode: "auto",
+          },
+        ],
+      },
+    });
+
+    render(
+      <MentionEditor
+        value=""
+        placeholder="message"
+        onChange={vi.fn()}
+        onMentionsChange={vi.fn()}
+        onPaste={vi.fn()}
+        onSend={vi.fn()}
+        onCompositionChange={vi.fn()}
+      />,
+    );
+
+    const editor = screen.getByRole("textbox");
+    editor.textContent = "@workflow:";
+    const range = document.createRange();
+    range.setStart(editor.firstChild!, editor.textContent.length);
+    range.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    fireEvent.input(editor);
+
+    expect(await screen.findByRole("option", { name: /学术研究与论文写作/ })).toBeDisabled();
+    expect(screen.getByRole("option", { name: "AI Writer" })).toBeEnabled();
+  });
+
+  it("distinguishes workflows with the same name and selects their original resource identity", async () => {
+    mocks.axiosGet.mockResolvedValue({ data: { workflows: [
+      { workflow_ref: "user:owner:research-a", workflow_id: "research-a", name: "Research" },
+      { workflow_ref: "user:owner:research-b", workflow_id: "research-b", name: "Research" },
+    ] } });
+    const onMentionsChange = vi.fn();
+    render(<MentionEditor value="" placeholder="message" onChange={vi.fn()} onMentionsChange={onMentionsChange}
+      onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    const editor = screen.getByRole("textbox");
+    editor.textContent = "@workflow:";
+    const range = document.createRange(); range.setStart(editor.firstChild!, editor.textContent.length); range.collapse(true);
+    window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(range); fireEvent.input(editor);
+    expect(await screen.findByRole("option", { name: "Research（research-a）" })).toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByRole("option", { name: "Research（research-b）" }));
+    expect(onMentionsChange).toHaveBeenLastCalledWith([expect.objectContaining({ resource_id: "user:owner:research-b" })]);
+  });
+
   it("resets the mention menu scroll when the query changes", async () => {
     mocks.listSkillAssetsPage.mockResolvedValue({
       records: [{ id: "skill-find", name: "find-skill-skillhub" }],

@@ -171,7 +171,10 @@ func saveChatExport(ctx context.Context, db *gorm.DB, userID, conversationID str
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
-		dto, err = persistConversationArtifact(ctx, tx, conversationID, req.HistoryID, userID, &ArtifactCreatedEvent{
+		// We are already inside the history transaction. Calling the public
+		// persistConversationArtifact helper here would open a nested SQLite
+		// writer transaction and wait forever on the process-wide writer gate.
+		dto, err = persistConversationArtifactTx(ctx, tx, conversationID, req.HistoryID, userID, &ArtifactCreatedEvent{
 			ArtifactID: req.ExportID, Filename: req.Filename, ContentType: "text", Value: value, Caption: &selected.Title,
 		})
 		if err != nil {
