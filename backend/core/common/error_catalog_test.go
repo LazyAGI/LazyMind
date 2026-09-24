@@ -406,7 +406,7 @@ func TestResolveToolConfigurationErrors(t *testing.T) {
 		code    int
 	}{
 		{"configuration unavailable", 503, 2001994},
-		{"cannot prepare configuration", 400, 2003115},
+		{"cannot prepare configuration", 400, 2003120},
 		{"too many actions", 400, 2003116},
 		{"acknowledgement failed", 500, 2003117},
 		{"unknown service", 400, 2003118},

@@ -14,6 +14,7 @@ from lark_oapi.api.application.v7 import (
     PatchApplicationAbilityRequest,
     PatchApplicationAbilityRequestBody,
 )
+from lark_oapi.api.contact.v3 import GetUserRequest
 
 from channel_gateway.feishu.domain import (
     FeishuAppRegistration,
@@ -26,10 +27,12 @@ _ADDONS = {
         'tenant': [
             'im:message:send_as_bot',
             'im:message.p2p_msg:readonly',
+            'im:chat:readonly',
             'im:resource',
             'cardkit:card:write',
             'application:bot.menu:write',
             'application:application:patch',
+            'contact:user.base:readonly',
         ],
     },
     'events': {
@@ -57,6 +60,30 @@ _MENU_ITEMS = (
     ('lazymind_assistant', '助理', 'Assistant', 'robot_outlined'),
 )
 _PUBLISH_VERSION_EXISTS = 50516
+
+
+def _owner_name(app_id: str, app_secret: str, owner_open_id: str) -> str:
+    """Resolve the authorized user's readable name without exposing open_id."""
+    client = (
+        lark_oapi.Client.builder()
+        .app_id(app_id)
+        .app_secret(app_secret)
+        .build()
+    )
+    request = (
+        GetUserRequest.builder()
+        .user_id_type('open_id')
+        .user_id(owner_open_id)
+        .build()
+    )
+    try:
+        response = client.contact.v3.user.get(request)
+    except Exception:
+        return ''
+    if not response.success() or response.data is None or response.data.user is None:
+        return ''
+    user = response.data.user
+    return str(getattr(user, 'name', '') or getattr(user, 'en_name', '') or '').strip()
 
 
 def _menu_payload() -> list[BotMenuNode]:
@@ -165,6 +192,8 @@ class LarkAppRegistrar:
         on_qr_code: Callable[[str, int], None],
         on_status_change: Callable[[str], None],
         cancel_event: threading.Event,
+        create_new: bool = True,
+        app_id: str | None = None,
     ) -> FeishuAppRegistration:
         def qr_callback(info: Any) -> None:
             payload = info if isinstance(info, dict) else {}
@@ -199,7 +228,8 @@ class LarkAppRegistrar:
                     'desc': '在飞书对话中继续 LazyMind 会话',
                 },
                 addons=_ADDONS,
-                create_only=True,
+                create_only=create_new,
+                app_id=app_id,
             )
         except Exception as exc:
             if cancel_event.is_set():
@@ -244,15 +274,26 @@ class LarkAppRegistrar:
             raise FeishuRuntimeError(
                 'Feishu registration result is missing app credentials'
             )
+        owner_name = str(
+            user_info.get('name')
+            or user_info.get('display_name')
+            or ''
+        ).strip()
+        if not owner_name:
+            owner_name = _owner_name(app_id, app_secret, owner_open_id)
+        bot_info = result.get('bot_info')
+        if not isinstance(bot_info, dict):
+            bot_info = {}
+        bot_name = next((str(value or '').strip() for value in (
+            result.get('bot_name'), result.get('app_name'), result.get('application_name'),
+            bot_info.get('bot_name'), bot_info.get('name'), bot_info.get('display_name'),
+        ) if str(value or '').strip()), '')
         return FeishuAppRegistration(
             app_id=app_id,
             app_secret=app_secret,
             owner_open_id=owner_open_id,
-            owner_name=str(
-                user_info.get('name')
-                or user_info.get('display_name')
-                or ''
-            ).strip(),
+            owner_name=owner_name,
+            bot_name=bot_name,
             tenant_key=str(
                 user_info.get('tenant_key')
                 or result.get('tenant_key')
