@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -163,5 +164,66 @@ func testCloudChatAvailabilityPreservesAlgorithmContract(t *testing.T, registere
 	}
 	if tokenRequests.Load() != int32(len(loaders)) || cli.calls.Load() != 0 || authorizer.calls.Load() != 0 {
 		t.Fatalf("legacy credentials depended on managed services: tokens=%d cli=%d source=%d", tokenRequests.Load(), cli.calls.Load(), authorizer.calls.Load())
+	}
+}
+
+// Exercise the real HTTP bridge with auth-service response fields, not a registry stub.
+func TestCloudProviderBridgeResponseCompatibilityAndFailures(t *testing.T) {
+	previous := providerconnection.DefaultService()
+	t.Cleanup(func() { providerconnection.SetDefaultService(previous) })
+	var failToken, emptyToken, noAccounts bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/internal/chat-enabled"):
+			items := []map[string]any{}
+			if !noAccounts {
+				items = append(items, map[string]any{"connection_id": "c"})
+			}
+			json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"items": items}})
+		case strings.HasSuffix(r.URL.Path, "/internal/c"):
+			json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"connection_id": "c", "owner_user_id": "u", "provider": "googledrive", "connection_method": "legacy_byo", "status": "ACTIVE", "can_use_chat": true}})
+		case strings.HasSuffix(r.URL.Path, "/c/token"):
+			if failToken {
+				w.WriteHeader(503)
+				return
+			}
+			token := "fixture-token"
+			if emptyToken {
+				token = ""
+			}
+			json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"connection_id": "c", "provider": "googledrive", "auth_mode": "oauth", "access_token": token, "token_type": "Bearer", "expires_at": nil, "status": "ACTIVE"}})
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_AUTH_SERVICE_URL", server.URL)
+	for _, bridgeEnabled := range []bool{true, false} {
+		t.Run(fmt.Sprintf("bridge=%t", bridgeEnabled), func(t *testing.T) {
+			if bridgeEnabled {
+				providerconnection.SetDefaultService(&providerconnection.Service{Registry: providerconnection.HTTPRegistry{BaseURL: server.URL + "/api/authservice"}})
+			} else {
+				providerconnection.SetDefaultService(nil)
+			}
+			failToken, emptyToken, noAccounts = false, false, false
+			tokens, err := LoadCloudProviderTokens(t.Context(), "googledrive", "u")
+			if err != nil || !reflect.DeepEqual(tokens, []string{"fixture-token"}) {
+				t.Errorf("valid authorization rejected: tokens count=%d err=%v", len(tokens), err)
+			}
+			failToken = true
+			if _, err := LoadCloudProviderTokens(t.Context(), "googledrive", "u"); err == nil {
+				t.Error("credential failure misreported as unconfigured")
+			}
+			failToken = false
+			emptyToken = true
+			if _, err := LoadCloudProviderTokens(t.Context(), "googledrive", "u"); err == nil {
+				t.Error("empty credential misreported as unconfigured")
+			}
+			noAccounts = true
+			if tokens, err := LoadCloudProviderTokens(t.Context(), "googledrive", "u"); err != nil || len(tokens) != 0 {
+				t.Errorf("no connection should remain unconfigured: %v", err)
+			}
+		})
 	}
 }

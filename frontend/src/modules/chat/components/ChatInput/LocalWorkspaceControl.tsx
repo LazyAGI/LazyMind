@@ -9,6 +9,8 @@ import {
   authorizeWorkspace,
   decideWorkspaceApproval,
   getConversationWorkspace,
+  getUserPermissionPreference,
+  saveUserPermissionPreference,
   listWorkspaces,
   listWorkspaceApprovals,
   prepareWorkspaceReauthorization,
@@ -67,7 +69,10 @@ export default function LocalWorkspaceControl({ approvalContainer, draftWorkspac
   };
   const [items, setItems] = useState<LocalWorkspaceView[]>([]);
   const [selected, setSelected] = useState<LocalWorkspaceView>();
-  const [mode, setMode] = useState<WorkspacePermissionMode>("ask_as_needed");
+  const [mode, setMode] = useState<WorkspacePermissionMode>("always_ask");
+  const [permissionVersion, setPermissionVersion] = useState(1);
+  const [userPermissionVersion, setUserPermissionVersion] = useState(1);
+  const [permissionReady, setPermissionReady] = useState(false);
   const [candidate, setCandidate] = useState<{ token: string; name?: string; path?: string; reauthorization?: boolean; conversationId?: string }>();
   const [manageOpen, setManageOpen] = useState(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
@@ -102,13 +107,19 @@ export default function LocalWorkspaceControl({ approvalContainer, draftWorkspac
   }
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
   useEffect(() => { selectedRef.current = selected; }, [selected]);
+  useEffect(() => {
+    if (runtime === "local" || runtime === "desktop") {
+      onSavingChangeRef.current?.(busy || !permissionReady || initializationError);
+    }
+  }, [runtime, busy, permissionReady, initializationError]);
 
   useEffect(() => {
     const hadSelection = Boolean(selectedRef.current);
     selectedRef.current = undefined;
     setItems([]);
     setSelected(undefined);
-    setMode("ask_as_needed");
+    setMode("always_ask");
+    setPermissionReady(false);
     setCandidate(undefined);
     listRequestRef.current += 1;
     setManageOpen(false);
@@ -118,12 +129,11 @@ export default function LocalWorkspaceControl({ approvalContainer, draftWorkspac
     setWorkspaceQuery("");
     setManagedItems([]);
     setBusy(false);
-    onSavingChangeRef.current?.(false);
     setInitializationError(false);
     decidedApprovalIdsRef.current.clear();
     revokeConfirmRef.current?.destroy();
     revokeConfirmRef.current = undefined;
-    if (hadSelection) onChangeRef.current(undefined, "ask_as_needed");
+    if (hadSelection) onChangeRef.current(undefined, "always_ask");
     if (runtime !== "local" && runtime !== "desktop") return;
     void refreshWorkspaceState();
     return () => {
@@ -189,8 +199,8 @@ export default function LocalWorkspaceControl({ approvalContainer, draftWorkspac
     selectedRef.current = workspace;
     setSelected(workspace);
     rememberWorkspaceId(runtime, workspace.workspace_id);
-    onChangeRef.current(workspace.status === "active" ? workspace.workspace_id : undefined, "ask_as_needed");
-  }, [initialProject, items, conversationId, runtime]);
+    onChangeRef.current(workspace.status === "active" ? workspace.workspace_id : undefined, mode);
+  }, [initialProject, items, conversationId, runtime, mode]);
   useEffect(() => {
     if (conversationId || !onProjectChange) return;
     if (!selected) {
@@ -211,10 +221,10 @@ export default function LocalWorkspaceControl({ approvalContainer, draftWorkspac
     selectedRef.current = workspace;
     setSelected(workspace);
     rememberWorkspaceId(runtime, workspace.workspace_id);
-    const nextMode = draftWorkspace.workspace_permission_mode ?? "ask_as_needed";
+    const nextMode = draftWorkspace.workspace_permission_mode ?? mode;
     setMode(nextMode);
     onChangeRef.current(workspace.workspace_id, nextMode);
-  }, [draftWorkspace, items, conversationId, runtime]);
+  }, [draftWorkspace, items, conversationId, runtime, mode]);
 
   if (runtime !== "local" && runtime !== "desktop") return null;
 
@@ -226,42 +236,46 @@ export default function LocalWorkspaceControl({ approvalContainer, draftWorkspac
     const request = requestRef.current;
     const loadRequest = ++workspaceLoadRequestRef.current;
     try {
+      const preference = await getUserPermissionPreference();
+      if (request !== requestRef.current || loadRequest !== workspaceLoadRequestRef.current) return;
+      setUserPermissionVersion(preference.permission_version ?? 1);
       if (conversationId) {
-        const workspace = await getConversationWorkspace(conversationId);
+        const binding = await getConversationWorkspace(conversationId);
+        const workspace = binding.workspace;
         if (request !== requestRef.current || loadRequest !== workspaceLoadRequestRef.current) return;
-        const hadSelection = Boolean(selectedRef.current);
         setInitializationError(false);
         selectedRef.current = workspace;
         setSelected(workspace);
         setItems(workspace ? [workspace] : []);
-        const nextMode = workspace?.permission_mode ?? "ask_as_needed";
+        const nextMode = binding.permission_mode;
+        setPermissionVersion(binding.permission_version);
+        setPermissionReady(true);
         setMode(nextMode);
-        if (workspace || hadSelection) {
-          onChangeRef.current(workspace?.status === "active" ? workspace.workspace_id : undefined, nextMode);
-        }
+        onChangeRef.current(workspace?.status === "active" ? workspace.workspace_id : undefined, nextMode);
         return;
       }
       const values = await listWorkspaces();
       if (request !== requestRef.current || loadRequest !== workspaceLoadRequestRef.current) return;
       setInitializationError(false);
+      const nextMode = preference.default_permission_mode ?? "always_ask";
+      setMode(nextMode);
+      setPermissionReady(true);
       setItems(values);
       if (selectedRef.current && !values.some((item) => item.workspace_id === selectedRef.current?.workspace_id)) {
         if (readPreferredWorkspaceId(runtime) === selectedRef.current.workspace_id) rememberWorkspaceId(runtime);
         selectedRef.current = undefined;
         setSelected(undefined);
-        onChangeRef.current(undefined, mode);
       } else if (!selectedRef.current && !initialProject && !draftWorkspace?.workspace_id) {
         const preferredId = readPreferredWorkspaceId(runtime);
         const preferred = values.find((item) => item.workspace_id === preferredId && item.status === "active");
         if (preferred) {
           selectedRef.current = preferred;
           setSelected(preferred);
-          setMode("ask_as_needed");
-          onChangeRef.current(preferred.workspace_id, "ask_as_needed");
         } else if (preferredId) {
           rememberWorkspaceId(runtime);
         }
       }
+      onChangeRef.current(selectedRef.current?.workspace_id, nextMode);
     } catch {
       if (request !== requestRef.current || loadRequest !== workspaceLoadRequestRef.current) return;
       setInitializationError(true);
@@ -339,36 +353,34 @@ export default function LocalWorkspaceControl({ approvalContainer, draftWorkspac
     await applyMode(next);
   };
   const applyMode = async (next: WorkspacePermissionMode) => {
-    if (conversationId && selected?.permission_version) {
-      const request = requestRef.current;
-      setBusy(true);
-      onSavingChangeRef.current?.(true);
-      try {
-        const result = await updateWorkspacePermission(conversationId, next, selected.permission_version);
+    if (!permissionReady || busy) return;
+    const request = requestRef.current;
+    setBusy(true);
+    try {
+      if (conversationId) {
+        const result = await updateWorkspacePermission(conversationId, next, permissionVersion, userPermissionVersion);
         if (request !== requestRef.current) return;
-        workspaceLoadRequestRef.current += 1;
-        setInitializationError(false);
-        const workspace = { ...selected, permission_mode: result.permission_mode, permission_version: result.permission_version };
-        selectedRef.current = workspace;
-        setSelected(workspace);
-        setMode(result.permission_mode);
-        onChangeRef.current(selected.workspace_id, result.permission_mode);
-        message.success(t("chat.workspace.savedNext"));
-      } catch (error) {
-        if (request === requestRef.current) {
-          message.error(`${t("chat.workspace.saveFailed")}：${reasonText(error)}`);
-          refreshOnConflict(error);
-        }
-      } finally {
-        if (request === requestRef.current) {
-          setBusy(false);
-          onSavingChangeRef.current?.(false);
-        }
+        setPermissionVersion(result.permission_version);
+        setUserPermissionVersion(result.user_permission_version);
+      } else {
+        const result = await saveUserPermissionPreference(next, userPermissionVersion);
+        if (request !== requestRef.current) return;
+        setUserPermissionVersion(result.permission_version);
       }
-      return;
+      workspaceLoadRequestRef.current += 1;
+      setMode(next);
+      onChangeRef.current(selectedRef.current?.workspace_id, next);
+      message.success(t("chat.workspace.savedNext"));
+    } catch (error) {
+      if (request === requestRef.current) {
+        message.error(`${t("chat.workspace.saveFailed")}：${reasonText(error)}`);
+        void refreshWorkspaceState();
+      }
+    } finally {
+      if (request === requestRef.current) {
+        setBusy(false);
+      }
     }
-    setMode(next);
-    onChangeRef.current(selected?.workspace_id, next);
   };
 
   const revoke = (target = selected) => {
@@ -467,7 +479,7 @@ export default function LocalWorkspaceControl({ approvalContainer, draftWorkspac
       {approvalError && <p role="alert">{t("chat.workspace.approval.loadFailed")}：{t(`chat.workspace.reason.${approvalError}`, { defaultValue: t("chat.workspace.reason.unknown") })}</p>}
       {approval.status === "pending" && <div className="workspace-approval-actions">
         <Button type="primary" loading={approvalBusy === approval.operation_id} disabled={Boolean(approvalBusy || approvalError) || approval.expires_at <= Date.now()} onClick={() => void decideApproval(approval, "allow_once")}>{t("chat.workspace.approval.allowOnce")}</Button>
-        {approval.allow_future && <Button disabled={Boolean(approvalBusy || approvalError) || approval.expires_at <= Date.now()} onClick={() => void decideApproval(approval, "allow_future")}>{t("chat.workspace.approval.allowFuture")}</Button>}
+        {approval.allow_future && <Button disabled={Boolean(approvalBusy || approvalError) || approval.expires_at <= Date.now()} onClick={() => void decideApproval(approval, "allow_future")}>{t(approval.capability === "shell" ? "chat.workspace.approval.allowFutureShell" : "chat.workspace.approval.allowFuture")}</Button>}
         <Button danger disabled={Boolean(approvalBusy || approvalError) || approval.expires_at <= Date.now()} onClick={() => void decideApproval(approval, "reject")}>{t("chat.workspace.approval.reject")}</Button>
       </div>}
       {approval.status === "expired" && <Button className="workspace-approval-dismiss" onClick={() => setApprovalsOpen(undefined)}>{t("chat.workspace.approval.dismiss")}</Button>}
@@ -504,7 +516,8 @@ export default function LocalWorkspaceControl({ approvalContainer, draftWorkspac
           {selected?.display_name ?? t("chat.workspace.select")} <DownOutlined />
         </Button>
       </Popover>}
-      {(!conversationId || selected) && <><Select className="local-workspace-permission" size="small" value={selected ? mode : "always_ask"} disabled={busy || !selected || Boolean(!conversationId && disabled) || selected.status !== "active"}
+      {conversationId && <span className="local-workspace-current" title={selected?.path}><FolderOpenOutlined /> {selected?.display_name ?? t("chat.workspace.unselected")}</span>}
+      <Select className="local-workspace-permission" size="small" value={mode} disabled={busy || !permissionReady || initializationError || Boolean(!conversationId && disabled)}
         classNames={{ popup: { root: "local-workspace-permission-menu" } }}
         options={Object.entries(labels).map(([value, label]) => ({ value, label }))}
         labelRender={(({ value }) => <Space size={6}><SafetyCertificateOutlined />{labels[value as WorkspacePermissionMode]}</Space>) as NonNullable<SelectProps<WorkspacePermissionMode>["labelRender"]>}
@@ -514,7 +527,6 @@ export default function LocalWorkspaceControl({ approvalContainer, draftWorkspac
           {mode === value && <CheckOutlined className="local-workspace-permission-check" />}
         </div>; }) as NonNullable<SelectProps<WorkspacePermissionMode>["optionRender"]>}
         onChange={(value: WorkspacePermissionMode) => void changeMode(value)} />
-      </>}
     </Space>
     {(!candidate || currentCandidate) && <Modal className="local-workspace-authorize-modal" open={Boolean(currentCandidate)} title={t("chat.workspace.authorizeTitle")} confirmLoading={busy} onCancel={() => setCandidate(undefined)} onOk={() => void allow()} okText={t("chat.workspace.authorize")}>
       <p className="local-workspace-authorize-question">{t("chat.workspace.authorizeQuestion", { name: currentCandidate?.name })}</p>

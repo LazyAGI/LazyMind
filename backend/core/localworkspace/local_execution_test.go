@@ -134,7 +134,7 @@ func TestLocalOperationModelNoticeDoesNotLeakInternalProtocol(t *testing.T) {
 			t.Fatalf("model notice contains %s", secret)
 		}
 	}
-	if !strings.Contains(notice, "写入和删除按权限模式审批") {
+	if !strings.Contains(notice, "按本会话权限模式审批") {
 		t.Fatal("missing permission mode notice")
 	}
 }

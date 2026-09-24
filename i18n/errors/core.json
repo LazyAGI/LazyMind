@@ -1852,5 +1852,10 @@
   "2003112": {"en-US": "Task sources exceed the supported limit", "zh-CN": "任务来源数量或大小超过限制"},
   "2003113": {"en-US": "Task update could not be saved", "zh-CN": "暂时无法保存任务更新"},
   "2003114": {"en-US": "The summary model returned instructions instead of a summary", "zh-CN": "摘要模型返回了指令而非摘要"},
-  "2003115": {"en-US": "The summary model returned empty content", "zh-CN": "摘要模型返回内容为空"}
+  "2003115": {"en-US": "The summary model returned empty content", "zh-CN": "摘要模型返回内容为空"},
+  "2003120": { "en-US": "Could not prepare tool configuration", "zh-CN": "无法准备工具配置" },
+  "2003116": { "en-US": "Too many tool configuration actions", "zh-CN": "工具配置操作数量过多" },
+  "2003117": { "en-US": "Could not acknowledge tool configuration", "zh-CN": "无法确认工具配置状态" },
+  "2003118": { "en-US": "Unknown tool service", "zh-CN": "未知的工具服务" },
+  "2003119": { "en-US": "Tool configuration changed; retry", "zh-CN": "工具配置已发生变化，请重试" }
 }

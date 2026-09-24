@@ -2310,6 +2310,8 @@ class WriterWritingCapabilities:
             )
 
         def generate_one(index: int, instruction_data: dict[str, Any]) -> None:
+            if stop_event.is_set():
+                return
             events = event_queues[index]
             path = checkpoint_path(index, instruction_data)
             try:
@@ -2322,6 +2324,8 @@ class WriterWritingCapabilities:
                         mark_completed(index, cached=True)
                     return
                 for attempt in range(1, max_attempts + 1):
+                    if stop_event.is_set():
+                        return
                     section_started_at[index] = time.monotonic()
                     buffered: list[str] = []
                     section_deltas: list[str] = []
@@ -2616,7 +2620,7 @@ class WriterWritingCapabilities:
             for future in futures:
                 if future is not None:
                     future.cancel()
-            executor.shutdown(wait=False, cancel_futures=True)
+            executor.shutdown(wait=True, cancel_futures=True)
         return _json_dumps(sections)
 
     def generate_draft_document(

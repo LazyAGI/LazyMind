@@ -121,6 +121,11 @@ export interface ContextUsageReport {
   categories: ContextUsageCategory[];
   estimation_version: string;
   preview_accuracy?: "deterministic" | "rule_only" | "llm_enhanced";
+  mcp_catalog?: {
+    source: "discovered_snapshot";
+    complete: boolean;
+    missing_services: string[];
+  };
   requires_llm?: boolean;
   llm_reason?: string;
 }
@@ -1346,6 +1351,8 @@ export interface ChatEntryDefaults {
 }
 
 export interface ChatSettingsResponse extends ConversationRuntimeSettings, ChatEntryDefaults {
+  default_permission_mode?: "always_ask" | "ask_as_needed" | "allow_all";
+  permission_version?: number;
   enable_tool_retrieval?: boolean;
   updated_at?: string;
 }

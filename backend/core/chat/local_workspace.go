@@ -45,7 +45,7 @@ func validateWorkspaceRequestMode(raw map[string]any) *common.AppError {
 	if !workspacePresent && !permissionPresent {
 		return nil
 	}
-	if !workspacePresent || workspaceID == "" || len(workspaceID) > 128 ||
+	if (workspacePresent && (workspaceID == "" || len(workspaceID) > 128)) ||
 		!localworkspace.ValidPermissionMode(permissionMode) {
 		return localworkspace.Error("invalid_selection", 400, "invalid request")
 	}
@@ -86,7 +86,6 @@ func ensureConversationWithWorkspaceTx(
 	raw map[string]any,
 ) (*orm.Conversation, int, error) {
 	workspaceID, workspacePresent := requestedWorkspaceID(raw)
-	permissionMode, _ := requestedWorkspacePermissionMode(raw)
 	var conversation *orm.Conversation
 	var seq int
 	var existing orm.Conversation
@@ -166,7 +165,7 @@ func ensureConversationWithWorkspaceTx(
 	if !exists && workspacePresent {
 		now := time.Now().UTC()
 		binding := orm.ConversationWorkspaceBinding{ConversationID: convID, WorkspaceID: workspaceID,
-			PermissionMode: permissionMode, PermissionVersion: 1, CreatedAt: now, UpdatedAt: now}
+			PermissionMode: conversation.PermissionMode, PermissionVersion: conversation.PermissionVersion, CreatedAt: now, UpdatedAt: now}
 		if err := tx.Create(&binding).Error; err != nil {
 			return nil, 0, localworkspace.Error("binding_conflict", 409, "conflict")
 		}

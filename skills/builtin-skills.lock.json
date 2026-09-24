@@ -2,6 +2,22 @@
   "schema_version": 1,
   "skills": [
     {
+      "key": "personal-document-search",
+      "uid": "bsk_01KPERSONALDOCSEARCH20260923",
+      "source_url": "builtin://search/personal-document-search",
+      "resolved_url": "builtin://search/personal-document-search",
+      "version": "1.0.0",
+      "name": "personal-document-search",
+      "description": "Use when the user wants to find or ask questions about their local files, cloud documents, mail, or Agent conversation history across Local Files, Agent Conversations, Feishu, official Notion MCP, Google Drive, and Mail. Rewrite queries for each source, search independently in parallel, read evidence on demand, and synthesize a cited answer.",
+      "category": "search",
+      "provider": "LazyMind",
+      "market_visible": true,
+      "archive_sha256": "23b593c88768ca97b33e80e6f519ceecace80c9f1f5646609864e06e29533418",
+      "tree_sha256": "3e5148480668ca0702b9c83c181210ffe3e813f546ac922ba6c2c3d40a775990",
+      "archive_size": 21467,
+      "package_file": "packages/bsk_01KPERSONALDOCSEARCH20260923.zip"
+    },
+    {
       "key": "deep-research",
       "uid": "bsk_94D43FFF92D2D888AAB1C848CD95",
       "source_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=deep-research.zip",

@@ -9,21 +9,12 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import "./feishuSetupGuide.scss";
 import { CLOUD_DOCUMENTS_FEISHU_PATH } from "../utils/cloudDocumentUrls";
+import { FEISHU_DEFAULT_SCOPES } from "@/modules/dataSource/constants/options";
 
 const { Paragraph, Text } = Typography;
 
 const FEISHU_OPEN_PLATFORM_URL = "https://open.feishu.cn/app?lang=zh-CN";
 const FEISHU_CALLBACK_PATH = "/oauth/feishu/callback";
-const FEISHU_FINE_GRAINED_PERMISSIONS = [
-  "offline_access",
-  "drive:drive",
-  "drive:drive:readonly",
-  "drive:drive.metadata:readonly",
-  "wiki:wiki",
-  "wiki:wiki:readonly",
-  "wiki:node:retrieve",
-  "docx:document",
-];
 
 type GuideStep = {
   title: string;
@@ -40,7 +31,7 @@ type GuideStep = {
 };
 
 function buildGuideSteps(t: TFunction, permissionSeparator: string): GuideStep[] {
-  const permissions = FEISHU_FINE_GRAINED_PERMISSIONS.join(permissionSeparator);
+  const permissions = FEISHU_DEFAULT_SCOPES.join(permissionSeparator);
   const stepKey = (key: string) => `admin.dataSourceFeishuSetupGuide.steps.${key}`;
   return [
   {

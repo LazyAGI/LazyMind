@@ -1077,6 +1077,7 @@ def filter_tools(
     configs: list[ToolConfig],
     available_tools: list[str] | None = None,
     user_query: str = '',
+    include_unready: bool = False,
 ) -> list[ToolConfig]:
     result = []
     for cfg in configs:
@@ -1086,7 +1087,9 @@ def filter_tools(
         patterns = _TOOL_CAPABILITY_REQUEST_PATTERNS.get(cfg.name, ())
         if terms and user_query and _capability_is_denied(user_query, terms, patterns):
             continue
-        if not tool_is_active(cfg):
+        if not tool_is_active(cfg) and not (include_unready and cfg.name in {
+            'mail', 'cloud_files', 'web_search', 'academic_search',
+        }):
             if not (
                 cfg.name in _ON_DEMAND_MODEL_TOOLS
                 and terms

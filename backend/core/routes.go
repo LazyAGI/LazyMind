@@ -409,6 +409,8 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- text -----
 	handleAPI(r, "POST", "/chat", []string{"qa.write"}, chat.Chat)
 	handleAPI(r, "GET", "/tools", []string{"qa.read"}, chat.ListTools)
+	handleAPI(r, "POST", "/internal/conversations/{conversation_id}/tool-configuration-actions", nil, chat.InternalToolConfiguration)
+	handleAPI(r, "GET", "/conversations/{conversation_id}/tool-configuration-actions", []string{"qa.read"}, chat.ListToolConfigurations)
 	handleAPI(r, "POST", "/tools/{tool_name}:disable", []string{"qa.read"}, chat.DisableTool)
 	handleAPI(r, "POST", "/tools/{tool_name}:enable", []string{"qa.read"}, chat.EnableTool)
 

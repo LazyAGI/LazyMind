@@ -338,19 +338,14 @@ func TestGenericToolApprovalUsesFrozenModeAndIdentity(t *testing.T) {
 				t.Fatal(err)
 			}
 			approved, err := DecideOperation(t.Context(), db.DB, states, result.OperationID, "allow_future", "owner")
-			if mode == PermissionAlwaysAsk {
-				if err == nil {
-					t.Fatal("always_ask accepted a future grant")
-				}
-				approved, err = DecideOperation(t.Context(), db.DB, states, result.OperationID, "allow_once", "owner")
+			if err == nil {
+				t.Fatal("changed permission accepted a future grant")
 			}
+			approved, err = DecideOperation(t.Context(), db.DB, states, result.OperationID, "allow_once", "owner")
 			if err != nil {
 				t.Fatal(err)
 			}
 			expected := ""
-			if mode == PermissionAskAsNeeded {
-				expected = "tool:" + req.ToolIdentity
-			}
 			if approved.ToolGranted != expected || approved.ShellGranted {
 				t.Fatalf("wrong grant: %+v", approved)
 			}

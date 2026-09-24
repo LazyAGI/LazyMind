@@ -1732,5 +1732,8 @@ def _build_chat_agent_task_context(conversation_id: str) -> str:
 
 async def guard_workflow_agent_stream(initial_stream: Any, **_: Any):
     """LazyMind handoff is enforced by declaring its tool as a stop tool."""
-    async for item in initial_stream:
-        yield item
+    try:
+        async for item in initial_stream:
+            yield item
+    finally:
+        await initial_stream.aclose()

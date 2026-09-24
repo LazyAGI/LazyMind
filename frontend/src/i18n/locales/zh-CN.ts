@@ -3,6 +3,23 @@ import { evolutionControlsZh } from "@/modules/selfEvolution/shared/controlTrans
 import { zhCNErrorMessages } from "./error-codes";
 
 const zhCN = {
+  toolConfiguration: {
+    continue: "继续任务",
+    continueMessage: "连接已完成，请继续上面尚未完成的任务。",
+    connected: "授权已完成，返回对话继续任务。",
+    returnToChat: "返回原对话",
+    retryConnection: "重试连接",
+    connecting: "正在连接授权服务…",
+
+    ready: "连接已就绪",
+    pending: "完成配置后，有下一轮时更新工具；本次任务不会等待或自动重启。",
+    forbidden: "当前不允许使用此能力。",
+    unavailable: "暂时无法核实连接状态，请稍后重试。",
+    connectMail: "连接邮箱",
+    authorize: "连接 / 重新授权",
+    selectTools: "选择工具",
+    configure: "去配置"
+  },
   notifications,
   toolRetrieval: {
     title: "按需加载工具",
@@ -2057,19 +2074,19 @@ const zhCN = {
 
     workspace: {
       retry: "重试",
-      select: "选择工作区", searchShort: "搜索工作区", openFolder: "打开本地文件夹", none: "不使用本地工作区", authorizeTitle: "首次使用时需要授权", authorize: "允许访问", authorizeQuestion: "允许 LazyMind 访问“{{name}}”工作区？",
+      select: "选择工作区", unselected: "未选择工作区", searchShort: "搜索工作区", openFolder: "打开本地文件夹", none: "不使用本地工作区", authorizeTitle: "首次使用时需要授权", authorize: "允许访问", authorizeQuestion: "允许 LazyMind 访问“{{name}}”工作区？",
       scope: "该目录作为默认工作目录。读取文件无需审批，写入和删除按所选权限模式处理。", chooseFailed: "无法选择工作区", authorizeFailed: "授权失败",
-      everyAsk: "始终询问", askAsNeeded: "按需确认", allowAll: "完全信任", allowAllTitle: "要开启“完全信任”吗？",
+      everyAsk: "始终询问", askAsNeeded: "按需询问", allowAll: "完全信任", allowAllTitle: "要开启“完全信任”吗？",
       everyAskDescription: "修改本机文件、运行命令或使用未受信任且文件访问范围未知的工具前，每次都询问。已信任的内置 Skill 能力除外。", askAsNeededDescription: "工作区内自动执行，超出已信任范围时再询问，并可记住本会话授权。", allowAllDescription: "本机文件、命令和其他工具操作无需文件访问确认。",
-      allowAllIntro: "开启后，本机文件、命令、脚本及文件访问范围未知的工具无需逐次确认：", allowAllFiles: "文件和文件夹", allowAllFilesDescription: "读取、创建和修改本机文件", allowAllProtected: "命令和其他工具", allowAllProtectedDescription: "命令、脚本及其他工具均通过文件访问授权", allowAllDestructive: "删除和覆盖", allowAllDestructiveDescription: "删除、覆盖或替换工作区内外的文件", allowAllConfirm: "确认开启",
-      allowAllRisk: "可能造成本机文件的数据丢失或敏感信息泄露。", savedNext: "已保存，下次执行生效", saving: "正在保存工作区权限…", saveFailed: "保存失败",
+      allowAllIntro: "开启后，当前会话及后续新会话默认使用完全信任，其他已有会话不变。本机文件、命令、脚本及文件访问范围未知的工具无需逐次确认：", allowAllFiles: "文件和文件夹", allowAllFilesDescription: "读取、创建和修改本机文件", allowAllProtected: "命令和其他工具", allowAllProtectedDescription: "命令、脚本及其他工具均通过文件访问授权", allowAllDestructive: "删除和覆盖", allowAllDestructiveDescription: "删除、覆盖或替换工作区内外的文件", allowAllConfirm: "确认开启",
+      allowAllRisk: "可能造成本机文件的数据丢失或敏感信息泄露。", savedNext: "已保存，当前会话下次执行生效，新会话沿用此选择", saving: "正在保存权限…", saveFailed: "保存失败",
       revoke: "撤销", revokeTitle: "撤销目录授权？", revokeAffected: "将影响 {{count}} 个任务。", revoked: "授权已撤销",
       revokedStopFailed: "授权已撤销，部分任务停止请求失败", revokeFailed: "撤销失败",
       manage: "管理授权", manageTitle: "工作区授权", search: "搜索名称或路径", loadFailed: "加载授权失败", reauthorize: "重新授权",
       approval: {
         open: "待审批", title: "需要你的批准", dismiss: "知道了", pendingCount: "待处理 {{count}} 项",
         notice: "允许后原工具调用将继续执行；只有状态显示“已完成”才表示执行完成。",
-        unknownFileAccess: "此工具未声明文件访问范围，执行时可能访问或修改文件。", allowFuture: "本会话后续允许此工具", allowOnce: "允许一次", reject: "拒绝", loadFailed: "无法刷新请求", requestExpired: "请求已过期", decisionFailed: "保存决定失败",
+        unknownFileAccess: "此工具未声明文件访问范围，执行时可能访问或修改文件。", allowFuture: "本会话后续允许此工具", allowFutureShell: "本会话后续允许 Shell", allowOnce: "允许一次", reject: "拒绝", loadFailed: "无法刷新请求", requestExpired: "请求已过期", decisionFailed: "保存决定失败",
         operation: { tool: "执行工具", shell: "运行 Shell 命令", write: "写入", read: "读取", create: "创建", append: "追加", replace: "替换", delete: "删除", overwrite: "覆盖", mkdir: "创建目录", ls: "列出目录", glob: "查找文件", grep: "搜索内容", info: "文件信息" },
         status: { inactive: "执行已结束，请求已失效", preparing: "准备请求中", unknown: "状态暂不可用", pending: "等待批准", allowed: "已批准，等待执行", executing: "执行中", completed: "已完成", failed: "失败", rejected: "已拒绝", expired: "已过期", uncertain: "结果未知" },
       },
@@ -2243,6 +2260,8 @@ const zhCN = {
     contextUsageUpdate: "更新估算",
     contextUsageError: "暂时无法计算上下文用量。",
     contextUsageRetry: "重试",
+    contextUsageMcpSnapshot: "MCP 工具目录使用已保存的发现快照。",
+    contextUsageMcpIncomplete: "部分 MCP 服务尚无工具目录快照，预估可能不完整：{{services}}。",
     contextUsageRuleOnlyWarning: "当前为规则预估",
     contextUsageRuleOnlyReason: "规则无法完全确定目标或资源约束。",
     contextUsageAgentReviewHint: "本次预估可能不准确，可主动使用模型重新预估。",
@@ -6300,6 +6319,8 @@ const zhCN = {
     memoryMcpEnabled: "启用服务",
     memoryMcpEnableStatus: "启用状态",
     memoryMcpEnableRequiresVerified: "请先重新连接并验证通过后再启用",
+    memoryMcpAuthorizationPending: "待认证",
+    memoryMcpRequestAuthorizationSuccess: "已允许在对话中请求 Notion 授权",
     memoryMcpLoadFailed: "加载 MCP 服务失败",
     memoryMcpSaveFailed: "保存 MCP 服务失败",
     memoryMcpCreateSuccess: "MCP 服务已创建",

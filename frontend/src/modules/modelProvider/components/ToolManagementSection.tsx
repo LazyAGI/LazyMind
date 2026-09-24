@@ -41,6 +41,7 @@ import {
   disableTool,
   discoverMcpServerTools,
   enableTool,
+  getMcpServer,
   listMcpServersPage,
   listToolAssetsPage,
   updateMcpServer,
@@ -321,12 +322,16 @@ export default function ToolManagementSection({ description, initialQuery = "", 
     [markToolActionLoading, refreshToolAssets, t],
   );
 
-  const openMcpToolsDrawer = useCallback((server: McpServerAsset) => {
+  const openMcpToolsDrawer = useCallback(async (server: McpServerAsset) => {
     if (toolsLocation.managed && toolsLocation.item !== server.id) { toolsLocation.select(server.id); return; }
-    const tools = server.tools || [];
-    setMcpToolTarget(server);
-    setMcpToolDraftNames(resolveAllowedMcpToolNames(server, tools));
-    setMcpToolsDrawerOpen(true);
+    try {
+      const detail = await getMcpServer(server.id);
+      setMcpToolTarget(detail);
+      setMcpToolDraftNames(resolveAllowedMcpToolNames(detail, detail.tools));
+      setMcpToolsDrawerOpen(true);
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
+    }
   }, [toolsLocation.managed, toolsLocation.item, toolsLocation.select]);
 
   const openMcpCreateModal = useCallback(() => {
@@ -383,7 +388,7 @@ export default function ToolManagementSection({ description, initialQuery = "", 
     if (!toolsLocation.item) { setMcpToolsDrawerOpen(false); return; }
     if (mcpToolsDrawerOpen || mcpLoading) return;
     const server = mcpServers.find((item) => item.id === toolsLocation.item);
-    if (server) openMcpToolsDrawer(server);
+    if (server) void openMcpToolsDrawer(server);
   }, [toolsLocation.item, mcpLoading, mcpServers, openMcpToolsDrawer]);
 
   const closeMcpModal = useCallback(() => {
@@ -447,7 +452,10 @@ export default function ToolManagementSection({ description, initialQuery = "", 
         await refreshMcpState();
         message.success(
           checked
-            ? t("admin.memoryMcpEnableSuccess")
+            ? t(!server.isVerified && server.id.startsWith("msp_notion_") &&
+              server.url === "https://mcp.notion.com/mcp" && server.authType === "oauth"
+              ? "admin.memoryMcpRequestAuthorizationSuccess"
+              : "admin.memoryMcpEnableSuccess")
             : t("admin.memoryMcpDisableSuccess"),
         );
       } catch {
@@ -493,7 +501,7 @@ export default function ToolManagementSection({ description, initialQuery = "", 
         setMcpServers((previous) =>
           previous.map((item) => (item.id === server.id ? nextServer : item)),
         );
-        openMcpToolsDrawer(nextServer);
+        await openMcpToolsDrawer(nextServer);
         await refreshMcpState();
         message.success(t("admin.memoryMcpDiscoverSuccess", { count: result.tools.length }));
       } catch {
@@ -591,14 +599,17 @@ export default function ToolManagementSection({ description, initialQuery = "", 
 
   const renderMcpServerCard = (server: McpServerAsset) => {
     const isSettingsLayout = layout === "settings";
-    const enableDisabled = !server.isVerified && !server.enabled;
+    const builtinNotion = server.id.startsWith("msp_notion_") &&
+      server.url === "https://mcp.notion.com/mcp" && server.authType === "oauth";
+    const awaitingAuthorization = builtinNotion && !server.isVerified && server.discoveryEnabled;
+    const enableDisabled = !server.isVerified && !server.enabled && !builtinNotion;
     const allowedCount =
       server.allowedTools === undefined ? Number(server.toolCount || 0) : server.allowedTools.length;
     const transportLabel = getMcpTransportLabel(server.transport);
     const switchNode = (
       <Switch
         aria-label={`${server.name} ${t("admin.memoryMcpEnableStatus")}`}
-        checked={server.enabled}
+        checked={server.enabled || awaitingAuthorization}
         checkedChildren={isSettingsLayout ? undefined : t("common.enabled")}
         disabled={enableDisabled}
         loading={mcpActionLoading.has(getMcpActionKey("toggle", server.id))}
@@ -633,7 +644,8 @@ export default function ToolManagementSection({ description, initialQuery = "", 
         <div className="model-provider-managed-tool-actions">
           <div className="model-provider-mcp-server-state">
             <Tag className="model-provider-service-status" color={server.enabled ? "success" : "default"}>
-              {server.enabled ? t("common.enabled") : t("common.disabled")}
+              {server.enabled ? t("common.enabled") : awaitingAuthorization
+                ? t("admin.memoryMcpAuthorizationPending") : t("common.disabled")}
             </Tag>
             {enableDisabled ? (
               <Tooltip title={t("admin.memoryMcpEnableRequiresVerified")}>

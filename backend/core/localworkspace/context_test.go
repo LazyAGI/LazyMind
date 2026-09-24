@@ -13,7 +13,7 @@ func TestBuildRequestQueryKeepsOriginalAndAddsWorkspace(t *testing.T) {
 	snapshot := &ContextSnapshot{WorkspaceID: "lws_one", Root: "/tmp/project one",
 		WorkspaceVersion: 2, PermissionMode: PermissionAlwaysAsk, PermissionVersion: 3}
 	got := BuildRequestQuery(original, snapshot)
-	for _, want := range []string{original, "/tmp/project one", "always_ask", "权限由工作区策略决定"} {
+	for _, want := range []string{original, "/tmp/project one", "always_ask", "权限由会话策略决定", "未绑定时使用工具的内部工作目录"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("query missing %q: %s", want, got)
 		}

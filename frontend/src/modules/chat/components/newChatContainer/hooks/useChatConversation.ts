@@ -830,6 +830,11 @@ export function useChatConversation({
     if (!result) {
       return;
     }
+    if (result.tool_configuration) {
+      window.dispatchEvent(new CustomEvent("tool-configuration-updated", {
+        detail: { conversationId: result.conversation_id, historyId: result.history_id },
+      }));
+    }
     const mediaDependency = parseMediaCapabilityDependency(result);
     if (mediaDependency) {
       showMediaCapabilityPrompt({

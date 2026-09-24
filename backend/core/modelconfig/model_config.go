@@ -177,19 +177,25 @@ func LoadCloudProviderTokens(ctx context.Context, provider, userID string) ([]st
 				AuthConnectionID: connectionID, UserID: userID, SourceID: "chat:" + provider,
 				BindingID: "chat:" + connectionID, Consumer: "chat", RequiredCapability: capability,
 			})
-			if err == nil && strings.TrimSpace(resolved.AccessToken) != "" {
-				tokens = append(tokens, strings.TrimSpace(resolved.AccessToken))
+			if err != nil {
+				return nil, fmt.Errorf("resolve %s connection %s: %w", provider, connectionID, err)
 			}
+			if strings.TrimSpace(resolved.AccessToken) == "" {
+				return nil, fmt.Errorf("resolve %s connection %s: empty access token", provider, connectionID)
+			}
+			tokens = append(tokens, strings.TrimSpace(resolved.AccessToken))
 			continue
 		}
 		legacyTokenURL := fmt.Sprintf("%s/v1/cloud/"+"connections/%s/token?user_id=%s",
 			common.AuthServiceBaseURL(), url.PathEscape(connectionID), url.QueryEscape(userID))
 		var response cloudTokenResponse
-		if err := common.ApiGet(ctx, legacyTokenURL, headers, &response, cloudToolTokenTimeout); err == nil {
-			if token := strings.TrimSpace(response.Data.AccessToken); token != "" {
-				tokens = append(tokens, token)
-			}
+		if err := common.ApiGet(ctx, legacyTokenURL, headers, &response, cloudToolTokenTimeout); err != nil {
+			return nil, fmt.Errorf("read %s connection %s token: %w", provider, connectionID, err)
 		}
+		if strings.TrimSpace(response.Data.AccessToken) == "" {
+			return nil, fmt.Errorf("read %s connection %s: empty access token", provider, connectionID)
+		}
+		tokens = append(tokens, strings.TrimSpace(response.Data.AccessToken))
 	}
 	return tokens, nil
 }

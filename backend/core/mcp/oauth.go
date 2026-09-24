@@ -121,7 +121,13 @@ func OAuthAuthorize(w http.ResponseWriter, r *http.Request)  { handleOAuth(w, r,
 func OAuthCallback(w http.ResponseWriter, r *http.Request)   { handleOAuth(w, r, "callback") }
 func OAuthDisconnect(w http.ResponseWriter, r *http.Request) { handleOAuth(w, r, "disconnect") }
 func handleOAuth(w http.ResponseWriter, r *http.Request, operation string) {
-	row, err := getOwnedServer(r.Context(), store.DB(), store.UserID(r), common.PathVar(r, "id"))
+	var row *orm.MCPServer
+	var err error
+	if operation == "authorize" {
+		row, err = authorizeServer(r.Context(), store.DB(), store.UserID(r), common.PathVar(r, "id"))
+	} else {
+		row, err = getOwnedServer(r.Context(), store.DB(), store.UserID(r), common.PathVar(r, "id"))
+	}
 	if err != nil {
 		replyError(w, err, "MCP authorization failed")
 		return
@@ -146,7 +152,11 @@ func handleOAuth(w http.ResponseWriter, r *http.Request, operation string) {
 		return
 	}
 	if operation == "disconnect" || operation == "authorize" {
-		if err := store.DB().WithContext(r.Context()).Model(&orm.MCPServer{}).Where("id = ? AND create_user_id = ?", row.ID, row.CreateUserID).Updates(map[string]any{"enabled": false, "is_verified": false, "updated_at": time.Now()}).Error; err != nil {
+		updates := map[string]any{"enabled": false, "is_verified": false, "updated_at": time.Now()}
+		if operation == "authorize" && isBuiltinNotion(*row) {
+			updates["discovery_enabled"] = true
+		}
+		if err := store.DB().WithContext(r.Context()).Model(&orm.MCPServer{}).Where("id = ? AND create_user_id = ?", row.ID, row.CreateUserID).Updates(updates).Error; err != nil {
 			replyError(w, err, "MCP authorization update failed")
 			return
 		}

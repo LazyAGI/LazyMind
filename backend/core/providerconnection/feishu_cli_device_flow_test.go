@@ -161,6 +161,13 @@ func TestFeishuCLIDeviceFlowReauthorizationReusesExistingAppProfile(t *testing.T
 	if completed.AuthConnectionID != profile.ConnectionID {
 		t.Fatalf("reauthorization connection = %q, want %q", completed.AuthConnectionID, profile.ConnectionID)
 	}
+	var persisted feishuCLISessionState
+	if err := profiles.ReadState(context.Background(), profile, session.SessionID, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != completed.Status {
+		t.Fatalf("persisted status = %q, want %q", persisted.Status, completed.Status)
+	}
 }
 
 func TestFeishuCLIDeviceFlowFinalizesAnAuthorizedExpiredSessionOnce(t *testing.T) {

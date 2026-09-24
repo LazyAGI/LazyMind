@@ -112,6 +112,7 @@ export type McpServerAsset = {
   transport: string;
   timeout: number;
   enabled: boolean;
+  discoveryEnabled: boolean;
   isVerified: boolean;
   share: boolean;
   toolCount: number;
@@ -279,6 +280,7 @@ const normalizeMcpServer = (item: ServerResponse): McpServerAsset => {
     transport: toStringValue(item.transport).trim(),
     timeout: toNumberValue(item.timeout, 30),
     enabled: toBooleanValue(item.enabled),
+    discoveryEnabled: toBooleanValue(item.discovery_enabled),
     isVerified: toBooleanValue(item.is_verified),
     share: toBooleanValue(item.share),
     toolCount: toNumberValue(item.tool_count, tools.length),
@@ -311,6 +313,11 @@ export async function listMcpServersPage(
     records,
     total: readListTotal(rawPayload, rawResponse, records.length),
   };
+}
+
+export async function getMcpServer(id: string): Promise<McpServerAsset> {
+  const response = await mcpServersApi.apiCoreMcpServersIdGet({ id });
+  return normalizeMcpServer(unwrapResponsePayload(response.data as ServerResponse));
 }
 
 export async function setAllMcpServersEnabled(
@@ -401,12 +408,15 @@ export async function updateMcpServerTools(id: string, allowedTools: string[]) {
 }
 
 // Same-tab flow persists only a server identifier, never a code or credential.
+export const MCP_OAUTH_CONVERSATION_KEY = "lazymind:mcp-oauth:conversation";
 export const MCP_OAUTH_SERVER_KEY = "lazymind:mcp-oauth:server";
-export async function authorizeMcpServer(id: string) {
+export async function authorizeMcpServer(id: string, conversationId?: string) {
   const response = await mcpServersApi.apiCoreMcpServersIdOauthAuthorizePost({ id });
   const payload = unwrapResponsePayload(response.data as { authorization_url: string });
   const target = new URL(payload.authorization_url);
   if (target.protocol !== "https:") throw new Error("Invalid MCP authorization URL");
+  if (conversationId) sessionStorage.setItem(MCP_OAUTH_CONVERSATION_KEY, conversationId);
+  else sessionStorage.removeItem(MCP_OAUTH_CONVERSATION_KEY);
   sessionStorage.setItem(MCP_OAUTH_SERVER_KEY, id);
   window.location.assign(target.href);
 }

@@ -20,6 +20,42 @@ from lazymind.chat.engine.agent_runtime import executor as executor_mod
 from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 
 
+def test_deduplicate_tool_groups_by_name_and_keep_first_duplicate():
+    from lazyllm.tools.agent.toolsManager import ToolGroup
+
+    first = ToolGroup([], name='search', discoverable=True)
+    duplicate = ToolGroup([], name='search', discoverable=True)
+    notion = ToolGroup([], name='notion', discoverable=True)
+    assert executor_mod._deduplicate_tools([first, duplicate, notion]) == [first, notion]
+    assert executor_mod._deduplicate_tools([{'name': 'search', 'tools': []}, first, notion]) == [
+        {'name': 'search', 'tools': []}, notion,
+    ]
+
+
+def test_deduplicate_preserves_callable_and_mcp_identity_rules():
+    from lazyllm.tools.agent import fc_register
+
+    def ordinary():
+        return 'ok'
+
+    @fc_register(tool_source='mcp', tool_identity='mcp:v1:' + 'a' * 64,
+                 tool_origin='First MCP', execute_in_sandbox=False)
+    def first_mcp():
+        '''First MCP tool.'''
+        return 'first'
+
+    @fc_register(tool_source='mcp', tool_identity='mcp:v1:' + 'b' * 64,
+                 tool_origin='Second MCP', execute_in_sandbox=False)
+    def second_mcp():
+        '''Second MCP tool.'''
+        return 'second'
+
+    second_mcp.__name__ = first_mcp.__name__
+    assert executor_mod._deduplicate_tools([
+        ordinary, ordinary, first_mcp, first_mcp, second_mcp,
+    ]) == [ordinary, first_mcp, second_mcp]
+
+
 def _plan(**options) -> AgentRunPlan:
     options.setdefault('workspace_permission', WorkspaceContext(local_runtime=False))
     prompt = PromptBuilder.for_role(AgentRole.CHAT).input('hello', source='user').build()
@@ -202,7 +238,7 @@ def test_executor_stream_passes_history_and_returns_final(monkeypatch) -> None:
     class Helper:
         future = Future()
 
-        def __init__(self, agent, init_sid):
+        def __init__(self, agent, init_sid, on_cancel):
             pass
 
         async def astream(self, query, **kwargs):
@@ -242,7 +278,7 @@ def test_stream_agent_clears_repeat_state_on_every_exit(monkeypatch, mode) -> No
     class Helper:
         future = Future()
 
-        def __init__(self, _agent, init_sid):
+        def __init__(self, _agent, init_sid, on_cancel):
             assert init_sid is False
 
         async def astream(self, _query, **_kwargs):
@@ -299,3 +335,26 @@ def test_executor_keeps_the_configured_fs_for_skill_indexing(monkeypatch, tmp_pa
         'read_skill_resource': 'NONE',
         'run_skill_script': 'OPAQUE',
     }
+
+
+def test_executor_composes_host_context_and_disables_hooks_for_preview(monkeypatch):
+    constructor = MagicMock(side_effect=lambda **_: MagicMock())
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
+    prepare = MagicMock()
+    context = MagicMock(return_value='host update')
+    agent = AgentExecutor().create_agent('llm', _plan(
+        before_model_request=prepare, model_context_provider=context,
+    ))
+    agent._runtime_notice_buffer.publish('repeat notice')
+    kwargs = constructor.call_args.kwargs
+    assert kwargs['before_model_request'] is prepare
+    assert kwargs['model_context_provider']() == 'host update\n\nrepeat notice'
+    context.reset_mock()
+    AgentExecutor().create_agent('llm', _plan(
+        before_model_request=prepare, model_context_provider=context, context_preview=True,
+    ))
+    kwargs = constructor.call_args.kwargs
+    assert 'before_model_request' not in kwargs
+    assert kwargs['model_context_provider']() is None
+    context.assert_not_called()
+    prepare.assert_not_called()

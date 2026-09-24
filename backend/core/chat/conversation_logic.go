@@ -329,6 +329,13 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 	c.EnableSubagent = &settings.enableSubagent
 	c.ChatExecutor = settings.chatExecutor
 	c.ThinkingDepth = settings.thinkingDepth
+	if localworkspace.Enabled() {
+		mode, _, err := localworkspace.UserPermission(ctx, db, userID)
+		if err != nil {
+			return nil, 0, err
+		}
+		c.PermissionMode, c.PermissionVersion = mode, 1
+	}
 	if err := db.Create(&c).Error; err != nil {
 		return nil, 0, err
 	}
@@ -2266,6 +2273,33 @@ func publishCapabilityDependency(
 	}
 }
 
+func publishToolConfiguration(
+	reqCtx, storeCtx context.Context,
+	w http.ResponseWriter,
+	flusher http.Flusher,
+	stateStore state.Store,
+	convID, historyID string,
+	seq int,
+	dependency map[string]any,
+	writeClient bool,
+) {
+	if dependency == nil {
+		return
+	}
+	chunk := &ChatChunkResponse{
+		ConversationID:    convID,
+		Seq:               int32(seq),
+		HistoryID:         historyID,
+		ToolConfiguration: dependency,
+	}
+	if writeClient && reqCtx.Err() == nil {
+		writeSSEChunk(w, flusher, chunk)
+	}
+	if stateStore != nil {
+		_ = appendChatChunk(storeCtx, stateStore, convID, historyID, chunk)
+	}
+}
+
 func streamSingleAnswer(
 	chatCtx, reqCtx context.Context,
 	w http.ResponseWriter,
@@ -2443,6 +2477,13 @@ func streamSingleAnswer(
 			persistAndPublishConversationArtifact(
 				chatCtx, reqCtx, w, flusher, db, stateStore, reqBody,
 				convID, historyID, seq, d.ArtifactCreated,
+			)
+			continue
+		}
+		if d.ToolConfiguration != nil {
+			publishToolConfiguration(
+				reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq,
+				d.ToolConfiguration, true,
 			)
 			continue
 		}
@@ -3111,6 +3152,13 @@ func streamDualAnswer(
 				)
 				continue
 			}
+			if d.ToolConfiguration != nil {
+				publishToolConfiguration(
+					reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq,
+					d.ToolConfiguration, true,
+				)
+				continue
+			}
 			if d.CapabilityDependency != nil {
 				publishCapabilityDependency(
 					reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq,
@@ -3155,6 +3203,13 @@ func streamDualAnswer(
 				persistAndPublishConversationArtifact(
 					chatCtx, reqCtx, w, flusher, db, stateStore, reqBody,
 					convID, secondaryHistoryID, seq, d.ArtifactCreated,
+				)
+				continue
+			}
+			if d.ToolConfiguration != nil {
+				publishToolConfiguration(
+					reqCtx, chatCtx, w, flusher, stateStore, convID, secondaryHistoryID, seq,
+					d.ToolConfiguration, true,
 				)
 				continue
 			}
@@ -3208,6 +3263,13 @@ func streamDualAnswer(
 							persistAndPublishConversationArtifact(
 								bg, reqCtx, w, flusher, db, stateStore, reqBody,
 								convID, historyID, seq, d.ArtifactCreated,
+							)
+							continue
+						}
+						if d.ToolConfiguration != nil {
+							publishToolConfiguration(
+								reqCtx, bg, w, flusher, stateStore, convID, historyID, seq,
+								d.ToolConfiguration, false,
 							)
 							continue
 						}
@@ -3279,6 +3341,13 @@ func streamDualAnswer(
 							persistAndPublishConversationArtifact(
 								bg, reqCtx, w, flusher, db, stateStore, reqBody,
 								convID, secondaryHistoryID, seq, d.ArtifactCreated,
+							)
+							continue
+						}
+						if d.ToolConfiguration != nil {
+							publishToolConfiguration(
+								reqCtx, bg, w, flusher, stateStore, convID, secondaryHistoryID, seq,
+								d.ToolConfiguration, false,
 							)
 							continue
 						}

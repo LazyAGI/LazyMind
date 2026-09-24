@@ -16,6 +16,7 @@ import { isVocabularyEnabled } from "@/runtime/mode";
 import UserAgreementPage from "@/pages/UserAgreementPage";
 import SettingsPage from "@/modules/settings";
 
+const McpOAuthConnect = lazy(() => import("@/modules/modelProvider/pages/McpOAuthConnect"));
 const McpOAuthCallback = lazy(() => import("@/modules/modelProvider/pages/McpOAuthCallback"));
 
 const WorkflowRunPage = lazy(() => import("@/modules/chat/pages/workflowRun"));
@@ -90,6 +91,7 @@ export default function AppRouter() {
     >
       <Suspense fallback={<Spin style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100%" }} />}>
       <Routes>
+        <Route path="/oauth/mcp/connect" element={<McpOAuthConnect />} />
         <Route path="/oauth/mcp/callback" element={<McpOAuthCallback />} />
         <Route
           path="/legal/user-agreement"

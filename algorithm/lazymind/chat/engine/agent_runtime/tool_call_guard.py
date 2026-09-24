@@ -198,7 +198,8 @@ class FailureRetryPolicy:
 
     @staticmethod
     def _failed(result: Any) -> bool:
-        return isinstance(result, dict) and result.get('ok') is False
+        return (isinstance(result, dict) and result.get('ok') is False
+                and not result.get('needs_configuration'))
 
     @staticmethod
     def _signature(prepared: PreparedToolCall) -> str:
