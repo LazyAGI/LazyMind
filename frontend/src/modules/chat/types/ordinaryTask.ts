@@ -1,3 +1,5 @@
+import type { MediaCapabilityDependencyDetail } from "../utils/mediaCapabilityDependency";
+
 /** Public execution data. Raw agent reasoning and tool arguments are never part of this contract. */
 export interface PublicProcessStep {
   step_id: string;
@@ -71,6 +73,8 @@ export interface OrdinaryTaskView {
   plan_steps?: string[];
   /** Overall task progress used to estimate plan position, not individual execution states. */
   progress_pct?: number;
+  /** Validated setup actions, without the raw task failure or tool logs. */
+  capability_dependency?: Pick<MediaCapabilityDependencyDetail, "status" | "required" | "missing" | "message">;
   sources: PublicSource[];
   stage_artifacts: PublicArtifact[];
   pages: Record<OrdinaryCollection, CollectionPage>;

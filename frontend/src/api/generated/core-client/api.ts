@@ -652,6 +652,19 @@ export interface Capabilities {
     'open': boolean;
     'preview': boolean;
 }
+export interface CapabilityDependency {
+    'message': string;
+    'missing': Array<MissingCapability>;
+    'required': Array<string>;
+    'status': CapabilityDependencyStatusEnum;
+}
+
+export const CapabilityDependencyStatusEnum = {
+    Blocked: 'blocked'
+} as const;
+
+export type CapabilityDependencyStatusEnum = typeof CapabilityDependencyStatusEnum[keyof typeof CapabilityDependencyStatusEnum];
+
 export interface ChatChunkResponse {
     'capability_dependency'?: object;
     'conversation_id'?: string;
@@ -4426,6 +4439,23 @@ export interface MergeWordGroupsRequest {
     'group_ids'?: Array<string>;
     'term': string;
 }
+export interface MissingCapability {
+    'available': boolean;
+    'id': MissingCapabilityIdEnum;
+    'label': string;
+    'reason': string;
+    'settings_url': string;
+}
+
+export const MissingCapabilityIdEnum = {
+    ImageGenerator: 'image_generator',
+    ImageEditor: 'image_editor',
+    VideoGenerator: 'video_generator',
+    Ffmpeg: 'ffmpeg'
+} as const;
+
+export type MissingCapabilityIdEnum = typeof MissingCapabilityIdEnum[keyof typeof MissingCapabilityIdEnum];
+
 export interface ModelFeaturesResponse {
     'image_embed_enabled': boolean;
     'image_embed_required': boolean;
@@ -4492,6 +4522,7 @@ export interface OrdinaryTaskListResponse {
 export interface OrdinaryTaskView {
     'agent_type'?: string;
     'attempt_id': string | null;
+    'capability_dependency'?: CapabilityDependency;
     'conversation_id': string;
     'display_key': string;
     'execution_id': string;

@@ -147,6 +147,70 @@ func TestOrdinaryTimingAndProjectionDoNotInventProcess(t *testing.T) {
 	}
 }
 
+func TestOrdinaryFailedTaskPreservesSafeCapabilityRecovery(t *testing.T) {
+	db, task := ordinaryFixture(t)
+	summary := `private-prefix MEDIA_CAPABILITY_DEPENDENCY_MISSING {"status":"blocked","workflow":"private-workflow","required":["video_generator","ffmpeg","unknown"],"missing":[{"id":"video_generator","label":"private-label","available":false,"settings_url":"https://evil.example/?token=private-token","reason":"private-error"},{"id":"ffmpeg","available":false},{"id":"video_generator","available":false},{"id":"unknown","available":false}],"message":"private-message","debug":"private-debug"} private-suffix`
+	if _, err := AcceptFinalStatus(context.Background(), db.DB, task.ID, StatusFailed, summary); err != nil {
+		t.Fatal(err)
+	}
+	view, err := ordinarySnapshot(context.Background(), db.DB, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The recovery contract must survive summary-only REST pages and SSE snapshots.
+	page, err := pageOrdinaryTask(view, httptest.NewRequest("GET", "/task", nil), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []any{page, taskdisplay.SnapshotEvent{Type: "task_snapshot", Data: view}} {
+		raw, _ := json.Marshal(value)
+		if strings.Contains(string(raw), "private-") || strings.Contains(string(raw), "evil.example") || strings.Contains(string(raw), "unknown") {
+			t.Fatalf("raw failure data leaked: %s", raw)
+		}
+		var payload map[string]any
+		_ = json.Unmarshal(raw, &payload)
+		if data, ok := payload["data"].(map[string]any); ok {
+			payload = data
+		}
+		recovery, ok := payload["capability_dependency"].(map[string]any)
+		if !ok || recovery["status"] != "blocked" {
+			t.Fatalf("missing public recovery: %s", raw)
+		}
+		missing := recovery["missing"].([]any)
+		if len(missing) != 2 || missing[0].(map[string]any)["settings_url"] != "/settings?section=models&target=video_generator" || missing[1].(map[string]any)["settings_url"] != "/settings?section=system_tools#ffmpeg-dependency" {
+			t.Fatalf("unsafe or incomplete recovery: %s", raw)
+		}
+	}
+}
+
+func TestOrdinaryCapabilityRecoveryRejectsNonFailuresAndInvalidPayloads(t *testing.T) {
+	for _, tc := range []struct{ name, status, summary string }{
+		{"success", StatusSucceeded, `MEDIA_CAPABILITY_DEPENDENCY_MISSING {"status":"blocked","missing":[{"id":"image_generator","available":false}]}`},
+		{"malformed", StatusFailed, `MEDIA_CAPABILITY_DEPENDENCY_MISSING {"status":"blocked","missing":`},
+		{"unmarked", StatusFailed, `{"status":"blocked","missing":[{"id":"image_generator","available":false}]}`},
+		{"ready", StatusFailed, `MEDIA_CAPABILITY_DEPENDENCY_MISSING {"status":"ready","missing":[{"id":"image_generator","available":false}]}`},
+		{"unknown", StatusFailed, `MEDIA_CAPABILITY_DEPENDENCY_MISSING {"status":"blocked","missing":[{"id":"unknown","available":false}]}`},
+		{"available", StatusFailed, `MEDIA_CAPABILITY_DEPENDENCY_MISSING {"status":"blocked","missing":[{"id":"image_generator","available":true}]}`},
+		{"missing_availability", StatusFailed, `MEDIA_CAPABILITY_DEPENDENCY_MISSING {"status":"blocked","missing":[{"id":"image_generator"}]}`},
+		{"oversized", StatusFailed, `MEDIA_CAPABILITY_DEPENDENCY_MISSING {"status":"blocked","missing":[{"id":"image_generator","available":false}],"message":"` + strings.Repeat("x", 64*1024) + `"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, task := ordinaryFixture(t)
+			if _, err := AcceptFinalStatus(context.Background(), db.DB, task.ID, tc.status, tc.summary); err != nil {
+				t.Fatal(err)
+			}
+			view, err := ordinarySnapshot(context.Background(), db.DB, task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, _ := json.Marshal(view)
+			if strings.Contains(string(raw), "capability_dependency") {
+				t.Fatalf("invalid recovery exported: %s", raw)
+			}
+		})
+	}
+}
+
 func TestOrdinaryPagesAreBoundedAndRejectStaleCursor(t *testing.T) {
 	view := taskdisplay.NewTask()
 	view.DisplayKey = "task:current"

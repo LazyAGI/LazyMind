@@ -92,6 +92,8 @@ type OrdinaryTaskView struct {
 	StageArtifacts   []PublicArtifact    `json:"stage_artifacts"`
 	Pages            Pages               `json:"pages"`
 	Timing           Timing              `json:"timing"`
+
+	CapabilityDependency *CapabilityDependency `json:"capability_dependency,omitempty"`
 }
 type OrdinaryRunView struct {
 	RunID           string           `json:"run_id"`

@@ -250,6 +250,26 @@ describe("task center workflow events", () => {
     });
   });
 
+  it.each(["ordinary", "developer"] as const)("runs a queued artifact refresh after switching to %s", async (viewMode) => {
+    useTaskCenterStore.setState({ viewMode: viewMode === "ordinary" ? "developer" : "ordinary" });
+    const pending = deferred<any>();
+    const artifact = { artifact_id: "current", value: { text: "saved result" } };
+    requestHarness.listConversationArtifacts.mockReturnValueOnce(pending.promise)
+      .mockResolvedValueOnce({ data: { artifacts: [artifact], deliveries: [artifact], history_order: { h1: 1 } } });
+    const loading = useTaskCenterStore.getState().loadConversationArtifacts("conversation-1");
+    useTaskCenterStore.getState().setViewMode(viewMode);
+    await useTaskCenterStore.getState().loadConversationArtifacts("conversation-1");
+    pending.resolve({ data: { artifacts: [{ artifact_id: "stale" }] } });
+    await loading;
+    expect(requestHarness.listConversationArtifacts).toHaveBeenCalledTimes(2);
+    const state = useTaskCenterStore.getState();
+    expect(state.artifactsByConversation["conversation-1"]).toEqual([artifact]);
+    expect(state.deliveriesByConversation["conversation-1"]).toEqual([artifact]);
+    expect(state.artifactHistoryOrderByConversation["conversation-1"]).toEqual({ h1: 1 });
+    expect(state._loadingArtifacts["conversation-1"]).toBe(false);
+    expect(state._queuedArtifactLoads["conversation-1"]).toBe(false);
+  });
+
   it("retains public detail on a failed refresh and renews an expired page cursor", async () => {
     useTaskCenterStore.setState({ viewMode: "ordinary" });
     const task = ordinary("one");
@@ -585,6 +605,23 @@ describe("task center workflow events", () => {
       status: "succeeded",
     });
     window.removeEventListener(CHAT_WORKFLOW_STEP_FEEDBACK_EVENT, listener);
+  });
+
+  it("forwards ordinary feedback identity for history hydration without requiring raw message text", () => {
+    useTaskCenterStore.setState({ viewMode: "ordinary" });
+    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+    useTaskCenterStore.getState().subscribeConvEvents("conversation-1");
+    const feedback = { type: "workflow_step_feedback", payload: {
+      task_id: "task-1", history_id: "history-1", status: "failed",
+    } };
+    emitConversationEvent(feedback);
+    emitConversationEvent({ ...feedback, replayed: true });
+    const events = dispatchSpy.mock.calls.map(([event]) => event as CustomEvent)
+      .filter((event) => event.type === CHAT_WORKFLOW_STEP_FEEDBACK_EVENT);
+    expect(events).toHaveLength(1);
+    expect(events[0].detail).toEqual({ conversationId: "conversation-1", feedbackId: "task-1",
+      historyId: "history-1", message: undefined, status: "failed" });
+    dispatchSpy.mockRestore();
   });
 
   it("refreshes the active workflow session for live and replayed creation events", async () => {

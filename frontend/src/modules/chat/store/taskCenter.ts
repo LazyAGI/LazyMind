@@ -996,17 +996,17 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
       _loadingArtifacts: { ...s._loadingArtifacts, [conversationId]: true },
       _queuedArtifactLoads: { ...s._queuedArtifactLoads, [conversationId]: false },
     }));
-    const epoch = get()._viewEpoch;
     const liveCreatedArtifactIds = new Set<string>();
     liveArtifactIdsCreatedDuringLoad.set(conversationId, liveCreatedArtifactIds);
     try {
       do {
+        const epoch = get()._viewEpoch;
         set((s) => ({
           _queuedArtifactLoads: { ...s._queuedArtifactLoads, [conversationId]: false },
         }));
         try {
           const res = await TaskServiceApi().listConversationArtifacts(conversationId);
-          if (get()._viewEpoch !== epoch) return;
+          if (get()._viewEpoch !== epoch) continue;
           const artifacts = res?.data?.data?.artifacts ?? res?.data?.artifacts ?? [];
           const deliveries = res?.data?.data?.deliveries ?? res?.data?.deliveries ?? artifacts;
           const historyOrder = res?.data?.data?.history_order ?? res?.data?.history_order ?? {};
@@ -1234,7 +1234,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             }));
             useWorkflowStore.getState().setAutoRunning(conversationId, true);
           } else if (type === 'workflow_step_feedback') {
-            if (replayed || !payload?.message || !payload?.task_id) return;
+            if (replayed || !payload?.task_id || (!payload?.message && !payload?.history_id)) return;
             window.dispatchEvent(new CustomEvent(CHAT_WORKFLOW_STEP_FEEDBACK_EVENT, {
               detail: {
                 conversationId,

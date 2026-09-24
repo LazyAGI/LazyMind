@@ -606,6 +606,28 @@ components:
                 - open
                 - preview
             type: object
+        CapabilityDependency:
+            properties:
+                message:
+                    type: string
+                missing:
+                    items:
+                        $ref: '#/components/schemas/MissingCapability'
+                    type: array
+                required:
+                    items:
+                        type: string
+                    type: array
+                status:
+                    enum:
+                        - blocked
+                    type: string
+            required:
+                - message
+                - missing
+                - required
+                - status
+            type: object
         ChatChunkResponse:
             properties:
                 capability_dependency:
@@ -6522,6 +6544,30 @@ components:
                 - description
                 - term
             type: object
+        MissingCapability:
+            properties:
+                available:
+                    type: boolean
+                id:
+                    enum:
+                        - image_generator
+                        - image_editor
+                        - video_generator
+                        - ffmpeg
+                    type: string
+                label:
+                    type: string
+                reason:
+                    type: string
+                settings_url:
+                    type: string
+            required:
+                - available
+                - id
+                - label
+                - reason
+                - settings_url
+            type: object
         ModelFeaturesResponse:
             properties:
                 image_embed_enabled:
@@ -6595,6 +6641,8 @@ components:
                 attempt_id:
                     nullable: true
                     type: string
+                capability_dependency:
+                    $ref: '#/components/schemas/CapabilityDependency'
                 conversation_id:
                     type: string
                 display_key:

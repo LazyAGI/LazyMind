@@ -38,7 +38,7 @@ func TestOrdinaryTaskOpenAPIContracts(t *testing.T) {
 		t.Fatal("missing public progress contract")
 	}
 	task := schemas["OrdinaryTaskView"].(map[string]any)["properties"].(map[string]any)
-	for _, key := range []string{"display_key", "revision", "execution_id", "parallel_group_id", "process_steps", "plan_steps", "progress_pct", "sources", "stage_artifacts", "pages", "timing"} {
+	for _, key := range []string{"display_key", "revision", "execution_id", "parallel_group_id", "process_steps", "plan_steps", "progress_pct", "capability_dependency", "sources", "stage_artifacts", "pages", "timing"} {
 		if task[key] == nil {
 			t.Errorf("missing public property %s", key)
 		}

@@ -41,6 +41,9 @@ func OrdinaryTask(ctx context.Context, db *gorm.DB, task *orm.SubAgentTask) (tas
 		out.Title = fmt.Sprintf("子任务 %d", task.SeqInConversation)
 	}
 	out.Status = task.Status
+	if task.Status == StatusFailed {
+		out.CapabilityDependency = taskdisplay.CapabilityRecovery(task.Summary)
+	}
 	progress := min(100, max(0, task.ProgressPct))
 	out.ProgressPct = &progress
 	out.Revision = task.DisplayRevision
