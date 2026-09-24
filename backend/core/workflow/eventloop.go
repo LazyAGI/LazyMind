@@ -727,6 +727,12 @@ func OnSubAgentDone(
 	pctx *WorkflowChatContext,
 ) {
 	_ = UpdateStepStatus(ctx, db, taskID, status)
+	// A user stop is authoritative even when an executor's late failure callback
+	// loses the step update race. Do not feed that callback to the retry driver.
+	if step, err := GetStepByTaskID(ctx, db, taskID); err == nil && step != nil &&
+		step.Status == StepStatusInterrupted && step.TerminalCode == "WORKFLOW_STOPPED" {
+		return
+	}
 	stepFailed := status != subagent.StatusSucceeded && status != subagent.StatusInterrupted
 	sessionCompleted := false
 	if status == subagent.StatusSucceeded && pctx != nil && pctx.SessionID != "" {

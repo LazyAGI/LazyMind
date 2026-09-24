@@ -36,6 +36,7 @@ from lazymind.chat.engine.agent_runtime import (
     normalize_attachments,
     render_attachment_content,
     make_cancel_stop_condition,
+    UserCancelledError,
 )
 from lazymind.chat.engine.prompts import add_standard_system_sections
 from lazymind.chat.engine.agent_runtime.active_context import (
@@ -158,7 +159,9 @@ def _generate_display_plan(llm: Any, objective: str, scope: Optional[Dict[str, A
             'task_context_only': objective[:12000],
         }, ensure_ascii=False)
     )
-    response = llm.share(stream=False)(prompt)
+    # Streaming-only models still return an aggregated response through LazyLLM.
+    # Keep this background request's text and reasoning out of the agent event queue.
+    response = llm.share(stream={'_stream_sink': lambda event: None})(prompt)
     text = response if isinstance(response, str) else (
         response.get('content', '') if isinstance(response, dict) else ''
     )
@@ -1402,8 +1405,11 @@ async def run_subagent_stream(
                     )
                     if steps:
                         await stream_events.put({'type': 'plan', 'steps': steps, 'scope_version': 2})
-                except Exception:
-                    LOG.warning('[SubAgent] Display plan unavailable; execution continues')
+                except Exception as exc:
+                    LOG.warning(
+                        f'[SubAgent] Display plan unavailable; execution continues '
+                        f'task_id={task_id} error_type={type(exc).__name__}'
+                    )
             display_plan_task = asyncio.create_task(generate_plan_in_background())
         if display_plan:
             ctx.db.append_step(task_id, step_seq, 'plan', {'steps': display_plan, 'scope_version': 2})
@@ -1648,6 +1654,10 @@ async def run_subagent_stream(
             'summary': summary, 'cost': cost,
             **({'control': workflow_control} if workflow_control else {}),
         })
+        yield 'data: [DONE]\n\n'
+    except UserCancelledError:
+        yield _sse({'type': 'done', 'task_id': task_id, 'status': 'interrupted',
+                    'summary': 'stopped by user'})
         yield 'data: [DONE]\n\n'
     except Exception as exc:  # noqa: BLE001
         LOG.exception('[SubAgent] run failed')

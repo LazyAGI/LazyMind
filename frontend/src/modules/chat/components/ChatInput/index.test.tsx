@@ -143,6 +143,14 @@ describe("ChatInput model switch save lock", () => {
     useModelSelectionStore.getState().resetForNewChat();
   });
 
+  it("does not mount workspace polling for document previews", () => {
+    const props = { value: "", onChange: vi.fn(), isChatContent: true, sessionId: "pdf-preview", runInBackground: true };
+    const view = render(<ChatInput {...props} allowLocalWorkspace={false} />);
+    expect(screen.queryByTestId("local-workspace-control")).not.toBeInTheDocument();
+    view.rerender(<ChatInput {...props} sessionId="conversation-1" />);
+    expect(screen.getByTestId("local-workspace-control")).toBeInTheDocument();
+  });
+
   it("blocks button, keyboard, and send handling until the workspace PUT settles", async () => {
     const onSend = vi.fn();
     const onSkillDeposit = vi.fn();

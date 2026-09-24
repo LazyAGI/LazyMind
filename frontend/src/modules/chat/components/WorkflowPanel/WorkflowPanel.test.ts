@@ -73,6 +73,8 @@ describe('workflow continuation checkpoints', () => {
   it('preserves explicit recovery after interruption and declared completed follow-on actions', () => {
     expect(resolveWorkflowContinueAction(checkpoint(false, 'interrupted'), 'waiting'))
       .toEqual({ kind: 'resume', stepId: 'analyze' });
+    expect(resolveWorkflowContinueAction(checkpoint(false, 'interrupted'), 'stopped'))
+      .toEqual({ kind: 'resume', stepId: 'analyze' });
     const completed = { ...checkpoint(false), status: 'completed' as const, projection: { completed: true } };
     expect(resolveWorkflowContinueAction(completed, 'completed')).toBeUndefined();
     expect(resolveWorkflowContinueAction(completed, 'completed', outlineTab))

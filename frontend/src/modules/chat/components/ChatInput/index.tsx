@@ -438,6 +438,8 @@ interface ChatInputProps {
   allowKnowledgeBaseSelection?: boolean;
   /** Side-chat requests do not support resource mentions or skill-to-workflow resolution. */
   allowMentions?: boolean;
+  /** Disable workspace binding and approvals for document-only conversations. */
+  allowLocalWorkspace?: boolean;
   /** Bump to remount the chat config popover (e.g. when starting a fresh welcome-screen chat). */
   configResetKey?: number | string;
   sessionId?: string;
@@ -670,6 +672,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       knowledgeRefreshKey,
       allowKnowledgeBaseSelection = true,
       allowMentions = true,
+      allowLocalWorkspace = true,
       configResetKey,
       sessionId,
       isStreaming = false,
@@ -1673,7 +1676,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       />
                     </div>
                   </div>
-                  {runInBackground && <LocalWorkspaceControl
+                  {runInBackground && allowLocalWorkspace && <LocalWorkspaceControl
                     approvalContainer={approvalContainer}
                     draftWorkspace={props.draftWorkspace}
                     initialProject={initialProject}

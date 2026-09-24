@@ -2,6 +2,7 @@ import signal
 import threading
 
 from lazyllm.tools.rag.parsing_service import DocumentProcessor
+from lazymind.processor.service.chunks import install_chunk_preview
 from lazymind.processor.service.db import require_shared_db_config
 from lazymind.processor.service.env import env_int
 
@@ -12,6 +13,7 @@ doc_processor = DocumentProcessor(
     db_config=db_config,
     num_workers=0,  # use separate worker container
 )
+install_chunk_preview(doc_processor)
 
 _shutdown_event = threading.Event()
 

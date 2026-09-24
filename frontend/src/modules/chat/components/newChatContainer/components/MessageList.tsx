@@ -517,6 +517,8 @@ const MessageList: React.FC<MessageListProps> = ({
     >
       {messageList.length > 0 &&
         messageList.map((item, index) => {
+          // Retried attempts remain in history, but only the current reply is shown.
+          if (item.role === RoleTypes.ASSISTANT && item.archived_failure) return null;
           const historyId = item.history_id || item.id;
           const visibleItem =
             suppressAskPending &&

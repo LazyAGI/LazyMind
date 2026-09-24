@@ -70,6 +70,8 @@ export interface ChatContainerProps {
   knowledgeRefreshKey?: number | string;
   allowKnowledgeBaseSelection?: boolean;
   allowMentions?: boolean;
+  /** Disable workspace binding and approvals for document-only conversations. */
+  allowLocalWorkspace?: boolean;
   embeddingReady?: boolean | null;
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;

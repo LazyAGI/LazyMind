@@ -235,6 +235,13 @@ describe("ChatContainerComponent wheel forwarding", () => {
     mocks.latestUserEditOptions = null;
   });
 
+  it("disables workspace controls for document previews but enables them for ordinary chats", () => {
+    const view = render(<ChatContainerComponent sessionId="pdf-preview" allowLocalWorkspace={false} />);
+    expect(mocks.latestChatInputProps.allowLocalWorkspace).toBe(false);
+    view.rerender(<ChatContainerComponent sessionId="conversation-1" />);
+    expect(mocks.latestChatInputProps.allowLocalWorkspace).toBe(true);
+  });
+
   it("passes the side-chat mention restriction to its composer", () => {
     render(<ChatContainerComponent sessionId="side-chat" allowMentions={false}
       onOpenSSE={vi.fn()} parseErrorData={(data) => data}
