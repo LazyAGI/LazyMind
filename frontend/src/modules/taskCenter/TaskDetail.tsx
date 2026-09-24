@@ -1,3 +1,4 @@
+import NotificationHistory from '@/modules/notifications/NotificationHistory';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Drawer, Dropdown, Empty, Modal, Tag, Tooltip } from 'antd';
 import type { MenuProps } from 'antd';
@@ -139,6 +140,7 @@ export default function TaskDetail({ task: selectedTask, onClose, onOpenConversa
             <p>{task.title || task.conversation_title || t('taskCenter.noDescription')}</p>
           </section>
 
+          {task.schedule_id && <section className='task-detail-section'><h3>{t('notifications.history')}</h3><NotificationHistory key={task.id} taskId={task.id} /></section>}
           <section className='task-detail-section'>
             <h3>{t('taskCenter.executionSteps')}</h3>
             {steps.length ? (

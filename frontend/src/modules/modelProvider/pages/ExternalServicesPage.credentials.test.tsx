@@ -1,5 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Modal } from "antd";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { SettingsNavigationGuard } from "@/modules/settings/SettingsNavigationGuard";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -47,6 +49,38 @@ async function openPage() {
 }
 
 describe("personal external service credentials without Cloud login", () => {
+  it("restores the service editor from the URL and protects changed values on browser back", async () => {
+    const router = createMemoryRouter([{ path: "/settings", element: <SettingsNavigationGuard>
+      <ExternalServicesPage includeMcp={false} includeDependencies={false} includeBuiltinTools={false} />
+    </SettingsNavigationGuard> }], { initialEntries: ["/settings?section=knowledge", "/settings?section=knowledge&editor=service&item=mineru"], initialIndex: 1 });
+    render(<RouterProvider router={router} />);
+    await screen.findByText(keys[0].masked);
+    const input = screen.getByDisplayValue(provider.base_url);
+    fireEvent.change(input, { target: { value: "https://draft.example/api" } });
+    await act(async () => { await router.navigate(-1); });
+    fireEvent.click(await screen.findByText("settingsPage.unsaved.stay"));
+    expect(router.state.location.search).toContain("editor=service");
+    expect(input).toHaveValue("https://draft.example/api");
+    await act(async () => { await router.navigate(-1); });
+    fireEvent.click(await screen.findByText("settingsPage.unsaved.discard"));
+    await waitFor(() => expect(router.state.location.search).toBe("?section=knowledge"));
+    expect(mocks.patch).not.toHaveBeenCalled();
+    await act(async () => { await router.navigate(1); });
+    await waitFor(() => expect(screen.getByDisplayValue(provider.base_url)).toBeInTheDocument());
+  });
+
+  it("keeps a failed service configuration open with the entered URL", async () => {
+    mocks.patch.mockRejectedValueOnce(new Error("offline"));
+    await openPage();
+    fireEvent.change(screen.getByDisplayValue(provider.base_url), { target: { value: "https://draft.example/api" } });
+    fireEvent.click(screen.getByText("modelProvider.external.saveConfig"));
+    await waitFor(() => expect(Modal.confirm).toHaveBeenCalledTimes(1));
+    await act(async () => { confirmation.onOk?.(); });
+    await screen.findByText("request failed");
+    expect(screen.getByDisplayValue("https://draft.example/api")).toBeInTheDocument();
+    expect(screen.getByText("modelProvider.external.saveConfig").closest("button")).toBeEnabled();
+  });
+
   it("shows stored key metadata and removes only the selected key by ID", async () => {
     render(<ExternalServiceConfigModal open service={{ ...provider, category: "parsing", key: provider.id, description: "", fields: ["apiKey"], logo: null, logoUrl: "", tone: "blue", status: "configured" }} onClose={() => {}} />);
     expect(await screen.findByText(keys[0].masked)).toBeInTheDocument();

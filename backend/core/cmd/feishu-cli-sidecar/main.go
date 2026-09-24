@@ -44,6 +44,16 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if helperPath := strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_PATH")); helperPath != "" {
+		checksum, helperErr := readSecretFile(os.Getenv("LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_SHA256_FILE"), 64, 128)
+		if helperErr == nil {
+			helperErr = runner.ConfigureCredentialHelper(helperPath, string(checksum))
+		}
+		clearBytes(checksum)
+		if helperErr != nil {
+			log.Print("Feishu CLI credential helper is unavailable; existing CLI operations remain available")
+		}
+	}
 	profiles, err := coreproviderconnection.NewFeishuCLIProfileStore(os.Getenv("LAZYMIND_FEISHU_CLI_RUNTIME_ROOT"))
 	if err != nil {
 		return err
@@ -77,6 +87,7 @@ func run() error {
 	mux.HandleFunc("POST /v1/sessions:get", server.signed(server.get))
 	mux.HandleFunc("POST /v1/sessions:cancel", server.signed(server.cancel))
 	mux.HandleFunc("POST /v1/execute", server.signed(server.execute))
+	mux.HandleFunc("POST /v1/user-access-token", server.signed(server.userAccessToken))
 	listenAddress := strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_SIDECAR_LISTEN"))
 	if listenAddress == "" {
 		listenAddress = "0.0.0.0:19091"
@@ -185,6 +196,32 @@ func (server *sidecarServer) execute(w http.ResponseWriter, request *http.Reques
 		request.Context(), input.OwnerUserID, input.ConnectionID, input.ProfileRef, input.Operation, input.Params,
 	)
 	writeJSON(w, result, err)
+}
+
+func (server *sidecarServer) userAccessToken(w http.ResponseWriter, request *http.Request, body []byte) {
+	var input struct {
+		Owner      string `json:"owner_user_id"`
+		Connection string `json:"connection_id"`
+		Profile    string `json:"profile_ref"`
+		Capability string `json:"required_capability"`
+	}
+	if decode(body, &input) != nil {
+		http.Error(w, "invalid request", http.StatusUnprocessableEntity)
+		return
+	}
+	result, err := server.backend.UserAccessToken(request.Context(), input.Owner, input.Connection, input.Profile, input.Capability)
+	if err != nil {
+		http.Error(w, "Feishu CLI credential is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	payload, err := coreproviderconnection.SealFeishuCLIUserToken(server.hmacKey, request.Header.Get("X-LazyMind-CLI-Signature"), result)
+	if err != nil {
+		http.Error(w, "Feishu CLI credential is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(payload)
 }
 
 func decode(payload []byte, output any) error {

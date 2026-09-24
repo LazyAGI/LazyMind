@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
+	"lazymind/core/common/taskdisplay"
 )
 
 const ContractVersion = "workflow.v1"
@@ -31,10 +32,14 @@ type envelope struct {
 type Handler struct{ Service *Service }
 
 func respond(w http.ResponseWriter, status int, data any, err *toolError) {
+	requestID := w.Header().Get("X-Request-ID")
+	if requestID == "" {
+		requestID = "server-generated"
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(envelope{ContractVersion: ContractVersion,
-		RequestID: "server-generated", OK: err == nil, Data: data, Error: err})
+		RequestID: requestID, OK: err == nil, Data: data, Error: err})
 }
 
 func executorID(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -61,6 +66,8 @@ func executorID(w http.ResponseWriter, r *http.Request) (string, bool) {
 
 func protocolToolError(err error) (int, *toolError) {
 	switch {
+	case errors.Is(err, ErrInvalidPublicDisplay):
+		return http.StatusUnprocessableEntity, &toolError{Code: "INVALID_PUBLIC_DISPLAY", Message: "public progress fields are invalid"}
 	case errors.Is(err, ErrLeaseLost):
 		return http.StatusConflict, &toolError{Code: CodeLeaseLost, Message: "attempt lease is no longer valid", Retryable: true}
 	case errors.Is(err, ErrAlreadyTerminal):
@@ -122,9 +129,11 @@ func (h Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) Progress(w http.ResponseWriter, r *http.Request) {
+	taskdisplay.PrepareRequest(w, r)
 	if _, ok := executorID(w, r); !ok {
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
 	body, ok := decodeLease(w, r)
 	if !ok {
 		return

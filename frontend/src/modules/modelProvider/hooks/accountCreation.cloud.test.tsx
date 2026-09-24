@@ -3,9 +3,11 @@ import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CloudSession } from "@/runtime/cloud/session";
+import type { FeishuAuthAccount } from "@/modules/dataSource/common/feishuAccounts";
 
 const mocks = vi.hoisted(() => ({
   session: vi.fn(), cli: vi.fn(), managed: vi.fn(), availability: vi.fn(),
+  legacyAuthorize: vi.fn(),
   t: (key: string) => key,
 }));
 vi.mock("react-i18next", async (original) => ({
@@ -22,7 +24,9 @@ vi.mock("@/modules/dataSource/api/clients", () => ({
     getOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsGet: async () => ({ data: { secret_configured: false } }),
   },
 }));
-vi.mock("./useFeishuOAuthFlow", () => ({ useFeishuOAuthFlow: () => ({ clearOauthAttempt: vi.fn() }) }));
+vi.mock("./useFeishuOAuthFlow", () => ({ useFeishuOAuthFlow: () => ({
+  clearOauthAttempt: vi.fn(), startFeishuOAuth: mocks.legacyAuthorize,
+}) }));
 vi.mock("./useLocalDataSourceSettings", () => ({
   useLocalDataSourceSettings: () => ({ loading: false, canCreateLocalSource: false, localSourceCount: 0 }),
 }));
@@ -72,6 +76,23 @@ function setSession(session: CloudSession | null) {
 }
 
 describe("one account-creation entry with Cloud/BYO routing", () => {
+  it.each(cases)("keeps existing BYO reauthorization on the original connection: $name", async ({ session }) => {
+    setSession(session);
+    const { result } = renderHook(useFeishuAccounts, { wrapper });
+    const account = {
+      id: "fixture-byo-account", name: "Fixture BYO", appId: "cli_fixture_byo", appSecret: "",
+      chatEnabled: true, status: "connected", createdAt: "2026-01-01T00:00:00Z",
+      connection_method: "legacy_byo", credential_location: "local",
+      connection: { connectionId: "fixture-original-connection" },
+    } as FeishuAuthAccount;
+    await act(async () => { result.current.handleAuthorizeAccount(account); });
+    expect(mocks.legacyAuthorize).toHaveBeenCalledWith(account, {
+      reauthorizeConnectionId: "fixture-original-connection",
+    });
+    expect(mocks.cli).not.toHaveBeenCalled();
+    expect(result.current.modalOpen).toBe(false);
+  });
+
   it.each(cases)("Feishu account page: $name", async ({ session, managed }) => {
     setSession(session);
     const { result } = renderHook(useFeishuAccounts, { wrapper });

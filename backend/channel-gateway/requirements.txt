@@ -6,3 +6,4 @@ lark-oapi==1.7.2
 psycopg[binary]==3.2.6
 truststore==0.10.4
 uvicorn==0.30.6
+wecom-aibot-python-sdk==1.0.1

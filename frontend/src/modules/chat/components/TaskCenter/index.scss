@@ -1077,7 +1077,8 @@
   font-weight: 600;
   line-height: 1.45;
 
-  > .anticon {
+  > .anticon,
+  > .ordinary-artifact-toggle > .anticon:first-child {
     width: 16px;
     color: #4a596c;
     font-size: 16px;
@@ -1456,7 +1457,7 @@
   strong { color: #2f6bff; font-variant-numeric: tabular-nums; }
   progress {
     width: 100%;
-    height: 4px;
+    height: 5px;
     border: 0;
     border-radius: 4px;
     overflow: hidden;
@@ -1465,7 +1466,26 @@
     &::-webkit-progress-bar { background: #edf1f7; }
     &::-webkit-progress-value { background: #2f6bff; transition: width 300ms ease; }
     &::-moz-progress-bar { background: #2f6bff; }
+    &:indeterminate::-webkit-progress-bar { background: #edf1f7; }
+    &.is-indeterminate::-webkit-progress-bar {
+      background: linear-gradient(90deg, #edf1f7 25%, #2f6bff 50%, #edf1f7 75%);
+      background-size: 200% 100%;
+      animation: ordinary-plan-loading 1.5s linear infinite;
+    }
   }
+}
+
+.ordinary-plan-section {
+  margin-bottom: 0;
+  .ordinary-plan-description { margin: 0 0 16px; color: #657286; font-size: 12px; line-height: 1.65; }
+  .ordinary-plan-item { padding-bottom: 18px; }
+  .ordinary-thinking-copy strong { font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
+  .ordinary-thinking-marker { font-size: 10px; }
+}
+
+@keyframes ordinary-plan-loading {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
 }
 
 .ordinary-plan-active-dot {
@@ -1484,4 +1504,37 @@
 @media (prefers-reduced-motion: reduce) {
   .ordinary-plan-active-dot { animation: none; }
   .ordinary-plan-progress progress::-webkit-progress-value { transition: none; }
+  .ordinary-plan-progress progress.is-indeterminate::-webkit-progress-bar { animation: none; }
 }
+
+.task-center--ordinary {
+  .ordinary-process-empty { color: #667085; font-size: 12px; }
+  .ordinary-process-status { font-size: 11px; }
+  .ordinary-process-timing { margin: 0 0 16px; }
+  .ordinary-load-more { margin: 8px 0; }
+  .ordinary-parallel-tab-title { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ordinary-artifact-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .ordinary-artifact-list[hidden] { display: none; }
+  .ordinary-artifact-toggle { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .ordinary-artifact-toggle:focus-visible { outline: 2px solid #315efb; outline-offset: 4px; border-radius: 2px; }
+  .ordinary-artifact-chevron { margin-left: auto; }
+  .ordinary-artifact-row { border: 1px solid #e5e7eb; padding: 10px; border-radius: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .ordinary-artifact-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 160px; > span { color: #667085; font-size: 11px; overflow-wrap: anywhere; } }
+  .ordinary-artifact-name { color: #344054; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; max-width: 100%; }
+  button.ordinary-artifact-name { background: none; border: 0; padding: 0; cursor: pointer; }
+  .ordinary-artifact-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+  .ordinary-artifact-actions button, .ordinary-load-more { color: #315efb; background: transparent; border: none; cursor: pointer; padding: 2px 0; font-size: 12px; }
+  .ordinary-artifact-error { flex-basis: 100%; color: #b42318; font-size: 12px; }
+  .ordinary-artifact-section { min-width: 0; }
+  button:focus-visible, a:focus-visible { outline: 2px solid #315efb; outline-offset: 3px; }
+  button:disabled { cursor: wait; opacity: .6; }
+}
+
+.ordinary-inline-preview { margin: 0; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; height: 100%; }
+// The shared drawer is also used when no WorkflowPanel is mounted.
+.file-preview-drawer__overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+.file-preview-drawer { background: #fff; border-radius: 10px; width: 80vw; max-width: 960px; height: 85vh; display: flex; flex-direction: column; overflow: hidden; }
+.file-preview-drawer__header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid #e5e7eb; }
+.file-preview-drawer__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-preview-drawer__close { border: none; background: transparent; font-size: 20px; cursor: pointer; }
+.file-preview-drawer__body { flex: 1; min-height: 0; overflow: auto; }

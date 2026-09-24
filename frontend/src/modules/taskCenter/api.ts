@@ -1,6 +1,10 @@
+import type { AxiosRequestConfig } from 'axios';
+import type { NotificationUpdate } from '@/modules/notifications/api';
+import { Configuration, DefaultApi, TaskNotificationsApi } from '@/api/generated/core-client';
 import { axiosInstance, BASE_URL } from '@/components/request';
 
-const CORE = `${BASE_URL}/api/core`;
+const defaultClient = new DefaultApi(new Configuration({ basePath: BASE_URL }), BASE_URL, axiosInstance);
+const notificationClient = new TaskNotificationsApi(new Configuration({ basePath: BASE_URL }), BASE_URL, axiosInstance);
 
 export interface StepInfo {
   step_id: string;
@@ -94,6 +98,7 @@ export interface ScheduleListResponse {
 }
 
 export interface CreateScheduleRequest {
+  notification?: NotificationUpdate;
   cron_expr: string;
   prompt_template: string;
   timezone: string;
@@ -112,63 +117,68 @@ export async function listTasks(params: {
   page?: number;
   page_size?: number;
 }): Promise<TaskListResponse> {
-  const query = new URLSearchParams();
-  if (params.status) query.set('status', params.status);
-  if (params.task_type) query.set('task_type', params.task_type);
-  if (params.keyword) query.set('keyword', params.keyword);
-  if (params.page) query.set('page', String(params.page));
-  if (params.page_size) query.set('page_size', String(params.page_size));
-  const resp = await axiosInstance.get<TaskListResponse>(
-    `${CORE}/task-center/tasks?${query.toString()}`,
-  );
-  return resp.data;
+  const response = await defaultClient.apiCoreTaskCenterTasksGet({
+    status: params.status,
+    taskType: params.task_type,
+    keyword: params.keyword,
+    page: params.page,
+    pageSize: params.page_size,
+  });
+  return response.data as unknown as TaskListResponse;
 }
 
 export async function cancelTask(id: string): Promise<void> {
-  await axiosInstance.post(`${CORE}/task-center/tasks/${id}:cancel`);
+  await defaultClient.apiCoreTaskCenterTasksTaskIdCancelPost({ taskId: id });
 }
 
 export async function getTask(id: string): Promise<Task> {
-  const response = await axiosInstance.get<Task>(`${CORE}/task-center/tasks/${encodeURIComponent(id)}`, { silentError: true } as never);
-  return response.data;
+  const response = await defaultClient.apiCoreTaskCenterTasksTaskIdGet(
+    { taskId: id },
+    { silentError: true } as AxiosRequestConfig & { silentError: boolean },
+  );
+  return response.data as unknown as Task;
 }
 
 export async function removeTask(id: string): Promise<void> {
-  await axiosInstance.post(`${CORE}/task-center/tasks/${id}:remove`);
+  await defaultClient.apiCoreTaskCenterTasksTaskIdRemovePost({ taskId: id });
 }
 
 export async function listSchedules(includeDisabled = false): Promise<ScheduleListResponse> {
-  const query = includeDisabled ? '?include_disabled=true' : '';
-  const resp = await axiosInstance.get<ScheduleListResponse>(`${CORE}/schedules${query}`);
-  return resp.data;
+  const response = await defaultClient.apiCoreSchedulesGet({
+    includeDisabled: includeDisabled || undefined,
+  });
+  return response.data;
 }
 
 export async function createSchedule(req: CreateScheduleRequest): Promise<Schedule> {
-  const resp = await axiosInstance.post<Schedule>(`${CORE}/schedules`, req);
-  return resp.data;
+  const response = await notificationClient.apiCoreSchedulesPost({ apiCoreSchedulesPostRequest: req });
+  return response.data;
 }
 
 export async function cancelSchedule(id: string): Promise<void> {
-  await axiosInstance.post(`${CORE}/schedules/${id}:cancel`);
+  await defaultClient.apiCoreSchedulesScheduleIdCancelPost({ scheduleId: id });
 }
 
 export async function enableSchedule(id: string): Promise<Schedule> {
-  const resp = await axiosInstance.post<Schedule>(`${CORE}/schedules/${id}:enable`);
-  return resp.data;
+  const response = await defaultClient.apiCoreSchedulesScheduleIdEnablePost({ scheduleId: id });
+  return response.data;
 }
 
 export async function runScheduleNow(id: string): Promise<{ task_id: string; conversation_id: string }> {
-  const resp = await axiosInstance.post(`${CORE}/schedules/${id}:run-now`);
-  return resp.data;
+  const response = await defaultClient.apiCoreSchedulesScheduleIdRunNowPost({ scheduleId: id });
+  return response.data;
 }
 
 export async function updateSchedule(id: string, req: Partial<CreateScheduleRequest>): Promise<Schedule> {
-  const resp = await axiosInstance.put<Schedule>(`${CORE}/schedules/${id}`, req);
-  return resp.data;
+  const response = await notificationClient.apiCoreSchedulesScheduleIdPut({
+    scheduleId: id,
+    apiCoreSchedulesPostRequest: req,
+  });
+  return response.data;
 }
 
 export async function deleteSchedule(id: string): Promise<void> {
-  await axiosInstance.delete(`${CORE}/schedules/${id}`);
+  await defaultClient.apiCoreSchedulesScheduleIdDelete({ scheduleId: id });
 }
 
 export async function listScheduleTasks(
@@ -176,29 +186,28 @@ export async function listScheduleTasks(
   page: number,
   pageSize = 10,
 ): Promise<TaskListResponse> {
-  const query = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
-  const resp = await axiosInstance.get<TaskListResponse>(
-    `${CORE}/task-center/schedules/${scheduleId}/tasks?${query.toString()}`,
-  );
-  return resp.data;
+  const response = await defaultClient.apiCoreTaskCenterSchedulesScheduleIdTasksGet({ scheduleId, page, pageSize });
+  return response.data as unknown as TaskListResponse;
 }
 
 export async function listAutomationGroups(): Promise<{ items: AutomationGroup[]; total: number }> {
-  const resp = await axiosInstance.get(`${CORE}/automation-groups`);
-  return resp.data;
+  const response = await defaultClient.apiCoreAutomationGroupsGet();
+  return response.data;
 }
 
 export async function createAutomationGroup(req: { name: string; remark?: string; timezone?: string }): Promise<AutomationGroup> {
-  const resp = await axiosInstance.post(`${CORE}/automation-groups`, req);
-  return resp.data;
+  const response = await defaultClient.apiCoreAutomationGroupsPost({ automationGroupCreateRequest: req });
+  return response.data;
 }
 
 export async function deleteAutomationGroup(id: string): Promise<void> {
-  await axiosInstance.delete(`${CORE}/automation-groups/${id}`);
+  await defaultClient.apiCoreAutomationGroupsGroupIdDelete({ groupId: id });
 }
 
 export async function moveSchedule(id: string, groupId?: string, position = 0): Promise<void> {
-  await axiosInstance.post(`${CORE}/schedules/${id}:move`, { group_id: groupId || null, position });
+  await defaultClient.apiCoreSchedulesScheduleIdMovePost(
+    { scheduleId: id, scheduleMoveRequest: { group_id: groupId || null, position } },
+  );
 }
 
 export interface BatchScheduleDraft {
@@ -210,12 +219,15 @@ export interface BatchScheduleDraft {
   kb_ids?: string[];
   file_ids?: string[];
   dependencies?: Array<ScheduleDependency & { source_client_key?: string }>;
+  notification?: NotificationUpdate;
 }
 
 export async function batchCreateAutomationGroup(req: {
   group: { name: string; remark?: string; timezone: string };
   tasks: BatchScheduleDraft[];
 }): Promise<{ group_id: string; schedule_ids: Record<string, string> }> {
-  const resp = await axiosInstance.post(`${CORE}/automation-groups:batch-create`, req);
-  return resp.data;
+  const response = await notificationClient.apiCoreAutomationGroupsBatchCreatePost({
+    automationGroupBatchCreateRequest: req,
+  });
+  return response.data;
 }
