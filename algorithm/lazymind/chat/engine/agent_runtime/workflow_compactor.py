@@ -98,9 +98,6 @@ def make_workflow_history_compactor(
             layout = describe_tool_turns(prior, current)
         turns = [turn for turn in layout if not turn.current]
         protected_turns = turns[-effective_keep:] if effective_keep else []
-        protected_results = {
-            index for turn in protected_turns for index in turn.result_indexes
-        }
         projected = prior + current
         split = len(prior)
         dropped: set[int] = set()
@@ -120,11 +117,10 @@ def make_workflow_history_compactor(
                 reserved_runtime_context_tokens=reserved,
             ) <= budget.effective_input_budget
 
-        # Replace old result bodies first, retaining complete call/result pairs.
+        # Keep recent turn structure, but allow every result body to be replaced
+        # with a recoverable reference before removing any older turns.
         for turn in turns:
             for index in turn.result_indexes:
-                if index in protected_results:
-                    continue
                 replacement = _spill_old_tool_result(projected[index], workspace)
                 if replacement is not None:
                     projected[index] = replacement

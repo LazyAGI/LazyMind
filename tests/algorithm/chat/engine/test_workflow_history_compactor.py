@@ -71,6 +71,16 @@ def test_workflow_overflow_drops_old_complete_turn_before_recent_turn(tmp_path):
             for call in message.get('tool_calls', [])] == ['recent']
 
 
+def test_workflow_overflow_spills_protected_recent_result_without_dropping_pair(tmp_path):
+    history = _tool_turn('recent', 'x' * 120_000)
+
+    prior, _current = _compact(history, workspace=str(tmp_path), keep_recent=1)
+
+    assert prior[0]['tool_calls'][0]['id'] == 'recent'
+    assert prior[1]['tool_call_id'] == 'recent'
+    assert 'workspace://tool_spills/' in prior[1]['content']
+
+
 def test_workflow_overflow_can_reference_current_tool_result_without_removing_pair(tmp_path):
     current_turn = _tool_turn('active', 'x' * 120_000)
     compactor = make_workflow_history_compactor(
@@ -123,7 +133,7 @@ def test_duplicate_call_ids_do_not_make_round_removable(tmp_path):
     assert prior == history
 
 
-def test_workflow_spill_locator_is_absolute_for_host_read_tool(tmp_path):
+def test_workflow_spill_locator_uses_workspace_uri(tmp_path):
     prior, _ = _compact(_tool_turn('call-1', 'x' * 120_000), workspace=str(tmp_path))
     spill = next((tmp_path / 'tool_spills').glob('read_file_*.txt'))
-    assert f'File path: {spill}' in prior[1]['content']
+    assert f'File path: workspace://tool_spills/{spill.name}' in prior[1]['content']

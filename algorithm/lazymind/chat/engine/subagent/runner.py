@@ -44,6 +44,10 @@ from lazymind.chat.engine.agent_runtime.active_context import (
 from lazymind.chat.engine.agent_runtime.workflow_compactor import (
     make_workflow_history_compactor,
 )
+from lazymind.chat.engine.agent_runtime.compactors import (
+    commit_tool_result_plan,
+    plan_tool_result_compaction,
+)
 from lazymind.chat.engine.tools.file_resources.tools import (
     search_file_resource as grep, read_file_resource as read_file,
     list_skill_files,
@@ -78,7 +82,6 @@ from . import (
 )
 from . import tools as subagent_tools
 from .context import (
-    LARGE_TOOL_RESULT_FALLBACK_CHARS,
     LARGE_TOOL_RESULT_SCAN_THRESHOLD_BYTES,
     LARGE_TOOL_RESULT_TOKEN_THRESHOLD,
     SubAgentContext,
@@ -958,20 +961,17 @@ def _truncate_tool_result(ctx: SubAgentContext, result: Any, tool_name: str) -> 
     if estimate_tokens(text) < LARGE_TOOL_RESULT_TOKEN_THRESHOLD:
         return text
     try:
-        abs_path = ctx.write_large_content(text, hint=tool_name or 'tool_result')
-        rel_path = os.path.relpath(abs_path, ctx.workspace_path) if ctx.workspace_path else abs_path
-        size_kb = len(encoded) / 1024
-        return (
-            f'[Large result offloaded to file — {size_kb:.1f} KB]\n'
-            f'File path (relative to workspace): {rel_path}\n'
-            f'Use this path to reference the content in subsequent reasoning or tool calls.'
+        plan = plan_tool_result_compaction(
+            tool_name,
+            result,
+            workspace=ctx.workspace_path,
         )
+        committed = commit_tool_result_plan(plan, workspace=ctx.workspace_path)
+        if committed.compactor == 'spill':
+            return committed.content
     except Exception as exc:
         LOG.warning('[SubAgent] failed to offload large tool result for %s: %s', tool_name, exc)
-        # Fallback: truncate with a notice.
-        limit = LARGE_TOOL_RESULT_FALLBACK_CHARS
-        truncated = text[:limit]
-        return truncated + f'\n... [truncated — original {len(encoded) // 1024} KB]'
+    return text
 
 
 def _commit_prompt_only_text_output(

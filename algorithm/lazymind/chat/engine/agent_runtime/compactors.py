@@ -590,6 +590,12 @@ def spill_tool_result_to_workspace(
     return os.path.relpath(path, root)
 
 
+def workspace_spill_uri(rel_path: str) -> str:
+    """Return the model-facing URI for a result stored in a workspace spill file."""
+    normalized = str(rel_path or '').replace(os.sep, '/')
+    return f'workspace://{normalized}'
+
+
 def format_spilled_tool_notice(
     tool_name: str,
     content: Any,
@@ -601,7 +607,7 @@ def format_spilled_tool_notice(
     lines = [
         '[Large tool result offloaded to workspace]',
         f'Tool: {tool_name or "tool"}',
-        f'File path: {os.path.join(workspace, rel_path) if workspace else rel_path}',
+        f'File path: {workspace_spill_uri(rel_path)}',
         f'Size: {size_kb:.1f} KB',
         'Use read on this path if you need more than the excerpt below.',
     ]

@@ -250,6 +250,56 @@ def test_read_file_result_stays_below_spill_threshold(monkeypatch, tmp_path):
         assert utf8_size(result['text']) <= RESULT_BYTE_BUDGET + 128
 
 
+def test_workflow_resolves_tool_spill_uri_inside_active_workspace(monkeypatch, tmp_path):
+    _set_scope(monkeypatch, tmp_path)
+    workflow_workspace = tmp_path / 'workflow' / 'task-1'
+    spill = workflow_workspace / 'tool_spills' / 'read_file_hash.txt'
+    spill.parent.mkdir(parents=True)
+    spill.write_text('recoverable tool result', encoding='utf-8')
+    resolver.lazyllm.globals['agentic_config'].update({
+        'agent_type': 'workflow_step',
+        'workflow_workspace_path': str(workflow_workspace),
+    })
+
+    resolved = resolver.resolve_text_target(
+        'workspace://tool_spills/read_file_hash.txt',
+    )
+
+    assert resolved.path == str(spill)
+    assert resolved.workspace == str(workflow_workspace)
+
+
+def test_chat_resolves_tool_spill_uri_inside_current_workspace(monkeypatch, tmp_path):
+    _set_scope(monkeypatch, tmp_path)
+    spill = tmp_path / 'tool_spills' / 'read_file_hash.txt'
+    spill.parent.mkdir()
+    spill.write_text('recoverable chat tool result', encoding='utf-8')
+
+    resolved = resolver.resolve_text_target(
+        'workspace://tool_spills/read_file_hash.txt',
+    )
+
+    assert resolved.path == str(spill)
+    assert resolved.workspace == str(tmp_path)
+
+
+def test_workflow_rejects_legacy_or_escaping_tool_spill_references(monkeypatch, tmp_path):
+    _set_scope(monkeypatch, tmp_path)
+    workflow_workspace = tmp_path / 'workflow' / 'task-1'
+    workflow_workspace.mkdir(parents=True)
+    legacy = tmp_path / 'large' / 'read_file_hash.txt'
+    legacy.parent.mkdir()
+    legacy.write_text('legacy tool result', encoding='utf-8')
+    resolver.lazyllm.globals['agentic_config'].update({
+        'agent_type': 'workflow_step',
+        'workflow_workspace_path': str(workflow_workspace),
+    })
+
+    for target in ('large/read_file_hash.txt', 'workspace://tool_spills/../secret.txt'):
+        with pytest.raises(ValueError):
+            resolver.resolve_text_target(target)
+
+
 def test_grep_zero_matches_has_explicit_footer(monkeypatch, tmp_path):
     _set_scope(monkeypatch, tmp_path)
     (tmp_path / 'notes.txt').write_text('alpha', encoding='utf-8')
