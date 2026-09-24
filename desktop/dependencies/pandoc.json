@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "name": "pandoc",
+  "version": "3.11",
+  "_comment": "TODO: add project-controlled mainland China mirror URLs to domesticUrls; artifacts must be byte-identical to the official releases and keep the pinned SHA-256 values.",
+  "targets": {
+    "darwin-arm64": {
+      "fileName": "pandoc-3.11-arm64-macOS.zip",
+      "domesticUrls": [],
+      "upstreamUrls": [
+        "https://github.com/jgm/pandoc/releases/download/3.11/pandoc-3.11-arm64-macOS.zip"
+      ],
+      "sha256": "15806bedf9517bfead72e88fe6a6696635c3691efbb6e152173440e9c5bb50b4",
+      "archivePath": "pandoc-3.11-arm64/bin/pandoc",
+      "runtimePath": "bin/pandoc"
+    },
+    "windows-x64": {
+      "fileName": "pandoc-3.11-windows-x86_64.zip",
+      "domesticUrls": [],
+      "upstreamUrls": [
+        "https://github.com/jgm/pandoc/releases/download/3.11/pandoc-3.11-windows-x86_64.zip"
+      ],
+      "sha256": "2ab72baf2399450e148ddf7a2a8689806c42e1bba71862b57e220fd9b8456d3d",
+      "archivePath": "pandoc-3.11/pandoc.exe",
+      "runtimePath": "bin/pandoc.exe"
+    }
+  }
+}

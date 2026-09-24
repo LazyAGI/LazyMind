@@ -598,6 +598,23 @@ describe("TaskCenter display modes", () => {
       .toBeInTheDocument();
   });
 
+  it.each(["extract", "reason"] as const)("shows %s writing tasks as reasoning", (type) => {
+    useTaskCenterStore.setState({
+      tasksByConversation: {
+        "conversation-1": [{
+          ...task("writer", 1, "succeeded"),
+          writing_subtasks: [{
+            subtask_id: "reason-1", node_id: "section-1", question: "Analyze supplied facts",
+            subtask_type: type, status: "completed", retry_count: 0, tools_used: ["llm"],
+          }],
+        }],
+      },
+    });
+    render(<TaskCenter sessionId="conversation-1" developerMode />);
+    expect(screen.getByText("chat.writerIR.subtaskTypes.reason")).toBeInTheDocument();
+    expect(screen.queryByText("chat.writerIR.subtaskTypes.extract")).not.toBeInTheDocument();
+  });
+
   it("distinguishes loading and load failures from a true empty state", () => {
     useTaskCenterStore.setState({
       tasksByConversation: {},

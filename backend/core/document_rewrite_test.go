@@ -25,6 +25,14 @@ import (
 const rewriteReference = "builtin:document.rewrite_selection.v1"
 const rewriteTestKey = "rewrite-fixture-only-key"
 
+func serveDynamicLLMRole(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodGet || r.URL.Path != "/api/model/role_type" || r.URL.Query().Get("role") != "llm" {
+		return false
+	}
+	_, _ = w.Write([]byte(`{"role":"llm","type":"llm","source":"dynamic","is_dynamic":true}`))
+	return true
+}
+
 type rewriteFixture struct {
 	descriptorFixture
 	representation    string
@@ -155,6 +163,9 @@ func newRewriteServer(t *testing.T, f rewriteFixture) *rewriteServer {
 	server := &rewriteServer{manifests: map[string]rewriteManifest{}}
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if serveDynamicLLMRole(w, r) {
+			return
+		}
 		var raw map[string]json.RawMessage
 		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 			t.Error(err)
@@ -199,10 +210,17 @@ func newRewriteServer(t *testing.T, f rewriteFixture) *rewriteServer {
 			t.Errorf("reference/store=%#v", req)
 		}
 		var envelope map[string]any
-		if err := json.Unmarshal(req.Artifact, &envelope); err != nil || len(envelope) != 1 || envelope["data"] == nil {
-			t.Errorf("logical document must use only data envelope, got %s", req.Artifact)
+		if err := json.Unmarshal(req.Artifact, &envelope); err != nil || envelope["data"] == nil {
+			t.Errorf("logical document must use data envelope, got %s", req.Artifact)
 			w.WriteHeader(422)
 			return
+		}
+		for key := range envelope {
+			if key != "data" && key != "writing_contexts" {
+				t.Errorf("logical document contains unexpected %s field", key)
+				w.WriteHeader(422)
+				return
+			}
 		}
 		source := envelope["data"]
 		server.mu.Lock()

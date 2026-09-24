@@ -19,6 +19,7 @@ test("resolves packaged runtime paths on macOS and Windows", () => {
     repoRoot: "/Applications/LazyMind.app/Contents/Resources/runtime/app",
     manager: "/Applications/LazyMind.app/Contents/Resources/runtime/bin/local-runtime-manager",
     agentConnector: "/Applications/LazyMind.app/Contents/Resources/runtime/bin/lazymind",
+    pandoc: "/Applications/LazyMind.app/Contents/Resources/runtime/bin/pandoc",
   });
   assert.match(
     packagedRuntimePaths("C:\\Apps\\LazyMind\\LazyMind.exe", "win32").manager,
@@ -28,7 +29,21 @@ test("resolves packaged runtime paths on macOS and Windows", () => {
     packagedRuntimePaths("C:\\Apps\\LazyMind\\LazyMind.exe", "win32").agentConnector,
     /resources[\\/]runtime[\\/]bin[\\/]lazymind\.exe$/,
   );
+  assert.match(
+    packagedRuntimePaths("C:\\Apps\\LazyMind\\LazyMind.exe", "win32").pandoc,
+    /resources[\\/]runtime[\\/]bin[\\/]pandoc\.exe$/,
+  );
 });
+
+function successfulAPIFetch(url) {
+  if (url.endsWith("admin-session")) {
+    return { ok: true, json: async () => ({ token: "token" }) };
+  }
+  if (url.endsWith("writer-download-conversions:convert")) {
+    return { ok: true, text: async () => "\\documentclass{article}\nDesktop Pandoc Smoke\n" };
+  }
+  return { ok: true };
+}
 
 test("waits through missing and starting state until Desktop is ready", async () => {
   const values = [new Error("missing"), { profile: "desktop", overallStatus: "starting" }, { profile: "desktop", overallStatus: "ready" }];
@@ -85,9 +100,7 @@ test("launches a packaged app, verifies APIs, and performs owned shutdown", asyn
     pollIntervalMs: 0,
     fetch: async (url, options = {}) => {
       calls.push([url, options]);
-      return url.endsWith("admin-session")
-        ? { ok: true, json: async () => ({ token: "token" }) }
-        : { ok: true };
+      return successfulAPIFetch(url);
     },
     runManager: async (args) => calls.push(args),
     isPortClosed: async () => true,
@@ -108,9 +121,7 @@ test("leaves a verified packaged app running for asynchronous workflow cleanup",
     launch: () => child,
     readState: async () => state,
     pollIntervalMs: 0,
-    fetch: async (url) => url.endsWith("admin-session")
-      ? { ok: true, json: async () => ({ token: "token" }) }
-      : { ok: true },
+    fetch: async (url) => successfulAPIFetch(url),
     runManager: async () => calls.push("down"),
   });
 
@@ -141,9 +152,7 @@ test("kills the packaged app when owned runtime shutdown fails", async () => {
       launch: () => ({ kill: () => { killed = true; } }),
       readState: async () => state,
       pollIntervalMs: 0,
-      fetch: async (url) => url.endsWith("admin-session")
-        ? { ok: true, json: async () => ({ token: "token" }) }
-        : { ok: true },
+      fetch: async (url) => successfulAPIFetch(url),
       runManager: async () => { throw new Error("shutdown timed out"); },
       runCleanupManager: async (args) => {
         if (args[0] === "status") {
@@ -170,9 +179,7 @@ test("warns and succeeds when bounded cleanup verifies a failed graceful shutdow
     launch: () => ({ kill: () => { killed = true; } }),
     readState: async () => state,
     pollIntervalMs: 0,
-    fetch: async (url) => url.endsWith("admin-session")
-      ? { ok: true, json: async () => ({ token: "token" }) }
-      : { ok: true },
+    fetch: async (url) => successfulAPIFetch(url),
     runManager: async () => { throw new Error("shutdown timed out"); },
     runCleanupManager: async (args) => {
       cleanupCalls.push(args[0]);

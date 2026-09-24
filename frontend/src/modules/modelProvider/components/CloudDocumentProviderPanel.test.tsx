@@ -9,6 +9,15 @@ const labels: Record<string, string> = {
   "modelProvider.cloudDocuments.authPending": "待授权",
   "modelProvider.cloudDocuments.manageAccount": "管理账号",
   "modelProvider.cloudDocuments.notionConnectAction": "新增 Notion 账号",
+  "modelProvider.cloudDocuments.obsidianTitle": "Obsidian",
+  "modelProvider.cloudDocuments.obsidianSetupGuideAction": "查看 Obsidian 接入教程",
+  "modelProvider.cloudDocuments.obsidianUnavailableHint": "选择 Obsidian 根目录",
+  "modelProvider.cloudDocuments.obsidianConnectedStatus": "已连接",
+  "modelProvider.cloudDocuments.obsidianUnavailableStatus": "未配置",
+  "modelProvider.cloudDocuments.obsidianChooseRoot": "选择根目录",
+  "modelProvider.cloudDocuments.obsidianChangeRoot": "更换根目录",
+  "modelProvider.cloudDocuments.obsidianDisconnect": "断开连接",
+  "modelProvider.cloudDocuments.obsidianUpdating": "正在更新 Obsidian 连接…",
 };
 
 function createVm(overrides: Record<string, unknown> = {}) {
@@ -129,5 +138,85 @@ describe("CloudDocumentProviderPanel", () => {
 
     expect(handleOpenNotionSetup).toHaveBeenCalledOnce();
     expect(handleManageNotionAuth).not.toHaveBeenCalled();
+  });
+
+  it("shows the Obsidian setup guide only in the Desktop configuration modal", async () => {
+    const handleManageObsidian = vi.fn();
+    const handleDisconnectObsidian = vi.fn();
+    const { rerender } = render(
+      <CloudDocumentProviderPanel
+        vm={createVm({
+          isDesktopRuntime: true,
+          obsidianConfig: { configured: true, available: true, root: "/tmp/obs" },
+          handleManageObsidian,
+          handleDisconnectObsidian,
+        })}
+      />,
+    );
+
+    expect(screen.getByText("Obsidian")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "查看 Obsidian 接入教程" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /更换根目录/ }));
+    const obsidianGuide = screen.getByRole("link", { name: "查看 Obsidian 接入教程" });
+    expect(obsidianGuide).toHaveAttribute("href", "/cloud-documents/docs/obsidian-setup");
+    expect(obsidianGuide).toHaveAttribute("target", "_blank");
+    expect(obsidianGuide).toHaveAttribute("rel", "noreferrer");
+    fireEvent.click(screen.getByRole("button", { name: "断开连接" }));
+    expect(handleDisconnectObsidian).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <CloudDocumentProviderPanel
+        vm={createVm({
+          isDesktopRuntime: true,
+          obsidianConfig: { configured: false, available: false },
+          handleManageObsidian,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /选择根目录/ }));
+    fireEvent.click(screen.getByRole("button", { name: "选择根目录" }));
+    expect(handleManageObsidian).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("link", { name: "查看 Obsidian 接入教程" })).toBeInTheDocument();
+
+    rerender(<CloudDocumentProviderPanel vm={createVm({ isDesktopRuntime: false })} />);
+    expect(screen.queryByRole("heading", { name: "Obsidian" })).not.toBeInTheDocument();
+
+    rerender(<CloudDocumentProviderPanel vm={createVm()} />);
+    expect(screen.queryByRole("heading", { name: "Obsidian" })).not.toBeInTheDocument();
+  });
+
+  it("passes a modal-close callback to the native Obsidian selection flow", () => {
+    const handleManageObsidian = vi.fn();
+    render(
+      <CloudDocumentProviderPanel
+        vm={createVm({
+          isDesktopRuntime: true,
+          obsidianConfig: { configured: false, available: false },
+          handleManageObsidian,
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /选择根目录/ }));
+    expect(screen.getByRole("link", { name: "查看 Obsidian 接入教程" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "选择根目录" }));
+
+    expect(handleManageObsidian).toHaveBeenCalledWith(expect.any(Function));
+    expect(screen.getByRole("link", { name: "查看 Obsidian 接入教程" })).toBeInTheDocument();
+  });
+
+  it("shows a blocking progress modal while the Obsidian runtime is restarting", () => {
+    render(
+      <CloudDocumentProviderPanel
+        vm={createVm({
+          isDesktopRuntime: true,
+          obsidianLoading: true,
+          obsidianConfig: { configured: true, available: true, root: "/tmp/obs" },
+        })}
+      />,
+    );
+
+    expect(screen.getByText("正在更新 Obsidian 连接…")).toBeInTheDocument();
   });
 });

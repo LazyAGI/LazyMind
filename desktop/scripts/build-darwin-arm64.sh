@@ -113,6 +113,40 @@ make_internal_symlinks_relative() {
     esac
   done
 }
+make_python_venv_relocatable() {
+  local venv_root="$1"
+  local bundled_python="$2"
+  local python_link="${venv_root}/bin/python"
+  local relative_python
+  local relative_home
+  relative_python="$(node -e 'const path = require("path"); console.log(path.relative(process.argv[1], process.argv[2]))' \
+    "${venv_root}/bin" "${bundled_python}")"
+  relative_home="$(node -e 'const path = require("path"); console.log(path.relative(process.argv[1], path.dirname(process.argv[2])))' \
+    "${venv_root}/bin" "${bundled_python}")"
+  ln -snf "${relative_python}" "${python_link}"
+  node -e '
+    const fs = require("fs");
+    const [configPath, relativeHome] = process.argv.slice(1);
+    const config = fs.readFileSync(configPath, "utf8");
+    if (!/^home = .*$/m.test(config)) throw new Error(`missing home entry in ${configPath}`);
+    fs.writeFileSync(configPath, config.replace(/^home = .*$/m, `home = ${relativeHome}`));
+  ' "${venv_root}/pyvenv.cfg" "${relative_home}"
+}
+
+assert_no_absolute_symlinks() {
+  local root="$1"
+  local failed=0
+  while IFS= read -r link; do
+    local target
+    target="$(readlink "${link}")"
+    if [[ "${target}" == /* ]]; then
+      echo "Absolute symlink cannot be packaged in the macOS app: ${link} -> ${target}" >&2
+      failed=1
+    fi
+  done < <(find "${root}" -type l -print)
+  (( failed == 0 ))
+}
+
 
 prune_python_runtime() {
   local root="$1"
@@ -222,8 +256,12 @@ fi
 
 echo "==> Preparing Python runtime and venvs"
 export UV_PYTHON_INSTALL_DIR="${RUNTIME_ROOT}/runtimes/python"
-"${UV_BIN}" python install 3.11.15
-PYTHON="$("${UV_BIN}" python find --managed-python --no-python-downloads --resolve-links 3.11.15)"
+"${UV_BIN}" python install --no-bin 3.11.15
+PYTHON="${UV_PYTHON_INSTALL_DIR}/cpython-3.11.15-macos-aarch64-none/bin/python3.11"
+if [[ ! -x "${PYTHON}" ]]; then
+  echo "Bundled Python executable was not installed: ${PYTHON}" >&2
+  exit 1
+fi
 rm -rf "${RUNTIME_ROOT}/deps/python/auth-service"
 "${UV_BIN}" venv --managed-python --no-python-downloads --relocatable --seed --link-mode copy --python "${PYTHON}" "${RUNTIME_ROOT}/deps/python/auth-service"
 "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/auth-service/bin/python" --link-mode copy --strict -r "${ROOT}/backend/auth-service/requirements.txt"
@@ -237,6 +275,9 @@ rm -rf "${RUNTIME_ROOT}/deps/python/algorithm"
 "${RUNTIME_ROOT}/deps/python/algorithm/bin/lazyllm" install rag
 "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements.txt"
 "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements-local.txt"
+make_python_venv_relocatable "${RUNTIME_ROOT}/deps/python/auth-service" "${PYTHON}"
+make_python_venv_relocatable "${RUNTIME_ROOT}/deps/python/channel-gateway" "${PYTHON}"
+make_python_venv_relocatable "${RUNTIME_ROOT}/deps/python/algorithm" "${PYTHON}"
 make_internal_symlinks_relative "${RUNTIME_ROOT}"
 echo "==> Pruning Python runtime bytecode and test packages"
 prune_python_runtime "${RUNTIME_ROOT}/runtimes/python"
@@ -301,6 +342,7 @@ rsync -a --delete \
 
 prune_runtime_app "${RUNTIME_ROOT}/app"
 assert_desktop_runtime_app "${RUNTIME_ROOT}/app"
+assert_no_absolute_symlinks "${RUNTIME_ROOT}"
 
 echo "==> Materializing offline Skill packages and featured catalog"
 BUILTIN_SKILL_BUNDLE_ARGS=(
@@ -319,6 +361,10 @@ fi
 
 echo "==> Downloading verified history injection package"
 node "${ROOT}/desktop/scripts/stage-history-injection-package.mjs" "${RUNTIME_ROOT}"
+
+echo "==> Downloading and staging verified Pandoc runtime"
+node "${ROOT}/desktop/scripts/stage-pandoc.mjs" \
+  "${RUNTIME_ROOT}" --target darwin-arm64
 
 TRUSTED_LOCAL_MODE=false
 if [[ "${LAZYMIND_TRUSTED_LOCAL_MODE:-}" == "true" ]]; then

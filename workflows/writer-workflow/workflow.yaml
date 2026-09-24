@@ -146,10 +146,6 @@ slots:
     label: Outline
     type: file
     cardinality: single
-  - id: writing_context_after_outline
-    label: Writing Context After Outline
-    type: file
-    cardinality: single
 
   - id: outline_revision_task
     label: Outline Revision Task
@@ -197,20 +193,12 @@ slots:
     label: Flat Draft
     type: file
     cardinality: single
-  - id: flat_writing_context_after_draft
-    label: Writing Context After Flat Draft
-    type: file
-    cardinality: single
   - id: flat_visual_plan
     label: Flat Visual Plan
     type: file
     cardinality: single
   - id: flat_resolved_media_assets
     label: Flat Resolved Media
-    type: file
-    cardinality: single
-  - id: writing_context_after_draft
-    label: Writing Context After Draft
     type: file
     cardinality: single
   - id: document_revision_task
@@ -309,6 +297,5 @@ i18n:
       draft_blocks: {label: 章节草稿}
       draft_document: {label: 成稿}
       flat_draft_document: {label: 成稿}
-      flat_writing_context_after_draft: {label: 成稿写作上下文}
       flat_visual_plan: {label: 短文视觉规划}
       flat_resolved_media_assets: {label: 短文已解析图片素材}

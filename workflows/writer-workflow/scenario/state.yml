@@ -92,13 +92,14 @@ steps:
       - material: writing_task
       - material: media_assets
       - material: resource_profiles
+        required: false
       - material: writing_context
       - material: source_document
         required: false
       - material: target_document
         required: false
     acceptance_criteria: |
-      writer_command, writing_task, media_assets, resource_profiles, and writing_context are present.
+      writer_command, writing_task, media_assets, and writing_context are present.
       media_assets is valid even when its assets mapping is empty.
       When a URL source was required, source_document and target_document are also present.
 
@@ -122,7 +123,7 @@ steps:
       writer_outline_workspace exactly once without operation or artifact path arguments.
       Do not call internal tools.
 
-      The workspace saves outline_document, writing_context_after_outline, and any revision
+      The workspace saves outline_document, and any revision
       artifacts itself. Do not reread the result for a summary.
     tools:
       - writer_outline_workspace
@@ -141,7 +142,6 @@ steps:
         required: false
     outputs:
       - material: outline_document
-      - material: writing_context_after_outline
       - material: outline_revision_task
         required: false
       - material: outline_locate_result
@@ -155,7 +155,7 @@ steps:
       - material: outline_write_result
         required: false
     acceptance_criteria: |
-      outline_document and writing_context_after_outline are present. Markdown outlines
+      outline_document is present. Markdown outlines
       are `.md`; IR outlines have stage="outline" and ui_editable=true. Revision internals are required only when
       this execution handled an AI revision. For a cloud-bound revision,
       outline_write_result must report success.
@@ -192,13 +192,12 @@ steps:
         required: false
     outputs:
       - material: flat_draft_document
-      - material: flat_writing_context_after_draft
       - material: short_writing_plan
       - material: flat_visual_plan
       - material: flat_resolved_media_assets
         required: false
     acceptance_criteria: |
-      flat_draft_document, flat_writing_context_after_draft, short_writing_plan, and
+      flat_draft_document, short_writing_plan, and
       flat_visual_plan are present. flat_draft_document is Markdown or a non-outline
       WriterDocument IR with ui_editable=true. No
       outline_document, section_instructions, or draft_blocks are produced. When flat_visual_plan is
@@ -245,17 +244,14 @@ steps:
         required: true
       - material: media_assets
         required: true
-      - material: writing_context_after_outline
+      - material: writing_context
         required: true
-        alternatives:
-          - material: writing_context
       - material: source_document
         required: false
       - material: target_document
         required: false
     outputs:
       - material: draft_document
-      - material: writing_context_after_draft
       - material: section_instructions
         required: false
       - material: visual_plan
@@ -277,9 +273,9 @@ steps:
       - material: document_write_result
         required: false
     acceptance_criteria: |
-      draft_document and writing_context_after_draft are present. Markdown output is a
+      draft_document is present. Markdown output is a
       `.md` file or an IR document with ui_editable=true. Generation/rewrite requires
-      section_instructions and draft_blocks; IR generation also requires visual_plan and
+      section_instructions; per-section generation also requires draft_blocks; IR generation also requires visual_plan and
       resolved_media_assets. A targeted revision requires document_revision_task,
       document_locate_result, document_modify_plan, document_revision_set, and a successful
       document_revision_result. A targeted image-adding revision also requires resolved_media_assets.

@@ -48,6 +48,7 @@ from .writing import (
     profile_document_resources,
     resolve_visual_media,
     stream_short_document,
+    stream_whole_document,
 )
 
 
@@ -203,6 +204,8 @@ def _writer_profile_resources(
         files_by_turn = require_context().params.get('history_files_per_turn') or {}
         file_paths = [path for paths in files_by_turn.values() for path in paths]
         input_resources = []
+    if not file_paths and not input_resources and not source_document_path and not knowledge_text.strip():
+        return ''
     profiles = profile_document_resources(
         _read_json_file(writing_task_path),
         user_input,
@@ -223,6 +226,7 @@ def _writer_collect_available_media(
     writing_task_path: str,
     source_document_path: str = '',
     input_resources_path: str = '',
+    analyze_source_images: bool = True,
 ) -> dict:
     """Collect attached and source-document images into the authoritative media library."""
     ctx = require_context()
@@ -249,6 +253,7 @@ def _writer_collect_available_media(
             _read_json_file(source_document_path) if source_document_path else None
         ),
         media_store=str(media_root),
+        analyze_source_images=analyze_source_images,
     )
     media_assets_path = _save_json_artifact(
         'media_assets',
@@ -277,7 +282,7 @@ def _writer_create_writing_context(
     """Create WritingContext, optionally incorporating an existing WriterDocument."""
     content = WriterCreateToolkit().create_writing_context(
         writing_task_json=_read_json_string(writing_task_path),
-        resource_profiles_json=_read_json_string(resource_profiles_path),
+        resource_profiles_json=_read_json_string(resource_profiles_path) if resource_profiles_path else '[]',
         writer_document_json=(
             _read_json_string(source_document_path) if source_document_path else ''
         ),
@@ -326,10 +331,10 @@ def _writer_generate_outline(writing_task_path: str, writing_context_path: str) 
             _read_json_file(writing_context_path),
             on_delta=emit_delta,
             on_outline_generated=lambda: _emit_writer_progress(
-                '大纲生成完成，正在补全写作指令'
+                '大纲内容与写作指令已生成'
             ),
             on_outline_prepared=lambda: _emit_writer_progress(
-                '大纲指令已补全，正在校验并保存'
+                '大纲已规范化，正在校验并保存'
             ),
         )
         outline_path = _save_writer_document(
@@ -1264,6 +1269,38 @@ def _writer_generate_draft_document(
     representation = str(
         ((task.get('output') or {}).get('representation') or '')
     ).strip()
+    limits = [
+        value for key in ('target_chars', 'max_chars')
+        if isinstance(value := (task.get('constraints') or {}).get(key), int)
+        and not isinstance(value, bool) and value > 0
+    ]
+    if task.get('task_type') == 'write' and limits and limits[0] <= 5000:
+        events = DraftMarkdownStreamEventEmitter(require_context().emit, slot='draft_document')
+        try:
+            document = stream_whole_document(
+                writing_task_path, writing_context_path, section_instructions_path,
+                artifact_store=str(_run_root('whole-document-source')),
+                visual_plan_path=visual_plan_path, media_assets_path=resolved_media_assets_path,
+                on_delta=events.feed,
+            )
+            document = finalize_short_document(
+                document, _read_json_file(resolved_media_assets_path) if resolved_media_assets_path else None,
+            )
+            if representation == 'ir':
+                document = markdown_to_writer_document(
+                    document, document_id=str(task.get('task_id') or uuid.uuid4()), stage='draft',
+                )
+            elif representation != 'markdown':
+                raise ValueError('Unsupported whole-document representation.')
+            path = _save_writer_document(
+                'draft_document', document, expected_stage='draft', editable=True,
+                directory=_run_root('whole-document'),
+            )
+        except Exception as exc:
+            events.abort(str(exc))
+            raise
+        events.end()
+        return {'draft_document': path, 'representation': representation, 'generation_mode': 'whole'}
     checkpoint_key = _execution_fingerprint(
         version=1,
         task=_read_json_string(writing_task_path),

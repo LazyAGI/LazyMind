@@ -55,6 +55,20 @@ def _agentic_config() -> Dict[str, Any]:
     return lazyllm.globals.get('agentic_config', {}) or {}
 
 
+def _step_request_input(bound_input: Optional[str], session_id: str) -> tuple[str, str]:
+    from lazymind.chat.service.component.history import is_workflow_rewind_action
+
+    cfg = _agentic_config()
+    current_input = str(
+        bound_input or cfg.get('workflow_current_query') or cfg.get('query') or ''
+    ).strip()
+    if is_workflow_rewind_action(current_input, {'session_id': session_id}):
+        # Let Core restore session intent for every step in this rerun turn,
+        # including downstream execute operations, not only rewind/retry.
+        return '', f'Recovery request for this rerun only: {current_input}'
+    return current_input, ''
+
+
 def _client() -> WorkflowClient:
     from lazymind.config import config
     cfg = _agentic_config()
@@ -168,12 +182,11 @@ def _handoff_tool(
                         f'User is currently focused on artifact sort order {focused_sort_order}.'
                     )
                 bound_user_input = user_input() if callable(user_input) else user_input
-                current_user_input = str(
-                    bound_user_input
-                    or cfg.get('workflow_current_query')
-                    or cfg.get('query')
-                    or ''
-                ).strip()
+                current_user_input, recovery_instruction = _step_request_input(
+                    bound_user_input, selected_session_id,
+                )
+                if recovery_instruction:
+                    focus_hints.append(recovery_instruction)
                 response = client.advance(AdvanceRequest(
                     session_id=selected_session_id,
                     expected_state_version=int(frontier.get('state_version') or 0),
@@ -399,12 +412,11 @@ def _safe_session_tools(
                         f'User is currently focused on artifact sort order {focused_sort_order}.'
                     )
                 bound_user_input = user_input() if callable(user_input) else user_input
-                current_user_input = str(
-                    bound_user_input
-                    or cfg.get('workflow_current_query')
-                    or cfg.get('query')
-                    or ''
-                ).strip()
+                current_user_input, recovery_instruction = _step_request_input(
+                    bound_user_input, selected_session_id,
+                )
+                if recovery_instruction:
+                    focus_hints.append(recovery_instruction)
                 result = toolkit.advance_step(
                     selected_session_id, int(frontier.get('state_version') or 0),
                     [

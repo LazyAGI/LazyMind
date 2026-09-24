@@ -202,6 +202,16 @@ describe('ArtifactRewriteDialog', () => {
     expect(screen.queryByText('chat.artifactRewrite.errors.previewFailed')).not.toBeInTheDocument();
   });
 
+  it('explains a local draft conflict instead of showing a generic save error', async () => {
+    renderDialog(vi.fn().mockRejectedValue(Object.assign(new Error('baseline changed'), {
+      code: 'DRAFT_VERSION_CONFLICT',
+    })));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Make it clearer' } });
+    fireEvent.click(screen.getByRole('button', { name: 'chat.artifactRewrite.preview' }));
+    expect(await screen.findByText('chat.artifactRewrite.errors.revisionConflict')).toBeVisible();
+    expect(screen.queryByText('chat.artifactRewrite.errors.previewFailed')).not.toBeInTheDocument();
+  });
+
   it('does not submit an empty or whitespace-only instruction', () => {
     const requestPreview = renderDialog();
     const input = screen.getByRole('textbox');

@@ -212,6 +212,7 @@ func normalizeRewriteIRDefaults(value map[string]any, root bool) {
 		defaults["metadata"] = map[string]any{}
 	} else {
 		defaults["content"], defaults["editable"], defaults["target_chars"] = "", true, nil
+		defaults["outline_description"] = ""
 		defaults["provider_payload"], defaults["numbering"] = map[string]any{}, map[string]any{}
 		for _, key := range []string{"spans", "references", "children", "context_relations", "subtasks"} {
 			defaults[key] = []any{}

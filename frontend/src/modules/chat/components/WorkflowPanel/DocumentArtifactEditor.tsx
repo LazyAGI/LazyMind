@@ -35,6 +35,9 @@ function key() { return crypto.randomUUID(); }
 function responseCode(error: unknown): string | undefined {
   return (error as { response?: { data?: { data?: { code?: string } } } })?.response?.data?.data?.code;
 }
+function rewriteConflict(code: 'DRAFT_VERSION_CONFLICT' | 'SELECTION_STALE'): Error & { code: string } {
+  return Object.assign(new Error(code), { code });
+}
 type Baseline = { id: string; revision: number; draft?: number; value: unknown };
 
 async function readDocumentValue(value: unknown, representation: string): Promise<unknown> {
@@ -86,6 +89,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   const latest = useRef(initial);
   const external = useRef(initial);
   const dirty = useRef(false);
+  const [hasLocalChanges, setHasLocalChanges] = useState(false);
   const seen = useRef('');
   const retainedPublicationSource = useRef<unknown>();
   const incomingValue = useRef(initial.value);
@@ -119,14 +123,18 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   const downloadPending = useRef(false);
   const retryDownload = useRef<() => void>();
   const publishPending = useRef(false);
-  const [publicationStatus, setPublicationStatus] = useState('');
+  const [publicationStatus, setPublicationStatus] = useState<{ signature: string; text: string }>();
+  const slotSignature = JSON.stringify([slot.artifact_id, slot.revision, slot.draft_version]);
+  const [currentSignature, setCurrentSignature] = useState(slotSignature);
   const [publicationUrl, setPublicationUrl] = useState(() => documentPublicationTargetUrl({ uri: slot.write_back_url, doc_id: slot.provider_document_id }, slot.provider));
   const publicationSucceeded = useCallback((url: string | undefined, provider?: string) => {
     setPublicationUrl(url);
-    setPublicationStatus(current => provider === 'wechat' && !url
-      ? String(i18n.t('chat.writerIR.wechatDraftLinkUnavailable'))
-      : current === String(i18n.t('chat.writerLocal.publishedWithEdits')) ? current : String(i18n.t('chat.writerIR.writeBackSuccess')));
-  }, []);
+    // A recovered publication must not mark newer local content as synced.
+    if (dirty.current || slot.write_back_state === 'synced_dirty'
+      || slotSignature !== JSON.stringify([latest.current.id, latest.current.revision, latest.current.draft])) return;
+    setPublicationStatus({ signature: slotSignature, text: provider === 'wechat' && !url
+      ? String(i18n.t('chat.writerIR.wechatDraftLinkUnavailable')) : String(i18n.t('chat.writerIR.writeBackSuccess')) });
+  }, [slotSignature, slot.write_back_state]);
   const [authorizationNeeded, setAuthorizationNeeded] = useState('');
   const [providerRefresh, setProviderRefresh] = useState(0);
   const availability = useWriterProviderAvailability(providers.map(provider => provider.id));
@@ -183,7 +191,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       // A delayed parent refresh must not undo a save or publication we accepted.
       if (next.revision < latest.current.revision || (next.revision === latest.current.revision && (next.draft ?? 0) < (latest.current.draft ?? 0))) return;
       external.current = next;
-      if (!dirty.current) { latest.current = next; draftContent.current = content; }
+      if (!dirty.current) { latest.current = next; draftContent.current = content; setCurrentSignature(signature); }
       // A publication refresh must not replace the editor holding newer local edits.
       if (dirty.current && (retainedPublicationSource.current !== undefined || publishPending.current)
         && typeof content !== typeof draftContent.current) return;
@@ -206,15 +214,19 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     const newerEdits = JSON.stringify(draftContent.current) !== JSON.stringify(submitted);
     const next = { id, revision, draft, value: content };
     latest.current = next; external.current = next;
+    setCurrentSignature(JSON.stringify([id, revision, draft]));
     if (!newerEdits) { dirty.current = false; draftContent.current = content; }
+    setHasLocalChanges(dirty.current);
     retainedPublicationSource.current = newerEdits && typeof submitted !== typeof content ? submitted : undefined;
     setValue(retainedPublicationSource.current ?? content); setVersion(revision);
   }, []);
   const edit = useCallback((content: unknown) => {
     draftContent.current = content;
     dirty.current = JSON.stringify(content) !== JSON.stringify(retainedPublicationSource.current ?? external.current.value);
+    setHasLocalChanges(dirty.current);
     if (!dirty.current) {
       latest.current = external.current;
+      setCurrentSignature(JSON.stringify([external.current.id, external.current.revision, external.current.draft]));
       if (retainedPublicationSource.current !== undefined) {
         retainedPublicationSource.current = undefined;
         draftContent.current = external.current.value;
@@ -337,7 +349,8 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   const applyPreview = async () => {
     if (!preview?.value.commit?.token) return undefined;
     const baseline=previewSource.current;
-    if (dirty.current || !baseline || external.current.id!==baseline.id || external.current.revision!==baseline.revision || external.current.draft!==baseline.draft) throw new Error('rewrite baseline changed');
+    if (dirty.current) throw rewriteConflict('SELECTION_STALE');
+    if (!baseline || external.current.id!==baseline.id || external.current.revision!==baseline.revision || external.current.draft!==baseline.draft) throw rewriteConflict('DRAFT_VERSION_CONFLICT');
     const response = await WorkflowSessionApi().executeDocumentAction(preview.id, { action: 'rewrite_selection',
       base_revision: preview.value.base_revision, base_draft_version: preview.value.base_draft_version,
       input: { commit_token: preview.value.commit.token } });
@@ -362,14 +375,15 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
         input: { provider, mode: 'replace', idempotency_key: key() } } };
     }
     const request = attempt.current;
-    publishPending.current = true; setPublishingProvider(provider); setError(''); setErrorAction(null); setPublicationStatus('');
+    publishPending.current = true; setPublishingProvider(provider); setError(''); setErrorAction(null); setPublicationStatus(undefined);
     try {
       const response = await WorkflowSessionApi().publishDocument(request.id, request.body, { silentError: true } as never);
       const result = response.data.data;
       if (!result.provider_synced || !result.artifact_saved || !result.artifact_id) throw new Error('publication did not complete');
       accept(result.artifact_id, result.revision, result.draft_version, result.document, current.value);
       setPublicationUrl(documentPublicationTargetUrl(result.target_document, provider));
-      setPublicationStatus(String(i18n.t(dirty.current ? 'chat.writerLocal.publishedWithEdits' : 'chat.writerIR.writeBackSuccess')));
+      setPublicationStatus({ signature: JSON.stringify([result.artifact_id, result.revision, result.draft_version]),
+        text: String(i18n.t(dirty.current ? 'chat.writerLocal.publishedWithEdits' : 'chat.writerIR.writeBackSuccess')) });
       attempt.current = undefined; onRefresh?.();
     } catch (failure) {
       const code = responseCode(failure);
@@ -421,6 +435,12 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     try { remembered = localStorage.getItem('writer-publish-provider'); } catch { /* Storage preferences are optional. */ }
     const preferred = providers.find(provider => provider.id === slot.provider)?.id ?? providers.find(provider => provider.id === remembered)?.id ?? providers[0]?.id;
     const authorizationStatus = (provider: string) => availability.states[provider] === 'ready' ? '' : String(i18n.t(availability.states[provider] === 'chat-disabled' ? 'chat.writerLocal.feishuChatDisabledShort' : availability.states[provider] === 'authorize' ? 'chat.writerLocal.authorizeShort' : availability.states[provider] === 'failed' ? 'chat.writerLocal.platformFailed' : 'chat.writerLocal.checking'));
+    const confirmedStatus = publicationStatus?.signature === currentSignature ? publicationStatus.text : '';
+    // Slot metadata may still describe the version before the latest local save.
+    const synced = slot.write_back_state === 'synced_clean' && slotSignature === currentSignature;
+    const successStatus = busy || publicationBlocked ? '' : hasLocalChanges
+      ? (confirmedStatus === String(i18n.t('chat.writerLocal.publishedWithEdits')) ? confirmedStatus : '')
+      : confirmedStatus || (synced ? String(i18n.t('chat.writerIR.writeBackSuccess')) : '');
     return registerFooterAction(`${editingKey}:publish`, {
       label: publishingProvider !== null ? String(i18n.t('chat.writerLocal.publishing', { provider: providerLabel(publishingProvider) }))
         : providers.length === 1 ? String(i18n.t(slot.provider === preferred && slot.write_back_ready ? 'chat.writerLocal.update' : 'chat.writerLocal.create', { provider: providerLabel(preferred) })) : String(i18n.t('chat.writerLocal.publishTo')),
@@ -449,10 +469,10 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
           onClick: () => chooseRef.current(provider.id),
         };
       }) : undefined,
-      statusText: error && authorizationNeeded ? undefined : error || publicationStatus || (providers.length === 1 && preferred ? authorizationStatus(preferred) : undefined), statusTone: error ? 'error' : 'success',
+      statusText: error && authorizationNeeded ? undefined : error || successStatus || (providers.length === 1 && preferred ? authorizationStatus(preferred) : undefined), statusTone: error ? 'error' : 'success',
       statusLink: publicationUrl ? { href: publicationUrl, label: String(i18n.t('chat.writerIR.openCloudDocument')) } : undefined,
     });
-  }, [active, writable, descriptor.capabilities, registerFooterAction, editingKey, loaded, providers, busy, publishingProvider, publicationBlocked, error, authorizationNeeded, publicationStatus, publicationUrl, slot.provider, slot.write_back_ready, availability.states]);
+  }, [active, writable, descriptor.capabilities, registerFooterAction, editingKey, loaded, providers, busy, publishingProvider, publicationBlocked, error, authorizationNeeded, publicationStatus, publicationUrl, slot.provider, slot.write_back_ready, slot.write_back_state, availability.states, currentSignature, slotSignature, hasLocalChanges]);
 
   if (!loaded) return <div role='status'>{error || '…'}</div>;
   const versionHistory = VersionHistory && sessionId ? <VersionHistory sessionId={sessionId} slotId={slot.slot_id}
@@ -501,6 +521,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       baseRevision={latest.current.revision} baseDraftVersion={latest.current.draft} selection={selection}
       onClose={() => setSelection(null)} onApplied={() => { setPreview(null); onRefresh?.(); }}
       requestPreview={async (instruction, picked) => {
+        if (dirty.current && flushEditor.current && !await flushEditor.current()) throw rewriteConflict('DRAFT_VERSION_CONFLICT');
         const current = latest.current; previewSource.current = { ...current };
         if (picked.type === 'ppt_html') throw new Error('unsupported document selection');
         const response = await WorkflowSessionApi().previewDocumentAction(current.id, { action: 'rewrite_selection',

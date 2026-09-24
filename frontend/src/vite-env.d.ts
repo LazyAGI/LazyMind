@@ -40,6 +40,9 @@ declare global {
       selectLocalWorkspace?: () => Promise<unknown> | unknown;
       reauthorizeLocalWorkspace?: (workspaceId: string) => Promise<unknown> | unknown;
       authorizeLocalWorkspace?: (selectionToken: string) => Promise<unknown> | unknown;
+      obsidianConfigStatus?: () => Promise<unknown> | unknown;
+      selectObsidianRoot?: () => Promise<unknown> | unknown;
+      clearObsidianRoot?: () => Promise<unknown> | unknown;
       exportDiagnostics?: () => Promise<string> | string;
       openCloudLogin?: (url: string) => Promise<unknown> | unknown;
       openCloudRegister?: () => Promise<unknown> | unknown;

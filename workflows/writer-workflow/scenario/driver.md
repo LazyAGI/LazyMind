@@ -7,7 +7,7 @@ value is merely a local path string does not satisfy an output and must be RETRY
 
 ## prepare
 
-- PASS when writing_task, media_assets, resource_profiles, and writing_context exist.
+- PASS when writing_task, media_assets, and writing_context exist.
   media_assets may contain an empty assets mapping when no image was uploaded.
 - If the request required a Feishu/Lark, Notion, or WeChat source, source_document and
   target_document must exist.
@@ -17,7 +17,7 @@ value is merely a local path string does not satisfy an output and must be RETRY
 
 ## outline
 
-- PASS when outline_document and writing_context_after_outline exist.
+- PASS when outline_document exists.
 - outline_document must be Markdown, or WriterDocument IR with stage="outline" and
   ui_editable=true. Both outline_document and draft_document remain locally editable.
 - For generate/prepare mode, revision internals are not required.
@@ -28,11 +28,11 @@ value is merely a local path string does not satisfy an output and must be RETRY
 
 ## write_document
 
-- PASS when draft_document and writing_context_after_draft exist.
+- PASS when draft_document exists.
 - draft_document must be Markdown, or non-outline WriterDocument IR with ui_editable=true.
 - An outline-stage artifact saved under draft_document is invalid and must be RETRY.
-- Sectioned generation/rewrite mode requires section_instructions and draft_blocks in the
-  selected representation.
+- Generation/rewrite requires section_instructions. Only per-section generation requires
+  draft_blocks; whole-document generation does not produce draft_blocks.
 - IR generation also requires visual_plan and resolved_media_assets. IR generation must
   not create a second Markdown draft artifact.
 - For targeted revision mode, document_revision_task, document_locate_result,
@@ -51,7 +51,7 @@ value is merely a local path string does not satisfy an output and must be RETRY
 
 ## write_flat_document
 
-- PASS when flat_draft_document, flat_writing_context_after_draft, short_writing_plan, and
+- PASS when flat_draft_document, short_writing_plan, and
   flat_visual_plan exist.
 - flat_draft_document must be Markdown, or a non-outline WriterDocument IR with ui_editable=true.
 - outline_document, section_instructions, and draft_blocks must not be produced.

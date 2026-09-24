@@ -185,6 +185,9 @@ func newPortableServer(t *testing.T, f portableFixture, format string, snapshot 
 	spy := &portableServer{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if serveDynamicLLMRole(w, r) {
+			return
+		}
 		if r.Method != "POST" || (r.URL.Path != "/api/document:inspect" && r.URL.Path != "/api/document/actions:invoke") {
 			t.Errorf("unexpected Algorithm/Provider call %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(404)
@@ -542,7 +545,7 @@ func TestDocumentConvertAuthorizationAndBaselines(t *testing.T) {
 }
 
 func TestDocumentConvertFailureAndCancellation(t *testing.T) {
-	for _, kind := range []string{"upstream", "invalid JSON", "missing content", "non-string content", "wrong format", "nonempty provider", "cancel"} {
+	for _, kind := range []string{"upstream", "pandoc", "invalid JSON", "missing content", "non-string content", "wrong format", "nonempty provider", "cancel"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newPortableFixture(t, "markdown", false)
 			spy := newPortableServer(t, f, "latex", nil, false)
@@ -552,6 +555,9 @@ func TestDocumentConvertFailureAndCancellation(t *testing.T) {
 			case "upstream":
 				spy.status = 502
 				spy.rawResponse = `{"detail":{"code":"WORKFLOW_ACTION_FAILED","message":"private-upstream-detail"}}`
+			case "pandoc":
+				spy.status = 502
+				spy.rawResponse = `{"detail":{"code":"PANDOC_NOT_FOUND","message":"private executable path"}}`
 			case "invalid JSON":
 				spy.rawResponse = `not-json`
 			case "missing content":
@@ -599,8 +605,16 @@ func TestDocumentConvertFailureAndCancellation(t *testing.T) {
 				code := "DOCUMENT_ACTION_RESULT_INVALID"
 				if kind == "upstream" {
 					code = "DOCUMENT_ACTION_FAILED"
+				} else if kind == "pandoc" {
+					code = "DOCUMENT_CONVERSION_FAILED"
 				}
-				rewriteError(t, f.post(t.Context(), "preview", "descriptor-owner", f.body("latex"), ""), 502, code)
+				w := f.post(t.Context(), "preview", "descriptor-owner", f.body("latex"), "")
+				rewriteError(t, w, 502, code)
+				if kind == "pandoc" {
+					if !strings.Contains(w.Body.String(), `"cause":"PANDOC_NOT_FOUND"`) || strings.Contains(w.Body.String(), "private executable path") {
+						t.Fatalf("Pandoc failure was not safely exposed: %s", w.Body.String())
+					}
+				}
 			}
 			requirePortableCosts(t, costs)
 			if portableState(t, f) != before {

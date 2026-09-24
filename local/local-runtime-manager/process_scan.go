@@ -93,6 +93,13 @@ func stopLocalProcessRecords(ctx context.Context, records []LocalProcessRecord) 
 	})
 }
 
+func processStopTarget(record LocalProcessRecord, currentPGID int, groupID func(int) int) int {
+	if record.PGID <= 0 || record.PGID == currentPGID || groupID(record.PID) != record.PGID {
+		return record.PID
+	}
+	return record.PGID
+}
+
 type processStopOptions struct {
 	interrupt       func(int) error
 	forceKill       func(int) error
@@ -106,8 +113,17 @@ func stopLocalProcessRecordsWith(ctx context.Context, records []LocalProcessReco
 	if len(records) == 0 {
 		return nil
 	}
+	currentPGID := processGroupID(os.Getpid())
 	for _, record := range records {
-		_ = options.interrupt(record.PID)
+		// A scanned orphan has no managed service lifecycle to preserve. In
+		// particular, Python's multiprocessing resource tracker ignores SIGINT
+		// and SIGTERM, so the normal graceful group interrupt cannot stop it.
+		// Kill the individual process instead of trusting a stale process group.
+		if record.Service == "local-runtime-orphan" {
+			_ = options.forceKill(record.PID)
+			continue
+		}
+		_ = options.interrupt(processStopTarget(record, currentPGID, processGroupID))
 	}
 	deadline := time.NewTimer(options.gracefulTimeout)
 	defer deadline.Stop()
@@ -121,12 +137,12 @@ func stopLocalProcessRecordsWith(ctx context.Context, records []LocalProcessReco
 		select {
 		case <-ctx.Done():
 			for _, record := range remaining {
-				_ = options.forceKill(record.PID)
+				_ = options.forceKill(processStopTarget(record, currentPGID, processGroupID))
 			}
 			return ctx.Err()
 		case <-deadline.C:
 			for _, record := range remaining {
-				_ = options.forceKill(record.PID)
+				_ = options.forceKill(processStopTarget(record, currentPGID, processGroupID))
 			}
 			return waitForStoppedLocalProcessRecords(ctx, records, options)
 		case <-ticker.C:

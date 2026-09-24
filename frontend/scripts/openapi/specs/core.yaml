@@ -10591,6 +10591,18 @@ components:
             properties:
                 artifact_saved:
                     type: boolean
+                cause:
+                    enum:
+                        - PANDOC_NOT_FOUND
+                        - PANDOC_NOT_EXECUTABLE
+                        - PANDOC_VERSION_UNSUPPORTED
+                        - PANDOC_TIMEOUT
+                        - PANDOC_INPUT_TOO_LARGE
+                        - PANDOC_OUTPUT_TOO_LARGE
+                        - PANDOC_TEMPLATE_INVALID
+                        - PANDOC_FILTER_FAILED
+                        - PANDOC_CONVERSION_FAILED
+                    type: string
                 code:
                     enum:
                         - IDENTITY_REQUIRED

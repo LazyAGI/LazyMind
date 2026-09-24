@@ -8,6 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"lazymind/core/common/orm"
 	"lazymind/core/modelconfig"
+	"lazymind/core/modelprovider"
 	"lazymind/core/workflow/artifactgraph"
 	"lazymind/core/workflow/document"
 )
@@ -44,8 +45,10 @@ func (r *Repository) DescribeArtifact(ctx context.Context, owner string, artifac
 
 	if artifact.Document != nil && artifact.Document.Editable {
 		config, err := modelconfig.LoadLLMConfig(ctx, r.db, owner)
-		if err == nil && RewriteModelAvailable(config) {
-			artifact.Document.Capabilities = append(artifact.Document.Capabilities, "rewrite_selection")
+		if err == nil {
+			if ready, err := RewriteModelAvailable(ctx, config); err == nil && ready {
+				artifact.Document.Capabilities = append(artifact.Document.Capabilities, "rewrite_selection")
+			}
 		}
 	}
 	// Conversion, numbering and cross-reference lookup are read-only, so live
@@ -101,10 +104,15 @@ func DocumentSessionEditable(session *orm.WorkflowSession) bool {
 	}
 }
 
-func RewriteModelAvailable(config map[string]any) bool {
+func RewriteModelAvailable(ctx context.Context, config map[string]any) (bool, error) {
 	llm, ok := config["llm"].(map[string]any)
 	model, _ := llm["model"].(string)
-	return ok && model != ""
+	if ok && model != "" {
+		return true, nil
+	}
+	// Static Runtime models do not require a user model selection in Core.
+	isDynamic, err := modelprovider.FetchRoleIsDynamic(ctx, "llm")
+	return err == nil && !isDynamic, err
 }
 
 // PinnedMarkdownHint reads only the immutable revision associated with this

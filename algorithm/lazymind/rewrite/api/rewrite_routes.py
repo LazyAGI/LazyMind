@@ -59,7 +59,8 @@ def rewrite(payload: RewritePayload):
     try:
         _init_session(payload.task_type, payload.llm_config)
         if payload.task_type == 'polish' and payload.full_content is not None:
-            return rewrite_ranges(payload.full_content, payload.selection_ranges, payload.user_instruct)
+            return rewrite_ranges(payload.full_content, payload.selection_ranges, payload.user_instruct,
+                                  llm_config=payload.llm_config)
         generated = rewrite_content(
             task_type=payload.task_type,
             content=payload.content,

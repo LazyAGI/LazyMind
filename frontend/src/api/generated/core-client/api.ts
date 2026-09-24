@@ -2748,12 +2748,27 @@ export interface DocumentActionArtifact {
 }
 export interface DocumentActionErrorOpenAPIData {
     'artifact_saved'?: boolean;
+    'cause'?: DocumentActionErrorOpenAPIDataCauseEnum;
     'code': DocumentActionErrorOpenAPIDataCodeEnum;
     'operation_id'?: string;
     'provider'?: string;
     'provider_synced'?: boolean;
     'retryable'?: boolean;
 }
+
+export const DocumentActionErrorOpenAPIDataCauseEnum = {
+    PandocNotFound: 'PANDOC_NOT_FOUND',
+    PandocNotExecutable: 'PANDOC_NOT_EXECUTABLE',
+    PandocVersionUnsupported: 'PANDOC_VERSION_UNSUPPORTED',
+    PandocTimeout: 'PANDOC_TIMEOUT',
+    PandocInputTooLarge: 'PANDOC_INPUT_TOO_LARGE',
+    PandocOutputTooLarge: 'PANDOC_OUTPUT_TOO_LARGE',
+    PandocTemplateInvalid: 'PANDOC_TEMPLATE_INVALID',
+    PandocFilterFailed: 'PANDOC_FILTER_FAILED',
+    PandocConversionFailed: 'PANDOC_CONVERSION_FAILED'
+} as const;
+
+export type DocumentActionErrorOpenAPIDataCauseEnum = typeof DocumentActionErrorOpenAPIDataCauseEnum[keyof typeof DocumentActionErrorOpenAPIDataCauseEnum];
 
 export const DocumentActionErrorOpenAPIDataCodeEnum = {
     IdentityRequired: 'IDENTITY_REQUIRED',

@@ -9,7 +9,9 @@ Desktop mode wraps the existing host-process Local runtime in an Electron shell.
 | macOS arm64 | `make local-up` / `make local-down` | `make desktop-darwin-arm64` (internal ZIP) / `make desktop-darwin-arm64-dmg` (signed DMG) |
 | Windows x64 | `make local-win-up` / `make local-win-down` | `make desktop-windows-x64` (portable ZIP) / `make desktop-windows-x64-installer` (installer) |
 
-Desktop packages bundle the Go services, process-compose, Caddy, the compiled frontend, Python 3.11 runtime, auth/algorithm venvs, LazyLLM, Milvus Lite 3, and the Local dependency overlay. Model weights are not bundled.
+Desktop packages bundle the Go services, process-compose, Caddy, Pandoc 3.11, the compiled frontend, Python 3.11 runtime, auth/algorithm venvs, LazyLLM, Milvus Lite 3, and the Local dependency overlay. Model weights are not bundled.
+
+Pandoc release URLs and SHA-256 pins live in `desktop/dependencies/pandoc.json`. Desktop builds reuse verified archives from `desktop/cache/dependencies/pandoc`, try `LAZYMIND_PANDOC_MIRROR_URL` first when configured, then the project-controlled mainland mirror list, and finally the official upstream release. The packaged algorithm services receive the absolute binary path through `LAZYMIND_PANDOC_PATH`; end users do not download or configure Pandoc.
 
 Release history samples are not stored in Git. Windows and macOS build entrypoints download the URL pinned in `desktop/history-injection-package.json`, verify its size and SHA-256, and include the outer archive as `resources/runtime/history-injection.zip`. Installer/first-launch warmup verifies it again, extracts only its `history-injection/` subtree into the mutable user runtime, and then starts Core so the conversations and artifacts are injected. The signed macOS application bundle is never modified during this process.
 

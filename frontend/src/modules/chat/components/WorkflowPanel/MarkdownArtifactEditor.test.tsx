@@ -485,6 +485,32 @@ describe('MarkdownArtifactEditor MDX compatibility', () => {
       '```',
     ].join('\n'));
   });
+
+  it.each([
+    '![人物关系图](<_assets/ac/image.jpg>)',
+    '![人物[关系]图](<_assets/ac/image.jpg> "人物关系")',
+    '![图]( <_assets/人物 关系{1}.jpg> )',
+    '![图](</Users/example/Application Support/LazyMind/image.jpg>)',
+    '![图](<https://example.com/image.jpg>)',
+    '[查看原图](<_assets/ac/image.jpg>)',
+  ])('preserves bracketed Markdown destinations: %s', (markdown) => {
+    const { container } = render(
+      <MarkdownArtifactEditor markdown={markdown} sourceRevision={1} onSave={async () => 1} />,
+    );
+
+    expect(container.querySelector<HTMLElement>('.writer-markdown-editor__surface')?.dataset.markdown)
+      .toBe(markdown);
+  });
+
+  it('still escapes angle brackets in plain text and incomplete image destinations', () => {
+    const markdown = '普通文本 <_assets/image.jpg>\n\n![图](<_assets/image.jpg>';
+    const { container } = render(
+      <MarkdownArtifactEditor markdown={markdown} sourceRevision={1} onSave={async () => 1} />,
+    );
+
+    expect(container.querySelector<HTMLElement>('.writer-markdown-editor__surface')?.dataset.markdown)
+      .toBe('普通文本 \\<_assets/image.jpg>\n\n![图](\\<_assets/image.jpg>');
+  });
 });
 
 describe('MarkdownArtifactEditor rewrite selection highlight', () => {

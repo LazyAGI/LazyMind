@@ -205,7 +205,7 @@ describe('Writer Markdown system anchors', () => {
   });
 
   it('keeps outline instructions hidden from the editor and restores them on save', () => {
-    const sidecar = '<!-- writer:outline {"node_id":"sec-1","target_chars":1200,"context_relations":[],"subtasks":[{"subtask_id":"st-1","subtask_type":"retrieve","question":"补充行业数据","status":"pending"}]} -->';
+    const sidecar = '<!-- writer:outline {"node_id":"sec-1","target_chars":1200,"outline_description":"本节介绍系统设计并核实行业数据。","context_relations":[],"subtasks":[{"subtask_id":"st-1","subtask_type":"retrieve","question":"补充行业数据","status":"pending"}]} -->';
     const source = [
       '# 标题',
       '',
@@ -364,7 +364,7 @@ describe('Writer Markdown system anchors', () => {
       '# 产品架构说明',
       '<a id="block-sec-1"></a>',
       '## 系统设计',
-      '<!-- writer:outline {"node_id":"ignored","target_chars":900,"context_relations":[{"relation":"continuity","target_node_id":"sec-0","guidance":"承接背景"}],"subtasks":[{"subtask_id":"st-1","subtask_type":"reason","question":"比较两种方案","status":"pending"}]} -->',
+      '<!-- writer:outline {"node_id":"ignored","target_chars":900,"outline_description":"本节承接背景，比较两种方案。","context_relations":[{"relation":"continuity","target_node_id":"sec-0","guidance":"承接背景"}],"subtasks":[{"subtask_id":"st-1","subtask_type":"reason","question":"比较两种方案","status":"pending"}]} -->',
     ].join('\n');
 
     expect(collectWriterMarkdownOutline(source).items[0]).toEqual({
@@ -373,6 +373,7 @@ describe('Writer Markdown system anchors', () => {
       level: 2,
       instructions: {
         node_id: 'sec-1',
+        outline_description: '本节承接背景，比较两种方案。',
         target_chars: 900,
         context_relations: [{
           relation: 'continuity',

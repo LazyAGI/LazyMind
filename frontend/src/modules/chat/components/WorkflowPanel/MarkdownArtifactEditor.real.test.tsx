@@ -164,3 +164,33 @@ it('preserves link and text spelling after inspecting read-only source',async()=
  await waitFor(()=>expect(onSave).toHaveBeenCalledTimes(1),{timeout:2500});
  expect(onSave.mock.calls[0][0]).toBe(source.replace('Old','New'));
 });
+
+
+it('shows outline prose without labels and keeps it out of editable Markdown across save and refresh', async () => {
+  const description = '用约800字介绍部署方式，并在成稿前核实所需硬件与维护成本。';
+  const displayed = description;
+  const sidecar = '<!-- writer:outline ' + JSON.stringify({
+    node_id: 'sec-1', outline_description: description, target_chars: 800,
+    context_relations: [], subtasks: [{subtask_id: 'q-1', node_id: 'sec-1',
+      question: '需要哪些硬件？', subtask_type: 'retrieve', status: 'pending'}],
+  }) + ' -->';
+  const original = '# 方案\n\n<a id="block-sec-1"></a>\n## 部署方案\n' + sidecar + '\n\n原有说明。\n';
+  const onSave = vi.fn(async (markdown: string) => ({markdown, revision: 2}));
+  const {container, rerender} = render(<MarkdownArtifactEditor markdown={original} sourceRevision={1} onSave={onSave} />);
+  await waitFor(() => expect(container.querySelector('[data-writer-outline-description]')).toHaveAttribute('data-writer-outline-description', displayed));
+  const panel = container.querySelector('[data-writer-outline-description]');
+  expect(panel?.tagName).toBe('H2');
+  expect(panel?.querySelector('ul, table, strong, button')).toBeNull();
+  expect(panel).toHaveAttribute('data-writer-outline-description', displayed);
+  expect(capture.editor!.getMarkdown()).not.toContain(description);
+  await act(async () => capture.editor!.setMarkdown(capture.editor!.getMarkdown().replace('原有说明', '修改后的说明')));
+  await act(async () => capture.change?.(capture.editor!.getMarkdown(), false));
+  await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1), {timeout: 2500});
+  const saved = onSave.mock.calls[0][0];
+  expect(saved).toContain(sidecar);
+  expect(saved.split(description)).toHaveLength(2);
+  expect(saved).toContain('修改后的说明');
+  rerender(<MarkdownArtifactEditor markdown={saved} sourceRevision={2} onSave={onSave} />);
+  await waitFor(() => expect(container.querySelectorAll('[data-writer-outline-description]')).toHaveLength(1));
+  expect(container.querySelector('[data-writer-outline-description]')).toHaveAttribute('data-writer-outline-description', displayed);
+});

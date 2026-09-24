@@ -142,7 +142,12 @@ def _state_run_root(context: Any, name: str) -> Path:
 
 
 def _state_workspace_fingerprint(**values: str) -> str:
-    payload = json.dumps(values, ensure_ascii=False, sort_keys=True)
+    inputs = {
+        key: {'path': value, 'sha256': hashlib.sha256(Path(value).read_bytes()).hexdigest()}
+        if key.endswith('_path') and value and Path(value).is_file() else value
+        for key, value in values.items()
+    }
+    payload = json.dumps(inputs, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(payload.encode('utf-8')).hexdigest()
 
 
@@ -474,6 +479,7 @@ def writer_collect_available_media(
     writing_task_path: str,
     source_document_path: str = '',
     input_resources_path: str = '',
+    analyze_source_images: bool = True,
 ) -> dict:
     return _DOCUMENT_EXECUTION.invoke(
         globals(), '_writer_collect_available_media', locals(),
@@ -500,6 +506,7 @@ def writer_prepare_workspace(
     ] = 'create',
     source_filename: str = '',
     knowledge_text: str = '',
+    analyze_source_images: bool = False,
 ) -> dict:
     """Prepare one writing request.
 
@@ -507,6 +514,10 @@ def writer_prepare_workspace(
     document. It may identify either a document to edit or reference material for a
     new document; the authoritative request resolves that distinction. Provider
     document locators belong in ``user_input`` and are resolved as cloud documents.
+    Set ``analyze_source_images`` only when the request needs the contents of existing
+    images (explanation, visual selection, image editing, or style reference). Leave
+    it false for text edits, continuation, or generating a new image from text.
+    Independent uploaded reference images are still analyzed.
     """
     user_input = _authoritative_writer_user_input('')
     knowledge_text = _verified_knowledge_text(knowledge_text)
@@ -646,6 +657,7 @@ def writer_prepare_workspace(
         writing_task_path=writing_task,
         source_document_path=source_document if operation != 'use_outline' else '',
         input_resources_path=provider_input_resources,
+        analyze_source_images=analyze_source_images,
     )
     resource_profiles = writer_profile_resources(
         writing_task_path=writing_task,
@@ -663,7 +675,7 @@ def writer_prepare_workspace(
         'writer_command': writer_command,
         'writing_task': writing_task,
         'media_assets': media_result['media_assets'],
-        'resource_profiles': resource_profiles,
+        **({'resource_profiles': resource_profiles} if resource_profiles else {}),
         'writing_context': writing_context,
         'representation': representation,
         'structure_mode': command.structure_mode,
@@ -705,6 +717,7 @@ def _outline_workspace_fingerprint(
     outline_document_path: str,
 ) -> str:
     return _state_workspace_fingerprint(
+        context_version='base-only-v1',
         operation=operation,
         writing_context_path=writing_context_path,
         user_input=user_input,
@@ -743,7 +756,7 @@ def writer_outline_workspace() -> dict:
         'writer_command', require_workflow_binding=True,
     )
     writing_context_path = _authoritative_writer_input_path(
-        ('writing_context_after_outline', 'writing_context'),
+        'writing_context',
         require_workflow_binding=True,
     )
     writing_task_path = _authoritative_writer_input_path('writing_task')
@@ -885,12 +898,6 @@ def writer_outline_workspace() -> dict:
         state['result'] = result
         _persist_outline_workspace_state(state, checkpoint_path)
 
-    if not result.get('writing_context_after_outline'):
-        _emit_writer_progress('大纲已完成，正在更新写作上下文')
-        result['writing_context_after_outline'] = writer_update_writing_context(
-            content_artifact_path=result['outline_document'],
-            writing_context_path=writing_context_path,
-        )
     state['result'] = result
     _emit_writer_progress('大纲处理完成，正在保存工作区结果')
     state['saved_artifact_keys'] = _save_draft_workspace_artifacts(result)
@@ -1130,6 +1137,7 @@ def _draft_workspace_fingerprint(
     target_document_path: str,
 ) -> str:
     return _state_workspace_fingerprint(
+        generation_version='whole-5000-outline-instructions-v1',
         operation=operation,
         user_input=user_input,
         writing_task_path=writing_task_path,
@@ -1192,11 +1200,7 @@ def writer_draft_workspace() -> dict:
         'writing_task', require_workflow_binding=True,
     )
     writing_context_path = _authoritative_writer_input_path(
-        (
-            'writing_context_after_draft',
-            'writing_context_after_outline',
-            'writing_context',
-        ),
+        'writing_context',
         require_workflow_binding=True,
     )
     media_assets_path = _authoritative_writer_input_path('media_assets')
@@ -1283,7 +1287,7 @@ def writer_draft_workspace() -> dict:
                     outline_path=outline_document_path,
                     writing_context_path=writing_context_path,
                 )
-                _emit_writer_progress('子任务已完成，正在生成 section instructions')
+                _emit_writer_progress('子任务处理结束，正在生成章节写作指令')
                 planning = writer_generate_section_instructions(
                     writing_task_path=writing_task_path,
                     outline_path=result['outline_document'],
@@ -1387,7 +1391,9 @@ def writer_draft_workspace() -> dict:
                 resolved_media_assets_path=resolved_media,
                 document_title=document_title,
             )
-            result['draft_blocks'] = generated['draft_blocks']
+            if generated.get('draft_blocks'):
+                result['draft_blocks'] = generated['draft_blocks']
+            result['generation_mode'] = generated.get('generation_mode', 'sections')
             result['draft_document'] = generated['draft_document']
             result['representation'] = generated['representation']
             state['result'] = result
@@ -1506,12 +1512,6 @@ def writer_draft_workspace() -> dict:
         result['markdown_editor_prepared'] = True
         state['result'] = result
         _persist_draft_workspace_state(state, checkpoint_path)
-    if not result.get('writing_context_after_draft'):
-        _emit_writer_progress('正在更新成稿上下文')
-        result['writing_context_after_draft'] = writer_update_writing_context(
-            content_artifact_path=result['draft_document'],
-            writing_context_path=writing_context_path,
-        )
     state['result'] = result
     _persist_draft_workspace_state(state, checkpoint_path)
     _emit_writer_progress('成稿校验完成，正在保存工作区结果')
@@ -1524,7 +1524,6 @@ def writer_draft_workspace() -> dict:
 
 _FLAT_OUTPUT_SLOTS = {
     'draft_document': 'flat_draft_document',
-    'writing_context_after_draft': 'flat_writing_context_after_draft',
     'visual_plan': 'flat_visual_plan',
     'resolved_media_assets': 'flat_resolved_media_assets',
 }
@@ -1673,12 +1672,6 @@ def writer_flat_draft_workspace() -> dict:
         result['markdown_editor_prepared'] = True
         state['result'] = result
         _persist_draft_workspace_state(state, checkpoint_path)
-    if not result.get('writing_context_after_draft'):
-        _emit_writer_progress('正在更新短文成稿上下文')
-        result['writing_context_after_draft'] = writer_update_writing_context(
-            content_artifact_path=result['draft_document'],
-            writing_context_path=writing_context_path,
-        )
     state['result'] = result
     _persist_draft_workspace_state(state, checkpoint_path)
     _emit_writer_progress('短文成稿校验完成，正在保存工作区结果')
