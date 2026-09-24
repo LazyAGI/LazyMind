@@ -94,6 +94,13 @@ if (!existsSync(builtinSkillCatalog)) {
   console.error(`builtin Skill catalog is missing: ${builtinSkillCatalog}`);
   process.exit(1);
 }
+const builtinSkills = JSON.parse(readFileSync(builtinSkillCatalog, "utf8")).skills;
+for (const skill of builtinSkills) {
+  if (!skill.source_url?.startsWith("builtin://") && existsSync(path.join(runtimeRoot, "builtin-skills", skill.package_file))) {
+    console.error(`remote builtin Skill package must not be bundled: ${skill.uid}`);
+    process.exit(1);
+  }
+}
 const featuredSkillCatalog = path.join(runtimeRoot, "featured-skills", "catalog.json");
 if (!existsSync(featuredSkillCatalog)) {
   console.error(`featured Skill catalog is missing: ${featuredSkillCatalog}`);
@@ -148,8 +155,8 @@ const manifest = {
   } : {}),
   features: {
     trustedLocalMode: trustedLocalModeOption === "true",
-    offlineBuiltinSkills: true,
-    offlineFeaturedSkills: true
+    offlineBuiltinSkills: false,
+    offlineFeaturedSkills: false
   },
   binaries: {
     "process-supervisor": executable("process-compose"),

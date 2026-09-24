@@ -52,11 +52,9 @@ function nsisMacro(source, name) {
   return match[1];
 }
 
-function writeOfflineSkillFixtures(root) {
-  const packages = path.join(root, "builtin-skills", "packages");
-  mkdirSync(packages, { recursive: true });
+function writeSkillCatalogFixtures(root) {
+  mkdirSync(path.join(root, "builtin-skills"), { recursive: true });
   writeFileSync(path.join(root, "builtin-skills", "catalog.json"), '{"schema_version":1,"skills":[]}\n');
-  writeFileSync(path.join(packages, "fixture.zip"), "fixture");
   const featured = path.join(root, "featured-skills");
   mkdirSync(featured, { recursive: true });
   mkdirSync(path.join(featured, "assets"), { recursive: true });
@@ -76,7 +74,7 @@ for (const target of [
       for (const name of ["process-compose", "local-proxy", "core", "scan-control-plane", "file-watcher", "caddy"]) {
         writeFileSync(path.join(bin, `${name}${target.suffix}`), name);
       }
-      writeOfflineSkillFixtures(root);
+      writeSkillCatalogFixtures(root);
       execFileSync(process.execPath, [
         manifestScript,
         root,
@@ -88,8 +86,8 @@ for (const target of [
       assert.equal(manifest.arch, target.arch);
       assert.deepEqual(manifest.features, {
         trustedLocalMode: false,
-        offlineBuiltinSkills: true,
-        offlineFeaturedSkills: true,
+        offlineBuiltinSkills: false,
+        offlineFeaturedSkills: false,
       });
       assert.equal(manifest.binaries.core, `bin/core${target.suffix}`);
       assert.ok(manifest.checksums[`bin/core${target.suffix}`]);
@@ -107,7 +105,7 @@ for (const target of [
 test("writes trusted local mode into the desktop runtime manifest", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "lazymind-manifest-trusted-"));
   try {
-    writeOfflineSkillFixtures(root);
+    writeSkillCatalogFixtures(root);
     execFileSync(process.execPath, [
       manifestScript,
       root,
@@ -118,15 +116,31 @@ test("writes trusted local mode into the desktop runtime manifest", () => {
     const manifest = JSON.parse(readFileSync(path.join(root, "manifest.json"), "utf8"));
     assert.deepEqual(manifest.features, {
       trustedLocalMode: true,
-      offlineBuiltinSkills: true,
-      offlineFeaturedSkills: true,
+      offlineBuiltinSkills: false,
+      offlineFeaturedSkills: false,
     });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("macOS and Windows builds materialize offline assets before writing the runtime manifest", () => {
+test("desktop runtime manifest rejects a bundled remote Skill ZIP", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "lazymind-manifest-remote-skill-"));
+  try {
+    writeSkillCatalogFixtures(root);
+    mkdirSync(path.join(root, "builtin-skills", "packages"), { recursive: true });
+    writeFileSync(path.join(root, "builtin-skills", "packages", "remote.zip"), "remote");
+    writeFileSync(path.join(root, "builtin-skills", "catalog.json"), JSON.stringify({
+      schema_version: 1,
+      skills: [{ uid: "bsk_remote", source_url: "https://example.test/remote.zip", package_file: "packages/remote.zip" }],
+    }));
+    assert.throws(() => execFileSync(process.execPath, [manifestScript, root, "--platform", "windows", "--arch", "amd64"]), /remote builtin Skill package must not be bundled/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("macOS and Windows builds materialize locked catalogs before writing the runtime manifest", () => {
   const darwin = readFileSync(darwinBuildScript, "utf8");
   const windows = readFileSync(windowsBuildScript, "utf8");
   for (const source of [darwin, windows]) {
@@ -139,9 +153,13 @@ test("macOS and Windows builds materialize offline assets before writing the run
     assert.ok(manifest > historyPackage, "history samples must be downloaded before the runtime manifest is written");
     assert.match(source, /builtin-sources\.yaml/);
     assert.match(source, /builtin-skills\.lock\.json/);
+    assert.match(source, /--catalog-only/);
     assert.match(source, /featured-sources/);
     assert.match(source, /featured-output/);
   }
+  assert.match(darwin, /remove_generated_path "\$\{RUNTIME_ROOT\}\/builtin-skills"/);
+  assert.match(windows, /Remove-GeneratedPath \(Join-Path \$runtimeRoot 'builtin-skills'\)/);
+  assert.match(windows, /Remove-GeneratedPath \(Join-Path \$runtimeRoot 'featured-skills'\)/);
   assert.match(darwin, /--exclude "skills\/\.runtime"/);
   assert.match(darwin, /remove_generated_path "\$\{app_root\}\/skills\/\.runtime"/);
   for (const category of ["research", "review", "search"]) {

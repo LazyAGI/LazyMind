@@ -318,6 +318,8 @@ function Copy-RuntimeApp {
 }
 
 function Materialize-OfflineSkills {
+    Remove-GeneratedPath (Join-Path $runtimeRoot 'builtin-skills')
+    Remove-GeneratedPath (Join-Path $runtimeRoot 'featured-skills')
     $arguments = @(
         'run', './cmd/builtin-skill-bundle',
         '--sources', (Join-Path $repoRoot 'skills\builtin-sources.yaml'),
@@ -325,12 +327,11 @@ function Materialize-OfflineSkills {
         '--cache', (Join-Path $repoRoot 'desktop\cache\builtin-skills'),
         '--output', (Join-Path $runtimeRoot 'builtin-skills'),
         '--featured-sources', (Join-Path $repoRoot 'skills\featured'),
-        '--featured-output', (Join-Path $runtimeRoot 'featured-skills')
+        '--featured-output', (Join-Path $runtimeRoot 'featured-skills'),
+        '--frozen-lockfile',
+        '--catalog-only'
     )
-    if ($env:LAZYMIND_RELEASE_BUILD -eq 'true') {
-        $arguments += '--frozen-lockfile'
-    }
-    Invoke-NativeWithRetry 'Builtin Skill package download' 'go.exe' $arguments (Join-Path $repoRoot 'backend\core')
+    Invoke-NativeWithRetry 'Builtin Skill catalog preparation' 'go.exe' $arguments (Join-Path $repoRoot 'backend\core')
 }
 
 function New-DeferredPythonRuntimeStage {
@@ -384,7 +385,7 @@ function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind 
 
     Write-Host '==> Staging runtime application files'
     Copy-RuntimeApp
-    Write-Host '==> Materializing offline Skill packages and featured catalog'
+    Write-Host '==> Materializing locked Skill previews and featured catalog'
     Materialize-OfflineSkills
     Write-Host '==> Downloading verified history injection package'
     Invoke-Native 'node.exe' @(

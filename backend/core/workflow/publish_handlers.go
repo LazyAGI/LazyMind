@@ -362,7 +362,7 @@ func redetectSkillCapabilitiesForDraft(ctx context.Context, db *gorm.DB, draft *
 	var snapshot workflowSourceSkillSnapshot
 	var err error
 	if strings.HasPrefix(draft.SourceSkillRevisionID, "builtin:") {
-		snapshot, err = loadWorkflowBuiltinSkillPackage(draft.SourceSkillID)
+		snapshot, err = loadWorkflowBuiltinSkillPackage(ctx, draft.SourceSkillID)
 	} else {
 		snapshot, err = loadWorkflowSourceSkillRevision(ctx, db, draft.CreatedBy, draft.SourceSkillID, draft.SourceSkillRevisionID)
 	}

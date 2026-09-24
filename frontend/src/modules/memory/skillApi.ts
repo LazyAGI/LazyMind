@@ -1183,10 +1183,12 @@ export async function createSkillAsset(
 
 export async function enableBuiltinSkill(
   builtinSkillUid: string,
+  options?: { silentError?: boolean },
 ): Promise<SkillAssetRecord | null> {
-  const response = await skillsApi.apiCoreBuiltinSkillsBuiltinSkillUidEnablePost({
-    builtinSkillUid,
-  });
+  const response = await skillsApi.apiCoreBuiltinSkillsBuiltinSkillUidEnablePost(
+    { builtinSkillUid },
+    { timeout: 120_000, silentError: options?.silentError } as never,
+  );
   const payload = unwrapEnvelope<SkillDetailOpenAPIResponse>(response.data);
   if (!payload?.id && !payload?.skill_id) {
     return null;
@@ -1468,7 +1470,10 @@ export async function getSkillDistributionUpgradeStatus(
 export async function prepareSkillDistributionUpgrade(
   skillId: string,
 ): Promise<SkillDistributionUpgradePrepareRecord> {
-  const response = await skillsApi.apiCoreSkillsSkillIdDistributionUpgradePreparePost({ skillId });
+  const response = await skillsApi.apiCoreSkillsSkillIdDistributionUpgradePreparePost(
+    { skillId },
+    { timeout: 120_000 },
+  );
   const raw = toRawObject(
     unwrapEnvelope<SkillDistributionUpgradePrepareOpenAPIResponse>(response.data),
   ) || {};

@@ -135,7 +135,7 @@ func EnableBuiltinSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pkg, found, err := skillbuiltin.PackageByUID(uid)
+	catalogPackage, found, err := skillbuiltin.PackageByUID(uid)
 	if err != nil {
 		replyServiceError(w, err)
 		return
@@ -145,11 +145,18 @@ func EnableBuiltinSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	service := newSkillService(db)
-	if compatible, found, err := installedCompatibleBuiltinSkill(r, db, userID, pkg); err != nil {
+	compatible, found, err := installedCompatibleBuiltinSkill(r, db, userID, catalogPackage)
+	if err != nil {
 		replyServiceError(w, err)
 		return
-	} else if found {
-		if _, err := syncInstalledBuiltinSkill(r, service, compatible.ID, userID, pkg); err != nil {
+	}
+	pkg, err := skillbuiltin.AcquirePackageByUID(r.Context(), uid)
+	if err != nil {
+		replyError(w, "builtin skill package download failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	if found {
+		if _, err := syncInstalledBuiltinSkill(r, service, compatible.ID, userID, *pkg); err != nil {
 			replyServiceError(w, err)
 			return
 		}
@@ -157,9 +164,9 @@ func EnableBuiltinSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	source, cleanup, err := sourceForBuiltinPackage(pkg)
+	source, cleanup, err := sourceForBuiltinPackage(*pkg)
 	if err != nil {
-		replyServiceError(w, err)
+		replyError(w, "builtin skill package download failed: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 	defer cleanup()
@@ -183,11 +190,11 @@ func EnableBuiltinSkill(w http.ResponseWriter, r *http.Request) {
 			replyBuiltinSkillDetail(w, r, service, existingID, userID)
 			return
 		}
-		if compatible, found, findErr := installedCompatibleBuiltinSkill(r, db, userID, pkg); findErr != nil {
+		if compatible, found, findErr := installedCompatibleBuiltinSkill(r, db, userID, *pkg); findErr != nil {
 			replyServiceError(w, findErr)
 			return
 		} else if found {
-			if _, syncErr := syncInstalledBuiltinSkill(r, service, compatible.ID, userID, pkg); syncErr != nil {
+			if _, syncErr := syncInstalledBuiltinSkill(r, service, compatible.ID, userID, *pkg); syncErr != nil {
 				replyServiceError(w, syncErr)
 				return
 			}
@@ -251,11 +258,7 @@ func sourceForBuiltinPackage(pkg skillbuiltin.Package) (skillservice.SourceInput
 			Filename:   fmt.Sprintf("%s@%s#%s", pkg.UID, pkg.Version, pkg.SHA256),
 		}, func() {}, nil
 	}
-	zipPath, err := writeSkillPackageZip(pkg.Files)
-	if err != nil {
-		return skillservice.SourceInput{}, func() {}, err
-	}
-	return skillservice.SourceInput{Type: "local_zip", StoredPath: zipPath, Filename: pkg.UID + ".zip"}, func() { _ = os.Remove(zipPath) }, nil
+	return skillservice.SourceInput{}, func() {}, errors.New("builtin skill package download failed")
 }
 
 func installedBuiltinSkillID(r *http.Request, db *gorm.DB, userID, uid string) string {

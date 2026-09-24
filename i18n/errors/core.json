@@ -1852,5 +1852,6 @@
   "2003112": {"en-US": "Task sources exceed the supported limit", "zh-CN": "任务来源数量或大小超过限制"},
   "2003113": {"en-US": "Task update could not be saved", "zh-CN": "暂时无法保存任务更新"},
   "2003114": {"en-US": "The summary model returned instructions instead of a summary", "zh-CN": "摘要模型返回了指令而非摘要"},
-  "2003115": {"en-US": "The summary model returned empty content", "zh-CN": "摘要模型返回内容为空"}
+  "2003115": {"en-US": "The summary model returned empty content", "zh-CN": "摘要模型返回内容为空"},
+  "2003116": {"en-US": "The Skill package could not be downloaded or verified. Retry, or update the Skill catalog if it keeps failing.", "zh-CN": "技能包下载或校验失败，请重试；若持续失败，请更新技能目录"}
 }
