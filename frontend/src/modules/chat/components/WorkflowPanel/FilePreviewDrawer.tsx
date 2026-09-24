@@ -10,14 +10,10 @@ interface FilePreviewDrawerProps {
   url: string;
   onClose: () => void;
   content?: string;
-  onReload?: () => Promise<unknown>;
 }
 
-export function FilePreviewDrawer({ open, filename, url, onClose, content, onReload }: FilePreviewDrawerProps) {
+export function FilePreviewDrawer({ open, filename, url, onClose, content }: FilePreviewDrawerProps) {
   const { t } = useTranslation();
-  const [reloading, setReloading] = useState(false);
-  const [reloadFailed, setReloadFailed] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -65,20 +61,9 @@ export function FilePreviewDrawer({ open, filename, url, onClose, content, onRel
             type='button'
           >×</button>
         </div>
-        {onReload && <div className="file-preview-drawer__reload">
-          <button type="button" disabled={reloading} onClick={async () => {
-            setReloading(true); setReloadFailed(false);
-            try { await onReload(); setReloadKey(value => value + 1); } catch {
-              globalThis.performance?.mark?.("lazymind.task_display.artifact_reload_failed");
-              setReloadFailed(true);
-            }
-            finally { setReloading(false); }
-          }}>{t("taskCenter.ordinaryReload")}</button>
-          {reloadFailed && <span role="alert">{t("taskCenter.ordinaryArtifactActionFailed")}</span>}
-        </div>}
         <div className='file-preview-drawer__body'>
           {content !== undefined ? <pre className="ordinary-inline-preview">{content}</pre> : resolvedUrl ? (
-            <FileViewer key={reloadKey} file={resolvedUrl} fileName={filename} />
+            <FileViewer file={resolvedUrl} fileName={filename} />
           ) : (
             <div className='file-preview-drawer__loading'>{t('common.loading')}</div>
           )}

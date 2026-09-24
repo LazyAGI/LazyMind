@@ -227,7 +227,7 @@ describe("TaskCenter display modes", () => {
     expect(screen.getByRole("region", { name: /ordinaryFinalArtifacts/ })).toBeInTheDocument();
   });
 
-  it("reports stage artifact reload failures inside the open preview and preserves content", async () => {
+  it("previews stage artifacts without reload controls and reports metadata pagination failures", async () => {
     const originalReload = useTaskCenterStore.getState().loadOrdinaryTask;
     const reload = vi.fn().mockRejectedValue(new Error("Metadata unavailable"));
     const view = ordinary("preview", { stage_artifacts: [{
@@ -243,8 +243,8 @@ describe("TaskCenter display modes", () => {
       render(<TaskCenter sessionId="conversation-1" />);
       fireEvent.click(screen.getByRole("button", { name: "report.md" }));
       const dialog = screen.getByRole("dialog");
-      fireEvent.click(within(dialog).getByRole("button", { name: "taskCenter.ordinaryReload" }));
-      expect(await within(dialog).findByRole("alert")).toHaveTextContent("taskCenter.ordinaryArtifactActionFailed");
+      expect(within(dialog).queryByRole("button", { name: "taskCenter.ordinaryReload" })).not.toBeInTheDocument();
+      expect(reload).not.toHaveBeenCalled();
       expect(within(dialog).getByText("Existing public report")).toBeInTheDocument();
       fireEvent.keyDown(dialog, { key: "Escape" });
       fireEvent.click(screen.getByRole("button", { name: "taskCenter.ordinaryLoadMore" }));

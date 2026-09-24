@@ -2668,11 +2668,17 @@
         max-width: 820px;
         margin: 8px auto 0;
         align-self: center;
+
+        // Keep notes readable when the slide consumes the available height.
+        &:has(.writer-markdown-editor) {
+          min-height: 180px;
+        }
       }
 
       // Constrained speaker notes scroll inside the Markdown surface instead
       // of letting the editor's 300px content minimum get clipped by the card.
-      .workflow-slot--text > .writer-markdown-editor {
+      .workflow-slot--text > .writer-markdown-editor,
+      .workflow-slot--artifact .writer-markdown-editor {
         .writer-markdown-editor__document-layout {
           flex: 1 1 auto;
           min-height: 0;

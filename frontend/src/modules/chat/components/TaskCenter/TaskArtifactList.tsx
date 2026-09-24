@@ -75,7 +75,7 @@ function ArtifactRow({ artifact, onReload }: { artifact: PublicArtifact; onReloa
     </div>
     {error && <span className="ordinary-artifact-error" role="alert">{t("taskCenter.ordinaryArtifactActionFailed")}</span>}
     {(error || artifact.state === "unavailable" || artifact.state === "failed") && onReload && <button type="button" disabled={busy} onClick={() => void execute(onReload)}>{t("taskCenter.ordinaryReload")}</button>}
-    {preview && <FilePreviewDrawer open filename={artifact.name} url={previewUrl} content={artifact.inline_content} onReload={onReload} onClose={() => setPreview(false)} />}
+    {preview && <FilePreviewDrawer open filename={artifact.name} url={previewUrl} content={artifact.inline_content} onClose={() => setPreview(false)} />}
   </li>;
 }
 

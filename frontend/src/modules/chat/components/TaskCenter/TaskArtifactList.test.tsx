@@ -23,10 +23,11 @@ describe("ordinary stage artifacts", () => {
     expect(screen.getByText(/ordinaryUnknownSize/)).toBeInTheDocument();
   });
   it("previews inline content as text, traps focus and restores the initiating control", () => {
-    render(<TaskArtifactList artifacts={[file()]} />);
+    render(<TaskArtifactList artifacts={[file()]} onReload={vi.fn()} />);
     const trigger = screen.getByRole("button", { name: "Report.md" });
     trigger.focus(); fireEvent.click(trigger);
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).queryByRole("button", { name: "taskCenter.ordinaryReload" })).not.toBeInTheDocument();
     expect(screen.getByText(/<script>window.evil/)).toBeInTheDocument();
     expect(screen.getByRole("dialog").querySelector("script")).toBeNull();
     const close = screen.getByRole("button", { name: "chat.closePreview" });
@@ -69,13 +70,11 @@ describe("ordinary stage artifacts", () => {
       render(<TaskArtifactList artifacts={[file({ download_url: "/api/core/artifacts/test/download?signature=TEST_PRIVATE_SIGNATURE" })]} onReload={reload} />);
       fireEvent.click(screen.getByRole("button", { name: "taskCenter.download Report.md" }));
       await screen.findByRole("alert");
-      fireEvent.click(screen.getByRole("button", { name: "Report.md" }));
-      const dialog = screen.getByRole("dialog");
-      fireEvent.click(within(dialog).getByRole("button", { name: "taskCenter.ordinaryReload" }));
-      await within(dialog).findByRole("alert");
+      fireEvent.click(screen.getByRole("button", { name: "taskCenter.ordinaryReload" }));
+      await waitFor(() => expect(mark).toHaveBeenCalledTimes(2));
       expect(mark.mock.calls).toEqual([
         ["lazymind.task_display.artifact_action_failed"],
-        ["lazymind.task_display.artifact_reload_failed"],
+        ["lazymind.task_display.artifact_action_failed"],
       ]);
     } finally {
       if (original) Object.defineProperty(performance, "mark", original);
