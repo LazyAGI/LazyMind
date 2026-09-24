@@ -176,8 +176,9 @@ export function TaskServiceApi() {
       );
     },
     listConversationArtifacts(conversationId: string, options?: RawAxiosRequestConfig) {
+      const encodedId = encodeURIComponent(conversationId);
       return axiosInstance.get(
-        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/artifacts`,
+        `${coreApiBaseUrl}/conversations/${encodedId}/artifacts?projection=v2`,
         options,
       );
     },
@@ -192,6 +193,57 @@ export function TaskServiceApi() {
         `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}/artifacts`,
         options,
       );
+    },
+  };
+}
+
+export interface ArtifactRevisionItem {
+  artifact_id: string;
+  revision_id: string;
+  revision_no: number;
+  content_type?: string;
+  content_hash?: string;
+  size?: number;
+  caption?: string | null;
+  producer_type?: string;
+  created_at?: string;
+  published?: boolean;
+  change_summary?: string;
+  head_version?: number;
+}
+
+export function ArtifactV2Api() {
+  return {
+    listRevisions(artifactId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/artifacts/${encodeURIComponent(artifactId)}/revisions`,
+        options,
+      );
+    },
+    downloadRevisionUrl(revisionId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.post(
+        `${coreApiBaseUrl}/artifact-revisions/${encodeURIComponent(revisionId)}:download-url`,
+        {},
+        options,
+      );
+    },
+    moveHead(
+      artifactId: string,
+      channel: string,
+      body: { revision_id: string; version?: number },
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.post(
+        `${coreApiBaseUrl}/artifacts/${encodeURIComponent(artifactId)}/heads/${encodeURIComponent(channel)}:move`,
+        body,
+        options,
+      );
+    },
+    diffRevisions(fromId: string, toId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(`${coreApiBaseUrl}/artifact-revisions:diff`, {
+        ...options,
+        params: { from: fromId, to: toId, ...(options?.params || {}) },
+      });
     },
   };
 }

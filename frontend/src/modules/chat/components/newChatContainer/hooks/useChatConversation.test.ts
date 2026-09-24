@@ -1107,6 +1107,39 @@ describe("useChatConversation regeneration recovery", () => {
     );
   });
 
+  it("does not treat a structured 403 as a lost SSE connection", async () => {
+    const clientConversationId = "66666666-6666-4666-8666-666666666666";
+    const { listeners, onOpenSSE } = createPreparedStream(clientConversationId);
+    const onOpenResumeSSE = vi.fn();
+    const { result } = renderConversation({
+      onOpenSSE,
+      onOpenResumeSSE,
+    });
+
+    await act(async () => {
+      await result.current.sendMessage({ text: "run paused workflow", clearInput: false });
+    });
+    act(() => {
+      listeners.get("error")?.({
+        type: "error",
+        status: 403,
+        data: JSON.stringify({ code: 2000102, message: "forbidden" }),
+      });
+    });
+
+    expect(onOpenResumeSSE).not.toHaveBeenCalled();
+    expect(result.current.streamRecovery.status).toBe("idle");
+    expect(result.current.messageList[1]).toMatchObject({
+      run_status: "failed",
+      run_terminal: {
+        status: "failed",
+        reason: "runtime_failure",
+        code: "request_rejected",
+        partial_output: false,
+      },
+    });
+  });
+
   it("confirms only the prepared client conversation id from the first SSE event", async () => {
     vi.useFakeTimers();
     listConversationsMock.mockResolvedValue({

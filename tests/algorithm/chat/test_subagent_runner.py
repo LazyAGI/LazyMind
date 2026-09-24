@@ -1402,7 +1402,8 @@ def test_unconfigured_retrieval_is_not_exposed_by_subagent(monkeypatch):
 
 def test_display_plan_does_not_delay_execution_and_is_persisted_live(monkeypatch):
     import threading
-    db = _install_fake_db(monkeypatch)
+    task = {**_DEFAULT_TASK, 'params': {'required_output_artifact_keys': []}, 'output_artifact_keys': []}
+    db = _install_fake_db(monkeypatch, task)
     _install_fake_lazyllm(monkeypatch)
     _install_fake_build(monkeypatch)
     _install_fake_translator(monkeypatch)
@@ -1424,8 +1425,10 @@ def test_display_plan_does_not_delay_execution_and_is_persisted_live(monkeypatch
 
     monkeypatch.setattr(runner_mod, '_generate_display_plan', generate)
     monkeypatch.setattr(runner_mod, 'AgentExecutor', Executor)
-    monkeypatch.setattr(runner_mod, '_evaluate_completion', lambda *_, **__: (True, 'done'))
-    task = {**_DEFAULT_TASK, 'params': {'required_output_artifact_keys': []}, 'output_artifact_keys': []}
+    monkeypatch.setattr(
+        runner_mod, '_evaluate_completion',
+        lambda *_, **__: (True, 'done', ''),
+    )
     raw = asyncio.run(_collect(runner_mod.run_subagent_stream(_DEFAULT_TASK_ID, task_spec=task)))
     events = _sse_to_events(raw)
     assert next(e for e in events if e['type'] == 'plan')['steps'] == outline

@@ -83,6 +83,19 @@ function emitConversationEvent(
 }
 
 describe("task center workflow events", () => {
+  it("keeps logical panel identity separate from each turn's immutable delivery", async () => {
+    const base = { artifact_id: "receipt", v2_artifact_id: "logical", conversation_id: "conv", history_id: "h1", producer_type: "main_agent", slot: "a", content_type: "text", seq: 1, value: { text: "one" } };
+    useTaskCenterStore.getState().upsertConversationArtifact("conv", base);
+    useTaskCenterStore.getState().upsertConversationArtifact("conv", { ...base, history_id: "h2", value: { text: "two" } });
+    expect(useTaskCenterStore.getState().artifactsByConversation.conv).toHaveLength(1);
+    expect(useTaskCenterStore.getState().artifactsByConversation.conv[0].artifact_id).toBe("logical");
+    expect(useTaskCenterStore.getState().deliveriesByConversation.conv.map(item => item.value.text)).toEqual(["one", "two"]);
+    requestHarness.listConversationArtifacts.mockResolvedValue({ data: { artifacts: [{ ...base, artifact_id: "logical", value: { text: "one" } }], deliveries: useTaskCenterStore.getState().deliveriesByConversation.conv, history_order: { h1: 0, h2: 1 } } });
+    await useTaskCenterStore.getState().loadConversationArtifacts("conv");
+    expect(useTaskCenterStore.getState().artifactsByConversation.conv[0].value.text).toBe("one");
+    expect(useTaskCenterStore.getState().deliveriesByConversation.conv[1].value.text).toBe("two");
+    expect(useTaskCenterStore.getState().artifactHistoryOrderByConversation.conv).toEqual({ h1: 0, h2: 1 });
+  });
   beforeEach(() => {
     vi.useFakeTimers();
     sseHarness.callbacks.clear();
@@ -96,10 +109,13 @@ describe("task center workflow events", () => {
       activeConversationId: "",
       tasksByConversation: {},
       artifactsByConversation: {},
+      deliveriesByConversation: {},
+      artifactHistoryOrderByConversation: {},
       _loadingTasks: {},
       _queuedTaskLoads: {},
       _taskLoadErrors: {},
       _loadingArtifacts: {},
+      _queuedArtifactLoads: {},
       _convStream: null,
       _taskStreams: {},
     });
@@ -488,5 +504,97 @@ describe("task center workflow events", () => {
     await vi.advanceTimersByTimeAsync(100);
 
     expect(workflowState.loadActiveSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps a live artifact when an older REST snapshot resolves and queues a reload", async () => {
+    const firstSnapshot = deferred<{ data: { artifacts: any[] } }>();
+    const reconciledSnapshot = deferred<{ data: { artifacts: any[] } }>();
+    requestHarness.listConversationArtifacts
+      .mockImplementationOnce(() => firstSnapshot.promise)
+      .mockImplementationOnce(() => reconciledSnapshot.promise);
+
+    const loadPromise = useTaskCenterStore.getState().loadConversationArtifacts("conversation-1");
+    expect(requestHarness.listConversationArtifacts).toHaveBeenCalledTimes(1);
+
+    useTaskCenterStore.getState().upsertConversationArtifact("conversation-1", {
+      artifact_id: "live-1",
+      conversation_id: "conversation-1",
+      history_id: "h1",
+      producer_type: "main_agent",
+      filename: "report.md",
+      content_type: "text",
+      seq: 1,
+      value: { text: "live" },
+    });
+    await useTaskCenterStore.getState().loadConversationArtifacts("conversation-1");
+    expect(useTaskCenterStore.getState()._queuedArtifactLoads["conversation-1"]).toBe(true);
+
+    firstSnapshot.resolve({ data: { artifacts: [] } });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(requestHarness.listConversationArtifacts).toHaveBeenCalledTimes(2);
+    expect(useTaskCenterStore.getState().artifactsByConversation["conversation-1"]).toEqual([
+      expect.objectContaining({ artifact_id: "live-1" }),
+    ]);
+
+    reconciledSnapshot.resolve({
+      data: {
+        artifacts: [{
+          artifact_id: "live-1",
+          conversation_id: "conversation-1",
+          history_id: "h1",
+          producer_type: "main_agent",
+          filename: "report.md",
+          content_type: "text",
+          seq: 1,
+          value: { text: "persisted" },
+        }],
+      },
+    });
+    await loadPromise;
+
+    expect(useTaskCenterStore.getState().artifactsByConversation["conversation-1"]).toEqual([
+      expect.objectContaining({ artifact_id: "live-1", value: { text: "persisted" } }),
+    ]);
+    expect(useTaskCenterStore.getState()._loadingArtifacts["conversation-1"]).toBe(false);
+  });
+
+  it("keeps a live same-id replacement over an older REST snapshot", async () => {
+    const firstSnapshot = deferred<{ data: { artifacts: any[] } }>();
+    requestHarness.listConversationArtifacts.mockImplementationOnce(() => firstSnapshot.promise);
+
+    const loadPromise = useTaskCenterStore.getState().loadConversationArtifacts("conversation-1");
+    useTaskCenterStore.getState().upsertConversationArtifact("conversation-1", {
+      artifact_id: "live-1",
+      conversation_id: "conversation-1",
+      history_id: "h1",
+      producer_type: "main_agent",
+      filename: "report.md",
+      content_type: "text",
+      seq: 1,
+      value: { text: "v2" },
+    });
+
+    firstSnapshot.resolve({
+      data: {
+        artifacts: [{
+          artifact_id: "live-1",
+          conversation_id: "conversation-1",
+          history_id: "h1",
+          producer_type: "main_agent",
+          filename: "report.md",
+          content_type: "text",
+          seq: 1,
+          value: { text: "v1" },
+        }],
+      },
+    });
+    await loadPromise;
+
+    expect(useTaskCenterStore.getState().artifactsByConversation["conversation-1"]).toEqual([
+      expect.objectContaining({ artifact_id: "live-1", value: { text: "v2" } }),
+    ]);
+    expect(requestHarness.listConversationArtifacts).toHaveBeenCalledTimes(1);
   });
 });

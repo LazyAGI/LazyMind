@@ -1,4 +1,8 @@
+import pytest
+from lazyllm.tools.agent import ToolExecutionError
+
 from lazymind.chat.service.chat_service import (
+    _build_chat_artifact_tools,
     _build_chat_workspace_read_tools,
     _normalize_document_filter,
     _should_register_subagent_tools,
@@ -14,6 +18,111 @@ def test_bound_workflow_keeps_only_read_only_workspace_tools():
     assert names == {'search_file_resource', 'read_file_resource'}
     assert 'save_chat_artifact' not in names
     assert 'write_file' not in names
+
+
+def test_workflow_readers_reject_remote_skills_before_remote_or_local_access(monkeypatch):
+    from lazymind.chat.engine.tools.file_resources import tools
+
+    def unexpected(*args, **kwargs):
+        pytest.fail('isolated remote Skill request reached a filesystem')
+
+    for name in ('read_remote', 'grep_remote', '_resolve_text_target_for_tool'):
+        monkeypatch.setattr(tools, name, unexpected)
+    readers = {tool.__name__: tool for tool in _build_chat_workspace_read_tools()}
+    with pytest.raises(ToolExecutionError, match='workflow isolation'):
+        readers['read_file_resource']('remote://skills/external/example/SKILL.md')
+    with pytest.raises(ToolExecutionError, match='workflow isolation'):
+        readers['search_file_resource']('remote://skills/external/example', 'needle')
+
+
+def test_workflow_readers_preserve_workspace_access(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from lazymind.chat.engine.tools.file_resources import tools
+
+    path = tmp_path / 'note.txt'
+    path.write_text('needle', encoding='utf-8')
+    monkeypatch.setattr(tools, '_resolve_text_target_for_tool', lambda *a, **kw: SimpleNamespace(
+        path=str(path), workspace=str(tmp_path), display_name='note.txt', kind='workspace', file_id=None,
+    ))
+    readers = {tool.__name__: tool for tool in _build_chat_workspace_read_tools()}
+    assert 'needle' in readers['read_file_resource']('note.txt')['text']
+    assert readers['search_file_resource']('note.txt', 'needle')['matches']
+
+
+def test_plain_chat_keeps_remote_capable_readers():
+    from lazymind.chat.engine.tools.file_resources import tools
+
+    registered = _build_chat_artifact_tools()
+    assert tools.read_file_resource in registered
+    assert tools.search_file_resource in registered
+    assert tools.list_skill_files in registered
+
+
+def test_workflow_toolmanager_uses_isolated_readers():
+    import json
+    from lazyllm.tools import ToolManager
+
+    manager = ToolManager(_build_chat_workspace_read_tools())
+    result = manager([{
+        'id': 'isolated-read', 'type': 'function',
+        'function': {'name': 'read_file_resource', 'arguments': json.dumps({
+            'target': 'remote://skills/external/example/SKILL.md',
+        })},
+    }])[0]
+    assert result['ok'] is False
+    assert 'remote_skill_access_not_allowed' in str(result)
+
+
+@pytest.mark.parametrize('with_snapshot', [False, True])
+@pytest.mark.parametrize('name', ['read_file_resource', 'search_file_resource'])
+def test_workflow_readers_through_local_authorization(monkeypatch, tmp_path, with_snapshot, name):
+    from types import SimpleNamespace
+    from lazyllm.tools import ToolManager
+    from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolExecutionMiddleware
+    from lazymind.chat.engine.agent_runtime.workspace_policy import WorkspaceAuthorizationPolicy
+    from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
+    from lazymind.chat.engine.tools.file_resources import tools
+    from lazyllm.tools.agent import AuthorizationDecision, HostFileAccess
+
+    path = tmp_path / 'note.txt'
+    path.write_text('needle', encoding='utf-8')
+    monkeypatch.setattr(tools, '_resolve_text_target_for_tool', lambda *a, **kw: SimpleNamespace(
+        path=str(path), workspace=str(tmp_path), display_name='note.txt', kind='workspace', file_id=None,
+    ))
+    snapshot = {'workspace_id': 'test', 'root': str(tmp_path), 'permission_mode': 'always_ask'}
+    permission = WorkspaceContext.from_snapshot(snapshot if with_snapshot else {})
+    assert permission.local_runtime
+    decisions = []
+    original = WorkspaceAuthorizationPolicy.decide
+
+    def decide(self, prepared):
+        decision = original(self, prepared)
+        decisions.append(decision)
+        # Fail immediately instead of waiting for approval on a metadata regression.
+        assert decision is AuthorizationDecision.ALLOW
+        return decision
+
+    monkeypatch.setattr(WorkspaceAuthorizationPolicy, 'decide', decide)
+    manager = ToolManager(_build_chat_workspace_read_tools())
+    metadata = manager.tools_info[name].runtime_metadata
+    assert metadata.host_file_access is HostFileAccess.NONE
+    assert metadata.exclusive is True
+    middleware = ToolExecutionMiddleware(manager, workspace_permission=permission)
+    args = {'target': 'note.txt'}
+    if name == 'search_file_resource':
+        args['pattern'] = 'needle'
+    result = middleware.execute_with_records({
+        'id': 'local-read', 'function': {'name': name, 'arguments': args},
+    }).results[0]
+    assert result['ok'], result
+    assert 'needle' in str(result['value'])
+    args = {**args, 'target': 'remote://skills/external/example/SKILL.md'}
+    result = middleware.execute_with_records({
+        'id': 'remote-read', 'function': {'name': name, 'arguments': args},
+    }).results[0]
+    assert not result['ok']
+    assert 'remote_skill_access_not_allowed' in str(result)
+    assert len(decisions) == 2
 
 
 def test_public_document_filter_is_translated_to_rag_metadata_key():

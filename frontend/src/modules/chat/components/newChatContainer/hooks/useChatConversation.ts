@@ -652,6 +652,7 @@ export function useChatConversation({
   function markStructuredChatFailure(
     conversationId: string,
     semanticCode: string,
+    reason: "model_failure" | "runtime_failure" = "model_failure",
   ) {
     clearStreamRecovery(conversationId);
     const sourceList =
@@ -662,6 +663,7 @@ export function useChatConversation({
       sourceList,
       RoleTypes.ASSISTANT,
       semanticCode,
+      reason,
     );
     if (conversationId) {
       conversationMessagesCache.current.set(conversationId, failedList);
@@ -801,6 +803,7 @@ export function useChatConversation({
           markStructuredChatFailure(
             errorConversationId,
             mappedError.semanticCode,
+            mappedError.reason,
           );
           return;
         }
@@ -1614,11 +1617,13 @@ export function useChatConversation({
       ...getFileUrls(tempFileGroup?.image, tempGroup?.image).map((image) => ({
         input_type: "image",
         uri: image.uri || "",
+        filename: image.name || "",
         input_base64: image.base64 || "",
       })),
       ...getFileUrls(tempFileGroup?.file, tempGroup?.file).map((file) => ({
         input_type: "file",
         uri: file.uri || "",
+        filename: file.name || "",
       })),
     ];
 
