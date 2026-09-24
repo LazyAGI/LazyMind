@@ -54,6 +54,15 @@ describe("Core chat stream error mapping", () => {
       .toEqual({ appCode: 2000000, httpStatus: status, semanticCode: "request_rejected", reason: "runtime_failure" });
   });
 
+  it.each([
+    [2002022, "at most one workflow mention", 400],
+    [2000102, "forbidden", 403],
+  ])("preserves upstream rejection mapping for code %s", (appCode, message, status) => {
+    expect(parseCoreChatStreamError(JSON.stringify({ code: appCode, message }), status)).toEqual({
+      appCode, httpStatus: status, semanticCode: "request_rejected", reason: "runtime_failure",
+    });
+  });
+
   it("distinguishes an invalid environment name from an encryption failure", () => {
     expect(parseCoreChatStreamError({ code: 2003122, message: "Reserved environment name",
       data: { detail: { reason: "user_env_invalid_name", name: "NODE_TLS_REJECT_UNAUTHORIZED" } },

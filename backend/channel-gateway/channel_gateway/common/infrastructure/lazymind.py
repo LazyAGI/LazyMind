@@ -4,11 +4,14 @@ import concurrent.futures
 import datetime as dt
 import json
 import logging
+import os
 import re
+import stat
 import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 
@@ -24,6 +27,7 @@ from channel_gateway.common.domain.chat import (
 )
 from channel_gateway.common.domain.channel import sanitize_channel_text
 from channel_gateway.common.errors import (
+    GatewayError,
     InvalidStaticAssetError,
     LazyMindError,
     LazyMindHTTPError,
@@ -245,7 +249,7 @@ class LazyMindClient:
         *,
         accept: str = 'application/json',
     ) -> dict[str, str]:
-        return {
+        headers = {
             'Accept': accept,
             'Content-Type': 'application/json',
             'X-User-Id': owner_user_id,
@@ -253,6 +257,60 @@ class LazyMindClient:
             'X-Request-Id': request_id,
             'Idempotency-Key': request_id,
         }
+        return headers
+
+    def verify_notification(self, owner, event, *, retry=False):
+        try:
+            preferences = self._request_json(
+                'GET', f'{self._base_url}/user/notification-preferences', owner_user_id=owner,
+                request_id='notification-gate', error_label='notification preferences', timeout_seconds=10,
+            )
+            payload = self._request_json(
+                'GET', f'{self._base_url}/task-center/tasks/{quote(event["task_id"], safe="")}/notifications',
+                owner_user_id=owner, request_id='notification-event', error_label='notification event',
+                timeout_seconds=10,
+            )
+        except Exception:
+            raise GatewayError(503, 'NOTIFICATION_CORE_UNAVAILABLE', '暂时无法验证任务通知', retryable=True) from None
+        preferences = preferences.get('data', preferences)
+        payload = payload.get('data', payload)
+        if preferences.get('enabled') is not True:
+            raise GatewayError(409, 'NOTIFICATIONS_DISABLED', '定时任务通知已关闭')
+        for item in payload.get('items', []):
+            if all(item.get(key) == value for key, value in event.items()):
+                if item.get('reason') == 'NOTIFICATION_CHANNEL_DISABLED':
+                    raise GatewayError(409, 'NOTIFICATION_CHANNEL_DISABLED', '该渠道通知已关闭')
+                if item.get('status') == 'skipped' or item.get('reason') == 'NOTIFICATIONS_DISABLED':
+                    raise GatewayError(409, 'NOTIFICATIONS_DISABLED', '该通知已跳过')
+                if retry or item.get('status') in ('pending', 'queued', 'sending', 'sent', 'failed', 'unknown'):
+                    return item
+        raise GatewayError(422, 'NOTIFICATION_EVENT_INVALID', '任务通知来源或内容不匹配')
+
+    def claim_notification(self, owner, notice_id, outbox_id, retry):
+        try:
+            self._request_json(
+                'POST', f'{self._base_url}/task-center/notification-events/{quote(notice_id, safe="")}:claim',
+                owner_user_id=owner, request_id='notification-claim', error_label='notification permission',
+                json_body={'outbox_id': outbox_id, 'retry': retry}, timeout_seconds=10,
+                internal=True,
+            )
+        except LazyMindHTTPError as error:
+            if error.status_code == 409:
+                raise GatewayError(409, 'NOTIFICATIONS_DISABLED', '通知已关闭或已跳过') from None
+            raise GatewayError(503, 'NOTIFICATION_CORE_UNAVAILABLE', '暂时无法领取通知发送许可', retryable=True) from None
+        except Exception:
+            raise GatewayError(503, 'NOTIFICATION_CORE_UNAVAILABLE', '暂时无法领取通知发送许可', retryable=True) from None
+
+    def notification_references(self, owner, account_id, cursor='', limit=20):
+        try:
+            result = self._request_json(
+                'GET', f'{self._base_url}/notification-account-references/{quote(account_id, safe="")}',
+                owner_user_id=owner, request_id='notification-references', error_label='notification references',
+                params={'cursor': cursor, 'limit': limit}, timeout_seconds=10,
+            )
+            return result.get('data', result)
+        except Exception:
+            raise GatewayError(503, 'NOTIFICATION_CORE_UNAVAILABLE', '暂时无法查询账号引用', retryable=True) from None
 
     def chat(
         self,
@@ -1487,6 +1545,29 @@ class LazyMindClient:
             error_label='personalization setting',
         )
 
+    @staticmethod
+    def _internal_service_token() -> str:
+        token = os.getenv('LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN', '').strip()
+        if token:
+            return token
+        raw_path = os.getenv('LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE', '').strip()
+        try:
+            path = Path(raw_path)
+            if not path.is_absolute():
+                raise ValueError('absolute path required')
+            info = path.stat()
+            if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= 4096:
+                raise ValueError('invalid credential file')
+            # Match Core: Docker secrets may be readable inside the container.
+            if not os.path.normpath(raw_path).startswith('/run/secrets/') and info.st_mode & 0o077:
+                raise ValueError('unsafe credential permissions')
+            token = path.read_text(encoding='utf-8').strip()
+            if not 16 <= len(token.encode('utf-8')) <= 4096:
+                raise ValueError('invalid credential length')
+            return token
+        except (OSError, ValueError):
+            raise LazyMindError('Internal service credential is unavailable') from None
+
     def _request_json(
         self,
         method: str,
@@ -1498,14 +1579,18 @@ class LazyMindClient:
         params: dict[str, Any] | None = None,
         json_body: dict[str, Any] | None = None,
         timeout_seconds: float | None = None,
+        internal: bool = False,
     ) -> dict[str, Any]:
+        headers = self._headers(owner_user_id, request_id)
+        if internal:
+            headers['X-LazyMind-Internal-Token'] = self._internal_service_token()
         try:
             response = httpx.request(
                 method,
                 endpoint,
                 params=params,
                 json=json_body,
-                headers=self._headers(owner_user_id, request_id),
+                headers=headers,
                 timeout=(
                     timeout_seconds
                     if timeout_seconds is not None

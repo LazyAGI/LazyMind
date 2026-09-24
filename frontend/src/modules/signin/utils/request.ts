@@ -183,9 +183,9 @@ export async function changeCurrentUserPassword(
   });
 }
 
-export async function logoutFromServer() {
-  const refreshToken = AgentAppsAuth.getRefreshToken();
-  const accessToken = AgentAppsAuth.getAccessToken();
+export async function logoutFromServer(session = AgentAppsAuth.getUserInfo()) {
+  const refreshToken = session?.refreshToken;
+  const accessToken = session?.token;
 
   if (!refreshToken) {
     return;

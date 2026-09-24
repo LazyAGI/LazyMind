@@ -649,6 +649,7 @@ func init() {
 		"unsupported writer document provider",
 		"invalid conversation status request", "provide between 1 and 100 conversation ids",
 		"invalid conversation id",
+		"name_only must be a boolean",
 		"invalid multipart body", "pdf file is required", "artifact must be a pdf", "unsupported translated artifact format",
 		"unsupported document translation provider", "translation source is required",
 		"unsupported backend translation format", "translation layout manifest is required",

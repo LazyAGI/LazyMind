@@ -27,6 +27,7 @@ import (
 	"lazymind/core/common/readonlyorm"
 	"lazymind/core/log"
 	"lazymind/core/modelprovider"
+	"lazymind/core/staticstorage"
 	"lazymind/core/store"
 
 	"github.com/gorilla/mux"
@@ -169,6 +170,9 @@ func fileRelativePath(fullPath string) string {
 	if p == "" {
 		return ""
 	}
+	if rel := staticstorage.RelativePath(p); rel != "" {
+		return rel
+	}
 	cleanPath := filepath.Clean(p)
 	subRoot := filepath.Clean(subagentWorkspaceRoot())
 	// macOS temporary directories commonly cross the /var -> /private/var
@@ -204,6 +208,9 @@ func fileRelativePath(fullPath string) string {
 
 func relFromStaticFilesURL(raw string) string {
 	pathOnly := strings.SplitN(strings.TrimSpace(raw), "?", 2)[0]
+	if idx := strings.Index(pathOnly, "/static-files/"); idx >= 0 {
+		pathOnly = pathOnly[idx:]
+	}
 	if !strings.HasPrefix(pathOnly, "/static-files/") {
 		return ""
 	}
@@ -226,6 +233,9 @@ func resolveSignedStaticFullPath(relPath string) string {
 	rel := strings.TrimSpace(relPath)
 	if rel == "" || rel == "." || strings.HasPrefix(rel, "../") {
 		return ""
+	}
+	if path, handled := staticstorage.Resolve(rel); handled {
+		return path
 	}
 	if strings.HasPrefix(rel, "subagent/") {
 		inner := strings.TrimPrefix(rel, "subagent/")
@@ -314,6 +324,48 @@ func StaticFileURLFromAnyStoragePath(pathOrURL string) string {
 	return staticFileURLFromFullPath(raw)
 }
 
+// StaticFileURLForUploadOwner re-signs a historical chat upload only when the
+// stored path belongs to that user's temp upload tree.
+func StaticFileURLForUploadOwner(pathOrURL, userID string) string {
+	if !TempUserUploadOwnedBy(pathOrURL, userID) {
+		return ""
+	}
+	return StaticFileURLFromAnyStoragePath(pathOrURL)
+}
+
+func staticFileRelativePath(pathOrURL string) string {
+	raw := strings.TrimSpace(pathOrURL)
+	if raw == "" {
+		return ""
+	}
+	if rel := relFromStaticFilesURL(raw); rel != "" {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(fileRelativePath(raw))
+}
+
+func isTempUserUploadRel(rel string) bool {
+	return strings.HasPrefix(filepath.ToSlash(rel), "tmp/users/")
+}
+
+func tempUserUploadPrefix(userID string) string {
+	return "tmp/users/" + safePathPart(strings.TrimSpace(userID)) + "/"
+}
+
+// TempUserUploadOwnedBy reports whether a stored upload lives under the given
+// user's tmp/users/{id}/ tree. Other storage kinds return false.
+func TempUserUploadOwnedBy(pathOrURL, userID string) bool {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return false
+	}
+	rel := staticFileRelativePath(pathOrURL)
+	if rel == "" || !isTempUserUploadRel(rel) {
+		return false
+	}
+	return strings.HasPrefix(rel, tempUserUploadPrefix(userID))
+}
+
 // StaticFileReferenceFromAnyStoragePath returns a stable unsigned reference.
 // Browser clients must exchange it through static-files:sign before reading.
 func StaticFileReferenceFromAnyStoragePath(pathOrURL string) string {
@@ -386,7 +438,7 @@ func streamLocalFile(w http.ResponseWriter, fullPath, filename, fallbackContentT
 	}
 	underUpload := isPathUnderRoot(cleanPath, uploadRoot())
 	underSubagent := isPathUnderRoot(cleanPath, subagentWorkspaceRoot())
-	if !underUpload && !underSubagent {
+	if !underUpload && !underSubagent && staticstorage.RelativePath(cleanPath) == "" {
 		common.ReplyErr(w, "file path is invalid", http.StatusBadRequest)
 		return
 	}
@@ -448,14 +500,28 @@ func SignStaticFiles(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid request body", err), http.StatusBadRequest)
 		return
 	}
+	userID := strings.TrimSpace(store.UserID(r))
 	urls := make(map[string]string, len(req.Paths))
 	for _, raw := range req.Paths {
 		path := strings.TrimSpace(raw)
 		if path == "" {
 			continue
 		}
-		if strings.Contains(path, "/static-files/") {
-			if refreshed := refreshStaticFileURL(path); refreshed != "" {
+		rel := staticFileRelativePath(path)
+		// Decode exactly once. Reject residual escapes because the download
+		// transport also unescapes its route parameter; never authorize one
+		// namespace and then sign a differently decoded namespace.
+		if decoded, err := url.PathUnescape(rel); err == nil && decoded != rel {
+			continue
+		}
+		if isTempUserUploadRel(rel) && !TempUserUploadOwnedBy(path, userID) {
+			continue
+		}
+		if !staticstorage.Authorized(r.Context(), rel, userID) {
+			continue
+		}
+		if rel != "" {
+			if refreshed := staticFileURLFromRelativePath(rel); refreshed != "" {
 				urls[path] = refreshed
 				continue
 			}

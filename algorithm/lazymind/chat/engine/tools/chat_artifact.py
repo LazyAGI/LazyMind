@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import unicodedata
@@ -76,6 +77,28 @@ def _file_markdown(filename: str, artifact_id: str) -> str:
     return f'[{filename}](file_id:{artifact_id})'
 
 
+def _artifact_metadata(
+    encoded_value: bytes,
+    change_summary: Optional[str],
+    logical_key: Optional[str],
+) -> Dict[str, Any]:
+    summary = str(change_summary).strip() if change_summary else None
+    key = str(logical_key).strip() if logical_key else None
+    if summary and len(summary) > 2000:
+        raise ToolExecutionError('change_summary exceeds the 2000 character limit')
+    if key and len(key) > 255:
+        raise ToolExecutionError('logical_key exceeds the 255 character limit')
+    return {
+        'schema_version': 2,
+        'publication': 'published',
+        'change_summary': summary,
+        'logical_key': key,
+        'content_hash': f'sha256:{hashlib.sha256(encoded_value).hexdigest()}',
+        'size': len(encoded_value),
+        'idempotency_key': str(uuid.uuid4()),
+    }
+
+
 def resolve_chat_artifact(arguments):
     permission = get_workspace_permission_context()
     files = FileResolution(default_root=permission.cwd if permission else None)
@@ -90,6 +113,8 @@ def save_chat_artifact(
     content: Any,
     content_type: Literal['text', 'json', 'file'] = 'text',
     caption: Optional[str] = None,
+    change_summary: Optional[str] = None,
+    logical_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Save a downloadable artifact produced in the current main-chat turn.
 
@@ -116,7 +141,10 @@ def save_chat_artifact(
     safe_name = _safe_filename(filename, normalized_type)
     normalized_caption = _normalize_caption(caption)
     if normalized_type == 'file':
-        return save_chat_file(safe_name, str(content or ''), normalized_caption)
+        return save_chat_file(
+            safe_name, str(content or ''), normalized_caption,
+            change_summary=change_summary, logical_key=logical_key,
+        )
     if normalized_type == 'json':
         value = {'data': content}
     else:
@@ -129,6 +157,7 @@ def save_chat_artifact(
     ).encode('utf-8')
     if len(encoded_value) > _MAX_ARTIFACT_BYTES:
         raise ToolExecutionError('artifact content exceeds the 2 MiB limit')
+    metadata = _artifact_metadata(encoded_value, change_summary, logical_key)
 
     artifact_id = str(uuid.uuid4())
     _write_agent_data(
@@ -138,6 +167,7 @@ def save_chat_artifact(
         content_type=normalized_type,
         value=value,
         caption=normalized_caption,
+        **metadata,
     )
     return {
         'artifact_id': artifact_id,
@@ -154,6 +184,8 @@ def save_chat_file(
     caption: Optional[str],
     artifact_id: Optional[str] = None,
     replace_existing: bool = False,
+    change_summary: Optional[str] = None,
+    logical_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     filename = _safe_filename(filename, 'file')
     user_id, conversation_id = _current_artifact_scope()
@@ -175,6 +207,10 @@ def save_chat_file(
         os.replace(temporary, destination)
         size = os.path.getsize(destination)
         value = {'filename': filename, 'path': destination, 'size': size}
+        metadata = _artifact_metadata(
+            json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode('utf-8'),
+            change_summary, logical_key,
+        )
         _write_agent_data(
             'artifact_created',
             artifact_id=artifact_id,
@@ -183,6 +219,7 @@ def save_chat_file(
             value=value,
             caption=caption,
             replace_existing=replace_existing,
+            **metadata,
         )
     except Exception:
         try:

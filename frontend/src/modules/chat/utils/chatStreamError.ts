@@ -1,11 +1,12 @@
 import type { RunTerminal } from "./StreamManager";
 
 type ModelFailureCode = NonNullable<RunTerminal["code"]>;
+type ChatStreamFailureCode = ModelFailureCode | "request_rejected";
 
 export interface MappedChatStreamError {
   appCode: number | string;
   httpStatus: number;
-  semanticCode: ModelFailureCode;
+  semanticCode: ChatStreamFailureCode;
   reason: "model_failure" | "runtime_failure";
   historyId?: string;
 }
@@ -179,7 +180,7 @@ function hasPartialAssistantOutput(message: Record<string, unknown>): boolean {
 export function applyChatStreamFailure(
   messages: any[],
   assistantRole: string,
-  semanticCode: ModelFailureCode,
+  semanticCode: ChatStreamFailureCode,
   reason: "model_failure" | "runtime_failure" = "model_failure",
 ): any[] {
   const assistantIndex = messages.findLastIndex(

@@ -139,8 +139,9 @@ type Service struct {
 	Now              func() time.Time
 	FeishuCLI        FeishuCLIBackend
 
-	cacheMu     sync.Mutex
-	cached      map[string]cachedAccessToken
+	cacheMu sync.Mutex
+	// Keep connection-level invalidation while isolating leases by authorization.
+	cached      map[string]map[ResolveRequest]cachedAccessToken
 	cliHandleMu sync.Mutex
 	cliHandles  map[string]feishuCLIHandle
 }
@@ -152,7 +153,7 @@ func NewService(cloud *cloudclient.Client, session *cloudsession.Service, regist
 	if cloud == nil || session == nil || registry == nil || authorizer == nil || len(clientInstanceID) < 16 {
 		return nil, errors.New("invalid Provider Connection Bridge configuration")
 	}
-	return &Service{Cloud: cloud, Session: session, Registry: registry, Authorizer: authorizer, ClientInstanceID: clientInstanceID, Now: time.Now, cached: map[string]cachedAccessToken{}, cliHandles: map[string]feishuCLIHandle{}}, nil
+	return &Service{Cloud: cloud, Session: session, Registry: registry, Authorizer: authorizer, ClientInstanceID: clientInstanceID, Now: time.Now, cached: map[string]map[ResolveRequest]cachedAccessToken{}, cliHandles: map[string]feishuCLIHandle{}}, nil
 }
 
 func NewLocalService(registry LocalConnectionRegistry, authorizer SourceBindingAuthorizer, clientInstanceID string) (*Service, error) {
@@ -160,7 +161,7 @@ func NewLocalService(registry LocalConnectionRegistry, authorizer SourceBindingA
 	if registry == nil || authorizer == nil || len(clientInstanceID) < 16 {
 		return nil, errors.New("invalid local Provider Connection configuration")
 	}
-	return &Service{Registry: registry, Authorizer: authorizer, ClientInstanceID: clientInstanceID, Now: time.Now, cached: map[string]cachedAccessToken{}, cliHandles: map[string]feishuCLIHandle{}}, nil
+	return &Service{Registry: registry, Authorizer: authorizer, ClientInstanceID: clientInstanceID, Now: time.Now, cached: map[string]map[ResolveRequest]cachedAccessToken{}, cliHandles: map[string]feishuCLIHandle{}}, nil
 }
 
 func (service *Service) CreateSession(ctx context.Context, provider string) (cloudclient.ProviderConnectionSession, error) {
@@ -312,12 +313,26 @@ func (service *Service) ResolveAccessToken(ctx context.Context, request ResolveR
 		return ResolvedToken{}, errors.New("invalid Provider Token Bridge request")
 	}
 	meta, err := service.Registry.Connection(ctx, request.UserID, request.AuthConnectionID)
-	if err != nil || meta.OwnerUserID != request.UserID {
+	if err != nil || meta.OwnerUserID != request.UserID || meta.AuthConnectionID != request.AuthConnectionID {
+		return ResolvedToken{}, errors.New("Provider Connection was not found")
+	}
+	// Publishing requires an active connection. Keep the existing recovery
+	// policy for read consumers, which may still resolve RETRYING connections.
+	if request.RequiredCapability == "chat.write" && meta.Status != "ACTIVE" {
 		return ResolvedToken{}, errors.New("Provider Connection was not found")
 	}
 	switch meta.ConnectionMethod {
 	case "legacy_byo":
-		token, err := service.Registry.LegacyAccessToken(ctx, request.UserID, request.AuthConnectionID)
+		var token string
+		// HTTP token responses carry their own identity and status. Preserve
+		// those checks when Writer moves from Auth directly to this bridge.
+		if registry, ok := service.Registry.(interface {
+			legacyAccessToken(context.Context, string, string, string) (string, error)
+		}); ok {
+			token, err = registry.legacyAccessToken(ctx, request.UserID, request.AuthConnectionID, meta.Provider)
+		} else {
+			token, err = service.Registry.LegacyAccessToken(ctx, request.UserID, request.AuthConnectionID)
+		}
 		if err != nil {
 			return ResolvedToken{}, err
 		}
@@ -330,6 +345,9 @@ func (service *Service) ResolveAccessToken(ctx context.Context, request ResolveR
 		}
 		if err := service.authorizeManagedRequest(ctx, request); err != nil {
 			return ResolvedToken{}, err
+		}
+		if request.Consumer == "chat" {
+			return service.resolveFeishuCLIToolToken(ctx, meta, request)
 		}
 		now := service.now().UTC()
 		handle := "lmc_fcli_" + randomFeishuCLIIdentifier()
@@ -408,7 +426,7 @@ func (service *Service) resolveManagedAccessToken(ctx context.Context, meta Conn
 	}
 	now := service.now()
 	service.cacheMu.Lock()
-	item, found := service.cached[meta.AuthConnectionID]
+	item, found := service.cached[meta.AuthConnectionID][request]
 	service.cacheMu.Unlock()
 	if found && item.expiresAt.After(now.Add(15*time.Second)) {
 		return item.resolved, nil
@@ -436,7 +454,10 @@ func (service *Service) resolveManagedAccessToken(ctx context.Context, meta Conn
 		TokenType: lease.TokenType, SubjectType: lease.SubjectType, ExpiresAt: lease.ExpiresAt, Status: lease.Status, TokenVersion: lease.TokenVersion,
 	}
 	service.cacheMu.Lock()
-	service.cached[meta.AuthConnectionID] = cachedAccessToken{resolved: resolved, expiresAt: lease.ExpiresAt}
+	if service.cached[meta.AuthConnectionID] == nil {
+		service.cached[meta.AuthConnectionID] = make(map[ResolveRequest]cachedAccessToken)
+	}
+	service.cached[meta.AuthConnectionID][request] = cachedAccessToken{resolved: resolved, expiresAt: lease.ExpiresAt}
 	service.cacheMu.Unlock()
 	return resolved, nil
 }
@@ -553,18 +574,26 @@ func (registry HTTPRegistry) Connection(ctx context.Context, userID, connectionI
 }
 
 func (registry HTTPRegistry) LegacyAccessToken(ctx context.Context, userID, connectionID string) (string, error) {
+	return registry.legacyAccessToken(ctx, userID, connectionID, "")
+}
+
+func (registry HTTPRegistry) legacyAccessToken(ctx context.Context, userID, connectionID, provider string) (string, error) {
 	var response struct {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
 		Data    struct {
-			AccessToken string `json:"access_token"`
+			ConnectionID string `json:"connection_id"`
+			Provider     string `json:"provider"`
+			Status       string `json:"status"`
+			AccessToken  string `json:"access_token"`
 		} `json:"data"`
 	}
 	path := fmt.Sprintf("%s/v1/cloud/connections/%s/token?user_id=%s", strings.TrimRight(registry.BaseURL, "/"), url.PathEscape(connectionID), url.QueryEscape(userID))
 	if err := registry.get(ctx, path, &response); err != nil {
 		return "", err
 	}
-	if response.Code != http.StatusOK {
+	if response.Code != http.StatusOK || response.Data.ConnectionID != connectionID || response.Data.Status != "ACTIVE" ||
+		(provider != "" && response.Data.Provider != provider) {
 		return "", errors.New("local Connection Registry rejected the request")
 	}
 	if strings.TrimSpace(response.Data.AccessToken) == "" {

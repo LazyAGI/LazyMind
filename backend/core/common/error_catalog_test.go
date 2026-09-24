@@ -229,12 +229,12 @@ func TestResolveUserEnvironmentErrorsUseSpecificCodes(t *testing.T) {
 		status  int
 		code    int
 	}{
-		{"check user env var failed", 500, 2003110},
-		{"env name already exists", 409, 2003111},
-		{"create user env var failed", 500, 2003112},
-		{"missing env id", 400, 2003113},
-		{"env var not found", 404, 2003114},
-		{"environment variable description is too long", 400, 2003115},
+		{"check user env var failed", 500, 2003130},
+		{"env name already exists", 409, 2003131},
+		{"create user env var failed", 500, 2003132},
+		{"missing env id", 400, 2003133},
+		{"env var not found", 404, 2003134},
+		{"environment variable description is too long", 400, 2003135},
 		{"delete user env var failed", 500, 2003116},
 		{"environment variable deletion confirmation is invalid", 409, 2003117},
 		{"environment variable deletion confirmation is invalid or already answered", 409, 2003117},

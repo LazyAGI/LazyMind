@@ -50,6 +50,7 @@ import (
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/taskcenter"
 	"lazymind/core/userenv"
 	"lazymind/core/workflow"
 	workflowexecutor "lazymind/core/workflow/executor"
@@ -423,6 +424,11 @@ func configureFeishuCLI(service *coreproviderconnection.Service, registry corepr
 	if err != nil {
 		log.Logger.Warn().Str("error_code", "CLI_INTEGRITY_MISMATCH").Msg("Feishu CLI runtime is unavailable")
 		return
+	}
+	if helperPath := strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_PATH")); helperPath != "" {
+		if err := runner.ConfigureCredentialHelper(helperPath, os.Getenv("LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_SHA256")); err != nil {
+			log.Logger.Warn().Str("error_code", "CLI_INTEGRITY_MISMATCH").Msg("Feishu CLI credential helper is unavailable")
+		}
 	}
 	profiles, err := coreproviderconnection.NewFeishuCLIProfileStore(runtimeRoot)
 	if err != nil {
@@ -941,6 +947,7 @@ func run(ctx context.Context) error {
 	// Start the schedule ticker.
 	if startBackgroundJobs {
 		backgroundDone = append(backgroundDone, scheduler.RunScheduler(runtimeCtx, store.DB(), ""))
+		backgroundDone = append(backgroundDone, taskcenter.RunNotificationDelivery(runtimeCtx, store.DB()))
 	}
 	initializeCloudSession(context.Background())
 	if err := initializeCredentialBackup(context.Background(), store.DB(), credentialKeys); err != nil {

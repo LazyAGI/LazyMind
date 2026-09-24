@@ -143,7 +143,7 @@ describe("dual answer exports", () => {
 });
 
 describe("AssistantMessage cancellation", () => {
-  it("places the saved artifact action beside copy and download in the completed message toolbar", () => {
+  it("places the saved export beside copy and the artifact panel in the completed message toolbar", () => {
     useTaskCenterStore.setState({
       artifactsByConversation: { "export-toolbar": [{
         artifact_id: "export-1", history_id: "export-history", filename: "plan.md",
@@ -162,7 +162,7 @@ describe("AssistantMessage cancellation", () => {
     const toolbar = action.closest(".chat-assistant-msg-tool-actions") as HTMLElement;
     expect(toolbar).not.toBeNull();
     expect(within(toolbar).getByRole("img", { name: "copy" })).toBeInTheDocument();
-    expect(within(toolbar).getByRole("img", { name: "download" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("img", { name: "file-text" })).toBeInTheDocument();
     fireEvent.click(action);
     expect(screen.getByRole("dialog")).toBeVisible();
   });

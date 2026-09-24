@@ -4,12 +4,12 @@ import "net/http"
 
 func init() {
 	registerAdditionalErrorAlias("environment input expired or unavailable; request a new input card", "Environment input expired or unavailable; request a new input card", http.StatusConflict, 2003125)
-	registerAdditionalErrorAlias("check user env var failed", "Failed to check environment variables", http.StatusInternalServerError, 2003110)
-	registerAdditionalErrorAlias("env name already exists", "Environment variable name already exists", http.StatusConflict, 2003111)
-	registerAdditionalErrorAlias("create user env var failed", "Failed to create environment variable", http.StatusInternalServerError, 2003112)
-	registerAdditionalErrorAlias("missing env id", "Environment variable ID is required", http.StatusBadRequest, 2003113)
-	registerAdditionalErrorAlias("env var not found", "Environment variable not found", http.StatusNotFound, 2003114)
-	registerAdditionalErrorAlias("environment variable description is too long", "Environment variable description is too long", http.StatusBadRequest, 2003115)
+	registerAdditionalErrorAlias("check user env var failed", "Failed to check environment variables", http.StatusInternalServerError, 2003130)
+	registerAdditionalErrorAlias("env name already exists", "Environment variable name already exists", http.StatusConflict, 2003131)
+	registerAdditionalErrorAlias("create user env var failed", "Failed to create environment variable", http.StatusInternalServerError, 2003132)
+	registerAdditionalErrorAlias("missing env id", "Environment variable ID is required", http.StatusBadRequest, 2003133)
+	registerAdditionalErrorAlias("env var not found", "Environment variable not found", http.StatusNotFound, 2003134)
+	registerAdditionalErrorAlias("environment variable description is too long", "Environment variable description is too long", http.StatusBadRequest, 2003135)
 	registerAdditionalErrorAlias("delete user env var failed", "Failed to delete environment variable", http.StatusInternalServerError, 2003116)
 	for _, source := range []string{
 		"environment variable deletion confirmation is invalid or already answered",

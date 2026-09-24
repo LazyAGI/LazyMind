@@ -29,6 +29,7 @@ def single_event_stream_response(
     payload: Dict[str, Any],
     *,
     run_id: str,
+    error_code: str | None = None,
 ) -> StreamingResponse:
     """Complete a static response without claiming a successful model call."""
     async def _stream():
@@ -41,8 +42,9 @@ def single_event_stream_response(
                 'text': None,
                 'sources': [],
                 'runtime_event': runtime_event('run_finished', run_id, {
-                    'status': 'completed',
-                    'reason': 'normal',
+                    'status': 'failed' if error_code else 'completed',
+                    'reason': 'runtime_failure' if error_code else 'normal',
+                    **({'code': error_code} if error_code else {}),
                     'partial_output': True,
                     'model_invoked': False,
                 }),

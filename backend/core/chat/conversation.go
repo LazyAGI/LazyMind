@@ -2721,6 +2721,13 @@ func StreamConvEvents(w http.ResponseWriter, r *http.Request) {
 	_ = WatchConvEvents(ctx, stateStore, convID, -1, func(index int64, ev *ConvEvent) error {
 		wireEvent := *ev
 		wireEvent.Replayed = index <= replayThrough
+		if r.URL.Query().Get("view") == "ordinary" {
+			public := ordinaryConversationEvent(&wireEvent)
+			if public == nil {
+				return nil
+			}
+			wireEvent = *public
+		}
 		bs, err := json.Marshal(&wireEvent)
 		if err != nil {
 			return nil

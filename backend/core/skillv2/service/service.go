@@ -795,7 +795,11 @@ func (s *SkillService) listSkillsQuery(ctx context.Context, req ListSkillsReques
 		Where("NOT EXISTS (SELECT 1 FROM skill_market_items AS market_items WHERE market_items.source_skill_id = skills.id)")
 	query = s.applyListSkillFilters(query, req)
 	if req.Keyword != "" {
-		query = query.Scopes(skillsearch.NewService(skillsearch.ServiceDeps{DB: s.db}).KeywordScope(req.Keyword))
+		if req.NameOnly {
+			query = query.Where("LOWER(skills.skill_name) LIKE ? ESCAPE '!'", "%"+escapeLike(req.Keyword)+"%")
+		} else {
+			query = query.Scopes(skillsearch.NewService(skillsearch.ServiceDeps{DB: s.db}).KeywordScope(req.Keyword))
+		}
 	}
 	return query
 }
