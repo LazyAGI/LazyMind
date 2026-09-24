@@ -21,7 +21,6 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
-	"lazymind/core/schedulepresence"
 	"lazymind/core/settings"
 	"lazymind/core/store"
 	"lazymind/core/taskcenter"
@@ -293,36 +292,12 @@ func RunScheduler(ctx context.Context, db *gorm.DB, chatBaseURL string) <-chan s
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if !schedulepresence.Active() {
-					continue
-				}
 				fireSchedules(ctx, db, chatBaseURL)
 				resumeWaitingTasks(ctx, db)
 			}
 		}
 	}()
 	return done
-}
-
-// SkipMissedSchedules advances triggers that elapsed while the Desktop window
-// was closed. Opening the window must not replay a backlog of scheduled chats.
-func SkipMissedSchedules(ctx context.Context, db *gorm.DB, now time.Time) error {
-	var due []orm.UserSchedule
-	if err := db.WithContext(ctx).Where("enabled = true AND next_run_at <= ?", now.UTC()).Find(&due).Error; err != nil {
-		return err
-	}
-	for _, schedule := range due {
-		next, err := nextCronTimeAfter(schedule.CronExpr, schedule.Timezone, now)
-		if err != nil {
-			return err
-		}
-		if err := db.WithContext(ctx).Model(&orm.UserSchedule{}).
-			Where("id = ? AND next_run_at = ?", schedule.ID, schedule.NextRunAt).
-			Update("next_run_at", next.UTC()).Error; err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // repairFutureScheduleNextRunsAt corrects future timestamps produced when a
@@ -385,9 +360,6 @@ const maxConcurrentFires = 50
 // fireSchedules queries all enabled schedules whose next_run_at <= now and fires them.
 // At most maxConcurrentFires goroutines run simultaneously to protect downstream services.
 func fireSchedules(ctx context.Context, db *gorm.DB, _ string) {
-	if !schedulepresence.Active() {
-		return
-	}
 	now := time.Now().UTC()
 	var due []orm.UserSchedule
 	if err := db.WithContext(ctx).
@@ -398,9 +370,6 @@ func fireSchedules(ctx context.Context, db *gorm.DB, _ string) {
 	sem := make(chan struct{}, maxConcurrentFires)
 	var wg sync.WaitGroup
 	for _, s := range due {
-		if !schedulepresence.Active() {
-			break
-		}
 		s := s
 		controls, err := settings.LoadFeatureControls(ctx, db, s.UserID)
 		if err != nil {

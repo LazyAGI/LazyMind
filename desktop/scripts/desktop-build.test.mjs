@@ -846,11 +846,6 @@ test("Desktop close and quit destroy renderers while keeping the runtime residen
   );
   assert.match(
     backgroundMode,
-    /desktopNotifications\.suspendSession\(\);\s*await updateSchedulePresence\(false\)/,
-    "closing the window pauses scheduled work and native notifications",
-  );
-  assert.match(
-    backgroundMode,
     /rendererReadyWait\?\.cancel\(\);[\s\S]*window\.removeAllListeners\("close"\);[\s\S]*window\.destroy\(\)/,
     "both background modes must destroy renderer windows",
   );

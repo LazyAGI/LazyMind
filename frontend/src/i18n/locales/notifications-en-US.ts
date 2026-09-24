@@ -149,7 +149,7 @@ export default {
   "off": "Off",
   "on": "On",
   "unavailable": "Currently unavailable",
-  "desktopHint": "Closing the Desktop window pauses local scheduled tasks and notifications. Other background services keep running.",
+  "desktopHint": "Allow desktop notifications for timely reminders when tasks finish or need attention.",
   "desktopUnsupported": "Use the LazyMind desktop app to receive native desktop notifications.",
   "connectTitle": "Channel connections",
   "connectHint": "Connect Feishu, WeCom or WeChat to receive task updates and results.",

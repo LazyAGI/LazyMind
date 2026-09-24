@@ -31,7 +31,7 @@ test("temporary cleanup reports HTTP and transport failures without rejecting", 
   }
 });
 
-test("closing Desktop pauses scheduled work before destroying the renderer", async () => {
+test("closing Desktop destroys the renderer immediately while owner cleanup is pending", async () => {
   const source = readFileSync(new URL("../electron/src/main.js", import.meta.url), "utf8");
   // Extract the lifecycle functions without evaluating the Electron entry point.
   const start = source.indexOf("function clearTemporaryCredentials(reason)");
@@ -41,21 +41,17 @@ test("closing Desktop pauses scheduled work before destroying the renderer", asy
   const pending = new Promise((resolve) => { finish = resolve; });
   const context = {
     cloudBaseURL: "https://cloud.example.com", internalServiceToken: "owner-fixture",
-    currentStatus: { config: { localProxy: { CoreHostPort: 18000 } } },
-    fetch: async (_url, options) => { assert.equal(JSON.parse(options.body).active, false); events.push("pause"); return { ok: true }; },
+    currentStatus: { config: { localProxy: { CoreHostPort: 18000 } } }, fetch: () => {},
     clearRuntimeTemporaryCredentials: (options) => { assert.equal(options.corePort, 18000); assert.equal(options.internalToken, "owner-fixture"); events.push("cleanup"); return pending; },
-    appendStartupLog: () => {}, isInstallerWarmup: false, isExternalRuntimeDev: false, isQuitting: false,
-    windowHiddenByUser: false, backgroundTransitionRevision: 0,
-    mainWindow: { isDestroyed: () => false, removeAllListeners: () => {}, destroy: () => events.push("destroy") }, startupWindow: undefined,
+    appendStartupLog: () => {}, isInstallerWarmup: false, isQuitting: false,
+    windowHiddenByUser: false, mainWindow: { isDestroyed: () => false, removeAllListeners: () => {}, destroy: () => events.push("destroy") }, startupWindow: undefined,
     finishStartupMetrics: () => {}, rendererReadyWait: undefined,
     ensureWindowsTray: () => {}, destroyWindowsTray: () => {}, isMac: false,
-    desktopNotifications: { suspendSession: () => events.push("suspend") },
-    schedulePresenceWrites: Promise.resolve(), AbortSignal,
   };
   vm.createContext(context);
   vm.runInContext(source.slice(start, end), context);
-  await context.enterBackgroundMode("window close", { discoverable: true });
-  assert.deepEqual(events, ["suspend", "pause", "cleanup", "destroy"]);
+  assert.equal(context.enterBackgroundMode("window close", { discoverable: true }), undefined);
+  assert.deepEqual(events, ["cleanup", "destroy"]);
   finish();
   await pending;
 });

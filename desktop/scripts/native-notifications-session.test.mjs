@@ -156,8 +156,7 @@ test("actual window reopen disables new background refresh and awaits current cr
   let resolve;
   const pending = new Promise((done) => { resolve = done; });
   let created = 0;
-  const context = { windowHiddenByUser: true, backgroundTransitionRevision: 0,
-    isMac: false, frontendOpeningAllowed: true,
+  const context = { windowHiddenByUser: true, isMac: false, frontendOpeningAllowed: true,
     activeWindow: () => created ? {} : undefined, windowCreationPromise: undefined,
     appendStartupLog: () => {}, runtimeProcess: true, sessionWrites: pending,
     createWindow: async () => { created += 1; }, isQuitting: false, setStartupFailure: assert.fail,
