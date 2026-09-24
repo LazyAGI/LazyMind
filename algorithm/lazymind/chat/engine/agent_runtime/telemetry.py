@@ -191,8 +191,16 @@ def emit_tool_result(tool_call: dict[str, Any], result: Any) -> None:
     name = str(function.get('name') or '')
     category = classify_tool(name)
     ok = True
+    diagnostics = {}
     if isinstance(result, dict) and 'ok' in result:
         ok = bool(result.get('ok'))
+    if isinstance(result, dict):
+        diagnostics = {
+            key: result[key]
+            for key in ('error_type', 'dependency', 'exit_code')
+            if isinstance(result.get(key), (str, int, float))
+            and not isinstance(result.get(key), bool)
+        }
     append_event(
         'tool_result',
         name=name,
@@ -201,6 +209,7 @@ def emit_tool_result(tool_call: dict[str, Any], result: Any) -> None:
         result_bytes=_size_bytes(result),
         result_preview=_preview(result),
         tool_call_id=tool_call.get('id') or '',
+        **diagnostics,
     )
     if category == 'harness':
         append_event(
