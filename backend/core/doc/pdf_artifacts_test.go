@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"context"
 	"testing"
 
 	"lazymind/core/common/orm"
@@ -21,6 +22,29 @@ func TestPDFCacheKeyIncludesSourceParseAndTranslationProvenance(t *testing.T) {
 	changedProvider.Model = "document-context"
 	if base == pdfCacheKey(state, pdfArtifactTranslation, changedProvider) {
 		t.Fatal("translation provenance must be part of the cache key")
+	}
+}
+
+func TestPDFTranslationJobIdempotencyKeyIsDocumentScoped(t *testing.T) {
+	cacheKey := "same-content-cache-key"
+	first := pdfTranslationJobIdempotencyKey("dataset-1", "document-1", cacheKey)
+	if first != pdfTranslationJobIdempotencyKey("dataset-1", "document-1", cacheKey) {
+		t.Fatal("translation job idempotency key must be stable")
+	}
+	if first == pdfTranslationJobIdempotencyKey("dataset-1", "document-2", cacheKey) {
+		t.Fatal("translation jobs from different documents must not share an idempotency key")
+	}
+	if len(first) > 128 {
+		t.Fatalf("translation job idempotency key length = %d, exceeds database limit", len(first))
+	}
+}
+
+func TestFailedOrCancelledBackendTranslationJobCanRetry(t *testing.T) {
+	for _, status := range []string{"FAILED", "CANCELLED"} {
+		job := pdfRenderJobRecord{ID: "old-job", Status: status, BackendManaged: true}
+		if reusableBackendTranslationJob(context.Background(), job) {
+			t.Fatalf("%s translation job must not block a retry", status)
+		}
 	}
 }
 

@@ -111,7 +111,8 @@ func createBackendTranslationPDFJob(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, job := range ext.PDFRenderJobs {
-			if job.BackendManaged && job.Kind == pdfArtifactTranslation && job.CacheKey == key && job.Status != "FAILED" && job.Status != "CANCELLED" {
+			if job.BackendManaged && job.Kind == pdfArtifactTranslation && job.CacheKey == key &&
+				reusableBackendTranslationJob(r.Context(), job) {
 				common.ReplyOK(w, map[string]any{"cache_status": "running", "job": job})
 				return
 			}
@@ -155,15 +156,28 @@ func createBackendTranslationPDFJob(w http.ResponseWriter, r *http.Request) {
 		SourcePath: sourcePath, LayoutPath: layoutPath, TargetLanguage: req.TargetLanguage, ProviderType: req.ProviderType,
 		OutputFilename: strings.TrimSuffix(sourceHeader.Filename, extension) + "-" + req.TargetLanguage + extension}
 	queued, err := asyncjob.Enqueue(r.Context(), store.DB(), asyncjob.EnqueueRequest{JobType: pdfTranslationJobType,
-		ResourceType: "pdf_render_job", ResourceID: renderJobID, IdempotencyKey: key, Payload: payload,
-		MaxAttempts: 2, CreateUserID: store.UserID(r), SkipSucceeded: req.Force})
+		ResourceType: "pdf_render_job", ResourceID: renderJobID,
+		IdempotencyKey: pdfTranslationJobIdempotencyKey(row.DatasetID, row.ID, key), Payload: payload,
+		MaxAttempts: 2, CreateUserID: store.UserID(r),
+		// Artifact reuse is decided above from this document's persisted
+		// artifacts. A successful async job without such an artifact is not a
+		// usable cache hit and must not be returned as a new running job.
+		SkipSucceeded: true})
 	if err != nil {
 		_ = os.Remove(sourcePath)
 		_ = os.Remove(layoutPath)
 		common.ReplyErr(w, "enqueue translation job failed", http.StatusInternalServerError)
 		return
 	}
-	_ = queued
+	if queued.ResourceID != renderJobID {
+		// A concurrent request already enqueued the same document translation.
+		// Do not expose a second render ID that has no backing async job.
+		_ = os.Remove(sourcePath)
+		_ = os.Remove(layoutPath)
+		jobRecord.ID = queued.ResourceID
+		common.ReplyOK(w, map[string]any{"cache_status": "running", "job": jobRecord})
+		return
+	}
 	ext.PDFRenderJobs = append(ext.PDFRenderJobs, jobRecord)
 	if err := saveDocumentExt(r, row, ext); err != nil {
 		_, _ = asyncjob.CancelResourceJobs(r.Context(), store.DB(), pdfTranslationJobType, "pdf_render_job", renderJobID, "render job persistence failed")
@@ -171,6 +185,23 @@ func createBackendTranslationPDFJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.ReplyOK(w, map[string]any{"cache_status": "miss", "job": jobRecord})
+}
+
+func reusableBackendTranslationJob(ctx context.Context, job pdfRenderJobRecord) bool {
+	status := strings.ToUpper(strings.TrimSpace(job.Status))
+	if status == "FAILED" || status == "CANCELLED" {
+		return false
+	}
+	return backendTranslationJobActive(ctx, job.ID)
+}
+
+func backendTranslationJobActive(ctx context.Context, renderJobID string) bool {
+	var count int64
+	err := store.DB().WithContext(ctx).Model(&orm.AsyncJob{}).
+		Where("job_type = ? AND resource_type = ? AND resource_id = ? AND status IN ?",
+			pdfTranslationJobType, "pdf_render_job", renderJobID, []string{"pending", "running"}).
+		Count(&count).Error
+	return err == nil && count > 0
 }
 
 func updateTranslationRenderJob(ctx context.Context, payload pdfTranslationPayload, mutate func(*pdfRenderJobRecord, *documentExt) error) error {
