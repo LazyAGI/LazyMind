@@ -123,13 +123,13 @@ func TestFeishuCLIAuthorizationRequestsReadWriteScopes(t *testing.T) {
 			name = "reauthorize"
 		}
 		t.Run(name, func(t *testing.T) {
-			runtime := &permissionFeishuRuntime{fakeFeishuCLIRuntime: newFakeFeishuCLIRuntime(), granted: fixtureFeishuReadWriteScopes()}
+			runtime := &permissionFeishuRuntime{fakeFeishuCLIRuntime: newFakeFeishuCLIRuntime(), granted: slices.Clone(fixtureOriginalFeishuScopes)}
 			profiles, err := NewFeishuCLIProfileStore(t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
 			registry := &fakeFeishuCLIConnectionRegistry{}
-			coordinator, err := NewFeishuCLIDeviceFlowCoordinator(runtime, profiles, registry, DefaultFeishuCLIReadScopes)
+			coordinator, err := NewFeishuCLIDeviceFlowCoordinator(runtime, profiles, registry, DefaultFeishuCLIScopes)
 			if err != nil {
 				t.Fatal(err)
 			}

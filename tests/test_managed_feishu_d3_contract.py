@@ -21,34 +21,28 @@ class ManagedFeishuD3ContractTest(unittest.TestCase):
         self.assertIn("isFeishuAuthValid", handler)
         self.assertIn("navigate(CLOUD_DOCUMENTS_FEISHU_PATH)", handler)
 
-    def test_feishu_default_scopes_support_document_reads_and_writes(self) -> None:
-        source = (
-            REPO / "frontend/src/modules/dataSource/constants/options.ts"
-        ).read_text(encoding="utf-8")
-        block = source.split("export const FEISHU_DEFAULT_SCOPES", 1)[-1].split(
-            "];", 1
-        )[0]
-        for required in (
+    def test_feishu_authorization_methods_preserve_original_scopes(self) -> None:
+        expected = {
             "offline_access",
+            "drive:drive",
             "drive:drive:readonly",
             "drive:drive.metadata:readonly",
-            "wiki:space:retrieve",
-            "wiki:node:read",
-            "wiki:node:retrieve",
-            "docx:document:readonly",
-            "drive:drive",
             "wiki:wiki",
+            "wiki:wiki:readonly",
+            "wiki:node:retrieve",
             "docx:document",
+        }
+        for path, marker, end in (
+            ("frontend/src/modules/dataSource/constants/options.ts", "export const FEISHU_DEFAULT_SCOPES = [", "];"),
+            ("backend/core/providerconnection/feishu_cli_device_flow.go", "var DefaultFeishuCLIScopes = []string{", "}"),
+            ("backend/auth-service/services/providers/feishu_oauth_provider.py", "_DEFAULT_SCOPE = (", ")"),
         ):
-            self.assertIn(f'"{required}"', block)
-        for forbidden in (
-            "im:message",
-            "contact:contact",
-        ):
-            self.assertIsNone(
-                re.search(rf'"{re.escape(forbidden)}"', block),
-                msg=f"document authorization grants unrelated capability: {forbidden}",
-            )
+            with self.subTest(path=path):
+                source = (REPO / path).read_text(encoding="utf-8")
+                block = source.split(marker, 1)[1].split(end, 1)[0]
+                actual = " ".join(re.findall(r"['\"]([^'\"]+)['\"]", block)).split()
+                self.assertEqual(set(actual), expected)
+                self.assertEqual(len(actual), len(expected))
 
     def test_provider_token_contract_carries_and_checks_user_subject(self) -> None:
         types = (

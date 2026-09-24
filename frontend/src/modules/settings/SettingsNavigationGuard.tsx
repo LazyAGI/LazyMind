@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Button, Form, Modal } from "antd";
+import { Button, Form, Modal, theme } from "antd";
 import type { FormInstance } from "antd";
 import { UNSAFE_DataRouterContext, useBlocker, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -33,6 +33,7 @@ function RouteGuard({ shouldBlock, confirmLeave }: { shouldBlock: () => boolean;
 
 export function SettingsNavigationGuard({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
+  const { token } = theme.useToken();
   const dataRouter = useContext(UNSAFE_DataRouterContext);
   const [params, setParams] = useSearchParams();
   const [drafts, setDrafts] = useState<Record<string, SettingsDraft>>({});
@@ -116,6 +117,9 @@ export function SettingsNavigationGuard({ children }: { children: ReactNode }) {
     {dataRouter ? <RouteGuard shouldBlock={() => Object.values(draftsRef.current).some((draft) => draft.dirty || draft.saving)} confirmLeave={confirmLeave} /> : null}
     {children}
     <Modal
+      centered
+      // Match Ant Design's confirmation layer, above editor portals and their popups.
+      zIndex={token.zIndexPopupBase + 1000}
       open={Boolean(pending)}
       title={t("settingsPage.unsaved.title")}
       onCancel={busy ? undefined : cancel}

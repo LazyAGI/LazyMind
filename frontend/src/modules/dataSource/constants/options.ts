@@ -10,10 +10,7 @@ export const FEISHU_DEFAULT_SCOPES = [
   "drive:drive.metadata:readonly",
   "wiki:wiki",
   "wiki:wiki:readonly",
-  "wiki:space:retrieve",
-  "wiki:node:read",
   "wiki:node:retrieve",
-  "docx:document:readonly",
   "docx:document",
 ];
 export const FEISHU_EXCLUDE_PATTERNS = ["**/~$*"];

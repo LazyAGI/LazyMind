@@ -86,8 +86,8 @@ def test_large_chinese_tool_result_below_token_limit_stays_inline(tmp_path):
     assert not (tmp_path / 'large').exists()
 
 
-def test_tool_result_at_token_limit_is_offloaded_after_byte_gate(tmp_path):
-    """A result reaching the 32K token budget must be persisted, not sent inline."""
+def test_tool_result_at_token_limit_uses_shared_spill_reference(tmp_path):
+    """A persisted large tool result must use the same store as history compaction."""
     from lazymind.chat.engine.subagent.context import SubAgentContext
 
     ctx = SubAgentContext(
@@ -106,8 +106,43 @@ def test_tool_result_at_token_limit_is_offloaded_after_byte_gate(tmp_path):
 
     rendered = runner_mod._truncate_tool_result(ctx, result, 'read_file')
 
-    assert rendered.startswith('[Large result offloaded to file')
-    assert list((tmp_path / 'large').glob('read_file_*.txt'))
+    assert 'workspace://tool_spills/' in rendered
+    assert list((tmp_path / 'tool_spills').glob('read_file_*.txt'))
+    assert not (tmp_path / 'large').exists()
+
+
+def test_durable_and_online_tool_result_spills_share_one_reference(tmp_path):
+    from lazymind.chat.engine.agent_runtime.workflow_compactor import (
+        make_workflow_history_compactor,
+    )
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='task-shared-spill',
+        conversation_id='conv-1',
+        agent_type='workflow_step',
+        objective='test shared result spill',
+        params={},
+        workspace_path=str(tmp_path),
+        input_slots=[],
+        output_slots=[],
+        db=None,
+        emit=lambda _event: None,
+    )
+    result = 'a' * 131_072
+    durable_notice = runner_mod._truncate_tool_result(ctx, result, 'read_file')
+    compactor = make_workflow_history_compactor(
+        max_input_tokens='32K', workspace=str(tmp_path), keep_recent=0,
+    )
+    prior, _ = compactor([
+        {'role': 'assistant', 'content': '', 'tool_calls': [{
+            'id': 'call-1', 'function': {'name': 'read_file', 'arguments': '{}'},
+        }]},
+        {'role': 'tool', 'tool_call_id': 'call-1', 'name': 'read_file', 'content': result},
+    ], prefix={'system_prompt': 'workflow system'}, current_input='continue')
+
+    assert prior[1]['content'] == durable_notice
+    assert len(list((tmp_path / 'tool_spills').glob('read_file_*.txt'))) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +369,39 @@ def test_subagent_plan_forwards_llm_config_for_context_budget(tmp_path):
     )
 
     assert plan.execution_options.llm_config == llm_config
+
+
+def test_workflow_step_uses_overflow_only_history_compactor(tmp_path):
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='task-workflow-budget', conversation_id='conv-1', agent_type='workflow_step',
+        objective='retrieve literature', params={}, workspace_path=str(tmp_path),
+        input_slots=[], output_slots=[], db=None, emit=lambda _event: None,
+    )
+
+    plan = runner_mod._build_subagent_plan(
+        ctx, None, tools=[], tool_prompt_appendices={},
+    )
+
+    assert plan.execution_options.workspace == str(tmp_path)
+    assert plan.execution_options.history_compactor is not None
+
+
+def test_ordinary_subagent_keeps_default_history_compactor(tmp_path):
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='task-default-budget', conversation_id='conv-1', agent_type='research',
+        objective='retrieve literature', params={}, workspace_path=str(tmp_path),
+        input_slots=[], output_slots=[], db=None, emit=lambda _event: None,
+    )
+
+    plan = runner_mod._build_subagent_plan(
+        ctx, None, tools=[], tool_prompt_appendices={},
+    )
+
+    assert plan.execution_options.history_compactor is None
 
 
 def test_ordinary_subagent_enables_inherited_skill_runtime(tmp_path):

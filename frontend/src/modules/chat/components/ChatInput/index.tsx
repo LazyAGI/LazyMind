@@ -1073,7 +1073,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       disabled ||
       isPromptPolishing ||
       modelSelectionSaving ||
-      workspacePermissionSaving || !projectValid ||
+      (runInBackground && (workspacePermissionSaving || !projectValid)) ||
       resolvingSkillWorkflow ||
       !value?.trim() ||
       isUploading;
@@ -1102,7 +1102,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       disabled ||
       isPromptPolishing ||
       modelSelectionSaving ||
-      workspacePermissionSaving || !projectValid ||
+      (runInBackground && (workspacePermissionSaving || !projectValid)) ||
       isStreaming ||
       !onSkillDeposit;
     const skillDepositTooltip = useMemo(() => {
@@ -1202,7 +1202,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         }
         return;
       }
-      if (!projectValid || modelSelectionSaving || workspacePermissionSavingRef.current) {
+      if ((runInBackground && (!projectValid || workspacePermissionSavingRef.current)) || modelSelectionSaving) {
         return;
       }
       if (isStreaming || isSendDisabled || resolvingSkillWorkflow) {
@@ -1246,7 +1246,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         files: fileListRef.current?.getFiles(),
         create_time: new Date().toISOString(),
         ...(runInBackground ? { run_in_background: true } : {}),
-        ...(workspaceId ? { workspace_id: workspaceId, workspace_permission_mode: workspacePermissionMode, project_name: projectName } : {}),
+        ...(runInBackground && workspaceId ? { workspace_id: workspaceId, workspace_permission_mode: workspacePermissionMode, project_name: projectName } : {}),
         ...(!sessionId && effectiveInitialModelSelection
           ? { initial_model_selection: effectiveInitialModelSelection }
           : {}),
@@ -1550,7 +1550,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     disabled ||
                     isPromptPolishing ||
                     modelSelectionSaving ||
-                    workspacePermissionSaving || !projectValid ||
+                    (runInBackground && (workspacePermissionSaving || !projectValid)) ||
                     isStreaming
                   ) return;
                   void handleSend();
@@ -1673,8 +1673,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       />
                     </div>
                   </div>
-                  {<LocalWorkspaceControl
-                    isTaskConv={runInBackground}
+                  {runInBackground && <LocalWorkspaceControl
                     approvalContainer={approvalContainer}
                     draftWorkspace={props.draftWorkspace}
                     initialProject={initialProject}
@@ -1821,8 +1820,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         },
                         runtime: contextRuntimeSettings,
                         thinkingDepth: effectiveThinkingDepth,
-                        workspaceId,
-                        workspacePermissionMode,
+                        workspaceId: runInBackground ? workspaceId : undefined,
+                        workspacePermissionMode: runInBackground ? workspacePermissionMode : undefined,
                       })}
                       buildRequest={() => {
                         const files = fileListRef.current?.getFiles() ?? [];
@@ -1854,7 +1853,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                           },
                           thinking_depth: effectiveThinkingDepth,
                           ...(runInBackground ? { run_in_background: true } : {}),
-                          ...(workspaceId ? { workspace_id: workspaceId, workspace_permission_mode: workspacePermissionMode, project_name: projectName } : {}),
+                          ...(runInBackground && workspaceId ? { workspace_id: workspaceId, workspace_permission_mode: workspacePermissionMode, project_name: projectName } : {}),
                           ...contextRuntimeSettings,
                         };
                       }}

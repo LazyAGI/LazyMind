@@ -8639,6 +8639,35 @@ components:
                 - page
                 - page_size
             type: object
+        TaskCenterScheduleSummary:
+            properties:
+                cron_expr:
+                    type: string
+                enabled:
+                    type: boolean
+                id:
+                    type: string
+                last_run_at:
+                    format: date-time
+                    type: string
+                name:
+                    type: string
+                next_run_at:
+                    format: date-time
+                    type: string
+                run_count:
+                    type: integer
+                timezone:
+                    type: string
+            required:
+                - id
+                - name
+                - cron_expr
+                - timezone
+                - enabled
+                - run_count
+                - next_run_at
+            type: object
         TaskCenterTaskResponse:
             properties:
                 conversation_id:
@@ -8663,6 +8692,8 @@ components:
                 progress:
                     properties: {}
                     type: object
+                schedule:
+                    $ref: '#/components/schemas/TaskCenterScheduleSummary'
                 schedule_id:
                     type: string
                 schedule_name:

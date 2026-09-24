@@ -10,7 +10,7 @@ export default function NotificationHistory({ taskId }: { taskId: string }) {
     {error && <Alert type="error" message={t('notifications.' + error, { defaultValue: t('notifications.loadFailed') })} />}
     {loading && <Spin size="small" />}
     {execution && <>
-      <p>{t('notifications.snapshot')} · {execution.snapshot.revision} · {snapshotChannels}</p>
+      {execution.snapshot.config && <p>{t('notifications.snapshot')} · {snapshotChannels}</p>}
       {rows.map(row => <div className="notification-history-row" key={row.id}>
         <ChannelBrand channel={row.channel} />
         <div className="notification-grow">

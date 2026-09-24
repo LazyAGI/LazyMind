@@ -64,7 +64,31 @@ func TestStreamChatUpstreamRequiresRunFinished(t *testing.T) {
 	defer server.Close()
 
 	chunks := collectUpstream(t, server.URL, "run_test")
-	if len(chunks) != 2 || chunks[1].Err == nil || !strings.Contains(chunks[1].Err.Error(), "without run_finished") {
+	if len(chunks) != 2 || chunks[1].Err == nil || chunks[1].ErrKind != UpstreamStreamErrorMissingTerminal || !strings.Contains(chunks[1].Err.Error(), "without run_finished") {
+		t.Fatalf("unexpected chunks: %#v", chunks)
+	}
+}
+
+func TestStreamChatUpstreamClassifiesEmptyBodyAsMissingTerminal(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	defer server.Close()
+
+	chunks := collectUpstream(t, server.URL, "run_test")
+	if len(chunks) != 1 || chunks[0].Err == nil || chunks[0].ErrKind != UpstreamStreamErrorMissingTerminal {
+		t.Fatalf("unexpected chunks: %#v", chunks)
+	}
+}
+
+func TestStreamChatUpstreamClassifiesTransportError(t *testing.T) {
+	frame := algorithmFrame(t, map[string]any{"text": "partial"}) + "\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(len(frame)+16))
+		_, _ = w.Write([]byte(frame))
+	}))
+	defer server.Close()
+
+	chunks := collectUpstream(t, server.URL, "run_test")
+	if len(chunks) != 2 || chunks[1].Err == nil || chunks[1].ErrKind != UpstreamStreamErrorTransport {
 		t.Fatalf("unexpected chunks: %#v", chunks)
 	}
 }
@@ -135,6 +159,33 @@ func TestStreamChatUpstreamPreservesTerminalOnAbnormalEOF(t *testing.T) {
 	}
 }
 
+func TestStreamChatUpstreamAddsDiagnosticIDToFailureTerminal(t *testing.T) {
+	server := streamServer(t, "run_test", algorithmFrame(t, map[string]any{
+		"runtime_event": map[string]any{
+			"schema_version": 1,
+			"event_id":       "evt_failure",
+			"run_id":         "run_test",
+			"type":           RuntimeEventRunFinished,
+			"data": map[string]any{
+				"status": "failed", "reason": "runtime_failure", "code": "runtime_failure", "partial_output": false,
+			},
+		},
+	}))
+	defer server.Close()
+
+	chunks := collectUpstream(t, server.URL, "run_test")
+	if len(chunks) != 1 || chunks[0].RuntimeEvent == nil || chunks[0].Err != nil {
+		t.Fatalf("unexpected chunks: %#v", chunks)
+	}
+	terminal, err := chunks[0].RuntimeEvent.Terminal()
+	if err != nil {
+		t.Fatalf("parse terminal: %v", err)
+	}
+	if !strings.HasPrefix(terminal.DiagnosticID, "diag_") {
+		t.Fatalf("diagnostic id = %q, want diag_ prefix", terminal.DiagnosticID)
+	}
+}
+
 func TestStreamChatUpstreamRejectsPayloadAfterTerminal(t *testing.T) {
 	server := streamServer(t, "run_test",
 		runFinishedFrame(t, "run_test"),
@@ -197,7 +248,7 @@ func TestStreamChatUpstreamRejectsMalformedFrame(t *testing.T) {
 	defer server.Close()
 
 	chunks := collectUpstream(t, server.URL, "run_test")
-	if len(chunks) != 1 || chunks[0].Err == nil || !strings.Contains(chunks[0].Err.Error(), "invalid algorithm stream frame") {
+	if len(chunks) != 1 || chunks[0].Err == nil || chunks[0].ErrKind != UpstreamStreamErrorProtocol || !strings.Contains(chunks[0].Err.Error(), "invalid algorithm stream frame") {
 		t.Fatalf("unexpected chunks: %#v", chunks)
 	}
 }

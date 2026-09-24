@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Task } from './api';
 import TaskDetail from './TaskDetail';
-import { getTask } from './api';
+import { getTask, listScheduleTasks } from './api';
 import { axiosInstance } from '@/components/request';
 
-vi.mock('./api', () => ({ getTask: vi.fn() }));
+vi.mock('./api', () => ({ getTask: vi.fn(), listScheduleTasks: vi.fn() }));
+vi.mock('@/modules/notifications/NotificationHistory', () => ({ default: ({ taskId }: { taskId: string }) => <div data-testid='notification-history'>{taskId}</div> }));
+vi.mock('@/modules/notifications/ScheduleNotificationPanel', () => ({ default: ({ scheduleId, taskId, showHistory }: { scheduleId: string; taskId: string; showHistory: boolean }) => <button data-schedule={scheduleId} data-task={taskId} data-history={showHistory}>配置通知</button> }));
 
 const translations: Record<string, string> = {
   'common.cancel': '取消',
@@ -34,6 +36,21 @@ const translations: Record<string, string> = {
   'taskCenter.trashTaskDescription': '任务和对应会话将保留 30 天',
   'taskCenter.trashTaskTitle': '将“{{name}}”移入回收站？',
   'taskCenter.typeWorkflowRun': '工作流任务',
+  'taskCenter.schedulePlan': '定时计划',
+  'taskCenter.scheduleTriggerPeriod': '触发周期',
+  'taskCenter.scheduleDisabled': '已停用',
+  'taskCenter.nextRunAt': '下次执行',
+  'taskCenter.lastRun': '最近执行',
+  'taskCenter.totalExecutions': '累计运行',
+  'taskCenter.executionCount': '{{count}} 次',
+  'taskCenter.scheduleEdit': '编辑',
+  'taskCenter.scheduleDelete': '删除',
+  'taskCenter.scheduleDescription': '任务描述',
+  'taskCenter.cronDaily': '每天 {{time}}',
+  'taskCenter.executionHistory': '执行记录',
+  'taskCenter.currentExecution': '当前查看',
+  'taskCenter.viewExecution': '查看执行详情',
+  'taskCenter.scheduleUnavailable': '关联定时计划不可用',
 };
 
 vi.mock('react-i18next', () => ({
@@ -69,11 +86,72 @@ const task: Task = {
 
 beforeEach(() => {
   vi.mocked(getTask).mockReset().mockResolvedValue(task);
+  vi.mocked(listScheduleTasks).mockReset().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 5 });
   vi.mocked(axiosInstance.get).mockReset().mockResolvedValue({ data: {} });
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('TaskDetail', () => {
+  const scheduled: Task = { ...task, id: 'scheduled-run', task_type: 'scheduled', status: 'succeeded', schedule_id: 'schedule-1', schedule: {
+    id: 'schedule-1', name: '每日简报', cron_expr: '0 9 * * *', timezone: 'Asia/Shanghai', enabled: true, run_count: 12,
+    last_run_at: '2026-09-24T01:00:00Z', next_run_at: '2026-09-25T01:00:00Z',
+  } };
+  it('shows the current plan and keeps notification rules tied to the selected execution', async () => {
+    const previous = { ...scheduled, id: 'previous-run', conversation_id: 'previous-conversation', conversation_title: '上次简报', created_at: '2026-09-23T01:00:00Z' };
+    vi.mocked(getTask).mockImplementation(async id => id === previous.id ? previous : scheduled);
+    vi.mocked(listScheduleTasks).mockResolvedValue({ items: [scheduled, previous], total: 2, page: 1, page_size: 5 });
+    const openConversation = vi.fn();
+    render(<TaskDetail task={scheduled} onClose={vi.fn()} onOpenConversation={openConversation} />);
+    expect(await screen.findByText('每天 09:00')).toBeInTheDocument();
+    expect(screen.getByText('Asia/Shanghai')).toBeInTheDocument();
+    expect(screen.getByText('12 次')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '配置通知' })).toHaveAttribute('data-history', 'false');
+    expect(screen.getByRole('button', { name: '配置通知' })).toHaveAttribute('data-task', scheduled.id);
+    expect(screen.queryByTestId('notification-history')).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /查看执行详情/ }));
+    await waitFor(() => expect(getTask).toHaveBeenCalledWith(previous.id));
+    expect(screen.getByRole('button', { name: '配置通知' })).toHaveAttribute('data-task', previous.id);
+    fireEvent.click(screen.getByRole('button', { name: '打开任务对话' }));
+    expect(openConversation).toHaveBeenCalledWith(previous.conversation_id);
+    expect(listScheduleTasks).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers edit and recoverable deletion for a queued scheduled execution', async () => {
+    const queued = { ...scheduled, status: 'pending', steps: [] };
+    vi.mocked(getTask).mockResolvedValue(queued);
+    const onDelete = vi.fn();
+    const onOpenConversation = vi.fn();
+    render(<TaskDetail task={queued} onClose={vi.fn()} onOpenConversation={onOpenConversation} onDelete={onDelete} />);
+    await screen.findByRole('heading', { name: '任务描述' });
+    expect(screen.queryByRole('heading', { name: '执行步骤' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '打开任务对话' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '编 辑' }));
+    expect(onOpenConversation).toHaveBeenCalledWith(queued.conversation_id);
+    fireEvent.click(screen.getByRole('button', { name: /删除/ }));
+    expect(onDelete).not.toHaveBeenCalled();
+    const confirm = await screen.findByText('任务和对应会话将保留 30 天');
+    const dialog = confirm.closest('[role="dialog"]')!;
+    fireEvent.click(within(dialog as HTMLElement).getByRole('button', { name: '移入回收站' }));
+    await waitFor(() => expect(onDelete).toHaveBeenCalledWith(queued));
+  });
+
+  it('does not show a stale next run time for a disabled plan', async () => {
+    vi.mocked(getTask).mockResolvedValue({ ...scheduled, schedule: { ...scheduled.schedule!, enabled: false } });
+    render(<TaskDetail task={scheduled} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+    await screen.findAllByText('已停用');
+    expect(document.querySelector('.task-schedule-summary')).not.toHaveTextContent('2026/9/25');
+  });
+
+  it('preserves execution history when its scheduled plan is unavailable', async () => {
+    const missing = { ...scheduled, schedule: undefined };
+    vi.mocked(getTask).mockResolvedValue(missing);
+    render(<TaskDetail task={missing} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+    expect(await screen.findByText('关联定时计划不可用')).toBeInTheDocument();
+    expect(screen.getByTestId('notification-history')).toHaveTextContent(missing.id);
+    expect(screen.queryByRole('button', { name: '配置通知' })).not.toBeInTheDocument();
+    expect(listScheduleTasks).not.toHaveBeenCalled();
+  });
+
   it('refreshes an open completed task after a conversation rename', async () => {
     vi.mocked(getTask).mockResolvedValue({ ...task, status: 'succeeded' });
     render(<TaskDetail task={task} onClose={vi.fn()} onOpenConversation={vi.fn()} />);

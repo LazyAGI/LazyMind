@@ -93,6 +93,19 @@ describe("RunStatusCard", () => {
     expect(screen.queryByRole("link", { name: "chat.checkModelSettings" })).not.toBeInTheDocument();
   });
 
+  it("shows the normalized failure code and diagnostic id", () => {
+    render(<RunStatusCard terminal={{
+      status: "failed",
+      reason: "runtime_failure",
+      code: "transport_error",
+      diagnostic_id: "diag_test",
+      partial_output: false,
+    }} />);
+
+    expect(screen.getByText(/chat\.runStatus\.failureCode/)).toHaveTextContent("transport_error");
+    expect(screen.getByText(/chat\.runStatus\.diagnosticId/)).toHaveTextContent("diag_test");
+  });
+
   it("renders incomplete model output with the interrupted title", () => {
     render(<RunStatusCard terminal={{
       status: "interrupted",

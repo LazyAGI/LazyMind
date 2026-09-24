@@ -676,7 +676,7 @@ def test_keep_recent_still_spills_oversized_tool_results(tmp_path) -> None:
     assert event.decision == 'spilled'
     assert projected[-1]['content'] == recent_small
     assert 'offloaded to workspace' in projected[1]['content']
-    assert str(tmp_path / 'tool_spills') in projected[1]['content']
+    assert 'workspace://tool_spills/' in projected[1]['content']
     spilled = list((tmp_path / 'tool_spills').glob('*.txt'))
     assert len(spilled) == 1
     assert spilled[0].read_text(encoding='utf-8') == huge
