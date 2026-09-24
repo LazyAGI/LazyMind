@@ -64,13 +64,6 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 		}
 	}
 
-	var state orm.DocumentProcessingState
-	if err := s.db.WithContext(r.Context()).Where("dataset_id = ? AND document_id = ?", req.DatasetID, req.DocumentID).Take(&state).Error; err == nil && state.ParseStatus == "running" {
-		var active orm.Task
-		_ = s.db.WithContext(r.Context()).Where("dataset_id = ? AND doc_id = ? AND deleted_at IS NULL", req.DatasetID, req.DocumentID).Order("created_at DESC").Take(&active).Error
-		return EnsureDocumentParsedResult{Status: "parsing", TaskID: active.ID}, nil
-	}
-
 	now := time.Now().UTC()
 	taskID := newTaskID()
 	filename := firstNonEmpty(rec.row.DisplayName, rec.ext.OriginalFilename, req.DocumentID)
@@ -85,16 +78,36 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 	task := orm.Task{ID: taskID, DocID: req.DocumentID, KbID: rec.dataset.KbID, AlgoID: parseDatasetAlgo(rec.dataset.Ext).AlgoID,
 		DatasetID: req.DatasetID, TaskType: string(TaskTypeParse), DisplayName: filename, Ext: mustJSON(taskMetadata),
 		BaseModel: orm.BaseModel{CreateUserID: req.UserID, CreateUserName: rec.row.CreateUserName, CreatedAt: now, UpdatedAt: now}}
+	claimed := false
 	err = s.db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		// The conditional update is the document-level parsing latch. Concurrent
+		// chats can all call this method, but only one transaction changes the
+		// state to running and creates a task; every loser joins that task below.
+		claim := tx.Model(&orm.DocumentProcessingState{}).
+			Where("dataset_id = ? AND document_id = ? AND parse_status <> ?", req.DatasetID, req.DocumentID, "running").
+			Updates(map[string]any{"parse_status": "running", "parse_error_code": "", "parse_error_message": "", "updated_at": now})
+		if claim.Error != nil {
+			return claim.Error
+		}
+		if claim.RowsAffected == 0 {
+			return nil
+		}
+		claimed = true
 		if err := tx.Create(&task).Error; err != nil {
 			return err
 		}
-		return tx.Model(&orm.DocumentProcessingState{}).
-			Where("dataset_id = ? AND document_id = ?", req.DatasetID, req.DocumentID).
-			Updates(map[string]any{"parse_status": "running", "parse_error_code": "", "parse_error_message": "", "updated_at": now}).Error
+		return nil
 	})
 	if err != nil {
 		return EnsureDocumentParsedResult{}, err
+	}
+	if !claimed {
+		var active orm.Task
+		_ = s.db.WithContext(r.Context()).Where(
+			"dataset_id = ? AND doc_id = ? AND task_type = ? AND deleted_at IS NULL",
+			req.DatasetID, req.DocumentID, string(TaskTypeParse),
+		).Order("created_at DESC").Take(&active).Error
+		return EnsureDocumentParsedResult{Status: "parsing", TaskID: active.ID}, nil
 	}
 	results, startErr := startParseTasksInternalAtLevel(r, req.DatasetID, []string{taskID}, ProcessingLevelParsed)
 	if startErr != nil || len(results) == 0 || results[0].Status != "STARTED" {

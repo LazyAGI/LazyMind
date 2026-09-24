@@ -5,7 +5,13 @@ import PdfTemporaryChat from "./index";
 const requests = vi.hoisted(() => ({ options: [] as Array<{ payload: string }> }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getAuthHeaders: () => ({}) } }));
-vi.mock("@/components/request", () => ({ BASE_URL: "", axiosInstance: { post: vi.fn() } }));
+vi.mock("@/components/request", () => ({
+  BASE_URL: "",
+  axiosInstance: { post: vi.fn() },
+  getLocalizedErrorMessage: (error: unknown) => error instanceof Error ? error.message : "request failed",
+}));
+const ensureDocumentParsed = vi.hoisted(() => vi.fn().mockResolvedValue({ status: "parsing" }));
+vi.mock("@/modules/knowledge/api/pdfArtifacts", () => ({ ensureDocumentParsed }));
 vi.mock("@/modules/chat/utils/request", () => ({
   CHAT_STREAM_URL: "/chat", CHAT_RESUME_STREAM_URL: "/resume", ChatServiceApi: vi.fn(),
 }));
@@ -38,10 +44,26 @@ beforeEach(() => {
   chatActions.createNewChat.mockClear();
   chatActions.sendMessage.mockClear();
   chatActions.prepareMessage.mockClear();
+  ensureDocumentParsed.mockClear();
 });
 afterEach(cleanup);
 
 describe("document question context", () => {
+  it("starts on-demand parsing when document chat is first opened", async () => {
+    render(<PdfTemporaryChat datasetId="dataset-a" documentId="document-pdf" fileName="source.pdf" onClose={() => {}} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(ensureDocumentParsed).toHaveBeenCalledWith("dataset-a", "document-pdf");
+    expect(screen.getByText("knowledge.pdfChatParsing")).toBeInTheDocument();
+  });
+
+  it("shows a transient parsing failure with its reason outside chat history", async () => {
+    ensureDocumentParsed.mockRejectedValueOnce(new Error("Reader could not decode the PDF"));
+    render(<PdfTemporaryChat datasetId="dataset-a" documentId="broken-pdf" fileName="broken.pdf" onClose={() => {}} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByText("knowledge.pdfChatParseFailed")).toBeInTheDocument();
+    expect(screen.getByText("Reader could not decode the PDF")).toBeInTheDocument();
+  });
+
   it.each(["pdf", "txt", "md", "docx", "html", "xlsx", "pptx"])("submits %s questions scoped to the active document", (extension) => {
     render(<PdfTemporaryChat datasetId="dataset-a" documentId={`document-${extension}`} fileName={`source.${extension}`} onClose={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "Ask document" }));

@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Literal, Optional, Sequence
 
 import os
+import time
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from pathlib import Path
 from urllib.parse import quote
@@ -393,9 +394,30 @@ class KBToolkit:
             raise ToolExecutionError('knowledge_base_id and document_id are required')
         if kb_id not in self._kb_ids([kb_id]):
             raise ToolExecutionError('Knowledge base is unavailable.')
-        return get_core_api(
-            f'/datasets/{quote(kb_id, safe="")}/documents/{quote(doc_id, safe="")}:content'
-        )
+        base = f'/datasets/{quote(kb_id, safe="")}/documents/{quote(doc_id, safe="")}'
+        # A preview chat is allowed to be the first consumer of a stored-only
+        # document. Start the idempotent Reader job and briefly wait for parsed
+        # root text. This path deliberately does not depend on block chunks or
+        # an embedding index.
+        deadline = time.monotonic() + 45
+        while True:
+            ensured = post_core_api(f'{base}:ensure-parsed', {})
+            response = ensured.get('response') if isinstance(ensured, dict) else {}
+            data = response.get('data', response) if isinstance(response, dict) else {}
+            status = str(data.get('status') or '').strip().lower() if isinstance(data, dict) else ''
+            if status == 'failed':
+                raise ToolExecutionError('Document parsing failed.')
+            if status == 'parsed':
+                break
+            if time.monotonic() >= deadline:
+                return {
+                    'document_id': doc_id,
+                    'parse_status': 'parsing',
+                    'content': {'text': ''},
+                    'message': 'Document parsing is still running. Retry read_document shortly.',
+                }
+            time.sleep(1)
+        return get_core_api(f'{base}:read')
 
     @staticmethod
     def _accessible_kb_ids() -> set[str]:

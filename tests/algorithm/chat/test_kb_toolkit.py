@@ -24,6 +24,29 @@ def test_kb_toolkit_is_available_without_selected_kb():
         toolkit._kb_ids()
 
 
+def test_read_document_ensures_parsing_then_uses_json_read_endpoint(monkeypatch):
+    lazyllm.globals['agentic_config'] = {'filters': {'kb_id': 'kb-one'}}
+    posts = []
+    gets = []
+
+    def ensure(path, payload):
+        posts.append((path, payload))
+        return {'response': {'data': {'status': 'parsed'}}}
+
+    def read(path):
+        gets.append(path)
+        return {'document_id': 'doc-one', 'content': {'text': 'whole document'}}
+
+    monkeypatch.setattr('lazymind.chat.engine.tools.kb.post_core_api', ensure)
+    monkeypatch.setattr('lazymind.chat.engine.tools.kb.get_core_api', read)
+
+    result = KBToolkit().read_document('kb-one', 'doc-one')
+
+    assert result['content']['text'] == 'whole document'
+    assert posts == [('/datasets/kb-one/documents/doc-one:ensure-parsed', {})]
+    assert gets == ['/datasets/kb-one/documents/doc-one:read']
+
+
 def _kb_tool_names(manager):
     return {item['function']['name'] for item in manager.tools_description}
 

@@ -275,6 +275,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PATCH", "/datasets/{dataset}", []string{"document.write"}, doc.UpdateDataset)
 	handleAPI(r, "PATCH", "/datasets/{dataset}/processing-level", []string{"document.write"}, doc.UpdateProcessingLevel)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}:ensure-parsed", []string{"document.read"}, doc.EnsureParsed)
+	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}:read", []string{"document.read"}, doc.ReadDocument)
 	handleAPI(r, "GET", "/datasets/{dataset}/processing-status", []string{"document.read"}, doc.GetProcessingStatus)
 
 	// ----- Academic references and paper imports -----
