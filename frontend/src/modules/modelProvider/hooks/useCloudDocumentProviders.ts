@@ -10,11 +10,8 @@ import {
 import { dataSourceCloudOauthApi } from "@/modules/dataSource/api/clients";
 import type { CloudConnectionResponse } from "@/api/generated/auth-client";
 import {
-  createFeishuAccountId,
-  getOAuthStateFromConnection,
   loadFeishuAppSetup,
   loadFeishuAuthAccounts,
-  persistFeishuAuthAccounts,
   type FeishuAccountFormValues,
   type FeishuAuthAccount,
 } from "@/modules/dataSource/common/feishuAccounts";
@@ -350,7 +347,7 @@ export function useCloudDocumentProviders() {
   ) => {
     const activeSetup =
       provider === "feishu"
-        ? feishuAppSetup
+        ? null
         : provider === "github"
           ? githubAppSetup
           : notionAppSetup;
@@ -586,25 +583,6 @@ export function useCloudDocumentProviders() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    if (feishuAuthAccounts.length === 0 && feishuAppSetup) {
-      const seededAccounts: FeishuAuthAccount[] = [
-        {
-          id: createFeishuAccountId(),
-          name: feishuAppSetup.appId,
-          appId: feishuAppSetup.appId,
-          appSecret: feishuAppSetup.appSecret,
-          chatEnabled: false,
-          status: getOAuthStateFromConnection(oauthConnection),
-          connection: oauthConnection,
-          createdAt: new Date().toISOString(),
-        },
-      ];
-      setFeishuAuthAccounts(seededAccounts);
-      persistFeishuAuthAccounts(seededAccounts);
-    }
-  }, [feishuAppSetup, feishuAuthAccounts.length, oauthConnection]);
 
   return {
     t,

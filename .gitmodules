@@ -1,4 +1,4 @@
 [submodule "algorithm/lazyllm"]
 	path = algorithm/lazyllm
-	url = https://github.com/Yuang-Deng/LazyLLM.git
-	branch = dya/pr771-search-runtime
+	url = https://github.com/LazyAGI/LazyLLM.git
+	branch = main

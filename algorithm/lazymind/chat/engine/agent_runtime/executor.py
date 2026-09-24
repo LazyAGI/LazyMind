@@ -35,6 +35,7 @@ from .tool_call_guard import (
     ExactRepeatMonitor,
     FailureRetryPolicy,
     OneShotNoticeBuffer,
+    ToolCallQuota,
     ToolExecutionMiddleware,
 )
 from .tool_limit_control import tool_limit_decision_coordinator
@@ -248,6 +249,7 @@ class AgentExecutor:
         agent._tools_manager = ToolExecutionMiddleware(
             CitationResultMiddleware(agent._tools_manager),
             failure_policy=FailureRetryPolicy(options.tool_failure_limits),
+            call_quota=ToolCallQuota(options.tool_call_limits),
             expanded_round_limit=max(2, int(_cfg['agentic_expanded_max_rounds'])),
             cancel_check=options.extra_stop_condition,
             repeat_monitor=repeat_monitor,

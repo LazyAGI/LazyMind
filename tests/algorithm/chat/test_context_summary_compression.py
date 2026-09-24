@@ -29,6 +29,14 @@ VALID_SUMMARY = '\n'.join(
         'Touched summarizer.py; run_script exit 0.',
         '## Pending work',
         'Wire tests and lint.',
+        '## Active skills',
+        '[]',
+        '## Artifact coordinates',
+        '[]',
+        '## Citation map',
+        '[]',
+        '## Spill paths',
+        '[]',
     ]
 )
 
@@ -175,7 +183,9 @@ def test_select_summary_range_handles_one_long_react_user_turn() -> None:
     )
 
     assert selected is not None
-    assert selected.summary_messages[0]['role'] == 'user'
+    assert selected.replace_start == 1
+    assert history[0] not in selected.summary_messages
+    assert selected.summary_messages[0]['role'] == 'assistant'
     assert selected.tail[0]['role'] == 'assistant'
     assert selected.tail[1]['role'] == 'tool'
     assert validate_tool_pairing(selected.summary_messages)[0]
@@ -288,7 +298,8 @@ def test_apply_summary_projection_is_immutable_and_commits() -> None:
     assert validate_tool_pairing(projected)
     assert history == original
     assert event.decision == 'summarized'
-    assert is_runtime_summary_message(projected[0])
+    assert projected[0]['content'].startswith('old goal turn1')
+    assert is_runtime_summary_message(projected[1])
     assert projected[-1]['content'] == 'latest tool keep me'
     assert any(m.get('content') == 'latest user request keep me' for m in projected)
 
@@ -357,12 +368,13 @@ def test_make_history_compactor_runs_stage2_after_prune() -> None:
         )
         projected = _projected(compact(history, keep_full_turns=1))
     assert calls['n'] >= 1
-    assert is_runtime_summary_message(projected[0])
+    assert projected[0]['role'] == 'user'
+    assert any(is_runtime_summary_message(message) for message in projected)
 
 
 def test_apply_summary_emits_covered_through_seq(monkeypatch) -> None:
     history = [
-        {'role': 'user', 'content': _long('old'), 'history_seq': 3},
+        {'role': 'user', 'content': 'old goal', 'history_seq': 3},
         {
             'role': 'assistant',
             'content': '',
@@ -402,7 +414,8 @@ def test_apply_summary_emits_covered_through_seq(monkeypatch) -> None:
     assert emitted.get('tag') == 'model_context_updated'
     assert emitted.get('covered_through_seq') == 3
     assert 'Current task' in emitted.get('summary_text', '')
-    assert is_runtime_summary_message(projected[0])
+    assert projected[0]['content'] == 'old goal'
+    assert is_runtime_summary_message(projected[1])
 
 
 def test_emit_model_context_updated_requires_strictly_new_coverage(monkeypatch) -> None:

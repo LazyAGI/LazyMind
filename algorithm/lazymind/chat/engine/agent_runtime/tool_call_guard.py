@@ -146,6 +146,48 @@ class _FailureBatchDecision:
     duplicate_sources: dict[int, int]
 
 
+class ToolCallQuota:
+    """Cap how many times a tool may execute in one agent run."""
+
+    def __init__(self, call_limits: dict[str, int] | None = None):
+        self._limits = {str(name): int(limit) for name, limit in (call_limits or {}).items()}
+        self._counts: Counter = Counter()
+
+    def _limit_for(self, name: str) -> int | None:
+        if name in self._limits:
+            return self._limits[name]
+        for pattern, limit in self._limits.items():
+            if pattern.endswith('*') and name.startswith(pattern[:-1]):
+                return limit
+        return None
+
+    def decide(self, prepared_calls: list[PreparedToolCall]) -> dict[int, Any]:
+        blocked: dict[int, Any] = {}
+        pending = Counter()
+        for index, prepared in enumerate(prepared_calls):
+            if not prepared.ready:
+                continue
+            name = prepared.tool_name
+            limit = self._limit_for(name)
+            if limit is None:
+                continue
+            projected = self._counts[name] + pending[name] + 1
+            if projected > limit:
+                blocked[index] = FailureRetryPolicy._blocked(
+                    name,
+                    f'{name} exceeded the per-step call cap ({limit}). '
+                    'Use the locator/path already returned; do not page or re-validate in a loop.',
+                )
+                continue
+            pending[name] += 1
+        return blocked
+
+    def observe(self, records: list[ToolExecutionRecord]) -> None:
+        for record in records:
+            if record.disposition is ToolExecutionDisposition.EXECUTED:
+                self._counts[record.tool_name] += 1
+
+
 class FailureRetryPolicy:
     """Preserve configured hard failure budgets independently of repeat notices."""
 
@@ -331,11 +373,13 @@ class ToolExecutionMiddleware:
                  expanded_round_limit: int | None = None, cancel_check: Any = None,
                  repeat_monitor: ExactRepeatMonitor | None = None,
                  notice_buffer: OneShotNoticeBuffer | None = None,
+                 call_quota: ToolCallQuota | None = None,
                  authorization_gate: Any = None,
                  workspace_permission=None, tool_context: ToolResolutionContext | None = None,
                  trusted_opaque_tools=()):
         self._manager = manager
         self._failure_policy = failure_policy or FailureRetryPolicy()
+        self._call_quota = call_quota or ToolCallQuota()
         self._expanded_round_limit = expanded_round_limit
         self._cancel_check = cancel_check
         self._repeat_monitor = repeat_monitor
@@ -417,6 +461,11 @@ class ToolExecutionMiddleware:
             decision = self._failure_policy.decide(prepared_calls, workspace_indices)
             blocked = dict(decision.blocked_results)
             pending = list(decision.pending_indices)
+            for index, result in self._call_quota.decide(prepared_calls).items():
+                if index not in blocked:
+                    blocked[index] = result
+                    if index in pending:
+                        pending.remove(index)
             approval_indices = set()
             authorization_reasons = {}
             authorization_unavailable = False
@@ -563,6 +612,7 @@ class ToolExecutionMiddleware:
             emit_tool_result(prepared_calls[index].tool_call, result)
         completed_records = [record for record in records if record is not None]
         self._failure_policy.observe(completed_records)
+        self._call_quota.observe(completed_records)
         batch = ToolExecutionBatch(
             results=lazyllm.package(results),
             records=tuple(completed_records),

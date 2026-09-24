@@ -68,7 +68,7 @@ func run() error {
 	}
 	clearBytes(internalToken)
 	coordinator, err := coreproviderconnection.NewFeishuCLIDeviceFlowCoordinator(
-		runner, profiles, registry, coreproviderconnection.DefaultFeishuCLIReadScopes,
+		runner, profiles, registry, coreproviderconnection.DefaultFeishuCLIScopes,
 	)
 	if err != nil {
 		return err

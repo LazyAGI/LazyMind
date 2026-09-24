@@ -14,7 +14,7 @@ export function resolveWorkflowContinueAction(
   if (completedStep) return { kind: 'completed', stepId: completedStep };
   const approvalStep = resolvePendingApprovalStep(session, displayStatus);
   if (approvalStep) return { kind: 'approval', stepId: approvalStep };
-  if (displayStatus !== 'waiting' || session.projection?.completed) return undefined;
+  if (!['waiting', 'stopped'].includes(displayStatus) || session.projection?.completed) return undefined;
   const nodes = session.projection?.nodes ?? {};
   if (Object.values(nodes).some((node) => node.validity !== 'stale'
     && ['pending', 'queued', 'claimed', 'running', 'failed'].includes(node.execution))) return undefined;

@@ -40,6 +40,7 @@ export interface RunTerminalView {
   reason: string;
   code?: string;
   partial_output: boolean;
+  diagnostic_id?: string;
 }
 
 function isUserCancelledTerminal(terminal: RunTerminalView): boolean {
@@ -128,6 +129,25 @@ export default function RunStatusCard({
             : t("chat.runStatus.noOutput"),
         ].join(" ")
       : runStatusDescription(terminal, t);
+  const displayCode = terminal.code && (
+    KNOWN_CODES.has(terminal.code) || terminal.reason === "runtime_failure"
+  )
+    ? terminal.code
+    : undefined;
+  const diagnosticDetails = displayCode || terminal.diagnostic_id ? (
+    <div className="chat-run-status-card__diagnostic" role="status">
+      {displayCode ? (
+        <div>
+          {t("chat.runStatus.failureCode", { code: displayCode })}
+        </div>
+      ) : null}
+      {terminal.diagnostic_id ? (
+        <div>
+          {t("chat.runStatus.diagnosticId", { id: terminal.diagnostic_id })}
+        </div>
+      ) : null}
+    </div>
+  ) : null;
   const isCancelled = isUserCancelledTerminal(terminal);
   const className = isCancelled
     ? "chat-run-status-card chat-run-status-card--cancelled"
@@ -191,7 +211,12 @@ export default function RunStatusCard({
         : isModelUnavailable
           ? "chat.modelUnavailableTitle"
         : runStatusTitleKey(terminal))}
-      description={description}
+      description={
+        <>
+          <div>{description}</div>
+          {diagnosticDetails}
+        </>
+      }
       action={actions}
     />
   );

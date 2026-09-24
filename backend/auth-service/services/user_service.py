@@ -1,6 +1,5 @@
 """User business logic: called by API layer, and this module calls repositories."""
 import uuid
-from datetime import datetime, timezone
 
 from core.database import SessionLocal
 from core.errors import ErrorCodes, raise_error
@@ -9,7 +8,7 @@ from services.auth_service import EMAIL_MAX_LEN, auth_service
 
 
 class UserService:
-    """User CRUD, role assignment, password reset."""
+    """User CRUD and role assignment."""
 
     def _is_bootstrap_admin(self, user) -> bool:
         if not user:
@@ -169,21 +168,6 @@ class UserService:
             if not user:
                 raise_error(ErrorCodes.USER_NOT_FOUND)
             user.disabled = disabled
-            db.commit()
-
-    def reset_password(self, user_id: uuid.UUID, new_password: str) -> None:
-        """Reset user password. Raises if user not found or password invalid."""
-        new_password = (new_password or '').strip()
-        if not new_password:
-            raise_error(ErrorCodes.NEW_PASSWORD_REQUIRED)
-        if not auth_service.validate_password(new_password):
-            raise_error(ErrorCodes.INVALID_PASSWORD)
-        with SessionLocal() as db:
-            user = UserRepository.get_by_id(db, user_id)
-            if not user:
-                raise_error(ErrorCodes.USER_NOT_FOUND)
-            user.password_hash = auth_service.hash_password(new_password)
-            user.updated_pwd_time = datetime.now(timezone.utc)
             db.commit()
 
 

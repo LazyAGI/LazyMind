@@ -31,19 +31,22 @@ var (
 	ErrCLIConnectionConflict = errors.New("Provider Connection state conflict")
 )
 
-var feishuCLIReadScopes = []string{
+var DefaultFeishuCLIScopes = []string{
 	"offline_access",
+	"drive:drive",
 	"drive:drive:readonly",
-	"wiki:space:retrieve",
-	"wiki:node:read",
+	"drive:drive.metadata:readonly",
+	"wiki:wiki",
+	"wiki:wiki:readonly",
 	"wiki:node:retrieve",
-	"docx:document:readonly",
+	"docx:document",
 }
 
-// Keep the existing exported name; authorization now also requests document writes.
-var DefaultFeishuCLIReadScopes = append(slices.Clone(feishuCLIReadScopes),
-	"drive:drive", "wiki:wiki", "docx:document",
-)
+// Existing CLI profiles may still carry the granular read-only grant set.
+var feishuCLIReadScopes = []string{
+	"offline_access", "drive:drive:readonly", "wiki:space:retrieve",
+	"wiki:node:read", "wiki:node:retrieve", "docx:document:readonly",
+}
 
 var feishuCLIAuthLoginCommand = [...]string{"auth", "login"}
 
@@ -367,7 +370,7 @@ func (coordinator *FeishuCLIDeviceFlowCoordinator) restoreSession(ctx context.Co
 	if session.Status == "COMPLETED" && (session.DisplayName == "" || len(session.Capabilities) == 0) {
 		status, statusErr := coordinator.runner.AuthStatus(ctx, profile.ConfigDir)
 		// Restoring a completed read connection must not require new write grants.
-		checked, checkErr := coordinator.runner.AuthCheck(ctx, profile.ConfigDir, feishuCLIReadScopes)
+		checked, checkErr := coordinator.checkCompatibleScopes(ctx, profile.ConfigDir, feishuCLIReadScopes)
 		if statusErr == nil && checkErr == nil {
 			session.DisplayName = status.Identities.User.UserName
 			session.GrantedScopes = append([]string(nil), checked.Granted...)

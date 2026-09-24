@@ -39,6 +39,10 @@ vi.mock("@/runtime/mode", () => ({
   getRuntimeMode: mocks.getRuntimeMode,
 }));
 
+vi.mock("@/components/auth", () => ({
+  AgentAppsAuth: { getUserInfo: () => ({ userId: "owner" }) },
+}));
+
 vi.mock("@/components/request", () => ({ BASE_URL: "", axiosInstance: { get: vi.fn(), post: vi.fn(), put: vi.fn() } }));
 
 vi.mock("@/modules/chat/utils/localWorkspace", async () => ({
@@ -111,7 +115,7 @@ async function openCandidateDialog(onChange: ReturnType<typeof vi.fn>) {
 }
 
 async function openWorkspaceMenu() {
-  fireEvent.click(screen.getByRole("button", { name: /chat\.workspace\.unselected/ }));
+  fireEvent.click(screen.getByRole("button", { name: /chat\.workspace\.select/ }));
   return screen.findByPlaceholderText("chat.workspace.searchShort");
 }
 
@@ -140,6 +144,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
   });
 
   beforeEach(() => {
+    localStorage.clear();
     vi.clearAllMocks();
     Object.values(mocks).forEach((mock) => mock.mockReset());
     vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [] } } });
@@ -180,6 +185,16 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     expect(mocks.saveUserPermissionPreference).not.toHaveBeenCalled();
   });
 
+  it("restores the last workspace with the saved user permission", async () => {
+    localStorage.setItem("chat:last-workspace:local:owner", alpha.workspace_id);
+    mocks.listWorkspaces.mockResolvedValue([alpha]);
+    mocks.getUserPermissionPreference.mockResolvedValue({ default_permission_mode: "allow_all", permission_version: 8 });
+    const onChange = vi.fn();
+    render(<LocalWorkspaceControl onChange={onChange} />);
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(alpha.workspace_id, "allow_all"));
+    expect(screen.getByRole("button", { name: /Alpha/ })).toBeInTheDocument();
+  });
+
   it("saves unbound conversation permission and the user default together", async () => {
     mocks.getUserPermissionPreference.mockResolvedValue({ default_permission_mode: "always_ask", permission_version: 5 });
     mocks.updateWorkspacePermission.mockResolvedValue({ permission_mode: "ask_as_needed", permission_version: 2, user_permission_version: 6 });
@@ -206,7 +221,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     expect(onChange).not.toHaveBeenCalledWith(undefined, "ask_as_needed");
   });
 
-  it("resets a reused draft to no workspace and ask-as-needed", async () => {
+  it("restores the last workspace in a reused draft", async () => {
     mocks.listWorkspaces.mockResolvedValue([alpha]);
     const onChange = vi.fn();
     const { rerender } = render(<LocalWorkspaceControl configResetKey={1} onChange={onChange} />);
@@ -217,8 +232,52 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
 
     rerender(<LocalWorkspaceControl configResetKey={2} onChange={onChange} />);
 
-    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(undefined, "ask_as_needed"));
-    expect(screen.getByRole("combobox")).toBeEnabled();
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(alpha.workspace_id, "ask_as_needed"));
+    expect(document.querySelector(".local-workspace-control")).toHaveTextContent("Alpha");
+  });
+
+  it("persists the last selection across new conversations and honors explicit none", async () => {
+    mocks.listWorkspaces.mockResolvedValue([alpha, beta]);
+    const first = render(<LocalWorkspaceControl onChange={vi.fn()} />);
+    await openWorkspaceMenu();
+    fireEvent.click(await screen.findByRole("button", { name: /Alpha/ }));
+    first.unmount();
+
+    const onChange = vi.fn();
+    const second = render(<LocalWorkspaceControl onChange={onChange} />);
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(alpha.workspace_id, "ask_as_needed"));
+    fireEvent.click(screen.getByRole("button", { name: /Alpha/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /chat.workspace.none/ }));
+    second.unmount();
+
+    const nextChange = vi.fn();
+    render(<LocalWorkspaceControl onChange={nextChange} />);
+    await waitFor(() => expect(mocks.listWorkspaces).toHaveBeenCalledTimes(3));
+    expect(screen.getByRole("button", { name: /chat.workspace.select/ })).toBeInTheDocument();
+    expect(nextChange).not.toHaveBeenCalledWith(alpha.workspace_id, expect.anything());
+  });
+
+  it("does not restore a workspace that is no longer active", async () => {
+    localStorage.setItem("chat:last-workspace:local:owner", alpha.workspace_id);
+    mocks.listWorkspaces.mockResolvedValue([beta]);
+    const onChange = vi.fn();
+    render(<LocalWorkspaceControl onChange={onChange} />);
+    await waitFor(() => expect(mocks.listWorkspaces).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: /chat.workspace.select/ })).toBeInTheDocument();
+    expect(localStorage.getItem("chat:last-workspace:local:owner")).toBe("");
+    expect(onChange).not.toHaveBeenCalledWith(alpha.workspace_id, expect.anything());
+  });
+
+  it("keeps project setup invisible while allowing the selected workspace", async () => {
+    mocks.listWorkspaces.mockResolvedValue([alpha]);
+    const onProjectChange = vi.fn();
+    render(<LocalWorkspaceControl onChange={vi.fn()} onProjectChange={onProjectChange} />);
+    await openWorkspaceMenu();
+    fireEvent.click(await screen.findByRole("button", { name: /Alpha/ }));
+    await waitFor(() => expect(onProjectChange).toHaveBeenLastCalledWith("alpha", true));
+    expect(document.querySelector(".local-workspace-control")).not.toHaveTextContent(alpha.path);
+    expect(screen.queryByText("conversationProject.project")).not.toBeInTheDocument();
+    expect(screen.queryByText("conversationProject.createOnSend")).not.toBeInTheDocument();
   });
 
   it("locks folder selection for an existing bound task", async () => {
@@ -353,7 +412,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     mocks.listWorkspaces.mockResolvedValue([alpha]);
     render(<LocalWorkspaceControl onChange={vi.fn()} />);
 
-    expect(await screen.findByRole("button", { name: /chat\.workspace\.unselected/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /chat\.workspace\.select/ })).toBeInTheDocument();
     expect(screen.queryByText("chat.workspace.recent")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "chat.workspace.manage" })).not.toBeInTheDocument();
     expect(await screen.findByText("chat.workspace.askAsNeeded")).toBeInTheDocument();
@@ -571,11 +630,11 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     mocks.listWorkspaces.mockResolvedValue([alpha, beta]);
     const onChange = vi.fn();
     render(<LocalWorkspaceControl draftWorkspace={{ workspace_id: alpha.workspace_id, workspace_permission_mode: "always_ask" }} onChange={onChange} />);
-    await waitFor(() => expect(onChange).toHaveBeenCalledWith(alpha.workspace_id, "ask_as_needed"));
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(alpha.workspace_id, "always_ask"));
     expect(screen.getByRole("button", { name: /Alpha/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Alpha/ }));
     fireEvent.click(await screen.findByRole("button", { name: /chat.workspace.none/ }));
-    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(undefined, "ask_as_needed"));
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(undefined, "always_ask"));
   });
 
   it.each([["execution_inactive", "status.inactive"], ["selection_expired", "requestExpired"]])("shows approval decision error %s", async (reason, label) => {

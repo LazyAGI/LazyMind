@@ -1,8 +1,9 @@
 import { createPortal } from "react-dom";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Button, Input, Modal, Popover, Select, Space, Tag, message, type SelectProps } from "antd";
-import { CheckOutlined, CloseOutlined, DownOutlined, ExclamationCircleOutlined, FolderOpenOutlined, SafetyCertificateOutlined, SettingOutlined, StopOutlined } from "@ant-design/icons";
+import { CheckOutlined, CloseOutlined, DownOutlined, ExclamationCircleOutlined, FolderOpenOutlined, SafetyCertificateOutlined, SearchOutlined, SettingOutlined, StopOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { AgentAppsAuth } from "@/components/auth";
 import { getRuntimeMode } from "@/runtime/mode";
 import {
   authorizeWorkspace,
@@ -23,10 +24,28 @@ import {
 } from "@/modules/chat/utils/localWorkspace";
 
 import type { ConversationGroup } from "../../conversationOrganizer/api";
-import DraftProject from "../../conversationOrganizer/DraftProject";
+import { defaultProjectName } from "../../conversationOrganizer/ProjectDirectoryField";
+
+const workspacePreferenceKey = (runtime: string) => {
+  const userId = AgentAppsAuth.getUserInfo()?.userId;
+  return userId ? `chat:last-workspace:${runtime}:${encodeURIComponent(userId)}` : undefined;
+};
+
+const readPreferredWorkspaceId = (runtime: string) => {
+  try {
+    const key = workspacePreferenceKey(runtime);
+    return key ? localStorage.getItem(key) || undefined : undefined;
+  } catch { return undefined; }
+};
+
+const rememberWorkspaceId = (runtime: string, workspaceId?: string) => {
+  try {
+    const key = workspacePreferenceKey(runtime);
+    if (key) localStorage.setItem(key, workspaceId ?? "");
+  } catch { /* Optional local preference. */ }
+};
 
 interface Props {
-  isTaskConv?: boolean;
   approvalContainer?: HTMLElement | null;
   draftWorkspace?: Pick<import("./types").SendMessageParams, "workspace_id" | "workspace_permission_mode" | "project_name">;
   initialProject?: ConversationGroup;
@@ -37,7 +56,7 @@ interface Props {
   onSavingChange?: (saving: boolean) => void;
   onChange: (workspaceId: string | undefined, mode: WorkspacePermissionMode) => void;
 }
-export default function LocalWorkspaceControl({ isTaskConv = false, approvalContainer, draftWorkspace, conversationId, configResetKey, disabled, onChange, onSavingChange, initialProject, onProjectChange }: Props) {
+export default function LocalWorkspaceControl({ approvalContainer, draftWorkspace, conversationId, configResetKey, disabled, onChange, onSavingChange, initialProject, onProjectChange }: Props) {
   const { t } = useTranslation();
   const runtime = getRuntimeMode();
   const labels: Record<WorkspacePermissionMode, string> = {
@@ -179,11 +198,20 @@ export default function LocalWorkspaceControl({ isTaskConv = false, approvalCont
     if (!workspace || selectedRef.current?.workspace_id === workspace.workspace_id) return;
     selectedRef.current = workspace;
     setSelected(workspace);
+    rememberWorkspaceId(runtime, workspace.workspace_id);
     onChangeRef.current(workspace.status === "active" ? workspace.workspace_id : undefined, mode);
-  }, [initialProject, items, conversationId]);
+  }, [initialProject, items, conversationId, runtime, mode]);
   useEffect(() => {
-    if (!conversationId && !selected) onProjectChange?.(undefined, !initialProject);
-  }, [selected, conversationId, initialProject, onProjectChange]);
+    if (conversationId || !onProjectChange) return;
+    if (!selected) {
+      onProjectChange(undefined, !initialProject);
+      return;
+    }
+    const draftName = selected.workspace_id === draftWorkspace?.workspace_id ? draftWorkspace.project_name : undefined;
+    const projectName = initialProject?.workspace_id === selected.workspace_id ? undefined : draftName ?? defaultProjectName(selected.path);
+    const nameValid = projectName === undefined || (projectName.trim().length > 0 && Array.from(projectName.trim()).length <= 255);
+    onProjectChange(projectName, selected.status === "active" && nameValid && (!initialProject || initialProject.workspace_id === selected.workspace_id));
+  }, [selected, conversationId, initialProject, draftWorkspace, onProjectChange]);
 
   useEffect(() => {
     if (conversationId || !draftWorkspace?.workspace_id || restoredDraftRef.current === draftWorkspace) return;
@@ -192,8 +220,11 @@ export default function LocalWorkspaceControl({ isTaskConv = false, approvalCont
     restoredDraftRef.current = draftWorkspace;
     selectedRef.current = workspace;
     setSelected(workspace);
-    onChangeRef.current(workspace.workspace_id, mode);
-  }, [draftWorkspace, items, conversationId]);
+    rememberWorkspaceId(runtime, workspace.workspace_id);
+    const nextMode = draftWorkspace.workspace_permission_mode ?? mode;
+    setMode(nextMode);
+    onChangeRef.current(workspace.workspace_id, nextMode);
+  }, [draftWorkspace, items, conversationId, runtime, mode]);
 
   if (runtime !== "local" && runtime !== "desktop") return null;
 
@@ -231,9 +262,18 @@ export default function LocalWorkspaceControl({ isTaskConv = false, approvalCont
       setPermissionReady(true);
       setItems(values);
       if (selectedRef.current && !values.some((item) => item.workspace_id === selectedRef.current?.workspace_id)) {
+        if (readPreferredWorkspaceId(runtime) === selectedRef.current.workspace_id) rememberWorkspaceId(runtime);
         selectedRef.current = undefined;
         setSelected(undefined);
-        onChangeRef.current(undefined, nextMode);
+      } else if (!selectedRef.current && !initialProject && !draftWorkspace?.workspace_id) {
+        const preferredId = readPreferredWorkspaceId(runtime);
+        const preferred = values.find((item) => item.workspace_id === preferredId && item.status === "active");
+        if (preferred) {
+          selectedRef.current = preferred;
+          setSelected(preferred);
+        } else if (preferredId) {
+          rememberWorkspaceId(runtime);
+        }
       }
       onChangeRef.current(selectedRef.current?.workspace_id, nextMode);
     } catch {
@@ -291,6 +331,7 @@ export default function LocalWorkspaceControl({ isTaskConv = false, approvalCont
         onProjectChange?.(undefined, false);
         selectedRef.current = workspace;
         setSelected(workspace);
+        rememberWorkspaceId(runtime, workspace.workspace_id);
         onChangeRef.current(workspace.workspace_id, mode);
       }
       setCandidate(undefined);
@@ -353,6 +394,7 @@ export default function LocalWorkspaceControl({ isTaskConv = false, approvalCont
         const result = await revokeWorkspace(target.workspace_id, target.version);
         if (request !== requestRef.current) return;
         const workspace: LocalWorkspaceView = { ...target, status: "revoked", version: result.version };
+        if (readPreferredWorkspaceId(runtime) === target.workspace_id) rememberWorkspaceId(runtime);
         setItems((current) => current.filter((item) => item.workspace_id !== target.workspace_id));
         setManagedItems((current) => current.map((item) => item.workspace_id === target.workspace_id ? workspace : item));
         if (selectedRef.current?.workspace_id === target.workspace_id) {
@@ -416,6 +458,7 @@ export default function LocalWorkspaceControl({ isTaskConv = false, approvalCont
     onProjectChange?.(undefined, !workspace);
     selectedRef.current = workspace;
     setSelected(workspace);
+    rememberWorkspaceId(runtime, workspace?.workspace_id);
     setWorkspaceMenuOpen(false);
     onChangeRef.current(workspace?.workspace_id, mode);
   };
@@ -457,7 +500,7 @@ export default function LocalWorkspaceControl({ isTaskConv = false, approvalCont
       </Space>}
       {!conversationId && !initialProject && <Popover trigger="click" placement="bottomLeft" autoAdjustOverflow={false} open={workspaceMenuOpen} onOpenChange={setWorkspaceMenuOpen}
         content={<div className="local-workspace-menu">
-          <Input.Search allowClear value={workspaceQuery} placeholder={t("chat.workspace.searchShort")} onChange={(event: ChangeEvent<HTMLInputElement>) => setWorkspaceQuery(event.target.value)} />
+          <Input allowClear prefix={<SearchOutlined />} value={workspaceQuery} placeholder={t("chat.workspace.searchShort")} onChange={(event: ChangeEvent<HTMLInputElement>) => setWorkspaceQuery(event.target.value)} />
           <div className="local-workspace-menu-list">
             {visibleItems.map((item) => <button type="button" key={item.workspace_id} disabled={item.status !== "active"} onClick={() => selectDraftWorkspace(item)}>
               <span className="local-workspace-menu-icon"><FolderOpenOutlined /></span><span><strong>{item.display_name}</strong><small>{item.path}</small></span>
@@ -470,7 +513,7 @@ export default function LocalWorkspaceControl({ isTaskConv = false, approvalCont
           </div>
         </div>}>
         <Button className="local-workspace-trigger" size="small" icon={<FolderOpenOutlined />} disabled={disabled || busy} loading={busy}>
-          {selected?.display_name ?? t("chat.workspace.unselected")} <DownOutlined />
+          {selected?.display_name ?? t("chat.workspace.select")} <DownOutlined />
         </Button>
       </Popover>}
       {conversationId && <span className="local-workspace-current" title={selected?.path}><FolderOpenOutlined /> {selected?.display_name ?? t("chat.workspace.unselected")}</span>}
@@ -485,7 +528,6 @@ export default function LocalWorkspaceControl({ isTaskConv = false, approvalCont
         </div>; }) as NonNullable<SelectProps<WorkspacePermissionMode>["optionRender"]>}
         onChange={(value: WorkspacePermissionMode) => void changeMode(value)} />
     </Space>
-    {!conversationId && selected && onProjectChange && <DraftProject isTaskConv={isTaskConv} initialName={selected.workspace_id === draftWorkspace?.workspace_id ? draftWorkspace.project_name : undefined} workspace={selected} fixedProject={initialProject} onChange={onProjectChange} />}
     {(!candidate || currentCandidate) && <Modal className="local-workspace-authorize-modal" open={Boolean(currentCandidate)} title={t("chat.workspace.authorizeTitle")} confirmLoading={busy} onCancel={() => setCandidate(undefined)} onOk={() => void allow()} okText={t("chat.workspace.authorize")}>
       <p className="local-workspace-authorize-question">{t("chat.workspace.authorizeQuestion", { name: currentCandidate?.name })}</p>
       <div className="local-workspace-authorize-folder"><FolderOpenOutlined /><span><strong>{currentCandidate?.name}</strong><small>{currentCandidate?.path}</small></span></div>

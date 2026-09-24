@@ -118,3 +118,37 @@ func TestClearModelContextPreservesOtherConversationExt(t *testing.T) {
 		t.Fatalf("unrelated ext was removed: %#v", got)
 	}
 }
+
+func TestHandleModelContextUpdatedMergesSidecarWithoutDroppingSummary(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.Conversation{})
+	ext := json.RawMessage(`{"model_context":{"summary_text":"keep me","covered_through_seq":4,"version":1}}`)
+	if err := db.Create(&orm.Conversation{ID: "conv-sidecar", Ext: ext}).Error; err != nil {
+		t.Fatal(err)
+	}
+	handleModelContextUpdated(t.Context(), db.DB, "conv-sidecar", &ModelContextUpdatedEvent{
+		ActiveSkills: json.RawMessage(`[{"name":"demo","path":"/skills/demo/SKILL.md","hash":"abc"}]`),
+		TaskGoal:     json.RawMessage(`"keep the bid outline on track"`),
+	})
+	var conv orm.Conversation
+	if err := db.Where("id = ?", "conv-sidecar").First(&conv).Error; err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]any{}
+	if err := json.Unmarshal(conv.Ext, &got); err != nil {
+		t.Fatal(err)
+	}
+	mc, _ := got["model_context"].(map[string]any)
+	if mc["summary_text"] != "keep me" {
+		t.Fatalf("summary dropped: %#v", mc)
+	}
+	if mc["covered_through_seq"] != float64(4) {
+		t.Fatalf("covered changed: %#v", mc["covered_through_seq"])
+	}
+	skills, _ := mc["active_skills"].([]any)
+	if len(skills) != 1 {
+		t.Fatalf("active_skills missing: %#v", mc)
+	}
+	if mc["task_goal"] != "keep the bid outline on track" {
+		t.Fatalf("task_goal missing: %#v", mc)
+	}
+}

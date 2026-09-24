@@ -1059,7 +1059,7 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
       const steps = attachOrdinarySteps(workflowSnapshotSteps(sessionId, projection.attempt_history) ?? session.steps, session.ordinary_tasks ?? []);
       return {
         projectionBySession: { ...state.projectionBySession, [sessionId]: projectionState },
-        ...(['completed', 'failed', 'stopped'].includes(reconciledStatus) ? {
+        ...(reconciledStatus !== 'active' ? {
           autoRunningByConversation: { ...state.autoRunningByConversation, [conversationId]: false },
         } : {}),
         sessionByConversation: {

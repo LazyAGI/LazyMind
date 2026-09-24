@@ -631,12 +631,18 @@ func manualSchemas() map[string]any {
 			[]string{"step_id", "status"}, prop("step_id", strSchema()), prop("title", strSchema()),
 			prop("status", strSchema()), prop("current_phase", strSchema()), prop("summary", strSchema()), prop("artifact", strSchema()),
 		),
+		"TaskCenterScheduleSummary": objReq(
+			[]string{"id", "name", "cron_expr", "timezone", "enabled", "run_count", "next_run_at"},
+			prop("id", strSchema()), prop("name", strSchema()), prop("cron_expr", strSchema()), prop("timezone", strSchema()),
+			prop("enabled", boolSchema()), prop("run_count", intSchema()), prop("last_run_at", dateTimeSchema()), prop("next_run_at", dateTimeSchema()),
+		),
 		"TaskCenterTaskResponse": objReq(
 			[]string{"id", "user_id", "conversation_id", "conversation_state", "task_type", "status", "steps", "created_at", "updated_at"},
 			prop("id", strSchema()), prop("user_id", strSchema()), prop("conversation_id", strSchema()),
 			prop("conversation_state", enumStringSchema("active", "archived", "trash", "missing")), prop("conversation_title", strSchema()),
 			prop("workflow_session_id", strSchema()), prop("task_type", strSchema()), prop("title", strSchema()), prop("status", strSchema()),
 			prop("schedule_id", strSchema()), prop("schedule_name", strSchema()), prop("steps", array(refSchema("TaskCenterStepInfo"))),
+			prop("schedule", refSchema("TaskCenterScheduleSummary")),
 			prop("progress", obj()), prop("created_at", dateTimeSchema()), prop("updated_at", dateTimeSchema()),
 			prop("finished_at", dateTimeSchema()), prop("waiting_reason", strSchema()),
 		),

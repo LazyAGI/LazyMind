@@ -34,10 +34,6 @@ class UserRoleBatchBody(BaseModel):
     role_id: str  # Role UUID string
 
 
-class ResetPasswordBody(BaseModel):
-    new_password: str
-
-
 class DisableUserBody(BaseModel):
     disabled: bool = True
 

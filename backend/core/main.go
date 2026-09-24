@@ -435,7 +435,7 @@ func configureFeishuCLI(service *coreproviderconnection.Service, registry corepr
 		return
 	}
 	coordinator, err := coreproviderconnection.NewFeishuCLIDeviceFlowCoordinator(
-		runner, profiles, registry, coreproviderconnection.DefaultFeishuCLIReadScopes,
+		runner, profiles, registry, coreproviderconnection.DefaultFeishuCLIScopes,
 	)
 	if err != nil {
 		log.Logger.Warn().Str("error_code", "CLI_UNAVAILABLE").Msg("Feishu CLI runtime is unavailable")

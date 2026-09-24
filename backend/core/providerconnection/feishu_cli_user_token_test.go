@@ -228,7 +228,7 @@ func TestCLICoordinatorChecksProfileIdentityAndWriteGrants(t *testing.T) {
 				t.Fatal(err)
 			}
 			runtime := &credentialRuntime{fakeFeishuCLIRuntime: newFakeFeishuCLIRuntime(), identity: FeishuCLIUserIdentity{OpenID: "ou_fixture", TenantKey: "fixture-tenant"}, token: "fixture-access"}
-			coordinator, err := NewFeishuCLIDeviceFlowCoordinator(runtime, profiles, &fakeFeishuCLIConnectionRegistry{}, DefaultFeishuCLIReadScopes)
+			coordinator, err := NewFeishuCLIDeviceFlowCoordinator(runtime, profiles, &fakeFeishuCLIConnectionRegistry{}, DefaultFeishuCLIScopes)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -299,7 +299,7 @@ func TestCLICoordinatorChecksProfileIdentityAndWriteGrants(t *testing.T) {
 			}
 			runtime.missing = true
 			revoked, err := backend.UserAccessToken(ctx, owner, connection, reference, capability)
-			if err == nil || revoked.AccessToken != "" || runtime.scopeCalls != 3 || runtime.tokenCalls != 2 {
+			if err == nil || revoked.AccessToken != "" || runtime.scopeCalls != 4 || runtime.tokenCalls != 2 {
 				t.Fatal("coordinator exported a token after grants were revoked")
 			}
 		})
