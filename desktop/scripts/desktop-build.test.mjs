@@ -703,6 +703,23 @@ test("selected Desktop folders become dynamic allowed roots without confirmation
   assert.doesNotMatch(handler, /restartRuntimeAfterFolderAccessChange/);
 });
 
+test("Desktop waits for the previous runtime monitor to close before restarting", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  const start = source.indexOf("async function restartRuntimeAfterFolderAccessChange()");
+  const end = source.indexOf("function logStartupContext()", start);
+  const restart = source.slice(start, end);
+
+  assert.ok(start >= 0 && end > start, "could not locate restartRuntimeAfterFolderAccessChange");
+  assert.match(restart, /monitor\.once\("close", onClose\)/);
+  assert.match(restart, /runtimeOwnershipHandoffTimeoutMs/);
+  const downCall = 'await runSidecar("down", [], { env: sidecarShutdownEnv() })';
+  assert.ok(restart.includes(downCall));
+  assert.ok(restart.indexOf('monitor.once("close", onClose)') < restart.indexOf(downCall));
+  assert.ok(restart.indexOf(downCall) < restart.indexOf("detachRuntimeMonitor()"));
+  assert.ok(restart.indexOf("await monitorClosed") < restart.indexOf("startRuntime()"));
+  assert.ok(restart.indexOf("await waitForRuntimeReady()") < restart.indexOf("window.webContents.reload()"));
+});
+
 test("Desktop discovery asks for consent before choosing roots and skips protected content folders", () => {
   const source = readFileSync(electronMainScript, "utf8");
   const start = source.indexOf('ipcMain.handle("lazymind:chooseLocalDiscoveryRoots"');

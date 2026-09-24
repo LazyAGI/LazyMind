@@ -43,6 +43,27 @@ func TestRuntimeEnvCarriesLocalAutoLoginLANFlag(t *testing.T) {
 	assertEnvContains(t, runtimeCommandEnv(paths, cfg), localAutoLoginAllowLANEnvVar+"=true")
 }
 
+func TestRuntimeProcessEnvironmentCarriesObsidianPathsToChat(t *testing.T) {
+	cfg := RuntimeConfig{Profile: "local"}
+	paths := RuntimePaths{}
+	t.Setenv("LAZYLLM_OBSIDIAN_VAULT_PATH", "/tmp/obsidian-vault")
+	t.Setenv("LAZYLLM_OBSIDIAN_HOST_ROOT", "/tmp/obsidian-root")
+
+	base := runtimeCommandEnv(paths, cfg)
+	plan := buildRuntimeProcessPlan(cfg)
+	chatEnv := runtimeProcessEnvironment(base, cfg, plan, chatProcessName)
+	assertEnvContains(t, chatEnv, "LAZYLLM_OBSIDIAN_VAULT_PATH=/tmp/obsidian-vault")
+	assertEnvContains(t, chatEnv, "LAZYLLM_OBSIDIAN_HOST_ROOT=/tmp/obsidian-root")
+
+	authEnv := runtimeProcessEnvironment(base, cfg, plan, authServiceProcessName)
+	assertEnvMissing(t, authEnv, "LAZYLLM_OBSIDIAN_VAULT_PATH")
+	assertEnvMissing(t, authEnv, "LAZYLLM_OBSIDIAN_HOST_ROOT")
+
+	algoEnv := runtimeProcessEnvironment(base, cfg, plan, algoProcessName)
+	assertEnvMissing(t, algoEnv, "LAZYLLM_OBSIDIAN_VAULT_PATH")
+	assertEnvMissing(t, algoEnv, "LAZYLLM_OBSIDIAN_HOST_ROOT")
+}
+
 func TestInstallerWarmupUsesPerProcessCapabilities(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)

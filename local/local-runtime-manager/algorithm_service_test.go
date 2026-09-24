@@ -400,6 +400,7 @@ func TestAlgorithmServiceEnvUsesRuntimeDataPaths(t *testing.T) {
 	assertEnvContains(t, env, "LAZYLLM_HOME="+paths.LazyLLMHome)
 	assertEnvContains(t, env, "TIKTOKEN_CACHE_DIR="+filepath.Join(paths.LazyLLMHome, "tiktoken"))
 	assertEnvContains(t, env, "LAZYMIND_DOCUMENT_SERVICE_STORAGE_DIR="+paths.UploadRoot)
+	assertEnvContains(t, env, "LAZYMIND_OBSERVABILITY_DIR="+filepath.Join(paths.DataDir, "observability"))
 	assertEnvContains(t, env, "LAZYLLM_TEMP_DIR="+paths.LazyLLMTempDir)
 	assertEnvContains(t, env, "LAZYMIND_OCR_CACHE_DIR="+paths.OCRCacheDir)
 	assertEnvContains(t, env, "LAZYMIND_MOUNT_BASE_DIR="+paths.UploadRoot)

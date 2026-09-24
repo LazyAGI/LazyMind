@@ -52,3 +52,5 @@ export const CLOUD_DOCUMENTS_MAIL_PATH = "/cloud-documents/mail";
 
 export const CLOUD_DOCUMENTS_GITHUB_SETUP_PATH =
   "/cloud-documents/docs/github-setup";
+export const CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH =
+  "/cloud-documents/docs/obsidian-setup";

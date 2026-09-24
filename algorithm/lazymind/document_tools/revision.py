@@ -93,7 +93,7 @@ def finalize_markdown_revision(
     markdown: str, resolved_media_assets: Any = None, *, source: str | None = None,
 ) -> str:
     """Resolve media placeholders introduced by a Markdown revision."""
-    from .writing import fill_markdown_media_placeholders
+    from .writing import _media_reference_variants, fill_markdown_media_placeholders
 
     library = resolved_media_assets or {}
     needs = library.get('visual_need_asset_ids') or {}
@@ -119,16 +119,21 @@ def finalize_markdown_revision(
     remaining = markdown_image_sources(filled)
     if any(target.startswith('media-placeholder://') for target in remaining):
         raise ValueError('Revision contains unresolved image placeholders.')
+    remaining_variants = {
+        variant
+        for reference in remaining
+        for variant in _media_reference_variants(reference)
+    }
     for need_id, asset_ids in needs.items():
         if not asset_ids:
             continue
         asset = assets.get(asset_ids[0]) or {}
-        paths = {
-            value if value.startswith(('https://', 'http://')) else Path(value).as_posix()
+        asset_variants = {
+            variant
             for key in ('local_path', 'uri')
-            if (value := str(asset.get(key) or ''))
+            for variant in _media_reference_variants(asset.get(key))
         }
-        if not paths.intersection(remaining):
+        if not asset_variants & remaining_variants:
             raise ValueError(f'Resolved revision image was not inserted: {need_id}')
     return filled
 

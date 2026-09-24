@@ -17,7 +17,6 @@ import (
 // a freshly extracted desktop runtime. Keep the scan bounded, but allow enough
 // time for slower supported Windows runner and user machines.
 const windowsProcessScanTimeout = 30 * time.Second
-const desktopOwnerPIDEnvVar = "LAZYMIND_DESKTOP_OWNER_PID"
 
 type windowsProcessInfo struct {
 	ProcessID       uint32  `json:"ProcessId"`
@@ -66,6 +65,9 @@ func scanLocalRuntimeProcesses(paths RuntimePaths) ([]LocalProcessRecord, error)
 		}
 		exe := nullableText(process.ExecutablePath)
 		cmdline := nullableText(process.CommandLine)
+		if isRuntimeGuardCommand(exe, strings.Fields(cmdline)) {
+			continue
+		}
 		if !processTextMatchesRuntime(paths, exe, cmdline) {
 			continue
 		}

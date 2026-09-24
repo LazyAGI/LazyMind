@@ -174,6 +174,128 @@ def test_prepare_control_distinguishes_reference_from_edit_source(
     assert (operation, target_stage) == (expected_operation, 'document')
 
 
+def _stub_prepare_workspace(monkeypatch, tmp_path, *, user_input, history_files_per_turn):
+    tools = _load_tools_module()
+    captured = {}
+    context = SimpleNamespace(
+        workspace_path=str(tmp_path),
+        params={
+            'history_files_per_turn': history_files_per_turn,
+            'session_id': 'writer-session',
+        },
+        emit=lambda _event: None,
+    )
+
+    monkeypatch.setattr(tools, '_authoritative_writer_user_input', lambda _default: user_input)
+    monkeypatch.setattr(tools, '_verified_knowledge_text', lambda value: value)
+    monkeypatch.setattr(tools, 'require_context', lambda: context)
+    monkeypatch.setattr(
+        tools,
+        '_provider_document_reference',
+        lambda _value: user_input if user_input.startswith('obsidian://') else '',
+    )
+    monkeypatch.setattr(tools, '_provider_document_locator', lambda _value: '')
+    monkeypatch.setattr(
+        tools,
+        '_resolve_prepare_control',
+        lambda *_args, **_kwargs: ('revise_document', 'document'),
+    )
+
+    def resolve_command(**kwargs):
+        captured['command'] = kwargs
+        return 'writer-command.json'
+
+    monkeypatch.setattr(tools, 'writer_resolve_command', resolve_command)
+    monkeypatch.setattr(
+        tools,
+        '_load_writer_command',
+        lambda _path: SimpleNamespace(structure_mode='flat', next_step='write_document'),
+    )
+
+    def load_document(*, user_input, stage):
+        captured['provider_load'] = (user_input, stage)
+        return {
+            'source_document': 'source.md',
+            'target_document': 'target.json',
+            'representation': 'markdown',
+        }
+
+    def load_local_document(filename):
+        captured['local_load'] = filename
+        return 'source.md'
+
+    monkeypatch.setattr(tools, 'writer_load_document', load_document)
+    monkeypatch.setattr(tools, 'writer_load_local_document', load_local_document)
+    monkeypatch.setattr(tools, 'writer_build_writing_task', lambda **_kwargs: 'task.json')
+    monkeypatch.setattr(
+        tools,
+        'writer_collect_available_media',
+        lambda **_kwargs: {
+            'media_assets': 'media.json',
+            'profile_input_resources': 'profile-resources.json',
+            'warnings': [],
+        },
+    )
+    monkeypatch.setattr(tools, 'writer_profile_resources', lambda **_kwargs: 'resources.json')
+    monkeypatch.setattr(tools, 'writer_create_writing_context', lambda **_kwargs: 'context.json')
+    monkeypatch.setattr(tools, '_save_draft_workspace_artifacts', lambda _result: [])
+    return tools, captured
+
+
+def test_prepare_rejects_provider_document_with_source_filename(monkeypatch, tmp_path):
+    locator = 'obsidian://open?vault=obs&file=note'
+    tools, captured = _stub_prepare_workspace(
+        monkeypatch,
+        tmp_path,
+        user_input=locator,
+        history_files_per_turn={},
+    )
+
+    with pytest.raises(ValueError, match='both a provider document locator'):
+        tools.writer_prepare_workspace(
+            operation='revise_document',
+            source_filename='note.md',
+        )
+
+    assert 'provider_load' not in captured
+    assert 'local_load' not in captured
+
+
+def test_prepare_rejects_real_uploaded_document_alongside_provider_locator(
+    monkeypatch, tmp_path,
+):
+    locator = 'obsidian://open?vault=obs&file=note'
+    tools, _ = _stub_prepare_workspace(
+        monkeypatch,
+        tmp_path,
+        user_input=locator,
+        history_files_per_turn={'1': [str(tmp_path / 'note.md')]},
+    )
+
+    with pytest.raises(ValueError, match='both a provider document locator'):
+        tools.writer_prepare_workspace(
+            operation='revise_document',
+            source_filename='note.md',
+        )
+
+
+def test_prepare_keeps_local_source_without_provider_locator(monkeypatch, tmp_path):
+    tools, captured = _stub_prepare_workspace(
+        monkeypatch,
+        tmp_path,
+        user_input='修改上传的文章，让表达更简洁',
+        history_files_per_turn={'1': [str(tmp_path / 'note.md')]},
+    )
+
+    tools.writer_prepare_workspace(
+        operation='revise_document',
+        source_filename='note.md',
+    )
+
+    assert captured['local_load'] == 'note.md'
+    assert 'provider_load' not in captured
+
+
 def test_write_document_revision_emits_markdown_draft_stream(monkeypatch, tmp_path):
     from lazymind.document_tools import revision as document_revision
 
@@ -420,6 +542,52 @@ def test_markdown_assembly_keeps_media_source_reference():
                 'uri': 'file:///mnt/obsidian/obs/assets/source.png',
                 'local_path': '/data/subagent/assets/source.png',
                 'meta': {'source_reference': 'assets/source.png'},
+            },
+        },
+    }
+
+    assert document_writing.drop_unregistered_markdown_images(
+        markdown, media_assets,
+    ) == markdown
+
+
+def test_markdown_media_fill_preserves_registered_path_with_whitespace():
+    from lazymind.document_tools import writing as document_writing
+
+    local_path = '/Users/test/Library/Application Support/LazyMind/image.png'
+    media_assets = {
+        'assets': {
+            'asset-generated': {
+                'local_path': local_path,
+            },
+        },
+        'visual_need_asset_ids': {
+            'IMAGE-1': ['asset-generated'],
+        },
+    }
+
+    filled = document_writing.fill_markdown_media_placeholders(
+        '![Generated](media-placeholder://IMAGE-1)\n',
+        media_assets,
+    )
+
+    expected = f'![Generated](<{local_path}>)\n'
+    assert filled == expected
+    assert document_writing.drop_unregistered_markdown_images(
+        filled, media_assets,
+    ) == expected
+
+
+def test_drop_unregistered_images_accepts_percent_encoded_path():
+    from lazymind.document_tools import writing as document_writing
+
+    raw = '/Users/test/Library/Application Support/LazyMind/image.png'
+    encoded = '/Users/test/Library/Application%20Support/LazyMind/image.png'
+    markdown = f'![Generated]({encoded})\n'
+    media_assets = {
+        'assets': {
+            'asset-generated': {
+                'local_path': raw,
             },
         },
     }

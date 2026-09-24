@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { Alert, Form, Input, Modal, Skeleton, Tag } from "antd";
+import { useState, type ReactNode } from "react";
+import { Alert, Button, Form, Input, Modal, Skeleton, Spin, Tag } from "antd";
 import {
   ArrowRightOutlined,
   FolderOpenOutlined,
@@ -16,8 +16,11 @@ import {
   CLOUD_DOCUMENTS_FEISHU_SETUP_PATH,
   CLOUD_DOCUMENTS_NOTION_SETUP_PATH,
   CLOUD_DOCUMENTS_GITHUB_SETUP_PATH,
+  CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH,
 } from "../utils/cloudDocumentUrls";
 import type { CloudDocumentProvidersVm } from "../hooks/useCloudDocumentProviders";
+
+const OBSIDIAN_LOGO_URL = "https://obsidian.md/images/obsidian-logo-gradient.svg";
 
 function getProviderTitle(
   type: CloudProviderType,
@@ -111,6 +114,8 @@ function ProviderLogo({
   icon: ReactNode;
   logoUrl?: string;
 }) {
+  const [logoFailed, setLogoFailed] = useState(false);
+
   if (type === "local") {
     return (
       <span className="model-provider-cloud-doc-resource-logo">
@@ -120,7 +125,9 @@ function ProviderLogo({
   }
   return (
     <span className="model-provider-cloud-doc-resource-logo">
-      <span className="model-provider-cloud-doc-resource-fallback-icon">{icon}</span>
+      {(!logoUrl || logoFailed) && (
+        <span className="model-provider-cloud-doc-resource-fallback-icon">{icon}</span>
+      )}
       {logoUrl ? (
         <img
           alt=""
@@ -128,9 +135,11 @@ function ProviderLogo({
           loading="lazy"
           src={logoUrl}
           onLoad={(event) => {
+            setLogoFailed(false);
             event.currentTarget.classList.add("is-loaded");
           }}
           onError={(event) => {
+            setLogoFailed(true);
             event.currentTarget.style.display = "none";
           }}
         />
@@ -140,6 +149,7 @@ function ProviderLogo({
 }
 
 export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentProvidersVm }) {
+  const [obsidianConfigModalOpen, setObsidianConfigModalOpen] = useState(false);
   const {
     t,
     canCreateLocalSource,
@@ -162,6 +172,11 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
     handleManageNotionAuth,
     handleOpenNotionSetup,
     handleOpenGitHubSetup,
+    isDesktopRuntime,
+    obsidianConfig,
+    obsidianLoading,
+    handleManageObsidian,
+    handleDisconnectObsidian,
   } = vm;
 
   if (vm.loading) {
@@ -179,7 +194,8 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
   }
 
   return (
-    <div className="model-provider-cloud-doc-grid">
+    <>
+      <div className="model-provider-cloud-doc-grid">
       {canCreateLocalSource ? (
         <div className="model-provider-cloud-doc-resource-row">
           <ProviderLogo type="local" icon={<FolderOpenOutlined />} />
@@ -196,6 +212,49 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
               {t("modelProvider.cloudDocuments.manageLocal")}
               <ArrowRightOutlined />
             </button>
+          </div>
+        </div>
+      ) : null}
+
+      {isDesktopRuntime ? (
+        <div className="model-provider-cloud-doc-resource-row">
+          <ProviderLogo
+            type="obsidian"
+            icon={<FolderOpenOutlined />}
+            logoUrl={OBSIDIAN_LOGO_URL}
+          />
+          <div className="model-provider-cloud-doc-resource-copy">
+            <h3>{t("modelProvider.cloudDocuments.obsidianTitle")}</h3>
+            <p>
+              {obsidianConfig?.available
+                ? t("modelProvider.cloudDocuments.obsidianConnectedHint", {
+                    root: obsidianConfig.root,
+                  })
+                : t("modelProvider.cloudDocuments.obsidianUnavailableHint")}
+            </p>
+          </div>
+          <Tag
+            className="model-provider-cloud-doc-resource-status"
+            color={isDesktopRuntime && obsidianConfig?.available ? "success" : "default"}
+          >
+            {obsidianConfig?.available
+              ? t("modelProvider.cloudDocuments.obsidianConnectedStatus")
+              : t("modelProvider.cloudDocuments.obsidianUnavailableStatus")}
+          </Tag>
+          <div className="model-provider-cloud-doc-resource-controls">
+            <>
+              <button
+                type="button"
+                className="model-provider-cloud-doc-resource-action"
+                onClick={() => setObsidianConfigModalOpen(true)}
+                disabled={obsidianLoading}
+              >
+                {obsidianConfig?.configured
+                  ? t("modelProvider.cloudDocuments.obsidianChangeRoot")
+                  : t("modelProvider.cloudDocuments.obsidianChooseRoot")}
+                <ArrowRightOutlined />
+              </button>
+            </>
           </div>
         </div>
       ) : null}
@@ -324,7 +383,66 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
           </button>
         </div>
       </div>
-    </div>
+      </div>
+      <Modal
+        title={t("modelProvider.cloudDocuments.obsidianTitle")}
+        open={obsidianLoading}
+        closable={false}
+        maskClosable={false}
+        keyboard={false}
+        footer={null}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Spin size="small" />
+          <span>{t("modelProvider.cloudDocuments.obsidianUpdating")}</span>
+        </div>
+      </Modal>
+      <Modal
+        title={t("modelProvider.cloudDocuments.obsidianTitle")}
+        open={obsidianConfigModalOpen}
+        onCancel={() => setObsidianConfigModalOpen(false)}
+        footer={[
+          obsidianConfig?.configured ? (
+            <Button
+              danger
+              key="disconnect"
+              disabled={obsidianLoading}
+              onClick={() => {
+                setObsidianConfigModalOpen(false);
+                void handleDisconnectObsidian();
+              }}
+            >
+              {t("modelProvider.cloudDocuments.obsidianDisconnect")}
+            </Button>
+          ) : null,
+          <Button
+            type="primary"
+            key="choose-root"
+            loading={obsidianLoading}
+            onClick={() => {
+              void handleManageObsidian(() => setObsidianConfigModalOpen(false));
+            }}
+          >
+            {obsidianConfig?.configured
+              ? t("modelProvider.cloudDocuments.obsidianChangeRoot")
+              : t("modelProvider.cloudDocuments.obsidianChooseRoot")}
+          </Button>,
+        ]}
+      >
+        <p>
+          {obsidianConfig?.available
+            ? t("modelProvider.cloudDocuments.obsidianConnectedHint", {
+                root: obsidianConfig.root,
+              })
+            : t("modelProvider.cloudDocuments.obsidianUnavailableHint")}
+        </p>
+        <p style={{ marginTop: 12, marginBottom: 0 }}>
+          <a href={CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH} target="_blank" rel="noreferrer">
+            {t("modelProvider.cloudDocuments.obsidianSetupGuideAction")}
+          </a>
+        </p>
+      </Modal>
+    </>
   );
 }
 

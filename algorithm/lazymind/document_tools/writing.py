@@ -8,10 +8,11 @@ import re
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from queue import Empty, Queue
 from threading import Event, RLock
 from typing import Any, ClassVar
+from urllib.parse import unquote
 import lazyllm
 from lazyllm import LOG, AutoModel, ThreadPoolExecutor
 from lazyllm.module.llms.onlinemodule.base.model_call_runner import (
@@ -1137,7 +1138,8 @@ def fill_markdown_media_placeholders(markdown: str, resolved_media_assets: Any) 
             if path:
                 if not path.startswith(('https://', 'http://')):
                     path = Path(path).as_posix()
-                return f'![{caption}]({path})'
+                destination = f'<{path}>' if any(char.isspace() for char in path) else path
+                return f'![{caption}]({destination})'
         dropped.append(need_id)
         return ''
 
@@ -1165,25 +1167,37 @@ def fill_markdown_media_placeholders(markdown: str, resolved_media_assets: Any) 
     return filled
 
 
+def _media_reference_variants(value: Any) -> set[str]:
+    raw = str(value or '').strip()
+    if not raw:
+        return set()
+    if raw.lower().startswith(('http://', 'https://')):
+        return {raw}
+    decoded = unquote(raw)
+    variants = {raw, decoded}
+    for candidate in (raw, decoded):
+        variants.add(Path(candidate).as_posix())
+        if re.match(r'^(?:[A-Za-z]:[\\/]|\\\\)', candidate):
+            variants.add(PureWindowsPath(candidate).as_posix())
+    return {item for item in variants if item}
+
+
 def drop_unregistered_markdown_images(
     markdown: str,
     resolved_media_assets: Any,
 ) -> str:
     """Drop Markdown images that are not present in the resolved media library."""
     assets = (resolved_media_assets or {}).get('assets') or {}
-    allowed = {
-        str(path).strip()
-        for asset in assets.values()
-        if isinstance(asset, Mapping)
-        for path in (asset.get('uri'), asset.get('local_path'))
-        if str(path or '').strip()
-    }
-    allowed.update(
-        str((asset.get('meta') or {}).get('source_reference')).strip()
-        for asset in assets.values()
-        if isinstance(asset, Mapping)
-        and str((asset.get('meta') or {}).get('source_reference') or '').strip()
-    )
+    allowed: set[str] = set()
+    for asset in assets.values():
+        if not isinstance(asset, Mapping):
+            continue
+        for reference in (
+            asset.get('uri'),
+            asset.get('local_path'),
+            (asset.get('meta') or {}).get('source_reference'),
+        ):
+            allowed.update(_media_reference_variants(reference))
     image_pattern = re.compile(r'!\[([^\]]*)\]\(([^)\n]+)\)')
     fence: str | None = None
     dropped: list[str] = []
@@ -1195,7 +1209,7 @@ def drop_unregistered_markdown_images(
             target = destination[1:destination.index('>')]
         else:
             target = destination.split(maxsplit=1)[0]
-        if target in allowed:
+        if _media_reference_variants(target) & allowed:
             return match.group(0)
         dropped.append(target)
         return ''

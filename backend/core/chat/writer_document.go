@@ -1258,7 +1258,11 @@ func writerArtifactPathAllowed(path string) bool {
 	if !filepath.IsAbs(path) {
 		return false
 	}
-	roots := []string{os.Getenv("LAZYMIND_SUBAGENT_WORKSPACE"), "/var/lib/lazymind/uploads"}
+	roots := []string{
+		os.Getenv("LAZYMIND_SUBAGENT_WORKSPACE"),
+		os.Getenv("LAZYMIND_UPLOAD_ROOT"),
+		"/var/lib/lazymind/uploads",
+	}
 	for _, root := range roots {
 		if root == "" {
 			continue
