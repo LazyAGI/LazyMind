@@ -12420,10 +12420,10 @@ components:
                         - disabled
                     type: string
                 category:
-                    description: Legacy inline-create field. ZIP and URL imports use External.
+                    description: Legacy inline-create field. ZIP and URL imports always use external.
                     type: string
                 description:
-                    description: Legacy inline-create field. ZIP and URL imports derive description from SKILL.md frontmatter.
+                    description: Optional fallback description for URL imports when SKILL.md frontmatter has no description. Valid frontmatter takes precedence; uploaded ZIP imports derive the description from the package.
                     type: string
                 field:
                     description: Capability field for search; independent of the internal/external storage category.
@@ -12436,7 +12436,7 @@ components:
                         type: string
                     type: array
                 name:
-                    description: Legacy inline-create field. ZIP and URL imports derive name from SKILL.md frontmatter.
+                    description: Optional fallback name for URL imports when SKILL.md frontmatter has no valid name. Valid frontmatter takes precedence; uploaded ZIP imports derive the name from the package.
                     type: string
                 source:
                     $ref: '#/components/schemas/skillSourceOpenAPIRequest'
@@ -12446,6 +12446,32 @@ components:
                     type: array
             required:
                 - source
+            type: object
+        skillCreateOpenAPIResponse:
+            properties:
+                aliases:
+                    description: Persisted import names also accepted by explicit_resource_bindings.skill_names.
+                    items:
+                        type: string
+                    type: array
+                canonical_runtime_name:
+                    description: Canonical name accepted by explicit_resource_bindings.skill_names.
+                    type: string
+                category:
+                    type: string
+                head_revision_id:
+                    type: string
+                skill_id:
+                    type: string
+                skill_name:
+                    type: string
+            required:
+                - aliases
+                - canonical_runtime_name
+                - category
+                - head_revision_id
+                - skill_id
+                - skill_name
             type: object
         skillDeleteOpenAPIResponse:
             properties:
@@ -26529,7 +26555,7 @@ paths:
             tags:
                 - skills
         post:
-            description: Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md; description is product metadata and is not written into SKILL.md front matter.
+            description: Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md. Valid frontmatter metadata takes precedence. For URL imports, request name and description are fallbacks when frontmatter fields are missing; uploaded ZIP imports derive metadata from the package. URL and ZIP imports use category external.
             requestBody:
                 content:
                     application/json:
@@ -26541,7 +26567,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/skillWriteOpenAPIResponse'
+                                $ref: '#/components/schemas/skillCreateOpenAPIResponse'
                     description: Created skill
             summary: Create directory skill
             tags:

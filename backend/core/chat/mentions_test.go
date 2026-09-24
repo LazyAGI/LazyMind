@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow"
 )
@@ -298,6 +299,65 @@ func TestApplyExplicitResourceBindingsIncludesOnlyCurrentMentions(t *testing.T) 
 	}
 	if got := bindings["mentions"].([]map[string]string); len(got) != 1 || got[0]["display_name"] != "视频资料库" {
 		t.Fatalf("mentions = %#v", got)
+	}
+}
+
+func TestResolveExplicitSkillBindingsAcceptsCanonicalAndUniqueBareNames(t *testing.T) {
+	available := []string{
+		"external/requested-skill",
+		"writing/editor",
+		"research/reviewer",
+	}
+	tests := []struct {
+		name     string
+		selected []string
+		want     []string
+	}{
+		{name: "canonical", selected: []string{"external/requested-skill"}, want: []string{"external/requested-skill"}},
+		{name: "unique bare", selected: []string{"requested-skill"}, want: []string{"external/requested-skill"}},
+		{name: "deduplicated", selected: []string{"requested-skill", "external/requested-skill"}, want: []string{"external/requested-skill"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveExplicitSkillBindings(map[string]any{
+				"explicit_resource_bindings": map[string]any{"skill_names": tt.selected},
+			}, available, nil)
+			if err != nil {
+				t.Fatalf("resolveExplicitSkillBindings returned error: %v", err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("resolved = %#v, want %#v", got, tt.want)
+			}
+			for index := range tt.want {
+				if got[index] != tt.want[index] {
+					t.Fatalf("resolved = %#v, want %#v", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveExplicitSkillBindingsRejectsNormalizedAliasCollision(t *testing.T) {
+	_, err := resolveExplicitSkillBindings(map[string]any{
+		"explicit_resource_bindings": map[string]any{"skill_names": []any{"CODE-REVIEWER"}},
+	}, []string{"writing/reviewer-a", "research/reviewer-b"}, map[string][]string{
+		"writing/reviewer-a":  {"Code Reviewer"},
+		"research/reviewer-b": {"code_reviewer"},
+	})
+	if err == nil {
+		t.Fatal("resolveExplicitSkillBindings succeeded for normalized alias collision")
+	}
+	appErr, ok := err.(*common.AppError)
+	if !ok {
+		t.Fatalf("error = %T %v, want *common.AppError", err, err)
+	}
+	detail, ok := appErr.Detail.(map[string]any)
+	if appErr.Code != 2003117 || !ok || detail["reason"] != "skill_binding_ambiguous" || detail["requested_name"] != "CODE-REVIEWER" {
+		t.Fatalf("error = %#v, want structured ambiguity", appErr)
+	}
+	candidates, ok := detail["candidates"].([]string)
+	if !ok || fmt.Sprint(candidates) != "[research/reviewer-b writing/reviewer-a]" {
+		t.Fatalf("candidates = %#v", detail["candidates"])
 	}
 }
 

@@ -12,6 +12,7 @@ const (
 type ChatResourceContext struct {
 	DisabledTools      []string
 	AvailableSkills    []string
+	SkillAliases       map[string][]string
 	SearchableSkills   []string
 	ExcludedSkills     []string
 	LoadedSkills       []LoadedSkill

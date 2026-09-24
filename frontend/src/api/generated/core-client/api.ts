@@ -5694,11 +5694,11 @@ export interface SkillCreateManagedOpenAPIRequest {
      */
     'call_mode'?: SkillCreateManagedOpenAPIRequestCallModeEnum;
     /**
-     * Legacy inline-create field. ZIP and URL imports use External.
+     * Legacy inline-create field. ZIP and URL imports always use external.
      */
     'category'?: string;
     /**
-     * Legacy inline-create field. ZIP and URL imports derive description from SKILL.md frontmatter.
+     * Optional fallback description for URL imports when SKILL.md frontmatter has no description. Valid frontmatter takes precedence; uploaded ZIP imports derive the description from the package.
      */
     'description'?: string;
     /**
@@ -5711,7 +5711,7 @@ export interface SkillCreateManagedOpenAPIRequest {
      */
     'keywords'?: Array<string>;
     /**
-     * Legacy inline-create field. ZIP and URL imports derive name from SKILL.md frontmatter.
+     * Optional fallback name for URL imports when SKILL.md frontmatter has no valid name. Valid frontmatter takes precedence; uploaded ZIP imports derive the name from the package.
      */
     'name'?: string;
     'source': SkillSourceOpenAPIRequest;
@@ -5727,6 +5727,20 @@ export const SkillCreateManagedOpenAPIRequestCallModeEnum = {
 
 export type SkillCreateManagedOpenAPIRequestCallModeEnum = typeof SkillCreateManagedOpenAPIRequestCallModeEnum[keyof typeof SkillCreateManagedOpenAPIRequestCallModeEnum];
 
+export interface SkillCreateOpenAPIResponse {
+    /**
+     * Persisted import names also accepted by explicit_resource_bindings.skill_names.
+     */
+    'aliases': Array<string>;
+    /**
+     * Canonical name accepted by explicit_resource_bindings.skill_names.
+     */
+    'canonical_runtime_name': string;
+    'category': string;
+    'head_revision_id': string;
+    'skill_id': string;
+    'skill_name': string;
+}
 export interface SkillDeleteOpenAPIResponse {
     'deleted': boolean;
 }
@@ -51083,7 +51097,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             };
         },
         /**
-         * Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md; description is product metadata and is not written into SKILL.md front matter.
+         * Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md. Valid frontmatter metadata takes precedence. For URL imports, request name and description are fallbacks when frontmatter fields are missing; uploaded ZIP imports derive metadata from the package. URL and ZIP imports use category external.
          * @summary Create directory skill
          * @param {SkillCreateManagedOpenAPIRequest} skillCreateManagedOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -51849,13 +51863,13 @@ export const SkillsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md; description is product metadata and is not written into SKILL.md front matter.
+         * Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md. Valid frontmatter metadata takes precedence. For URL imports, request name and description are fallbacks when frontmatter fields are missing; uploaded ZIP imports derive metadata from the package. URL and ZIP imports use category external.
          * @summary Create directory skill
          * @param {SkillCreateManagedOpenAPIRequest} skillCreateManagedOpenAPIRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreSkillsPost(skillCreateManagedOpenAPIRequest: SkillCreateManagedOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillWriteOpenAPIResponse>> {
+        async apiCoreSkillsPost(skillCreateManagedOpenAPIRequest: SkillCreateManagedOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillCreateOpenAPIResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillsPost(skillCreateManagedOpenAPIRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['SkillsApi.apiCoreSkillsPost']?.[localVarOperationServerIndex]?.url;
@@ -52174,13 +52188,13 @@ export const SkillsApiFactory = function (configuration?: Configuration, basePat
             return localVarFp.apiCoreSkillsMaintenanceTaskGet(options).then((request) => request(axios, basePath));
         },
         /**
-         * Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md; description is product metadata and is not written into SKILL.md front matter.
+         * Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md. Valid frontmatter metadata takes precedence. For URL imports, request name and description are fallbacks when frontmatter fields are missing; uploaded ZIP imports derive metadata from the package. URL and ZIP imports use category external.
          * @summary Create directory skill
          * @param {SkillsApiApiCoreSkillsPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSkillsPost(requestParameters: SkillsApiApiCoreSkillsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<SkillWriteOpenAPIResponse> {
+        apiCoreSkillsPost(requestParameters: SkillsApiApiCoreSkillsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<SkillCreateOpenAPIResponse> {
             return localVarFp.apiCoreSkillsPost(requestParameters.skillCreateManagedOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
@@ -52626,7 +52640,7 @@ export class SkillsApi extends BaseAPI {
     }
 
     /**
-     * Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md; description is product metadata and is not written into SKILL.md front matter.
+     * Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md. Valid frontmatter metadata takes precedence. For URL imports, request name and description are fallbacks when frontmatter fields are missing; uploaded ZIP imports derive metadata from the package. URL and ZIP imports use category external.
      * @summary Create directory skill
      * @param {SkillsApiApiCoreSkillsPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.

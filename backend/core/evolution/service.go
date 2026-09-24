@@ -18,6 +18,7 @@ import (
 	appLog "lazymind/core/log"
 	"lazymind/core/settings"
 	skillv2 "lazymind/core/skillv2"
+	skillruntimeidentity "lazymind/core/skillv2/runtimeidentity"
 )
 
 type SkillState struct {
@@ -101,6 +102,7 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 	now := time.Now()
 	availableSkills := make([]string, 0, len(injectedKeys))
 	searchableSkills := make([]string, 0, len(searchableKeys))
+	skillAliases := make(map[string][]string, len(v2Skills))
 	snapshots := make([]orm.ResourceSessionSnapshot, 0, len(v2Skills))
 	seenSkillNames := map[string]struct{}{}
 	validKeys := map[string]orm.SkillV2Skill{}
@@ -130,6 +132,13 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 		}
 		parentName := strings.TrimSpace(skill.SkillName)
 		category := strings.TrimSpace(skill.Category)
+		aliases, err := skillruntimeidentity.Aliases(skill.Ext)
+		if err != nil {
+			return nil, err
+		}
+		if len(aliases) > 0 {
+			skillAliases[availableName] = aliases
+		}
 		seenSkillNames[availableName] = struct{}{}
 		validKeys[availableName] = skill
 		snapshots = append(snapshots, orm.ResourceSessionSnapshot{
@@ -166,6 +175,7 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 	context := &ChatResourceContext{
 		DisabledTools:      []string{},
 		AvailableSkills:    availableSkills,
+		SkillAliases:       skillAliases,
 		SearchableSkills:   searchableSkills,
 		UsePersonalization: usePersonalization,
 	}
@@ -195,6 +205,16 @@ func AddMentionedSkills(ctx context.Context, db *gorm.DB, userID, sessionID stri
 			return fmt.Errorf("mentioned skill is not accessible: %s", skillID)
 		}
 		name := fmt.Sprintf("%s/%s", strings.TrimSpace(skill.Category), strings.TrimSpace(skill.SkillName))
+		aliases, err := skillruntimeidentity.Aliases(skill.Ext)
+		if err != nil {
+			return err
+		}
+		if len(aliases) > 0 {
+			if resourceContext.SkillAliases == nil {
+				resourceContext.SkillAliases = map[string][]string{}
+			}
+			resourceContext.SkillAliases[name] = aliases
+		}
 		loadContent := loadContentIDs == nil || loadContentIDs[skill.ID]
 		var state *SkillState
 		if loadContent {

@@ -128,6 +128,9 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 	if !containsMigrationFileVersion(v03.Dev, 20260914200000) {
 		t.Fatal("v0_3 dev migrations are missing external agent workflow tasks")
 	}
+	if !containsMigrationFileVersion(v03.Dev, 20260918100000) {
+		t.Fatal("v0_3 dev migrations are missing academic reference imports")
+	}
 	if !containsMigrationFileVersion(v03.Dev, 20260918091302) {
 		t.Fatal("v0_3 dev migrations are missing conversation result reads")
 	}

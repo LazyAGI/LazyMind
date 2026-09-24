@@ -53,6 +53,7 @@ type sourceList struct {
 
 type remoteSource struct {
 	SourceURL       string `yaml:"source_url"`
+	UID             string `yaml:"uid,omitempty"`
 	Category        string `yaml:"category,omitempty"`
 	Provider        string `yaml:"provider,omitempty"`
 	Version         string `yaml:"version,omitempty"`
@@ -69,7 +70,7 @@ func (source *remoteSource) UnmarshalYAML(node *yaml.Node) error {
 	}
 	for index := 0; index < len(node.Content); index += 2 {
 		switch node.Content[index].Value {
-		case "source_url", "category", "provider", "version", "required_version":
+		case "source_url", "uid", "category", "provider", "version", "required_version":
 		default:
 			return bundleFailure("skill source field %s is not supported", node.Content[index].Value)
 		}
@@ -109,6 +110,7 @@ type sourceInput struct {
 	Bundled         *bundledSource
 	MarketVisible   bool
 	FallbackName    string
+	UID             string
 	Category        string
 	Provider        string
 	RequiredVersion string
@@ -194,6 +196,7 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 		sources = append(sources, sourceInput{
 			URL:             source.SourceURL,
 			MarketVisible:   true,
+			UID:             source.UID,
 			Category:        source.Category,
 			Provider:        source.Provider,
 			RequiredVersion: source.RequiredVersion,
@@ -585,6 +588,7 @@ func loadSources(path string) (sourceList, error) {
 			return sourceList{}, bundleFailure("source %s: %v", source, err)
 		}
 		entry.SourceURL = source
+		entry.UID = strings.TrimSpace(entry.UID)
 		entry.Category = strings.TrimSpace(entry.Category)
 		entry.Provider = provider
 		entry.Version = strings.TrimSpace(entry.Version)
@@ -668,6 +672,7 @@ func resolveSourceInputWithResolverAndLockedArchive(ctx context.Context, client 
 			spec.Identity = githubUIDIdentity(githubResolution)
 		}
 		spec.FallbackName = source.FallbackName
+		spec.UID = source.UID
 		spec.Category = source.Category
 		spec.Provider = source.Provider
 		if source.RequiredVersion != "" {

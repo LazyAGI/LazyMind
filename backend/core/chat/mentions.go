@@ -5,14 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"sort"
 	"strings"
 
 	"gorm.io/gorm"
 
 	"lazymind/core/acl"
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	"lazymind/core/settings"
+	skillruntimeidentity "lazymind/core/skillv2/runtimeidentity"
 	"lazymind/core/workflow"
 )
 
@@ -267,6 +271,83 @@ func applyExplicitResourceBindings(body map[string]any, mentions resolvedChatMen
 		"workflow_refs":      mentions.WorkflowRefs,
 		"mentions":           mentions.ResourceMentions,
 	}
+}
+
+func resolveExplicitSkillBindings(raw map[string]any, availableSkills []string, skillAliases map[string][]string) ([]string, error) {
+	bindings, ok := raw["explicit_resource_bindings"].(map[string]any)
+	if !ok {
+		return nil, nil
+	}
+	selected := stringSlice(bindings["skill_names"])
+	if len(selected) == 0 {
+		return nil, nil
+	}
+
+	exact := make(map[string]struct{}, len(availableSkills))
+	byFullName := make(map[string][]string, len(availableSkills))
+	byBareName := make(map[string][]string, len(availableSkills))
+	for _, candidate := range uniqueStrings(availableSkills) {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		exact[candidate] = struct{}{}
+		if normalized := skillruntimeidentity.NormalizeBindingName(candidate); normalized != "" {
+			byFullName[normalized] = append(byFullName[normalized], candidate)
+		}
+		bareName := candidate
+		if index := strings.LastIndex(candidate, "/"); index >= 0 {
+			bareName = candidate[index+1:]
+		}
+		if normalized := skillruntimeidentity.NormalizeBindingName(bareName); normalized != "" {
+			byBareName[normalized] = append(byBareName[normalized], candidate)
+		}
+		for _, alias := range skillAliases[candidate] {
+			alias = strings.TrimSpace(alias)
+			normalized := skillruntimeidentity.NormalizeBindingName(alias)
+			if normalized == "" {
+				continue
+			}
+			if strings.Contains(alias, "/") {
+				byFullName[normalized] = append(byFullName[normalized], candidate)
+			} else {
+				byBareName[normalized] = append(byBareName[normalized], candidate)
+			}
+		}
+	}
+
+	resolved := make([]string, 0, len(selected))
+	for _, requested := range selected {
+		requested = strings.TrimSpace(requested)
+		if _, ok := exact[requested]; ok {
+			resolved = append(resolved, requested)
+			continue
+		}
+		normalized := skillruntimeidentity.NormalizeBindingName(requested)
+		var matches []string
+		if strings.Contains(requested, "/") {
+			matches = uniqueStrings(byFullName[normalized])
+		} else {
+			matches = uniqueStrings(byBareName[normalized])
+		}
+		switch len(matches) {
+		case 0:
+			return nil, common.ResolveAppError("skill binding not found", http.StatusBadRequest).WithDetail(map[string]any{
+				"reason":         "skill_binding_not_found",
+				"requested_name": requested,
+			})
+		case 1:
+			resolved = append(resolved, matches[0])
+		default:
+			sort.Strings(matches)
+			return nil, common.ResolveAppError("skill binding is ambiguous", http.StatusBadRequest).WithDetail(map[string]any{
+				"reason":         "skill_binding_ambiguous",
+				"requested_name": requested,
+				"candidates":     matches,
+			})
+		}
+	}
+	return uniqueStrings(resolved), nil
 }
 
 func mergeMentionedDatasets(raw map[string]any, ids []string) {

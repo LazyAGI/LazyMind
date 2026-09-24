@@ -453,6 +453,18 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusForbidden)
 		return
 	}
+	bindingCandidates := uniqueStrings(append(append([]string{}, resourceContext.AvailableSkills...), resourceContext.SearchableSkills...))
+	explicitSkillNames, err := resolveExplicitSkillBindings(raw, bindingCandidates, resourceContext.SkillAliases)
+	if err != nil {
+		var appErr *common.AppError
+		if errors.As(err, &appErr) {
+			common.ReplyAppErr(w, appErr)
+		} else {
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+	mentionedResources.SkillNames = uniqueStrings(append(explicitSkillNames, mentionedResources.SkillNames...))
 	if len(mentionedResources.WorkflowRefs) > 1 {
 		common.ReplyErr(w, "at most one workflow mention is allowed per turn", http.StatusBadRequest)
 		return
