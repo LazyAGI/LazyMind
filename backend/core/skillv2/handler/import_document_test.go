@@ -108,6 +108,20 @@ func TestSkillHubImportNormalizesDocumentFilename(t *testing.T) {
 	}
 }
 
+func TestNormalizationWarningsDTO(t *testing.T) {
+	warnings := []skillmetadata.NormalizationWarning{
+		{Code: skillmetadata.NormalizationDescriptionCompacted, Message: "description warning"},
+		{Code: skillmetadata.NormalizationCanonicalName, Message: "name warning"},
+	}
+	got := normalizationWarningsDTO(warnings)
+	if len(got) != 2 || got[0]["code"] != warnings[0].Code || got[0]["message"] != warnings[0].Message || got[1]["code"] != warnings[1].Code || got[1]["message"] != warnings[1].Message {
+		t.Fatalf("warning response = %#v", got)
+	}
+	if empty := normalizationWarningsDTO(nil); empty == nil || len(empty) != 0 {
+		t.Fatalf("empty warning response = %#v", empty)
+	}
+}
+
 func TestSkillHubImportRecoversPlainDescriptionAndUsesCanonicalSlug(t *testing.T) {
 	tests := []struct {
 		name, pageURL, path, document, wantName, wantDescription string

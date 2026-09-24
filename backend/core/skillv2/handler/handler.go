@@ -28,6 +28,7 @@ import (
 	skillfs "lazymind/core/skillv2/fs"
 	skillhttperr "lazymind/core/skillv2/httperr"
 	skillmarket "lazymind/core/skillv2/market"
+	skillmetadata "lazymind/core/skillv2/metadata"
 	skillremotefs "lazymind/core/skillv2/remotefs"
 	skillreview "lazymind/core/skillv2/review"
 	skillrevision "lazymind/core/skillv2/revision"
@@ -262,15 +263,19 @@ func Create(w http.ResponseWriter, r *http.Request) {
 		replyServiceError(w, err)
 		return
 	}
-	warnings := make([]map[string]string, 0, len(resp.Warnings))
-	for _, warning := range resp.Warnings {
-		warnings = append(warnings, map[string]string{"code": warning.Code, "message": warning.Message})
-	}
 	common.ReplyOK(w, map[string]any{
 		"skill_id":         resp.SkillID,
 		"head_revision_id": resp.HeadRevisionID,
-		"warnings":         warnings,
+		"warnings":         normalizationWarningsDTO(resp.Warnings),
 	})
+}
+
+func normalizationWarningsDTO(warnings []skillmetadata.NormalizationWarning) []map[string]string {
+	out := make([]map[string]string, 0, len(warnings))
+	for _, warning := range warnings {
+		out = append(out, map[string]string{"code": warning.Code, "message": warning.Message})
+	}
+	return out
 }
 
 func (s skillSourceRequest) isExternalImport() bool {
@@ -360,6 +365,7 @@ func Patch(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{
 		"skill_id":         resp.SkillID,
 		"head_revision_id": resp.HeadRevisionID,
+		"warnings":         normalizationWarningsDTO(resp.Warnings),
 	})
 }
 

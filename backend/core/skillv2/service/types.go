@@ -118,6 +118,7 @@ type PatchSkillRequest struct {
 type PatchSkillResponse struct {
 	SkillID        string
 	HeadRevisionID string
+	Warnings       []skillmetadata.NormalizationWarning
 }
 
 type DeleteSkillRequest struct {

@@ -59,26 +59,15 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 	if err != nil {
 		return CreateSkillResponse{}, err
 	}
-	files := pkg.Files
 	externalImport := isExternalImportSource(req.Source.Type)
 	var normalizationWarnings []skillmetadata.NormalizationWarning
 	if externalImport {
-		if err := skillpackage.NormalizeSkillDocument(files); err != nil {
-			return CreateSkillResponse{}, err
-		}
-		content, _, err := skillmetadata.NormalizeExternalDescription(files["SKILL.md"])
+		normalizationWarnings, err = normalizeExternalImportPackage(&pkg)
 		if err != nil {
 			return CreateSkillResponse{}, err
 		}
-		files["SKILL.md"] = content
-		if pkg.CanonicalName != "" {
-			content, normalizationWarnings, err = skillmetadata.NormalizeExternalMetadata(files["SKILL.md"], pkg.CanonicalName)
-			if err != nil {
-				return CreateSkillResponse{}, err
-			}
-			files["SKILL.md"] = content
-		}
 	}
+	files := pkg.Files
 	if err := validateSkillFiles(files); err != nil {
 		return CreateSkillResponse{}, err
 	}
@@ -240,6 +229,26 @@ func isExternalImportSource(sourceType string) bool {
 	default:
 		return false
 	}
+}
+
+func normalizeExternalImportPackage(pkg *sourcePackage) ([]skillmetadata.NormalizationWarning, error) {
+	if err := skillpackage.NormalizeSkillDocument(pkg.Files); err != nil {
+		return nil, err
+	}
+	content, _, err := skillmetadata.NormalizeExternalDescription(pkg.Files["SKILL.md"])
+	if err != nil {
+		return nil, err
+	}
+	pkg.Files["SKILL.md"] = content
+	if pkg.CanonicalName == "" {
+		return nil, nil
+	}
+	content, warnings, err := skillmetadata.NormalizeExternalMetadata(pkg.Files["SKILL.md"], pkg.CanonicalName)
+	if err != nil {
+		return nil, err
+	}
+	pkg.Files["SKILL.md"] = content
+	return warnings, nil
 }
 
 func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (PatchSkillResponse, error) {
@@ -425,6 +434,14 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		if err != nil {
 			return err
 		}
+		externalImport := isExternalImportSource(req.Source.Type)
+		var normalizationWarnings []skillmetadata.NormalizationWarning
+		if externalImport {
+			normalizationWarnings, err = normalizeExternalImportPackage(&pkg)
+			if err != nil {
+				return err
+			}
+		}
 		files := pkg.Files
 		if err := validateSkillFiles(files); err != nil {
 			return err
@@ -432,7 +449,6 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		nextName := skill.SkillName
 		nextCategory := skill.Category
 		nextDescription := skill.Description
-		externalImport := isExternalImportSource(req.Source.Type)
 		if externalImport {
 			meta, err := resolveExternalMetadata(pkg, skill.ID)
 			if err != nil {
@@ -548,7 +564,7 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		if err := skillsearch.RebuildSkillTx(ctx, tx, req.SkillID, s.clock.Now()); err != nil {
 			return err
 		}
-		out = PatchSkillResponse{SkillID: req.SkillID, HeadRevisionID: revisionID}
+		out = PatchSkillResponse{SkillID: req.SkillID, HeadRevisionID: revisionID, Warnings: normalizationWarnings}
 		return nil
 	})
 	return out, err
