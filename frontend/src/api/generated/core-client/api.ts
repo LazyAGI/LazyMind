@@ -371,6 +371,10 @@ export interface Algo {
 export interface AllDatasetTagsResponse {
     'tags'?: Array<string>;
 }
+export interface ApiCoreAutomationGroupsGet200Response {
+    'items': Array<AutomationGroupResponse>;
+    'total': number;
+}
 export interface ApiCoreConversationsConversationIdEventsGet200Response {
     'payload'?: object;
     'replayed'?: boolean;
@@ -467,6 +471,47 @@ export interface ApiCoreKbPermissionBatchPost200Response {
 }
 export interface ApiCoreLocalWorkspacesWorkspaceIdRevokePostRequest {
     'version': number;
+}
+export interface ApiCoreSchedulesGet200Response {
+    'items': Array<ScheduleResponse>;
+    'total': number;
+}
+export interface ApiCoreSchedulesPostRequest {
+    'cron_expr'?: string;
+    'dependencies'?: Array<ScheduleDependency>;
+    'file_ids'?: Array<string>;
+    'group_id'?: string | null;
+    'kb_ids'?: Array<string>;
+    'name'?: string;
+    'notification'?: ScheduleNotificationUpdate;
+    'prompt_template'?: string;
+    'remark'?: string;
+    'timezone'?: string;
+}
+export interface ApiCoreSchedulesScheduleIdNotificationsGet200Response {
+    'code'?: number;
+    'data'?: ScheduleNotificationView;
+}
+export interface ApiCoreSchedulesScheduleIdRunNowPost200Response {
+    'task_id': string;
+    'conversation_id': string;
+    'status'?: string;
+}
+export interface ApiCoreTaskCenterDesktopNotificationsGet200Response {
+    'code'?: number;
+    'data'?: DesktopNotifications;
+}
+export interface ApiCoreTaskCenterDesktopNotificationsNotificationIdAckPost200Response {
+    'code'?: number;
+    'data'?: DesktopNotificationReceipt;
+}
+export interface ApiCoreTaskCenterTasksTaskIdNotificationsGet200Response {
+    'code'?: number;
+    'data'?: TaskNotifications;
+}
+export interface ApiCoreUserNotificationPreferencesGet200Response {
+    'code'?: number;
+    'data'?: NotificationPreferences;
 }
 /**
  * @type ApiCoreWorkflowArtifactsArtifactIdDocumentActionsExecutePostRequest
@@ -566,6 +611,45 @@ export interface AuthorizationSubjectGrant {
     'grantee_id'?: string;
     'grantee_type'?: string;
     'permissions'?: Array<string>;
+}
+export interface AutomationGroupBatchCreateRequest {
+    'group': AutomationGroupBatchCreateRequestGroup;
+    'tasks': Array<AutomationGroupBatchCreateRequestTasksInner>;
+}
+export interface AutomationGroupBatchCreateRequestGroup {
+    'name': string;
+    'remark'?: string;
+    'timezone': string;
+}
+export interface AutomationGroupBatchCreateRequestTasksInner {
+    'client_key': string;
+    'cron_expr': string;
+    'dependencies'?: Array<object>;
+    'file_ids'?: Array<string>;
+    'kb_ids'?: Array<string>;
+    'name': string;
+    'notification'?: ScheduleNotificationUpdate;
+    'prompt_template': string;
+    'remark'?: string;
+    'timezone'?: string;
+}
+export interface AutomationGroupBatchCreateResponse {
+    'group_id': string;
+    'schedule_ids': { [key: string]: string; };
+}
+export interface AutomationGroupCreateRequest {
+    'name': string;
+    'remark'?: string;
+    'timezone'?: string;
+}
+export interface AutomationGroupResponse {
+    'id': string;
+    'name': string;
+    'remark': string;
+    'timezone': string;
+    'enabled': boolean;
+    'task_count': number;
+    'created_at': string;
 }
 export interface BatchAddACLData {
     'count'?: number;
@@ -2554,6 +2638,36 @@ export interface Descriptor {
     'representation': string;
     'schema': string;
 }
+export interface DesktopNotificationAck {
+    'device_id': DesktopNotificationAckDeviceIdEnum;
+    'status': DesktopNotificationAckStatusEnum;
+}
+
+export const DesktopNotificationAckDeviceIdEnum = {
+    Local: 'local',
+    Browser: 'browser'
+} as const;
+
+export type DesktopNotificationAckDeviceIdEnum = typeof DesktopNotificationAckDeviceIdEnum[keyof typeof DesktopNotificationAckDeviceIdEnum];
+export const DesktopNotificationAckStatusEnum = {
+    Delivered: 'delivered',
+    PermissionDenied: 'permission_denied'
+} as const;
+
+export type DesktopNotificationAckStatusEnum = typeof DesktopNotificationAckStatusEnum[keyof typeof DesktopNotificationAckStatusEnum];
+
+export interface DesktopNotificationReceipt {
+    'created_at'?: string;
+    'device_id'?: string;
+    'notification_id'?: string;
+    'reason'?: string;
+    'status'?: string;
+}
+export interface DesktopNotifications {
+    'device_id'?: string;
+    'items'?: Array<TaskNotification>;
+    'next_cursor'?: string;
+}
 export interface DiffEntryLineOpenAPIResponse {
     'displayNoNewLineWarning'?: boolean;
     'html'?: string;
@@ -4466,6 +4580,62 @@ export interface ModelProviderBaseURLPresetItem {
     'label'?: string;
     'value': string;
 }
+export interface NotificationConfig {
+    'channels': NotificationConfigChannels;
+    'events': NotificationConfigEvents;
+}
+export interface NotificationConfigChannels {
+    'desktop'?: NotificationConfigChannelsDesktop;
+    'feishu'?: NotificationConfigChannelsDesktop;
+    'wechat'?: NotificationConfigChannelsDesktop;
+    'wecom'?: NotificationConfigChannelsDesktop;
+}
+export interface NotificationConfigChannelsDesktop {
+    'account_id'?: string;
+    'enabled': boolean;
+    'recipient_id'?: string;
+}
+export interface NotificationConfigEvents {
+    'failed': NotificationConfigEventsFailed;
+    'succeeded': NotificationConfigEventsFailed;
+    'waiting': NotificationConfigEventsFailed;
+}
+export interface NotificationConfigEventsFailed {
+    'content': NotificationConfigEventsFailedContentEnum;
+    'enabled': boolean;
+}
+
+export const NotificationConfigEventsFailedContentEnum = {
+    Summary: 'summary',
+    Full: 'full'
+} as const;
+
+export type NotificationConfigEventsFailedContentEnum = typeof NotificationConfigEventsFailedContentEnum[keyof typeof NotificationConfigEventsFailedContentEnum];
+
+export interface NotificationError {
+    'code': number;
+    'data': NotificationErrorData;
+    'message': string;
+}
+export interface NotificationErrorData {
+    'detail'?: NotificationErrorDataDetail;
+}
+export interface NotificationErrorDataDetail {
+    'reason': string;
+    'request_id': string;
+    'running_task_ids'?: Array<string>;
+}
+export interface NotificationPreferences {
+    'defaults': NotificationConfig;
+    'enabled': boolean;
+    'revision': number;
+}
+export interface NotificationPreferencesPatch {
+    'confirm_running_task_ids'?: Array<string>;
+    'defaults'?: NotificationConfig;
+    'enabled'?: boolean;
+    'revision': number;
+}
 export interface OAuthCallbackRequest {
     'code': string;
     'state': string;
@@ -5120,6 +5290,50 @@ export const RunTerminalStatusEnum = {
 
 export type RunTerminalStatusEnum = typeof RunTerminalStatusEnum[keyof typeof RunTerminalStatusEnum];
 
+export interface ScheduleDependency {
+    'id'?: string;
+    'source_schedule_id': string;
+    'source_name'?: string;
+    'source_client_key'?: string;
+    'window_type'?: string;
+    'content_types'?: Array<string>;
+    'incomplete_policy'?: string;
+    'max_wait_seconds'?: number;
+}
+export interface ScheduleMoveRequest {
+    'group_id': string | null;
+    'position': number;
+}
+export interface ScheduleNotificationUpdate {
+    'clear'?: boolean;
+    'config'?: NotificationConfig;
+    'revision': number;
+}
+export interface ScheduleNotificationView {
+    'availability'?: object;
+    'config': NotificationConfig | null;
+    'configured': boolean;
+    'revision': number;
+}
+export interface ScheduleResponse {
+    'id': string;
+    'user_id': string;
+    'name': string;
+    'remark': string;
+    'cron_expr': string;
+    'timezone': string;
+    'prompt_template': string;
+    'kb_ids'?: Array<string>;
+    'file_ids'?: Array<string>;
+    'group_id'?: string;
+    'group_position': number;
+    'dependencies'?: Array<ScheduleDependency>;
+    'enabled': boolean;
+    'run_count': number;
+    'last_run_at'?: string;
+    'next_run_at': string;
+    'created_at': string;
+}
 export interface SearchDatasetMemberRequest {
     'is_all'?: boolean;
     'name_prefix'?: string;
@@ -6175,6 +6389,77 @@ export interface TaskInfo {
     'succeed_token_count'?: number;
     'total_document_count'?: number;
     'total_document_size'?: number;
+}
+export interface TaskNotification {
+    'user_id'?: string;
+    'account_id'?: string;
+    'app_name'?: string;
+    'body': string;
+    'channel': TaskNotificationChannelEnum;
+    'config_revision'?: number;
+    'content'?: TaskNotificationContentEnum;
+    'created_at': string;
+    'event': TaskNotificationEventEnum;
+    'event_id': string;
+    'execution_id'?: string;
+    'gateway_id'?: string;
+    'navigation'?: TaskNotificationNavigation;
+    'notification_id': string;
+    'reason'?: string;
+    'recipient_id'?: string;
+    'schedule_id': string;
+    'status': TaskNotificationStatusEnum;
+    'task_id': string;
+    'title': string;
+    'updated_at'?: string;
+}
+
+export const TaskNotificationChannelEnum = {
+    Desktop: 'desktop',
+    Wechat: 'wechat',
+    Feishu: 'feishu',
+    Wecom: 'wecom'
+} as const;
+
+export type TaskNotificationChannelEnum = typeof TaskNotificationChannelEnum[keyof typeof TaskNotificationChannelEnum];
+export const TaskNotificationContentEnum = {
+    Summary: 'summary',
+    Full: 'full'
+} as const;
+
+export type TaskNotificationContentEnum = typeof TaskNotificationContentEnum[keyof typeof TaskNotificationContentEnum];
+export const TaskNotificationEventEnum = {
+    Succeeded: 'succeeded',
+    Failed: 'failed',
+    Waiting: 'waiting'
+} as const;
+
+export type TaskNotificationEventEnum = typeof TaskNotificationEventEnum[keyof typeof TaskNotificationEventEnum];
+export const TaskNotificationStatusEnum = {
+    Pending: 'pending',
+    Queued: 'queued',
+    Sending: 'sending',
+    Sent: 'sent',
+    Failed: 'failed',
+    Unknown: 'unknown',
+    Skipped: 'skipped',
+    Unavailable: 'unavailable'
+} as const;
+
+export type TaskNotificationStatusEnum = typeof TaskNotificationStatusEnum[keyof typeof TaskNotificationStatusEnum];
+
+export interface TaskNotificationNavigation {
+    'schedule_id'?: string;
+    'task_id'?: string;
+    'type'?: string;
+}
+export interface TaskNotifications {
+    'items'?: Array<TaskNotification>;
+    'snapshot'?: TaskNotificationsSnapshot;
+}
+export interface TaskNotificationsSnapshot {
+    'config'?: NotificationConfig | null;
+    'revision'?: number;
 }
 export interface TaskPayload {
     'data_source_type'?: string;
@@ -13569,35 +13854,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary POST /automation-groups:batch-create
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAutomationGroupsBatchCreatePost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/automation-groups:batch-create`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
          * @summary GET /automation-groups
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -13615,6 +13871,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -13661,10 +13918,13 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         /**
          *
          * @summary POST /automation-groups
+         * @param {AutomationGroupCreateRequest} automationGroupCreateRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAutomationGroupsPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreAutomationGroupsPost: async (automationGroupCreateRequest: AutomationGroupCreateRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'automationGroupCreateRequest' is not null or undefined
+            assertParamExists('apiCoreAutomationGroupsPost', 'automationGroupCreateRequest', automationGroupCreateRequest)
             const localVarPath = `/api/core/automation-groups`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -13677,10 +13937,13 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(automationGroupCreateRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -21153,10 +21416,11 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         /**
          *
          * @summary GET /schedules
+         * @param {boolean} [includeDisabled]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSchedulesGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreSchedulesGet: async (includeDisabled?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/schedules`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -21169,35 +21433,11 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /schedules
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreSchedulesPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/schedules`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
+            if (includeDisabled !== undefined) {
+                localVarQueryParameter['include_disabled'] = includeDisabled;
             }
 
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -21297,6 +21537,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -21311,12 +21552,15 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          *
          * @summary POST /schedules/{schedule_id}:move
          * @param {string} scheduleId
+         * @param {ScheduleMoveRequest} scheduleMoveRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSchedulesScheduleIdMovePost: async (scheduleId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreSchedulesScheduleIdMovePost: async (scheduleId: string, scheduleMoveRequest: ScheduleMoveRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'scheduleId' is not null or undefined
             assertParamExists('apiCoreSchedulesScheduleIdMovePost', 'scheduleId', scheduleId)
+            // verify required parameter 'scheduleMoveRequest' is not null or undefined
+            assertParamExists('apiCoreSchedulesScheduleIdMovePost', 'scheduleMoveRequest', scheduleMoveRequest)
             const localVarPath = `/api/core/schedules/{schedule_id}:move`
                 .replace(`{${"schedule_id"}}`, encodeURIComponent(String(scheduleId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
@@ -21330,43 +21574,12 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Content-Type'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary PUT /schedules/{schedule_id}
-         * @param {string} scheduleId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreSchedulesScheduleIdPut: async (scheduleId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'scheduleId' is not null or undefined
-            assertParamExists('apiCoreSchedulesScheduleIdPut', 'scheduleId', scheduleId)
-            const localVarPath = `/api/core/schedules/{schedule_id}`
-                .replace(`{${"schedule_id"}}`, encodeURIComponent(String(scheduleId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(scheduleMoveRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -21396,6 +21609,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -25096,23 +25310,11 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary POST /automation-groups:batch-create
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreAutomationGroupsBatchCreatePost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAutomationGroupsBatchCreatePost(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAutomationGroupsBatchCreatePost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
          * @summary GET /automation-groups
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAutomationGroupsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async apiCoreAutomationGroupsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAutomationGroupsGet200Response>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAutomationGroupsGet(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAutomationGroupsGet']?.[localVarOperationServerIndex]?.url;
@@ -25134,11 +25336,12 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         /**
          *
          * @summary POST /automation-groups
+         * @param {AutomationGroupCreateRequest} automationGroupCreateRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAutomationGroupsPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAutomationGroupsPost(options);
+        async apiCoreAutomationGroupsPost(automationGroupCreateRequest: AutomationGroupCreateRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AutomationGroupResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAutomationGroupsPost(automationGroupCreateRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAutomationGroupsPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -27964,25 +28167,14 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         /**
          *
          * @summary GET /schedules
+         * @param {boolean} [includeDisabled]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreSchedulesGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSchedulesGet(options);
+        async apiCoreSchedulesGet(includeDisabled?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreSchedulesGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSchedulesGet(includeDisabled, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSchedulesGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /schedules
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreSchedulesPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSchedulesPost(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSchedulesPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -28018,7 +28210,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreSchedulesScheduleIdEnablePost(scheduleId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async apiCoreSchedulesScheduleIdEnablePost(scheduleId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ScheduleResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSchedulesScheduleIdEnablePost(scheduleId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSchedulesScheduleIdEnablePost']?.[localVarOperationServerIndex]?.url;
@@ -28028,26 +28220,14 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          *
          * @summary POST /schedules/{schedule_id}:move
          * @param {string} scheduleId
+         * @param {ScheduleMoveRequest} scheduleMoveRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreSchedulesScheduleIdMovePost(scheduleId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSchedulesScheduleIdMovePost(scheduleId, options);
+        async apiCoreSchedulesScheduleIdMovePost(scheduleId: string, scheduleMoveRequest: ScheduleMoveRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSchedulesScheduleIdMovePost(scheduleId, scheduleMoveRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSchedulesScheduleIdMovePost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary PUT /schedules/{schedule_id}
-         * @param {string} scheduleId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreSchedulesScheduleIdPut(scheduleId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSchedulesScheduleIdPut(scheduleId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSchedulesScheduleIdPut']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -28057,7 +28237,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreSchedulesScheduleIdRunNowPost(scheduleId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async apiCoreSchedulesScheduleIdRunNowPost(scheduleId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreSchedulesScheduleIdRunNowPost200Response>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSchedulesScheduleIdRunNowPost(scheduleId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSchedulesScheduleIdRunNowPost']?.[localVarOperationServerIndex]?.url;
@@ -29572,20 +29752,11 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary POST /automation-groups:batch-create
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAutomationGroupsBatchCreatePost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreAutomationGroupsBatchCreatePost(options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
          * @summary GET /automation-groups
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAutomationGroupsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        apiCoreAutomationGroupsGet(options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAutomationGroupsGet200Response> {
             return localVarFp.apiCoreAutomationGroupsGet(options).then((request) => request(axios, basePath));
         },
         /**
@@ -29601,11 +29772,12 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         /**
          *
          * @summary POST /automation-groups
+         * @param {DefaultApiApiCoreAutomationGroupsPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAutomationGroupsPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreAutomationGroupsPost(options).then((request) => request(axios, basePath));
+        apiCoreAutomationGroupsPost(requestParameters: DefaultApiApiCoreAutomationGroupsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<AutomationGroupResponse> {
+            return localVarFp.apiCoreAutomationGroupsPost(requestParameters.automationGroupCreateRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -31692,20 +31864,12 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         /**
          *
          * @summary GET /schedules
+         * @param {DefaultApiApiCoreSchedulesGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSchedulesGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreSchedulesGet(options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /schedules
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreSchedulesPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreSchedulesPost(options).then((request) => request(axios, basePath));
+        apiCoreSchedulesGet(requestParameters: DefaultApiApiCoreSchedulesGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreSchedulesGet200Response> {
+            return localVarFp.apiCoreSchedulesGet(requestParameters.includeDisabled, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -31734,7 +31898,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSchedulesScheduleIdEnablePost(requestParameters: DefaultApiApiCoreSchedulesScheduleIdEnablePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        apiCoreSchedulesScheduleIdEnablePost(requestParameters: DefaultApiApiCoreSchedulesScheduleIdEnablePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ScheduleResponse> {
             return localVarFp.apiCoreSchedulesScheduleIdEnablePost(requestParameters.scheduleId, options).then((request) => request(axios, basePath));
         },
         /**
@@ -31745,17 +31909,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @throws {RequiredError}
          */
         apiCoreSchedulesScheduleIdMovePost(requestParameters: DefaultApiApiCoreSchedulesScheduleIdMovePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreSchedulesScheduleIdMovePost(requestParameters.scheduleId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary PUT /schedules/{schedule_id}
-         * @param {DefaultApiApiCoreSchedulesScheduleIdPutRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreSchedulesScheduleIdPut(requestParameters: DefaultApiApiCoreSchedulesScheduleIdPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreSchedulesScheduleIdPut(requestParameters.scheduleId, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreSchedulesScheduleIdMovePost(requestParameters.scheduleId, requestParameters.scheduleMoveRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -31764,7 +31918,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSchedulesScheduleIdRunNowPost(requestParameters: DefaultApiApiCoreSchedulesScheduleIdRunNowPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        apiCoreSchedulesScheduleIdRunNowPost(requestParameters: DefaultApiApiCoreSchedulesScheduleIdRunNowPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreSchedulesScheduleIdRunNowPost200Response> {
             return localVarFp.apiCoreSchedulesScheduleIdRunNowPost(requestParameters.scheduleId, options).then((request) => request(axios, basePath));
         },
         /**
@@ -32828,6 +32982,13 @@ export interface DefaultApiApiCoreAgentInvocationsInvocationIdStartPostRequest {
  */
 export interface DefaultApiApiCoreAutomationGroupsGroupIdDeleteRequest {
     readonly groupId: string
+}
+
+/**
+ * Request parameters for apiCoreAutomationGroupsPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreAutomationGroupsPostRequest {
+    readonly automationGroupCreateRequest: AutomationGroupCreateRequest
 }
 
 /**
@@ -34111,6 +34272,13 @@ export interface DefaultApiApiCorePublishedWorkflowsWorkflowRefVersionsRevisionI
 }
 
 /**
+ * Request parameters for apiCoreSchedulesGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreSchedulesGetRequest {
+    readonly includeDisabled?: boolean
+}
+
+/**
  * Request parameters for apiCoreSchedulesScheduleIdCancelPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreSchedulesScheduleIdCancelPostRequest {
@@ -34136,13 +34304,8 @@ export interface DefaultApiApiCoreSchedulesScheduleIdEnablePostRequest {
  */
 export interface DefaultApiApiCoreSchedulesScheduleIdMovePostRequest {
     readonly scheduleId: string
-}
 
-/**
- * Request parameters for apiCoreSchedulesScheduleIdPut operation in DefaultApi.
- */
-export interface DefaultApiApiCoreSchedulesScheduleIdPutRequest {
-    readonly scheduleId: string
+    readonly scheduleMoveRequest: ScheduleMoveRequest
 }
 
 /**
@@ -34871,16 +35034,6 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary POST /automation-groups:batch-create
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreAutomationGroupsBatchCreatePost(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreAutomationGroupsBatchCreatePost(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
      * @summary GET /automation-groups
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -34903,11 +35056,12 @@ export class DefaultApi extends BaseAPI {
     /**
      *
      * @summary POST /automation-groups
+     * @param {DefaultApiApiCoreAutomationGroupsPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreAutomationGroupsPost(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreAutomationGroupsPost(options).then((request) => request(this.axios, this.basePath));
+    public apiCoreAutomationGroupsPost(requestParameters: DefaultApiApiCoreAutomationGroupsPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreAutomationGroupsPost(requestParameters.automationGroupCreateRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -37209,21 +37363,12 @@ export class DefaultApi extends BaseAPI {
     /**
      *
      * @summary GET /schedules
+     * @param {DefaultApiApiCoreSchedulesGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreSchedulesGet(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreSchedulesGet(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /schedules
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreSchedulesPost(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreSchedulesPost(options).then((request) => request(this.axios, this.basePath));
+    public apiCoreSchedulesGet(requestParameters: DefaultApiApiCoreSchedulesGetRequest = {}, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreSchedulesGet(requestParameters.includeDisabled, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -37267,18 +37412,7 @@ export class DefaultApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreSchedulesScheduleIdMovePost(requestParameters: DefaultApiApiCoreSchedulesScheduleIdMovePostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreSchedulesScheduleIdMovePost(requestParameters.scheduleId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary PUT /schedules/{schedule_id}
-     * @param {DefaultApiApiCoreSchedulesScheduleIdPutRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreSchedulesScheduleIdPut(requestParameters: DefaultApiApiCoreSchedulesScheduleIdPutRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreSchedulesScheduleIdPut(requestParameters.scheduleId, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreSchedulesScheduleIdMovePost(requestParameters.scheduleId, requestParameters.scheduleMoveRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -52708,6 +52842,824 @@ export const ApiCoreSkillsGetSourceEnum = {
     External: 'external'
 } as const;
 export type ApiCoreSkillsGetSourceEnum = typeof ApiCoreSkillsGetSourceEnum[keyof typeof ApiCoreSkillsGetSourceEnum];
+
+
+/**
+ * TaskNotificationsApi - axios parameter creator
+ */
+export const TaskNotificationsApiAxiosParamCreator = function (configuration?: Configuration) {
+    return {
+        /**
+         * Each tasks[].notification belongs only to that concrete schedule. Omission keeps the current default snapshot. Any task, dependency, or notification failure rolls back the entire group.
+         * @summary Create a task group and save each task\'s optional notification draft atomically
+         * @param {AutomationGroupBatchCreateRequest} automationGroupBatchCreateRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAutomationGroupsBatchCreatePost: async (automationGroupBatchCreateRequest: AutomationGroupBatchCreateRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'automationGroupBatchCreateRequest' is not null or undefined
+            assertParamExists('apiCoreAutomationGroupsBatchCreatePost', 'automationGroupBatchCreateRequest', automationGroupBatchCreateRequest)
+            const localVarPath = `/api/core/automation-groups:batch-create`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(automationGroupBatchCreateRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * notification is optional. Omission retains legacy defaults on creation and preserves the rule on update. Send config or clear:true, not both. Updates compare notification.revision; conflicts roll back all task edits. Creation ignores the supplied revision. Runs and history are unchanged.
+         * @summary Save schedule and optional notification draft atomically
+         * @param {ApiCoreSchedulesPostRequest} apiCoreSchedulesPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSchedulesPost: async (apiCoreSchedulesPostRequest: ApiCoreSchedulesPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'apiCoreSchedulesPostRequest' is not null or undefined
+            assertParamExists('apiCoreSchedulesPost', 'apiCoreSchedulesPostRequest', apiCoreSchedulesPostRequest)
+            const localVarPath = `/api/core/schedules`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreSchedulesPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Read configuration and current channel availability. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Read configuration and current channel availability
+         * @param {string} scheduleId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSchedulesScheduleIdNotificationsGet: async (scheduleId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'scheduleId' is not null or undefined
+            assertParamExists('apiCoreSchedulesScheduleIdNotificationsGet', 'scheduleId', scheduleId)
+            const localVarPath = `/api/core/schedules/{schedule_id}/notifications`
+                .replace(`{${"schedule_id"}}`, encodeURIComponent(String(scheduleId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Update next-run configuration with an independent revision. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Update next-run configuration with an independent revision
+         * @param {string} scheduleId
+         * @param {ScheduleNotificationUpdate} scheduleNotificationUpdate
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSchedulesScheduleIdNotificationsPut: async (scheduleId: string, scheduleNotificationUpdate: ScheduleNotificationUpdate, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'scheduleId' is not null or undefined
+            assertParamExists('apiCoreSchedulesScheduleIdNotificationsPut', 'scheduleId', scheduleId)
+            // verify required parameter 'scheduleNotificationUpdate' is not null or undefined
+            assertParamExists('apiCoreSchedulesScheduleIdNotificationsPut', 'scheduleNotificationUpdate', scheduleNotificationUpdate)
+            const localVarPath = `/api/core/schedules/{schedule_id}/notifications`
+                .replace(`{${"schedule_id"}}`, encodeURIComponent(String(scheduleId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(scheduleNotificationUpdate, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * notification is optional. Omission retains legacy defaults on creation and preserves the rule on update. Send config or clear:true, not both. Updates compare notification.revision; conflicts roll back all task edits. Creation ignores the supplied revision. Runs and history are unchanged.
+         * @summary Save schedule and optional notification draft atomically
+         * @param {string} scheduleId
+         * @param {ApiCoreSchedulesPostRequest} apiCoreSchedulesPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSchedulesScheduleIdPut: async (scheduleId: string, apiCoreSchedulesPostRequest: ApiCoreSchedulesPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'scheduleId' is not null or undefined
+            assertParamExists('apiCoreSchedulesScheduleIdPut', 'scheduleId', scheduleId)
+            // verify required parameter 'apiCoreSchedulesPostRequest' is not null or undefined
+            assertParamExists('apiCoreSchedulesScheduleIdPut', 'apiCoreSchedulesPostRequest', apiCoreSchedulesPostRequest)
+            const localVarPath = `/api/core/schedules/{schedule_id}`
+                .replace(`{${"schedule_id"}}`, encodeURIComponent(String(scheduleId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreSchedulesPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * System notifications: browser in all deployments; local native client in Local/Desktop only. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary System notifications: browser in all deployments; local native client in Local/Desktop only
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {ApiCoreTaskCenterDesktopNotificationsGetDeviceIdEnum} [deviceId]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterDesktopNotificationsGet: async (cursor?: string, limit?: number, deviceId?: ApiCoreTaskCenterDesktopNotificationsGetDeviceIdEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/task-center/desktop-notifications`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (cursor !== undefined) {
+                localVarQueryParameter['cursor'] = cursor;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            if (deviceId !== undefined) {
+                localVarQueryParameter['device_id'] = deviceId;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Idempotent system-notification receipt; delivered means submitted, not seen by the user. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Idempotent system-notification receipt; delivered means submitted, not seen by the user
+         * @param {string} notificationId
+         * @param {DesktopNotificationAck} desktopNotificationAck
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterDesktopNotificationsNotificationIdAckPost: async (notificationId: string, desktopNotificationAck: DesktopNotificationAck, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'notificationId' is not null or undefined
+            assertParamExists('apiCoreTaskCenterDesktopNotificationsNotificationIdAckPost', 'notificationId', notificationId)
+            // verify required parameter 'desktopNotificationAck' is not null or undefined
+            assertParamExists('apiCoreTaskCenterDesktopNotificationsNotificationIdAckPost', 'desktopNotificationAck', desktopNotificationAck)
+            const localVarPath = `/api/core/task-center/desktop-notifications/{notification_id}:ack`
+                .replace(`{${"notification_id"}}`, encodeURIComponent(String(notificationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(desktopNotificationAck, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Read immutable run configuration and delivery history. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Read immutable run configuration and delivery history
+         * @param {string} taskId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterTasksTaskIdNotificationsGet: async (taskId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'taskId' is not null or undefined
+            assertParamExists('apiCoreTaskCenterTasksTaskIdNotificationsGet', 'taskId', taskId)
+            const localVarPath = `/api/core/task-center/tasks/{task_id}/notifications`
+                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Read scheduled-task notification defaults and global gate. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Read scheduled-task notification defaults and global gate
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserNotificationPreferencesGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/user/notification-preferences`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Compare revision; closing requires the exact current affected run IDs. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Compare revision; closing requires the exact current affected run IDs
+         * @param {NotificationPreferencesPatch} notificationPreferencesPatch
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserNotificationPreferencesPatch: async (notificationPreferencesPatch: NotificationPreferencesPatch, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'notificationPreferencesPatch' is not null or undefined
+            assertParamExists('apiCoreUserNotificationPreferencesPatch', 'notificationPreferencesPatch', notificationPreferencesPatch)
+            const localVarPath = `/api/core/user/notification-preferences`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(notificationPreferencesPatch, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+    }
+};
+
+/**
+ * TaskNotificationsApi - functional programming interface
+ */
+export const TaskNotificationsApiFp = function(configuration?: Configuration) {
+    const localVarAxiosParamCreator = TaskNotificationsApiAxiosParamCreator(configuration)
+    return {
+        /**
+         * Each tasks[].notification belongs only to that concrete schedule. Omission keeps the current default snapshot. Any task, dependency, or notification failure rolls back the entire group.
+         * @summary Create a task group and save each task\'s optional notification draft atomically
+         * @param {AutomationGroupBatchCreateRequest} automationGroupBatchCreateRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAutomationGroupsBatchCreatePost(automationGroupBatchCreateRequest: AutomationGroupBatchCreateRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AutomationGroupBatchCreateResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAutomationGroupsBatchCreatePost(automationGroupBatchCreateRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TaskNotificationsApi.apiCoreAutomationGroupsBatchCreatePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * notification is optional. Omission retains legacy defaults on creation and preserves the rule on update. Send config or clear:true, not both. Updates compare notification.revision; conflicts roll back all task edits. Creation ignores the supplied revision. Runs and history are unchanged.
+         * @summary Save schedule and optional notification draft atomically
+         * @param {ApiCoreSchedulesPostRequest} apiCoreSchedulesPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreSchedulesPost(apiCoreSchedulesPostRequest: ApiCoreSchedulesPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ScheduleResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSchedulesPost(apiCoreSchedulesPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TaskNotificationsApi.apiCoreSchedulesPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Read configuration and current channel availability. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Read configuration and current channel availability
+         * @param {string} scheduleId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreSchedulesScheduleIdNotificationsGet(scheduleId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreSchedulesScheduleIdNotificationsGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSchedulesScheduleIdNotificationsGet(scheduleId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TaskNotificationsApi.apiCoreSchedulesScheduleIdNotificationsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Update next-run configuration with an independent revision. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Update next-run configuration with an independent revision
+         * @param {string} scheduleId
+         * @param {ScheduleNotificationUpdate} scheduleNotificationUpdate
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreSchedulesScheduleIdNotificationsPut(scheduleId: string, scheduleNotificationUpdate: ScheduleNotificationUpdate, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreSchedulesScheduleIdNotificationsGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSchedulesScheduleIdNotificationsPut(scheduleId, scheduleNotificationUpdate, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TaskNotificationsApi.apiCoreSchedulesScheduleIdNotificationsPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * notification is optional. Omission retains legacy defaults on creation and preserves the rule on update. Send config or clear:true, not both. Updates compare notification.revision; conflicts roll back all task edits. Creation ignores the supplied revision. Runs and history are unchanged.
+         * @summary Save schedule and optional notification draft atomically
+         * @param {string} scheduleId
+         * @param {ApiCoreSchedulesPostRequest} apiCoreSchedulesPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreSchedulesScheduleIdPut(scheduleId: string, apiCoreSchedulesPostRequest: ApiCoreSchedulesPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ScheduleResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSchedulesScheduleIdPut(scheduleId, apiCoreSchedulesPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TaskNotificationsApi.apiCoreSchedulesScheduleIdPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * System notifications: browser in all deployments; local native client in Local/Desktop only. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary System notifications: browser in all deployments; local native client in Local/Desktop only
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {ApiCoreTaskCenterDesktopNotificationsGetDeviceIdEnum} [deviceId]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreTaskCenterDesktopNotificationsGet(cursor?: string, limit?: number, deviceId?: ApiCoreTaskCenterDesktopNotificationsGetDeviceIdEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreTaskCenterDesktopNotificationsGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterDesktopNotificationsGet(cursor, limit, deviceId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TaskNotificationsApi.apiCoreTaskCenterDesktopNotificationsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Idempotent system-notification receipt; delivered means submitted, not seen by the user. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Idempotent system-notification receipt; delivered means submitted, not seen by the user
+         * @param {string} notificationId
+         * @param {DesktopNotificationAck} desktopNotificationAck
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreTaskCenterDesktopNotificationsNotificationIdAckPost(notificationId: string, desktopNotificationAck: DesktopNotificationAck, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreTaskCenterDesktopNotificationsNotificationIdAckPost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterDesktopNotificationsNotificationIdAckPost(notificationId, desktopNotificationAck, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TaskNotificationsApi.apiCoreTaskCenterDesktopNotificationsNotificationIdAckPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Read immutable run configuration and delivery history. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Read immutable run configuration and delivery history
+         * @param {string} taskId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreTaskCenterTasksTaskIdNotificationsGet(taskId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreTaskCenterTasksTaskIdNotificationsGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksTaskIdNotificationsGet(taskId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TaskNotificationsApi.apiCoreTaskCenterTasksTaskIdNotificationsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Read scheduled-task notification defaults and global gate. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Read scheduled-task notification defaults and global gate
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreUserNotificationPreferencesGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreUserNotificationPreferencesGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserNotificationPreferencesGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TaskNotificationsApi.apiCoreUserNotificationPreferencesGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Compare revision; closing requires the exact current affected run IDs. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Compare revision; closing requires the exact current affected run IDs
+         * @param {NotificationPreferencesPatch} notificationPreferencesPatch
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreUserNotificationPreferencesPatch(notificationPreferencesPatch: NotificationPreferencesPatch, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreUserNotificationPreferencesGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserNotificationPreferencesPatch(notificationPreferencesPatch, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TaskNotificationsApi.apiCoreUserNotificationPreferencesPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+    }
+};
+
+/**
+ * TaskNotificationsApi - factory interface
+ */
+export const TaskNotificationsApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
+    const localVarFp = TaskNotificationsApiFp(configuration)
+    return {
+        /**
+         * Each tasks[].notification belongs only to that concrete schedule. Omission keeps the current default snapshot. Any task, dependency, or notification failure rolls back the entire group.
+         * @summary Create a task group and save each task\'s optional notification draft atomically
+         * @param {TaskNotificationsApiApiCoreAutomationGroupsBatchCreatePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAutomationGroupsBatchCreatePost(requestParameters: TaskNotificationsApiApiCoreAutomationGroupsBatchCreatePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<AutomationGroupBatchCreateResponse> {
+            return localVarFp.apiCoreAutomationGroupsBatchCreatePost(requestParameters.automationGroupBatchCreateRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * notification is optional. Omission retains legacy defaults on creation and preserves the rule on update. Send config or clear:true, not both. Updates compare notification.revision; conflicts roll back all task edits. Creation ignores the supplied revision. Runs and history are unchanged.
+         * @summary Save schedule and optional notification draft atomically
+         * @param {TaskNotificationsApiApiCoreSchedulesPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSchedulesPost(requestParameters: TaskNotificationsApiApiCoreSchedulesPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ScheduleResponse> {
+            return localVarFp.apiCoreSchedulesPost(requestParameters.apiCoreSchedulesPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Read configuration and current channel availability. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Read configuration and current channel availability
+         * @param {TaskNotificationsApiApiCoreSchedulesScheduleIdNotificationsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSchedulesScheduleIdNotificationsGet(requestParameters: TaskNotificationsApiApiCoreSchedulesScheduleIdNotificationsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreSchedulesScheduleIdNotificationsGet200Response> {
+            return localVarFp.apiCoreSchedulesScheduleIdNotificationsGet(requestParameters.scheduleId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Update next-run configuration with an independent revision. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Update next-run configuration with an independent revision
+         * @param {TaskNotificationsApiApiCoreSchedulesScheduleIdNotificationsPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSchedulesScheduleIdNotificationsPut(requestParameters: TaskNotificationsApiApiCoreSchedulesScheduleIdNotificationsPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreSchedulesScheduleIdNotificationsGet200Response> {
+            return localVarFp.apiCoreSchedulesScheduleIdNotificationsPut(requestParameters.scheduleId, requestParameters.scheduleNotificationUpdate, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * notification is optional. Omission retains legacy defaults on creation and preserves the rule on update. Send config or clear:true, not both. Updates compare notification.revision; conflicts roll back all task edits. Creation ignores the supplied revision. Runs and history are unchanged.
+         * @summary Save schedule and optional notification draft atomically
+         * @param {TaskNotificationsApiApiCoreSchedulesScheduleIdPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSchedulesScheduleIdPut(requestParameters: TaskNotificationsApiApiCoreSchedulesScheduleIdPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<ScheduleResponse> {
+            return localVarFp.apiCoreSchedulesScheduleIdPut(requestParameters.scheduleId, requestParameters.apiCoreSchedulesPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * System notifications: browser in all deployments; local native client in Local/Desktop only. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary System notifications: browser in all deployments; local native client in Local/Desktop only
+         * @param {TaskNotificationsApiApiCoreTaskCenterDesktopNotificationsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterDesktopNotificationsGet(requestParameters: TaskNotificationsApiApiCoreTaskCenterDesktopNotificationsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreTaskCenterDesktopNotificationsGet200Response> {
+            return localVarFp.apiCoreTaskCenterDesktopNotificationsGet(requestParameters.cursor, requestParameters.limit, requestParameters.deviceId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Idempotent system-notification receipt; delivered means submitted, not seen by the user. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Idempotent system-notification receipt; delivered means submitted, not seen by the user
+         * @param {TaskNotificationsApiApiCoreTaskCenterDesktopNotificationsNotificationIdAckPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterDesktopNotificationsNotificationIdAckPost(requestParameters: TaskNotificationsApiApiCoreTaskCenterDesktopNotificationsNotificationIdAckPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreTaskCenterDesktopNotificationsNotificationIdAckPost200Response> {
+            return localVarFp.apiCoreTaskCenterDesktopNotificationsNotificationIdAckPost(requestParameters.notificationId, requestParameters.desktopNotificationAck, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Read immutable run configuration and delivery history. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Read immutable run configuration and delivery history
+         * @param {TaskNotificationsApiApiCoreTaskCenterTasksTaskIdNotificationsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterTasksTaskIdNotificationsGet(requestParameters: TaskNotificationsApiApiCoreTaskCenterTasksTaskIdNotificationsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreTaskCenterTasksTaskIdNotificationsGet200Response> {
+            return localVarFp.apiCoreTaskCenterTasksTaskIdNotificationsGet(requestParameters.taskId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Read scheduled-task notification defaults and global gate. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Read scheduled-task notification defaults and global gate
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserNotificationPreferencesGet(options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreUserNotificationPreferencesGet200Response> {
+            return localVarFp.apiCoreUserNotificationPreferencesGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Compare revision; closing requires the exact current affected run IDs. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary Compare revision; closing requires the exact current affected run IDs
+         * @param {TaskNotificationsApiApiCoreUserNotificationPreferencesPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserNotificationPreferencesPatch(requestParameters: TaskNotificationsApiApiCoreUserNotificationPreferencesPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreUserNotificationPreferencesGet200Response> {
+            return localVarFp.apiCoreUserNotificationPreferencesPatch(requestParameters.notificationPreferencesPatch, options).then((request) => request(axios, basePath));
+        },
+    };
+};
+
+/**
+ * Request parameters for apiCoreAutomationGroupsBatchCreatePost operation in TaskNotificationsApi.
+ */
+export interface TaskNotificationsApiApiCoreAutomationGroupsBatchCreatePostRequest {
+    readonly automationGroupBatchCreateRequest: AutomationGroupBatchCreateRequest
+}
+
+/**
+ * Request parameters for apiCoreSchedulesPost operation in TaskNotificationsApi.
+ */
+export interface TaskNotificationsApiApiCoreSchedulesPostRequest {
+    readonly apiCoreSchedulesPostRequest: ApiCoreSchedulesPostRequest
+}
+
+/**
+ * Request parameters for apiCoreSchedulesScheduleIdNotificationsGet operation in TaskNotificationsApi.
+ */
+export interface TaskNotificationsApiApiCoreSchedulesScheduleIdNotificationsGetRequest {
+    readonly scheduleId: string
+}
+
+/**
+ * Request parameters for apiCoreSchedulesScheduleIdNotificationsPut operation in TaskNotificationsApi.
+ */
+export interface TaskNotificationsApiApiCoreSchedulesScheduleIdNotificationsPutRequest {
+    readonly scheduleId: string
+
+    readonly scheduleNotificationUpdate: ScheduleNotificationUpdate
+}
+
+/**
+ * Request parameters for apiCoreSchedulesScheduleIdPut operation in TaskNotificationsApi.
+ */
+export interface TaskNotificationsApiApiCoreSchedulesScheduleIdPutRequest {
+    readonly scheduleId: string
+
+    readonly apiCoreSchedulesPostRequest: ApiCoreSchedulesPostRequest
+}
+
+/**
+ * Request parameters for apiCoreTaskCenterDesktopNotificationsGet operation in TaskNotificationsApi.
+ */
+export interface TaskNotificationsApiApiCoreTaskCenterDesktopNotificationsGetRequest {
+    readonly cursor?: string
+
+    readonly limit?: number
+
+    readonly deviceId?: ApiCoreTaskCenterDesktopNotificationsGetDeviceIdEnum
+}
+
+/**
+ * Request parameters for apiCoreTaskCenterDesktopNotificationsNotificationIdAckPost operation in TaskNotificationsApi.
+ */
+export interface TaskNotificationsApiApiCoreTaskCenterDesktopNotificationsNotificationIdAckPostRequest {
+    readonly notificationId: string
+
+    readonly desktopNotificationAck: DesktopNotificationAck
+}
+
+/**
+ * Request parameters for apiCoreTaskCenterTasksTaskIdNotificationsGet operation in TaskNotificationsApi.
+ */
+export interface TaskNotificationsApiApiCoreTaskCenterTasksTaskIdNotificationsGetRequest {
+    readonly taskId: string
+}
+
+/**
+ * Request parameters for apiCoreUserNotificationPreferencesPatch operation in TaskNotificationsApi.
+ */
+export interface TaskNotificationsApiApiCoreUserNotificationPreferencesPatchRequest {
+    readonly notificationPreferencesPatch: NotificationPreferencesPatch
+}
+
+/**
+ * TaskNotificationsApi - object-oriented interface
+ */
+export class TaskNotificationsApi extends BaseAPI {
+    /**
+     * Each tasks[].notification belongs only to that concrete schedule. Omission keeps the current default snapshot. Any task, dependency, or notification failure rolls back the entire group.
+     * @summary Create a task group and save each task\'s optional notification draft atomically
+     * @param {TaskNotificationsApiApiCoreAutomationGroupsBatchCreatePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAutomationGroupsBatchCreatePost(requestParameters: TaskNotificationsApiApiCoreAutomationGroupsBatchCreatePostRequest, options?: RawAxiosRequestConfig) {
+        return TaskNotificationsApiFp(this.configuration).apiCoreAutomationGroupsBatchCreatePost(requestParameters.automationGroupBatchCreateRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * notification is optional. Omission retains legacy defaults on creation and preserves the rule on update. Send config or clear:true, not both. Updates compare notification.revision; conflicts roll back all task edits. Creation ignores the supplied revision. Runs and history are unchanged.
+     * @summary Save schedule and optional notification draft atomically
+     * @param {TaskNotificationsApiApiCoreSchedulesPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreSchedulesPost(requestParameters: TaskNotificationsApiApiCoreSchedulesPostRequest, options?: RawAxiosRequestConfig) {
+        return TaskNotificationsApiFp(this.configuration).apiCoreSchedulesPost(requestParameters.apiCoreSchedulesPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Read configuration and current channel availability. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+     * @summary Read configuration and current channel availability
+     * @param {TaskNotificationsApiApiCoreSchedulesScheduleIdNotificationsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreSchedulesScheduleIdNotificationsGet(requestParameters: TaskNotificationsApiApiCoreSchedulesScheduleIdNotificationsGetRequest, options?: RawAxiosRequestConfig) {
+        return TaskNotificationsApiFp(this.configuration).apiCoreSchedulesScheduleIdNotificationsGet(requestParameters.scheduleId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Update next-run configuration with an independent revision. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+     * @summary Update next-run configuration with an independent revision
+     * @param {TaskNotificationsApiApiCoreSchedulesScheduleIdNotificationsPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreSchedulesScheduleIdNotificationsPut(requestParameters: TaskNotificationsApiApiCoreSchedulesScheduleIdNotificationsPutRequest, options?: RawAxiosRequestConfig) {
+        return TaskNotificationsApiFp(this.configuration).apiCoreSchedulesScheduleIdNotificationsPut(requestParameters.scheduleId, requestParameters.scheduleNotificationUpdate, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * notification is optional. Omission retains legacy defaults on creation and preserves the rule on update. Send config or clear:true, not both. Updates compare notification.revision; conflicts roll back all task edits. Creation ignores the supplied revision. Runs and history are unchanged.
+     * @summary Save schedule and optional notification draft atomically
+     * @param {TaskNotificationsApiApiCoreSchedulesScheduleIdPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreSchedulesScheduleIdPut(requestParameters: TaskNotificationsApiApiCoreSchedulesScheduleIdPutRequest, options?: RawAxiosRequestConfig) {
+        return TaskNotificationsApiFp(this.configuration).apiCoreSchedulesScheduleIdPut(requestParameters.scheduleId, requestParameters.apiCoreSchedulesPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * System notifications: browser in all deployments; local native client in Local/Desktop only. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+     * @summary System notifications: browser in all deployments; local native client in Local/Desktop only
+     * @param {TaskNotificationsApiApiCoreTaskCenterDesktopNotificationsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreTaskCenterDesktopNotificationsGet(requestParameters: TaskNotificationsApiApiCoreTaskCenterDesktopNotificationsGetRequest = {}, options?: RawAxiosRequestConfig) {
+        return TaskNotificationsApiFp(this.configuration).apiCoreTaskCenterDesktopNotificationsGet(requestParameters.cursor, requestParameters.limit, requestParameters.deviceId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Idempotent system-notification receipt; delivered means submitted, not seen by the user. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+     * @summary Idempotent system-notification receipt; delivered means submitted, not seen by the user
+     * @param {TaskNotificationsApiApiCoreTaskCenterDesktopNotificationsNotificationIdAckPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreTaskCenterDesktopNotificationsNotificationIdAckPost(requestParameters: TaskNotificationsApiApiCoreTaskCenterDesktopNotificationsNotificationIdAckPostRequest, options?: RawAxiosRequestConfig) {
+        return TaskNotificationsApiFp(this.configuration).apiCoreTaskCenterDesktopNotificationsNotificationIdAckPost(requestParameters.notificationId, requestParameters.desktopNotificationAck, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Read immutable run configuration and delivery history. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+     * @summary Read immutable run configuration and delivery history
+     * @param {TaskNotificationsApiApiCoreTaskCenterTasksTaskIdNotificationsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreTaskCenterTasksTaskIdNotificationsGet(requestParameters: TaskNotificationsApiApiCoreTaskCenterTasksTaskIdNotificationsGetRequest, options?: RawAxiosRequestConfig) {
+        return TaskNotificationsApiFp(this.configuration).apiCoreTaskCenterTasksTaskIdNotificationsGet(requestParameters.taskId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Read scheduled-task notification defaults and global gate. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+     * @summary Read scheduled-task notification defaults and global gate
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreUserNotificationPreferencesGet(options?: RawAxiosRequestConfig) {
+        return TaskNotificationsApiFp(this.configuration).apiCoreUserNotificationPreferencesGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Compare revision; closing requires the exact current affected run IDs. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+     * @summary Compare revision; closing requires the exact current affected run IDs
+     * @param {TaskNotificationsApiApiCoreUserNotificationPreferencesPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreUserNotificationPreferencesPatch(requestParameters: TaskNotificationsApiApiCoreUserNotificationPreferencesPatchRequest, options?: RawAxiosRequestConfig) {
+        return TaskNotificationsApiFp(this.configuration).apiCoreUserNotificationPreferencesPatch(requestParameters.notificationPreferencesPatch, options).then((request) => request(this.axios, this.basePath));
+    }
+}
+
+export const ApiCoreTaskCenterDesktopNotificationsGetDeviceIdEnum = {
+    Local: 'local',
+    Browser: 'browser'
+} as const;
+export type ApiCoreTaskCenterDesktopNotificationsGetDeviceIdEnum = typeof ApiCoreTaskCenterDesktopNotificationsGetDeviceIdEnum[keyof typeof ApiCoreTaskCenterDesktopNotificationsGetDeviceIdEnum];
 
 
 /**

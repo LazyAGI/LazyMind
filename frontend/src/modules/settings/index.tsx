@@ -4,6 +4,7 @@ import type { ChangeEvent, ReactNode } from "react";
 import { Alert, Button, Empty, Input, Skeleton, Switch, Tabs, Tag, message } from "antd";
 import {
   ApiOutlined,
+  BellOutlined,
   ArrowLeftOutlined,
   CheckCircleFilled,
   ClockCircleOutlined,
@@ -81,6 +82,8 @@ import "./index.scss";
 import { SettingsNavigationGuard } from "./SettingsNavigationGuard";
 import { useSettingsChange } from "./useSettingsChange";
 
+import NotificationSettings from "@/modules/notifications/NotificationSettings";
+
 type SectionID =
   | "overview"
   | "models"
@@ -92,6 +95,7 @@ type SectionID =
   | "system_tools"
   | "mcp"
   | "assistants"
+  | "notifications"
   | "channels"
   | "cloud-usage"
   | "diagnostics"
@@ -162,7 +166,8 @@ function baseNavigation(isAdmin: boolean, t: Translate, cloudRuntimeAvailable = 
         { id: "mcp", label: t("settingsPage.sections.mcp"), keywords: t("settingsPage.sectionKeywords.mcp"), icon: <ToolOutlined /> },
         { id: "assistants", label: t("settingsPage.sections.assistants"), keywords: t("settingsPage.sectionKeywords.assistants"), icon: <RobotOutlined /> },
         ...(isVocabularyEnabled() ? [{ id: "external_apps" as const, label: "外部应用", keywords: "Anki AnkiConnect 外部应用 词汇表", icon: <UnorderedListOutlined /> }] : []),
-        { id: "channels", label: t("settingsPage.sections.channels"), keywords: t("settingsPage.sectionKeywords.channels"), icon: <LinkOutlined />, status: t("settingsPage.sectionStatus.connect") },
+        { id: "channels", label: t("settingsPage.sections.channels"), keywords: t("settingsPage.sectionKeywords.channels"), icon: <LinkOutlined /> },
+        { id: "notifications", label: t("notifications.title"), keywords: "通知 notification", icon: <BellOutlined /> },
       ],
     },
     {
@@ -845,6 +850,8 @@ function SettingsPageContent() {
       </>;
     } else if (section === "assistants") {
       content = integratedSurface(<AgentIntegrationPage />, "is-assistants");
+    } else if (section === "notifications") {
+      content = <NotificationSettings />;
     } else if (section === "channels") {
       content = integratedSurface(<TerminalConnectionPage />, "is-channels");
     } else if (section === "cloud-usage") {

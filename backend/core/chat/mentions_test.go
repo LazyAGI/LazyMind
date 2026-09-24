@@ -352,7 +352,7 @@ func TestResolveExplicitSkillBindingsRejectsNormalizedAliasCollision(t *testing.
 		t.Fatalf("error = %T %v, want *common.AppError", err, err)
 	}
 	detail, ok := appErr.Detail.(map[string]any)
-	if appErr.Code != 2003115 || !ok || detail["reason"] != "skill_binding_ambiguous" || detail["requested_name"] != "CODE-REVIEWER" {
+	if appErr.Code != 2003117 || !ok || detail["reason"] != "skill_binding_ambiguous" || detail["requested_name"] != "CODE-REVIEWER" {
 		t.Fatalf("error = %#v, want structured ambiguity", appErr)
 	}
 	candidates, ok := detail["candidates"].([]string)

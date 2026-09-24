@@ -1,3 +1,4 @@
+import notifications from './notifications-en-US';
 import { evolutionControlsEn } from "@/modules/selfEvolution/shared/controlTranslations";
 import { enUSErrorMessages } from "./error-codes";
 
@@ -8,6 +9,7 @@ const enUS = {
     error: "Unable to load or save settings. Refresh and try again.",
   },
   // Common
+  notifications,
   selfEvolutionControls: evolutionControlsEn,
   recording: {
     "collectActions": "Capture clicks, keyboard actions and DOM (on by default)",
@@ -1598,6 +1600,7 @@ const enUS = {
         "Connect LazyMind to your messaging apps and continue conversations and tasks from the same account.",
       quickSubtitle: "Continue conversations and tasks in your messaging apps",
       connectedCount: "{{count}} connected",
+      connectedAndPendingCount: "{{connected}} connected · {{pending}} pending activation",
       connectedDetailsTitle: "Connected channel accounts",
       connectedDetailsHint: "Select an account to show its channel QR code again below.",
       loadingAccounts: "Loading connected accounts…",
@@ -1720,6 +1723,7 @@ const enUS = {
       },
       accountStatusMap: {
         connected: "Connected",
+        pendingActivation: "Pending activation",
         disconnected: "Disconnected",
       },
       runtimeStatusMap: {
@@ -1729,6 +1733,45 @@ const enUS = {
         degraded: "Degraded",
         unsupported: "Unsupported",
       },
+    },
+    wecom: {
+      title: "WeCom Channel",
+      subtitle: "Create and connect a WeCom AI bot by scanning a QR code.",
+      connectWorkspace: "WeCom connection guide",
+      quickConnect: "Quick connect",
+      guideTitle: "Connect with WeCom Scan",
+      guideHint: "Scanning creates and binds an API-mode AI bot in the current enterprise.",
+      stepOpenTitle: "Open WeCom",
+      stepOpenHint: "Use WeCom on your phone to scan the QR code.",
+      stepScanTitle: "Scan the QR code",
+      stepScanHint: "Scan with the enterprise account that should own the bot.",
+      stepConfirmTitle: "Confirm bot creation",
+      stepConfirmHint: "Approve the request. BotID and Secret are saved securely automatically.",
+      securityHint: "The QR code is one-time. Bot credentials are encrypted and never shown in the UI.",
+      readyTitle: "Ready to connect WeCom",
+      readyHint: "Generate a secure, one-time WeCom connection QR code.",
+      estimatedTime: "Usually takes less than 1 minute",
+      startScan: "Generate QR Code",
+      addAnotherAccount: "Add Another Account",
+      newConnectionTitle: "Connect Another WeCom Account",
+      newConnectionHint: "The new connection does not replace accounts already selected by tasks.",
+      preparingQr: "Generating QR code…",
+      qrExpiresAt: "QR expires at: {{time}}",
+      refreshQr: "Refresh QR",
+      cancelScan: "Cancel Connection",
+      closePanel: "Close",
+      loadAccountsFailed: "Failed to load WeCom accounts",
+      startFailed: "Failed to start WeCom QR session",
+      pollFailed: "Failed to poll WeCom QR status",
+      cancelSuccess: "QR session canceled",
+      cancelFailed: "Failed to cancel QR session",
+      refreshFailed: "Failed to refresh QR code",
+      challengeDigitsOnly: "Please enter a numeric code",
+      challengeFailed: "Failed to submit verification code",
+      connectSuccess: "WeCom account connected",
+      connectSuccessVisual: "Connected",
+      connectFailedVisual: "Not connected",
+      sessionStatusMap: { preparing: "Preparing", waiting_scan: "Waiting for scan", scanned: "Scanned", verification_required: "Verification required", confirming: "Connecting", connected: "Connected", expired: "Expired", canceled: "Canceled", failed: "Failed" },
     },
     feishu: {
       title: "Feishu Channel",

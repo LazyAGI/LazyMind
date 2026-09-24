@@ -102,8 +102,8 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		v03.Aggregate == nil || v03.Aggregate.Version != 20260805000000 {
 		t.Fatalf("unexpected v0_3 mode: %#v", v03)
 	}
-	if len(v03.Dev) != 105 {
-		t.Fatalf("v0_3 dev migration count=%d, want 105", len(v03.Dev))
+	if len(v03.Dev) != 106 {
+		t.Fatalf("v0_3 dev migration count=%d, want 106", len(v03.Dev))
 	}
 	if !containsMigrationFileVersion(v03.Dev, 20260923073919) {
 		t.Fatal("v0_3 dev migrations are missing ordinary task display")
@@ -118,6 +118,9 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		if !containsMigrationFileVersion(v03.Dev, version) {
 			t.Fatalf("v0_3 dev migrations are missing %d", version)
 		}
+	}
+	if !containsMigrationFileVersion(v03.Dev, 20260914145559) {
+		t.Fatal("v0_3 dev migrations are missing task notifications")
 	}
 	if !containsMigrationFileVersion(v03.Dev, 20260918064724) {
 		t.Fatal("v0_3 dev migrations are missing MCP auth type")

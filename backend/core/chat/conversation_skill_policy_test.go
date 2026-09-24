@@ -299,7 +299,7 @@ func TestChatReturnsStructuredSkillBindingNotFound(t *testing.T) {
 	}
 	data, dataOK := response.Data.(map[string]any)
 	detail, detailOK := data["detail"].(map[string]any)
-	if response.Code != 2003114 || !dataOK || !detailOK || detail["reason"] != "skill_binding_not_found" || detail["requested_name"] != "missing_skill" {
+	if response.Code != 2003116 || !dataOK || !detailOK || detail["reason"] != "skill_binding_not_found" || detail["requested_name"] != "missing_skill" {
 		t.Fatalf("response = %#v, want structured skill_binding_not_found", response)
 	}
 }

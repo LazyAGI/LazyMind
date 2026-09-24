@@ -1,6 +1,7 @@
-import { getLocalizedErrorMessage } from "@/components/request";
-import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
+import { getLocalizedErrorMessage } from '@/components/request';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
+  Alert,
   Button,
   Empty,
   Input,
@@ -9,12 +10,9 @@ import {
   QRCode,
   Space,
   Spin,
-  Table,
   Tag,
-  Tooltip,
   Typography,
 } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
 import {
   CheckCircleFilled,
   CloseCircleFilled,
@@ -24,12 +22,14 @@ import {
   QrcodeOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
-  UnorderedListOutlined,
-  WechatOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
+import { getAccountDetail, getReferences, setDefaultRecipient, notificationError, providers, type AccountDetail, type Reference } from '@/modules/notifications/api';
+import TargetPicker from '@/modules/notifications/TargetPicker';
+import ChannelBrand from '@/modules/notifications/ChannelBrand';
+import '@/modules/notifications/index.scss';
 
 import type {
   ChannelAccount,
@@ -37,26 +37,19 @@ import type {
   ConnectionSession,
 } from '../api';
 import {
+  archiveChannelAccount,
+  channelAccountLabel,
   disconnectChannelAccount,
+  isChannelAccountAvailable,
+  isChannelAccountPendingActivation,
+  pauseChannelAccount,
+  resumeChannelAccount,
   listChannelAccounts,
 } from '../api';
 import { useChannelConnection } from '../hooks/useChannelConnection';
 import './channelConnectionPage.scss';
 
 const { Paragraph, Text, Title } = Typography;
-
-function ChannelIcon({ provider }: { provider: ChannelProvider }) {
-  return provider === 'wechat'
-    ? <WechatOutlined />
-    : (
-      <img
-        className="feishu-official-icon"
-        src="/feishu-official.svg"
-        alt=""
-        aria-hidden="true"
-      />
-    );
-}
 
 function formatTime(value: string | null | undefined): string {
   if (!value) {
@@ -145,12 +138,23 @@ function renderSessionVisual(
 
 interface ChannelConnectionPageProps {
   provider: ChannelProvider;
+  accountId?: string;
+  createNew?: boolean;
+  autoStart?: boolean;
+  onConnected?: (account?: ChannelAccount) => void;
 }
 
-function ChannelConnectionPage({ provider }: ChannelConnectionPageProps) {
+function ChannelConnectionPage({ provider, accountId, createNew, autoStart, onConnected }: ChannelConnectionPageProps) {
   const translationKey = `channelGateway.${provider}`;
-  const copy = (name: string) => `${translationKey}.${name}`;
-  const channelIcon = <ChannelIcon provider={provider} />;
+  const copy = (name: string) => {
+    if (provider === 'feishu' && accountId) {
+      if (['newConnectionTitle', 'guideTitle', 'readyTitle', 'stepConfirmTitle', 'sessionStatusMap.confirming'].includes(name)) return 'notifications.reauthorize';
+      if (['newConnectionHint', 'guideHint', 'stepConfirmHint'].includes(name)) return 'notifications.reauthorizeHint';
+      if (name === 'addAnotherAccount') return `${translationKey}.closePanel`;
+    }
+    return `${translationKey}.${name}`;
+  };
+  const channelIcon = <ChannelBrand channel={provider} />;
   const {
     t,
     accounts,
@@ -166,15 +170,25 @@ function ChannelConnectionPage({ provider }: ChannelConnectionPageProps) {
     closeSessionPanel,
   } = useChannelConnection(provider);
 
+  useEffect(() => { if (session?.status === 'connected') onConnected?.(session.account || undefined); }, [session?.status, session?.account, onConnected]);
   const step = currentStep(session);
   const hasAccounts = accounts.length > 0;
   const activeScan = isActiveScan(session);
   const connectWorkspaceId = `${provider}-connect-workspace`;
   const connectTitleId = `${provider}-connect-title`;
+  const autoStartedAccountId = useRef<string>();
 
-  const beginScan = () => {
-    void startScan();
-  };
+  const beginScan = useCallback(() => startScan({ accountId, ...(provider === 'feishu' && accountId ? { reauthorize: true } : {}), ...(createNew ? { createNew: true } : {}) }), [accountId, createNew, provider, startScan]);
+
+  useEffect(() => {
+    if (!autoStart || !accountId) {
+      autoStartedAccountId.current = undefined;
+      return;
+    }
+    if (autoStartedAccountId.current === accountId) return;
+    autoStartedAccountId.current = accountId;
+    void beginScan();
+  }, [accountId, autoStart, beginScan]);
 
   const connectWorkspace = (
     <section
@@ -327,7 +341,7 @@ function ChannelConnectionPage({ provider }: ChannelConnectionPageProps) {
                 size="large"
                 icon={<QrcodeOutlined />}
                 loading={sessionStarting}
-                onClick={beginScan}
+                onClick={() => void beginScan()}
               >
                 {t(copy('startScan'))}
               </Button>
@@ -348,297 +362,128 @@ function ChannelConnectionPage({ provider }: ChannelConnectionPageProps) {
   );
 }
 
-function accountProvider(account: ChannelAccount): ChannelProvider {
-  return account.provider === 'feishu' ? 'feishu' : 'wechat';
+function AccountDisclosure({ account, onReconnect, onChanged }: { account: ChannelAccount; onReconnect: () => void; onChanged: () => void }) {
+  const { t } = useTranslation();
+  const [detail, setDetail] = useState<AccountDetail>();
+  const [refs, setRefs] = useState<Reference[]>([]);
+  const [cursor, setCursor] = useState('');
+  const [error, setError] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const binding = account.binding_status || detail?.binding_status;
+  const unbound = binding === 'unbound';
+  const pendingActivation = isChannelAccountPendingActivation(detail || account);
+  useEffect(() => {
+    let active = true;
+    void getAccountDetail(account.id).then(value => { if (active) setDetail(value); }).catch(() => {});
+    return () => { active = false; };
+  }, [account.id, account.default_recipient_id]);
+  const load = async () => {
+    setBusy(true); setError(false);
+    try {
+      const [d, r] = await Promise.all([getAccountDetail(account.id), getReferences(account.id)]);
+      setDetail(d); setRefs(r.items); setCursor(r.next_cursor);
+    } catch { setError(true); } finally { setBusy(false); }
+  };
+  const disconnect = async (unbind = false, archive = false) => {
+    setBusy(true);
+    try {
+      // Re-read impact immediately before asking for confirmation; an unavailable dependency must not look like zero references.
+      const r = await getReferences(account.id);
+      Modal.confirm({ zIndex: 1600, title: t(archive ? 'notifications.removeAccountTitle' : unbind ? 'notifications.unbindTitle' : 'notifications.disconnectTitle'), content: <><p>{t(archive ? 'notifications.removeAccountHint' : unbind ? 'notifications.unbindHint' : account.provider === 'feishu' ? 'notifications.pauseFeishuHint' : 'notifications.disconnectHint')}</p><p>{t('notifications.referenceCount', { count: r.total })}</p>{r.items.map(item => <p key={item.kind + item.id}>{item.name}</p>)}</>, okButtonProps: { danger: true }, okText: t(archive ? 'notifications.removeAccount' : unbind ? 'notifications.unbind' : 'notifications.disconnect'), cancelText: t('notifications.cancel'), onOk: async () => { await (archive ? archiveChannelAccount : account.provider === 'feishu' && !unbind ? pauseChannelAccount : disconnectChannelAccount)(account.id); onChanged(); } });
+    } catch { setError(true); } finally { setBusy(false); }
+  };
+  const reconnect = async () => {
+    setBusy(true);
+    try {
+      await resumeChannelAccount(account.id);
+      onChanged();
+      message.success(t('notifications.connected'));
+    } catch (error) {
+      const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+      if (code?.endsWith('_REAUTHORIZATION_REQUIRED')) {
+        message.info(t('notifications.reauthorizeHint'));
+        onReconnect();
+      } else {
+        message.error(getLocalizedErrorMessage(error) || t('notifications.loadFailed'));
+      }
+    } finally { setBusy(false); }
+  };
+  return <details className="notification-account" onToggle={e => { if (e.currentTarget.open && !busy) void load(); }}>
+    <summary><ChannelBrand channel={account.provider as ChannelProvider} avatar={account.avatar_url} /><div className="notification-grow"><strong>{channelAccountLabel(account)}</strong><small>{detail?.default_recipient?.label || t('notifications.noPrimary')} · {t('notifications.taskReferenceCount', { count: detail?.notification_reference_count || 0 })}</small></div><Tag color={pendingActivation ? 'warning' : account.status === 'connected' ? 'success' : 'default'}>{t('notifications.' + (binding === 'unbound' ? 'unbound' : pendingActivation ? 'pendingActivation' : account.status === 'connected' ? 'connected' : 'disconnected'))}</Tag></summary>
+    {busy && <Spin size="small" />}
+    {error && <p role="alert">{t('notifications.loadFailed')} <Button onClick={() => void load()}>{t('notifications.retry')}</Button></p>}
+    {detail && <div className="notification-account-details">
+      <div><small>{t('notifications.accountInformation')}</small><strong>{channelAccountLabel(account)}</strong><p>{t('notifications.primary')}：{detail.default_recipient?.label || t('notifications.noPrimary')}</p></div>
+      <div><small>{t('notifications.runtime')}</small><strong>{t(`channelGateway.${account.provider}.runtimeStatusMap.${detail.runtime_status}`)}</strong><p>{t(pendingActivation ? 'notifications.pendingActivationHint' : account.status === 'connected' ? 'notifications.connectionAvailableHint' : 'notifications.connectionStoppedHint')}</p></div>
+      <div><small>{t('notifications.connectedAt')}</small><strong>{formatTime(detail.connected_at)}</strong><p>{t('notifications.authorizationTimeHint')}</p></div>
+      <div><small>{t('notifications.lastMessageAt')}</small><strong>{formatTime(detail.last_message_at)}</strong><p>{t('notifications.lastMessageHint')}</p></div>
+      <div className="notification-wide"><small>{t('notifications.references')}</small><strong>{refs.map(r => r.name).join('、') || t('notifications.noReferences')}</strong><p>{t('notifications.referencesStableHint')}</p>
+        {cursor && <Button disabled={busy} onClick={async () => { setBusy(true); try { const r = await getReferences(account.id, cursor); setRefs(old => [...old, ...r.items]); setCursor(r.next_cursor); } catch { setError(true); } finally { setBusy(false); } }}>{t('notifications.loadMore')}</Button>}
+      </div>
+    </div>}
+    <footer><div className="notification-account-actions">{account.status === 'connected'
+      ? <Button disabled={busy} danger onClick={() => void disconnect()}>{t('notifications.disconnect')}</Button>
+      : <Button disabled={busy} onClick={() => void reconnect()}>{t('notifications.reconnect')}</Button>}
+      {account.provider === 'feishu' && unbound && <Button disabled={busy} onClick={onReconnect}>{t('notifications.reauthorize')}</Button>}
+      {account.provider === 'feishu' && unbound && <Button disabled={busy} danger onClick={() => void disconnect(false, true)}>{t('notifications.removeAccount')}</Button>}</div><small>{t('notifications.accountId')}：{account.id}</small></footer>
+  </details>;
 }
 
-export function TerminalConnectionPage() {
+export function TerminalConnectionPage({ initialProvider, embedded = false, onUseAccount }: { initialProvider?: ChannelProvider; embedded?: boolean; onUseAccount?: (account: ChannelAccount) => void } = {}) {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [accountsPanelOpen, setAccountsPanelOpen] = useState(false);
+  const fromURL = searchParams.get('provider') as ChannelProvider;
+  const [provider, setProvider] = useState<ChannelProvider>(initialProvider || (providers.includes(fromURL) ? fromURL : 'feishu'));
   const [accounts, setAccounts] = useState<ChannelAccount[]>([]);
-  const [accountsLoading, setAccountsLoading] = useState(true);
-  const [disconnectingAccountId, setDisconnectingAccountId] = useState<string | null>(null);
-  const provider: ChannelProvider = (
-    searchParams.get('provider') === 'feishu' ? 'feishu' : 'wechat'
-  );
-
-  const loadAccounts = useCallback(async () => {
-    setAccountsLoading(true);
-    try {
-      const [wechatAccounts, feishuAccounts] = await Promise.all([
-        listChannelAccounts('wechat'),
-        listChannelAccounts('feishu'),
-      ]);
-      setAccounts(
-        [...wechatAccounts.items, ...feishuAccounts.items]
-          .sort((left, right) => (
-            dayjs(right.updated_at).valueOf() - dayjs(left.updated_at).valueOf()
-          )),
-      );
-    } catch (error) {
-      message.error(getLocalizedErrorMessage(error));
-    } finally {
-      setAccountsLoading(false);
-    }
-  }, [t]);
-
+  const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [reconnectId, setReconnectId] = useState<string>();
+  const [refresh, setRefresh] = useState(0);
+  const onChanged = useCallback(() => setRefresh(n => n + 1), []);
+  const [choosingDefault, setChoosingDefault] = useState(false);
+  const [savingDefault, setSavingDefault] = useState(false);
+  const [connectedAccount, setConnectedAccount] = useState<ChannelAccount>();
+  const onConnected = useCallback((account?: ChannelAccount) => { setConnectedAccount(account); setReconnectId(undefined); setRefresh(n => n + 1); }, []);
   useEffect(() => {
-    void loadAccounts();
-  }, [loadAccounts]);
-
-  const selectProvider = (nextProvider: ChannelProvider) => {
-    const nextSearchParams = new URLSearchParams(searchParams);
-    nextSearchParams.set('provider', nextProvider);
-    setSearchParams(nextSearchParams, { replace: true });
+    let active = true;
+    setLoading(true); setError(false);
+    Promise.all(providers.map(listChannelAccounts)).then(results => { if (active) setAccounts(results.flatMap(r => r.items)); }).catch(() => { if (active) setError(true); }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [refresh]);
+  const select = (p: ChannelProvider) => {
+    setProvider(p); setReconnectId(undefined); setConnectedAccount(undefined);
+    if (!embedded) { const params = new URLSearchParams(searchParams); params.set('provider', p); setSearchParams(params, { replace: true }); }
   };
-
-  const openAccountsPanel = () => {
-    setAccountsPanelOpen(true);
-    void loadAccounts();
-  };
-
-  const disconnectAccount = async (account: ChannelAccount) => {
-    setDisconnectingAccountId(account.id);
-    try {
-      await disconnectChannelAccount(account.id);
-      message.success(t('channelGateway.terminal.disconnectSuccess'));
-      await loadAccounts();
-    } catch (error) {
-      message.error(getLocalizedErrorMessage(error));
-    } finally {
-      setDisconnectingAccountId(null);
-    }
-  };
-
-  const columns: ColumnsType<ChannelAccount> = [
-    {
-      title: t('channelGateway.terminal.provider'),
-      dataIndex: 'provider',
-      key: 'provider',
-      width: 140,
-      render: (_value: string, account) => {
-        const rowProvider = accountProvider(account);
-        return (
-          <div className="terminal-account-provider">
-            <span className={`terminal-provider-icon is-${rowProvider}`} aria-hidden="true">
-              <ChannelIcon provider={rowProvider} />
-            </span>
-            <strong>{t(`channelGateway.terminal.${rowProvider}Title`)}</strong>
-          </div>
-        );
-      },
-    },
-    {
-      title: t('channelGateway.terminal.accountLabel'),
-      dataIndex: 'label',
-      key: 'label',
-      width: 240,
-      render: (value: string, account) => {
-        const rowProvider = accountProvider(account);
-        return (
-          <div className={`wechat-account-name is-${rowProvider}`}>
-            <span aria-hidden="true"><ChannelIcon provider={rowProvider} /></span>
-            <Tooltip title={value || '-'}>
-              <strong>{value || '-'}</strong>
-            </Tooltip>
-          </div>
-        );
-      },
-    },
-    {
-      title: t('channelGateway.terminal.accountStatus'),
-      dataIndex: 'status',
-      key: 'status',
-      width: 140,
-      render: (value: string, account) => {
-        const rowProvider = accountProvider(account);
-        return (
-          <Tag color={statusColor(value)}>
-            {t(`channelGateway.${rowProvider}.accountStatusMap.${value}`, {
-              defaultValue: value,
-            })}
-          </Tag>
-        );
-      },
-    },
-    {
-      title: t('channelGateway.terminal.runtimeStatus'),
-      dataIndex: 'runtime_status',
-      key: 'runtime_status',
-      width: 140,
-      render: (value: string, account) => {
-        const rowProvider = accountProvider(account);
-        return (
-          <Tag color={statusColor(value)}>
-            {t(`channelGateway.${rowProvider}.runtimeStatusMap.${value}`, {
-              defaultValue: value,
-            })}
-          </Tag>
-        );
-      },
-    },
-    {
-      title: t('channelGateway.terminal.connectedAt'),
-      dataIndex: 'connected_at',
-      key: 'connected_at',
-      width: 180,
-      render: formatTime,
-    },
-    {
-      title: t('channelGateway.terminal.lastMessageAt'),
-      dataIndex: 'last_message_at',
-      key: 'last_message_at',
-      width: 180,
-      render: formatTime,
-    },
-    {
-      title: t('channelGateway.terminal.lastError'),
-      // The column renders catalog text; backend diagnostics stay out of the tooltip.
-      key: 'last_error',
-      width: 220,
-      ellipsis: true,
-      render: (_value: unknown, account) =>
-        account.last_error ? (
-          <Tooltip title={getLocalizedErrorMessage({ code: account.last_error })} placement="top" overlayStyle={{ maxWidth: 360 }}>
-            <span className="wechat-error-cell">{getLocalizedErrorMessage({ code: account.last_error })}</span>
-          </Tooltip>
-        ) : '-',
-    },
-    {
-      title: t('channelGateway.terminal.actions'),
-      key: 'actions',
-      fixed: 'right',
-      width: 110,
-      render: (_value, account) => (
-        <Button
-          danger
-          type="link"
-          loading={disconnectingAccountId === account.id}
-          onClick={() => {
-            Modal.confirm({
-              title: t('channelGateway.terminal.disconnectConfirmTitle'),
-              content: t('channelGateway.terminal.disconnectConfirmContent', {
-                account: account.label,
-              }),
-              okText: t('channelGateway.terminal.disconnectConfirmOk'),
-              cancelText: t('common.cancel'),
-              okButtonProps: { danger: true },
-              onOk: () => disconnectAccount(account),
-            });
-          }}
-        >
-          {t('channelGateway.terminal.disconnectAccount')}
-        </Button>
-      ),
-    },
-  ];
-
-  return (
-    <div className="terminal-connection-page">
-      <header className="terminal-connection-header">
-        <span className="terminal-connection-icon" aria-hidden="true">
-          <LinkOutlined />
-        </span>
-        <div>
-          <Title level={2}>{t('channelGateway.terminal.title')}</Title>
-          <Paragraph>{t('channelGateway.terminal.subtitle')}</Paragraph>
-        </div>
-        <Button
-          className="terminal-accounts-trigger"
-          aria-controls="terminal-accounts-panel"
-          aria-haspopup="dialog"
-          icon={<UnorderedListOutlined />}
-          loading={accountsLoading && accounts.length === 0}
-          onClick={openAccountsPanel}
-        >
-          {t('channelGateway.terminal.viewAccounts', { count: accounts.length })}
-        </Button>
-      </header>
-
-      <main className="terminal-connection-content">
-        <nav
-          className="terminal-provider-switch"
-          aria-label={t('channelGateway.terminal.providerLabel')}
-        >
-          {(['wechat', 'feishu'] as ChannelProvider[]).map((item) => (
-            <button
-              key={item}
-              type="button"
-              className={item === provider ? 'is-active' : ''}
-              aria-pressed={item === provider}
-              onClick={() => selectProvider(item)}
-            >
-              <span className={`terminal-provider-icon is-${item}`} aria-hidden="true">
-                <ChannelIcon provider={item} />
-              </span>
-              <span>
-                <strong>{t(`channelGateway.terminal.${item}Title`)}</strong>
-                <small>{t(`channelGateway.terminal.${item}Hint`)}</small>
-              </span>
-            </button>
-          ))}
-        </nav>
-
-        <ChannelConnectionPage
-          key={provider}
-          provider={provider}
-        />
-      </main>
-
-      <Modal
-        className="wechat-accounts-modal"
-        open={accountsPanelOpen}
-        width={1200}
-        footer={null}
-        destroyOnClose
-        centered
-        onCancel={() => setAccountsPanelOpen(false)}
-      >
-        <section
-          id="terminal-accounts-panel"
-          className="wechat-connection-accounts"
-          aria-labelledby="terminal-accounts-title"
-        >
-          <div className="wechat-connection-accounts-head">
-            <div>
-              <div className="wechat-accounts-title-row">
-                <Title id="terminal-accounts-title" level={4}>
-                  {t('channelGateway.terminal.accountsTitle')}
-                </Title>
-                {!accountsLoading ? <span>{accounts.length}</span> : null}
-              </div>
-              <Text type="secondary">{t('channelGateway.terminal.accountsHint')}</Text>
-            </div>
-            <Space wrap className="wechat-accounts-actions">
-              <Button
-                icon={<ReloadOutlined />}
-                loading={accountsLoading}
-                onClick={() => void loadAccounts()}
-              >
-                {t('channelGateway.terminal.refreshAccounts')}
-              </Button>
-            </Space>
-          </div>
-
-          <Table<ChannelAccount>
-            rowKey="id"
-            loading={accountsLoading}
-            columns={columns}
-            dataSource={accounts}
-            pagination={false}
-            scroll={{ x: 1330 }}
-            locale={{
-              emptyText: (
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={t('channelGateway.terminal.accountsEmpty')}
-                />
-              ),
-            }}
-          />
-        </section>
-      </Modal>
-    </div>
-  );
+  return <div className="notification-connections">
+    <header className="notification-heading"><LinkOutlined /><div><h2>{t('notifications.connectTitle')}</h2><p>{t('notifications.connectHint')}</p></div><Tag className="notification-connection-count"><LinkOutlined />{t('notifications.enabledCount', { count: accounts.filter(isChannelAccountAvailable).length })}</Tag></header>
+    {error && <p role="alert">{t('notifications.loadFailed')}</p>}
+    {connectedAccount && <Alert type="success" message={`${channelAccountLabel(connectedAccount)} · ${t('notifications.connected')}`} action={<Space><Button onClick={() => setChoosingDefault(true)}>{t('notifications.setDefaultRecipient')}</Button>{onUseAccount && <Button onClick={() => onUseAccount(connectedAccount)}>{t('notifications.returnUseAccount')}</Button>}</Space>} />}
+    {choosingDefault && connectedAccount && <TargetPicker provider={connectedAccount.provider as ChannelProvider} accounts={[connectedAccount]} current={{ enabled: true, account_id: connectedAccount.id }} disabled={savingDefault} onClose={() => setChoosingDefault(false)} onSave={async target => {
+      setSavingDefault(true);
+      try { const updated = await setDefaultRecipient(connectedAccount.id, target.recipient_id!); setConnectedAccount(updated); setChoosingDefault(false); onChanged(); }
+      catch (error) { const reason = notificationError(error).reason; message.error(t(reason === 'FEISHU_GROUPS_UNAVAILABLE' ? 'notifications.groupPermissionHint' : reason === 'NOTIFICATION_TARGET_UNAVAILABLE' ? 'notifications.recipientNoLongerAvailable' : 'notifications.defaultSaveFailed')); } finally { setSavingDefault(false); }
+    }} />}
+    <nav className="notification-provider-tabs" aria-label={t('notifications.channels')}>{providers.map(p => {
+      const providerAccounts = accounts.filter(a => a.provider === p);
+      const count = providerAccounts.filter(isChannelAccountAvailable).length;
+      const pendingCount = providerAccounts.filter(isChannelAccountPendingActivation).length;
+      return <button key={p} type="button" aria-pressed={provider === p} onClick={() => select(p)}><ChannelBrand channel={p} /><span><strong>{t('notifications.' + p)}</strong>{count > 0 ? <small>{t('notifications.enabledCount', { count })}</small> : pendingCount > 0 ? <small>{t('notifications.pendingActivationCount', { count: pendingCount })}</small> : null}</span><small>{t('notifications.' + (count ? 'connected' : pendingCount ? 'pendingActivation' : 'notConnected'))}</small></button>;
+    })}</nav>
+    <div className="notification-connection-columns"><section className="notification-account-manager"><header><div><small>{t('notifications.accountManagement')}</small><h2>{t('notifications.connectedAccounts')}</h2><p>{t('notifications.accountHint')}</p></div>{accounts.some(a => a.provider === provider && isChannelAccountAvailable(a)) && <Tag color="success">{t('notifications.availableCount', { count: accounts.filter(a => a.provider === provider && isChannelAccountAvailable(a)).length })}</Tag>}</header><div className="notification-account-list">
+      {loading && <Spin />}
+      {!loading && !error && !accounts.some(a => a.provider === provider) && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('notifications.noAccounts')} />}
+      {accounts.filter(a => a.provider === provider).map(account => <AccountDisclosure key={account.id + account.updated_at} account={account} onChanged={onChanged} onReconnect={() => setReconnectId(account.id)} />)}
+      </div><p className="notification-account-note">{t('notifications.accountRoleHint')}</p>
+    </section><section className="notification-connect-pane"><header className="notification-connect-pane-heading"><div><small>{t('notifications.scanConnection')}</small><h2>{t(reconnectId ? 'notifications.reconnectPlatform' : 'notifications.connectPlatform', { platform: t('notifications.' + provider) })}</h2><p>{t('notifications.newAccountHint')}</p></div><ChannelBrand channel={provider} /></header>
+      {provider !== 'feishu' && reconnectId && <Button onClick={() => setReconnectId(undefined)}>{t('notifications.newAccount')}</Button>}
+      {(!loading || accounts.length > 0) && !error && <ChannelConnectionPage
+        key={provider}
+        provider={provider}
+        accountId={reconnectId}
+        autoStart={Boolean(reconnectId)}
+        createNew={provider === 'feishu' && !reconnectId && accounts.some(a => a.provider === 'feishu')}
+        onConnected={onConnected}
+      />}
+    </section></div>
+  </div>;
 }

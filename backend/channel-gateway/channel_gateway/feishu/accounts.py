@@ -1,16 +1,22 @@
 import hashlib
+import threading
 from collections.abc import Callable
 from dataclasses import asdict
 from typing import Any
 
-from channel_gateway.common.domain.channel import RuntimeFence, account_view
+from channel_gateway.common.domain.channel import RuntimeFence, account_identity, account_view
 from channel_gateway.common.errors import GatewayError
 from channel_gateway.common.ports.providers import (
-    AccountCredentialRepository,
     PayloadCipher,
 )
 from channel_gateway.feishu.domain import FeishuAppCredentials
 from channel_gateway.feishu.ports import FeishuAccountRepository
+from channel_gateway.feishu.groups import FeishuGroups
+
+
+def _generated_feishu_label(value: str) -> bool:
+    label = str(value or '').strip()
+    return label == '飞书账号' or label.startswith('飞书 · ou_')
 
 
 class FeishuCredentialStore:
@@ -19,7 +25,7 @@ class FeishuCredentialStore:
     def __init__(
         self,
         *,
-        store: AccountCredentialRepository,
+        store: FeishuAccountRepository,
         cipher: PayloadCipher,
     ):
         self._store = store
@@ -53,6 +59,7 @@ class FeishuCredentialStore:
                 display_name=str(
                     payload.get('display_name') or ''
                 ).strip(),
+                bot_name=str(payload.get('bot_name') or '').strip(),
             )
         except Exception as exc:
             raise RuntimeError(
@@ -65,11 +72,18 @@ class FeishuCredentialStore:
         ):
             raise RuntimeError('Feishu app credentials are incomplete')
         if self._cipher.needs_migration(ciphertext):
-            self._store.update_account_credentials(
-                account_id,
-                self._cipher.encrypt(owner_user_id, payload),
-                int(account['credential_revision']),
-            )
+            migrated = self._cipher.encrypt(owner_user_id, payload)
+            if self._store.update_account_credentials(account_id, migrated, int(account['credential_revision'])):
+                account = {**account, 'credentials_ciphertext': migrated,
+                           'credential_revision': int(account['credential_revision']) + 1}
+        metadata = {
+            'app_id': credentials.app_id[:256], 'authorized_name': credentials.display_name[:128],
+            'authorized_id': credentials.provider_account_id[:256],
+        }
+        if account_identity(account) != metadata:
+            updated = self._store.update_account_identity(account_id, metadata, int(account['credential_revision']))
+            if updated:
+                account = updated
         return {
             **dict(account),
             'credentials': credentials,
@@ -89,6 +103,7 @@ class FeishuAccountService:
         self._cipher = cipher
         self._on_account_connected = on_account_connected
         self._on_account_disconnected = on_account_disconnected
+        self._lifecycle_lock = threading.RLock()
 
     def connect_registered_account(
         self,
@@ -104,15 +119,12 @@ class FeishuAccountService:
                 f'{credentials.provider_account_id}'
             ).encode('utf-8')
         ).hexdigest()
-        label_name = (
-            credentials.display_name
-            or credentials.provider_account_id
-        )
+        label_name = credentials.bot_name or '飞书账号'
         account = self._store.connect_referenced_account(
             owner_user_id=owner_user_id,
             provider='feishu',
             external_id_hash=external_id_hash,
-            label=f'飞书 · {label_name}',
+            label=label_name,
             credentials_ciphertext=self._cipher.encrypt(
                 owner_user_id,
                 asdict(credentials),
@@ -128,7 +140,7 @@ class FeishuAccountService:
             )
         if notify_runtime and self._on_account_connected:
             self._on_account_connected(str(account['id']))
-        return account_view(account)
+        return account_view(self._with_identity(account))
 
     def start_account_runtime(self, account_id: str) -> None:
         if self._on_account_connected:
@@ -136,30 +148,129 @@ class FeishuAccountService:
 
     def list_accounts(self, owner_user_id: str) -> dict[str, Any]:
         rows = self._store.list_accounts(owner_user_id, 'feishu')
-        return {'items': [account_view(row) for row in rows]}
+        return {'items': [account_view(self._with_identity(row)) for row in rows]}
+
+    def _with_identity(self, account: dict[str, Any]) -> dict[str, Any]:
+        if account.get('credentials_ciphertext'):
+            try:
+                loaded = FeishuCredentialStore(
+                    store=self._store, cipher=self._cipher,
+                ).load_runtime_account(account['id'])
+                loaded.pop('credentials', None)
+                return loaded
+            except RuntimeError:
+                pass
+        return account
+
+    def _group_account(self, owner, account_id):
+        account = self._store.get_account(owner, account_id)
+        if not account:
+            raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '频道账号不存在')
+        if account['provider'] != 'feishu':
+            raise GatewayError(422, 'PROVIDER_NOT_SUPPORTED', '群发现仅支持飞书')
+        if account['status'] != 'connected':
+            raise GatewayError(422, 'NOTIFICATION_TARGET_UNAVAILABLE', '请先连接账号')
+        try:
+            loaded = FeishuCredentialStore(store=self._store, cipher=self._cipher).load_runtime_account(account_id)
+        except RuntimeError:
+            raise GatewayError(409, 'FEISHU_REAUTHORIZATION_REQUIRED', '请重新授权原机器人') from None
+        return loaded, FeishuGroups(loaded['credentials'])
+
+    def notification_groups(self, owner, account_id, cursor='', limit=100):
+        account, groups = self._group_account(owner, account_id)
+        page = groups.list(cursor, limit)
+        self._store.cache_notification_groups(owner, account_id, account['credential_revision'], page['items'])
+        return page
+
+    def validate_notification_group(self, owner, account_id, recipient_id):
+        account, groups = self._group_account(owner, account_id)
+        target = groups.get(recipient_id)
+        self._store.cache_notification_groups(owner, account_id, account['credential_revision'], [target])
+
+    def rename_account(self, owner: str, account_id: str, label: str) -> dict[str, Any]:
+        account = self._store.rename_account(owner, account_id, label)
+        if not account:
+            raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '飞书账号不存在')
+        return account_view(self._with_identity(account))
+
+    def archive_account(self, owner: str, account_id: str) -> None:
+        with self._lifecycle_lock:
+            self._store.archive_account(owner, account_id)
 
     def disconnect_account(
         self,
         owner_user_id: str,
         account_id: str,
     ) -> None:
-        if not self._store.get_account(owner_user_id, account_id):
-            raise GatewayError(
-                404,
-                'ACCOUNT_NOT_FOUND',
-                '飞书账号不存在或已解除连接',
+        self._disconnect(owner_user_id, account_id, retain_credentials=False)
+
+    def pause_account(self, owner_user_id: str, account_id: str) -> None:
+        self._disconnect(owner_user_id, account_id, retain_credentials=True)
+
+    def _disconnect(self, owner_user_id: str, account_id: str, *, retain_credentials: bool) -> None:
+        with self._lifecycle_lock:
+            account = self._store.get_account(owner_user_id, account_id)
+            if not account:
+                raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '飞书账号不存在')
+            self._with_identity(account)
+            if not self._store.disconnect_account(owner_user_id, account_id, retain_credentials=retain_credentials):
+                raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '飞书账号状态已经变化，请刷新后重试')
+            if self._on_account_disconnected:
+                self._on_account_disconnected(account_id)
+
+    def registration_app_id(self, owner_user_id: str, account_id: str) -> str | None:
+        account = self._store.get_account(owner_user_id, account_id)
+        if not account or account['provider'] != 'feishu':
+            raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '飞书账号不存在')
+        try:
+            return FeishuCredentialStore(store=self._store, cipher=self._cipher).load_runtime_account(
+                account_id,
+            )['credentials'].app_id
+        except RuntimeError:
+            return account_identity(account)['app_id'] or None
+
+    def resume_account(self, owner_user_id: str, account_id: str) -> dict[str, Any]:
+        with self._lifecycle_lock:
+            account = self._store.get_account(owner_user_id, account_id)
+            if not account or account['provider'] != 'feishu':
+                raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '飞书账号不存在')
+            try:
+                validated = FeishuCredentialStore(
+                    store=self._store, cipher=self._cipher,
+                ).load_runtime_account(account_id)
+            except RuntimeError:
+                raise GatewayError(409, 'FEISHU_REAUTHORIZATION_REQUIRED', '飞书凭据不可用，请重新授权原机器人') from None
+            if validated['status'] == 'connected':
+                return account_view(validated)
+            resumed = self._store.resume_account(owner_user_id, account_id, int(validated['credential_revision']))
+            if resumed:
+                self.start_account_runtime(account_id)
+                return account_view(resumed)
+            current = self._store.get_account(owner_user_id, account_id)
+            if current and current['status'] == 'connected' and current['credentials_ciphertext']:
+                return account_view(current)
+            raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '飞书账号状态已经变化，请刷新后重试')
+
+    def reauthorize_account(
+        self, *, owner_user_id: str, account_id: str, session_id: str, qr_version: int,
+        credentials: FeishuAppCredentials, runtime_fence: RuntimeFence,
+    ) -> None:
+        with self._lifecycle_lock:
+            identity = hashlib.sha256(f'{credentials.app_id}:{credentials.provider_account_id}'.encode()).hexdigest()
+            account = self._store.complete_reauthorized_connection(
+                session_id=session_id, qr_version=qr_version, owner_user_id=owner_user_id, account_id=account_id,
+                external_id_hash=identity, credentials_ciphertext=self._cipher.encrypt(
+                    owner_user_id, asdict(credentials),
+                ), runtime_fence=runtime_fence,
             )
-        if not self._store.delete_account(
-            owner_user_id,
-            account_id,
-        ):
-            raise GatewayError(
-                409,
-                'ACCOUNT_STATE_CHANGED',
-                '飞书账号状态已经变化，请刷新后重试',
-            )
-        if self._on_account_disconnected:
-            self._on_account_disconnected(account_id)
+            if credentials.bot_name and _generated_feishu_label(account.get('label', '')):
+                renamed = self._store.rename_account(
+                    owner_user_id, account_id, credentials.bot_name,
+                )
+                if renamed:
+                    account = renamed
+            self._with_identity(account)
+            self.start_account_runtime(account_id)
 
     def discard_provisioned_account(
         self,

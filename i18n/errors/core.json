@@ -1838,10 +1838,10 @@
   "2003105": {"en-US": "MCP connection failed; reconnect this service if authorization has expired", "zh-CN": "MCP 连接失败；若授权已过期，请重新连接此服务"},
   "2003106": {"en-US": "MCP tool call failed; reconnect this service if authorization has expired", "zh-CN": "MCP 工具调用失败；若授权已过期，请重新连接此服务"},
   "2003107": {"en-US": "Read MCP event stream", "zh-CN": "读取 MCP 事件流失败"},
-  "2003114": {"en-US":"The requested Skill binding was not found","zh-CN":"未找到请求的 Skill 绑定"},
-  "2003115": {"en-US":"The requested Skill binding is ambiguous","zh-CN":"请求的 Skill 绑定存在歧义"},
-  "2003116": {"en-US":"Failed to decode the Skill runtime identity","zh-CN":"解析 Skill 运行时标识失败"},
-  "2003117": {"en-US":"Failed to encode the Skill runtime identity","zh-CN":"编码 Skill 运行时标识失败"},
+  "2003116": {"en-US":"The requested Skill binding was not found","zh-CN":"未找到请求的 Skill 绑定"},
+  "2003117": {"en-US":"The requested Skill binding is ambiguous","zh-CN":"请求的 Skill 绑定存在歧义"},
+  "2003118": {"en-US":"Failed to decode the Skill runtime identity","zh-CN":"解析 Skill 运行时标识失败"},
+  "2003119": {"en-US":"Failed to encode the Skill runtime identity","zh-CN":"编码 Skill 运行时标识失败"},
   "2002919": {"en-US": "Workflow is temporarily unavailable", "zh-CN": "工作流暂时不可用"},
   "2002924": {"en-US": "Open the workflow page while signed in to change approval preferences", "zh-CN": "请登录后在工作流页面修改审核偏好"},
   "2002921": {"en-US": "The artifact file is outside LazyMind storage", "zh-CN": "产物文件不在 LazyMind 存储范围内"},
@@ -1854,5 +1854,7 @@
   "2003110": {"en-US": "Task event could not be accepted", "zh-CN": "无法接收任务更新"},
   "2003111": {"en-US": "Workflow session unavailable", "zh-CN": "工作流会话不可用"},
   "2003112": {"en-US": "Task sources exceed the supported limit", "zh-CN": "任务来源数量或大小超过限制"},
-  "2003113": {"en-US": "Task update could not be saved", "zh-CN": "暂时无法保存任务更新"}
+  "2003113": {"en-US": "Task update could not be saved", "zh-CN": "暂时无法保存任务更新"},
+  "2003114": {"en-US": "The summary model returned instructions instead of a summary", "zh-CN": "摘要模型返回了指令而非摘要"},
+  "2003115": {"en-US": "The summary model returned empty content", "zh-CN": "摘要模型返回内容为空"}
 }

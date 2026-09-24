@@ -1,7 +1,9 @@
+import notifications from './notifications-zh-CN';
 import { evolutionControlsZh } from "@/modules/selfEvolution/shared/controlTranslations";
 import { zhCNErrorMessages } from "./error-codes";
 
 const zhCN = {
+  notifications,
   toolRetrieval: {
     title: "按需加载工具",
     description: "适用于你的所有 LazyMind 对话及子任务。按需检索并加载工具，减少工具定义占用的上下文；修改从下一次请求生效。",
@@ -1565,6 +1567,7 @@ const zhCN = {
       subtitle: "将 LazyMind 连接到常用通讯终端，在微信或飞书中继续同一账号下的对话与任务。",
       quickSubtitle: "在常用通讯终端中继续对话与任务",
       connectedCount: "{{count}} 个已连接",
+      connectedAndPendingCount: "{{connected}} 个已连接 · {{pending}} 个待激活",
       connectedDetailsTitle: "已连接终端账号",
       connectedDetailsHint: "点击账号可在下方重新展示对应渠道的二维码。",
       loadingAccounts: "正在加载已连接账号…",
@@ -1678,6 +1681,7 @@ const zhCN = {
       },
       accountStatusMap: {
         connected: "已连接",
+        pendingActivation: "待激活",
         disconnected: "已断开",
       },
       runtimeStatusMap: {
@@ -1687,6 +1691,45 @@ const zhCN = {
         degraded: "降级",
         unsupported: "不支持",
       },
+    },
+    wecom: {
+      title: "企业微信渠道连接",
+      subtitle: "通过企业微信扫码创建并绑定智能机器人。",
+      connectWorkspace: "企业微信连接引导",
+      quickConnect: "快速连接",
+      guideTitle: "用企业微信扫一扫完成连接",
+      guideHint: "扫码后将在当前企业中创建并绑定 API 模式智能机器人。",
+      stepOpenTitle: "打开企业微信",
+      stepOpenHint: "使用企业微信扫描页面二维码。",
+      stepScanTitle: "扫描页面二维码",
+      stepScanHint: "请使用需要创建机器人的企业微信账号扫码。",
+      stepConfirmTitle: "确认创建机器人",
+      stepConfirmHint: "按手机提示完成授权，BotID 与 Secret 将自动安全保存。",
+      securityHint: "二维码仅用于本次连接，机器人密钥会加密保存且不会在页面展示。",
+      readyTitle: "准备连接企业微信",
+      readyHint: "点击下方按钮，生成本次企业微信连接专用二维码。",
+      estimatedTime: "通常可在 1 分钟内完成",
+      startScan: "生成二维码并连接",
+      addAnotherAccount: "继续添加账号",
+      newConnectionTitle: "连接新的企业微信账号",
+      newConnectionHint: "新连接不会替换任务已经选择的接收账号。",
+      preparingQr: "正在生成二维码…",
+      qrExpiresAt: "二维码过期时间：{{time}}",
+      refreshQr: "刷新二维码",
+      cancelScan: "取消连接",
+      closePanel: "关闭",
+      loadAccountsFailed: "加载企业微信账号失败",
+      startFailed: "创建企业微信扫码会话失败",
+      pollFailed: "轮询企业微信扫码状态失败",
+      cancelSuccess: "已取消扫码会话",
+      cancelFailed: "取消扫码会话失败",
+      refreshFailed: "刷新二维码失败",
+      challengeDigitsOnly: "请输入数字验证码",
+      challengeFailed: "提交验证码失败",
+      connectSuccess: "企业微信账号连接成功",
+      connectSuccessVisual: "连接成功",
+      connectFailedVisual: "连接未完成",
+      sessionStatusMap: { preparing: "准备中", waiting_scan: "等待扫码", scanned: "已扫码", verification_required: "需要验证", confirming: "连接中", connected: "已连接", expired: "已过期", canceled: "已取消", failed: "失败" },
     },
     feishu: {
       title: "飞书渠道连接",

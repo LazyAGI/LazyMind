@@ -1,6 +1,7 @@
 import { useSettingsDraft } from "@/modules/settings/SettingsNavigationGuard";
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { message } from 'antd';
+import { getLocalizedErrorMessage } from '@/components/request';
 import { useTranslation } from 'react-i18next';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -8,6 +9,7 @@ import {
   cancelConnectionSession,
   createConnectionSession,
   disconnectChannelAccount,
+  pauseChannelAccount,
   getConnectionSession,
   listChannelAccounts,
   refreshConnectionSession,
@@ -25,36 +27,7 @@ const TERMINAL_STATUSES = new Set([
 ]);
 
 function getErrorMessage(error: unknown, fallback: string): string {
-  if (
-    error &&
-    typeof error === 'object' &&
-    'response' in error &&
-    error.response &&
-    typeof error.response === 'object' &&
-    'data' in error.response
-  ) {
-    const data = (error.response as { data?: unknown }).data;
-    if (data && typeof data === 'object') {
-      const detail = (data as { detail?: unknown; message?: unknown }).detail;
-      const msg = (data as { message?: unknown }).message;
-      if (typeof msg === 'string' && msg.trim()) {
-        return msg;
-      }
-      if (typeof detail === 'string' && detail.trim()) {
-        return detail;
-      }
-      if (Array.isArray(detail) && detail[0] && typeof detail[0] === 'object') {
-        const first = detail[0] as { msg?: unknown };
-        if (typeof first.msg === 'string' && first.msg.trim()) {
-          return first.msg;
-        }
-      }
-    }
-  }
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  return fallback;
+  return getLocalizedErrorMessage(error) || fallback;
 }
 
 export function useChannelConnection(provider: ChannelProvider) {
@@ -129,7 +102,7 @@ export function useChannelConnection(provider: ChannelProvider) {
           }
           applySession(next);
           if (next.status === 'connected') {
-            message.success(t(`${translationKey}.connectSuccess`));
+            message.success(provider === 'wecom' ? t('notifications.connected') : t(`${translationKey}.connectSuccess`));
             await loadAccounts();
             return;
           }
@@ -147,10 +120,10 @@ export function useChannelConnection(provider: ChannelProvider) {
         }
       }, delayMs);
     },
-    [applySession, clearPollTimer, loadAccounts, t, translationKey],
+    [applySession, clearPollTimer, loadAccounts, provider, t, translationKey],
   );
 
-  const startScan = useCallback(async () => {
+  const startScan = useCallback(async (options?: { createNew?: boolean; reauthorize?: boolean; accountId?: string; credentials?: { bot_id: string; secret: string } }) => {
     if (sessionStarting) {
       return;
     }
@@ -166,10 +139,12 @@ export function useChannelConnection(provider: ChannelProvider) {
       }
       const next = await createConnectionSession(provider, {
         idempotencyKey: uuidv4(),
+        ...options,
       });
+      if (!mountedRef.current) return;
       applySession(next);
       if (next.status === 'connected') {
-        message.success(t(`${translationKey}.connectSuccess`));
+        message.success(provider === 'wecom' ? t('notifications.connected') : t(`${translationKey}.connectSuccess`));
         await loadAccounts();
         return;
       }
@@ -224,8 +199,8 @@ export function useChannelConnection(provider: ChannelProvider) {
     }
     setDisconnectingAccountId(accountId);
     try {
-      await disconnectChannelAccount(accountId);
-      message.success(t(`${translationKey}.disconnectSuccess`));
+      await (provider === 'feishu' ? pauseChannelAccount : disconnectChannelAccount)(accountId);
+      message.success(t(provider === 'feishu' ? 'notifications.disconnected' : `${translationKey}.disconnectSuccess`));
       await loadAccounts();
     } catch (error) {
       message.error(
@@ -236,7 +211,7 @@ export function useChannelConnection(provider: ChannelProvider) {
         setDisconnectingAccountId(null);
       }
     }
-  }, [disconnectingAccountId, loadAccounts, t, translationKey]);
+  }, [disconnectingAccountId, loadAccounts, provider, t, translationKey]);
 
   const refreshQr = useCallback(async () => {
     const sessionId = sessionIdRef.current;
@@ -276,9 +251,10 @@ export function useChannelConnection(provider: ChannelProvider) {
     clearPollTimer();
     try {
       const next = await submitConnectionChallenge(sessionId, value);
+      if (!mountedRef.current) return;
       applySession(next);
       if (next.status === 'connected') {
-        message.success(t(`${translationKey}.connectSuccess`));
+        message.success(provider === 'wecom' ? t('notifications.connected') : t(`${translationKey}.connectSuccess`));
         await loadAccounts();
         return;
       }
@@ -301,6 +277,7 @@ export function useChannelConnection(provider: ChannelProvider) {
     actionLoading,
     applySession,
     challengeValue,
+    provider,
     clearPollTimer,
     loadAccounts,
     schedulePoll,
