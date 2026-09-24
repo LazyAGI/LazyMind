@@ -1199,12 +1199,12 @@ async def _handle_chat_impl(
         raw_history,
         compact_workflow_receipts=compact_rewind_history,
     )
-    for message in agent_history:
-        if message.get('role') != 'user' or is_runtime_summary_message(message):
+    for history_message in agent_history:
+        if history_message.get('role') != 'user' or is_runtime_summary_message(history_message):
             continue
-        meta = dict(message.get('_lazymind_meta') or {})
+        meta = dict(history_message.get('_lazymind_meta') or {})
         meta['kind'] = AUTHORITATIVE_TASK_KIND
-        message['_lazymind_meta'] = meta
+        history_message['_lazymind_meta'] = meta
         break
     agent_history = append_loaded_skill_invocations(
         agent_history, agent.loaded_skills, excluded=agent.excluded_skills,
