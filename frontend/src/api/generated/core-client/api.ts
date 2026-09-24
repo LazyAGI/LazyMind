@@ -4430,6 +4430,12 @@ export interface ModelFeaturesResponse {
     'image_embed_enabled': boolean;
     'image_embed_required': boolean;
 }
+export interface ModelProviderBaseURLPresetItem {
+    'api_key_required'?: boolean;
+    'key': string;
+    'label'?: string;
+    'value': string;
+}
 export interface OAuthCallbackRequest {
     'code': string;
     'state': string;
@@ -6374,12 +6380,14 @@ export interface UserInfo {
 }
 export interface UserModelProviderOpenAPIItem {
     'base_url': string;
+    'base_url_presets'?: Array<ModelProviderBaseURLPresetItem>;
     'capabilities'?: Array<string>;
     'category': string;
     'default_model_provider_id': string;
     'description': string;
     'id': string;
     'is_configured': boolean;
+    'model_types'?: Array<string>;
     'name': string;
 }
 export interface UserUIPreferencesOpenAPIResponse {

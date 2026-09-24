@@ -11123,6 +11123,20 @@ components:
             required:
                 - id
             type: object
+        modelProviderBaseURLPresetItem:
+            properties:
+                api_key_required:
+                    type: boolean
+                key:
+                    type: string
+                label:
+                    type: string
+                value:
+                    type: string
+            required:
+                - key
+                - value
+            type: object
         okOpenAPIResponse:
             properties:
                 ok:
@@ -13258,6 +13272,10 @@ components:
             properties:
                 base_url:
                     type: string
+                base_url_presets:
+                    items:
+                        $ref: '#/components/schemas/modelProviderBaseURLPresetItem'
+                    type: array
                 capabilities:
                     items:
                         type: string
@@ -13272,6 +13290,10 @@ components:
                     type: string
                 is_configured:
                     type: boolean
+                model_types:
+                    items:
+                        type: string
+                    type: array
                 name:
                     type: string
             required:
