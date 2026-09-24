@@ -178,10 +178,17 @@ func UpdateServer(ctx context.Context, db *gorm.DB, userID, id string, req Updat
 	}
 	if req.Enabled != nil {
 		if *req.Enabled && !row.IsVerified {
-			return nil, fmt.Errorf("%w: mcp server must be verified before enabling", errBadRequest)
+			if !isBuiltinNotion(*row) || connectionChanged {
+				return nil, fmt.Errorf("%w: mcp server must be verified before enabling", errBadRequest)
+			}
+			// A disconnected personal Notion can be discovered for its authorization
+			// card, but remains unavailable to tool execution until verification.
+			updates["enabled"] = false
+			updates["discovery_enabled"] = true
+		} else {
+			updates["enabled"] = *req.Enabled
+			updates["discovery_enabled"] = *req.Enabled
 		}
-		updates["enabled"] = *req.Enabled
-		updates["discovery_enabled"] = *req.Enabled
 	}
 	if req.Timeout != nil {
 		if *req.Timeout <= 0 {
@@ -612,21 +619,22 @@ func normalizedTimeout(timeout int) int {
 
 func serverResponse(row orm.MCPServer, toolCount int64, tools []ToolResponse) ServerResponse {
 	return ServerResponse{
-		ID:            row.ID,
-		AuthType:      effectiveAuthType(row),
-		Name:          row.Name,
-		Transport:     row.Transport,
-		URL:           row.URL,
-		APIKeyPreview: apiKeyPreview(row.HeadersJSON),
-		AllowedTools:  parseStringJSON(row.AllowedToolsJSON),
-		Enabled:       row.Enabled,
-		IsVerified:    row.IsVerified,
-		Share:         row.Share,
-		Timeout:       normalizedTimeout(row.Timeout),
-		ToolCount:     toolCount,
-		Tools:         tools,
-		CreateTime:    row.CreatedAt,
-		UpdateTime:    row.UpdatedAt,
+		ID:               row.ID,
+		AuthType:         effectiveAuthType(row),
+		Name:             row.Name,
+		Transport:        row.Transport,
+		URL:              row.URL,
+		APIKeyPreview:    apiKeyPreview(row.HeadersJSON),
+		AllowedTools:     parseStringJSON(row.AllowedToolsJSON),
+		Enabled:          row.Enabled,
+		DiscoveryEnabled: row.DiscoveryEnabled,
+		IsVerified:       row.IsVerified,
+		Share:            row.Share,
+		Timeout:          normalizedTimeout(row.Timeout),
+		ToolCount:        toolCount,
+		Tools:            tools,
+		CreateTime:       row.CreatedAt,
+		UpdateTime:       row.UpdatedAt,
 	}
 }
 

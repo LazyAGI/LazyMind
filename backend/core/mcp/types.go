@@ -13,22 +13,23 @@ const (
 )
 
 type ServerResponse struct {
-	AuthType      string         `json:"auth_type"`
-	OAuthStatus   string         `json:"oauth_status,omitempty"`
-	ID            string         `json:"id"`
-	Name          string         `json:"name"`
-	Transport     string         `json:"transport"`
-	URL           string         `json:"url"`
-	APIKeyPreview string         `json:"api_key_preview,omitempty"`
-	AllowedTools  []string       `json:"allowed_tools"`
-	Enabled       bool           `json:"enabled"`
-	IsVerified    bool           `json:"is_verified"`
-	Share         bool           `json:"share"`
-	Timeout       int            `json:"timeout"`
-	ToolCount     int64          `json:"tool_count,omitempty"`
-	Tools         []ToolResponse `json:"tools,omitempty"`
-	CreateTime    time.Time      `json:"create_time"`
-	UpdateTime    time.Time      `json:"update_time"`
+	AuthType         string         `json:"auth_type"`
+	OAuthStatus      string         `json:"oauth_status,omitempty"`
+	ID               string         `json:"id"`
+	Name             string         `json:"name"`
+	Transport        string         `json:"transport"`
+	URL              string         `json:"url"`
+	APIKeyPreview    string         `json:"api_key_preview,omitempty"`
+	AllowedTools     []string       `json:"allowed_tools"`
+	Enabled          bool           `json:"enabled"`
+	DiscoveryEnabled bool           `json:"discovery_enabled"`
+	IsVerified       bool           `json:"is_verified"`
+	Share            bool           `json:"share"`
+	Timeout          int            `json:"timeout"`
+	ToolCount        int64          `json:"tool_count,omitempty"`
+	Tools            []ToolResponse `json:"tools,omitempty"`
+	CreateTime       time.Time      `json:"create_time"`
+	UpdateTime       time.Time      `json:"update_time"`
 }
 
 type ToolResponse struct {

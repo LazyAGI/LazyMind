@@ -112,6 +112,7 @@ export type McpServerAsset = {
   transport: string;
   timeout: number;
   enabled: boolean;
+  discoveryEnabled: boolean;
   isVerified: boolean;
   share: boolean;
   toolCount: number;
@@ -279,6 +280,7 @@ const normalizeMcpServer = (item: ServerResponse): McpServerAsset => {
     transport: toStringValue(item.transport).trim(),
     timeout: toNumberValue(item.timeout, 30),
     enabled: toBooleanValue(item.enabled),
+    discoveryEnabled: toBooleanValue(item.discovery_enabled),
     isVerified: toBooleanValue(item.is_verified),
     share: toBooleanValue(item.share),
     toolCount: toNumberValue(item.tool_count, tools.length),
@@ -311,6 +313,11 @@ export async function listMcpServersPage(
     records,
     total: readListTotal(rawPayload, rawResponse, records.length),
   };
+}
+
+export async function getMcpServer(id: string): Promise<McpServerAsset> {
+  const response = await mcpServersApi.apiCoreMcpServersIdGet({ id });
+  return normalizeMcpServer(unwrapResponsePayload(response.data as ServerResponse));
 }
 
 export async function setAllMcpServersEnabled(

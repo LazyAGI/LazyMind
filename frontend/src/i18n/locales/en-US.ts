@@ -11,7 +11,7 @@ const enUS = {
     retryConnection: "Retry connection",
     connecting: "Connecting to the authorization service…",
 
-    ready: "Configuration complete",
+    ready: "Connection ready",
     pending: "Configure this capability to use it on the next natural turn. The task will not wait or restart automatically.",
     forbidden: "This capability is not currently allowed.",
     unavailable: "Connection status is temporarily unavailable. Please try again later.",
@@ -6528,6 +6528,8 @@ const enUS = {
     memoryMcpEnabled: "Enable Server",
     memoryMcpEnableStatus: "Enable Status",
     memoryMcpEnableRequiresVerified: "Verify the server before enabling it",
+    memoryMcpAuthorizationPending: "Authorization pending",
+    memoryMcpRequestAuthorizationSuccess: "Notion authorization can now be requested in chat",
     memoryMcpLoadFailed: "Failed to load MCP servers",
     memoryMcpSaveFailed: "Failed to save MCP server",
     memoryMcpCreateSuccess: "MCP server created",

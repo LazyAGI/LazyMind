@@ -57,6 +57,62 @@ func TestBuiltinNotionHonorsExistingDisabledConfiguration(t *testing.T) {
 	}
 }
 
+func TestBuiltinNotionCanRequestAuthorizationAfterBeingDisabled(t *testing.T) {
+	db := newTestDB(t)
+	oauthTestAuth(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"code":200,"data":{"status":"disconnected"}}`))
+	})
+	row, err := authorizeServer(t.Context(), db.DB, "alice", builtinNotion("alice").ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled, requested := false, true
+	if _, err := UpdateServer(t.Context(), db.DB, "alice", row.ID, UpdateServerRequest{Enabled: &disabled}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := UpdateServer(t.Context(), db.DB, "alice", row.ID, UpdateServerRequest{Enabled: &requested})
+	if err != nil {
+		t.Fatalf("requesting authorization for disabled Notion: %v", err)
+	}
+	if response.Enabled || !response.DiscoveryEnabled {
+		t.Fatalf("unverified Notion state: %+v", response)
+	}
+	catalog, err := LoadCapabilities(t.Context(), db.DB, "alice")
+	if err != nil || len(catalog) != 1 || catalog[0].Status != "needs_authorization" {
+		t.Fatalf("Notion authorization entry missing: %+v %v", catalog, err)
+	}
+	runtime, err := LoadRuntimeConfig(t.Context(), db.DB, "alice")
+	if err != nil || len(runtime) != 0 {
+		t.Fatalf("unverified Notion became executable: %+v %v", runtime, err)
+	}
+	if _, err := UpdateServer(t.Context(), db.DB, "alice", row.ID, UpdateServerRequest{Enabled: &disabled}); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err = LoadCapabilities(t.Context(), db.DB, "alice")
+	if err != nil || len(catalog) != 0 {
+		t.Fatalf("explicit disable still exposed Notion: %+v %v", catalog, err)
+	}
+}
+
+func TestBuiltinNotionCannotRequestAuthorizationWhileChangingConnection(t *testing.T) {
+	db := newTestDB(t)
+	oauthTestAuth(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"code":200,"data":{"status":"disconnected"}}`))
+	})
+	row, err := authorizeServer(t.Context(), db.DB, "alice", builtinNotion("alice").ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requested := true
+	otherURL := "https://example.com/mcp"
+	if _, err := UpdateServer(t.Context(), db.DB, "alice", row.ID, UpdateServerRequest{
+		Enabled: &requested,
+		URL:     &otherURL,
+	}); err == nil {
+		t.Fatal("changing the builtin Notion connection while requesting authorization should fail")
+	}
+}
+
 func TestBuiltinNotionAuthorizationIsPersonalAndIdempotent(t *testing.T) {
 	db := newTestDB(t)
 	for _, user := range []string{"alice", "bob", "alice"} {

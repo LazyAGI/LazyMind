@@ -11,7 +11,7 @@ const zhCN = {
     retryConnection: "重试连接",
     connecting: "正在连接授权服务…",
 
-    ready: "配置已完成",
+    ready: "连接已就绪",
     pending: "完成配置后，有下一轮时更新工具；本次任务不会等待或自动重启。",
     forbidden: "当前不允许使用此能力。",
     unavailable: "暂时无法核实连接状态，请稍后重试。",
@@ -6308,6 +6308,8 @@ const zhCN = {
     memoryMcpEnabled: "启用服务",
     memoryMcpEnableStatus: "启用状态",
     memoryMcpEnableRequiresVerified: "请先重新连接并验证通过后再启用",
+    memoryMcpAuthorizationPending: "待认证",
+    memoryMcpRequestAuthorizationSuccess: "已允许在对话中请求 Notion 授权",
     memoryMcpLoadFailed: "加载 MCP 服务失败",
     memoryMcpSaveFailed: "保存 MCP 服务失败",
     memoryMcpCreateSuccess: "MCP 服务已创建",

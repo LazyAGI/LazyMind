@@ -5406,6 +5406,7 @@ export interface ServerResponse {
     'api_key_preview'?: string;
     'auth_type': string;
     'create_time': string;
+    'discovery_enabled': boolean;
     'enabled': boolean;
     'id': string;
     'is_verified': boolean;

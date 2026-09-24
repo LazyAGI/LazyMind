@@ -8147,6 +8147,8 @@ components:
                 create_time:
                     format: date-time
                     type: string
+                discovery_enabled:
+                    type: boolean
                 enabled:
                     type: boolean
                 id:
@@ -8178,6 +8180,7 @@ components:
             required:
                 - auth_type
                 - create_time
+                - discovery_enabled
                 - enabled
                 - id
                 - is_verified
