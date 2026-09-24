@@ -97,7 +97,6 @@ def make_workflow_history_compactor(
         if layout is None:
             layout = describe_tool_turns(prior, current)
         turns = [turn for turn in layout if not turn.current]
-        protected_turns = turns[-effective_keep:] if effective_keep else []
         projected = prior + current
         split = len(prior)
         dropped: set[int] = set()
