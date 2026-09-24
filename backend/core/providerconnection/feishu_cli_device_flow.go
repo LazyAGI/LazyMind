@@ -700,27 +700,35 @@ func (coordinator *FeishuCLIDeviceFlowCoordinator) finalizeAuthenticatedProfile(
 		coordinator.mu.Unlock()
 		return "CLI_UNAVAILABLE"
 	}
-	current.Status = "COMPLETED"
-	current.AuthorizationStartURL = ""
-	current.DeviceCode = ""
-	current.DisplayName = displayName
-	current.GrantedScopes = append([]string(nil), grantedScopes...)
-	current.Capabilities = capabilities
-	current.ErrorCode = ""
-	coordinator.mu.Unlock()
-	if err := coordinator.persist(sessionID); err != nil {
+	completed := *current
+	completed.Status = "COMPLETED"
+	completed.AuthorizationStartURL = ""
+	completed.DeviceCode = ""
+	completed.DisplayName = displayName
+	completed.GrantedScopes = append([]string(nil), grantedScopes...)
+	completed.Capabilities = capabilities
+	completed.ErrorCode = ""
+	if err := coordinator.persistSessionLocked(&completed); err != nil {
+		coordinator.mu.Unlock()
 		return "CLI_UNAVAILABLE"
 	}
+	*current = completed
+	coordinator.mu.Unlock()
 	return ""
 }
 
 func (coordinator *FeishuCLIDeviceFlowCoordinator) persist(sessionID string) error {
 	coordinator.mu.Lock()
+	defer coordinator.mu.Unlock()
 	session, found := coordinator.sessions[sessionID]
 	if !found {
-		coordinator.mu.Unlock()
 		return ErrCLIConnectionNotFound
 	}
+	return coordinator.persistSessionLocked(session)
+}
+
+// persistSessionLocked serializes writes with session updates and other writes.
+func (coordinator *FeishuCLIDeviceFlowCoordinator) persistSessionLocked(session *FeishuCLISession) error {
 	state := feishuCLISessionState{
 		SessionID: session.SessionID, OwnerUserID: session.OwnerUserID, Status: session.Status,
 		AuthorizationStartURL: session.AuthorizationStartURL, ExpiresAt: session.ExpiresAt,
@@ -732,8 +740,7 @@ func (coordinator *FeishuCLIDeviceFlowCoordinator) persist(sessionID string) err
 		AdminRetryCount: session.AdminRetryCount, RetryAfter: session.RetryAfter,
 	}
 	profile := session.Profile
-	coordinator.mu.Unlock()
-	return coordinator.profiles.WriteState(context.Background(), profile, sessionID, state)
+	return coordinator.profiles.WriteState(context.Background(), profile, session.SessionID, state)
 }
 
 func feishuCLICapabilities() []cloudclient.ProviderConnectionCapability {
