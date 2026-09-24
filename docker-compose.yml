@@ -357,7 +357,9 @@ services:
       - "8085"
     environment:
       <<: *proxy-env
+      LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE: /run/secrets/internal-service/token
     volumes:
+      - internal-service-credentials:/run/secrets/internal-service:ro
       - channel-gateway-data:/var/lib/lazymind/channel-gateway
       - ./data/core/uploads:/var/lib/lazymind/uploads
     healthcheck:
@@ -366,6 +368,8 @@ services:
       timeout: 5s
       retries: 5
     depends_on:
+      internal-service-token-init:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       db-bootstrap:

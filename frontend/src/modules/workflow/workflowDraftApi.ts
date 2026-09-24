@@ -165,6 +165,7 @@ export async function getWorkflowDraft(
 }
 
 export interface UpdateDraftPayload {
+  name?: string;
   content?: string;
   workflow_yaml_content?: string;
   state_yaml_content?: string;

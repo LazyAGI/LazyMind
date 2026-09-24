@@ -7,11 +7,15 @@ const sseHarness = vi.hoisted(() => ({
 const workflowState = vi.hoisted(() => ({
   loadActiveSession: vi.fn().mockResolvedValue(undefined),
   setAutoRunning: vi.fn(),
+  sessionByConversation: {} as Record<string, any>,
+  setSession: vi.fn(),
 }));
 
 const requestHarness = vi.hoisted(() => ({
   listConversationTasks: vi.fn(),
   listConversationArtifacts: vi.fn(),
+  getTaskDetail: vi.fn(),
+  getProjection: vi.fn(),
 }));
 
 vi.mock("@/components/auth", () => ({
@@ -26,9 +30,11 @@ vi.mock("@/components/request", () => ({
 vi.mock("@/modules/chat/utils/request", () => ({
   convEventsUrl: (conversationId: string) => `/events/${conversationId}`,
   taskStreamUrl: (taskId: string) => `/tasks/${taskId}/stream`,
+  WorkflowSessionApi: () => ({ getProjection: requestHarness.getProjection }),
   TaskServiceApi: () => ({
     listConversationTasks: requestHarness.listConversationTasks,
     listConversationArtifacts: requestHarness.listConversationArtifacts,
+    getTaskDetail: requestHarness.getTaskDetail,
   }),
 }));
 
@@ -60,6 +66,7 @@ vi.mock("@/components/StateGraphModal", () => ({
 }));
 
 import { useTaskCenterStore } from "./taskCenter";
+import { ordinary } from "../components/TaskCenter/ordinaryTestFixtures";
 import {
   CHAT_AUTO_ADVANCE_EVENT,
   CHAT_WORKFLOW_STEP_FEEDBACK_EVENT,
@@ -83,7 +90,8 @@ function emitConversationEvent(
 }
 
 describe("task center workflow events", () => {
-  it("keeps logical panel identity separate from each turn's immutable delivery", async () => {
+  it.each(["ordinary", "developer"] as const)("keeps logical panel identity separate from each turn's immutable delivery in %s mode", async (viewMode) => {
+    useTaskCenterStore.setState({ viewMode });
     const base = { artifact_id: "receipt", v2_artifact_id: "logical", conversation_id: "conv", history_id: "h1", producer_type: "main_agent", slot: "a", content_type: "text", seq: 1, value: { text: "one" } };
     useTaskCenterStore.getState().upsertConversationArtifact("conv", base);
     useTaskCenterStore.getState().upsertConversationArtifact("conv", { ...base, history_id: "h2", value: { text: "two" } });
@@ -99,6 +107,10 @@ describe("task center workflow events", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     sseHarness.callbacks.clear();
+    requestHarness.getTaskDetail.mockReset();
+    requestHarness.getProjection.mockReset();
+    workflowState.sessionByConversation = {};
+    workflowState.setSession.mockImplementation((id, session) => { workflowState.sessionByConversation[id] = session; });
     requestHarness.listConversationTasks.mockReset();
     requestHarness.listConversationTasks.mockResolvedValue({ data: { tasks: [] } });
     requestHarness.listConversationArtifacts.mockReset();
@@ -106,6 +118,7 @@ describe("task center workflow events", () => {
     workflowState.loadActiveSession.mockClear();
     workflowState.setAutoRunning.mockClear();
     useTaskCenterStore.setState({
+      viewMode: "developer", _viewEpoch: 0, runsByConversation: {},
       activeConversationId: "",
       tasksByConversation: {},
       artifactsByConversation: {},
@@ -127,6 +140,150 @@ describe("task center workflow events", () => {
       useTaskCenterStore.getState().unsubscribeConvEvents(activeConversationId);
     }
     vi.useRealTimers();
+  });
+
+  it("uses public snapshots in ordinary mode and rejects raw execution events", async () => {
+    useTaskCenterStore.setState({ viewMode: "ordinary" });
+    requestHarness.listConversationTasks.mockResolvedValue({ data: { data: {
+      tasks: [ordinary("one", { status: "running" })], runs: [{ run_id: "run-1", revision: 1, final_output_refs: [] }],
+    } } });
+    await useTaskCenterStore.getState().loadConversationTasks("conversation-1");
+    expect(requestHarness.listConversationTasks).toHaveBeenCalledWith("conversation-1", { params: { view: "ordinary" } });
+    const task = useTaskCenterStore.getState().getTasks("conversation-1")[0];
+    expect(task.ordinary?.display_key).toBe("task:one:1");
+    useTaskCenterStore.getState().applyTaskEvent("conversation-1", "one", { type: "think", content: "private" });
+    expect(useTaskCenterStore.getState().getTasks("conversation-1")[0].execution_log).toEqual([]);
+    expect(useTaskCenterStore.getState().runsByConversation["conversation-1"]).toHaveLength(1);
+  });
+
+  it("keeps a newer SSE snapshot when an older REST list resolves", async () => {
+    useTaskCenterStore.setState({ viewMode: "ordinary" });
+    const pending = deferred<any>();
+    requestHarness.listConversationTasks.mockReturnValue(pending.promise);
+    const loading = useTaskCenterStore.getState().loadConversationTasks("conversation-1");
+    useTaskCenterStore.getState().applyTaskEvent("conversation-1", "one", {
+      type: "task_snapshot", data: ordinary("one", { revision: 3, status: "succeeded" }),
+    });
+    pending.resolve({ data: { tasks: [ordinary("one", { revision: 2, status: "running" })] } });
+    await loading;
+    expect(useTaskCenterStore.getState().getTasks("conversation-1")[0].status).toBe("succeeded");
+  });
+
+  it("paginates workflow display keys through the workflow projection, including nodes with a task id", async () => {
+    useTaskCenterStore.setState({ viewMode: "ordinary" });
+    const source = (id: string) => ({ source_id: id, platform: "web", domain: "example.com", title: id, url: `https://example.com/${id}`, kind: "web" as const });
+    const first = ordinary("one", { display_key: "workflow:session:step:attempt", session_id: "session", workflow_step_id: "step", sources: [source("first")] });
+    first.pages.sources = { total: 2, next_cursor: "second", revision: 1 };
+    const second = { ...first, sources: [source("second")], pages: { ...first.pages, sources: { total: 2, next_cursor: null, revision: 1 } } };
+    workflowState.sessionByConversation["conversation-1"] = { session_id: "session", ordinary_revision: 1,
+      ordinary_tasks: [first], steps: [{ ordinary: first }] };
+    requestHarness.getProjection.mockResolvedValue({ data: { data: { revision: 1, tasks: [second] } } });
+    await useTaskCenterStore.getState().loadOrdinaryTask("conversation-1", first.display_key, "sources", "second");
+    expect(requestHarness.getTaskDetail).not.toHaveBeenCalled();
+    expect(requestHarness.getProjection).toHaveBeenCalledWith("session", { params: { view: "ordinary", collection: "sources", cursor: "second", limit: 100, display_key: first.display_key } });
+    const merged = workflowState.sessionByConversation["conversation-1"].steps[0].ordinary;
+    expect(merged.sources.map((item: { source_id: string }) => item.source_id)).toEqual(["first", "second"]);
+    expect(merged.pages.sources.next_cursor).toBeNull();
+  });
+
+  it("retains the last public list if the server returns an incompatible legacy response", async () => {
+    useTaskCenterStore.setState({ viewMode: "ordinary" });
+    useTaskCenterStore.getState().applyOrdinarySnapshot("conversation-1", ordinary("one"));
+    requestHarness.listConversationTasks.mockResolvedValue({ data: { tasks: [{ task_id: "one", objective: "private" }] } });
+    await useTaskCenterStore.getState().loadConversationTasks("conversation-1");
+    expect(useTaskCenterStore.getState().getTasks("conversation-1")[0].ordinary?.display_key).toBe("task:one:1");
+    expect(useTaskCenterStore.getState()._taskLoadErrors["conversation-1"]).toBe(true);
+  });
+
+  it("discards developer responses that finish after switching to ordinary view", async () => {
+    const pending = deferred<any>();
+    requestHarness.listConversationTasks.mockReturnValueOnce(pending.promise);
+    const loading = useTaskCenterStore.getState().loadConversationTasks("conversation-1");
+    useTaskCenterStore.getState().setViewMode("ordinary");
+    pending.resolve({ data: { tasks: [{ task_id: "private", objective: "private", steps: [] }] } });
+    await loading;
+    expect(useTaskCenterStore.getState().getTasks("conversation-1")).toEqual([]);
+  });
+
+  it("closes a task stream created before its list row exists when the view changes", async () => {
+    useTaskCenterStore.setState({ viewMode: "ordinary" });
+    const pending = deferred<any>();
+    requestHarness.listConversationTasks.mockReturnValueOnce(pending.promise);
+    useTaskCenterStore.getState().subscribeConvEvents("conversation-1");
+    emitConversationEvent({ type: "task_created", payload: { task_id: "new-task" } });
+    const oldStream = useTaskCenterStore.getState()._taskStreams["new-task"];
+    expect(oldStream).toBeDefined();
+    expect(useTaskCenterStore.getState().getTasks("conversation-1")).toEqual([]);
+    useTaskCenterStore.getState().setViewMode("developer");
+    expect(useTaskCenterStore.getState()._taskStreams).toEqual({});
+    useTaskCenterStore.getState().subscribeConvEvents("conversation-1");
+    useTaskCenterStore.getState().subscribeTask("conversation-1", "new-task");
+    expect(useTaskCenterStore.getState()._taskStreams["new-task"]).not.toBe(oldStream);
+    pending.resolve({ data: { tasks: [] } });
+    await Promise.resolve();
+  });
+
+  it("does not restore legacy artifacts after changing to ordinary view", async () => {
+    const pending = deferred<any>();
+    requestHarness.listConversationArtifacts.mockReturnValueOnce(pending.promise);
+    const loading = useTaskCenterStore.getState().loadConversationArtifacts("conversation-1");
+    useTaskCenterStore.getState().setViewMode("ordinary");
+    pending.resolve({ data: { artifacts: [{ artifact_id: "old", value: { internal: true } }] } });
+    await loading;
+    expect(useTaskCenterStore.getState().artifactsByConversation).toEqual({});
+  });
+
+  it("hydrates ordinary artifact notices without inserting incomplete delivery rows", async () => {
+    useTaskCenterStore.setState({ viewMode: "ordinary" });
+    const pending = deferred<any>();
+    requestHarness.listConversationArtifacts.mockReturnValueOnce(pending.promise);
+    useTaskCenterStore.getState().subscribeConvEvents("conversation-1");
+    emitConversationEvent({ type: "artifact_created", payload: { artifact_id: "receipt", history_id: "h1" } });
+    expect(requestHarness.listConversationArtifacts).toHaveBeenCalledWith("conversation-1");
+    expect(useTaskCenterStore.getState().artifactsByConversation).toEqual({});
+    expect(useTaskCenterStore.getState().deliveriesByConversation).toEqual({});
+    const artifact = { artifact_id: "logical", conversation_id: "conversation-1", history_id: "h1", producer_type: "main_agent", slot: "result", content_type: "text", seq: 1, value: { text: "complete" } };
+    pending.resolve({ data: { artifacts: [artifact], deliveries: [{ ...artifact, artifact_id: "receipt", v2_artifact_id: "logical" }] } });
+    await vi.waitFor(() => {
+      expect(useTaskCenterStore.getState().artifactsByConversation["conversation-1"]).toEqual([artifact]);
+      expect(useTaskCenterStore.getState().deliveriesByConversation["conversation-1"]).toEqual([expect.objectContaining({ artifact_id: "receipt", value: { text: "complete" } })]);
+    });
+  });
+
+  it.each(["ordinary", "developer"] as const)("runs a queued artifact refresh after switching to %s", async (viewMode) => {
+    useTaskCenterStore.setState({ viewMode: viewMode === "ordinary" ? "developer" : "ordinary" });
+    const pending = deferred<any>();
+    const artifact = { artifact_id: "current", value: { text: "saved result" } };
+    requestHarness.listConversationArtifacts.mockReturnValueOnce(pending.promise)
+      .mockResolvedValueOnce({ data: { artifacts: [artifact], deliveries: [artifact], history_order: { h1: 1 } } });
+    const loading = useTaskCenterStore.getState().loadConversationArtifacts("conversation-1");
+    useTaskCenterStore.getState().setViewMode(viewMode);
+    await useTaskCenterStore.getState().loadConversationArtifacts("conversation-1");
+    pending.resolve({ data: { artifacts: [{ artifact_id: "stale" }] } });
+    await loading;
+    expect(requestHarness.listConversationArtifacts).toHaveBeenCalledTimes(2);
+    const state = useTaskCenterStore.getState();
+    expect(state.artifactsByConversation["conversation-1"]).toEqual([artifact]);
+    expect(state.deliveriesByConversation["conversation-1"]).toEqual([artifact]);
+    expect(state.artifactHistoryOrderByConversation["conversation-1"]).toEqual({ h1: 1 });
+    expect(state._loadingArtifacts["conversation-1"]).toBe(false);
+    expect(state._queuedArtifactLoads["conversation-1"]).toBe(false);
+  });
+
+  it("retains public detail on a failed refresh and renews an expired page cursor", async () => {
+    useTaskCenterStore.setState({ viewMode: "ordinary" });
+    const task = ordinary("one");
+    useTaskCenterStore.getState().applyOrdinarySnapshot("conversation-1", task);
+    requestHarness.getTaskDetail.mockRejectedValueOnce(new Error("offline"));
+    await expect(useTaskCenterStore.getState().loadOrdinaryTask("conversation-1", "one")).rejects.toThrow("offline");
+    expect(useTaskCenterStore.getState().getTasks("conversation-1")[0].ordinary).toBe(task);
+    requestHarness.getTaskDetail.mockRejectedValueOnce({ response: { status: 409 } });
+    requestHarness.getTaskDetail.mockResolvedValueOnce({ data: { data: { task: ordinary("one", { revision: 2 }) } } });
+    await useTaskCenterStore.getState().loadOrdinaryTask("conversation-1", "one", "sources", "expired");
+    expect(requestHarness.getTaskDetail).toHaveBeenLastCalledWith("one", {
+      params: { view: "ordinary", collection: undefined, cursor: undefined, limit: 100, display_key: "task:one:1" },
+    });
+    expect(useTaskCenterStore.getState().getTasks("conversation-1")[0].ordinary?.revision).toBe(2);
   });
 
   it("receives a plan and restores it from persisted steps", async () => {
@@ -448,6 +605,23 @@ describe("task center workflow events", () => {
       status: "succeeded",
     });
     window.removeEventListener(CHAT_WORKFLOW_STEP_FEEDBACK_EVENT, listener);
+  });
+
+  it("forwards ordinary feedback identity for history hydration without requiring raw message text", () => {
+    useTaskCenterStore.setState({ viewMode: "ordinary" });
+    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+    useTaskCenterStore.getState().subscribeConvEvents("conversation-1");
+    const feedback = { type: "workflow_step_feedback", payload: {
+      task_id: "task-1", history_id: "history-1", status: "failed",
+    } };
+    emitConversationEvent(feedback);
+    emitConversationEvent({ ...feedback, replayed: true });
+    const events = dispatchSpy.mock.calls.map(([event]) => event as CustomEvent)
+      .filter((event) => event.type === CHAT_WORKFLOW_STEP_FEEDBACK_EVENT);
+    expect(events).toHaveLength(1);
+    expect(events[0].detail).toEqual({ conversationId: "conversation-1", feedbackId: "task-1",
+      historyId: "history-1", message: undefined, status: "failed" });
+    dispatchSpy.mockRestore();
   });
 
   it("refreshes the active workflow session for live and replayed creation events", async () => {

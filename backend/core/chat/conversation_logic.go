@@ -2678,6 +2678,11 @@ func streamSingleAnswer(
 		}
 	}
 	finalStatus := runTerminal.Status
+	if persisted {
+		if err := taskcenter.FinalizeScheduledConversation(persistCtx, db, convID); err != nil {
+			log.Logger.Warn().Str("conversation_id", convID).Msg("scheduled_result_finalization_failed")
+		}
+	}
 	if stateStore != nil && persisted {
 		statusCtx, cancel := terminalWriteContext(chatCtx)
 		_ = setChatRuntimeStatus(statusCtx, stateStore, convID, historyID, finalStatus, stripToolTags(fullText), runID, runTerminal)

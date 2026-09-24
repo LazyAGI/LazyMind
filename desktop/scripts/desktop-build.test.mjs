@@ -854,7 +854,7 @@ test("Desktop close and quit destroy renderers while keeping the runtime residen
   assert.doesNotMatch(backgroundMode, /beginFastQuit|detachRuntimeMonitor|runSidecar\("down"/);
   assert.match(
     source,
-    /function showActiveWindow\(\)[\s\S]*app\.show\(\);[\s\S]*app\.dock\.show\(\)[\s\S]*const creation = createWindow\(\)/,
+    /function showActiveWindow\(\)[\s\S]*app\.show\(\);[\s\S]*app\.dock\.show\(\)[\s\S]*const creation = sessionWrites\.catch\([\s\S]*?\.then\(\(\) => createWindow\(\)\)/,
     "opening the resident app must restore the Dock icon and recreate its frontend",
   );
   assert.match(source, /app\.on\("second-instance"[\s\S]*showActiveWindow\(\)/);

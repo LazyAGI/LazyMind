@@ -152,6 +152,7 @@ type ListSkillsRequest struct {
 	Source      string
 	UserID      string
 	Keyword     string
+	NameOnly    bool
 	Category    string
 	Tags        []string
 	Offset      int

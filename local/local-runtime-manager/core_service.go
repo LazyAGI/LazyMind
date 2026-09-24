@@ -187,6 +187,7 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_PAYLOAD_FILE=" + strings.TrimSpace(os.Getenv("LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_PAYLOAD_FILE")),
 		"LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_SIGNATURE_FILE=" + strings.TrimSpace(os.Getenv("LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_SIGNATURE_FILE")),
 		"LAZYMIND_CORE_HOST=127.0.0.1",
+		"LAZYMIND_CHANNEL_GATEWAY_BASE_URL=http://127.0.0.1:" + strconv.Itoa(cfg.ChannelGateway.Port),
 		"LAZYMIND_CORE_PORT=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
 		localWorkspaceHostTokenEnvVar + "=" + localWorkspaceHostToken(cfg, paths),
 		"ACL_DB_DRIVER=sqlite",

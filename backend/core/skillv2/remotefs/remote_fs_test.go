@@ -93,6 +93,28 @@ func TestRemoteFSBuiltinSkillMDReturnsStrictRuntimeViewWithoutChangingBlob(t *te
 	}
 }
 
+func TestRemoteFSRunningTaskCanReadSkillAfterDisable(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	handler := NewHandler(HandlerDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+	read := func() string {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		handler.Content(rec, httptest.NewRequest(http.MethodGet, remoteContentURL("skills/research/论文精读/SKILL.md", "user_001", "running-task", ""), nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("content status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		return rec.Body.String()
+	}
+	before := read()
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Update("is_enabled", false).Error; err != nil {
+		t.Fatalf("disable skill: %v", err)
+	}
+	if after := read(); after != before {
+		t.Fatalf("running task skill content changed after disabling: %q", after)
+	}
+}
+
 func TestRemoteFSWriteText_IsVisibleInSameTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")

@@ -2,6 +2,19 @@ package main
 
 func manualOpenAPISpec() map[string]any {
 	schemas, paths := manualSchemas(), manualPaths()
+	for name, schema := range notificationSchemas() {
+		schemas[name] = schema
+	}
+	for path, operations := range notificationPaths() {
+		paths[path] = operations
+	}
+	ordinarySchemas, ordinaryPaths := ordinaryTaskOpenAPI()
+	for name, schema := range ordinarySchemas {
+		schemas[name] = schema
+	}
+	for path, operation := range ordinaryPaths {
+		paths[path] = operation
+	}
 	for name, schema := range localExecutionSchemas() {
 		schemas[name] = schema
 	}
