@@ -423,6 +423,7 @@ type UpstreamStreamChunk struct {
 	RuntimeEvent             *ChatRuntimeEvent              `json:"runtime_event,omitempty"`
 	PerformanceMetrics       *RunPerformanceMetrics         `json:"performance_metrics,omitempty"`
 	Err                      error                          `json:"-"`
+	ErrKind                  lazyStreamErrorKind            `json:"-"`
 }
 
 type upstreamStreamLine struct {
@@ -934,6 +935,11 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 			}
 			if d.Err != nil {
 				if terminalSeen && d.ErrKind == lazyStreamErrorTransport && terminalChunk != nil {
+					terminal, _ := terminalChunk.RuntimeEvent.Terminal()
+					terminal.TransportDiagnostic = &RunTransportDiagnostic{Code: upstreamStreamFailureCode(d.Err)}
+					event := *terminalChunk.RuntimeEvent
+					event.Data = terminalJSON(terminal)
+					terminalChunk.RuntimeEvent = &event
 					select {
 					case out <- *terminalChunk:
 					case <-ctx.Done():
@@ -941,7 +947,7 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 					return
 				}
 				select {
-				case out <- UpstreamStreamChunk{Err: d.Err}:
+				case out <- UpstreamStreamChunk{Err: d.Err, ErrKind: d.ErrKind}:
 				case <-ctx.Done():
 				}
 				return
@@ -984,7 +990,7 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 			}
 			if chunk.Err != nil {
 				select {
-				case out <- UpstreamStreamChunk{Err: chunk.Err}:
+				case out <- UpstreamStreamChunk{Err: chunk.Err, ErrKind: lazyStreamErrorProtocol}:
 				case <-ctx.Done():
 				}
 				return
@@ -1000,7 +1006,7 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 		}
 		if !terminalSeen && ctx.Err() == nil {
 			select {
-			case out <- UpstreamStreamChunk{Err: errors.New("algorithm stream ended without run_finished")}:
+			case out <- UpstreamStreamChunk{Err: errors.New("algorithm stream ended without run_finished"), ErrKind: lazyStreamErrorProtocol}:
 			case <-ctx.Done():
 			}
 		} else if terminalChunk != nil && ctx.Err() == nil {
