@@ -655,6 +655,7 @@ def get_artifact(key: str, sort_order: Optional[int] = None, task_ref: Optional[
             result = {
                 'status': 'ok', 'key': key, 'artifacts': artifacts,
             }
+            return result
         else:
             result = _get_public_workflow_artifacts(key, workflow_session_id, sort_order)
     elif sort_order is not None:

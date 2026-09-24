@@ -258,8 +258,10 @@ def test_summary_is_stable_until_context_reaches_trigger_again() -> None:
     assert len(calls) == 1
     assert first == second
     assert json.dumps(state['entries'][0], ensure_ascii=False, sort_keys=True) == summary_bytes
-    assert state['entries'][0]['kind'] == 'summary'
-    assert '_lazymind_meta' not in first[0]
+    assert state['entries'][0]['kind'] == 'full'
+    assert state['entries'][0]['message']['content'] == history[0]['content']
+    assert state['entries'][1]['kind'] == 'summary'
+    assert '_lazymind_meta' not in first[1]
 
 
 def test_context_safety_overrides_summary_hysteresis(monkeypatch) -> None:
@@ -374,4 +376,6 @@ def test_rolling_summary_uses_prior_summary_plus_new_delta() -> None:
     assert len(prompts) == 2
     assert 'NEW_COVERABLE_DELTA' in prompts[1]
     assert 'ORIGINAL_RAW_PREFIX' not in prompts[1]
-    assert state['entries'][0]['source_end'] > 2
+    summary = next(entry for entry in state['entries'] if entry['kind'] == 'summary')
+    assert state['entries'][0]['kind'] == 'full'
+    assert summary['source_end'] > 2

@@ -137,7 +137,7 @@ def test_goal_sidecar_fail_closed_requires_verbatim_text():
 
 
 def test_subagent_does_not_truncate_artifact_locators():
-    from lazymind.chat.engine.subagent.context import LARGE_TOOL_RESULT_THRESHOLD
+    from lazymind.chat.engine.subagent.context import LARGE_TOOL_RESULT_SCAN_THRESHOLD_BYTES
     from lazymind.chat.engine.subagent.runner import _truncate_tool_result
 
     class _Ctx:
@@ -146,7 +146,7 @@ def test_subagent_does_not_truncate_artifact_locators():
         def write_large_content(self, text, hint=''):
             raise AssertionError('artifact results must not use the generic spill cut')
 
-    body = 'x' * (LARGE_TOOL_RESULT_THRESHOLD + 32)
+    body = 'x' * (LARGE_TOOL_RESULT_SCAN_THRESHOLD_BYTES + 32)
     assert _truncate_tool_result(_Ctx(), body, 'get_artifact') == body
 
 
