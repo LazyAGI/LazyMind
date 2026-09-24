@@ -243,8 +243,8 @@ class CloudOAuthOwnerTest(unittest.TestCase):
         for mode in ('oauth_user', 'tenant'):
             for preference in (True, False):
                 with self.subTest(mode=mode, preference=preference):
-                    def connect():
-                        if mode == 'oauth_user':
+                    def connect(auth_mode=mode):
+                        if auth_mode == 'oauth_user':
                             return self._authorize_oauth_connection()
                         return self.service.create_connection(
                             provider='feishu', tenant_id='', owner_user_id='user-1', auth_mode='tenant',
@@ -254,8 +254,11 @@ class CloudOAuthOwnerTest(unittest.TestCase):
                     connection_id = connect()
                     self.service.update_connection(connection_id, user_id='user-1', chat_enabled=preference)
                     self.service.delete_connection(connection_id, user_id='user-1')
-                    self.assertNotIn(connection_id, [item['connection_id'] for item in
-                        self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-1')['items']])
+                    self.assertNotIn(connection_id, [
+                        item['connection_id'] for item in self.service.list_chat_enabled_connections(
+                            provider='feishu', owner_user_id='user-1',
+                        )['items']
+                    ])
 
                     restored_id = connect()
                     try:
@@ -265,8 +268,11 @@ class CloudOAuthOwnerTest(unittest.TestCase):
                         self.assertTrue(detail['provider_options']['chat_enabled'])
                         self.assertTrue(detail['provider_options']['chatEnabled'])
                         self.assertTrue(detail['can_use_chat'])
-                        self.assertIn(restored_id, [item['connection_id'] for item in
-                            self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-1')['items']])
+                        self.assertIn(restored_id, [
+                            item['connection_id'] for item in self.service.list_chat_enabled_connections(
+                                provider='feishu', owner_user_id='user-1',
+                            )['items']
+                        ])
                     finally:
                         self.service.delete_connection(restored_id, user_id='user-1')
 
@@ -434,15 +440,21 @@ class CloudOAuthOwnerTest(unittest.TestCase):
                     upsert(**kwargs)
                     self.service.update_connection(connection_id, user_id='user-1', chat_enabled=preference)
                     self.service.delete_connection(connection_id, user_id='user-1')
-                    self.assertNotIn(connection_id, [item['connection_id'] for item in
-                        self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-1')['items']])
+                    self.assertNotIn(connection_id, [
+                        item['connection_id'] for item in self.service.list_chat_enabled_connections(
+                            provider='feishu', owner_user_id='user-1',
+                        )['items']
+                    ])
                     restored = upsert(**kwargs)
                     self.assertEqual(restored['connection_id'], connection_id)
                     self.assertTrue(restored['provider_options']['chat_enabled'])
                     self.assertTrue(restored['provider_options']['chatEnabled'])
                     self.assertTrue(restored['can_use_chat'])
-                    self.assertIn(connection_id, [item['connection_id'] for item in
-                        self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-1')['items']])
+                    self.assertIn(connection_id, [
+                        item['connection_id'] for item in self.service.list_chat_enabled_connections(
+                            provider='feishu', owner_user_id='user-1',
+                        )['items']
+                    ])
 
     def test_wechat_connection_lifecycle(self) -> None:
         created = self.service.create_connection(
