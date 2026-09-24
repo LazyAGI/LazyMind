@@ -137,6 +137,14 @@ describe("PDF artifacts API", () => {
     expect(matchPdfTranslationDraftBlock(blocks, { text: "未匹配", page: 1 })).toBeUndefined();
   });
 
+  it("matches a selected source passage to its persisted draft block", () => {
+    const blocks = [{
+      id: "b1", page: 2, source_text: "Original paragraph for translation.", translated_text: "待改进的译文。",
+      bbox: [10, 20, 300, 80] as [number, number, number, number],
+    }];
+    expect(matchPdfTranslationDraftBlock(blocks, { text: "paragraph for translation", page: 2 }, "source")?.id).toBe("b1");
+  });
+
   it("splits long OCR text without truncating surrogate pairs or content", () => {
     const source = `${"中文😀".repeat(1300)}tail`;
     const chunks = splitTranslationText(source, 1800);

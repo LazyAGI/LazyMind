@@ -216,12 +216,13 @@ export async function revisePdfTranslation(datasetId: string, documentId: string
 export function matchPdfTranslationDraftBlock(
   blocks: PdfTranslationDraftBlock[],
   selection: { text: string; page: number; bbox?: [number, number, number, number] },
+  textKind: "source" | "translation" = "translation",
 ): PdfTranslationDraftBlock | undefined {
   const pageBlocks = blocks.filter((block) => block.page === selection.page);
   const selectedText = selection.text.replace(/\s+/g, " ").trim();
   const textMatch = pageBlocks.find((block) => {
-    const translated = block.translated_text.replace(/\s+/g, " ").trim();
-    return translated.includes(selectedText) || selectedText.includes(translated);
+    const candidate = (textKind === "source" ? block.source_text : block.translated_text).replace(/\s+/g, " ").trim();
+    return candidate.includes(selectedText) || selectedText.includes(candidate);
   });
   if (textMatch) return textMatch;
   if (!selection.bbox) return undefined;

@@ -677,25 +677,29 @@ const Detail = () => {
     message.success("翻译任务已取消");
   }, [knowledgeBaseId, knowledgeId, pdfCapabilities?.jobs, pdfTask, refreshPdfCapabilities]);
 
-  const openTranslationRevision = useCallback(async (selection: PdfTextSelection) => {
-    if (!selectedPdfArtifact?.has_draft) {
+  const openTranslationRevision = useCallback(async (selection: PdfTextSelection, textKind: "source" | "translation" = "translation") => {
+    const translationArtifact = selectedPdfArtifact?.kind === "TRANSLATION_PDF"
+      ? selectedPdfArtifact
+      : pdfCapabilities?.translations.at(-1);
+    if (!translationArtifact?.has_draft) {
       message.warning("这个译本没有可编辑草稿，请重新生成译本后再试");
       return;
     }
     try {
-      const draft = await getPdfTranslationDraft(knowledgeBaseId, knowledgeId, selectedPdfArtifact.id);
-      const block = matchPdfTranslationDraftBlock(draft.blocks, selection);
+      const draft = await getPdfTranslationDraft(knowledgeBaseId, knowledgeId, translationArtifact.id);
+      const block = matchPdfTranslationDraftBlock(draft.blocks, selection, textKind);
       if (!block) {
-        message.warning("未能定位所选文字对应的翻译段落，请重新选择完整段落");
+        message.warning(`未能定位所选${textKind === "source" ? "原文" : "译文"}对应的翻译段落，请重新选择完整段落`);
         return;
       }
+      setSelectedPdfArtifact(translationArtifact);
       setRevisionBlock(block);
       setRevisionText(block.translated_text);
       setRevisionModalOpen(true);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "读取翻译草稿失败");
     }
-  }, [knowledgeBaseId, knowledgeId, selectedPdfArtifact]);
+  }, [knowledgeBaseId, knowledgeId, pdfCapabilities?.translations, selectedPdfArtifact]);
 
   const retranslateRevisionBlock = useCallback(async () => {
     if (!selectedPdfArtifact || !revisionBlock) return;
@@ -1053,6 +1057,7 @@ const Detail = () => {
                   onExportReadyChange={setCanExportImagePdf}
                   onPdfSelection={askPdfSelection}
                   onPdfTranslateSelection={translatePdfSelection}
+                  onPdfRetranslateSelection={(selection) => void openTranslationRevision(selection, "source")}
                   translationConfigured={translationConfigured}
                   pdfViewPosition={pdfViewPosition}
                   onPdfViewPositionChange={handlePdfViewPositionChange}
@@ -1065,7 +1070,7 @@ const Detail = () => {
                   fileName={knowledgeDetail?.display_name || ""}
                   onPdfSelection={askPdfSelection}
                   onPdfTranslateSelection={translatePdfSelection}
-                  onPdfRetranslateSelection={openTranslationRevision}
+                  onPdfRetranslateSelection={(selection) => void openTranslationRevision(selection, "translation")}
                   translationConfigured={translationConfigured}
                   pdfViewPosition={pdfViewPosition}
                   onPdfViewPositionChange={handlePdfViewPositionChange}
@@ -1084,7 +1089,9 @@ const Detail = () => {
               referenceActions={referenceActions}
               onPdfSelection={askPdfSelection}
               onPdfTranslateSelection={translatePdfSelection}
-              onPdfRetranslateSelection={pdfSourceView === "translation" ? openTranslationRevision : undefined}
+              onPdfRetranslateSelection={pdfCapabilities?.translations.length
+                ? (selection) => void openTranslationRevision(selection, pdfSourceView === "translation" ? "translation" : "source")
+                : undefined}
               onAddVocabularySelection={isVocabularyEnabled() ? (selection) => setVocabularySelection(selection) : undefined}
               translationConfigured={translationConfigured}
               learningSelectionActions={capabilityFamilies(learningCapabilities).map(family=>({key:family,label:t(capabilityFamilyI18nKey(family)),languages:Array.from(new Set(learningCapabilities.filter(item=>item.key!=="pinyin"&&family===capabilityFamily(item.key)).flatMap(item=>item.languages))),subjectKinds:Array.from(new Set(learningCapabilities.filter(item=>family===capabilityFamily(item.key)).flatMap(item=>item.subject_kinds))),disabled:!learningLocalAvailable,disabledTip:t("vocabulary.localOnlyDesktop")}))}
