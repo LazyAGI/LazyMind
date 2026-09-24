@@ -22,6 +22,45 @@ def test_remote_executor_ignores_non_json_stream_frames():
 
 
 @pytest.mark.asyncio
+async def test_remote_event_failure_closes_subagent_inside_execution_scope(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from lazymind.chat.engine.subagent import runner
+    from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
+
+    order = []
+
+    async def stream(**kwargs):
+        try:
+            yield 'data: {"type":"text","text":"ready"}\n\n'
+        finally:
+            assert WorkspaceContext.from_config({}).workflow_full_trust
+            order.append('closed')
+
+    async def event(_client, _task, _lease, payload):
+        if payload['type'] == 'text':
+            raise RuntimeError('event transport failed')
+
+    async def fail(*_args, **_kwargs):
+        assert order == ['closed']
+        order.append('failed')
+
+    worker = RemoteWorkflowExecutor()
+    worker.runtime = SimpleNamespace(
+        context=AsyncMock(return_value={'metadata': {'task_id': 'test-close'}, 'inputs': {}}),
+        execution_spec=AsyncMock(return_value={
+            'task': {'input_slots': [], 'output_slots': []}, 'params': {}, 'steps': [],
+            'workspace_path': str(tmp_path), 'llm_config': {},
+        }),
+        task_event=event, fail=fail,
+    )
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+    await worker._run_claim(object(), {'attempt_id': 'attempt', 'lease_token': 'lease'})
+    assert order == ['closed', 'failed']
+    assert not WorkspaceContext.from_config({}).workflow_full_trust
+
+
+@pytest.mark.asyncio
 async def test_post_step_capability_check_runs_in_analysis_attempt_without_another_subagent(
     monkeypatch, tmp_path,
 ):

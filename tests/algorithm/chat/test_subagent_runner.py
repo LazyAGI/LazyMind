@@ -244,6 +244,34 @@ def _install_fake_translator(monkeypatch):
     monkeypatch.setattr(runner_mod, 'AgentEventFrameTranslator', FakeTranslator)
 
 
+def test_subagent_closes_agent_before_disposing_database(monkeypatch):
+    db = _install_fake_db(monkeypatch)
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_translator(monkeypatch)
+    order = []
+    db.dispose = lambda: order.append('dispose')
+    monkeypatch.setattr(runner_mod, '_generate_display_plan', lambda *_: [])
+
+    class Executor:
+        async def stream(self, *_):
+            try:
+                yield 'event', {'tag': 'text', 'delta': 'ready ' * 100}
+                await asyncio.Event().wait()
+            finally:
+                order.append('producer closed')
+
+    monkeypatch.setattr(runner_mod, 'AgentExecutor', Executor)
+
+    async def scenario():
+        stream = runner_mod.run_subagent_stream(_DEFAULT_TASK_ID, task_spec=_DEFAULT_TASK)
+        while 'ready ' not in await anext(stream):
+            pass
+        await stream.aclose()
+        assert order == ['producer closed', 'dispose']
+
+    asyncio.run(scenario())
+
+
 def test_subagent_plan_preserves_extension_params_without_structured_duplicates(tmp_path):
     from lazymind.chat.engine.subagent.context import SubAgentContext
 

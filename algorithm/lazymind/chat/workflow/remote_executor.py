@@ -15,6 +15,7 @@ import os
 import pathlib
 import re
 import threading
+from contextlib import aclosing
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
@@ -205,7 +206,7 @@ class RemoteWorkflowExecutor:
                     }
                 else:
                     initial_steps = list(spec.get('steps') or [])
-                    async for frame in run_subagent_stream(
+                    stream = run_subagent_stream(
                         task_id=task_id,
                         resume=bool(initial_steps),
                         model_config=spec.get('llm_config'),
@@ -218,44 +219,46 @@ class RemoteWorkflowExecutor:
                             'generation': str(claim.get('fencing_generation') or ''),
                             'lease_token': lease,
                         },
-                    ):
-                        event = self._parse_frame(frame)
-                        if event is None:
-                            continue
-                        kind = event.get('type')
-                        if kind == 'artifact':
-                            artifact = {'slot': event.get('slot'), 'content_type': event.get('content_type'),
-                                        'seq': event.get('seq', 1), 'value': event.get('value')}
-                            artifact['value'] = await self._persist_files(
-                                client, attempt_id, lease, artifact['value'],
-                                str(artifact.get('content_type') or ''), workspace)
-                            # The ordinary Task Center projection must receive the same
-                            # host-neutral value as the Workflow artifact sink.  A raw
-                            # path here points into this executor's temporary workspace
-                            # and is inaccessible to Core after the attempt finishes.
-                            await self.runtime.task_event(client, task_id, lease, {
-                                **event, 'value': artifact['value'],
-                            })
-                            await self.runtime.artifact(client, attempt_id, lease, artifact)
-                            artifacts.append(artifact)
-                        elif kind not in {'done', 'error'}:
-                            await self.runtime.task_event(client, task_id, lease, event)
+                    )
+                    async with aclosing(stream):
+                        async for frame in stream:
+                            event = self._parse_frame(frame)
+                            if event is None:
+                                continue
+                            kind = event.get('type')
+                            if kind == 'artifact':
+                                artifact = {'slot': event.get('slot'), 'content_type': event.get('content_type'),
+                                            'seq': event.get('seq', 1), 'value': event.get('value')}
+                                artifact['value'] = await self._persist_files(
+                                    client, attempt_id, lease, artifact['value'],
+                                    str(artifact.get('content_type') or ''), workspace)
+                                # The ordinary Task Center projection must receive the same
+                                # host-neutral value as the Workflow artifact sink.  A raw
+                                # path here points into this executor's temporary workspace
+                                # and is inaccessible to Core after the attempt finishes.
+                                await self.runtime.task_event(client, task_id, lease, {
+                                    **event, 'value': artifact['value'],
+                                })
+                                await self.runtime.artifact(client, attempt_id, lease, artifact)
+                                artifacts.append(artifact)
+                            elif kind not in {'done', 'error'}:
+                                await self.runtime.task_event(client, task_id, lease, event)
 
-                        if kind in {'task_start', 'progress'}:
-                            await self.runtime.progress(client, attempt_id, lease, {
-                                'progress': event.get('progress', 0),
-                                'phase': event.get('current_phase', kind)})
-                        elif kind == 'done':
-                            terminal_event = event
-                            summary = str(event.get('summary') or '')
-                            event_control = event.get('control')
-                            if isinstance(event_control, dict):
-                                control = dict(event_control)
-                            if event.get('status') not in {None, '', 'succeeded'}:
-                                failure = summary or str(event.get('status'))
-                        elif kind == 'error':
-                            terminal_event = event
-                            failure = str(event.get('message') or 'LazyMind SubAgent failed')
+                            if kind in {'task_start', 'progress'}:
+                                await self.runtime.progress(client, attempt_id, lease, {
+                                    'progress': event.get('progress', 0),
+                                    'phase': event.get('current_phase', kind)})
+                            elif kind == 'done':
+                                terminal_event = event
+                                summary = str(event.get('summary') or '')
+                                event_control = event.get('control')
+                                if isinstance(event_control, dict):
+                                    control = dict(event_control)
+                                if event.get('status') not in {None, '', 'succeeded'}:
+                                    failure = summary or str(event.get('status'))
+                            elif kind == 'error':
+                                terminal_event = event
+                                failure = str(event.get('message') or 'LazyMind SubAgent failed')
                 if not failure and not lease_lost.is_set():
                     try:
                         await self._run_post_step_checks(

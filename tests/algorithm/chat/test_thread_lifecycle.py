@@ -86,9 +86,10 @@ def test_executor_joins_before_reset_and_marks_early_close_unsuccessful(monkeypa
 
     monkeypatch.setattr(executor_mod, 'telemetry_enabled', lambda: True)
     monkeypatch.setattr(executor_mod, 'append_event', lambda name, **data: events.append((name, data)))
-    plan = AgentRunPlan(role=AgentRole.CHAT, tools=[],
-                       prompt=PromptBuilder.for_role(AgentRole.CHAT).input('A', source='user').build(),
-                       execution_options=AgentExecutionOptions())
+    plan = AgentRunPlan(
+        role=AgentRole.CHAT, tools=[],
+        prompt=PromptBuilder.for_role(AgentRole.CHAT).input('A', source='user').build(),
+        execution_options=AgentExecutionOptions())
 
     async def scenario():
         notified = asyncio.Event()
@@ -183,3 +184,46 @@ def test_parallel_writer_waits_for_sections_and_stream_children(monkeypatch, tmp
         with pytest.raises(asyncio.CancelledError, match='stop sections'):
             future.result(timeout=5)
         assert producer_exits == [True, True]
+
+
+@pytest.mark.parametrize('mode', ['paused', 'pending'])
+def test_subagent_merge_joins_producer_on_close_and_repeated_cancel(mode):
+    from lazymind.chat.engine.subagent.runner import merge_agent_and_stream_events
+
+    async def scenario():
+        release = threading.Event()
+        notified = asyncio.Event()
+
+        def work():
+            lazyllm.FileSystemQueue().enqueue(json.dumps({'tag': 'text', 'delta': 'ready'}))
+            assert release.wait(5)
+            return 'done'
+
+        helper = lazyllm.StreamCallHelper(work, init_sid=False, on_cancel=notified.set)
+        source = helper.astream()
+        merged = merge_agent_and_stream_events(source, asyncio.Queue())
+        assert (await anext(merged))[0] == 'agent'
+        task = asyncio.create_task(merged.aclose() if mode == 'paused' else anext(merged))
+        try:
+            if mode == 'pending':
+                await asyncio.sleep(0)
+                task.cancel('original cancellation')
+            await asyncio.wait_for(notified.wait(), 1)
+            assert not task.done()
+            task.cancel('repeated cancellation')
+            await asyncio.sleep(0)
+            assert not task.done()
+        finally:
+            release.set()
+            try:
+                if mode == 'pending':
+                    with pytest.raises(asyncio.CancelledError, match='original cancellation'):
+                        await task
+                else:
+                    await task
+            finally:
+                await source.aclose()
+        assert helper.future.done()
+        assert helper.future.result() == 'done'
+
+    asyncio.run(scenario())
