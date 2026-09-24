@@ -3,6 +3,7 @@ package common
 import "net/http"
 
 func init() {
+	registerAdditionalErrorAlias("environment input expired or unavailable; request a new input card", "Environment input expired or unavailable; request a new input card", http.StatusConflict, 2003125)
 	registerAdditionalErrorAlias("check user env var failed", "Failed to check environment variables", http.StatusInternalServerError, 2003110)
 	registerAdditionalErrorAlias("env name already exists", "Environment variable name already exists", http.StatusConflict, 2003111)
 	registerAdditionalErrorAlias("create user env var failed", "Failed to create environment variable", http.StatusInternalServerError, 2003112)

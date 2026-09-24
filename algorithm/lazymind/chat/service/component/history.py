@@ -9,7 +9,7 @@ from lazyllm.tools.agent.base import (
     attachable_tool_observation,
 )
 
-from lazymind.chat.engine.tools.session_env import (
+from lazymind.chat.engine.agent_runtime.env_redaction import (
     SESSION_ENV_TOOL_NAME,
     USER_ENV_TOOL_NAME,
     redact_session_env_arguments,

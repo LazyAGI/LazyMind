@@ -8,7 +8,7 @@ from typing import Any, Optional
 import lazyllm
 
 from lazymind.config import config
-from lazymind.chat.engine.tools.session_env import redact_session_env_arguments
+from lazymind.chat.engine.agent_runtime.env_redaction import redact_session_env_arguments
 
 _PREVIEW_CHARS = 400
 

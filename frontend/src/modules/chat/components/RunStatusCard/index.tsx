@@ -17,6 +17,7 @@ const KNOWN_CODES = new Set([
   "insufficient_system_resource",
   "unknown",
   "user_env_unavailable",
+  "user_env_invalid_name",
 ]);
 
 const MODEL_SETTINGS_CODES = new Set([

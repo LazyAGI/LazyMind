@@ -21,6 +21,7 @@ export interface AskPending {
   /** Optional subtitle / description shown below the title */
   description?: string;
   user_env_delete?: { id: string; name: string; expected_updated_at: string };
+  env_input?: import("../EnvInputCard").EnvironmentInput;
   mail_draft?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview;
   mail_drafts?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview[];
 }

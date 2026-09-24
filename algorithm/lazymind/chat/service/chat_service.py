@@ -16,7 +16,8 @@ import lazyllm
 from lazymind.chat.engine.tools.workspace_context import (
     ToolResolutionContext, normalize_managed_roots, normalize_managed_files,
 )
-from lazymind.chat.engine.tools.session_env import ConversationEnvStore, inject_runtime_env
+from lazymind.chat.engine.agent_runtime.conversation_env import ConversationEnvStore
+from lazymind.chat.engine.agent_runtime.env_runtime import inject_runtime_env
 from lazymind.chat.engine.tools.conversation_workspace import chat_agent_workspace
 from lazyllm import LOG, set_trace_context
 from fastapi.responses import StreamingResponse
@@ -1994,8 +1995,10 @@ async def _handle_chat_impl(
 
     # ask_user is always a stop-tool for ChatAgent regardless of workflow state.
     stop_tools = list(workflow_contribution.stop_tools)
-    if any(cfg.name == 'delete_user_env' for cfg in user_env_configs):
-        stop_tools.append('delete_user_env')
+    stop_tools.extend(
+        cfg.name for cfg in [*session_env_configs, *user_env_configs]
+        if cfg.name in {'set_session_env', 'set_user_env', 'delete_user_env'}
+    )
     if allow_ask_user and 'ask_user' not in stop_tools:
         stop_tools.append('ask_user')
     if any(getattr(tool, '__name__', '') == 'ask_words' for tool in all_tools):

@@ -27,10 +27,7 @@ interface Props {
 }
 
 const envNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const credentialEnvNamePattern =
-  /(^|_)(API_)?(KEY|TOKEN|SECRET|PASSWORD|PASS|CREDENTIAL|CREDENTIALS|AUTH|ACCESS|REFRESH)(_|$)|(_API_KEY$)/i;
-const controlEnvNamePattern =
-  /(^|_)(PATH|HOME|SHELL|ENV|PROXY|PRELOAD|LIBRARY|CERT|BUNDLE|OPTIONS?|OPTS|CONFIG|RC|PROFILE|STARTUP)(_|$)/i;
+const controlEnvNamePattern = /^(LD_|DYLD_)/i;
 const blockedEnvNames = new Set([
   "HOME",
   "PATH",
@@ -57,9 +54,15 @@ const blockedEnvNames = new Set([
   "REQUESTS_CA_BUNDLE",
   "CURL_CA_BUNDLE",
   "SSLKEYLOGFILE",
+  "NODE_OPTIONS", "NODE_EXTRA_CA_CERTS", "RUBYOPT", "RUBYLIB", "PERL5OPT", "PERL5LIB",
+  "GIT_CONFIG", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_COUNT",
+  "GIT_SSH_COMMAND", "ZDOTDIR", "PROMPT_COMMAND",
+  "PYTHONINSPECT", "PYTHONBREAKPOINT", "NODE_PATH", "NODE_TLS_REJECT_UNAUTHORIZED",
+  "OPENSSL_CONF", "OPENSSL_MODULES", "GIT_CONFIG_PARAMETERS",
+  "GIT_SSL_NO_VERIFY", "GIT_SSL_CAINFO", "GIT_SSL_CAPATH",
 ]);
 
-function validateEnvName(t: TFunction, value?: string) {
+export function validateEnvName(t: TFunction, value?: string) {
   const name = (value || "").trim();
   if (!name) return Promise.reject(new Error(t("settingsPage.envVars.nameRequired")));
   if (name.length > 128 || !envNamePattern.test(name)) {
@@ -68,9 +71,6 @@ function validateEnvName(t: TFunction, value?: string) {
   const normalized = name.toUpperCase();
   if (blockedEnvNames.has(normalized) || controlEnvNamePattern.test(normalized)) {
     return Promise.reject(new Error(t("settingsPage.envVars.nameReserved")));
-  }
-  if (!credentialEnvNamePattern.test(normalized)) {
-    return Promise.reject(new Error(t("settingsPage.envVars.nameCredential")));
   }
   return Promise.resolve();
 }
@@ -240,7 +240,8 @@ export default function UserEnvironmentVariablesSettings({ headingRef }: Props) 
       width: 180,
       render: (value: string, row) => (
         <Button type="link" className="settings-env-secret-button" disabled={saving || pendingIds.has(row.id)} onClick={() => openEdit(row)}>
-          {row.credential_status === "unavailable" ? t("settingsPage.envVars.secretUnavailable") : value || "••••••••"}
+          {row.credential_status === "invalid_name" ? t("settingsPage.envVars.invalidNameTitle")
+            : row.credential_status === "unavailable" ? t("settingsPage.envVars.secretUnavailable") : value || "••••••••"}
         </Button>
       ),
     },
@@ -336,6 +337,9 @@ export default function UserEnvironmentVariablesSettings({ headingRef }: Props) 
         destroyOnHidden
       >
         {editConflict && <Alert type="warning" showIcon message={t("settingsPage.envVars.conflict")} />}
+        {editing?.credential_status === "invalid_name" && (
+          <Alert type="warning" showIcon message={t("settingsPage.envVars.invalidNameTitle")} description={t("settingsPage.envVars.invalidNameDescription")} />
+        )}
         {editing?.credential_status === "unavailable" && (
           <Alert type="warning" showIcon message={t("settingsPage.envVars.unavailableTitle")} description={t("settingsPage.envVars.unavailableDescription")} />
         )}

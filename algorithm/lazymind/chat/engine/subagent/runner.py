@@ -25,7 +25,7 @@ from lazyllm.tools.agent.base import (
     attachable_tool_observation,
 )
 from lazymind.chat.engine.tool_auth import inject_tool_config
-from lazymind.chat.engine.tools.session_env import inject_runtime_env
+from lazymind.chat.engine.agent_runtime.env_runtime import inject_runtime_env
 
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,

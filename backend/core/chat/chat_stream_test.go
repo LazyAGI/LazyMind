@@ -29,6 +29,80 @@ func TestUpstreamStreamChunkPreservesToolLimitPending(t *testing.T) {
 	}
 }
 
+func TestDualAnswerEnvironmentInputProvidesSafeFallback(t *testing.T) {
+	for _, locale := range []string{"zh-CN", "en-US"} {
+		for _, snapshot := range []bool{false, true} {
+			for _, disconnected := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/snapshot=%t/disconnected=%t", locale, snapshot, disconnected), func(t *testing.T) {
+					db := setupUserEnvTest(t)
+					if err := db.AutoMigrate(&orm.MultiAnswersChatHistory{}); err != nil {
+						t.Fatal(err)
+					}
+					if err := db.Create(&orm.Conversation{ID: "dual-env", BaseModel: orm.BaseModel{CreateUserID: "owner"}}).Error; err != nil {
+						t.Fatal(err)
+					}
+					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						var request LazyChatRequest
+						if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+							t.Error(err)
+							return
+						}
+						_, _ = fmt.Fprintln(w, algorithmFrame(t, map[string]any{"ask_pending": &AskPendingEvent{
+							AskID: "pending", EnvInput: &EnvironmentInputRequest{Name: "APP_ID", Scope: "user"},
+						}}))
+						_, _ = fmt.Fprintln(w, algorithmFrame(t, map[string]any{"text": "Input requested."}))
+						if snapshot {
+							_, _ = fmt.Fprintln(w, algorithmFrame(t, map[string]any{"export_snapshot": map[string]any{"content": "Snapshot content."}}))
+						}
+						_, _ = fmt.Fprintln(w, algorithmFrame(t, map[string]any{
+							"runtime_event": completedRunEvent(request.Conversation.RunID, true),
+						}))
+					}))
+					defer server.Close()
+					rec := httptest.NewRecorder()
+					rec.Header().Set("Content-Language", locale)
+					reqCtx, cancel := context.WithCancel(context.Background())
+					defer cancel()
+					if disconnected {
+						cancel()
+					}
+					streamDualAnswer(context.Background(), reqCtx, rec, rec, db.DB, nil, server.URL,
+						map[string]any{"query": "configure APP_ID", "run_id": "primary", "secondary_run_id": "secondary"},
+						"dual-env", "configure APP_ID", "primary-history", "secondary-history",
+						chatPersistTarget{HistoryID: "primary-history", Seq: 1}, json.RawMessage(`{}`))
+					var rows []orm.MultiAnswersChatHistory
+					if err := db.Where("conversation_id = ?", "dual-env").Find(&rows).Error; err != nil || len(rows) != 2 {
+						t.Fatalf("histories=%d err=%v", len(rows), err)
+					}
+					want := "请切换到单回答"
+					if locale == "en-US" {
+						want = "Switch to single-answer mode"
+					}
+					for _, row := range rows {
+						if row.RunStatus != "completed" || (snapshot && !strings.Contains(row.Result, "Snapshot content.")) {
+							t.Fatalf("answer/snapshot not finalized: %s", row.ID)
+						}
+						if strings.Count(row.Result, want) != 1 || strings.Contains(string(row.Ext), "env_input") {
+							t.Fatalf("missing fallback or actionable unsupported card: %s", row.ID)
+						}
+					}
+					if !disconnected && !strings.Contains(rec.Body.String(), want) {
+						t.Fatal("fallback not sent to frontend")
+					}
+					if !disconnected && strings.Index(rec.Body.String(), want) > strings.Index(rec.Body.String(), "run_finished") {
+						t.Fatal("fallback must arrive before the completion event")
+					}
+					var count int64
+					db.Model(&orm.UserEnvironmentVariable{}).Count(&count)
+					if count != 0 {
+						t.Fatal("dual input must not save a variable")
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestUpstreamStreamChunkPreservesCapabilityDependency(t *testing.T) {
 	dependency := map[string]any{
 		"status":  "blocked",

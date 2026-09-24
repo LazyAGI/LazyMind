@@ -22,7 +22,7 @@ import httpx
 
 from lazymind.config import config
 from lazymind.chat.workflow.client import RemoteExecutorClient
-from lazymind.chat.engine.tools.session_env import inject_runtime_env
+from lazymind.chat.engine.agent_runtime.env_runtime import inject_runtime_env
 from lazymind.chat.engine.tools.workspace_context import workflow_execution_scope
 
 LOG = logging.getLogger(__name__)

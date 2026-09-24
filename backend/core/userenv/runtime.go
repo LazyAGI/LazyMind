@@ -2,9 +2,11 @@ package userenv
 
 import (
 	"context"
+	"net/http"
 	"strings"
 
 	"gorm.io/gorm"
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 )
 
@@ -25,6 +27,11 @@ func LoadEnabled(ctx context.Context, db *gorm.DB, userID string) (map[string]st
 	}
 	env := make(map[string]string, len(rows))
 	for _, row := range rows {
+		if _, err := NormalizeName(row.Name); err != nil {
+			return nil, common.ResolveAppError(err.Error(), http.StatusConflict).WithDetail(map[string]string{
+				"reason": "user_env_invalid_name", "name": row.Name,
+			})
+		}
 		value, err := UpgradeCredential(db.WithContext(ctx), &row)
 		if err != nil {
 			return nil, err

@@ -1,372 +1,141 @@
 from __future__ import annotations
 
-import os
-import tempfile
-from unittest.mock import patch
+import json
+from pathlib import Path
 
 import lazyllm
 import pytest
-from lazyllm.tools import inject_env_vars
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.agent.skill_manager import SkillManager
 from lazyllm.tools.tool_config_inject import get_dynamic_env_vars
 
-from lazymind.chat.engine.tools.ask_user import ask_user
+from lazymind.chat.api import agent_control_routes
+from lazymind.chat.engine.agent_runtime.conversation_env import ConversationEnvStore
+from lazymind.chat.engine.agent_runtime.env_runtime import inject_runtime_env
 from lazymind.chat.engine.tools.session_env import build_session_env_tool
-from lazymind.chat.service.chat_service import clear_conversation_env
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 
-_MISSING_KEY = 'DYNAMIC_TEST_API_KEY'
-_SECRET = 'secret-from-ask-card'
+_KEY = 'DYNAMIC_TEST_API_KEY'
+_SECRET = 'synthetic-card-value'
 
 
-def _make_env_skill(base_dir: str, skill_name: str = 'env-skill') -> str:
-    skill_dir = os.path.join(base_dir, skill_name)
-    scripts_dir = os.path.join(skill_dir, 'scripts')
-    os.makedirs(scripts_dir, exist_ok=True)
-    with open(os.path.join(skill_dir, 'SKILL.md'), 'w', encoding='utf-8') as f:
-        f.write(
-            '---\n'
-            f'name: {skill_name}\n'
-            f'description: {skill_name} needs an API key\n'
-            '---\n'
-            f'# {skill_name}\n'
-            f'Requires `{_MISSING_KEY}`.\n'
-        )
-    with open(os.path.join(scripts_dir, 'needs_key.py'), 'w', encoding='utf-8') as f:
-        f.write(
-            'import os\nimport sys\n'
-            f'value = os.getenv({_MISSING_KEY!r}, "")\n'
-            'if not value:\n'
-            f'    sys.stderr.write("missing {_MISSING_KEY}")\n'
-            '    sys.exit(1)\n'
-            'print(value)\n'
-        )
-    return skill_name
+@pytest.fixture
+def runtime(monkeypatch, tmp_path):
+    previous_sid = lazyllm.globals._sid
+    previous = dict(get_dynamic_env_vars())
+    monkeypatch.setattr(agent_control_routes, 'config', {'enable_router': False, 'core_internal_token': 'test-internal'})
+    app = FastAPI()
+    app.include_router(agent_control_routes.router)
+    store = ConversationEnvStore()
+    events = []
+    monkeypatch.setattr('lazymind.chat.engine.tools.session_env._write_agent_data',
+                        lambda tag, **data: events.append({'tag': tag, **data}))
+    try:
+        yield store, TestClient(app, headers={'X-LazyMind-Internal-Token': 'test-internal'}), events
+    finally:
+        lazyllm.globals._init_sid(previous_sid)
+        inject_runtime_env(previous)
 
 
-def _begin_turn(session_id: str, conversation_id: str, store: dict[str, dict[str, str]]) -> None:
-    lazyllm.globals._init_sid(session_id)
-    inject_env_vars(store.get(conversation_id))
-
-
-def _run_needs_key(manager: SkillManager, skill_name: str):
-    return manager.run_script(skill_name, 'scripts/needs_key.py')
-
-
-def _ask_for_missing_key(env_name: str = _MISSING_KEY) -> tuple[str, dict]:
-    question = (
-        f'Please paste {env_name}. It applies only to this conversation.'
+def make_skill(tmp_path: Path, keys: list[str], declared=False):
+    folder = tmp_path / 'probe'
+    scripts = folder / 'scripts'
+    scripts.mkdir(parents=True)
+    required = ('required_env:\n' + ''.join(f'  - {name}\n' for name in keys)) if declared else ''
+    (folder / 'SKILL.md').write_text(
+        '---\nname: probe\ndescription: environment probe\n' + required + '---\n# probe\n',
     )
-    captured: dict = {}
-
-    def _capture(tag: str, **kwargs):
-        captured['tag'] = tag
-        captured.update(kwargs)
-
-    with patch('lazymind.chat.engine.tools.ask_user._write_agent_data', _capture):
-        receipt = ask_user(
-            [{'text': question, 'type': 'text'}],
-            title='Missing skill credential',
-            description='This value is stored for the current conversation only.',
-        )
-    translator = AgentEventFrameTranslator(query='run the skill')
-    frames = translator.feed({'tag': captured['tag'], **{
-        key: value for key, value in captured.items() if key != 'tag'
-    }})
-    finish_frames = translator.finish(receipt)
-    return receipt, {
-        'receipt': receipt,
-        'frames': frames,
-        'finish_frames': finish_frames,
-        'question': question,
-        'payload': captured,
-    }
+    (scripts / 'probe.py').write_text(
+        'import os, sys\n'
+        f'keys = {keys!r}\n'
+        'missing = [name for name in keys if not os.getenv(name)]\n'
+        'if missing:\n'
+        '    sys.stderr.write("missing " + " ".join(missing))\n'
+        '    sys.exit(1)\n'
+        'print("configured")\n',
+    )
+    return SkillManager(dir=str(tmp_path))
 
 
-def test_missing_env_ask_user_card_then_set_and_retry_skill():
-    store: dict[str, dict[str, str]] = {}
-    conversation_id = 'conversation-chain'
-    previous_sid = lazyllm.globals._sid
-    old_dynamic_env = lazyllm.globals.get('dynamic_env_vars')
-    with tempfile.TemporaryDirectory() as tmp:
-        skill_name = _make_env_skill(tmp)
-        manager = SkillManager(dir=tmp)
-        set_env = build_session_env_tool(store, conversation_id)
-        try:
-            _begin_turn('turn-1', conversation_id, store)
-            with pytest.raises(ToolExecutionError) as missing:
-                _run_needs_key(manager, skill_name)
-            assert _MISSING_KEY in str(missing.value)
-            assert missing.value.missing_env == [_MISSING_KEY]
-            assert f'missing_env: ["{_MISSING_KEY}"]' in str(missing.value)
-
-            receipt, ask = _ask_for_missing_key()
-            pending = ask['frames'][0]['ask_pending']
-            assert ask['payload']['tag'] == 'ask_pending'
-            assert pending['questions'][0]['type'] == 'text'
-            assert _MISSING_KEY in pending['questions'][0]['text']
-            assert ask['finish_frames'] == []
-
-            user_answer = f'{ask["question"]}: {_SECRET}'
-            _begin_turn('turn-2', conversation_id, store)
-            assert get_dynamic_env_vars().get(_MISSING_KEY) in (None, '')
-            assert _SECRET in user_answer
-
-            result = set_env(_MISSING_KEY, _SECRET)
-            assert result['status'] == 'ok'
-            assert result['conversation_id'] == conversation_id
-            assert _SECRET not in str(result)
-            retried = _run_needs_key(manager, skill_name)
-        finally:
-            lazyllm.globals._init_sid(previous_sid)
-            if old_dynamic_env is None:
-                lazyllm.globals.pop('dynamic_env_vars', None)
-            else:
-                lazyllm.globals['dynamic_env_vars'] = old_dynamic_env
-
-    assert retried['status'] == 'ok'
-    assert retried['stdout'].strip() == _SECRET
-    assert store[conversation_id][_MISSING_KEY] == _SECRET
+def begin_turn(store, sid, conversation='one', defaults=None):
+    lazyllm.globals._init_sid(sid)
+    inject_runtime_env(defaults, store.get_many(conversation))
 
 
-def test_declared_required_env_still_runs_then_card_and_retry(monkeypatch):
-    monkeypatch.delenv('DECLARED_API_KEY', raising=False)
-    store: dict[str, dict[str, str]] = {}
-    conversation_id = 'conversation-declared'
-    previous_sid = lazyllm.globals._sid
-    old_dynamic_env = lazyllm.globals.get('dynamic_env_vars')
-    with tempfile.TemporaryDirectory() as tmp:
-        skill_dir = os.path.join(tmp, 'declared-skill')
-        scripts_dir = os.path.join(skill_dir, 'scripts')
-        os.makedirs(scripts_dir, exist_ok=True)
-        with open(os.path.join(skill_dir, 'SKILL.md'), 'w', encoding='utf-8') as f:
-            f.write(
-                '---\n'
-                'name: declared-skill\n'
-                'description: declared skill\n'
-                'required_env:\n'
-                '  - DECLARED_API_KEY\n'
-                '---\n'
-                '# declared\n'
-            )
-        with open(os.path.join(scripts_dir, 'needs_key.py'), 'w', encoding='utf-8') as f:
-            f.write(
-                'import os\nimport sys\n'
-                'value = os.getenv("DECLARED_API_KEY", "")\n'
-                'if not value:\n'
-                '    sys.stderr.write("boom")\n'
-                '    sys.exit(1)\n'
-                'print(value)\n'
-            )
-        manager = SkillManager(dir=tmp)
-        set_env = build_session_env_tool(store, conversation_id)
-        try:
-            _begin_turn('turn-1', conversation_id, store)
-            with pytest.raises(ToolExecutionError) as missing:
-                manager.run_script('declared-skill', 'scripts/needs_key.py')
-            env_name = missing.value.missing_env[0]
-            assert env_name == 'DECLARED_API_KEY'
-            assert 'boom' in str(missing.value)
-            receipt, ask = _ask_for_missing_key(env_name)
-            assert env_name in ask['question']
-            _begin_turn('turn-2', conversation_id, store)
-            set_env(env_name, _SECRET)
-            retried = manager.run_script('declared-skill', 'scripts/needs_key.py')
-        finally:
-            lazyllm.globals._init_sid(previous_sid)
-            if old_dynamic_env is None:
-                lazyllm.globals.pop('dynamic_env_vars', None)
-            else:
-                lazyllm.globals['dynamic_env_vars'] = old_dynamic_env
-
-    assert retried['stdout'].strip() == _SECRET
+def submit_card(store, client, events, name=_KEY, value=_SECRET, conversation='one'):
+    receipt = build_session_env_tool(store, conversation)(name)
+    card = events[-1]
+    assert card['env_input'] == {'scope': 'conversation', 'name': name}
+    assert value not in json.dumps(card)
+    translator = AgentEventFrameTranslator(query='Configure environment')
+    frames = translator.feed(card)
+    assert frames[0]['ask_pending']['env_input']['name'] == name
+    assert translator.finish(receipt) == []
+    response = client.post('/api/chat/session-env:input', json={
+        'conversation_id': conversation, 'ask_id': receipt['ask_id'], 'value': value,
+    })
+    assert response.status_code == 200 and response.json()['ok'] is True
+    assert value not in response.text
+    return receipt
 
 
-def test_later_turn_new_sid_rehydrates_conversation_env_for_skill():
-    store: dict[str, dict[str, str]] = {}
-    conversation_id = 'conversation-rehydrate'
-    previous_sid = lazyllm.globals._sid
-    old_dynamic_env = lazyllm.globals.get('dynamic_env_vars')
-    with tempfile.TemporaryDirectory() as tmp:
-        skill_name = _make_env_skill(tmp)
-        manager = SkillManager(dir=tmp)
-        set_env = build_session_env_tool(store, conversation_id)
-        try:
-            _begin_turn('turn-set', conversation_id, store)
-            set_env(_MISSING_KEY, _SECRET)
-            _begin_turn('turn-later', conversation_id, store)
-            assert get_dynamic_env_vars()[_MISSING_KEY] == _SECRET
-            result = _run_needs_key(manager, skill_name)
-        finally:
-            lazyllm.globals._init_sid(previous_sid)
-            if old_dynamic_env is None:
-                lazyllm.globals.pop('dynamic_env_vars', None)
-            else:
-                lazyllm.globals['dynamic_env_vars'] = old_dynamic_env
-
+@pytest.mark.parametrize('declared', [False, True])
+def test_missing_env_secure_card_then_new_turn_retries_skill(runtime, tmp_path, monkeypatch, declared):
+    store, client, events = runtime
+    monkeypatch.delenv(_KEY, raising=False)
+    manager = make_skill(tmp_path, [_KEY], declared)
+    begin_turn(store, 'first')
+    with pytest.raises(ToolExecutionError) as failure:
+        manager.run_script('probe', 'scripts/probe.py')
+    assert _KEY in failure.value.missing_env
+    submit_card(store, client, events)
+    # The API request does not mutate a stale execution context.
+    assert _KEY not in get_dynamic_env_vars()
+    begin_turn(store, 'resumed')
+    assert get_dynamic_env_vars()[_KEY] == _SECRET
+    result = manager.run_script('probe', 'scripts/probe.py')
     assert result['status'] == 'ok'
-    assert result['stdout'].strip() == _SECRET
+    assert result['stdout'].strip() == 'configured'
+    assert _SECRET not in str(events) + str(result)
 
 
-def test_new_conversation_does_not_see_other_conversation_env():
-    store: dict[str, dict[str, str]] = {}
-    previous_sid = lazyllm.globals._sid
-    old_dynamic_env = lazyllm.globals.get('dynamic_env_vars')
-    with tempfile.TemporaryDirectory() as tmp:
-        skill_name = _make_env_skill(tmp)
-        manager = SkillManager(dir=tmp)
-        set_env_a = build_session_env_tool(store, 'conversation-a')
-        try:
-            _begin_turn('sid-a', 'conversation-a', store)
-            set_env_a(_MISSING_KEY, _SECRET)
-            _begin_turn('sid-b', 'conversation-b', store)
-            assert _MISSING_KEY not in get_dynamic_env_vars()
-            with pytest.raises(ToolExecutionError) as missing:
-                _run_needs_key(manager, skill_name)
-            assert store['conversation-a'][_MISSING_KEY] == _SECRET
-            assert 'conversation-b' not in store
-        finally:
-            lazyllm.globals._init_sid(previous_sid)
-            if old_dynamic_env is None:
-                lazyllm.globals.pop('dynamic_env_vars', None)
-            else:
-                lazyllm.globals['dynamic_env_vars'] = old_dynamic_env
-
-    assert _MISSING_KEY in str(missing.value)
+def test_proactive_input_new_conversation_isolation_and_cleanup(runtime, tmp_path, monkeypatch):
+    store, client, events = runtime
+    monkeypatch.delenv(_KEY, raising=False)
+    manager = make_skill(tmp_path, [_KEY])
+    begin_turn(store, 'first')
+    submit_card(store, client, events)
+    begin_turn(store, 'later')
+    assert manager.run_script('probe', 'scripts/probe.py')['status'] == 'ok'
+    begin_turn(store, 'other', conversation='two')
+    with pytest.raises(ToolExecutionError):
+        manager.run_script('probe', 'scripts/probe.py')
+    store.clear('one')
+    begin_turn(store, 'after-clear')
+    with pytest.raises(ToolExecutionError):
+        manager.run_script('probe', 'scripts/probe.py')
 
 
-def test_proactive_set_session_env_then_skill_without_ask_user():
-    store: dict[str, dict[str, str]] = {}
-    conversation_id = 'conversation-proactive'
-    previous_sid = lazyllm.globals._sid
-    old_dynamic_env = lazyllm.globals.get('dynamic_env_vars')
-    with tempfile.TemporaryDirectory() as tmp:
-        skill_name = _make_env_skill(tmp)
-        manager = SkillManager(dir=tmp)
-        set_env = build_session_env_tool(store, conversation_id)
-        try:
-            _begin_turn('turn-proactive', conversation_id, store)
-            user_message = f'{_MISSING_KEY}={_SECRET}'
-            assert '=' in user_message
-            set_env(_MISSING_KEY, _SECRET)
-            result = _run_needs_key(manager, skill_name)
-        finally:
-            lazyllm.globals._init_sid(previous_sid)
-            if old_dynamic_env is None:
-                lazyllm.globals.pop('dynamic_env_vars', None)
-            else:
-                lazyllm.globals['dynamic_env_vars'] = old_dynamic_env
-
-    assert result['status'] == 'ok'
-    assert result['stdout'].strip() == _SECRET
+@pytest.mark.parametrize('defaults', [{}, {_KEY: 'user-default'}])
+def test_secure_input_preserves_session_precedence_and_user_default(runtime, defaults):
+    store, client, events = runtime
+    begin_turn(store, 'first', defaults=defaults)
+    submit_card(store, client, events)
+    begin_turn(store, 'resumed', defaults=defaults)
+    assert get_dynamic_env_vars()[_KEY] == _SECRET
+    begin_turn(store, 'other', conversation='two', defaults=defaults)
+    assert get_dynamic_env_vars() == defaults
+    assert defaults.get(_KEY) in (None, 'user-default')
 
 
-def test_two_missing_keys_are_set_then_skill_continues():
-    store: dict[str, dict[str, str]] = {}
-    conversation_id = 'conversation-two-keys'
-    previous_sid = lazyllm.globals._sid
-    old_dynamic_env = lazyllm.globals.get('dynamic_env_vars')
-    with tempfile.TemporaryDirectory() as tmp:
-        skill_dir = os.path.join(tmp, 'two-key-skill')
-        scripts_dir = os.path.join(skill_dir, 'scripts')
-        os.makedirs(scripts_dir, exist_ok=True)
-        with open(os.path.join(skill_dir, 'SKILL.md'), 'w', encoding='utf-8') as f:
-            f.write('---\nname: two-key-skill\ndescription: needs two keys\n---\n# two\n')
-        with open(os.path.join(scripts_dir, 'needs_keys.py'), 'w', encoding='utf-8') as f:
-            f.write(
-                'import os\nimport sys\n'
-                'a = os.getenv("KEY_A", "")\n'
-                'b = os.getenv("KEY_B", "")\n'
-                'if not a or not b:\n'
-                '    sys.stderr.write("missing KEY_A or KEY_B")\n'
-                '    sys.exit(1)\n'
-                'print(a + ":" + b)\n'
-            )
-        manager = SkillManager(dir=tmp)
-        set_env = build_session_env_tool(store, conversation_id)
-        captured: dict = {}
-
-        def _capture(tag: str, **kwargs):
-            captured['tag'] = tag
-            captured.update(kwargs)
-
-        try:
-            _begin_turn('turn-1', conversation_id, store)
-            with pytest.raises(ToolExecutionError):
-                manager.run_script('two-key-skill', 'scripts/needs_keys.py')
-            with patch('lazymind.chat.engine.tools.ask_user._write_agent_data', _capture):
-                ask_user([
-                    {'text': 'Please paste KEY_A. This conversation only.', 'type': 'text'},
-                    {'text': 'Please paste KEY_B. This conversation only.', 'type': 'text'},
-                ])
-            assert captured['tag'] == 'ask_pending'
-            assert [q['type'] for q in captured['questions']] == ['text', 'text']
-            _begin_turn('turn-2', conversation_id, store)
-            set_env('KEY_A', 'alpha')
-            set_env('KEY_B', 'beta')
-            result = manager.run_script('two-key-skill', 'scripts/needs_keys.py')
-        finally:
-            lazyllm.globals._init_sid(previous_sid)
-            if old_dynamic_env is None:
-                lazyllm.globals.pop('dynamic_env_vars', None)
-            else:
-                lazyllm.globals['dynamic_env_vars'] = old_dynamic_env
-
-    assert result['stdout'].strip() == 'alpha:beta'
-    assert store[conversation_id] == {'KEY_A': 'alpha', 'KEY_B': 'beta'}
-
-
-def test_clear_conversation_env_unblocks_only_after_reset():
-    from lazymind.chat.service import chat_service
-
-    previous_store = dict(chat_service._conversation_env_vars)
-    previous_sid = lazyllm.globals._sid
-    old_dynamic_env = lazyllm.globals.get('dynamic_env_vars')
-    chat_service._conversation_env_vars.clear()
-    with tempfile.TemporaryDirectory() as tmp:
-        skill_name = _make_env_skill(tmp)
-        manager = SkillManager(dir=tmp)
-        set_env = build_session_env_tool(
-            chat_service._conversation_env_vars, 'conversation-clear',
-        )
-        try:
-            _begin_turn('turn-set', 'conversation-clear', chat_service._conversation_env_vars)
-            set_env(_MISSING_KEY, _SECRET)
-            assert clear_conversation_env('conversation-clear') is True
-            _begin_turn('turn-after-delete', 'conversation-clear', chat_service._conversation_env_vars)
-            assert _MISSING_KEY not in get_dynamic_env_vars()
-            with pytest.raises(ToolExecutionError):
-                _run_needs_key(manager, skill_name)
-        finally:
-            chat_service._conversation_env_vars.clear()
-            chat_service._conversation_env_vars.update(previous_store)
-            lazyllm.globals._init_sid(previous_sid)
-            if old_dynamic_env is None:
-                lazyllm.globals.pop('dynamic_env_vars', None)
-            else:
-                lazyllm.globals['dynamic_env_vars'] = old_dynamic_env
-
-
-def test_blocked_env_name_does_not_let_skill_continue():
-    store: dict[str, dict[str, str]] = {}
-    previous_sid = lazyllm.globals._sid
-    old_dynamic_env = lazyllm.globals.get('dynamic_env_vars')
-    with tempfile.TemporaryDirectory() as tmp:
-        skill_name = _make_env_skill(tmp)
-        manager = SkillManager(dir=tmp)
-        set_env = build_session_env_tool(store, 'conversation-blocked')
-        try:
-            _begin_turn('turn-blocked', 'conversation-blocked', store)
-            blocked = set_env('PATH', '/tmp/bin')
-            with pytest.raises(ToolExecutionError):
-                _run_needs_key(manager, skill_name)
-        finally:
-            lazyllm.globals._init_sid(previous_sid)
-            if old_dynamic_env is None:
-                lazyllm.globals.pop('dynamic_env_vars', None)
-            else:
-                lazyllm.globals['dynamic_env_vars'] = old_dynamic_env
-
-    assert blocked['error_type'] == 'InvalidEnvName'
-    assert store == {}
+def test_two_variables_are_collected_in_separate_secure_cards(runtime, tmp_path):
+    store, client, events = runtime
+    manager = make_skill(tmp_path, ['APP_ID', 'AWS_REGION'])
+    begin_turn(store, 'first')
+    for name in ['APP_ID', 'AWS_REGION']:
+        submit_card(store, client, events, name=name)
+        begin_turn(store, f'resume-{name}')
+    assert manager.run_script('probe', 'scripts/probe.py')['stdout'].strip() == 'configured'
+    assert store.get_many('one') == {'APP_ID': _SECRET, 'AWS_REGION': _SECRET}

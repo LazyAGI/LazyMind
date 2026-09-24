@@ -8,7 +8,7 @@ export interface UserEnvironmentVariable {
   enabled: boolean;
   description: string;
   masked_value: string;
-  credential_status?: "available" | "unavailable";
+  credential_status?: "available" | "unavailable" | "invalid_name";
   created_at: string;
   updated_at: string;
 }

@@ -13,7 +13,6 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/common/secretcrypto"
-	"lazymind/core/modelprovider"
 	"lazymind/core/userenv"
 )
 
@@ -52,7 +51,7 @@ func TestUserEnvCipherBindsRecord(t *testing.T) {
 func TestUserEnvMissingKeyFailsClosed(t *testing.T) {
 	setupUserEnvTest(t)
 	t.Setenv("LAZYMIND_USER_ENV_SECRET_KEY", "")
-	restore := modelprovider.SetCredentialKeyManager(nil)
+	restore := userenv.SetCredentialKeyManager(nil)
 	defer restore()
 	if _, err := userenv.EncryptValue(userEnvFixture(), "private-test-value"); err == nil {
 		t.Fatal("missing secure store must not fall back to a public key")
@@ -122,7 +121,7 @@ func TestUserEnvLegacyCredentialUpgradePreservesData(t *testing.T) {
 func TestUserEnvLegacyUpgradeWithoutNewKeyPreservesOriginalRow(t *testing.T) {
 	db := setupUserEnvTest(t)
 	t.Setenv("LAZYMIND_USER_ENV_SECRET_KEY", "")
-	restore := modelprovider.SetCredentialKeyManager(nil)
+	restore := userenv.SetCredentialKeyManager(nil)
 	defer restore()
 	row := userEnvFixture()
 	row.CredentialVersion = 1

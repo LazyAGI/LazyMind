@@ -6,7 +6,8 @@ import { createInstance } from "i18next";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import zhCN from "@/i18n/locales/zh-CN";
 import enUS from "@/i18n/locales/en-US";
-import UserEnvironmentVariablesSettings from "./UserEnvironmentVariablesSettings";
+import UserEnvironmentVariablesSettings, { validateEnvName } from "./UserEnvironmentVariablesSettings";
+import envNameCases from "../../../../tests/contracts/env_names.json";
 import * as api from "./userEnvApi";
 
 vi.mock("./userEnvApi", () => ({
@@ -47,6 +48,11 @@ function renderSettings(strictMode = false) {
 }
 
 describe("User environment variables", () => {
+  it.each(envNameCases)("shares the environment name contract for $name", async ({ name, valid }) => {
+    const result = validateEnvName(i18n.t, name);
+    if (valid) await expect(result).resolves.toBeUndefined();
+    else await expect(result).rejects.toThrow();
+  });
   it("keeps the Chinese and English translation keys aligned", () => {
     expect(Object.keys(zhCN.settingsPage.envVars).sort()).toEqual(Object.keys(enUS.settingsPage.envVars).sort());
   });
@@ -117,6 +123,23 @@ describe("User environment variables", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: /保\s*存/ }));
     expect(await within(dialog).findByText("密钥不能仅包含空白字符")).toBeInTheDocument();
     expect(api.patchUserEnvironmentVariable).not.toHaveBeenCalled();
+  });
+
+  it.each(["zh-CN", "en-US"] as const)("identifies reserved names without suggesting key recovery in %s", async (language) => {
+    await i18n.changeLanguage(language);
+    const copy = language === "zh-CN" ? zhCN.settingsPage.envVars : enUS.settingsPage.envVars;
+    const invalid = { ...row, name: "NODE_TLS_REJECT_UNAUTHORIZED", credential_status: "invalid_name" as const };
+    vi.mocked(api.listUserEnvironmentVariables).mockResolvedValue([invalid]);
+    vi.mocked(api.patchUserEnvironmentVariable).mockResolvedValue({ ...invalid, enabled: false });
+    renderSettings();
+    const status = await screen.findByRole("button", { name: copy.invalidNameTitle });
+    const toggle = screen.getByRole("switch");
+    fireEvent.click(toggle);
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
+    fireEvent.click(status);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(copy.invalidNameDescription)).toBeInTheDocument();
+    expect(within(dialog).queryByText(copy.unavailableDescription)).not.toBeInTheDocument();
   });
 
   it("keeps an unavailable credential visible, disableable and replaceable", async () => {

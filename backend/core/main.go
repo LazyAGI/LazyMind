@@ -50,6 +50,7 @@ import (
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/userenv"
 	"lazymind/core/workflow"
 	workflowexecutor "lazymind/core/workflow/executor"
 	workflowstore "lazymind/core/workflow/store"
@@ -769,6 +770,7 @@ func run(ctx context.Context) error {
 		log.Logger.Fatal().Msg("initialize local credential key manager failed")
 	}
 	modelprovider.SetCredentialKeyManager(credentialKeys)
+	userenv.SetCredentialKeyManager(credentialKeys)
 	if err := migrate.RunUp(); err != nil {
 		return &startupError{msg: "run SQL migrations", err: err}
 	}

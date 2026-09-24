@@ -37,6 +37,7 @@ import { WorkflowPanel } from "@/modules/chat/components/WorkflowPanel";
 import MultiAnswerDisplay, { type PreferenceType } from "../MultiAnswerDisplay";
 import FeedbackModal from "../FeedbackModal";
 import AskCard from "@/modules/chat/components/AskCard";
+import EnvInputCard from "@/modules/chat/components/EnvInputCard";
 import MailDraftCard from "@/modules/chat/components/MailDraftCard";
 import MailMailboxCard from "@/modules/chat/components/MailDraftCard/MailMailboxCard";
 import ToolLimitCard from "@/modules/chat/components/ToolLimitCard";
@@ -1324,6 +1325,30 @@ const AssistantMessage = (props: any) => {
     // Render ask_pending card if present
     if (item.ask_pending) {
       const askPending = item.ask_pending;
+      if (askPending.env_input) {
+        return (
+          <EnvInputCard
+            key={askPending.ask_id}
+            conversationId={sessionId}
+            historyId={item.history_id}
+            askId={askPending.ask_id}
+            input={askPending.env_input}
+            result={item.env_input_result}
+            disabled={runActive || !!hasLaterUserMessage || index !== length - 1 ||
+              (!!item.ask_answered && !item.env_input_result)}
+            onComplete={async (receipt) => {
+              updateMessage({ ...item, ask_answered: true, env_input_result: receipt });
+              await props.sendMessage?.(
+                t(`settingsPage.envVars.inputContinuation.${
+                  receipt.status === "configured" && receipt.enabled === false ? "disabled" : receipt.status
+                }`, {
+                  name: receipt.name, scope: t(`settingsPage.envVars.scope.${receipt.scope}`),
+                }),
+              );
+            }}
+          />
+        );
+      }
       const showAskCard = shouldRenderAskPending(
         item.ask_answered,
         index === length - 1,

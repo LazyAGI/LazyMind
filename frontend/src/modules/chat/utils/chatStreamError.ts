@@ -134,6 +134,9 @@ export function parseCoreChatStreamError(
 
   const body = isRecord(payload.data) ? payload.data : payload;
   const detail = isRecord(body.detail) ? body.detail : undefined;
+  if (detail?.reason === "user_env_invalid_name") {
+    return { appCode, httpStatus, semanticCode: "user_env_invalid_name", reason: "runtime_failure" };
+  }
   if (detail?.reason === "user_env_unavailable" ||
       message === "Unable to access user environment variables; check the credential key configuration") {
     return { appCode, httpStatus, semanticCode: "user_env_unavailable", reason: "runtime_failure" };

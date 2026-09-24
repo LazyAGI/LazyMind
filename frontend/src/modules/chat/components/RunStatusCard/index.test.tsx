@@ -84,11 +84,11 @@ describe("RunStatusCard", () => {
     expect(screen.getByText(/chat\.runStatus\.runtimeError/)).toBeInTheDocument();
   });
 
-  it("explains unavailable environment credentials without suggesting a model change", () => {
+  it.each(["user_env_unavailable", "user_env_invalid_name"])("explains %s without suggesting a model change", (code) => {
     render(<RunStatusCard terminal={{
-      status: "failed", reason: "runtime_failure", code: "user_env_unavailable", partial_output: false,
+      status: "failed", reason: "runtime_failure", code, partial_output: false,
     }} />);
-    expect(screen.getByRole("alert")).toHaveTextContent("chat.runStatus.codes.user_env_unavailable");
+    expect(screen.getByRole("alert")).toHaveTextContent(`chat.runStatus.codes.${code}`);
     expect(screen.queryByRole("button", { name: "chat.changeModel" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "chat.checkModelSettings" })).not.toBeInTheDocument();
   });

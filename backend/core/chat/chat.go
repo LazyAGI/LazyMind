@@ -220,6 +220,17 @@ type AskPendingEvent struct {
 	MailDrafts    []map[string]any           `json:"mail_drafts,omitempty"`
 	ReviewHook    map[string]any             `json:"review_hook,omitempty"`
 	UserEnvDelete *UserEnvDeleteConfirmation `json:"user_env_delete,omitempty"`
+	EnvInput      *EnvironmentInputRequest   `json:"env_input,omitempty"`
+}
+
+// EnvironmentInputRequest contains metadata only; values use a dedicated authenticated API.
+type EnvironmentInputRequest struct {
+	Name              string     `json:"name"`
+	Scope             string     `json:"scope"`
+	ID                string     `json:"id,omitempty"`
+	ExpectedUpdatedAt *time.Time `json:"expected_updated_at,omitempty"`
+	Description       *string    `json:"description,omitempty"`
+	Enabled           *bool      `json:"enabled,omitempty"`
 }
 
 type UserEnvDeleteConfirmation struct {

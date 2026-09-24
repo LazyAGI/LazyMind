@@ -43,9 +43,8 @@ from lazymind.chat.engine.tools.memory import MemoryTools
 from lazymind.chat.engine.tools.lazy_kb import KBToolkit, kb_tmp_search
 from lazymind.model_config import get_model_role_runtime_identity, is_model_role_available
 from lazymind.chat.engine.tools.ask_user import ask_user
+from lazymind.chat.engine.agent_runtime.conversation_env import ConversationEnvLease, ConversationEnvStore
 from lazymind.chat.engine.tools.session_env import (
-    ConversationEnvStore,
-    ConversationEnvLease,
     build_session_env_tool,
     build_user_env_tool,
     build_delete_session_env_tool,
@@ -228,65 +227,19 @@ ASK_USER_QUERY_APPENDIX = (
     'do NOT call `ask_user` merely to offer optional next steps or say what the user can ask for next; '
     'write that brief follow-up in assistant prose instead.'
 )
-SESSION_ENV_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
-    'tool_policy': (
-        '# Session environment for skills (this conversation only)\n'
-        '`set_session_env` stores variables for THIS conversation only. Other conversations, '
-        'including a newly opened chat, cannot read them.\n'
-        'Use this tool only when the user has NOT requested persistent storage. '
-        'For an explicit permanent, user-level, future-conversation, or Settings-saved request, '
-        'use `set_user_env` instead; do not also create a conversation override. '
-        'The following recovery steps apply only to temporary setup.\n'
-        'When a skill or `run_script` fails, use `missing_env` in the tool result when present '
-        'as the names to collect. If `missing_env` is absent, infer from stderr/stdout. Always '
-        'attempt the skill first; do not wait for credentials before the first run.\n'
-        'When a skill or `run_script` fails because an API key, token, or environment variable '
-        'is missing:\n'
-        '1. If this turn already includes the name and value (including a proactive `NAME=value` '
-        'or `NAME: value`), call `set_session_env` then immediately retry the same skill/`run_script`.\n'
-        '2. Otherwise, if `ask_user` is available, call it once with `type=text` asking only for '
-        'the missing variable(s). Name the exact env var in the question text. State that it applies '
-        'only to this conversation. Never ask for credentials in assistant prose.\n'
-        '3. After the user answers, call `set_session_env` then immediately retry. Do not ask the '
-        'user to restart the service or start a new chat.\n'
-        'The user may also proactively ask you to set a temporary variable. Call `set_session_env` then continue '
-        'the original task.\n'
-        'Never echo secret values in the final answer.'
-    ),
-}
 SESSION_ENV_QUERY_APPENDIX = (
-    'ATTENTION — if this turn supplies an environment variable name and value (an `ask_user` '
-    'credential answer, a proactive `NAME=value` / `NAME: value`, or an explicit request to '
-    'configure a key), and does not explicitly request user-level or persistent storage, '
-    'call `set_session_env` first for each provided variable, then immediately '
-    'retry the interrupted skill/`run_script` and continue the original task. Do not ask the user '
-    'to restart. These values apply only to this conversation. Never echo the secret value. '
-    'For either environment-setting tool, copy the actual value from the CURRENT user message '
-    'or credential answer into the value argument unchanged. Passing it to this configuration '
-    'tool is required; it is not a public reply. Historical tool arguments omit secret values '
-    'and UI/log copies may show placeholders: never copy those placeholders into a new call. '
-    'The execution path does not redact tool arguments. If a call returns RedactedEnvValue, '
-    'correct the argument using the current user input; do not claim transport redaction or '
-    'ask for the value again when it is already present.'
+    'For environment setup, call set_session_env with the name only. It opens a secure input card. '
+    'Never request or copy values through chat, ask_user, tool arguments, scripts, or messages. '
+    'If a user has already pasted a value, do not repeat it; direct them to the secure input card. '
+    'After the backend reports configuration complete, resume the interrupted task without asking again.'
 )
-USER_ENV_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
-    'tool_policy': (
-        '# User environment variables (persistent settings)\n'
-        'For both `set_session_env` and `set_user_env`, pass the actual value supplied by the '
-        'user in tool arguments. Never substitute `<redacted>` or a masked display value. '
-        'The runtime redacts logs and display copies separately from execution arguments.\n'
-        '`set_user_env` stores variables persistently for the current user and makes them available '
-        'to future conversations. Call it only when the user explicitly asks for a user-level, '
-        'permanent, future-conversation, or Settings-saved environment variable. If the user simply '
-        'provides `NAME=value`, asks to configure a key, or answers a missing-env prompt without '
-        'asking for persistence, call `set_session_env` instead.\n'
-        'Never echo secret values in the final answer.'
-    ),
-}
+SESSION_ENV_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {'tool_policy': SESSION_ENV_QUERY_APPENDIX}
 USER_ENV_QUERY_APPENDIX = (
-    'ATTENTION — use `set_user_env` only for an explicit persistent/user-level/future-conversation '
-    'environment variable request. For ordinary credential setup in this chat, use `set_session_env`.'
+    'Use set_user_env only when the user explicitly requests permanent/user-level/Settings storage. '
+    'Otherwise use set_session_env. Both tools request secure input, never accept a value, and stop the turn. '
+    'The user submits directly to the backend. Only configuration status is returned to you.'
 )
+USER_ENV_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {'tool_policy': USER_ENV_QUERY_APPENDIX}
 KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         "# Selected Knowledge Base Rules (CRITICAL — follow strictly)\n"
@@ -589,18 +542,18 @@ ASK_USER_TOOL_CONFIG = ToolConfig(
 
 
 def build_session_env_tool_config(
-    conversation_env_store: ConversationEnvStore | dict[str, dict[str, str]],
+    conversation_env_store: ConversationEnvStore,
     conversation_id: str,
     lease: ConversationEnvLease | None = None,
 ) -> ToolConfig:
     return ToolConfig(
         name='set_session_env',
         label='会话环境变量',
-        description='为当前对话临时配置 skill 脚本所需环境变量，并立即对 run_script 生效',
+        description='通过安全输入卡片配置当前会话的临时环境变量',
         tool=build_session_env_tool(conversation_env_store, conversation_id, lease),
         module='execution',
         label_en='Session Environment',
-        description_en='Temporarily configure environment variables for skill scripts in this conversation.',
+        description_en='Request secure input of a temporary environment variable for this conversation.',
         appendix_system_prompt=SESSION_ENV_TOOL_POLICY_APPENDIX,
         appendix_query=SESSION_ENV_QUERY_APPENDIX,
     )
@@ -609,11 +562,11 @@ def build_session_env_tool_config(
 USER_ENV_TOOL_CONFIG = ToolConfig(
     name='set_user_env',
     label='用户环境变量',
-    description='将环境变量保存为当前用户的持久配置，供未来对话使用',
+    description='通过安全输入卡片配置用户级环境变量，供未来对话使用',
     tool=build_user_env_tool(),
     module='execution',
     label_en='User Environment',
-    description_en='Persist user-level environment variables for future conversations.',
+    description_en='Request secure input of a persistent user-level environment variable for future conversations.',
     appendix_system_prompt=USER_ENV_TOOL_POLICY_APPENDIX,
     appendix_query=USER_ENV_QUERY_APPENDIX,
 )

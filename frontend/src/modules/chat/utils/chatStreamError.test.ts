@@ -54,6 +54,14 @@ describe("Core chat stream error mapping", () => {
       .toEqual({ appCode: 2000000, httpStatus: status, semanticCode: "request_rejected", reason: "runtime_failure" });
   });
 
+  it("distinguishes an invalid environment name from an encryption failure", () => {
+    expect(parseCoreChatStreamError({ code: 2003122, message: "Reserved environment name",
+      data: { detail: { reason: "user_env_invalid_name", name: "NODE_TLS_REJECT_UNAUTHORIZED" } },
+    }, 409)).toEqual({
+      appCode: 2003122, httpStatus: 409, semanticCode: "user_env_invalid_name", reason: "runtime_failure",
+    });
+  });
+
   it.each([
     { code: 2000000, message: "Internal error", data: { detail: { reason: "user_env_unavailable" } } },
     { code: 2000000, message: "Unable to access user environment variables; check the credential key configuration" },

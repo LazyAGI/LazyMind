@@ -3,8 +3,10 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +28,206 @@ func setupUserEnvTest(t *testing.T) *orm.DB {
 	corestore.Init(db.DB, nil, nil)
 	t.Cleanup(func() { corestore.Init(nil, nil, nil) })
 	return db
+}
+
+func seedEnvironmentInput(t *testing.T, db *gorm.DB, target EnvironmentInputRequest) orm.ChatHistory {
+	t.Helper()
+	conv := orm.Conversation{ID: "input-conv", BaseModel: orm.BaseModel{CreateUserID: "owner"}}
+	if err := db.Create(&conv).Error; err != nil {
+		t.Fatal(err)
+	}
+	ext, _ := json.Marshal(map[string]any{"ask_pending": AskPendingEvent{AskID: "input-card", EnvInput: &target}, "ask_answered": false})
+	history := orm.ChatHistory{ID: "input-history", ConversationID: conv.ID, Seq: 1, Ext: ext}
+	if err := db.Create(&history).Error; err != nil {
+		t.Fatal(err)
+	}
+	return history
+}
+
+func sendEnvironmentInput(owner, body string) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	SubmitEnvironmentInput(rec, newUserEnvRequest(http.MethodPost, "/unused", body, owner, map[string]string{"name": "input-conv"}))
+	return rec
+}
+
+func TestEnvironmentInputUserValueBypassesHistoryAndIsIdempotent(t *testing.T) {
+	db := setupUserEnvTest(t)
+	h := seedEnvironmentInput(t, db.DB, EnvironmentInputRequest{Name: "SERVICE_BASE_URL", Scope: "user"})
+	body := `{"history_id":"input-history","ask_id":"input-card","value":" synthetic-input-secret "}`
+	rec := sendEnvironmentInput("owner", body)
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "synthetic-input-secret") {
+		t.Fatalf("status=%d", rec.Code)
+	}
+	var row orm.UserEnvironmentVariable
+	if err := db.Where("user_id = ?", "owner").First(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	if value, err := userenv.DecryptValue(row); err != nil || value != " synthetic-input-secret " {
+		t.Fatal("input was not encrypted correctly")
+	}
+	if err := db.First(&h, "id = ?", h.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(h.Ext), "synthetic-input-secret") || strings.Contains(string(h.Ext), "ask_saved_answers") {
+		t.Fatal("secret entered history")
+	}
+	item := chatHistoryToResponseItem(h)
+	if item["env_input_result"] == nil || item["ask_answered"] != true {
+		t.Fatal("missing safe receipt")
+	}
+	rec = sendEnvironmentInput("owner", strings.ReplaceAll(body, "synthetic-input-secret", "replayed-secret"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("replay status=%d", rec.Code)
+	}
+	var unchanged orm.UserEnvironmentVariable
+	db.First(&unchanged, "id = ?", row.ID)
+	if unchanged.ValueCiphertext != row.ValueCiphertext || unchanged.CredentialRevision != row.CredentialRevision {
+		t.Fatal("replay changed value")
+	}
+}
+
+func TestEnvironmentInputRejectsCrossUserStaleAndOrdinaryAnswerPaths(t *testing.T) {
+	for _, scenario := range []string{"other_owner", "wrong_card", "old_history", "fork", "archived", "autosave", "structured"} {
+		t.Run(scenario, func(t *testing.T) {
+			db := setupUserEnvTest(t)
+			h := seedEnvironmentInput(t, db.DB, EnvironmentInputRequest{Name: "APP_ID", Scope: "user"})
+			owner := "owner"
+			body := `{"history_id":"input-history","ask_id":"input-card","value":"synthetic-secret"}`
+			switch scenario {
+			case "other_owner":
+				owner = "other"
+			case "wrong_card":
+				body = strings.ReplaceAll(body, "input-card", "wrong")
+			case "old_history":
+				db.Create(&orm.ChatHistory{ID: "new-history", ConversationID: h.ConversationID, Seq: 2})
+			case "fork":
+				db.Model(&h).Update("ext", strings.Replace(string(h.Ext), "{", `{"fork_read_only":true,`, 1))
+			case "archived":
+				db.Model(&orm.Conversation{}).Where("id = ?", h.ConversationID).Update("archived_at", time.Now())
+			case "autosave":
+				rec := httptest.NewRecorder()
+				SaveAskAnswers(rec, newUserEnvRequest(http.MethodPatch, "/unused", `{"history_id":"input-history","answers":{"0":{"value":"synthetic-secret"}}}`, owner, nil))
+				if rec.Code != http.StatusConflict {
+					t.Fatalf("autosave status=%d", rec.Code)
+				}
+				return
+			case "structured":
+				if validAskSubmission(map[string]any{"ask_id": "input-card", "env_input": map[string]any{}},
+					map[string]any{"ask_id": "input-card", "questions": []any{}}) {
+					t.Fatal("ordinary answer accepted")
+				}
+				return
+			}
+			rec := sendEnvironmentInput(owner, body)
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("status=%d", rec.Code)
+			}
+			var count int64
+			db.Model(&orm.UserEnvironmentVariable{}).Count(&count)
+			if count != 0 {
+				t.Fatal("rejected input persisted a value")
+			}
+		})
+	}
+}
+
+func TestEnvironmentInputUpdatePreservesMetadataAndRejectsStaleVersion(t *testing.T) {
+	for _, stale := range []bool{false, true} {
+		t.Run(fmt.Sprint(stale), func(t *testing.T) {
+			db := setupUserEnvTest(t)
+			enabled := false
+			created, err := userenv.Create(db.DB, "owner", userenv.CreateRequest{Name: "AWS_REGION", Value: "old", Enabled: &enabled, Description: "keep"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := EnvironmentInputRequest{Name: created.Name, Scope: "user", ID: created.ID, ExpectedUpdatedAt: &created.UpdatedAt}
+			seedEnvironmentInput(t, db.DB, target)
+			if stale {
+				value := "other"
+				if _, err := userenv.Patch(db.DB, "owner", created.ID, userenv.PatchRequest{Value: &value}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rec := sendEnvironmentInput("owner", `{"history_id":"input-history","ask_id":"input-card","value":"new"}`)
+			expected := http.StatusOK
+			if stale {
+				expected = http.StatusConflict
+			}
+			if rec.Code != expected {
+				t.Fatalf("status=%d", rec.Code)
+			}
+			if !stale && !strings.Contains(rec.Body.String(), `"enabled":false`) {
+				t.Fatal("receipt must report that the updated variable remains disabled")
+			}
+			var row orm.UserEnvironmentVariable
+			db.First(&row, "id = ?", created.ID)
+			value, _ := userenv.DecryptValue(row)
+			want := "new"
+			if stale {
+				want = "other"
+			}
+			if row.Enabled || row.Description != "keep" || value != want {
+				t.Fatal("unexpected value or metadata")
+			}
+		})
+	}
+}
+
+func TestEnvironmentInputSessionAndCancelNeverPersistValue(t *testing.T) {
+	for _, scenario := range []string{"save", "cancel", "lost-response"} {
+		t.Run(scenario, func(t *testing.T) {
+			cancel := scenario != "save"
+			status := "configured"
+			if scenario == "cancel" {
+				status = "canceled"
+			}
+			db := setupUserEnvTest(t)
+			h := seedEnvironmentInput(t, db.DB, EnvironmentInputRequest{Name: "a_api_key", Scope: "conversation"})
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if r.Header.Get("X-LazyMind-Internal-Token") != "test-internal" {
+					t.Error("missing service authentication")
+				}
+				var payload map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					t.Error(err)
+				}
+				if payload["conversation_id"] != h.ConversationID || payload["ask_id"] != "input-card" || payload["cancel"] != cancel {
+					t.Error("invalid internal input")
+				}
+				if (cancel && payload["value"] != nil) || (!cancel && payload["value"] != "temporary-secret") {
+					t.Error("incorrect value transmission")
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "status": status})
+			}))
+			defer server.Close()
+			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+			t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "test-internal")
+			body := fmt.Sprintf(`{"history_id":"input-history","ask_id":"input-card","value":"temporary-secret","cancel":%t}`, cancel)
+			for i := 0; i < 2; i++ {
+				rec := sendEnvironmentInput("owner", body)
+				if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "temporary-secret") {
+					t.Fatalf("status=%d", rec.Code)
+				}
+				if !strings.Contains(rec.Body.String(), `"status":"`+status+`"`) {
+					t.Fatal("receipt must match the worker's actual outcome")
+				}
+			}
+			if calls != 1 {
+				t.Fatalf("calls=%d", calls)
+			}
+			var count int64
+			db.Model(&orm.UserEnvironmentVariable{}).Count(&count)
+			if count != 0 {
+				t.Fatal("session value persisted as user configuration")
+			}
+			db.First(&h, "id = ?", h.ID)
+			if strings.Contains(string(h.Ext), "temporary-secret") {
+				t.Fatal("session value persisted in history")
+			}
+		})
+	}
 }
 
 func TestUserEnvDeletionLateAutosaveCannotRestoreConfirmation(t *testing.T) {
@@ -310,6 +512,49 @@ func TestApplyUserEnvironmentRuntimeConfigOnlyInjectsEnabledVars(t *testing.T) {
 	}
 }
 
+func TestUserEnvReservedPersistedNameCannotLoadOrEnable(t *testing.T) {
+	db := setupUserEnvTest(t)
+	row := orm.UserEnvironmentVariable{
+		ID: "env_old_reserved", UserID: "user-reserved", Name: "NODE_TLS_REJECT_UNAUTHORIZED",
+		CredentialVersion: userenv.CredentialVersion, CredentialRevision: 1, Enabled: true,
+	}
+	var err error
+	row.ValueCiphertext, err = userenv.EncryptValue(row, "0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	env, loadErr := userenv.LoadEnabled(context.Background(), db.DB, row.UserID)
+	if loadErr == nil || len(env) != 0 {
+		t.Fatal("previously stored reserved variable must not enter runtime")
+	}
+	rec := httptest.NewRecorder()
+	replyUserEnvError(rec, loadErr)
+	if !strings.Contains(rec.Body.String(), "user_env_invalid_name") || strings.Contains(rec.Body.String(), "credential key") {
+		t.Fatalf("policy error must not suggest changing encryption keys: %s", rec.Body.String())
+	}
+	items, err := userenv.List(db.DB, row.UserID)
+	if err != nil || len(items) != 1 || items[0].CredentialStatus != "invalid_name" {
+		t.Fatalf("list must identify the invalid name: %v", err)
+	}
+	enabled := false
+	if saved, err := userenv.Patch(db.DB, row.UserID, row.ID, userenv.PatchRequest{Enabled: &enabled}); err != nil || saved.CredentialStatus != "invalid_name" {
+		t.Fatalf("must allow disabling reserved variable: %v", err)
+	}
+	if _, err := userenv.LoadEnabled(context.Background(), db.DB, row.UserID); err != nil {
+		t.Fatalf("disabled reserved variable should not block chat: %v", err)
+	}
+	enabled = true
+	if _, err := userenv.Patch(db.DB, row.UserID, row.ID, userenv.PatchRequest{Enabled: &enabled}); err == nil {
+		t.Fatal("must not re-enable reserved variable")
+	}
+	if err := userenv.Delete(db.DB, row.UserID, row.ID, "", nil); err != nil {
+		t.Fatalf("must allow deleting reserved variable: %v", err)
+	}
+}
+
 func TestPatchUserEnvironmentVariableRenamingReencryptsValue(t *testing.T) {
 	db := setupUserEnvTest(t)
 	ctx := context.Background()
@@ -358,12 +603,32 @@ func TestPatchUserEnvironmentVariableRenamingReencryptsValue(t *testing.T) {
 
 func TestNormalizeUserEnvNameRejectsRuntimeControlNames(t *testing.T) {
 	for _, name := range []string{"HTTP_PROXY", "SSL_CERT_FILE", "BASH_ENV", "PYTHONPATH"} {
-		if _, err := normalizeUserEnvName(name); err == nil {
+		if _, err := userenv.NormalizeName(name); err == nil {
 			t.Fatalf("expected %s to be rejected", name)
 		}
 	}
-	if got, err := normalizeUserEnvName("tavily_api_key"); err != nil || got != "tavily_api_key" {
+	if got, err := userenv.NormalizeName("tavily_api_key"); err != nil || got != "tavily_api_key" {
 		t.Fatalf("normalize credential env = %q, %v", got, err)
+	}
+}
+
+func TestUserEnvNameSharedContract(t *testing.T) {
+	raw, err := os.ReadFile("../../../tests/contracts/env_names.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []struct {
+		Name  string `json:"name"`
+		Valid bool   `json:"valid"`
+	}
+	if err := json.Unmarshal(raw, &cases); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cases {
+		got, err := userenv.NormalizeName(c.Name)
+		if (err == nil) != c.Valid || (c.Valid && got != c.Name) {
+			t.Errorf("name %q: got %q, err %v", c.Name, got, err)
+		}
 	}
 }
 

@@ -3,25 +3,33 @@ from __future__ import annotations
 import asyncio
 import json
 from types import SimpleNamespace
+from pathlib import Path
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from lazyllm.tools import ToolManager
+from lazyllm.tools.agent.toolError import ToolExecutionError
+
+from lazymind.chat.engine.agent_runtime.conversation_env import ConversationEnvStore
+from lazymind.chat.engine.agent_runtime.env_runtime import inject_runtime_env
+from lazymind.chat.engine.agent_runtime.env_policy import validate_env_name
+from lazymind.chat.engine.agent_runtime.env_redaction import redact_session_env_arguments
+from lazymind.chat.engine.agent_runtime.env_input import session_env_inputs
+from lazymind.chat.api import agent_control_routes
 
 import lazyllm
 import pytest
 
 from lazymind.chat.engine.tools.session_env import (
-    ConversationEnvStore,
     build_session_env_tool,
     build_user_env_tool,
     build_delete_session_env_tool,
     build_delete_user_env_tool,
-    inject_runtime_env,
-    redact_session_env_arguments,
 )
 from lazymind.chat.service.chat_service import clear_conversation_env
 from lazymind.chat.service import chat_service
 from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.service.component.tool_registry import (
     SESSION_ENV_QUERY_APPENDIX,
-    SESSION_ENV_TOOL_POLICY_APPENDIX,
     USER_ENV_TOOL_CONFIG,
     build_session_env_tool_config,
 )
@@ -75,25 +83,8 @@ def test_delete_session_env_removes_only_override_and_restores_default(defaults)
         assert 'test-value' not in str(result)
         assert tool('a_api_key')['deleted'] is False
         store.clear('one')
-        assert tool('a_api_key')['error_type'] == 'StaleConversationEnvError'
-    finally:
-        _restore_dynamic_env(previous)
-
-
-@pytest.mark.parametrize('enabled', [True, False])
-def test_delete_session_env_uses_user_default_updated_in_same_turn(monkeypatch, enabled):
-    monkeypatch.setattr('lazymind.chat.engine.tools.session_env.post_core_api',
-                        lambda *args: {'response': {'data': {'enabled': enabled}}})
-    store = ConversationEnvStore()
-    scoped, lease = store.snapshot('one')
-    previous = lazyllm.globals.get('dynamic_env_vars')
-    try:
-        inject_runtime_env({'a_api_key': 'old-user-test'}, scoped)
-        build_session_env_tool(store, 'one', lease)('a_api_key', 'session-test')
-        build_user_env_tool()('a_api_key', 'updated-user-test', enabled=enabled)
-        assert lazyllm.globals['dynamic_env_vars']['a_api_key'] == 'session-test'
-        build_delete_session_env_tool(store, 'one', lease)('a_api_key')
-        assert lazyllm.globals['dynamic_env_vars'] == ({'a_api_key': 'updated-user-test'} if enabled else {})
+        with pytest.raises(ToolExecutionError, match='cleared'):
+            tool('a_api_key')
     finally:
         _restore_dynamic_env(previous)
 
@@ -122,45 +113,6 @@ def test_delete_user_env_only_emits_confirmation_with_safe_metadata(monkeypatch,
     assert len(events) == 1
 
 
-@pytest.mark.parametrize('scope', ['user', 'conversation'])
-@pytest.mark.parametrize('value', [' leading-password', 'trailing-password ', ' both-password '])
-def test_env_tools_preserve_credential_whitespace(monkeypatch, scope, value):
-    calls = []
-
-    def save(path, payload):
-        calls.append(payload)
-        return {'response': {'data': {'enabled': True}}}
-
-    monkeypatch.setattr('lazymind.chat.engine.tools.session_env.post_core_api', save)
-    backing = {}
-    tool = build_user_env_tool() if scope == 'user' else build_session_env_tool(backing, 'whitespace-test')
-    old = lazyllm.globals.get('dynamic_env_vars')
-    lazyllm.globals['dynamic_env_vars'] = {}
-    try:
-        result = tool('SERVICE_PASSWORD', value)
-        assert result['status'] == 'ok'
-        assert lazyllm.globals['dynamic_env_vars']['SERVICE_PASSWORD'] == value
-        if scope == 'user':
-            assert calls[0]['value'] == value
-        else:
-            assert backing['whitespace-test']['SERVICE_PASSWORD'] == value
-    finally:
-        _restore_dynamic_env(old)
-
-
-@pytest.mark.parametrize('scope', ['user', 'conversation'])
-@pytest.mark.parametrize('value', ['', '   ', '\t\n', 'bad\0value'])
-def test_env_tools_reject_empty_or_invalid_credentials(monkeypatch, scope, value):
-    def unexpected_save(*args, **kwargs):
-        pytest.fail('invalid credential reached persistence')
-
-    monkeypatch.setattr('lazymind.chat.engine.tools.session_env.post_core_api', unexpected_save)
-    backing = {}
-    tool = build_user_env_tool() if scope == 'user' else build_session_env_tool(backing, 'invalid-value-test')
-    assert tool('SERVICE_PASSWORD', value)['error_type'] == 'InvalidEnvValue'
-    assert not backing
-
-
 @pytest.mark.parametrize('has_user_env', [True, False])
 def test_chat_env_availability_matches_runtime_without_exposing_values(monkeypatch, has_user_env):
     store = ConversationEnvStore()
@@ -171,7 +123,7 @@ def test_chat_env_availability_matches_runtime_without_exposing_values(monkeypat
 
     def create_agent(self, llm, plan):
         observed_env.append(dict(lazyllm.globals.get('dynamic_env_vars', {})))
-        assert 'delete_user_env' in plan.stop_tools
+        assert {'delete_user_env', 'set_user_env', 'set_session_env'} <= set(plan.stop_tools)
         assert 'delete_session_env' not in plan.stop_tools
         return SimpleNamespace(describe_context=lambda *_args: {})
 
@@ -208,25 +160,6 @@ def test_chat_env_availability_matches_runtime_without_exposing_values(monkeypat
     assert observed_env == [expected]
 
 
-def test_set_session_env_updates_store_and_runtime_without_echoing_secret():
-    store: dict[str, dict[str, str]] = {}
-    tool = build_session_env_tool(store, 'conversation-1')
-    old_dynamic_env = lazyllm.globals.get('dynamic_env_vars')
-    lazyllm.globals['dynamic_env_vars'] = {}
-    try:
-        result = tool('REDFOX_API_KEY', 'secret-value')
-        dynamic_env = lazyllm.globals.get('dynamic_env_vars')
-    finally:
-        _restore_dynamic_env(old_dynamic_env)
-
-    assert result['status'] == 'ok'
-    assert result['name'] == 'REDFOX_API_KEY'
-    assert result['value_set'] is True
-    assert 'secret-value' not in str(result)
-    assert store['conversation-1']['REDFOX_API_KEY'] == 'secret-value'
-    assert dynamic_env['REDFOX_API_KEY'] == 'secret-value'
-
-
 def test_conversation_env_store_supports_get_many_and_clear():
     backing: dict[str, dict[str, str]] = {}
     store = ConversationEnvStore(backing)
@@ -241,114 +174,6 @@ def test_conversation_env_store_supports_get_many_and_clear():
     assert store.clear('conversation-1') is True
     assert store.clear('conversation-1') is False
     assert backing == {}
-
-
-@pytest.mark.parametrize('scope', ['conversation', 'user'])
-def test_redaction_placeholder_cannot_overwrite_configuration(monkeypatch, scope):
-    from lazymind.chat.engine.tools import session_env
-
-    def unexpected_request(*args, **kwargs):
-        pytest.fail('redacted values must be rejected before contacting Core')
-
-    monkeypatch.setattr(session_env, 'post_core_api', unexpected_request)
-    backing = {'test-conversation': {'CODEX_E2E_TOKEN': 'existing-value'}}
-    tool = build_user_env_tool() if scope == 'user' else build_session_env_tool(backing, 'test-conversation')
-    result = tool('CODEX_E2E_TOKEN', '<redacted>')
-    assert result['status'] == 'error'
-    assert result['error_type'] == 'RedactedEnvValue'
-    assert backing['test-conversation']['CODEX_E2E_TOKEN'] == 'existing-value'
-
-
-@pytest.mark.parametrize('tool_name', ['set_session_env', 'set_user_env', 'delete_session_env', 'delete_user_env'])
-@pytest.mark.parametrize('language, failure', [('zh', '未能'), ('en', 'could not')])
-def test_env_business_error_is_not_rendered_as_success(tool_name, language, failure):
-    result = {'ok': True, 'value': {'status': 'error', 'name': 'CODEX_E2E_TOKEN', 'error_type': 'RedactedEnvValue'}}
-    preview = _tool_result_preview(tool_name, result, language=language)
-    assert '已可用于' not in preview
-    assert '已调用完成' not in preview
-    assert failure.lower() in preview.lower()
-    if tool_name.startswith('delete_'):
-        assert 'CODEX_E2E_TOKEN' in preview
-
-
-def test_set_session_env_rejects_reserved_names():
-    store: dict[str, dict[str, str]] = {}
-    tool = build_session_env_tool(store, 'conversation-1')
-
-    result = tool('PATH', '/tmp/bin')
-    proxy = tool('HTTP_PROXY', 'http://evil.example')
-    bash_env = tool('BASH_ENV', '/tmp/hook.sh')
-
-    assert result['status'] == 'error'
-    assert result['error_type'] == 'InvalidEnvName'
-    assert proxy['error_type'] == 'InvalidEnvName'
-    assert bash_env['error_type'] == 'InvalidEnvName'
-    assert store == {}
-
-
-def test_set_session_env_rejects_non_credential_and_runtime_control_names():
-    store: dict[str, dict[str, str]] = {}
-    tool = build_session_env_tool(store, 'conversation-1')
-
-    plain_config = tool('OPENAI_ORG_ID', 'org-1')
-    runtime_config = tool('MODEL_CONFIG_TOKEN', 'secret-value')
-    cert_path = tool('CUSTOM_CERT_SECRET', 'secret-value')
-
-    assert plain_config['error_type'] == 'InvalidEnvName'
-    assert 'credential name' in plain_config['error']
-    assert runtime_config['error_type'] == 'InvalidEnvName'
-    assert 'runtime behavior' in runtime_config['error']
-    assert cert_path['error_type'] == 'InvalidEnvName'
-    assert 'runtime behavior' in cert_path['error']
-    assert store == {}
-
-
-def test_set_session_env_rejects_invalid_name_and_empty_value():
-    store: dict[str, dict[str, str]] = {}
-    tool = build_session_env_tool(store, 'conversation-1')
-
-    invalid_name = tool('RED FOX', 'secret-value')
-    empty_value = tool('REDFOX_API_KEY', '  ')
-
-    assert invalid_name['error_type'] == 'InvalidEnvName'
-    assert empty_value['error_type'] == 'InvalidEnvValue'
-    assert store == {}
-
-
-def test_set_session_env_uses_globals_sid_when_conversation_id_missing():
-    store: dict[str, dict[str, str]] = {}
-    tool = build_session_env_tool(store, '')
-    previous_sid = lazyllm.globals._sid
-    old_dynamic_env = lazyllm.globals.get('dynamic_env_vars')
-    lazyllm.globals._init_sid('fallback-sid')
-    lazyllm.globals['dynamic_env_vars'] = {}
-    try:
-        result = tool('REDFOX_API_KEY', 'secret-value')
-    finally:
-        _restore_dynamic_env(old_dynamic_env)
-        lazyllm.globals._init_sid(previous_sid)
-
-    assert result['status'] == 'ok'
-    assert result['conversation_id'] == 'fallback-sid'
-    assert store['fallback-sid']['REDFOX_API_KEY'] == 'secret-value'
-
-
-def test_session_env_tool_config_name_matches_function():
-    config = build_session_env_tool_config({}, 'conversation-1')
-
-    assert config.name == 'set_session_env'
-    assert config.tool.__name__ == 'set_session_env'
-    assert config.appendix_system_prompt is SESSION_ENV_TOOL_POLICY_APPENDIX
-    assert config.appendix_query is SESSION_ENV_QUERY_APPENDIX
-
-
-def test_session_env_instructions_defer_explicit_persistence_to_user_tool():
-    tool = build_session_env_tool({}, 'conversation-1')
-    for instructions in (tool.__doc__, SESSION_ENV_TOOL_POLICY_APPENDIX['tool_policy']):
-        instructions = ' '.join(instructions.split())
-        assert 'use `set_user_env` instead' in instructions
-        assert 'do not also create a conversation override' in instructions
-        assert 'only to temporary setup' in instructions
 
 
 def test_runtime_env_replaces_stale_credentials_and_preserves_explicit_override():
@@ -368,26 +193,6 @@ def test_runtime_env_replaces_stale_credentials_and_preserves_explicit_override(
         assert lazyllm.globals['conversation_env_overrides'] == {}
     finally:
         _restore_dynamic_env(old)
-
-
-def test_set_session_env_is_scoped_to_conversation():
-    store: dict[str, dict[str, str]] = {}
-    tool_a = build_session_env_tool(store, 'conversation-a')
-    tool_b = build_session_env_tool(store, 'conversation-b')
-    old_dynamic_env = lazyllm.globals.get('dynamic_env_vars')
-    lazyllm.globals['dynamic_env_vars'] = {}
-    try:
-        result_a = tool_a('REDFOX_API_KEY', 'secret-a')
-        result_b = tool_b('REDFOX_API_KEY', 'secret-b')
-        dynamic_env = lazyllm.globals.get('dynamic_env_vars')
-    finally:
-        _restore_dynamic_env(old_dynamic_env)
-
-    assert result_a['status'] == 'ok'
-    assert result_b['status'] == 'ok'
-    assert store['conversation-a']['REDFOX_API_KEY'] == 'secret-a'
-    assert store['conversation-b']['REDFOX_API_KEY'] == 'secret-b'
-    assert dynamic_env['REDFOX_API_KEY'] == 'secret-b'
 
 
 def test_session_env_arguments_are_redacted_in_tool_call_frames():
@@ -457,135 +262,6 @@ def test_env_argument_redaction_covers_non_object_arguments(tool_name, language,
     assert json.dumps(call) == original
 
 
-def test_user_env_tool_config_is_persistent_tool():
-    from lazyllm.tools.agent.toolsManager import ToolManager
-
-    assert USER_ENV_TOOL_CONFIG.name == 'set_user_env'
-    assert USER_ENV_TOOL_CONFIG.tool.__name__ == 'set_user_env'
-    assert 'persist' in USER_ENV_TOOL_CONFIG.description_en.lower()
-    parameters = ToolManager([USER_ENV_TOOL_CONFIG.tool]).tools_description[0]['function']['parameters']
-    assert set(parameters['required']) == {'name', 'value'}
-    assert {'type': 'null'} in parameters['properties']['enabled']['anyOf']
-    assert {'type': 'null'} in parameters['properties']['description']['anyOf']
-
-
-def test_set_user_env_calls_core_and_updates_runtime(monkeypatch):
-    calls = []
-
-    def fake_post_core_api(path, payload, *, user_id=None):
-        calls.append((path, payload, user_id))
-        return {'response': {'data': {'name': payload['name'], 'masked_value': 'tvly****3456'}}}
-
-    monkeypatch.setattr('lazymind.chat.engine.tools.session_env.post_core_api', fake_post_core_api)
-    old_dynamic_env = lazyllm.globals.get('dynamic_env_vars')
-    lazyllm.globals['dynamic_env_vars'] = {}
-    try:
-        result = build_user_env_tool()('tavily_api_key', 'tvly-secret-3456', 'search', True)
-        dynamic_env = lazyllm.globals.get('dynamic_env_vars')
-    finally:
-        _restore_dynamic_env(old_dynamic_env)
-
-    assert result['status'] == 'ok'
-    assert result['scope'] == 'user'
-    assert result['name'] == 'tavily_api_key'
-    assert calls == [('/user/env-vars', {
-        'name': 'tavily_api_key',
-        'value': 'tvly-secret-3456',
-        'description': 'search',
-        'enabled': True,
-    }, None)]
-    assert dynamic_env['tavily_api_key'] == 'tvly-secret-3456'
-    assert 'tvly-secret-3456' not in str(result)
-
-
-def test_set_user_env_updates_existing_var_on_conflict(monkeypatch):
-    from lazymind.chat.engine.tools.infra.core_api_client import CoreAPIError
-
-    calls = []
-
-    def fake_post_core_api(path, payload, *, user_id=None):
-        calls.append(('post', path, payload, user_id))
-        raise CoreAPIError('POST', 'http://core/user/env-vars', 409, {'message': 'env name already exists'})
-
-    def fake_get_core_api(path, params=None, *, user_id=None):
-        calls.append(('get', path, params, user_id))
-        return {'items': [{'id': 'env_existing', 'name': 'TAVILY_API_KEY'}]}
-
-    def fake_patch_core_api(path, payload, *, user_id=None):
-        calls.append(('patch', path, payload, user_id))
-        return {'response': {'data': {'name': payload['name'], 'masked_value': 'tvly****3456'}}}
-
-    monkeypatch.setattr('lazymind.chat.engine.tools.session_env.post_core_api', fake_post_core_api)
-    monkeypatch.setattr('lazymind.chat.engine.tools.session_env.get_core_api', fake_get_core_api)
-    monkeypatch.setattr('lazymind.chat.engine.tools.session_env.patch_core_api', fake_patch_core_api)
-
-    result = build_user_env_tool()('TAVILY_API_KEY', 'tvly-secret-3456')
-
-    assert result['status'] == 'ok'
-    assert result['action'] == 'updated'
-    assert calls[0][0] == 'post'
-    assert calls[1] == ('get', '/user/env-vars', None, None)
-    assert calls[2][0] == 'patch'
-    assert calls[2][1] == '/user/env-vars/env_existing'
-
-
-@pytest.mark.parametrize('enabled', [False, True])
-@pytest.mark.parametrize('changes', [{}, {'description': '', 'enabled': True}, {'enabled': False}])
-def test_user_env_key_update_preserves_unspecified_metadata(monkeypatch, enabled, changes):
-    from unittest.mock import Mock
-    from lazymind.chat.engine.tools.infra.core_api_client import CoreAPIError
-
-    root = 'lazymind.chat.engine.tools.session_env.'
-    post = Mock(side_effect=CoreAPIError('POST', 'http://test', 409, 'duplicate'))
-    monkeypatch.setattr(root + 'post_core_api', post)
-    monkeypatch.setattr(root + 'get_core_api', lambda *_: {'items': [{
-        'id': 'existing-env', 'name': 'TEST_TOKEN', 'enabled': enabled, 'description': 'keep note',
-    }]})
-    expected_enabled = changes.get('enabled', enabled)
-    update = Mock(return_value={'response': {'data': {'enabled': expected_enabled}}})
-    monkeypatch.setattr(root + 'patch_core_api', update)
-    old = lazyllm.globals.get('dynamic_env_vars')
-    lazyllm.globals['dynamic_env_vars'] = {'TEST_TOKEN': 'old-synthetic-value'}
-    try:
-        result = build_user_env_tool()('TEST_TOKEN', 'new-synthetic-value', **changes)
-        assert result['status'] == 'ok'
-        assert result['enabled'] is expected_enabled
-        assert update.call_args.args[1] == {'name': 'TEST_TOKEN', 'value': 'new-synthetic-value', **changes}
-        assert lazyllm.globals['dynamic_env_vars'].get('TEST_TOKEN') == (
-            'new-synthetic-value' if expected_enabled else None
-        )
-    finally:
-        _restore_dynamic_env(old)
-
-
-@pytest.mark.parametrize('has_values', [False, True])
-def test_cleared_conversation_rejects_old_tools_but_allows_new_turn(has_values):
-    store = ConversationEnvStore()
-    _, lease = store.snapshot('cleared-conversation')
-    old_tool = build_session_env_tool(store, 'cleared-conversation', lease)
-    other_tool = build_session_env_tool(store, 'other-conversation')
-    if has_values:
-        store.set('cleared-conversation', 'TEST_TOKEN', 'previous-value')
-    store.clear('cleared-conversation')
-    # A turn may be cleared between taking its snapshot and constructing its tools.
-    late_tool = build_session_env_tool(store, 'cleared-conversation', lease)
-    new_tool = build_session_env_tool(store, 'cleared-conversation')
-    old_dynamic = lazyllm.globals.get('dynamic_env_vars')
-    lazyllm.globals['dynamic_env_vars'] = {}
-    try:
-        for tool in (old_tool, late_tool):
-            assert tool('TEST_TOKEN', 'late-value')['error_type'] == 'StaleConversation'
-        assert store.get_many('cleared-conversation') == {}
-        assert lazyllm.globals['dynamic_env_vars'] == {}
-        assert other_tool('TEST_TOKEN', 'other-value')['status'] == 'ok'
-        assert new_tool('TEST_TOKEN', 'new-value')['status'] == 'ok'
-        assert old_tool('TEST_TOKEN', 'late-value')['error_type'] == 'StaleConversation'
-        assert store.get_many('cleared-conversation') == {'TEST_TOKEN': 'new-value'}
-        assert store.get_many('other-conversation') == {'TEST_TOKEN': 'other-value'}
-    finally:
-        _restore_dynamic_env(old_dynamic)
-
-
 def test_unused_conversation_leases_are_not_retained():
     import gc
     import weakref
@@ -597,56 +273,6 @@ def test_unused_conversation_leases_are_not_retained():
     gc.collect()
     assert reference() is None
     assert len(store._leases) == 0
-
-
-@pytest.mark.parametrize('has_override', [True, False])
-def test_user_env_changes_keep_session_precedence_and_clear_disabled_values(monkeypatch, has_override):
-    monkeypatch.setattr('lazymind.chat.engine.tools.session_env.post_core_api', lambda *_: {})
-    old = lazyllm.globals.get('dynamic_env_vars')
-    lazyllm.globals['dynamic_env_vars'] = {}
-    try:
-        if has_override:
-            build_session_env_tool(ConversationEnvStore(), 'priority-test')('TEST_API_KEY', 'session-secret')
-        tool = build_user_env_tool()
-        tool('TEST_API_KEY', 'user-secret')
-        assert lazyllm.globals['dynamic_env_vars']['TEST_API_KEY'] == ('session-secret' if has_override else 'user-secret')
-        result = tool('TEST_API_KEY', 'replacement-secret', enabled=False)
-        assert result['enabled'] is False
-        assert result['available_to'] == []
-        assert lazyllm.globals['dynamic_env_vars'].get('TEST_API_KEY') == ('session-secret' if has_override else None)
-    finally:
-        _restore_dynamic_env(old)
-
-
-def test_user_env_result_and_errors_never_echo_management_payload(monkeypatch):
-    secret = 'private-test-value'
-    monkeypatch.setattr('lazymind.chat.engine.tools.session_env.post_core_api', lambda *_: {
-        'response': {'data': {'masked_value': secret, 'description': secret, 'value': secret}},
-    })
-    old = lazyllm.globals.get('dynamic_env_vars')
-    try:
-        result = build_user_env_tool()('TEST_API_KEY', secret, description=secret)
-        assert secret not in str(result)
-        assert 'response' not in result
-
-        def fail(*_):
-            raise RuntimeError(secret)
-
-        monkeypatch.setattr('lazymind.chat.engine.tools.session_env.post_core_api', fail)
-        assert secret not in str(build_user_env_tool()('TEST_API_KEY', secret))
-    finally:
-        _restore_dynamic_env(old)
-
-
-def test_env_tools_reject_nul_before_storing(monkeypatch):
-    from unittest.mock import Mock
-    post = Mock()
-    monkeypatch.setattr('lazymind.chat.engine.tools.session_env.post_core_api', post)
-    store = ConversationEnvStore()
-    assert build_session_env_tool(store, 'nul-test')('TEST_API_KEY', 'bad\0value')['status'] == 'error'
-    assert store.get_many('nul-test') == {}
-    assert build_user_env_tool()('TEST_API_KEY', 'bad\0value')['status'] == 'error'
-    post.assert_not_called()
 
 
 def test_session_env_json_string_arguments_are_redacted():
@@ -731,3 +357,183 @@ def test_clear_conversation_env_drops_only_that_conversation():
     finally:
         chat_service._conversation_env_vars.clear()
         chat_service._conversation_env_vars.update(previous)
+
+
+def _run_tool(tool, name='SERVICE_BASE_URL'):
+    return ToolManager([tool]).execute_with_records({
+        'id': 'env-call', 'function': {'name': tool.__name__, 'arguments': {'name': name}},
+    }).results[0]
+
+
+@pytest.mark.parametrize('case', json.loads(
+    (Path(__file__).resolve().parents[3] / 'tests/contracts/env_names.json').read_text(),
+))
+def test_env_name_shared_contract(case):
+    if case['valid']:
+        assert validate_env_name(case['name']) == case['name']
+    else:
+        with pytest.raises(ValueError):
+            validate_env_name(case['name'])
+
+
+@pytest.mark.parametrize('name', ['PATH', '11', 'LD_AUDIT', 'NODE_OPTIONS'])
+@pytest.mark.parametrize('kind', ['session', 'user', 'delete_session', 'delete_user'])
+def test_invalid_env_names_fail_at_tool_manager_boundary(name, kind):
+    store = ConversationEnvStore()
+    _, lease = store.snapshot('invalid')
+    tool = {
+        'session': build_session_env_tool(store, 'invalid', lease),
+        'user': build_user_env_tool(),
+        'delete_session': build_delete_session_env_tool(store, 'invalid', lease),
+        'delete_user': build_delete_user_env_tool(),
+    }[kind]
+    result = _run_tool(tool, name)
+    assert result['ok'] is False
+    assert 'could not' in _tool_result_preview(tool.__name__, result, language='en').lower()
+
+
+@pytest.mark.parametrize('builder', [build_user_env_tool, build_delete_user_env_tool])
+def test_core_failure_is_sanitized_at_tool_manager_boundary(monkeypatch, builder):
+    def fail(*args):
+        raise RuntimeError('internal request contained synthetic-secret')
+    monkeypatch.setattr('lazymind.chat.engine.tools.session_env.get_core_api', fail)
+    result = _run_tool(builder())
+    assert result['ok'] is False
+    assert 'synthetic-secret' not in str(result)
+
+
+def test_stale_session_failure_reaches_tool_manager():
+    store = ConversationEnvStore()
+    tool = build_session_env_tool(store, 'stale')
+    store.clear('stale')
+    result = _run_tool(tool)
+    assert result['ok'] is False
+    assert 'cleared' in result['value']
+
+
+def test_user_deletion_confirmation_remains_a_success(monkeypatch):
+    monkeypatch.setattr('lazymind.chat.engine.tools.session_env.get_core_api', lambda *_: {'items': [{
+        'id': 'one', 'name': 'SERVICE_BASE_URL', 'updated_at': '2026-09-24T00:00:00Z',
+    }]})
+    monkeypatch.setattr('lazymind.chat.engine.tools.session_env._write_agent_data', lambda *_, **__: None)
+    result = _run_tool(build_delete_user_env_tool())
+    assert result['ok'] is True
+    assert result['value']['status'] == 'confirmation_required'
+
+
+@pytest.mark.parametrize('existing', [False, True])
+def test_user_setup_only_requests_secure_input(monkeypatch, existing):
+    events = []
+    item = {'id': 'one', 'name': 'AWS_REGION', 'updated_at': '2026-09-24T00:00:00Z'}
+    monkeypatch.setattr('lazymind.chat.engine.tools.session_env.get_core_api',
+                        lambda *_: {'items': [item] if existing else []})
+    monkeypatch.setattr('lazymind.chat.engine.tools.session_env._write_agent_data',
+                        lambda tag, **data: events.append(data))
+    result = _run_tool(build_user_env_tool(), 'AWS_REGION')
+    assert result['ok'] is True
+    assert result['value']['status'] == 'input_required'
+    metadata = events[0]['env_input']
+    assert metadata['scope'] == 'user'
+    assert 'value' not in metadata
+    assert ('id' in metadata) == existing
+    if existing:
+        assert metadata['expected_updated_at'] == item['updated_at']
+
+
+@pytest.mark.parametrize('value', [' padded-value ', '', '   ', 'bad\x00value', '<redacted>'])
+def test_session_input_uses_dedicated_api_and_never_echoes_value(monkeypatch, value):
+    events = []
+    monkeypatch.setattr('lazymind.chat.engine.tools.session_env._write_agent_data',
+                        lambda tag, **data: events.append(data))
+    monkeypatch.setattr(agent_control_routes, 'config', {'enable_router': False, 'core_internal_token': 'test-internal'})
+    store = ConversationEnvStore()
+    tool = build_session_env_tool(store, 'input')
+    result = _run_tool(tool)
+    assert result['ok'] is True and store.get_many('input') == {}
+    app = FastAPI()
+    app.include_router(agent_control_routes.router)
+    response = TestClient(app).post('/api/chat/session-env:input', headers={
+        'X-LazyMind-Internal-Token': 'test-internal',
+    }, json={
+        'conversation_id': 'input', 'ask_id': events[0]['ask_id'], 'value': value,
+    })
+    valid = value == ' padded-value '
+    assert response.status_code == (200 if valid else 400)
+    assert store.get_many('input') == ({'SERVICE_BASE_URL': value} if valid else {})
+    if value:
+        assert value not in response.text
+        assert value not in str(events)
+
+
+def test_pending_input_is_scoped_idempotent_and_invalidated_by_cleanup(monkeypatch):
+    monkeypatch.setattr('lazymind.chat.engine.tools.session_env._write_agent_data', lambda *_, **__: None)
+    store = ConversationEnvStore()
+    tool = build_session_env_tool(store, 'one')
+    receipt = tool('APP_ID')
+    ask_id = receipt['ask_id']
+    assert not session_env_inputs.submit(ask_id, 'other', 'wrong')
+    assert session_env_inputs.submit(ask_id, 'one', 'first')
+    assert session_env_inputs.submit(ask_id, 'one', 'replay')
+    assert store.get_many('one') == {'APP_ID': 'first'}
+    store.clear('one')
+    with pytest.raises(ValueError, match='cleared'):
+        session_env_inputs.submit(ask_id, 'one', 'late')
+    with pytest.raises(ToolExecutionError):
+        tool('APP_ID')
+
+
+def test_tools_no_longer_accept_value_arguments_and_prompt_never_requests_them():
+    import inspect
+    session = build_session_env_tool(ConversationEnvStore(), 'schema')
+    for tool in (session, build_user_env_tool()):
+        assert 'value' not in inspect.signature(tool).parameters
+    assert 'secure input card' in SESSION_ENV_QUERY_APPENDIX
+    assert build_session_env_tool_config(ConversationEnvStore(), 'config').name == 'set_session_env'
+    assert USER_ENV_TOOL_CONFIG.tool.__name__ == 'set_user_env'
+
+
+@pytest.mark.parametrize('token', ['', 'wrong'])
+def test_session_input_requires_service_authentication(monkeypatch, token):
+    monkeypatch.setattr(agent_control_routes, 'config', {'core_internal_token': 'expected'})
+    app = FastAPI()
+    app.include_router(agent_control_routes.router)
+    response = TestClient(app).post('/api/chat/session-env:input',
+                                    headers={'X-LazyMind-Internal-Token': token},
+                                    json={'conversation_id': 'input', 'ask_id': 'ask', 'value': 'private-value'})
+    assert response.status_code == 401
+    assert 'private-value' not in response.text
+
+
+def test_session_input_expiration_rejects_late_value(monkeypatch):
+    from lazymind.chat.engine.agent_runtime.env_input import SessionEnvInputRegistry
+    registry = SessionEnvInputRegistry()
+    store = ConversationEnvStore()
+    _, lease = store.snapshot('one')
+    monkeypatch.setattr('lazymind.chat.engine.agent_runtime.env_input.time.monotonic', lambda: 0)
+    registry.register('ask', store, 'one', lease, 'APP_ID')
+    monkeypatch.setattr('lazymind.chat.engine.agent_runtime.env_input.time.monotonic', lambda: 1801)
+    assert not registry.submit('ask', 'one', 'late-value')
+    assert not registry.owns('ask', 'one')
+    assert store.get_many('one') == {}
+
+
+@pytest.mark.parametrize('already_applied', [False, True])
+def test_session_cancel_reports_actual_outcome_after_a_lost_response(monkeypatch, already_applied):
+    from lazymind.chat.engine.agent_runtime.env_input import SessionEnvInputRegistry
+    registry = SessionEnvInputRegistry()
+    monkeypatch.setattr('lazymind.chat.engine.agent_runtime.env_input.session_env_inputs', registry)
+    monkeypatch.setattr(agent_control_routes, 'config', {'enable_router': False, 'core_internal_token': 'test-internal'})
+    store = ConversationEnvStore()
+    _, lease = store.snapshot('one')
+    registry.register('ask', store, 'one', lease, 'APP_ID')
+    if already_applied:
+        assert registry.submit('ask', 'one', 'first')
+    app = FastAPI()
+    app.include_router(agent_control_routes.router)
+    response = TestClient(app).post('/api/chat/session-env:input',
+                                    headers={'X-LazyMind-Internal-Token': 'test-internal'},
+                                    json={'conversation_id': 'one', 'ask_id': 'ask', 'cancel': True})
+    assert response.status_code == 200
+    assert response.json() == {'ok': True, 'status': 'configured' if already_applied else 'canceled'}
+    assert registry.submit('ask', 'one', 'late-value') == already_applied
+    assert store.get_many('one') == ({'APP_ID': 'first'} if already_applied else {})

@@ -12,18 +12,36 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
 	"lazymind/core/common/secretcrypto"
 	"lazymind/core/credentialvault"
-	"lazymind/core/modelprovider"
 )
 
 const CredentialVersion = 2
 
 var ErrConflict = errors.New("environment variable changed; reload and retry")
+
+var keyManagerState = struct {
+	sync.RWMutex
+	manager *credentialvault.LocalKeyManager
+}{}
+
+// SetCredentialKeyManager injects shared key infrastructure at application startup.
+func SetCredentialKeyManager(manager *credentialvault.LocalKeyManager) func() {
+	keyManagerState.Lock()
+	previous := keyManagerState.manager
+	keyManagerState.manager = manager
+	keyManagerState.Unlock()
+	return func() {
+		keyManagerState.Lock()
+		keyManagerState.manager = previous
+		keyManagerState.Unlock()
+	}
+}
 
 type userEnvEnvelope struct {
 	Version    int    `json:"version"`
@@ -53,7 +71,9 @@ func userEnvKey(source, userID string) ([]byte, error) {
 		key := sha256.Sum256([]byte(secret))
 		return key[:], nil
 	}
-	manager := modelprovider.CredentialKeyManager()
+	keyManagerState.RLock()
+	manager := keyManagerState.manager
+	keyManagerState.RUnlock()
 	if source != "device" || manager == nil {
 		return nil, credentialvault.ErrLocalSecureStoreUnavailable
 	}

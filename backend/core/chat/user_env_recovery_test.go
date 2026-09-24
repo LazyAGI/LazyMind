@@ -10,19 +10,18 @@ import (
 	"testing"
 
 	"lazymind/core/common/orm"
-	"lazymind/core/modelprovider"
 	"lazymind/core/userenv"
 )
 
 func TestUserEnvMaskBoundaries(t *testing.T) {
 	for _, value := range []string{"", "12345678", "123456789", "1234567890123456", strings.Repeat("界", 16)} {
-		if maskUserEnvValue(value) != "••••••••" {
+		if userenv.MaskValue(value) != "••••••••" {
 			t.Fatal("short credential must be fully masked")
 		}
 	}
 	for _, value := range []string{"12345678901234567", strings.Repeat("界", 17)} {
 		runes := []rune(value)
-		if maskUserEnvValue(value) != string(runes[:4])+"****"+string(runes[len(runes)-4:]) {
+		if userenv.MaskValue(value) != string(runes[:4])+"****"+string(runes[len(runes)-4:]) {
 			t.Fatal("long credential must expose only four characters at each end")
 		}
 	}
@@ -92,7 +91,7 @@ func TestUserEnvUnreadableCredentialRecovery(t *testing.T) {
 			}
 			if missingKey {
 				t.Setenv("LAZYMIND_USER_ENV_SECRET_KEY", "")
-				restore := modelprovider.SetCredentialKeyManager(nil)
+				restore := userenv.SetCredentialKeyManager(nil)
 				defer restore()
 			} else {
 				row.ValueCiphertext = "corrupt"
@@ -163,7 +162,9 @@ func TestUserEnvListKeepsHealthyRowsAndDeletesUnreadableRows(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ListUserEnvironmentVariables(rec, newUserEnvRequest(http.MethodGet, "/user/env-vars", "", "user-crypto", nil))
 	var response struct {
-		Data listUserEnvVariablesResponse `json:"data"`
+		Data struct {
+			Items []userenv.Variable `json:"items"`
+		} `json:"data"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil || rec.Code != http.StatusOK || len(response.Data.Items) != 2 {
 		t.Fatal("one bad credential must not hide the rest of the list")

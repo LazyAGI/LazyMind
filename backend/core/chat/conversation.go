@@ -1591,6 +1591,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	var askPending any
 	var askAnswered bool
 	var askSavedAnswers any
+	var envInputResult any
 	var intentUpdated any
 	var externalAgentActivity any
 	var modelRoute *chatModelRoute
@@ -1602,6 +1603,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 			AskPending            any                `json:"ask_pending"`
 			AskAnswered           bool               `json:"ask_answered"`
 			AskSavedAnswers       any                `json:"ask_saved_answers"`
+			EnvInputResult        any                `json:"env_input_result"`
 			IntentUpdated         any                `json:"intent_updated"`
 			ExternalAgentActivity any                `json:"external_agent_activity"`
 			ModelRoute            *chatModelRoute    `json:"model_route"`
@@ -1613,6 +1615,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 			askPending = ext.AskPending
 			askAnswered = ext.AskAnswered
 			askSavedAnswers = ext.AskSavedAnswers
+			envInputResult = ext.EnvInputResult
 			intentUpdated = ext.IntentUpdated
 			externalAgentActivity = ext.ExternalAgentActivity
 			modelRoute = ext.ModelRoute
@@ -1658,6 +1661,9 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		// read-only cards together with their submitted answers.
 		item["ask_pending"] = askPending
 		item["ask_answered"] = askAnswered
+		if envInputResult != nil {
+			item["env_input_result"] = envInputResult
+		}
 		if askSavedAnswers != nil {
 			item["ask_saved_answers"] = askSavedAnswers
 		}

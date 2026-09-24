@@ -96,7 +96,7 @@ func TestUserEnvClientVersionUsesDatabaseTimestampPrecision(t *testing.T) {
 		t.Fatalf("equivalent client timestamp rejected: %d", rec.Code)
 	}
 	var response struct {
-		Data userEnvVariableResponse `json:"data"`
+		Data userenv.Variable `json:"data"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)

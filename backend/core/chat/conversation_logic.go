@@ -1944,6 +1944,7 @@ func handleStreamChat(
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	common.SetLanguageResponseHeaders(w, r.Header.Get("Accept-Language"))
 	w.WriteHeader(http.StatusOK)
 
 	historyID := target.HistoryID
@@ -2822,6 +2823,11 @@ func streamDualAnswer(
 ) {
 	snapshots := map[string]*ChatExportSnapshot{}
 	terminals := map[string]*ChatRuntimeEvent{}
+	envInputRequests := map[string]bool{}
+	envInputNotice := "\n\n此输入请求尚未保存环境变量。双回答模式暂不支持安全输入卡片，请切换到单回答后重新发送配置请求；用户级变量也可在设置的环境变量页配置。\n\n"
+	if common.NormalizeLocale(w.Header().Get("Content-Language")) == common.LocaleEnUS {
+		envInputNotice = "\n\nThis input request has not saved an environment variable. Secure input cards are not supported in dual-answer mode. Switch to single-answer mode and send the configuration request again, or configure user-level variables in Settings > Environment variables.\n\n"
+	}
 	historyExt = withChatExports(historyExt, nil)
 	publishDualRuntime := func(reqCtx, chatCtx context.Context, w http.ResponseWriter, flusher http.Flusher,
 		stateStore state.Store, convID, hid string, seq int, event *ChatRuntimeEvent, metrics *RunPerformanceMetrics, live bool) {
@@ -2979,6 +2985,11 @@ func streamDualAnswer(
 				primaryCh = nil
 				continue
 			}
+			if d.AskPending != nil && d.AskPending.EnvInput != nil {
+				envInputRequests[historyID] = true
+				appendPrimary(envInputNotice, "", nil)
+				continue
+			}
 			if d.ExportSnapshot != nil {
 				snapshots[historyID] = d.ExportSnapshot
 			}
@@ -3024,6 +3035,11 @@ func streamDualAnswer(
 			if !ok {
 				secondaryDone = true
 				secondaryCh = nil
+				continue
+			}
+			if d.AskPending != nil && d.AskPending.EnvInput != nil {
+				envInputRequests[secondaryHistoryID] = true
+				appendSecondary(envInputNotice, "", nil)
 				continue
 			}
 			if d.ExportSnapshot != nil {
@@ -3076,6 +3092,11 @@ func streamDualAnswer(
 						primaryDone = true
 						primaryCh = nil
 					} else {
+						if d.AskPending != nil && d.AskPending.EnvInput != nil {
+							envInputRequests[historyID] = true
+							appendPrimary(envInputNotice, "", nil)
+							continue
+						}
 						if d.ExportSnapshot != nil {
 							snapshots[historyID] = d.ExportSnapshot
 						}
@@ -3147,6 +3168,11 @@ func streamDualAnswer(
 						secondaryDone = true
 						secondaryCh = nil
 					} else {
+						if d.AskPending != nil && d.AskPending.EnvInput != nil {
+							envInputRequests[secondaryHistoryID] = true
+							appendSecondary(envInputNotice, "", nil)
+							continue
+						}
 						if d.ExportSnapshot != nil {
 							snapshots[secondaryHistoryID] = d.ExportSnapshot
 						}
@@ -3280,6 +3306,11 @@ dualPersist:
 		exports := []ChatExport{}
 		if terminal.Status == "completed" {
 			exports = finalizeChatExports(snapshot, convID, hid, runID)
+		}
+		if envInputRequests[hid] {
+			// Preserve the notice across the final replacement without duplicating it in history.
+			*result = strings.ReplaceAll(*result, envInputNotice, "")
+			snapshot.Content += envInputNotice
 		}
 		*text = snapshot.Content
 		*result = replaceChatExportResult(*result, snapshot.Content)
@@ -4107,6 +4138,9 @@ func markLastAskPendingAnswered(ctx context.Context, db *gorm.DB, histories []or
 		if answered, _ := m["ask_answered"].(bool); answered {
 			break
 		}
+		if pending, _ := m["ask_pending"].(map[string]any); pending["env_input"] != nil {
+			break
+		}
 		m["ask_answered"] = true
 		if answers := submittedAskAnswers(structured); answers != nil {
 			m["ask_saved_answers"] = answers
@@ -4174,6 +4208,10 @@ func SaveAskAnswers(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	if pending, _ := m["ask_pending"].(map[string]any); pending["env_input"] != nil {
+		common.ReplyAppErr(w, invalidEnvironmentInput())
+		return
+	}
 	m["ask_saved_answers"] = body.Answers
 	updated, err := json.Marshal(m)
 	if err != nil {
@@ -4220,6 +4258,9 @@ func validateWorkspaceAskSubmission(histories []orm.ChatHistory, raw map[string]
 }
 
 func validAskSubmission(pending, submission map[string]any) bool {
+	if pending["env_input"] != nil {
+		return false
+	}
 	pendingID, _ := pending["ask_id"].(string)
 	submittedID, _ := submission["ask_id"].(string)
 	if strings.TrimSpace(submittedID) == "" || strings.TrimSpace(submittedID) != strings.TrimSpace(pendingID) {

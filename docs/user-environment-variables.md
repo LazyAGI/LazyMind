@@ -3,7 +3,44 @@
 Only user-level variables are persisted and managed in Settings. Conversation
 variables remain in process memory. Exact, case-sensitive names are preserved.
 The effective priority is conversation > user > process environment. Values are
-injected into skill subprocesses; the model receives variable names only.
+injected into skill subprocesses; configuration tools receive names, not values.
+Names may include ordinary application settings such as SERVICE_BASE_URL,
+AWS_REGION and APP_ID. Syntax/length validation preserves case; known runtime
+controls (proxy, loader, interpreter startup and trust-store overrides, including
+NODE_TLS_REJECT_UNAUTHORIZED) are blocked. Previously stored reserved names cannot
+be loaded into runtime or re-enabled; they can still be disabled or deleted.
+All values are treated as sensitive, regardless of their names.
+
+## Secure chat input
+
+The agent calls set_session_env or set_user_env with a name and optional
+non-sensitive metadata. The tool emits an input card and stops the turn.
+The password input posts directly to the authenticated Core
+conversations/{id}:env-input endpoint. It never uses query, ask_user answers,
+answer autosave, tool arguments or model history to transport values.
+Core checks conversation ownership, the persisted card and its target version.
+Only a configured/canceled receipt is persisted and sent when chat resumes.
+Dual-answer mode does not support secure input cards yet. Such requests display
+and persist a notice to switch to single-answer mode and resend the configuration
+request (or use Settings for user variables), without saving a variable.
+Switching conversations or replacing a card discards its pending UI callbacks;
+an already-submitted save may finish on the server but cannot resume another chat.
+
+Session input is routed to the worker that issued the card and remains in memory.
+Discovery probes only metadata, with at most eight concurrent probes and an
+eight-second total deadline including the write. Values go only to the owning
+worker; an uncertain write is not retried against another worker.
+Pending session cards expire after 30 minutes; cleanup or a worker restart
+invalidates them. User input uses the same encrypted domain service as Settings.
+Retries of an already-consumed card return its receipt without writing again.
+Cancel never changes the variable. If a session save already succeeded but its
+response was lost, cancellation returns the committed configured receipt instead
+of claiming to undo the write. Deleting a session override remains immediate;
+deleting a user variable still requires explicit confirmation.
+
+Do not paste secrets into ordinary chat: ordinary messages are model input and
+this protocol cannot retroactively remove values already sent that way. Use the
+dedicated card or Settings. Existing history/tool redaction remains in place.
 
 ## Encryption and deployment
 
@@ -57,8 +94,8 @@ Settings sends only changed fields and includes `expected_updated_at` from the
 displayed record on edits and toggles. Core checks that timestamp at database
 microsecond precision before mutating the row. Stale clients receive HTTP 409;
 the UI refreshes only the conflicting row and keeps unsaved edits visible until the dialog is
-closed and reopened. The precondition is optional for non-UI callers such as
-the chat tool, which submits partial updates without replaying a UI snapshot.
+closed and reopened. Chat input cards bind an existing variable's version too;
+stale cards cannot overwrite a change made in Settings.
 
 Credential values preserve leading and trailing whitespace; empty, whitespace-only
 and NUL-containing values are rejected. Masks fully hide credentials of 16 or
@@ -73,9 +110,9 @@ omitted to fall back to a process-level credential.
 
 Each chat turn reloads enabled user credentials. A change in Settings therefore
 takes effect on the next turn; an already running subprocess retains its own
-environment. The chat tool updates the current run too, preserving a same-name
-conversation override. Tool replies expose only status, name and scope metadata.
-When the chat tool updates an existing value, omitted descriptions and enabled
+environment. Submitting a chat input card resumes in a new turn, preserving a
+same-name conversation override. Tool replies expose only status, name and scope.
+When a chat input card updates an existing value, omitted descriptions and enabled
 flags stay unchanged; explicit empty descriptions and false flags are applied.
 
 SubAgent runs and remote workflow attempts also load enabled credentials from
@@ -100,7 +137,7 @@ Moving a task conversation to trash from Task Center uses the same cleanup
 notification, only after the database transaction commits. Cleanup invalidates
 the active conversation generation: tools from an older turn cannot repopulate
 its store. A new turn gets a fresh generation and may set new credentials.
-Generation handles are weakly retained, so unused handles do not accumulate.
+Generation handles are weakly retained except for short-lived pending input cards.
 Conversation credentials are not shared between workers; multi-worker routing
 still requires session affinity for them to survive between turns.
 

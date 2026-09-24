@@ -217,7 +217,8 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
             from lazymind.model_config import is_model_role_available
             assert is_model_role_available('video_generator', config_path=str(model_yaml)) == configured
             import lazyllm
-            assert lazyllm.globals['dynamic_env_vars'] == (
+            from lazyllm.tools import get_dynamic_env_vars
+            assert get_dynamic_env_vars() == (
                 {'Mixed_API_KEY': 'synthetic-secret'} if configured else {}
             )
             assert lazyllm.globals['conversation_env_overrides'] == {}
