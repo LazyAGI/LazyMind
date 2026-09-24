@@ -1,4 +1,4 @@
-import { BellOutlined, FileTextOutlined, SafetyCertificateOutlined, SettingOutlined, WarningOutlined } from '@ant-design/icons';
+import { BellOutlined, FileTextOutlined, RightOutlined, SafetyCertificateOutlined, SettingOutlined, WarningOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Button, Drawer, Modal, Select, Spin, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -23,8 +23,11 @@ function ConfiguredChannel({ channel, rule, unavailable }: { channel: ChannelNam
   return <div className="notification-row"><ChannelBrand channel={channel} avatar={account?.avatar_url} /><div className="notification-grow"><strong>{t('notifications.' + channel)}</strong><p>{[account?.label || rule.account_id, rule.recipient_id].filter(Boolean).join(' · ')}</p></div><Tag>{t('notifications.' + (rule.enabled ? 'on' : 'off'))}</Tag>{unavailable && <Tag color="warning">{t('notifications.unavailable')}</Tag>}</div>;
 }
 
-export default function ScheduleNotificationPanel({ scheduleId, compact = false, draftMode = false, title, editorOpen, onEditorOpenChange, onDraftChange }: {
-  scheduleId?: string; compact?: boolean; draftMode?: boolean; title?: string;
+export default function ScheduleNotificationPanel({ scheduleId, taskId: selectedTaskId, compact = false, draftMode = false, showHistory = true, summaryCard = false, editorOnly = false, title, editorOpen, onEditorOpenChange, onDraftChange }: {
+  scheduleId?: string; taskId?: string; compact?: boolean; draftMode?: boolean; title?: string;
+  showHistory?: boolean;
+  summaryCard?: boolean;
+  editorOnly?: boolean;
   editorOpen?: boolean; onEditorOpenChange?: (open: boolean) => void; onDraftChange?: (change: NotificationUpdate | undefined) => void;
 }) {
   const { t } = useTranslation();
@@ -59,11 +62,11 @@ export default function ScheduleNotificationPanel({ scheduleId, compact = false,
   useEffect(() => { if (!compact || draftMode) void load(); }, [load, compact, draftMode]);
   useEffect(() => { if (compact && !draftMode && open) void load(); }, [load, compact, draftMode, open]);
   useEffect(() => {
-    if (compact || !scheduleId) return;
+    if (compact || !scheduleId || !showHistory) return;
     let active = true;
     listScheduleTasks(scheduleId, runPage).then(page => { if (active) { setRuns(old => runPage === 1 ? page.items : [...old, ...page.items]); setRunTotal(page.total); if (runPage === 1) setTaskId(page.items[0]?.id); } }).catch(() => { if (active) setError('loadFailed'); });
     return () => { active = false; };
-  }, [scheduleId, compact, runPage]);
+  }, [scheduleId, compact, runPage, showHistory]);
   const save = async (value = draft) => {
     if (!config || value === undefined || saving) return;
     const reason = value ? ruleError(value) : undefined;
@@ -110,8 +113,22 @@ export default function ScheduleNotificationPanel({ scheduleId, compact = false,
   const cancelEditor = () => { if (!saving) { setDraft(config?.config); setError(''); setOpen(false); } };
   const closeSettings = () => { setSettingsOpen(false); void getPreferences().then(p => setEnabled(p.enabled)).catch(() => setError('loadFailed')); };
   const errorView = error && <Alert type="error" message={t('notifications.' + error, { account: errorAccount || t('notifications.account'), defaultValue: t('notifications.saveFailed') })} action={<Button onClick={() => void load()}>{t('notifications.reload')}</Button>} />;
+  const activeChannels = channels.filter(channel => config?.config?.channels[channel]?.enabled);
+  const summary = config?.configured
+    ? activeChannels.length ? `${activeChannels.map(channel => t('notifications.' + channel)).join('、')} · ${events.filter(event => config.config?.events[event].enabled).map(event => t(event === 'succeeded' ? 'taskCenter.statusSuccess' : event === 'failed' ? 'taskCenter.statusFailed' : 'notifications.waiting')).join('、')}` : t('notifications.off')
+    : t('notifications.unconfigured');
   return <div className={compact ? 'notification-compact' : 'notification-schedule'}>
-    {!compact && <>
+    {!editorOnly && <>
+    {summaryCard && <>
+      <h3>{t('notifications.reminder')}</h3>
+      {errorView}
+      <button type='button' className='task-notification-entry' aria-label={t('notifications.configure')} disabled={loading || !config} onClick={() => { setDraft(config?.config); setOpen(true); }}>
+        <span className='task-notification-entry-icon'><BellOutlined /></span>
+        <span className='task-notification-entry-copy'><strong>{summary}</strong><small>{loading ? t('taskCenter.loadingSchedule') : !enabled ? t('notifications.paused') : config?.configured ? t('taskCenter.configuredNotificationChannels', { count: activeChannels.length }) : t('notifications.emptyHint')}</small></span>
+        <RightOutlined />
+      </button>
+    </>}
+    {!compact && !summaryCard && <>
       <h3>{t('notifications.title')}</h3>
       {loading && <Spin size="small" />}
       {errorView}
@@ -121,19 +138,21 @@ export default function ScheduleNotificationPanel({ scheduleId, compact = false,
       </div>}
       {!enabled && <Alert type="warning" message={t('notifications.paused')} />}
     </>}
-    <Button icon={<SettingOutlined aria-hidden="true" />} disabled={loading || (draftMode && !config)} onClick={() => { setDraft(config?.config); setOpen(true); }}>{t('notifications.configure')}</Button>
+    {!summaryCard && <Button icon={<SettingOutlined aria-hidden="true" />} disabled={loading || (draftMode && !config)} onClick={() => { setDraft(config?.config); setOpen(true); }}>{t('notifications.configure')}</Button>}
     {compact && !open && errorView}
     {compact && config && <NotificationSummary compact value={config.config} />}
     {!compact && <>
-      {config?.config && <NotificationSummary value={config.config} />}
-      <h3>{t('notifications.history')}</h3>
+      {!summaryCard && config?.config && <NotificationSummary value={config.config} />}
+      {showHistory && <><h3>{t('notifications.history')}</h3>
       <Select aria-label={t('notifications.chooseRun')} style={{ width: '100%' }} placeholder={t('notifications.chooseRun')} value={taskId} onChange={setTaskId} options={runs.map(run => ({ value: run.id, label: `${new Date(run.created_at).toLocaleString()} · ${run.title || run.id}` }))} />
       {runs.length < runTotal && <Button onClick={() => setRunPage(n => n + 1)}>{t('notifications.loadMore')}</Button>}
-      {taskId ? <NotificationHistory key={taskId} taskId={taskId} /> : <p>{t('notifications.noHistory')}</p>}
+      {taskId ? <NotificationHistory key={taskId} taskId={taskId} /> : <p>{t('notifications.noHistory')}</p>}</>}
+    </>}
     </>}
     <Drawer className="notification-editor-drawer" zIndex={1200} width={680} open={open} title={<><div>{t('notifications.configure')}</div><small>{title} · {t('notifications.onlyThisTask')}</small></>} onClose={cancelEditor} footer={<div className="notification-footer"><Button className="notification-restore-defaults" type="link" disabled={loading || saving || conflict} onClick={async () => { setLoading(true); try { const p = await getPreferences(); setDraft(p.defaults); setEnabled(p.enabled); } catch { setError('loadFailed'); } finally { setLoading(false); } }}>{t('notifications.restoreGlobalDefaults')}</Button><div className="notification-footer-actions"><Button disabled={saving} onClick={cancelEditor}>{t('notifications.cancel')}</Button><Button type="primary" loading={saving} disabled={draft === undefined || loading || conflict} onClick={() => void save()}>{t('notifications.save')}</Button></div></div>}>
       {errorView}
       {loading ? <Spin /> : draft !== undefined && <><Alert className="notification-task-info" type={enabled ? 'info' : 'warning'} showIcon message={t('notifications.' + (enabled ? 'draftSaveHint' : 'paused'))} action={!enabled && <Button onClick={() => setSettingsOpen(true)}>{t('notifications.openSettings')}</Button>} /><div className="notification-task-overview"><span className="notification-task-overview-icon"><BellOutlined /></span><div className="notification-grow"><h3>{t('notifications.taskOverview')}</h3><NotificationSummary value={draft} /></div><Tag className="notification-task-channel-count" color="blue">{t('notifications.configuredChannelCount', { count: channels.filter(channel => draft?.channels[channel]?.enabled).length })}</Tag></div><RuleEditor variant="task" value={draft || emptyRule()} onChange={next => void change(next)} disabled={saving || conflict} /></>}
+      {open && selectedTaskId && <section><h3>{t('taskCenter.currentExecutionNotifications')}</h3><NotificationHistory key={selectedTaskId} taskId={selectedTaskId} /></section>}
     </Drawer>
     <Modal zIndex={1300} width={1000} open={settingsOpen} title={t('notifications.title')} footer={<Button onClick={closeSettings}>{t('notifications.return')}</Button>} onCancel={closeSettings}>{settingsOpen && <NotificationSettings />}</Modal>
   </div>;

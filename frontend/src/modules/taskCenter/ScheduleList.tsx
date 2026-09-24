@@ -1,3 +1,5 @@
+import { describeCron, formatMonthDays, parseCadence, parseCronExpr, parseMonthDayField, sortMonthDays } from './scheduleTime';
+export { describeCron } from './scheduleTime';
 import type { NotificationUpdate } from '@/modules/notifications/api';
 import ScheduleNotificationPanel from '@/modules/notifications/ScheduleNotificationPanel';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -100,52 +102,8 @@ function FieldLabel({ children }: { children: ReactNode }) {
 ──────────────────────────────────────────────── */
 const WEEKDAY_VALUES = [0, 1, 2, 3, 4, 5, 6];
 
-function parseCadence(value: string): { interval: number; unit?: 'week' | 'month'; cron: string } {
-  const match = value.match(/^@every:(\d+):(week|month);(.+)$/);
-  return match ? { interval: Math.max(1, Number(match[1])), unit: match[2] as 'week' | 'month', cron: match[3] } : { interval: 1, cron: value };
-}
-
 function withCadence(cron: string, interval: number, unit: 'week' | 'month'): string {
   return interval > 1 ? `@every:${interval}:${unit};${cron}` : cron;
-}
-
-function sortMonthDays(days: number[]): number[] {
-  return [...days].sort((a, b) => {
-    if (a > 0 && b < 0) return -1;
-    if (a < 0 && b > 0) return 1;
-    return a > 0 ? a - b : Math.abs(a) - Math.abs(b);
-  });
-}
-
-type TFunc = (key: string, options?: Record<string, unknown>) => string;
-
-function formatMonthDays(days: number[], t: TFunc): string {
-  const sorted = sortMonthDays(days);
-  const regular = sorted.filter((day) => day > 0);
-  const fromEnd = sorted.filter((day) => day < 0).map((day) => Math.abs(day));
-  const separator = t('taskCenter.scheduleListSeparator');
-  return [
-    regular.length ? t('taskCenter.cronMonthDays', { days: regular.join(separator) }) : '',
-    fromEnd.length ? t('taskCenter.cronMonthDaysFromEnd', { days: fromEnd.join(separator) }) : '',
-  ].filter(Boolean).join(separator);
-}
-
-function parseMonthDayField(field: string): number[] {
-  const days: number[] = [];
-  field.split(',').forEach((rawToken) => {
-    const token = rawToken.trim();
-    const range = token.match(/^(-?\d+)-(-?\d+)$/);
-    if (range) {
-      const start = Number(range[1]);
-      const end = Number(range[2]);
-      const step = start <= end ? 1 : -1;
-      for (let day = start; day !== end + step; day += step) days.push(day);
-      return;
-    }
-    const day = Number(token);
-    if (Number.isInteger(day)) days.push(day);
-  });
-  return sortMonthDays([...new Set(days.filter((day) => (day >= 1 && day <= 31) || (day >= -4 && day <= -1)))]);
 }
 
 function buildCronExpr(weekdays: number[], time: dayjs.Dayjs): string {
@@ -161,40 +119,9 @@ function buildMonthlyCronExpr(days: number[], time: dayjs.Dayjs): string {
   return `${time.minute()} ${time.hour()} ${days.join(',') || '1'} * *`;
 }
 
-function parseCronExpr(cron: string): { weekdays: number[]; time: dayjs.Dayjs } {
-  const parts = parseCadence(cron).cron.trim().split(/\s+/);
-  const minute = parseInt(parts[0] ?? '0', 10) || 0;
-  const hour = parseInt(parts[1] ?? '0', 10) || 0;
-  const dowStr = parts[4] ?? '*';
-  const weekdays =
-    dowStr === '*'
-      ? []
-      : dowStr.split(',').map((v) => parseInt(v, 10)).filter((v) => !isNaN(v));
-  return { weekdays, time: dayjs().hour(hour).minute(minute).second(0) };
-}
-
 function capitalize(s: string) {
   if (!s) return '';
   return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-export function describeCron(cron: string, t: TFunc): string {
-  const cadence = parseCadence(cron);
-  const fields = cadence.cron.trim().split(/\s+/);
-  if (fields.length === 5 && fields[2] !== '*') {
-    const days = formatMonthDays(parseMonthDayField(fields[2]), t);
-    const time = `${String(fields[1]).padStart(2, '0')}:${String(fields[0]).padStart(2, '0')}`;
-    return cadence.interval > 1
-      ? t('taskCenter.cronMonthlyInterval', { interval: cadence.interval, days, time })
-      : t('taskCenter.cronMonthly', { days, time });
-  }
-  const { weekdays, time } = parseCronExpr(cron);
-  const timeStr = time.format('HH:mm');
-  if (weekdays.length === 0) return t('taskCenter.cronDaily', { time: timeStr });
-  const sep = t('taskCenter.weekdaySeparator');
-  const labels = weekdays.map((d) => t(`taskCenter.weekdayFull${d}`)).join(sep);
-  const weekly = t('taskCenter.cronWeekdays', { days: labels, time: timeStr });
-  return cadence.interval > 1 ? t('taskCenter.cronWeeklyInterval', { interval: cadence.interval, schedule: weekly }) : weekly;
 }
 
 /* ────────────────────────────────────────────────
@@ -441,7 +368,8 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [notificationDraft, setNotificationDraft] = useState<NotificationUpdate>();
   const [notificationOpen, setNotificationOpen] = useState(false);
-  const [detailNotificationOpen, setDetailNotificationOpen] = useState(false);
+  const [cardNotificationOpen, setCardNotificationOpen] = useState(false);
+  const [cardNotificationTarget, setCardNotificationTarget] = useState<Schedule | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
   const [fileList, setFileList] = useState<UploadFile[]>([]);
@@ -701,7 +629,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
         <label><Switch size='small' checked={schedule.enabled} onChange={(checked) => void (checked ? handleEnable(schedule.id) : handleDisable(schedule.id))} /> {schedule.enabled ? t('taskCenter.scheduleStatusEnabled') : t('taskCenter.scheduleStatusDisabled')}</label>
         <span>{t('taskCenter.scheduleRunTotal', { total: schedule.run_count ?? 0 })}</span>
         <div>
-          <Button icon={<SettingOutlined aria-hidden="true" />} onClick={() => { setDetailNotificationOpen(true); setSelectedSchedule(schedule); }}>{t('notifications.configure')}</Button>
+          <Button icon={<SettingOutlined aria-hidden="true" />} onClick={() => { setCardNotificationTarget(schedule); setCardNotificationOpen(true); }}>{t('notifications.configure')}</Button>
           <Button className='schedule-run-button' icon={<PlayCircleOutlined />} onClick={() => void handleRunNow(schedule.id)}>{viewMode === 'large' ? t('taskCenter.scheduleRunNow') : null}</Button>
           <Dropdown
             trigger={['click']}
@@ -834,16 +762,17 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           ) : <Empty className='schedule-empty' description={t('taskCenter.empty')} />}
         </section>
       </Spin>
-      <Drawer className='schedule-detail-drawer' width={460} open={Boolean(selectedSchedule)} onClose={() => { setSelectedSchedule(null); setDetailNotificationOpen(false); }} title={selectedSchedule?.name || t('taskCenter.scheduleName')} footer={selectedSchedule ? <div className='schedule-detail-actions'><Button danger size='large' disabled={Boolean(deletingScheduleId)} onClick={() => setDeleteTarget(selectedSchedule)}>{t('taskCenter.scheduleDelete')}</Button><Button type='primary' size='large' onClick={() => handleOpenEdit(selectedSchedule)}>{t('taskCenter.scheduleEdit')}</Button></div> : null}>
+      <Drawer className='schedule-detail-drawer' width={460} open={Boolean(selectedSchedule)} onClose={() => setSelectedSchedule(null)} title={selectedSchedule?.name || t('taskCenter.scheduleName')} footer={selectedSchedule ? <div className='schedule-detail-actions'><Button danger size='large' disabled={Boolean(deletingScheduleId)} onClick={() => setDeleteTarget(selectedSchedule)}>{t('taskCenter.scheduleDelete')}</Button><Button type='primary' size='large' onClick={() => handleOpenEdit(selectedSchedule)}>{t('taskCenter.scheduleEdit')}</Button></div> : null}>
         {selectedSchedule && <div className='schedule-detail-content'>
           <section><h3>{t('taskCenter.scheduleDescription')}</h3><p>{selectedSchedule.prompt_template}</p></section>
           <section><h3>{t('taskCenter.scheduleTriggerPeriod')}</h3><p>{describeCron(selectedSchedule.cron_expr, t)} · {selectedSchedule.timezone}</p></section>
           <section><h3>{t('taskCenter.nextRunAt')}</h3><p>{selectedSchedule.next_run_at ? dayjs(selectedSchedule.next_run_at).format('YYYY/MM/DD HH:mm:ss') : '—'}</p></section>
           <section><h3>{t('taskCenter.lastRun')}</h3><p>{selectedSchedule.last_run_at ? dayjs(selectedSchedule.last_run_at).format('YYYY/MM/DD HH:mm:ss') : '—'}</p></section>
           <section><h3>{t('taskCenter.scheduleTaskCount')}</h3><ExpandedScheduleTasks scheduleId={selectedSchedule.id} /></section>
-          <ScheduleNotificationPanel key={selectedSchedule.id} scheduleId={selectedSchedule.id} title={selectedSchedule.name} editorOpen={detailNotificationOpen} onEditorOpenChange={(open) => { setDetailNotificationOpen(open); if (!open) setSelectedSchedule(null); }} />
+          <ScheduleNotificationPanel key={selectedSchedule.id} scheduleId={selectedSchedule.id} title={selectedSchedule.name} />
         </div>}
       </Drawer>
+      {cardNotificationTarget && <ScheduleNotificationPanel key={cardNotificationTarget.id} compact editorOnly scheduleId={cardNotificationTarget.id} title={cardNotificationTarget.name} editorOpen={cardNotificationOpen} onEditorOpenChange={setCardNotificationOpen} />}
       <Modal
         title={t('taskCenter.scheduleDeleteConfirmTitle')}
         open={Boolean(deleteTarget)}
