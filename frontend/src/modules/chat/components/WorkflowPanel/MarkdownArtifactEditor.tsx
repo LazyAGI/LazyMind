@@ -300,6 +300,15 @@ function isEscaped(value: string, index: number): boolean {
 }
 
 function mdxMarkupLength(line: string, start: number): number {
+  const linkDestination = /\]\([ \t]*$/.exec(line.slice(0, start));
+  if (linkDestination && !isEscaped(line, linkDestination.index)) {
+    // Angle brackets delimit Markdown destinations; escaping '<' makes it
+    // part of the image URL and prevents the preview resource from matching.
+    const destination = line.slice(start).match(
+      /^<(?:\\.|[^<>\\])*>(?=[ \t]*(?:\)|["'(]))/,
+    );
+    if (destination) return destination[0].length;
+  }
   const markup = line.slice(start).match(
     /^(?:<!--.*?-->|<\/?[A-Za-z][A-Za-z0-9:._-]*(?=[\s/>])[^<>]*>|<(?:https?:\/\/|mailto:)[^<>\s]+>|<[^<>\s@]+@[^<>\s@]+>)/i,
   );

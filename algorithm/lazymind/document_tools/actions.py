@@ -123,6 +123,7 @@ class WriteDocumentArguments(_StrictModel):
     title: str = ''
     parent_uri: str = ''
     mode: Literal['replace', 'append'] = 'replace'
+    user_input: str = ''
 
 
 class ActionArtifact(_StrictModel):

@@ -217,6 +217,7 @@ def write_document(
     title: str = '',
     parent_uri: str = '',
     mode: str = 'replace',
+    user_input: str = '',
 ) -> dict[str, Any]:
     """Write an already converted provider document, then read back confirmation."""
     if mode not in {'replace', 'append'}:
@@ -226,6 +227,11 @@ def write_document(
         raise ToolExecutionError('Portable document conversions cannot be written to a provider.')
     provider = get_writer_provider(converted.provider)
     target = TargetDocument.model_validate(target_document) if target_document else None
+    if target is None and converted.provider == 'github':
+        resolved = _provider_create_target(parent_uri.strip() or user_input)
+        if resolved is not None:
+            _, target = resolved
+            target.title = title.strip() or converted.source_document.title or target.title
     if target is None:
         provider.require_capability('create')
         target = provider.create_document(
@@ -372,15 +378,22 @@ def _source_document_target(user_input: str, *, stage: str = 'final') -> TargetD
 
 
 def _provider_create_target(user_input: str) -> tuple[str, TargetDocument] | None:
+    resolved = None
+    seen: set[str] = set()
     for match in _provider_locator_matches(user_input):
         locator = match.group(0).rstrip(').,;!?]}，。；！？】》」』')
+        if locator in seen:
+            continue
+        seen.add(locator)
         try:
             target = resolve_writer_create_target(locator)
         except ValueError:
             continue
         if target.meta.get('create_pending'):
-            return locator, target
-    return None
+            if resolved is not None:
+                raise ToolExecutionError('Exactly one provider document creation target is required.')
+            resolved = locator, target
+    return resolved
 
 
 def _extract_provider_resources(user_input: str) -> list[dict]:

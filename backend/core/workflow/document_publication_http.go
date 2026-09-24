@@ -379,6 +379,9 @@ func PublishDocumentArtifact(ctx context.Context, db *gorm.DB, owner, id string,
 		if op.ParentURI != "" {
 			args["parent_uri"] = op.ParentURI
 		}
+		if op.SharedTarget && op.Provider == "github" && len(target) == 0 && op.ParentURI == "" {
+			args["user_input"] = sessionIntentText(session.IntentContext)
+		}
 		request.Reference = "builtin:document.write_document.v1"
 		request.Arguments = args
 	}

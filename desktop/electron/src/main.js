@@ -808,7 +808,7 @@ async function runInstallerWarmup() {
           callback({ cancel: true });
         }
       });
-      await warmupWindow.loadURL(`http://127.0.0.1:${status.config.frontendPort}`);
+      await warmupWindow.loadURL(`http://localhost:${status.config.frontendPort}`);
     },
     stopRuntime: () => runSidecar("down", maintenanceArgs, {
       env: { ...sidecarEnv(), LAZYMIND_LOCAL_DOWN_TIMEOUT: "120s" },
@@ -2014,7 +2014,7 @@ function createHiddenRendererAttempt(frontendPort) {
   rendererReadyWait = readyWait;
   startupMetricsRecorder.mark("frontendLoadStarted");
   const ready = Promise.all([
-    window.loadURL(`http://127.0.0.1:${frontendPort}/agent/chat/home`),
+    window.loadURL(`http://localhost:${frontendPort}/agent/chat/home`),
     readyWait.promise,
   ]);
   return {
