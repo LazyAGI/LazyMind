@@ -149,6 +149,95 @@
   p { margin: 0; color: var(--color-text-description); line-height: 1.6; }
 }
 
+.pdf-translation-revision-modal {
+  .ant-modal-body {
+    max-height: min(68vh, 720px);
+    overflow: auto;
+  }
+}
+
+.pdf-translation-revision {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.pdf-translation-revision__pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 360px;
+  overflow: hidden;
+  border: 1px solid var(--color-border-secondary, #e5e7eb);
+  border-radius: 12px;
+  background: #fff;
+
+  > header {
+    display: flex;
+    min-height: 52px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--color-border-secondary, #e5e7eb);
+
+    span { color: var(--color-text, #1f2329); font-size: 16px; font-weight: 600; }
+    small { margin-left: 8px; color: var(--color-text-description, #8f959e); font-size: 12px; }
+  }
+}
+
+.pdf-translation-revision__source {
+  background: var(--color-fill-quaternary, #fafafa);
+}
+
+.pdf-translation-revision__target {
+  border-color: var(--color-primary-border, #91caff);
+  background: var(--color-primary-bg, #f0f7ff);
+}
+
+.pdf-translation-revision__source-text {
+  flex: 1;
+  padding: 18px;
+  overflow: auto;
+  color: var(--color-text, #1f2329);
+  font-size: 15px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+}
+
+.pdf-translation-revision__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.pdf-translation-revision__editor.ant-input {
+  flex: 1;
+  min-height: 306px;
+  padding: 18px;
+  resize: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 15px;
+  line-height: 1.75;
+
+  &:focus { box-shadow: inset 0 0 0 2px rgb(22 119 255 / 18%); }
+}
+
+.pdf-translation-revision__hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--color-text-description, #8f959e);
+  font-size: 13px;
+}
+
+@media (max-width: 760px) {
+  .pdf-translation-revision { grid-template-columns: 1fr; }
+  .pdf-translation-revision__pane { min-height: 260px; }
+  .pdf-translation-revision__editor.ant-input { min-height: 206px; }
+}
+
 .knowledge-preview-toolbar,
 .knowledge-preview-sequence {
   display: flex;

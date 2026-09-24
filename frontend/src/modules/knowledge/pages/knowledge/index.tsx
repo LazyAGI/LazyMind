@@ -1278,8 +1278,10 @@ const Detail = () => {
         </div>
       </Modal>
       <Modal
+        className="pdf-translation-revision-modal"
         open={revisionModalOpen}
         title="重新翻译此段"
+        width={1080}
         okText="确认并生成新译本"
         cancelText="取消"
         confirmLoading={revisionLoading}
@@ -1287,25 +1289,38 @@ const Detail = () => {
         onCancel={() => setRevisionModalOpen(false)}
         onOk={() => void confirmTranslationRevision()}
       >
-        <div className="pdf-translation-config">
-          <div><label>原文</label><div>{revisionBlock?.source_text}</div></div>
-          <div>
-            <label>新译文</label>
-            <Input.TextArea value={revisionText} onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setRevisionText(event.target.value)} autoSize={{ minRows: 4, maxRows: 10 }} />
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button
-              loading={revisionTranslatingWith === "api"}
-              disabled={revisionLoading && revisionTranslatingWith !== "api"}
-              onClick={() => void retranslateRevisionBlock("api")}
-            >翻译 API 重译</Button>
-            <Button
-              loading={revisionTranslatingWith === "llm"}
-              disabled={revisionLoading && revisionTranslatingWith !== "llm"}
-              onClick={() => void retranslateRevisionBlock("llm")}
-            >大模型重译</Button>
-          </div>
-          <p>确认后会生成一个新的翻译版 PDF，其他段落和原译本保持不变。</p>
+        <div className="pdf-translation-revision">
+          <section className="pdf-translation-revision__pane pdf-translation-revision__source">
+            <header><span>原文</span><small>Original</small></header>
+            <div className="pdf-translation-revision__source-text">{revisionBlock?.source_text}</div>
+          </section>
+          <section className="pdf-translation-revision__pane pdf-translation-revision__target">
+            <header>
+              <div><span>译文</span><small>Translation</small></div>
+              <div className="pdf-translation-revision__actions">
+                <Button
+                  size="small"
+                  loading={revisionTranslatingWith === "api"}
+                  disabled={revisionLoading && revisionTranslatingWith !== "api"}
+                  onClick={() => void retranslateRevisionBlock("api")}
+                >翻译 API</Button>
+                <Button
+                  size="small"
+                  loading={revisionTranslatingWith === "llm"}
+                  disabled={revisionLoading && revisionTranslatingWith !== "llm"}
+                  onClick={() => void retranslateRevisionBlock("llm")}
+                >大模型</Button>
+              </div>
+            </header>
+            <Input.TextArea
+              className="pdf-translation-revision__editor"
+              value={revisionText}
+              onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setRevisionText(event.target.value)}
+              autoSize={false}
+              placeholder="选择翻译方式生成译文，或直接在这里编辑"
+            />
+          </section>
+          <p className="pdf-translation-revision__hint">确认后会生成一个新的翻译版 PDF，其他段落和原译本保持不变。</p>
         </div>
       </Modal>
       <Modal
