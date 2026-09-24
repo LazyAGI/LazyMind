@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +13,14 @@ import (
 
 const RootNodeGroup = "lazyllm_root"
 
+const (
+	// Keep the synchronous wait below the default 30-second Core client and
+	// gateway timeouts. A longer parse keeps running on the shared task and a
+	// subsequent read joins it instead of creating duplicate work.
+	documentParseWaitTimeout  = 25 * time.Second
+	documentParsePollInterval = time.Second
+)
+
 type EnsureDocumentParsedRequest struct {
 	UserID     string
 	DatasetID  string
@@ -22,6 +31,48 @@ type EnsureDocumentParsedRequest struct {
 type EnsureDocumentParsedResult struct {
 	Status string `json:"status"`
 	TaskID string `json:"task_id,omitempty"`
+}
+
+// EnsureDocumentParsedAndWait owns the complete on-demand parse lifecycle for
+// synchronous readers. Concurrent callers join the same task through
+// EnsureDocumentParsed's database latch and wait here for its terminal state.
+func (s *DocumentService) EnsureDocumentParsedAndWait(r *http.Request, req EnsureDocumentParsedRequest) error {
+	return waitForDocumentParsed(r.Context(), documentParseWaitTimeout, documentParsePollInterval, func() (EnsureDocumentParsedResult, error) {
+		return s.EnsureDocumentParsed(r, req)
+	})
+}
+
+func waitForDocumentParsed(
+	ctx context.Context,
+	timeout time.Duration,
+	pollInterval time.Duration,
+	ensure func() (EnsureDocumentParsedResult, error),
+) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		result, err := ensure()
+		if err != nil {
+			return err
+		}
+		switch strings.ToLower(strings.TrimSpace(result.Status)) {
+		case "parsed":
+			return nil
+		case "failed":
+			return &DocumentServiceError{Code: DocumentServiceUnavailable, Message: "document Reader parsing failed"}
+		}
+
+		poll := time.NewTimer(pollInterval)
+		select {
+		case <-ctx.Done():
+			poll.Stop()
+			return ctx.Err()
+		case <-deadline.C:
+			poll.Stop()
+			return &DocumentServiceError{Code: DocumentServiceUnavailable, Message: "document parsing is still running"}
+		case <-poll.C:
+		}
+	}
 }
 
 // EnsureDocumentParsed is the single on-demand entry point for features that
