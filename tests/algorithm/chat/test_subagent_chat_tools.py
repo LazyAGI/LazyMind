@@ -202,6 +202,22 @@ def test_create_subagent_auto_failed_task(monkeypatch):
     assert 'failed' in result['message']
 
 
+def test_create_subagent_returns_structured_completion_failure(monkeypatch):
+    _patch_config(monkeypatch)
+    monkeypatch.setattr(sct, '_write_agent_data', lambda *_, **__: None)
+
+    class FakeDB:
+        def get_task_status(self, _task_id):
+            return {'status': 'failed', 'current_phase': 'missing_required_artifacts',
+                    'summary': 'The requested file was not delivered.'}
+
+    monkeypatch.setattr(sct, 'TaskQueryDB', FakeDB)
+    result = sct.create_subagent(agent_type='document_generation', title='Export', objective='Create a PDF')
+    assert result['status'] == 'failed'
+    assert result['task_status'] == 'failed'
+    assert result['failure']['code'] == 'missing_required_artifacts'
+
+
 def test_create_subagent_auto_emits_heartbeat(monkeypatch):
     """Heartbeat must be written when poll interval >= HEARTBEAT_INTERVAL."""
     _patch_config(monkeypatch)

@@ -17,6 +17,7 @@ from lazymind.chat.engine.subagent import (
     SUBAGENT_SKILLS_CONTEXT_KEY,
 )
 from lazymind.chat.engine.subagent.db import TaskQueryDB
+from lazymind.chat.engine.subagent.context import COMPLETION_FAILURE_PHASES, resolve_output_contract
 from lazyllm.tools.agent.base import _write_agent_data
 
 # How often to emit a heartbeat while polling in auto mode (seconds).
@@ -170,6 +171,9 @@ def create_subagent(
         params (dict): Optional parameters for the task, e.g. {"count": 4}.
         input_slots (list): Slot ids this SubAgent may read from prior tasks.
         output_slots (list): Slot ids this SubAgent must produce (fixed declaration).
+            Declare deliverables for artifact-producing tasks, with their content types in
+            params.output_slot_types (e.g. {"document": "file"}). A final summary cannot
+            replace a required file. Tasks without output declarations need completion review.
         tools (list): Optional explicit tool names; defaults to the agent_type tool set.
         resume (bool): Set to True when the user explicitly asks to continue or retry a
             FAILED or interrupted task. Pass the failed task's title so the agent can locate
@@ -210,7 +214,7 @@ def create_subagent(
     else:
         params.pop(SUBAGENT_ATTACHMENT_CONTEXT_KEY, None)
     input_slots = input_slots or []
-    output_slots = output_slots or []
+    output_slots, _ = resolve_output_contract(agent_type, output_slots or [], params)
 
     task_id = str(uuid.uuid4())
     if resume:
@@ -281,7 +285,14 @@ def create_subagent(
                 msg = f"Task '{title}' did not fully succeed:\n{summary}\n{resume_hint}"
             else:
                 msg = f"Task '{title}' failed: {phase or status_row.get('status')}. {resume_hint}"
-            result = {'status': 'failed', 'message': msg, 'summary': summary}
+            result = {
+                'status': 'failed', 'message': msg, 'summary': summary,
+                'task_status': status_row.get('status'),
+                'failure': {
+                    'code': phase if phase in COMPLETION_FAILURE_PHASES else f'task_{status}',
+                    'message': summary or str(phase or status),
+                },
+            }
         return result
 
     # manual: return immediately; Go runs the SubAgent in the background.

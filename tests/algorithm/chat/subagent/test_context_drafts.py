@@ -68,3 +68,16 @@ def test_artifact_sequence_continues_from_persisted_revisions(tmp_path):
     ctx.db = FakeDB()  # type: ignore[assignment]
     assert ctx.next_artifact_seq('result') == 4
     assert ctx.next_artifact_seq('result') == 5
+
+
+def test_saved_keys_use_recorded_artifacts_and_resume_snapshot(tmp_path):
+    from lazymind.chat.engine.subagent.db import MemorySubAgentStore
+
+    ctx = _context(str(tmp_path))
+    ctx.db = MemorySubAgentStore({'id': ctx.task_id}, artifacts=[
+        {'slot': 'previous', 'content_type': 'text', 'value': {'text': 'Saved earlier'}, 'seq': 1},
+    ])
+    ctx.next_artifact_seq('allocated_only')
+    ctx.record_local_artifact('current', 'text', {'text': 'Saved now'}, 1)
+
+    assert set(ctx.saved_keys()) == {'previous', 'current'}

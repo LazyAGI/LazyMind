@@ -385,13 +385,13 @@ func persistTaskEventWithRecord(ctx context.Context, db *gorm.DB, ev *TaskEvent)
 		if status == "" {
 			status = StatusSucceeded
 		}
-		return AcceptFinalStatus(ctx, db, ev.TaskID, status, ev.Summary)
+		return acceptFinalStatusWithPhase(ctx, db, ev.TaskID, status, ev.Summary, ev.CurrentPhase)
 	case "error":
 		status := ev.Status
 		if status == "" {
 			status = StatusFailed
 		}
-		return AcceptFinalStatus(ctx, db, ev.TaskID, status, ev.Message)
+		return acceptFinalStatusWithPhase(ctx, db, ev.TaskID, status, ev.Message, ev.CurrentPhase)
 	}
 	return err == nil, err
 }
@@ -420,6 +420,9 @@ func publishTaskEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 			status = StatusSucceeded
 		}
 		fields := map[string]any{"status": status, "summary": summary}
+		if ev.CurrentPhase != "" {
+			fields["current_phase"] = ev.CurrentPhase
+		}
 		if ev.Type == "done" {
 			fields["progress"] = 100
 		}

@@ -27,6 +27,30 @@ LARGE_TOOL_RESULT_TOKEN_THRESHOLD = 32 * 1024  # 32K estimated tokens
 # Preserve the former conservative fallback if filesystem offload fails.
 LARGE_TOOL_RESULT_FALLBACK_CHARS = 16 * 1024
 
+COMPLETION_FAILURE_PHASES = frozenset({
+    'missing_required_artifacts', 'objective_incomplete', 'completion_evaluation_failed',
+})
+
+
+def resolve_output_contract(
+    agent_type: str, output_slots: List[str], params: Dict[str, Any],
+) -> Tuple[List[str], List[str]]:
+    """Resolve ordinary deliverables without changing Workflow optional-output rules."""
+    declared = list(output_slots)
+    required = params.get('required_output_artifact_keys') or []
+    if isinstance(required, (str, bytes, bytearray)):
+        try:
+            required = json.loads(required)
+        except ValueError:
+            required = []
+    required = [str(key) for key in required if str(key).strip()] if isinstance(required, list) else []
+    if agent_type == 'workflow_step':
+        return declared, required
+    slot_types = params.get('output_slot_types') or {}
+    typed = [str(key) for key in slot_types if str(key).strip()] if isinstance(slot_types, dict) else []
+    declared = list(dict.fromkeys([*declared, *required, *typed]))
+    return declared, list(declared)
+
 
 @dataclass
 class SubAgentContext:
@@ -74,7 +98,11 @@ class SubAgentContext:
         return [a for a in self._local_artifacts if a['slot'] in keyset]
 
     def saved_keys(self) -> List[str]:
-        return list(self._artifact_counts.keys())
+        persisted = self.db.load_artifacts(self.task_id) if self.db is not None else []
+        return list(dict.fromkeys(
+            str(artifact['slot']) for artifact in [*persisted, *self._local_artifacts]
+            if artifact.get('slot')
+        ))
 
     # ------------------------------------------------------------------
     # Draft file management
