@@ -47,6 +47,25 @@ func TestLocalPortAllocatorFailsWhenSearchRangeIsExhausted(t *testing.T) {
 	}
 }
 
+func TestLocalPortAllocatorSkipsHostAvailabilityChecks(t *testing.T) {
+	allocator := newLocalPortAllocator()
+	allocator.skipPortChecks = true
+	allocator.available = func(string, int) bool {
+		t.Fatal("host port availability should not be checked")
+		return false
+	}
+
+	if port := allocator.resolvedPort("process-compose", nil, 19080); port != 19080 {
+		t.Fatalf("resolved port = %d, want 19080", port)
+	}
+	if !allocator.portAvailable(19081) {
+		t.Fatal("unreserved port should be available without a host probe")
+	}
+	if err := allocator.Err(); err != nil {
+		t.Fatalf("unexpected allocation error: %v", err)
+	}
+}
+
 func TestRuntimeConfigMovesOccupiedLocalProxyPortAndPropagatesIt(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)

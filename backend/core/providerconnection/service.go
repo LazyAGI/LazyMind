@@ -557,7 +557,13 @@ func (registry HTTPRegistry) LegacyAccessToken(ctx context.Context, userID, conn
 		Code    int    `json:"code"`
 		Message string `json:"message"`
 		Data    struct {
-			AccessToken string `json:"access_token"`
+			ConnectionID string     `json:"connection_id"`
+			Provider     string     `json:"provider"`
+			AuthMode     string     `json:"auth_mode"`
+			AccessToken  string     `json:"access_token"`
+			TokenType    string     `json:"token_type"`
+			ExpiresAt    *time.Time `json:"expires_at"`
+			Status       string     `json:"status"`
 		} `json:"data"`
 	}
 	path := fmt.Sprintf("%s/v1/cloud/connections/%s/token?user_id=%s", strings.TrimRight(registry.BaseURL, "/"), url.PathEscape(connectionID), url.QueryEscape(userID))

@@ -284,6 +284,12 @@ func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
 
 func runtimeProcessEnvironment(base []string, cfg RuntimeConfig, plan runtimeProcessPlan, processName string) []string {
 	env := append([]string(nil), base...)
+	if processName == chatProcessName {
+		env = append(env,
+			"LAZYLLM_OBSIDIAN_VAULT_PATH="+envText("LAZYLLM_OBSIDIAN_VAULT_PATH", ""),
+			"LAZYLLM_OBSIDIAN_HOST_ROOT="+envText("LAZYLLM_OBSIDIAN_HOST_ROOT", ""),
+		)
+	}
 	if cfg.MaintenanceMode != installerWarmupMaintenanceMode {
 		return env
 	}

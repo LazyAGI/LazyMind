@@ -625,6 +625,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_UPLOAD_DIR=" + paths.UploadRoot,
 		"LAZYMIND_UPLOAD_ROOT=" + paths.UploadRoot,
 		"LAZYMIND_DOCUMENT_SERVICE_STORAGE_DIR=" + paths.UploadRoot,
+		"LAZYMIND_OBSERVABILITY_DIR=" + filepath.Join(paths.DataDir, "observability"),
 		"http_proxy=" + envText("http_proxy", ""),
 		"https_proxy=" + envText("https_proxy", ""),
 		"HTTP_PROXY=" + envText("HTTP_PROXY", ""),

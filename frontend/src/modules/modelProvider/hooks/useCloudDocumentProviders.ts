@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { Form, message } from "antd";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -48,6 +49,15 @@ import {
 } from "../utils/cloudDocumentUrls";
 import { useLocalDataSourceSettings } from "./useLocalDataSourceSettings";
 import { markCloudDocumentConnectionSuccess } from "../utils/cloudDocumentOnboarding";
+import { isDesktopRuntime } from "@/runtime/mode";
+import {
+  clearObsidianRoot,
+  obsidianConfigStatus,
+  restartRuntime,
+  selectObsidianRoot,
+  type DesktopObsidianConfig,
+} from "@/runtime/desktopBridge";
+import { setTransientRequestErrorsSuppressed } from "@/components/request";
 
 const MAIL_PROVIDERS = ["gmailimap", "qqmail", "qqexmail", "netease163", "neteaseqiye"] as const;
 
@@ -96,9 +106,27 @@ export function useCloudDocumentProviders() {
   const [editingFeishuAccountId, setEditingFeishuAccountId] = useState<string | null>(null);
   const [oauthLoading, setOauthLoading] = useState(true);
 	const [cloudManagedOAuthAvailable, setCloudManagedOAuthAvailable] = useState(false);
+  const desktopRuntime = isDesktopRuntime();
+  const [obsidianConfig, setObsidianConfig] = useState<DesktopObsidianConfig | null>(null);
+  const [obsidianLoading, setObsidianLoading] = useState(false);
+  const obsidianTransitionRef = useRef(false);
   const oauthAttemptRef = useRef<PendingOAuthAttempt | null>(null);
   const feishuAuthAccountsLoadedRef = useRef(false);
   const loading = localSettings.loading || oauthLoading;
+
+  const refreshObsidianConfig = async () => {
+    if (!desktopRuntime) {
+      return;
+    }
+    try {
+      const nextConfig = await obsidianConfigStatus();
+      if (!obsidianTransitionRef.current) {
+        setObsidianConfig(nextConfig);
+      }
+    } catch {
+      // Keep the last known configuration when the Desktop bridge is temporarily unavailable.
+    }
+  };
 
   const isFeishuSetupReady = true;
   const isNotionSetupReady = true;
@@ -338,6 +366,7 @@ export function useCloudDocumentProviders() {
         refreshProviderConnection("googledrive"),
         refreshWeChatOfficialAccountConnections(),
         refreshMailAccounts(),
+        refreshObsidianConfig(),
       ]);
     } finally {
       setOauthLoading(false);
@@ -526,6 +555,62 @@ export function useCloudDocumentProviders() {
     openCloudSetupModal("github", "auth");
   };
 
+  const handleManageObsidian = async (onSelectionAccepted?: () => void) => {
+    if (obsidianLoading || obsidianTransitionRef.current) {
+      return;
+    }
+    obsidianTransitionRef.current = true;
+    setTransientRequestErrorsSuppressed(true);
+    try {
+      const nextConfig = await selectObsidianRoot();
+      if (nextConfig?.canceled || !nextConfig) {
+        return;
+      }
+
+      flushSync(() => {
+        onSelectionAccepted?.();
+        setObsidianLoading(true);
+      });
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => window.setTimeout(resolve, 0));
+      });
+      const restartResult = await restartRuntime();
+      if (!restartResult.ok) {
+        throw restartResult.error || new Error("Failed to restart the Desktop runtime");
+      }
+      setObsidianConfig(nextConfig);
+      message.success(t("modelProvider.cloudDocuments.obsidianConnected"));
+    } catch {
+      message.error(t("modelProvider.cloudDocuments.obsidianConnectFailed"));
+    } finally {
+      setTransientRequestErrorsSuppressed(false);
+      setObsidianLoading(false);
+      obsidianTransitionRef.current = false;
+    }
+  };
+
+  const handleDisconnectObsidian = async () => {
+    if (obsidianLoading || obsidianTransitionRef.current) {
+      return;
+    }
+    obsidianTransitionRef.current = true;
+    setObsidianLoading(true);
+    setTransientRequestErrorsSuppressed(true);
+    try {
+      const nextConfig = await clearObsidianRoot();
+      setObsidianConfig(nextConfig);
+      if (nextConfig) {
+        message.success(t("modelProvider.cloudDocuments.obsidianDisconnected"));
+      }
+    } catch {
+      message.error(t("modelProvider.cloudDocuments.obsidianDisconnectFailed"));
+    } finally {
+      setTransientRequestErrorsSuppressed(false);
+      setObsidianLoading(false);
+      obsidianTransitionRef.current = false;
+    }
+  };
+
   useEffect(() => {
     void refreshPageData();
 	window.addEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refreshPageData);
@@ -645,6 +730,11 @@ export function useCloudDocumentProviders() {
     handleSaveFeishuSetup,
     refreshPageData,
     cloudDocumentsPath: CLOUD_DOCUMENTS_PATH,
+    isDesktopRuntime: desktopRuntime,
+    obsidianConfig,
+    obsidianLoading,
+    handleManageObsidian,
+    handleDisconnectObsidian,
   };
 }
 

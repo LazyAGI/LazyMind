@@ -5,7 +5,11 @@ export function documentPublicationUrl(value: unknown, provider?: string): strin
     if (url.username || url.password) return undefined;
     if (provider === 'wechat' && (url.host !== 'mp.weixin.qq.com' || !(url.pathname === '/s' || url.pathname.startsWith('/s/')))) return undefined;
     if (['https:', 'http:'].includes(url.protocol)) return url.href;
-    if (url.protocol === 'obsidian:' && url.host === 'open' && !url.pathname && !url.hash
+    const obsidianOpen = (url.host === 'open' && !url.pathname)
+      // Electron's renderer URL parser represents obsidian://open as an empty
+      // host with the authority in the pathname.
+      || (url.host === '' && url.pathname === '//open');
+    if (url.protocol === 'obsidian:' && obsidianOpen && !url.hash
       && [...url.searchParams.keys()].length === 1 && url.searchParams.has('path')
       && isAbsoluteNotePath(url.searchParams.get('path'))) return url.href;
   } catch { /* The provider did not return an accessible document URL. */ }

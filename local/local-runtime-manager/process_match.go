@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+const desktopOwnerPIDEnvVar = "LAZYMIND_DESKTOP_OWNER_PID"
+
 func processTextMatchesRuntime(paths RuntimePaths, parts ...string) bool {
 	text := strings.Join(parts, " ")
 	repo := filepath.Clean(paths.RepoRoot)
@@ -36,6 +38,23 @@ func processTextMatchesRuntime(paths RuntimePaths, parts ...string) bool {
 			if strings.Contains(text, marker) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func isLocalRuntimeManagerExecutable(executable string) bool {
+	base := strings.ToLower(filepath.Base(executable))
+	return strings.TrimSuffix(base, filepath.Ext(base)) == "local-runtime-manager"
+}
+
+func isRuntimeGuardCommand(executable string, args []string) bool {
+	if !isLocalRuntimeManagerExecutable(executable) {
+		return false
+	}
+	for _, arg := range args {
+		if arg == "guard" {
+			return true
 		}
 	}
 	return false

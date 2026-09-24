@@ -43,6 +43,7 @@ const GoogleDriveSetupGuide = lazy(() => import("@/modules/modelProvider/pages/G
 const LocalDataSourcePage = lazy(() => import("@/modules/modelProvider/pages/LocalDataSourcePage"));
 const FeishuSetupGuide = lazy(() => import("@/modules/modelProvider/pages/FeishuSetupGuide"));
 const GitHubSetupGuide = lazy(() => import("@/modules/modelProvider/pages/GitHubSetupGuide"));
+const ObsidianSetupGuide = lazy(() => import("@/modules/modelProvider/pages/ObsidianSetupGuide"));
 const WeChatSetupGuide = lazy(() => import("@/modules/modelProvider/pages/WeChatSetupGuide"));
 const NotionSetupGuide = lazy(() => import("@/modules/modelProvider/pages/NotionSetupGuide"));
 const DatasetListPage = lazy(() => import("@/modules/datasetManagement/pages/list"));
@@ -206,6 +207,7 @@ export default function AppRouter() {
             <Route path="google-drive" element={<GoogleDriveConnectionPage />} />
             <Route path="docs/feishu-setup" element={<FeishuSetupGuide />} />
             <Route path="docs/github-setup" element={<GitHubSetupGuide />} />
+            <Route path="docs/obsidian-setup" element={<ObsidianSetupGuide />} />
             <Route path="docs/wechat-official-account-setup" element={<WeChatSetupGuide />} />
             <Route path="docs/notion-setup" element={<NotionSetupGuide />} />
             <Route path="docs/google-drive-setup" element={<GoogleDriveSetupGuide />} />
