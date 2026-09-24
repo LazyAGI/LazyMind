@@ -13,23 +13,21 @@ describe("SkillManagementToolbar", () => {
 
   const baseProps = {
     t: (key: string) => key,
-    skillView: 'installed' as const, onSkillViewChange: vi.fn(), installedCount: 6,
+    skillView: 'installed' as const, installedCount: 6,
     onCreateSkill: vi.fn(), organizeMode: false, organizeDisabled: false,
     organizeStatus: 'idle' as const, onOrganizeSkills: vi.fn(), manualSkillReviewCount: 2,
     manualSkillReviewDisabled: false, onSkillReviewClick: vi.fn(), messageCenterCount: 1,
     onMessageCenterClick: vi.fn(), showMessageCenter: true, isAdmin: false,
   };
 
-  it.each([false, true])('shows location beside the title, respecting desktop restriction (%s)', (desktop) => {
+  it.each([false, true].flatMap((desktop) =>
+    (['installed', 'workflows'] as const).map((skillView) => ({ desktop, skillView })),
+  ))('shows $skillView without a location switch (desktop=$desktop)', ({ desktop, skillView }) => {
     vi.mocked(isDesktopRuntime).mockReturnValue(desktop);
-    render(<SkillManagementToolbar {...baseProps} />);
-    expect(screen.getByRole('heading')).toHaveTextContent('admin.memorySkillViewInstalled');
-    expect(screen.queryByRole('tab', { name: 'admin.memorySkillLocationCloud' }) !== null).toBe(!desktop);
-    expect(screen.queryByRole('tab', { name: 'admin.memorySkillViewMarket' })).not.toBeInTheDocument();
-    if (!desktop) {
-      fireEvent.click(screen.getByRole('tab', { name: 'admin.memorySkillLocationCloud' }));
-      expect(baseProps.onSkillViewChange).toHaveBeenCalledWith('cloud');
-    }
+    render(<SkillManagementToolbar {...baseProps} skillView={skillView} />);
+    expect(screen.getByRole('heading')).toHaveTextContent(skillView === 'installed' ? 'admin.memorySkillViewInstalled' : 'admin.memorySkillViewWorkflows');
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
   });
 
   it('preserves organize, sediment, messages, and adds a draft review action', async () => {
@@ -46,12 +44,11 @@ describe("SkillManagementToolbar", () => {
     expect(onReviewDrafts).toHaveBeenCalled();
   });
 
-  it('routes workflow location changes to the controlled callback', () => {
-    const onWorkflowSourceModeChange = vi.fn();
-    render(<SkillManagementToolbar {...baseProps} skillView="workflows" workflowSourceMode="cloud" onWorkflowSourceModeChange={onWorkflowSourceModeChange} />);
-    expect(screen.getByRole('tab', { name: 'admin.memorySkillLocationCloud' })).toHaveAttribute('aria-selected', 'true');
-    fireEvent.click(screen.getByRole('tab', { name: 'admin.memorySkillLocationLocal' }));
-    expect(onWorkflowSourceModeChange).toHaveBeenCalledWith('local');
+  it('keeps the workflow creation action', () => {
+    const onNewWorkflow = vi.fn();
+    render(<SkillManagementToolbar {...baseProps} skillView="workflows" onNewWorkflow={onNewWorkflow} />);
+    fireEvent.click(screen.getByRole('button', { name: /admin.memoryWorkflowNewButton/ }));
+    expect(onNewWorkflow).toHaveBeenCalledOnce();
   });
 
   it('retains both supported import paths', async () => {
@@ -122,7 +119,6 @@ describe("SkillManagementToolbar", () => {
       <SkillManagementToolbar
         t={(key) => key === "admin.memorySkillAdminPublishButton" ? "管理员上架技能" : key}
         skillView="market"
-        onSkillViewChange={vi.fn()}
         installedCount={0}
         onCreateSkill={vi.fn()}
         organizeMode={false}

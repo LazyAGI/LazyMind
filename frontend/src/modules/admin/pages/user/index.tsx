@@ -1,20 +1,17 @@
 import { useState, useEffect, useCallback } from "react";
-import { Table, Button, Space, Tag, Popconfirm, message, Modal, Form, Input, Tooltip } from "antd";
+import { Table, Button, Space, Tag, Popconfirm, message, Input, Tooltip } from "antd";
 import {
   PlusOutlined,
   StopOutlined,
   CheckCircleOutlined,
   EditOutlined,
-  KeyOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import CreateUserModal from "./components/CreateUserModal";
 import { createUserApi } from "@/modules/signin/utils/request";
-import { validatePassword } from "@/modules/signin/utils/formRules";
 import type { UserItem } from "@/api/generated/auth-client";
 import { getLocalizedTablePagination } from "@/components/ui/pagination";
 
-const PASSWORD_MAX_LENGTH = 32;
 const USERNAME_COLUMN_WIDTH = 220;
 
 type AdminUserItem = UserItem & {
@@ -65,7 +62,6 @@ const UserManagement = () => {
   const [users, setUsers] = useState<AdminUserItem[]>([]);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
   const [editingUser, setEditingUser] = useState<AdminUserItem | null>(null);
-  const [resetPasswordForm] = Form.useForm();
   const [searchTerm, setSearchTerm] = useState("");
 
   const fetchUsers = useCallback(async (page = 1, pageSize = 20, search = "") => {
@@ -161,57 +157,6 @@ const UserManagement = () => {
     setIsModalVisible(true);
   };
 
-  const handleResetPassword = (user: UserItem) => {
-    const userId = resolveUserId(user);
-
-    Modal.confirm({
-      title: t("admin.resetUserPasswordTitle", { username: user.username }),
-      content: (
-        <Form form={resetPasswordForm} layout="vertical">
-          <Form.Item
-            name="new_password"
-            label={t("admin.newPassword")}
-            rules={[
-              { required: true, message: t("admin.enterNewPasswordRequired") },
-              {
-                validator: async (_, value) => validatePassword(value),
-              },
-            ]}
-          >
-            <Input.Password
-              placeholder={t("admin.enterNewPassword", { max: PASSWORD_MAX_LENGTH })}
-              maxLength={PASSWORD_MAX_LENGTH}
-              autoComplete="new-password"
-            />
-          </Form.Item>
-        </Form>
-      ),
-      okText: t("common.confirm"),
-      cancelText: t("common.cancel"),
-      onOk: async () => {
-        try {
-          if (!userId) {
-            throw new Error("Missing user id");
-          }
-          const values = await resetPasswordForm.validateFields();
-          const api = createUserApi();
-          await api.resetPasswordApiAuthserviceUserUserIdResetPasswordPatch({
-            userId,
-            resetPasswordBody: { new_password: values.new_password },
-          });
-          message.success(t("admin.resetPasswordSuccess"));
-          resetPasswordForm.resetFields();
-        } catch (error) {
-          console.error("Reset password failed:", error);
-          return Promise.reject();
-        }
-      },
-      onCancel: () => {
-        resetPasswordForm.resetFields();
-      },
-    });
-  };
-
   const columns = [
     {
       title: t("admin.username"),
@@ -294,14 +239,6 @@ const UserManagement = () => {
           ) : (
             editRoleButton
           )}
-          <Button 
-            type="link" 
-            size="small"
-            icon={<KeyOutlined />} 
-            onClick={() => handleResetPassword(record)}
-          >
-            {t("admin.resetPassword")}
-          </Button>
           {statusButtonDisabled ? (
             <Tooltip title={t("admin.bootstrapAdminDisableLocked")}>
               <span>

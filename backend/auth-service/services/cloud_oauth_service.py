@@ -364,7 +364,9 @@ class CloudOAuthService:
             if normalized_provider == 'feishu':
                 previous = self._decrypt_payload(row.credential_ciphertext, field_name='credential')
                 credential['provider_options'] = _feishu_chat_options(
-                    provider_options, previous.get('provider_options') or {},
+                    provider_options,
+                    None if (row.status or '').strip().upper() == 'REVOKED'
+                    else previous.get('provider_options') or {},
                 )
                 row.credential_ciphertext = self._encrypt_payload(credential, field_name='credential')
             else:
@@ -1254,7 +1256,7 @@ class CloudOAuthService:
                 restoring_revoked_connection = (
                     (existing.status or '').strip().upper() == 'REVOKED'
                 )
-                if provider_impl.provider_name() == 'feishu':
+                if provider_impl.provider_name() == 'feishu' and not restoring_revoked_connection:
                     # Reauthorization replaces credentials, not the user's current chat preference.
                     previous = self._decrypt_payload(existing.credential_ciphertext, field_name='credential')
                     previous_options = previous.get('provider_options') or {}

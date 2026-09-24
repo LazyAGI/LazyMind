@@ -8,7 +8,7 @@ from models import CloudAuthConnection
 class CloudAuthConnectionRepository:
     @staticmethod
     def _preserve_feishu_chat_preference(row: CloudAuthConnection, incoming: str) -> str:
-        if row.provider != 'feishu':
+        if row.provider != 'feishu' or (row.status or '').strip().upper() == 'REVOKED':
             return incoming
         previous = json.loads(row.provider_account_meta or '{}')
         meta = json.loads(incoming)

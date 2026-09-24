@@ -30,13 +30,15 @@ var (
 	ErrCLIConnectionConflict = errors.New("Provider Connection state conflict")
 )
 
-var DefaultFeishuCLIReadScopes = []string{
+var DefaultFeishuCLIScopes = []string{
 	"offline_access",
+	"drive:drive",
 	"drive:drive:readonly",
-	"wiki:space:retrieve",
-	"wiki:node:read",
+	"drive:drive.metadata:readonly",
+	"wiki:wiki",
+	"wiki:wiki:readonly",
 	"wiki:node:retrieve",
-	"docx:document:readonly",
+	"docx:document",
 }
 
 var feishuCLIAuthLoginCommand = [...]string{"auth", "login"}
