@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   openFeishuCLIAuthorization: vi.fn(),
   openManagedAuthorization: vi.fn(),
   reserveManagedAuthorizationPopup: vi.fn(),
+  requestFeishuAuthorizeUrl: vi.fn(),
+  openLegacyPopup: vi.fn(),
 }));
 
 vi.mock("antd", () => ({
@@ -54,8 +56,8 @@ vi.mock("@/modules/dataSource/common/feishuOAuth", () => ({
   enableCloudConnectionForChat: mocks.enableCloudConnectionForChat,
   peekFeishuDataSourceWizardDraft: vi.fn(() => null),
   requestCloudDataSourceAuthorizeUrl: vi.fn(),
-  openCenteredPopup: vi.fn(),
-  requestFeishuDataSourceAuthorizeUrl: vi.fn(),
+  openCenteredPopup: mocks.openLegacyPopup,
+  requestFeishuDataSourceAuthorizeUrl: mocks.requestFeishuAuthorizeUrl,
   saveFeishuDataSourceWizardDraft: vi.fn(),
 }));
 
@@ -95,7 +97,7 @@ describe("createOAuthEngine managed OAuth", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
-    mocks.createSession.mockReset();
+    mocks.createSession.mockReset().mockResolvedValue({ data: {} });
     mocks.getSession.mockReset();
     mocks.reauthorize.mockReset();
     mocks.reconcileConnections.mockReset();
@@ -106,11 +108,73 @@ describe("createOAuthEngine managed OAuth", () => {
       .mockReset()
       .mockReturnValue({ kind: "popup" });
     mocks.listConnections.mockResolvedValue({ data: { items: [{}] } });
+    mocks.requestFeishuAuthorizeUrl.mockReset().mockResolvedValue("https://accounts.feishu.cn/fixture");
+    mocks.openLegacyPopup.mockReset().mockReturnValue({ closed: false, focus: vi.fn() });
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
+  });
+
+  function legacyContext(available: boolean | undefined, setup?: { appId: string; appSecret: string }) {
+    return {
+      t: (key: string) => key,
+      form: { getFieldsValue: vi.fn(() => ({})) },
+      oauthAttemptRef: { current: null },
+      setOauthState: vi.fn(), setConnectionVerified: vi.fn(),
+      setOauthConnection: vi.fn(), setNotionOauthConnection: vi.fn(),
+      setNotionAuthAccounts: vi.fn(), setFeishuAuthAccounts: vi.fn(),
+      setWizardStep: vi.fn(), setValidatedAgentId: vi.fn(),
+      setAuthSelectModalOpen: vi.fn(), setAuthSelectProvider: vi.fn(),
+      openCloudSetupModal: vi.fn(),
+      feishuAuthAccountsLoadedRef: { current: false },
+      scanAgents: [], notionAuthAccounts: [], selectedType: "feishu",
+      oauthState: "pending", connectionVerified: false, oauthConnection: null,
+      cloudManagedOAuthAvailable: available, feishuAppSetup: setup,
+    } as unknown as ManagementContext;
+  }
+
+  it.each([false, undefined])("uses saved BYO credentials without starting CLI when Cloud availability is %s", async (available) => {
+    const setup = { appId: "cli_fixture_byo", appSecret: "fixture-secret-not-real" };
+    const ctx = legacyContext(available, setup);
+    const started = await createOAuthEngine(ctx).startCloudOAuth("feishu");
+    expect(mocks.createSession).not.toHaveBeenCalled();
+    expect(started).toBe(true);
+    expect(mocks.requestFeishuAuthorizeUrl).toHaveBeenCalledWith(expect.objectContaining({
+      appId: setup.appId, appSecret: setup.appSecret,
+      scopes: expect.arrayContaining(["drive:drive", "wiki:wiki", "docx:document", "offline_access"]),
+    }));
+    expect(mocks.reauthorize).not.toHaveBeenCalled();
+    expect(mocks.openLegacyPopup).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, undefined])("opens BYO setup without starting CLI when credentials are absent and Cloud availability is %s", async (available) => {
+    const ctx = legacyContext(available);
+    expect(await createOAuthEngine(ctx).startCloudOAuth("feishu")).toBe(false);
+    expect(ctx.openCloudSetupModal).toHaveBeenCalledWith("feishu", "create");
+    expect(mocks.createSession).not.toHaveBeenCalled();
+    expect(mocks.requestFeishuAuthorizeUrl).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("keeps explicit BYO authorization independent of Cloud availability (%s)", async (available) => {
+    const setup = { appId: "cli_fixture_byo", appSecret: "fixture-secret-not-real" };
+    expect(await createOAuthEngine(legacyContext(available)).startCloudOAuth("feishu", { setup })).toBe(true);
+    expect(mocks.requestFeishuAuthorizeUrl).toHaveBeenCalledWith(expect.objectContaining({
+      appId: setup.appId,
+      scopes: expect.arrayContaining(["drive:drive", "wiki:wiki", "docx:document"]),
+    }));
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps the CLI entry available when Cloud is explicitly available", async () => {
+    mocks.createSession.mockResolvedValue({ data: { session_id: "fixture-cli", authorization_start_url: "https://accounts.feishu.cn/fixture" } });
+    mocks.getSession.mockResolvedValue({ data: { status: "COMPLETED", auth_connection_id: "fixture-connection" } });
+    const pending = createOAuthEngine(legacyContext(true)).startCloudOAuth("feishu");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await pending).toBe(true);
+    expect(mocks.createSession).toHaveBeenCalledWith({ providerConnectionCreateRequest: { provider: "feishu" } });
+    expect(mocks.requestFeishuAuthorizeUrl).not.toHaveBeenCalled();
   });
 
   it("enables the completed Notion connection for Chat before reporting success", async () => {

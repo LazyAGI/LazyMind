@@ -484,6 +484,8 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     Install-FeishuCLI
 
     Write-Host '==> Building Go desktop runtime binaries'
+    Build-GoBinary (Join-Path $repoRoot 'backend\feishu-credential-helper') (Join-Path $runtimeRoot 'bin\feishu-credential-helper.exe') @('.')
+    (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $runtimeRoot 'bin\feishu-credential-helper.exe')).Hash.ToLowerInvariant() | Set-Content -Encoding ascii -NoNewline -LiteralPath (Join-Path $runtimeRoot 'bin\feishu-credential-helper.sha256')
     $desktopManager = Join-Path $runtimeRoot 'bin\local-runtime-manager.exe'
     Build-GoBinary (Join-Path $repoRoot 'local\local-runtime-manager') $desktopManager -WindowsGUI
     Assert-WindowsGUISubsystem $desktopManager

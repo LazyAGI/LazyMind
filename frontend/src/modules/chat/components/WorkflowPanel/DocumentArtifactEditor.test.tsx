@@ -2,6 +2,7 @@ const availability = vi.hoisted(() => ({ states: { feishu: 'ready', github: 'rea
 vi.mock('./useWriterProviderAvailability', () => ({ useWriterProviderAvailability: () => availability }));
 import { act, fireEvent, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Dropdown } from 'antd';
 import i18n from '@/i18n';
 import type { SlotRevision } from '@/modules/chat/store/workflowPanel';
 import { DocumentArtifactEditor } from './DocumentArtifactEditor';
@@ -34,6 +35,65 @@ vi.mock('./WriterDownloadFormat', () => ({
 }));
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); availability.refresh.mockReset(); availability.states = { feishu: 'ready', github: 'ready', wechat: 'ready', obsidian: 'ready', notion: 'ready' }; });
+
+it('opens each unavailable provider settings without selecting a publish action or losing the edited draft', async () => {
+  await i18n.changeLanguage('zh-CN');
+  const targets = [
+    ['feishu', '/cloud-documents/feishu'], ['github', '/cloud-documents'],
+    ['googledrive', '/cloud-documents/google-drive'], ['notion', '/cloud-documents'],
+    ['wechat', '/cloud-documents/wechat-official-account'],
+  ];
+  Object.assign(availability.states, Object.fromEntries(targets.map(([id]) => [id, 'authorize'])));
+  api.listDocumentProviders.mockResolvedValue({ data: { data: { providers: [...targets.map(([id]) => ({ id })), { id: 'obsidian' }] } } });
+  api.saveDocumentArtifact.mockResolvedValue({ data: { ok: true, result: {
+    artifact_id: 'menu-draft', revision: 3, draft_version: 8, value: { text: '# Updated draft' },
+  } } });
+  let action: SlotFooterAction | undefined;
+  const slot = { artifact_id: 'menu-draft', slot_id: 'draft_document', revision: 3, draft_version: 7,
+    artifact_value: { text: '# Draft' }, document: { representation: 'markdown', editable: true, capabilities: ['save', 'publish_document'] } } as SlotRevision;
+  render(<SlotEditingContext.Provider value={{ setEditing: vi.fn(), registerFlush: () => () => {},
+    registerFooterAction: (_key, next) => { if (next?.icon === 'write-back') action = next; return () => {}; },
+  }}><DocumentArtifactEditor slot={slot} sessionId='fixture' /></SlotEditingContext.Provider>);
+  await waitFor(() => expect(action?.disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: 'save draft fixture' }));
+  await waitFor(() => expect(screen.getByRole('article')).toHaveTextContent('# Updated draft'));
+  const selectProvider = vi.fn();
+  await act(async () => { render(<Dropdown open menu={{ items: action!.menu!.map(option => ({ ...option,
+    onClick: () => { selectProvider(); option.onClick(); },
+  })) }}><button>publish menu</button></Dropdown>); });
+  const links = screen.getAllByRole('link', { name: /去授权/ });
+  expect(links).toHaveLength(targets.length);
+  for (const [index, [, path]] of targets.entries()) {
+    expect(links[index]).toHaveAttribute('href', `${window.location.origin}${path}`);
+    expect(links[index]).toHaveAttribute('target', '_blank');
+    expect(links[index]).toHaveAttribute('rel', 'noopener noreferrer');
+    fireEvent.keyDown(links[index], { key: 'Enter', keyCode: 13 });
+    fireEvent.click(links[index]);
+  }
+  expect(selectProvider).not.toHaveBeenCalled();
+  expect(api.publishDocument).not.toHaveBeenCalled();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(screen.getByRole('article')).toHaveTextContent('# Updated draft');
+});
+
+it.each(['ready', 'checking', 'failed', 'chat-disabled'])('only offers a settings shortcut for actionable availability: %s', async state => {
+  await i18n.changeLanguage('zh-CN');
+  availability.states.feishu = state;
+  api.listDocumentProviders.mockResolvedValue({ data: { data: { providers: [{ id: 'feishu' }, { id: 'obsidian' }] } } });
+  let action: SlotFooterAction | undefined;
+  const slot = { artifact_id: 'menu-state', slot_id: 'draft_document', revision: 1,
+    artifact_value: { text: '# Draft' }, document: { representation: 'markdown', editable: true, capabilities: ['save', 'publish_document'] } } as SlotRevision;
+  render(<SlotEditingContext.Provider value={{ setEditing: vi.fn(), registerFlush: () => () => {},
+    registerFooterAction: (_key, next) => { if (next?.icon === 'write-back') action = next; return () => {}; },
+  }}><DocumentArtifactEditor slot={slot} sessionId='fixture' /></SlotEditingContext.Provider>);
+  await waitFor(() => expect(action?.disabled).toBe(false));
+  await act(async () => { render(<Dropdown open menu={{ items: action!.menu }}><button>publish menu</button></Dropdown>); });
+  if (state === 'chat-disabled') {
+    expect(screen.getByRole('link', { name: /去设置/ })).toHaveAttribute('href', `${window.location.origin}/cloud-documents/feishu`);
+  } else {
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  }
+});
 
 it('keeps the edited draft while linking directly to Feishu settings, then publishes the same draft', async () => {
   await i18n.changeLanguage('zh-CN');

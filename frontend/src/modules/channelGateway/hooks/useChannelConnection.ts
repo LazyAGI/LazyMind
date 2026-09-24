@@ -1,3 +1,4 @@
+import { useSettingsDraft } from "@/modules/settings/SettingsNavigationGuard";
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { message } from 'antd';
 import { getLocalizedErrorMessage } from '@/components/request';
@@ -39,6 +40,9 @@ export function useChannelConnection(provider: ChannelProvider) {
   const [actionLoading, setActionLoading] = useState(false);
   const [disconnectingAccountId, setDisconnectingAccountId] = useState<string | null>(null);
   const [challengeValue, setChallengeValue] = useState('');
+  useSettingsDraft({ dirty: Boolean(challengeValue), saving: actionLoading,
+    discard: () => setChallengeValue(''),
+  });
   const pollTimerRef = useRef<number | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);

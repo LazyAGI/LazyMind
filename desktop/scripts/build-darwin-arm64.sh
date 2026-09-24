@@ -200,6 +200,8 @@ mkdir -p \
 install_feishu_cli
 
 echo "==> Building Go desktop runtime binaries"
+(cd "${ROOT}/backend/feishu-credential-helper" && "${GO_BIN}" build ${GO_BUILD_FLAGS[@]+"${GO_BUILD_FLAGS[@]}"} -mod=readonly -o "${RUNTIME_ROOT}/bin/feishu-credential-helper" .)
+shasum -a 256 "${RUNTIME_ROOT}/bin/feishu-credential-helper" | awk '{print $1}' > "${RUNTIME_ROOT}/bin/feishu-credential-helper.sha256"
 (cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/local-runtime-manager" .)
 (cd "${ROOT}/local/lazymind-cli" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/lazymind" ./cmd/lazymind)
 (cd "${ROOT}/local/local-proxy" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/local-proxy" ./cmd/local-proxy)

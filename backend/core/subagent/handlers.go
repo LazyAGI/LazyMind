@@ -12,6 +12,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/common/taskdisplay"
 	"lazymind/core/localworkspace"
 	"lazymind/core/modelconfig"
 	"lazymind/core/store"
@@ -116,6 +117,7 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 	privateTask := map[string]any{}
 	_ = json.Unmarshal(privateTaskBody, &privateTask)
 	privateTask["params"] = params
+	privateTask["execution_id"] = task.ExecutionID
 	common.ReplyOK(w, map[string]any{"task": privateTask, "params": params,
 		"steps": stepDTOs, "create_user_id": task.CreateUserID, "llm_config": config,
 		"tool_config": toolConfig, "workspace_path": task.WorkspacePath})
@@ -139,16 +141,22 @@ func workflowToolConfigCapabilities(capabilities, legacyTools []string) []string
 // when the Workflow Executor runs outside Core. Non-Workflow SubAgents keep
 // using the same routeEvent function directly.
 func InternalIngestTaskEvent(w http.ResponseWriter, r *http.Request) {
+	taskdisplay.PrepareRequest(w, r)
 	taskID := common.PathVar(r, "task_id")
 	if !authorizeWorkflowExecutorTask(w, r, taskID) {
 		return
 	}
 	var event TaskEvent
-	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2*1024*1024)).Decode(&event); err != nil {
 		common.ReplyErr(w, "invalid task event", http.StatusBadRequest)
 		return
 	}
 	event.TaskID = taskID
+	if event.Type == "process_step" && (event.ExecutionID == "" || event.ProcessStep == nil || event.EventID == "") {
+		taskdisplay.Observe(r.Context(), taskdisplay.EventRejected, 0, 1)
+		taskdisplay.ReplyError(w, r, "invalid public task event", http.StatusBadRequest)
+		return
+	}
 	if event.Type == "artifact" {
 		task, err := GetTask(r.Context(), store.DB(), taskID)
 		if err != nil {
@@ -164,19 +172,15 @@ func InternalIngestTaskEvent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if role, content := remoteStepContent(event); role != "" {
-		if err := AppendRemoteStep(r.Context(), store.DB(), taskID, role, content); err != nil {
-			common.ReplyErr(w, "persist task event failed", http.StatusServiceUnavailable)
-			return
-		}
+	accepted, err := ingestRemoteTaskEvent(r.Context(), store.DB(), event, strings.TrimSpace(r.Header.Get("X-Workflow-Lease-Token")))
+	if err != nil {
+		taskdisplay.ReplyError(w, r, "task event rejected", http.StatusConflict)
+		return
 	}
 	event.DurableToolResults = nil
-	// Artifacts are committed through the fenced remote Workflow API. Terminal
-	// hooks remain enabled after Runtime terminal commit so LazyMind conversation
-	// handoff/synthetic-turn behavior remains identical to the in-process path.
-	if err := routeEventWithWorkflowHooks(r.Context(), store.DB(), store.State(), event, false, true); err != nil {
-		common.ReplyErr(w, "persist task event failed", http.StatusServiceUnavailable)
-		return
+	// Publish and invoke hooks only after the fenced transaction commits.
+	if accepted {
+		publishTaskEvent(r.Context(), store.DB(), store.State(), event, false, true)
 	}
 	common.ReplyOK(w, map[string]any{"accepted": true})
 }
@@ -375,21 +379,28 @@ func toStepDTO(s *orm.SubAgentStep) stepDTO {
 
 // ListConversationTasks handles GET /conversations/{conversation_id}/tasks.
 func ListConversationTasks(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("view") == "ordinary" {
+		taskdisplay.PrepareRequest(w, r)
+	}
 	convID := common.PathVar(r, "conversation_id")
 	if convID == "" {
-		common.ReplyErr(w, "conversation_id required", http.StatusBadRequest)
+		replyTaskError(w, r, "conversation_id required", http.StatusBadRequest)
 		return
 	}
 	db := store.DB()
 	if db == nil {
-		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		replyTaskError(w, r, "store not initialized", http.StatusInternalServerError)
 		return
 	}
 	ctx := r.Context()
 	userID := requestUserID(r)
 	tasks, err := ListTasksByConversationForUser(ctx, db, convID, userID)
 	if err != nil {
-		common.ReplyErr(w, "query tasks failed", http.StatusInternalServerError)
+		replyTaskError(w, r, "query tasks failed", http.StatusInternalServerError)
+		return
+	}
+	if r.URL.Query().Get("view") == "ordinary" {
+		replyOrdinaryList(w, r, db, tasks)
 		return
 	}
 	summaryOnly := r.URL.Query().Get("summary_only") == "true"
@@ -415,7 +426,7 @@ func ListConversationTasks(w http.ResponseWriter, r *http.Request) {
 		dto := toTaskDTO(&tasks[i])
 		arts, err := LoadArtifacts(ctx, db, tasks[i].ID)
 		if err != nil {
-			common.ReplyErr(w, "query task artifacts failed", http.StatusInternalServerError)
+			replyTaskError(w, r, "query task artifacts failed", http.StatusInternalServerError)
 			return
 		}
 		for j := range arts {
@@ -434,28 +445,35 @@ func ListConversationTasks(w http.ResponseWriter, r *http.Request) {
 
 // GetTaskDetail handles GET /tasks/{task_id}.
 func GetTaskDetail(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("view") == "ordinary" {
+		taskdisplay.PrepareRequest(w, r)
+	}
 	taskID := common.PathVar(r, "task_id")
 	if taskID == "" {
-		common.ReplyErr(w, "task_id required", http.StatusBadRequest)
+		replyTaskError(w, r, "task_id required", http.StatusBadRequest)
 		return
 	}
 	db := store.DB()
 	if db == nil {
-		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		replyTaskError(w, r, "store not initialized", http.StatusInternalServerError)
 		return
 	}
 	ctx := r.Context()
 	t, err := GetTask(ctx, db, taskID)
 	if err != nil {
 		if IsNotFound(err) {
-			common.ReplyErr(w, "task not found", http.StatusNotFound)
+			replyTaskError(w, r, "task not found", http.StatusNotFound)
 			return
 		}
-		common.ReplyErr(w, "query task failed", http.StatusInternalServerError)
+		replyTaskError(w, r, "query task failed", http.StatusInternalServerError)
 		return
 	}
 	if t.CreateUserID != requestUserID(r) {
-		common.ReplyErr(w, "task not found", http.StatusNotFound)
+		replyTaskError(w, r, "task not found", http.StatusNotFound)
+		return
+	}
+	if r.URL.Query().Get("view") == "ordinary" {
+		replyOrdinaryDetail(w, r, db, t, false)
 		return
 	}
 	dto := toTaskDTO(t)
@@ -465,32 +483,39 @@ func GetTaskDetail(w http.ResponseWriter, r *http.Request) {
 
 // GetTaskArtifacts handles GET /tasks/{task_id}/artifacts.
 func GetTaskArtifacts(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("view") == "ordinary" {
+		taskdisplay.PrepareRequest(w, r)
+	}
 	taskID := common.PathVar(r, "task_id")
 	if taskID == "" {
-		common.ReplyErr(w, "task_id required", http.StatusBadRequest)
+		replyTaskError(w, r, "task_id required", http.StatusBadRequest)
 		return
 	}
 	db := store.DB()
 	if db == nil {
-		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		replyTaskError(w, r, "store not initialized", http.StatusInternalServerError)
 		return
 	}
 	task, err := GetTask(r.Context(), db, taskID)
 	if err != nil {
 		if IsNotFound(err) {
-			common.ReplyErr(w, "task not found", http.StatusNotFound)
+			replyTaskError(w, r, "task not found", http.StatusNotFound)
 		} else {
-			common.ReplyErr(w, "query task failed", http.StatusInternalServerError)
+			replyTaskError(w, r, "query task failed", http.StatusInternalServerError)
 		}
 		return
 	}
 	if task.CreateUserID != requestUserID(r) {
-		common.ReplyErr(w, "task not found", http.StatusNotFound)
+		replyTaskError(w, r, "task not found", http.StatusNotFound)
+		return
+	}
+	if r.URL.Query().Get("view") == "ordinary" {
+		replyOrdinaryDetail(w, r, db, task, true)
 		return
 	}
 	arts, err := LoadArtifacts(r.Context(), db, taskID)
 	if err != nil {
-		common.ReplyErr(w, "query artifacts failed", http.StatusInternalServerError)
+		replyTaskError(w, r, "query artifacts failed", http.StatusInternalServerError)
 		return
 	}
 	out := make([]artifactDTO, 0, len(arts))

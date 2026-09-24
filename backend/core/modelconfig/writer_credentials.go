@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"lazymind/core/common"
+	"lazymind/core/providerconnection"
 )
 
 var errWriterCredentialLoad = errors.New("load cloud document authorization failed")
@@ -72,7 +73,24 @@ func LoadWriterProviderToolConfig(ctx context.Context, provider, userID string) 
 		seen[item.ConnectionID] = struct{}{}
 	}
 	tokens := make([]string, 0, len(connections.Data.Items))
+	bridge := providerconnection.DefaultService()
 	for _, item := range connections.Data.Items {
+		if bridge != nil {
+			resolved, err := bridge.ResolveAccessToken(ctx, providerconnection.ResolveRequest{
+				AuthConnectionID: item.ConnectionID, UserID: userID,
+				SourceID: "chat:" + provider, BindingID: "chat:" + item.ConnectionID,
+				Consumer: "chat", RequiredCapability: "chat.write",
+			})
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if err != nil || resolved.AuthConnectionID != item.ConnectionID || resolved.Provider != provider ||
+				resolved.Status != "ACTIVE" || resolved.TokenType != "Bearer" || strings.TrimSpace(resolved.AccessToken) == "" {
+				return nil, errWriterCredentialLoad
+			}
+			tokens = append(tokens, strings.TrimSpace(resolved.AccessToken))
+			continue
+		}
 		endpoint := fmt.Sprintf("%s/v1/cloud/connections/%s/token?user_id=%s", common.AuthServiceBaseURL(), url.PathEscape(item.ConnectionID), url.QueryEscape(userID))
 		var response writerConnectionToken
 		if err := common.ApiGet(ctx, endpoint, headers, &response, cloudToolTokenTimeout); err != nil {
