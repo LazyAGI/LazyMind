@@ -153,6 +153,7 @@ describe("ChatInput model switch save lock", () => {
         onSend={onSend}
         isChatContent
         sessionId="conversation-1"
+        runInBackground
         showConversationConfig={false}
         showHistoryButton={false}
         showPromptSuggestions={false}
@@ -299,21 +300,22 @@ describe("ChatInput model switch save lock", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("clears workspace request fields when a reused draft is reset", async () => {
+  it("hides workspace selection and omits its fields in quick question mode", async () => {
     const onSend = vi.fn();
     const baseProps = {
-      value: "hello", onChange: vi.fn(), onSend, isChatContent: true, runInBackground: false,
+      value: "hello", onChange: vi.fn(), onSend, isChatContent: true,
       showConversationConfig: false, showHistoryButton: false, showPromptSuggestions: false,
       showSkillDeposit: false, showThinkingDepth: false,
     };
-    const { rerender } = render(<ChatInput {...baseProps} configResetKey={1} />);
+    const { rerender } = render(<ChatInput {...baseProps} runInBackground />);
     fireEvent.click(screen.getByRole("button", { name: "select workspace" }));
     fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
     await waitFor(() => expect(onSend).toHaveBeenLastCalledWith(expect.objectContaining({
         workspace_id: "grant-alpha", workspace_permission_mode: "allow_all",
       })));
 
-    rerender(<ChatInput {...baseProps} configResetKey={2} />);
+    rerender(<ChatInput {...baseProps} runInBackground={false} />);
+    expect(screen.queryByTestId("local-workspace-control")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
     const resetPayload = onSend.mock.calls[onSend.mock.calls.length - 1]?.[0];
@@ -321,7 +323,7 @@ describe("ChatInput model switch save lock", () => {
     expect(resetPayload).not.toHaveProperty("workspace_permission_mode");
   });
 
-  it("checks a formal conversation for a workspace binding", () => {
+  it("does not show workspace selection in a formal quick question", () => {
     render(
       <ChatInput
         value=""
@@ -337,7 +339,7 @@ describe("ChatInput model switch save lock", () => {
       />,
     );
 
-    expect(screen.getByTestId("local-workspace-control")).toHaveTextContent("conversation-1");
+    expect(screen.queryByTestId("local-workspace-control")).not.toBeInTheDocument();
   });
 
   it("keeps the permission control mounted after a workspace task starts", () => {
