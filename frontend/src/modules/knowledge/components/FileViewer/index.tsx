@@ -51,6 +51,7 @@ interface FileViewerProps {
   referenceActions?: PdfReferenceAction[];
   onPdfSelection?: (selection: PdfTextSelection) => void;
   onPdfTranslateSelection?: (selection: PdfTextSelection) => void;
+  onPdfRetranslateSelection?: (selection: PdfTextSelection) => void;
   onAddVocabularySelection?: (selection: PdfTextSelection) => void;
   translationConfigured?: boolean;
   learningSelectionActions?: LearningSelectionAction[];
@@ -344,6 +345,8 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             onAskSelection={props.onPdfSelection}
             askSelectionLabel={t("knowledge.askPdfSelection")}
             onTranslateSelection={props.onPdfTranslateSelection}
+            onRetranslateSelection={props.onPdfRetranslateSelection}
+            retranslateSelectionLabel="重译此段"
             onAddVocabularySelection={props.onAddVocabularySelection}
             addVocabularySelectionLabel={t("learning.addToCollection")}
             translateSelectionLabel={t("knowledge.translateSelection")}

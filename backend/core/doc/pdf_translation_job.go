@@ -48,12 +48,63 @@ type pdfTranslationPayload struct {
 }
 
 type translationLayoutManifest struct {
-	Version int `json:"version"`
-	Blocks  []struct {
-		ID   string `json:"id"`
-		Text string `json:"text"`
-		Type string `json:"type"`
-	} `json:"blocks"`
+	Version int                      `json:"version"`
+	Blocks  []translationLayoutBlock `json:"blocks"`
+}
+
+type translationLayoutBlock struct {
+	ID         string    `json:"id"`
+	Page       int       `json:"page"`
+	PageWidth  float64   `json:"pageWidth,omitempty"`
+	PageHeight float64   `json:"pageHeight,omitempty"`
+	BBox       []float64 `json:"bbox,omitempty"`
+	Type       string    `json:"type"`
+	Text       string    `json:"text"`
+}
+
+type pdfTranslationDraft struct {
+	Version        int                        `json:"version"`
+	ArtifactID     string                     `json:"artifact_id"`
+	BaseArtifactID string                     `json:"base_artifact_id,omitempty"`
+	TargetLanguage string                     `json:"target_language"`
+	Blocks         []pdfTranslationDraftBlock `json:"blocks"`
+	CreatedAt      string                     `json:"created_at"`
+}
+
+type pdfTranslationDraftBlock struct {
+	ID             string    `json:"id"`
+	Page           int       `json:"page"`
+	PageWidth      float64   `json:"page_width,omitempty"`
+	PageHeight     float64   `json:"page_height,omitempty"`
+	BBox           []float64 `json:"bbox,omitempty"`
+	Type           string    `json:"type,omitempty"`
+	SourceText     string    `json:"source_text"`
+	TranslatedText string    `json:"translated_text"`
+}
+
+func buildPDFTranslationDraft(artifactID, baseArtifactID, targetLanguage string, manifest translationLayoutManifest, translations map[string]string) pdfTranslationDraft {
+	blocks := make([]pdfTranslationDraftBlock, 0, len(manifest.Blocks))
+	for _, block := range manifest.Blocks {
+		translated, ok := translations[block.ID]
+		if !ok {
+			continue
+		}
+		blocks = append(blocks, pdfTranslationDraftBlock{
+			ID: block.ID, Page: block.Page, PageWidth: block.PageWidth, PageHeight: block.PageHeight,
+			BBox: append([]float64(nil), block.BBox...), Type: block.Type,
+			SourceText: block.Text, TranslatedText: translated,
+		})
+	}
+	return pdfTranslationDraft{Version: 1, ArtifactID: artifactID, BaseArtifactID: baseArtifactID,
+		TargetLanguage: targetLanguage, Blocks: blocks, CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+}
+
+func writePDFTranslationDraft(path string, draft pdfTranslationDraft) error {
+	raw, err := json.Marshal(draft)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, raw, 0o640)
 }
 
 func RegisterPDFTranslationJobs() {
@@ -369,8 +420,8 @@ func translateUnitsParallel(
 			outputMu.Lock()
 			chunksByUnit[task.unitIndex][task.chunkIndex] = value
 			outputMu.Unlock()
-			done := completed.Add(task.weight)
 			progressMu.Lock()
+			done := completed.Add(task.weight)
 			err = onProgress(done, total)
 			progressMu.Unlock()
 			if err != nil {
@@ -575,8 +626,14 @@ func handlePDFTranslationJob(ctx context.Context, job asyncjob.Job, reporter asy
 			renderResult.RenderedBlockCount, renderResult.RequestedBlockCount))
 	}
 	artifactID := uuid.NewString()
+	draftPath := strings.TrimSuffix(payload.LayoutPath, ".json") + ".draft.json"
+	draft := buildPDFTranslationDraft(artifactID, "", payload.TargetLanguage, manifest, translations)
+	if err := writePDFTranslationDraft(draftPath, draft); err != nil {
+		return fail(err)
+	}
 	err = updateTranslationRenderJob(ctx, payload, func(record *pdfRenderJobRecord, ext *documentExt) error {
 		artifact := pdfArtifactRecord{ID: artifactID, Kind: pdfArtifactTranslation, CacheKey: record.CacheKey, StoredPath: outputPath,
+			SourcePath: payload.SourcePath, LayoutPath: payload.LayoutPath, DraftPath: draftPath, HasLayout: true, HasDraft: true,
 			Filename: payload.OutputFilename, ContentType: "application/pdf", TargetLanguage: record.TargetLanguage,
 			ProviderType: record.ProviderType, Provider: record.Provider, Model: record.Model, WarningCount: renderResult.WarningCount,
 			CreatedAt: time.Now().UTC().Format(time.RFC3339)}

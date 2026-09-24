@@ -16,6 +16,27 @@ export interface PdfArtifact {
   model?: string;
   warning_count?: number;
   has_layout?: boolean;
+  has_draft?: boolean;
+  created_at: string;
+}
+
+export interface PdfTranslationDraftBlock {
+  id: string;
+  page: number;
+  page_width?: number;
+  page_height?: number;
+  bbox?: [number, number, number, number];
+  type?: string;
+  source_text: string;
+  translated_text: string;
+}
+
+export interface PdfTranslationDraft {
+  version: number;
+  artifact_id: string;
+  base_artifact_id?: string;
+  target_language: string;
+  blocks: PdfTranslationDraftBlock[];
   created_at: string;
 }
 
@@ -163,6 +184,57 @@ export async function getPdfArtifactLayout(datasetId: string, documentId: string
     `${documentBase(datasetId, documentId)}/pdf-artifacts/${encodeURIComponent(artifactId)}:layout`,
   );
   return response.data.blocks || [];
+}
+
+export async function getPdfTranslationDraft(datasetId: string, documentId: string, artifactId: string): Promise<PdfTranslationDraft> {
+  const response = await axiosInstance.get<Envelope<PdfTranslationDraft>>(
+    `${documentBase(datasetId, documentId)}/pdf-artifacts/${encodeURIComponent(artifactId)}:draft`,
+  );
+  return response.data.data;
+}
+
+export async function retranslatePdfDraftBlock(datasetId: string, documentId: string, artifactId: string, input: {
+  block_id: string;
+  provider_type?: "api" | "llm";
+}): Promise<{ block_id: string; translated_text: string }> {
+  const response = await axiosInstance.post<Envelope<{ block_id: string; translated_text: string }>>(
+    `${documentBase(datasetId, documentId)}/pdf-artifacts/${encodeURIComponent(artifactId)}:retranslate`, input,
+    { timeout: 10 * 60 * 1000 },
+  );
+  return response.data.data;
+}
+
+export async function revisePdfTranslation(datasetId: string, documentId: string, artifactId: string, overrides: Record<string, string>): Promise<PdfArtifact> {
+  const response = await axiosInstance.post<Envelope<PdfArtifact>>(
+    `${documentBase(datasetId, documentId)}/pdf-artifacts/${encodeURIComponent(artifactId)}:revise`,
+    { overrides },
+    { timeout: 20 * 60 * 1000 },
+  );
+  return response.data.data;
+}
+
+export function matchPdfTranslationDraftBlock(
+  blocks: PdfTranslationDraftBlock[],
+  selection: { text: string; page: number; bbox?: [number, number, number, number] },
+): PdfTranslationDraftBlock | undefined {
+  const pageBlocks = blocks.filter((block) => block.page === selection.page);
+  const selectedText = selection.text.replace(/\s+/g, " ").trim();
+  const textMatch = pageBlocks.find((block) => {
+    const translated = block.translated_text.replace(/\s+/g, " ").trim();
+    return translated.includes(selectedText) || selectedText.includes(translated);
+  });
+  if (textMatch) return textMatch;
+  if (!selection.bbox) return undefined;
+  const [sx0, sy0, sx1, sy1] = selection.bbox;
+  return pageBlocks
+    .filter((block) => block.bbox?.length === 4)
+    .map((block) => {
+      const [x0, y0, x1, y1] = block.bbox!;
+      const overlap = Math.max(0, Math.min(sx1, x1) - Math.max(sx0, x0)) * Math.max(0, Math.min(sy1, y1) - Math.max(sy0, y0));
+      return { block, overlap };
+    })
+    .filter((item) => item.overlap > 0)
+    .sort((left, right) => right.overlap - left.overlap)[0]?.block;
 }
 
 export async function translateTextWithLLM(text: string, targetLanguage: string): Promise<string> {

@@ -143,8 +143,14 @@ func removeArtifactCacheEntry(artifacts []pdfArtifactRecord, target pdfArtifactR
 func removeArtifactFiles(artifacts []pdfArtifactRecord) {
 	for _, artifact := range artifacts {
 		_ = os.Remove(artifact.StoredPath)
+		if artifact.SourcePath != "" {
+			_ = os.Remove(artifact.SourcePath)
+		}
 		if artifact.LayoutPath != "" {
 			_ = os.Remove(artifact.LayoutPath)
+		}
+		if artifact.DraftPath != "" {
+			_ = os.Remove(artifact.DraftPath)
 		}
 	}
 }

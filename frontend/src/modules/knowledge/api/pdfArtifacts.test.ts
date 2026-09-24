@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() }));
 vi.mock("@/components/request", () => ({ BASE_URL: "", axiosInstance: mocks }));
 
-import { completePdfRenderJob, createSearchablePdfJob, createTranslationPdfJob, deletePdfArtifact, getPdfArtifactData, getPdfArtifactLayout, isActivePdfJob, isRasterLayoutBlock, latestActiveTranslationJob, latestTranslationJob, listPdfLayoutBlocks, pdfArtifactContentUrl, splitTranslationText, translateTextWithLLM, validatePdfLayoutBlocks } from "./pdfArtifacts";
+import { completePdfRenderJob, createSearchablePdfJob, createTranslationPdfJob, deletePdfArtifact, getPdfArtifactData, getPdfArtifactLayout, isActivePdfJob, isRasterLayoutBlock, latestActiveTranslationJob, latestTranslationJob, listPdfLayoutBlocks, matchPdfTranslationDraftBlock, pdfArtifactContentUrl, splitTranslationText, translateTextWithLLM, validatePdfLayoutBlocks } from "./pdfArtifacts";
 
 describe("PDF artifacts API", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -126,6 +126,15 @@ describe("PDF artifacts API", () => {
     await expect(getPdfArtifactData("d", "doc", "a1")).resolves.toBe(pdf);
     await expect(getPdfArtifactLayout("d", "doc", "a1")).resolves.toEqual([{ id: "b1", page: 1, text: "Text" }]);
     expect(mocks.get.mock.calls.every(([url]) => !String(url).includes("/segments"))).toBe(true);
+  });
+
+  it("matches a selected translated passage to its persisted draft block", () => {
+    const blocks = [{
+      id: "b1", page: 2, source_text: "Original paragraph", translated_text: "这是完整的译文段落。",
+      bbox: [10, 20, 300, 80] as [number, number, number, number],
+    }];
+    expect(matchPdfTranslationDraftBlock(blocks, { text: "完整的译文", page: 2 })?.id).toBe("b1");
+    expect(matchPdfTranslationDraftBlock(blocks, { text: "未匹配", page: 1 })).toBeUndefined();
   });
 
   it("splits long OCR text without truncating surrogate pairs or content", () => {

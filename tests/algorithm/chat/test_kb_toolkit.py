@@ -28,6 +28,8 @@ def test_read_document_delegates_parse_and_read_lifecycle_to_core(monkeypatch):
     lazyllm.globals['agentic_config'] = {'filters': {'kb_id': 'kb-one'}}
     gets = []
 
+    monkeypatch.setattr(KBToolkit, '_accessible_kb_ids', staticmethod(lambda: {'kb-one'}))
+
     def read(path):
         gets.append(path)
         return {'document_id': 'doc-one', 'content': {'text': 'whole document'}}

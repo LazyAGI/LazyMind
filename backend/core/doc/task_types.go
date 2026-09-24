@@ -323,8 +323,11 @@ type pdfArtifactRecord struct {
 	Kind           string `json:"kind"`
 	CacheKey       string `json:"cache_key"`
 	StoredPath     string `json:"stored_path"`
+	SourcePath     string `json:"source_path,omitempty"`
 	LayoutPath     string `json:"layout_path,omitempty"`
+	DraftPath      string `json:"draft_path,omitempty"`
 	HasLayout      bool   `json:"has_layout,omitempty"`
+	HasDraft       bool   `json:"has_draft,omitempty"`
 	Filename       string `json:"filename"`
 	ContentType    string `json:"content_type"`
 	TargetLanguage string `json:"target_language,omitempty"`
