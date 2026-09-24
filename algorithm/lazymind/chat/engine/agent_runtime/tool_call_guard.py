@@ -6,7 +6,7 @@ import time
 import uuid
 from collections import Counter
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import lazyllm
@@ -27,6 +27,7 @@ from lazymind.chat.engine.tools.workspace_context import (
     tool_resolution_scope, workspace_permission_scope, thaw,
 )
 from .cancellation import UserCancelledError
+from .skill_errors import classify_skill_failure
 
 from lazymind.chat.engine.tools.session_env import redact_session_env_arguments
 from .telemetry import append_event, emit_tool_call, emit_tool_result
@@ -91,6 +92,9 @@ def _summarize_tool_result(result: Any) -> dict[str, Any]:
         return summary
     if 'ok' in result:
         summary['ok'] = result.get('ok')
+    for key in ('error_type', 'dependency', 'exit_code'):
+        if key in result:
+            summary[key] = str(result[key])[:240]
     msg = result.get('msg')
     if msg:
         summary['msg'] = str(msg)[:240]
@@ -512,6 +516,11 @@ class ToolExecutionMiddleware:
         for result, record in executed:
             if record.index in decision.blocked_results or record.index in decision.duplicate_sources:
                 continue
+            if (record.disposition is ToolExecutionDisposition.EXECUTED
+                    and record.tool_name in {'run_script', 'run_skill_script'}
+                    and self._opaque_tool_is_trusted(record.tool_name)):
+                result = classify_skill_failure(result)
+                record = replace(record, result=result)
             states = coordinator.execution_states if coordinator is not None else {}
             workspace_started = states.get(record.index)
             if record.index in states and record.prepared.ready:

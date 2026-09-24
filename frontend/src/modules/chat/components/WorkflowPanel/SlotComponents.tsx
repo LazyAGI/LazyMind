@@ -5448,19 +5448,38 @@ export function SlotRenderer({
     );
   }
   if (widget?.widgetType === 'html-slide') {
-    if (isSlideSpecArtifact(slot.artifact_value)) {
-      return <SlotJsonSlide slot={slot} compact={cardMode} />;
-    }
     return (
-      <SlotHtmlSlide
-        navigation={slideNavigation}
-        slot={slot}
-        compact={cardMode}
-        sessionId={sessionId}
-        slotId={artifactSlotKey}
-        readOnly={effectiveReadOnly}
-        onRefresh={onRefresh}
-      />
+      <>
+        {isSlideSpecArtifact(slot.artifact_value) ? <SlotJsonSlide slot={slot} compact={cardMode} /> : (
+          <SlotHtmlSlide
+            navigation={slideNavigation}
+            slot={slot}
+            compact={cardMode}
+            sessionId={sessionId}
+            slotId={artifactSlotKey}
+            readOnly={effectiveReadOnly}
+            onRefresh={onRefresh}
+          />
+        )}
+        {!cardMode && sessionId && artifactSlotKey && revisionCount !== undefined && revisionCount > 0 && (
+          <div className='workflow-slot__artifact-footer'>
+            <div className='workflow-slot__artifact-footer-left'>
+              <SlotVersionPopover
+                sessionId={sessionId}
+                slotId={artifactSlotKey}
+                listIndex={slot.list_index ?? -1}
+                revisionCount={revisionCount}
+                currentRevision={slot.revision}
+                currentValue={slot.artifact_value}
+                currentChangeSource={slot.change_source}
+                contentType={slot.content_type}
+                readOnly={effectiveReadOnly}
+                onRollbackDone={onRefresh}
+              />
+            </div>
+          </div>
+        )}
+      </>
     );
   }
   if (normalized === 'image') {

@@ -12,6 +12,7 @@ import lazyllm.module.stream_helper as _sh
 import lazyllm.tools.agent as _agent_mod
 
 from lazymind.chat.engine.tools.infra import CitationResultMiddleware
+from lazymind.chat.engine.tools.skill_listing import restore_loaded_skill_runtime
 from lazymind.config import config as _cfg
 
 from .context_estimator import estimate_non_history_tokens
@@ -35,6 +36,7 @@ from .tool_call_guard import (
     ToolExecutionMiddleware,
 )
 from .tool_limit_control import tool_limit_decision_coordinator
+from .skill_sandbox import configure_skill_sandbox
 
 
 def _sanitize_tools(tools: list[Any]) -> list[Any]:
@@ -190,8 +192,10 @@ class AgentExecutor:
             prompt=plan.prompt.system_prompt,
             **kwargs,
         )
+        configure_skill_sandbox(getattr(agent, '_skill_manager', None))
         from .tool_retrieval import configure_tool_retrieval
         configure_tool_retrieval(agent, plan)
+        restore_loaded_skill_runtime(getattr(agent, '_skill_manager', None), plan.history)
         trusted_opaque_tools = tuple(
             tool for name in (getattr(agent, '_skill_tool_names', set()) & {'run_script', 'run_skill_script'})
             if (tool := agent._tools_manager.tools_info.get(name)) is not None

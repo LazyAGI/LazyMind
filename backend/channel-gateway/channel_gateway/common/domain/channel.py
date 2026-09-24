@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -42,11 +43,27 @@ _HIDDEN_PROTOCOL_TAGS = re.compile(
 )
 
 
+def account_identity(row: dict[str, Any]) -> dict[str, str]:
+    try:
+        value = json.loads(row.get('identity_metadata') or '{}')
+    except (TypeError, ValueError):
+        value = {}
+    if not isinstance(value, dict):
+        value = {}
+    return {key: str(value.get(key) or '')[:limit] for key, limit in (
+        ('app_id', 256), ('authorized_name', 128), ('authorized_id', 256),
+    )}
+
+
 def account_view(row: dict[str, Any]) -> dict[str, Any]:
     return {
         'id': row['id'],
         'provider': row['provider'],
         'label': row['label'],
+        'default_recipient_id': row.get('default_recipient_id') or '',
+        'identity': account_identity(row) if row['provider'] == 'feishu' else {},
+        'binding_status': ('unbound' if not row.get('credentials_ciphertext') else
+                           'connected' if row['status'] == 'connected' else 'paused'),
         'status': row['status'],
         'runtime_status': row.get('runtime_status') or 'stopped',
         'connected_at': _iso(row.get('connected_at')),
@@ -54,6 +71,15 @@ def account_view(row: dict[str, Any]) -> dict[str, Any]:
         'last_message_at': _iso(row.get('last_message_at')),
         'last_error': row.get('last_error'),
         'updated_at': _iso(row['updated_at']),
+        'avatar_url': None,
+        'capabilities': {
+            'connection_mode': 'qr_code',
+            'text_chat': True, 'task_notifications': True,
+            'notification_context_required': row['provider'] == 'wechat',
+            'notification_ready': (row['provider'] != 'wechat'
+                                   or bool(row.get('notification_ready'))),
+            'media_delivery': row['provider'] != 'wecom',
+        },
     }
 
 

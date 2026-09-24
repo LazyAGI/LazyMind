@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/common/taskdisplay"
 	"lazymind/core/workflow/controlstore"
 
 	"github.com/google/uuid"
@@ -325,12 +326,21 @@ func (s *Service) Heartbeat(ctx context.Context, attemptID, token string) (time.
 	return expires, nil
 }
 
-func (s *Service) Progress(ctx context.Context, attemptID, token string, progress json.RawMessage) error {
+func (s *Service) Progress(ctx context.Context, attemptID, token string, progress json.RawMessage) (err error) {
+	defer func() {
+		if err != nil {
+			taskdisplay.Observe(ctx, taskdisplay.EventRejected, 0, 1)
+		}
+	}()
+	display, err := decodePublicDisplay(progress)
+	if err != nil {
+		return err
+	}
 	now := s.now()
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&orm.WorkflowSessionStep{}).Where(
 			"id = ? AND lease_token = ? AND lease_expires_at >= ? AND status IN ('claimed','running')",
-			attemptID, token, now).Updates(map[string]any{"status": "running", "progress_json": progress, "updated_at": now})
+			attemptID, token, now).UpdateColumn("updated_at", gorm.Expr("updated_at"))
 		if result.Error != nil {
 			return result.Error
 		}
@@ -339,6 +349,16 @@ func (s *Service) Progress(ctx context.Context, attemptID, token string, progres
 		}
 		var row orm.WorkflowSessionStep
 		if err := tx.Where("id = ?", attemptID).First(&row).Error; err != nil {
+			return err
+		}
+		duplicate, err := persistPublicDisplay(tx, row, display, now)
+		if duplicate {
+			taskdisplay.Observe(ctx, taskdisplay.EventDuplicate, 0, 1)
+		}
+		if err != nil || duplicate {
+			return err
+		}
+		if err := tx.Model(&row).Updates(map[string]any{"status": "running", "progress_json": progress, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		return appendEvent(tx, row, "", "attempt.progress", progress, now)

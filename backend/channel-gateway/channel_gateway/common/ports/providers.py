@@ -18,6 +18,9 @@ class AccountAdapter(Protocol):
     ) -> None:
         ...
 
+    def resume_account(self, owner_user_id: str, account_id: str) -> dict[str, Any]:
+        ...
+
 
 class AccountAdapterResolver(Protocol):
     def accounts(self, name: str) -> AccountAdapter | None:

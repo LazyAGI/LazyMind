@@ -428,10 +428,27 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       menuLabel: String(i18n.t('chat.writerLocal.chooseProvider')),
       disabled: busy || publicationBlocked || !loaded || providers.length === 0, flushBeforeAction: true, flushKey: editingKey,
       onClick: () => { if (preferred) chooseRef.current(preferred); },
-      menu: providers.length > 1 ? providers.map(provider => ({ key: provider.id,
-        label: [providerLabel(provider.id), authorizationStatus(provider.id)].filter(Boolean).join(' · '),
-        icon: <span className='workflow-panel__provider-icon' aria-hidden='true'><WriterProviderIcon provider={provider.id} /></span>,
-        onClick: () => chooseRef.current(provider.id) })) : undefined,
+      menu: providers.length > 1 ? providers.map(provider => {
+        const label = [providerLabel(provider.id), authorizationStatus(provider.id)].filter(Boolean).join(' · ');
+        const state = availability.states[provider.id];
+        const settingsAction = state === 'authorize' ? String(i18n.t('chat.writerLocal.authorizeAction'))
+          : state === 'chat-disabled' ? String(i18n.t('chat.writerLocal.settings')) : '';
+        return { key: provider.id,
+          label: settingsAction ? <span className='workflow-panel__provider-menu-label'>
+            <span>{label}</span>
+            <a className='workflow-panel__provider-settings-link'
+              href={getCloudDocumentsUrl(provider.id === 'feishu' || provider.id === 'googledrive' || provider.id === 'wechat' ? provider.id : undefined)}
+              target='_blank' rel='noopener noreferrer'
+              aria-label={String(i18n.t('chat.writerLocal.providerSettingsLabel', { provider: providerLabel(provider.id), action: settingsAction }))}
+              onClick={event => event.stopPropagation()}
+              onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') event.stopPropagation(); }}>
+              {settingsAction}<ExportOutlined aria-hidden='true' />
+            </a>
+          </span> : label,
+          icon: <span className='workflow-panel__provider-icon' aria-hidden='true'><WriterProviderIcon provider={provider.id} /></span>,
+          onClick: () => chooseRef.current(provider.id),
+        };
+      }) : undefined,
       statusText: error && authorizationNeeded ? undefined : error || publicationStatus || (providers.length === 1 && preferred ? authorizationStatus(preferred) : undefined), statusTone: error ? 'error' : 'success',
       statusLink: publicationUrl ? { href: publicationUrl, label: String(i18n.t('chat.writerIR.openCloudDocument')) } : undefined,
     });

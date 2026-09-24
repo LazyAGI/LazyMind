@@ -1,0 +1,5 @@
+-r ../../../backend/channel-gateway/requirements.txt
+pytest==9.1.1
+flake8==7.3.0
+
+PyYAML==6.0.3

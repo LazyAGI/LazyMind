@@ -50,6 +50,7 @@ import (
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/taskcenter"
 	"lazymind/core/workflow"
 	workflowexecutor "lazymind/core/workflow/executor"
 	workflowstore "lazymind/core/workflow/store"
@@ -943,6 +944,7 @@ func run(ctx context.Context) error {
 	// Start the schedule ticker.
 	if startBackgroundJobs {
 		backgroundDone = append(backgroundDone, scheduler.RunScheduler(runtimeCtx, store.DB(), ""))
+		backgroundDone = append(backgroundDone, taskcenter.RunNotificationDelivery(runtimeCtx, store.DB()))
 	}
 	initializeCloudSession(context.Background())
 	if err := initializeCredentialBackup(context.Background(), store.DB(), credentialKeys); err != nil {

@@ -51,6 +51,11 @@ func CreateSchedule(ctx context.Context, db *gorm.DB, s *orm.UserSchedule) error
 		}
 		s.NextRunAt = next.UTC()
 	}
+	if s.NotificationConfig == nil && s.NotificationRevision == 0 {
+		if err := taskcenter.InitializeScheduleNotifications(ctx, db, s); err != nil {
+			return err
+		}
+	}
 	return db.WithContext(ctx).Create(s).Error
 }
 
@@ -548,7 +553,11 @@ func sendScheduledChatRequest(userID, convID, taskID string, db *gorm.DB, reqBod
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		failScheduledTask(db, taskID, fmt.Sprintf("任务请求失败：服务返回 HTTP %d", resp.StatusCode))
+		// Keep task progress stable; upstream bodies may contain private diagnostics.
+		_, _ = io.Copy(io.Discard, resp.Body)
+		reason := fmt.Sprintf("任务请求失败：服务返回 HTTP %d", resp.StatusCode)
+		fmt.Printf("[Scheduler] upstream error task=%s status=%d\n", taskID, resp.StatusCode)
+		failScheduledTask(db, taskID, reason)
 		return
 	}
 	// Drain the response body so the upstream goroutines can finish writing to
@@ -663,15 +672,16 @@ func ListSchedulesHandler(w http.ResponseWriter, r *http.Request) {
 func CreateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	userID := store.UserID(r)
 	var body struct {
-		Name           string            `json:"name"`
-		Remark         string            `json:"remark"`
-		CronExpr       string            `json:"cron_expr"`
-		Timezone       string            `json:"timezone"`
-		PromptTemplate string            `json:"prompt_template"`
-		KbIDs          []string          `json:"kb_ids"`
-		FileIDs        []string          `json:"file_ids"`
-		GroupID        *string           `json:"group_id"`
-		Dependencies   []dependencyInput `json:"dependencies"`
+		Name           string                                 `json:"name"`
+		Remark         string                                 `json:"remark"`
+		CronExpr       string                                 `json:"cron_expr"`
+		Timezone       string                                 `json:"timezone"`
+		PromptTemplate string                                 `json:"prompt_template"`
+		KbIDs          []string                               `json:"kb_ids"`
+		FileIDs        []string                               `json:"file_ids"`
+		GroupID        *string                                `json:"group_id"`
+		Dependencies   []dependencyInput                      `json:"dependencies"`
+		Notification   *taskcenter.ScheduleNotificationUpdate `json:"notification,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid body: "+err.Error(), http.StatusBadRequest)
@@ -714,13 +724,36 @@ func CreateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		Enabled:        true,
 	}
 	db := store.DB()
+	if err := taskcenter.InitializeScheduleNotifications(r.Context(), db, s); err != nil {
+		taskcenter.ReplyScheduleNotificationError(w, r, err)
+		return
+	}
+	if body.Notification != nil {
+		prepared, err := taskcenter.PrepareScheduleNotificationUpdate(r.Context(), userID, *body.Notification)
+		if err != nil {
+			taskcenter.ReplyScheduleNotificationError(w, r, err)
+			return
+		}
+		body.Notification = &prepared
+	}
 	if err := db.Transaction(func(tx *gorm.DB) error {
 		if err := CreateSchedule(r.Context(), tx, s); err != nil {
 			return err
 		}
+		if body.Notification != nil {
+			change := *body.Notification
+			change.Revision = s.NotificationRevision
+			if err := taskcenter.SaveScheduleNotificationUpdate(r.Context(), tx, userID, s.ID, change); err != nil {
+				return err
+			}
+		}
 		return replaceDependencies(tx, userID, s.ID, body.Dependencies)
 	}); err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		if body.Notification != nil {
+			taskcenter.ReplyScheduleNotificationError(w, r, err)
+		} else {
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		}
 		return
 	}
 	common.ReplyJSON(w, toScheduleResponse(*s))
@@ -808,15 +841,16 @@ func UpdateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	userID := store.UserID(r)
 	id := strings.TrimPrefix(r.URL.Path, "/schedules/")
 	var body struct {
-		Name           string            `json:"name"`
-		Remark         string            `json:"remark"`
-		CronExpr       string            `json:"cron_expr"`
-		Timezone       string            `json:"timezone"`
-		PromptTemplate string            `json:"prompt_template"`
-		KbIDs          []string          `json:"kb_ids"`
-		FileIDs        []string          `json:"file_ids"`
-		GroupID        *string           `json:"group_id"`
-		Dependencies   []dependencyInput `json:"dependencies"`
+		Name           string                                 `json:"name"`
+		Remark         string                                 `json:"remark"`
+		CronExpr       string                                 `json:"cron_expr"`
+		Timezone       string                                 `json:"timezone"`
+		PromptTemplate string                                 `json:"prompt_template"`
+		KbIDs          []string                               `json:"kb_ids"`
+		FileIDs        []string                               `json:"file_ids"`
+		GroupID        *string                                `json:"group_id"`
+		Dependencies   []dependencyInput                      `json:"dependencies"`
+		Notification   *taskcenter.ScheduleNotificationUpdate `json:"notification,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid body: "+err.Error(), http.StatusBadRequest)
@@ -877,11 +911,24 @@ func UpdateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		updates["group_id"] = body.GroupID
 		s.GroupID = body.GroupID
 	}
-	if len(updates) == 0 && body.Dependencies == nil {
+	if len(updates) == 0 && body.Dependencies == nil && body.Notification == nil {
 		common.ReplyJSON(w, toScheduleResponse(s))
 		return
 	}
+	if body.Notification != nil {
+		prepared, err := taskcenter.PrepareScheduleNotificationUpdate(r.Context(), userID, *body.Notification)
+		if err != nil {
+			taskcenter.ReplyScheduleNotificationError(w, r, err)
+			return
+		}
+		body.Notification = &prepared
+	}
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if body.Notification != nil {
+			if err := taskcenter.SaveScheduleNotificationUpdate(r.Context(), tx, userID, id, *body.Notification); err != nil {
+				return err
+			}
+		}
 		if len(updates) > 0 {
 			if err := tx.Model(&orm.UserSchedule{}).Where("id = ? AND user_id = ?", id, userID).Updates(updates).Error; err != nil {
 				return err
@@ -892,7 +939,11 @@ func UpdateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	}); err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		if body.Notification != nil {
+			taskcenter.ReplyScheduleNotificationError(w, r, err)
+		} else {
+			common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 	common.ReplyJSON(w, toScheduleResponse(s))

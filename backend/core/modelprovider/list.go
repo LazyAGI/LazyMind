@@ -29,8 +29,10 @@ type listItem struct {
 }
 
 type baseURLPresetItem struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
+	Key            string `json:"key"`
+	Value          string `json:"value"`
+	Label          string `json:"label,omitempty"`
+	APIKeyRequired *bool  `json:"api_key_required,omitempty"`
 }
 
 type listResponse struct {
@@ -331,6 +333,15 @@ func splitCapabilities(caps string) []string {
 }
 
 func buildBaseURLPresets(row orm.UserModelProvider) []baseURLPresetItem {
+	if normalizeProviderName(row.Name) == "openai" {
+		required := true
+		return []baseURLPresetItem{
+			{Key: "official", Value: row.BaseURL, Label: "OpenAI", APIKeyRequired: &required},
+			{Key: "deepseek", Value: "https://api.deepseek.com", Label: "DeepSeek", APIKeyRequired: &required},
+			{Key: "siliconflow", Value: "https://api.siliconflow.cn/v1", Label: "SiliconFlow", APIKeyRequired: &required},
+			{Key: "openrouter", Value: "https://openrouter.ai/api/v1", Label: "OpenRouter", APIKeyRequired: &required},
+		}
+	}
 	if normalizeProviderName(row.Name) != "mineru" {
 		return nil
 	}
