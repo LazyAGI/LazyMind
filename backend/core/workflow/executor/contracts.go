@@ -9,6 +9,7 @@ import (
 // trusted Executor boundaries. It never contains a model configuration, API
 // credential or Host-local path. Public adapters must redact Metadata.
 type AttemptContext struct {
+	ExecutionHandle         string              `json:"-"`
 	PostStepCheckpoint      *PostStepCheckpoint `json:"post_step_checkpoint,omitempty"`
 	ContractVersion         string              `json:"contract_version"`
 	SessionID               string              `json:"session_id"`
@@ -56,11 +57,13 @@ type PostStepCheckpoint struct {
 }
 
 type Result struct {
-	Summary     string         `json:"summary,omitempty"`
-	ExecutorRef string         `json:"executor_ref,omitempty"`
-	Artifacts   []Artifact     `json:"artifacts,omitempty"`
-	Control     *Control       `json:"control,omitempty"`
-	Projection  map[string]any `json:"projection,omitempty"`
+	Error              string              `json:"error,omitempty"`
+	PostStepCheckpoint *PostStepCheckpoint `json:"post_step_checkpoint,omitempty"`
+	Summary            string              `json:"summary,omitempty"`
+	ExecutorRef        string              `json:"executor_ref,omitempty"`
+	Artifacts          []Artifact          `json:"artifacts,omitempty"`
+	Control            *Control            `json:"control,omitempty"`
+	Projection         map[string]any      `json:"projection,omitempty"`
 }
 
 type ContextLoader interface {
@@ -69,4 +72,14 @@ type ContextLoader interface {
 
 type ArtifactSink interface {
 	Save(context.Context, AttemptContext, Artifact) error
+}
+
+type Completion struct {
+	PostStepCheckpoint *PostStepCheckpoint `json:"post_step_checkpoint,omitempty"`
+	ExecutionHandle    string              `json:"execution_handle"`
+	Outcome            string              `json:"outcome"`
+	Summary            string              `json:"summary,omitempty"`
+	ErrorCode          string              `json:"error_code,omitempty"`
+	ExecutorRef        string              `json:"executor_ref,omitempty"`
+	Control            *Control            `json:"control,omitempty"`
 }

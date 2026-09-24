@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>A4 折页印前检查</title>
+<style>body{margin:0;background:#f5f7fb;color:#152033;font:15px/1.7 Inter,system-ui,"PingFang SC",sans-serif}.page{max-width:900px;margin:32px auto;padding:0 20px 48px}.hero{background:linear-gradient(135deg,#0b6b66,#159a8c);color:white;padding:28px;border-radius:20px;margin-bottom:18px}.hero small{opacity:.8}.content{background:#fff;border:1px solid #e5e9f2;border-radius:20px;padding:28px;box-shadow:0 8px 30px #0b6b6610}h1{font-size:27px;line-height:1.25;margin:0 0 22px}h2{font-size:18px;margin:26px 0 10px;color:#0b6b66;border-left:4px solid #159a8c;padding-left:10px}p{margin:8px 0}.item{background:#f4f6fc;border-radius:10px;padding:9px 12px;margin:7px 0}pre{white-space:pre-wrap;overflow:auto;background:#f7f8fb;padding:10px;border-radius:8px;font:13px/1.55 ui-monospace,monospace}</style>
+</head>
+<body>
+<style>*{box-sizing:border-box}.page{max-width:1120px}.hero{padding:32px}.hero h1{font-size:clamp(29px,4vw,42px);margin:8px 0}.visual{display:grid;gap:14px;margin:18px 0}.visual .split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.visual .board{min-width:0;background:#fff;border:1px solid #dce4ee;border-radius:18px;padding:22px;box-shadow:0 12px 32px #1e365012}.visual .dark{background:#172537;color:#fff}.visual .big{font-size:clamp(27px,4vw,42px);font-weight:850;line-height:1.2}.visual .ey{font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:800;opacity:.7}.visual .rail{display:grid;grid-template-columns:repeat(var(--n,5),1fr);gap:7px}.visual .rail div{padding:12px;background:#edf3f7;border-top:4px solid #558da2;border-radius:9px;font-size:13px}.visual .rail b{display:block}.visual .row{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #dce4ee;padding:9px 0}.visual .row:last-child{border:0}.content{margin-top:16px}.content>.item{padding:12px;border-left:3px solid #8da9bb}td,th{overflow-wrap:anywhere}@media(max-width:720px){.page{padding:0 14px;margin:14px auto}.hero,.content{padding:20px}.visual .split{grid-template-columns:1fr}.visual .rail{grid-template-columns:1fr 1fr}.visual .board{padding:17px}}</style>
+<main class="page">
+<style>body{background:#e6eee7}.visual .board{border-radius:5px;box-shadow:8px 8px 0 #c9d9ce;border-color:#bed3c5}.visual .dark{background:#155349;box-shadow:8px 8px 0 #9bcabb}.visual .ey{color:#167761;opacity:1}.visual .dark .ey{color:#a8ead7}.visual .row{border-color:#b9d2c3}.content{border-radius:5px}</style>
+<section class="hero">
+<small>印前检查清单</small>
+<h1>A4 折页印前检查</h1>
+<div>区分待向印厂确认的参数与可立即执行的文件检查。</div>
+</section>
+<section class="visual"><div class="split"><div class="board"><div class="ey">A4 双面折页 · 生产示意</div><div style="display:flex;height:200px;max-width:340px;margin:12px auto;padding:9px;border:2px dashed #d98a62;background:#e6f2eb;box-shadow:8px 8px 0 #d1ddd5"><div style="flex:1;border:1px solid #9ab7a4;padding:9px">版面 A</div><div style="flex:1;border:1px solid #9ab7a4;padding:9px">折线</div><div style="flex:1;border:1px solid #9ab7a4;padding:9px">版面 B</div></div><p>出血至少 3mm · 最终尺寸 300dpi</p></div><div class="board dark"><div class="ey">印厂确认门禁</div><div class="row"><span>纸张 / 涂布</span><b>待确认</b></div><div class="row"><span>ICC 色彩配置</span><b>待确认</b></div><div class="row"><span>PDF 标准</span><b>待确认</b></div><p>确认后检查 CMYK、字体、透明度与 PDF/X-4。</p></div></div></section>
+<article class="content">
+<h1>A4 双面折页印前清单</h1>
+<h2>先向印厂确认</h2>
+<p>纸张、涂布情况、ICC 色彩配置与 PDF 标准尚未提供，必须先确认。</p>
+<h2>文件预检</h2>
+<div class="item">CMYK：印刷文件使用正确色彩模式并嵌入确认的配置。</div>
+<div class="item">出血：至少 3mm；大型或印厂另有要求时按其要求。</div>
+<div class="item">分辨率：最终尺寸 300dpi。</div>
+<div class="item">字体：转曲或嵌入，检查特殊字符。</div>
+<div class="item">透明度：检查复杂效果、叠印与镂空。</div>
+<div class="item">交付：按确认的 PDF/X-4 标准输出。</div>
+<h2>不作假定</h2>
+<p>未确认纸张和色彩配置前，不指定纸张重量、Pantone 或具体 ICC 名称。</p>
+</article>
+</main>
+</body>
+</html>

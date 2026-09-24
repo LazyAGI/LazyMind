@@ -23,10 +23,7 @@ func TestProjectCreationInheritanceTrashAndRestore(t *testing.T) {
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	ctx := context.Background()
 	uid := "user-1"
-	root := filepath.Join(t.TempDir(), "workspace")
-	if err := os.Mkdir(root, 0700); err != nil {
-		t.Fatal(err)
-	}
+	root := projectWorkspacePath(t)
 	path := filepath.Join(root, "keep.txt")
 	if err := os.WriteFile(path, []byte("keep"), 0600); err != nil {
 		t.Fatal(err)
@@ -123,6 +120,7 @@ func TestProjectCreationInheritanceTrashAndRestore(t *testing.T) {
 	if err := os.Mkdir(root, 0700); err != nil {
 		t.Fatal(err)
 	}
+	root = canonicalProjectWorkspacePath(t, root)
 	replacement, err := localworkspace.Register(ctx, db.DB, uid, localworkspace.RegisterInput{DisplayName: "replacement", CanonicalPath: root, Source: "local"})
 	if err != nil {
 		t.Fatal(err)
@@ -139,4 +137,22 @@ func TestProjectCreationInheritanceTrashAndRestore(t *testing.T) {
 			t.Fatalf("conflict failed to roll back %T: count=%d err=%v", model, count, err)
 		}
 	}
+}
+
+func projectWorkspacePath(t *testing.T) string {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "workspace")
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	return canonicalProjectWorkspacePath(t, root)
+}
+
+func canonicalProjectWorkspacePath(t *testing.T, root string) string {
+	t.Helper()
+	canonical, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return canonical
 }

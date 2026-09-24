@@ -86,8 +86,21 @@ def _normalize_owner_user_id(owner_user_id: str | None) -> str:
     return (owner_user_id or '').strip()
 
 
+def _can_use_chat(status: str | None, chat_enabled: bool) -> bool:
+    """The single eligibility rule shared by connection responses and runtime filtering."""
+    return (status or '').strip().upper() == 'ACTIVE' and chat_enabled
+
+
 def _reserved_tenant_id(_: str | None = None) -> str:
     return ''
+
+
+def _feishu_chat_options(options: dict | None, previous: dict | None = None) -> dict:
+    result = dict(options or {})
+    if 'chat_enabled' not in result and 'chatEnabled' not in result:
+        enabled = True if previous is None else previous.get('chat_enabled', previous.get('chatEnabled', False))
+        result.update(chat_enabled=enabled, chatEnabled=enabled)
+    return result
 
 
 def _json_dumps(payload: dict[str, Any]) -> str:
@@ -238,8 +251,7 @@ class CloudOAuthService:
     def _new_connection_id() -> str:
         return f'conn_{uuid.uuid4().hex}'
 
-    @staticmethod
-    def _extract_app_key(row) -> tuple[str, str, str, str]:
+    def _extract_app_key(self, row) -> tuple[str, str, str, str]:
         """Return (owner, provider, auth_mode, app_id) for dedup checks."""
         connection_method = (getattr(row, 'connection_method', '') or '').strip().lower()
         if connection_method == 'managed_oauth':
@@ -256,7 +268,7 @@ class CloudOAuthService:
                 (row.auth_mode or '').strip(),
                 (row.profile_ref or row.connection_id or '').strip(),
             )
-        credential = decrypt_json(row.credential_ciphertext)
+        credential = self._management_credential(row) or {}
         return (
             (row.owner_user_id or '').strip(),
             (row.provider or '').strip(),
@@ -287,6 +299,15 @@ class CloudOAuthService:
                 ErrorCodes.CLOUD_CREDENTIAL_DECRYPT_FAILED,
                 extra_msg=f'{field_name}: {_truncate_error(exc)}',
             )
+
+    def _management_credential(self, row) -> dict[str, Any] | None:
+        """Keep damaged accounts manageable; token flows still require decryption."""
+        try:
+            return self._decrypt_payload(row.credential_ciphertext, field_name='credential')
+        except AppException as exc:
+            if exc.code != ErrorCodes.CLOUD_CREDENTIAL_DECRYPT_FAILED[1]:
+                raise
+            return None
 
     def _create_connection_record(
         self,
@@ -320,7 +341,9 @@ class CloudOAuthService:
             'client_secret': client_secret,
             'redirect_uri': (redirect_uri or '').strip(),
             'scope': (scope or '').strip(),
-            'provider_options': provider_options or {},
+            'provider_options': (
+                _feishu_chat_options(provider_options) if normalized_provider == 'feishu' else provider_options or {}
+            ),
         }
         auth_state_payload = {
             'oauth_state': (oauth_state or '').strip(),
@@ -338,7 +361,14 @@ class CloudOAuthService:
 
         def update_existing(db, row) -> str:
             row.client_id = normalized_client_id
-            row.credential_ciphertext = credential_ciphertext
+            if normalized_provider == 'feishu':
+                previous = self._decrypt_payload(row.credential_ciphertext, field_name='credential')
+                credential['provider_options'] = _feishu_chat_options(
+                    provider_options, previous.get('provider_options') or {},
+                )
+                row.credential_ciphertext = self._encrypt_payload(credential, field_name='credential')
+            else:
+                row.credential_ciphertext = credential_ciphertext
             row.auth_state_ciphertext = auth_state_ciphertext
             row.scope = (scope or '').strip()
             if normalized_display_name:
@@ -417,8 +447,16 @@ class CloudOAuthService:
     def _connection_payload(self, row) -> dict[str, Any]:
         connection_method = (row.connection_method or '').strip().lower()
         is_reference = connection_method in {'managed_oauth', 'cli_personal_app'}
-        credential = {} if is_reference else self._decrypt_payload(row.credential_ciphertext, field_name='credential')
+        credential = {} if is_reference else self._management_credential(row)
+        credential_unreadable = credential is None
+        credential = credential or {}
+        status = 'ERROR' if credential_unreadable and (row.status or '').upper() != 'REVOKED' else row.status
         reference_meta = _json_loads(row.provider_account_meta) if is_reference else {}
+        raw_options = reference_meta if is_reference else credential.get('provider_options')
+        options = dict(raw_options) if isinstance(raw_options, dict) else {}
+        chat_enabled = options.get('chat_enabled', options.get('chatEnabled', False)) is True
+        # Normalize response aliases without changing the user's stored preference.
+        options.update(chat_enabled=chat_enabled, chatEnabled=chat_enabled)
         return {
             'connection_id': row.connection_id,
             'tenant_id': row.tenant_id or '',
@@ -437,17 +475,14 @@ class CloudOAuthService:
             'provider_workspace_id': row.provider_workspace_id or '',
             'capability_contract_version': row.capability_contract_version or '',
             'provider_account_meta': _json_loads(row.provider_account_meta),
-            'provider_options': (
-                reference_meta
-                if is_reference
-                else credential.get('provider_options')
-                if isinstance(credential.get('provider_options'), dict)
-                else {}
-            ),
+            'provider_options': options,
             'scope': row.scope or '',
             'last_used_at': row.last_used_at,
-            'status': row.status,
-            'last_error': row.last_error or '',
+            'status': status,
+            'can_use_chat': _can_use_chat(status, chat_enabled),
+            'last_error': (
+                ErrorCodes.CLOUD_CREDENTIAL_DECRYPT_FAILED[2] if credential_unreadable else row.last_error or ''
+            ),
             'created_at': row.created_at,
             'updated_at': row.updated_at,
         }
@@ -962,7 +997,10 @@ class CloudOAuthService:
                     )
                     credential['client_id'] = normalized_client_id
                     credential['client_secret'] = normalized_client_secret
-                    credential['provider_options'] = provider_options or {}
+                    credential['provider_options'] = (
+                        _feishu_chat_options(provider_options, credential.get('provider_options') or {})
+                        if provider_impl.provider_name() == 'feishu' else provider_options or {}
+                    )
                     reused.credential_ciphertext = self._encrypt_payload(
                         credential, field_name='credential'
                     )
@@ -1201,11 +1239,11 @@ class CloudOAuthService:
             # if the same Feishu user authorized both.
             is_different_app = False
             if existing is not None:
-                existing_client_id = (
-                    decrypt_json(existing.credential_ciphertext).get('client_id') or ''
-                ).strip()
+                existing_credential = self._management_credential(existing)
+                existing_client_id = ((existing_credential or {}).get('client_id') or '').strip()
                 new_client_id = (credential.get('client_id') or '').strip()
-                is_different_app = bool(
+                # Do not merge into an account whose app identity cannot be verified.
+                is_different_app = existing_credential is None or bool(
                     existing_client_id and new_client_id and existing_client_id != new_client_id
                 )
             if (
@@ -1216,6 +1254,15 @@ class CloudOAuthService:
                 restoring_revoked_connection = (
                     (existing.status or '').strip().upper() == 'REVOKED'
                 )
+                if provider_impl.provider_name() == 'feishu':
+                    # Reauthorization replaces credentials, not the user's current chat preference.
+                    previous = self._decrypt_payload(existing.credential_ciphertext, field_name='credential')
+                    previous_options = previous.get('provider_options') or {}
+                    options = dict(credential.get('provider_options') or {})
+                    enabled = previous_options.get('chat_enabled', previous_options.get('chatEnabled', False))
+                    options.update(chat_enabled=enabled, chatEnabled=enabled)
+                    credential['provider_options'] = options
+                    row.credential_ciphertext = self._encrypt_payload(credential, field_name='credential')
                 existing.client_id = row.client_id
                 existing.credential_ciphertext = row.credential_ciphertext
                 existing.auth_state_ciphertext = row.auth_state_ciphertext
@@ -1280,7 +1327,9 @@ class CloudOAuthService:
             active_app_keys: set[tuple[str, str, str, str]] = set()
             for row in rows:
                 if (row.status or '').strip().upper() == 'ACTIVE':
-                    active_app_keys.add(self._extract_app_key(row))
+                    app_key = self._extract_app_key(row)
+                    if app_key[3]:
+                        active_app_keys.add(app_key)
             return {
                 'items': [
                     self._connection_payload(row)
@@ -1299,27 +1348,25 @@ class CloudOAuthService:
         owner_user_id: str,
         provider: str | None = None,
     ) -> dict[str, Any]:
-        """Return connections where provider_options.chat_enabled is True."""
+        """Return connections eligible for chat using the public response's rule."""
         owner = _normalize_owner_user_id(owner_user_id)
+        if not owner:
+            raise_error(ErrorCodes.UNAUTHORIZED)
         with SessionLocal() as db:
             rows = CloudAuthConnectionRepository.list_for_owner(
                 db,
                 owner_user_id=owner if owner else None,
                 provider=provider,
                 auth_mode=None,
-                status='ACTIVE',
+                status=None,
                 exclude_auth_modes=(_OAUTH_APP_AUTH_MODE,),
             )
             enabled = []
             for row in rows:
                 try:
-                    if (row.connection_method or '').strip().lower() == 'managed_oauth':
-                        opts = _json_loads(row.provider_account_meta)
-                    else:
-                        credential = self._decrypt_payload(row.credential_ciphertext, field_name='credential')
-                        opts = credential.get('provider_options')
-                    if isinstance(opts, dict) and opts.get('chat_enabled'):
-                        enabled.append(self._connection_payload(row))
+                    payload = self._connection_payload(row)
+                    if payload['can_use_chat']:
+                        enabled.append(payload)
                 except Exception:
                     pass
             return {'items': enabled}
@@ -1349,7 +1396,9 @@ class CloudOAuthService:
             active_app_keys: set[tuple[str, str, str, str]] = set()
             for row in rows:
                 if (row.status or '').strip().upper() == 'ACTIVE':
-                    active_app_keys.add(self._extract_app_key(row))
+                    app_key = self._extract_app_key(row)
+                    if app_key[3]:
+                        active_app_keys.add(app_key)
             return {
                 'items': [
                     self._connection_payload(row)
@@ -1389,6 +1438,8 @@ class CloudOAuthService:
             return {'items': items}
 
     def get_connection(self, connection_id: str, *, user_id: str | None = None) -> dict[str, Any]:
+        if user_id is not None and not user_id.strip():
+            raise_error(ErrorCodes.FORBIDDEN)
         with SessionLocal() as db:
             row = CloudAuthConnectionRepository.get_by_id(db, connection_id)
             if row is None:
@@ -1397,6 +1448,8 @@ class CloudOAuthService:
             return self._connection_payload(row)
 
     def get_connection_internal(self, connection_id: str, *, user_id: str) -> dict[str, Any]:
+        if not user_id.strip():
+            raise_error(ErrorCodes.FORBIDDEN)
         with SessionLocal() as db:
             row = CloudAuthConnectionRepository.get_for_owner(db, connection_id, user_id)
             if row is None:
@@ -1433,7 +1486,7 @@ class CloudOAuthService:
         }
         meta = _json_dumps({
             'capabilities': capabilities or [],
-            'chat_enabled': False,
+            'chat_enabled': provider == 'feishu',
             **identity_meta,
         })
         with SessionLocal() as db:
@@ -1492,7 +1545,7 @@ class CloudOAuthService:
         }
         meta = _json_dumps({
             'capabilities': capabilities or [],
-            'chat_enabled': False,
+            'chat_enabled': True,
             **identity_meta,
         })
         scopes = sorted({
@@ -1561,9 +1614,8 @@ class CloudOAuthService:
             }
             # Extract app_id before clearing the credential so we can scope
             # the PENDING cleanup to the same app only.
-            deleted_credential = self._decrypt_payload(
-                row.credential_ciphertext, field_name='credential'
-            )
+            # Without a verified app_id, leave other connections alone.
+            deleted_credential = self._management_credential(row) or {}
             deleted_app_id = (deleted_credential.get('client_id') or '').strip()
 
             row.credential_ciphertext = self._encrypt_payload(empty_credential, field_name='credential')
@@ -1571,7 +1623,6 @@ class CloudOAuthService:
             row.status = 'REVOKED'
             row.last_error = 'deleted by owner'
             row.last_used_at = None
-            CloudAuthConnectionRepository.save(db, row)
 
             # Also revoke any PENDING connections for the same app so they
             # do not appear as orphaned entries after the parent is deleted.
@@ -1586,14 +1637,17 @@ class CloudOAuthService:
                     status='PENDING',
                 )
                 for pending_row in pending_rows:
-                    pending_credential = self._decrypt_payload(
-                        pending_row.credential_ciphertext, field_name='credential'
-                    )
+                    if pending_row.connection_id == connection_id:
+                        continue
+                    pending_credential = self._management_credential(pending_row) or {}
                     pending_app_id = (pending_credential.get('client_id') or '').strip()
                     if pending_app_id == deleted_app_id:
                         pending_row.status = 'REVOKED'
                         pending_row.last_error = 'parent connection deleted by owner'
-                        CloudAuthConnectionRepository.save(db, pending_row)
+
+            # Commit the target and related cleanup together. A database error
+            # must not leave a deleted target behind a failed API response.
+            db.commit()
 
         self._cache_delete(connection_id)
         return {
@@ -1635,7 +1689,7 @@ class CloudOAuthService:
             if (row.status or '').strip().upper() == 'REVOKED':
                 raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
 
-            if (row.connection_method or '').strip().lower() == 'managed_oauth':
+            if (row.connection_method or '').strip().lower() in {'managed_oauth', 'cli_personal_app'}:
                 if any(value is not None for value in (client_id, app_id, appId, client_secret, app_secret, appSecret)):
                     raise_error(ErrorCodes.MANAGED_TOKEN_REQUIRES_CORE_BRIDGE)
                 meta = _json_loads(row.provider_account_meta)

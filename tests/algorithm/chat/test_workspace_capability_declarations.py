@@ -27,14 +27,23 @@ def test_default_internal_tool_implementations_declare_no_host_paths():
     ])
 
 
-def test_scoped_factories_preserve_declarations_when_registered():
+def test_scoped_factories_preserve_declarations_when_registered(tmp_path):
+    from types import SimpleNamespace
+    from lazyllm.tools.agent.skill_manager import SkillManager
     from lazymind.chat.engine.tools.file_resources.tools import build_resource_read_tools
     from lazymind.chat.engine.tools.session_env import build_session_env_tool
-    from lazymind.chat.engine.tools.skill_listing import build_list_skills_tool
     from lazymind.chat.engine.tools.schedule import build_schedule_toolkit
+    folder = tmp_path / 'example'
+    folder.mkdir()
+    (folder / 'SKILL.md').write_text('---\nname: example\ndescription: example\n---\nbody\n', encoding='utf-8')
+    manager = SkillManager(
+        dir=str(tmp_path), skills=['example'], prompt_skills=['example'],
+        skill_search=lambda _req: {'skills': []}, sandbox=SimpleNamespace(),
+    )
+    search_skill = next(tool for tool in manager.get_skill_tools() if tool.__name__ == 'search_skill')
     _assert_no_host_paths([
         *build_resource_read_tools(), build_session_env_tool({}, 'test'),
-        build_list_skills_tool(['example']), *build_schedule_toolkit()['tools'],
+        search_skill, *build_schedule_toolkit()['tools'],
     ])
 
 

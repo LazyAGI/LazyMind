@@ -55,7 +55,7 @@ x-core-env: &core-env
   LAZYMIND_HISTORY_INJECTION_ROOT: /var/lib/lazymind/uploads/.history-injection/bundles
   LAZYMIND_BOOTSTRAP_ADMIN_USERNAME: ${LAZYMIND_BOOTSTRAP_ADMIN_USERNAME:-admin}
   LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD: ${LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD:-admin}
-  LAZYMIND_PUBLIC_BASE_URL: http://localhost:8000/api/core
+  LAZYMIND_PUBLIC_BASE_URL: ${LAZYMIND_PUBLIC_BASE_URL:-http://localhost:${LAZYMIND_FRONTEND_PORT:-8090}/api/core}
   LAZYMIND_FILE_URL_SIGN_SECRET: changeme-in-production
   LAZYMIND_FILE_URL_EXPIRE_SECONDS: "3600"
   LAZYMIND_OFFICE_CONVERT_URL: http://office-convert-service:8080/v1/office/to-pdf
@@ -323,6 +323,7 @@ services:
       LAZYMIND_JWT_SECRET: dev-secret-change-me
       LAZYMIND_JWT_TTL_MINUTES: "60"
       LAZYMIND_JWT_REFRESH_TTL_DAYS: "7"
+      LAZYMIND_MCP_OAUTH_PUBLIC_BASE_URL: ${LAZYMIND_MCP_OAUTH_PUBLIC_BASE_URL:-}
       LAZYMIND_AUTH_CLOUD_SECRET_KEY: dev-ragscan-secret-key-change-me
       LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE: /run/secrets/internal-service/token
       LAZYMIND_BOOTSTRAP_ADMIN_USERNAME: ${LAZYMIND_BOOTSTRAP_ADMIN_USERNAME:-admin}
@@ -431,6 +432,7 @@ services:
       - internal-service-credentials:/run/secrets/internal-service:ro
       - ./api/backend:/openapi-export
       - ./data/evo:/var/lib/lazymind/evo
+      - ${LAZYMIND_ARTIFACT_STORAGE_ROOT:-./data/subagent/artifact-blobs}:/data/artifacts
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ${LAZYMIND_CLOUD_SESSION_DIR:-./data/core/cloud-session}:/var/lib/lazymind/cloud-session
       # Unconfigured optional files mount an empty device, not a missing host file.
@@ -474,12 +476,16 @@ services:
       MIGRATIONS_DIR: /migrations
       LAZYMIND_ALGO_SERVICE_URL: http://lazyllm-doc-server:8000
       LAZYMIND_SUBAGENT_WORKSPACE: /data/subagent
+      # Persistent artifact storage has its own setting, even when colocated.
+      LAZYMIND_ARTIFACT_STORAGE_ROOT: /data/artifacts
+      LAZYMIND_ARTIFACT_V2_ENABLED: ${LAZYMIND_ARTIFACT_V2_ENABLED:-false}
       LAZYMIND_READONLY_VALIDATE: "0"
       LAZYMIND_READONLY_DB_DRIVER: postgres
       LAZYMIND_READONLY_DB_DSN: "host=db user=app password=app dbname=app port=5432 sslmode=disable TimeZone=UTC"
       LAZYMIND_READONLY_SCHEMA: public
       LAZYMIND_READONLY_TABLES: "public.lazyllm_documents,public.lazyllm_doc_service_tasks,public.lazyllm_kb_documents"
       LAZYMIND_DOCUMENT_SERVICE_URL: http://lazyllm-doc-server:8000
+      LAZYMIND_DOCUMENT_WORKER_URL: http://processor-worker:8001
       LAZYMIND_PARSING_SERVICE_URL: http://lazyllm-parse-server:8000
       LAZYMIND_CHAT_SERVICE_URL: http://chat:8046
       LAZYMIND_EVO_SERVICE_URL: http://evo-api:8047
@@ -945,6 +951,7 @@ services:
       LAZYMIND_MAX_CONCURRENCY: ${LAZYMIND_MAX_CONCURRENCY:-10}
       LAZYMIND_LLM_PRIORITY: ${LAZYMIND_LLM_PRIORITY:-0}
       LAZYMIND_DEFAULT_CHAT_DATASET: algo
+      LAZYMIND_AUTH_SERVICE_URL: http://auth-service:8000/api/authservice
       LAZYMIND_CORE_API_URL: http://core:8000
       LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS: ${LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS:-5000}
       LAZYMIND_EPISODE_RECENT_PROGRESS_INJECT_TOPK: ${LAZYMIND_EPISODE_RECENT_PROGRESS_INJECT_TOPK:-3}

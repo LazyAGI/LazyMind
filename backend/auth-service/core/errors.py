@@ -6,6 +6,15 @@ ErrorTuple = Tuple[int, int, str]
 
 
 class ErrorCodes:
+    MCP_OAUTH_AUTHORIZATION_REQUIRED: ErrorTuple = (401, 1001101, 'MCP authorization required')
+    MCP_OAUTH_INVALID_REQUEST: ErrorTuple = (400, 1001102, 'Invalid MCP OAuth request or state')
+    MCP_OAUTH_PROVIDER_FAILED: ErrorTuple = (502, 1001103, 'MCP OAuth provider request failed')
+    MCP_OAUTH_BUSY: ErrorTuple = (503, 1001104, 'MCP authorization is busy; retry shortly')
+    MCP_OAUTH_CONFIGURATION_INVALID: ErrorTuple = (
+        503, 1001105, 'MCP OAuth public callback is not configured correctly',
+    )
+    MCP_OAUTH_STORAGE_UNAVAILABLE: ErrorTuple = (503, 1001106, 'MCP OAuth storage or encryption is unavailable')
+
     INTERNAL_ERROR: ErrorTuple = (500, 1000000, 'Internal server error')
     INVALID_REQUEST: ErrorTuple = (400, 1000001, 'Invalid request parameters')
     RESOURCE_NOT_FOUND: ErrorTuple = (404, 1000002, 'Resource not found')

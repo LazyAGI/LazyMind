@@ -1,3 +1,66 @@
+CREATE TABLE IF NOT EXISTS external_agent_workflow_tasks (
+    id VARCHAR(36) PRIMARY KEY,
+    owner_user_id VARCHAR(255) NOT NULL,
+    idempotency_key VARCHAR(255) NOT NULL DEFAULT '',
+    agent_type VARCHAR(32) NOT NULL,
+    external_conversation_id VARCHAR(255) NOT NULL DEFAULT '',
+    external_thread_id VARCHAR(255) NOT NULL DEFAULT '',
+    skill_id VARCHAR(255) NOT NULL,
+    skill_revision_id VARCHAR(255) NOT NULL DEFAULT '',
+    task_description TEXT NOT NULL DEFAULT '',
+    draft_id VARCHAR(36) NOT NULL DEFAULT '',
+    workflow_ref VARCHAR(512) NOT NULL DEFAULT '',
+    workflow_id VARCHAR(255) NOT NULL DEFAULT '',
+    workflow_revision_id VARCHAR(36) NOT NULL DEFAULT '',
+    session_id VARCHAR(36) NOT NULL DEFAULT '',
+    conversation_id VARCHAR(36) NOT NULL DEFAULT '',
+    status VARCHAR(32) NOT NULL DEFAULT 'queued',
+    stage VARCHAR(32) NOT NULL DEFAULT 'preflight',
+    error_code VARCHAR(64) NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    suggestion TEXT NOT NULL DEFAULT '',
+    request_json JSONB NOT NULL DEFAULT '{}',
+    result_summary_json JSONB NOT NULL DEFAULT '{}',
+    result_artifacts_json JSONB NOT NULL DEFAULT '[]',
+    lazymind_url VARCHAR(1024) NOT NULL DEFAULT '',
+    completed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_external_agent_workflow_task_owner_key UNIQUE (owner_user_id, idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_agent_workflow_tasks_owner_status
+    ON external_agent_workflow_tasks(owner_user_id, status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_external_agent_workflow_tasks_agent
+    ON external_agent_workflow_tasks(agent_type);
+CREATE INDEX IF NOT EXISTS idx_external_agent_workflow_tasks_skill
+    ON external_agent_workflow_tasks(skill_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_workflow_tasks_external_conversation
+    ON external_agent_workflow_tasks(external_conversation_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_workflow_tasks_draft
+    ON external_agent_workflow_tasks(draft_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_workflow_tasks_session
+    ON external_agent_workflow_tasks(session_id);
+
+CREATE TABLE IF NOT EXISTS external_agent_skill_sources (
+    id VARCHAR(36) PRIMARY KEY,
+    owner_user_id VARCHAR(255) NOT NULL,
+    source_type VARCHAR(32) NOT NULL,
+    source_key VARCHAR(128) NOT NULL,
+    source_name VARCHAR(255) NOT NULL DEFAULT '',
+    source_url TEXT NOT NULL DEFAULT '',
+    resolved_skill_id VARCHAR(36) NOT NULL DEFAULT '',
+    install_status VARCHAR(32) NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_external_agent_skill_source UNIQUE (owner_user_id, source_type, source_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_agent_skill_sources_owner
+    ON external_agent_skill_sources(owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_skill_sources_skill
+    ON external_agent_skill_sources(resolved_skill_id);
+
 -- +migrate Dialect postgres
 ALTER TABLE plugin_human_artifacts
     ADD COLUMN IF NOT EXISTS draft_version BIGINT NOT NULL DEFAULT 1;
@@ -1838,6 +1901,7 @@ CREATE TABLE conversation_opening_backfills (
 -- +migrate Dialect postgres,sqlite
 -- Active conversation groups and incremental organizer
 CREATE TABLE conversation_groups (
+ is_task_conv BOOLEAN NOT NULL DEFAULT FALSE,
  kind VARCHAR(16) NOT NULL DEFAULT 'group', workspace_id VARCHAR(64), project_path TEXT,
  pinned BOOLEAN NOT NULL DEFAULT FALSE, sort_order BIGINT NOT NULL DEFAULT 0,
  id VARCHAR(36) PRIMARY KEY, user_id VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL,
@@ -1845,8 +1909,8 @@ CREATE TABLE conversation_groups (
  created_by VARCHAR(16) NOT NULL DEFAULT 'user', created_run_id VARCHAR(64) NOT NULL DEFAULT '',
  created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, deleted_at TIMESTAMP
 );
-CREATE UNIQUE INDEX uk_conversation_groups_user_name ON conversation_groups(user_id, normalized_name) WHERE kind = 'group';
-CREATE UNIQUE INDEX uk_conversation_projects_user_path ON conversation_groups(user_id, project_path);
+CREATE UNIQUE INDEX uk_conversation_groups_user_name ON conversation_groups(user_id, is_task_conv, normalized_name) WHERE kind = 'group';
+CREATE UNIQUE INDEX uk_conversation_projects_user_path ON conversation_groups(user_id, is_task_conv, project_path) WHERE kind = 'project' AND deleted_at IS NULL;
 CREATE INDEX idx_conversation_groups_created_run ON conversation_groups(created_run_id);
 CREATE TABLE conversation_group_members (
  conversation_id VARCHAR(36) PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
@@ -2022,6 +2086,52 @@ CREATE TABLE IF NOT EXISTS conversation_fork_requests (
     created_at TIMESTAMP NOT NULL,
     PRIMARY KEY (actor_user_id, idempotency_key)
 );
+
+-- Durable review and host-delivery facts for opt-in controlled Workflow sessions.
+ALTER TABLE plugin_sessions ADD COLUMN control_protocol VARCHAR(32) NOT NULL DEFAULT '';
+ALTER TABLE plugin_sessions ADD COLUMN control_binding_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE plugin_session_steps ADD COLUMN review_required BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE plugin_session_steps ADD COLUMN submission_hash VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE plugin_session_steps ADD COLUMN executor_host VARCHAR(32) NOT NULL DEFAULT '';
+CREATE TABLE workflow_review_checkpoints (
+    id VARCHAR(36) PRIMARY KEY,
+    session_id VARCHAR(36) NOT NULL,
+    attempt_id VARCHAR(36) NOT NULL UNIQUE,
+    step_id VARCHAR(64) NOT NULL,
+    version BIGINT NOT NULL DEFAULT 1,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    slots_json TEXT NOT NULL DEFAULT '[]',
+    manifest_json TEXT NOT NULL DEFAULT '[]',
+    manifest_hash VARCHAR(64) NOT NULL DEFAULT '',
+    decision_command_id VARCHAR(255) NOT NULL DEFAULT '',
+    accepted_by VARCHAR(255) NOT NULL DEFAULT '',
+    accepted_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE INDEX idx_workflow_reviews_session_status ON workflow_review_checkpoints(session_id, status);
+CREATE TABLE workflow_host_actions (
+    id VARCHAR(36) PRIMARY KEY,
+    session_id VARCHAR(36) NOT NULL,
+    command_id VARCHAR(255) NOT NULL UNIQUE,
+    kind VARCHAR(16) NOT NULL,
+    binding_generation BIGINT NOT NULL,
+    connector_id VARCHAR(128) NOT NULL,
+    native_session_id VARCHAR(255) NOT NULL,
+    execution_id VARCHAR(36) NOT NULL DEFAULT '',
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    dispatch_owner VARCHAR(128) NOT NULL DEFAULT '',
+    dispatch_token_hash VARCHAR(64) NOT NULL DEFAULT '',
+    dispatch_expires_at TIMESTAMP,
+    last_error TEXT NOT NULL DEFAULT '',
+    native_event_seq BIGINT NOT NULL DEFAULT 0,
+    accepted_at TIMESTAMP,
+    consumed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE INDEX idx_workflow_host_actions_delivery ON workflow_host_actions(connector_id, status, created_at);
+CREATE INDEX idx_workflow_host_actions_session ON workflow_host_actions(session_id, created_at);
 -- Vocabulary and Anki provider tables are consolidated from the v0.3 development migration.
 -- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS vocabulary_provider_settings (owner_id VARCHAR(64) PRIMARY KEY, selected_provider VARCHAR(16) NOT NULL DEFAULT 'anki', anki_endpoint TEXT NOT NULL DEFAULT 'http://127.0.0.1:8765', anki_deck_name TEXT NOT NULL DEFAULT 'LazyMind Vocabulary', anki_model_version INTEGER NOT NULL DEFAULT 1, created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -2192,6 +2302,249 @@ CREATE INDEX IF NOT EXISTS idx_datasets_processing_level ON datasets(processing_
 CREATE TABLE IF NOT EXISTS document_processing_states (dataset_id VARCHAR(255) NOT NULL, document_id VARCHAR(128) NOT NULL, parse_status VARCHAR(16) NOT NULL DEFAULT 'pending', chunk_status VARCHAR(16) NOT NULL DEFAULT 'pending', index_status VARCHAR(16) NOT NULL DEFAULT 'pending', parse_error_code VARCHAR(64) NOT NULL DEFAULT '', parse_error_message TEXT NOT NULL DEFAULT '', chunk_error_code VARCHAR(64) NOT NULL DEFAULT '', chunk_error_message TEXT NOT NULL DEFAULT '', index_error_code VARCHAR(64) NOT NULL DEFAULT '', index_error_message TEXT NOT NULL DEFAULT '', source_fingerprint VARCHAR(128) NOT NULL DEFAULT '', parse_fingerprint VARCHAR(128) NOT NULL DEFAULT '', chunk_fingerprint VARCHAR(128) NOT NULL DEFAULT '', index_fingerprint VARCHAR(128) NOT NULL DEFAULT '', parser_version VARCHAR(128) NOT NULL DEFAULT '', chunker_version VARCHAR(128) NOT NULL DEFAULT '', embedding_version VARCHAR(128) NOT NULL DEFAULT '', parse_artifact_ref TEXT NOT NULL DEFAULT '', chunk_artifact_ref TEXT NOT NULL DEFAULT '', index_artifact_ref TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 1, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(dataset_id,document_id));
 CREATE INDEX IF NOT EXISTS idx_document_processing_status ON document_processing_states(dataset_id,parse_status,chunk_status,index_status);
 
+-- Artifact V2 metadata baseline. Product write paths stay behind feature flags.
+-- +migrate Dialect postgres
+CREATE TABLE IF NOT EXISTS artifacts (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id VARCHAR(128) NOT NULL,
+    owner_user_id VARCHAR(255) NOT NULL,
+    project_id VARCHAR(36),
+    kind VARCHAR(32) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    logical_key VARCHAR(255),
+    status VARCHAR(24) NOT NULL,
+    classification VARCHAR(32) NOT NULL DEFAULT 'internal',
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    deleted_at TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX IF NOT EXISTS idx_artifacts_owner_created ON artifacts (tenant_id, owner_user_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_artifacts_owner_logical_key
+ON artifacts (tenant_id, owner_user_id, logical_key)
+WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key <> '';
+
+CREATE TABLE IF NOT EXISTS artifact_blobs (
+    id VARCHAR(64) PRIMARY KEY,
+    tenant_id VARCHAR(128) NOT NULL,
+    sha256 VARCHAR(64) NOT NULL,
+    size BIGINT NOT NULL,
+    mime_type VARCHAR(255) NOT NULL,
+    storage_backend VARCHAR(32) NOT NULL,
+    storage_key TEXT NOT NULL,
+    encryption_key_ref VARCHAR(255),
+    state VARCHAR(24) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    CONSTRAINT uk_artifact_blobs_tenant_hash_size UNIQUE (tenant_id, sha256, size)
+);
+
+CREATE TABLE IF NOT EXISTS artifact_revisions (
+    id VARCHAR(36) PRIMARY KEY,
+    artifact_id VARCHAR(36) NOT NULL,
+    revision_no BIGINT NOT NULL,
+    parent_revision_id VARCHAR(36),
+    merge_parent_revision_id VARCHAR(36),
+    blob_id VARCHAR(64),
+    inline_json JSONB,
+    content_type VARCHAR(64) NOT NULL,
+    schema_name VARCHAR(128),
+    schema_version VARCHAR(32),
+    content_hash VARCHAR(80) NOT NULL,
+    size BIGINT NOT NULL,
+    caption TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    producer_type VARCHAR(32) NOT NULL,
+    producer_id VARCHAR(128),
+    producer_run_id VARCHAR(128),
+    producer_event_id VARCHAR(128),
+    created_by VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    CONSTRAINT uk_artifact_revision_no UNIQUE (artifact_id, revision_no)
+);
+CREATE INDEX IF NOT EXISTS idx_artifact_revisions_producer ON artifact_revisions (producer_run_id, producer_event_id);
+
+CREATE TABLE IF NOT EXISTS artifact_heads (
+    artifact_id VARCHAR(36) NOT NULL,
+    channel VARCHAR(32) NOT NULL,
+    revision_id VARCHAR(36) NOT NULL,
+    version BIGINT NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    PRIMARY KEY (artifact_id, channel)
+);
+
+CREATE TABLE IF NOT EXISTS artifact_bindings (
+    id VARCHAR(36) PRIMARY KEY,
+    artifact_id VARCHAR(36) NOT NULL,
+    revision_id VARCHAR(36),
+    scope_type VARCHAR(32) NOT NULL,
+    scope_id VARCHAR(128) NOT NULL,
+    role VARCHAR(32) NOT NULL,
+    slot_key VARCHAR(255),
+    list_item_key VARCHAR(128),
+    position INTEGER,
+    validity VARCHAR(24) NOT NULL,
+    follow_head BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_artifact_bindings_scope ON artifact_bindings (scope_type, scope_id, role);
+
+CREATE TABLE IF NOT EXISTS artifact_dependencies (
+    output_revision_id VARCHAR(36) NOT NULL,
+    input_revision_id VARCHAR(36) NOT NULL,
+    role VARCHAR(64) NOT NULL,
+    required BOOLEAN NOT NULL,
+    PRIMARY KEY (output_revision_id, input_revision_id, role)
+);
+
+CREATE TABLE IF NOT EXISTS artifact_idempotency (
+    tenant_id VARCHAR(128) NOT NULL,
+    idempotency_key VARCHAR(255) NOT NULL,
+    operation VARCHAR(64) NOT NULL,
+    request_hash VARCHAR(64) NOT NULL,
+    response_json JSONB NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    PRIMARY KEY (tenant_id, idempotency_key, operation)
+);
+
+CREATE TABLE IF NOT EXISTS artifact_event_outbox (
+    id VARCHAR(36) PRIMARY KEY,
+    event_type VARCHAR(64) NOT NULL,
+    payload JSONB NOT NULL,
+    status VARCHAR(24) NOT NULL,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_artifact_outbox_retry ON artifact_event_outbox (status, next_attempt_at);
+
+CREATE OR REPLACE FUNCTION artifact_revisions_immutable() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'artifact revision payload is immutable';
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS artifact_revisions_no_update ON artifact_revisions;
+CREATE TRIGGER artifact_revisions_no_update
+BEFORE UPDATE ON artifact_revisions
+FOR EACH ROW EXECUTE PROCEDURE artifact_revisions_immutable();
+
+-- +migrate Dialect sqlite
+CREATE TABLE IF NOT EXISTS artifacts (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    owner_user_id TEXT NOT NULL,
+    project_id TEXT,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    logical_key TEXT,
+    status TEXT NOT NULL,
+    classification TEXT NOT NULL DEFAULT 'internal',
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    deleted_at DATETIME
+);
+CREATE INDEX IF NOT EXISTS idx_artifacts_owner_created ON artifacts (tenant_id, owner_user_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_artifacts_owner_logical_key
+ON artifacts (tenant_id, owner_user_id, logical_key)
+WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key <> '';
+
+CREATE TABLE IF NOT EXISTS artifact_blobs (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    mime_type TEXT NOT NULL,
+    storage_backend TEXT NOT NULL,
+    storage_key TEXT NOT NULL,
+    encryption_key_ref TEXT,
+    state TEXT NOT NULL,
+    created_at DATETIME NOT NULL,
+    UNIQUE (tenant_id, sha256, size)
+);
+
+CREATE TABLE IF NOT EXISTS artifact_revisions (
+    id TEXT PRIMARY KEY,
+    artifact_id TEXT NOT NULL,
+    revision_no INTEGER NOT NULL,
+    parent_revision_id TEXT,
+    merge_parent_revision_id TEXT,
+    blob_id TEXT,
+    inline_json TEXT,
+    content_type TEXT NOT NULL,
+    schema_name TEXT,
+    schema_version TEXT,
+    content_hash TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    caption TEXT,
+    metadata TEXT NOT NULL DEFAULT '{}',
+    producer_type TEXT NOT NULL,
+    producer_id TEXT,
+    producer_run_id TEXT,
+    producer_event_id TEXT,
+    created_by TEXT NOT NULL,
+    created_at DATETIME NOT NULL,
+    UNIQUE (artifact_id, revision_no)
+);
+CREATE INDEX IF NOT EXISTS idx_artifact_revisions_producer ON artifact_revisions (producer_run_id, producer_event_id);
+
+CREATE TABLE IF NOT EXISTS artifact_heads (
+    artifact_id TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    revision_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    updated_at DATETIME NOT NULL,
+    PRIMARY KEY (artifact_id, channel)
+);
+
+CREATE TABLE IF NOT EXISTS artifact_bindings (
+    id TEXT PRIMARY KEY,
+    artifact_id TEXT NOT NULL,
+    revision_id TEXT,
+    scope_type TEXT NOT NULL,
+    scope_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    slot_key TEXT,
+    list_item_key TEXT,
+    position INTEGER,
+    validity TEXT NOT NULL,
+    follow_head INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_artifact_bindings_scope ON artifact_bindings (scope_type, scope_id, role);
+
+CREATE TABLE IF NOT EXISTS artifact_dependencies (
+    output_revision_id TEXT NOT NULL,
+    input_revision_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    required INTEGER NOT NULL,
+    PRIMARY KEY (output_revision_id, input_revision_id, role)
+);
+
+CREATE TABLE IF NOT EXISTS artifact_idempotency (
+    tenant_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    response_json TEXT NOT NULL,
+    created_at DATETIME NOT NULL,
+    PRIMARY KEY (tenant_id, idempotency_key, operation)
+);
+
+CREATE TABLE IF NOT EXISTS artifact_event_outbox (
+    id TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    status TEXT NOT NULL,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at DATETIME NOT NULL,
+    created_at DATETIME NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_artifact_outbox_retry ON artifact_event_outbox (status, next_attempt_at);
+
+CREATE TRIGGER IF NOT EXISTS artifact_revisions_no_update
+BEFORE UPDATE ON artifact_revisions
+BEGIN
+  SELECT RAISE(ABORT, 'artifact revision payload is immutable');
+END;
+
 -- +migrate Dialect postgres
 CREATE TABLE conversation_tool_grants (
     conversation_id VARCHAR(36) NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -2248,7 +2601,44 @@ CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_invocation_id ON 
 CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_capability_type ON external_capability_invocations(capability_type);
 CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_capability_id ON external_capability_invocations(capability_id);
 CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_status ON external_capability_invocations(status);
+-- +migrate Dialect *
+CREATE TABLE IF NOT EXISTS academic_works (id VARCHAR(36) PRIMARY KEY, canonical_title TEXT NOT NULL, normalized_title TEXT NOT NULL, authors_json JSON NOT NULL, first_author_normalized VARCHAR(255) NOT NULL DEFAULT '', publication_year INTEGER NOT NULL DEFAULT 0, venue TEXT NOT NULL DEFAULT '', abstract TEXT NOT NULL DEFAULT '', doi_normalized VARCHAR(512) NOT NULL DEFAULT '', arxiv_id_base VARCHAR(64) NOT NULL DEFAULT '', external_ids_json JSON NOT NULL, metadata_provenance_json JSON NOT NULL, resolution_confidence DOUBLE PRECISION NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_academic_works_doi ON academic_works(doi_normalized) WHERE doi_normalized <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS uk_academic_works_arxiv ON academic_works(arxiv_id_base) WHERE arxiv_id_base <> '';
+CREATE INDEX IF NOT EXISTS idx_academic_works_title ON academic_works(normalized_title);
+CREATE TABLE IF NOT EXISTS academic_work_documents (academic_work_id VARCHAR(36) NOT NULL, dataset_id VARCHAR(255) NOT NULL, document_id VARCHAR(128) NOT NULL, version_kind VARCHAR(32) NOT NULL DEFAULT 'unknown', source_provider VARCHAR(64) NOT NULL DEFAULT '', source_locator TEXT NOT NULL DEFAULT '', source_version VARCHAR(64) NOT NULL DEFAULT '', content_sha256 VARCHAR(64) NOT NULL DEFAULT '', match_method VARCHAR(64) NOT NULL DEFAULT '', match_confidence DOUBLE PRECISION NOT NULL DEFAULT 0, is_preferred_version BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, PRIMARY KEY(academic_work_id,dataset_id,document_id));
+CREATE INDEX IF NOT EXISTS idx_academic_work_documents_dataset ON academic_work_documents(dataset_id);
+CREATE INDEX IF NOT EXISTS idx_academic_work_documents_document ON academic_work_documents(document_id);
+CREATE INDEX IF NOT EXISTS idx_academic_work_documents_hash ON academic_work_documents(content_sha256);
+CREATE TABLE IF NOT EXISTS academic_references (id VARCHAR(36) PRIMARY KEY, source_document_id VARCHAR(128) NOT NULL, source_work_id VARCHAR(36) NOT NULL DEFAULT '', reference_key VARCHAR(64) NOT NULL DEFAULT '', raw_text TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', authors_json JSON NOT NULL, publication_year INTEGER NOT NULL DEFAULT 0, doi_normalized VARCHAR(512) NOT NULL DEFAULT '', arxiv_id_base VARCHAR(64) NOT NULL DEFAULT '', resolved_work_id VARCHAR(36) NOT NULL DEFAULT '', resolution_status VARCHAR(32) NOT NULL DEFAULT 'unresolved', resolution_method VARCHAR(64) NOT NULL DEFAULT '', resolution_confidence DOUBLE PRECISION NOT NULL DEFAULT 0, page INTEGER NOT NULL DEFAULT 0, bbox_json JSON NOT NULL, segment_ids_json JSON NOT NULL, extractor_name VARCHAR(128) NOT NULL DEFAULT '', extractor_version VARCHAR(64) NOT NULL DEFAULT '', source_fingerprint VARCHAR(128) NOT NULL DEFAULT '', created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_academic_references_source ON academic_references(source_document_id);
+CREATE INDEX IF NOT EXISTS idx_academic_references_work ON academic_references(resolved_work_id);
+CREATE INDEX IF NOT EXISTS idx_academic_references_doi ON academic_references(doi_normalized);
+CREATE INDEX IF NOT EXISTS idx_academic_references_arxiv ON academic_references(arxiv_id_base);
+CREATE TABLE IF NOT EXISTS paper_import_batches (id VARCHAR(36) PRIMARY KEY, entry_type VARCHAR(32) NOT NULL, target_dataset_id VARCHAR(255) NOT NULL, target_pid VARCHAR(255) NOT NULL DEFAULT '', source_document_ids_json JSON NOT NULL, policy_snapshot_json JSON NOT NULL, status VARCHAR(32) NOT NULL, total_items INTEGER NOT NULL DEFAULT 0, completed_items INTEGER NOT NULL DEFAULT 0, failed_items INTEGER NOT NULL DEFAULT 0, skipped_items INTEGER NOT NULL DEFAULT 0, needs_action_items INTEGER NOT NULL DEFAULT 0, async_job_id VARCHAR(36) NOT NULL DEFAULT '', idempotency_key VARCHAR(128) NOT NULL DEFAULT '', created_by VARCHAR(255) NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_paper_import_batches_target ON paper_import_batches(target_dataset_id);
+CREATE INDEX IF NOT EXISTS idx_paper_import_batches_status ON paper_import_batches(status);
+CREATE INDEX IF NOT EXISTS idx_paper_import_batches_user ON paper_import_batches(created_by);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_paper_import_batches_idempotency ON paper_import_batches(created_by,idempotency_key) WHERE idempotency_key <> '';
+CREATE TABLE IF NOT EXISTS paper_import_items (id VARCHAR(36) PRIMARY KEY, batch_id VARCHAR(36) NOT NULL, academic_work_id VARCHAR(36) NOT NULL, reference_ids_json JSON NOT NULL, presence_snapshot_json JSON NOT NULL, selected_candidate_json JSON NOT NULL, stage VARCHAR(32) NOT NULL, status VARCHAR(32) NOT NULL, content_sha256 VARCHAR(64) NOT NULL DEFAULT '', document_id VARCHAR(128) NOT NULL DEFAULT '', document_task_id VARCHAR(128) NOT NULL DEFAULT '', attempt_count INTEGER NOT NULL DEFAULT 0, error_code VARCHAR(64) NOT NULL DEFAULT '', error_details_json JSON NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_paper_import_items_batch ON paper_import_items(batch_id);
+CREATE INDEX IF NOT EXISTS idx_paper_import_items_work ON paper_import_items(academic_work_id);
+CREATE INDEX IF NOT EXISTS idx_paper_import_items_status ON paper_import_items(status);
 
+-- +migrate Dialect postgres,sqlite
+-- Personal MCP authentication mode. Existing encrypted headers remain compatible.
+ALTER TABLE mcp_servers ADD COLUMN auth_type VARCHAR(16) NOT NULL DEFAULT '';
+-- Result receipts are independent of browser storage and deployment versions.
+CREATE TABLE IF NOT EXISTS conversation_result_reads (
+    user_id VARCHAR(255) NOT NULL,
+    conversation_id VARCHAR(36) NOT NULL,
+    terminal_version VARCHAR(64) NOT NULL,
+    PRIMARY KEY (user_id, conversation_id, terminal_version)
+);
+CREATE TABLE IF NOT EXISTS conversation_result_read_state (
+    id BIGINT NOT NULL PRIMARY KEY,
+    initialized BOOLEAN NOT NULL DEFAULT FALSE
+);
 -- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS document_publication_operations (
  id VARCHAR(64) PRIMARY KEY, owner_user_id VARCHAR(255) NOT NULL,
@@ -2302,3 +2692,86 @@ CREATE TABLE IF NOT EXISTS document_publication_bindings (
  result_revision_id VARCHAR(64) NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_document_publication_item ON document_publication_bindings(session_id,slot_id,item_index);
+
+-- +migrate Dialect postgres
+ALTER TABLE public.skills ADD COLUMN IF NOT EXISTS call_mode VARCHAR(16) NOT NULL DEFAULT 'on_demand';
+ALTER TABLE public.skills ADD COLUMN IF NOT EXISTS sort_rank BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.skills ADD COLUMN IF NOT EXISTS original_revision_id VARCHAR(36);
+ALTER TABLE public.skills ADD COLUMN IF NOT EXISTS field TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.skills ADD COLUMN IF NOT EXISTS aliases JSON NOT NULL DEFAULT '[]';
+ALTER TABLE public.skills ADD COLUMN IF NOT EXISTS keywords JSON NOT NULL DEFAULT '[]';
+UPDATE public.skills SET call_mode = CASE WHEN call_mode = 'disabled' OR NOT is_enabled THEN 'manual' WHEN call_mode IS NULL OR call_mode = '' THEN 'on_demand' ELSE call_mode END;
+UPDATE public.skills SET sort_rank = FLOOR(EXTRACT(EPOCH FROM created_at) * 1000) WHERE sort_rank = 0;
+UPDATE public.skills SET original_revision_id = (
+    SELECT r.id FROM public.skill_revisions r WHERE r.skill_id = skills.id
+    ORDER BY r.revision_no ASC, r.created_at ASC, r.id ASC LIMIT 1
+) WHERE original_revision_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_skills_owner_call_mode_sort ON public.skills(owner_user_id, call_mode, sort_rank DESC, created_at DESC);
+
+-- +migrate Dialect sqlite
+ALTER TABLE skills ADD COLUMN call_mode VARCHAR(16) NOT NULL DEFAULT 'on_demand';
+ALTER TABLE skills ADD COLUMN sort_rank BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE skills ADD COLUMN original_revision_id VARCHAR(36);
+ALTER TABLE skills ADD COLUMN field TEXT NOT NULL DEFAULT '';
+ALTER TABLE skills ADD COLUMN aliases JSON NOT NULL DEFAULT '[]';
+ALTER TABLE skills ADD COLUMN keywords JSON NOT NULL DEFAULT '[]';
+UPDATE skills SET call_mode = CASE WHEN call_mode = 'disabled' OR NOT is_enabled THEN 'manual' WHEN call_mode IS NULL OR call_mode = '' THEN 'on_demand' ELSE call_mode END;
+UPDATE skills SET sort_rank = CAST(strftime('%s', created_at) AS INTEGER) * 1000 WHERE sort_rank = 0;
+UPDATE skills SET original_revision_id = (
+    SELECT r.id FROM skill_revisions r WHERE r.skill_id = skills.id
+    ORDER BY r.revision_no ASC, r.created_at ASC, r.id ASC LIMIT 1
+) WHERE original_revision_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_skills_owner_call_mode_sort ON skills(owner_user_id, call_mode, sort_rank DESC, created_at DESC);
+
+-- +migrate Dialect postgres
+CREATE TABLE evolution_model_validations (
+    model_ref VARCHAR(160) PRIMARY KEY,
+    validation_version VARCHAR(64) NOT NULL,
+    evidence_id VARCHAR(255) NOT NULL,
+    passed BOOLEAN NOT NULL DEFAULT FALSE,
+    verified_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+ALTER TABLE agent_threads ADD COLUMN status_observed_at TIMESTAMP WITH TIME ZONE NULL;
+
+-- +migrate Dialect sqlite
+CREATE TABLE evolution_model_validations (
+    model_ref VARCHAR(160) PRIMARY KEY,
+    validation_version VARCHAR(64) NOT NULL,
+    evidence_id VARCHAR(255) NOT NULL,
+    passed BOOLEAN NOT NULL DEFAULT FALSE,
+    verified_at DATETIME NOT NULL,
+    expires_at DATETIME NOT NULL
+);
+ALTER TABLE agent_threads ADD COLUMN status_observed_at DATETIME NULL;
+
+-- +migrate Dialect postgres
+ALTER TABLE user_chat_settings ADD COLUMN enable_tool_retrieval BOOLEAN NOT NULL DEFAULT false;
+
+-- +migrate Dialect sqlite
+ALTER TABLE user_chat_settings ADD COLUMN enable_tool_retrieval BOOLEAN NOT NULL DEFAULT false;
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE IF NOT EXISTS skill_recordings (
+    evidence TEXT NOT NULL DEFAULT '{}',
+    attempt INTEGER NOT NULL DEFAULT 0,
+    id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(64) NOT NULL,
+    conversation_id VARCHAR(128) NOT NULL,
+    skill_id VARCHAR(64) NOT NULL DEFAULT '',
+    status VARCHAR(32) NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    frames TEXT NOT NULL DEFAULT '[]',
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_skill_recordings_owner_conversation ON skill_recordings(user_id, conversation_id);
+CREATE INDEX IF NOT EXISTS idx_skill_recordings_skill ON skill_recordings(skill_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_recordings_active_user ON skill_recordings(user_id) WHERE status = 'generating';
+
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE default_models ADD COLUMN vision BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_model_provider_group_models ADD COLUMN vision BOOLEAN NOT NULL DEFAULT FALSE;

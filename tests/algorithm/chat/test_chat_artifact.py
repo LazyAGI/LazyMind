@@ -53,6 +53,31 @@ def test_save_chat_artifact_file_copies_to_persistent_workspace(tmp_path, monkey
     assert emitted[0]['value']['size'] == len(b'fake-docx')
 
 
+def test_save_chat_artifact_emits_logical_key_and_hash(monkeypatch):
+    emitted = []
+    monkeypatch.setattr(
+        chat_artifact, '_current_artifact_scope', lambda: ('user-1', 'conversation-1'),
+    )
+    monkeypatch.setattr(
+        chat_artifact,
+        '_write_agent_data',
+        lambda tag, **payload: emitted.append({'tag': tag, **payload}),
+    )
+
+    chat_artifact.save_chat_artifact(
+        'report.md', 'hello', change_summary='first draft', logical_key='report',
+    )
+
+    event = emitted[0]
+    assert event['schema_version'] == 2
+    assert event['logical_key'] == 'report'
+    assert event['publication'] == 'published'
+    assert event['change_summary'] == 'first draft'
+    assert event['content_hash'].startswith('sha256:')
+    assert event['size'] > 0
+    assert event['idempotency_key']
+
+
 def test_save_chat_artifact_file_rejects_source_outside_agent_workspace(
     tmp_path, monkeypatch,
 ):
@@ -88,6 +113,7 @@ def test_workspace_file_tools_share_chat_agent_workspace(tmp_path, monkeypatch):
     assert Path(written['path']) == workspace / 'bid_output' / 'outline.json'
     assert '{"chapters": []}' in loaded['text']
     assert listing['entries'] == ['outline.json']
+
 
 
 def test_read_file_accepts_only_current_workflow_attempt_workspace(tmp_path, monkeypatch):

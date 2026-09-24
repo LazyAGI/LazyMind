@@ -40,6 +40,17 @@ func manualOpenAPISpec() map[string]any {
 
 func manualSchemas() map[string]any {
 	return map[string]any{
+		"ChatExport": objReq([]string{"index", "title", "filename", "content_type", "start", "end", "export_id"},
+			prop("index", intSchema()), prop("title", strSchema()), prop("filename", strSchema()),
+			prop("content_type", enumStringSchema("text/markdown")), prop("start", intSchema()), prop("end", intSchema()), prop("export_id", strSchema())),
+		"CreateChatExportRequest": objReq([]string{"history_id", "export_id", "filename", "content_type", "content"},
+			prop("history_id", strSchema()), prop("export_id", strSchema()), prop("filename", strSchema()),
+			prop("content_type", enumStringSchema("text/markdown")), prop("content", strSchema())),
+		"ChatExportArtifactResponse": obj(prop("code", intSchema()), prop("data", obj(
+			prop("artifact_id", strSchema()), prop("conversation_id", strSchema()), prop("history_id", strSchema()),
+			prop("producer_type", strSchema()), prop("filename", strSchema()), prop("slot", strSchema()),
+			prop("content_type", strSchema()), prop("seq", intSchema()), prop("value", obj(prop("text", strSchema()))),
+			prop("caption", strSchema()), prop("created_at", strSchema())))),
 		"EmptyObject": obj(),
 		"LocalWorkspace": objReq([]string{"workspace_id", "display_name", "path", "status", "version", "source"},
 			prop("workspace_id", strSchema()), prop("display_name", strSchema()), prop("path", strSchema()),
@@ -638,7 +649,8 @@ func manualSchemas() map[string]any {
 		"ConversationRunningStatusItem": objReq([]string{"conversation_id", "status"},
 			prop("conversation_id", strSchema()), prop("status", enumStringSchema("running", "idle", "unknown")),
 			prop("terminal_status", enumStringSchema("completed", "failed", "canceled")),
-			prop("terminal_version", strSchema())),
+			prop("terminal_version", strSchema()), prop("terminal_read", boolSchema())),
+		"ConversationResultReadRequest": objReq([]string{"terminal_version"}, prop("terminal_version", map[string]any{"type": "string", "minLength": 1, "maxLength": 64})),
 		"ConversationBatchStatusRequest": objReq([]string{"conversation_ids"}, prop("conversation_ids", map[string]any{
 			"type": "array", "minItems": 1, "maxItems": 100, "items": map[string]any{"type": "string", "minLength": 1, "maxLength": 64},
 		})),
@@ -714,7 +726,7 @@ func manualSchemas() map[string]any {
 			prop("model_name", strSchema()), prop("source", enumStringSchema("own", "shared", "cloud")),
 			prop("selection_version", int64Schema()),
 		),
-		"ConversationHistoryItem": obj(
+		"ConversationHistoryItem": obj(prop("exports", array(refSchema("ChatExport"))),
 			prop("fork_read_only", boolSchema()),
 			prop("seq", intSchema()), prop("query", strSchema()), prop("result", strSchema()), prop("id", strSchema()), prop("feed_back", intSchema()), prop("sources", array(obj())), prop("input", array(obj())), prop("reasoning_content", strSchema()), prop("thinking_time_s", int64Schema()), prop("reason", strSchema()), prop("expected_answer", strSchema()), prop("create_time", strSchema()), prop("run_id", strSchema()), prop("run_status", strSchema()), prop("run_terminal", refSchema("RunTerminal")), prop("performance_metrics", refSchema("RunPerformanceMetrics")), prop("failed_attempts", array(refSchema("FailedRunAttempt"))), prop("execution", refSchema("ExternalExecutionProjection")), prop("model_route", refSchema("ChatModelRoute")),
 		),
@@ -775,7 +787,7 @@ func manualSchemas() map[string]any {
 			prop("diagnostic_id", strSchema()),
 		),
 		"ChatRuntimeEvent":            obj(prop("schema_version", intSchema()), prop("event_id", strSchema()), prop("run_id", strSchema()), prop("type", strSchema()), prop("data", obj())),
-		"ChatChunkResponse":           obj(prop("conversation_id", strSchema()), prop("seq", intSchema()), prop("message", strSchema()), prop("delta", strSchema()), prop("delta_mode", enumStringSchema("append", "replace")), prop("history_id", strSchema()), prop("sources", array(obj())), prop("prompt_questions", array(strSchema())), prop("reasoning_content", strSchema()), prop("thinking_duration_s", int64Schema()), prop("capability_dependency", obj()), prop("runtime_event", refSchema("ChatRuntimeEvent")), prop("performance_metrics", refSchema("RunPerformanceMetrics")), prop("execution", refSchema("ExternalExecutionProjection")), prop("model_route", refSchema("ChatModelRoute"))),
+		"ChatChunkResponse":           obj(prop("exports", array(refSchema("ChatExport"))), prop("conversation_id", strSchema()), prop("seq", intSchema()), prop("message", strSchema()), prop("delta", strSchema()), prop("delta_mode", enumStringSchema("append", "replace")), prop("history_id", strSchema()), prop("sources", array(obj())), prop("prompt_questions", array(strSchema())), prop("reasoning_content", strSchema()), prop("thinking_duration_s", int64Schema()), prop("capability_dependency", obj()), prop("runtime_event", refSchema("ChatRuntimeEvent")), prop("performance_metrics", refSchema("RunPerformanceMetrics")), prop("execution", refSchema("ExternalExecutionProjection")), prop("model_route", refSchema("ChatModelRoute"))),
 		"ACLApiResponse":              obj(prop("code", intSchema()), prop("message", strSchema()), prop("data", obj())),
 		"AddACLRequest":               objReq([]string{"grantee_type", "grantee_id", "permission"}, prop("grantee_type", strSchema()), prop("grantee_id", strSchema()), prop("permission", strSchema()), prop("expires_at", dateTimeSchema())),
 		"UpdateACLRequest":            objReq([]string{"permission"}, prop("permission", strSchema()), prop("expires_at", dateTimeSchema())),
@@ -940,6 +952,7 @@ func manualPaths() map[string]any {
 		"/tools":                                             map[string]any{"get": op("Tool list", queryParams(param("query", "keyword", false, strSchema()), param("query", "page", false, intSchema()), param("query", "page_size", false, intSchema())), nil, response(200, "Tool list", refSchema("ToolListResponse")))},
 		"/tools/{tool_name}:disable":                         map[string]any{"post": op("Disable tool", nil, nil, response(200, "Tool disabled", refSchema("ToolStateResponse")))},
 		"/tools/{tool_name}:enable":                          map[string]any{"post": op("Enable tool", nil, nil, response(200, "Tool enabled", refSchema("ToolStateResponse")))},
+		"/conversations/{conversation_id}/artifacts":         map[string]any{"post": op("Save a finalized Main Chat export", nil, jsonBody(refSchema("CreateChatExportRequest"), true), response(200, "Saved artifact (idempotent)", refSchema("ChatExportArtifactResponse")))},
 		"/conversations:resumeChat":                          map[string]any{"post": sseOp("Resume conversation stream", jsonBody(refSchema("ConversationResumeRequest"), true), response(200, "SSE streaming response item is ChatChunkResponse wrapped by result", refSchema("ChatChunkResponse")))},
 		"/conversations:stopChatGeneration":                  map[string]any{"post": op("Stop conversation generation", nil, jsonBody(refSchema("ConversationStopRequest"), true), response(200, "Stopped successfully", refSchema("EmptyObject")))},
 		"/conversations/{conversation_id}:toolLimitDecision": map[string]any{"post": op("Choose whether to continue after the tool-round limit", nil, nil, response(200, "Decision forwarded", refSchema("EmptyObject")))},
@@ -1225,9 +1238,21 @@ func manualPaths() map[string]any {
 				},
 			},
 		},
-		"/conversations:setChatHistory":      map[string]any{"post": op("Set conversation history", nil, jsonBody(refSchema("ConversationSetHistoryRequest"), true), response(200, "Set result", refSchema("SetChatHistoryResponse")))},
-		"/conversations:batchDelete":         map[string]any{"post": op("Batch delete conversations", nil, jsonBody(refSchema("ConversationBatchDeleteRequest"), true), response(200, "Batch deleted conversations", refSchema("ConversationBatchDeleteResponse")))},
-		"/conversations:batchStatus":         map[string]any{"post": op("Get a content-free status snapshot for up to 100 accessible conversations (32 KiB request limit)", nil, jsonBody(refSchema("ConversationBatchStatusRequest"), true), response(200, "Running, idle, or unknown; inaccessible conversations are omitted", refSchema("ConversationBatchStatusResponse")))},
+		"/conversations:setChatHistory": map[string]any{"post": op("Set conversation history", nil, jsonBody(refSchema("ConversationSetHistoryRequest"), true), response(200, "Set result", refSchema("SetChatHistoryResponse")))},
+		"/conversations:batchDelete":    map[string]any{"post": op("Batch delete conversations", nil, jsonBody(refSchema("ConversationBatchDeleteRequest"), true), response(200, "Batch deleted conversations", refSchema("ConversationBatchDeleteResponse")))},
+		"/conversations:batchStatus":    map[string]any{"post": op("Get a content-free status snapshot for up to 100 accessible conversations (32 KiB request limit)", nil, jsonBody(refSchema("ConversationBatchStatusRequest"), true), response(200, "Running, idle, or unknown; inaccessible conversations are omitted", refSchema("ConversationBatchStatusResponse")))},
+		"/conversations/{conversation_id}:readResult": map[string]any{"post": map[string]any{
+			"summary":     "Acknowledge exactly one conversation result version (idempotent)",
+			"parameters":  queryParams(param("path", "conversation_id", true, strSchema())),
+			"requestBody": jsonBody(refSchema("ConversationResultReadRequest"), true),
+			"responses": map[string]any{
+				"204": map[string]any{"description": "Result acknowledged"},
+				"400": response(400, "Invalid result confirmation", refSchema("ErrorResponse")),
+				"404": response(404, "Conversation not found", refSchema("ErrorResponse")),
+				"409": response(409, "Result version changed", refSchema("ErrorResponse")),
+				"500": response(500, "Unable to confirm result", refSchema("ErrorResponse")),
+			},
+		}},
 		"/conversations:feedBackChatHistory": map[string]any{"post": op("Feedback conversation history", nil, jsonBody(refSchema("ConversationFeedbackRequest"), true), response(200, "Feedback succeeded", refSchema("EmptyObject")))},
 		"/conversation:switchStatus": map[string]any{
 			"get":  op("Get multi-answer switch status", nil, nil, response(200, "Multi-answer switch status", refSchema("ConversationSwitchStatusResponse"))),

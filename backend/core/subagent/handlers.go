@@ -67,7 +67,7 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 	}
 	if err == nil && snapshot != nil {
 		var live *localworkspace.ContextSnapshot
-		live, err = localworkspace.ResolveForConversation(r.Context(), store.DB(), task.CreateUserID, task.ConversationID)
+		live, err = localworkspace.ResolveForSubagent(r.Context(), store.DB(), task.CreateUserID, task.ConversationID, params)
 		if err == nil && (live == nil || live.WorkspaceID != snapshot.WorkspaceID || live.WorkspaceVersion != snapshot.WorkspaceVersion) {
 			err = localworkspace.Error("binding_conflict", http.StatusConflict, "conflict")
 		}
@@ -205,6 +205,8 @@ func remoteStepContent(event TaskEvent) (string, json.RawMessage) {
 	var value any
 	role := ""
 	switch event.Type {
+	case "plan":
+		role, value = "plan", map[string]any{"steps": event.Steps, "scope_version": event.ScopeVersion}
 	case "text":
 		role, value = "text", map[string]any{"content": event.Text}
 	case "think":

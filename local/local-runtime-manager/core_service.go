@@ -214,6 +214,7 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_AUTH_SERVICE_URL=" + endpoints.Host.AuthServiceBaseURL + "/api/authservice",
 		"LAZYMIND_ALGO_SERVICE_URL=" + endpoints.Host.DocumentServiceBaseURL,
 		"LAZYMIND_DOCUMENT_SERVICE_URL=" + endpoints.Host.DocumentServiceBaseURL,
+		"LAZYMIND_DOCUMENT_WORKER_URL=http://127.0.0.1:" + strconv.Itoa(cfg.Algorithm.WorkerPort),
 		"LAZYMIND_PARSING_SERVICE_URL=" + endpoints.Host.ProcessorBaseURL,
 		"LAZYMIND_PROCESSOR_SERVICE_URL=" + endpoints.Host.ProcessorBaseURL,
 		"LAZYMIND_CHAT_SERVICE_URL=" + endpoints.Host.ChatBaseURL,
@@ -227,6 +228,7 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_OFFICE_CONVERT_URL=" + endpoints.Host.OfficeConvertURL,
 		"LAZYMIND_OFFICE_CONVERT_WORKERS=" + envText("LAZYMIND_OFFICE_CONVERT_WORKERS", "4"),
 		"LAZYMIND_SUBAGENT_WORKSPACE=" + paths.SubagentDataDir,
+		"LAZYMIND_ARTIFACT_STORAGE_ROOT=" + envText("LAZYMIND_ARTIFACT_STORAGE_ROOT", filepath.Join(paths.SubagentDataDir, "artifact-blobs")),
 		"LAZYMIND_SUBAGENT_DB_DSN=" + coreURL,
 		"LAZYMIND_READONLY_VALIDATE=0",
 		"LAZYMIND_READONLY_DB_DRIVER=sqlite",
@@ -259,10 +261,25 @@ func feishuCLIRuntimeEnv(paths RuntimePaths) []string {
 		binaryPath = ""
 		binarySHA256 = ""
 	}
+	helperPath := strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_PATH"))
+	helperSHA256 := strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_SHA256")))
+	if helperPath == "" {
+		helperPath = executablePath(paths.BinDir, "feishu-credential-helper")
+	}
+	if helperSHA256 == "" {
+		if payload, err := os.ReadFile(filepath.Join(paths.BinDir, "feishu-credential-helper.sha256")); err == nil {
+			helperSHA256 = strings.ToLower(strings.TrimSpace(string(payload)))
+		}
+	}
+	if info, err := os.Stat(helperPath); err != nil || !info.Mode().IsRegular() || len(helperSHA256) != 64 {
+		helperPath, helperSHA256 = "", ""
+	}
 	return []string{
 		"LAZYMIND_FEISHU_CLI_PATH=" + binaryPath,
 		"LAZYMIND_FEISHU_CLI_SHA256=" + binarySHA256,
 		"LAZYMIND_FEISHU_CLI_RUNTIME_ROOT=" + filepath.Join(paths.RuntimeRoot, "provider-connections", "feishu-cli"),
+		"LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_PATH=" + helperPath,
+		"LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_SHA256=" + helperSHA256,
 	}
 }
 

@@ -21,7 +21,7 @@ class ManagedFeishuD3ContractTest(unittest.TestCase):
         self.assertIn("isFeishuAuthValid", handler)
         self.assertIn("navigate(CLOUD_DOCUMENTS_FEISHU_PATH)", handler)
 
-    def test_managed_feishu_default_scopes_are_minimal_and_read_only(self) -> None:
+    def test_feishu_default_scopes_support_document_reads_and_writes(self) -> None:
         source = (
             REPO / "frontend/src/modules/dataSource/constants/options.ts"
         ).read_text(encoding="utf-8")
@@ -36,17 +36,18 @@ class ManagedFeishuD3ContractTest(unittest.TestCase):
             "wiki:node:read",
             "wiki:node:retrieve",
             "docx:document:readonly",
+            "drive:drive",
+            "wiki:wiki",
+            "docx:document",
         ):
             self.assertIn(f'"{required}"', block)
         for forbidden in (
-            "drive:drive",
-            "wiki:wiki",
-            "wiki:wiki:readonly",
-            "docx:document",
+            "im:message",
+            "contact:contact",
         ):
             self.assertIsNone(
                 re.search(rf'"{re.escape(forbidden)}"', block),
-                msg=f"managed default scope grants write capability: {forbidden}",
+                msg=f"document authorization grants unrelated capability: {forbidden}",
             )
 
     def test_provider_token_contract_carries_and_checks_user_subject(self) -> None:

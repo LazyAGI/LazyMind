@@ -810,6 +810,7 @@ func seedGroupModelsFromDefaults(
 			ProviderName:             d.ProviderName,
 			Name:                     d.Name,
 			ModelType:                d.ModelType,
+			Vision:                   d.Vision,
 			MaxInputTokens:           d.MaxInputTokens,
 			FreeAutoSelectPriority:   d.FreeAutoSelectPriority,
 			FreeAutoSelectBaseURLs:   d.FreeAutoSelectBaseURLs,

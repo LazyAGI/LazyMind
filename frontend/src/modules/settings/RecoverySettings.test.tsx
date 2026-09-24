@@ -213,6 +213,15 @@ describe("RecoverySettings", () => {
     expect(screen.getByTestId("recovery-location")).not.toHaveTextContent("view=archive");
   });
 
+  it("opens task archives from the URL and updates the request when switching categories", async () => {
+    renderRecoverySettings(`${RECOVERY_ARCHIVE_PATH}&kind=task`);
+    expect(screen.getByRole("tab", { name: "任务" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(mocks.listArchivedConversations).toHaveBeenCalledWith(expect.objectContaining({ kind: "task" })));
+    fireEvent.click(screen.getByRole("tab", { name: "对话" }));
+    expect(screen.getByTestId("recovery-location")).toHaveTextContent("kind=dialog");
+    await waitFor(() => expect(mocks.listArchivedConversations).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "dialog" })));
+  });
+
   it("refreshes the conversation sidebar after unarchiving a conversation", async () => {
     const handleRefresh = vi.fn();
     window.addEventListener(

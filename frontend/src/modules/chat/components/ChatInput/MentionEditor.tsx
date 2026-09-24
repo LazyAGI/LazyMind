@@ -52,6 +52,7 @@ type Candidate = {
   content?: string;
   disabled?: boolean;
   disabledReason?: string;
+  disabledReasonKey?: string;
 };
 
 type QueryState = {
@@ -98,6 +99,10 @@ const MENU_VIEWPORT_OFFSET = 16;
 
 const cacheKey = (type: CandidateType, keyword: string) =>
   `${type}:${keyword.trim().toLocaleLowerCase()}`;
+
+function candidateName(item: { name?: string | null }) {
+  return String(item.name || "");
+}
 
 const bypassCandidateCache = (type: CandidateType) =>
   type === "skill" || type === "tool" || type === "workflow";
@@ -217,7 +222,17 @@ async function loadCandidates(type: CandidateType, keyword: string): Promise<Can
     const payload = unwrap<{ workflows?: Array<Record<string, unknown>> }>(response.data);
     return (payload.workflows || [])
       .filter((item) => !keyword || `${item.name || ""} ${item.description || ""}`.toLowerCase().includes(keyword.toLowerCase()))
-      .map((item) => ({ id: String(item.workflow_ref || item.workflow_id || ""), type, name: String(item.name || item.workflow_id || ""), description: String(item.description || "") }));
+      .map((item) => {
+        const disabled = item.enabled === false || item.call_mode === "disabled";
+        return {
+          id: String(item.workflow_ref || item.workflow_id || ""),
+          type,
+          name: String(item.name || item.workflow_id || ""),
+          description: String(item.description || ""),
+          disabled,
+          disabledReasonKey: disabled ? "chat.mentionWorkflowDisabled" : undefined,
+        };
+      });
   }
   if (type === "prompt") {
     const response = await PromptServiceApi().listPrompts({ keyword, pageSize: 100 });
@@ -239,7 +254,10 @@ function loadAndCacheCandidates(type: CandidateType, keyword: string) {
       const normalizedKeyword = keyword.trim().toLocaleLowerCase();
       const seen = new Set<string>();
       const filtered = items.filter((item) => {
-        if (normalizedKeyword && !item.name.toLocaleLowerCase().includes(normalizedKeyword)) {
+        if (!candidateName(item) || !item.id) {
+          return false;
+        }
+        if (normalizedKeyword && !candidateName(item).toLocaleLowerCase().includes(normalizedKeyword)) {
           return false;
         }
         const identity = `${item.type}:${item.id}`;
@@ -262,7 +280,7 @@ function cachedCandidates(type: CandidateType, keyword: string) {
   const base = candidateCache.get(cacheKey(type, ""));
   const normalized = keyword.trim().toLocaleLowerCase();
   if (!base || !normalized) return [];
-  return base.filter((item) => item.name.toLocaleLowerCase().includes(normalized));
+  return base.filter((item) => candidateName(item).toLocaleLowerCase().includes(normalized));
 }
 
 function replaceCandidateGroup(current: Candidate[], type: CandidateType, items: Candidate[]) {
@@ -470,8 +488,10 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   }, [allowMentions]);
 
   const getDisabledReason = useCallback((candidate: Candidate) => (
-    candidate.disabledReason || disabledMentionReasons?.[candidate.type as MentionType]
-  ), [disabledMentionReasons]);
+    candidate.disabledReason ||
+    (candidate.disabledReasonKey ? t(candidate.disabledReasonKey) : undefined) ||
+    disabledMentionReasons?.[candidate.type as MentionType]
+  ), [disabledMentionReasons, t]);
 
   const isCandidateDisabled = useCallback((candidate: Candidate) => (
     candidate.disabled || Boolean(getDisabledReason(candidate))

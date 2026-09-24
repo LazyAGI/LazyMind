@@ -17,7 +17,6 @@ from .guidance import (
     LEARNING_GUIDANCE,
     REQUEST_ANALYSIS_GUIDANCE,
     RESPONSE_LANGUAGE_GUIDANCE,
-    SKILL_RESTRAINT_GUIDANCE,
     TRANSFORMATION_GUIDANCE,
 )
 from .task_profile import TaskProfile
@@ -192,10 +191,6 @@ def add_standard_system_sections(
                 task_profile.complexity == 'simple' and task_profile.deliverable_kind == 'direct_answer'
             ),
         ).system(
-            'task_skill_restraint', '', SKILL_RESTRAINT_GUIDANCE,
-            'platform.task.skills', priority=36,
-            skip_if=task_profile.skill_mode == 'explicit',
-        ).system(
             'task_request_analysis', '', REQUEST_ANALYSIS_GUIDANCE,
             'platform.task.request_analysis', priority=37,
             skip_if=(
@@ -210,7 +205,6 @@ def add_standard_system_sections(
         assessment = task_profile.request_assessment
         excluded = task_profile.excluded_resources
         excluded_lines = [
-            *(f'- Skill: {value}' for value in excluded.skill_names),
             *(f'- Knowledge base: {value}' for value in excluded.knowledge_base_ids),
             *(f'- Workflow: {value}' for value in excluded.workflow_refs),
         ]

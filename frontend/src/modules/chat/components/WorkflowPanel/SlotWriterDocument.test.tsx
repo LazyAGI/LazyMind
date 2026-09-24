@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { draftStore, useWorkflowStore, type SlotRevision } from '@/modules/chat/store/workflowPanel';
 
@@ -80,7 +80,7 @@ vi.mock('./WriterDownloadFormat', () => ({
   writerMarkdownTitle: () => '',
 }));
 
-import { resolveSnapshotDiffText, SlotEditingContext, SlotRenderer, SlotVersionPopover } from './SlotComponents';
+import { useSlotImageUrl, resolveSnapshotDiffText, SlotEditingContext, SlotRenderer, SlotVersionPopover } from './SlotComponents';
 import { WriterProviderChoice } from './SlotComponents';
 import type { SlotFooterAction } from './slotEditingContext';
 
@@ -1098,5 +1098,33 @@ describe('Markdown file write-back baseline lifecycle', () => {
       2, 'writer-session', 2, 1, undefined, undefined, 'draft_document', 'notion', undefined,
       { silentError: true },
     ));
+  });
+});
+
+
+describe('image loading recovery', () => {
+  it('ends a stalled preload and retries when the network comes back', async () => {
+    vi.useFakeTimers();
+    let ready = false;
+    class RecoveringImage {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_value: string) { if (ready) Promise.resolve().then(() => this.onload?.()); }
+    }
+    vi.stubGlobal('Image', RecoveringImage);
+    const { result, unmount } = renderHook(() => useSlotImageUrl({ url: 'https://example.test/recovery.png' }));
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+      expect(result.current.pending).toBe(false);
+      expect(result.current.displayUrl).toBe('');
+      ready = true;
+      await act(async () => { window.dispatchEvent(new Event('online')); });
+      expect(result.current.displayUrl).toBe('https://example.test/recovery.png');
+      expect(result.current.pending).toBe(false);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
   });
 });

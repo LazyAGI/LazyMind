@@ -4,6 +4,7 @@ import { HistoryOutlined } from "@ant-design/icons";
 import { useParams } from "react-router-dom";
 import { DetailPageHeader } from "@/components/ui";
 import { getLocalizedErrorMessage } from "@/components/request";
+import RecordingReview from "@/modules/chat/components/SkillRecording/Review";
 import ResourceVersionDrawer from "../../components/ResourceVersionDrawer";
 import SkillPackageEditor from "../../components/skillPackage/SkillPackageEditor";
 import RouteLoading from "../../components/RouteLoading";
@@ -41,6 +42,7 @@ export default function MemorySkillDetailPage() {
   const [isDescriptionEditing, setIsDescriptionEditing] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState("");
   const [descriptionSaving, setDescriptionSaving] = useState(false);
+  const [initialRevisionId, setInitialRevisionId] = useState<string>();
   const [versionDrawerOpen, setVersionDrawerOpen] = useState(false);
   const [packageReloadKey, setPackageReloadKey] = useState(0);
 
@@ -64,6 +66,7 @@ export default function MemorySkillDetailPage() {
       tags: asset.tags,
       autoEvo: asset.autoEvo,
       isEnabled: asset.isEnabled,
+      callMode: asset.callMode,
       ...overrides,
     });
 
@@ -318,8 +321,11 @@ export default function MemorySkillDetailPage() {
             {t("admin.memorySkillDraftPending")}
           </Tag>
         ) : null}
+        {skill.field ? <Tag>{t("admin.memorySkillField")}: {skill.field}</Tag> : null}
+        {skill.aliases?.length ? <Tag>{t("admin.memorySkillAliases")}: {skill.aliases.join(", ")}</Tag> : null}
+        {skill.keywords?.length ? <Tag>{t("admin.memorySkillKeywords")}: {skill.keywords.join(", ")}</Tag> : null}
         {skill.tags.map((item: string) => (
-          <Tag key={item}>{item}</Tag>
+          <Tag key={item}>{item === "recording:pending" ? t("recording.status.pending") : item}</Tag>
         ))}
       </div>
       </div>
@@ -327,15 +333,27 @@ export default function MemorySkillDetailPage() {
 
   return (
     <div className="memory-skill-detail-layout">
+      <RecordingReview skillId={itemId} onDecision={async (keep) => {
+        await refreshSkillAssets();
+        if (keep) setRetryKey((value) => value + 1);
+        else navigateToMemoryList("skills");
+      }} />
       <DetailPageHeader
         className="memory-skill-detail-page-header"
         title={skillTitleNode}
         description={skillMetaContent}
         settingsMenu={
           skill ? (
-            <Button icon={<HistoryOutlined />} onClick={() => setVersionDrawerOpen(true)}>
-              {t("admin.memoryVersionHistoryButton")}
-            </Button>
+            <Space>
+              {skill.originalRevisionId ? (
+                <Button onClick={() => { setInitialRevisionId(skill.originalRevisionId); setVersionDrawerOpen(true); }}>
+                  {t("admin.memorySkillOriginalVersion")}
+                </Button>
+              ) : null}
+              <Button icon={<HistoryOutlined />} onClick={() => { setInitialRevisionId(undefined); setVersionDrawerOpen(true); }}>
+                {t("admin.memoryVersionHistoryButton")}
+              </Button>
+            </Space>
           ) : null
         }
         onBack={() => navigateToMemoryList("skills")}
@@ -374,6 +392,8 @@ export default function MemorySkillDetailPage() {
 
       <ResourceVersionDrawer
         open={versionDrawerOpen}
+        initialRevisionId={initialRevisionId}
+        originalRevisionId={skill?.originalRevisionId}
         resourceId={itemId}
         resourceName={skill?.name || itemId}
         t={t}

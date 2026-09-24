@@ -3,11 +3,13 @@ package doc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/acl"
 	"lazymind/core/common"
@@ -41,6 +43,30 @@ const (
 // activeMarketJobStatuses are the async job statuses that hold an in-flight
 // lock on a knowledge market item for the current user.
 var activeMarketJobStatuses = []string{"pending", "running"}
+
+// LockMarketInstall must be called inside a transaction. Uninstall and task
+// enqueue hold this same lock until their complete state transition commits.
+// SQLite needs a write reservation before reading; SELECT FOR UPDATE alone is
+// ignored by its dialect. No callback containing external effects is retried.
+func LockMarketInstall(ctx context.Context, tx *gorm.DB, userID, marketItemID string) (*orm.KnowledgeMarketInstall, error) {
+	query := tx.WithContext(ctx).Where("user_id = ? AND market_item_id = ?", userID, marketItemID)
+	if tx.Dialector.Name() == "sqlite" {
+		if err := query.Model(&orm.KnowledgeMarketInstall{}).UpdateColumn("market_item_id", gorm.Expr("market_item_id")).Error; err != nil {
+			if common.IsSQLiteBusy(err) {
+				return nil, ErrMarketProcessing
+			}
+			return nil, err
+		}
+	}
+	var install orm.KnowledgeMarketInstall
+	if err := query.Clauses(clause.Locking{Strength: "UPDATE"}).Take(&install).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &install, nil
+}
 
 // batchCheckInstalledMarketDatasets reports which of the given dataset IDs are
 // personal datasets created by the current user's official knowledge base
@@ -124,9 +150,9 @@ func HasActiveMarketJob(ctx context.Context, db *gorm.DB, userID, marketItemID s
 	var count int64
 	err := db.WithContext(ctx).
 		Model(&orm.AsyncJob{}).
-		Where("create_user_id = ? AND status IN ? AND ((job_type IN ? AND resource_id = ?) OR (job_type = ? AND resource_id = ?))",
+		Where("create_user_id = ? AND (status IN ? OR (status = 'canceled' AND lock_until > ?)) AND ((job_type IN ? AND resource_id = ?) OR (job_type = ? AND resource_id = ?))",
 			userID,
-			activeMarketJobStatuses,
+			activeMarketJobStatuses, time.Now().UTC(),
 			[]string{MarketInstallJobType, MarketUpdateJobType},
 			marketItemID,
 			MarketUpdateAllJobType,
@@ -159,12 +185,8 @@ func HasActiveMarketBatch(ctx context.Context, db *gorm.DB, userID string) (bool
 	return count > 0, nil
 }
 
-// resetMarketInstallInTx clears the install record of an official knowledge
-// base after its personal dataset has been deleted (uninstall): it removes the
-// install row and every install job of that item so the marketplace shows the
-// item as not installed and a later install starts from a clean state (the
-// kb_install:{item}:{user} idempotency key is released). It must run inside
-// the same transaction that soft-deletes the dataset so uninstall is atomic.
+// resetMarketInstallInTx removes the install link after uninstall, retaining
+// the independently snapshotted task history and releasing idempotency keys.
 func resetMarketInstallInTx(ctx context.Context, tx *gorm.DB, userID, marketItemID string) error {
 	userID = strings.TrimSpace(userID)
 	marketItemID = strings.TrimSpace(marketItemID)
@@ -176,11 +198,11 @@ func resetMarketInstallInTx(ctx context.Context, tx *gorm.DB, userID, marketItem
 		Delete(&orm.KnowledgeMarketInstall{}).Error; err != nil {
 		return fmt.Errorf("delete market install failed: %w", err)
 	}
-	if err := tx.WithContext(ctx).
+	if err := tx.WithContext(ctx).Model(&orm.AsyncJob{}).
 		Where("job_type IN ? AND resource_id = ? AND create_user_id = ?",
 			[]string{MarketInstallJobType, MarketUpdateJobType}, marketItemID, userID).
-		Delete(&orm.AsyncJob{}).Error; err != nil {
-		return fmt.Errorf("delete market install/update jobs failed: %w", err)
+		Update("idempotency_key", gorm.Expr("? || id", "kb_history:")).Error; err != nil {
+		return fmt.Errorf("release market task idempotency keys failed: %w", err)
 	}
 	log.Logger.Info().
 		Str("market_item_id", marketItemID).

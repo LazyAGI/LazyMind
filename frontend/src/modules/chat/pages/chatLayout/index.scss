@@ -10,6 +10,7 @@
   overflow: hidden;
 
   .chat-conversation-pane {
+    position: relative;
     display: flex;
     flex-direction: column;
     min-width: 0;
@@ -18,6 +19,34 @@
 
     &--task-restore-visible .conversation-trail {
       left: 4px;
+    }
+
+    .chat-conversation-menu {
+      position: absolute;
+      top: 10px;
+      right: 14px;
+      z-index: 5;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      border: 0;
+      border-radius: 7px;
+      background: rgb(255 255 255 / 84%);
+      color: #6c7890;
+      cursor: pointer;
+
+      &:hover {
+        background: #f0f4fa;
+        color: #2f6bff;
+      }
+
+      &:focus-visible {
+        outline: 2px solid #8badf3;
+        outline-offset: 2px;
+      }
     }
   }
 
@@ -257,6 +286,87 @@
     gap: 16px;
     position: relative;
 
+    > .task-center,
+    > .artifact-panel,
+    > .side-chat-embedded {
+      flex: 1;
+      min-height: 0;
+    }
+
+    > .side-chat-embedded {
+      display: flex;
+      flex-direction: column;
+
+      > .side-chat-header {
+        padding: 0 0 12px;
+        border-bottom: 1px solid #eef1f6;
+      }
+
+      .side-chat-heading-icon {
+        display: none;
+      }
+
+      .side-chat-header-actions {
+        margin-left: auto;
+      }
+
+      > .side-chat-panel {
+        flex: 1;
+        height: auto;
+        min-height: 0;
+      }
+    }
+
+    .right-box-tabs {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+
+      &__list {
+        display: flex;
+        min-width: 0;
+        flex: 1;
+        gap: 4px;
+      }
+
+      button[role="tab"] {
+        flex: 1;
+        min-width: 0;
+        border: 0;
+        border-radius: 8px;
+        background: #f3f6fb;
+        color: #667085;
+        padding: 6px 8px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+
+        &.active {
+          background: #eff5ff;
+          color: #2563eb;
+          font-weight: 600;
+        }
+      }
+
+      &__close {
+        flex: 0 0 auto;
+        border: 0;
+        background: transparent;
+        color: #8c98a8;
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 6px;
+        font-size: 16px;
+        line-height: 1;
+
+        &:hover {
+          background: #f0f4fa;
+          color: #2f6bff;
+        }
+      }
+    }
+
     .right-box-resize-handle {
       position: absolute;
       left: 0;
@@ -312,7 +422,8 @@
     z-index: 30;
     background: #fff;
 
-    > .task-center {
+    > .task-center,
+    > .artifact-panel {
       width: 100%;
       height: 100%;
       min-height: 0;

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>退款客服提示词重构</title>
+<style>body{margin:0;background:#f5f7fb;color:#152033;font:15px/1.7 Inter,system-ui,"PingFang SC",sans-serif}.page{max-width:900px;margin:32px auto;padding:0 20px 48px}.hero{background:linear-gradient(135deg,#553a99,#8d61d5);color:white;padding:28px;border-radius:20px;margin-bottom:18px}.hero small{opacity:.8}.content{background:#fff;border:1px solid #e5e9f2;border-radius:20px;padding:28px;box-shadow:0 8px 30px #553a9910}h1{font-size:27px;line-height:1.25;margin:0 0 22px}h2{font-size:18px;margin:26px 0 10px;color:#553a99;border-left:4px solid #8d61d5;padding-left:10px}p{margin:8px 0}.item{background:#f4f6fc;border-radius:10px;padding:9px 12px;margin:7px 0}pre{white-space:pre-wrap;overflow:auto;background:#f7f8fb;padding:10px;border-radius:8px;font:13px/1.55 ui-monospace,monospace}</style>
+</head>
+<body>
+<style>*{box-sizing:border-box}.page{max-width:1120px}.hero{padding:32px}.hero h1{font-size:clamp(29px,4vw,42px);margin:8px 0}.visual{display:grid;gap:14px;margin:18px 0}.visual .split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.visual .board{min-width:0;background:#fff;border:1px solid #dce4ee;border-radius:18px;padding:22px;box-shadow:0 12px 32px #1e365012}.visual .dark{background:#172537;color:#fff}.visual .big{font-size:clamp(27px,4vw,42px);font-weight:850;line-height:1.2}.visual .ey{font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:800;opacity:.7}.visual .rail{display:grid;grid-template-columns:repeat(var(--n,5),1fr);gap:7px}.visual .rail div{padding:12px;background:#edf3f7;border-top:4px solid #558da2;border-radius:9px;font-size:13px}.visual .rail b{display:block}.visual .row{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #dce4ee;padding:9px 0}.visual .row:last-child{border:0}.content{margin-top:16px}.content>.item{padding:12px;border-left:3px solid #8da9bb}td,th{overflow-wrap:anywhere}@media(max-width:720px){.page{padding:0 14px;margin:14px auto}.hero,.content{padding:20px}.visual .split{grid-template-columns:1fr}.visual .rail{grid-template-columns:1fr 1fr}.visual .board{padding:17px}}</style>
+<main class="page">
+<style>body{background:#eeebf6}.visual .board{border-radius:12px;border-color:#d2c7e9}.visual .dark{background:#211a38;border-color:#6b55a0}.visual .ey,.visual .row b{font-family:ui-monospace,monospace;color:#6948a4;opacity:1}.visual .dark .ey,.visual .dark .row b{color:#bd9cff}.visual .rail div{background:#f0eafa;border-color:#a882dd}.content{border-color:#d2c7e9}</style>
+<section class="hero">
+<small>可复用提示词模板</small>
+<h1>退款客服提示词重构</h1>
+<div>将模糊要求转为带事实边界的可复用模板。</div>
+</section>
+<section class="visual"><div class="split"><div class="board"><div class="ey">BEFORE · 模糊输入</div><div class="big">“帮我回复客户，不要生硬。”</div><p>角色、事实边界与输出格式都未定义。</p></div><div class="board dark"><div class="ey">AFTER · 可复用提示词</div><div class="row"><b>角色</b><span>同理且准确的电商客服</span></div><div class="row"><b>输入</b><span>订单状态 / 已确认退款 / 客户问题</span></div><div class="row"><b>约束</b><span>不承诺未确认日期</span></div><div class="row"><b>输出</b><span>简短可发送回复</span></div></div></div></section>
+<article class="content">
+<h1>优化后的提示词</h1>
+<h2>角色</h2>
+<p>你是同理且准确的电商客服。</p>
+<h2>输入</h2>
+<p>订单状态：`{order_status}`；已确认退款信息：`{confirmed_refund_info}`；客户问题：`{customer_message}`。</p>
+<h2>约束</h2>
+<div class="item">不承诺未确认的退款日期。</div>
+<div class="item">先承认客户的等待或困扰。</div>
+<div class="item">只说明已确认状态和下一步。</div>
+<div class="item">不使用空泛安抚或推测订单信息。</div>
+<h2>输出格式</h2>
+<p>输出一段可直接发送的简短回复。</p>
+<h2>示例</h2>
+<p>若只确认“退款申请已提交”，回复应说明已提交和会继续跟进，而不是给出具体到账日期。</p>
+</article>
+</main>
+</body>
+</html>

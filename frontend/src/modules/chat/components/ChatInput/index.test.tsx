@@ -12,6 +12,8 @@ import { useChatInputStore } from "../../store/chatInput";
 import type { ChatMention } from "./MentionEditor";
 import { listSkillLinkedWorkflows } from "@/modules/workflow/workflowDraftApi";
 
+vi.mock("../SkillRecording", () => ({ default: () => null }));
+
 const promptMocks = vi.hoisted(() => ({ polish: vi.fn() }));
 vi.mock("@/modules/chat/utils/request", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/modules/chat/utils/request")>()),

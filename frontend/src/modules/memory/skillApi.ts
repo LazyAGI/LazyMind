@@ -20,6 +20,7 @@ import {
   type SkillFileOpenAPIResponse,
   type SkillListItemOpenAPIResponse,
   type SkillOrganizeOpenAPIResponse,
+  type SkillOrganizeOpenAPIRequest,
   type SkillRevisionOpenAPIResponse,
   type SkillShareDetailOpenAPIResponse,
   type SkillShareListItemOpenAPIResponse,
@@ -88,6 +89,9 @@ export interface SkillDraftSummary {
   version: number;
 }
 
+export type SkillCallMode = "manual" | "on_demand" | "priority";
+export type SkillOrganizeDepth = "light" | "deep";
+
 export interface SkillAssetRecord {
   id: string;
   skillId: string;
@@ -97,10 +101,16 @@ export interface SkillAssetRecord {
   category: string;
   tags: string[];
   content: string;
+  originalRevisionId?: string;
+  originBuiltinSkillUid?: string;
+  field?: string;
+  aliases?: string[];
+  keywords?: string[];
   headRevisionId: string;
   draft: SkillDraftSummary;
   autoEvo: boolean;
   isEnabled: boolean;
+  callMode: SkillCallMode;
   deletedAt?: string;
   trashExpiresAt?: string;
   deletedBy?: string;
@@ -171,12 +181,16 @@ export interface ShareSkillPayload {
 }
 
 export interface SkillUpdatePayloadSource {
+  field?: string;
+  aliases?: string[];
+  keywords?: string[];
   name?: string;
   description?: string;
   category?: string;
   tags?: string[];
   autoEvo?: boolean;
   isEnabled?: boolean;
+  callMode?: SkillCallMode;
 }
 
 export type SkillShareStatus =
@@ -253,6 +267,7 @@ export type SkillReviewTaskStatus =
   | "review_cluster"
   | "review_miner"
   | "review_solution"
+  | "review_when_to_use"
   | "review_apply"
   | "completed"
   | "done"
@@ -498,6 +513,7 @@ const normalizeMarketItem = (item: MarketItemOpenAPIResponse): MarketSkillRecord
         draft: { hasUncommittedDraft: false, taskId: "", version: 0 },
         autoEvo: false,
         isEnabled: true,
+        callMode: "on_demand" as SkillCallMode,
       };
 
   return {
@@ -517,7 +533,15 @@ const normalizeSkillItem = (
   item: SkillListItemOpenAPIResponse | SkillDetailOpenAPIResponse,
   content = "",
 ): SkillAssetRecord => {
-  const skillItem = item as typeof item & { auto_evo?: unknown; is_enabled?: unknown };
+  const metadata = item as typeof item & {
+    original_revision_id?: string;
+    origin_builtin_skill_uid?: string;
+    field?: string;
+    aliases?: string[];
+    keywords?: string[];
+    auto_evo?: boolean;
+    is_enabled?: boolean;
+  };
   const skillId = item.skill_id || item.id;
   const name = item.name || item.skill_name || skillId;
 
@@ -530,10 +554,19 @@ const normalizeSkillItem = (
     category: item.category || "",
     tags: toStringArray(item.tags),
     content: content || item.file_content || "",
+    originalRevisionId: metadata.original_revision_id || "",
+    originBuiltinSkillUid: metadata.origin_builtin_skill_uid || "",
+    field: metadata.field || "",
+    aliases: toStringArray(metadata.aliases),
+    keywords: toStringArray(metadata.keywords),
     headRevisionId: item.head_revision_id || "",
     draft: normalizeDraftSummary(item.draft),
-    autoEvo: toBoolean(skillItem.auto_evo, false),
-    isEnabled: toBoolean(skillItem.is_enabled, true),
+    autoEvo: toBoolean(metadata.auto_evo, false),
+    isEnabled: toBoolean(metadata.is_enabled, true),
+    callMode: normalizeSkillCallMode(
+      (item as { call_mode?: unknown }).call_mode,
+      toBoolean(metadata.is_enabled, true),
+    ),
     deletedAt:
       typeof (item as { deleted_at?: unknown }).deleted_at === "string"
         ? (item as { deleted_at?: string }).deleted_at
@@ -714,9 +747,30 @@ export const buildSkillUpdatePayload = (
   category: skill.category,
   description: skill.description,
   is_enabled: skill.isEnabled,
+  call_mode: skill.callMode,
+  field: skill.field,
+  aliases: skill.aliases,
+  keywords: skill.keywords,
   name: skill.name,
   tags: skill.tags,
-});
+} as SkillUpdateManagedOpenAPIRequest);
+
+export const normalizeSkillCallMode = (
+  value: unknown,
+  enabled = true,
+): SkillCallMode => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "disabled" || normalized === "manual") {
+    return "manual";
+  }
+  if (normalized === "priority" || normalized === "always" || normalized === "prefer") {
+    return "priority";
+  }
+  if (normalized === "on_demand" || normalized === "ondemand" || normalized === "auto") {
+    return "on_demand";
+  }
+  return enabled ? "on_demand" : "manual";
+};
 
 type RawObject = Record<string, unknown>;
 
@@ -841,6 +895,7 @@ const normalizeSkillReviewTaskStatus = (
   };
 };
 
+
 const normalizeSkillReviewResult = (value: unknown): SkillReviewResultRecord | null => {
   const raw = toRawObject(value);
   const id = toStringValue(raw?.id, "");
@@ -942,13 +997,15 @@ export async function listSkillAssets(
 
 export async function organizeSkills(
   skills: string[],
+  mode: SkillOrganizeDepth = "light",
 ): Promise<SkillOrganizeRunRecord> {
   const response = await skillsApi.apiCoreSkillOrganizePost(
     {
       skillOrganizeOpenAPIRequest: {
         requestid: createSkillOrganizeRequestId(),
         skills,
-      },
+        mode,
+      } as SkillOrganizeOpenAPIRequest,
     },
     { silentError: true } as never,
   );
@@ -1005,14 +1062,23 @@ const skillOrganizeTerminalStatuses = new Set<SkillOrganizeTaskStatus>([
   "skipped",
 ]);
 
+export const isSkillOrganizeTerminalStatus = (
+  status: string,
+): status is SkillOrganizeTaskStatus =>
+  skillOrganizeTerminalStatuses.has(status as SkillOrganizeTaskStatus);
+
 export async function waitForSkillOrganize(
   requestId: string,
   signal?: AbortSignal,
+  onProgress?: (task: SkillOrganizeTaskRecord) => void,
 ): Promise<SkillOrganizeTaskRecord> {
   while (!signal?.aborted) {
     const task = await getSkillOrganizeTask(requestId, signal);
-    if (task && skillOrganizeTerminalStatuses.has(task.status)) {
-      return task;
+    if (task) {
+      onProgress?.(task);
+      if (skillOrganizeTerminalStatuses.has(task.status)) {
+        return task;
+      }
     }
     await new Promise((resolve) => window.setTimeout(resolve, 2000));
   }
@@ -1038,9 +1104,13 @@ export async function listSkillCategories(): Promise<string[]> {
 export async function listSkillAssetsPage(
   options: ListSkillOptions = {},
 ): Promise<SkillAssetListResult> {
+  const category = options.category?.trim() || undefined;
+  const source = category === "__builtin" ? "builtin"
+    : category === "internal" || category === "external" ? category : undefined;
   const response = await skillsApi.apiCoreSkillsGet({
     keyword: options.keyword?.trim() || undefined,
-    category: options.category?.trim() || undefined,
+    source,
+    category: source ? undefined : category,
     tags: (options.tags ?? []).map((item) => item.trim()).filter(Boolean),
     page: options.page ?? 1,
     pageSize: options.pageSize ?? 200,
@@ -1904,6 +1974,7 @@ export async function listBuiltinSkills(): Promise<MarketSkillRecord[]> {
     draft: { hasUncommittedDraft: false, taskId: "", version: 0 },
     autoEvo: false,
     isEnabled: true,
+    callMode: "on_demand",
     marketItemId: item.builtin_skill_uid,
     sourceSkillId: item.builtin_skill_uid,
     marketSource: "builtin",

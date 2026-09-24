@@ -8,6 +8,7 @@ import {
   fingerprintArtifact,
   fingerprintText,
   getRasterPng,
+  loadRasterPng,
   rasterCacheKey,
   setRasterPng,
 } from './slideRasterCache';
@@ -44,7 +45,7 @@ async function loadArtifactText(raw: unknown): Promise<string> {
 function aliasKey(sessionId: string, slot: SlotRevision): string {
   return rasterCacheKey(
     sessionId,
-    `alias:${fingerprintArtifact(slot.artifact_value)}|r${slot.revision ?? 0}`,
+    `alias:${slot.slot_id || slot.slot}:${slot.list_index ?? 0}:${fingerprintArtifact(slot.artifact_value)}|r${slot.revision ?? 0}|d${slot.draft_version ?? 0}`,
   );
 }
 
@@ -78,6 +79,9 @@ export function SlideThumb({
 
     let cancelled = false;
     (async () => {
+      const saved = await loadRasterPng(aKey);
+      if (cancelled || gen !== genRef.current) return;
+      if (saved) { setPreviewSrc(saved); return; }
       const text = await loadArtifactText(slot.artifact_value);
       if (cancelled || gen !== genRef.current) return;
       const html = extractHtmlFromArtifact(text) || extractHtmlFromArtifact(slot.artifact_value);
@@ -89,7 +93,7 @@ export function SlideThumb({
       const contentKey = rasterCacheKey(sessionId, fingerprintText(html));
       const png = await ensureRasterPng(contentKey, html);
       // Index under alias so the next render hits before re-fetching HTML.
-      setRasterPng(aKey, png, RASTER_EXPORT_PIXEL_RATIO);
+      await setRasterPng(aKey, png, RASTER_EXPORT_PIXEL_RATIO);
       if (cancelled || gen !== genRef.current) return;
       setPreviewSrc(png);
     })().catch(() => {
@@ -99,7 +103,7 @@ export function SlideThumb({
     return () => {
       cancelled = true;
     };
-  }, [sessionId, slot.artifact_value, slot.slot_id, slot.revision, slot.sort_order]);
+  }, [sessionId, slot.artifact_value, slot.slot_id, slot.revision, slot.draft_version, slot.sort_order]);
 
   if (previewSrc) {
     return (

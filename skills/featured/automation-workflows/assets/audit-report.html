@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>自动化审计｜时间账本</title>
+  <style>
+    :root{--ink:#eaf2ff;--muted:#8ea2c5;--panel:#101d37;--panel2:#152746;--line:#284168;--blue:#4aa8ff;--lime:#b7ef55;--amber:#ffbd62;--coral:#ff7d8d;--shadow:0 24px 80px #02071180}
+    *{box-sizing:border-box}body{margin:0;background:#07101f;color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;letter-spacing:.01em}
+    body:before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at 8% 4%,#246bff35,transparent 32%),radial-gradient(circle at 92% 18%,#b7ef5517,transparent 25%),linear-gradient(120deg,transparent 35%,#ffffff03 35%,#ffffff03 35.2%,transparent 35.2%);z-index:-1}
+    .wrap{max-width:1180px;margin:auto;padding:34px 28px 64px}.top{display:flex;justify-content:space-between;align-items:center;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.14em}.brand{display:flex;align-items:center;gap:10px;color:var(--ink);font-weight:800}.brand-mark{width:26px;height:26px;border:2px solid var(--blue);border-radius:8px;position:relative;box-shadow:0 0 26px #4aa8ff80}.brand-mark:after,.brand-mark:before{content:"";position:absolute;background:var(--lime);border-radius:50%;width:5px;height:5px}.brand-mark:before{left:4px;top:9px}.brand-mark:after{right:4px;top:9px}.stamp{border:1px solid var(--line);border-radius:999px;padding:8px 12px;color:var(--lime);background:#0e1a30}
+    h1{font-size:clamp(32px,5vw,62px);line-height:1.02;letter-spacing:-.06em;margin:58px 0 16px;max-width:780px}.lead{max-width:720px;color:var(--muted);font-size:16px;line-height:1.75;margin:0}.hero-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:26px}.pill{padding:8px 11px;border-radius:999px;border:1px solid var(--line);background:#0c1930;color:#bcd0f2;font-size:12px}.pill strong{color:var(--lime);font-weight:700}
+    .dashboard{display:grid;grid-template-columns:1.08fr .92fr;gap:18px;margin-top:34px}.card{background:linear-gradient(145deg,#122342,#0d1830);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow);overflow:hidden}.card-pad{padding:24px}.eyebrow{color:var(--blue);font-size:11px;font-weight:800;letter-spacing:.15em;text-transform:uppercase}.big-number{font-size:76px;line-height:.9;letter-spacing:-.08em;font-weight:850;margin:18px 0 8px}.big-number span{font-size:20px;color:var(--muted);letter-spacing:0}.sub{color:var(--muted);font-size:13px}.glow-line{height:8px;border-radius:10px;background:linear-gradient(90deg,var(--blue),var(--lime));margin:28px 0 10px;box-shadow:0 0 24px #4aa8ff50}.axis{display:flex;justify-content:space-between;color:#617799;font-size:10px}.metric-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:26px}.metric{padding:15px;border:1px solid #263d64;background:#0d1a32;border-radius:16px}.metric b{font-size:22px;letter-spacing:-.04em;display:block}.metric small{color:var(--muted);font-size:11px;line-height:1.5}.metric.lime b{color:var(--lime)}.metric.amber b{color:var(--amber)}.metric.blue b{color:var(--blue)}
+    .card-head{display:flex;justify-content:space-between;align-items:flex-start;padding:22px 24px 12px}.card-head h2{font-size:17px;margin:5px 0 0;letter-spacing:-.02em}.count{font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px}.task-list{padding:0 24px 22px}.task{padding:17px 0;border-bottom:1px solid #23385d}.task:last-child{border-bottom:0}.task-top{display:flex;justify-content:space-between;gap:12px;align-items:center}.task-name{font-weight:750;font-size:14px}.task-meta{font-size:11px;color:var(--muted);margin-top:5px}.priority{font-size:11px;padding:5px 8px;border-radius:6px;font-weight:800}.p0{color:#07101f;background:var(--lime)}.p1{color:#221504;background:var(--amber)}.p2{color:#210b10;background:var(--coral)}.barline{height:8px;background:#1d3153;border-radius:8px;overflow:hidden;margin-top:13px}.bar{height:100%;width:var(--w);background:linear-gradient(90deg,var(--blue),#7be3ff);border-radius:8px}.task-foot{display:flex;justify-content:space-between;color:#a9bbd9;font-size:11px;margin-top:8px}.task-foot b{color:var(--ink)}
+    .side{display:flex;flex-direction:column;gap:18px}.route{background:linear-gradient(135deg,#16345a,#13233f);min-height:280px;position:relative}.route:after{content:"";position:absolute;right:-38px;bottom:-46px;width:180px;height:180px;border:1px solid #b7ef5540;border-radius:50%;box-shadow:0 0 0 18px #b7ef5508,0 0 0 36px #b7ef5504}.route h2{font-size:18px;margin:7px 0;color:var(--ink)}.route-path{display:flex;align-items:center;gap:9px;margin:42px 0 26px;position:relative;z-index:1}.route-node{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;font-size:18px;font-weight:850;border:1px solid #ffffff2e;background:#24528a;box-shadow:0 10px 26px #0004}.route-node.active{background:var(--lime);color:#09121e;box-shadow:0 0 30px #b7ef5580}.arrow{color:#76a0d3;font-size:21px}.route-copy{max-width:400px;color:#b8c9e5;font-size:13px;line-height:1.7}.route-copy b{color:var(--lime)}
+    .formula{min-height:250px}.formula-grid{display:grid;gap:12px;margin-top:20px}.formula-line{border-left:3px solid var(--blue);background:#0c1930;padding:13px 14px;border-radius:0 13px 13px 0}.formula-line:nth-child(2){border-left-color:var(--amber)}.formula-line:nth-child(3){border-left-color:var(--lime)}.formula-line code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#dce9ff;font-size:12px}.formula-line span{display:block;color:var(--muted);font-size:11px;margin-top:6px}.note{margin-top:24px;color:#7085aa;font-size:11px;line-height:1.6}.footer{display:flex;justify-content:space-between;gap:20px;margin-top:24px;padding-top:17px;border-top:1px solid #223759;color:#6d83a8;font-size:11px}
+    @media(max-width:850px){.dashboard{grid-template-columns:1fr}.route-path{margin-top:28px}.wrap{padding:24px 17px 44px}h1{margin-top:42px}.big-number{font-size:64px}}
+    @media(max-width:460px){.metric-row{grid-template-columns:1fr}.route-path{gap:5px}.route-node{width:42px;height:42px}.arrow{font-size:16px}}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <nav class="top"><div class="brand"><span class="brand-mark"></span> WORKFLOW / AUDIT</div><div class="stamp">基于任务记录 · 计算口径已展开</div></nav>
+    <header>
+      <h1>先把时间账<br><em style="font-style:normal;color:var(--lime)">算清楚。</em></h1>
+      <p class="lead">把 4 类重复工作放进同一把尺子：每月耗时、规则清晰度、自动化节省上限，再看设置成本什么时候能收回来。</p>
+      <div class="hero-meta"><span class="pill">时间价值 <strong>$50 / h</strong></span><span class="pill">工具成本 <strong>$20 / 月</strong></span><span class="pill">优先级门槛 <strong>≤ 3 个月回收</strong></span></div>
+    </header>
+    <section class="dashboard">
+      <article class="card">
+        <div class="card-pad">
+          <div class="eyebrow">Monthly time ledger</div>
+          <div class="big-number">22.75<span> h / 月</span></div>
+          <div class="sub">4 类任务合计 · 273 小时 / 年</div>
+          <div class="glow-line"></div><div class="axis"><span>0 h</span><span>每月时间投入</span><span>24 h</span></div>
+          <div class="metric-row"><div class="metric lime"><b>$677.5</b><small>共享工具场景<br>每月净节省</small></div><div class="metric amber"><b>0.22</b><small>共享工具场景<br>月度回收期</small></div><div class="metric blue"><b>13.95 h</b><small>三项优先流程<br>每月可节省</small></div></div>
+          <p class="note">计算假设：每周按 4.33 周 / 月换算；时间价值为 $50 / h；共享工具场景含 3 小时设置成本和 $20 / 月工具费。</p>
+        </div>
+      </article>
+      <aside class="side">
+        <article class="card route"><div class="card-pad"><div class="eyebrow">Recommended sequence</div><h2>先做摩擦最大的三步</h2><div class="route-path"><div class="route-node active">③</div><div class="arrow">→</div><div class="route-node">①</div><div class="arrow">→</div><div class="route-node">②</div></div><p class="route-copy"><b>表单 → CRM</b> 规则最稳定、每天重复；接着清理线索，再处理经营数据月报。客户访谈方案保留人工判断，只做模板化辅助。</p></div></article>
+        <article class="card formula"><div class="card-pad"><div class="eyebrow">Calculation lens</div><h2 style="font-size:18px;margin:7px 0 0">每个数字怎么来的</h2><div class="formula-grid"><div class="formula-line"><code>月耗时 = 单次分钟 × 月频次 ÷ 60</code><span>每周任务的月频次 = 每周次数 × 4.33</span></div><div class="formula-line"><code>净节省 = 节省小时 × $50 − $20</code><span>共享工具场景扣除一次性设置后的月度工具费</span></div><div class="formula-line"><code>回收期 = $150 ÷ 月净节省</code><span>3 项优先流程各设置 1 小时，共 $150</span></div></div></div></article>
+      </aside>
+    </section>
+    <section class="card" style="margin-top:18px"><div class="card-head"><div><div class="eyebrow">Priority board</div><h2>四类工作，四种处理方式</h2></div><div class="count">按月耗时排序</div></div><div class="task-list">
+      <div class="task"><div class="task-top"><div><div class="task-name">整理客户线索</div><div class="task-meta">45 分钟 × 13 次 / 月 · 重复性 5 / 5 · 规则 4 / 5</div></div><span class="priority p0">P0 · 4.70</span></div><div class="barline"><div class="bar" style="--w:100%"></div></div><div class="task-foot"><span><b>9.75 h</b> / 月 · 可节省约 80%</span><span>回收约 4 天</span></div></div>
+      <div class="task"><div class="task-top"><div><div class="task-name">写客户访谈方案</div><div class="task-meta">90 分钟 × 4 次 / 月 · 重复性 3 / 5 · 规则 2 / 5</div></div><span class="priority p2">P2 · 2.73</span></div><div class="barline"><div class="bar" style="--w:62%"></div></div><div class="task-foot"><span><b>6 h</b> / 月 · 模板化上限约 50%</span><span>不建议全自动</span></div></div>
+      <div class="task"><div class="task-top"><div><div class="task-name">表单线索复制到 CRM</div><div class="task-meta">15 分钟 × 20 次 / 月 · 重复性 5 / 5 · 规则 5 / 5</div></div><span class="priority p0">P0 · 4.02</span></div><div class="barline"><div class="bar" style="--w:51%"></div></div><div class="task-foot"><span><b>5 h</b> / 月 · 可节省约 95%</span><span>回收约 7 天</span></div></div>
+      <div class="task"><div class="task-top"><div><div class="task-name">汇总经营数据</div><div class="task-meta">120 分钟 × 1 次 / 月 · 重复性 3 / 5 · 规则 5 / 5</div></div><span class="priority p1">P1 · 2.81</span></div><div class="barline"><div class="bar" style="--w:21%"></div></div><div class="task-foot"><span><b>2 h</b> / 月 · 可节省约 70%</span><span>回收约 1 个月</span></div></div>
+    </div></section>
+    <footer class="footer"><span>结论：先处理 ③，再做 ①，随后落地 ②；④ 进入模板库。</span><span>自动化规划 · 01</span></footer>
+  </main>
+</body>
+</html>

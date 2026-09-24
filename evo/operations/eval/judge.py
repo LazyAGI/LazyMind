@@ -119,14 +119,14 @@ def judge_answer(case: Mapping[str, Any], rag_answer: Mapping[str, Any],
     except Exception as exc:
         return judge_contract_error(case, rag_answer, policy, str(exc))
 
-    ref_chunks = {item.rsplit(':', 1)[-1] for item in _ids(case.get('reference_chunk_ids'))}
-    got_chunks = {item.rsplit(':', 1)[-1] for item in _ids(rag_answer.get('chunk_ids'))}
-    ref_docs = {item.rsplit(':', 1)[-1] for item in _ids(case.get('reference_doc_ids'))}
-    got_docs = {item.rsplit(':', 1)[-1] for item in _ids(rag_answer.get('doc_ids'))}
+    ref_chunks = _ids(case.get('reference_chunk_ids'))
+    got_chunks = _ids(rag_answer.get('chunk_ids'))
+    ref_docs = _ids(case.get('reference_doc_ids'))
+    got_docs = _ids(rag_answer.get('doc_ids'))
     chunk_recall, chunk_precision = _overlap(ref_chunks, got_chunks)
     doc_recall, doc_precision = _overlap(ref_docs, got_docs)
-    recall = chunk_recall if ref_chunks and got_chunks else doc_recall
-    precision = chunk_precision if ref_chunks and got_chunks else doc_precision
+    recall = chunk_recall if ref_chunks else doc_recall
+    precision = chunk_precision if ref_chunks else doc_precision
     if not ref_chunks and not ref_docs:
         retrieval_failure, recall, precision = 'not_applicable', 1.0, 1.0
     elif recall == 0.0:

@@ -14,6 +14,56 @@ from lazymind.common.integrations import remote_fs as remote_fs_module
 _INTERNAL_HEADERS = {'X-LazyMind-Internal-Token': 'test-internal-token'}
 
 
+@pytest.mark.parametrize('body_size', [0, 10, 11, 1000])
+def test_limited_read_streams_and_closes_without_consuming_full_body(monkeypatch, body_size):
+    class StreamingResponse:
+        status_code = 200
+        consumed = 0
+        closed = False
+
+        @property
+        def content(self):
+            pytest.fail('must not buffer the complete response')
+
+        def raise_for_status(self):
+            pass
+
+        def iter_content(self, chunk_size):
+            for start in range(0, body_size, chunk_size):
+                chunk = b'x' * min(chunk_size, body_size - start)
+                self.consumed += len(chunk)
+                yield chunk
+
+        def close(self):
+            self.closed = True
+
+    response = StreamingResponse()
+
+    def request(method, url, **kwargs):
+        assert kwargs['stream'] is True
+        assert kwargs['params']['path'] == 'skills/external/example/SKILL.md'
+        assert kwargs['params']['user_id'] == 'user-1'
+        assert kwargs['headers']['X-LazyMind-Internal-Token'] == 'test-internal-token'
+        return response
+
+    monkeypatch.setattr(requests, 'request', request)
+    data = RemoteFS().read_limited('remote://skills/external/example/SKILL.md', 10)
+    assert data == b'x' * min(body_size, 11)
+    assert response.consumed == min(body_size, 11)
+    assert response.closed
+
+
+def test_limited_read_closes_on_http_error_without_reading_body(monkeypatch):
+    response = requests.Response()
+    response.status_code = 403
+    closed = []
+    monkeypatch.setattr(response, 'close', lambda: closed.append(True))
+    monkeypatch.setattr(RemoteFS, '_raw_request', lambda *a, **kw: response)
+    with pytest.raises(requests.HTTPError):
+        RemoteFS().read_limited('remote://skills/external/example/SKILL.md', 10)
+    assert closed == [True]
+
+
 class FakeResponse:
     def __init__(self, json_data=None, content: bytes = b'', status_code: int = 200, text: str = ''):
         self._json_data = json_data

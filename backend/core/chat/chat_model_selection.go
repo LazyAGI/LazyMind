@@ -68,6 +68,7 @@ type chatModelSnapshot struct {
 }
 
 type availableChatModel struct {
+	Vision           bool     `gorm:"column:vision"`
 	ID               string   `gorm:"column:model_id"`
 	ProviderID       string   `gorm:"column:provider_id"`
 	ProviderGroupID  string   `gorm:"column:provider_group_id"`
@@ -215,7 +216,7 @@ func loadAvailableChatModels(ctx context.Context, db *gorm.DB, userID string) ([
 			"m.id AS model_id, m.user_model_provider_id AS provider_id, "+
 				"m.user_model_provider_group_id AS provider_group_id, "+
 				"m.create_user_id AS owner_user_id, m.provider_name, m.name AS model_name, "+
-				"m.model_type, m.max_input_tokens, g.name AS group_name, g.base_url, "+
+				"m.model_type, m.vision, m.max_input_tokens, g.name AS group_name, g.base_url, "+
 				"g.api_key, g.api_key_ciphertext",
 		).
 		Joins(
@@ -1230,6 +1231,34 @@ func persistSuccessfulChatModel(ctx context.Context, db *gorm.DB, userID, conver
 	}
 }
 
+// LoadDefaultChatLLMConfig returns the same llm role that chat would use when
+// no conversation overlay is available: the user's current default chat model.
+func LoadDefaultChatLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {
+	if db == nil {
+		return nil, errChatModelUnavailable
+	}
+	models, err := loadAvailableChatModels(ctx, db, userID)
+	if err != nil {
+		return nil, err
+	}
+	model, err := resolveDefaultChatModel(ctx, db, userID, models)
+	if err != nil {
+		return nil, err
+	}
+	if !chatModelUsable(model) {
+		return nil, errChatModelUnavailable
+	}
+	fixed, err := buildChatLLMConfig(ctx, model)
+	if err != nil {
+		return nil, err
+	}
+	cfg, _ := fixed.(map[string]any)
+	if cfg == nil {
+		return nil, errChatModelUnavailable
+	}
+	return cfg, nil
+}
+
 func buildChatLLMConfig(ctx context.Context, model *availableChatModel) (any, error) {
 	if model == nil {
 		return nil, errChatModelUnavailable
@@ -1251,7 +1280,7 @@ func buildChatLLMConfig(ctx context.Context, model *availableChatModel) (any, er
 		return nil, errChatModelUnavailable
 	}
 	fixed := modelconfig.BuildLLMConfig([]modelconfig.SelectedRuntimeModel{{
-		ModelType: "llm", ProviderName: model.ProviderName, ModelName: model.ModelName,
+		ModelType: "llm", TechnicalModelType: model.ModelType, Vision: model.Vision, ProviderName: model.ProviderName, ModelName: model.ModelName,
 		BaseURL: model.BaseURL, APIKey: apiKey, MaxInputTokens: model.MaxInputTokens,
 	}})
 	fixedLLM, _ := fixed["llm"]

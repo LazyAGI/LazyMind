@@ -1,0 +1,133 @@
+schema_version: 2
+id: spec-workflow-guide
+type: work
+version: 2.34.3
+status: published
+default_locale: zh-CN
+provider: Tencent ADM
+skill:
+  source_url: https://skillhub.cn/skills/tencent-adm/spec-workflow-guide
+  required_version: 2.34.3
+placement:
+  home: true
+  gallery: true
+  order: 104
+classification:
+  category: 产品研发
+  tags:
+  - 需求规格
+  - 技术设计
+  - 任务拆解
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  requirements:
+    file: assets/requirements.html
+    role: result
+  design:
+    file: assets/design.html
+    role: result
+  tasks:
+    file: assets/tasks.html
+    role: result
+presentation:
+  card:
+    title: 规格化研发规划
+    description: 把模糊需求依次沉淀为验收规格、技术设计和实施任务
+    output_type: report
+    output_label: 研发规格包
+    cover_asset: cover
+    result_summary: 用阶段确认与需求追溯减少边做边改，形成可以评审和执行的研发文档
+  detail:
+    title: 规格化研发规划
+    description: 面向中大型产品改动，先澄清范围并形成可测试需求，再设计模块、数据与接口，最后拆成关联需求编号的实施任务。来源：Tencent ADM，经 SkillHub 原包接入。
+    attachment_hint: 可替换示例业务，也可提供现有需求材料
+tasks:
+- id: requirements-first
+  selector:
+    title: 把想法写成验收需求
+    description: 明确范围、角色、业务规则和可测试验收条件
+    output_label: requirements.md
+  launch:
+    prompt_short: 为30人团队的会议室预约系统写第一阶段需求规格
+    prompt: |-
+      请使用 spec-workflow-guide Skill，为一个 30 人团队内部使用的会议室预约系统完成第一阶段 requirements.md，写完后停止并等待确认。
+
+      已知条件：3间会议室；员工可查看空闲时段、预约、取消；同一会议室不能重叠预约；发起人可邀请参会人；会议开始前10分钟仍无人签到则释放房间；管理员可设置停用时段。暂不做访客、付费、跨办公区和门禁硬件集成。
+
+      请给出问题、范围、用户故事、业务规则、非目标，并用 EARS 风格写可测试验收条件；把仍需业务确认的问题单列，不要直接进入设计或编码。
+  replay:
+    steps:
+    - title: 划定范围
+      description: 锁定3间会议室、核心角色与明确非目标
+    - title: 写用户故事
+      description: 将预约、取消、签到释放与停用时段关联到角色
+    - title: 形成验收条款
+      description: 用EARS句式覆盖冲突、权限、时间和异常边界
+    - title: 停在确认门
+      description: 第一阶段完成后等待用户批准再进入设计
+  result:
+    template: html_preview_v1
+    eyebrow: 原 Skill 工作流示例
+    title: 会议室预约需求规格
+    summary: 5条用户故事、12项可测试验收标准和4个待确认问题，明确停在设计前
+    html_asset: requirements
+- id: design-system
+  selector:
+    title: 把已确认需求转成设计
+    description: 定义模块、状态、接口、重试策略与测试边界
+    output_label: design.md
+  launch:
+    prompt_short: 根据已批准的订单 Webhook 需求，形成技术设计并等待确认
+    prompt: |-
+      请使用 spec-workflow-guide Skill。下面 requirements.md 已通过产品、安全和运维共同确认，请只完成第二阶段 design.md，写完后停止并等待确认，不拆任务、不编码。
+
+      目标：把订单状态事件可靠推送给合作方。订单事务已经写入现有 order_event 表，字段固定为 id、order_id、event_type、payload、status、retry_count、next_retry_at、last_error、created_at、updated_at，本次不新增页面、不重做数据模型。事件产生后30秒内首次投递；请求使用 HMAC 签名和事件 ID 幂等头；2xx 视为成功，其余结果按指数退避最多重试5次，之后进入 Dead；管理员可通过现有内部 API 手动重放。不同订单无需全局有序，同一订单必须保持顺序。峰值每分钟500个事件。
+
+      设计需覆盖模块边界、状态机、投递接口、签名与幂等、同订单并发控制、重试与恢复、内部重放权限、审计、可观测性和测试方案，并逐项映射需求。不要扩展现有表结构，也不要进入任务拆解。
+  replay:
+    steps:
+    - title: 读取批准需求
+      description: 保持范围与非目标不漂移
+    - title: 建立投递状态机
+      description: 明确待投递、发送中、重试、成功和死信状态
+    - title: 处理可靠性风险
+      description: 明确签名、幂等、同订单顺序、退避与人工重放
+    - title: 等待设计确认
+      description: 不越过阶段门进入任务拆解
+  result:
+    template: html_preview_v1
+    eyebrow: 原 Skill 工作流示例
+    title: 订单 Webhook 可靠投递设计
+    summary: 状态机、投递协议、重试恢复和可观测性均可追溯到已批准需求
+    html_asset: design
+- id: plan-delivery
+  selector:
+    title: 把设计拆成实施任务
+    description: 生成可领取、可评审、可追溯的交付清单
+    output_label: tasks.md
+  launch:
+    prompt_short: 将已批准的文档审批设计拆成可执行研发任务
+    prompt: |-
+      请使用 spec-workflow-guide Skill。以下需求和设计均已确认，请完成第三阶段 tasks.md，按交付顺序拆成可领取、可验证的小任务；每项注明对应需求编号。不要直接编码。
+
+      R1 上传 PDF 后创建审批单；R2 审批人可通过、驳回并填写意见；R3 两级审批按顺序进行；R4 任何决策都写入不可覆盖审计日志；R5 申请人可撤回尚未完成的审批。设计采用审批服务、文件服务、通知服务；PostgreSQL 保存 approval、step、decision、audit_event；对象存储保存原文件；事务内写决策和审计事件，outbox 异步通知。暂不支持会签、电子签章和模板设计。
+
+      任务需覆盖数据迁移、领域状态机、API、文件校验、outbox、权限、自动化测试、可观测性、灰度与回滚，并列出依赖和完成定义。
+  replay:
+    steps:
+    - title: 读取需求与设计
+      description: 以R1-R5和既定模块为任务边界
+    - title: 建立交付顺序
+      description: 从数据与领域模型推进到接口、通知和上线
+    - title: 绑定验收证据
+      description: 每项任务写明需求编号和完成定义
+    - title: 形成可领取清单
+      description: 控制任务粒度并显式标注依赖
+  result:
+    template: html_preview_v1
+    eyebrow: 原 Skill 工作流示例
+    title: 文档审批实施计划
+    summary: 10个任务覆盖数据、状态机、接口、测试与发布，每项均关联R1-R5
+    html_asset: tasks

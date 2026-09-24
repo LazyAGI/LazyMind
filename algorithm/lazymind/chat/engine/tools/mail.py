@@ -78,6 +78,8 @@ _MAX_CARD_ATTACHMENT_BYTES = 15 * 1024 * 1024
 _MAX_CARD_ATTACHMENT_COUNT = 5
 _MAX_CARD_ATTACHMENT_TOTAL_BYTES = 20 * 1024 * 1024
 _IMAP_TIMEOUT_SECONDS = 20
+_LIST_DEFAULT_LIMIT = 50
+_LIST_MAX_LIMIT = 100
 _TRANSFER_URL_RE = re.compile(
     r'https?://[^\s"\'<>]+(?:'
     r'(?:mail\.)?qq\.com/cgi-bin/ftn'
@@ -100,6 +102,45 @@ def _agentic_config() -> dict[str, Any]:
 
 def _fail(message: str) -> NoReturn:
     raise ToolExecutionError(message)
+
+
+def _clamp_limit(value: Any, default: int = _LIST_DEFAULT_LIMIT, maximum: int = _LIST_MAX_LIMIT) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    if parsed < 1:
+        return 1
+    return min(parsed, maximum)
+
+
+def _plain_error_text(value: Any) -> str:
+    if value is None:
+        return ''
+    if isinstance(value, dict):
+        if value.get('ok') is False:
+            text = _plain_error_text(
+                value.get('last_error') or value.get('value') or value.get('msg') or value.get('error')
+            )
+            if text:
+                return text
+        for key in ('last_error', 'message', 'msg', 'error', 'detail', 'reason'):
+            text = _plain_error_text(value.get(key))
+            if text:
+                return text
+        nested = value.get('value')
+        if nested is not None and nested is not value:
+            return _plain_error_text(nested)
+        return ''
+    if isinstance(value, (list, tuple)):
+        return ''
+    text = str(value).strip()
+    if text.startswith('{') or text.startswith('['):
+        try:
+            return _plain_error_text(json.loads(text))
+        except json.JSONDecodeError:
+            return text
+    return text
 
 
 def _draft_revision(draft: dict[str, Any]) -> int:
@@ -1317,13 +1358,18 @@ class _IMAPBackend:
                 client._encoding = 'utf-8'
             folders = _resolve_search_folders(client, filters.get('folder', ''))
             items = []
+            limit = _clamp_limit(filters.get('limit', _LIST_DEFAULT_LIMIT))
+            has_more = False
             for folder in folders:
                 if not _select_mailbox(client, folder, readonly=True):
                     continue
                 status, data = client.uid('SEARCH', *criteria)
                 if status != 'OK':
                     continue
-                ids = (data[0] or b'').split()[-20:]
+                ids = (data[0] or b'').split()
+                if len(ids) > limit:
+                    has_more = True
+                ids = ids[-limit:]
                 for uid in reversed(ids):
                     status, fetched = client.uid(
                         'FETCH',
@@ -1346,11 +1392,13 @@ class _IMAPBackend:
                         'snippet': '',
                     })
             items.sort(key=lambda row: str(row.get('date') or ''), reverse=True)
+            capped = items[:limit]
             return {
                 'provider': self.provider,
                 'mailbox': self.email,
                 'folders': folders,
-                'items': items[:20],
+                'items': capped,
+                'has_more': has_more or len(items) > limit,
             }
         finally:
             try:
@@ -1724,7 +1772,7 @@ def _preview(draft: dict[str, Any]) -> dict[str, Any]:
         'in_reply_to': draft.get('in_reply_to') or '',
         'status': status,
         'sent_at': draft.get('sent_at') or '',
-        'last_error': draft.get('last_error') or '',
+        'last_error': _plain_error_text(draft.get('last_error')),
         'requires_confirmation': status not in {'sent'},
         'requires_reauth': bool(draft.get('requires_reauth')),
         'reauth_path': _REAUTH_PATH if draft.get('requires_reauth') else '',
@@ -1819,6 +1867,7 @@ class MailToolkit:
         before: str = '',
         mailbox: str = '',
         folder: str = '',
+        limit: int = _LIST_DEFAULT_LIMIT,
     ) -> dict[str, Any]:
         """List matching emails (headers only). Call read for the body of one id.
 
@@ -1829,6 +1878,7 @@ class MailToolkit:
             subject: Filter by subject.
             after: Inclusive start date, YYYY-MM-DD.
             before: Inclusive end date, YYYY-MM-DD.
+            limit: Max hits after merge. Default 50, maximum 100.
             mailbox: Optional email, connection id, or provider (netease163/qqmail/gmailimap).
                 Email/connection id match exactly. A provider name matches every enabled
                 account of that type. Empty searches all enabled mailboxes.
@@ -1847,6 +1897,8 @@ class MailToolkit:
             accounts = _require_accounts()
         items: list[dict[str, Any]] = []
         errors: list[dict[str, Any]] = []
+        capped = _clamp_limit(limit)
+        has_more = False
         kwargs = {
             'keyword': str(keyword or '').strip(),
             'sender': str(sender or '').strip(),
@@ -1855,6 +1907,7 @@ class MailToolkit:
             'after': str(after or '').strip(),
             'before': str(before or '').strip(),
             'folder': str(folder or '').strip(),
+            'limit': str(capped),
         }
         for cred in accounts:
             try:
@@ -1866,12 +1919,14 @@ class MailToolkit:
                     'error': str(orig),
                 })
                 continue
+            has_more = has_more or bool(result.get('has_more'))
             items.extend(item for item in (result.get('items') or []) if isinstance(item, dict))
         if not items and errors and len(errors) == len(accounts):
             _fail(errors[0]['error'])
         items.sort(key=lambda row: str(row.get('date') or ''), reverse=True)
         payload: dict[str, Any] = {
-            'items': items[:20],
+            'items': items[:capped],
+            'has_more': has_more or len(items) > capped,
             'mailboxes': [cred.get('email') or '' for cred in accounts],
         }
         if errors:
@@ -2228,7 +2283,7 @@ class MailToolkit:
         except ToolExecutionError as orig:
             unknown = bool(getattr(orig, 'delivery_unknown', False))
             draft['status'] = 'delivery_unknown' if unknown else 'failed'
-            draft['last_error'] = str(orig)
+            draft['last_error'] = _plain_error_text(orig) or 'Failed to send the email.'
             draft['requires_reauth'] = 'Re-authorize' in str(orig)
             _save_draft(draft)
             _emit_draft_card(draft)

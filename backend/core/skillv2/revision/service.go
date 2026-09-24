@@ -260,6 +260,9 @@ func (s *Service) DeleteRevision(ctx context.Context, req DeleteRevisionRequest)
 		if err := tx.Where("id = ?", req.SkillID).Take(&skill).Error; err != nil {
 			return err
 		}
+		if skill.OriginalRevisionID != nil && *skill.OriginalRevisionID == req.RevisionID {
+			return fmt.Errorf("cannot delete original revision")
+		}
 		if skill.HeadRevisionID != nil && *skill.HeadRevisionID == req.RevisionID {
 			return fmt.Errorf("cannot delete head revision")
 		}
@@ -438,7 +441,7 @@ func (s *Service) selectRevisionToPrune(ctx context.Context, tx *gorm.DB, skillI
 			continue
 		}
 		var headCount int64
-		if err := tx.Model(&skillRow{}).Where("id = ? AND head_revision_id = ?", skillID, row.ID).Count(&headCount).Error; err != nil {
+		if err := tx.Model(&skillRow{}).Where("id = ? AND (head_revision_id = ? OR original_revision_id = ?)", skillID, row.ID, row.ID).Count(&headCount).Error; err != nil {
 			return skillRevisionRow{}, false, err
 		}
 		if headCount > 0 {
@@ -555,10 +558,11 @@ type systemClock struct{}
 func (systemClock) Now() time.Time { return time.Now() }
 
 type skillRow struct {
-	ID             string    `gorm:"column:id;type:varchar(36);primaryKey"`
-	HeadRevisionID *string   `gorm:"column:head_revision_id;type:varchar(36)"`
-	Version        int64     `gorm:"column:version;not null;default:1"`
-	UpdatedAt      time.Time `gorm:"column:updated_at;not null"`
+	ID                 string    `gorm:"column:id;type:varchar(36);primaryKey"`
+	HeadRevisionID     *string   `gorm:"column:head_revision_id;type:varchar(36)"`
+	OriginalRevisionID *string   `gorm:"column:original_revision_id;type:varchar(36)"`
+	Version            int64     `gorm:"column:version;not null;default:1"`
+	UpdatedAt          time.Time `gorm:"column:updated_at;not null"`
 }
 
 func (skillRow) TableName() string { return "skills" }

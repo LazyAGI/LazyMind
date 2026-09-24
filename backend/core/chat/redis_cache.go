@@ -63,6 +63,7 @@ const (
 )
 
 type ChatChunkResponse struct {
+	Exports               *[]ChatExport                `json:"exports,omitempty"`
 	ConversationID        string                       `json:"conversation_id"`
 	Seq                   int32                        `json:"seq"`
 	Message               string                       `json:"message"`

@@ -94,6 +94,9 @@ func TestBuildChatResourceContextCreatesPerUserResourcesAndSnapshots(t *testing.
 	if len(ctx.AvailableSkills) != 1 || ctx.AvailableSkills[0] != "coding/git-workflow" {
 		t.Fatalf("unexpected available_skills: %#v", ctx.AvailableSkills)
 	}
+	if len(ctx.SearchableSkills) != 1 || ctx.SearchableSkills[0] != "coding/git-workflow" {
+		t.Fatalf("unexpected searchable_skills: %#v", ctx.SearchableSkills)
+	}
 	if !ctx.UsePersonalization {
 		t.Fatalf("expected personalization enabled by default")
 	}

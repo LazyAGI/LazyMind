@@ -138,6 +138,7 @@ func buildCapabilityRuntime() (*capabilitybootstrap.Runtime, error) {
 		AuthServiceBaseURL:        common.AuthServiceBaseURL(),
 		AuthHTTPClient:            &http.Client{Timeout: 10 * time.Second},
 		KnowledgeSearchBaseURL:    common.ChatServiceEndpoint(),
+		CloudDocumentBaseURL:      common.ChatServiceEndpoint(),
 		InternalServiceToken:      os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"),
 		KnowledgeSearchHTTPClient: &http.Client{Timeout: 60 * time.Second},
 		ScanBaseURL:               common.ScanControlPlaneEndpoint(),
@@ -421,6 +422,11 @@ func configureFeishuCLI(service *coreproviderconnection.Service, registry corepr
 	if err != nil {
 		log.Logger.Warn().Str("error_code", "CLI_INTEGRITY_MISMATCH").Msg("Feishu CLI runtime is unavailable")
 		return
+	}
+	if helperPath := strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_PATH")); helperPath != "" {
+		if err := runner.ConfigureCredentialHelper(helperPath, os.Getenv("LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_SHA256")); err != nil {
+			log.Logger.Warn().Str("error_code", "CLI_INTEGRITY_MISMATCH").Msg("Feishu CLI credential helper is unavailable")
+		}
 	}
 	profiles, err := coreproviderconnection.NewFeishuCLIProfileStore(runtimeRoot)
 	if err != nil {
@@ -841,6 +847,9 @@ func run(ctx context.Context) error {
 	if err := runHistoryInjections(ctx, store.DB()); err != nil {
 		return &startupError{msg: "inject bundled history", err: err}
 	}
+	if err := chat.InitializeConversationResultReads(ctx, store.DB()); err != nil {
+		return &startupError{msg: "initialize conversation result read baseline", err: err}
+	}
 	evalset.RegisterAsyncJobs()
 	chat.RegisterConversationTitleJobs(store.DB())
 	conversationgroup.RegisterTitlePreparer(chat.OrganizerTitlePreparer{})
@@ -848,6 +857,7 @@ func run(ctx context.Context) error {
 	knowledge_market.RegisterAsyncJobs()
 	doc.RegisterPDFTranslationJobs()
 	workflow.RegisterWorkflowDraftGenerateJob()
+	workflow.RegisterExternalWorkflowTaskJob()
 	workflowHosts := workflowexecutor.DefaultHostRegistry
 	workflowHosts.RegisterHost("lazymind", workflowexecutor.HostRegistration{
 		AllowAllCapabilities: true,
@@ -883,6 +893,7 @@ func run(ctx context.Context) error {
 			LockTTL:         asyncConfig.LockTTL,
 		})
 		backgroundDone = append(backgroundDone, runner.Done())
+		backgroundDone = append(backgroundDone, workflow.StartExternalWorkflowTaskRecovery(runtimeCtx, store.DB()))
 		backgroundDone = append(backgroundDone, conversationgroup.StartTerminalJobReconciler(runtimeCtx, store.DB(), 2*time.Second))
 		backgroundDone = append(backgroundDone, chat.StartConversationTitle(runtimeCtx, store.DB())...)
 
@@ -893,6 +904,7 @@ func run(ctx context.Context) error {
 		resourceUpdateEnabled := resourceupdate.EnabledFromEnv()
 		resourceupdate.LogStartup(resourceUpdateEnabled)
 		if resourceUpdateEnabled {
+			resourceupdate.SetResolveChatLLM(chat.LoadDefaultChatLLMConfig)
 			backgroundDone = append(backgroundDone,
 				resourceupdate.Start(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig()))
 		}

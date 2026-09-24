@@ -24,5 +24,5 @@ export default function useOrganizerNameLock(enabled = true) {
       window.removeEventListener(CONVERSATION_GROUPS_CHANGED_EVENT, refresh);
     };
   }, [enabled]);
-  return locked;
+  return enabled && locked;
 }
