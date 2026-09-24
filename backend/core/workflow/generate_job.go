@@ -618,11 +618,11 @@ func nextGeneratedWorkflowID(ctx context.Context, db *gorm.DB, userID, draftID, 
 		}
 		var draftCount int64
 		db.WithContext(ctx).Model(&orm.WorkflowDraft{}).
-			Where("created_by = ? AND plugin_id = ? AND deleted_at IS NULL AND id <> ?", userID, candidate, draftID).
+			Where("created_by = ? AND plugin_id = ? AND deleted_at IS NULL AND id <> ?", userID, candidate, draftID). // workflow-naming: persistence
 			Count(&draftCount)
 		var resourceCount int64
 		db.WithContext(ctx).Model(&orm.WorkflowResource{}).
-			Where("owner_user_id = ? AND plugin_id = ? AND source_draft_id <> ?", userID, candidate, draftID).
+			Where("owner_user_id = ? AND plugin_id = ? AND source_draft_id <> ?", userID, candidate, draftID). // workflow-naming: persistence
 			Count(&resourceCount)
 		if draftCount == 0 && resourceCount == 0 {
 			return candidate
