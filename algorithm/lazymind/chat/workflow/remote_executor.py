@@ -659,10 +659,8 @@ class RemoteWorkflowExecutor:
     def _cancel_subagent(task_id: str) -> None:
         """Use the ordinary LazyMind cancellation channel; no Workflow-only loop."""
         try:
-            import lazyllm
-            from lazyllm.common.queue import FileSystemQueue
-            lazyllm.globals._init_sid(sid=task_id)
-            FileSystemQueue(klass='cancel').enqueue(json.dumps({'tag': 'cancel'}))
+            from lazymind.chat.engine.agent_runtime.cancellation import request_cancel
+            request_cancel(task_id)
         except Exception:
             LOG.exception('failed to cancel LazyMind SubAgent task %s', task_id)
 

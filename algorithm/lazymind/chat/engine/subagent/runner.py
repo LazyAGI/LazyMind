@@ -1051,9 +1051,8 @@ def _terminal_tool_failure(event: Dict[str, Any], terminal_tool_names: set[str])
 def _signal_task_cancel(task_id: str) -> bool:
     """Signal the sid-scoped worker Agent without masking the original failure."""
     try:
-        from lazyllm.common.queue import FileSystemQueue
-        lazyllm.globals._init_sid(sid=task_id)
-        FileSystemQueue(klass='cancel').enqueue(json.dumps({'tag': 'cancel'}))
+        from lazymind.chat.engine.agent_runtime.cancellation import request_cancel
+        request_cancel(task_id)
         return True
     except Exception:
         LOG.exception('failed to stop terminal workflow tool task %s', task_id)

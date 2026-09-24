@@ -238,7 +238,7 @@ def test_executor_stream_passes_history_and_returns_final(monkeypatch) -> None:
     class Helper:
         future = Future()
 
-        def __init__(self, agent, init_sid):
+        def __init__(self, agent, init_sid, on_cancel):
             pass
 
         async def astream(self, query, **kwargs):
@@ -278,7 +278,7 @@ def test_stream_agent_clears_repeat_state_on_every_exit(monkeypatch, mode) -> No
     class Helper:
         future = Future()
 
-        def __init__(self, _agent, init_sid):
+        def __init__(self, _agent, init_sid, on_cancel):
             assert init_sid is False
 
         async def astream(self, _query, **_kwargs):

@@ -16,6 +16,7 @@ from lazymind.chat.engine.tools.infra import CitationResultMiddleware
 from lazymind.config import config as _cfg
 
 from .context_estimator import estimate_non_history_tokens
+from .cancellation import request_cancel
 from .models import AgentRole, AgentRunPlan
 from .model_availability import (
     is_model_failure_event,
@@ -293,8 +294,12 @@ class AgentExecutor:
         plan: AgentRunPlan,
     ) -> AsyncIterator[Tuple[str, Any]]:
         agent = self.create_agent(llm, plan)
-        async for item in self.stream_agent(agent, plan):
-            yield item
+        stream = self.stream_agent(agent, plan)
+        try:
+            async for item in stream:
+                yield item
+        finally:
+            await stream.aclose()
 
     async def stream_agent(
         self,
@@ -319,14 +324,16 @@ class AgentExecutor:
                 input_preview=(plan.prompt.current_input or '')[:240],
                 sid=sid(),
             )
-        helper = _sh.StreamCallHelper(agent, init_sid=False)
+        run_sid = lazyllm.globals._sid
+        helper = _sh.StreamCallHelper(agent, init_sid=False, on_cancel=lambda: request_cancel(run_sid))
         kwargs = {'llm_chat_history': history} if history is not None else {}
         execution_options = getattr(plan, 'execution_options', None)
         llm_config = getattr(execution_options, 'llm_config', None)
         finished_model_calls: set[str] = set()
-        failed = False
+        failed = True
+        stream = helper.astream(plan.prompt.current_input, **kwargs)
         try:
-            async for item in helper.astream(plan.prompt.current_input, **kwargs):
+            async for item in stream:
                 if is_model_failure_event(item):
                     item = await asyncio.to_thread(
                         refine_unavailable_model_event,
@@ -360,20 +367,24 @@ class AgentExecutor:
                     f'[AgentExecutor] agent future raised: {type(exc).__name__}: {exc}'
                 )
                 raise
+            failed = False
             yield 'final', result
         finally:
-            if repeat_monitor is not None:
-                repeat_monitor.reset()
-            if notice_buffer is not None:
-                notice_buffer.clear()
-            if telemetry_enabled():
-                append_event(
-                    'run_end',
-                    role=getattr(plan.role, 'value', str(plan.role)),
-                    run_id=run_id,
-                    ok=not failed,
-                    sid=sid(),
-                )
+            try:
+                await stream.aclose()
+            finally:
+                if repeat_monitor is not None:
+                    repeat_monitor.reset()
+                if notice_buffer is not None:
+                    notice_buffer.clear()
+                if telemetry_enabled():
+                    append_event(
+                        'run_end',
+                        role=getattr(plan.role, 'value', str(plan.role)),
+                        run_id=run_id,
+                        ok=not failed,
+                        sid=run_sid,
+                    )
 
     @staticmethod
     def _record_finished_model_call(item: Any, seen: set[str]) -> None:

@@ -8,6 +8,15 @@ class UserCancelledError(CancelledError):
     """The active Agent run was explicitly stopped by the user."""
 
 
+def request_cancel(sid: str) -> None:
+    """Signal a run without changing the caller's globals or locals binding."""
+    import lazyllm
+    from lazyllm.common.queue import FileSystemQueue
+
+    with lazyllm.globals._bind_sid(sid):
+        FileSystemQueue(klass='cancel').enqueue(json.dumps({'tag': 'cancel'}))
+
+
 def make_cancel_stop_condition():
     """Stop the current Agent when its sid-scoped cancel queue is signalled."""
     def _check(_output) -> bool:

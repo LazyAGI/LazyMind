@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+from contextlib import aclosing
 from functools import wraps
 import hashlib
 import json
@@ -951,8 +952,9 @@ async def _run_chat_with_parse_status(
                 frame, round(time.time() - started, 3), query, session_id, tag='PARSE_UPLOAD',
             )
         if isinstance(response, StreamingResponse):
-            async for chunk in response.body_iterator:
-                yield chunk
+            async with aclosing(response.body_iterator):
+                async for chunk in response.body_iterator:
+                    yield chunk
             return
         yield sse_line(response_payload(200, 'success', response, time.time() - started))
 
@@ -1026,8 +1028,9 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             sensitive_match_override=sensitive_match,
         )
         if isinstance(response, StreamingResponse):
-            async for chunk in response.body_iterator:
-                yield chunk
+            async with aclosing(response.body_iterator):
+                async for chunk in response.body_iterator:
+                    yield chunk
             return
         yield sse_line(response_payload(200, 'success', response, time.time() - started))
 
@@ -2178,15 +2181,16 @@ async def _handle_chat_impl(
                     stop_tools=stop_tools,
                     history=agent_history,
                 )
-                async for kind, payload in guarded_agent_stream:
-                    if kind == 'event':
-                        for frame in translator.feed(payload):
-                            cost = round(time.time() - start_time, 3)
-                            yield log_and_emit_frame(frame, cost, query, conversation.session_id, tag='FEED')
-                    else:
-                        # 'final' -- payload is already the resolved result value;
-                        # AgentExecutor propagates future exceptions before yielding final.
-                        final_result = payload
+                async with aclosing(guarded_agent_stream):
+                    async for kind, payload in guarded_agent_stream:
+                        if kind == 'event':
+                            for frame in translator.feed(payload):
+                                cost = round(time.time() - start_time, 3)
+                                yield log_and_emit_frame(frame, cost, query, conversation.session_id, tag='FEED')
+                        else:
+                            # 'final' -- payload is already the resolved result value;
+                            # AgentExecutor propagates future exceptions before yielding final.
+                            final_result = payload
 
             for frame in translator.finish(final_result):
                 cost = round(time.time() - start_time, 3)
