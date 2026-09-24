@@ -123,6 +123,13 @@ function parseGenerationFailurePayload(raw: string): GenerationFailurePayload | 
   }
 }
 
+function splitGenerationLines(raw: string): string[] {
+  return raw
+    .split(/\r?\n|[；;]/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 function generationFailurePhaseLabel(phase: string): string {
   switch (phase) {
     case 'analysis':
@@ -383,8 +390,16 @@ export default function WorkflowDetailPage() {
     );
   }, [t]);
   const renderGenerationWarningDetails = useCallback((raw: string, repairDetails: string[] = []) => {
-    const lines = repairDetails.length > 0 ? repairDetails : parseGenerationDiagnostics(raw).diagnostics
-      .map((item) => getWorkflowDiagnosticMessage(t, item));
+    const parsed = parseGenerationDiagnostics(raw);
+    const diagnosticLines = parsed.diagnostics.map((item) => getWorkflowDiagnosticMessage(t, item));
+    const plainText = raw.startsWith('[修复失败]')
+      ? raw.replace(/^\[修复失败\]\s*/, '')
+      : parsed.summary || raw;
+    const lines = repairDetails.length > 0
+      ? repairDetails
+      : diagnosticLines.length > 0
+        ? diagnosticLines
+        : splitGenerationLines(plainText);
     if (lines.length === 0) return localizeErrorCode('2000509');
     return (
       <div className="workflow-generation-issue-details">
@@ -407,6 +422,21 @@ export default function WorkflowDetailPage() {
   const generationWarningKey = draft?.generate_warning ? `generate_warning:${contentKey(draft.generate_warning)}` : '';
   const showGenerationWarning = draft?.generate_status === 'done' && Boolean(draft.generate_warning)
     && !dismissedBanners.has(generationWarningKey) && !repairModalOpen;
+  const showGenerationWarningEntry = draft?.generate_status === 'done' && Boolean(draft.generate_warning)
+    && dismissedBanners.has(generationWarningKey);
+  const showGenerationWarningBanner = useCallback(() => {
+    if (!generationWarningKey) return;
+    setDismissedBanners((prev) => {
+      const next = new Set(prev);
+      next.delete(generationWarningKey);
+      if (workflowId) {
+        try {
+          localStorage.setItem(`workflow_banners_dismissed:${workflowId}`, JSON.stringify([...next]));
+        } catch { /* ignore */ }
+      }
+      return next;
+    });
+  }, [generationWarningKey, workflowId]);
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
   // true = show empty-canvas hint; false = user already has experience (≥1 non-empty workflow)
@@ -828,11 +858,15 @@ export default function WorkflowDetailPage() {
     state_machine: '适合步骤已有但执行顺序、依赖关系或分支逻辑不正确时使用。',
     scenario_scripts: '适合核心结构和执行流程已可用，只需要补齐说明、脚本和最终校验时使用。',
   };
+  const hasDesignBrief = Boolean(draft.design_brief_content?.trim());
+  const hasWorkflowSkeleton = hasDesignBrief && Boolean(draft.workflow_yaml_content?.trim());
+  const hasStateMachine = hasWorkflowSkeleton && Boolean(draft.state_yaml_content?.trim());
+  const hasScenarioScripts = hasStateMachine && (draft.generate_status === 'done' || Boolean(draft.scenario_content?.trim()));
   const regeneratePhaseDone: Record<WorkflowGenerateStartPhase, boolean> = {
-    design_brief: Boolean(draft.design_brief_content?.trim()),
-    skeleton: Boolean(draft.workflow_yaml_content?.trim()),
-    state_machine: Boolean(draft.state_yaml_content?.trim()),
-    scenario_scripts: draft.generate_status === 'done' || Boolean(draft.scenario_content?.trim()),
+    design_brief: hasDesignBrief,
+    skeleton: hasWorkflowSkeleton,
+    state_machine: hasStateMachine,
+    scenario_scripts: hasScenarioScripts,
   };
   const firstIncompletePhase = GENERATE_START_PHASES.find((phase) => !regeneratePhaseDone[phase]);
   const regeneratePhaseOptions: RegeneratePhaseOption[] = GENERATE_START_PHASES.map((phase) => {
@@ -1183,6 +1217,11 @@ export default function WorkflowDetailPage() {
                 conversionDisabled={viewingHistory || isRepairing || repairModalOpen || isStillGenerating}
                 onCreated={(draftId) => navigate(`/memory-management/workflows/${draftId}`)}
               />
+              {showGenerationWarningEntry && (
+                <Button onClick={showGenerationWarningBanner}>
+                  {repairFailed ? '修复失败原因' : '优化建议'}
+                </Button>
+              )}
               {viewingHistory ? (
                 <Button onClick={() => void handleEditHistoricalVersion()}>编辑此版本</Button>
               ) : editorReady ? (

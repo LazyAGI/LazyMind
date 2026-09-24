@@ -46,6 +46,14 @@ func setWorkflowYAMLUpdate(updates map[string]any, yamlContent string) {
 	updates["plugin_id"] = extractWorkflowID(yamlContent) // workflow-naming: persistence
 }
 
+func replaceWorkflowYAMLID(content, workflowID string) string {
+	idLine := "id: " + workflowID
+	if workflowIDPattern.MatchString(content) {
+		return workflowIDPattern.ReplaceAllString(content, idLine)
+	}
+	return idLine + "\n" + content
+}
+
 var generatingStatusesForResponse = map[string]bool{
 	generateStatusAnalyzing:    true,
 	generateStatusGenerating:   true,
@@ -376,12 +384,7 @@ func nextWorkflowCopyID(db *gorm.DB, userID, sourceID string) string {
 var workflowNamePattern = regexp.MustCompile(`(?m)^name:\s*.*$`)
 
 func replaceWorkflowYAMLIdentity(content, workflowID, name string) string {
-	idLine := "id: " + workflowID
-	if workflowIDPattern.MatchString(content) {
-		content = workflowIDPattern.ReplaceAllString(content, idLine)
-	} else {
-		content = idLine + "\n" + content
-	}
+	content = replaceWorkflowYAMLID(content, workflowID)
 	nameLine := "name: " + strconv.Quote(name)
 	if workflowNamePattern.MatchString(content) {
 		return workflowNamePattern.ReplaceAllString(content, nameLine)
