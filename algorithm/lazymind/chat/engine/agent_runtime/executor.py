@@ -157,6 +157,7 @@ class AgentExecutor:
         repeat_monitor = ExactRepeatMonitor()
         notice_buffer = OneShotNoticeBuffer()
         configuration_runtime = None if options.context_preview else options.configuration_runtime
+
         def prepare_request():
             if options.before_model_request is not None:
                 result = options.before_model_request()
@@ -168,12 +169,13 @@ class AgentExecutor:
             if configuration_runtime is not None:
                 configuration_runtime.before_request()
 
-        runtime_observer = observer
         if configuration_runtime is not None:
             def runtime_observer(event, **payload):
                 configuration_runtime.observe(event, **payload)
                 if observer is not None:
                     observer(event, **payload)
+        else:
+            runtime_observer = observer
 
         def model_context():
             notices = []

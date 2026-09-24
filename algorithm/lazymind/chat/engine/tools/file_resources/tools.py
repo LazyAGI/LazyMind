@@ -60,7 +60,8 @@ def read_file_resource(
     After search_file_resource, pass offset near the hit line to inspect surrounding context.
 
     Args:
-        target: A resource id, attachment name, workspace path, remote://skills/... URI, or local PDF/Office absolute path.
+        target: A resource id, attachment name, workspace path, remote://skills/... URI,
+            or local PDF/Office absolute path.
         offset: 1-based first line (default 1).
         limit: Maximum lines to return (default 2000, max 4000).
         turn: Optional 1-based conversation turn used to disambiguate attachments.
@@ -112,7 +113,8 @@ def search_file_resource(
     context. Do not treat search_file_resource snippets as the full file.
 
     Args:
-        target: A resource id, attachment name, workspace path, remote://skills/... URI, or local PDF/Office absolute path.
+        target: A resource id, attachment name, workspace path, remote://skills/... URI,
+            or local PDF/Office absolute path.
         pattern: Literal substring or regular expression.
         max_results: Maximum matches (default 50).
         turn: Optional 1-based conversation turn used to disambiguate attachments.

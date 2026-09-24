@@ -16,7 +16,7 @@ from .workspace_authorization import response_data
 
 
 class ToolConfigurationRuntime:
-    def __init__(self, user_id, conversation_id, history_id, run_id, *, loader, resume=True, query=""):
+    def __init__(self, user_id, conversation_id, history_id, run_id, *, loader, resume=True, query=''):
         self.user_id, self.conversation_id = user_id, conversation_id
         self.history_id, self.run_id = history_id, run_id
         self.loader = loader
@@ -61,8 +61,8 @@ class ToolConfigurationRuntime:
                 service = cfg.name
                 for provider in cfg.tool['tools']:
                     source = provider.source_name
-                    if re.search(r'(?:使用|通过|用|using\s+|with\s+|via\s+)\s*' + re.escape(source) +
-                                 r'(?![a-zA-Z0-9_])', self.query, re.IGNORECASE):
+                    if re.search(r'(?:使用|通过|用|using\s+|with\s+|via\s+)\s*' + re.escape(source)
+                                 + r'(?![a-zA-Z0-9_])', self.query, re.IGNORECASE):
                         definition['tools'] = [provider]
                         service = f'{service}/{source}'
                         break
@@ -98,7 +98,7 @@ class ToolConfigurationRuntime:
                 status = 'needs_authorization' if isinstance(exc, MCPAuthorizationRequired) else 'unavailable'
                 if issues is not None:
                     issues.append({'server': str(item.get('label') or 'MCP'), 'status': status})
-                lazyllm.LOG.warning(f"[MCP] skipped service {service}: {status}")
+                lazyllm.LOG.warning(f'[MCP] skipped service {service}: {status}')
             group = ToolGroup(tools=tools, name='mcp_' + re.sub(r'[^a-zA-Z0-9_]', '_', service[4:]),
                               desc=f"MCP service {item['label']}. " + (
                                   'Member schemas are unknown until configuration is complete.' if not tools else ''),
@@ -149,14 +149,17 @@ class ToolConfigurationRuntime:
                     if service.startswith('mcp:'):
                         if check.get('mcp_config') == self.services[service].get('runtime'):
                             continue
-                    elif all((lazyllm.globals.config[TOOL_AUTH_REGISTRY.get(key, 'dynamic_tool_auth')] or {}).get(key) == value
+                    elif all((lazyllm.globals.config[TOOL_AUTH_REGISTRY.get(key, 'dynamic_tool_auth')] or {}).get(key)
+                             == value
                              for key, value in (check.get('tool_config') or {}).items()):
                         continue
                 if service.startswith('mcp:'):
-                    self.services[service]['status'] = check['status'] if check['status'] != 'ready' else 'refresh_pending'
+                    self.services[service]['status'] = (
+                        check['status'] if check['status'] != 'ready' else 'refresh_pending')
                 if check['status'] in {'forbidden', 'unavailable'}:
                     return {'status': check['status'], 'service': service,
-                            'message': 'This capability is forbidden or temporarily unavailable; do not retry or bypass it.'}
+                            'message': 'This capability is forbidden or temporarily unavailable; '
+                                       'do not retry or bypass it.'}
                 # Technical failures must not be advertised as missing authorization.
                 if self.services[service]['status'] == 'unavailable':
                     return {'status': 'unavailable', 'service': service,
@@ -222,8 +225,9 @@ class ToolConfigurationRuntime:
                     if response.get('pending_delivery'):
                         self.pending[service] = (action, 'Connection is ready. Use only tools present in this request.')
                     continue
-                if service.startswith('mcp:') and (not self._ready(service) or
-                        response.get('mcp_config') != self.services[service].get('runtime')):
+                if service.startswith('mcp:') and (
+                        not self._ready(service)
+                        or response.get('mcp_config') != self.services[service].get('runtime')):
                     runtime = response.get('mcp_config')
                     try:
                         tools = self.loader(runtime) if runtime else []
