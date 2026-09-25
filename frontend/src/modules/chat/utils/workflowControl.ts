@@ -15,6 +15,7 @@ export interface WorkflowControlView extends Pick<Snapshot, 'session_id' | 'stat
 export interface WorkflowActionIntent {
   kind: WorkflowActionKind;
   stepId?: string;
+  completedStepId?: string;
   review?: Pick<WorkflowReview, 'id' | 'version' | 'manifest_hash'>;
   preferenceScope?: 'step' | 'following';
 }
@@ -40,20 +41,23 @@ export const REVIEW_CHANGED_NOTICE = 'chat.workflowControlReviewChanged';
 export type OverlayInfoBanner = { key: string; tone: 'info' | 'warning' };
 
 /** Live host-delivery strip. Accepted receipts do not get a second info banner. */
-export function deliveryBanner(delivery: WorkflowControlView['delivery'] | null | undefined): OverlayInfoBanner | undefined {
+export function deliveryBanner(delivery: WorkflowControlView['delivery'] | null | undefined, binding?: WorkflowControlView['binding']): OverlayInfoBanner | undefined {
   if (!delivery || delivery.consumed_at) return undefined;
   if (delivery.status === 'pending' || delivery.status === 'dispatching') {
     return { key: 'chat.workflowControlDeliveryPending', tone: 'info' };
   }
   if (delivery.status === 'unknown') return { key: 'chat.workflowControlDeliveryUnknown', tone: 'warning' };
+  if (delivery.status === 'failed' && delivery.kind === 'cancel' && binding?.provider === 'codex') {
+    return { key: 'chat.workflowControlCodexStopped', tone: 'info' };
+  }
   if (delivery.status === 'failed') return { key: 'chat.workflowControlDeliveryFailed', tone: 'warning' };
   return undefined;
 }
 
 /** At most one info/warning strip so the panel workspace is not squeezed by stacked Alerts. */
-export function overlayInfoBanner(noticeKey: string, delivery: WorkflowControlView['delivery'] | null | undefined): OverlayInfoBanner | undefined {
+export function overlayInfoBanner(noticeKey: string, delivery: WorkflowControlView['delivery'] | null | undefined, binding?: WorkflowControlView['binding']): OverlayInfoBanner | undefined {
   if (noticeKey === REVIEW_CHANGED_NOTICE) return { key: noticeKey, tone: 'info' };
-  return deliveryBanner(delivery) ?? (noticeKey ? { key: noticeKey, tone: 'info' } : undefined);
+  return deliveryBanner(delivery, binding) ?? (noticeKey ? { key: noticeKey, tone: 'info' } : undefined);
 }
 
 export function deliveryPending(control: WorkflowControlView): boolean {
@@ -83,9 +87,16 @@ export function controlActions(
           throw new ReviewRefreshRequired('Review changed after saving');
         }
       }
+      // Resolve Continue after editor saves and the authoritative refresh. Editing
+      // may have already invalidated the completed target's old attempt.
+      const completedRewind = intent.kind === 'continue' && intent.completedStepId
+        && current.admission.reason !== 'edits_pending_continue' && current.continuation !== 'stopped';
+      const kind = intent.kind === 'continue' && current.continuation === 'stopped'
+        ? 'resume' : completedRewind ? 'rewind' : intent.kind;
+      const stepId = completedRewind ? intent.completedStepId : intent.stepId;
       pending = { key, command: {
-        command_id: id(), kind: intent.kind, expected_state_version: current.state_version,
-        ...(intent.stepId ? { step_id: intent.stepId } : {}),
+        command_id: id(), kind, expected_state_version: current.state_version,
+        ...(stepId ? { step_id: stepId } : {}),
         ...(intent.review ? { review_id: intent.review.id, review_version: intent.review.version, manifest_hash: intent.review.manifest_hash } : {}),
         ...(intent.preferenceScope ? { preference_scope: intent.preferenceScope } : {}),
       } };

@@ -3131,6 +3131,7 @@ const enUS = {
     workflowControlDeliveryPending: "Operation committed; waiting for the original Agent session.",
     workflowControlDeliveryAccepted: "The original Agent accepted the operation. Workflow state will continue to update.",
     workflowControlDeliveryUnknown: "Host receipt is unknown. Reconciling the original session; do not resend continue.",
+    workflowControlCodexStopped: "Workflow stopped. Codex cannot interrupt the current response, which may continue running.",
     workflowControlDeliveryFailed: "The host did not accept the operation. Check the original session and connection.",
     workflowControlLegacy: "This run uses the legacy protocol. Control it from its original conversation; new runs use the controlled workflow protocol.",
     workflowRunRefresh: "Refresh",

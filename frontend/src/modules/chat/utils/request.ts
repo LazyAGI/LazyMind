@@ -474,7 +474,7 @@ export function WorkflowSessionApi() {
     getControl(sessionId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/control`, options);
     },
-    control(sessionId: string, command: import('./workflowControl').WorkflowControlRequest, options?: RawAxiosRequestConfig) {
+    control(sessionId: string, command: import('./workflowControl').WorkflowControlRequest, options?: PublicationRequestOptions) {
       return axiosInstance.post(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/control`, command, options);
     },
     listDocumentProviders(options?: RawAxiosRequestConfig) {

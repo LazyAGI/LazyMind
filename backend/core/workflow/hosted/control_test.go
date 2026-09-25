@@ -450,3 +450,68 @@ func TestNativeExecutionSharesAtomicReviewAndHostContinuation(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeCompletionReplacesUnconsumedStartNotification(t *testing.T) {
+	for _, status := range []string{"pending", "dispatching", "accepted", "unknown"} {
+		t.Run(status, func(t *testing.T) {
+			service, db := hostedTestService(t)
+			service.Completion = &execution.Service{DB: db, Store: service.Store, Attempts: service.Attempts, Contexts: service.Contexts}
+			if err := db.AutoMigrate(&orm.WorkflowReviewCheckpoint{}, &orm.WorkflowHostAction{}, &orm.WorkflowApprovalPreference{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "session-1").Updates(map[string]any{
+				"control_protocol":     controlpolicy.Protocol,
+				"control_binding_json": `{"driver_session_id":"driver","connector_id":"connector","generation":1}`,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&orm.WorkflowSessionStep{}).Where("id = ?", "attempt-1").Updates(map[string]any{
+				"executor_host": "lazymind", "review_required": false, "task_id": "native-task",
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			old := orm.WorkflowHostAction{ID: "start-notification", SessionID: "session-1", Kind: "continue",
+				ExecutionID: "attempt-1", Status: status, BindingGeneration: 1, ConnectorID: "connector", NativeSessionID: "driver"}
+			if err := db.Create(&old).Error; err != nil {
+				t.Fatal(err)
+			}
+			ctx := t.Context()
+			claim, err := service.Attempts.ClaimForHost(ctx, "native", "lazymind")
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw := json.RawMessage(`{"summary":"native result"}`)
+			if err := finishNative(service, ctx, claim.AttemptID, claim.LeaseToken, "succeeded", "", raw); err == nil {
+				t.Fatal("completion without required output succeeded")
+			}
+			if err := db.First(&old, "id = ?", old.ID).Error; err != nil || old.ConsumedAt != nil {
+				t.Fatalf("failed completion retired notification: %+v %v", old, err)
+			}
+			contract, err := service.Contexts.LoadAttemptContext(ctx, claim.AttemptID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			contract.ExecutionHandle = claim.LeaseToken
+			for _, artifact := range successfulSubmission(claim.LeaseToken).Artifacts {
+				if err := service.Artifacts.Save(ctx, contract, artifact); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for i := 0; i < 2; i++ {
+				if err := finishNative(service, ctx, claim.AttemptID, claim.LeaseToken, "succeeded", "", raw); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := db.First(&old, "id = ?", old.ID).Error; err != nil || old.ConsumedAt == nil {
+				t.Fatalf("start notification still blocks completion: %+v %v", old, err)
+			}
+			var notifications []orm.WorkflowHostAction
+			if err := db.Where("session_id = ? AND consumed_at IS NULL", "session-1").Find(&notifications).Error; err != nil {
+				t.Fatal(err)
+			}
+			if len(notifications) != 1 || notifications[0].ID == old.ID || notifications[0].Status != "pending" || notifications[0].ExecutionID != claim.AttemptID {
+				t.Fatalf("expected one fresh completion notification, including after replay: %+v", notifications)
+			}
+		})
+	}
+}

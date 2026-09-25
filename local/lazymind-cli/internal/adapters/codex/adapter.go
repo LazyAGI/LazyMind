@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -14,7 +13,10 @@ import (
 
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
+	"lazymind/agentconnector/internal/codexplugin"
+	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/mcpbridge"
+	"lazymind/agentconnector/internal/workflowhost"
 )
 
 const (
@@ -101,14 +103,16 @@ func (a *Adapter) Status(context.Context) agentintegration.Status {
 	case exists && !a.isOwned(config):
 		status.State = agentintegration.Conflict
 		status.Message = "Codex already has an MCP server named `lazymind` that is not managed by this LazyMind installation."
-	case exists && config.Enabled && a.hasCurrentEnvironment(config):
+	case !exists && a.pluginEnabled():
 		status.State = agentintegration.Enabled
+		status.Message = "LazyMind Workflow plugin is installed. Open a new Codex task to load its tools."
+
 	case agentintegration.MissingRequirement(requirements):
 		status.State = agentintegration.RequirementsMissing
 	default:
 		status.State = agentintegration.Ready
 		if exists {
-			status.Message = "The existing LazyMind MCP entry needs to be enabled again."
+			status.Message = "Reconnect to upgrade the existing MCP entry to the LazyMind Workflow plugin."
 		}
 	}
 	return status
@@ -122,18 +126,26 @@ func (a *Adapter) Connect(ctx context.Context) agentintegration.Status {
 	if status.State != agentintegration.Ready {
 		return status
 	}
-	if _, err := a.bridge.Probe(ctx); err != nil {
-		return agentintegration.Fail(status, "LazyMind MCP is unavailable: "+err.Error())
+	// Installation is local and uses the saved account scope. A temporarily
+	// offline Core must not prevent installing the plugin; MCP checks service
+	// connectivity and authentication when Codex loads it.
+	profile, err := codexHome()
+	if err != nil {
+		return agentintegration.Fail(status, err.Error())
 	}
+	record, err := codexplugin.Install(ctx, a.home, a.self, a.binary, profile, a.hostID)
+	if err != nil {
+		return agentintegration.Fail(status, "install LazyMind Workflow plugin: "+err.Error())
+	}
+	// Migrate only after successful plugin installation. An unrelated MCP entry
+	// was already rejected by Status and is never overwritten.
 	if _, exists, err := a.getConfig(); err != nil {
 		return agentintegration.Fail(status, err.Error())
 	} else if exists {
 		if _, err := a.run(ctx, "mcp", "remove", serverName); err != nil {
-			return agentintegration.Fail(status, "remove stale Codex MCP configuration: "+err.Error())
+			_, _ = a.run(ctx, "plugin", "remove", codexplugin.Name+"@"+record.Marketplace, "--json")
+			return agentintegration.Fail(status, "remove legacy MCP entry: "+err.Error())
 		}
-	}
-	if err := a.addConfig(ctx); err != nil {
-		return agentintegration.Fail(status, "configure Codex MCP: "+err.Error())
 	}
 	return a.Status(ctx)
 }
@@ -145,6 +157,14 @@ func (a *Adapter) Disconnect(ctx context.Context) agentintegration.Status {
 	status := a.Status(ctx)
 	if status.State == agentintegration.Conflict || status.State == agentintegration.Failed {
 		return status
+	}
+	if record, err := codexplugin.Read(); err == nil && record.Home == a.home {
+		if _, err := a.run(ctx, "plugin", "remove", codexplugin.Name+"@"+record.Marketplace, "--json"); err != nil {
+			return agentintegration.Fail(status, "remove Codex Workflow plugin: "+err.Error())
+		}
+		if err := workflowhost.Disable(a.home, record.ConnectorID); err != nil {
+			return agentintegration.Fail(status, err.Error())
+		}
 	}
 	if _, exists, err := a.getConfig(); err != nil {
 		return agentintegration.Fail(status, err.Error())
@@ -212,22 +232,6 @@ func (a *Adapter) getConfig() (mcpConfig, bool, error) {
 	}, true, nil
 }
 
-func (a *Adapter) addConfig(ctx context.Context) error {
-	environment := currentEnvironment(a.home, a.hostID)
-	keys := make([]string, 0, len(environment))
-	for key := range environment {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	arguments := []string{"mcp", "add", serverName}
-	for _, key := range keys {
-		arguments = append(arguments, "--env", key+"="+environment[key])
-	}
-	arguments = append(arguments, "--", a.self, "mcp", "proxy")
-	_, err := a.run(ctx, arguments...)
-	return err
-}
-
 func (a *Adapter) run(ctx context.Context, arguments ...string) (string, error) {
 	runCtx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
@@ -238,25 +242,6 @@ func (a *Adapter) isOwned(config mcpConfig) bool {
 	return agentexec.SameExecutable(config.Transport.Command, a.self) &&
 		len(config.Transport.Args) == 2 &&
 		config.Transport.Args[0] == "mcp" && config.Transport.Args[1] == "proxy"
-}
-
-func (a *Adapter) hasCurrentEnvironment(config mcpConfig) bool {
-	configuredHome := filepath.Clean(strings.TrimSpace(config.Transport.Env["LAZYMIND_HOME"]))
-	if configuredHome == "." {
-		configuredHome = ""
-	}
-	return configuredHome == a.home && config.Transport.Env["LAZYMIND_AGENT_PROVIDER"] == "codex" &&
-		config.Transport.Env["LAZYMIND_AGENT_HOST_ID"] == a.hostID
-}
-
-func currentEnvironment(home, hostID string) map[string]string {
-	environment := map[string]string{
-		"LAZYMIND_AGENT_PROVIDER": "codex", "LAZYMIND_AGENT_HOST_ID": hostID,
-	}
-	if home != "" {
-		environment["LAZYMIND_HOME"] = home
-	}
-	return environment
 }
 
 func findBinary(configured string) (string, error) {
@@ -281,3 +266,24 @@ func codexHome() (string, error) {
 }
 
 func FindBinary(configured string) (string, error) { return findBinary(configured) }
+
+func (a *Adapter) pluginEnabled() bool {
+	record, err := codexplugin.Read()
+	if err != nil || record.Home != a.home || record.BuildID != codexplugin.BuildID() || !agentexec.SameExecutable(record.Self, a.self) {
+		return false
+	}
+	profile, err := codexHome()
+	if err != nil || record.Profile != profile {
+		return false
+	}
+	enabled, err := codexplugin.Enabled(profile, record.Marketplace)
+	if err != nil || !enabled {
+		return false
+	}
+	store, err := credentials.NewStore(a.home, "")
+	if err != nil {
+		return false
+	}
+	account, err := store.AccountScope()
+	return err == nil && workflowhost.Configured(a.home, record.ConnectorID, account)
+}

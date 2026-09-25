@@ -275,11 +275,8 @@ func (s *Service) claimCandidate(ctx context.Context, candidate orm.WorkflowSess
 			Updates(map[string]any{"status": "claimed", "updated_at": now}).Error; err != nil {
 			return err
 		}
-		if controlled && candidate.ExecutorHost == "lazymind" {
-			if err := controlstore.ConsumeContinuation(tx, candidate.SessionID, candidate.ID); err != nil {
-				return err
-			}
-		}
+		// A worker claim is not receipt by the external controller. Keep its
+		// notification pending until the controller observes it through MCP.
 		payload, _ := json.Marshal(map[string]any{"attempt_id": candidate.ID, "status": "claimed", "fencing_generation": candidate.FencingGeneration + 1})
 		return appendEvent(tx, candidate, "", "attempt.patch", payload, now)
 	})

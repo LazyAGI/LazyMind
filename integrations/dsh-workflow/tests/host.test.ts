@@ -212,7 +212,9 @@ it.each([
   const f = await fixture(restored, false, manual)
   if (!restored) await f.execute('mcp__lazymind__workflow_start')
   if (granted) await f.execute('mcp__lazymind__workflow_step_begin', f.root, { session_id: 'run-1' })
-  const control = await f.bridge.state('run-1', new AbortController().signal)
+  const prior = await f.bridge.state('run-1', new AbortController().signal)
+  // The panel command has already committed the review before Core emits its action.
+  const control = restored ? { ...prior, continuation: 'continue', admission: { can_begin: true } } : prior
   const cancel = vi.fn()
   const prompt = vi.fn(async (_input: { content: Array<{text: string}> }) => ({}))
   f.ctx.provide('sessionController', { resolveAgent: async () => ({ agent: f.root }), cancel, prompt })

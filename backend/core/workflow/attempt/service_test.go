@@ -34,6 +34,36 @@ func queue(t *testing.T, service *Service, id, session, step string) {
 	}
 }
 
+func TestNativeClaimPreservesExternalControllerNotification(t *testing.T) {
+	service, db := testService(t)
+	if err := db.AutoMigrate(&orm.WorkflowSession{}, &orm.WorkflowHostAction{}); err != nil {
+		t.Fatal(err)
+	}
+	session := orm.WorkflowSession{ID: "controlled", ControllerHost: "external-agent", Status: "active",
+		ControlProtocol: "workflow.control.v1", ControlBindingJSON: `{"required":true,"driver_session_id":"driver","generation":1}`}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	queue(t, service, "native-attempt", session.ID, "step")
+	if err := db.Model(&orm.WorkflowSessionStep{}).Where("id = ?", "native-attempt").Update("executor_host", "lazymind").Error; err != nil {
+		t.Fatal(err)
+	}
+	action := orm.WorkflowHostAction{ID: "resume-notification", SessionID: session.ID, Kind: "continue",
+		ExecutionID: "native-attempt", Status: "pending", BindingGeneration: 1}
+	if err := db.Create(&action).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ClaimForHost(t.Context(), "native-worker", "lazymind"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&action, "id = ?", action.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if action.Status != "pending" || action.ConsumedAt != nil {
+		t.Fatalf("worker consumed the controller notification: %+v", action)
+	}
+}
+
 func TestQueueIsAtomicAndOutboxIsolated(t *testing.T) {
 	service, db := testService(t)
 	queue(t, service, "a1", "s1", "step1")

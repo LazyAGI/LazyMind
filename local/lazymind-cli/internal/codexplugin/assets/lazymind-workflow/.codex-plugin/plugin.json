@@ -1,0 +1,21 @@
+{
+  "name": "lazymind-workflow",
+  "version": "0.1.0",
+  "description": "Run LazyMind workflows with panel review and queued continuation.",
+  "author": {
+    "name": "LazyMind"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "LazyMind Workflow",
+    "shortDescription": "Run workflows, review results, and continue in the same task.",
+    "longDescription": "Connect LazyMind tools and Workflow Panel to Codex. The plugin automatically manages queued continuation and yields for human review.",
+    "developerName": "LazyMind",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": [
+      "启动一个 LazyMind Workflow"
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

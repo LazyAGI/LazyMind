@@ -65,6 +65,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 }
 
 func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "codex-workflow-pair" {
+		return runCodexWorkflowPair(args[1:], stdout, stderr)
+	}
 	if len(args) > 0 && args[0] == "session" {
 		return runInternalSession(args[1:], os.Stdin, stdout)
 	}
@@ -342,7 +345,13 @@ func runInternalCodex(ctx context.Context, action, binary string, bridge *mcpbri
 	default:
 		return fmt.Errorf("unsupported Codex action %q", action)
 	}
-	return printJSON(stdout, status)
+	if err := printJSON(stdout, status); err != nil {
+		return err
+	}
+	if action == "connect" && status.State != agentintegration.Enabled {
+		return fmt.Errorf("Codex plugin installation did not complete: %s", status.Message)
+	}
+	return nil
 }
 
 func runAssistant(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -605,6 +614,9 @@ func waitAgentDiscovery(ctx context.Context) bool {
 }
 
 func runMCP(ctx context.Context, args []string) error {
+	if len(args) == 1 && args[0] == "codex-workflow" {
+		return runCodexWorkflowMCP(ctx)
+	}
 	if len(args) != 1 || args[0] != "proxy" {
 		return errors.New("usage: lazymind mcp proxy")
 	}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { TabDef, WorkflowSession } from '@/modules/chat/store/workflowPanel';
-import { resolveCompletedContinueStep, resolveWorkflowContinueAction } from './workflowContinue';
+import { resolveCompletedContinueStep, resolveExternalContinueAction, resolveWorkflowContinueAction } from './workflowContinue';
 
 const outlineTab: TabDef = {
   id: 'outline',
@@ -10,6 +10,24 @@ const outlineTab: TabDef = {
   slots: [],
   completed_continue_step: 'write_document',
 };
+
+describe('Core-controlled continuation', () => {
+  it('offers Core continuation even without a native approval checkpoint', () => {
+    expect(resolveWorkflowContinueAction(checkpoint(false), 'waiting')).toBeUndefined();
+    expect(resolveExternalContinueAction({ continuation: 'continue', available_actions: ['save', 'continue'] })).toBe('continue');
+  });
+  it('does not invent continuation for unbound, executing, or review-pending runs', () => {
+    for (const continuation of ['continue', 'awaiting_executor', 'awaiting_user']) {
+      expect(resolveExternalContinueAction({ continuation, available_actions: ['save', 'confirm', 'rewind'] })).toBeUndefined();
+    }
+  });
+  it('uses allowed resume and declared completed-step rewind', () => {
+    expect(resolveExternalContinueAction({ continuation: 'awaiting_user', admission: { reason: 'edits_pending_continue' }, available_actions: ['continue'] }, 'write_document')).toBe('continue');
+    expect(resolveExternalContinueAction({ continuation: 'stopped', available_actions: ['resume'] })).toBe('resume');
+    expect(resolveExternalContinueAction({ continuation: 'completed', available_actions: ['rewind'] }, 'write_document')).toBe('rewind');
+    expect(resolveExternalContinueAction({ continuation: 'completed', available_actions: ['rewind'] })).toBeUndefined();
+  });
+});
 
 describe('resolveCompletedContinueStep', () => {
   it('uses the workflow-declared completed continuation', () => {

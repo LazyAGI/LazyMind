@@ -3062,6 +3062,7 @@ const zhCN = {
     workflowControlDeliveryPending: "用户操作已提交，等待原 Agent 会话接纳。",
     workflowControlDeliveryAccepted: "原 Agent 已接纳操作，工作流状态将继续更新。",
     workflowControlDeliveryUnknown: "宿主回执未知，正在核对原会话。请勿重复发送继续指令。",
+    workflowControlCodexStopped: "Workflow 已停止。Codex 不支持中断当前回复，仍在进行的回复可能会继续。",
     workflowControlDeliveryFailed: "宿主未能接纳操作，请检查原会话与连接。",
     workflowControlLegacy: "此运行使用旧协议。流程控制请在原对话中操作；新建运行将使用新的控制协议。",
     workflowRunRefresh: "刷新",

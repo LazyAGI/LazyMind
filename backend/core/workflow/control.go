@@ -138,6 +138,14 @@ func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID st
 			}
 		case "continue":
 			wasEditPaused := controlstore.EditPaused(*session)
+			// An edited completed run must be reprojected before terminal admission
+			// can apply; downstream attempts may already have become stale.
+			if wasEditPaused && session.Status == SessionStatusCompleted {
+				session.Status = SessionStatusWaiting
+				if err := tx.Model(session).Update("status", session.Status).Error; err != nil {
+					return err
+				}
+			}
 			if err := controlstore.ClearEditPause(tx, session); err != nil {
 				return err
 			}

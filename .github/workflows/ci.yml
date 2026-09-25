@@ -32,6 +32,21 @@ jobs:
         run: |
           extra_args=()
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # An unrelated PR cannot change the pinned Skill archives. Keep
+            # Featured Workflow validation, without downloading every remote
+            # SkillHub package on every CI run.
+            if git -C ../.. diff --quiet "${{ github.event.pull_request.base.sha }}" HEAD -- \
+              skills/builtin-sources.yaml skills/builtin-skills.lock.json \
+              skills/patches skills/featured \
+              backend/core/cmd/builtin-skill-bundle \
+              backend/core/skillv2/builtin backend/core/skillv2/metadata \
+              backend/core/skillv2/skillpackage backend/core/skillv2/skillpatch \
+              backend/core/skillv2/sourceurl; then
+              go run ./cmd/builtin-skill-bundle \
+                --featured-sources ../../skills/featured \
+                --check-featured
+              exit 0
+            fi
             git show "${{ github.event.pull_request.base.sha }}:skills/builtin-skills.lock.json" > /tmp/base-builtin-skills.lock.json
             extra_args+=(--verify-lock-base /tmp/base-builtin-skills.lock.json)
           fi

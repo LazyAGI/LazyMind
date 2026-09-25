@@ -15,6 +15,7 @@ const fixture = vi.hoisted(() => ({
   refresh: vi.fn(),
   setApprovalPreference: vi.fn(async () => {}),
   setFocusedTab: vi.fn(),
+  focusedTab: undefined as string | undefined,
 }));
 vi.mock('@/modules/chat/hooks/useWorkflow', () => ({
   useWorkflowSession: () => ({ session: fixture.session, loading: false, refresh: fixture.refresh }),
@@ -25,7 +26,8 @@ vi.mock('@/modules/chat/store/workflowPanel', async (original) => {
     get sessionByConversation() { return { 'layout-test': fixture.session }; },
     bumpDismissedRefresh: vi.fn(), autoRunningByConversation: {}, setAutoRunning: vi.fn(),
     fetchWorkflowUI: () => Promise.resolve(fixture.ui), setFocusedTab: fixture.setFocusedTab,
-    setFocusedSortOrder: vi.fn(), focusedTabByConversation: {}, workflowUIByWorkflow: {},
+    setFocusedSortOrder: vi.fn(),
+    get focusedTabByConversation() { return { 'layout-test': fixture.focusedTab }; }, workflowUIByWorkflow: {},
   };
   return { ...actual, useWorkflowStore: Object.assign((selector?: (value: typeof state) => unknown) => selector ? selector(state) : state, { getState: () => state }) };
 });
@@ -57,6 +59,8 @@ beforeEach(async () => {
   await i18n.changeLanguage('zh-CN');
   vi.clearAllMocks();
   fixture.flush.mockResolvedValue(true);
+  fixture.focusedTab = undefined;
+  fixture.setFocusedTab.mockImplementation((_id: string, tab: string) => { fixture.focusedTab = tab; });
   localStorage.clear();
   fixture.ui = { name: '示例工作流', tabs: [
     { id: 'prepare', step_id: 'prepare', label: '写作准备', layout: 'list', slots: [] },
@@ -78,6 +82,33 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('shared workflow compact layout', () => {
+  it.each(['native', 'codex'] as const)('follows steps until the user selects a tab on %s', async surface => {
+    const props = surface === 'codex' ? { embedded: true, externalPresentation: { activities: {}, compactEmptyStates: false } } : {};
+    fixture.session = { ...fixture.session, status: 'active', current_step_id: 'prepare' };
+    const view = render(<WorkflowPanel conversationId='layout-test' {...props} />);
+    await waitFor(() => expect(screen.getByRole('tab', { name: '写作准备' })).toHaveAttribute('aria-selected', 'true'));
+    fixture.session = { ...fixture.session, current_step_id: 'write_document' };
+    view.rerender(<WorkflowPanel conversationId='layout-test' {...props} />);
+    await waitFor(() => expect(screen.getByRole('tab', { name: '成稿' })).toHaveAttribute('aria-selected', 'true'));
+    fireEvent.click(screen.getByRole('tab', { name: '写作准备' }));
+    fixture.session = { ...fixture.session, status: 'waiting', slots: [...fixture.session.slots!] };
+    view.rerender(<WorkflowPanel conversationId='layout-test' {...props} />);
+    expect(screen.getByRole('tab', { name: '写作准备' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('keeps Codex empty slots and default folding identical to native content', async () => {
+    fixture.session.slots = [];
+    fixture.ui.tabs![1].slots[0].widget = { widgetType: 'text-markdown' };
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿' });
+    const nativeContent = view.container.querySelector('.workflow-panel__body')!.innerHTML;
+    view.rerender(<WorkflowPanel conversationId='layout-test' embedded
+      externalPresentation={{ activities: {}, compactEmptyStates: false }} />);
+    expect(view.container.querySelector('.workflow-panel__body')!.innerHTML).toBe(nativeContent);
+    expect(view.container.querySelector('.workflow-panel__slot-placeholder')).toHaveTextContent('—');
+    expect(view.container.querySelector('.workflow-panel__slot-collapse')).toBeNull();
+  });
+
   it.each(['active', 'waiting', 'failed', 'completed'] as const)(
     'shows the full trust notice for %s sessions and after remount', async (status) => {
       fixture.session.status = status;
@@ -344,7 +375,7 @@ describe('external presentation opt-in', () => {
       write_document: { execution: 'failed', validity: 'effective', requires_approval: false, reachability: 'reachable', readiness: 'blocked', branch: '' },
       prepare: { execution: 'running', validity: 'effective', requires_approval: false, reachability: 'reachable', readiness: 'blocked', branch: '' },
     } } as WorkflowSession['projection'];
-    const view = render(<WorkflowPanel conversationId='layout-test' externalPresentation={{ activities: {} }} />);
+    const view = render(<WorkflowPanel conversationId='layout-test' externalPresentation={{ activities: {}, compactEmptyStates: true }} />);
     await screen.findByRole('tab', { name: /成稿/ });
     await waitFor(() => expect(screen.getByText('步骤执行失败')).toBeVisible());
     view.rerender(<WorkflowPanel conversationId='layout-test' />);
@@ -355,16 +386,16 @@ describe('external presentation opt-in', () => {
   it('auto-expands an empty external slot when content arrives and respects an explicit collapse', async () => {
     fixture.session.slots = [];
     fixture.ui.tabs![1].slots[0].widget = { widgetType: 'text-markdown', collapseWhenEmpty: true };
-    const view = render(<WorkflowPanel conversationId='layout-test' externalPresentation={{ activities: {} }} />);
+    const view = render(<WorkflowPanel conversationId='layout-test' externalPresentation={{ activities: {}, compactEmptyStates: true }} />);
     await screen.findByRole('tab', { name: /成稿/ });
     const button = () => view.container.querySelector<HTMLButtonElement>('.workflow-panel__slot-collapse')!;
     expect(button()).toHaveAttribute('aria-expanded', 'false');
     fixture.session.slots = [{ slot_id: 'document', slot: 'document', step_id: 'write_document', selected: true, revision: 1, artifact_value: { text: 'arrived' } }] as WorkflowSession['slots'];
-    view.rerender(<WorkflowPanel conversationId='layout-test' externalPresentation={{ activities: {} }} />);
+    view.rerender(<WorkflowPanel conversationId='layout-test' externalPresentation={{ activities: {}, compactEmptyStates: true }} />);
     expect(button()).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('正文 document')).toBeVisible();
     fireEvent.click(button());
-    view.rerender(<WorkflowPanel conversationId='layout-test' externalPresentation={{ activities: {} }} />);
+    view.rerender(<WorkflowPanel conversationId='layout-test' externalPresentation={{ activities: {}, compactEmptyStates: true }} />);
     expect(button()).toHaveAttribute('aria-expanded', 'false');
     view.rerender(<WorkflowPanel conversationId='layout-test' />);
     expect(button()).toBeNull();

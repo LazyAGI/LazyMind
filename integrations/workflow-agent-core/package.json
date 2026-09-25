@@ -1,0 +1,12 @@
+{
+  "name": "@lazymind/workflow-agent-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./protocol": "./src/protocol.ts",
+    "./runtime": "./src/runtime.ts",
+    "./transport": "./src/transport.ts",
+    "./panel-store": "./src/panel-store.ts"
+  }
+}
