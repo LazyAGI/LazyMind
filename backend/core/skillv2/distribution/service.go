@@ -24,6 +24,7 @@ func (err distributionError) Error() string { return string(err) }
 const ErrConflictsRequireReview distributionError = "distribution upgrade conflicts require draft review"
 const ErrUpgradeDraftActive distributionError = "distribution upgrade draft is active"
 const ErrDraftActive distributionError = "cannot prepare distribution upgrade while draft overlay exists"
+const ErrPackageUnavailable distributionError = "builtin Skill upgrade package is unavailable"
 
 func IsUpgradeTaskID(taskID string) bool {
 	return strings.HasPrefix(strings.TrimSpace(taskID), upgradeTaskPrefix)
@@ -66,6 +67,12 @@ type PackageProvider interface {
 	Latest(uid string) (Package, bool, error)
 }
 
+// PackageAcquirer supplies the complete locked package for an explicit upgrade.
+// Latest is metadata-only so status checks never download an archive.
+type PackageAcquirer interface {
+	Acquire(ctx context.Context, uid string) (Package, error)
+}
+
 type ServiceDeps struct {
 	DB       *gorm.DB
 	Blobs    BlobStore
@@ -101,8 +108,9 @@ type Status struct {
 type Conflict = merge3.Conflict
 
 type PrepareRequest struct {
-	SkillID string
-	UserID  string
+	SkillID         string
+	UserID          string
+	DownloadPackage bool
 }
 
 type PrepareResponse struct {
@@ -235,6 +243,23 @@ func (s *Service) Prepare(ctx context.Context, req PrepareRequest) (PrepareRespo
 	}
 	if !found {
 		return PrepareResponse{}, failure("latest builtin Skill distribution was not found")
+	}
+	if initialBinding.CurrentArchiveSHA256 != latest.ArchiveSHA256 && initialBinding.PendingArchiveSHA256 == "" {
+		if req.DownloadPackage {
+			if acquirer, ok := s.provider.(PackageAcquirer); ok {
+				complete, err := acquirer.Acquire(ctx, initialBinding.BuiltinSkillUID)
+				if err != nil {
+					return PrepareResponse{}, fmt.Errorf("%w: %v", ErrPackageUnavailable, err)
+				}
+				if complete.UID != latest.UID || complete.ArchiveSHA256 != latest.ArchiveSHA256 || complete.TreeSHA256 != latest.TreeSHA256 {
+					return PrepareResponse{}, fmt.Errorf("%w: catalog changed while preparing upgrade", ErrPackageUnavailable)
+				}
+				latest = complete
+			}
+		}
+		if len(latest.Files) == 0 {
+			return PrepareResponse{}, ErrPackageUnavailable
+		}
 	}
 
 	var response PrepareResponse

@@ -927,6 +927,7 @@ func init() {
 	registerAdditionalErrorAlias("draft version conflict", "draft version conflict; refresh and retry", http.StatusConflict, 2003085)
 	registerAdditionalError("summary model returned empty content", http.StatusBadGateway, 2003115)
 	registerAdditionalError("summary model returned the summary instruction instead of a summary", http.StatusBadGateway, 2003114)
+	registerAdditionalError("builtin skill package download failed", http.StatusBadGateway, 2003116)
 	registerAdditionalError("result version changed", http.StatusConflict, 2003100)
 	registerAdditionalError("release market task idempotency keys failed", http.StatusInternalServerError, 2003101)
 	registerAdditionalError("workflow unavailable", http.StatusServiceUnavailable, 2002919)

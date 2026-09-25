@@ -219,8 +219,7 @@ func catalogPackages(catalogPath string) ([]Package, error) {
 		if strings.TrimSpace(entry.Content) == "" {
 			return nil, catalogFailure("builtin skill %s is missing catalog content", entry.UID)
 		}
-		archivePath, _ := resolvePackagePath(catalogPath, entry.PackageFile)
-		packages = append(packages, packageFromCatalog(entry, archivePath, map[string][]byte{"SKILL.md": []byte(entry.Content)}))
+		packages = append(packages, packageFromCatalog(entry, "", map[string][]byte{"SKILL.md": []byte(entry.Content)}))
 	}
 	return packages, nil
 }
@@ -237,22 +236,15 @@ func catalogPackageByUID(catalogPath, uid string) (Package, bool, error) {
 		if entry.UID != uid {
 			continue
 		}
-		archivePath, err := resolvePackagePath(catalogPath, entry.PackageFile)
-		if err != nil {
-			return Package{}, false, err
+		if strings.TrimSpace(entry.Content) == "" {
+			return Package{}, false, catalogFailure("builtin skill %s is missing catalog content", entry.UID)
 		}
-		if err := verifyArchive(archivePath, entry.ArchiveSHA256, entry.ArchiveSize); err != nil {
-			return Package{}, false, catalogFailure("builtin skill %s: %v", uid, err)
+		cacheRoot, _ := builtinCacheRoot()
+		pkg, found, cacheErr := cachedPackage(catalogPath, entry, cacheRoot)
+		if cacheErr != nil || found {
+			return pkg, found, cacheErr
 		}
-		pkg, err := skillpackage.ReadZip(archivePath)
-		if err != nil {
-			return Package{}, false, err
-		}
-		files := pkg.Files
-		if _, ok := files["SKILL.md"]; !ok {
-			return Package{}, false, catalogFailure("builtin skill %s missing SKILL.md", uid)
-		}
-		return packageFromCatalog(entry, archivePath, files), true, nil
+		return packageFromCatalog(entry, "", map[string][]byte{"SKILL.md": []byte(entry.Content)}), true, nil
 	}
 	return Package{}, false, nil
 }

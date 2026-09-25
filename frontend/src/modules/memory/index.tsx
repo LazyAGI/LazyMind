@@ -3599,12 +3599,13 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         new Set(previous).add(builtinSkillUid),
       );
       try {
-        await enableBuiltinSkill(builtinSkillUid);
+        await enableBuiltinSkill(builtinSkillUid, { silentError: true });
         // No extra list refresh here — caller handles optimistic UI update.
         // Data syncs when the user switches tabs.
         message.success(t("admin.memoryBuiltinSkillEnableSuccess"));
       } catch (error) {
         console.error("Enable builtin skill failed:", error);
+        message.error(getLocalizedErrorMessage(error));
         throw error;
       } finally {
         setBuiltinSkillEnableLoading((previous) => {
