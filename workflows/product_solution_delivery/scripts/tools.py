@@ -1313,6 +1313,7 @@ def normalize_product_parameters(
     sample_aliases = {
         "provided": "provided", "已提供": "provided", "有样例": "provided",
         "none-confirmed": "none-confirmed", "无样例": "none-confirmed",
+        "default": "none-confirmed",
         "默认结构": "none-confirmed", "使用默认结构": "none-confirmed",
         "不使用参考样例": "none-confirmed", "不提供参考样例": "none-confirmed",
         "不使用样例": "none-confirmed",
