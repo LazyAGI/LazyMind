@@ -13,6 +13,8 @@ const skillApiMocks = vi.hoisted(() => ({
   listSkillMarketPage: vi.fn(),
   listSkillMarketTags: vi.fn(),
   organizeSkills: vi.fn(),
+  cancelSkillOrganizeTask: vi.fn(),
+  listSkillOrganizeTasks: vi.fn(),
   waitForSkillOrganize: vi.fn(),
 }));
 const viewMocks = vi.hoisted(() => ({ props: {} as Record<string, any> }));

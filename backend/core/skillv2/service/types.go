@@ -174,6 +174,7 @@ type SkillSummary struct {
 	Name                  string
 	SkillName             string
 	Category              string
+	SourceRefType         string
 	Description           string
 	Tags                  []string
 	Field                 string

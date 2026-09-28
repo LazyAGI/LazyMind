@@ -905,7 +905,7 @@ func TestSkillOrganizeTaskListUsesAlgorithmRunStatus(t *testing.T) {
 	})
 	insertSkillReviewStats(t, db, map[string]any{
 		"id": "org-failed", "requestid": "request-failed", "userid": "user-1",
-		"status": "failed", "started_at": "2026-07-20T10:02:00Z", "summary": map[string]any{"failed_stage": "organize_apply"},
+		"status": "failed", "started_at": "2026-07-20T10:02:00Z", "summary": map[string]any{"failed_stage": "organize_apply", "error": "missing SKILL.md", "error_code": "skill_organize_invalid_package", "mode": "light", "skills": []string{"external/demo"}},
 	})
 	insertSkillReviewStats(t, db, map[string]any{
 		"id": "org-other-user", "requestid": "request-other-user", "userid": "user-2",
@@ -941,7 +941,12 @@ func TestSkillOrganizeTaskListUsesAlgorithmRunStatus(t *testing.T) {
 		statuses["request-completed"].Status != orm.SkillReviewStatsStatusCompleted ||
 		statuses["request-completed"].RunStatus != "completed" ||
 		statuses["request-failed"].Status != orm.ResourceUpdateTaskStatusFailed ||
-		statuses["request-failed"].RunStatus != "failed" {
+		statuses["request-failed"].RunStatus != "failed" ||
+		statuses["request-failed"].Error != "missing SKILL.md" ||
+		statuses["request-failed"].ErrorCode != "skill_organize_invalid_package" ||
+		statuses["request-failed"].FailedStage != "organize_apply" ||
+		statuses["request-failed"].Mode != "light" ||
+		len(statuses["request-failed"].Skills) != 1 {
 		t.Fatalf("unexpected organize statuses: %#v", statuses)
 	}
 
@@ -967,6 +972,13 @@ func TestSkillOrganizeTaskListUsesAlgorithmRunStatus(t *testing.T) {
 	}
 	if failed.Total != 1 || failed.Items[0].Status != orm.ResourceUpdateTaskStatusFailed {
 		t.Fatalf("unexpected request-filtered organize tasks: %#v", failed)
+	}
+	item, ok := failedSkillOrganizeRequest(orm.ResourceUpdateTaskTypeOrganizeSkill, "request-failed", failed.Items)
+	if !ok || item.Error != "missing SKILL.md" || item.ErrorCode != "skill_organize_invalid_package" {
+		t.Fatalf("expected the failed organize request to be returned as an error, got %#v ok=%v", item, ok)
+	}
+	if _, ok := failedSkillOrganizeRequest(orm.ResourceUpdateTaskTypeOrganizeSkill, "", failed.Items); ok {
+		t.Fatal("history listing must not treat a failed row as an HTTP error")
 	}
 }
 

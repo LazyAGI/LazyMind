@@ -518,10 +518,17 @@ const MessageList: React.FC<MessageListProps> = ({
       {messageList.length > 0 &&
         messageList.map((item, index) => {
           const historyId = item.history_id || item.id;
+          const pending = item.ask_pending;
+          const hasMailDraft = Boolean(
+            pending &&
+            (pending.mail_draft ||
+              (Array.isArray(pending.mail_drafts) && pending.mail_drafts.length)),
+          );
           const visibleItem =
             suppressAskPending &&
             item.role === RoleTypes.ASSISTANT &&
-            item.ask_pending
+            item.ask_pending &&
+            !hasMailDraft
               ? { ...item, ask_pending: undefined }
               : item;
           return (

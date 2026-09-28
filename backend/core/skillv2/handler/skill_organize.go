@@ -122,19 +122,20 @@ func SubmitSkillOrganize(w http.ResponseWriter, r *http.Request) {
 	resp, status, err := submitSkillOrganize(r.Context(), db, userID, normalized)
 	accepted := err == nil && status == http.StatusOK && resp != nil && resp.Code == 0 && skillOrganizeResponseStatusAccepted(resp.Data.Status) &&
 		resp.Data.RequestID == normalized.RequestID && strings.TrimSpace(resp.Data.TaskID) != ""
-	reservationStatus := orm.ResourceUpdateTaskStatusFailed
-	algorithmTaskID := ""
 	if accepted {
-		reservationStatus = orm.ResourceUpdateTaskStatusDone
-		algorithmTaskID = strings.TrimSpace(resp.Data.TaskID)
-	}
-	reservationErr := err
-	if !accepted && reservationErr == nil {
-		reservationErr = fmt.Errorf("skill organize returned unexpected response")
-	}
-	if finishErr := finishSkillOrganizeReservation(r.Context(), db, reservation.ID, reservationStatus, algorithmTaskID, reservationErr); finishErr != nil {
-		replyError(w, "update skill organize reservation failed", http.StatusInternalServerError)
-		return
+		if noteErr := noteSkillOrganizeAccepted(r.Context(), db, reservation.ID, strings.TrimSpace(resp.Data.TaskID), normalized); noteErr != nil {
+			replyError(w, "update skill organize reservation failed", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		reservationErr := err
+		if reservationErr == nil {
+			reservationErr = fmt.Errorf("skill organize returned unexpected response")
+		}
+		if finishErr := finishSkillOrganizeReservation(r.Context(), db, reservation.ID, orm.ResourceUpdateTaskStatusFailed, "", reservationErr); finishErr != nil {
+			replyError(w, "update skill organize reservation failed", http.StatusInternalServerError)
+			return
+		}
 	}
 	if err != nil {
 		replyError(w, fmt.Sprintf("skill organize call failed: %v", err), http.StatusBadGateway)
@@ -176,6 +177,22 @@ func createSkillOrganizeReservation(ctx context.Context, db *gorm.DB, userID, re
 		UpdatedAt:    now,
 	}
 	return task, db.WithContext(ctx).Create(&task).Error
+}
+
+func noteSkillOrganizeAccepted(ctx context.Context, db *gorm.DB, taskID, resultID string, req skillOrganizeSubmitRequest) error {
+	requestJSON, err := json.Marshal(map[string]any{
+		"requestid": strings.TrimSpace(req.RequestID),
+		"mode":      strings.TrimSpace(req.Mode),
+		"skills":    req.Skills,
+	})
+	if err != nil {
+		return err
+	}
+	return db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).Where("id = ?", taskID).Updates(map[string]any{
+		"result_id":    strings.TrimSpace(resultID),
+		"request_json": requestJSON,
+		"updated_at":   time.Now().UTC(),
+	}).Error
 }
 
 func finishSkillOrganizeReservation(ctx context.Context, db *gorm.DB, taskID, status, resultID string, taskErr error) error {
@@ -355,4 +372,57 @@ func normalizeSkillOrganizePath(raw string) (string, error) {
 		return "", fmt.Errorf("skill path must be skills/<category>/<skill_name>")
 	}
 	return cleaned, nil
+}
+
+func CancelSkillOrganize(w http.ResponseWriter, r *http.Request) {
+	db, ok := requireDB(w)
+	if !ok {
+		return
+	}
+	userID, _, ok := requireUser(w, r)
+	if !ok {
+		return
+	}
+	requestID := strings.TrimSpace(r.URL.Query().Get("requestid"))
+	if requestID == "" {
+		var body struct {
+			RequestID string `json:"requestid"`
+		}
+		if !decodeJSON(w, r, &body) {
+			return
+		}
+		requestID = strings.TrimSpace(body.RequestID)
+	}
+	if requestID == "" {
+		replyError(w, "requestid is required", http.StatusBadRequest)
+		return
+	}
+	var task orm.ResourceUpdateTask
+	err := db.WithContext(r.Context()).
+		Where("user_id = ? AND task_type = ? AND status = ?", userID, orm.ResourceUpdateTaskTypeOrganizeSkill, orm.ResourceUpdateTaskStatusRunning).
+		Order("created_at DESC").
+		Take(&task).Error
+	if err != nil {
+		replyError(w, "skill organize task is not running", http.StatusConflict)
+		return
+	}
+	storedID := ""
+	var stored struct {
+		RequestID string `json:"requestid"`
+	}
+	_ = json.Unmarshal(task.RequestJSON, &stored)
+	storedID = strings.TrimSpace(stored.RequestID)
+	if storedID != "" && storedID != requestID {
+		replyError(w, "skill organize task is not running", http.StatusConflict)
+		return
+	}
+	resp, status, callErr := algo.CancelSkillOrganize(r.Context(), algo.SkillOrganizeCancelRequest{
+		RequestID: requestID,
+		UserID:    userID,
+	})
+	if callErr != nil || status >= 300 || resp == nil || !resp.Data.Cancelled {
+		replyError(w, "skill organize cancel failed", http.StatusBadGateway)
+		return
+	}
+	common.ReplyOK(w, map[string]any{"status": "cancelled", "requestid": requestID})
 }

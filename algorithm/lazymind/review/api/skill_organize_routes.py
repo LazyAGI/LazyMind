@@ -7,9 +7,15 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from lazyllm import LOG
 from lazyllm import ThreadPoolExecutor
+from pydantic import BaseModel
 
 from lazymind.review.skill_organize.config import DEFAULT_BACKGROUND_WORKERS
 from lazymind.review.skill_organize.schemas import SkillOrganizeRequest
+from lazymind.review.service.skill_organize import (
+    arm_skill_organize_cancel,
+    cancel_skill_organize,
+)
+
 router = APIRouter()
 background_executor = ThreadPoolExecutor(max_workers=DEFAULT_BACKGROUND_WORKERS)
 
@@ -32,6 +38,7 @@ async def skill_organize(payload: SkillOrganizeRequest):
     taskid = build_skill_organize_taskid(payload.requestid)
     try:
         record_skill_organize_pending(payload, taskid)
+        arm_skill_organize_cancel(payload.requestid)
     except Exception as exc:
         LOG.exception(f'[SkillOrganize] failed to create pending skill organize task: {exc}')
         return JSONResponse(
@@ -75,6 +82,24 @@ async def skill_organize(payload: SkillOrganizeRequest):
             'code': 0,
             'msg': 'skill organize accepted',
             'data': {'status': 'pending', 'requestid': payload.requestid, 'taskid': taskid},
+        },
+    )
+
+
+class SkillOrganizeCancelBody(BaseModel):
+    requestid: str
+    user_id: str = ''
+
+
+@router.post('/api/chat/skill_organize:cancel', summary='Cancel a running skill organize job')
+async def skill_organize_cancel(payload: SkillOrganizeCancelBody):
+    cancelled = cancel_skill_organize(payload.requestid)
+    return JSONResponse(
+        status_code=200,
+        content={
+            'code': 0,
+            'msg': 'skill organize cancel requested' if cancelled else 'skill organize was not running',
+            'data': {'cancelled': cancelled, 'requestid': payload.requestid},
         },
     )
 

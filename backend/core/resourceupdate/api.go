@@ -90,6 +90,11 @@ type skillReviewTaskStatusResponse struct {
 	RunStatus          string                   `json:"run_status,omitempty"`
 	ResultCount        int64                    `json:"result_count"`
 	WhenToUseConflicts []whenToUseConflictGroup `json:"when_to_use_conflicts,omitempty"`
+	Error              string                   `json:"error,omitempty"`
+	ErrorCode          string                   `json:"error_code,omitempty"`
+	FailedStage        string                   `json:"failed_stage,omitempty"`
+	Mode               string                   `json:"mode,omitempty"`
+	Skills             []string                 `json:"skills,omitempty"`
 }
 
 type skillReviewTaskListResponse struct {
@@ -242,7 +247,32 @@ func listSkillTasks(w http.ResponseWriter, r *http.Request, taskType, errorLabel
 		mapReviewError(w, err, errorLabel)
 		return
 	}
+	if failed, ok := failedSkillOrganizeRequest(taskType, requestID, resp.Items); ok {
+		message := strings.TrimSpace(failed.Error)
+		if message == "" {
+			message = "skill organize failed"
+		}
+		common.ReplyErrWithData(w, message, map[string]any{
+			"code":         failed.ErrorCode,
+			"error":        failed.Error,
+			"failed_stage": failed.FailedStage,
+			"status":       failed.Status,
+		}, http.StatusInternalServerError)
+		return
+	}
 	common.ReplyOK(w, resp)
+}
+
+func failedSkillOrganizeRequest(taskType, requestID string, items []skillReviewTaskStatusResponse) (skillReviewTaskStatusResponse, bool) {
+	if taskType != orm.ResourceUpdateTaskTypeOrganizeSkill || strings.TrimSpace(requestID) == "" {
+		return skillReviewTaskStatusResponse{}, false
+	}
+	for _, item := range items {
+		if item.Status == orm.ResourceUpdateTaskStatusFailed || item.RunStatus == orm.ResourceUpdateTaskStatusFailed {
+			return item, true
+		}
+	}
+	return skillReviewTaskStatusResponse{}, false
 }
 
 func buildSkillReviewTaskList(ctx context.Context, db *gorm.DB, userID, status, requestID string, page, pageSize int) (skillReviewTaskListResponse, error) {
@@ -325,6 +355,7 @@ func buildSkillReviewTaskStatus(ctx context.Context, db *gorm.DB, userID string,
 		if task.Status == orm.ResourceUpdateTaskStatusDone {
 			resp.Status = orm.ResourceUpdateTaskStatusRunning
 		}
+		applySkillOrganizeDetails(&resp, task, "")
 		return resp, nil
 	}
 
@@ -332,7 +363,69 @@ func buildSkillReviewTaskStatus(ctx context.Context, db *gorm.DB, userID string,
 	resp.Status = stats.Status
 	resp.ResultCount = skillReviewStatsToResponse(stats).SkillCount
 	resp.WhenToUseConflicts = parseWhenToUseConflicts(stats.Summary)
+	applySkillOrganizeDetails(&resp, task, stats.Summary)
+	settleFinishedSkillOrganizeReservation(ctx, db, task, stats.Status)
 	return resp, nil
+}
+
+func applySkillOrganizeDetails(resp *skillReviewTaskStatusResponse, task orm.ResourceUpdateTask, summary string) {
+	if task.TaskType != orm.ResourceUpdateTaskTypeOrganizeSkill {
+		return
+	}
+	var request struct {
+		Mode   string   `json:"mode"`
+		Skills []string `json:"skills"`
+	}
+	_ = json.Unmarshal(task.RequestJSON, &request)
+	resp.Mode = strings.TrimSpace(request.Mode)
+	resp.Skills = request.Skills
+	var parsed struct {
+		Error       string   `json:"error"`
+		ErrorCode   string   `json:"error_code"`
+		FailedStage string   `json:"failed_stage"`
+		Mode        string   `json:"mode"`
+		Skills      []string `json:"skills"`
+	}
+	if strings.TrimSpace(summary) != "" {
+		_ = json.Unmarshal([]byte(summary), &parsed)
+	}
+	if strings.TrimSpace(parsed.Mode) != "" {
+		resp.Mode = strings.TrimSpace(parsed.Mode)
+	}
+	if len(parsed.Skills) > 0 {
+		resp.Skills = parsed.Skills
+	}
+	resp.Error = strings.TrimSpace(parsed.Error)
+	if resp.Error == "" {
+		resp.Error = strings.TrimSpace(task.ErrorMessage)
+	}
+	resp.ErrorCode = strings.TrimSpace(parsed.ErrorCode)
+	resp.FailedStage = strings.TrimSpace(parsed.FailedStage)
+}
+
+func settleFinishedSkillOrganizeReservation(ctx context.Context, db *gorm.DB, task orm.ResourceUpdateTask, statsStatus string) {
+	if task.TaskType != orm.ResourceUpdateTaskTypeOrganizeSkill || task.Status != orm.ResourceUpdateTaskStatusRunning {
+		return
+	}
+	next := ""
+	switch strings.TrimSpace(statsStatus) {
+	case "completed", orm.ResourceUpdateTaskStatusDone:
+		next = orm.ResourceUpdateTaskStatusDone
+	case orm.ResourceUpdateTaskStatusFailed:
+		next = orm.ResourceUpdateTaskStatusFailed
+	case "cancelled", orm.ResourceUpdateTaskStatusSkipped:
+		next = orm.ResourceUpdateTaskStatusSkipped
+	default:
+		return
+	}
+	now := time.Now().UTC()
+	_ = db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).Where("id = ? AND status = ?", task.ID, orm.ResourceUpdateTaskStatusRunning).Updates(map[string]any{
+		"status":       next,
+		"finished_at":  now,
+		"locked_by":    "",
+		"locked_until": nil,
+		"updated_at":   now,
+	}).Error
 }
 
 func findSkillReviewTaskStats(ctx context.Context, db *gorm.DB, userID string, task orm.ResourceUpdateTask, requestID string) (skillReviewStatsRow, bool, error) {

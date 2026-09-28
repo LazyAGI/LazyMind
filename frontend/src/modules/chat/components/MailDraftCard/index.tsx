@@ -116,8 +116,21 @@ function formatMailError(value: unknown): string {
   return text;
 }
 
-function attachmentsFromDraft(names: string[] | undefined): LocalAttachment[] {
-  return (names || [])
+function stringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item ?? "").trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(/[,;]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function attachmentsFromDraft(names: unknown): LocalAttachment[] {
+  return stringList(names)
     .map((name) => String(name || "").trim())
     .filter(Boolean)
     .map((name) => ({
@@ -148,8 +161,8 @@ export default function MailDraftCard({
     !deliveryUnknown &&
     (draft.status === "failed" || partialSent || Boolean(lastError));
   const editable = !sent && !disabled;
-  const [to, setTo] = useState((draft.to || []).join(", "));
-  const [cc, setCc] = useState((draft.cc || []).join(", "));
+  const [to, setTo] = useState(stringList(draft.to).join(", "));
+  const [cc, setCc] = useState(stringList(draft.cc).join(", "));
   const [subject, setSubject] = useState(draft.subject || "");
   const [body, setBody] = useState(draft.body || "");
   const [attachments, setAttachments] = useState<LocalAttachment[]>(
@@ -183,8 +196,8 @@ export default function MailDraftCard({
   }, [artifacts]);
 
   useEffect(() => {
-    setTo((draft.to || []).join(", "));
-    setCc((draft.cc || []).join(", "));
+    setTo(stringList(draft.to).join(", "));
+    setCc(stringList(draft.cc).join(", "));
     setSubject(draft.subject || "");
     setBody(draft.body || "");
     setAttachments(attachmentsFromDraft(draft.attachments));
@@ -280,9 +293,13 @@ export default function MailDraftCard({
           <dt>{t("chat.mailDraft.to")}</dt>
           <dd>
             {editable ? (
-              <Input value={to} onChange={(event) => setTo(event.target.value)} />
+              <Input
+                className="mail-draft-address"
+                value={to}
+                onChange={(event) => setTo(event.target.value)}
+              />
             ) : (
-              (draft.to || []).join(", ") || "-"
+              stringList(draft.to).join(", ") || "-"
             )}
           </dd>
         </div>
@@ -290,9 +307,13 @@ export default function MailDraftCard({
           <dt>{t("chat.mailDraft.cc")}</dt>
           <dd>
             {editable ? (
-              <Input value={cc} onChange={(event) => setCc(event.target.value)} />
+              <Input
+                className="mail-draft-address"
+                value={cc}
+                onChange={(event) => setCc(event.target.value)}
+              />
             ) : (
-              (draft.cc || []).join(", ") || "-"
+              stringList(draft.cc).join(", ") || "-"
             )}
           </dd>
         </div>

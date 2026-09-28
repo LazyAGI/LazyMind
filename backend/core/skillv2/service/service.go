@@ -1131,13 +1131,25 @@ func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, 
 			return sourcePackage{}, "", "", fmt.Errorf("upload is not completed")
 		}
 		pkg, err := skillpackage.ReadZip(session.StoredPath)
-		return sourcePackage{Files: pkg.Files, PackageRoot: pkg.PackageRoot, ArchiveFilename: session.Filename}, "upload", source.UploadID, err
+		if err != nil {
+			return sourcePackage{}, "", "", err
+		}
+		if err := skillpackage.RejectExtraSkillPackages(pkg.Files); err != nil {
+			return sourcePackage{}, "", "", err
+		}
+		return sourcePackage{Files: pkg.Files, PackageRoot: pkg.PackageRoot, ArchiveFilename: session.Filename}, "upload", source.UploadID, nil
 	case "local_zip":
 		if strings.TrimSpace(source.StoredPath) == "" {
 			return sourcePackage{}, "", "", fmt.Errorf("stored_path required")
 		}
 		pkg, err := skillpackage.ReadZip(source.StoredPath)
-		return sourcePackage{Files: pkg.Files, PackageRoot: pkg.PackageRoot, ArchiveFilename: source.Filename}, "local_zip", source.Filename, err
+		if err != nil {
+			return sourcePackage{}, "", "", err
+		}
+		if err := skillpackage.RejectExtraSkillPackages(pkg.Files); err != nil {
+			return sourcePackage{}, "", "", err
+		}
+		return sourcePackage{Files: pkg.Files, PackageRoot: pkg.PackageRoot, ArchiveFilename: source.Filename}, "local_zip", source.Filename, nil
 	case "builtin_zip":
 		if strings.TrimSpace(source.StoredPath) == "" {
 			return sourcePackage{}, "", "", fmt.Errorf("stored_path required")
@@ -1162,6 +1174,9 @@ func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, 
 			pkg, err = skillpackage.ReadZip(downloaded.Path)
 		}
 		if err != nil {
+			return sourcePackage{}, "", "", err
+		}
+		if err := skillpackage.RejectExtraSkillPackages(pkg.Files); err != nil {
 			return sourcePackage{}, "", "", err
 		}
 		ensureURLImportDefaults(pkg.Files)
@@ -1794,6 +1809,7 @@ func (s *SkillService) summaryFor(ctx context.Context, row skillRow) (SkillSumma
 		Name:                  row.SkillName,
 		SkillName:             row.SkillName,
 		Category:              row.Category,
+		SourceRefType:         rowSourceRefType(ctx, s, row),
 		Description:           row.Description,
 		Tags:                  tags,
 		Field:                 row.Field, Aliases: aliases, Keywords: keywords, OriginalRevisionID: valueOrEmpty(row.OriginalRevisionID),
@@ -1807,6 +1823,18 @@ func (s *SkillService) summaryFor(ctx context.Context, row skillRow) (SkillSumma
 		TrashExpiresAt: row.TrashExpiresAt,
 		DeletedBy:      valueOrEmpty(row.DeletedBy),
 	}, nil
+}
+
+func rowSourceRefType(ctx context.Context, s *SkillService, row skillRow) string {
+	if row.HeadRevisionID == nil || strings.TrimSpace(*row.HeadRevisionID) == "" {
+		return ""
+	}
+	var revision skillRevisionRow
+	err := s.db.WithContext(ctx).Select("source_ref_type").Where("id = ?", *row.HeadRevisionID).Take(&revision).Error
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(revision.SourceRefType)
 }
 
 func markPendingSkillDraftAuto(ctx context.Context, tx *gorm.DB, skillID string, now time.Time) error {

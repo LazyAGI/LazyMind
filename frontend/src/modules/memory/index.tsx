@@ -197,6 +197,7 @@ const mapSkillAssetRecordToStructuredAsset = (
   content: item.content,
   originalRevisionId: item.originalRevisionId,
   originBuiltinSkillUid: item.originBuiltinSkillUid,
+  sourceRefType: item.sourceRefType,
   field: item.field,
   aliases: item.aliases,
   keywords: item.keywords,
@@ -2460,7 +2461,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         {
           name: t("admin.memorySkillUploadDefaultName"),
           description: t("admin.memorySkillUploadPersonalDesc"),
-          category: "personal",
+          category: "external",
           tags: [],
           isEnabled: true,
           source: { type: "url", url: trimmedUrl },
@@ -2511,7 +2512,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         {
           name: inferredName,
           description: t("admin.memorySkillUploadPersonalDesc"),
-          category: "personal",
+          category: "external",
           tags: [],
           isEnabled: true,
           source: { type: "uploaded_zip", uploadId: upload.uploadId },
@@ -2561,12 +2562,12 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   };
 
   const openSkillShareCenter = (nextTab: SkillShareCenterTab = "incoming") => {
-    if (hideUserGroupSurfaces) {
-      return;
-    }
-    setSkillShareCenterTab(nextTab);
+    const tab = hideUserGroupSurfaces ? "organize" : nextTab;
+    setSkillShareCenterTab(tab);
     setSkillShareCenterOpen(true);
-    void refreshSkillShareCenter({ showErrorToast: true });
+    if (tab !== "organize") {
+      void refreshSkillShareCenter({ showErrorToast: true });
+    }
   };
 
   const closeSkillShareCenter = () => {
@@ -3952,7 +3953,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
           await createSkillAsset({
             name: payload.name,
             description: payload.description,
-            category: payload.category || "personal",
+            category: "external",
             tags: payload.tags,
             isEnabled: true,
             source,
@@ -4500,7 +4501,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       width: 110,
       render: (value: string, record) => (
         <div className="memory-skill-source">
-          <span>{record.originBuiltinSkillUid ? t("admin.memorySkillOriginBuiltin") : value === "internal" ? t("admin.memorySkillOriginInternal") : value === "external" ? t("admin.memorySkillOriginExternal") : t("admin.memorySkillOriginUnknown")}</span>
+          <span>{record.originBuiltinSkillUid ? t("admin.memorySkillOriginBuiltin") : record.category === "external" || record.sourceRefType === "url" || record.sourceRefType === "upload" ? t("admin.memorySkillOriginExternal") : record.category === "internal" ? t("admin.memorySkillOriginInternal") : t("admin.memorySkillOriginUnknown")}</span>
           {record.field || (value && !["internal", "external"].includes(value)) ? <small>{record.field || value}</small> : null}
         </div>
       ),
@@ -5117,30 +5118,30 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         />
       </Modal>
 
-      {!hideUserGroupSurfaces && (
-        <>
-          <SkillShareCenterModal
-            t={t}
-            skillShareCenterOpen={skillShareCenterOpen}
-            closeSkillShareCenter={closeSkillShareCenter}
-            skillShareCenterTab={skillShareCenterTab}
-            setSkillShareCenterTab={setSkillShareCenterTab}
-            incomingPendingCount={incomingPendingCount}
-            outgoingSkillShares={outgoingSkillShares}
-            skillShareCenterLoading={skillShareCenterLoading}
-            refreshSkillShareCenter={refreshSkillShareCenter}
-            skillShareCenterError={skillShareCenterError}
-            currentSkillShareList={currentSkillShareList}
-            skillShareActionState={skillShareActionState}
-            getSkillShareStatusMeta={getSkillShareStatusMeta}
-            formatDateTime={formatDateTime}
-            previewSkillShare={previewSkillShare}
-            rejectIncomingSkillShare={rejectIncomingSkillShare}
-            acceptIncomingSkillShare={acceptIncomingSkillShare}
-            isSkillShareActionable={isSkillShareActionable}
-          />
+      <SkillShareCenterModal
+        t={t}
+        hideShareTabs={hideUserGroupSurfaces}
+        skillShareCenterOpen={skillShareCenterOpen}
+        closeSkillShareCenter={closeSkillShareCenter}
+        skillShareCenterTab={skillShareCenterTab}
+        setSkillShareCenterTab={setSkillShareCenterTab}
+        incomingPendingCount={incomingPendingCount}
+        outgoingSkillShares={outgoingSkillShares}
+        skillShareCenterLoading={skillShareCenterLoading}
+        refreshSkillShareCenter={refreshSkillShareCenter}
+        skillShareCenterError={skillShareCenterError}
+        currentSkillShareList={currentSkillShareList}
+        skillShareActionState={skillShareActionState}
+        getSkillShareStatusMeta={getSkillShareStatusMeta}
+        formatDateTime={formatDateTime}
+        previewSkillShare={previewSkillShare}
+        rejectIncomingSkillShare={rejectIncomingSkillShare}
+        acceptIncomingSkillShare={acceptIncomingSkillShare}
+        isSkillShareActionable={isSkillShareActionable}
+      />
 
-          <ShareModal
+      {!hideUserGroupSurfaces && (
+        <ShareModal
             t={t}
             shareModalOpen={shareModalOpen}
             closeShareModal={closeShareModal}
@@ -5157,7 +5158,6 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
             getSkillShareStatusMeta={getSkillShareStatusMeta}
             formatDateTime={formatDateTime}
           />
-        </>
       )}
 
     </div>

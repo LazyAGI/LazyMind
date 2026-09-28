@@ -40,6 +40,20 @@ type SkillOrganizeData struct {
 	TaskID    string `json:"taskid"`
 }
 
+type SkillOrganizeCancelRequest struct {
+	RequestID string `json:"requestid"`
+	UserID    string `json:"user_id"`
+}
+
+type SkillOrganizeCancelResponse struct {
+	Code int `json:"code"`
+	Msg  string `json:"msg"`
+	Data struct {
+		Cancelled bool   `json:"cancelled"`
+		RequestID string `json:"requestid"`
+	} `json:"data"`
+}
+
 type MemoryReviewRequest struct {
 	RunID                      string         `json:"run_id"`
 	TaskID                     string         `json:"task_id"`

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   Alert,
   Button,
@@ -9,14 +10,22 @@ import {
   Space,
   Tag,
 } from "antd";
-import type { SkillShareStatus } from "../skillApi";
+import type { SkillShareStatus, SkillOrganizeTaskRecord } from "../skillApi";
+import { listSkillOrganizeTasks } from "../skillApi";
+import {
+  skillOrganizeErrorText,
+  skillOrganizeModeLabel,
+  skillOrganizeStatusLabel,
+} from "../skillOrganizeCopy";
+import type { SkillShareCenterTab } from "../shared";
 
 interface SkillShareCenterModalProps {
   t: any;
+  hideShareTabs?: boolean;
   skillShareCenterOpen: boolean;
   closeSkillShareCenter: () => void;
-  skillShareCenterTab: "incoming" | "outgoing";
-  setSkillShareCenterTab: (value: "incoming" | "outgoing") => void;
+  skillShareCenterTab: SkillShareCenterTab;
+  setSkillShareCenterTab: (value: SkillShareCenterTab) => void;
   incomingPendingCount: number;
   outgoingSkillShares: any[];
   skillShareCenterLoading: boolean;
@@ -35,6 +44,7 @@ interface SkillShareCenterModalProps {
 export default function SkillShareCenterModal(props: SkillShareCenterModalProps) {
   const {
     t,
+    hideShareTabs = false,
     skillShareCenterOpen,
     closeSkillShareCenter,
     skillShareCenterTab,
@@ -53,6 +63,37 @@ export default function SkillShareCenterModal(props: SkillShareCenterModalProps)
     acceptIncomingSkillShare,
     isSkillShareActionable,
   } = props;
+  const activeTab: SkillShareCenterTab = hideShareTabs ? "organize" : skillShareCenterTab;
+  const [organizeTasks, setOrganizeTasks] = useState<SkillOrganizeTaskRecord[]>([]);
+  const [organizeLoading, setOrganizeLoading] = useState(false);
+  const [organizeError, setOrganizeError] = useState("");
+
+  const loadOrganizeHistory = async () => {
+    setOrganizeLoading(true);
+    setOrganizeError("");
+    try {
+      setOrganizeTasks(await listSkillOrganizeTasks(50));
+    } catch (error) {
+      setOrganizeTasks([]);
+      setOrganizeError(skillOrganizeErrorText("", "", t));
+      console.error("Load skill organize history failed:", error);
+    } finally {
+      setOrganizeLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!skillShareCenterOpen || activeTab !== "organize") {
+      return;
+    }
+    void loadOrganizeHistory();
+  }, [activeTab, skillShareCenterOpen]);
+
+  const skillLabel = (value: string) => {
+    const text = value.trim();
+    const parts = text.split("/").filter(Boolean);
+    return parts[parts.length - 1] || text;
+  };
 
   return (
     <Modal
@@ -68,10 +109,15 @@ export default function SkillShareCenterModal(props: SkillShareCenterModalProps)
     >
       <div className="memory-skill-share-center">
         <div className="memory-skill-share-toolbar">
-          <Segmented<"incoming" | "outgoing">
-            value={skillShareCenterTab}
+          <Segmented<SkillShareCenterTab>
+            value={activeTab}
             onChange={(value) => setSkillShareCenterTab(value)}
-            options={[
+            options={hideShareTabs ? [
+              {
+                label: t("admin.memorySkillOrganizeHistory"),
+                value: "organize",
+              },
+            ] : [
               {
                 label: t("admin.memorySkillShareCenterIncoming", {
                   count: incomingPendingCount,
@@ -84,17 +130,82 @@ export default function SkillShareCenterModal(props: SkillShareCenterModalProps)
                 }),
                 value: "outgoing",
               },
+              {
+                label: t("admin.memorySkillOrganizeHistory"),
+                value: "organize",
+              },
             ]}
           />
           <Button
-            loading={skillShareCenterLoading}
-            onClick={() => void refreshSkillShareCenter({ showErrorToast: true })}
+            loading={activeTab === "organize" ? organizeLoading : skillShareCenterLoading}
+            onClick={() => {
+              if (activeTab === "organize") {
+                void loadOrganizeHistory();
+                return;
+              }
+              void refreshSkillShareCenter({ showErrorToast: true });
+            }}
           >
             {t("admin.memorySkillShareRefresh")}
           </Button>
         </div>
 
-        {skillShareCenterError ? (
+        {activeTab === "organize" ? (
+          <>
+            {organizeError ? <Alert type="error" showIcon message={organizeError} /> : null}
+            {organizeLoading && !organizeTasks.length ? (
+              <Skeleton active paragraph={{ rows: 6 }} />
+            ) : organizeTasks.length ? (
+              <div className="memory-skill-share-list">
+                {organizeTasks.map((item) => {
+                  const mode = skillOrganizeModeLabel(item.mode, t);
+                  const when = item.task?.finishedAt || item.task?.createdAt;
+                  const errorText = item.status === "failed"
+                    ? skillOrganizeErrorText(item.errorCode, item.error, t)
+                    : "";
+                  return (
+                    <div key={item.requestId || item.task?.id} className="memory-skill-share-card">
+                      <div className="memory-skill-share-card-head">
+                        <div className="memory-skill-share-card-title">
+                          <strong>{skillOrganizeStatusLabel(item.status, t)}</strong>
+                          {mode ? <span>{mode}</span> : null}
+                        </div>
+                        <Tag color={item.status === "failed" ? "error" : item.status === "completed" || item.status === "done" ? "success" : "processing"}>
+                          {skillOrganizeStatusLabel(item.status, t)}
+                        </Tag>
+                      </div>
+                      <div className="memory-skill-share-card-body">
+                        {item.skills.length ? (
+                          <div className="memory-skill-share-card-line">
+                            <strong>{t("admin.memorySkillOrganizeHistorySkills")}</strong>
+                            <span>{item.skills.map(skillLabel).join("、")}</span>
+                          </div>
+                        ) : null}
+                        {when ? (
+                          <div className="memory-skill-share-card-line">
+                            <strong>{t("admin.memorySkillOrganizeHistoryTime")}</strong>
+                            <span>{formatDateTime(when)}</span>
+                          </div>
+                        ) : null}
+                        {errorText ? (
+                          <div className="memory-skill-share-card-line">
+                            <strong>{t("admin.memorySkillOrganizeFailed")}</strong>
+                            <span>{errorText}</span>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={t("admin.memorySkillOrganizeHistoryEmpty")}
+              />
+            )}
+          </>
+        ) : skillShareCenterError ? (
           <Alert
             type="error"
             showIcon
@@ -110,7 +221,7 @@ export default function SkillShareCenterModal(props: SkillShareCenterModalProps)
           />
         ) : null}
 
-        {skillShareCenterLoading && !currentSkillShareList.length ? (
+        {activeTab !== "organize" && (skillShareCenterLoading && !currentSkillShareList.length ? (
           <Skeleton active paragraph={{ rows: 6 }} />
         ) : currentSkillShareList.length ? (
           <div className="memory-skill-share-list">
@@ -229,12 +340,12 @@ export default function SkillShareCenterModal(props: SkillShareCenterModalProps)
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={
-              skillShareCenterTab === "incoming"
+              activeTab === "incoming"
                 ? t("admin.memorySkillShareEmptyIncoming")
                 : t("admin.memorySkillShareEmptyOutgoing")
             }
           />
-        )}
+        ))}
       </div>
     </Modal>
   );

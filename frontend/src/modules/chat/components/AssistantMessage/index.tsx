@@ -1,7 +1,7 @@
 import { Button, Divider, Flex, message, Modal, Spin, Tooltip } from "antd";
 import { trim, debounce } from "lodash";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import type { KeyboardEvent, MouseEvent } from "react";
+import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import "./index.scss";
@@ -38,6 +38,7 @@ import MultiAnswerDisplay, { type PreferenceType } from "../MultiAnswerDisplay";
 import FeedbackModal from "../FeedbackModal";
 import AskCard from "@/modules/chat/components/AskCard";
 import MailDraftCard from "@/modules/chat/components/MailDraftCard";
+import MessagePartBoundary from "@/modules/chat/components/MessagePartBoundary";
 import MailMailboxCard from "@/modules/chat/components/MailDraftCard/MailMailboxCard";
 import ToolLimitCard from "@/modules/chat/components/ToolLimitCard";
 import ChatExportActions from "../newChatContainer/components/ChatExportActions";
@@ -442,6 +443,10 @@ function feedbackReducer(
     default:
       return state;
   }
+}
+
+function MessagePart({ render }: { render: () => ReactNode }) {
+  return <>{render()}</>;
 }
 
 const AssistantMessage = (props: any) => {
@@ -1345,9 +1350,9 @@ const AssistantMessage = (props: any) => {
           { mail_drafts: drafts },
           item.answered_mail_draft_ids,
         );
-        if (!remainingDrafts.length) return null;
+        if (remainingDrafts.length) {
         const mailReadOnly = mailDraftCardsReadOnly(
-          disabled,
+          props.disabled,
           item.ask_answered,
         );
         const markDraftAnswered = (confirmedId: string) => {
@@ -1416,6 +1421,7 @@ const AssistantMessage = (props: any) => {
             })}
           </div>
         );
+        }
       }
       if (!showAskCard) return null;
       return (
@@ -1571,15 +1577,23 @@ const AssistantMessage = (props: any) => {
                 const answer = item.answers[answerIndex || 0];
                 const uniqueKey = answer?.history_id || `answer_${answerIndex}`;
 
-                return renderText(
-                  {
-                    ...item,
-                    delta: content,
-                    reasoning_content: reasoningContent,
-                    sources: answer?.sources || [],
-                    thinking_duration_s: answer?.thinking_duration_s,
-                  },
-                  uniqueKey,
+                return (
+                  <MessagePartBoundary fallback={<span>{t("chat.messageRenderFailed")}</span>}>
+                    <MessagePart
+                      render={() =>
+                        renderText(
+                          {
+                            ...item,
+                            delta: content,
+                            reasoning_content: reasoningContent,
+                            sources: answer?.sources || [],
+                            thinking_duration_s: answer?.thinking_duration_s,
+                          },
+                          uniqueKey,
+                        )
+                      }
+                    />
+                  </MessagePartBoundary>
                 );
               }}
               onSelectAnswer={onSelectAnswer}
@@ -1595,7 +1609,11 @@ const AssistantMessage = (props: any) => {
             />
             {renderForkAction()}
           </div>
-          {!item.fork_read_only && (item.ask_pending || index === length - 1) && renderBottom()}
+          {!item.fork_read_only && (item.ask_pending || index === length - 1) && (
+            <MessagePartBoundary fallback={<span>{t("chat.messageRenderFailed")}</span>}>
+              <MessagePart render={() => renderBottom()} />
+            </MessagePartBoundary>
+          )}
           {index === length - 1 && workflowSession && sessionId && (
             <WorkflowPanel
               key={sessionId}
@@ -1638,11 +1656,19 @@ const AssistantMessage = (props: any) => {
             onRetry={runRetryable ? regenerate : undefined}
             retryDisabled={regenerateDisabled}
           />
-          {shouldShowLoading
-            ? renderLoading()
-            : item.onboardingInfo
-              ? renderOnboardingInfo(item.onboardingInfo)
-              : renderText(item)}
+          {shouldShowLoading ? (
+            renderLoading()
+          ) : (
+            <MessagePartBoundary fallback={<span>{t("chat.messageRenderFailed")}</span>}>
+              <MessagePart
+                render={() =>
+                  item.onboardingInfo
+                    ? renderOnboardingInfo(item.onboardingInfo)
+                    : renderText(item)
+                }
+              />
+            </MessagePartBoundary>
+          )}
           {item.finish_reason ===
             ChatConversationsResponseFinishReasonEnum.FinishReasonUnknown &&
             renderError()}
@@ -1651,7 +1677,11 @@ const AssistantMessage = (props: any) => {
           {runCompleted && !item.onboardingInfo && renderFooter()}
           {item.fork_read_only && !item.delta && <span>{t("chat.fork.emptyTerminal")}</span>}
         </div>
-        {!item.fork_read_only && (item.ask_pending || index === length - 1) && renderBottom()}
+        {!item.fork_read_only && (item.ask_pending || index === length - 1) && (
+          <MessagePartBoundary fallback={<span>{t("chat.messageRenderFailed")}</span>}>
+            <MessagePart render={() => renderBottom()} />
+          </MessagePartBoundary>
+        )}
         {index === length - 1 && workflowSession && sessionId && (
           <WorkflowPanel
             key={sessionId}

@@ -228,6 +228,14 @@ func TestSkillHubPageURLImportResolvesDownloadAndPreservesSource(t *testing.T) {
 	if revision.SourceRefType != "url" || revision.SourceRefID != sourceURL {
 		t.Fatalf("source reference = (%q, %q), want (%q, %q)", revision.SourceRefType, revision.SourceRefID, "url", sourceURL)
 	}
+	var imported testutil.SkillRow
+	if err := db.Where("id = ?", response.SkillID).Take(&imported).Error; err != nil {
+		t.Fatalf("query imported skill: %v", err)
+	}
+	wantRoot := "external/" + imported.SkillName
+	if imported.Category != "external" || imported.RelativeRoot != wantRoot {
+		t.Fatalf("imported skill category=%q relative_root=%q, want external and %q", imported.Category, imported.RelativeRoot, wantRoot)
+	}
 }
 
 func TestCreateSkillFromInvalidURLReturnsInvalidParams(t *testing.T) {
