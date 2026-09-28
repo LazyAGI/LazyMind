@@ -24,6 +24,24 @@ def test_kb_toolkit_is_available_without_selected_kb():
         toolkit._kb_ids()
 
 
+def test_read_document_delegates_parse_and_read_lifecycle_to_core(monkeypatch):
+    lazyllm.globals['agentic_config'] = {'filters': {'kb_id': 'kb-one'}}
+    gets = []
+
+    monkeypatch.setattr(KBToolkit, '_accessible_kb_ids', staticmethod(lambda: {'kb-one'}))
+
+    def read(path):
+        gets.append(path)
+        return {'document_id': 'doc-one', 'content': {'text': 'whole document'}}
+
+    monkeypatch.setattr('lazymind.chat.engine.tools.kb.get_core_api', read)
+
+    result = KBToolkit().read_document('kb-one', 'doc-one')
+
+    assert result['content']['text'] == 'whole document'
+    assert gets == ['/datasets/kb-one/documents/doc-one:read']
+
+
 def _kb_tool_names(manager):
     return {item['function']['name'] for item in manager.tools_description}
 

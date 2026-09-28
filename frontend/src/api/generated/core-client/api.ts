@@ -2755,7 +2755,6 @@ export const DocumentActionErrorOpenAPIDataCauseEnum = {
 } as const;
 
 export type DocumentActionErrorOpenAPIDataCauseEnum = typeof DocumentActionErrorOpenAPIDataCauseEnum[keyof typeof DocumentActionErrorOpenAPIDataCauseEnum];
-
 export const DocumentActionErrorOpenAPIDataCodeEnum = {
     IdentityRequired: 'IDENTITY_REQUIRED',
     PermissionDenied: 'PERMISSION_DENIED',
@@ -5694,11 +5693,11 @@ export interface SkillCreateManagedOpenAPIRequest {
      */
     'call_mode'?: SkillCreateManagedOpenAPIRequestCallModeEnum;
     /**
-     * Legacy inline-create field. ZIP and URL imports use External.
+     * Legacy inline-create field. ZIP and URL imports always use external.
      */
     'category'?: string;
     /**
-     * Legacy inline-create field. ZIP and URL imports derive description from SKILL.md frontmatter.
+     * Optional fallback description for URL imports when SKILL.md frontmatter has no description. Valid frontmatter takes precedence; uploaded ZIP imports derive the description from the package.
      */
     'description'?: string;
     /**
@@ -5711,7 +5710,7 @@ export interface SkillCreateManagedOpenAPIRequest {
      */
     'keywords'?: Array<string>;
     /**
-     * Legacy inline-create field. ZIP and URL imports derive name from SKILL.md frontmatter.
+     * Optional fallback name for URL imports when SKILL.md frontmatter has no valid name. Valid frontmatter takes precedence; uploaded ZIP imports derive the name from the package.
      */
     'name'?: string;
     'source': SkillSourceOpenAPIRequest;
@@ -5727,6 +5726,21 @@ export const SkillCreateManagedOpenAPIRequestCallModeEnum = {
 
 export type SkillCreateManagedOpenAPIRequestCallModeEnum = typeof SkillCreateManagedOpenAPIRequestCallModeEnum[keyof typeof SkillCreateManagedOpenAPIRequestCallModeEnum];
 
+export interface SkillCreateOpenAPIResponse {
+    /**
+     * Persisted import names also accepted by explicit_resource_bindings.skill_names.
+     */
+    'aliases'?: Array<string>;
+    /**
+     * Canonical name accepted by explicit_resource_bindings.skill_names.
+     */
+    'canonical_runtime_name': string;
+    'category': string;
+    'head_revision_id': string;
+    'skill_id': string;
+    'skill_name': string;
+    'warnings'?: Array<SkillNormalizationWarningOpenAPIResponse>;
+}
 export interface SkillDeleteOpenAPIResponse {
     'deleted': boolean;
 }
@@ -5937,6 +5951,10 @@ export interface SkillMaintenanceTaskOpenAPIResponse {
     'started_at': string;
     'status': string;
     'type': string;
+}
+export interface SkillNormalizationWarningOpenAPIResponse {
+    'code': string;
+    'message': string;
 }
 export interface SkillOrganizeOpenAPIRequest {
     'artifact_dir'?: string;
@@ -16481,6 +16499,39 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary POST /conversations/{name}:env-input
+         * @param {string} name
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsNameEnvInputPost: async (name: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'name' is not null or undefined
+            assertParamExists('apiCoreConversationsNameEnvInputPost', 'name', name)
+            const localVarPath = `/api/core/conversations/{name}:env-input`
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Get conversation
          * @param {string} name
          * @param {*} [options] Override http request option.
@@ -23122,6 +23173,130 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary GET /user/env-vars
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserEnvVarsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/user/env-vars`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary DELETE /user/env-vars/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserEnvVarsIdDelete: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreUserEnvVarsIdDelete', 'id', id)
+            const localVarPath = `/api/core/user/env-vars/{id}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary PATCH /user/env-vars/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserEnvVarsIdPatch: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreUserEnvVarsIdPatch', 'id', id)
+            const localVarPath = `/api/core/user/env-vars/{id}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /user/env-vars
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserEnvVarsPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/user/env-vars`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary POST /v1/internal/provider-connections/{auth_connection_id}/access-token:report
          * @param {string} authConnectionId
          * @param {*} [options] Override http request option.
@@ -26599,6 +26774,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary POST /conversations/{name}:env-input
+         * @param {string} name
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsNameEnvInputPost(name: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsNameEnvInputPost(name, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsNameEnvInputPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Get conversation
          * @param {string} name
          * @param {*} [options] Override http request option.
@@ -29113,6 +29301,56 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary GET /user/env-vars
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreUserEnvVarsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserEnvVarsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreUserEnvVarsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary DELETE /user/env-vars/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreUserEnvVarsIdDelete(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserEnvVarsIdDelete(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreUserEnvVarsIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary PATCH /user/env-vars/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreUserEnvVarsIdPatch(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserEnvVarsIdPatch(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreUserEnvVarsIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /user/env-vars
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreUserEnvVarsPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserEnvVarsPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreUserEnvVarsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary POST /v1/internal/provider-connections/{auth_connection_id}/access-token:report
          * @param {string} authConnectionId
          * @param {*} [options] Override http request option.
@@ -30883,6 +31121,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreConversationsNameDetailGet(requestParameters: DefaultApiApiCoreConversationsNameDetailGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationDetailResponse> {
             return localVarFp.apiCoreConversationsNameDetailGet(requestParameters.name, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /conversations/{name}:env-input
+         * @param {DefaultApiApiCoreConversationsNameEnvInputPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsNameEnvInputPost(requestParameters: DefaultApiApiCoreConversationsNameEnvInputPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreConversationsNameEnvInputPost(requestParameters.name, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -32735,6 +32983,44 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary GET /user/env-vars
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserEnvVarsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreUserEnvVarsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary DELETE /user/env-vars/{id}
+         * @param {DefaultApiApiCoreUserEnvVarsIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserEnvVarsIdDelete(requestParameters: DefaultApiApiCoreUserEnvVarsIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreUserEnvVarsIdDelete(requestParameters.id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary PATCH /user/env-vars/{id}
+         * @param {DefaultApiApiCoreUserEnvVarsIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserEnvVarsIdPatch(requestParameters: DefaultApiApiCoreUserEnvVarsIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreUserEnvVarsIdPatch(requestParameters.id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /user/env-vars
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserEnvVarsPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreUserEnvVarsPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary POST /v1/internal/provider-connections/{auth_connection_id}/access-token:report
          * @param {DefaultApiApiCoreV1InternalProviderConnectionsAuthConnectionIdAccessTokenReportPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -33867,6 +34153,13 @@ export interface DefaultApiApiCoreConversationsNameDetailGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreConversationsNameEnvInputPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsNameEnvInputPostRequest {
+    readonly name: string
+}
+
+/**
  * Request parameters for apiCoreConversationsNameGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationsNameGetRequest {
@@ -34958,6 +35251,20 @@ export interface DefaultApiApiCoreTasksTaskIdStreamGetRequest {
  */
 export interface DefaultApiApiCoreTempUploadsPostRequest {
     readonly files?: Array<File>
+}
+
+/**
+ * Request parameters for apiCoreUserEnvVarsIdDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreUserEnvVarsIdDeleteRequest {
+    readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreUserEnvVarsIdPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreUserEnvVarsIdPatchRequest {
+    readonly id: string
 }
 
 /**
@@ -36333,6 +36640,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreConversationsNameDetailGet(requestParameters: DefaultApiApiCoreConversationsNameDetailGetRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreConversationsNameDetailGet(requestParameters.name, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /conversations/{name}:env-input
+     * @param {DefaultApiApiCoreConversationsNameEnvInputPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsNameEnvInputPost(requestParameters: DefaultApiApiCoreConversationsNameEnvInputPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsNameEnvInputPost(requestParameters.name, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -38373,6 +38691,48 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreUploadFilesPost(options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreUploadFilesPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /user/env-vars
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreUserEnvVarsGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreUserEnvVarsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary DELETE /user/env-vars/{id}
+     * @param {DefaultApiApiCoreUserEnvVarsIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreUserEnvVarsIdDelete(requestParameters: DefaultApiApiCoreUserEnvVarsIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreUserEnvVarsIdDelete(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary PATCH /user/env-vars/{id}
+     * @param {DefaultApiApiCoreUserEnvVarsIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreUserEnvVarsIdPatch(requestParameters: DefaultApiApiCoreUserEnvVarsIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreUserEnvVarsIdPatch(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /user/env-vars
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreUserEnvVarsPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreUserEnvVarsPost(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -51682,7 +52042,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             };
         },
         /**
-         * Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md; description is product metadata and is not written into SKILL.md front matter.
+         * Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md. Valid frontmatter metadata takes precedence. For URL imports, request name and description are fallbacks when frontmatter fields are missing; uploaded ZIP imports derive metadata from the package. URL and ZIP imports use category external.
          * @summary Create directory skill
          * @param {SkillCreateManagedOpenAPIRequest} skillCreateManagedOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -52448,13 +52808,13 @@ export const SkillsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md; description is product metadata and is not written into SKILL.md front matter.
+         * Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md. Valid frontmatter metadata takes precedence. For URL imports, request name and description are fallbacks when frontmatter fields are missing; uploaded ZIP imports derive metadata from the package. URL and ZIP imports use category external.
          * @summary Create directory skill
          * @param {SkillCreateManagedOpenAPIRequest} skillCreateManagedOpenAPIRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreSkillsPost(skillCreateManagedOpenAPIRequest: SkillCreateManagedOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillWriteOpenAPIResponse>> {
+        async apiCoreSkillsPost(skillCreateManagedOpenAPIRequest: SkillCreateManagedOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillCreateOpenAPIResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillsPost(skillCreateManagedOpenAPIRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['SkillsApi.apiCoreSkillsPost']?.[localVarOperationServerIndex]?.url;
@@ -52773,13 +53133,13 @@ export const SkillsApiFactory = function (configuration?: Configuration, basePat
             return localVarFp.apiCoreSkillsMaintenanceTaskGet(options).then((request) => request(axios, basePath));
         },
         /**
-         * Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md; description is product metadata and is not written into SKILL.md front matter.
+         * Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md. Valid frontmatter metadata takes precedence. For URL imports, request name and description are fallbacks when frontmatter fields are missing; uploaded ZIP imports derive metadata from the package. URL and ZIP imports use category external.
          * @summary Create directory skill
          * @param {SkillsApiApiCoreSkillsPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSkillsPost(requestParameters: SkillsApiApiCoreSkillsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<SkillWriteOpenAPIResponse> {
+        apiCoreSkillsPost(requestParameters: SkillsApiApiCoreSkillsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<SkillCreateOpenAPIResponse> {
             return localVarFp.apiCoreSkillsPost(requestParameters.skillCreateManagedOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
@@ -53225,7 +53585,7 @@ export class SkillsApi extends BaseAPI {
     }
 
     /**
-     * Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md; description is product metadata and is not written into SKILL.md front matter.
+     * Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md. Valid frontmatter metadata takes precedence. For URL imports, request name and description are fallbacks when frontmatter fields are missing; uploaded ZIP imports derive metadata from the package. URL and ZIP imports use category external.
      * @summary Create directory skill
      * @param {SkillsApiApiCoreSkillsPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.

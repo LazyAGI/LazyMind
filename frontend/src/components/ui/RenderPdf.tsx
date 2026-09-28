@@ -25,6 +25,8 @@ interface RenderPdfProps {
   onAskSelection?: (selection: PdfTextSelection) => void;
   askSelectionLabel?: string;
   onTranslateSelection?: (selection: PdfTextSelection) => void;
+  onRetranslateSelection?: (selection: PdfTextSelection) => void;
+  retranslateSelectionLabel?: string;
   onAddVocabularySelection?: (selection: PdfTextSelection) => void;
   addVocabularySelectionLabel?: string;
   translateSelectionLabel?: string;
@@ -88,6 +90,8 @@ export default function RenderPdf({
   onAskSelection,
   askSelectionLabel = "向 LazyMind 提问",
   onTranslateSelection,
+  onRetranslateSelection,
+  retranslateSelectionLabel = "重译此段",
   onAddVocabularySelection,
   addVocabularySelectionLabel = "加入生词",
   translateSelectionLabel = "翻译",
@@ -227,7 +231,7 @@ export default function RenderPdf({
     // during text selection. The explicit selection toolbar always wins.
     window.clearTimeout(referenceHoverTimer.current);
     window.clearTimeout(referenceHoverCloseTimer.current);
-    if ((!onAskSelection && !onTranslateSelection && !onImportReferenceSelection) || !containerRef.current) {
+    if ((!onAskSelection && !onTranslateSelection && !onRetranslateSelection && !onImportReferenceSelection) || !containerRef.current) {
       return;
     }
     const selection = window.getSelection();
@@ -829,6 +833,21 @@ export default function RenderPdf({
                 </button>
               </span>
             </Tooltip>
+          ) : null}
+          {onRetranslateSelection && !selectionAction.referenceHover ? (
+            <button
+              type="button"
+              aria-label={retranslateSelectionLabel}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                onRetranslateSelection(selectionAction.selection);
+                window.getSelection()?.removeAllRanges();
+                setSelectionAction(null);
+              }}
+              style={{ border: "1px solid #d9d9d9", borderRadius: 6, padding: "5px 10px", background: "#fff", color: "#1677ff", cursor: "pointer" }}
+            >
+              {retranslateSelectionLabel}
+            </button>
           ) : null}
           {onImportReferenceSelection && selectionAction.referenceAction ? (
             <button

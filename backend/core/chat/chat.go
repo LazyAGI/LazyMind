@@ -988,6 +988,11 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 			}
 			if d.Err != nil {
 				if terminalSeen && d.ErrKind == lazyStreamErrorTransport && terminalChunk != nil {
+					terminal, _ := terminalChunk.RuntimeEvent.Terminal()
+					terminal.TransportDiagnostic = &RunTransportDiagnostic{Code: upstreamStreamFailureCode(d.Err)}
+					event := *terminalChunk.RuntimeEvent
+					event.Data = terminalJSON(terminal)
+					terminalChunk.RuntimeEvent = &event
 					select {
 					case out <- *terminalChunk:
 					case <-ctx.Done():

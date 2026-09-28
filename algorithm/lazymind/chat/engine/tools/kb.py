@@ -393,8 +393,11 @@ class KBToolkit:
             raise ToolExecutionError('knowledge_base_id and document_id are required')
         if kb_id not in self._kb_ids([kb_id]):
             raise ToolExecutionError('Knowledge base is unavailable.')
+        # Core owns the full read lifecycle: it starts or joins the document's
+        # single parse task, waits for readable root text, and reports the
+        # terminal parse error. The chat layer only performs one authorized read.
         return get_core_api(
-            f'/datasets/{quote(kb_id, safe="")}/documents/{quote(doc_id, safe="")}:content'
+            f'/datasets/{quote(kb_id, safe="")}/documents/{quote(doc_id, safe="")}:read'
         )
 
     @staticmethod

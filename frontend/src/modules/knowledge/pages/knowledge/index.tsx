@@ -1,6 +1,6 @@
-import { Button, message, Modal, Popover, Progress, Segmented, Spin, Tag, Tooltip, Row, Col, Select, Switch, Tabs } from "antd";
+import { Button, Input, message, Modal, Popover, Progress, Segmented, Spin, Tag, Tooltip, Row, Col, Select, Switch, Tabs } from "antd";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import type { ReactNode } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import {
@@ -52,16 +52,21 @@ import {
   deletePdfArtifact,
   getPdfCapabilities,
   getPdfData,
+  getPdfTranslationDraft,
   listPdfLayoutBlocks,
   isActivePdfJob,
   latestActiveTranslationJob,
   latestTranslationJob,
   pdfArtifactContentUrl,
+  matchPdfTranslationDraftBlock,
+  retranslatePdfDraftBlock,
+  revisePdfTranslation,
   updatePdfRenderJob,
   type PdfArtifact,
   type PdfCapabilities,
   type PdfLayoutBlock,
   type PdfRenderJob,
+  type PdfTranslationDraftBlock,
 } from "@/modules/knowledge/api/pdfArtifacts";
 import { buildSearchablePdf } from "@/modules/knowledge/utils/pdfDocumentRenderer";
 import { translatableDocumentExtensions } from "@/modules/knowledge/utils/documentTranslation";
@@ -182,8 +187,14 @@ const Detail = () => {
   const [pdfTask, setPdfTask] = useState<PdfRenderJob>();
   const [pdfTaskDetail, setPdfTaskDetail] = useState("");
   const [translationModalOpen, setTranslationModalOpen] = useState(false);
+  const [translationPreparing, setTranslationPreparing] = useState(false);
   const [translationMode, setTranslationMode] = useState<"api" | "llm">("api");
   const [translationTarget, setTranslationTarget] = useState("zh");
+  const [revisionBlock, setRevisionBlock] = useState<PdfTranslationDraftBlock>();
+  const [revisionText, setRevisionText] = useState("");
+  const [revisionModalOpen, setRevisionModalOpen] = useState(false);
+  const [revisionLoading, setRevisionLoading] = useState(false);
+  const [revisionTranslatingWith, setRevisionTranslatingWith] = useState<"api" | "llm">();
   const cancelledPdfJobsRef = useRef(new Set<string>());
   const canShowSegments =
     developerActive && processingLevelSupportsSegments(processingLevel);
@@ -602,7 +613,10 @@ const Detail = () => {
   }, [knowledgeBaseId, knowledgeDetail?.display_name, knowledgeId, refreshPdfCapabilities]);
 
   const runTranslationPdf = useCallback(async (force = false, basis?: PdfArtifact) => {
+    if (translationPreparing) return;
     setTranslationModalOpen(false);
+    setTranslationPreparing(true);
+    setPdfTaskDetail("正在准备翻译任务");
     const filename = knowledgeDetail?.display_name || "document.pdf";
     const extension = filename.split(".").pop()?.toLowerCase() || "";
     let source: ArrayBuffer;
@@ -614,42 +628,57 @@ const Detail = () => {
         for (let attempt = 0; attempt < 150; attempt++) {
           const parsed = await ensureDocumentParsed(knowledgeBaseId, knowledgeId);
           if (parsed.status === "failed") throw new Error("文档 Reader 解析失败");
-          if (parsed.status === "parsed") break;
+          if (parsed.status === "parsed") {
+            setPdfTaskDetail("文档解析完成，正在创建翻译任务");
+            break;
+          }
+          setPdfTaskDetail("文档解析中，完成后将自动继续翻译");
           if (attempt === 149) throw new Error("文档 Reader 解析超时");
           await wait(2000);
         }
       }
     } catch (error) {
       const detail = error instanceof Error ? error.message : "无法读取 PDF 文本层";
+      setPdfTaskDetail("");
+      setTranslationPreparing(false);
       message.error(detail);
       return;
     }
     const targetLanguage = basis?.target_language || translationTarget;
     const providerType = basis?.provider_type === "llm" ? "llm" : basis?.provider_type === "api" ? "api" : translationMode;
     const provider = basis?.provider || (providerType === "api" ? "Tencent Translation" : "LazyMind LLM");
-    const created = await createTranslationPdfJob(knowledgeBaseId, knowledgeId, {
-      target_language: targetLanguage,
-      provider_type: providerType,
-      provider,
-      model: basis?.model || (providerType === "llm" ? "document-context" : undefined),
-      options_hash: layoutSource,
-      force,
-      source: new Blob([source]),
-      source_filename: filename,
-    });
-    if (created.artifact) {
-      setSelectedPdfArtifact(created.artifact);
-      setPdfSourceView("translation");
-      message.success("已加载缓存译本");
-      return;
+    try {
+      const created = await createTranslationPdfJob(knowledgeBaseId, knowledgeId, {
+        target_language: targetLanguage,
+        provider_type: providerType,
+        provider,
+        model: basis?.model || (providerType === "llm" ? "document-context" : undefined),
+        options_hash: layoutSource,
+        force,
+        source: new Blob([source]),
+        source_filename: filename,
+      });
+      if (created.artifact) {
+        setSelectedPdfArtifact(created.artifact);
+        setPdfSourceView("translation");
+        setPdfTaskDetail("");
+        message.success("已加载缓存译本");
+        return;
+      }
+      const job = created.job;
+      if (!job) throw new Error("后端未返回翻译任务");
+      cancelledPdfJobsRef.current.delete(job.id);
+      setPdfTask({ ...job, status: "RUNNING", stage: "TRANSLATING", progress: 3 });
+      setPdfTaskDetail("任务已提交到后端，可关闭或刷新页面");
+      await refreshPdfCapabilities();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "创建翻译任务失败";
+      setPdfTaskDetail("");
+      message.error(detail);
+    } finally {
+      setTranslationPreparing(false);
     }
-    const job = created.job;
-    if (!job) return;
-    cancelledPdfJobsRef.current.delete(job.id);
-    setPdfTask({ ...job, status: "RUNNING", stage: "TRANSLATING", progress: 3 });
-    setPdfTaskDetail("任务已提交到后端，可关闭或刷新页面");
-    await refreshPdfCapabilities();
-  }, [knowledgeBaseId, knowledgeDetail?.display_name, knowledgeId, originalPreviewFile, refreshPdfCapabilities, translationMode, translationTarget]);
+  }, [knowledgeBaseId, knowledgeDetail?.display_name, knowledgeId, originalPreviewFile, refreshPdfCapabilities, translationMode, translationPreparing, translationTarget]);
 
   const cancelTranslationJob = useCallback(async () => {
     const job = pdfTask?.kind === "TRANSLATION_PDF" && isActivePdfJob(pdfTask)
@@ -667,6 +696,67 @@ const Detail = () => {
     await refreshPdfCapabilities();
     message.success("翻译任务已取消");
   }, [knowledgeBaseId, knowledgeId, pdfCapabilities?.jobs, pdfTask, refreshPdfCapabilities]);
+
+  const openTranslationRevision = useCallback(async (selection: PdfTextSelection, textKind: "source" | "translation" = "translation") => {
+    const translationArtifact = selectedPdfArtifact?.kind === "TRANSLATION_PDF"
+      ? selectedPdfArtifact
+      : pdfCapabilities?.translations.at(-1);
+    if (!translationArtifact?.has_draft) {
+      message.warning("这个译本没有可编辑草稿，请重新生成译本后再试");
+      return;
+    }
+    try {
+      const draft = await getPdfTranslationDraft(knowledgeBaseId, knowledgeId, translationArtifact.id);
+      const block = matchPdfTranslationDraftBlock(draft.blocks, selection, textKind);
+      if (!block) {
+        message.warning(`未能定位所选${textKind === "source" ? "原文" : "译文"}对应的翻译段落，请重新选择完整段落`);
+        return;
+      }
+      setSelectedPdfArtifact(translationArtifact);
+      setRevisionBlock(block);
+      setRevisionText(block.translated_text);
+      setRevisionModalOpen(true);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "读取翻译草稿失败");
+    }
+  }, [knowledgeBaseId, knowledgeId, pdfCapabilities?.translations, selectedPdfArtifact]);
+
+  const retranslateRevisionBlock = useCallback(async (providerType: "api" | "llm") => {
+    if (!selectedPdfArtifact || !revisionBlock) return;
+    setRevisionLoading(true);
+    setRevisionTranslatingWith(providerType);
+    try {
+      const result = await retranslatePdfDraftBlock(knowledgeBaseId, knowledgeId, selectedPdfArtifact.id, {
+        block_id: revisionBlock.id,
+        provider_type: providerType,
+      });
+      setRevisionText(result.translated_text);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "重新翻译失败");
+    } finally {
+      setRevisionLoading(false);
+      setRevisionTranslatingWith(undefined);
+    }
+  }, [knowledgeBaseId, knowledgeId, revisionBlock, selectedPdfArtifact]);
+
+  const confirmTranslationRevision = useCallback(async () => {
+    if (!selectedPdfArtifact || !revisionBlock || !revisionText.trim()) return;
+    setRevisionLoading(true);
+    try {
+      const artifact = await revisePdfTranslation(knowledgeBaseId, knowledgeId, selectedPdfArtifact.id, {
+        [revisionBlock.id]: revisionText.trim(),
+      });
+      await refreshPdfCapabilities();
+      setSelectedPdfArtifact(artifact);
+      setPdfSourceView("translation");
+      setRevisionModalOpen(false);
+      message.success("已生成新的翻译版 PDF，原译本保持不变");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "生成新版译本失败");
+    } finally {
+      setRevisionLoading(false);
+    }
+  }, [knowledgeBaseId, knowledgeId, refreshPdfCapabilities, revisionBlock, revisionText, selectedPdfArtifact]);
 
   useEffect(() => {
     const activeJob = latestActiveTranslationJob(pdfCapabilities?.jobs || []);
@@ -721,7 +811,7 @@ const Detail = () => {
   const documentExtension = (knowledgeDetail?.display_name || "").split(".").pop()?.toLowerCase() || "";
   const isPdfDocument = documentExtension === "pdf";
   const canTranslateDocument = translatableDocumentExtensions.includes(documentExtension);
-  const translationInProgress = Boolean(pdfTask?.kind === "TRANSLATION_PDF" && isActivePdfJob(pdfTask)) ||
+  const translationInProgress = translationPreparing || Boolean(pdfTask?.kind === "TRANSLATION_PDF" && isActivePdfJob(pdfTask)) ||
     Boolean(latestActiveTranslationJob(pdfCapabilities?.jobs || []));
 
   const pageTitle = useMemo(() => {
@@ -989,6 +1079,7 @@ const Detail = () => {
                   onExportReadyChange={setCanExportImagePdf}
                   onPdfSelection={askPdfSelection}
                   onPdfTranslateSelection={translatePdfSelection}
+                  onPdfRetranslateSelection={(selection) => void openTranslationRevision(selection, "source")}
                   translationConfigured={translationConfigured}
                   pdfViewPosition={pdfViewPosition}
                   onPdfViewPositionChange={handlePdfViewPositionChange}
@@ -1001,6 +1092,7 @@ const Detail = () => {
                   fileName={knowledgeDetail?.display_name || ""}
                   onPdfSelection={askPdfSelection}
                   onPdfTranslateSelection={translatePdfSelection}
+                  onPdfRetranslateSelection={(selection) => void openTranslationRevision(selection, "translation")}
                   translationConfigured={translationConfigured}
                   pdfViewPosition={pdfViewPosition}
                   onPdfViewPositionChange={handlePdfViewPositionChange}
@@ -1019,6 +1111,9 @@ const Detail = () => {
               referenceActions={referenceActions}
               onPdfSelection={askPdfSelection}
               onPdfTranslateSelection={translatePdfSelection}
+              onPdfRetranslateSelection={pdfCapabilities?.translations.length
+                ? (selection) => void openTranslationRevision(selection, pdfSourceView === "translation" ? "translation" : "source")
+                : undefined}
               onAddVocabularySelection={isVocabularyEnabled() ? (selection) => setVocabularySelection(selection) : undefined}
               translationConfigured={translationConfigured}
               learningSelectionActions={capabilityFamilies(learningCapabilities).map(family=>({key:family,label:t(capabilityFamilyI18nKey(family)),languages:Array.from(new Set(learningCapabilities.filter(item=>item.key!=="pinyin"&&family===capabilityFamily(item.key)).flatMap(item=>item.languages))),subjectKinds:Array.from(new Set(learningCapabilities.filter(item=>family===capabilityFamily(item.key)).flatMap(item=>item.subject_kinds))),disabled:!learningLocalAvailable,disabledTip:t("vocabulary.localOnlyDesktop")}))}
@@ -1046,16 +1141,16 @@ const Detail = () => {
           >
             {knowledgeDetail ? (
               <>
-                {pdfTask?.kind === "TRANSLATION_PDF" && pdfTask.status !== "READY" && !previewSideCollapsed ? (
-                  <div className={`pdf-processing-card pdf-processing-card--translation is-${pdfTask.status.toLowerCase()}`}>
+                {(translationPreparing || (pdfTask?.kind === "TRANSLATION_PDF" && pdfTask.status !== "READY")) && !previewSideCollapsed ? (
+                  <div className={`pdf-processing-card pdf-processing-card--translation is-${translationPreparing ? "waiting_dependency" : pdfTask?.status.toLowerCase()}`}>
                     <div>
-                      <strong>{pdfTask.status === "FAILED" ? "翻译失败" : pdfTask.status === "CANCELLED" ? "翻译已取消" : "正在翻译文档"}</strong>
+                      <strong>{translationPreparing ? "正在准备翻译" : pdfTask?.status === "FAILED" ? "翻译失败" : pdfTask?.status === "CANCELLED" ? "翻译已取消" : "正在翻译文档"}</strong>
                       <span>{pdfTaskDetail}</span>
-                      {isActivePdfJob(pdfTask) ? <Button type="link" danger size="small" onClick={() => void cancelTranslationJob()}>取消</Button> : null}
+                      {!translationPreparing && isActivePdfJob(pdfTask) ? <Button type="link" danger size="small" onClick={() => void cancelTranslationJob()}>取消</Button> : null}
                     </div>
-                    <Progress percent={pdfTask.progress} status={pdfTask.status === "FAILED" ? "exception" : "active"} size="small" />
+                    <Progress percent={translationPreparing ? 0 : pdfTask?.progress || 0} status={pdfTask?.status === "FAILED" ? "exception" : "active"} size="small" />
                     <small>{translationMode === "llm" ? "LazyMind 大模型" : "腾讯机器翻译 API"}</small>
-                    {pdfTask.error_message ? <div className="pdf-processing-card__error">{pdfTask.error_message}</div> : null}
+                    {pdfTask?.error_message ? <div className="pdf-processing-card__error">{pdfTask.error_message}</div> : null}
                   </div>
                 ) : null}
                 <div className={`knowledge-preview-side${previewSideCollapsed ? " is-collapsed" : ""}`}>
@@ -1192,6 +1287,7 @@ const Detail = () => {
         title="翻译文档"
         okText="开始翻译"
         cancelText="取消"
+        confirmLoading={translationPreparing}
         onCancel={() => setTranslationModalOpen(false)}
         onOk={() => void runTranslationPdf()}
       >
@@ -1199,6 +1295,52 @@ const Detail = () => {
           <div><label>翻译方式</label><Segmented block value={translationMode} onChange={(value) => setTranslationMode(value as "api" | "llm")} options={[{ label: "翻译 API", value: "api" }, { label: "LazyMind 大模型", value: "llm" }]} /></div>
           <div><label>目标语言</label><Select value={translationTarget} onChange={setTranslationTarget} options={[{ label: "简体中文", value: "zh" }, { label: "英文", value: "en" }]} /></div>
           <p>翻译会保留支持格式的文档结构、表格和图片，仅替换可翻译文字。若原件是图片 PDF，会先生成并缓存文本 PDF。</p>
+        </div>
+      </Modal>
+      <Modal
+        className="pdf-translation-revision-modal"
+        open={revisionModalOpen}
+        title="重新翻译此段"
+        width={1080}
+        okText="确认并生成新译本"
+        cancelText="取消"
+        confirmLoading={revisionLoading}
+        okButtonProps={{ disabled: !revisionText.trim() || revisionText.trim() === revisionBlock?.translated_text.trim() }}
+        onCancel={() => setRevisionModalOpen(false)}
+        onOk={() => void confirmTranslationRevision()}
+      >
+        <div className="pdf-translation-revision">
+          <section className="pdf-translation-revision__pane pdf-translation-revision__source">
+            <header><span>原文</span><small>Original</small></header>
+            <div className="pdf-translation-revision__source-text">{revisionBlock?.source_text}</div>
+          </section>
+          <section className="pdf-translation-revision__pane pdf-translation-revision__target">
+            <header>
+              <div><span>译文</span><small>Translation</small></div>
+              <div className="pdf-translation-revision__actions">
+                <Button
+                  size="small"
+                  loading={revisionTranslatingWith === "api"}
+                  disabled={revisionLoading && revisionTranslatingWith !== "api"}
+                  onClick={() => void retranslateRevisionBlock("api")}
+                >翻译 API</Button>
+                <Button
+                  size="small"
+                  loading={revisionTranslatingWith === "llm"}
+                  disabled={revisionLoading && revisionTranslatingWith !== "llm"}
+                  onClick={() => void retranslateRevisionBlock("llm")}
+                >大模型</Button>
+              </div>
+            </header>
+            <Input.TextArea
+              className="pdf-translation-revision__editor"
+              value={revisionText}
+              onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setRevisionText(event.target.value)}
+              autoSize={false}
+              placeholder="选择翻译方式生成译文，或直接在这里编辑"
+            />
+          </section>
+          <p className="pdf-translation-revision__hint">确认后会生成一个新的翻译版 PDF，其他段落和原译本保持不变。</p>
         </div>
       </Modal>
       <Modal

@@ -255,12 +255,10 @@ func (s *DocumentService) GetDocument(ctx context.Context, req DocumentReadReque
 			request.Header.Set("Authorization", req.Caller.Authorization)
 			request.Header.Set("X-Tenant-Id", req.Caller.TenantID)
 			request.Header.Set("X-User-Role", req.Caller.UserRole)
-			parsed, ensureErr := s.EnsureDocumentParsed(request, EnsureDocumentParsedRequest{UserID: req.UserID, DatasetID: req.DatasetID, DocumentID: req.DocumentID, Caller: req.Caller})
-			if ensureErr != nil {
-				return DocumentReadResult{}, ensureErr
-			}
-			if parsed.Status != "parsed" {
-				return DocumentReadResult{}, &DocumentServiceError{Code: DocumentServiceUnavailable, Message: "document parsing is still running"}
+			if waitErr := s.EnsureDocumentParsedAndWait(request, EnsureDocumentParsedRequest{
+				UserID: req.UserID, DatasetID: req.DatasetID, DocumentID: req.DocumentID, Caller: req.Caller,
+			}); waitErr != nil {
+				return DocumentReadResult{}, waitErr
 			}
 			roots, rootErr := s.ListDocumentChunks(ctx, DocumentChunksRequest{UserID: req.UserID, DatasetID: req.DatasetID, DocumentID: req.DocumentID, PageSize: 200, SegmentGroup: RootNodeGroup, Caller: req.Caller})
 			if rootErr != nil {

@@ -60,14 +60,15 @@ func claimRunDecision(
 		if claimErr != nil {
 			return claimErr
 		}
-		winner = candidate
 		if !won {
 			existing, err := stateStore.Get(ctx, key)
 			if err != nil {
 				return err
 			}
+			// Omitted winner fields must not inherit values from the losing candidate.
 			return json.Unmarshal(existing, &winner)
 		}
+		winner = candidate
 		return nil
 	})
 	if err != nil {

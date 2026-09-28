@@ -8552,6 +8552,35 @@ components:
                 task_id:
                     type: string
             type: object
+        TaskCenterScheduleSummary:
+            properties:
+                cron_expr:
+                    type: string
+                enabled:
+                    type: boolean
+                id:
+                    type: string
+                last_run_at:
+                    format: date-time
+                    type: string
+                name:
+                    type: string
+                next_run_at:
+                    format: date-time
+                    type: string
+                run_count:
+                    type: integer
+                timezone:
+                    type: string
+            required:
+                - id
+                - name
+                - cron_expr
+                - timezone
+                - enabled
+                - run_count
+                - next_run_at
+            type: object
         TaskCenterStatusCounts:
             properties:
                 all:
@@ -8617,35 +8646,6 @@ components:
                 - total
                 - page
                 - page_size
-            type: object
-        TaskCenterScheduleSummary:
-            properties:
-                cron_expr:
-                    type: string
-                enabled:
-                    type: boolean
-                id:
-                    type: string
-                last_run_at:
-                    format: date-time
-                    type: string
-                name:
-                    type: string
-                next_run_at:
-                    format: date-time
-                    type: string
-                run_count:
-                    type: integer
-                timezone:
-                    type: string
-            required:
-                - id
-                - name
-                - cron_expr
-                - timezone
-                - enabled
-                - run_count
-                - next_run_at
             type: object
         TaskCenterTaskResponse:
             properties:
@@ -12579,10 +12579,10 @@ components:
                         - disabled
                     type: string
                 category:
-                    description: Legacy inline-create field. ZIP and URL imports use External.
+                    description: Legacy inline-create field. ZIP and URL imports always use external.
                     type: string
                 description:
-                    description: Legacy inline-create field. ZIP and URL imports derive description from SKILL.md frontmatter.
+                    description: Optional fallback description for URL imports when SKILL.md frontmatter has no description. Valid frontmatter takes precedence; uploaded ZIP imports derive the description from the package.
                     type: string
                 field:
                     description: Capability field for search; independent of the internal/external storage category.
@@ -12595,7 +12595,7 @@ components:
                         type: string
                     type: array
                 name:
-                    description: Legacy inline-create field. ZIP and URL imports derive name from SKILL.md frontmatter.
+                    description: Optional fallback name for URL imports when SKILL.md frontmatter has no valid name. Valid frontmatter takes precedence; uploaded ZIP imports derive the name from the package.
                     type: string
                 source:
                     $ref: '#/components/schemas/skillSourceOpenAPIRequest'
@@ -12605,6 +12605,35 @@ components:
                     type: array
             required:
                 - source
+            type: object
+        skillCreateOpenAPIResponse:
+            properties:
+                aliases:
+                    description: Persisted import names also accepted by explicit_resource_bindings.skill_names.
+                    items:
+                        type: string
+                    type: array
+                canonical_runtime_name:
+                    description: Canonical name accepted by explicit_resource_bindings.skill_names.
+                    type: string
+                category:
+                    type: string
+                head_revision_id:
+                    type: string
+                skill_id:
+                    type: string
+                skill_name:
+                    type: string
+                warnings:
+                    items:
+                        $ref: '#/components/schemas/skillNormalizationWarningOpenAPIResponse'
+                    type: array
+            required:
+                - canonical_runtime_name
+                - category
+                - head_revision_id
+                - skill_id
+                - skill_name
             type: object
         skillDeleteOpenAPIResponse:
             properties:
@@ -13085,6 +13114,16 @@ components:
                 - started_at
                 - status
                 - type
+            type: object
+        skillNormalizationWarningOpenAPIResponse:
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+            required:
+                - code
+                - message
             type: object
         skillOrganizeOpenAPIRequest:
             properties:
@@ -18580,6 +18619,18 @@ paths:
                                 $ref: '#/components/schemas/ConversationDetailResponse'
                     description: Conversation metadata (no chat history; use :history)
             summary: Get conversation metadata
+    /api/core/conversations/{name}:env-input:
+        post:
+            parameters:
+                - in: path
+                  name: name
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /conversations/{name}:env-input
     /api/core/conversations/{name}:history:
         get:
             parameters:
@@ -26533,7 +26584,7 @@ paths:
             tags:
                 - skills
         post:
-            description: Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md; description is product metadata and is not written into SKILL.md front matter.
+            description: Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md. Valid frontmatter metadata takes precedence. For URL imports, request name and description are fallbacks when frontmatter fields are missing; uploaded ZIP imports derive metadata from the package. URL and ZIP imports use category external.
             requestBody:
                 content:
                     application/json:
@@ -26545,7 +26596,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/skillWriteOpenAPIResponse'
+                                $ref: '#/components/schemas/skillCreateOpenAPIResponse'
                     description: Created skill
             summary: Create directory skill
             tags:
@@ -28463,6 +28514,40 @@ paths:
             summary: Partially update quick-question and new-task defaults
             tags:
                 - user
+    /api/core/user/env-vars:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /user/env-vars
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /user/env-vars
+    /api/core/user/env-vars/{id}:
+        delete:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /user/env-vars/{id}
+        patch:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /user/env-vars/{id}
     /api/core/user/notification-preferences:
         get:
             description: Read scheduled-task notification defaults and global gate. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.

@@ -92,9 +92,13 @@ type DistributionSource struct {
 }
 
 type CreateSkillResponse struct {
-	SkillID        string
-	HeadRevisionID string
-	Warnings       []skillmetadata.NormalizationWarning
+	SkillID              string
+	HeadRevisionID       string
+	SkillName            string
+	Category             string
+	CanonicalRuntimeName string
+	Aliases              []string
+	Warnings             []skillmetadata.NormalizationWarning
 }
 
 type PatchSkillRequest struct {

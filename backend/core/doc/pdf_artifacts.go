@@ -46,6 +46,14 @@ func pdfCacheKey(state orm.DocumentProcessingState, kind string, req createPDFJo
 	return hex.EncodeToString(sum[:])
 }
 
+// Translation artifacts may share a cache key when processing fingerprints
+// are absent or equal, but async jobs must never be reused across documents.
+func pdfTranslationJobIdempotencyKey(datasetID, documentID, cacheKey string) string {
+	value := strings.Join([]string{datasetID, documentID, cacheKey}, "\x00")
+	sum := sha256.Sum256([]byte(value))
+	return "pdf-translate:" + hex.EncodeToString(sum[:])
+}
+
 func loadPDFDocument(r *http.Request, write bool) (orm.Document, documentExt, orm.DocumentProcessingState, bool) {
 	datasetID, documentID := datasetIDFromPath(r), documentIDFromPath(r)
 	permission := acl.PermissionDatasetRead
@@ -135,8 +143,14 @@ func removeArtifactCacheEntry(artifacts []pdfArtifactRecord, target pdfArtifactR
 func removeArtifactFiles(artifacts []pdfArtifactRecord) {
 	for _, artifact := range artifacts {
 		_ = os.Remove(artifact.StoredPath)
+		if artifact.SourcePath != "" {
+			_ = os.Remove(artifact.SourcePath)
+		}
 		if artifact.LayoutPath != "" {
 			_ = os.Remove(artifact.LayoutPath)
+		}
+		if artifact.DraftPath != "" {
+			_ = os.Remove(artifact.DraftPath)
 		}
 	}
 }
@@ -156,6 +170,12 @@ func GetPDFCapabilities(w http.ResponseWriter, r *http.Request) {
 		if jobs[i].Kind == pdfArtifactTranslation && !jobs[i].BackendManaged && (jobs[i].Status == pdfJobRunning || jobs[i].Status == pdfJobWaiting) {
 			jobs[i].Status, jobs[i].Stage = "FAILED", "FAILED"
 			jobs[i].ErrorMessage = "旧版浏览器翻译任务已失效，请重新发起"
+		}
+		if jobs[i].Kind == pdfArtifactTranslation && jobs[i].BackendManaged &&
+			(jobs[i].Status == pdfJobRunning || jobs[i].Status == pdfJobWaiting) &&
+			!backendTranslationJobActive(r.Context(), jobs[i].ID) {
+			jobs[i].Status, jobs[i].Stage = "FAILED", "FAILED"
+			jobs[i].ErrorMessage = "翻译任务不存在或已失效，请重新发起"
 		}
 	}
 	for _, artifact := range ext.PDFArtifacts {
