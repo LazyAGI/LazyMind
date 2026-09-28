@@ -292,8 +292,8 @@ export default function LocalWorkspaceControl({ approvalContainer, draftWorkspac
   const loadManagedItems = async (query = "") => {
     const request = ++listRequestRef.current;
     try {
-      const values = await listWorkspaces({ query, includeInactive: true });
-      if (request === listRequestRef.current) setManagedItems(values);
+      const values = await listWorkspaces({ query, includeInactive: true, excludeRevoked: true });
+      if (request === listRequestRef.current) setManagedItems(values.filter((item) => item.status !== "revoked"));
     } catch (error) {
       if (request === listRequestRef.current) message.error(`${t("chat.workspace.loadFailed")}：${reasonText(error)}`);
     }
@@ -309,6 +309,17 @@ export default function LocalWorkspaceControl({ approvalContainer, draftWorkspac
         : await selectWorkspaceCandidate(runtime);
       if (request !== requestRef.current) return;
       if (!result.canceled && result.selection_token) {
+        const existing = !reauthorization && result.path
+          ? items.find((item) => item.status === "active" && item.path === result.path)
+          : undefined;
+        if (existing) {
+          onProjectChange?.(undefined, false);
+          selectedRef.current = existing;
+          setSelected(existing);
+          rememberWorkspaceId(runtime, existing.workspace_id);
+          onChangeRef.current(existing.workspace_id, mode);
+          return;
+        }
         setCandidate({ token: result.selection_token, name: result.display_name, path: result.path, reauthorization, conversationId });
       }
     } catch (error) {
@@ -393,10 +404,11 @@ export default function LocalWorkspaceControl({ approvalContainer, draftWorkspac
       try {
         const result = await revokeWorkspace(target.workspace_id, target.version);
         if (request !== requestRef.current) return;
+        listRequestRef.current += 1;
         const workspace: LocalWorkspaceView = { ...target, status: "revoked", version: result.version };
         if (readPreferredWorkspaceId(runtime) === target.workspace_id) rememberWorkspaceId(runtime);
         setItems((current) => current.filter((item) => item.workspace_id !== target.workspace_id));
-        setManagedItems((current) => current.map((item) => item.workspace_id === target.workspace_id ? workspace : item));
+        setManagedItems((current) => current.filter((item) => item.workspace_id !== target.workspace_id));
         if (selectedRef.current?.workspace_id === target.workspace_id) {
           selectedRef.current = conversationId ? workspace : undefined;
           setSelected(conversationId ? workspace : undefined);
