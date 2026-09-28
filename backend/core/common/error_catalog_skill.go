@@ -22,10 +22,4 @@ func init() {
 	registerAdditionalError("discovery value required", http.StatusBadRequest, 2002952)
 	registerAdditionalError("skill organize task is not running", http.StatusConflict, 2003145)
 	registerAdditionalError("skill organize cancel failed", http.StatusBadGateway, 2003146)
-	registerAdditionalErrorPattern(
-		"skill package contains multiple SKILL.md files (%s); import the skill subdirectory URL instead",
-		"Skill package contains multiple SKILL.md files; import the skill subdirectory URL instead",
-		http.StatusBadRequest,
-		2003147,
-	)
 }

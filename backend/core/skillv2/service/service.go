@@ -1200,25 +1200,13 @@ func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, 
 			return sourcePackage{}, "", "", fmt.Errorf("upload is not completed")
 		}
 		pkg, err := skillpackage.ReadZip(session.StoredPath)
-		if err != nil {
-			return sourcePackage{}, "", "", err
-		}
-		if err := skillpackage.RejectExtraSkillPackages(pkg.Files); err != nil {
-			return sourcePackage{}, "", "", err
-		}
-		return sourcePackage{Files: pkg.Files, PackageRoot: pkg.PackageRoot, ArchiveFilename: session.Filename}, "upload", source.UploadID, nil
+		return sourcePackage{Files: pkg.Files, PackageRoot: pkg.PackageRoot, ArchiveFilename: session.Filename}, "upload", source.UploadID, err
 	case "local_zip":
 		if strings.TrimSpace(source.StoredPath) == "" {
 			return sourcePackage{}, "", "", fmt.Errorf("stored_path required")
 		}
 		pkg, err := skillpackage.ReadZip(source.StoredPath)
-		if err != nil {
-			return sourcePackage{}, "", "", err
-		}
-		if err := skillpackage.RejectExtraSkillPackages(pkg.Files); err != nil {
-			return sourcePackage{}, "", "", err
-		}
-		return sourcePackage{Files: pkg.Files, PackageRoot: pkg.PackageRoot, ArchiveFilename: source.Filename}, "local_zip", source.Filename, nil
+		return sourcePackage{Files: pkg.Files, PackageRoot: pkg.PackageRoot, ArchiveFilename: source.Filename}, "local_zip", source.Filename, err
 	case "builtin_zip":
 		if strings.TrimSpace(source.StoredPath) == "" {
 			return sourcePackage{}, "", "", fmt.Errorf("stored_path required")
@@ -1243,9 +1231,6 @@ func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, 
 			pkg, err = skillpackage.ReadZip(downloaded.Path)
 		}
 		if err != nil {
-			return sourcePackage{}, "", "", err
-		}
-		if err := skillpackage.RejectExtraSkillPackages(pkg.Files); err != nil {
 			return sourcePackage{}, "", "", err
 		}
 		ensureURLImportDefaults(pkg.Files)

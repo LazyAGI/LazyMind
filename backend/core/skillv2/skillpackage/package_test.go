@@ -36,64 +36,21 @@ func TestReadZipNormalizesSingleRootAndHashesDeterministically(t *testing.T) {
 	}
 }
 
-func TestReadZipKeepsTemplateSkillMarkdownInsideOnePackage(t *testing.T) {
-	zipPath := writeZip(t, map[string]string{
-		"SKILL.md":           "---\nname: demo\ndescription: demo\n---\n",
-		"templates/SKILL.md": "template",
-	})
-	pkg, err := ReadZip(zipPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(pkg.Files["SKILL.md"]) == "" || string(pkg.Files["templates/SKILL.md"]) != "template" {
-		t.Fatalf("files = %#v", pkg.Files)
-	}
-}
-
-func TestReadZipKeepsRootPackageThatAlsoContainsNestedSkills(t *testing.T) {
-	zipPath := writeZip(t, map[string]string{
-		"SKILL.md":                "---\nname: catalog\ndescription: Catalog.\n---\n",
-		"knowledge-base/SKILL.md": "nested",
-		"notes/SKILL.md":          "notes",
-	})
-	pkg, err := ReadZip(zipPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(pkg.Files["SKILL.md"]) == "" || string(pkg.Files["notes/SKILL.md"]) != "notes" {
-		t.Fatalf("files = %#v", pkg.Files)
-	}
-	if err := RejectExtraSkillPackages(pkg.Files); err == nil || !strings.Contains(err.Error(), "knowledge-base/SKILL.md") || !strings.Contains(err.Error(), "notes/SKILL.md") {
-		t.Fatalf("reject error = %v", err)
-	}
-}
-
-func TestReadZipRejectsMultipleSkillMarkdown(t *testing.T) {
+func TestReadZipNormalizesRepositoryRootWithoutRootSkillMD(t *testing.T) {
 	zipPath := writeZip(t, map[string]string{
 		"repository-ref/skills/target/SKILL.md": "content",
 		"repository-ref/skills/other/SKILL.md":  "other",
 	})
-	_, err := ReadZip(zipPath)
-	if err == nil || !strings.Contains(err.Error(), "other/SKILL.md") || !strings.Contains(err.Error(), "target/SKILL.md") {
-		t.Fatalf("multiple SKILL.md error = %v", err)
-	}
-}
-
-func TestReadZipHoistsUniqueNestedSkill(t *testing.T) {
-	zipPath := writeZip(t, map[string]string{
-		"repo/README.md":                        "readme",
-		"repo/skills/last30days/SKILL.md":       "---\nname: last30days\ndescription: Recent.\n---\n",
-		"repo/skills/last30days/scripts/run.py": "print('ok')\n",
-	})
 	pkg, err := ReadZip(zipPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pkg.PackageRoot != "repo/skills/last30days" {
-		t.Fatalf("PackageRoot = %q", pkg.PackageRoot)
+	files := pkg.Files
+	if pkg.PackageRoot != "repository-ref" {
+		t.Fatalf("PackageRoot = %q, want repository-ref", pkg.PackageRoot)
 	}
-	if string(pkg.Files["SKILL.md"]) == "" || string(pkg.Files["scripts/run.py"]) != "print('ok')\n" || pkg.Files["README.md"] != nil {
-		t.Fatalf("hoisted files = %#v", pkg.Files)
+	if string(files["skills/target/SKILL.md"]) != "content" || string(files["repository-ref/skills/target/SKILL.md"]) != "" {
+		t.Fatalf("unexpected normalized files: %#v", files)
 	}
 }
 

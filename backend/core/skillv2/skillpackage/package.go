@@ -320,116 +320,35 @@ func readFiles(entries []*zip.File) (Package, error) {
 		}
 		files[name] = data
 	}
-	files, packageRoot, err := normalizeRoot(files)
-	if err != nil {
-		return Package{}, err
-	}
+	files, packageRoot := normalizeRoot(files)
 	return Package{Files: files, PackageRoot: packageRoot}, nil
 }
 
-func normalizeRoot(files map[string][]byte) (map[string][]byte, string, error) {
-	normalized := files
-	packageRoot := ""
-	for {
-		stripped, root, ok := stripCommonDirectory(normalized)
-		if !ok {
-			break
-		}
-		normalized = stripped
-		if packageRoot == "" {
-			packageRoot = root
-		} else {
-			packageRoot = packageRoot + "/" + root
-		}
-	}
-	if _, ok := normalized["SKILL.md"]; ok {
-		return normalized, packageRoot, nil
-	}
-	skillPaths := skillPackageRoots(normalized)
-	if len(skillPaths) > 1 {
-		return nil, "", fmt.Errorf("skill package contains multiple SKILL.md files (%s); import the skill subdirectory URL instead", strings.Join(skillPaths, ", "))
-	}
-	if len(skillPaths) == 1 && skillPaths[0] != "SKILL.md" {
-		dir := path.Dir(skillPaths[0])
-		hoisted := make(map[string][]byte)
-		prefix := dir + "/"
-		for filePath, data := range normalized {
-			if filePath == skillPaths[0] || strings.HasPrefix(filePath, prefix) {
-				hoisted[strings.TrimPrefix(filePath, prefix)] = data
-			}
-		}
-		if packageRoot == "" {
-			packageRoot = dir
-		} else {
-			packageRoot = packageRoot + "/" + dir
-		}
-		normalized = hoisted
-	}
-	return normalized, packageRoot, nil
-}
-
-func stripCommonDirectory(files map[string][]byte) (map[string][]byte, string, bool) {
+func normalizeRoot(files map[string][]byte) (map[string][]byte, string) {
 	if _, ok := files["SKILL.md"]; ok {
-		return nil, "", false
+		return files, ""
 	}
 	root := ""
 	for filePath := range files {
 		parts := strings.SplitN(filePath, "/", 2)
 		if len(parts) != 2 || parts[1] == "" {
-			return nil, "", false
+			return files, ""
 		}
 		if root == "" {
 			root = parts[0]
 		} else if root != parts[0] {
-			return nil, "", false
+			return files, ""
 		}
 	}
 	if root == "" {
-		return nil, "", false
+		return files, ""
 	}
 	normalized := make(map[string][]byte, len(files))
 	prefix := root + "/"
 	for filePath, data := range files {
 		normalized[strings.TrimPrefix(filePath, prefix)] = data
 	}
-	return normalized, root, true
-}
-
-func skillPackageRoots(files map[string][]byte) []string {
-	paths := make([]string, 0)
-	for filePath := range files {
-		if filePath != "SKILL.md" && !strings.HasSuffix(filePath, "/SKILL.md") {
-			continue
-		}
-		if isNestedTemplateSkill(filePath) {
-			continue
-		}
-		paths = append(paths, filePath)
-	}
-	sort.Strings(paths)
-	return paths
-}
-
-func isNestedTemplateSkill(filePath string) bool {
-	parts := strings.Split(filePath, "/")
-	if len(parts) < 2 {
-		return false
-	}
-	for _, part := range parts[:len(parts)-1] {
-		switch strings.ToLower(part) {
-		case "templates", "template", "examples", "example", "docs":
-			return true
-		}
-	}
-	return false
-}
-
-func RejectExtraSkillPackages(files map[string][]byte) error {
-	roots := skillPackageRoots(files)
-	if len(roots) <= 1 {
-		return nil
-	}
-	return fmt.Errorf("skill package contains multiple SKILL.md files (%s); import the skill subdirectory URL instead", strings.Join(roots, ", "))
+	return normalized, root
 }
 
 func isIgnoredMetadata(name string) bool {
