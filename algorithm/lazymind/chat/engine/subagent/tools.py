@@ -258,6 +258,90 @@ def _validate_declared_artifact_type(
     return None
 
 
+def _readable_artifact_file(ctx: Any, raw_path: Any) -> bool:
+    """Validate a local or managed artifact reference without opening arbitrary host paths."""
+    raw = str(raw_path or '').strip()
+    if not raw:
+        return False
+    managed = raw.startswith(('/static-files/', '/api/core/static-files/', UPLOAD_MARKER))
+    path = _materialize_local_path(raw)
+    if path.lower().startswith(('http://', 'https://')):
+        return False
+    if not os.path.isabs(path):
+        if not ctx.workspace_path:
+            return False
+        path = os.path.join(ctx.workspace_path, path)
+    path = os.path.realpath(path)
+    if not managed:
+        workspace = os.path.realpath(ctx.workspace_path) if ctx.workspace_path else ''
+        try:
+            if not workspace or os.path.commonpath([workspace, path]) != workspace:
+                return False
+        except ValueError:
+            return False
+    try:
+        if not os.path.isfile(path):
+            return False
+        with open(path, 'rb') as handle:
+            handle.read(1)
+        return True
+    except OSError:
+        return False
+
+
+def _remote_artifact_reference(artifact: Dict[str, Any], raw_path: Any) -> bool:
+    raw = str(raw_path or '').strip()
+    parsed = urlparse(raw)
+    if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
+        return False
+    # Image artifacts are intentionally allowed to remain remote. File blobs need
+    # an immutable Artifact V2 identity before a URL is accepted as delivery evidence.
+    return (
+        str(artifact.get('content_type') or '').lower() == 'image'
+        or bool(artifact.get('v2_revision_id') or artifact.get('v2_artifact_id'))
+    )
+
+
+def artifact_is_deliverable(ctx: Any, artifact: Dict[str, Any]) -> bool:
+    """Return whether an artifact still satisfies its type and backing-resource contract."""
+    if not isinstance(artifact, dict):
+        return False
+    key = str(artifact.get('slot') or '')
+    content_type = str(artifact.get('content_type') or '').strip().lower()
+    value = artifact.get('value')
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            value = parsed if isinstance(parsed, dict) else {}
+        except ValueError:
+            value = {}
+    if not isinstance(value, dict):
+        return False
+
+    original_type = str(value.get('type') or '').strip().lower()
+    contract_type = original_type if content_type == 'file' and original_type in {'text', 'json'} else content_type
+    if not key or _validate_declared_artifact_type(ctx, key, contract_type):
+        return False
+    if content_type == 'text':
+        return isinstance(value.get('text'), str)
+    if content_type == 'json':
+        return 'data' in value
+    if content_type == 'file_list':
+        paths = value.get('paths')
+        return bool(paths) and isinstance(paths, list) and all(
+            _readable_artifact_file(ctx, path)
+            or _remote_artifact_reference(artifact, path)
+            for path in paths
+        )
+    if content_type in {'file', 'image'}:
+        path = value.get('path') or value.get('image_url') or value.get('url')
+        return (
+            _readable_artifact_file(ctx, path)
+            or _remote_artifact_reference(artifact, value.get('url') or path)
+        )
+    return False
+
+
 def _save_artifact(key: str, value: Any, content_type: str = 'text',
                    source_tool: Optional[str] = None,
                    sort_order: Optional[int] = None,

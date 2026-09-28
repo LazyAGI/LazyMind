@@ -142,6 +142,12 @@ _COMPLETION_CONCERN = re.compile(
     r'无法|不能|失败|未完成|未能|缺少|尚未|没有(?:完成|生成|交付)',
     re.IGNORECASE,
 )
+_COMPLETION_EVALUATION_POLL_SECONDS = 0.05
+
+
+def _silent_background_model_call(llm: Any, prompt: str) -> Any:
+    """Call a background model in streaming-compatible mode without publishing deltas."""
+    return llm.share(stream={'_stream_sink': lambda _event: None})(prompt)
 
 
 def _generate_display_plan(llm: Any, objective: str, scope: Optional[Dict[str, Any]] = None) -> List[str]:
@@ -172,7 +178,7 @@ def _generate_display_plan(llm: Any, objective: str, scope: Optional[Dict[str, A
     )
     # Streaming-only models still return an aggregated response through LazyLLM.
     # Keep this background request's text and reasoning out of the agent event queue.
-    response = llm.share(stream={'_stream_sink': lambda event: None})(prompt)
+    response = _silent_background_model_call(llm, prompt)
     text = response if isinstance(response, str) else (
         response.get('content', '') if isinstance(response, dict) else ''
     )
@@ -1649,15 +1655,14 @@ async def run_subagent_stream(
             ev['task_id'] = task_id
             yield _sse(ev)
         artifacts = [*db.load_artifacts(task_id), *ctx.local_artifacts()]
-        saved = set()
-        for artifact in artifacts:
-            key = str(artifact.get('slot') or '')
-            content_type = artifact.get('content_type') or ''
-            original_type = _coerce_dict(artifact.get('value')).get('type')
-            if content_type == 'file' and original_type in {'text', 'json'}:
-                content_type = original_type
-            if key and not subagent_tools._validate_declared_artifact_type(ctx, key, content_type):
-                saved.add(key)
+        deliverable_artifacts = [
+            artifact for artifact in artifacts
+            if subagent_tools.artifact_is_deliverable(ctx, artifact)
+        ]
+        saved = {
+            str(artifact.get('slot')) for artifact in deliverable_artifacts
+            if artifact.get('slot')
+        }
         missing = [k for k in required_output_keys if k not in saved]
         if missing:
             message = f'Required output artifacts are missing or have the wrong type: {", ".join(missing)}'
@@ -1675,12 +1680,13 @@ async def run_subagent_stream(
             (effective_agent_type != 'workflow_step' and not required_output_keys)
             or _COMPLETION_CONCERN.search(str(final_result or ''))
         ):
-            is_ok, summary, failure_phase = _evaluate_completion(
+            is_ok, summary, failure_phase = await _evaluate_completion_async(
                 llm=llm,
                 objective=ctx.objective,
                 steps=db.load_steps(task_id),
-                artifacts=artifacts,
+                artifacts=deliverable_artifacts,
                 force_result=final_result,
+                cancel_check=cancel_check,
             )
             if cancel_check is not None:
                 cancel_check(None)
@@ -1902,8 +1908,7 @@ def _evaluate_completion(
     eval_prompt = '\n'.join(prompt_lines)
 
     try:
-        summarize_llm = llm.share(stream=False)
-        resp = summarize_llm(eval_prompt)
+        resp = _silent_background_model_call(llm, eval_prompt)
         text = resp if isinstance(resp, str) else (
             resp.get('content', '') if isinstance(resp, dict) else ''
         )
@@ -1933,6 +1938,53 @@ def _evaluate_completion(
     except Exception as e:
         LOG.warning(f'[SubAgent] _evaluate_completion LLM call failed: {e}')
         return False, 'Could not verify task completion.', 'completion_evaluation_failed'
+
+
+async def _evaluate_completion_async(
+    llm: Any,
+    objective: str,
+    steps: List[Dict[str, Any]],
+    artifacts: List[Dict[str, Any]],
+    force_result: Any,
+    cancel_check: Any = None,
+) -> tuple[bool, str, str]:
+    """Run the synchronous reviewer off-loop while the owner coroutine controls terminal state."""
+    timeout = float(_cfg['subagent_completion_evaluation_timeout'])
+    if cancel_check is not None:
+        cancel_check(None)
+    evaluation = asyncio.create_task(asyncio.to_thread(
+        _evaluate_completion,
+        llm,
+        objective,
+        steps,
+        artifacts,
+        force_result,
+    ))
+    deadline = asyncio.get_running_loop().time() + timeout
+    try:
+        while True:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                LOG.warning('[SubAgent] completion evaluation timed out after %ss', timeout)
+                return (
+                    False,
+                    'Could not verify task completion before the evaluation deadline.',
+                    'completion_evaluation_failed',
+                )
+            done, _ = await asyncio.wait(
+                [evaluation],
+                timeout=min(_COMPLETION_EVALUATION_POLL_SECONDS, remaining),
+            )
+            if done:
+                result = evaluation.result()
+                if cancel_check is not None:
+                    cancel_check(None)
+                return result
+            if cancel_check is not None:
+                cancel_check(None)
+    finally:
+        if not evaluation.done():
+            evaluation.cancel()
 
 
 def _rebuild_history_from_steps(db: Any, task_id: str) -> List[Dict[str, Any]]:

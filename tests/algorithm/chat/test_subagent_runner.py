@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock, patch
@@ -222,9 +224,11 @@ def _sse_to_events(raw: str) -> List[Dict[str, Any]]:
     return events
 
 
-async def _collect(gen) -> str:
+async def _collect(gen, on_chunk=None) -> str:
     parts = []
     async for chunk in gen:
+        if on_chunk is not None:
+            on_chunk(chunk)
         parts.append(chunk)
     return ''.join(parts)
 
@@ -325,7 +329,7 @@ def test_created_artifact_task_without_output_slots_cannot_succeed(monkeypatch, 
     assert len(terminal) == 1
     assert terminal[0]['status'] == 'failed', terminal
     assert terminal[0]['current_phase'] == 'missing_required_artifacts'
-    model.share.assert_called_once_with(stream=False)
+    _assert_silent_stream_call(model)
     assert raw.endswith('data: [DONE]\n\n')
 
 
@@ -556,6 +560,366 @@ def _terminal(events):
     return terminal[0]
 
 
+async def _run_completion_review_scenario(
+    monkeypatch,
+    tmp_path,
+    model,
+    *,
+    agent_type='research',
+    objective='Explain the analysis in plain text.',
+    params=None,
+    output_slots=None,
+    artifacts=None,
+    final='Analysis delivered.',
+    before_final=None,
+    on_chunk=None,
+):
+    fake_llm = MagicMock()
+    fake_llm.globals._init_sid = lambda sid: None
+    fake_llm.locals._init_sid = lambda sid: None
+    monkeypatch.setattr(runner_mod, 'lazyllm', fake_llm)
+    monkeypatch.setattr(runner_mod, 'AutoModel', lambda **_: model)
+    monkeypatch.setattr(runner_mod, 'inject_model_config', lambda cfg: None)
+    monkeypatch.setattr(runner_mod, 'inject_tool_config', lambda cfg: None)
+    monkeypatch.setattr(runner_mod, 'inject_runtime_env', lambda cfg: None)
+    monkeypatch.setattr(runner_mod, 'set_context', lambda ctx: None)
+    monkeypatch.setattr(
+        runner_mod,
+        '_generate_display_plan',
+        lambda *_args, **_kwargs: ['Prepare task', 'Execute task', 'Deliver result'],
+    )
+    _install_fake_translator(monkeypatch)
+
+    class Executor:
+        async def stream(self, _llm, _plan):
+            if before_final is not None:
+                await before_final()
+            yield 'final', final
+
+    monkeypatch.setattr(runner_mod, 'AgentExecutor', Executor)
+    task = {
+        'id': 'completion-review-task',
+        'conversation_id': 'completion-review-conversation',
+        'agent_type': agent_type,
+        'objective': objective,
+        'params': params or {},
+        'workspace_path': str(tmp_path),
+        'input_slots': [],
+        'output_slots': output_slots or [],
+        'artifacts': artifacts or [],
+        'mode': 'auto',
+    }
+    raw = await _collect(
+        runner_mod.run_subagent_stream(task['id'], task_spec=task, resume=bool(artifacts)),
+        on_chunk=on_chunk,
+    )
+    return raw, _sse_to_events(raw)
+
+
+@pytest.mark.asyncio
+async def test_completion_review_does_not_block_event_loop(monkeypatch, tmp_path):
+    verdict = json.dumps({
+        'completed': True,
+        'requires_artifact': False,
+        'artifact_keys': [],
+        'reason': 'Analysis delivered.',
+    })
+
+    evaluation_finished = threading.Event()
+
+    class SlowModel:
+        def share(self, **_kwargs):
+            def call(_prompt):
+                time.sleep(0.2)
+                evaluation_finished.set()
+                return verdict
+
+            return call
+
+    timer = None
+    started = 0.0
+
+    async def timer_elapsed():
+        await asyncio.sleep(0.025)
+        return asyncio.get_running_loop().time() - started, evaluation_finished.is_set()
+
+    original_evaluate = runner_mod._evaluate_completion_async
+
+    async def timed_evaluate(*args, **kwargs):
+        nonlocal timer, started
+        started = asyncio.get_running_loop().time()
+        timer = asyncio.create_task(timer_elapsed())
+        await asyncio.sleep(0)
+        return await original_evaluate(*args, **kwargs)
+
+    monkeypatch.setattr(runner_mod, '_evaluate_completion_async', timed_evaluate)
+    _raw, events = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, SlowModel(),
+    )
+
+    assert timer is not None
+    elapsed, evaluator_already_finished = await timer
+    assert elapsed < 0.18
+    assert evaluator_already_finished is False
+    assert _terminal(events)['status'] == 'succeeded'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('provider', ['qwen', 'openai'])
+async def test_completion_review_supports_silent_streaming_models(monkeypatch, tmp_path, provider):
+    calls = []
+
+    class StreamingOnlyModel:
+        def share(self, **kwargs):
+            calls.append(kwargs)
+            if kwargs.get('stream') is False:
+                raise RuntimeError(f'{provider} provider requires streaming')
+            sink = kwargs['stream']['_stream_sink']
+
+            def call(_prompt):
+                sink({'reasoning_content': 'PRIVATE_COMPLETION_REASONING'})
+                return json.dumps({
+                    'completed': True,
+                    'requires_artifact': False,
+                    'artifact_keys': [],
+                    'reason': 'Analysis delivered.',
+                })
+
+            return call
+
+    raw, events = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, StreamingOnlyModel(),
+    )
+
+    assert _terminal(events)['status'] == 'succeeded'
+    assert calls and isinstance(calls[-1].get('stream'), dict)
+    assert 'PRIVATE_COMPLETION_REASONING' not in raw
+
+
+@pytest.mark.asyncio
+async def test_missing_resumed_file_is_not_completion_evidence(monkeypatch, tmp_path):
+    model = MagicMock()
+    missing = tmp_path / 'deleted.pdf'
+    raw, events = await _run_completion_review_scenario(
+        monkeypatch,
+        tmp_path,
+        model,
+        agent_type='document_generation',
+        objective='Deliver the requested document.',
+        params={'output_slot_types': {'document': 'file'}},
+        output_slots=['document'],
+        artifacts=[{
+            'slot': 'document',
+            'content_type': 'file',
+            'seq': 1,
+            'value': {'filename': 'deleted.pdf', 'path': str(missing), 'size': 12},
+        }],
+        final='The requested document was delivered.',
+    )
+
+    assert not missing.exists()
+    assert _terminal(events)['status'] == 'failed', raw
+    assert _terminal(events)['current_phase'] == 'missing_required_artifacts'
+    model.share.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_completion_review_discards_late_success(monkeypatch, tmp_path):
+    evaluation_started = threading.Event()
+
+    class SlowModel:
+        def share(self, **_kwargs):
+            def call(_prompt):
+                evaluation_started.set()
+                time.sleep(0.2)
+                return json.dumps({
+                    'completed': True,
+                    'requires_artifact': False,
+                    'artifact_keys': [],
+                    'reason': 'Late success must be ignored.',
+                })
+
+            return call
+
+    def cancel_check(_output):
+        if evaluation_started.is_set():
+            raise runner_mod.UserCancelledError('stopped during completion review')
+        return False
+
+    monkeypatch.setattr(runner_mod, 'make_cancel_stop_condition', lambda: cancel_check)
+    evaluation_boundary = 0.0
+
+    async def before_final():
+        nonlocal evaluation_boundary
+        evaluation_boundary = asyncio.get_running_loop().time()
+
+    raw, events = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, SlowModel(), before_final=before_final,
+    )
+
+    assert asyncio.get_running_loop().time() - evaluation_boundary < 0.15
+    assert _terminal(events)['status'] == 'interrupted'
+    await asyncio.sleep(0.25)
+    assert not any(event['status'] == 'succeeded' for event in events if 'status' in event)
+    assert 'Late success must be ignored.' not in raw
+
+
+@pytest.mark.asyncio
+async def test_completion_review_timeout_fails_closed_without_late_success(monkeypatch, tmp_path):
+    release_evaluation = threading.Event()
+    evaluation_finished = threading.Event()
+
+    class SlowModel:
+        def share(self, **_kwargs):
+            def call(_prompt):
+                release_evaluation.wait(timeout=1)
+                evaluation_finished.set()
+                return json.dumps({
+                    'completed': True,
+                    'requires_artifact': False,
+                    'artifact_keys': [],
+                    'reason': 'Late timeout success must be ignored.',
+                })
+
+            return call
+
+    terminal_boundary = 0.0
+    evaluator_finished_at_terminal = True
+
+    def record_terminal(chunk):
+        nonlocal terminal_boundary, evaluator_finished_at_terminal
+        if '"current_phase": "completion_evaluation_failed"' in chunk:
+            terminal_boundary = asyncio.get_running_loop().time()
+            evaluator_finished_at_terminal = evaluation_finished.is_set()
+
+    with runner_mod._cfg.temp('subagent_completion_evaluation_timeout', 0.05):
+        raw, events = await _run_completion_review_scenario(
+            monkeypatch,
+            tmp_path,
+            SlowModel(),
+            on_chunk=record_terminal,
+        )
+
+    assert terminal_boundary > 0
+    assert evaluator_finished_at_terminal is False
+    terminal = _terminal(events)
+    assert terminal['status'] == 'failed'
+    assert terminal['current_phase'] == 'completion_evaluation_failed'
+    release_evaluation.set()
+    await asyncio.sleep(0.05)
+    assert not any(event['status'] == 'succeeded' for event in events if 'status' in event)
+    assert 'Late timeout success must be ignored.' not in raw
+
+
+@pytest.mark.asyncio
+async def test_valid_resumed_file_is_completion_evidence(monkeypatch, tmp_path):
+    document = tmp_path / 'existing.pdf'
+    document.write_bytes(b'%PDF-1.4\nexisting delivery\n')
+    model = MagicMock()
+    _raw, events = await _run_completion_review_scenario(
+        monkeypatch,
+        tmp_path,
+        model,
+        agent_type='document_generation',
+        objective='Deliver the requested document.',
+        params={'output_slot_types': {'document': 'file'}},
+        output_slots=['document'],
+        artifacts=[{
+            'slot': 'document', 'content_type': 'file', 'seq': 1,
+            'value': {'filename': document.name, 'path': str(document), 'size': document.stat().st_size},
+        }],
+        final='The requested document was delivered.',
+    )
+
+    assert _terminal(events)['status'] == 'succeeded'
+    model.share.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('missing_index,expected', [(None, 'succeeded'), (1, 'failed')])
+async def test_resumed_file_list_requires_every_file(monkeypatch, tmp_path, missing_index, expected):
+    paths = [tmp_path / 'part-1.txt', tmp_path / 'part-2.txt']
+    for index, path in enumerate(paths):
+        if index != missing_index:
+            path.write_text(f'part {index + 1}', encoding='utf-8')
+    model = MagicMock()
+    _raw, events = await _run_completion_review_scenario(
+        monkeypatch,
+        tmp_path,
+        model,
+        agent_type='document_generation',
+        objective='Deliver every generated document.',
+        params={'output_slot_types': {'documents': 'file'}},
+        output_slots=['documents'],
+        artifacts=[{
+            'slot': 'documents', 'content_type': 'file_list', 'seq': 1,
+            'value': {'paths': [str(path) for path in paths]},
+        }],
+        final='Every requested document was delivered.',
+    )
+
+    assert _terminal(events)['status'] == expected
+    if expected == 'failed':
+        assert _terminal(events)['current_phase'] == 'missing_required_artifacts'
+    model.share.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('original_type', ['text', 'json'])
+async def test_deleted_offloaded_content_is_not_completion_evidence(
+    monkeypatch, tmp_path, original_type,
+):
+    missing = tmp_path / f'deleted-{original_type}.txt'
+    model = MagicMock()
+    _raw, events = await _run_completion_review_scenario(
+        monkeypatch,
+        tmp_path,
+        model,
+        objective='Deliver the requested report.',
+        params={'output_slot_types': {'report': original_type}},
+        output_slots=['report'],
+        artifacts=[{
+            'slot': 'report', 'content_type': 'file', 'seq': 1,
+            'value': {'type': original_type, 'path': str(missing), 'size': 1024},
+        }],
+        final='The requested report was delivered.',
+    )
+
+    assert _terminal(events)['status'] == 'failed'
+    assert _terminal(events)['current_phase'] == 'missing_required_artifacts'
+    model.share.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_artifact_v2_remote_blob_is_not_rejected_as_a_local_path(monkeypatch, tmp_path):
+    model = MagicMock()
+    _raw, events = await _run_completion_review_scenario(
+        monkeypatch,
+        tmp_path,
+        model,
+        agent_type='document_generation',
+        objective='Deliver the requested document.',
+        params={'output_slot_types': {'document': 'file'}},
+        output_slots=['document'],
+        artifacts=[{
+            'slot': 'document', 'content_type': 'file', 'seq': 1,
+            'v2_artifact_id': 'artifact-v2', 'v2_revision_id': 'revision-v2',
+            'value': {'filename': 'report.pdf', 'url': 'https://files.example.test/report.pdf'},
+        }],
+        final='The requested document was delivered.',
+    )
+
+    assert _terminal(events)['status'] == 'succeeded'
+    model.share.assert_not_called()
+
+
+def _assert_silent_stream_call(model):
+    assert model.share.call_count == 1
+    stream = model.share.call_args.kwargs.get('stream')
+    assert isinstance(stream, dict)
+    assert callable(stream.get('_stream_sink'))
+
+
 @pytest.mark.parametrize('params', [
     {'required_output_artifact_keys': ['document']},
     {'output_slot_types': {'document': 'file'}},
@@ -588,7 +952,7 @@ def test_uncontracted_text_task_is_evaluated_without_creating_files(completion_c
     )
     assert _terminal(events)['status'] == expected
     assert not any(event['type'] == 'artifact' for event in events)
-    model.share.assert_called_once_with(stream=False)
+    _assert_silent_stream_call(model)
     if not completed:
         assert _terminal(events)['current_phase'] == 'objective_incomplete'
 
@@ -621,7 +985,7 @@ def test_failure_words_trigger_review_not_an_automatic_failure(completion_case, 
                  'reason': 'Retry succeeded.' if completed else 'Required signature was not completed.'},
     )
     assert _terminal(events)['status'] == expected
-    model.share.assert_called_once_with(stream=False)
+    _assert_silent_stream_call(model)
 
 
 def test_recovered_tool_error_does_not_poison_completion(completion_case):
@@ -693,7 +1057,7 @@ def test_workflow_final_incomplete_report_is_reviewed(completion_case):
     )
     assert _terminal(events)['status'] == 'failed'
     assert _terminal(events)['current_phase'] == 'objective_incomplete'
-    model.share.assert_called_once_with(stream=False)
+    _assert_silent_stream_call(model)
 
 
 def test_cancel_after_draft_publication_cannot_emit_success(monkeypatch, completion_case):
@@ -741,14 +1105,14 @@ def test_cancel_at_completion_boundary_cannot_be_revived(monkeypatch, completion
         if canceled:
             raise runner_mod.UserCancelledError('stopped by user')
 
-    def evaluate(**_):
+    async def evaluate(**_):
         nonlocal canceled
         canceled = True
         return True, 'Late success verdict', ''
 
     monkeypatch.setattr(runner_mod, 'make_cancel_stop_condition', lambda: check)
     evaluate_mock = MagicMock(side_effect=evaluate)
-    monkeypatch.setattr(runner_mod, '_evaluate_completion', evaluate_mock)
+    monkeypatch.setattr(runner_mod, '_evaluate_completion_async', evaluate_mock)
     events, _, _ = completion_case()
     assert _terminal(events)['status'] == 'interrupted'
     assert evaluate_mock.call_count == int(during_evaluation)
@@ -1638,10 +2002,10 @@ def test_display_plan_does_not_delay_execution_and_is_persisted_live(monkeypatch
 
     monkeypatch.setattr(runner_mod, '_generate_display_plan', generate)
     monkeypatch.setattr(runner_mod, 'AgentExecutor', Executor)
-    monkeypatch.setattr(
-        runner_mod, '_evaluate_completion',
-        lambda *_, **__: (True, 'done', ''),
-    )
+    async def complete(*_, **__):
+        return True, 'done', ''
+
+    monkeypatch.setattr(runner_mod, '_evaluate_completion_async', complete)
     raw = asyncio.run(_collect(runner_mod.run_subagent_stream(_DEFAULT_TASK_ID, task_spec=task)))
     events = _sse_to_events(raw)
     assert next(e for e in events if e['type'] == 'plan')['steps'] == outline
