@@ -379,13 +379,16 @@ def _apply_workflow_edits(request: LLMTaskRequest, output: dict[str, Any]) -> di
     for field, path in field_to_path.items():
         if path in changed and not str(output.get(field) or '').strip():
             output[field] = changed[path]
-    scripts = output.get('scripts')
-    if not isinstance(scripts, dict):
-        scripts = {}
+    raw_scripts = output.get('scripts')
+    has_script_output = isinstance(raw_scripts, dict)
+    scripts = raw_scripts if has_script_output else {}
+    has_script_edit = False
     for path, content in changed.items():
         if path.startswith('scripts/'):
+            has_script_edit = True
             scripts[path] = content
-    output['scripts'] = {str(k): str(v) for k, v in scripts.items()}
+    if has_script_output or has_script_edit:
+        output['scripts'] = {str(k): str(v) for k, v in scripts.items()}
     return output
 
 
