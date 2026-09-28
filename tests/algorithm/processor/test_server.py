@@ -2,6 +2,7 @@ import importlib
 import runpy
 import signal
 import sys
+from types import SimpleNamespace
 
 
 class _FakeDocumentProcessor:
@@ -9,6 +10,7 @@ class _FakeDocumentProcessor:
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
+        self._raw_impl = SimpleNamespace()
         self.started = False
         self.waited = False
         self.stopped = False
@@ -36,6 +38,8 @@ def _fresh_import_server(monkeypatch):
 
 
 def test_server_constructs_document_processor_from_env(monkeypatch):
+    from lazymind.processor.service.chunks import list_doc_chunks_data
+
     monkeypatch.setenv('LAZYMIND_DOCUMENT_PROCESSOR_PORT', '8123')
 
     module = _fresh_import_server(monkeypatch)
@@ -47,6 +51,9 @@ def test_server_constructs_document_processor_from_env(monkeypatch):
         'db_config': {'service': 'DocumentProcessor'},
         'num_workers': 0,
     }
+    preview = module.doc_processor._raw_impl._list_doc_chunks_data
+    assert preview.__self__ is module.doc_processor._raw_impl
+    assert preview.__func__ is list_doc_chunks_data
 
 
 def test_server_signal_handler_sets_shutdown_and_stops_processor(monkeypatch):

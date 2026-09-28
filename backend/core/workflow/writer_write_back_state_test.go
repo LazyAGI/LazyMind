@@ -78,6 +78,24 @@ func TestEnrichWriterWriteBackSlots_MarkdownInitialDelivery(t *testing.T) {
 	}
 }
 
+func TestEnrichWriterWriteBackSlots_MarkdownInitialDeliveryFromUploadRoot(t *testing.T) {
+	db := newTestDB(t)
+	uploadRoot := t.TempDir()
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", t.TempDir())
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", uploadRoot)
+	draftPath := filepath.Join(uploadRoot, "draft_document.md")
+	mustWriteWriterArtifact(t, draftPath, "# Ready for delivery\n")
+	draft := writerRevision("draft", "session", "flat_draft_document", 1, "ai", writerPathValue(draftPath))
+	mustCreateWriterRecord(t, db.DB.Create(&draft).Error)
+
+	slots := []slotDTO{toSlotDTO(&draft)}
+	enrichSlots(context.Background(), db.DB, "session", slots)
+	got := slots[0]
+	if !got.WriteBackReady || !got.WriteBackDirty || got.WriteBackState != writerWriteBackInitialDelivery || got.ProviderDocumentID != "" {
+		t.Fatalf("unexpected initial delivery state: %+v", got)
+	}
+}
+
 func TestEnrichWriterWriteBackSlots_UsesGitHubTarget(t *testing.T) {
 	db := newTestDB(t)
 	mustCreateWriterRecord(t, db.DB.Create(&orm.WorkflowSession{

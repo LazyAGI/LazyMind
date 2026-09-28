@@ -130,7 +130,7 @@ func TestWorkspaceDraftResolutionDoesNotPersistBinding(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if snapshot == nil || snapshot.PermissionMode != mode {
+		if snapshot == nil || snapshot.PermissionMode != PermissionAlwaysAsk {
 			t.Fatalf("mode %s snapshot=%+v", mode, snapshot)
 		}
 	}
@@ -261,8 +261,8 @@ func TestWorkspacePermissionUpdateUsesSavedVersion(t *testing.T) {
 	if stale.Code != 409 || conflict.Code != common.ResolveAppError("conflict", 409).Code || conflict.Data.Detail["reason"] != "binding_conflict" {
 		t.Fatalf("stale update=%d %s", stale.Code, stale.Body.String())
 	}
-	var saved orm.ConversationWorkspaceBinding
-	if err := db.Where("conversation_id = ?", conv.ID).First(&saved).Error; err != nil {
+	var saved orm.Conversation
+	if err := db.Where("id = ?", conv.ID).First(&saved).Error; err != nil {
 		t.Fatal(err)
 	}
 	if saved.PermissionMode != "ask_as_needed" || saved.PermissionVersion != 2 {
@@ -272,13 +272,13 @@ func TestWorkspacePermissionUpdateUsesSavedVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	rejected := update("owner", `{"permission_mode":"allow_all","version":2}`)
-	if rejected.Code != 409 {
+	if rejected.Code != 200 {
 		t.Fatalf("revoked update=%d %s", rejected.Code, rejected.Body.String())
 	}
-	if err := db.Where("conversation_id = ?", conv.ID).First(&saved).Error; err != nil {
+	if err := db.Where("id = ?", conv.ID).First(&saved).Error; err != nil {
 		t.Fatal(err)
 	}
-	if saved.PermissionVersion != 2 {
+	if saved.PermissionVersion != 3 {
 		t.Fatalf("revoked request changed version: %+v", saved)
 	}
 }

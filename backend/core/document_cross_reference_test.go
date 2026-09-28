@@ -149,6 +149,9 @@ func newCrossServer(t *testing.T, f crossFixture) *crossServer {
 	spy := &crossServer{manifests: map[string]any{}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if serveDynamicLLMRole(w, r) {
+			return
+		}
 		var fields map[string]json.RawMessage
 		if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
 			t.Error(err)

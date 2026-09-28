@@ -487,12 +487,9 @@ async def task_cancel(req: TaskCancelRequest) -> TaskCancelResponse:
     - task_id: direct task/session ID (original SubAgent path)
     - conversation_id: looks up the active chat session from _active_sessions
     """
-    import json as _json
     from lazymind.chat.service.chat_service import _active_sessions
+    from lazymind.chat.engine.agent_runtime.cancellation import request_cancel
     try:
-        import lazyllm
-        from lazyllm.common.queue import FileSystemQueue
-
         sid: Optional[str] = None
         if req.conversation_id:
             sid = _active_sessions.get(req.conversation_id)
@@ -502,8 +499,7 @@ async def task_cancel(req: TaskCancelRequest) -> TaskCancelResponse:
         if not sid:
             return TaskCancelResponse(ok=False)
 
-        lazyllm.globals._init_sid(sid=sid)
-        FileSystemQueue(klass='cancel').enqueue(_json.dumps({'tag': 'cancel'}))
+        request_cancel(sid)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     return TaskCancelResponse(ok=True)

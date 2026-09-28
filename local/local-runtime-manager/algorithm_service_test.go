@@ -142,6 +142,33 @@ func TestAlgorithmServiceEnvPinsLocalRouterHost(t *testing.T) {
 	assertEnvContains(t, env, "LAZYMIND_WORKFLOWS_DIR="+filepath.Join(repo, "workflows"))
 }
 
+func TestAlgorithmServiceEnvUsesBundledPandocWhenConfigured(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	paths.PandocBin = executablePath(filepath.Join(paths.ResourcesRoot, "bin"), "pandoc")
+
+	env := algorithmServiceEnv(cfg, paths, chatProcessName)
+
+	assertEnvContains(t, env, "LAZYMIND_PANDOC_PATH="+paths.PandocBin)
+}
+
+func TestAlgorithmServiceEnvLeavesPandocUnsetWithoutBundledBinary(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+
+	env := algorithmServiceEnv(cfg, paths, chatProcessName)
+
+	assertEnvNotContains(t, env, "LAZYMIND_PANDOC_PATH=")
+}
+
 func TestAlgorithmServiceEnvUsesSQLiteServerAliases(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
@@ -373,6 +400,7 @@ func TestAlgorithmServiceEnvUsesRuntimeDataPaths(t *testing.T) {
 	assertEnvContains(t, env, "LAZYLLM_HOME="+paths.LazyLLMHome)
 	assertEnvContains(t, env, "TIKTOKEN_CACHE_DIR="+filepath.Join(paths.LazyLLMHome, "tiktoken"))
 	assertEnvContains(t, env, "LAZYMIND_DOCUMENT_SERVICE_STORAGE_DIR="+paths.UploadRoot)
+	assertEnvContains(t, env, "LAZYMIND_OBSERVABILITY_DIR="+filepath.Join(paths.DataDir, "observability"))
 	assertEnvContains(t, env, "LAZYLLM_TEMP_DIR="+paths.LazyLLMTempDir)
 	assertEnvContains(t, env, "LAZYMIND_OCR_CACHE_DIR="+paths.OCRCacheDir)
 	assertEnvContains(t, env, "LAZYMIND_MOUNT_BASE_DIR="+paths.UploadRoot)

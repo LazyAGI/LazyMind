@@ -400,8 +400,10 @@ def install_lazyllm_sqlite_proxy():
             return
 
         import sqlalchemy
+        from lazyllm.tools.rag.parsing_service.queue import _SQLBasedQueue
         from lazyllm.tools.rag.store.hybrid.map_store import MapStore
         from lazyllm.tools.rag.store.segment.sqlite_store import SQLiteStore
+        from lazyllm.tools.rag.utils import _orm_to_dict
         from lazyllm.tools.sql.sql_manager import SqlManager
 
         manager_engine = SqlManager.engine.fget
@@ -410,6 +412,29 @@ def install_lazyllm_sqlite_proxy():
         map_store_open = MapStore._open_conn
         map_store_connect = MapStore.connect
         map_store_dir = MapStore.dir.fget
+        queue_peek = _SQLBasedQueue.peek
+
+        def proxied_queue_peek(queue, filter_by=None):
+            if not queue._sql_manager._db_name.startswith('sqliteproxy://'):
+                return queue_peek(queue, filter_by)
+            table = queue._sql_manager.get_table_orm_class(queue._table_name)
+            if not hasattr(table, 'finished_at'):
+                return queue_peek(queue, filter_by)
+            # The Go proxy adds UTC to naive DATETIME values. Preserve the stored
+            # wall time, then normalize explicit offsets to local naive time
+            # for the pinned LazyLLM callback scheduler.
+            with queue._sql_manager.get_session() as session:
+                record = queue._build_query(session, filter_by).add_columns(
+                    sqlalchemy.cast(table.finished_at, sqlalchemy.String),
+                ).first()
+                if record is None:
+                    return None
+                result = _orm_to_dict(record[0])
+                finished_at = datetime.datetime.fromisoformat(record[1]) if record[1] else None
+                if finished_at is not None and finished_at.tzinfo is not None:
+                    finished_at = finished_at.astimezone().replace(tzinfo=None)
+                result['finished_at'] = finished_at
+                return result
 
         def proxied_manager_engine(manager):
             if not manager._db_name.startswith('sqliteproxy://'):
@@ -475,4 +500,5 @@ def install_lazyllm_sqlite_proxy():
         MapStore._open_conn = proxied_map_store_open
         MapStore.connect = proxied_map_store_connect
         MapStore.dir = property(proxied_map_store_dir)
+        _SQLBasedQueue.peek = proxied_queue_peek
         _adapter_installed = True

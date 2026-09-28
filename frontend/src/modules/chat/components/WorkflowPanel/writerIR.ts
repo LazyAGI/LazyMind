@@ -19,6 +19,7 @@ export interface WriterWritingSubtask {
   subtask_id: string;
   node_id: string;
   question: string;
+  // extract is accepted only for historical artifacts/events; it is displayed as reason.
   subtask_type: 'retrieve' | 'extract' | 'reason';
   status?: 'pending' | 'running' | 'completed' | 'retrying' | 'failed';
   result_summary?: string;
@@ -34,6 +35,7 @@ export interface WriterBlock {
   children?: WriterBlock[];
   stage?: WriterStage;
   status?: string;
+  outline_description?: string;
   target_chars?: number;
   context_relations?: WriterContextRelation[];
   subtasks?: WriterWritingSubtask[];

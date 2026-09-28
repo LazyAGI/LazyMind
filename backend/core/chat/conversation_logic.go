@@ -329,6 +329,13 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 	c.EnableSubagent = &settings.enableSubagent
 	c.ChatExecutor = settings.chatExecutor
 	c.ThinkingDepth = settings.thinkingDepth
+	if localworkspace.Enabled() {
+		mode, _, err := localworkspace.UserPermission(ctx, db, userID)
+		if err != nil {
+			return nil, 0, err
+		}
+		c.PermissionMode, c.PermissionVersion = mode, 1
+	}
 	if err := db.Create(&c).Error; err != nil {
 		return nil, 0, err
 	}
@@ -1996,6 +2003,7 @@ func handleStreamChat(
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	common.SetLanguageResponseHeaders(w, r.Header.Get("Accept-Language"))
 
 	historyID := target.HistoryID
 	if historyID == "" {
@@ -2266,6 +2274,33 @@ func publishCapabilityDependency(
 	}
 }
 
+func publishToolConfiguration(
+	reqCtx, storeCtx context.Context,
+	w http.ResponseWriter,
+	flusher http.Flusher,
+	stateStore state.Store,
+	convID, historyID string,
+	seq int,
+	dependency map[string]any,
+	writeClient bool,
+) {
+	if dependency == nil {
+		return
+	}
+	chunk := &ChatChunkResponse{
+		ConversationID:    convID,
+		Seq:               int32(seq),
+		HistoryID:         historyID,
+		ToolConfiguration: dependency,
+	}
+	if writeClient && reqCtx.Err() == nil {
+		writeSSEChunk(w, flusher, chunk)
+	}
+	if stateStore != nil {
+		_ = appendChatChunk(storeCtx, stateStore, convID, historyID, chunk)
+	}
+}
+
 func streamSingleAnswer(
 	chatCtx, reqCtx context.Context,
 	w http.ResponseWriter,
@@ -2443,6 +2478,13 @@ func streamSingleAnswer(
 			persistAndPublishConversationArtifact(
 				chatCtx, reqCtx, w, flusher, db, stateStore, reqBody,
 				convID, historyID, seq, d.ArtifactCreated,
+			)
+			continue
+		}
+		if d.ToolConfiguration != nil {
+			publishToolConfiguration(
+				reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq,
+				d.ToolConfiguration, true,
 			)
 			continue
 		}
@@ -2924,6 +2966,11 @@ func streamDualAnswer(
 ) {
 	snapshots := map[string]*ChatExportSnapshot{}
 	terminals := map[string]*ChatRuntimeEvent{}
+	envInputRequests := map[string]bool{}
+	envInputNotice := "\n\n此输入请求尚未保存环境变量。双回答模式暂不支持安全输入卡片，请切换到单回答后重新发送配置请求；用户级变量也可在设置的环境变量页配置。\n\n"
+	if common.NormalizeLocale(w.Header().Get("Content-Language")) == common.LocaleEnUS {
+		envInputNotice = "\n\nThis input request has not saved an environment variable. Secure input cards are not supported in dual-answer mode. Switch to single-answer mode and send the configuration request again, or configure user-level variables in Settings > Environment variables.\n\n"
+	}
 	historyExt = withChatExports(historyExt, nil)
 	publishDualRuntime := func(reqCtx, chatCtx context.Context, w http.ResponseWriter, flusher http.Flusher,
 		stateStore state.Store, convID, hid string, seq int, event *ChatRuntimeEvent, metrics *RunPerformanceMetrics, live bool) {
@@ -3081,6 +3128,11 @@ func streamDualAnswer(
 				primaryCh = nil
 				continue
 			}
+			if d.AskPending != nil && d.AskPending.EnvInput != nil {
+				envInputRequests[historyID] = true
+				appendPrimary(envInputNotice, "", nil)
+				continue
+			}
 			if d.ExportSnapshot != nil {
 				snapshots[historyID] = d.ExportSnapshot
 			}
@@ -3111,6 +3163,13 @@ func streamDualAnswer(
 				)
 				continue
 			}
+			if d.ToolConfiguration != nil {
+				publishToolConfiguration(
+					reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq,
+					d.ToolConfiguration, true,
+				)
+				continue
+			}
 			if d.CapabilityDependency != nil {
 				publishCapabilityDependency(
 					reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq,
@@ -3126,6 +3185,11 @@ func streamDualAnswer(
 			if !ok {
 				secondaryDone = true
 				secondaryCh = nil
+				continue
+			}
+			if d.AskPending != nil && d.AskPending.EnvInput != nil {
+				envInputRequests[secondaryHistoryID] = true
+				appendSecondary(envInputNotice, "", nil)
 				continue
 			}
 			if d.ExportSnapshot != nil {
@@ -3158,6 +3222,13 @@ func streamDualAnswer(
 				)
 				continue
 			}
+			if d.ToolConfiguration != nil {
+				publishToolConfiguration(
+					reqCtx, chatCtx, w, flusher, stateStore, convID, secondaryHistoryID, seq,
+					d.ToolConfiguration, true,
+				)
+				continue
+			}
 			if d.CapabilityDependency != nil {
 				publishCapabilityDependency(
 					reqCtx, chatCtx, w, flusher, stateStore, convID, secondaryHistoryID, seq,
@@ -3178,6 +3249,11 @@ func streamDualAnswer(
 						primaryDone = true
 						primaryCh = nil
 					} else {
+						if d.AskPending != nil && d.AskPending.EnvInput != nil {
+							envInputRequests[historyID] = true
+							appendPrimary(envInputNotice, "", nil)
+							continue
+						}
 						if d.ExportSnapshot != nil {
 							snapshots[historyID] = d.ExportSnapshot
 						}
@@ -3208,6 +3284,13 @@ func streamDualAnswer(
 							persistAndPublishConversationArtifact(
 								bg, reqCtx, w, flusher, db, stateStore, reqBody,
 								convID, historyID, seq, d.ArtifactCreated,
+							)
+							continue
+						}
+						if d.ToolConfiguration != nil {
+							publishToolConfiguration(
+								reqCtx, bg, w, flusher, stateStore, convID, historyID, seq,
+								d.ToolConfiguration, false,
 							)
 							continue
 						}
@@ -3249,6 +3332,11 @@ func streamDualAnswer(
 						secondaryDone = true
 						secondaryCh = nil
 					} else {
+						if d.AskPending != nil && d.AskPending.EnvInput != nil {
+							envInputRequests[secondaryHistoryID] = true
+							appendSecondary(envInputNotice, "", nil)
+							continue
+						}
 						if d.ExportSnapshot != nil {
 							snapshots[secondaryHistoryID] = d.ExportSnapshot
 						}
@@ -3279,6 +3367,13 @@ func streamDualAnswer(
 							persistAndPublishConversationArtifact(
 								bg, reqCtx, w, flusher, db, stateStore, reqBody,
 								convID, secondaryHistoryID, seq, d.ArtifactCreated,
+							)
+							continue
+						}
+						if d.ToolConfiguration != nil {
+							publishToolConfiguration(
+								reqCtx, bg, w, flusher, stateStore, convID, secondaryHistoryID, seq,
+								d.ToolConfiguration, false,
 							)
 							continue
 						}
@@ -3382,6 +3477,11 @@ dualPersist:
 		exports := []ChatExport{}
 		if terminal.Status == "completed" {
 			exports = finalizeChatExports(snapshot, convID, hid, runID)
+		}
+		if envInputRequests[hid] {
+			// Preserve the notice across the final replacement without duplicating it in history.
+			*result = strings.ReplaceAll(*result, envInputNotice, "")
+			snapshot.Content += envInputNotice
 		}
 		*text = snapshot.Content
 		*result = replaceChatExportResult(*result, snapshot.Content)
@@ -4209,6 +4309,9 @@ func markLastAskPendingAnswered(ctx context.Context, db *gorm.DB, histories []or
 		if answered, _ := m["ask_answered"].(bool); answered {
 			break
 		}
+		if pending, _ := m["ask_pending"].(map[string]any); pending["env_input"] != nil {
+			break
+		}
 		m["ask_answered"] = true
 		if answers := submittedAskAnswers(structured); answers != nil {
 			m["ask_saved_answers"] = answers
@@ -4263,11 +4366,21 @@ func SaveAskAnswers(w http.ResponseWriter, r *http.Request) {
 	}
 	m := make(map[string]any)
 	if len(h.Ext) > 0 {
-		_ = json.Unmarshal(h.Ext, &m)
+		if err := json.Unmarshal(h.Ext, &m); err != nil {
+			common.ReplyErr(w, "invalid history ext", http.StatusInternalServerError)
+			return
+		}
+	}
+	if m == nil {
+		m = make(map[string]any)
 	}
 	if answered, _ := m["ask_answered"].(bool); answered {
 		// Already submitted — do not allow overwriting answers.
 		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if pending, _ := m["ask_pending"].(map[string]any); pending["env_input"] != nil {
+		common.ReplyAppErr(w, invalidEnvironmentInput())
 		return
 	}
 	m["ask_saved_answers"] = body.Answers
@@ -4276,9 +4389,14 @@ func SaveAskAnswers(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "failed to marshal ext", http.StatusInternalServerError)
 		return
 	}
-	if err := db.WithContext(r.Context()).Model(&orm.ChatHistory{}).
-		Where("id = ?", body.HistoryID).
-		Update("ext", updated).Error; err != nil {
+	// Drop stale autosaves instead of overwriting a concurrently consumed confirmation.
+	query := db.WithContext(r.Context()).Model(&orm.ChatHistory{}).Where("id = ?", body.HistoryID)
+	if h.Ext == nil {
+		query = query.Where("ext IS NULL")
+	} else {
+		query = query.Where("CAST(ext AS TEXT) = ?", string(h.Ext))
+	}
+	if err := query.Update("ext", updated).Error; err != nil {
 		common.ReplyErr(w, "failed to update history", http.StatusInternalServerError)
 		return
 	}
@@ -4311,6 +4429,9 @@ func validateWorkspaceAskSubmission(histories []orm.ChatHistory, raw map[string]
 }
 
 func validAskSubmission(pending, submission map[string]any) bool {
+	if pending["env_input"] != nil {
+		return false
+	}
 	pendingID, _ := pending["ask_id"].(string)
 	submittedID, _ := submission["ask_id"].(string)
 	if strings.TrimSpace(submittedID) == "" || strings.TrimSpace(submittedID) != strings.TrimSpace(pendingID) {

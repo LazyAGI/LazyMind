@@ -85,7 +85,8 @@ type FormPhase = 'form' | 'previewing';
 
 function errorCode(error: unknown): string | undefined {
   if (!error || typeof error !== 'object') return undefined;
-  const response = (error as {
+  const typed = error as {
+    code?: unknown;
     response?: {
       data?: {
         code?: unknown;
@@ -93,14 +94,15 @@ function errorCode(error: unknown): string | undefined {
         data?: { code?: unknown; error_code?: unknown };
       };
     };
-  }).response;
+  };
+  const response = typed.response;
   const data = response?.data;
-  return [data?.data?.error_code, data?.data?.code, data?.error_code, data?.code]
+  return [typed.code, data?.data?.error_code, data?.data?.code, data?.error_code, data?.code]
     .find((code): code is string => typeof code === 'string');
 }
 
 function errorMessage(code: string | undefined, fallback: string): string {
-  if (code === 'REVISION_CONFLICT') return 'errors.revisionConflict';
+  if (code === 'REVISION_CONFLICT' || code === 'DRAFT_VERSION_CONFLICT') return 'errors.revisionConflict';
   if (code === 'SELECTION_AMBIGUOUS') return 'errors.ambiguous';
   if (code === 'SELECTION_STALE') return 'errors.stale';
   if (code === 'SELECTION_UNSUPPORTED') return 'errors.unsupported';

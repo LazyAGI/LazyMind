@@ -16,6 +16,9 @@ func TestApplyDesktopManifestPathsLoadsTrustedLocalMode(t *testing.T) {
 		Platform: runtime.GOOS,
 		Arch:     runtime.GOARCH,
 		Features: RuntimeManifestFeatures{TrustedLocalMode: true},
+		Binaries: map[string]string{
+			"pandoc": executableName(filepath.Join("bin", "pandoc")),
+		},
 		Paths: RuntimeManifestPaths{
 			HistoryInjectionArchive: "history-injection.zip",
 		},
@@ -38,6 +41,9 @@ func TestApplyDesktopManifestPathsLoadsTrustedLocalMode(t *testing.T) {
 
 	if !paths.TrustedLocalMode {
 		t.Fatal("trusted local mode was not loaded from the desktop runtime manifest")
+	}
+	if paths.PandocBin != filepath.Join(resourcesRoot, "bin", executableName("pandoc")) {
+		t.Fatalf("Pandoc binary = %q", paths.PandocBin)
 	}
 	if paths.HistoryInjectionArchive != filepath.Join(resourcesRoot, "history-injection.zip") {
 		t.Fatalf("history injection archive = %q", paths.HistoryInjectionArchive)

@@ -29,7 +29,7 @@ from lazymind.chat.engine.tools.workspace_context import (
 from .cancellation import UserCancelledError
 from .skill_errors import classify_skill_failure
 
-from lazymind.chat.engine.tools.session_env import redact_session_env_arguments
+from lazymind.chat.engine.agent_runtime.env_redaction import redact_session_env_arguments
 from .telemetry import append_event, emit_tool_call, emit_tool_result
 
 
@@ -198,7 +198,8 @@ class FailureRetryPolicy:
 
     @staticmethod
     def _failed(result: Any) -> bool:
-        return isinstance(result, dict) and result.get('ok') is False
+        return (isinstance(result, dict) and result.get('ok') is False
+                and not result.get('needs_configuration'))
 
     @staticmethod
     def _signature(prepared: PreparedToolCall) -> str:

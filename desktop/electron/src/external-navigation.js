@@ -92,10 +92,24 @@ function isLoopbackHostname(hostname) {
   return /^127(?:\.\d{1,3}){3}$/.test(value);
 }
 
-function installExternalNavigationHandler(webContents, openExternal, reportError = () => {}) {
+function installExternalNavigationHandler(
+  webContents,
+  openExternal,
+  reportError = () => {},
+  sameOriginWindowOptions,
+) {
   webContents.setWindowOpenHandler((details) => {
-    if (isOAuthPopup(details) || isSameOrigin(details.url, webContents.getURL())) {
+    if (isOAuthPopup(details)) {
       return { action: "allow" };
+    }
+
+    if (isSameOrigin(details.url, webContents.getURL())) {
+      return {
+        action: "allow",
+        ...(sameOriginWindowOptions
+          ? { overrideBrowserWindowOptions: sameOriginWindowOptions }
+          : {}),
+      };
     }
 
     if (canOpenExternally(details.url)) {
@@ -104,8 +118,17 @@ function installExternalNavigationHandler(webContents, openExternal, reportError
     return { action: "deny" };
   });
 
-  webContents.on("did-create-window", (childWindow) => {
-    installExternalNavigationHandler(childWindow.webContents, openExternal, reportError);
+  webContents.on("did-create-window", (childWindow, details) => {
+    const childSameOriginWindowOptions = sameOriginWindowOptions &&
+      isSameOrigin(details.url, webContents.getURL())
+      ? sameOriginWindowOptions
+      : undefined;
+    installExternalNavigationHandler(
+      childWindow.webContents,
+      openExternal,
+      reportError,
+      childSameOriginWindowOptions,
+    );
   });
 }
 

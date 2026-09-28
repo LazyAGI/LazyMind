@@ -17,8 +17,6 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/secretcrypto"
-	appLog "lazymind/core/log"
-	"lazymind/core/settings"
 )
 
 var (
@@ -97,6 +95,7 @@ func CreateServer(ctx context.Context, db *gorm.DB, req CreateServerRequest, use
 		HeadersJSON:      headersJSON,
 		AllowedToolsJSON: allowedJSON,
 		Enabled:          false,
+		DiscoveryEnabled: true,
 		Timeout:          timeout,
 		BaseModel: orm.BaseModel{
 			CreateUserID:   strings.TrimSpace(userID),
@@ -179,9 +178,17 @@ func UpdateServer(ctx context.Context, db *gorm.DB, userID, id string, req Updat
 	}
 	if req.Enabled != nil {
 		if *req.Enabled && !row.IsVerified {
-			return nil, fmt.Errorf("%w: mcp server must be verified before enabling", errBadRequest)
+			if !isBuiltinNotion(*row) || connectionChanged {
+				return nil, fmt.Errorf("%w: mcp server must be verified before enabling", errBadRequest)
+			}
+			// A disconnected personal Notion can be discovered for its authorization
+			// card, but remains unavailable to tool execution until verification.
+			updates["enabled"] = false
+			updates["discovery_enabled"] = true
+		} else {
+			updates["enabled"] = *req.Enabled
+			updates["discovery_enabled"] = *req.Enabled
 		}
-		updates["enabled"] = *req.Enabled
 	}
 	if req.Timeout != nil {
 		if *req.Timeout <= 0 {
@@ -237,18 +244,18 @@ func SetOwnedServersEnabled(ctx context.Context, db *gorm.DB, userID string, ena
 			}
 			result.UpdatedCount = result.TotalCount - result.SkippedUnverifiedCount
 			if err := ownedServers().Where("is_verified = ?", true).
-				Updates(map[string]any{"enabled": true, "updated_at": now}).Error; err != nil {
+				Updates(map[string]any{"enabled": true, "discovery_enabled": true, "updated_at": now}).Error; err != nil {
 				return err
 			}
 			// Preserve the invariant that an unverified service is never callable,
 			// including rows created before that validation was introduced.
 			if err := ownedServers().Where("is_verified = ?", false).
-				Updates(map[string]any{"enabled": false, "updated_at": now}).Error; err != nil {
+				Updates(map[string]any{"enabled": false, "discovery_enabled": enabled, "updated_at": now}).Error; err != nil {
 				return err
 			}
 		} else {
 			result.UpdatedCount = result.TotalCount
-			if err := ownedServers().Updates(map[string]any{"enabled": false, "updated_at": now}).Error; err != nil {
+			if err := ownedServers().Updates(map[string]any{"enabled": false, "discovery_enabled": enabled, "updated_at": now}).Error; err != nil {
 				return err
 			}
 		}
@@ -338,13 +345,42 @@ func DiscoverServer(ctx context.Context, db *gorm.DB, userID, id string) (*Disco
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now()
-	if err := db.WithContext(ctx).Model(&orm.MCPServer{}).
-		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, strings.TrimSpace(userID)).
-		Updates(map[string]any{"is_verified": true, "updated_at": now}).Error; err != nil {
-		return nil, err
+	discoverySucceeded := true
+	updates := map[string]any{"is_verified": true, "updated_at": time.Now()}
+	query := db.WithContext(ctx).Model(&orm.MCPServer{}).
+		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, strings.TrimSpace(userID))
+	if isBuiltinNotion(*row) {
+		available := map[string]bool{}
+		for _, tool := range tools {
+			available[tool.Name] = true
+		}
+		allowed := []string{}
+		for _, name := range parseStringJSON(row.AllowedToolsJSON) {
+			if available[name] {
+				allowed = append(allowed, name)
+			}
+		}
+		encoded, err := json.Marshal(allowed)
+		if err != nil {
+			return nil, err
+		}
+		// Keep desired permissions on an empty/unsupported response so retry can recover.
+		if len(allowed) > 0 {
+			updates["allowed_tools_json"] = json.RawMessage(encoded)
+		}
+		discoverySucceeded = len(allowed) > 0
+		updates["enabled"] = row.DiscoveryEnabled && len(allowed) > 0
+		// Do not overwrite a disable, disconnect or permission edit during discovery.
+		query = query.Where("updated_at = ?", row.UpdatedAt)
 	}
-	return &DiscoverResponse{Success: true, Tools: responses}, nil
+	result := query.Updates(updates)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return nil, fmt.Errorf("%w: MCP configuration changed during discovery", errBadRequest)
+	}
+	return &DiscoverResponse{Success: discoverySucceeded, Tools: responses}, nil
 }
 
 func UpdateServerTools(ctx context.Context, db *gorm.DB, userID, id string, req UpdateToolsRequest) (*ServerResponse, error) {
@@ -369,67 +405,15 @@ func UpdateServerTools(ctx context.Context, db *gorm.DB, userID, id string, req 
 }
 
 func LoadRuntimeConfig(ctx context.Context, db *gorm.DB, userID string) ([]RuntimeConfig, error) {
-	if db == nil {
-		return nil, nil
-	}
-	userID = strings.TrimSpace(userID)
-	controls, err := settings.LoadFeatureControls(ctx, db, userID)
+	catalog, err := loadCapabilities(ctx, db, userID, "", false)
 	if err != nil {
 		return nil, err
 	}
-	var rows []orm.MCPServer
-	q := db.WithContext(ctx).Where("enabled = ? AND is_verified = ? AND deleted_at IS NULL AND transport IN ?", true, true, []string{transportSSE, transportHTTP})
-	if userID == "" {
-		q = q.Where("share = ?", true)
-	} else if !controls.MCPEnabled {
-		q = q.Where("share = ? AND create_user_id <> ?", true, userID)
-	} else {
-		q = q.Where("(create_user_id = ? OR share = ?)", userID, true)
-	}
-	if err := q.Order("share ASC, updated_at DESC").Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make([]RuntimeConfig, 0, len(rows))
-	for _, row := range dedupeServers(rows) {
-		if effectiveAuthType(row) == "oauth" && (userID == "" || row.CreateUserID != userID || row.Share) {
-			continue
+	out := make([]RuntimeConfig, 0, len(catalog))
+	for _, item := range catalog {
+		if item.Runtime != nil {
+			out = append(out, *item.Runtime)
 		}
-		allowedTools, err := canonicalizeAllowedToolNames(ctx, db, row.ID, parseStringJSON(row.AllowedToolsJSON))
-		if err != nil {
-			return nil, err
-		}
-		if len(allowedTools) == 0 {
-			// A verified service with no authorized tool remains configured but
-			// must not become callable until the user grants a tool explicitly.
-			continue
-		}
-		headers, err := decodeHeaders(row.HeadersJSON)
-		if err != nil {
-			return nil, err
-		}
-		var oauthRef *OAuthReference
-		if effectiveAuthType(row) == "oauth" {
-			status, err := oauthOperation(ctx, row, "status", nil)
-			if err != nil {
-				appLog.Logger.Warn().Str("server_id", row.ID).Msg("MCP OAuth service unavailable; skipping this server")
-				continue
-			}
-			if status.Status != "authorized" {
-				continue
-			}
-			oauthRef = &OAuthReference{UserID: userID, ServerID: row.ID, ServerURL: row.URL, GrantID: status.GrantID, GrantVersion: status.GrantVersion}
-			headers = nil
-		}
-		out = append(out, RuntimeConfig{
-			OAuth:        oauthRef,
-			ID:           row.ID,
-			Name:         row.Name,
-			Transport:    row.Transport,
-			URL:          row.URL,
-			Headers:      headers,
-			AllowedTools: allowedTools,
-			Timeout:      normalizedTimeout(row.Timeout),
-		})
 	}
 	return out, nil
 }
@@ -635,21 +619,22 @@ func normalizedTimeout(timeout int) int {
 
 func serverResponse(row orm.MCPServer, toolCount int64, tools []ToolResponse) ServerResponse {
 	return ServerResponse{
-		ID:            row.ID,
-		AuthType:      effectiveAuthType(row),
-		Name:          row.Name,
-		Transport:     row.Transport,
-		URL:           row.URL,
-		APIKeyPreview: apiKeyPreview(row.HeadersJSON),
-		AllowedTools:  parseStringJSON(row.AllowedToolsJSON),
-		Enabled:       row.Enabled,
-		IsVerified:    row.IsVerified,
-		Share:         row.Share,
-		Timeout:       normalizedTimeout(row.Timeout),
-		ToolCount:     toolCount,
-		Tools:         tools,
-		CreateTime:    row.CreatedAt,
-		UpdateTime:    row.UpdatedAt,
+		ID:               row.ID,
+		AuthType:         effectiveAuthType(row),
+		Name:             row.Name,
+		Transport:        row.Transport,
+		URL:              row.URL,
+		APIKeyPreview:    apiKeyPreview(row.HeadersJSON),
+		AllowedTools:     parseStringJSON(row.AllowedToolsJSON),
+		Enabled:          row.Enabled,
+		DiscoveryEnabled: row.DiscoveryEnabled,
+		IsVerified:       row.IsVerified,
+		Share:            row.Share,
+		Timeout:          normalizedTimeout(row.Timeout),
+		ToolCount:        toolCount,
+		Tools:            tools,
+		CreateTime:       row.CreatedAt,
+		UpdateTime:       row.UpdatedAt,
 	}
 }
 

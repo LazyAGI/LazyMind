@@ -10,6 +10,35 @@ import pytest
 from lazymind.chat.workflow.remote_executor import RemoteWorkflowExecutor
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status', ['interrupted', 'cancelled', 'canceled'])
+async def test_interrupted_subagent_cancels_attempt_without_failure_or_output_checks(monkeypatch, tmp_path, status):
+    from unittest.mock import AsyncMock
+    from lazymind.chat.engine.subagent import runner
+
+    worker = RemoteWorkflowExecutor()
+    runtime = AsyncMock()
+    runtime.context.return_value = {'metadata': {'task_id': 'task-1'}, 'inputs': {}}
+    runtime.execution_spec.return_value = {
+        'task': {'input_slots': [], 'output_slots': ['required-image']},
+        'workspace_path': str(tmp_path), 'params': {}, 'steps': [], 'llm_config': {},
+    }
+    worker.runtime = runtime
+    checks = AsyncMock()
+    monkeypatch.setattr(worker, '_run_post_step_checks', checks)
+
+    async def stream(**_kwargs):
+        yield 'data: ' + json.dumps({'type': 'done', 'status': status, 'summary': 'stopped by user'}) + '\n\n'
+
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+    await worker._run_claim(object(), {'attempt_id': 'attempt-1', 'lease_token': 'lease-1'})
+    runtime.cancel.assert_awaited_once()
+    runtime.fail.assert_not_awaited()
+    runtime.complete.assert_not_awaited()
+    checks.assert_not_awaited()
+    assert runtime.task_event.call_args.args[-1]['status'] == status
+
+
 def test_remote_executor_preserves_ordinary_subagent_stream_event_shape():
     event = {'type': 'text', 'text': 'hello', 'think': ''}
     assert RemoteWorkflowExecutor._parse_frame(
@@ -19,6 +48,45 @@ def test_remote_executor_preserves_ordinary_subagent_stream_event_shape():
 
 def test_remote_executor_ignores_non_json_stream_frames():
     assert RemoteWorkflowExecutor._parse_frame('event: heartbeat\n\n') is None
+
+
+@pytest.mark.asyncio
+async def test_remote_event_failure_closes_subagent_inside_execution_scope(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from lazymind.chat.engine.subagent import runner
+    from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
+
+    order = []
+
+    async def stream(**kwargs):
+        try:
+            yield 'data: {"type":"text","text":"ready"}\n\n'
+        finally:
+            assert WorkspaceContext.from_config({}).workflow_full_trust
+            order.append('closed')
+
+    async def event(_client, _task, _lease, payload):
+        if payload['type'] == 'text':
+            raise RuntimeError('event transport failed')
+
+    async def fail(*_args, **_kwargs):
+        assert order == ['closed']
+        order.append('failed')
+
+    worker = RemoteWorkflowExecutor()
+    worker.runtime = SimpleNamespace(
+        context=AsyncMock(return_value={'metadata': {'task_id': 'test-close'}, 'inputs': {}}),
+        execution_spec=AsyncMock(return_value={
+            'task': {'input_slots': [], 'output_slots': []}, 'params': {}, 'steps': [],
+            'workspace_path': str(tmp_path), 'llm_config': {},
+        }),
+        task_event=event, fail=fail,
+    )
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+    await worker._run_claim(object(), {'attempt_id': 'attempt', 'lease_token': 'lease'})
+    assert order == ['closed', 'failed']
+    assert not WorkspaceContext.from_config({}).workflow_full_trust
 
 
 @pytest.mark.asyncio
@@ -143,6 +211,7 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
                 'task': {'conversation_id': 'conversation-1',
                          'input_slots': [], 'output_slots': ['workflow_routing']},
                 'workspace_path': str(tmp_path / 'task-analysis'),
+                'user_env_vars': {'Mixed_API_KEY': 'synthetic-secret'} if configured else {},
                 'params': {
                     'workflow_id': 'image-workflow', 'revision_id': 'revision-1',
                     'step_id': 'analyze_subject',
@@ -216,6 +285,11 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
             from lazymind.model_config import is_model_role_available
             assert is_model_role_available('video_generator', config_path=str(model_yaml)) == configured
             import lazyllm
+            from lazyllm.tools import get_dynamic_env_vars
+            assert get_dynamic_env_vars() == (
+                {'Mixed_API_KEY': 'synthetic-secret'} if configured else {}
+            )
+            assert lazyllm.globals['conversation_env_overrides'] == {}
             from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
             restored = lazyllm.globals['agentic_config']
             permission = WorkspaceContext.from_config(restored)
@@ -276,6 +350,8 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
     assert checks[0] == checks[1] == checks[2]
     assert runtime.completed['control'] == {'next_step': next_step}
     assert runtime.completed['artifacts'] == checkpoint['artifacts']
+    assert 'synthetic-secret' not in json.dumps(checkpoint)
+    assert 'synthetic-secret' not in json.dumps(runtime.events)
     assert runtime.events[-1]['status'] == 'succeeded'
     assert len(runtime.artifacts) == 3
 
@@ -792,7 +868,8 @@ async def test_reclaimed_attempt_resumes_durable_steps_in_workspace(monkeypatch,
             return {'task': {'input_slots': [], 'output_slots': []},
                     'workspace_path': str(workspace), 'params': {},
                     'steps': [{'seq': 0, 'role': 'text', 'content': {'content': 'checkpoint'}}],
-                    'llm_config': {}, 'tool_config': {'tavily': 'test-token'}}
+                    'llm_config': {}, 'tool_config': {'tavily': 'test-token'},
+                    'user_env_vars': {'Mixed_API_KEY': 'synthetic-secret'}}
 
         async def heartbeat(self, *_):
             return None
@@ -815,6 +892,8 @@ async def test_reclaimed_attempt_resumes_durable_steps_in_workspace(monkeypatch,
     assert runtime.completed is True
     assert captured['resume'] is True
     assert captured['tool_config'] == {'tavily': 'test-token'}
+    assert captured['user_env_vars'] == {'Mixed_API_KEY': 'synthetic-secret'}
+    assert 'synthetic-secret' not in json.dumps(captured['task_spec'])
     assert captured['task_spec']['workspace_path'] == str(workspace)
     assert captured['initial_steps'][0]['content']['content'] == 'checkpoint'
     assert workspace.exists()
