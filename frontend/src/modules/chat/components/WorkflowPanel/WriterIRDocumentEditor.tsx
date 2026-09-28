@@ -1,3 +1,4 @@
+import { writerOutlineDescription } from './writerOutlineDescription';
 import { mergeIRRewrite } from './mergeRewritePreview';
 import { createPortal } from 'react-dom';
 import { WriterLocalSourceEditor } from './WriterLocalSourceEditor';
@@ -15,7 +16,7 @@ import {
   TableOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons';
-import { Dropdown } from 'antd';
+import { Dropdown, message } from 'antd';
 import {
   useCallback,
   useEffect,
@@ -283,11 +284,6 @@ interface WriterEditorLabels extends WriterFoldLabels {
   disableCodeWrap: string;
   copyCode: string;
   codeCopied: string;
-  outlineInstructions: string;
-  targetChars: string;
-  contextRelations: string;
-  writingSubtasks: string;
-  subtaskTypes: Record<'retrieve' | 'extract' | 'reason', string>;
 }
 
 const DEFAULT_WRITER_EDITOR_LABELS: WriterEditorLabels = {
@@ -302,52 +298,12 @@ const DEFAULT_WRITER_EDITOR_LABELS: WriterEditorLabels = {
   disableCodeWrap: 'Disable wrapping',
   copyCode: 'Copy',
   codeCopied: 'Copied',
-  outlineInstructions: 'Writing instructions',
-  targetChars: 'Length',
-  contextRelations: 'Context',
-  writingSubtasks: 'Subtasks',
-  subtaskTypes: {
-    retrieve: 'Retrieve',
-    extract: 'Extract',
-    reason: 'Reason',
-  },
 };
 
-function renderOutlineInstructions(block: WriterBlock, labels: WriterEditorLabels): string {
-  const targetChars = Number(block.target_chars);
-  const contextRelations = block.context_relations ?? [];
-  const subtasks = block.subtasks ?? [];
-  if (!(targetChars > 0) && contextRelations.length === 0 && subtasks.length === 0) return '';
-
-  const targetMarkup = targetChars > 0
-    ? `<div class="writer-ir__outline-instruction-row"><strong>${escapeHtml(labels.targetChars)}</strong><span>${Math.trunc(targetChars)}</span></div>`
-    : '';
-  const contextMarkup = contextRelations.length > 0
-    ? `<div class="writer-ir__outline-instruction-group"><strong>${escapeHtml(labels.contextRelations)}</strong><ul>${contextRelations.map((item) => {
-      const guidance = item.guidance?.trim();
-      const relation = item.relation?.trim();
-      const target = item.target_node_id?.trim();
-      const detail = guidance || [relation, target].filter(Boolean).join(' / ');
-      return `<li>${escapeHtml(detail || '-')}</li>`;
-    }).join('')}</ul></div>`
-    : '';
-  const subtaskMarkup = subtasks.length > 0
-    ? `<div class="writer-ir__outline-instruction-group"><strong>${escapeHtml(labels.writingSubtasks)}</strong><ul>${subtasks.map((item) => {
-      const type = labels.subtaskTypes[item.subtask_type] ?? item.subtask_type;
-      return `<li><span class="writer-ir__outline-subtask-type">${escapeHtml(type)}</span>${escapeHtml(item.question)}</li>`;
-    }).join('')}</ul></div>`
-    : '';
-
-  return [
-    '<details class="writer-ir__outline-instructions" data-writer-outline-instructions="true" contenteditable="false" open>',
-    `<summary>${escapeHtml(labels.outlineInstructions)}</summary>`,
-    '<div class="writer-ir__outline-instruction-body">',
-    targetMarkup,
-    contextMarkup,
-    subtaskMarkup,
-    '</div>',
-    '</details>',
-  ].join('');
+function renderOutlineInstructions(block: WriterBlock): string {
+  const description = writerOutlineDescription(block);
+  if (!description) return '';
+  return `<div class="writer-ir__outline-instructions" data-writer-outline-instructions="true" contenteditable="false">${escapeHtml(description)}</div>`;
 }
 
 function renderFoldToggle(
@@ -673,7 +629,7 @@ function renderBlock(
       foldToggle,
       dragHandle,
       `<h${level} data-writer-block-content="true" data-writer-heading-mode="${numberingMode}"${placeholder} class="writer-ir__heading writer-ir__heading--${level}">${marker}${headingText}</h${level}>`,
-      renderOutlineInstructions(block, foldLabels),
+      renderOutlineInstructions(block),
       children,
       '</div>',
     ].join('');
@@ -1373,15 +1329,6 @@ export function WriterIRDocumentEditor({
     disableCodeWrap: t('chat.writerIR.disableCodeWrap'),
     copyCode: t('chat.writerIR.copyCode'),
     codeCopied: t('chat.writerIR.codeCopied'),
-    outlineInstructions: t('chat.writerIR.outlineInstructions'),
-    targetChars: t('chat.writerIR.targetChars'),
-    contextRelations: t('chat.writerIR.contextRelations'),
-    writingSubtasks: t('chat.writerIR.writingSubtasks'),
-    subtaskTypes: {
-      retrieve: t('chat.writerIR.subtaskTypes.retrieve'),
-      extract: t('chat.writerIR.subtaskTypes.extract'),
-      reason: t('chat.writerIR.subtaskTypes.reason'),
-    },
   }), [t]);
   const dragLabel = t('chat.writerIR.dragBlock');
 
@@ -1530,7 +1477,10 @@ export function WriterIRDocumentEditor({
   const navigateToReferenceTarget = useCallback((nodeId: string) => {
     const editor = editorRef.current;
     const target = editor ? findRenderedBlock(editor, nodeId) : undefined;
-    if (!target) return;
+    if (!target) {
+      void message.warning(t('chat.writerIR.referenceTargetMissing'));
+      return;
+    }
     if (target.closest('[hidden]') && collapsedNodeIdsRef.current.size > 0) {
       pendingReferenceTargetRef.current = nodeId;
       collapsedNodeIdsRef.current = new Set();
@@ -1538,7 +1488,7 @@ export function WriterIRDocumentEditor({
       return;
     }
     scrollToReferenceTarget(nodeId);
-  }, [scrollToReferenceTarget]);
+  }, [scrollToReferenceTarget, t]);
 
   useLayoutEffect(() => {
     const nodeId = pendingReferenceTargetRef.current;

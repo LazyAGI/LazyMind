@@ -84,6 +84,7 @@ type ChatChunkResponse struct {
 	ToolLimitPending      *ToolLimitPendingEvent       `json:"tool_limit_pending,omitempty"`
 	IntentUpdated         *IntentUpdatedEvent          `json:"intent_updated,omitempty"`
 	CapabilityDependency  map[string]any               `json:"capability_dependency,omitempty"`
+	ToolConfiguration     map[string]any               `json:"tool_configuration,omitempty"`
 	RuntimeEvent          *ChatRuntimeEvent            `json:"runtime_event,omitempty"`
 	PerformanceMetrics    *RunPerformanceMetrics       `json:"performance_metrics,omitempty"`
 }

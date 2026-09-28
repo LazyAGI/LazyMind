@@ -5,6 +5,10 @@ package common
 import "net/http"
 
 func init() {
+	registerAdditionalErrorPattern("SKILL.md frontmatter field %q conflicts with compatibility normalization", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorAlias("verified source name has an unsupported runtime path character", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorPattern("%w in subdirectory %q", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorAlias("skill package has ambiguous SKILL.md paths", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("conversation organizer run cannot be restarted", "This organizer task cannot be restarted; check its recovery status", http.StatusConflict, 2002752)
 	for _, source := range []string{
 		"invalid cloud knowledge page", "invalid cloud knowledge item", "invalid cloud knowledge detail",

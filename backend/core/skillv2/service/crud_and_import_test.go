@@ -93,7 +93,7 @@ func TestCreateSkillFromURL_FallsBackToURLFilename(t *testing.T) {
 	}
 }
 
-func TestCreateSkillFromURL_UsesRequestedMetadataWhenFrontmatterIsMissing(t *testing.T) {
+func TestCreateSkillFromURL_PreservesRequestedNameAsRuntimeAlias(t *testing.T) {
 	db := newSkillV2TestDB(t)
 	zipPath := filepath.Join(t.TempDir(), "download.zip")
 	writeSkillZip(t, zipPath, map[string][]byte{
@@ -124,11 +124,21 @@ func TestCreateSkillFromURL_UsesRequestedMetadataWhenFrontmatterIsMissing(t *tes
 	if err := db.Where("id = ?", resp.SkillID).Take(&imported).Error; err != nil {
 		t.Fatalf("query URL imported skill: %v", err)
 	}
-	if imported.SkillName != "requested-skill" || imported.Description != "Requested description" || imported.Category != "external" {
+	if imported.SkillName != "download" || imported.Description != "Package without frontmatter." || imported.Category != "external" {
 		t.Fatalf("URL imported metadata = %#v", imported)
 	}
-	if resp.SkillName != "requested-skill" || resp.Category != "external" || resp.CanonicalRuntimeName != "external/requested-skill" {
+	if resp.SkillName != "download" || resp.Category != "external" || resp.CanonicalRuntimeName != "external/download" {
 		t.Fatalf("CreateSkill response = %#v", resp)
+	}
+	aliases, err := skillruntimeidentity.Aliases(imported.Ext)
+	if err != nil {
+		t.Fatalf("decode imported runtime aliases: %v", err)
+	}
+	if got, want := strings.Join(aliases, "|"), "requested-skill"; got != want {
+		t.Fatalf("runtime aliases = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(resp.Aliases, "|"), "requested-skill"; got != want {
+		t.Fatalf("response aliases = %q, want %q", got, want)
 	}
 }
 

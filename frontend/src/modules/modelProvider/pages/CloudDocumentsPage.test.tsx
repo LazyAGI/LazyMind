@@ -171,6 +171,8 @@ describe("CloudDocumentsPage onboarding", () => {
       isGitHubAuthValid: false,
       isGoogleDriveAuthValid: false,
       isMailAuthValid: false,
+      isDesktopRuntime: false,
+      obsidianConfig: null,
       handleManageLocalSource: vi.fn(),
       handleManageFeishuAuth: vi.fn(),
       handleManageGoogleDrive: vi.fn(),
@@ -295,6 +297,43 @@ describe("CloudDocumentsPage onboarding", () => {
     mocks.vm.isMailAuthValid = true;
     renderPage();
     expect(await screen.findByText("1 / 6")).toBeInTheDocument();
+  });
+
+  it("counts Obsidian only when running in Desktop", async () => {
+    window.localStorage.setItem(
+      "lazymind.cloud-documents.onboarding.v2",
+      "seen",
+    );
+    mocks.vm.canCreateLocalSource = false;
+    mocks.vm.obsidianConfig = { configured: true, available: true };
+
+    const { unmount } = renderPage();
+    expect(await screen.findByText("0 / 5")).toBeInTheDocument();
+    unmount();
+
+    mocks.vm.isDesktopRuntime = true;
+    renderPage();
+    expect(await screen.findByText("1 / 6")).toBeInTheDocument();
+  });
+
+  it("treats Obsidian as a chat-only connected provider in the guide", async () => {
+    mocks.vm.canCreateLocalSource = false;
+    mocks.vm.isDesktopRuntime = true;
+    mocks.vm.obsidianConfig = { configured: true, available: true };
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "新手指引" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("已完成")).toBeInTheDocument();
+    expect(within(dialog).getByText("部分可用")).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("link", { name: "在对话中引用云文档" }),
+    ).toHaveAttribute("href", "/agent/chat/home");
+    expect(
+      within(dialog).getByRole("button", {
+        name: "知识库同步（暂不支持）",
+      }),
+    ).toBeDisabled();
   });
 
   it("opens the selected provider setup from the source-choice stage", async () => {

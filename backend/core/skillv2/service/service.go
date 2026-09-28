@@ -25,6 +25,7 @@ import (
 	skillruntimeidentity "lazymind/core/skillv2/runtimeidentity"
 	skillsearch "lazymind/core/skillv2/search"
 	skillpackage "lazymind/core/skillv2/skillpackage"
+	skillsourceurl "lazymind/core/skillv2/sourceurl"
 )
 
 const (
@@ -59,6 +60,14 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 	if err != nil {
 		return CreateSkillResponse{}, err
 	}
+	externalImport := isExternalImportSource(req.Source.Type)
+	var normalizationWarnings []skillmetadata.NormalizationWarning
+	if externalImport {
+		normalizationWarnings, err = normalizeExternalImportPackage(&pkg)
+		if err != nil {
+			return CreateSkillResponse{}, err
+		}
+	}
 	files := pkg.Files
 	requestedName := req.Name
 	runtimeAliases := []string{}
@@ -66,12 +75,8 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 	if err := validateSkillFiles(files); err != nil {
 		return CreateSkillResponse{}, err
 	}
-	if isExternalImportSource(req.Source.Type) {
-		fallback := skillmetadata.Metadata{}
-		if strings.EqualFold(strings.TrimSpace(req.Source.Type), "url") {
-			fallback = skillmetadata.Metadata{Name: req.Name, Description: req.Description}
-		}
-		meta, err := resolveExternalMetadata(pkg, skillID, fallback)
+	if externalImport {
+		meta, err := resolveExternalMetadata(pkg, skillID)
 		if err != nil {
 			return CreateSkillResponse{}, err
 		}
@@ -200,6 +205,7 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 		Category:             req.Category,
 		CanonicalRuntimeName: path.Join(req.Category, req.Name),
 		Aliases:              runtimeAliases,
+		Warnings:             normalizationWarnings,
 	}, nil
 }
 
@@ -244,6 +250,26 @@ func isExternalImportSource(sourceType string) bool {
 	default:
 		return false
 	}
+}
+
+func normalizeExternalImportPackage(pkg *sourcePackage) ([]skillmetadata.NormalizationWarning, error) {
+	if err := skillpackage.NormalizeSkillDocument(pkg.Files); err != nil {
+		return nil, err
+	}
+	content, _, err := skillmetadata.NormalizeExternalDescription(pkg.Files["SKILL.md"])
+	if err != nil {
+		return nil, err
+	}
+	pkg.Files["SKILL.md"] = content
+	if pkg.CanonicalName == "" {
+		return nil, nil
+	}
+	content, warnings, err := skillmetadata.NormalizeExternalMetadata(pkg.Files["SKILL.md"], pkg.CanonicalName)
+	if err != nil {
+		return nil, err
+	}
+	pkg.Files["SKILL.md"] = content
+	return warnings, nil
 }
 
 func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (PatchSkillResponse, error) {
@@ -429,6 +455,14 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		if err != nil {
 			return err
 		}
+		externalImport := isExternalImportSource(req.Source.Type)
+		var normalizationWarnings []skillmetadata.NormalizationWarning
+		if externalImport {
+			normalizationWarnings, err = normalizeExternalImportPackage(&pkg)
+			if err != nil {
+				return err
+			}
+		}
 		files := pkg.Files
 		if err := validateSkillFiles(files); err != nil {
 			return err
@@ -436,9 +470,8 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		nextName := skill.SkillName
 		nextCategory := skill.Category
 		nextDescription := skill.Description
-		externalImport := isExternalImportSource(req.Source.Type)
 		if externalImport {
-			meta, err := resolveExternalMetadata(pkg, skill.ID, skillmetadata.Metadata{})
+			meta, err := resolveExternalMetadata(pkg, skill.ID)
 			if err != nil {
 				return err
 			}
@@ -563,7 +596,7 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		if err := skillsearch.RebuildSkillTx(ctx, tx, req.SkillID, s.clock.Now()); err != nil {
 			return err
 		}
-		out = PatchSkillResponse{SkillID: req.SkillID, HeadRevisionID: revisionID}
+		out = PatchSkillResponse{SkillID: req.SkillID, HeadRevisionID: revisionID, Warnings: normalizationWarnings}
 		return nil
 	})
 	return out, err
@@ -1147,6 +1180,7 @@ type sourcePackage struct {
 	Files           map[string][]byte
 	PackageRoot     string
 	ArchiveFilename string
+	CanonicalName   string
 }
 
 func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, source SourceInput) (sourcePackage, string, string, error) {
@@ -1204,7 +1238,13 @@ func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, 
 		if sourceRef == "" {
 			sourceRef = source.URL
 		}
-		return sourcePackage{Files: pkg.Files, PackageRoot: pkg.PackageRoot, ArchiveFilename: archiveFilenameFromURL(source.URL)}, "url", sourceRef, nil
+		canonicalName := ""
+		if parsed, parseErr := url.Parse(source.SourceURL); parseErr == nil {
+			if resolution, matched, resolveErr := skillsourceurl.ResolveSkillHubPageURL(parsed); matched && resolveErr == nil && resolution.DownloadURL == source.URL {
+				canonicalName = path.Base(resolution.Coordinate)
+			}
+		}
+		return sourcePackage{Files: pkg.Files, PackageRoot: pkg.PackageRoot, ArchiveFilename: archiveFilenameFromURL(source.URL), CanonicalName: canonicalName}, "url", sourceRef, nil
 	default:
 		return sourcePackage{}, "", "", fmt.Errorf("unsupported source type %q", source.Type)
 	}
@@ -1219,18 +1259,28 @@ func ensureURLImportDefaults(files map[string][]byte) {
 	}
 }
 
-func resolveExternalMetadata(pkg sourcePackage, skillID string, fallback skillmetadata.Metadata) (skillmetadata.Metadata, error) {
+func resolveExternalMetadata(pkg sourcePackage, skillID string) (skillmetadata.Metadata, error) {
 	content, ok := pkg.Files["SKILL.md"]
 	if !ok {
 		return skillmetadata.Metadata{}, fmt.Errorf("skill package must contain SKILL.md")
 	}
-	resolved, err := skillmetadata.ResolveWithFallback(
-		content,
-		fallback,
-		pkg.PackageRoot,
-		archiveStem(pkg.ArchiveFilename),
-		"lazymind-skill-"+skillID,
-	)
+	if pkg.CanonicalName != "" {
+		parsed, err := skillmetadata.Parse(content)
+		if err != nil {
+			return skillmetadata.Metadata{}, err
+		}
+		if !parsed.HasName {
+			if err := skillmetadata.ValidateName(pkg.CanonicalName); err != nil {
+				return skillmetadata.Metadata{}, fmt.Errorf("invalid skill name: SkillHub package name: %w", err)
+			}
+			for _, char := range pkg.CanonicalName {
+				if !(char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '.' || char == '_' || char == '-') {
+					return skillmetadata.Metadata{}, fmt.Errorf("invalid skill name: SkillHub package name has an unsupported runtime path character")
+				}
+			}
+		}
+	}
+	resolved, err := skillmetadata.Resolve(content, pkg.CanonicalName, pkg.PackageRoot, archiveStem(pkg.ArchiveFilename), "lazymind-skill-"+skillID)
 	if err != nil {
 		return skillmetadata.Metadata{}, err
 	}

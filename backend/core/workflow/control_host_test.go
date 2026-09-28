@@ -134,6 +134,40 @@ func TestStopFencesOldWritesAndResumePreservesReview(t *testing.T) {
 	expectControlCode(t, err, "BINDING_STALE")
 }
 
+func TestCodexStopRemainsSuccessfulAfterUnsupportedCancellation(t *testing.T) {
+	svc, _ := hostControlFixture(t)
+	ctx := context.Background()
+	if err := svc.DB.Model(&orm.WorkflowSession{}).Where("id = ?", "run").Update("control_binding_json",
+		`{"required":true,"provider":"codex","connector_id":"connector","driver_session_id":"driver","generation":1}`).Error; err != nil {
+		t.Fatal(err)
+	}
+	// A stale panel version must not prevent revoking execution authority.
+	command := WorkflowControlCommand{CommandID: "codex-stop", Kind: "stop", StateVersion: -1}
+	stopped, err := svc.Execute(ctx, "owner", "run", command)
+	if err != nil || stopped.Control.Continuation != "stopped" {
+		t.Fatalf("stop: %+v %v", stopped, err)
+	}
+	// Model the dispatcher receipt without invoking a real Codex task.
+	if err := svc.DB.Model(&orm.WorkflowHostAction{}).Where("id = ?", stopped.Receipt.ActionID).
+		Updates(map[string]any{"status": "failed", "last_error": "This host does not support interrupting the current turn; Workflow is stopped in Core."}).Error; err != nil {
+		t.Fatal(err)
+	}
+	refreshed := currentControl(t, svc.DB)
+	if refreshed.Continuation != "stopped" || refreshed.Delivery == nil || refreshed.Delivery.Status != "failed" {
+		t.Fatalf("host cancellation failure changed the stopped snapshot: %+v", refreshed)
+	}
+	// Retrying an uncertain response reuses the receipt after host settlement.
+	replayed, err := svc.Execute(ctx, "owner", "run", command)
+	if err != nil || replayed.Receipt != stopped.Receipt || replayed.Control.Continuation != "stopped" {
+		t.Fatalf("replayed stop: %+v %v", replayed, err)
+	}
+	command.CommandID = "codex-stop-again"
+	repeated, err := svc.Execute(ctx, "owner", "run", command)
+	if err != nil || repeated.Control.Continuation != "stopped" {
+		t.Fatalf("repeated stop: %+v %v", repeated, err)
+	}
+}
+
 func TestControlledRetryCreatesOneReplacementForCancelledAttempt(t *testing.T) {
 	db, _ := setupBatchTransitionSession(t)
 	if err := db.AutoMigrate(&orm.WorkflowReviewCheckpoint{}, &orm.WorkflowHostAction{}, &orm.WorkflowCommand{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{}); err != nil {
@@ -538,5 +572,45 @@ func TestContinueAfterStopSchedulesExecution(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestContinueEditedCompletedRunCreatesFreshExecution(t *testing.T) {
+	db, _ := setupBatchTransitionSession(t)
+	if err := db.AutoMigrate(&orm.WorkflowReviewCheckpoint{}, &orm.WorkflowHostAction{}, &orm.WorkflowCommand{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{}, &orm.SubAgentTask{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Updates(map[string]any{
+		"control_protocol": controlpolicy.Protocol, "controller_host": "external-agent", "status": "completed",
+		"control_binding_json": `{"required":true,"edit_paused":true,"driver_session_id":"driver","connector_id":"connector","generation":1}`,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSessionStep{ID: "stale-draft", SessionID: "batch-session", StepID: "branch_b", TaskID: "old-draft", Status: "succeeded", Validity: "stale", Attempt: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var session orm.WorkflowSession
+	if err := db.First(&session, "id = ?", "batch-session").Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := WorkflowControlService{DB: db.DB}
+	command := WorkflowControlCommand{CommandID: "continue-edited-completed", Kind: "continue", StateVersion: session.StateVersion}
+	result, err := svc.Execute(t.Context(), "batch-user", session.ID, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Receipt.ExecutionID == "" || result.Receipt.ActionID == "" {
+		t.Fatalf("no recovery: %+v", result)
+	}
+	var replacement orm.WorkflowSessionStep
+	if err := db.First(&replacement, "id = ?", result.Receipt.ExecutionID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if replacement.StepID != "branch_b" || replacement.Attempt != 2 || replacement.Validity != "effective" {
+		t.Fatalf("wrong recovery: %+v", replacement)
+	}
+	replay, err := svc.Execute(t.Context(), "batch-user", session.ID, command)
+	if err != nil || replay.Receipt != result.Receipt {
+		t.Fatalf("replay changed recovery: %+v %v", replay, err)
 	}
 }

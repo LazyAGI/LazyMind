@@ -28,6 +28,9 @@ func scanLocalRuntimeProcesses(paths RuntimePaths) ([]LocalProcessRecord, error)
 		cmdlineRaw, _ := os.ReadFile(filepath.Join(root, "cmdline"))
 		cmdline := splitProcCmdline(cmdlineRaw)
 		cmdlineText := strings.Join(cmdline, " ")
+		if isRuntimeGuardCommand(exe, cmdline) {
+			continue
+		}
 		if !processTextMatchesRuntime(paths, exe, cmdlineText) {
 			continue
 		}

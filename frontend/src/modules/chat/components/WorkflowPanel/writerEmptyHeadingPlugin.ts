@@ -22,8 +22,17 @@ export const writerEmptyHeadingPlugin = realmPlugin({
           || !heading.is(selection.focus.getNode().getTopLevelElement())
         ) return false;
 
-        // Once empty, let the editor handle further deletion and leave the heading.
-        if (selection.isCollapsed()) return false;
+        if (selection.isCollapsed()) {
+          if (heading.getTextContent()) return false;
+          const level = Number(editor.getElementByKey(heading.getKey())?.tagName.slice(1));
+          let sibling = heading.getNextSibling();
+          while (sibling && sibling.getType() !== 'heading') sibling = sibling.getNextSibling();
+          const siblingLevel = sibling
+            ? Number(editor.getElementByKey(sibling.getKey())?.tagName.slice(1))
+            : 0;
+          // Keep an empty parent as the numbering anchor for following child headings.
+          return siblingLevel > level;
+        }
         if (selection.getTextContent() !== heading.getTextContent()) return false;
 
         // Clearing the heading itself keeps its level even at the document start,

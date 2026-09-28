@@ -16,7 +16,7 @@ from .models import ContextBudget, CompressionTrigger, SummaryEvent
 from .summary_prompt import (
     build_summary_user_prompt,
     get_summary_system_prompt,
-    has_required_summary_sections,
+    has_required_profile_blocks,
     wrap_summary_for_projection,
 )
 from .summary_range import (
@@ -26,6 +26,13 @@ from .summary_range import (
     validate_tool_pairing,
 )
 from .telemetry import append_event
+
+from .active_context import (
+    collect_summary_runtime_state,
+    merge_model_context_sidecar,
+    resolve_summary_profile,
+    sidecar_fields,
+)
 
 try:
     from lazyllm.tools.agent.base import _write_agent_data
@@ -88,15 +95,18 @@ def _validate_summary(
     replaced_span: list[dict[str, Any]],
     projected: list[dict[str, Any]],
     expected_tail: list[dict[str, Any]],
+    expected_prefix: list[dict[str, Any]],
     budget: ContextBudget,
     before_total: int,
     after_total: int,
     non_history_tokens: int,
+    profile: Optional[str] = None,
+    runtime_state: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str, int, int]:
     if not (summary_markdown or '').strip():
         return False, 'empty_summary', 0, 0
 
-    if not has_required_summary_sections(summary_markdown):
+    if not has_required_profile_blocks(summary_markdown, profile, runtime_state):
         return False, 'missing_required_sections', 0, 0
 
     summary_tokens = estimate_tokens(summary_markdown)
@@ -104,11 +114,14 @@ def _validate_summary(
     if summary_tokens >= replaced_tokens:
         return False, 'summary_not_shorter', summary_tokens, replaced_tokens
 
+    if projected[:len(expected_prefix)] != expected_prefix:
+        return False, 'prefix_modified', summary_tokens, replaced_tokens
+
     if expected_tail:
         actual_tail = projected[len(projected) - len(expected_tail):]
         if actual_tail != expected_tail:
             return False, 'tail_modified', summary_tokens, replaced_tokens
-    elif len(projected) != 1:
+    elif len(projected) != len(expected_prefix) + 1:
         return False, 'tail_modified', summary_tokens, replaced_tokens
 
     ok, reason = validate_tool_pairing(projected)
@@ -119,11 +132,14 @@ def _validate_summary(
         return True, 'ok', summary_tokens, replaced_tokens
 
     tail_tokens = _estimate_history_tokens(expected_tail)
-    target_unreachable = non_history_tokens + tail_tokens >= budget.target_tokens
+    prefix_tokens = _estimate_history_tokens(expected_prefix)
+    fixed_tokens = non_history_tokens + prefix_tokens + tail_tokens
+    target_unreachable = fixed_tokens >= budget.target_tokens
     if not target_unreachable:
         return False, 'target_not_reached', summary_tokens, replaced_tokens
 
-    overshoot = max(1, before_total - budget.target_tokens)
+    # Recovery is measured against the reachable floor, excluding immutable context.
+    overshoot = max(1, before_total - max(budget.target_tokens, fixed_tokens))
     reclaimed = max(0, before_total - after_total)
     required_recovery = float(config['context_summary_required_overshoot_reclaim_ratio'])
     if reclaimed < overshoot * required_recovery:
@@ -179,8 +195,23 @@ def apply_summary_compression(
     if selected is None:
         return _abandon(original, budget, trigger, before_total, ratio_before, 'no_summary_range')
 
-    system_prompt = get_summary_system_prompt()
-    user_prompt = build_summary_user_prompt(selected.summary_messages)
+    runtime_state = collect_summary_runtime_state()
+    profile = resolve_summary_profile(runtime_state)
+    if (
+        profile == 'workflow'
+        and not runtime_state.get('artifact_coords')
+        and not runtime_state.get('workflow_step_id')
+    ):
+        return _abandon(
+            original, budget, trigger, before_total, ratio_before, 'workflow_missing_coords',
+            replaced_message_count=len(selected.summary_messages),
+            tail_tokens=selected.tail_tokens,
+        )
+
+    system_prompt = get_summary_system_prompt(profile)
+    user_prompt = build_summary_user_prompt(
+        selected.summary_messages, runtime_state=runtime_state,
+    )
 
     try:
         if summarizer is not None:
@@ -203,7 +234,7 @@ def apply_summary_compression(
         summary_tokens=summary_tokens_est,
     )
 
-    # Preserve any messages before replace_start (should be empty for v1 rolling).
+    # Keep authoritative task messages outside the replaceable summary range.
     prefix = copy.deepcopy(original[:selected.replace_start])
     tail = copy.deepcopy(selected.tail)
     projected = prefix + [summary_message] + tail
@@ -214,10 +245,13 @@ def apply_summary_compression(
         replaced_span=replaced_span,
         projected=projected,
         expected_tail=tail,
+        expected_prefix=prefix,
         budget=budget,
         before_total=before_total,
         after_total=after_total,
         non_history_tokens=non_history_tokens,
+        profile=profile,
+        runtime_state=runtime_state,
     )
     if not ok:
         return _abandon(
@@ -294,13 +328,17 @@ def _emit_model_context_updated(summary_markdown: str, covered_through_seq: int)
             summary_text=summary_markdown.strip(),
             covered_through_seq=int(covered_through_seq),
             version=1,
+            **sidecar_fields(),
         )
         if isinstance(cfg, dict):
-            cfg['model_context'] = {
-                'summary_text': summary_markdown.strip(),
-                'covered_through_seq': int(covered_through_seq),
-                'version': 1,
-            }
+            cfg['model_context'] = merge_model_context_sidecar(
+                {
+                    'summary_text': summary_markdown.strip(),
+                    'covered_through_seq': int(covered_through_seq),
+                    'version': 1,
+                },
+                sidecar_fields(),
+            )
     except Exception as exc:  # noqa: BLE001
         lazyllm.LOG.warning(f'[ContextSummary] model_context_emit_failed err={exc}')
 

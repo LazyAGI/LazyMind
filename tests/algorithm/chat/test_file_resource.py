@@ -250,6 +250,56 @@ def test_read_file_result_stays_below_spill_threshold(monkeypatch, tmp_path):
         assert utf8_size(result['text']) <= RESULT_BYTE_BUDGET + 128
 
 
+def test_workflow_resolves_tool_spill_uri_inside_active_workspace(monkeypatch, tmp_path):
+    _set_scope(monkeypatch, tmp_path)
+    workflow_workspace = tmp_path / 'workflow' / 'task-1'
+    spill = workflow_workspace / 'tool_spills' / 'read_file_hash.txt'
+    spill.parent.mkdir(parents=True)
+    spill.write_text('recoverable tool result', encoding='utf-8')
+    resolver.lazyllm.globals['agentic_config'].update({
+        'agent_type': 'workflow_step',
+        'workflow_workspace_path': str(workflow_workspace),
+    })
+
+    resolved = resolver.resolve_text_target(
+        'workspace://tool_spills/read_file_hash.txt',
+    )
+
+    assert resolved.path == str(spill)
+    assert resolved.workspace == str(workflow_workspace)
+
+
+def test_chat_resolves_tool_spill_uri_inside_current_workspace(monkeypatch, tmp_path):
+    _set_scope(monkeypatch, tmp_path)
+    spill = tmp_path / 'tool_spills' / 'read_file_hash.txt'
+    spill.parent.mkdir()
+    spill.write_text('recoverable chat tool result', encoding='utf-8')
+
+    resolved = resolver.resolve_text_target(
+        'workspace://tool_spills/read_file_hash.txt',
+    )
+
+    assert resolved.path == str(spill)
+    assert resolved.workspace == str(tmp_path)
+
+
+def test_workflow_rejects_legacy_or_escaping_tool_spill_references(monkeypatch, tmp_path):
+    _set_scope(monkeypatch, tmp_path)
+    workflow_workspace = tmp_path / 'workflow' / 'task-1'
+    workflow_workspace.mkdir(parents=True)
+    legacy = tmp_path / 'large' / 'read_file_hash.txt'
+    legacy.parent.mkdir()
+    legacy.write_text('legacy tool result', encoding='utf-8')
+    resolver.lazyllm.globals['agentic_config'].update({
+        'agent_type': 'workflow_step',
+        'workflow_workspace_path': str(workflow_workspace),
+    })
+
+    for target in ('large/read_file_hash.txt', 'workspace://tool_spills/../secret.txt'):
+        with pytest.raises(ValueError):
+            resolver.resolve_text_target(target)
+
+
 def test_grep_zero_matches_has_explicit_footer(monkeypatch, tmp_path):
     _set_scope(monkeypatch, tmp_path)
     (tmp_path / 'notes.txt').write_text('alpha', encoding='utf-8')
@@ -649,3 +699,65 @@ def test_manifest_cannot_redirect_admitted_read_to_bound_workspace(monkeypatch, 
     }))
     with pytest.raises(ToolExecutionError, match='current main-Agent workspace'):
         workspace_tools.read_file_resource('fr_probe')
+
+
+@pytest.mark.parametrize('extension', ['pdf', 'docx'])
+def test_host_document_read_uses_read_policy_and_original_source(
+    monkeypatch, tmp_path, workspace_runtime, extension,
+):
+    from lazymind.chat.engine.tools.workspace_context import workspace_permission_scope
+    outside = tmp_path / ('outside.' + extension)
+    outside.write_bytes(b'original document')
+    workspace = tmp_path / 'workspace'
+    middleware, core, _ = workspace_runtime(root=workspace, extra_tools=[workspace_tools.read_file_resource])
+    monkeypatch.setattr(conversation_workspace, 'chat_agent_workspace', lambda *_: str(workspace))
+    seen = []
+
+    def parse(path, **kwargs):
+        assert Path(path).read_bytes() == b'original document'
+        seen.append(path)
+        return 'evidence from document'
+
+    monkeypatch.setattr(resolver, 'parse_attachment_content', parse)
+    monkeypatch.setattr('lazymind.chat.engine.tools.file_resources.ingest.parse_pdf_pages',
+                        lambda path: [(1, parse(path))])
+    call = {'id': 'read-document', 'function': {'name': 'read_file_resource',
+                                             'arguments': {'target': str(outside)}}}
+    with workspace_permission_scope(middleware._workspace_permission):
+        prepared = middleware._manager.prepare_tool_calls([call])[0]
+    assert seen == []  # Resolving declarations must not parse or read the source.
+    assert [(i.path, i.operation) for i in prepared.host_files] == [(str(outside), 'read')]
+    result = middleware.execute_with_records([call]).results[0]
+    assert result['ok'], result
+    assert 'evidence from document' in result['value']['text']
+    assert result['value']['target'] == str(outside)
+    assert result['value']['display_name'] == outside.name
+    assert seen and seen[0] != str(outside)  # Parser consumes the approved private copy.
+    assert not core.operations  # Read-only operations do not prompt for write approval.
+
+
+def test_resource_only_reader_cannot_open_external_pdf(monkeypatch, tmp_path):
+    from lazymind.chat.engine.tools.workspace_context import WorkspaceContext, workspace_permission_scope
+    outside = _write_pdf(tmp_path / 'external.pdf')
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    _set_scope(monkeypatch, workspace)
+    tools = {tool.__name__: tool for tool in workspace_tools.build_resource_read_tools()}
+    with workspace_permission_scope(WorkspaceContext(active=True, trusted_local=True)):
+        with pytest.raises(ToolExecutionError, match='attachment or a file resource'):
+            tools['read_file_resource'](str(outside))
+
+
+def test_external_document_is_not_parsed_when_authorization_denies(
+    monkeypatch, tmp_path, workspace_runtime,
+):
+    outside = tmp_path / 'outside.docx'
+    outside.write_bytes(b'private')
+    middleware, _, _ = workspace_runtime(extra_tools=[workspace_tools.read_file_resource], gate=lambda _: 'deny')
+    def parse(*args, **kwargs):
+        pytest.fail('Denied document must not reach parser')
+    monkeypatch.setattr(resolver, 'parse_attachment_content', parse)
+    result = middleware.execute_with_records([{
+        'id': 'denied', 'function': {'name': 'read_file_resource', 'arguments': {'target': str(outside)}},
+    }]).results[0]
+    assert not result['ok']

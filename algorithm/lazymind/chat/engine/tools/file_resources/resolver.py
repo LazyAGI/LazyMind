@@ -36,6 +36,29 @@ class ResolvedTextResource:
     file_id: Optional[str] = None
 
 
+def host_document_path(target: str) -> str:
+    """Normalize an explicit host locator only in a host-filesystem runtime; no IO."""
+    from lazymind.chat.engine.tools.host_file_resolution import FileResolution
+    from lazymind.chat.engine.tools.workspace_context import get_workspace_permission_context
+
+    permission = get_workspace_permission_context()
+    if not permission or not permission.local_runtime or not (permission.active or permission.trusted_local):
+        return ''
+    if not isinstance(target, str) or not (os.path.isabs(target) or target.startswith('file://')):
+        return ''
+    return FileResolution().local(target)
+
+
+def resolve_resource_access(arguments):
+    from lazymind.chat.engine.tools.host_file_resolution import FileResolution
+
+    resolution = FileResolution()
+    path = host_document_path(arguments.get('target', ''))
+    if path:
+        arguments['target'] = resolution.local(path)
+    return resolution.finish(arguments)
+
+
 def _agentic_config() -> Dict[str, Any]:
     try:
         value = lazyllm.globals.get('agentic_config') or {}
@@ -171,7 +194,7 @@ def _resolved_from_local_file(
     if not os.path.isfile(source):
         raise FileNotFoundError(source)
     if source.lower().endswith('.pdf'):
-        manifest = store.find_by_source_path(source) or store.find_by_display_name(display_name)
+        manifest = store.find_by_source_path(source)
         if not manifest:
             from .ingest import ingest_pdf_file
             manifest = ingest_pdf_file(
@@ -221,6 +244,39 @@ def _materialize_document_text(path: str, workspace: str) -> str:
     return str(parsed_path)
 
 
+def _workspace_spill_target(
+    target: str,
+    *,
+    workspace: str,
+) -> Optional[ResolvedTextResource]:
+    """Resolve a compacted tool-result URI inside one trusted workspace."""
+    if not target.startswith('workspace://'):
+        return None
+    relative = target.removeprefix('workspace://')
+    relative_path = Path(relative)
+    if (
+        not relative
+        or relative_path.is_absolute()
+        or relative_path.parts[:1] != ('tool_spills',)
+        or '..' in relative_path.parts
+    ):
+        raise ValueError('invalid workspace tool-result reference')
+    resolved = os.path.realpath(os.path.join(workspace, *relative_path.parts))
+    try:
+        inside_workspace = os.path.commonpath((workspace, resolved)) == workspace
+    except ValueError:
+        inside_workspace = False
+    if not inside_workspace or not os.path.isfile(resolved):
+        raise ValueError(f"workspace tool-result reference '{target}' was not found")
+    return ResolvedTextResource(
+        target=target,
+        path=resolved,
+        display_name=os.path.basename(resolved),
+        kind='workspace',
+        workspace=workspace,
+    )
+
+
 def _workflow_workspace_target(
     target: str,
     *,
@@ -235,6 +291,14 @@ def _workflow_workspace_target(
     if not raw_workspace:
         return None
     workspace = os.path.realpath(raw_workspace)
+    spill_target = _workspace_spill_target(target, workspace=workspace)
+    if spill_target:
+        return spill_target
+    if target.startswith('large/'):
+        raise ValueError(
+            'legacy Workflow tool-result references are unsupported; '
+            'use a workspace://tool_spills/... reference',
+        )
     candidate = materialize_local_path(target)
     if not candidate or not os.path.isabs(candidate):
         return None
@@ -345,6 +409,18 @@ def resolve_text_target(
     if resources_only:
         raise ValueError('target must be an attachment or a file resource in this conversation')
 
+    host_path = host_document_path(key)
+    if host_path and (host_path.lower().endswith('.pdf') or is_chat_document_file(host_path)):
+        from lazymind.chat.engine.tools.host_file_resolution import stage_input_file
+
+        if not os.path.isfile(host_path):
+            raise FileNotFoundError(host_path)
+        if os.path.getsize(host_path) > _MAX_SOURCE_BYTES:
+            raise ValueError('source file exceeds the existing 100 MiB document limit')
+        return _resolved_from_local_file(
+            stage_input_file(host_path), os.path.basename(host_path), key, workspace, store,
+        )
+
     workflow_target = _workflow_workspace_target(
         key,
         allow_directory=allow_directory,
@@ -352,6 +428,10 @@ def resolve_text_target(
     )
     if workflow_target:
         return workflow_target
+
+    spill_target = _workspace_spill_target(key, workspace=workspace)
+    if spill_target:
+        return spill_target
 
     _, resolved = _resolve_workspace_path(key, user_id, conversation_id)
     if os.path.isdir(resolved):

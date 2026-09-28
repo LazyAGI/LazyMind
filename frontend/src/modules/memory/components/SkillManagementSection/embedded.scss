@@ -66,23 +66,6 @@
     gap: 18px;
     h2 { margin: 0; color: #101828; font-size: 20px; font-weight: 600; letter-spacing: -.4px; }
   }
-  .memory-skill-location-tabs {
-    display: flex;
-    padding: 3px;
-    border-radius: 6px;
-    background: #f1f4f8;
-    button {
-      border: 0;
-      border-radius: 4px;
-      padding: 5px 11px;
-      background: transparent;
-      color: #667085;
-      font: inherit;
-      font-size: 12px;
-      cursor: pointer;
-      &.is-active { background: #fff; color: #101828; box-shadow: 0 1px 4px #142c4d12; }
-    }
-  }
   .memory-skill-toolbar-actions { display: flex; flex-wrap: wrap; flex-shrink: 1; padding-bottom: 0; gap: 6px; }
   .memory-skill-toolbar-actions > .memory-skill-create-split { order: 2; }
   .memory-skill-insight-card {

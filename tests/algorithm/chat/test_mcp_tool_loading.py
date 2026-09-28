@@ -184,3 +184,97 @@ def test_static_tool_cache_keeps_system_and_user_namespaces_separate(monkeypatch
     assert system[0] is not user[0]
     assert asyncio.run(chat_service._build_mcp_tools(config, 'system'))[0] is system[0]
     assert asyncio.run(chat_service._build_mcp_tools(config, 'user'))[0] is user[0]
+
+
+def test_batch_loading_is_bounded_concurrent_and_preserves_source_order(monkeypatch):
+    import threading
+    entered, release = threading.Event(), threading.Event()
+    lock = threading.Lock()
+    active = peak = 0
+
+    def load(server, namespace='user'):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+            if active >= 4:
+                entered.set()
+        try:
+            assert release.wait(3)
+            return [server['id']]
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(chat_service, '_load_mcp_server_tools', load)
+
+    async def run():
+        task = asyncio.create_task(chat_service._build_mcp_tools([{'id': str(i)} for i in range(8)]))
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            await asyncio.sleep(0.05)
+            assert peak == 4
+        finally:
+            release.set()
+        assert await task == [str(i) for i in range(8)]
+    asyncio.run(run())
+
+
+def test_oauth_preview_uses_authorized_snapshot_with_execution_schema_identity(monkeypatch):
+    from types import SimpleNamespace
+    from lazyllm.tools.mcp.tool_adaptor import generate_lazyllm_tool
+    from lazyllm.tools.agent.toolsManager import ToolManager
+    server = {'id': 'personal', 'url': 'https://mcp.example/mcp', 'name': 'Personal',
+              'transport': 'http', 'auth_type': 'oauth', 'allowed_tools': ['docs.search'],
+              'oauth': {'user_id': 'alice', 'server_id': 'personal', 'server_url': 'https://mcp.example/mcp',
+                        'grant_id': 'g', 'grant_version': 1}}
+    schema = {'type': 'object', 'properties': {'query': {'type': 'string', 'description': 'Keywords'}},
+              'required': ['query']}
+    wire = SimpleNamespace(name='docs.search', description='Search documents.', inputSchema=schema)
+    monkeypatch.setattr(chat_service.MCPClient, 'get_tools', lambda self, **_: [generate_lazyllm_tool(self, wire)])
+    actual = ToolManager(chat_service._load_mcp_server_tools(server))
+    monkeypatch.setattr(chat_service, 'MCPOAuthAdapter', lambda *_: (_ for _ in ()).throw(AssertionError('OAuth')))
+    snapshot = {'status': 'ready', 'tools_complete': True, 'tools': [
+        {'tool_name': 'docs.search', 'description': 'Search documents.', 'input_schema': schema},
+        {'tool_name': 'unapproved', 'description': 'Hidden', 'input_schema': schema}]}
+    preview = ToolManager(chat_service._mcp_tools_for_preview(server, snapshot))
+    assert preview.tools_description == actual.tools_description
+    assert list(preview.atomic_tool_catalog()) == ['docs_search_mcp_c8f4ce5b8214']
+    assert next(iter(preview.atomic_tool_catalog().values()))['identity'] == next(
+        iter(actual.atomic_tool_catalog().values()))['identity']
+    assert chat_service._mcp_tools_for_preview(server, {**snapshot, 'status': 'needs_authorization'}) == []
+    assert chat_service._mcp_tools_for_preview(server, None) == []
+
+
+def test_preview_reports_missing_schema_without_reclassifying_auth():
+    report = chat_service._mcp_preview_catalog_status([
+        {'service': 'mcp:a', 'label': 'A', 'status': 'ready', 'tools_complete': True},
+        {'service': 'mcp:b', 'label': 'B', 'status': 'ready', 'tools_complete': False},
+        {'service': 'mcp:c', 'label': 'C', 'status': 'needs_authorization'},
+    ])
+    assert report == {'source': 'discovered_snapshot', 'complete': False, 'missing_services': ['B']}
+
+
+def test_loader_cancellation_drains_pending_service_tasks():
+    import threading
+    import pytest
+    from lazymind.chat.service.mcp_loading import load_mcp_catalog
+
+    release = threading.Event()
+
+    def load(config):
+        if config['id'] == 0:
+            raise asyncio.CancelledError()
+        release.wait(timeout=2)
+        return []
+
+    async def run():
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await load_mcp_catalog([
+                    {'service': f'mcp:{i}', 'status': 'ready', 'runtime': {'id': i}} for i in range(9)], load)
+            assert not [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+        finally:
+            release.set()
+
+    asyncio.run(run())

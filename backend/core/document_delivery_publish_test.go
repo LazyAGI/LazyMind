@@ -71,6 +71,9 @@ func newDeliveryFixture(t *testing.T, representation string) (descriptorFixture,
 	s.result = map[string]any{"success": true, "changed": true, "provider_synced": true, "patch_result": map[string]any{"success": true}, "persisted_document": persisted, "representation": representation, "provider": deliveryProvider, "target_document": s.target}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if serveDynamicLLMRole(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/api/document/providers":
 			s.mu.Lock()

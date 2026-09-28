@@ -76,16 +76,26 @@ export async function listWorkspaces(options: { query?: string; includeInactive?
   const result = data<{ items?: LocalWorkspaceView[] }>((await axiosInstance.get(`${coreBase}/local-workspaces`, { params })).data);
   return result.items ?? [];
 }
-export async function getConversationWorkspace(conversationId: string): Promise<LocalWorkspaceView | undefined> {
+export async function getConversationWorkspace(conversationId: string) {
   const result = data<{ status?: string; workspace?: LocalWorkspaceView; permission_mode?: WorkspacePermissionMode; permission_version?: number }>(
     (await axiosInstance.get(`${coreBase}/conversations/${encodeURIComponent(conversationId)}:workspace`)).data,
   );
-  return result.workspace ? { ...result.workspace, permission_mode: result.permission_mode, permission_version: result.permission_version } : undefined;
+  return { workspace: result.workspace, permission_mode: result.permission_mode ?? "always_ask", permission_version: result.permission_version ?? 1 };
 }
-export async function updateWorkspacePermission(conversationId: string, mode: WorkspacePermissionMode, version: number) {
-  return data<{ permission_mode: WorkspacePermissionMode; permission_version: number; effective_at: "next_request" }>(
-    (await axiosInstance.put(`${coreBase}/conversations/${encodeURIComponent(conversationId)}:workspace-permission`, { permission_mode: mode, version })).data,
+export async function updateWorkspacePermission(conversationId: string, mode: WorkspacePermissionMode, version: number, userPermissionVersion: number) {
+  return data<{ permission_mode: WorkspacePermissionMode; permission_version: number; user_permission_version: number; effective_at: "next_request" }>(
+    (await axiosInstance.put(`${coreBase}/conversations/${encodeURIComponent(conversationId)}:workspace-permission`, { permission_mode: mode, version, user_permission_version: userPermissionVersion })).data,
   );
+}
+export interface UserPermissionPreference {
+  default_permission_mode: WorkspacePermissionMode;
+  permission_version: number;
+}
+export async function getUserPermissionPreference(): Promise<UserPermissionPreference> {
+  return data<UserPermissionPreference>((await axiosInstance.get(`${coreBase}/user/chat-settings`)).data);
+}
+export async function saveUserPermissionPreference(mode: WorkspacePermissionMode, version: number): Promise<UserPermissionPreference> {
+  return data<UserPermissionPreference>((await axiosInstance.patch(`${coreBase}/user/chat-settings`, { default_permission_mode: mode, permission_version: version })).data);
 }
 export function workspaceReason(error: unknown): string {
   const value = error as { response?: { data?: { code?: unknown; reason?: string; detail?: { reason?: string }; data?: { detail?: { reason?: string } } } }; code?: unknown };

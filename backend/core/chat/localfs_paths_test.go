@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"lazymind/core/common/orm"
 	"lazymind/core/localworkspace"
 	"testing"
 )
@@ -11,7 +12,8 @@ func TestUnboundWorkspaceDraftContext(t *testing.T) {
 	if !localworkspace.Enabled() {
 		t.Fatal("local workspace runtime disabled")
 	}
-	value, err := workspaceSnapshotForRequest(context.Background(), nil, "u1", map[string]any{})
+	db := orm.MigrateTestDB(t, &orm.UserChatSettings{})
+	value, err := workspaceSnapshotForRequest(context.Background(), db.DB, "u1", map[string]any{})
 	if err != nil || value == nil || value.WorkspaceID != "" || value.PermissionMode != localworkspace.PermissionAlwaysAsk {
 		t.Fatalf("unbound draft context: %#v, %v", value, err)
 	}

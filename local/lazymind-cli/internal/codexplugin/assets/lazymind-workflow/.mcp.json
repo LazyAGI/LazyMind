@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "lazymind": {
+      "command": "lazymind",
+      "args": [
+        "mcp",
+        "codex-workflow"
+      ]
+    }
+  }
+}

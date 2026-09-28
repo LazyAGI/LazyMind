@@ -174,6 +174,128 @@ def test_prepare_control_distinguishes_reference_from_edit_source(
     assert (operation, target_stage) == (expected_operation, 'document')
 
 
+def _stub_prepare_workspace(monkeypatch, tmp_path, *, user_input, history_files_per_turn):
+    tools = _load_tools_module()
+    captured = {}
+    context = SimpleNamespace(
+        workspace_path=str(tmp_path),
+        params={
+            'history_files_per_turn': history_files_per_turn,
+            'session_id': 'writer-session',
+        },
+        emit=lambda _event: None,
+    )
+
+    monkeypatch.setattr(tools, '_authoritative_writer_user_input', lambda _default: user_input)
+    monkeypatch.setattr(tools, '_verified_knowledge_text', lambda value: value)
+    monkeypatch.setattr(tools, 'require_context', lambda: context)
+    monkeypatch.setattr(
+        tools,
+        '_provider_document_reference',
+        lambda _value: user_input if user_input.startswith('obsidian://') else '',
+    )
+    monkeypatch.setattr(tools, '_provider_document_locator', lambda _value: '')
+    monkeypatch.setattr(
+        tools,
+        '_resolve_prepare_control',
+        lambda *_args, **_kwargs: ('revise_document', 'document'),
+    )
+
+    def resolve_command(**kwargs):
+        captured['command'] = kwargs
+        return 'writer-command.json'
+
+    monkeypatch.setattr(tools, 'writer_resolve_command', resolve_command)
+    monkeypatch.setattr(
+        tools,
+        '_load_writer_command',
+        lambda _path: SimpleNamespace(structure_mode='flat', next_step='write_document'),
+    )
+
+    def load_document(*, user_input, stage):
+        captured['provider_load'] = (user_input, stage)
+        return {
+            'source_document': 'source.md',
+            'target_document': 'target.json',
+            'representation': 'markdown',
+        }
+
+    def load_local_document(filename):
+        captured['local_load'] = filename
+        return 'source.md'
+
+    monkeypatch.setattr(tools, 'writer_load_document', load_document)
+    monkeypatch.setattr(tools, 'writer_load_local_document', load_local_document)
+    monkeypatch.setattr(tools, 'writer_build_writing_task', lambda **_kwargs: 'task.json')
+    monkeypatch.setattr(
+        tools,
+        'writer_collect_available_media',
+        lambda **_kwargs: {
+            'media_assets': 'media.json',
+            'profile_input_resources': 'profile-resources.json',
+            'warnings': [],
+        },
+    )
+    monkeypatch.setattr(tools, 'writer_profile_resources', lambda **_kwargs: 'resources.json')
+    monkeypatch.setattr(tools, 'writer_create_writing_context', lambda **_kwargs: 'context.json')
+    monkeypatch.setattr(tools, '_save_draft_workspace_artifacts', lambda _result: [])
+    return tools, captured
+
+
+def test_prepare_rejects_provider_document_with_source_filename(monkeypatch, tmp_path):
+    locator = 'obsidian://open?vault=obs&file=note'
+    tools, captured = _stub_prepare_workspace(
+        monkeypatch,
+        tmp_path,
+        user_input=locator,
+        history_files_per_turn={},
+    )
+
+    with pytest.raises(ValueError, match='both a provider document locator'):
+        tools.writer_prepare_workspace(
+            operation='revise_document',
+            source_filename='note.md',
+        )
+
+    assert 'provider_load' not in captured
+    assert 'local_load' not in captured
+
+
+def test_prepare_rejects_real_uploaded_document_alongside_provider_locator(
+    monkeypatch, tmp_path,
+):
+    locator = 'obsidian://open?vault=obs&file=note'
+    tools, _ = _stub_prepare_workspace(
+        monkeypatch,
+        tmp_path,
+        user_input=locator,
+        history_files_per_turn={'1': [str(tmp_path / 'note.md')]},
+    )
+
+    with pytest.raises(ValueError, match='both a provider document locator'):
+        tools.writer_prepare_workspace(
+            operation='revise_document',
+            source_filename='note.md',
+        )
+
+
+def test_prepare_keeps_local_source_without_provider_locator(monkeypatch, tmp_path):
+    tools, captured = _stub_prepare_workspace(
+        monkeypatch,
+        tmp_path,
+        user_input='修改上传的文章，让表达更简洁',
+        history_files_per_turn={'1': [str(tmp_path / 'note.md')]},
+    )
+
+    tools.writer_prepare_workspace(
+        operation='revise_document',
+        source_filename='note.md',
+    )
+
+    assert captured['local_load'] == 'note.md'
+    assert 'provider_load' not in captured
+
+
 def test_write_document_revision_emits_markdown_draft_stream(monkeypatch, tmp_path):
     from lazymind.document_tools import revision as document_revision
 
@@ -420,6 +542,52 @@ def test_markdown_assembly_keeps_media_source_reference():
                 'uri': 'file:///mnt/obsidian/obs/assets/source.png',
                 'local_path': '/data/subagent/assets/source.png',
                 'meta': {'source_reference': 'assets/source.png'},
+            },
+        },
+    }
+
+    assert document_writing.drop_unregistered_markdown_images(
+        markdown, media_assets,
+    ) == markdown
+
+
+def test_markdown_media_fill_preserves_registered_path_with_whitespace():
+    from lazymind.document_tools import writing as document_writing
+
+    local_path = '/Users/test/Library/Application Support/LazyMind/image.png'
+    media_assets = {
+        'assets': {
+            'asset-generated': {
+                'local_path': local_path,
+            },
+        },
+        'visual_need_asset_ids': {
+            'IMAGE-1': ['asset-generated'],
+        },
+    }
+
+    filled = document_writing.fill_markdown_media_placeholders(
+        '![Generated](media-placeholder://IMAGE-1)\n',
+        media_assets,
+    )
+
+    expected = f'![Generated](<{local_path}>)\n'
+    assert filled == expected
+    assert document_writing.drop_unregistered_markdown_images(
+        filled, media_assets,
+    ) == expected
+
+
+def test_drop_unregistered_images_accepts_percent_encoded_path():
+    from lazymind.document_tools import writing as document_writing
+
+    raw = '/Users/test/Library/Application Support/LazyMind/image.png'
+    encoded = '/Users/test/Library/Application%20Support/LazyMind/image.png'
+    markdown = f'![Generated]({encoded})\n'
+    media_assets = {
+        'assets': {
+            'asset-generated': {
+                'local_path': raw,
             },
         },
     }
@@ -717,3 +885,157 @@ def test_draft_workspace_revise_uses_writing_task_representation(
         assert state['result']['target_document'] == target_document
         assert state['result']['markdown_editor_prepared'] is True
         assert 'document_write_result' not in state['result']
+
+
+def test_generated_outline_does_not_run_a_second_completion(monkeypatch):
+    from lazymind.document_tools import writing as writer
+
+    chunks = []
+    completed = []
+
+    class Toolkit:
+        def stream_outline(self, *, on_delta, **kwargs):
+            on_delta('# Story\n## Chapter\n')
+            return '# Story\n## Chapter\n'
+
+        def prepare_outline(self, **kwargs):
+            raise AssertionError('generated outline must not call completion')
+
+    monkeypatch.setattr(writer, 'WriterWritingCapabilities', Toolkit)
+    result = writer.generate_outline(
+        {'query': 'Write a story'}, {'context_id': 'ctx'}, on_delta=chunks.append,
+        on_outline_prepared=lambda: completed.append(True),
+    )
+    assert result == ''.join(chunks)
+    assert completed == [True]
+
+
+@pytest.mark.parametrize('fail', [False, True])
+def test_outline_stream_records_timing_trace_without_changing_preview(monkeypatch, fail):
+    from types import SimpleNamespace
+    import lazyllm.tracing as tracing
+    from lazyllm.tools.writer.tools.stream_tools import DraftMarkdownStream
+    from lazymind.document_tools.writing import WriterWritingCapabilities
+
+    attributes, finished, errors, preview = {}, [], [], []
+    handle = object()
+    monkeypatch.setattr(tracing, 'start_span', lambda **kwargs: handle)
+    monkeypatch.setattr(tracing, 'get_trace_context', lambda: SimpleNamespace(trace_id='trace-123'))
+    monkeypatch.setattr(tracing, 'set_span_attributes', lambda span, attrs: attributes.update(attrs))
+    monkeypatch.setattr(tracing, 'set_span_error', lambda span, exc: errors.append(exc))
+    monkeypatch.setattr(tracing, 'finish_span', lambda span: finished.append(span))
+
+    def call(sink):
+        sink({'tag': 'think', 'delta': 'reasoning'})
+        if fail:
+            raise TimeoutError('test timeout')
+        sink({'tag': 'text', 'delta': '# Outline'})
+        return '# Outline'
+
+    planning = SimpleNamespace(stream_outline=lambda **kwargs: DraftMarkdownStream(
+        call=call, finalize=lambda body: {'body': body}, prefix='', idle_timeout=1,
+    ))
+    monkeypatch.setattr(WriterWritingCapabilities, '_outline_planning', lambda *args: (planning, '', ''))
+    monkeypatch.setattr(WriterWritingCapabilities, '_outline_result', staticmethod(lambda result: result['body']))
+    toolkit = WriterWritingCapabilities()
+    if fail:
+        with pytest.raises(TimeoutError, match='test timeout'):
+            toolkit.stream_outline('{}', '{}', preview.append)
+    else:
+        assert toolkit.stream_outline('{}', '{}', preview.append) == '# Outline'
+        assert ''.join(preview) == '# Outline\n'
+    assert attributes['writer.outline.trace_id'] == 'trace-123'
+    assert attributes['writer.outline.status'] == ('error' if fail else 'completed')
+    assert attributes['writer.outline.first_response_ms'] >= 0
+    assert ('writer.outline.first_visible_ms' in attributes) is not fail
+    assert ('writer.outline.generation_finished_ms' in attributes) is not fail
+    assert len(errors) == int(fail)
+    assert finished == [handle]
+
+
+@pytest.mark.parametrize(('target', 'maximum', 'whole'), [
+    (3000, 3300, True), (5000, 5500, True), (5001, 5501, False),
+    (6000, 6600, False), (None, 5000, True), (None, None, False),
+])
+def test_whole_document_generation_boundary(monkeypatch, tmp_path, target, maximum, whole):
+    from lazymind.document_tools import execution
+    task = {'task_type': 'write', 'output': {'representation': 'markdown'},
+            'constraints': {'target_chars': target, 'max_chars': maximum}}
+    monkeypatch.setattr(execution, '_read_json_file', lambda path: task)
+    monkeypatch.setattr(execution, '_read_json_string', lambda path: '{}')
+    monkeypatch.setattr(execution, '_workspace_root', lambda: tmp_path)
+    monkeypatch.setattr(execution, '_run_root', lambda name: tmp_path / name)
+    monkeypatch.setattr(execution, 'require_context', lambda: SimpleNamespace(emit=lambda e: None))
+    calls = []
+    monkeypatch.setattr(execution, 'stream_whole_document',
+                        lambda *a, **kw: calls.append('whole') or '# Story\n\nBody.')
+    monkeypatch.setattr(execution, '_save_writer_document', lambda *a, **kw: 'whole.md')
+    monkeypatch.setattr(execution, '_writer_generate_draft_blocks_markdown',
+                        lambda **kw: calls.append('sections') or ['chapter.md'])
+    monkeypatch.setattr(execution, '_assemble_draft_document_markdown', lambda **kw: 'sections.md')
+    result = execution.invoke({}, '_writer_generate_draft_document', {
+        'writing_task_path': 'task', 'section_instructions_path': 'instructions', 'writing_context_path': 'context',
+    })
+    assert calls == ['whole' if whole else 'sections']
+    assert ('draft_blocks' not in result) == whole
+
+
+def test_workspace_checkpoint_changes_when_outline_is_edited_in_place(tmp_path):
+    tools = _load_tools_module()
+    outline = tmp_path / 'outline.md'
+    outline.write_text('# Story\n\n## Original\n')
+    first = tools._state_workspace_fingerprint(outline_document_path=str(outline))
+    assert tools._state_workspace_fingerprint(outline_document_path=str(outline)) == first
+    outline.write_text('# Story\n\n## Edited\n')
+    assert tools._state_workspace_fingerprint(outline_document_path=str(outline)) != first
+
+
+@pytest.mark.parametrize('analyze', [False, True])
+def test_source_image_analysis_policy_is_forwarded(monkeypatch, tmp_path, analyze):
+    from lazymind import model_config
+    from lazymind.document_tools import writing as writer
+    captured = {}
+
+    class Capabilities:
+        def build_resources(self, **kwargs):
+            return '[]'
+
+        def collect_available_media(self, **kwargs):
+            captured.update(kwargs)
+            return '{}'
+
+    monkeypatch.setattr(writer, 'WriterWritingCapabilities', Capabilities)
+    monkeypatch.setattr(model_config, 'is_model_role_available', lambda _: True)
+    task = {'constraints': {'visual_policy': {'require_input_image_reuse': True}}}
+    writer.collect_document_media(task, file_paths=[], source_document='# Document',
+                                  media_store=str(tmp_path), analyze_source_images=analyze)
+    policy = json.loads(captured['writing_task_json'])['constraints']['visual_policy']
+    assert policy == {'require_input_image_reuse': True, 'analyze_source_images': analyze}
+    assert 'analyze_source_images' not in task['constraints']['visual_policy']
+    assert captured['use_vision_model'] is True  # Independent references retain vision support.
+
+
+def test_resource_profiles_skip_preserved_images_but_keep_reference_material(monkeypatch, tmp_path):
+    from lazymind.document_tools import writing as writer
+    captured = {}
+
+    class ResourceTools:
+        def __init__(self, **kwargs):
+            pass
+
+        def profile_resources(self, **kwargs):
+            captured.update(kwargs)
+            return {}
+
+    monkeypatch.setattr(writer, 'WriterResourceTools', ResourceTools)
+    monkeypatch.setattr(writer, 'AutoModel', lambda **kwargs: None)
+    monkeypatch.setattr(writer, '_temp_root', lambda: tmp_path)
+    monkeypatch.setattr(writer, '_primary_data', lambda _: [])
+    resources = [
+        {'resource_id': 'old', 'resource_type': 'image', 'meta': {'source_image_preserved': True}},
+        {'resource_id': 'upload', 'resource_type': 'image'},
+        {'resource_id': 'short-reference', 'resource_type': 'text', 'inline_text': 'Windows'},
+        {'resource_id': 'source', 'resource_type': 'text', 'inline_text': 'Source document'},
+    ]
+    writer.WriterWritingCapabilities().profile_resources('{}', '', json.dumps(resources))
+    assert [item.resource_id for item in captured['input_resources']] == ['upload', 'short-reference', 'source']

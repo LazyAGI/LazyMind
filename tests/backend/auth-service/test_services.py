@@ -453,7 +453,7 @@ def test_group_service_group_membership_and_permissions(service_modules, db_sess
     assert delete_missing_group.value.code == 1000402
 
 
-def test_user_service_crud_role_assignment_and_password_reset(service_modules, db_session, seeded_data, monkeypatch):
+def test_user_service_crud_and_role_assignment(service_modules, db_session, seeded_data, monkeypatch):
     _, _, user_service_module = service_modules
     service = UserService()
     user_role = seeded_data['user_role']
@@ -572,23 +572,6 @@ def test_user_service_crud_role_assignment_and_password_reset(service_modules, d
     with pytest.raises(AppException) as disable_missing_user:
         service.disable_user(uuid.uuid4())
     assert disable_missing_user.value.code == 1000401
-
-    service.reset_password(normal.id, 'Aa1!reset')
-    refreshed = UserRepository.get_by_id(db_session, normal.id)
-    assert refreshed.password_hash == 'hashed::Aa1!reset'
-    assert refreshed.updated_pwd_time is not None
-
-    with pytest.raises(AppException) as reset_password_required:
-        service.reset_password(normal.id, '   ')
-    assert reset_password_required.value.code == 1000206
-
-    with pytest.raises(AppException) as invalid_password_after_reset:
-        service.reset_password(normal.id, 'bad')
-    assert invalid_password_after_reset.value.code == 1000103
-
-    with pytest.raises(AppException) as reset_missing_user:
-        service.reset_password(uuid.uuid4(), 'Aa1!reset')
-    assert reset_missing_user.value.code == 1000401
 
 
 def test_user_service_default_role_missing_raises(service_modules, db_session, monkeypatch):

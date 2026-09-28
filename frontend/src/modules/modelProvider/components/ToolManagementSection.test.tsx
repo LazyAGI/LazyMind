@@ -8,6 +8,7 @@ const toolApiMocks = vi.hoisted(() => ({
   disableTool: vi.fn(),
   discoverMcpServerTools: vi.fn(),
   enableTool: vi.fn(),
+  getMcpServer: vi.fn(),
   listMcpServersPage: vi.fn(),
   listToolAssetsPage: vi.fn(),
   updateMcpServer: vi.fn(),
@@ -125,6 +126,7 @@ describe("ToolManagementSection MCP overview synchronization", () => {
       records: [mcpServer],
       total: 1,
     });
+    toolApiMocks.getMcpServer.mockResolvedValue(mcpServer);
     toolApiMocks.discoverMcpServerTools.mockResolvedValue({
       success: true,
       tools: mcpTools,
@@ -185,6 +187,21 @@ describe("ToolManagementSection MCP overview synchronization", () => {
     });
   });
 
+  it("loads discovered tools from server details when reopening the tools drawer", async () => {
+    toolApiMocks.listMcpServersPage.mockResolvedValue({
+      records: [{ ...mcpServer, tools: [] }],
+      total: 1,
+    });
+    const router = createMemoryRouter([{ path: "/settings", element: <SettingsNavigationGuard><ToolManagementSection view="mcp" /></SettingsNavigationGuard> }], {
+      initialEntries: ["/settings?section=mcp&editor=mcp-tools&item=mcp_server_1"],
+    });
+    render(<RouterProvider router={router} />);
+
+    expect(await screen.findByText("remote_search")).toBeInTheDocument();
+    expect(toolApiMocks.getMcpServer).toHaveBeenCalledWith("mcp_server_1");
+    expect(screen.queryByText(/暂无已发现工具|No tools discovered/)).not.toBeInTheDocument();
+  });
+
   it("refreshes the overview after a successful connection check", async () => {
     const onChanged = vi.fn().mockResolvedValue(undefined);
     render(
@@ -201,6 +218,39 @@ describe("ToolManagementSection MCP overview synchronization", () => {
     await waitFor(() => {
       expect(toolApiMocks.checkMcpServer).toHaveBeenCalledWith("mcp_server_1");
       expect(onChanged).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("lets a disabled unverified Notion request authorization without executing tools", async () => {
+    let discoveryEnabled = false;
+    const notion = {
+      ...mcpServer,
+      id: "msp_notion_personal",
+      name: "Notion",
+      url: "https://mcp.notion.com/mcp",
+      authType: "oauth",
+      oauthStatus: "needs_authorization",
+      enabled: false,
+      isVerified: false,
+    };
+    toolApiMocks.listMcpServersPage.mockImplementation(async () => ({
+      records: [{ ...notion, discoveryEnabled }],
+      total: 1,
+    }));
+    toolApiMocks.updateMcpServer.mockImplementation(async () => {
+      discoveryEnabled = true;
+      return { ...notion, discoveryEnabled };
+    });
+
+    render(<ToolManagementSection layout="settings" view="mcp" />);
+
+    const toggle = await screen.findByRole("switch", { name: /Notion/ });
+    expect(toggle).toBeEnabled();
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(toggle).toBeChecked();
+      expect(screen.getByText(/待认证|Authorization pending/)).toBeInTheDocument();
     });
   });
 });

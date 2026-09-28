@@ -72,22 +72,83 @@ test("opens ordinary external blank links outside Electron", async () => {
   assert.deepEqual(opened, ["https://open.feishu.cn/app"]);
 });
 
-test("keeps same-origin links and OAuth popups inside Electron", () => {
+test("gives same-origin windows the desktop preload without changing OAuth popups", () => {
   let handler;
+  const sameOriginWindowOptions = {
+    webPreferences: { preload: "/runtime/preload.js" },
+  };
   const webContents = {
     getURL: () => "http://127.0.0.1:8090/agent/chat/home",
     setWindowOpenHandler: (value) => { handler = value; },
     on: () => {},
   };
 
-  installExternalNavigationHandler(webContents, async () => {});
+  installExternalNavigationHandler(
+    webContents,
+    async () => {},
+    () => {},
+    sameOriginWindowOptions,
+  );
   assert.deepEqual(handler({
     url: "http://127.0.0.1:8090/lib/knowledge/list",
     frameName: "_blank",
-  }), { action: "allow" });
+  }), {
+    action: "allow",
+    overrideBrowserWindowOptions: sameOriginWindowOptions,
+  });
   assert.deepEqual(handler({
     url: "https://accounts.google.com/o/oauth2/v2/auth",
     frameName: "Google OAuth",
     features: "width=560,height=760,left=100,top=100",
+  }), { action: "allow" });
+});
+
+test("only propagates desktop window options through same-origin children", () => {
+  let didCreateWindow;
+  const sameOriginWindowOptions = {
+    webPreferences: { preload: "/runtime/preload.js" },
+  };
+  const parentWebContents = {
+    getURL: () => "http://127.0.0.1:8090/agent/chat/home",
+    setWindowOpenHandler: () => {},
+    on: (event, listener) => {
+      if (event === "did-create-window") didCreateWindow = listener;
+    },
+  };
+
+  installExternalNavigationHandler(
+    parentWebContents,
+    async () => {},
+    () => {},
+    sameOriginWindowOptions,
+  );
+
+  let sameOriginHandler;
+  didCreateWindow({
+    webContents: {
+      getURL: () => "http://127.0.0.1:8090/cloud-documents/docs/github-setup",
+      setWindowOpenHandler: (value) => { sameOriginHandler = value; },
+      on: () => {},
+    },
+  }, { url: "http://127.0.0.1:8090/cloud-documents/docs/github-setup" });
+  assert.deepEqual(sameOriginHandler({
+    url: "http://127.0.0.1:8090/cloud-documents",
+    frameName: "_blank",
+  }), {
+    action: "allow",
+    overrideBrowserWindowOptions: sameOriginWindowOptions,
+  });
+
+  let oauthHandler;
+  didCreateWindow({
+    webContents: {
+      getURL: () => "https://accounts.google.com/o/oauth2/v2/auth",
+      setWindowOpenHandler: (value) => { oauthHandler = value; },
+      on: () => {},
+    },
+  }, { url: "https://accounts.google.com/o/oauth2/v2/auth" });
+  assert.deepEqual(oauthHandler({
+    url: "https://accounts.google.com/signin",
+    frameName: "_blank",
   }), { action: "allow" });
 });
