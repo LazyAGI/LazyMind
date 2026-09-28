@@ -1,6 +1,16 @@
 import type { TabDef, WorkflowSession } from '@/modules/chat/store/workflowPanel';
 import { resolvePendingApprovalStep } from './workflowApproval';
 
+/** Controlled panels use Core's allowed actions, not native auto-dispatch checkpoints. */
+export function resolveExternalContinueAction(
+  control: { continuation: string; available_actions: string[]; admission?: { reason?: string } },
+  completedStep?: string,
+): 'continue' | 'resume' | 'rewind' | undefined {
+  const action = control.continuation === 'stopped' ? 'resume'
+    : completedStep && control.admission?.reason !== 'edits_pending_continue' ? 'rewind' : 'continue';
+  return control.available_actions.includes(action) ? action : undefined;
+}
+
 export type WorkflowContinueAction = { kind: 'approval' | 'resume' | 'completed'; stepId: string };
 
 /** Waiting alone is not a checkpoint: automatic dispatch also passes through it. */

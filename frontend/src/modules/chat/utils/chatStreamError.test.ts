@@ -18,7 +18,7 @@ describe("Core chat stream error mapping", () => {
           JSON.stringify({ code: appCode, message }),
           status,
         ),
-      ).toEqual({ appCode, httpStatus: status, semanticCode });
+      ).toEqual({ appCode, httpStatus: status, semanticCode, reason: "model_failure" });
     },
   );
 
@@ -35,6 +35,7 @@ describe("Core chat stream error mapping", () => {
       appCode: code,
       httpStatus: 400,
       semanticCode: code,
+      reason: "model_failure",
     });
     expect(JSON.stringify(mapped)).not.toContain("provider secret diagnostic");
   });
@@ -43,22 +44,39 @@ describe("Core chat stream error mapping", () => {
     ["not json", 503],
     [JSON.stringify({ message: "no code" }), 503],
     [JSON.stringify({ code: 2001597, message: "model config unavailable" }), 0],
-    [JSON.stringify({ code: 2000000, message: "Internal server error" }), 500],
-  ])("leaves transport and structured 5xx failures to stream recovery", (data, status) => {
+    [JSON.stringify({ code: 2000000, message: "Internal server error" }), 200],
+  ])("leaves transport or unstructured failures to stream recovery", (data, status) => {
     expect(parseCoreChatStreamError(data, status)).toBeUndefined();
   });
 
+  it.each([400, 403, 500, 503])("does not resume a structured HTTP %s rejection", (status) => {
+    expect(parseCoreChatStreamError({ code: 2000000, message: "private diagnostic" }, status))
+      .toEqual({ appCode: 2000000, httpStatus: status, semanticCode: "request_rejected", reason: "runtime_failure" });
+  });
+
   it.each([
-    [JSON.stringify({ code: 2002022, message: "at most one workflow mention" }), 400, 2002022],
-    [JSON.stringify({ code: 2000102, message: "forbidden" }), 403, 2000102],
-  ])("classifies a structured %s rejection as a terminal request failure", (data, status, appCode) => {
-    expect(
-      parseCoreChatStreamError(data, status),
-    ).toEqual({
-      appCode,
-      httpStatus: status,
-      semanticCode: "request_rejected",
-      reason: "runtime_failure",
+    [2002022, "at most one workflow mention", 400],
+    [2000102, "forbidden", 403],
+  ])("preserves upstream rejection mapping for code %s", (appCode, message, status) => {
+    expect(parseCoreChatStreamError(JSON.stringify({ code: appCode, message }), status)).toEqual({
+      appCode, httpStatus: status, semanticCode: "request_rejected", reason: "runtime_failure",
+    });
+  });
+
+  it("distinguishes an invalid environment name from an encryption failure", () => {
+    expect(parseCoreChatStreamError({ code: 2003122, message: "Reserved environment name",
+      data: { detail: { reason: "user_env_invalid_name", name: "NODE_TLS_REJECT_UNAUTHORIZED" } },
+    }, 409)).toEqual({
+      appCode: 2003122, httpStatus: 409, semanticCode: "user_env_invalid_name", reason: "runtime_failure",
+    });
+  });
+
+  it.each([
+    { code: 2000000, message: "Internal error", data: { detail: { reason: "user_env_unavailable" } } },
+    { code: 2000000, message: "Unable to access user environment variables; check the credential key configuration" },
+  ])("classifies unavailable environment credentials without exposing diagnostics", (payload) => {
+    expect(parseCoreChatStreamError(payload, 500)).toEqual({
+      appCode: 2000000, httpStatus: 500, semanticCode: "user_env_unavailable", reason: "runtime_failure",
     });
   });
 });

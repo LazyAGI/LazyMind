@@ -580,19 +580,41 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-			persistImmediateRunTerminal(r.Context(), db, convID, historyID, displayQuery, runID, target, historyExt, &RunTerminal{
+			persisted := persistImmediateRunTerminal(r.Context(), db, convID, historyID, displayQuery, runID, target, historyExt, &RunTerminal{
 				Status:        "failed",
 				Reason:        "model_failure",
 				Code:          "not_found",
 				PartialOutput: false,
 			})
-			common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
+			appErr := common.ResolveAppError(err.Error(), http.StatusServiceUnavailable)
+			if persisted {
+				appErr = appErr.WithDetail(map[string]string{"history_id": historyID})
+			}
+			common.ReplyAppErr(w, appErr)
 			return
 		}
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load chat runtime config failed", err), http.StatusInternalServerError)
 		return
 	}
 	applyMCPRuntimeConfig(r.Context(), db, userID, r.Header.Get("Authorization"), reqBody)
+	// Resolve persisted confirmation before loading credentials, so an unreadable
+	// variable can still be deleted and cannot be injected into this continuation.
+	if !target.IsRegeneration {
+		continuation, err := submitUserEnvDeletion(r.Context(), db, userID, histories, raw["ask_answers_structured"])
+		if err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
+		if continuation != "" {
+			continuation = displayQuery + "\n\n[Environment variable deletion result]\n" + continuation
+			reqBody["query"] = continuation
+			reqBody["user_query"] = continuation
+		}
+	}
+	if err := applyUserEnvironmentRuntimeConfig(r.Context(), db, userID, reqBody); err != nil {
+		replyUserEnvError(w, err)
+		return
+	}
 	if basicChatOnly {
 		applyBasicChatOnlyPolicy(reqBody)
 	} else {
@@ -1569,6 +1591,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	var askPending any
 	var askAnswered bool
 	var askSavedAnswers any
+	var envInputResult any
 	var intentUpdated any
 	var externalAgentActivity any
 	var modelRoute *chatModelRoute
@@ -1580,6 +1603,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 			AskPending            any                `json:"ask_pending"`
 			AskAnswered           bool               `json:"ask_answered"`
 			AskSavedAnswers       any                `json:"ask_saved_answers"`
+			EnvInputResult        any                `json:"env_input_result"`
 			IntentUpdated         any                `json:"intent_updated"`
 			ExternalAgentActivity any                `json:"external_agent_activity"`
 			ModelRoute            *chatModelRoute    `json:"model_route"`
@@ -1591,6 +1615,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 			askPending = ext.AskPending
 			askAnswered = ext.AskAnswered
 			askSavedAnswers = ext.AskSavedAnswers
+			envInputResult = ext.EnvInputResult
 			intentUpdated = ext.IntentUpdated
 			externalAgentActivity = ext.ExternalAgentActivity
 			modelRoute = ext.ModelRoute
@@ -1636,6 +1661,9 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		// read-only cards together with their submitted answers.
 		item["ask_pending"] = askPending
 		item["ask_answered"] = askAnswered
+		if envInputResult != nil {
+			item["env_input_result"] = envInputResult
+		}
 		if askSavedAnswers != nil {
 			item["ask_saved_answers"] = askSavedAnswers
 		}

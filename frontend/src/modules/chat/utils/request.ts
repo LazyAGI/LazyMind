@@ -479,7 +479,7 @@ export function WorkflowSessionApi() {
     getControl(sessionId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/control`, options);
     },
-    control(sessionId: string, command: import('./workflowControl').WorkflowControlRequest, options?: RawAxiosRequestConfig) {
+    control(sessionId: string, command: import('./workflowControl').WorkflowControlRequest, options?: PublicationRequestOptions) {
       return axiosInstance.post(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/control`, command, options);
     },
     listDocumentProviders(options?: RawAxiosRequestConfig) {
@@ -512,7 +512,8 @@ export function WorkflowSessionApi() {
         { ...options, headers: { ...options?.headers, 'Workflow-Contract-Version': 'workflow.v1' } });
     },
     previewDocumentAction(artifactId: string, body: ApiCoreWorkflowArtifactsArtifactIdDocumentActionsPreviewPostRequest, options?: RawAxiosRequestConfig) {
-      return axiosInstance.post<DocumentActionPreviewOpenAPIResponse>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/document-actions:preview`, body, options);
+      return axiosInstance.post<DocumentActionPreviewOpenAPIResponse>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/document-actions:preview`, body,
+        { timeout: 10 * 60 * 1000, ...options });
     },
     executeDocumentAction(artifactId: string, body: ApiCoreWorkflowArtifactsArtifactIdDocumentActionsExecutePostRequest, options?: RawAxiosRequestConfig) {
       return axiosInstance.post<DocumentRewriteExecuteOpenAPIResponse>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/document-actions:execute`, body, options);

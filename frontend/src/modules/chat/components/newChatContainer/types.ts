@@ -197,6 +197,7 @@ export interface ChatMessage {
     intent_context: Record<string, unknown>;
   };
   ask_pending?: {
+    env_input?: import("../EnvInputCard").EnvironmentInput;
     ask_id: string;
     questions: Array<{
       text: string;
@@ -205,11 +206,18 @@ export interface ChatMessage {
       allow_other?: boolean;
     }>;
     title?: string;
+    title_i18n_key?: string;
     description?: string;
+    user_env_delete?: {
+      id: string;
+      name: string;
+      expected_updated_at?: string;
+    };
     mail_draft?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview;
     mail_drafts?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview[];
   };
   ask_answered?: boolean;
+  env_input_result?: import("../EnvInputCard").EnvironmentInputResult;
   answered_mail_draft_ids?: string[];
   ask_saved_answers?: Record<number, unknown>;
 }

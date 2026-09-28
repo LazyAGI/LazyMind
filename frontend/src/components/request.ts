@@ -100,6 +100,30 @@ const HTTP_STATUS_ERROR_CODE_MAP: Record<number, string> = {
 const GENERIC_REQUEST_ERROR_CODE = "2000509";
 const API_ERROR_MESSAGE_KEY = "api-request-error";
 
+// Obsidian root changes restart the local runtime. Requests already in flight
+// during that short transition are expected to fail transiently. Keep the
+// request/rejection semantics unchanged, but let the owning UI suppress the
+// generic toast while the transition is active.
+let transientRequestErrorSuppressionDepth = 0;
+
+export function setTransientRequestErrorsSuppressed(suppressed: boolean) {
+  transientRequestErrorSuppressionDepth = Math.max(
+    0,
+    transientRequestErrorSuppressionDepth + (suppressed ? 1 : -1),
+  );
+}
+
+function shouldSuppressTransientRequestError(error: AxiosError) {
+  if (transientRequestErrorSuppressionDepth <= 0) {
+    return false;
+  }
+  if (!error.response) {
+    return true;
+  }
+  const status = Number(error.response?.status);
+  return status >= 500 && status < 600;
+}
+
 const RAW_ERROR_MESSAGE_CODE_MAP: Record<string, string> = {
   "dataset name already exists": "2001102",
 };
@@ -406,7 +430,7 @@ export const handleError = async (error: AxiosError): Promise<any> => {
         return Promise.reject(refreshError);
       }
     } else {
-      if (!silentError) {
+      if (!silentError && !shouldSuppressTransientRequestError(error)) {
         message.error({
           key: API_ERROR_MESSAGE_KEY,
           content: getLocalizedErrorMessage(error),
@@ -414,14 +438,14 @@ export const handleError = async (error: AxiosError): Promise<any> => {
       }
     }
   } else if (error.request) {
-    if (!silentError) {
+    if (!silentError && !shouldSuppressTransientRequestError(error)) {
       message.error({
         key: API_ERROR_MESSAGE_KEY,
         content: localizeErrorCode(GENERIC_REQUEST_ERROR_CODE),
       });
     }
   } else {
-    if (!silentError) {
+    if (!silentError && !shouldSuppressTransientRequestError(error)) {
       message.error({
         key: API_ERROR_MESSAGE_KEY,
         content: getLocalizedErrorMessage(error),

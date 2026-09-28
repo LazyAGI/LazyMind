@@ -355,6 +355,15 @@ func TestWriterProviderCredentialPolicy(t *testing.T) {
 	}
 }
 
+func TestWriterArtifactPathAllowedUsesConfiguredUploadRoot(t *testing.T) {
+	uploadRoot := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", uploadRoot)
+
+	if !writerArtifactPathAllowed(filepath.Join(uploadRoot, "workflow-artifacts", "media.json")) {
+		t.Fatal("configured upload-root artifact should be allowed")
+	}
+}
+
 func TestAttachWriterMediaURLs(t *testing.T) {
 	uploadRoot := t.TempDir()
 	imagePath := filepath.Join(uploadRoot, "session", "diagram.png")

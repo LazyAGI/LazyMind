@@ -303,7 +303,7 @@ function WritingSubtaskList({ subtasks }: { subtasks?: WritingSubtask[] }) {
             <span className="writing-subtask-copy">
               <span className="writing-subtask-heading">
                 <strong>{item.node_title || item.node_id}</strong>
-                <span>{t(`chat.writerIR.subtaskTypes.${item.subtask_type}`)}</span>
+                <span>{t(`chat.writerIR.subtaskTypes.${item.subtask_type === "extract" ? "reason" : item.subtask_type}`)}</span>
                 <span>{t(`taskCenter.writingSubtaskStatus_${item.status}`)}</span>
               </span>
               <span>{item.question}</span>

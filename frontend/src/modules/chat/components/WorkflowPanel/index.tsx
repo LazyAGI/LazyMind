@@ -1,5 +1,5 @@
 import { WorkflowApprovalActions } from './WorkflowApprovalActions';
-import { ExternalWorkflowPresentationContext, type ExternalWorkflowPresentation } from './external/presentation';
+import { CompactWorkflowEmptyStatesContext, type ExternalWorkflowPresentation } from './external/presentation';
 import { activeExecutionTasks } from './external/useExecutionActivity';
 import { executionPreview, executionPreviewTab } from './external/executionPreview';
 import { workflowEmptyStateKey } from './external/workflowEmptyState';
@@ -61,7 +61,7 @@ import { SlideThumb } from './ppt/SlideThumb';
 import { WorkflowTabActions } from './actions/WorkflowTabActions';
 import { WorkflowPanelTabActiveContext, SlotEditingContext, type SlotFooterAction } from './slotEditingContext';
 import { findWriterArtifactStream } from './writerArtifactStream';
-import { resolveCompletedContinueStep, resolveWorkflowContinueAction } from './workflowContinue';
+import { resolveCompletedContinueStep, resolveExternalContinueAction, resolveWorkflowContinueAction } from './workflowContinue';
 import { resolvePendingApprovalStep } from './workflowApproval';
 import { moveSelectedCompositePages, sameCompositePageOrder } from './compositePageReorder';
 import { deliveryPending, type WorkflowActionIntent, type WorkflowControlView } from '@/modules/chat/utils/workflowControl';
@@ -209,11 +209,11 @@ function AutoSlotGrid({
   readOnly?: boolean;
 }) {
   const { t } = useTranslation();
-  const externalPresentation = React.useContext(ExternalWorkflowPresentationContext);
+  const compactEmptyStates = React.useContext(CompactWorkflowEmptyStatesContext);
   if (!session.slots || session.slots.length === 0) {
     return (
       <div className='workflow-panel__empty' role='status' aria-live='polite'>
-        <span>{t(externalPresentation ? workflowEmptyStateKey(session, session.current_step_id) : 'chat.workflowWaitingForResults')}</span>
+        <span>{t(compactEmptyStates ? workflowEmptyStateKey(session, session.current_step_id) : 'chat.workflowWaitingForResults')}</span>
       </div>
     );
   }
@@ -825,7 +825,7 @@ function CompositeSlotGrid({
   readOnly?: boolean;
 }) {
   const { t } = useTranslation();
-  const externalPresentation = React.useContext(ExternalWorkflowPresentationContext);
+  const compactEmptyStates = React.useContext(CompactWorkflowEmptyStatesContext);
   const reorderSlotItems = useWorkflowStore((state) => state.reorderSlotItems);
   const rows = getCompositeRows(tab, session);
   const columns = filterColumnsByVisibleSlots(
@@ -920,7 +920,7 @@ function CompositeSlotGrid({
   if (rows.length === 0) {
     return (
       <div className='workflow-panel__empty' role='status' aria-live='polite'>
-        <span>{t(externalPresentation ? workflowEmptyStateKey(session, resolveWorkflowTabStepId(tab, session.steps)) : 'chat.workflowWaitingForResults')}</span>
+        <span>{t(compactEmptyStates ? workflowEmptyStateKey(session, resolveWorkflowTabStepId(tab, session.steps)) : 'chat.workflowWaitingForResults')}</span>
       </div>
     );
   }
@@ -1398,16 +1398,16 @@ function NamedTabSlot({
   readOnly?: boolean;
 }) {
   const { t } = useTranslation();
-  const externalPresentation = React.useContext(ExternalWorkflowPresentationContext);
+  const compactEmptyStates = React.useContext(CompactWorkflowEmptyStatesContext);
   const slotLabel = slotDef.label ?? slotDef.id;
   const isImageList = slotDef.type === 'image' && slotDef.cardinality === 'list';
   const isDraggable = Boolean(slotDef.ordered) && !readOnly;
   const [nativeCollapsed, setContentCollapsed] = useState(slotDef.widget?.collapsed === true);
-  const collapseWhenEmpty = externalPresentation && slotDef.widget?.collapseWhenEmpty !== false;
+  const collapseWhenEmpty = compactEmptyStates && slotDef.widget?.collapseWhenEmpty !== false;
   const [externalCollapsed, toggleExternalCollapsed] = useSlotCollapse(
     revisions.length > 0 || Boolean(artifactStream), collapseWhenEmpty, slotDef.widget?.collapsed === true,
   );
-  const contentCollapsed = externalPresentation ? externalCollapsed : nativeCollapsed;
+  const contentCollapsed = compactEmptyStates ? externalCollapsed : nativeCollapsed;
   const prefersFullGridRow = slotDef.widget?.itemLayout === 'grid'
     || (slotDef.widget?.itemWidth ?? 0) >= 600
     || slotDef.widget?.collapsed === true;
@@ -1423,7 +1423,7 @@ function NamedTabSlot({
       className='workflow-panel__slot-placeholder'
       aria-label={`${slotLabel} pending`}
     >
-      <span>{externalPresentation ? t(workflowEmptyStateKey(session, slotStepId)) : '—'}</span>
+      <span>{compactEmptyStates ? t(workflowEmptyStateKey(session, slotStepId)) : '—'}</span>
     </div>
   ) : isImageList ? (
     <SortableImageList
@@ -1472,7 +1472,7 @@ function NamedTabSlot({
         {(slotDef.label || slotDef.id) && (
           <span className='workflow-panel__slot-label'>{slotLabel}</span>
         )}
-        {externalPresentation && contentCollapsed && revisions.length === 0 && !artifactStream &&
+        {compactEmptyStates && contentCollapsed && revisions.length === 0 && !artifactStream &&
           <span className='workflow-panel__empty-summary' role='status'>{t(workflowEmptyStateKey(session, slotStepId))}</span>}
         {(slotDef.widget?.collapsed !== undefined || collapseWhenEmpty) && (
           <button
@@ -1480,7 +1480,7 @@ function NamedTabSlot({
             className={`workflow-panel__slot-collapse${contentCollapsed ? ' workflow-panel__slot-collapse--collapsed' : ''}`}
             aria-expanded={!contentCollapsed}
             aria-label={contentCollapsed ? t('chat.workflowPanelExpand') : t('chat.workflowPanelCollapse')}
-            onClick={externalPresentation ? toggleExternalCollapsed : () => setContentCollapsed((value) => !value)}
+            onClick={compactEmptyStates ? toggleExternalCollapsed : () => setContentCollapsed((value) => !value)}
           >
             <span aria-hidden='true'>⌃</span>
           </button>
@@ -1508,7 +1508,7 @@ function TabSlotGrid({
   onFocusSortOrder?: (sortOrder: number | undefined) => void;
   readOnly?: boolean;
 }) {
-  const externalPresentation = React.useContext(ExternalWorkflowPresentationContext);
+  const compactEmptyStates = React.useContext(CompactWorkflowEmptyStatesContext);
   const { t } = useTranslation();
   const addFileInputRef = useRef<HTMLInputElement>(null);
   const addingSlotIdRef = useRef<string>('');
@@ -1564,7 +1564,7 @@ function TabSlotGrid({
   const allHidden = visibleSlots.length === 0 || Boolean(tab.composite_behavior?.hide_empty_columns)
     && visibleSlots.every(def => getTabSlotRevisions(session, tab, def.id).length === 0
       && !findWriterArtifactStream(session, getTabStepId(tab), def.id, tasks));
-  if (externalPresentation && allHidden) return <div className='workflow-panel__empty' role='status'>
+  if (compactEmptyStates && allHidden) return <div className='workflow-panel__empty' role='status'>
     {t(workflowEmptyStateKey(session, resolveWorkflowTabStepId(tab, session.steps)))}
   </div>;
   return (
@@ -1951,7 +1951,9 @@ export function WorkflowPanel({
     tabs[visibleActiveTabIdx],
   );
   const continueAction = resolveWorkflowContinueAction(session, displayStatus, tabs[visibleActiveTabIdx]);
-  const showContinue = Boolean(continueAction) || externalControl?.continuation === 'stopped';
+  const showContinue = externalControl
+    ? Boolean(resolveExternalContinueAction(externalControl, completedContinueStepId))
+    : Boolean(continueAction);
   const showStepRollback =
     (session.status === 'completed' || session.status === 'failed')
     && Boolean(session.steps && session.steps.length > 0)
@@ -1998,7 +2000,7 @@ export function WorkflowPanel({
     if (!isContinuationCurrent()) return;
     if (controlAdapter) {
       const intent: WorkflowActionIntent = completedContinueStepId
-        ? { kind: 'rewind', stepId: completedContinueStepId }
+        ? { kind: 'continue', completedStepId: completedContinueStepId }
         : externalControl?.continuation === 'stopped'
           ? { kind: 'resume' }
           : { kind: 'continue' };
@@ -2077,7 +2079,7 @@ export function WorkflowPanel({
     : t('chat.workflowContinue');
 
   const panel = (
-    <ExternalWorkflowPresentationContext.Provider value={Boolean(externalPresentation)}>
+    <CompactWorkflowEmptyStatesContext.Provider value={externalPresentation?.compactEmptyStates === true}>
     <SlotEditingContext.Provider value={{
       setEditing: handleSlotEditingChange,
       registerFlush,
@@ -2450,7 +2452,7 @@ export function WorkflowPanel({
             </button>
           )}
           {showContinue && !approvalStepId && supportsExternal(
-            externalControl?.continuation === 'stopped' ? 'resume' : completedContinueStepId ? 'rewind' : 'continue',
+            externalControl ? resolveExternalContinueAction(externalControl, completedContinueStepId) ?? 'continue' : 'continue',
           ) && (
             <button
               type='button'
@@ -2513,7 +2515,7 @@ export function WorkflowPanel({
       />
     )}
     </SlotEditingContext.Provider>
-    </ExternalWorkflowPresentationContext.Provider>
+    </CompactWorkflowEmptyStatesContext.Provider>
   );
 
   if (expanded && !embedded) {

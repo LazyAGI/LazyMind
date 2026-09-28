@@ -1,4 +1,8 @@
 -- +migrate Dialect postgres,sqlite
+DROP INDEX IF EXISTS idx_user_environment_variables_deleted_at;
+DROP INDEX IF EXISTS idx_user_env_user_enabled;
+DROP INDEX IF EXISTS idx_user_env_user_name_active;
+DROP TABLE IF EXISTS user_environment_variables;
 UPDATE conversation_workspace_bindings SET
     permission_mode = COALESCE((SELECT NULLIF(permission_mode, '') FROM conversations WHERE id = conversation_id), permission_mode),
     permission_version = COALESCE((SELECT NULLIF(permission_version, 0) FROM conversations WHERE id = conversation_id), permission_version);

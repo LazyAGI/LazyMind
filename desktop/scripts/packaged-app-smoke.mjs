@@ -73,6 +73,7 @@ export function packagedRuntimePaths(appPath, platform = process.platform) {
     repoRoot: platformPath.join(resourcesRoot, "app"),
     manager: platformPath.join(resourcesRoot, "bin", platform === "win32" ? "local-runtime-manager.exe" : "local-runtime-manager"),
     agentConnector: platformPath.join(resourcesRoot, "bin", platform === "win32" ? "lazymind.exe" : "lazymind"),
+    pandoc: platformPath.join(resourcesRoot, "bin", platform === "win32" ? "pandoc.exe" : "pandoc"),
   };
 }
 
@@ -111,6 +112,27 @@ export async function verifyPackagedAPI(state, request = globalThis.fetch) {
     headers: { authorization: `Bearer ${token}` },
   });
   if (!healthResponse.ok) throw new Error(`Core health failed: HTTP ${healthResponse.status}`);
+  const conversionResponse = await request(`${gateway}/api/core/writer-download-conversions:convert`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      source_format: "markdown",
+      target_format: "latex",
+      content: "# Desktop Pandoc Smoke\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n$$x^2$$",
+      language: "en-US",
+      materialized_numbering: true,
+    }),
+  });
+  if (!conversionResponse.ok) {
+    throw new Error(`Markdown-to-LaTeX conversion failed: HTTP ${conversionResponse.status}`);
+  }
+  const latex = await conversionResponse.text();
+  if (!latex.includes("\\documentclass") || !latex.includes("Desktop Pandoc Smoke")) {
+    throw new Error("Markdown-to-LaTeX conversion returned invalid LaTeX");
+  }
   return gateway;
 }
 

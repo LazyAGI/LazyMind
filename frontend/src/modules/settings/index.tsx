@@ -4,6 +4,7 @@ import type { ChangeEvent, ReactNode } from "react";
 import { Alert, Button, Empty, Input, Skeleton, Switch, Tabs, Tag, message } from "antd";
 import {
   ApiOutlined,
+  ApartmentOutlined,
   BellOutlined,
   ArrowLeftOutlined,
   CheckCircleFilled,
@@ -14,6 +15,7 @@ import {
   DeleteOutlined,
   ExperimentOutlined,
   InfoCircleOutlined,
+  KeyOutlined,
   LinkOutlined,
   RobotOutlined,
   RightOutlined,
@@ -60,6 +62,7 @@ import QuickModelSettings from "./QuickModelSettings";
 import RecoverySettings from "./RecoverySettings";
 import VocabularySettings from "@/modules/vocabulary/VocabularySettings";
 import UserSkillWorkflowSettings, { type ResourceTab } from "./UserSkillWorkflowSettings";
+import UserEnvironmentVariablesSettings from "./UserEnvironmentVariablesSettings";
 import { resolveMcpReadinessStatus } from "./mcpReadinessStatus";
 import { resolveModelNavigationStatus } from "./modelNavigationStatus";
 import {
@@ -90,6 +93,7 @@ type SectionID =
   | "tasks"
   | "knowledge"
   | "memory"
+  | "env_vars"
   | "external_apps"
   | "skills"
   | "system_tools"
@@ -163,7 +167,8 @@ function baseNavigation(isAdmin: boolean, t: Translate, cloudRuntimeAvailable = 
       items: [
         { id: "skills", label: t("settingsPage.sections.skills"), keywords: t("settingsPage.sectionKeywords.skills"), icon: <RobotOutlined /> },
         { id: "system_tools", label: t("settingsPage.sections.systemTools"), keywords: t("settingsPage.sectionKeywords.systemTools"), icon: <ToolOutlined /> },
-        { id: "mcp", label: t("settingsPage.sections.mcp"), keywords: t("settingsPage.sectionKeywords.mcp"), icon: <ToolOutlined /> },
+        { id: "mcp", label: t("settingsPage.sections.mcp"), keywords: t("settingsPage.sectionKeywords.mcp"), icon: <ApartmentOutlined /> },
+        { id: "env_vars", label: t("settingsPage.sections.envVars"), keywords: t("settingsPage.sectionKeywords.envVars"), icon: <KeyOutlined /> },
         { id: "assistants", label: t("settingsPage.sections.assistants"), keywords: t("settingsPage.sectionKeywords.assistants"), icon: <RobotOutlined /> },
         ...(isVocabularyEnabled() ? [{ id: "external_apps" as const, label: "外部应用", keywords: "Anki AnkiConnect 外部应用 词汇表", icon: <UnorderedListOutlined /> }] : []),
         { id: "channels", label: t("settingsPage.sections.channels"), keywords: t("settingsPage.sectionKeywords.channels"), icon: <LinkOutlined /> },
@@ -504,7 +509,7 @@ function SettingsPageContent() {
           dashboardRow(t("settingsPage.sections.systemTools"), t("settingsPage.overview.builtinTools"), t("settingsPage.overview.builtinToolsDesc"), <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("system_tools")}>{t("settingsPage.manageTools")}</Button>),
           dashboardRow(t("settingsPage.sections.systemTools"), t("settingsPage.overview.localDeps"), t("settingsPage.overview.localDepsDesc"), <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("system_tools")}>{hasLocalDependencies ? t("settingsPage.checkDeps") : t("settingsPage.cloudHosted")}</Button>),
         ])}
-        {dashboardCard("mcp", <ToolOutlined />, t("settingsPage.sections.mcp"), t("settingsPage.overview.mcpDesc"), [
+        {dashboardCard("mcp", <ApartmentOutlined />, t("settingsPage.sections.mcp"), t("settingsPage.overview.mcpDesc"), [
           dashboardRow(t("settingsPage.sections.mcp"), t("settingsPage.overview.mcpMaster"), t("settingsPage.overview.mcpMasterDesc"), switchControl("mcp_enabled")),
           dashboardRow(t("settingsPage.sections.mcp"), t("settingsPage.overview.verifiedServices"), t("settingsPage.overview.verifiedServicesDesc", { verified: mcp.counts.verified, runnable: mcp.counts.runnable }), <Tag className="settings-status-tag">{formatCount(mcp, t)}</Tag>),
         ])}
@@ -800,6 +805,8 @@ function SettingsPageContent() {
       );
     } else if (section === "memory") {
       content = <MemoryCapabilitySettings headingRef={headingRef} />;
+    } else if (section === "env_vars") {
+      content = <UserEnvironmentVariablesSettings headingRef={headingRef} />;
     } else if (section === "external_apps" && isVocabularyEnabled()) {
       content = <>
         {integratedHeader("外部应用", "查看并连接 LazyMind 可以配合使用的外部应用。")}
