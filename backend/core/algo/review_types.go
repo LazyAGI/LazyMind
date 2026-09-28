@@ -46,7 +46,7 @@ type SkillOrganizeCancelRequest struct {
 }
 
 type SkillOrganizeCancelResponse struct {
-	Code int `json:"code"`
+	Code int    `json:"code"`
 	Msg  string `json:"msg"`
 	Data struct {
 		Cancelled bool   `json:"cancelled"`
