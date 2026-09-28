@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { ConfigProvider } from "antd";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { KnowledgeMarketTaskDetailOpenAPIResponse } from "@/api/generated/core-client";
 
@@ -107,10 +107,14 @@ async function mountPage() {
   await act(async () => {
     render(
       <ConfigProvider button={{ autoInsertSpace: false }} theme={{ token: { motion: false } }}>
-        <MemoryRouter><KnowledgePage /></MemoryRouter>
+        <MemoryRouter><KnowledgePage /><CurrentLocation /></MemoryRouter>
       </ConfigProvider>,
     );
   });
+}
+
+function CurrentLocation() {
+  return <div aria-label="Current location">{useLocation().pathname}</div>;
 }
 
 async function click(element: HTMLElement) {
@@ -174,6 +178,70 @@ afterEach(() => {
 });
 
 describe("knowledge market background tasks", () => {
+  it.each([false, true])("disables update all without a count when nothing needs updating (installed: %s)", async (installed) => {
+    vi.mocked(marketApi.listKnowledgeMarketInstalls).mockResolvedValue({
+      total: installed ? 1 : 0,
+      items: installed ? [{
+        market_item_id: "update", name: "知识库 update", active: false,
+        dataset_id: "dataset", domain: "测试", icon: "", install_state: "done",
+        installed_version: "2", updated_at: "2026-09-03",
+      }] : [],
+    });
+    await mountPage();
+    await click(screen.getByRole("tab", { name: "已安装的官方知识库" }));
+    const button = screen.getByRole("button", { name: "一键更新", exact: true });
+    expect(button).toBeDisabled();
+    await click(button);
+    expect(marketApi.updateAllKnowledgeMarketItems).not.toHaveBeenCalled();
+  });
+
+  it("enables update all with the available count and disables it while the batch runs", async () => {
+    await mountPage();
+    await click(screen.getByRole("tab", { name: "已安装的官方知识库" }));
+    const button = screen.getByRole("button", { name: "一键更新 (1)" });
+    expect(button).toBeEnabled();
+    await click(button);
+    expect(button).toBeDisabled();
+    await click(button);
+    expect(marketApi.updateAllKnowledgeMarketItems).toHaveBeenCalledTimes(1);
+  });
+
+  it("announces the batch count and only announces completion when an individual update finishes", async () => {
+    await mountPage();
+    await click(screen.getByRole("tab", { name: "已安装的官方知识库" }));
+    await click(screen.getByRole("button", { name: "一键更新 (1)" }));
+    expect(screen.getByText("一键更新已开始")).toBeInTheDocument();
+    expect(screen.getByText("1 个知识库已加入后台更新任务。")).toBeInTheDocument();
+    jobs.set("batch", task("batch", { job_type: "knowledge_market_update_all", job_status: "succeeded" }));
+    jobs.set("update", task("update", { job_type: "knowledge_market_update" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(screen.queryByText("更新完成")).toBeNull();
+    expect(screen.getByText("批量更新检查已完成")).toBeInTheDocument();
+    jobs.set("update", task("update", {
+      job_type: "knowledge_market_update", job_status: "succeeded", stage: "done", overall_percent: 100,
+      dataset_id: "updated-dataset",
+    }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(screen.getByText("更新完成")).toBeInTheDocument();
+    expect(screen.getByText("知识库 update 已可在对话中使用。")).toBeInTheDocument();
+    await click(screen.getByRole("button", { name: "查看详情" }));
+    expect(screen.getByLabelText("Current location")).toHaveTextContent("/lib/knowledge/detail/updated-dataset");
+  });
+
+  it("opens background task details if a completed update has no dataset ID", async () => {
+    await mountPage();
+    await click(screen.getByRole("tab", { name: /知识广场/ }));
+    await click(screen.getByRole("button", { name: "检查更新" }));
+    expect(screen.getByText("更新已开始")).toBeInTheDocument();
+    jobs.set("update", task("update", {
+      job_type: "knowledge_market_update", job_status: "succeeded", stage: "done", overall_percent: 100,
+    }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    await click(screen.getByRole("button", { name: "查看详情" }));
+    expect(screen.getByRole("dialog", { name: "后台任务" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Current location")).toHaveTextContent(/^\/$/);
+  });
+
   it.each([false, true])("dismisses the submitted notice after five seconds while the task continues (hover: %s)", async (hover) => {
     await mountPage();
     await click(screen.getByRole("tab", { name: /知识广场/ }));
@@ -342,7 +410,8 @@ describe("knowledge market background tasks", () => {
     jobs.set("update", task("update", { job_type: "knowledge_market_update", job_status: "succeeded", stage: "done", overall_percent: 100 }));
     await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
     expect(taskEntry(0)).toBeInTheDocument();
-    expect(screen.getAllByText("已完成任务")).toHaveLength(2);
+    expect(screen.getAllByText("已完成任务")).toHaveLength(1);
+    expect(screen.getByText("更新完成")).toBeInTheDocument();
     expect(document.querySelector(".ant-message-notice")).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(taskEntry(0).querySelector(".ant-badge-count")).toBeNull();
@@ -369,11 +438,12 @@ describe("knowledge market background tasks", () => {
     await click(screen.getByRole("tab", { name: "已安装的官方知识库" }));
     await click(screen.getByRole("button", { name: /一键更新/ }));
     expect(taskEntry(1)).toBeInTheDocument();
-    expect(screen.getByText("已加入后台任务")).toBeInTheDocument();
+    expect(screen.getByText("一键更新已开始")).toBeInTheDocument();
     jobs.set("batch", task("batch", { job_type: "knowledge_market_update_all", job_status: "failed", stage: "failed" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
     expect(taskEntry(0)).toBeInTheDocument();
     expect(screen.queryByText("已完成任务")).toBeNull();
+    expect(screen.queryByText("更新完成")).toBeNull();
     expect(screen.getByText(/批量检查 处理失败/).closest(".ant-notification-bottomRight")).not.toBeNull();
   });
 
@@ -407,7 +477,8 @@ describe("knowledge market background tasks", () => {
     }));
     await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
     expect(taskEntry(0)).toBeInTheDocument();
-    expect(screen.getAllByText("已完成任务")).toHaveLength(2);
+    expect(screen.getByText("批量更新检查已完成")).toBeInTheDocument();
+    expect(screen.getByText("更新完成")).toBeInTheDocument();
   });
 
   it("does not add a task or show a submitted notification when submission fails", async () => {

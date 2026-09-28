@@ -96,6 +96,16 @@
     line-height: 1.5;
   }
 
+  .knowledge-task-notification-detail.ant-btn-link {
+    height: auto;
+    padding: 0;
+    color: #c7d7ff;
+
+    &:hover {
+      color: #fff;
+    }
+  }
+
   .ant-notification-notice-close {
     color: #d6dade;
 
