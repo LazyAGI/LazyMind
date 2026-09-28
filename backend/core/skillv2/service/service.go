@@ -504,6 +504,17 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		if externalImport || req.Description != nil {
 			updates["description"] = nextDescription
 		}
+		if externalImport {
+			previousRuntimeName := path.Join(skill.Category, skill.SkillName)
+			nextRuntimeName := path.Join(nextCategory, nextName)
+			if previousRuntimeName != nextRuntimeName {
+				nextExt, _, err := skillruntimeidentity.MergeAliases(skill.Ext, previousRuntimeName)
+				if err != nil {
+					return err
+				}
+				updates["ext"] = nextExt
+			}
+		}
 		applySearchMetadata(updates, req)
 		if req.Tags != nil {
 			tags, _ := json.Marshal(*req.Tags)

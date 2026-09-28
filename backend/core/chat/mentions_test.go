@@ -302,11 +302,14 @@ func TestApplyExplicitResourceBindingsIncludesOnlyCurrentMentions(t *testing.T) 
 	}
 }
 
-func TestResolveExplicitSkillBindingsAcceptsCanonicalAndUniqueBareNames(t *testing.T) {
+func TestResolveExplicitSkillBindingsAcceptsCanonicalUniqueBareAndAliasNames(t *testing.T) {
 	available := []string{
 		"external/requested-skill",
 		"writing/editor",
 		"research/reviewer",
+	}
+	aliases := map[string][]string{
+		"external/requested-skill": {"external/old-skill"},
 	}
 	tests := []struct {
 		name     string
@@ -315,13 +318,14 @@ func TestResolveExplicitSkillBindingsAcceptsCanonicalAndUniqueBareNames(t *testi
 	}{
 		{name: "canonical", selected: []string{"external/requested-skill"}, want: []string{"external/requested-skill"}},
 		{name: "unique bare", selected: []string{"requested-skill"}, want: []string{"external/requested-skill"}},
+		{name: "previous runtime alias", selected: []string{"external/old-skill"}, want: []string{"external/requested-skill"}},
 		{name: "deduplicated", selected: []string{"requested-skill", "external/requested-skill"}, want: []string{"external/requested-skill"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := resolveExplicitSkillBindings(map[string]any{
 				"explicit_resource_bindings": map[string]any{"skill_names": tt.selected},
-			}, available, nil)
+			}, available, aliases)
 			if err != nil {
 				t.Fatalf("resolveExplicitSkillBindings returned error: %v", err)
 			}

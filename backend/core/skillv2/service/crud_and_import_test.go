@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+
+	skillruntimeidentity "lazymind/core/skillv2/runtimeidentity"
 )
 
 func TestCreateSkillFromURL_CreatesInitialRevision(t *testing.T) {
@@ -387,6 +389,63 @@ func TestReplaceSkillContentFromUploadedZip_KeepsFallbackMetadataAndRawSkillMD(t
 	}
 	if blob := getBlobByPath(t, db, resp.HeadRevisionID, "SKILL.md"); string(blob.Content) != string(original) {
 		t.Fatalf("stored replacement SKILL.md = %q, want %q", blob.Content, original)
+	}
+}
+
+func TestReplaceExternalSkillSource_PreservesPreviousRuntimeBindingAlias(t *testing.T) {
+	db := newSkillV2TestDB(t)
+	seedSkillWithHeadRevision(t, db, "skill1", "rev1")
+	if err := db.Model(&testSkillV2SkillRow{}).Where("id = ?", "skill1").Updates(map[string]any{
+		"category":      "external",
+		"skill_name":    "old-skill",
+		"relative_root": "external/old-skill",
+		"ext":           []byte(`{"runtime_aliases":["manifest-old"]}`),
+	}).Error; err != nil {
+		t.Fatalf("seed external skill identity: %v", err)
+	}
+	zipPath := filepath.Join(t.TempDir(), "replacement.zip")
+	writeSkillZip(t, zipPath, map[string][]byte{
+		"SKILL.md": externalSkillMD("new-skill", "Replacement description"),
+	})
+	uploadStore := newFakeUploadStore()
+	uploadStore.Put(UploadSession{
+		UploadID:    "upload_replace_runtime_identity",
+		OwnerUserID: "user_001",
+		State:       "completed",
+		StoredPath:  zipPath,
+		Filename:    "replacement.zip",
+	})
+	svc := NewSkillService(SkillServiceDeps{
+		DB:          db,
+		UploadStore: uploadStore,
+		BlobStore:   NewBlobStore(db, NewLocalObjectStore(t.TempDir())),
+		Clock:       fixedClock(),
+	})
+
+	if _, err := svc.PatchSkill(context.Background(), PatchSkillRequest{
+		SkillID: "skill1",
+		UserID:  "user_001",
+		Source: &SourceInput{
+			Type:     "uploaded_zip",
+			UploadID: "upload_replace_runtime_identity",
+			Filename: "replacement.zip",
+		},
+	}); err != nil {
+		t.Fatalf("PatchSkill source replacement returned error: %v", err)
+	}
+	var replaced testSkillV2SkillRow
+	if err := db.Where("id = ?", "skill1").Take(&replaced).Error; err != nil {
+		t.Fatalf("query replaced skill: %v", err)
+	}
+	if replaced.SkillName != "new-skill" || replaced.Category != "external" {
+		t.Fatalf("replacement identity = %s/%s", replaced.Category, replaced.SkillName)
+	}
+	aliases, err := skillruntimeidentity.Aliases(replaced.Ext)
+	if err != nil {
+		t.Fatalf("decode replacement runtime aliases: %v", err)
+	}
+	if got, want := strings.Join(aliases, "|"), "manifest-old|external/old-skill"; got != want {
+		t.Fatalf("runtime aliases = %q, want %q", got, want)
 	}
 }
 
