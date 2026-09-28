@@ -1097,6 +1097,48 @@ def test_completion_model_error_fails_closed():
     assert phase == 'completion_evaluation_failed'
 
 
+@pytest.mark.parametrize('verdict,expected_phase', [
+    ({'completed': True, 'requires_artifact': False, 'artifact_keys': [],
+      'reason': 'Analysis delivered.'}, ''),
+    ({'completed': False, 'requires_artifact': True, 'artifact_keys': [],
+      'reason': 'The required PDF was not delivered.'}, 'missing_required_artifacts'),
+])
+def test_completion_review_keeps_reasoning_separate_from_json(monkeypatch, verdict, expected_phase):
+    from lazyllm import OnlineChatModule
+
+    llm = OnlineChatModule(source='deepseek', model='deepseek-v4-pro', api_key='test-key', stream=False)
+    original_formatter = llm._formatter
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.status_code = 200
+    chunks = [
+        {'role': 'assistant', 'content': ''},
+        {'reasoning_content': 'PRIVATE_COMPLETION_REASONING'},
+        {'content': json.dumps(verdict)},
+    ]
+    response.iter_lines.return_value = iter([
+        ('data: ' + json.dumps({'choices': [{'index': 0, 'delta': delta}]})).encode()
+        for delta in chunks
+    ] + [
+        b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',
+        b'data: [DONE]',
+    ])
+    post = MagicMock(return_value=response)
+    monkeypatch.setattr('requests.post', post)
+    enqueue = MagicMock(side_effect=AssertionError('Completion review leaked into agent stream'))
+    monkeypatch.setattr('lazyllm.FileSystemQueue.enqueue', enqueue)
+
+    completed, summary, phase = runner_mod._evaluate_completion(llm, 'Task objective', [], [], 'Result')
+
+    assert completed is verdict['completed']
+    assert verdict['reason'] in summary
+    assert phase == expected_phase
+    assert post.call_args.kwargs['json']['stream'] is True
+    assert llm._stream is False
+    assert llm._formatter is original_formatter
+    enqueue.assert_not_called()
+
+
 @pytest.mark.parametrize('during_evaluation', [False, True])
 def test_cancel_at_completion_boundary_cannot_be_revived(monkeypatch, completion_case, during_evaluation):
     canceled = not during_evaluation
@@ -1899,7 +1941,7 @@ def test_display_plan_is_model_generated_and_bounded():
         runner_mod._generate_display_plan(llm, 'task')
 
 
-@pytest.mark.parametrize('source', ['qwen', 'openai'])
+@pytest.mark.parametrize('source', ['qwen', 'openai', 'deepseek'])
 def test_display_plan_collects_stream_without_emitting_agent_events(monkeypatch, source):
     from lazyllm import OnlineChatModule
 
@@ -1908,6 +1950,7 @@ def test_display_plan_collects_stream_without_emitting_agent_events(monkeypatch,
     response.__enter__.return_value = response
     response.status_code = 200
     chunks = [
+        {'role': 'assistant', 'content': ''},
         {'reasoning_content': 'Private planning reasoning'},
         {'content': '["Read inputs",'},
         {'content': '"Analyze data",'},

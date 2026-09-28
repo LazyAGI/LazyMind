@@ -147,7 +147,8 @@ _COMPLETION_EVALUATION_POLL_SECONDS = 0.05
 
 def _silent_background_model_call(llm: Any, prompt: str) -> Any:
     """Call a background model in streaming-compatible mode without publishing deltas."""
-    return llm.share(stream={'_stream_sink': lambda _event: None})(prompt)
+    # Keep structured content separate from reasoning instead of adding <think> to JSON.
+    return llm.share(format=lambda response: response, stream={'_stream_sink': lambda _event: None})(prompt)
 
 
 def _generate_display_plan(llm: Any, objective: str, scope: Optional[Dict[str, Any]] = None) -> List[str]:
