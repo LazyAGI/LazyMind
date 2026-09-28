@@ -609,7 +609,8 @@ def format_spilled_tool_notice(
         f'Tool: {tool_name or "tool"}',
         f'File path: {workspace_spill_uri(rel_path)}',
         f'Size: {size_kb:.1f} KB',
-        'Use read on this path if you need more than the excerpt below.',
+        'Use read_file_resource(target="' + workspace_spill_uri(rel_path) + '", offset=1) '
+        'to read more. Continue with next_offset until End of file.',
     ]
     lines.extend(_browser_spill_metadata(tool_name, content))
     lines.extend([

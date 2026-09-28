@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import time
@@ -16,6 +17,7 @@ from lazyllm.tools.agent import (
     ToolExecutionBatch,
     ToolExecutionDisposition,
     ToolExecutionRecord,
+    ToolExecutionError,
 )
 from lazyllm.tools.agent.toolError import tool_failure
 from .workspace_authorization import WorkspaceAuthorization
@@ -501,7 +503,26 @@ class ToolExecutionMiddleware:
                         coordinator.prepare_guard(item)
                 except UserCancelledError:
                     raise
-                except Exception:
+                except Exception as exc:
+                    invalid_path = (
+                        isinstance(exc, ToolExecutionError) and str(exc) == 'path_invalid'
+                    ) or (
+                        isinstance(exc, OSError)
+                        and (exc.errno in (errno.EINVAL, errno.ENAMETOOLONG)
+                             or getattr(exc, 'winerror', None) in (123, 161, 206))
+                    )
+                    if invalid_path:
+                        blocked[index] = tool_failure('path_invalid: invalid file path')
+                        authorization_reasons[index] = 'path_invalid'
+                        approval_indices.discard(index)
+                        if index in pending:
+                            pending.remove(index)
+                        lazyllm.LOG.warning(
+                            f'Host path preparation failed: type={type(exc).__name__} '
+                            f'errno={getattr(exc, "errno", None)} '
+                            f'winerror={getattr(exc, "winerror", None)}'
+                        )
+                        continue
                     # Core errors may contain paths/credentials. Expose only the
                     # stable authorization failure, and fail the entire barrier.
                     authorization_unavailable |= workspace_active

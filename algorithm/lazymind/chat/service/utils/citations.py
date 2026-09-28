@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 import threading
+import uuid
+from weakref import WeakValueDictionary
 from collections import Counter, OrderedDict
 from collections.abc import Iterable
 from html import escape
@@ -43,19 +45,23 @@ _SOURCE_ROLE_KEYS = {
     'searched': SEARCHED_SOURCE_INDICES_KEY,
 }
 _SOURCE_ROLE_ORDER = ('cited', 'fetched', 'searched')
-CITATION_LOCK_KEY = '_citation_state_lock'
+CITATION_LOCK_KEY = '_citation_state_lock_id'
 _LOCK_INIT = threading.Lock()
+_CITATION_LOCKS = WeakValueDictionary()
 
 
 def citation_state_lock(config: dict[str, Any]) -> threading.RLock:
-    lock = config.get(CITATION_LOCK_KEY)
-    if lock is not None:
-        return lock
+    # Callers hold a strong reference throughout acquisition/use. Idle locks can
+    # disappear, but a held or waiting lock must never be replaced.
     with _LOCK_INIT:
-        lock = config.get(CITATION_LOCK_KEY)
+        lock_id = config.get(CITATION_LOCK_KEY)
+        if not isinstance(lock_id, str) or not lock_id:
+            lock_id = uuid.uuid4().hex
+            config[CITATION_LOCK_KEY] = lock_id
+        lock = _CITATION_LOCKS.get(lock_id)
         if lock is None:
             lock = threading.RLock()
-            config[CITATION_LOCK_KEY] = lock
+            _CITATION_LOCKS[lock_id] = lock
         return lock
 
 

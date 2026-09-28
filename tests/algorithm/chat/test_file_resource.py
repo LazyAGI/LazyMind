@@ -26,6 +26,76 @@ def _write_pdf(path: Path, payload: bytes = b'%PDF-1.4 demo') -> Path:
     return path
 
 
+@pytest.mark.parametrize('scope', ['chat', 'subagent', 'workflow_step'])
+@pytest.mark.parametrize('scoped', [True, False])
+def test_scoped_reader_reads_spill_in_active_execution_workspace(monkeypatch, tmp_path, scope, scoped):
+    _set_scope(monkeypatch, tmp_path)
+    cfg = resolver.lazyllm.globals['agentic_config']
+    root = tmp_path
+    if scope != 'chat':
+        root = tmp_path / scope
+        cfg['agent_type'] = scope
+        cfg['_subagent_workspace'] = str(root)
+        if scope == 'workflow_step':
+            cfg['workflow_workspace_path'] = str(root)
+    (root / 'tool_spills').mkdir(parents=True)
+    (root / 'tool_spills' / 'result.txt').write_text('first\nsecond\nthird', encoding='utf-8')
+    _, read = workspace_tools.build_resource_read_tools()
+    if not scoped:
+        read = workspace_tools.read_file_resource
+    first = read('workspace://tool_spills/result.txt', limit=1)
+    assert first['next_offset'] == 2
+    rest = read('workspace://tool_spills/result.txt', offset=2)
+    assert rest['eof'] is True
+    assert 'second' in str(rest) and 'third' in str(rest)
+
+
+def test_spill_notice_identifies_registered_reader_and_readable_target(monkeypatch, tmp_path):
+    import re
+    from lazymind.chat.engine.agent_runtime.compactors import compact_or_spill_tool_result
+    from lazyllm.tools import ToolManager
+
+    _set_scope(monkeypatch, tmp_path)
+    notice, *_ = compact_or_spill_tool_result(
+        'KBToolkit_read_document', 'first\nsecond\nthird', workspace=str(tmp_path), threshold=1,
+    )
+    tool, target = re.search(r'Use (\w+)\(target="([^"]+)"', notice).groups()
+    manager = ToolManager(workspace_tools.build_resource_read_tools())
+    result = manager._tool_call[tool]({'target': target, 'offset': 2})
+    assert 'second' in str(result) and 'third' in str(result)
+
+
+def test_subagent_spill_does_not_fall_back_to_parent_workspace(monkeypatch, tmp_path):
+    _set_scope(monkeypatch, tmp_path)
+    (tmp_path / 'tool_spills').mkdir()
+    (tmp_path / 'tool_spills' / 'parent.txt').write_text('parent secret', encoding='utf-8')
+    resolver.lazyllm.globals['agentic_config']['_subagent_workspace'] = str(tmp_path / 'child')
+    with pytest.raises(ToolExecutionError):
+        workspace_tools.read_file_resource('workspace://tool_spills/parent.txt')
+
+
+@pytest.mark.parametrize('target', ['workspace://tool_spills/../secret.txt', 'workspace://secret.txt'])
+def test_scoped_spill_reader_rejects_escape(monkeypatch, tmp_path, target):
+    _set_scope(monkeypatch, tmp_path)
+    (tmp_path / 'secret.txt').write_text('secret', encoding='utf-8')
+    _, read = workspace_tools.build_resource_read_tools()
+    with pytest.raises(ToolExecutionError):
+        read(target)
+
+
+@pytest.mark.parametrize('inside_workspace', [False, True])
+def test_scoped_spill_reader_rejects_symlink_outside_spill_directory(monkeypatch, tmp_path, inside_workspace):
+    root = tmp_path / 'chat'
+    (root / 'tool_spills').mkdir(parents=True)
+    secret = (root if inside_workspace else tmp_path) / 'secret.txt'
+    secret.write_text('secret', encoding='utf-8')
+    (root / 'tool_spills' / 'result.txt').symlink_to(secret)
+    _set_scope(monkeypatch, root)
+    _, read = workspace_tools.build_resource_read_tools()
+    with pytest.raises(ToolExecutionError):
+        read('workspace://tool_spills/result.txt')
+
+
 def _set_scope(monkeypatch, tmp_path, *, files=None):
     monkeypatch.setattr(resolver.lazyllm, 'globals', {
         'agentic_config': {
