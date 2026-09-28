@@ -183,13 +183,17 @@ class AgentEventFrameTranslator:
             frames.append(_stream_frame(extra={'artifact_created': artifact}))
             return frames
         if event_type == 'ask_pending':
-            if self.capability_dependency_emitted:
-                return frames
             ask_data = {k: v for k, v in event.items() if k != 'tag'}
             mail_draft = ask_data.get('mail_draft')
+            extra_drafts = ask_data.get('mail_drafts')
+            has_mail_draft = (
+                isinstance(mail_draft, dict)
+                or (isinstance(extra_drafts, list) and any(isinstance(item, dict) for item in extra_drafts))
+            )
+            if self.capability_dependency_emitted and not has_mail_draft:
+                return frames
             if isinstance(mail_draft, dict) and mail_draft.get('draft_id'):
                 self._mail_drafts[str(mail_draft['draft_id'])] = mail_draft
-            extra_drafts = ask_data.get('mail_drafts')
             if isinstance(extra_drafts, list):
                 for item in extra_drafts:
                     if isinstance(item, dict) and item.get('draft_id'):
@@ -206,6 +210,9 @@ class AgentEventFrameTranslator:
                 self.ask_pending_emitted = True
                 self.run.ask_pending = True
             frames.append(_stream_frame(extra={'ask_pending': ask_data}))
+            return frames
+        if event_type == 'tool_configuration':
+            frames.append(_stream_frame(extra={'tool_configuration': event.get('action', {})}))
             return frames
         if event_type == 'tool_limit_pending':
             payload = {k: v for k, v in event.items() if k != 'tag'}

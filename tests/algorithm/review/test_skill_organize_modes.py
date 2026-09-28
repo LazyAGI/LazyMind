@@ -208,3 +208,26 @@ def test_search_metadata_client_uses_trusted_separate_api(monkeypatch):
     metadata_client.update_search_metadata(updates)
     assert calls == [('/internal/skills:metadata', {'skill_keys': [SOURCE.key]}),
                      ('/internal/skills:metadata:update', {'updates': updates})]
+
+
+def test_cancel_before_plan_records_cancelled_summary(monkeypatch):
+    from lazymind.review.service import skill_organize as service
+
+    captured = {}
+    request = SkillOrganizeRequest(requestid='org-cancel', user_id='u', skills=[SOURCE.key], mode='light')
+    service.arm_skill_organize_cancel(request.requestid)
+    assert service.cancel_skill_organize(request.requestid)
+    monkeypatch.setattr(service, 'write_stage_file', lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(service, '_record_skill_organize_stage_safely', lambda *_args, **_kwargs: None)
+
+    def capture(**kwargs):
+        captured.update(kwargs)
+        return 1
+
+    monkeypatch.setattr(service, 'insert_skill_organize_result', capture)
+    result = service._run_skill_organize(request, None, taskid='task-cancel', remote_store=None)
+    assert result.success is False
+    summary = captured['organize_result']
+    assert summary['status'] == 'cancelled'
+    assert summary['error_code'] == 'skill_organize_cancelled'
+    assert summary['skills'] == [SOURCE.key]

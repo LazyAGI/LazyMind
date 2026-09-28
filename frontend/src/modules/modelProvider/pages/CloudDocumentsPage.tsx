@@ -144,8 +144,13 @@ export default function CloudDocumentsPage() {
   const [guideProvider, setGuideProvider] =
     useState<CloudDocumentGuideProvider>("feishu");
   const guideInitializedRef = useRef(false);
+  const isObsidianReady =
+    vm.isDesktopRuntime && vm.obsidianConfig?.available === true;
   const providerTotal =
-    cloudAuthProviderOptions.length + (vm.canCreateLocalSource ? 1 : 0) + 1;
+    cloudAuthProviderOptions.length +
+    (vm.canCreateLocalSource ? 1 : 0) +
+    1 +
+    (vm.isDesktopRuntime ? 1 : 0);
   const providerReadyCount =
     (vm.canCreateLocalSource && vm.localSourceCount > 0 ? 1 : 0) +
     (vm.isFeishuAuthValid ? 1 : 0) +
@@ -153,7 +158,8 @@ export default function CloudDocumentsPage() {
     (vm.isGitHubAuthValid ? 1 : 0) +
     (vm.isGoogleDriveAuthValid ? 1 : 0) +
     (vm.isWeChatOfficialAccountAuthValid ? 1 : 0) +
-    (vm.isMailAuthValid ? 1 : 0);
+    (vm.isMailAuthValid ? 1 : 0) +
+    (isObsidianReady ? 1 : 0);
   const hasConnectedProvider = providerReadyCount > 0;
   const hasKnowledgeSyncProvider =
     (vm.canCreateLocalSource && vm.localSourceCount > 0) ||

@@ -103,6 +103,7 @@ export interface SkillAssetRecord {
   content: string;
   originalRevisionId?: string;
   originBuiltinSkillUid?: string;
+  sourceRefType?: string;
   field?: string;
   aliases?: string[];
   keywords?: string[];
@@ -165,7 +166,8 @@ export type SkillOrganizeTaskStatus =
   | "completed"
   | "done"
   | "failed"
-  | "skipped";
+  | "skipped"
+  | "cancelled";
 
 export interface SkillOrganizeTaskRecord {
   task: ResourceUpdateTaskRecord | null;
@@ -173,6 +175,11 @@ export interface SkillOrganizeTaskRecord {
   status: SkillOrganizeTaskStatus;
   runStatus: string;
   resultCount: number;
+  error: string;
+  errorCode: string;
+  failedStage: string;
+  mode: string;
+  skills: string[];
 }
 
 export interface ShareSkillPayload {
@@ -281,6 +288,11 @@ export interface SkillReviewTaskStatusRecord {
   status: SkillReviewTaskStatus;
   runStatus: string;
   resultCount: number;
+  error?: string;
+  errorCode?: string;
+  failedStage?: string;
+  mode?: string;
+  skills?: string[];
 }
 
 export interface SkillReviewTaskListResult {
@@ -557,6 +569,7 @@ const normalizeSkillItem = (
     content: content || item.file_content || "",
     originalRevisionId: metadata.original_revision_id || "",
     originBuiltinSkillUid: metadata.origin_builtin_skill_uid || "",
+    sourceRefType: (item as { source_ref_type?: string }).source_ref_type || "",
     field: metadata.field || "",
     aliases: toStringArray(metadata.aliases),
     keywords: toStringArray(metadata.keywords),
@@ -893,6 +906,11 @@ const normalizeSkillReviewTaskStatus = (
     status: status as SkillReviewTaskStatus,
     runStatus: toStringValue(raw?.run_status, ""),
     resultCount: toNumberValue(raw?.result_count, 0),
+    error: toStringValue(raw?.error, ""),
+    errorCode: toStringValue(raw?.error_code, ""),
+    failedStage: toStringValue(raw?.failed_stage, ""),
+    mode: toStringValue(raw?.mode, ""),
+    skills: toStringArray(raw?.skills),
   };
 };
 
@@ -1019,7 +1037,7 @@ export async function organizeSkills(
 }
 
 async function querySkillOrganizeTask(
-  params: { requestid?: string; status?: string },
+  params: { requestid?: string; status?: string; page_size?: number },
   signal?: AbortSignal,
 ): Promise<SkillOrganizeTaskRecord | null> {
   const response = await axiosInstance.get(`${coreBasePath}/skill-organize/tasks`, {
@@ -1029,7 +1047,8 @@ async function querySkillOrganizeTask(
       page_size: 1,
     },
     signal,
-  });
+    silentError: true,
+  } as never);
   const payload = unwrapEnvelope<unknown>(response.data);
   const raw = toRawObject(payload);
   const items = Array.isArray(raw?.items) ? raw.items : [];
@@ -1040,6 +1059,11 @@ async function querySkillOrganizeTask(
   return {
     ...record,
     status: record.status as SkillOrganizeTaskStatus,
+    error: record.error || "",
+    errorCode: record.errorCode || "",
+    failedStage: record.failedStage || "",
+    mode: record.mode || "",
+    skills: record.skills || [],
   };
 }
 
@@ -1061,6 +1085,7 @@ const skillOrganizeTerminalStatuses = new Set<SkillOrganizeTaskStatus>([
   "done",
   "failed",
   "skipped",
+  "cancelled",
 ]);
 
 export const isSkillOrganizeTerminalStatus = (
@@ -1084,6 +1109,35 @@ export async function waitForSkillOrganize(
     await new Promise((resolve) => window.setTimeout(resolve, 2000));
   }
   throw new DOMException("Polling canceled", "AbortError");
+}
+
+export async function listSkillOrganizeTasks(
+  pageSize = 20,
+): Promise<SkillOrganizeTaskRecord[]> {
+  const response = await axiosInstance.get(`${coreBasePath}/skill-organize/tasks`, {
+    params: { page: 1, page_size: pageSize },
+  });
+  const payload = unwrapEnvelope<unknown>(response.data);
+  const raw = toRawObject(payload);
+  const items = Array.isArray(raw?.items) ? raw.items : [];
+  return items
+    .map((item) => normalizeSkillReviewTaskStatus(item))
+    .filter((item): item is SkillReviewTaskStatusRecord => Boolean(item))
+    .map((record) => ({
+      ...record,
+      status: record.status as SkillOrganizeTaskStatus,
+      error: record.error || "",
+      errorCode: record.errorCode || "",
+      failedStage: record.failedStage || "",
+      mode: record.mode || "",
+      skills: record.skills || [],
+    }));
+}
+
+export async function cancelSkillOrganizeTask(requestId: string): Promise<void> {
+  await axiosInstance.post(`${coreBasePath}/skill_organize:cancel`, {
+    requestid: requestId,
+  });
 }
 
 export async function listSkillTags(): Promise<string[]> {

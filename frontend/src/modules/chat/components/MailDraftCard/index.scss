@@ -23,6 +23,14 @@
     color: #0f172a;
   }
 
+  .mail-draft-address,
+  .ant-select,
+  .ant-input,
+  .ant-input-affix-wrapper,
+  textarea.ant-input {
+    width: 100%;
+  }
+
   pre {
     margin: 0;
     white-space: pre-wrap;

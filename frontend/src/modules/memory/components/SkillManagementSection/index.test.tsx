@@ -13,6 +13,8 @@ const skillApiMocks = vi.hoisted(() => ({
   listSkillMarketPage: vi.fn(),
   listSkillMarketTags: vi.fn(),
   organizeSkills: vi.fn(),
+  cancelSkillOrganizeTask: vi.fn(),
+  listSkillOrganizeTasks: vi.fn(),
   waitForSkillOrganize: vi.fn(),
 }));
 const viewMocks = vi.hoisted(() => ({ props: {} as Record<string, any> }));
@@ -46,7 +48,6 @@ vi.mock("./SkillManagementToolbar", () => ({
   ),
 }));
 vi.mock("./SkillInstalledView", () => ({ default: (props: Record<string, any>) => { viewMocks.props = props; return <output data-testid="selected">{props.selectedOrganizeSkillIds.join(",")}</output>; } }));
-vi.mock("./CloudResourceTable", () => ({ default: () => null }));
 vi.mock("./SkillMarketView", () => ({ default: () => null }));
 vi.mock("./SkillAdminPublishModal", () => ({ default: () => null }));
 vi.mock("./WorkflowInstalledView", () => ({ default: () => null }));

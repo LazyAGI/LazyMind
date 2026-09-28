@@ -625,3 +625,20 @@ def test_translator_sent_mail_draft_keeps_final_answer():
     assert translator.run.ask_pending is False
     final_frames = translator.finish({'text': '邮件已发送'})
     assert any('邮件已发送' in str(frame.get('text') or '') for frame in final_frames)
+
+
+def test_translator_keeps_mail_draft_after_capability_marker():
+    translator = AgentEventFrameTranslator(query='send mail')
+    translator.capability_dependency_emitted = True
+    dropped = translator.feed({
+        'tag': 'ask_pending',
+        'ask_id': 'plain',
+        'questions': [{'text': 'configure?', 'type': 'boolean', 'choices': ['yes', 'no']}],
+    })
+    kept = translator.feed({
+        'tag': 'ask_pending',
+        'ask_id': 'mail',
+        'mail_draft': {'draft_id': 'draft_keep', 'subject': 'preview', 'status': 'draft'},
+    })
+    assert dropped == []
+    assert kept[0]['ask_pending']['mail_draft']['draft_id'] == 'draft_keep'

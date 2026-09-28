@@ -36,3 +36,18 @@ def build_sidechat_tool_configs(
             config = replace(config, appendix_system_prompt=_ATTACHMENT_READONLY_APPENDIX)
         result.append(config)
     return result
+
+
+def select_search_provider(config, query):
+    """Keep explicit provider selection in product tool policy."""
+    import re
+    definition = {**config.tool, 'discoverable': True, 'prefix': config.tool.get('prefix')}
+    service = config.name
+    for provider in config.tool['tools']:
+        source = provider.source_name
+        if re.search(r'(?:使用|通过|用|using\s+|with\s+|via\s+)\s*' + re.escape(source)
+                     + r'(?![a-zA-Z0-9_])', query, re.IGNORECASE):
+            definition['tools'] = [provider]
+            service = f'{service}/{source}'
+            break
+    return service, definition

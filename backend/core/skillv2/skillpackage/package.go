@@ -109,10 +109,42 @@ func ReadZipSubdirectory(zipPath, prefix string) (Package, error) {
 		}
 		files[relative] = data
 	}
-	if _, ok := files["SKILL.md"]; !ok {
-		return Package{}, fmt.Errorf("skill package must contain SKILL.md in subdirectory %q", prefix)
+	if err := NormalizeSkillDocument(files); err != nil {
+		return Package{}, fmt.Errorf("%w in subdirectory %q", err, prefix)
 	}
 	return Package{Files: files, PackageRoot: path.Base(prefix)}, nil
+}
+
+// NormalizeSkillDocument canonicalizes the unique root document of an external
+// package. Root selection and archive safety checks must happen before this step.
+func NormalizeSkillDocument(files map[string][]byte) error {
+	candidate := ""
+	directoryConflict := false
+	for filePath := range files {
+		root, _, nested := strings.Cut(filePath, "/")
+		if len(root) != len("SKILL.md") || !strings.EqualFold(root, "SKILL.md") {
+			continue
+		}
+		if nested {
+			directoryConflict = true
+			continue
+		}
+		if candidate != "" {
+			return fmt.Errorf("skill package has ambiguous SKILL.md paths")
+		}
+		candidate = filePath
+	}
+	if candidate == "" {
+		return fmt.Errorf("skill package must contain SKILL.md")
+	}
+	if directoryConflict {
+		return fmt.Errorf("skill package has ambiguous SKILL.md paths")
+	}
+	if candidate != "SKILL.md" {
+		files["SKILL.md"] = files[candidate]
+		delete(files, candidate)
+	}
+	return nil
 }
 
 func singleArchiveRoot(entries []*zip.File) (string, error) {

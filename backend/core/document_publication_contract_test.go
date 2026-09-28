@@ -28,4 +28,10 @@ func TestDocumentPublicationStageErrorsAreDeclared(t *testing.T) {
 			t.Errorf("publication error code %s is missing from OpenAPI", code)
 		}
 	}
+	causes := properties["cause"].(map[string]any)["enum"].([]any)
+	for _, cause := range []string{"PANDOC_NOT_FOUND", "PANDOC_TIMEOUT", "PANDOC_CONVERSION_FAILED"} {
+		if !slices.Contains(causes, any(cause)) {
+			t.Errorf("Pandoc failure cause %s is missing from OpenAPI", cause)
+		}
+	}
 }

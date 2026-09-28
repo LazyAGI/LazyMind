@@ -1,0 +1,21 @@
+{
+  "name": "@lazymind/codex-workflow",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "tsdown src/main.ts --format esm --platform node --out-dir dist --no-dts && node scripts/embed.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "start": "node dist/main.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "24.3.0",
+    "tsdown": "0.19.0",
+    "typescript": "5.9.3",
+    "vitest": "2.1.9"
+  }
+}

@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -85,10 +87,42 @@ func feishuCLIToolScopes(capability string) ([]string, error) {
 	case "chat.read", "chat.search":
 		return append([]string(nil), feishuCLIReadScopes...), nil
 	case "chat.write":
-		return append([]string(nil), DefaultFeishuCLIReadScopes...), nil
+		return append(slices.Clone(feishuCLIReadScopes), "drive:drive", "wiki:wiki", "docx:document"), nil
 	default:
 		return nil, ErrCLIUnavailable
 	}
+}
+
+// Validate either the existing granular CLI grants or the original OAuth grant
+// set. This checks existing permissions only; it never requests extra scopes.
+func (coordinator *FeishuCLIDeviceFlowCoordinator) checkCompatibleScopes(ctx context.Context, profileDir string, required []string) (FeishuCLIAuthCheck, error) {
+	for _, scopes := range [][]string{required, DefaultFeishuCLIScopes} {
+		if err := ctx.Err(); err != nil {
+			return FeishuCLIAuthCheck{}, err
+		}
+		checked, err := coordinator.runner.AuthCheck(ctx, profileDir, scopes)
+		if err != nil {
+			var commandError *FeishuCLICommandError
+			if !errors.As(err, &commandError) || (commandError.Code != "AUTH_SCOPE_MISSING" && commandError.Code != FeishuCLIStatusAuthWaitingAdmin) {
+				return FeishuCLIAuthCheck{}, err
+			}
+			continue
+		}
+		if !checked.OK || len(checked.Missing) != 0 {
+			continue
+		}
+		complete := true
+		for _, scope := range scopes {
+			if !slices.Contains(checked.Granted, scope) {
+				complete = false
+				break
+			}
+		}
+		if complete {
+			return checked, nil
+		}
+	}
+	return FeishuCLIAuthCheck{}, &FeishuCLICommandError{Code: "AUTH_SCOPE_MISSING"}
 }
 
 func (coordinator *FeishuCLIDeviceFlowCoordinator) UserAccessToken(ctx context.Context, owner, connection, reference, capability string) (ResolvedToken, error) {
@@ -116,21 +150,9 @@ func (coordinator *FeishuCLIDeviceFlowCoordinator) UserAccessToken(ctx context.C
 	if !ok {
 		return ResolvedToken{}, ErrCLINotInstalled
 	}
-	checked, err := coordinator.runner.AuthCheck(ctx, profile.ConfigDir, scopes)
+	_, err = coordinator.checkCompatibleScopes(ctx, profile.ConfigDir, scopes)
 	if err != nil {
 		return ResolvedToken{}, err
-	}
-	granted := make(map[string]bool, len(checked.Granted))
-	for _, scope := range checked.Granted {
-		granted[scope] = true
-	}
-	if !checked.OK || len(checked.Missing) != 0 {
-		return ResolvedToken{}, &FeishuCLICommandError{Code: "AUTH_SCOPE_MISSING"}
-	}
-	for _, scope := range scopes {
-		if !granted[scope] {
-			return ResolvedToken{}, &FeishuCLICommandError{Code: "AUTH_SCOPE_MISSING"}
-		}
 	}
 	token, identity, err := runner.UserAccessToken(ctx, profile.ConfigDir)
 	if err != nil {

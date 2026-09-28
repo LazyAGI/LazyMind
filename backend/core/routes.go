@@ -280,6 +280,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PATCH", "/datasets/{dataset}", []string{"document.write"}, doc.UpdateDataset)
 	handleAPI(r, "PATCH", "/datasets/{dataset}/processing-level", []string{"document.write"}, doc.UpdateProcessingLevel)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}:ensure-parsed", []string{"document.read"}, doc.EnsureParsed)
+	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}:read", []string{"document.read"}, doc.ReadDocument)
 	handleAPI(r, "GET", "/datasets/{dataset}/processing-status", []string{"document.read"}, doc.GetProcessingStatus)
 
 	// ----- Academic references and paper imports -----
@@ -351,6 +352,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete", []string{"document.write"}, doc.CompletePDFRenderJob)
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content", []string{"document.read"}, doc.GetPDFArtifact)
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:layout", []string{"document.read"}, doc.GetPDFArtifactLayout)
+	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:draft", []string{"document.read"}, doc.GetPDFTranslationDraft)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:retranslate", []string{"document.write"}, doc.RetranslatePDFDraftBlock)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:revise", []string{"document.write"}, doc.RevisePDFTranslation)
 	handleAPI(r, "DELETE", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}", []string{"document.write"}, doc.DeletePDFArtifact)
 	handleAPI(r, "DELETE", "/datasets/{dataset}/documents/{document}", []string{"document.write"}, doc.DeleteDocument)
 	handleAPI(r, "PATCH", "/datasets/{dataset}/documents/{document}", []string{"document.write"}, doc.UpdateDocument)
@@ -414,6 +418,8 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- text -----
 	handleAPI(r, "POST", "/chat", []string{"qa.write"}, chat.Chat)
 	handleAPI(r, "GET", "/tools", []string{"qa.read"}, chat.ListTools)
+	handleAPI(r, "POST", "/internal/conversations/{conversation_id}/tool-configuration-actions", nil, chat.InternalToolConfiguration)
+	handleAPI(r, "GET", "/conversations/{conversation_id}/tool-configuration-actions", []string{"qa.read"}, chat.ListToolConfigurations)
 	handleAPI(r, "POST", "/tools/{tool_name}:disable", []string{"qa.read"}, chat.DisableTool)
 	handleAPI(r, "POST", "/tools/{tool_name}:enable", []string{"qa.read"}, chat.EnableTool)
 
@@ -606,6 +612,10 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- User Chat Settings (quick-question/new-task defaults) -----
 	handleAPI(r, "GET", "/user/chat-settings", []string{"qa.read"}, chat.GetChatSettings)
 	handleAPI(r, "PATCH", "/user/chat-settings", []string{"qa.write"}, chat.PatchChatSettings)
+	handleAPI(r, "GET", "/user/env-vars", []string{"qa.read"}, chat.ListUserEnvironmentVariables)
+	handleAPI(r, "POST", "/user/env-vars", []string{"qa.write"}, chat.CreateUserEnvironmentVariable)
+	handleAPI(r, "PATCH", "/user/env-vars/{id}", []string{"qa.write"}, chat.PatchUserEnvironmentVariable)
+	handleAPI(r, "DELETE", "/user/env-vars/{id}", []string{"qa.write"}, chat.DeleteUserEnvironmentVariable)
 	// Legal consent is a login prerequisite and must not depend on optional QA permissions.
 	// The handlers still require the gateway-injected X-User-Id identity.
 	handleAPI(r, "GET", "/user/ui-preferences", []string{}, userprefs.GetUIPreferences)
@@ -772,6 +782,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/skill-recordings", []string{"qa.write"}, skillv2handler.SubmitSkillRecording)
 	handleAPI(r, "POST", "/skill-recordings/decision", []string{"qa.write"}, skillv2handler.DecideSkillRecording)
 	handleAPI(r, "POST", "/skill_organize", []string{"qa.write"}, skillv2handler.SubmitSkillOrganize)
+	handleAPI(r, "POST", "/skill_organize:cancel", []string{"qa.write"}, skillv2handler.CancelSkillOrganize)
 	handleAPI(r, "GET", "/skills/maintenance-task", []string{"qa.read"}, skillv2handler.MaintenanceTaskStatus)
 	handleAPI(r, "GET", "/skills/tags", []string{"qa.read"}, skillv2handler.ListTags)
 	handleAPI(r, "GET", "/skills/categories", []string{"qa.read"}, skillv2handler.ListCategories)
@@ -895,6 +906,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/conversations:setChatHistory", []string{"qa.write"}, chat.SetChatHistory)
 	handleAPI(r, "POST", "/conversations:feedBackChatHistory", []string{"qa.write"}, chat.FeedBackChatHistory)
 	handleAPI(r, "PATCH", "/conversations/{name}:ask-answers", []string{"qa.write"}, chat.SaveAskAnswers)
+	handleAPI(r, "POST", "/conversations/{name}:env-input", []string{"qa.write"}, chat.SubmitEnvironmentInput)
 	handleAPI(r, "PATCH", "/conversations:editable-block", []string{"qa.write"}, chat.PatchEditableBlock)
 
 	handleAPI(r, "GET", "/conversation:switchStatus", []string{"qa.read"}, chat.GetMultiAnswersSwitchStatus)

@@ -8,6 +8,7 @@ from .context_estimator import estimate_tokens
 from .message_fields import model_facing_message
 
 RUNTIME_SUMMARY_KIND = 'runtime_summary'
+AUTHORITATIVE_TASK_KIND = 'authoritative_task'
 RUNTIME_SUMMARY_DISCLAIMER_PREFIX = (
     'The following is a runtime-generated summary of earlier conversation history.'
 )
@@ -15,6 +16,19 @@ RUNTIME_SUMMARY_DISCLAIMER_PREFIX = (
 
 def _message_tokens(message: dict[str, Any]) -> int:
     return estimate_tokens(json.dumps(model_facing_message(message), ensure_ascii=False, default=str))
+
+
+def is_authoritative_task_message(message: dict[str, Any]) -> bool:
+    meta = message.get('_lazymind_meta')
+    return isinstance(meta, dict) and meta.get('kind') == AUTHORITATIVE_TASK_KIND
+
+
+def _is_leading_protected_message(message: dict[str, Any], index: int) -> bool:
+    if is_runtime_summary_message(message):
+        return False
+    if is_authoritative_task_message(message):
+        return True
+    return index == 0 and message.get('role') == 'user'
 
 
 def is_runtime_summary_message(message: dict[str, Any]) -> bool:
@@ -217,6 +231,15 @@ def select_summary_range(
         replace_start = 0
         summary_messages = list(history[:tail_start])
 
+    if not summary_messages:
+        return None
+
+    while (
+        replace_start < tail_start
+        and _is_leading_protected_message(history[replace_start], replace_start)
+    ):
+        replace_start += 1
+    summary_messages = list(history[replace_start:tail_start])
     if not summary_messages:
         return None
 

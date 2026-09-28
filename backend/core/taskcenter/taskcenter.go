@@ -25,6 +25,9 @@ import (
 // Register this hook at startup from the plugin package to avoid import cycles.
 var OnCancelHook func(ctx context.Context, convID string)
 
+// OnConversationTrashHook runs only after a task's conversation is moved to trash.
+var OnConversationTrashHook func(convID string)
+
 const taskExecutionTimeoutReason = "任务执行超过2小时，未正常完成"
 
 var terminalTaskStatuses = []string{"succeeded", "failed", "skipped", "canceled"}
@@ -248,23 +251,37 @@ type stepInfo struct {
 }
 
 type taskResponse struct {
-	ID                string          `json:"id"`
-	UserID            string          `json:"user_id"`
-	ConversationID    string          `json:"conversation_id"`
-	ConversationState string          `json:"conversation_state"`
-	ConversationTitle string          `json:"conversation_title,omitempty"`
-	WorkflowSessionID *string         `json:"workflow_session_id,omitempty"`
-	TaskType          string          `json:"task_type"`
-	Title             *string         `json:"title,omitempty"`
-	Status            string          `json:"status"`
-	ScheduleID        *string         `json:"schedule_id,omitempty"`
-	ScheduleName      *string         `json:"schedule_name,omitempty"`
-	Steps             []stepInfo      `json:"steps"`
-	ProgressJSON      json.RawMessage `json:"progress,omitempty"`
-	CreatedAt         time.Time       `json:"created_at"`
-	UpdatedAt         time.Time       `json:"updated_at"`
-	FinishedAt        *time.Time      `json:"finished_at,omitempty"`
-	WaitingReason     string          `json:"waiting_reason,omitempty"`
+	ID                string               `json:"id"`
+	UserID            string               `json:"user_id"`
+	ConversationID    string               `json:"conversation_id"`
+	ConversationState string               `json:"conversation_state"`
+	ConversationTitle string               `json:"conversation_title,omitempty"`
+	WorkflowSessionID *string              `json:"workflow_session_id,omitempty"`
+	TaskType          string               `json:"task_type"`
+	Title             *string              `json:"title,omitempty"`
+	Status            string               `json:"status"`
+	ScheduleID        *string              `json:"schedule_id,omitempty"`
+	ScheduleName      *string              `json:"schedule_name,omitempty"`
+	Schedule          *taskScheduleSummary `json:"schedule,omitempty"`
+	Steps             []stepInfo           `json:"steps"`
+	ProgressJSON      json.RawMessage      `json:"progress,omitempty"`
+	CreatedAt         time.Time            `json:"created_at"`
+	UpdatedAt         time.Time            `json:"updated_at"`
+	FinishedAt        *time.Time           `json:"finished_at,omitempty"`
+	WaitingReason     string               `json:"waiting_reason,omitempty"`
+}
+
+// Current plan metadata is returned only by the task detail endpoint.
+// Notification rules remain attached to the execution's immutable snapshot.
+type taskScheduleSummary struct {
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	CronExpr  string     `json:"cron_expr"`
+	Timezone  string     `json:"timezone"`
+	Enabled   bool       `json:"enabled"`
+	RunCount  int        `json:"run_count"`
+	LastRunAt *time.Time `json:"last_run_at,omitempty"`
+	NextRunAt time.Time  `json:"next_run_at"`
 }
 
 func toResponse(t orm.TaskCenterTask, conversationTitle, conversationState string, scheduleName *string, steps []stepInfo) taskResponse {
@@ -675,7 +692,21 @@ func GetTaskByID(w http.ResponseWriter, r *http.Request) {
 		steps = loadStepsForConversation(r.Context(), db, t.ConversationID)
 	}
 
-	common.ReplyJSON(w, toResponse(t, convTitle, conversationState, nil, steps))
+	response := toResponse(t, convTitle, conversationState, nil, steps)
+	if t.ScheduleID != nil && *t.ScheduleID != "" {
+		var schedule taskScheduleSummary
+		err := db.WithContext(r.Context()).Table("user_schedules").
+			Select("id, name, cron_expr, timezone, enabled, run_count, last_run_at, next_run_at").
+			Where("id = ? AND user_id = ?", *t.ScheduleID, userID).First(&schedule).Error
+		if err == nil {
+			response.Schedule = &schedule
+			response.ScheduleName = &schedule.Name
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ReplyErr(w, "query task failed", http.StatusInternalServerError)
+			return
+		}
+	}
+	common.ReplyJSON(w, response)
 }
 
 // CancelTaskByID handles POST /task-center/tasks/{task_id}:cancel
@@ -740,6 +771,9 @@ func RemoveTaskHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if existing.ConversationID != "" && OnConversationTrashHook != nil {
+		OnConversationTrashHook(existing.ConversationID)
 	}
 	if !isTerminal(existing.Status) {
 		if existing.ConversationID != "" && OnCancelHook != nil {

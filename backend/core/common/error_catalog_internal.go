@@ -5,6 +5,10 @@ package common
 import "net/http"
 
 func init() {
+	registerAdditionalErrorPattern("SKILL.md frontmatter field %q conflicts with compatibility normalization", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorAlias("verified source name has an unsupported runtime path character", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorPattern("%w in subdirectory %q", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorAlias("skill package has ambiguous SKILL.md paths", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("conversation organizer run cannot be restarted", "This organizer task cannot be restarted; check its recovery status", http.StatusConflict, 2002752)
 	for _, source := range []string{
 		"invalid cloud knowledge page", "invalid cloud knowledge item", "invalid cloud knowledge detail",
@@ -817,6 +821,29 @@ func init() {
 	for _, source := range []string{
 		"read persistent volume identity", "persistent volume identity unavailable",
 		"read persistent file identity", "persistent file identity unavailable",
+	} {
+		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
+	}
+	for _, source := range []string{
+		"block_id is required",
+		"at least one translation override is required",
+	} {
+		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
+	}
+	for _, source := range []string{
+		"translation artifact not found",
+		"translation draft not found; regenerate this translation first",
+		"translation draft block not found",
+	} {
+		registerAdditionalErrorAlias(source, "Resource not found", http.StatusNotFound, 2000106)
+	}
+	for _, source := range []string{
+		"read translation draft",
+		"decode translation draft",
+		"save translation overrides failed",
+		"save translation draft failed",
+		"pdf translation renderer did not render every block",
+		"register revised translation failed",
 	} {
 		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
 	}

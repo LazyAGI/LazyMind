@@ -694,7 +694,6 @@ export default function ModelProviderPage({
   const [expandedGroupIds, setExpandedGroupIds] = useState<Record<string, boolean>>({});
   const [loadingGroupModelIds, setLoadingGroupModelIds] = useState<Record<string, boolean>>({});
   const [preparingDeletion, setPreparingDeletion] = useState(false);
-  const [sensenovaBaseUrlPreset, setSensenovaBaseUrlPreset] = useState<string>("");
   const [credentialBackupStatus, setCredentialBackupStatus] = useState<CredentialBackupStatus>({
     enabled: false, backedUp: 0, pending: 0, failed: 0,
   });
@@ -747,6 +746,19 @@ export default function ModelProviderPage({
       )
     : false;
   const apiKeyRequired = !!configProvider && !baseUrlChanged;
+  const baseUrlPresets = isSensenovaProvider(configProvider)
+    ? [
+        { label: t("modelProvider.sensenovaClassicMode"), value: SENSENOVA_CLASSIC_BASE_URL },
+        { label: t("modelProvider.sensenovaTokenPlanMode"), value: SENSENOVA_NEW_BASE_URL },
+      ]
+    : configProvider && isOpenAIProvider(configProvider)
+      ? [{ label: t("modelProvider.sensenovaClassicMode"), value: configProvider.baseUrl }]
+      : [];
+  const selectedBaseUrlPreset = baseUrlPresets.find(
+    (preset) => normalizeBaseUrlForCompare(preset.value) === normalizeBaseUrlForCompare(
+      watchedProviderBaseUrl ?? providerConfigForm.getFieldValue("baseUrl")
+    )
+  )?.value || "__custom__";
 
   const loadCloudSystemProvider = useCallback(async () => {
     const requestId = ++cloudCatalogRequestIdRef.current;
@@ -1210,20 +1222,6 @@ export default function ModelProviderPage({
     });
 
     providerFormDraft.captureSavedValues();
-
-    // Sync the sensenova base URL preset Select with the form value.
-    if (isSensenovaProvider(providerDraft)) {
-      const normalized = normalizeFormText(currentBaseUrl);
-      if (normalized === normalizeFormText(SENSENOVA_CLASSIC_BASE_URL)) {
-        setSensenovaBaseUrlPreset(SENSENOVA_CLASSIC_BASE_URL);
-      } else if (normalized === normalizeFormText(SENSENOVA_NEW_BASE_URL)) {
-        setSensenovaBaseUrlPreset(SENSENOVA_NEW_BASE_URL);
-      } else {
-        setSensenovaBaseUrlPreset("");
-      }
-    } else {
-      setSensenovaBaseUrlPreset("");
-    }
   };
 
   useEffect(() => {
@@ -1247,7 +1245,6 @@ export default function ModelProviderPage({
     configLocation.select();
     setConfigModal(null);
     providerConfigForm.resetFields();
-    setSensenovaBaseUrlPreset("");
   };
 
   const saveProviderConfig = async (
@@ -1409,7 +1406,6 @@ export default function ModelProviderPage({
       configLocation.select();
       setConfigModal(null);
       providerConfigForm.resetFields();
-      setSensenovaBaseUrlPreset("");
     } catch (error) {
       message.error(getLocalizedErrorMessage(error));
     } finally {
@@ -2239,35 +2235,29 @@ export default function ModelProviderPage({
             <Input maxLength={80} placeholder={configProvider?.name || t("modelProvider.groupNamePlaceholder")} />
           </Form.Item>
 
-          {isSensenovaProvider(configProvider) ? (
+          {baseUrlPresets.length > 0 ? (
             <div style={{ marginBottom: 24 }}>
               <div style={{ marginBottom: 8, fontWeight: 500, fontSize: 14, color: "rgba(0,0,0,0.88)" }}>
                 Base URL
               </div>
               <Select
+                aria-label={t("modelProvider.baseUrlSelectPlaceholder")}
                 style={{ width: "100%" }}
                 options={[
-                  { label: t("modelProvider.sensenovaClassicMode"), value: SENSENOVA_CLASSIC_BASE_URL },
-                  { label: t("modelProvider.sensenovaTokenPlanMode"), value: SENSENOVA_NEW_BASE_URL },
+                  ...baseUrlPresets,
                   { label: t("modelProvider.baseUrlCustomOption"), value: "__custom__" },
                 ]}
                 placeholder={t("modelProvider.baseUrlSelectPlaceholder")}
-                value={sensenovaBaseUrlPreset || undefined}
+                value={selectedBaseUrlPreset}
                 onChange={(value) => {
-                  if (value === "__custom__") {
-                    setSensenovaBaseUrlPreset("");
-                    providerConfigForm.setFieldsValue({ baseUrl: "" });
-                  } else {
-                    setSensenovaBaseUrlPreset(value);
-                    providerConfigForm.setFieldsValue({ baseUrl: value });
-                  }
+                  providerConfigForm.setFieldsValue({ baseUrl: value === "__custom__" ? "" : value });
                 }}
               />
             </div>
           ) : null}
           <Form.Item
             extra={baseUrlChanged ? t("modelProvider.baseUrlCustomExtra") : t("modelProvider.baseUrlDefaultExtra")}
-            label={isSensenovaProvider(configProvider) ? "" : "Base URL"}
+            label={baseUrlPresets.length > 0 ? "" : "Base URL"}
             name="baseUrl"
             normalize={(value: string | undefined) => value?.trim()}
             rules={[
@@ -2281,7 +2271,7 @@ export default function ModelProviderPage({
               },
             ]}
           >
-            <Input maxLength={512} placeholder="https://api.example.com/v1" />
+            <Input aria-label="Base URL" maxLength={512} placeholder="https://api.example.com/v1" />
           </Form.Item>
 
           <Form.Item

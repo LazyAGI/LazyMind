@@ -12,7 +12,7 @@ from .models import (
     ContextUsageItem,
     ContextUsageReport,
 )
-from .cancellation import UserCancelledError, make_cancel_stop_condition
+from .cancellation import UserCancelledError, make_cancel_stop_condition, request_cancel
 from .prompt_builder import PromptBuilder
 from .context_estimator import (
     estimate_context_usage,
@@ -43,5 +43,6 @@ __all__ = [
     'normalize_attachments',
     'render_attachment_content',
     'make_cancel_stop_condition',
+    'request_cancel',
     'UserCancelledError',
 ]

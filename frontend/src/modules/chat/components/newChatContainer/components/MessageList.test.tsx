@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { RoleTypes } from "@/modules/chat/constants/common";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import ChatMessageContent from "./ChatMessageContent";
 import MessageList from "./MessageList";
@@ -29,6 +30,16 @@ vi.mock("@/modules/chat/components/MarkdownViewer", () => ({
   default: ({ children }: { children?: React.ReactNode }) => <span>{children}</span>,
 }));
 
+vi.mock("@/modules/chat/components/MailDraftCard", () => ({
+  default: ({ draft }: { draft?: { subject?: string; draft_id?: string } }) => (
+    <div>{draft?.subject || draft?.draft_id}</div>
+  ),
+}));
+
+vi.mock("@/modules/chat/components/MailDraftCard/MailMailboxCard", () => ({
+  default: () => null,
+}));
+
 function selectMessageText(text: string) {
   const selected = screen.getByText(text);
   const range = document.createRange();
@@ -43,7 +54,42 @@ function selectMessageText(text: string) {
 }
 
 describe("MessageList side chat selection", () => {
-  it("preserves failed attempts and attachments while only allowing side chat from real history", () => {
+  it("removes the entire failed reply on retry and shows a new failure if retry fails", () => {
+    const failed = {
+      result: "old partial reply",
+      run_id: "failed-run-1",
+      run_status: "failed",
+      run_terminal: {
+        status: "failed", reason: "model_failure", code: "transport_error", partial_output: true,
+      },
+    };
+    const record = { id: "history-1", query: "question", ...failed };
+    const props = {
+      sendMessage: vi.fn(), stopGeneration: vi.fn(), updateAssistantMessage: vi.fn(),
+      renderText: (item: any) => <span>{item.delta}</span>,
+    };
+    const retry = vi.fn(() => {
+      rerender(<MessageList {...props} regenerate={retry} messageList={buildChatMessageListFromHistory([
+        { ...record, result: "", run_status: undefined, run_terminal: undefined, failed_attempts: [failed] },
+      ])} />);
+    });
+    const { rerender } = render(<MessageList {...props} regenerate={retry}
+      messageList={buildChatMessageListFromHistory([record])} />);
+    expect(screen.getByText("old partial reply")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "chat.tryAgain" }));
+    expect(retry).toHaveBeenCalledOnce();
+    expect(screen.queryByText("old partial reply")).not.toBeInTheDocument();
+    expect(screen.queryByText("chat.runStatus.failed")).not.toBeInTheDocument();
+
+    rerender(<MessageList {...props} regenerate={retry} messageList={buildChatMessageListFromHistory([
+      { ...record, result: "new partial reply", run_id: "failed-run-2", failed_attempts: [failed] },
+    ])} />);
+    expect(screen.queryByText("old partial reply")).not.toBeInTheDocument();
+    expect(screen.getByText("new partial reply")).toBeInTheDocument();
+    expect(screen.getAllByText("chat.runStatus.failed")).toHaveLength(1);
+  });
+
+  it("hides retried failures restored from history while preserving attachments and the latest reply", () => {
     const onOpenSideChat = vi.fn();
     const onCiteMessage = vi.fn();
     const messageList = buildChatMessageListFromHistory([
@@ -92,18 +138,9 @@ describe("MessageList side chat selection", () => {
 
     expect(screen.getByText("explain this report")).toBeInTheDocument();
     expect(screen.getByText("report.pdf")).toBeInTheDocument();
-    expect(screen.getByText("failed partial answer")).toBeInTheDocument();
-    expect(screen.getByText("chat.runStatus.failed")).toBeInTheDocument();
-
-    selectMessageText("failed partial answer");
-    expect(
-      screen.queryByRole("button", { name: "chat.sideChat.askFromSelection" }),
-    ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "chat.cite" }));
-    expect(onCiteMessage).toHaveBeenCalledWith(
-      "failed partial answer",
-      "history-1:failed:failed-run-1",
-    );
+    expect(screen.queryByText("failed partial answer")).not.toBeInTheDocument();
+    expect(screen.queryByText("chat.runStatus.failed")).not.toBeInTheDocument();
+    expect(document.querySelector('[data-chat-history-id="history-1:failed:failed-run-1"]')).toBeNull();
     expect(onOpenSideChat).not.toHaveBeenCalled();
 
     selectMessageText("latest answer");
@@ -153,5 +190,57 @@ describe("MessageList capability configuration precedence", () => {
     expect(screen.getByText("配置文生图模型")).toBeInTheDocument();
     expect(screen.queryByText("文生图模型还没配置，你希望怎么处理？"))
       .not.toBeInTheDocument();
+  });
+
+  it("keeps a mail confirmation card while capability configuration is required", () => {
+    render(
+      <MessageList
+        messageList={[{
+          role: RoleTypes.ASSISTANT,
+          delta: "preview",
+          ask_pending: {
+            ask_id: "mail-ask",
+            mail_draft: { draft_id: "draft_1", subject: "send preview", status: "draft" },
+          },
+        }]}
+        suppressAskPending
+        capabilityConfigCard={<div>配置文生图模型</div>}
+        sendMessage={vi.fn()}
+        regenerate={vi.fn()}
+        stopGeneration={vi.fn()}
+        renderText={() => null}
+        updateAssistantMessage={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("send preview")).toBeInTheDocument();
+  });
+});
+
+describe("MessageList render isolation", () => {
+  it("keeps later messages when one assistant reply throws", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    render(
+      <MessageList
+        messageList={[
+          { role: RoleTypes.ASSISTANT, delta: "explode table", id: "broken" },
+          { role: RoleTypes.ASSISTANT, delta: "still here", id: "ok" },
+        ]}
+        sendMessage={vi.fn()}
+        regenerate={vi.fn()}
+        stopGeneration={vi.fn()}
+        renderText={(item) => {
+          if (String(item.delta || "").includes("explode")) {
+            throw new Error("bad table");
+          }
+          return <span>{item.delta}</span>;
+        }}
+        updateAssistantMessage={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("chat.messageRenderFailed")).toBeInTheDocument();
+    expect(screen.getByText("still here")).toBeInTheDocument();
+    errorSpy.mockRestore();
   });
 });

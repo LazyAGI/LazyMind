@@ -21,13 +21,28 @@ type ChatRuntimeEvent struct {
 }
 
 type RunTerminal struct {
-	Status        string `json:"status"`
-	Reason        string `json:"reason"`
-	Code          string `json:"code,omitempty"`
-	PartialOutput bool   `json:"partial_output"`
-	ModelInvoked  *bool  `json:"model_invoked,omitempty"`
-	ModelCallID   string `json:"model_call_id,omitempty"`
-	DiagnosticID  string `json:"diagnostic_id,omitempty"`
+	Status              string                  `json:"status"`
+	Reason              string                  `json:"reason"`
+	Code                string                  `json:"code,omitempty"`
+	PartialOutput       bool                    `json:"partial_output"`
+	ModelInvoked        *bool                   `json:"model_invoked,omitempty"`
+	ModelCallID         string                  `json:"model_call_id,omitempty"`
+	DiagnosticID        string                  `json:"diagnostic_id,omitempty"`
+	TransportDiagnostic *RunTransportDiagnostic `json:"transport_diagnostic,omitempty"`
+}
+
+// RunTransportDiagnostic describes stream closure independently of the run outcome.
+// Only stable codes are public; upstream error text can contain private details.
+type RunTransportDiagnostic struct {
+	Code string `json:"code"`
+}
+
+func upstreamStreamFailureCode(err error) string {
+	var timeout interface{ Timeout() bool }
+	if errors.As(err, &timeout) && timeout.Timeout() {
+		return "upstream_stream_timeout"
+	}
+	return "upstream_stream_failed"
 }
 
 func (terminal *RunTerminal) modelWasInvoked() bool {
@@ -177,6 +192,13 @@ func parseRunTerminal(raw json.RawMessage) (*RunTerminal, error) {
 	if _, exists := fields["model_invoked"]; exists && terminal.ModelInvoked == nil {
 		return nil, errors.New("run_finished model_invoked must be boolean")
 	}
+	if diagnostic := terminal.TransportDiagnostic; diagnostic != nil {
+		switch diagnostic.Code {
+		case "upstream_stream_failed", "upstream_stream_timeout":
+		default:
+			return nil, errors.New("invalid run transport diagnostic")
+		}
+	}
 	codeRaw, codePresent := fields["code"]
 	if codePresent {
 		var code string
@@ -211,8 +233,29 @@ func parseRunTerminal(raw json.RawMessage) (*RunTerminal, error) {
 	return &terminal, nil
 }
 
+func ensureRunTerminalDiagnosticID(event *ChatRuntimeEvent) {
+	if event == nil || event.Type != RuntimeEventRunFinished {
+		return
+	}
+	terminal, err := event.Terminal()
+	if err != nil || terminal == nil || strings.TrimSpace(terminal.DiagnosticID) != "" {
+		return
+	}
+	switch terminal.Reason {
+	case "model_failure", "model_incomplete", "runtime_failure":
+		terminal.DiagnosticID = newID("diag_")
+		event.Data = terminalJSON(terminal)
+	}
+}
+
 func failedRunEvent(runID, code string, partialOutput bool) *ChatRuntimeEvent {
-	terminal := RunTerminal{Status: "failed", Reason: "runtime_failure", Code: code, PartialOutput: partialOutput}
+	terminal := RunTerminal{
+		Status:        "failed",
+		Reason:        "runtime_failure",
+		Code:          code,
+		PartialOutput: partialOutput,
+		DiagnosticID:  newID("diag_"),
+	}
 	return runFinishedEvent(runID, terminal)
 }
 
@@ -276,6 +319,6 @@ func hasBusinessStreamPayload(chunk UpstreamStreamChunk) bool {
 	return chunk.Text != "" || chunk.ReasoningText != "" || len(chunk.Sources) > 0 ||
 		chunk.TaskCreated != nil || chunk.ArtifactCreated != nil || chunk.AskPending != nil ||
 		chunk.ToolLimitPending != nil || chunk.IntentUpdated != nil || chunk.WorkflowPreflightUpdated != nil ||
-		chunk.CapabilityDependency != nil ||
+		chunk.CapabilityDependency != nil || chunk.ToolConfiguration != nil ||
 		chunk.Heartbeat
 }

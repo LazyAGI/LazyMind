@@ -77,4 +77,51 @@ describe("MailDraftCard", () => {
     expect(onConfirm.mock.calls[0][2].attachment_paths).toEqual(["report.pdf"]);
     expect(onConfirm.mock.calls[0][2].attachments).toEqual([]);
   });
+
+  it("accepts string recipients without crashing", () => {
+    render(
+      <MemoryRouter>
+        <MailDraftCard
+          draft={{
+            draft_id: "draft_str",
+            revision: 1,
+            to: "a@b.com, c@d.com" as unknown as string[],
+            cc: "e@f.com" as unknown as string[],
+            subject: "hi",
+            body: "body",
+            attachments: "notes.txt" as unknown as string[],
+            status: "draft",
+          }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByDisplayValue("a@b.com, c@d.com")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("e@f.com")).toBeInTheDocument();
+    expect(screen.getByText("notes.txt")).toBeInTheDocument();
+  });
+
+  it("prefills recipients in a full-width field and ignores enter selection", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <MailDraftCard
+          draft={{
+            draft_id: "draft_to",
+            revision: 1,
+            to: ["firmach@163.com", "a@b.com"],
+            cc: [],
+            subject: "hi",
+            body: "body",
+            status: "draft",
+          }}
+          onConfirm={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    const recipient = screen.getByDisplayValue("firmach@163.com, a@b.com");
+    expect(container.querySelector(".mail-draft-address")).toBeTruthy();
+    fireEvent.keyDown(recipient, { key: "Enter" });
+    expect(screen.getByDisplayValue("firmach@163.com, a@b.com")).toBeInTheDocument();
+  });
 });

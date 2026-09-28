@@ -31,19 +31,22 @@ var (
 	ErrCLIConnectionConflict = errors.New("Provider Connection state conflict")
 )
 
-var feishuCLIReadScopes = []string{
+var DefaultFeishuCLIScopes = []string{
 	"offline_access",
+	"drive:drive",
 	"drive:drive:readonly",
-	"wiki:space:retrieve",
-	"wiki:node:read",
+	"drive:drive.metadata:readonly",
+	"wiki:wiki",
+	"wiki:wiki:readonly",
 	"wiki:node:retrieve",
-	"docx:document:readonly",
+	"docx:document",
 }
 
-// Keep the existing exported name; authorization now also requests document writes.
-var DefaultFeishuCLIReadScopes = append(slices.Clone(feishuCLIReadScopes),
-	"drive:drive", "wiki:wiki", "docx:document",
-)
+// Existing CLI profiles may still carry the granular read-only grant set.
+var feishuCLIReadScopes = []string{
+	"offline_access", "drive:drive:readonly", "wiki:space:retrieve",
+	"wiki:node:read", "wiki:node:retrieve", "docx:document:readonly",
+}
 
 var feishuCLIAuthLoginCommand = [...]string{"auth", "login"}
 
@@ -367,7 +370,7 @@ func (coordinator *FeishuCLIDeviceFlowCoordinator) restoreSession(ctx context.Co
 	if session.Status == "COMPLETED" && (session.DisplayName == "" || len(session.Capabilities) == 0) {
 		status, statusErr := coordinator.runner.AuthStatus(ctx, profile.ConfigDir)
 		// Restoring a completed read connection must not require new write grants.
-		checked, checkErr := coordinator.runner.AuthCheck(ctx, profile.ConfigDir, feishuCLIReadScopes)
+		checked, checkErr := coordinator.checkCompatibleScopes(ctx, profile.ConfigDir, feishuCLIReadScopes)
 		if statusErr == nil && checkErr == nil {
 			session.DisplayName = status.Identities.User.UserName
 			session.GrantedScopes = append([]string(nil), checked.Granted...)
@@ -700,27 +703,35 @@ func (coordinator *FeishuCLIDeviceFlowCoordinator) finalizeAuthenticatedProfile(
 		coordinator.mu.Unlock()
 		return "CLI_UNAVAILABLE"
 	}
-	current.Status = "COMPLETED"
-	current.AuthorizationStartURL = ""
-	current.DeviceCode = ""
-	current.DisplayName = displayName
-	current.GrantedScopes = append([]string(nil), grantedScopes...)
-	current.Capabilities = capabilities
-	current.ErrorCode = ""
-	coordinator.mu.Unlock()
-	if err := coordinator.persist(sessionID); err != nil {
+	completed := *current
+	completed.Status = "COMPLETED"
+	completed.AuthorizationStartURL = ""
+	completed.DeviceCode = ""
+	completed.DisplayName = displayName
+	completed.GrantedScopes = append([]string(nil), grantedScopes...)
+	completed.Capabilities = capabilities
+	completed.ErrorCode = ""
+	if err := coordinator.persistSessionLocked(&completed); err != nil {
+		coordinator.mu.Unlock()
 		return "CLI_UNAVAILABLE"
 	}
+	*current = completed
+	coordinator.mu.Unlock()
 	return ""
 }
 
 func (coordinator *FeishuCLIDeviceFlowCoordinator) persist(sessionID string) error {
 	coordinator.mu.Lock()
+	defer coordinator.mu.Unlock()
 	session, found := coordinator.sessions[sessionID]
 	if !found {
-		coordinator.mu.Unlock()
 		return ErrCLIConnectionNotFound
 	}
+	return coordinator.persistSessionLocked(session)
+}
+
+// persistSessionLocked serializes writes with session updates and other writes.
+func (coordinator *FeishuCLIDeviceFlowCoordinator) persistSessionLocked(session *FeishuCLISession) error {
 	state := feishuCLISessionState{
 		SessionID: session.SessionID, OwnerUserID: session.OwnerUserID, Status: session.Status,
 		AuthorizationStartURL: session.AuthorizationStartURL, ExpiresAt: session.ExpiresAt,
@@ -732,8 +743,7 @@ func (coordinator *FeishuCLIDeviceFlowCoordinator) persist(sessionID string) err
 		AdminRetryCount: session.AdminRetryCount, RetryAfter: session.RetryAfter,
 	}
 	profile := session.Profile
-	coordinator.mu.Unlock()
-	return coordinator.profiles.WriteState(context.Background(), profile, sessionID, state)
+	return coordinator.profiles.WriteState(context.Background(), profile, session.SessionID, state)
 }
 
 func feishuCLICapabilities() []cloudclient.ProviderConnectionCapability {

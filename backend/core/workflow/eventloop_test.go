@@ -712,6 +712,8 @@ func TestStopActiveWorkflowSession_CancelsAllPendingAndRunningAttempts(t *testin
 	}{
 		{stepID: "queued_branch", taskID: "stop-task-pending", status: StepStatusPending},
 		{stepID: "active_branch", taskID: "stop-task-running", status: StepStatusRunning},
+		{stepID: "remote_queue", taskID: "stop-task-queued", status: "queued"},
+		{stepID: "remote_claim", taskID: "stop-task-claimed", status: "claimed"},
 	} {
 		if _, err := subagent.CreateTask(ctx, db.DB, subagent.CreateTaskInput{
 			TaskID: item.taskID, ConversationID: "stop-conv-parallel", AgentType: "workflow_step",
@@ -722,7 +724,7 @@ func TestStopActiveWorkflowSession_CancelsAllPendingAndRunningAttempts(t *testin
 		if _, err := CreateSessionStep(ctx, db.DB, "stop-sess-parallel", item.stepID, item.taskID, 1); err != nil {
 			t.Fatalf("CreateSessionStep(%s): %v", item.taskID, err)
 		}
-		if item.status == StepStatusRunning {
+		if item.status != StepStatusPending {
 			if err := UpdateStepStatus(ctx, db.DB, item.taskID, item.status); err != nil {
 				t.Fatalf("UpdateStepStatus(%s): %v", item.taskID, err)
 			}
@@ -754,7 +756,8 @@ func TestStopActiveWorkflowSession_CancelsAllPendingAndRunningAttempts(t *testin
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		mu.Lock()
-		allCancelled := cancelled["stop-task-pending"] && cancelled["stop-task-running"]
+		allCancelled := cancelled["stop-task-pending"] && cancelled["stop-task-running"] &&
+			cancelled["stop-task-queued"] && cancelled["stop-task-claimed"]
 		mu.Unlock()
 		if allCancelled {
 			break
@@ -762,7 +765,7 @@ func TestStopActiveWorkflowSession_CancelsAllPendingAndRunningAttempts(t *testin
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	for _, taskID := range []string{"stop-task-pending", "stop-task-running"} {
+	for _, taskID := range []string{"stop-task-pending", "stop-task-running", "stop-task-queued", "stop-task-claimed"} {
 		task, err := subagent.GetTask(ctx, db.DB, taskID)
 		if err != nil || task == nil {
 			t.Fatalf("GetTask(%s): task=%v err=%v", taskID, task, err)
@@ -789,6 +792,14 @@ func TestStopActiveWorkflowSession_CancelsAllPendingAndRunningAttempts(t *testin
 		if !wasCancelled {
 			t.Errorf("task %s did not receive a Python cancel request", taskID)
 		}
+		OnSubAgentDone(ctx, db.DB, nil, taskID, subagent.StatusFailed, "late executor failure",
+			func(string, map[string]any) { t.Error("stopped attempt emitted a retry/advance event") },
+			&WorkflowChatContext{SessionID: "stop-sess-parallel", StepID: step.StepID,
+				ConvID: "stop-conv-parallel", WorkflowMode: "auto"})
+	}
+	session, err := GetSession(ctx, db.DB, "stop-sess-parallel")
+	if err != nil || session.Status != SessionStatusWaiting {
+		t.Fatalf("late failure overwrote stop: %+v %v", session, err)
 	}
 }
 

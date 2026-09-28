@@ -7,7 +7,6 @@ from core.errors import AppException
 from schemas.user import (
     CreateUserBody,
     DisableUserBody,
-    ResetPasswordBody,
     UserRoleBatchBody,
     UserRoleBody,
 )
@@ -163,15 +162,12 @@ def test_user_mutation_endpoints_delegate_to_service(monkeypatch):
     monkeypatch.setattr(user_api.user_service, 'get_user', lambda uid: calls.append(('get', uid)) or {'user_id': str(uid)})
     monkeypatch.setattr(user_api.user_service, 'set_user_role', lambda uid, rid: calls.append(('role', uid, rid)))
     monkeypatch.setattr(user_api.user_service, 'disable_user', lambda uid, disabled: calls.append(('disable', uid, disabled)))
-    monkeypatch.setattr(user_api.user_service, 'reset_password', lambda uid, pwd: calls.append(('reset', uid, pwd)))
 
     assert _call(user_api.get_user, str(user_id), object()) == {'user_id': str(user_id)}
     assert _call(user_api.set_user_role, str(user_id), UserRoleBody(role_id=str(role_id)), object()) == {'ok': True}
     assert _call(user_api.disable_user, str(user_id), DisableUserBody(disabled=False), object()) == {'ok': True}
-    assert _call(user_api.reset_password, str(user_id), ResetPasswordBody(new_password='newpass'), object()) == {'ok': True}
     assert calls == [
         ('get', user_id),
         ('role', user_id, role_id),
         ('disable', user_id, False),
-        ('reset', user_id, 'newpass'),
     ]

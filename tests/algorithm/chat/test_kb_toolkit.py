@@ -24,6 +24,24 @@ def test_kb_toolkit_is_available_without_selected_kb():
         toolkit._kb_ids()
 
 
+def test_read_document_delegates_parse_and_read_lifecycle_to_core(monkeypatch):
+    lazyllm.globals['agentic_config'] = {'filters': {'kb_id': 'kb-one'}}
+    gets = []
+
+    monkeypatch.setattr(KBToolkit, '_accessible_kb_ids', staticmethod(lambda: {'kb-one'}))
+
+    def read(path):
+        gets.append(path)
+        return {'document_id': 'doc-one', 'content': {'text': 'whole document'}}
+
+    monkeypatch.setattr('lazymind.chat.engine.tools.kb.get_core_api', read)
+
+    result = KBToolkit().read_document('kb-one', 'doc-one')
+
+    assert result['content']['text'] == 'whole document'
+    assert gets == ['/datasets/kb-one/documents/doc-one:read']
+
+
 def _kb_tool_names(manager):
     return {item['function']['name'] for item in manager.tools_description}
 
@@ -120,7 +138,7 @@ def test_selected_knowledge_base_exposes_concrete_tools_directly():
     'search the knowledge base for the release plan',
     'search our KNOWLEDGE-BASES',
 ])
-def test_knowledge_base_words_auto_expand_toolkit(query):
+def test_knowledge_base_words_do_not_activate_toolkit(query):
     init_session()
     lazyllm_locals['_lazyllm_agent'] = {'workspace': {}}
     lazyllm.globals['agentic_config'] = {'filters': {}}
@@ -129,7 +147,20 @@ def test_knowledge_base_words_auto_expand_toolkit(query):
     assert _kb_tool_names(manager) == {'get_KBToolkit_methods'}
     manager.sync_active_groups(query)
 
+    assert _kb_tool_names(manager) == {'get_KBToolkit_methods'}
+
+
+def test_knowledge_base_gateway_explicitly_activates_toolkit():
+    init_session()
+    lazyllm_locals['_lazyllm_agent'] = {'workspace': {}}
+    lazyllm.globals['agentic_config'] = {'filters': {}}
+    manager = ToolManager([KBToolkit()])
+
+    manager([{'function': {'name': 'get_KBToolkit_methods', 'arguments': {}}}])
+    manager.sync_active_groups()
+
     assert 'KBToolkit_kb_search' in _kb_tool_names(manager)
+    assert 'get_KBToolkit_methods' not in _kb_tool_names(manager)
 
 
 def test_knowledge_base_rule_does_not_match_longer_word_fragment():

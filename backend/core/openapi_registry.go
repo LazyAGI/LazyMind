@@ -115,6 +115,7 @@ type documentActionErrorOpenAPIData struct {
 	ProviderSynced *bool  `json:"provider_synced,omitempty"`
 	ArtifactSaved  *bool  `json:"artifact_saved,omitempty"`
 	Retryable      *bool  `json:"retryable,omitempty"`
+	Cause          string `json:"cause,omitempty" enum:"PANDOC_NOT_FOUND,PANDOC_NOT_EXECUTABLE,PANDOC_VERSION_UNSUPPORTED,PANDOC_TIMEOUT,PANDOC_INPUT_TOO_LARGE,PANDOC_OUTPUT_TOO_LARGE,PANDOC_TEMPLATE_INVALID,PANDOC_FILTER_FAILED,PANDOC_CONVERSION_FAILED"`
 
 	Code string `json:"code" enum:"IDENTITY_REQUIRED,PERMISSION_DENIED,ARTIFACT_NOT_FOUND,REVISION_REQUIRED,REVISION_CONFLICT,DRAFT_VERSION_REQUIRED,DRAFT_VERSION_CONFLICT,SESSION_NOT_EDITABLE,DOCUMENT_ACTION_INVALID,DOCUMENT_ACTION_UNSUPPORTED,MODEL_CONFIG_REQUIRED,SELECTION_STALE,SELECTION_AMBIGUOUS,ARTIFACT_IN_USE,DOCUMENT_ACTION_FAILED,DOCUMENT_CONVERSION_FAILED,DOCUMENT_PROVIDERS_UNAVAILABLE,DOCUMENT_ACTION_RESULT_INVALID,DOCUMENT_ACTION_SAVE_FAILED,CROSS_REFERENCE_SELECTION_INVALID,CROSS_REFERENCE_TARGET_NOT_FOUND,PUBLICATION_NOT_FOUND,PUBLICATION_IN_PROGRESS,PUBLICATION_STATE_CONFLICT,PUBLICATION_RECOVERY_CLOSED,PUBLICATION_IDEMPOTENCY_CONFLICT,PUBLICATION_ALREADY_BOUND,PUBLICATION_OUTCOME_UNKNOWN,PROVIDER_SYNC_LOCAL_CONFLICT,PROVIDER_SYNC_LOCAL_PERSIST_FAILED,PROVIDER_CREDENTIALS_UNAVAILABLE,PROVIDER_BINDING_CONFLICT"`
 }
@@ -674,6 +675,10 @@ type exportConversationFilePathParams struct {
 
 type conversationPathParams struct {
 	Name string `path:"name"`
+}
+
+type toolConfigurationQueryParams struct {
+	HistoryID string `query:"history_id" desc:"Optional history whose configuration cards should be returned."`
 }
 
 type conversationModelPathParams struct {
@@ -1687,10 +1692,10 @@ type skillSourceOpenAPIRequest struct {
 }
 
 type skillCreateManagedOpenAPIRequest struct {
-	Name        string                    `json:"name,omitempty" desc:"Legacy inline-create field. ZIP and URL imports derive name from SKILL.md frontmatter."`
-	Category    string                    `json:"category,omitempty" desc:"Legacy inline-create field. ZIP and URL imports use External."`
+	Name        string                    `json:"name,omitempty" desc:"Optional fallback name for URL imports when SKILL.md frontmatter has no valid name. Valid frontmatter takes precedence; uploaded ZIP imports derive the name from the package."`
+	Category    string                    `json:"category,omitempty" desc:"Legacy inline-create field. ZIP and URL imports always use external."`
 	Source      skillSourceOpenAPIRequest `json:"source"`
-	Description string                    `json:"description,omitempty" desc:"Legacy inline-create field. ZIP and URL imports derive description from SKILL.md frontmatter."`
+	Description string                    `json:"description,omitempty" desc:"Optional fallback description for URL imports when SKILL.md frontmatter has no description. Valid frontmatter takes precedence; uploaded ZIP imports derive the description from the package."`
 	Tags        []string                  `json:"tags,omitempty"`
 	AutoEvo     *bool                     `json:"auto_evo,omitempty"`
 	IsEnabled   *bool                     `json:"is_enabled,omitempty"`
@@ -1788,6 +1793,21 @@ type skillDetailOpenAPIResponse struct {
 type skillWriteOpenAPIResponse struct {
 	SkillID        string `json:"skill_id"`
 	HeadRevisionID string `json:"head_revision_id,omitempty"`
+}
+
+type skillCreateOpenAPIResponse struct {
+	SkillID              string                                     `json:"skill_id"`
+	HeadRevisionID       string                                     `json:"head_revision_id"`
+	SkillName            string                                     `json:"skill_name"`
+	Category             string                                     `json:"category"`
+	CanonicalRuntimeName string                                     `json:"canonical_runtime_name" desc:"Canonical name accepted by explicit_resource_bindings.skill_names."`
+	Aliases              []string                                   `json:"aliases" desc:"Persisted import names also accepted by explicit_resource_bindings.skill_names."`
+	Warnings             []skillNormalizationWarningOpenAPIResponse `json:"warnings"`
+}
+
+type skillNormalizationWarningOpenAPIResponse struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 type skillFileQueryParams struct {
@@ -2555,22 +2575,26 @@ type chatEntryDefaultsPatchOpenAPIRequest struct {
 }
 
 type userChatSettingsPatchOpenAPIRequest struct {
-	EnableToolRetrieval *bool                                 `json:"enable_tool_retrieval,omitempty"`
-	EnableWorkflow      *bool                                 `json:"enable_workflow,omitempty"`
-	WorkflowMode        *string                               `json:"workflow_mode,omitempty"`
-	EnableSubagent      *bool                                 `json:"enable_subagent,omitempty"`
-	QuickQuestion       *chatEntryDefaultsPatchOpenAPIRequest `json:"quick_question,omitempty"`
-	NewTask             *chatEntryDefaultsPatchOpenAPIRequest `json:"new_task,omitempty"`
+	DefaultPermissionMode *string                               `json:"default_permission_mode,omitempty" enum:"always_ask,ask_as_needed,allow_all"`
+	PermissionVersion     *int64                                `json:"permission_version,omitempty"`
+	EnableToolRetrieval   *bool                                 `json:"enable_tool_retrieval,omitempty"`
+	EnableWorkflow        *bool                                 `json:"enable_workflow,omitempty"`
+	WorkflowMode          *string                               `json:"workflow_mode,omitempty"`
+	EnableSubagent        *bool                                 `json:"enable_subagent,omitempty"`
+	QuickQuestion         *chatEntryDefaultsPatchOpenAPIRequest `json:"quick_question,omitempty"`
+	NewTask               *chatEntryDefaultsPatchOpenAPIRequest `json:"new_task,omitempty"`
 }
 
 type userChatSettingsOpenAPIResponse struct {
-	EnableToolRetrieval bool                     `json:"enable_tool_retrieval"`
-	EnableWorkflow      bool                     `json:"enable_workflow"`
-	WorkflowMode        string                   `json:"workflow_mode"`
-	EnableSubagent      bool                     `json:"enable_subagent"`
-	QuickQuestion       chatEntryDefaultsOpenAPI `json:"quick_question"`
-	NewTask             chatEntryDefaultsOpenAPI `json:"new_task"`
-	UpdatedAt           string                   `json:"updated_at"`
+	DefaultPermissionMode string                   `json:"default_permission_mode" enum:"always_ask,ask_as_needed,allow_all"`
+	PermissionVersion     int64                    `json:"permission_version"`
+	EnableToolRetrieval   bool                     `json:"enable_tool_retrieval"`
+	EnableWorkflow        bool                     `json:"enable_workflow"`
+	WorkflowMode          string                   `json:"workflow_mode"`
+	EnableSubagent        bool                     `json:"enable_subagent"`
+	QuickQuestion         chatEntryDefaultsOpenAPI `json:"quick_question"`
+	NewTask               chatEntryDefaultsOpenAPI `json:"new_task"`
+	UpdatedAt             string                   `json:"updated_at"`
 }
 
 type userUIPreferencesPatchOpenAPIRequest struct {
@@ -3507,10 +3531,10 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/skills",
 			Summary:     "Create directory skill",
-			Description: "Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md; description is product metadata and is not written into SKILL.md front matter.",
+			Description: "Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md. Valid frontmatter metadata takes precedence. For URL imports, request name and description are fallbacks when frontmatter fields are missing; uploaded ZIP imports derive metadata from the package. URL and ZIP imports use category external.",
 			Tags:        []string{"skills"},
 			RequestBody: jsonBodyOf(skillCreateManagedOpenAPIRequest{}, true),
-			Responses:   map[int]openAPIResponse{200: resp("Created skill", skillWriteOpenAPIResponse{})},
+			Responses:   map[int]openAPIResponse{200: resp("Created skill", skillCreateOpenAPIResponse{})},
 		},
 		{
 			Method:     "POST",
@@ -4706,6 +4730,13 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  mcpServerPathParams{},
 			RequestBody: jsonBodyOf(mcp.UpdateToolsRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Updated MCP server tools", mcp.ServerResponse{})},
+		},
+		{
+			Method: "GET", Path: "/conversations/{conversation_id}/tool-configuration-actions",
+			Summary: "List verified tool configuration actions", Tags: []string{"conversations"},
+			QueryParams: toolConfigurationQueryParams{},
+			PathParams:  conversationModelPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Configuration actions", chat.ToolConfigurationListResponse{})},
 		},
 		{
 			Method:      "PATCH",

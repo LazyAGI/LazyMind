@@ -5,7 +5,7 @@ import re
 from html import escape
 from typing import Any
 
-from lazymind.chat.engine.tools.session_env import redact_session_env_arguments
+from lazymind.chat.engine.agent_runtime.env_redaction import redact_session_env_arguments
 from .tool_render_templates import (
     KB_EMPTY_RESULT_MESSAGES,
     TOOL_RENDER_FALLBACKS,
@@ -528,6 +528,10 @@ def _render_preview_template(
     count = _tool_result_count(business_value)
     if count is not None:
         context['count'] = f'**{count}**'
+        requested = count
+        if isinstance(business_value, dict) and isinstance(business_value.get('requested'), int):
+            requested = business_value['requested']
+        context['requested'] = f'**{requested}**'
     context['value'] = f'**{preview_value}**'
     context['tool_name'] = f'**{tool_name}**'
     context['match'] = f'**{match_group or render_name}**'
@@ -603,11 +607,6 @@ def _tool_result_count(value: Any) -> int | None:
 
 def _tool_result_preview(tool_name: str, result: Any, value: str = '', language: str = 'en') -> str:
     status = _tool_result_status(result)
-    business_value = (
-        _normalized_success_business_value(result)
-        if status == 'ok'
-        else result
-    )
     if status == 'needs_approval':
         return _render_preview_template(
             tool_name,
@@ -632,6 +631,7 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
             ),
             result,
         )
+    business_value = _normalized_success_business_value(result)
     if (
         isinstance(business_value, dict)
         and business_value.get('total') == 0
@@ -670,8 +670,7 @@ def _tool_call_frame_text(tool_call: dict[str, Any], language: str = 'en') -> tu
             arguments = raw_args
     else:
         arguments = raw_args
-    if isinstance(arguments, dict):
-        arguments = redact_session_env_arguments(tool_name, arguments)
+    arguments = redact_session_env_arguments(tool_name, arguments)
     preview_value = _tool_call_preview_value(tool_name, arguments, language)
     payload = {
         'id': tool_call_id,

@@ -425,6 +425,7 @@ export function buildChatMessageListFromHistory(
     // Restore ask_pending from persisted ext so the AskCard is visible after page reload.
     if (hasAskPending) {
       assistantMessage.ask_pending = (record as any).ask_pending;
+      assistantMessage.env_input_result = (record as any).env_input_result;
       // Restore partially-filled answers so the wizard resumes where the user left off.
       if ((record as any).ask_saved_answers) {
         assistantMessage.ask_saved_answers = (record as any).ask_saved_answers;

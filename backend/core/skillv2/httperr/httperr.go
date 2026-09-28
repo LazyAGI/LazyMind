@@ -27,6 +27,12 @@ const (
 	CodeDiffRefMismatch      = "diff_ref_mismatch"
 	CodeDistributionConflict = "distribution_upgrade_conflict"
 	CodeInternal             = "internal_error"
+
+	CodeSkillMDNotFound        = "skill_md_not_found"
+	CodeSkillMDAmbiguous       = "skill_md_ambiguous"
+	CodeFrontmatterYAMLInvalid = "frontmatter_yaml_invalid"
+	CodeInvalidSkillName       = "invalid_skill_name"
+	CodeDescriptionTooLong     = "description_too_long"
 )
 
 type Semantic struct {
@@ -78,6 +84,12 @@ func ForMessage(message string, status int) Semantic {
 
 func statusForMessage(message string) int {
 	msg := strings.ToLower(strings.TrimSpace(message))
+	switch skillImportCode(msg) {
+	case CodeSkillMDNotFound, CodeSkillMDAmbiguous:
+		return http.StatusUnprocessableEntity
+	case CodeFrontmatterYAMLInvalid, CodeInvalidSkillName, CodeDescriptionTooLong:
+		return http.StatusBadRequest
+	}
 	switch {
 	case strings.Contains(msg, "not found"):
 		return http.StatusNotFound
@@ -104,6 +116,7 @@ func statusForMessage(message string) int {
 
 func codeForMessage(message string, status int) string {
 	msg := strings.ToLower(strings.TrimSpace(message))
+	importCode := skillImportCode(msg)
 	switch {
 	case status == http.StatusUnauthorized:
 		return CodeUnauthenticated
@@ -115,6 +128,8 @@ func codeForMessage(message string, status int) string {
 		return CodePayloadTooLarge
 	case status >= http.StatusInternalServerError:
 		return CodeInternal
+	case importCode != "":
+		return importCode
 	case strings.Contains(msg, "unsafe path"), strings.Contains(msg, "invalid path"),
 		strings.Contains(msg, "path is required"):
 		return CodeInvalidPath
@@ -142,6 +157,25 @@ func codeForMessage(message string, status int) string {
 		return CodeDiffRefMismatch
 	default:
 		return codeForStatus(status)
+	}
+}
+
+func skillImportCode(message string) string {
+	switch {
+	case strings.Contains(message, "skill package has ambiguous skill.md paths"):
+		return CodeSkillMDAmbiguous
+	case strings.Contains(message, "skill package must contain skill.md"):
+		return CodeSkillMDNotFound
+	case strings.Contains(message, `invalid skill.md frontmatter field "name"`),
+		strings.Contains(message, "invalid skill name:"), strings.Contains(message, "skill name cannot exceed"):
+		return CodeInvalidSkillName
+	case strings.Contains(message, "skill description cannot exceed"):
+		return CodeDescriptionTooLong
+	case strings.Contains(message, "invalid skill.md frontmatter:"),
+		strings.Contains(message, "skill.md frontmatter closing separator is required"):
+		return CodeFrontmatterYAMLInvalid
+	default:
+		return ""
 	}
 }
 

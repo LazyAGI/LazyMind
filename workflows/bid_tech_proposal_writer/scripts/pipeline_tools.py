@@ -1165,7 +1165,9 @@ def normalize_bid_outline_from_inputs(outline_document_path: str) -> dict[str, A
 
     This wrapper keeps large requirement bodies and machine JSON outside the SubAgent
     prompt. Markdown headings are the sole structural source of truth; trace IDs and word
-    allocations are deterministically rebuilt from the current Attempt inputs.
+    allocations are deterministically rebuilt from the current Attempt inputs. One
+    deterministic repair reuses the first validator's normalized outline with the
+    frozen word_target; the model must not retry with copied bodies.
     """
     from lazymind.chat.engine.subagent.context import require_context
 
@@ -1182,16 +1184,26 @@ def normalize_bid_outline_from_inputs(outline_document_path: str) -> dict[str, A
         markdown,
         str(parameters.get('project_name') or parameters.get('project_full_name') or ''),
     )
-    return validate_and_allocate_outline(
+    frozen_word_target = str(parameters.get('word_target') or '')
+    requirements = str(_workflow_artifact_payload(inputs['technical_requirements']) or '')
+    disqualification = str(_workflow_artifact_payload(inputs['disqualification_items']) or '')
+    result = validate_and_allocate_outline(
         outline_json=candidate,
-        requirements_markdown=str(
-            _workflow_artifact_payload(inputs['technical_requirements']) or ''
-        ),
-        disqualification_markdown=str(
-            _workflow_artifact_payload(inputs['disqualification_items']) or ''
-        ),
-        word_target=str(parameters.get('word_target') or ''),
+        requirements_markdown=requirements,
+        disqualification_markdown=disqualification,
+        word_target=frozen_word_target,
     )
+    if result.get('valid'):
+        return result
+    repaired = result.get('normalized_outline') or candidate
+    retry = validate_and_allocate_outline(
+        outline_json=repaired,
+        requirements_markdown=requirements,
+        disqualification_markdown=disqualification,
+        word_target=frozen_word_target,
+    )
+    retry['repair_applied'] = True
+    return retry
 
 
 def validate_proposal_from_inputs() -> dict[str, Any]:

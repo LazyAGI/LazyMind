@@ -95,8 +95,8 @@ func TestSubmitSkillOrganizeForwardsCoreManagedFields(t *testing.T) {
 	if err := db.Where("task_type = ?", orm.ResourceUpdateTaskTypeOrganizeSkill).Take(&reservation).Error; err != nil {
 		t.Fatalf("load organize reservation: %v", err)
 	}
-	if reservation.Status != orm.ResourceUpdateTaskStatusDone {
-		t.Fatalf("organize reservation status = %q, want done", reservation.Status)
+	if reservation.Status != orm.ResourceUpdateTaskStatusRunning {
+		t.Fatalf("organize reservation status = %q, want running", reservation.Status)
 	}
 	if reservation.ResultID != "org_smoke_20260707183512345678" {
 		t.Fatalf("organize reservation result_id = %q", reservation.ResultID)

@@ -107,6 +107,36 @@ describe('Writer Markdown real MDXEditor round trip', () => {
     unregister();
   });
 
+  it('keeps an empty parent heading when a child heading follows', async () => {
+    let editor!: LexicalEditor;
+    const { container } = render(<MDXEditor
+      markdown={'## Parent\n\n### Child'}
+      plugins={[headingsPlugin(), writerEmptyHeadingPlugin(),
+        captureEditorPlugin({ onEditor: (value) => { editor = value; } })]} />);
+    await waitFor(() => expect(editor).toBeDefined());
+    act(() => {
+      editor.update(() => {
+        const heading = $getRoot().getFirstChild();
+        const text = $isElementNode(heading) ? heading.getFirstChild() : null;
+        if (!$isTextNode(text)) throw new Error('Expected heading text');
+        text.select(0, text.getTextContentSize());
+      }, { discrete: true });
+      editor.dispatchCommand(DELETE_CHARACTER_COMMAND, true);
+    });
+    await waitFor(() => expect(container.querySelector('h2')?.textContent).toBe(''));
+    const normalDeletion = vi.fn(() => true);
+    const unregister = editor.registerCommand(
+      DELETE_CHARACTER_COMMAND,
+      normalDeletion,
+      COMMAND_PRIORITY_LOW,
+    );
+    act(() => { editor.dispatchCommand(DELETE_CHARACTER_COMMAND, true); });
+    expect(normalDeletion).not.toHaveBeenCalled();
+    expect(container.querySelector('h2')?.textContent).toBe('');
+    expect(container.querySelector('h3')?.textContent).toBe('Child');
+    unregister();
+  });
+
   it.each([
     ['Backspace', DELETE_CHARACTER_COMMAND, true],
     ['Delete', DELETE_CHARACTER_COMMAND, false],

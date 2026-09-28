@@ -14,7 +14,7 @@ describe('skill collaboration surface visibility', () => {
     ).toBe(true);
   });
 
-  it.each(['local', 'desktop'])('hides the message center in %s mode', (mode) => {
+  it.each(['local', 'desktop'])('keeps the message center on the installed view in %s mode', (mode) => {
     const features = resolveRuntimeFeatures({ VITE_LAZYMIND_MODE: mode });
 
     expect(
@@ -22,7 +22,7 @@ describe('skill collaboration surface visibility', () => {
         skillView: 'installed',
         hideUserGroupSurfaces: features.hideUserGroupSurfaces,
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('does not show the message center outside the installed view', () => {
