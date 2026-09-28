@@ -114,6 +114,7 @@ func collectOpenAPIRouteMethods(r *mux.Router) (map[string]map[string]struct{}, 
 
 func skipOpenAPIRoute(path string) bool {
 	return strings.HasPrefix(path, "/openapi") ||
+		path == "/realtime/connect" || // WebSocket transport, not a generated HTTP operation.
 		path == "/docs" ||
 		strings.HasPrefix(path, "/internal/") ||
 		strings.HasPrefix(path, "/remote-fs/")

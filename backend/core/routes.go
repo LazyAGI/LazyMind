@@ -22,6 +22,7 @@ import (
 	"lazymind/core/cloudresource"
 	"lazymind/core/cloudsession"
 	"lazymind/core/cloudusage"
+	"lazymind/core/common"
 	"lazymind/core/conversationgroup"
 	"lazymind/core/credentialvault"
 	"lazymind/core/currentmemory"
@@ -42,6 +43,7 @@ import (
 	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
 	coreproviderconnection "lazymind/core/providerconnection"
+	"lazymind/core/realtime"
 	"lazymind/core/remotefs"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/scheduler"
@@ -102,6 +104,9 @@ func handleAgentThreadAPI(r *mux.Router, method, path string, perms []string, h 
 
 // registerAllRoutes text OpenAPI text（text Job），text handleAPI textPermissiontext（text extract_api_permissions.py text Kong RBAC）。
 func registerAllRoutes(r *mux.Router) {
+	// Browser WebSockets cannot set Authorization on the upgrade request.
+	// Each multiplexed operation is authorized against its original API path.
+	r.Handle("/realtime/connect", realtime.Handler{Routes: r, Authorize: realtime.Authorize(common.AuthServiceBaseURL())}).Methods(http.MethodGet)
 	handleAPI(r, "GET", "/local-workspaces", []string{"qa.read"}, localworkspace.List)
 	handleAPI(r, "POST", "/local-workspaces/{workspace_id}:revoke", []string{"qa.write"}, localworkspace.Revoke)
 	handleAPI(r, "GET", "/conversations/{conversation_id}:workspace", []string{"qa.read"}, localworkspace.ConversationBinding)

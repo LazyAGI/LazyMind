@@ -26,7 +26,10 @@ local success = { status = 200, body = cjson.encode({ data = {
   user_id = "fixture-user", username = "fixture-name", tenant_id = "fixture-tenant", role = "user",
 } }) }
 
-local function run(responses)
+local function run(responses, options)
+  options = options or {}
+  local method = options.method or "POST"
+  local path = options.path or "/api/core/documents"
   local calls, clients, logs = {}, {}, {}
   local headers = { ["X-User-Id"] = "forged", ["X-User-Role"] = "admin" }
   local exit
@@ -44,9 +47,12 @@ local function run(responses)
   end }
   local kong = {
     request = {
-      get_method = function() return "POST" end,
-      get_path = function() return "/api/core/documents" end,
-      get_header = function(name) equal(name, "Authorization", "header"); return "Bearer fixture-token" end,
+      get_method = function() return method end,
+      get_path = function() return path end,
+      get_header = function(name)
+        if name == "Upgrade" then return options.upgrade end
+        equal(name, "Authorization", "header"); return "Bearer fixture-token"
+      end,
     },
     service = { request = {
       clear_header = function(name) headers[name] = nil end,
@@ -64,13 +70,30 @@ local function run(responses)
     equal(call.params.headers.Authorization, "Bearer fixture-token", "authorization preserved")
     equal(call.params.headers["Content-Type"], "application/json", "content type")
     local payload = cjson.decode(call.params.body)
-    equal(payload.method, "POST", "original business method")
-    equal(payload.path, "/api/core/documents", "original business path")
+    equal(payload.method, method, "original business method")
+    equal(payload.path, path, "original business path")
     equal(call.client.timeout, 1234, "configured timeout")
   end
   for _, log in ipairs(logs) do assert(not log:find("fixture%-token"), "credential leaked") end
   return calls, headers, exit
 end
+
+test("only the realtime upgrade delegates per-operation authorization to Core", function()
+  local calls, headers, exit = run({}, { method = "GET", path = "/api/core/realtime/connect", upgrade = "websocket" })
+  equal(#calls, 0, "no handshake bearer expected")
+  equal(headers["X-User-Id"], nil, "forged user stripped")
+  equal(headers["X-User-Role"], nil, "forged role stripped")
+  equal(exit, nil, "Core must authorize every stream")
+  for _, options in ipairs({
+    { method = "GET", path = "/api/core/realtime/connect" },
+    { method = "POST", path = "/api/core/realtime/connect", upgrade = "websocket" },
+    { method = "GET", path = "/api/core/conversations/c1/events", upgrade = "websocket" },
+  }) do
+    local checked, _, denied = run({ { res = { status = 401 } } }, options)
+    equal(#checked, 1, "normal RBAC required")
+    equal(denied.status, 401, "unauthorized request rejected")
+  end
+end)
 
 test("normal success retains identity and expires idle connections before the server", function()
   local calls, headers, exit = run({ { res = success } })
