@@ -42,3 +42,19 @@ func TestWaitForDocumentParsedTimesOut(t *testing.T) {
 		t.Fatalf("error = %v, want unavailable DocumentServiceError", err)
 	}
 }
+
+func TestFailedParseStatusIsRetryable(t *testing.T) {
+	for _, status := range []string{"FAILED", "ERROR"} {
+		if !isRetryableParseObservation(status, "") {
+			t.Fatalf("upload status %q should be retryable", status)
+		}
+	}
+	for _, taskStatus := range []string{"FAILED", "ERROR"} {
+		if !isRetryableParseObservation("WAITING", taskStatus) {
+			t.Fatalf("task status %q should be retryable", taskStatus)
+		}
+	}
+	if isRetryableParseObservation("SUCCESS", "FAILED") {
+		t.Fatal("successful document artifact must win over a stale failed Core task")
+	}
+}

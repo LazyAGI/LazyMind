@@ -33,6 +33,18 @@ type EnsureDocumentParsedResult struct {
 	TaskID string `json:"task_id,omitempty"`
 }
 
+func isRetryableParseObservation(uploadStatus, taskStatus string) bool {
+	uploadStatus = strings.ToUpper(strings.TrimSpace(uploadStatus))
+	if uploadStatus == "SUCCESS" || uploadStatus == "SUCCEEDED" {
+		return false
+	}
+	if uploadStatus == "FAILED" || uploadStatus == "ERROR" {
+		return true
+	}
+	taskStatus = strings.ToUpper(strings.TrimSpace(taskStatus))
+	return taskStatus == "FAILED" || taskStatus == "ERROR"
+}
+
 // EnsureDocumentParsedAndWait owns the complete on-demand parse lifecycle for
 // synchronous readers. Concurrent callers join the same task through
 // EnsureDocumentParsed's database latch and wait here for its terminal state.
@@ -87,13 +99,11 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 	if rec.lazy != nil {
 		status := strings.ToUpper(strings.TrimSpace(rec.lazy.UploadStatus))
 		taskStatus := strings.ToUpper(strings.TrimSpace(rec.taskStat))
-		if taskStatus == "FAILED" || taskStatus == "ERROR" {
-			message := "document Reader parsing failed"
-			_ = s.updateParseState(r, req.DatasetID, req.DocumentID, "failed", "READER_PARSE_FAILED", message)
-			return EnsureDocumentParsedResult{Status: "failed"}, &DocumentServiceError{Code: DocumentServiceUnavailable, Message: message}
-		}
 		switch status {
 		case "SUCCESS", "SUCCEEDED":
+			// The document service is authoritative for the current document
+			// artifact. A previous Core task may still be FAILED after a later
+			// retry succeeds, so do not let that stale task mask valid roots.
 			roots, rootsErr := s.ListDocumentChunks(r.Context(), DocumentChunksRequest{
 				UserID: req.UserID, DatasetID: req.DatasetID, DocumentID: req.DocumentID,
 				PageSize: 1, SegmentGroup: RootNodeGroup, Caller: req.Caller,
@@ -107,10 +117,14 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 			_ = s.updateParseState(r, req.DatasetID, req.DocumentID, "succeeded", "", "")
 			return EnsureDocumentParsedResult{Status: "parsed"}, nil
 		case "FAILED", "ERROR":
-			message := "document Reader parsing failed"
-			_ = s.updateParseState(r, req.DatasetID, req.DocumentID, "failed", "READER_PARSE_FAILED", message)
-			return EnsureDocumentParsedResult{Status: "failed"}, &DocumentServiceError{Code: DocumentServiceUnavailable, Message: message}
+			// Failed parses are retryable. Fall through to the same task creation
+			// path used for a document that has never been parsed.
 		default:
+			if isRetryableParseObservation(status, taskStatus) {
+				// The document service has not published a terminal artifact, while
+				// the prior Core task has failed. Start a fresh shared retry below.
+				break
+			}
 			return EnsureDocumentParsedResult{Status: "parsing"}, nil
 		}
 	}
