@@ -220,19 +220,28 @@ async function loadCandidates(type: CandidateType, keyword: string): Promise<Can
   if (type === "workflow") {
     const response = await axiosInstance.get(`${BASE_URL}/api/core/chat/settings/workflows`, { params: { keyword } });
     const payload = unwrap<{ workflows?: Array<Record<string, unknown>> }>(response.data);
-    return (payload.workflows || [])
-      .filter((item) => !keyword || `${item.name || ""} ${item.description || ""}`.toLowerCase().includes(keyword.toLowerCase()))
+    const workflows = payload.workflows || [];
+    const names = new Map<string, number>();
+    for (const item of workflows) {
+      const name = String(item.name || item.workflow_id || "");
+      names.set(name, (names.get(name) || 0) + 1);
+    }
+    return workflows
       .map((item) => {
+        const id = String(item.workflow_ref || item.workflow_id || "");
+        const name = String(item.name || item.workflow_id || "");
+        const workflowId = String(item.workflow_id || id);
+        const identity = workflows.some((other) => other !== item && other.workflow_id === item.workflow_id && other.name === item.name)
+          ? id : workflowId;
         const disabled = item.enabled === false || item.call_mode === "disabled";
         return {
-          id: String(item.workflow_ref || item.workflow_id || ""),
-          type,
-          name: String(item.name || item.workflow_id || ""),
+          id, type, name: (names.get(name) || 0) > 1 ? `${name}（${identity}）` : name,
           description: String(item.description || ""),
           disabled,
           disabledReasonKey: disabled ? "chat.mentionWorkflowDisabled" : undefined,
         };
-      });
+      })
+      .filter((item) => !keyword || `${item.name} ${item.description}`.toLowerCase().includes(keyword.toLowerCase()));
   }
   if (type === "prompt") {
     const response = await PromptServiceApi().listPrompts({ keyword, pageSize: 100 });

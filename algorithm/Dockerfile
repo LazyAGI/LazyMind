@@ -53,7 +53,7 @@ ARG PANDOC_SHA256_ARM64=56ed5566ec41d22ec9ee0704e6ac0b98ba102e92384efd5306173a22
 RUN set -eu; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        curl ffmpeg fonts-noto-cjk fonts-wqy-zenhei \
+        curl ffmpeg fonts-noto-cjk fonts-wqy-zenhei nodejs \
         libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libxcb1 ripgrep; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \

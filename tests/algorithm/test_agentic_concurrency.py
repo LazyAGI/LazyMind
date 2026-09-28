@@ -5,6 +5,7 @@ import asyncio
 import json
 import threading
 from typing import Any, Dict, List
+from types import SimpleNamespace
 
 import lazyllm
 from lazymind.common.memory.context import MemoryContext
@@ -36,7 +37,8 @@ class _FakeAgent:
 
     def __init__(self, **kwargs: Any) -> None:
         self._kwargs = kwargs
-        self._tools_manager = object()
+        self._tools_manager = SimpleNamespace(tools_info={})
+        self._skill_manager = None
         config = chat_service.lazyllm.globals.get('agentic_config')
         self._config_snapshot = dict(config) if isinstance(config, dict) else None
 
@@ -133,10 +135,11 @@ def test_stream_parallel_requests_see_isolated_config(monkeypatch):
     results = asyncio.run(drive_all())
 
     assert len(_FakeAgent.observations) == 6
+    # Each test query is one paragraph, followed by optional tool guidance.
     obs_by_query = {
         obs['query']
         .rsplit('### User Instruction\n\n', 1)[-1]
-        .split('\n\nATTENTION —', 1)[0]: obs
+        .split('\n\n', 1)[0]: obs
         for obs in _FakeAgent.observations
     }
     assert set(obs_by_query.keys()) == {f's_{i}' for i in range(6)}
@@ -185,3 +188,60 @@ def test_stream_response_keeps_session_after_route_context_exits(monkeypatch):
     assert obs['sid'] == 'route-stream-session'
     assert obs['config']['session_id'] == 'route-stream-session'
     assert obs['config']['filters']['kb_id'] == 'route_kb'
+
+
+def test_chat_response_close_waits_before_unregistering_active_session(monkeypatch):
+    from lazymind.chat.engine.agent_runtime import cancellation, executor as executor_mod
+
+    release, exited = threading.Event(), threading.Event()
+    cancelled = []
+
+    class BlockingAgent(_FakeAgent):
+        def __call__(self, query, **kwargs):
+            self._observe(query)
+            lazyllm.FileSystemQueue().enqueue(json.dumps({'tag': 'text', 'delta': 'body-ready'}))
+            try:
+                assert release.wait(5)
+                cancellation.make_cancel_stop_condition()(None)
+            except cancellation.UserCancelledError:
+                cancelled.append(True)
+                raise
+            finally:
+                exited.set()
+
+    monkeypatch.setattr(chat_service, 'AutoModel', lambda *_a, **_kw: object())
+    monkeypatch.setattr(chat_service.lazyllm.tools.agent, 'ReactAgent', BlockingAgent)
+    _mock_memory_context(monkeypatch)
+
+    async def drive():
+        notified = asyncio.Event()
+
+        def request_cancel(sid):
+            cancellation.request_cancel(sid)
+            notified.set()
+
+        monkeypatch.setattr(executor_mod, 'request_cancel', request_cancel)
+        response = await chat_service.handle_chat(ChatRequest(
+            message={'query': 'cancel this test', 'history': []},
+            conversation={'session_id': 'close-session', 'conversation_id': 'close-conversation'},
+            retrieval={'filters': {}}, runtime={'llm_config': {}},
+            personalization={'use_memory': False},
+            agent={'disabled_tools': DISABLED_TOOLS_EXCEPT_CALCULATOR, 'enable_subagent': False},
+            workflow={'enable_workflow': False},
+        ))
+        while 'body-ready' not in str(await anext(response.body_iterator)):
+            pass
+        close = asyncio.create_task(response.body_iterator.aclose())
+        try:
+            await asyncio.wait_for(notified.wait(), 2)
+            assert not close.done()
+            assert chat_service._active_sessions['close-conversation'] == 'close-session'
+            assert not exited.is_set()
+        finally:
+            release.set()
+            await close
+        assert exited.is_set()
+        assert cancelled == [True]
+        assert 'close-conversation' not in chat_service._active_sessions
+
+    asyncio.run(drive())

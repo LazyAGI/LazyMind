@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -81,7 +83,8 @@ func CreateTask(ctx context.Context, db *gorm.DB, in CreateTaskInput) (*orm.SubA
 			return err
 		}
 		t := &orm.SubAgentTask{
-			ID:                in.TaskID,
+			ID:          in.TaskID,
+			ExecutionID: uuid.NewString(), DisplayRevision: 1,
 			ConversationID:    in.ConversationID,
 			TriggerHistoryID:  in.TriggerHistoryID,
 			SeqInConversation: maxSeq + 1,
@@ -121,11 +124,25 @@ func UpdateSources(ctx context.Context, db *gorm.DB, taskID string, sources json
 	if err := json.Unmarshal(sources, &items); err != nil {
 		return fmt.Errorf("invalid sources snapshot: %w", err)
 	}
-	return db.WithContext(ctx).Model(&orm.SubAgentTask{}).Where("id = ?", taskID).
-		Updates(map[string]any{
-			"sources":    orm.RawJSON(sources),
-			"updated_at": time.Now().UTC(),
-		}).Error
+	if len(items) > 1000 || len(sources) > 2*1024*1024 {
+		return fmt.Errorf("sources snapshot exceeds limit")
+	}
+	return taskTransaction(ctx, db, func(tx *gorm.DB) error {
+		if err := tx.Model(&orm.SubAgentTask{}).Where("id = ?", taskID).UpdateColumn("display_revision", gorm.Expr("display_revision")).Error; err != nil {
+			return err
+		}
+		task, err := GetTask(ctx, tx, taskID)
+		if err != nil {
+			return err
+		}
+		if isTerminal(task.Status) {
+			return ErrTaskTerminal
+		}
+		if err := tx.Model(task).Updates(map[string]any{"sources": orm.RawJSON(sources), "updated_at": time.Now().UTC(), "display_revision": gorm.Expr("display_revision + 1")}).Error; err != nil {
+			return err
+		}
+		return recordOrdinaryWorkflowChange(ctx, tx, task)
+	})
 }
 
 // UpdateWritingSubtasks replaces the latest document-level writing subtask snapshot.
@@ -216,9 +233,11 @@ func UpdateStatus(ctx context.Context, db *gorm.DB, taskID, status string) error
 	now := time.Now().UTC()
 	return db.WithContext(ctx).Model(&orm.SubAgentTask{}).Where("id = ?", taskID).
 		Updates(map[string]any{
-			"status":         status,
-			"last_heartbeat": now,
-			"updated_at":     now,
+			"status":           status,
+			"last_heartbeat":   now,
+			"updated_at":       now,
+			"display_revision": gorm.Expr("display_revision + 1"),
+			"started_at":       gorm.Expr("COALESCE(started_at, ?)", now),
 		}).Error
 }
 
@@ -230,9 +249,11 @@ func AcceptTaskStart(ctx context.Context, db *gorm.DB, taskID string) (bool, err
 	result := db.WithContext(ctx).Model(&orm.SubAgentTask{}).
 		Where("id = ? AND status IN ?", taskID, []string{StatusPending, StatusRunning}).
 		Updates(map[string]any{
-			"status":         StatusRunning,
-			"last_heartbeat": now,
-			"updated_at":     now,
+			"status":           StatusRunning,
+			"started_at":       gorm.Expr("COALESCE(started_at, ?)", now),
+			"last_heartbeat":   now,
+			"updated_at":       now,
+			"display_revision": gorm.Expr("display_revision + 1"),
 		})
 	return result.RowsAffected > 0, result.Error
 }
@@ -241,10 +262,11 @@ func AcceptTaskStart(ctx context.Context, db *gorm.DB, taskID string) (bool, err
 func UpdateProgress(ctx context.Context, db *gorm.DB, taskID string, pct int, phase string, estimatedSec int) error {
 	now := time.Now().UTC()
 	updates := map[string]any{
-		"progress_pct":   pct,
-		"current_phase":  phase,
-		"last_heartbeat": now,
-		"updated_at":     now,
+		"progress_pct":     pct,
+		"current_phase":    phase,
+		"last_heartbeat":   now,
+		"updated_at":       now,
+		"display_revision": gorm.Expr("display_revision + 1"),
 	}
 	if estimatedSec > 0 {
 		updates["estimated_sec"] = estimatedSec
@@ -268,10 +290,12 @@ func AcceptFinalStatus(
 ) (bool, error) {
 	now := time.Now().UTC()
 	updates := map[string]any{
-		"status":         status,
-		"summary":        summary,
-		"last_heartbeat": now,
-		"updated_at":     now,
+		"status":           status,
+		"finished_at":      gorm.Expr("COALESCE(finished_at, ?)", now),
+		"summary":          summary,
+		"last_heartbeat":   now,
+		"updated_at":       now,
+		"display_revision": gorm.Expr("display_revision + 1"),
 	}
 	if status == StatusSucceeded {
 		updates["progress_pct"] = 100
@@ -287,6 +311,7 @@ type SavedArtifact struct {
 	Task     orm.SubAgentTask
 	Row      orm.SubAgentArtifact
 	Revision *artifact.RevisionView
+	Accepted bool
 }
 
 // SaveArtifact appends one artifact row for a task.
@@ -295,34 +320,65 @@ func SaveArtifact(ctx context.Context, db *gorm.DB, taskID, key, contentType str
 	return err
 }
 
+func saveArtifactIfChanged(ctx context.Context, db *gorm.DB, taskID, key, contentType string, value json.RawMessage, seq int) (bool, error) {
+	saved, err := SaveArtifactWithRecord(ctx, db, taskID, key, contentType, value, seq)
+	if err != nil {
+		return false, err
+	}
+	return saved.Accepted, nil
+}
+
 // SaveArtifactWithRecord atomically commits the delivery row and, when enabled,
-// its immutable V2 revision. Events may be emitted only after this commits.
+// its immutable V2 revision. Duplicate events do not create rows or revisions.
 func SaveArtifactWithRecord(ctx context.Context, db *gorm.DB, taskID, key, contentType string, value json.RawMessage, seq int) (*SavedArtifact, error) {
 	now := time.Now().UTC()
 	var saved SavedArtifact
-	err := common.ImmediateTransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+	err := taskTransaction(ctx, db, func(tx *gorm.DB) error {
 		var task orm.SubAgentTask
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ?", taskID).
 			First(&task).Error; err != nil {
 			return err
 		}
+		canonical := common.CanonicalizeTextArtifactValue(contentType, normalizeJSON(value, "{}"))
+		var previous orm.SubAgentArtifact
+		existing := tx.Where("task_id = ? AND execution_id = ? AND slot = ? AND seq = ?", taskID, task.ExecutionID, key, seq).First(&previous).Error
+		if existing == nil {
+			saved = SavedArtifact{Task: task, Row: previous}
+			var before, after any
+			_ = json.Unmarshal(previous.Value, &before)
+			_ = json.Unmarshal(canonical, &after)
+			if previous.ContentType != contentType || !reflect.DeepEqual(before, after) {
+				return ErrPublicEventConflict
+			}
+			return nil
+		}
+		if !errors.Is(existing, gorm.ErrRecordNotFound) {
+			return existing
+		}
 		if isTerminal(task.Status) {
 			return ErrTaskTerminal
+		}
+		if err := tx.Model(&orm.SubAgentTask{}).Where("id = ?", taskID).UpdateColumn("display_revision", gorm.Expr("display_revision + 1")).Error; err != nil {
+			return err
 		}
 		row := orm.SubAgentArtifact{
 			ID:          "saa_" + common.GenerateID(),
 			TaskID:      taskID,
+			ExecutionID: task.ExecutionID,
 			Slot:        key,
 			ContentType: contentType,
-			Value:       common.CanonicalizeTextArtifactValue(contentType, normalizeJSON(value, "{}")),
+			Value:       canonical,
 			Seq:         seq,
 			CreatedAt:   now,
 		}
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
-		saved = SavedArtifact{Task: task, Row: row}
+		if err := recordOrdinaryWorkflowChange(ctx, tx, &task); err != nil {
+			return err
+		}
+		saved = SavedArtifact{Task: task, Row: row, Accepted: true}
 		if artifact.Enabled() && task.AgentType != "workflow_step" {
 			view, err := artifact.DualWriteSubAgent(ctx, artifact.InTransaction(tx), artifact.SubAgentSnapshot{
 				TaskID: task.ID, ConversationID: task.ConversationID, TriggerHistoryID: task.TriggerHistoryID,
@@ -374,7 +430,7 @@ func MarkInterrupted(ctx context.Context, db *gorm.DB, maxAge time.Duration) (in
 	cutoff := time.Now().UTC().Add(-maxAge)
 	res := db.WithContext(ctx).Model(&orm.SubAgentTask{}).
 		Where("status = ? AND last_heartbeat < ?", StatusRunning, cutoff).
-		Updates(map[string]any{"status": StatusInterrupted, "updated_at": time.Now().UTC()})
+		Updates(map[string]any{"status": StatusInterrupted, "updated_at": time.Now().UTC(), "finished_at": time.Now().UTC(), "display_revision": gorm.Expr("display_revision + 1")})
 	return res.RowsAffected, res.Error
 }
 
@@ -394,7 +450,7 @@ func InterruptConversation(ctx context.Context, db *gorm.DB, convID, summary str
 		now := time.Now().UTC()
 		return tx.Model(&orm.SubAgentTask{}).Where("id IN ?", taskIDs).Updates(map[string]any{
 			"status": StatusInterrupted, "summary": summary,
-			"last_heartbeat": now, "updated_at": now,
+			"last_heartbeat": now, "updated_at": now, "finished_at": now, "display_revision": gorm.Expr("display_revision + 1"),
 		}).Error
 	})
 	return taskIDs, err
@@ -418,13 +474,32 @@ func LoadSteps(ctx context.Context, db *gorm.DB, taskID string) ([]orm.SubAgentS
 // AppendRemoteStep persists streamed Host events so reconnects and lease
 // reclaims have the same durable execution history as an in-process SubAgent.
 func AppendRemoteStep(ctx context.Context, db *gorm.DB, taskID, role string, content json.RawMessage) error {
-	return common.ImmediateTransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+	return taskTransaction(ctx, db, func(tx *gorm.DB) error {
 		var maxSeq int
 		if err := tx.Model(&orm.SubAgentStep{}).Where("task_id = ?", taskID).
 			Select("COALESCE(MAX(seq), -1)").Scan(&maxSeq).Error; err != nil {
 			return err
 		}
-		return tx.Create(&orm.SubAgentStep{ID: "sas_" + common.GenerateID(), TaskID: taskID,
-			Seq: maxSeq + 1, Role: role, Content: normalizeJSON(content, "{}"), CreatedAt: time.Now().UTC()}).Error
+		row := orm.SubAgentStep{ID: "sas_" + common.GenerateID(), TaskID: taskID,
+			Seq: maxSeq + 1, Role: role, Content: normalizeJSON(content, "{}"), CreatedAt: time.Now().UTC()}
+		var task *orm.SubAgentTask
+		if role == "plan" {
+			var err error
+			task, err = GetTask(ctx, tx, taskID)
+			if err != nil {
+				return err
+			}
+			row.ExecutionID = task.ExecutionID
+		}
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		if role == "plan" && len(publicPlanSteps(content)) > 0 {
+			if err := tx.Model(task).UpdateColumn("display_revision", gorm.Expr("display_revision + 1")).Error; err != nil {
+				return err
+			}
+			return recordOrdinaryWorkflowChange(ctx, tx, task)
+		}
+		return nil
 	})
 }

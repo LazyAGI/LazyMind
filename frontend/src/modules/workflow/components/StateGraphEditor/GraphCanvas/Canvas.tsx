@@ -24,6 +24,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { v4 as uuidv4 } from 'uuid';
+import dagre from '@dagrejs/dagre';
 import type { GraphModel, StepNode, NodeLayout } from '../core/model';
 import {
   VIRTUAL_END,
@@ -45,8 +46,6 @@ import './Canvas.scss';
 
 const NODE_WIDTH = NODE_DEFAULT_WIDTH;
 const NODE_HEIGHT = 80;
-const DEFAULT_SPACING_X = NODE_WIDTH + 100;
-const DEFAULT_SPACING_Y = 100;
 
 export interface CanvasHandle {
   addNode: () => void;
@@ -89,6 +88,29 @@ function buildPredecessorMap(model: GraphModel): Map<string, string[]> {
   return map;
 }
 
+function automaticLayout(model: GraphModel): Record<string, NodeLayout> {
+  const graph = new dagre.graphlib.Graph();
+  graph.setGraph({ rankdir: 'LR', ranksep: 100, nodesep: 80, marginx: 80, marginy: 80 });
+  graph.setDefaultEdgeLabel(() => ({}));
+  const ids = [VIRTUAL_START, ...model.nodes.map((node) => node.id), VIRTUAL_END];
+  for (const id of ids) {
+    const node = model.nodes.find((item) => item.id === id);
+    graph.setNode(id, { width: node ? (model.layout[id]?.width ?? NODE_WIDTH) : 80,
+      height: node ? (model.layout[id]?.height ?? Math.max(140, 90 + (node.inputs.length + node.outputs.length) * 24)) : 40 });
+  }
+  for (const transition of model.startTransitions) if (graph.hasNode(transition.to)) graph.setEdge(VIRTUAL_START, transition.to);
+  for (const node of model.nodes) for (const transition of node.transitions) {
+    if (graph.hasNode(transition.to)) graph.setEdge(node.id, transition.to);
+  }
+  // Unconnected drafts still get a readable horizontal arrangement.
+  if (!graph.edgeCount()) ids.slice(1).forEach((id, index) => graph.setEdge(ids[index], id));
+  dagre.layout(graph);
+  return Object.fromEntries(ids.map((id) => {
+    const node = graph.node(id);
+    return [id, { x: node.x - node.width / 2, y: node.y - node.height / 2 }];
+  }));
+}
+
 function modelToFlowNodes(
   model: GraphModel,
   nodeErrorMap: Map<string, string[]>,
@@ -97,11 +119,12 @@ function modelToFlowNodes(
   getZoom: () => number,
 ): Node[] {
   const flowNodes: Node[] = [];
-  let autoX = 80;
+  const fallbackLayout = automaticLayout(model);
+  const preserveTerminals = model.nodes.length === 0 || model.nodes.some((node) => model.layout[node.id]);
   const predMap = buildPredecessorMap(model);
 
   // __start__ virtual node
-  const startVisual=model.layout[VIRTUAL_START]??{x:autoX,y:200};
+  const startVisual = (preserveTerminals ? model.layout[VIRTUAL_START] : undefined) ?? fallbackLayout[VIRTUAL_START];
   flowNodes.push({
     id: VIRTUAL_START,
     type: 'terminal',
@@ -111,10 +134,8 @@ function modelToFlowNodes(
     draggable: true,
   });
 
-  autoX += DEFAULT_SPACING_X;
-
   for (const node of model.nodes) {
-    const pos: NodeLayout = model.layout[node.id] ?? { x: autoX, y: 150 + (flowNodes.length % 2) * DEFAULT_SPACING_Y };
+    const pos: NodeLayout = model.layout[node.id] ?? fallbackLayout[node.id];
     const errMsgs = nodeErrorMap.get(node.id) ?? [];
     const nodeWidth = pos.width ?? NODE_WIDTH;
     // Build output label map: slotId → display label
@@ -148,11 +169,10 @@ function modelToFlowNodes(
       selected: false,
       width: nodeWidth,
     });
-    autoX += DEFAULT_SPACING_X;
   }
 
   // __end__ virtual node
-  const endVisual=model.layout[VIRTUAL_END]??{x:autoX,y:200};
+  const endVisual = (preserveTerminals ? model.layout[VIRTUAL_END] : undefined) ?? fallbackLayout[VIRTUAL_END];
   flowNodes.push({
     id: VIRTUAL_END,
     type: 'terminal',

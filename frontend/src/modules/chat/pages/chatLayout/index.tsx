@@ -504,12 +504,13 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
 
   useEffect(() => {
     if (!sessionId) return;
+    useTaskCenterStore.getState().setViewMode(developerModeActive ? "developer" : "ordinary");
     subscribeConvEvents(sessionId);
     void refreshConversationExecution(sessionId);
     return () => {
       unsubscribeConvEvents(sessionId);
     };
-  }, [sessionId, refreshConversationExecution, subscribeConvEvents, unsubscribeConvEvents]);
+  }, [sessionId, developerModeActive, refreshConversationExecution, subscribeConvEvents, unsubscribeConvEvents]);
 
   // Auto-expand the task panel the first time visible task execution appears.
   // The display count also covers hosted workflow attempts that have no SubAgent row.

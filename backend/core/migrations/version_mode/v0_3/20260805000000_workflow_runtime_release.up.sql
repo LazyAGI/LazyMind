@@ -2694,6 +2694,50 @@ CREATE TABLE IF NOT EXISTS document_publication_bindings (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_document_publication_item ON document_publication_bindings(session_id,slot_id,item_index);
 
 -- +migrate Dialect postgres
+CREATE TABLE IF NOT EXISTS user_environment_variables (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    name VARCHAR(128) NOT NULL,
+    value_ciphertext TEXT NOT NULL,
+    credential_version INTEGER NOT NULL DEFAULT 2,
+    credential_revision BIGINT NOT NULL DEFAULT 1,
+    enabled BOOLEAN NOT NULL,
+    description VARCHAR(512) NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    deleted_at TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_env_user_name_active
+    ON user_environment_variables (user_id, name)
+    WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_user_env_user_enabled
+    ON user_environment_variables (user_id, enabled);
+CREATE INDEX IF NOT EXISTS idx_user_environment_variables_deleted_at
+    ON user_environment_variables (deleted_at);
+
+-- +migrate Dialect sqlite
+CREATE TABLE IF NOT EXISTS user_environment_variables (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    name VARCHAR(128) NOT NULL,
+    value_ciphertext TEXT NOT NULL,
+    credential_version INTEGER NOT NULL DEFAULT 2,
+    credential_revision INTEGER NOT NULL DEFAULT 1,
+    enabled BOOLEAN NOT NULL,
+    description VARCHAR(512) NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    deleted_at DATETIME
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_env_user_name_active
+    ON user_environment_variables (user_id, name)
+    WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_user_env_user_enabled
+    ON user_environment_variables (user_id, enabled);
+CREATE INDEX IF NOT EXISTS idx_user_environment_variables_deleted_at
+    ON user_environment_variables (deleted_at);
+
+-- +migrate Dialect postgres
 ALTER TABLE public.skills ADD COLUMN IF NOT EXISTS call_mode VARCHAR(16) NOT NULL DEFAULT 'on_demand';
 ALTER TABLE public.skills ADD COLUMN IF NOT EXISTS sort_rank BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.skills ADD COLUMN IF NOT EXISTS original_revision_id VARCHAR(36);
@@ -2775,3 +2819,141 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_recordings_active_user ON skill_reco
 -- +migrate Dialect postgres,sqlite
 ALTER TABLE default_models ADD COLUMN vision BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE user_model_provider_group_models ADD COLUMN vision BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE user_chat_settings ADD COLUMN default_permission_mode VARCHAR(32) NOT NULL DEFAULT 'always_ask';
+ALTER TABLE user_chat_settings ADD COLUMN permission_version BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE conversations ADD COLUMN permission_mode VARCHAR(32) NOT NULL DEFAULT '';
+ALTER TABLE conversations ADD COLUMN permission_version BIGINT NOT NULL DEFAULT 0;
+UPDATE conversations SET
+    permission_mode = COALESCE((SELECT permission_mode FROM conversation_workspace_bindings WHERE conversation_id = conversations.id), 'always_ask'),
+    permission_version = COALESCE((SELECT permission_version FROM conversation_workspace_bindings WHERE conversation_id = conversations.id), 1);
+CREATE TABLE IF NOT EXISTS tool_configuration_actions (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    conversation_id VARCHAR(36) NOT NULL,
+    history_id VARCHAR(36) NOT NULL,
+    run_id VARCHAR(64) NOT NULL,
+    service VARCHAR(255) NOT NULL,
+    label VARCHAR(255) NOT NULL,
+    status VARCHAR(64) NOT NULL,
+    revision VARCHAR(64) NOT NULL DEFAULT '',
+    version BIGINT NOT NULL DEFAULT 1,
+    delivered_version BIGINT NOT NULL DEFAULT 0,
+    request_id VARCHAR(64) NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tool_configuration_owner ON tool_configuration_actions(user_id, conversation_id);
+
+ALTER TABLE mcp_servers ADD COLUMN discovery_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+UPDATE mcp_servers SET discovery_enabled = TRUE WHERE enabled = TRUE;
+
+-- +migrate Dialect postgres
+ALTER TABLE user_schedules ADD COLUMN notification_config TEXT;
+ALTER TABLE user_schedules ADD COLUMN notification_revision BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE task_center_tasks ADD COLUMN notification_config TEXT;
+ALTER TABLE task_center_tasks ADD COLUMN notification_revision BIGINT NOT NULL DEFAULT 0;
+
+CREATE TABLE user_notification_preferences (
+    user_id VARCHAR(255) PRIMARY KEY,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    revision BIGINT NOT NULL DEFAULT 1,
+    defaults TEXT NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+CREATE TABLE task_notifications (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    task_id VARCHAR(36) NOT NULL,
+    schedule_id VARCHAR(36) NOT NULL,
+    event_id VARCHAR(64) NOT NULL,
+    event VARCHAR(16) NOT NULL,
+    channel VARCHAR(16) NOT NULL,
+    account_id VARCHAR(256) NOT NULL DEFAULT '',
+    recipient_id VARCHAR(256) NOT NULL DEFAULT '',
+    config_revision BIGINT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    content VARCHAR(16) NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    reason VARCHAR(64) NOT NULL DEFAULT '',
+    gateway_id VARCHAR(64) NOT NULL DEFAULT '',
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+CREATE INDEX idx_task_notifications_task ON task_notifications(task_id);
+CREATE INDEX idx_task_notifications_pending ON task_notifications(user_id, status, created_at);
+CREATE TABLE desktop_notification_receipts (
+    notification_id VARCHAR(64) NOT NULL,
+    device_id VARCHAR(256) NOT NULL,
+    user_id VARCHAR(255) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    reason VARCHAR(64) NOT NULL DEFAULT '',
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    PRIMARY KEY (notification_id, device_id)
+);
+
+-- +migrate Dialect sqlite
+ALTER TABLE user_schedules ADD COLUMN notification_config TEXT;
+ALTER TABLE user_schedules ADD COLUMN notification_revision BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE task_center_tasks ADD COLUMN notification_config TEXT;
+ALTER TABLE task_center_tasks ADD COLUMN notification_revision BIGINT NOT NULL DEFAULT 0;
+
+CREATE TABLE user_notification_preferences (
+    user_id VARCHAR(255) PRIMARY KEY,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    revision BIGINT NOT NULL DEFAULT 1,
+    defaults TEXT NOT NULL,
+    updated_at DATETIME NOT NULL
+);
+CREATE TABLE task_notifications (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    task_id VARCHAR(36) NOT NULL,
+    schedule_id VARCHAR(36) NOT NULL,
+    event_id VARCHAR(64) NOT NULL,
+    event VARCHAR(16) NOT NULL,
+    channel VARCHAR(16) NOT NULL,
+    account_id VARCHAR(256) NOT NULL DEFAULT '',
+    recipient_id VARCHAR(256) NOT NULL DEFAULT '',
+    config_revision BIGINT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    content VARCHAR(16) NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    reason VARCHAR(64) NOT NULL DEFAULT '',
+    gateway_id VARCHAR(64) NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
+);
+CREATE INDEX idx_task_notifications_task ON task_notifications(task_id);
+CREATE INDEX idx_task_notifications_pending ON task_notifications(user_id, status, created_at);
+CREATE TABLE desktop_notification_receipts (
+    notification_id VARCHAR(64) NOT NULL,
+    device_id VARCHAR(256) NOT NULL,
+    user_id VARCHAR(255) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    reason VARCHAR(64) NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL,
+    PRIMARY KEY (notification_id, device_id)
+);
+-- Public task display execution identity and authoritative timing.
+-- +migrate Dialect postgres
+ALTER TABLE sub_agent_tasks ADD COLUMN execution_id VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE sub_agent_tasks ADD COLUMN display_revision BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE sub_agent_tasks ADD COLUMN started_at TIMESTAMPTZ;
+ALTER TABLE sub_agent_tasks ADD COLUMN finished_at TIMESTAMPTZ;
+ALTER TABLE sub_agent_steps ADD COLUMN execution_id VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE sub_agent_artifacts ADD COLUMN execution_id VARCHAR(64) NOT NULL DEFAULT '';
+CREATE INDEX idx_subagent_public_steps ON sub_agent_steps(task_id, execution_id, role, seq);
+CREATE INDEX idx_subagent_execution_artifacts ON sub_agent_artifacts(task_id, execution_id);
+
+-- +migrate Dialect sqlite
+ALTER TABLE sub_agent_tasks ADD COLUMN execution_id VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE sub_agent_tasks ADD COLUMN display_revision BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE sub_agent_tasks ADD COLUMN started_at DATETIME;
+ALTER TABLE sub_agent_tasks ADD COLUMN finished_at DATETIME;
+ALTER TABLE sub_agent_steps ADD COLUMN execution_id VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE sub_agent_artifacts ADD COLUMN execution_id VARCHAR(64) NOT NULL DEFAULT '';
+CREATE INDEX idx_subagent_public_steps ON sub_agent_steps(task_id, execution_id, role, seq);
+CREATE INDEX idx_subagent_execution_artifacts ON sub_agent_artifacts(task_id, execution_id);

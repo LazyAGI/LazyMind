@@ -1,9 +1,14 @@
 from dataclasses import dataclass
 
 from channel_gateway.common.domain.channel import ChannelAddress
+from channel_gateway.common.errors import ProviderRejectedError
 
 
 class WeChatError(RuntimeError):
+    pass
+
+
+class WeChatRejectedError(WeChatError, ProviderRejectedError):
     pass
 
 

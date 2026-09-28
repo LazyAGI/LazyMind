@@ -22,7 +22,7 @@ export interface SlotFooterAction {
   icon?: 'write-back' | 'download' | 'copy';
   selectedMenuKey?: string;
   menuLabel?: string;
-  menu?: Array<{ key: string; label: string; icon?: ReactNode; onClick: () => void }>;
+  menu?: Array<{ key: string; label: ReactNode; icon?: ReactNode; onClick: () => void }>;
   statusText?: string;
   statusTone?: 'success' | 'error';
   statusLink?: {

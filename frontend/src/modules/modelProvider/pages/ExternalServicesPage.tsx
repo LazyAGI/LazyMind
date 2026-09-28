@@ -1,3 +1,4 @@
+import { useSettingsDraft, useSettingsEditor } from "@/modules/settings/SettingsNavigationGuard";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Alert, AutoComplete, Button, Empty, Form, Input, Modal, Space, Spin, Tag, Tooltip, message } from "antd";
 import {
@@ -716,6 +717,7 @@ export default function ExternalServicesPage({
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [form] = Form.useForm<Record<string, ExternalServiceFormValues>>();
+  const configLocation = useSettingsEditor("service");
   const [activeService, setActiveService] = useState<ExternalServiceConfig | null>(null);
   const [services, setServices] = useState<ExternalServiceConfig[]>([]);
   const [loading, setLoading] = useState(false);
@@ -739,6 +741,13 @@ export default function ExternalServicesPage({
   const [groupForActiveService, setGroupForActiveService] = useState<ApiExternalGroup | null>(null);
   const originalBaseUrlRef = useRef("");
   const loadGroupKeysGenRef = useRef(0);
+  const formValues = Form.useWatch([], form);
+  const confirmConfigClose = useSettingsDraft({
+    dirty: Boolean(activeService) && (Boolean(newKeyValue || newKeyEngineId) || (keysLoaded &&
+      normalizeBaseUrlForCompare(formValues?.[activeService!.key]?.baseUrl || "") !== normalizeBaseUrlForCompare(originalBaseUrlRef.current))),
+    saving: addingKey || savingServiceConfig,
+    discard: () => { setNewKeyValue(""); setNewKeyEngineId(""); },
+  });
 
   const loadExternalServices = useCallback((keyword: string) => {
     const requestId = requestIdRef.current + 1;
@@ -799,7 +808,7 @@ export default function ExternalServicesPage({
     };
   }, []);
 
-  async function loadGroupKeys(serviceKey: string) {
+  async function loadGroupKeys(serviceKey: string, initializeForm = false) {
     const gen = loadGroupKeysGenRef.current;
     setKeysError(false);
     try {
@@ -813,7 +822,7 @@ export default function ExternalServicesPage({
         // When the group has a custom base_url, use it as the initial form value.
         // This ensures the user's previously-saved base_url is shown after page refresh,
         // not the catalog default from user_model_providers.base_url.
-        if (group.base_url) {
+        if (group.base_url && initializeForm) {
           form.setFieldValue([serviceKey, "baseUrl"], group.base_url);
           originalBaseUrlRef.current = group.base_url;
         }
@@ -892,6 +901,7 @@ export default function ExternalServicesPage({
       setNewKeyEngineId("");
       void loadExternalServices(normalizedSearchValue);
     } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setAddingKey(false);
     }
@@ -899,6 +909,10 @@ export default function ExternalServicesPage({
 
   async function handleSaveServiceConfig() {
     if (!activeService || !keysLoaded || keysError || addingKey || savingServiceConfig) {
+      return;
+    }
+    if (newKeyValue || newKeyEngineId) {
+      message.warning(t("modelProvider.external.addKeyBeforeSaving"));
       return;
     }
     setSavingServiceConfig(true);
@@ -948,11 +962,13 @@ export default function ExternalServicesPage({
 
       message.success(t("modelProvider.external.configSaved", { name: activeService.name }));
       void loadExternalServices(normalizedSearchValue);
+      confirmConfigClose.acceptSaved();
       closeConfigModal();
     } catch (error) {
       if (isFormValidationError(error)) {
         return;
       }
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setSavingServiceConfig(false);
     }
@@ -980,6 +996,8 @@ export default function ExternalServicesPage({
     if (addingKey) {
       return;
     }
+    configLocation.select();
+    loadGroupKeysGenRef.current += 1;
     setActiveService(null);
     setKeyList([]);
     setNewKeyValue("");
@@ -989,37 +1007,33 @@ export default function ExternalServicesPage({
   };
 
   const openConfigModal = (service: ExternalServiceConfig) => {
+    if (configLocation.managed && configLocation.item !== service.key) {
+      configLocation.select(service.key);
+      return;
+    }
+    loadGroupKeysGenRef.current += 1;
     setActiveService(service);
     setKeyList([]);
     setNewKeyValue("");
     setNewKeyEngineId("");
     setKeysLoaded(false);
     setGroupForActiveService(null);
-    void loadGroupKeys(service.key);
+    void loadGroupKeys(service.key, true);
     if (service.fields.includes("baseUrl")) {
       const fallbackBaseUrl = service.baseUrl || service.baseUrlPresets?.[0]?.value || "";
-      const currentFormValue = form.getFieldValue([service.key, "baseUrl"]);
-      originalBaseUrlRef.current = currentFormValue || fallbackBaseUrl;
-      window.setTimeout(() => {
-        const currentBaseUrl = form.getFieldValue([service.key, "baseUrl"]);
-        if (!currentBaseUrl) {
-          if (fallbackBaseUrl) {
-            form.setFieldValue([service.key, "baseUrl"], fallbackBaseUrl);
-          }
-        }
-      }, 0);
+      originalBaseUrlRef.current = fallbackBaseUrl;
+      form.setFieldValue([service.key, "baseUrl"], fallbackBaseUrl);
     }
 
-    void listProviderGroups(service.key)
-      .then((groupData) => {
-        const existingGroup = (groupData.groups || [])[0];
-        const nextBaseUrl = existingGroup?.base_url?.trim() || service.baseUrl || "";
-        form.setFieldValue([service.key, "baseUrl"], nextBaseUrl);
-      })
-      .catch(() => {
-        form.setFieldValue([service.key, "baseUrl"], service.baseUrl || "");
-      });
   };
+
+  useEffect(() => {
+    if (!configLocation.managed) return;
+    if (!configLocation.item) { loadGroupKeysGenRef.current += 1; setActiveService(null); return; }
+    if (loading || activeService?.key === configLocation.item) return;
+    const service = services.find((item) => item.key === configLocation.item);
+    if (service) openConfigModal(service);
+  }, [configLocation.item, loading, services]);
 
   const categorizedServices = useMemo(() => {
     const byCategory: Record<ServiceCategoryKey, ExternalServiceConfig[]> = {
@@ -1182,7 +1196,7 @@ export default function ExternalServicesPage({
       <Modal
         className="model-provider-service-config-modal"
         destroyOnClose
-        onCancel={closeConfigModal}
+        onCancel={() => confirmConfigClose(closeConfigModal)}
         open={!!activeService}
         width={600}
         title={
@@ -1267,6 +1281,7 @@ export default function ExternalServicesPage({
                 >
                   {activeService.baseUrlPresets?.length ? (
                     <AutoComplete
+                      disabled={!keysLoaded || keysError || savingServiceConfig}
                       allowClear
                       filterOption={false}
                       options={activeService.baseUrlPresets.map((preset) => ({
@@ -1284,7 +1299,7 @@ export default function ExternalServicesPage({
                       onChange={(value) => form.setFieldValue([activeService.key, "baseUrl"], value)}
                     />
                   ) : (
-                    <Input maxLength={512} placeholder="https://api.example.com" />
+                    <Input disabled={!keysLoaded || keysError || savingServiceConfig} maxLength={512} placeholder="https://api.example.com" />
                   )}
                 </Form.Item>
               ) : null}
@@ -1298,7 +1313,7 @@ export default function ExternalServicesPage({
                 <Alert
                   type="error"
                   message={localizeErrorCode("2000509")}
-                  action={<Button onClick={() => void loadGroupKeys(activeService.key)}>{t("common.retry")}</Button>}
+                  action={<Button onClick={() => void loadGroupKeys(activeService.key, true)}>{t("common.retry")}</Button>}
                 />
               ) : !keysLoaded ? <Spin size="small" /> : keyList.length === 0 ? (
                 <div className="model-provider-key-empty">

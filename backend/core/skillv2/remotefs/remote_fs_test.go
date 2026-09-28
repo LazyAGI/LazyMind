@@ -16,6 +16,7 @@ import (
 	skillmetadata "lazymind/core/skillv2/metadata"
 	skillservice "lazymind/core/skillv2/service"
 	skillpackage "lazymind/core/skillv2/skillpackage"
+	skillsourceurl "lazymind/core/skillv2/sourceurl"
 	"lazymind/core/skillv2/testutil"
 )
 
@@ -60,6 +61,58 @@ func TestRemoteFSExternalSkillMDReturnsStrictRuntimeViewWithoutChangingBlob(t *t
 	}
 }
 
+func TestRemoteFSReadsNormalizedExternalSourceReplacement(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	originalName := "Persona / Crowd Insight"
+	document := []byte("---\nname: " + originalName + "\ndescription: >-\n  " + strings.Repeat("Privacy: use only supplied fictional data. ", 40) + "\n---\n# Persona\n")
+	archivePath, err := skillpackage.WriteZip(map[string][]byte{"skill.md": document}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(archivePath)
+	pageURL, err := url.Parse("https://skillhub.cn/skills/example/persona-replacement")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolution, matched, err := skillsourceurl.ResolveSkillHubPageURL(pageURL)
+	if err != nil || !matched {
+		t.Fatalf("resolve SkillHub URL: matched=%v err=%v", matched, err)
+	}
+	svc := skillservice.NewSkillService(skillservice.SkillServiceDeps{
+		DB:         db.DB,
+		Downloader: skillservice.NewFakeZipDownloader(map[string]string{resolution.DownloadURL: archivePath}),
+		BlobStore:  skillservice.NewBlobStore(db.DB, skillservice.NewLocalObjectStore(t.TempDir())),
+	})
+	response, err := svc.PatchSkill(context.Background(), skillservice.PatchSkillRequest{
+		SkillID: "skill1", UserID: "user_001",
+		Source: &skillservice.SourceInput{Type: "url", URL: resolution.DownloadURL, SourceURL: pageURL.String()},
+	})
+	if err != nil {
+		t.Fatalf("PatchSkill source replacement: %v", err)
+	}
+	if response.HeadRevisionID == "rev1" {
+		t.Fatal("source replacement did not create a new revision")
+	}
+	if len(response.Warnings) != 2 || response.Warnings[0].Code != skillmetadata.NormalizationDescriptionCompacted || response.Warnings[1].Code != skillmetadata.NormalizationCanonicalName {
+		t.Fatalf("source replacement warnings = %#v", response.Warnings)
+	}
+
+	handler := NewHandler(HandlerDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+	rec := httptest.NewRecorder()
+	handler.Content(rec, httptest.NewRequest(http.MethodGet, remoteContentURL("skills/external/persona-replacement/SKILL.md", "user_001", "task-replacement", ""), nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("content status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	meta, err := skillmetadata.ParseRequired(rec.Body.Bytes())
+	if err != nil || meta.Name != "persona-replacement" || len([]rune(meta.Description)) > skillmetadata.MaxSkillDescriptionLength {
+		t.Fatalf("runtime metadata = %#v, err=%v", meta, err)
+	}
+	if !strings.Contains(rec.Body.String(), skillmetadata.OriginalNameField) || !strings.Contains(rec.Body.String(), skillmetadata.OriginalDescriptionField) {
+		t.Fatalf("runtime document lost original metadata: %s", rec.Body.String())
+	}
+}
+
 func TestRemoteFSBuiltinSkillMDReturnsStrictRuntimeViewWithoutChangingBlob(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	original := []byte("---\nversion: 1.0.0\n---\n# Runtime skill\n\nUseful runtime description.\n")
@@ -90,6 +143,28 @@ func TestRemoteFSBuiltinSkillMDReturnsStrictRuntimeViewWithoutChangingBlob(t *te
 	}
 	if skill.OriginBuiltinSkillUID != "bsk_runtime_skill" {
 		t.Fatalf("installed skill = %#v", skill)
+	}
+}
+
+func TestRemoteFSRunningTaskCanReadSkillAfterDisable(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	handler := NewHandler(HandlerDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+	read := func() string {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		handler.Content(rec, httptest.NewRequest(http.MethodGet, remoteContentURL("skills/research/论文精读/SKILL.md", "user_001", "running-task", ""), nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("content status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		return rec.Body.String()
+	}
+	before := read()
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Update("is_enabled", false).Error; err != nil {
+		t.Fatalf("disable skill: %v", err)
+	}
+	if after := read(); after != before {
+		t.Fatalf("running task skill content changed after disabling: %q", after)
 	}
 }
 

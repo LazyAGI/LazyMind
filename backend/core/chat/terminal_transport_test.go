@@ -69,16 +69,16 @@ func TestStreamTerminalTransportReconciliation(t *testing.T) {
 		{name: "completed abnormal EOF", terminal: &RunTerminal{Status: "completed", Reason: "normal"}, closure: "truncated", wantStatus: "completed", wantDiag: "upstream_stream_failed"},
 		{name: "accepted success abnormal EOF", terminal: &RunTerminal{Status: "completed", Reason: "normal"}, closure: "truncated", accepted: true, wantStatus: "completed", wantDiag: "upstream_stream_failed"},
 		{name: "committed success then transport error", closure: "truncated", accepted: true, wantStatus: "completed", wantDiag: "upstream_stream_failed"},
-		{name: "partial output abnormal EOF", closure: "truncated", wantStatus: "failed", wantCode: "upstream_stream_failed", wantDiag: "upstream_stream_failed"},
+		{name: "partial output abnormal EOF", closure: "truncated", wantStatus: "failed", wantCode: "transport_error", wantDiag: "upstream_stream_failed"},
 		{name: "artifact before parent failure", terminal: &RunTerminal{Status: "failed", Reason: "runtime_failure", Code: "parent_execution_failed"}, closure: "truncated", wantStatus: "failed", wantCode: "parent_execution_failed", wantDiag: "upstream_stream_failed"},
 		{name: "disconnected drain success", terminal: &RunTerminal{Status: "completed", Reason: "normal"}, closure: "truncated", disconnected: true, wantStatus: "completed", wantDiag: "upstream_stream_failed"},
 		{name: "completed normal EOF", terminal: &RunTerminal{Status: "completed", Reason: "normal"}, wantStatus: "completed"},
-		{name: "partial normal EOF", wantStatus: "failed", wantCode: "upstream_stream_failed"},
-		{name: "timeout before terminal", closure: "timeout", wantStatus: "failed", wantCode: "upstream_stream_timeout", wantDiag: "upstream_stream_timeout"},
+		{name: "partial normal EOF", wantStatus: "failed", wantCode: "missing_run_terminal"},
+		{name: "timeout before terminal", closure: "timeout", wantStatus: "failed", wantCode: "transport_error", wantDiag: "upstream_stream_timeout"},
 		{name: "timeout after terminal", terminal: &RunTerminal{Status: "completed", Reason: "normal"}, closure: "timeout", wantStatus: "completed", wantDiag: "upstream_stream_timeout"},
 		{name: "committed success then timeout", closure: "timeout", accepted: true, wantStatus: "completed", wantDiag: "upstream_stream_timeout"},
 		{name: "cancel wins over success and transport error", terminal: &RunTerminal{Status: "completed", Reason: "normal"}, closure: "truncated", cancelled: true, wantStatus: "cancelled", wantDiag: "upstream_stream_failed"},
-		{name: "old run success cannot complete current run", terminal: &RunTerminal{Status: "completed", Reason: "normal"}, wrongRun: true, wantStatus: "failed", wantCode: "upstream_stream_failed"},
+		{name: "old run success cannot complete current run", terminal: &RunTerminal{Status: "completed", Reason: "normal"}, wrongRun: true, wantStatus: "failed", wantCode: "protocol_error"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, stateStore := newRunDecisionStreamHarness(t)

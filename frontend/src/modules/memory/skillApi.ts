@@ -135,6 +135,7 @@ export interface SkillDraftPreviewRecord {
 
 export interface ListSkillOptions {
   keyword?: string;
+  nameOnly?: boolean;
   category?: string;
   tags?: string[];
   page?: number;
@@ -1110,6 +1111,7 @@ export async function listSkillAssetsPage(
   const response = await skillsApi.apiCoreSkillsGet({
     keyword: options.keyword?.trim() || undefined,
     source,
+    nameOnly: options.nameOnly,
     category: source ? undefined : category,
     tags: (options.tags ?? []).map((item) => item.trim()).filter(Boolean),
     page: options.page ?? 1,

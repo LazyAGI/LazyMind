@@ -198,6 +198,7 @@ type projectionResponse struct {
 }
 
 type attemptHistoryDTO struct {
+	AttemptID     string  `json:"attempt_id"`
 	Attempt       int     `json:"attempt"`
 	TaskID        string  `json:"task_id"`
 	Status        string  `json:"status"`
@@ -248,7 +249,7 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 			duration = 0
 		}
 		attemptHistory[attempt.StepID] = append(attemptHistory[attempt.StepID], attemptHistoryDTO{
-			Attempt: attempt.Attempt, TaskID: attempt.TaskID, Status: attempt.Status, Validity: validity,
+			AttemptID: attempt.ID, Attempt: attempt.Attempt, TaskID: attempt.TaskID, Status: attempt.Status, Validity: validity,
 			IntentContext: intentMap[attempt.StepID],
 			DurationSec:   duration, ArtifactCount: artifactCount, StartedAt: attempt.CreatedAt.UTC().Format(time.RFC3339), UpdatedAt: attempt.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		})
@@ -292,6 +293,10 @@ func removeStepID(values []string, target string) []string {
 }
 
 func GetSessionProjection(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("view") == "ordinary" {
+		getOrdinarySessionProjection(w, r)
+		return
+	}
 	var projection projectionResponse
 	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		var session orm.WorkflowSession

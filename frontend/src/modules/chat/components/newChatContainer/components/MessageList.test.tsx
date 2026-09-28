@@ -43,7 +43,42 @@ function selectMessageText(text: string) {
 }
 
 describe("MessageList side chat selection", () => {
-  it("preserves failed attempts and attachments while only allowing side chat from real history", () => {
+  it("removes the entire failed reply on retry and shows a new failure if retry fails", () => {
+    const failed = {
+      result: "old partial reply",
+      run_id: "failed-run-1",
+      run_status: "failed",
+      run_terminal: {
+        status: "failed", reason: "model_failure", code: "transport_error", partial_output: true,
+      },
+    };
+    const record = { id: "history-1", query: "question", ...failed };
+    const props = {
+      sendMessage: vi.fn(), stopGeneration: vi.fn(), updateAssistantMessage: vi.fn(),
+      renderText: (item: any) => <span>{item.delta}</span>,
+    };
+    const retry = vi.fn(() => {
+      rerender(<MessageList {...props} regenerate={retry} messageList={buildChatMessageListFromHistory([
+        { ...record, result: "", run_status: undefined, run_terminal: undefined, failed_attempts: [failed] },
+      ])} />);
+    });
+    const { rerender } = render(<MessageList {...props} regenerate={retry}
+      messageList={buildChatMessageListFromHistory([record])} />);
+    expect(screen.getByText("old partial reply")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "chat.tryAgain" }));
+    expect(retry).toHaveBeenCalledOnce();
+    expect(screen.queryByText("old partial reply")).not.toBeInTheDocument();
+    expect(screen.queryByText("chat.runStatus.failed")).not.toBeInTheDocument();
+
+    rerender(<MessageList {...props} regenerate={retry} messageList={buildChatMessageListFromHistory([
+      { ...record, result: "new partial reply", run_id: "failed-run-2", failed_attempts: [failed] },
+    ])} />);
+    expect(screen.queryByText("old partial reply")).not.toBeInTheDocument();
+    expect(screen.getByText("new partial reply")).toBeInTheDocument();
+    expect(screen.getAllByText("chat.runStatus.failed")).toHaveLength(1);
+  });
+
+  it("hides retried failures restored from history while preserving attachments and the latest reply", () => {
     const onOpenSideChat = vi.fn();
     const onCiteMessage = vi.fn();
     const messageList = buildChatMessageListFromHistory([
@@ -92,18 +127,9 @@ describe("MessageList side chat selection", () => {
 
     expect(screen.getByText("explain this report")).toBeInTheDocument();
     expect(screen.getByText("report.pdf")).toBeInTheDocument();
-    expect(screen.getByText("failed partial answer")).toBeInTheDocument();
-    expect(screen.getByText("chat.runStatus.failed")).toBeInTheDocument();
-
-    selectMessageText("failed partial answer");
-    expect(
-      screen.queryByRole("button", { name: "chat.sideChat.askFromSelection" }),
-    ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "chat.cite" }));
-    expect(onCiteMessage).toHaveBeenCalledWith(
-      "failed partial answer",
-      "history-1:failed:failed-run-1",
-    );
+    expect(screen.queryByText("failed partial answer")).not.toBeInTheDocument();
+    expect(screen.queryByText("chat.runStatus.failed")).not.toBeInTheDocument();
+    expect(document.querySelector('[data-chat-history-id="history-1:failed:failed-run-1"]')).toBeNull();
     expect(onOpenSideChat).not.toHaveBeenCalled();
 
     selectMessageText("latest answer");

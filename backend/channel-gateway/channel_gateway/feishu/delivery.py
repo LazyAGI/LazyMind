@@ -32,6 +32,7 @@ from channel_gateway.feishu.ports import (
 from channel_gateway.feishu.presentation import (
     FeishuPresentationRenderer,
     FeishuReplyRenderer,
+    FeishuNotificationRenderer,
     media_free_feishu_text,
     streaming_reply_card,
     task_progress_text,
@@ -238,6 +239,7 @@ class FeishuDeliveryProvider:
         self._credentials = credentials
         self._channels = channels
         self._renderer = FeishuPresentationRenderer(renderer)
+        self._notification_renderer = FeishuNotificationRenderer
         self._lazymind = lazymind
 
     def open_stream(
@@ -382,6 +384,8 @@ class FeishuDeliveryProvider:
         self,
         message: ClaimedOutbound,
     ) -> list[dict[str, Any]]:
+        if message.purpose == 'notification':
+            return self._notification_renderer.render(message)
         message = self._persist_workspace_result(message)
         parts = self._renderer.render(message)
         sources = [

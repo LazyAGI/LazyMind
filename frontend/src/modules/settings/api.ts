@@ -1,3 +1,6 @@
+import type { UserUIPreferencesOpenAPIResponse } from "@/api/generated/core-client";
+import { patchUserUiPreferences } from "@/modules/user/uiPreferencesApi";
+import { setAllMcpServersEnabled, type BulkUpdateMcpServersResult } from "@/modules/memory/toolApi";
 import { axiosInstance, BASE_URL } from "@/components/request";
 
 const coreBasePath = `${BASE_URL}/api/core`;
@@ -80,4 +83,20 @@ export async function runSettingsChecks(): Promise<SettingsChecks> {
     `${coreBasePath}/settings/checks`,
   );
   return unwrap<SettingsChecks>(response.data);
+}
+
+export type SettingsChangeKey = keyof SettingsControls | "developer_mode_active";
+export interface SettingsChangeRequest {
+  key: SettingsChangeKey;
+  enabled: boolean;
+}
+export interface SettingsChangeResult extends SettingsChangeRequest {
+  preferences?: UserUIPreferencesOpenAPIResponse;
+  mcp?: BulkUpdateMcpServersResult;
+}
+export async function applySettingsChange(change: SettingsChangeRequest): Promise<SettingsChangeResult> {
+  if (change.key === "mcp_enabled") {
+    return { ...change, mcp: await setAllMcpServersEnabled(change.enabled) };
+  }
+  return { ...change, preferences: await patchUserUiPreferences({ [change.key]: change.enabled }) };
 }

@@ -28,6 +28,7 @@ import (
 	skillfs "lazymind/core/skillv2/fs"
 	skillhttperr "lazymind/core/skillv2/httperr"
 	skillmarket "lazymind/core/skillv2/market"
+	skillmetadata "lazymind/core/skillv2/metadata"
 	skillremotefs "lazymind/core/skillv2/remotefs"
 	skillreview "lazymind/core/skillv2/review"
 	skillrevision "lazymind/core/skillv2/revision"
@@ -111,6 +112,15 @@ func List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := positiveQueryInt(r, "page", 1)
+	nameOnly := false
+	if value := r.URL.Query().Get("name_only"); value != "" {
+		var err error
+		nameOnly, err = strconv.ParseBool(value)
+		if err != nil {
+			skillhttperr.ReplyWithCode(w, "name_only must be a boolean", http.StatusBadRequest, skillhttperr.CodeInvalidRequest)
+			return
+		}
+	}
 	requestedPageSize := positiveQueryInt(r, "page_size", 20)
 	effectivePageSize := requestedPageSize
 	if effectivePageSize > 100 {
@@ -119,6 +129,7 @@ func List(w http.ResponseWriter, r *http.Request) {
 	resp, err := newSkillService(db).ListSkills(r.Context(), skillservice.ListSkillsRequest{
 		UserID:   userID,
 		Keyword:  r.URL.Query().Get("keyword"),
+		NameOnly: nameOnly,
 		Category: r.URL.Query().Get("category"),
 		Source:   r.URL.Query().Get("source"),
 		Tags:     r.URL.Query()["tags"],
@@ -255,7 +266,16 @@ func Create(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{
 		"skill_id":         resp.SkillID,
 		"head_revision_id": resp.HeadRevisionID,
+		"warnings":         normalizationWarningsDTO(resp.Warnings),
 	})
+}
+
+func normalizationWarningsDTO(warnings []skillmetadata.NormalizationWarning) []map[string]string {
+	out := make([]map[string]string, 0, len(warnings))
+	for _, warning := range warnings {
+		out = append(out, map[string]string{"code": warning.Code, "message": warning.Message})
+	}
+	return out
 }
 
 func (s skillSourceRequest) isExternalImport() bool {
@@ -345,6 +365,7 @@ func Patch(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{
 		"skill_id":         resp.SkillID,
 		"head_revision_id": resp.HeadRevisionID,
+		"warnings":         normalizationWarningsDTO(resp.Warnings),
 	})
 }
 

@@ -45,21 +45,26 @@ def test_tool_limit_coordinator_continues_same_invocation() -> None:
         lazyllm.globals._init_sid(sid)
         result['limit'] = coordinator.on_max_retries(None, 21, 21)
 
-    with config.temp('agentic_tool_limit_wait_timeout', 2.0), \
+    # File-backed queues can be slow on Windows CI; this tests behavior, not latency.
+    wait_timeout = 10.0
+    with config.temp('agentic_tool_limit_wait_timeout', wait_timeout), \
             config.temp('agentic_expanded_max_rounds', 200):
         thread = threading.Thread(target=wait_for_decision)
         thread.start()
         decision_id = ''
-        deadline = time.time() + 1
-        while time.time() < deadline and not decision_id:
-            for event in _read_events():
-                if event['tag'] == 'tool_limit_pending':
-                    decision_id = event['decision_id']
-                    break
-            time.sleep(0.01)
-        assert decision_id
-        assert coordinator.submit(sid, decision_id, 'continue') is True
-        thread.join(timeout=2)
+        try:
+            deadline = time.monotonic() + wait_timeout
+            while time.monotonic() < deadline and not decision_id:
+                for event in _read_events():
+                    if event['tag'] == 'tool_limit_pending':
+                        decision_id = event['decision_id']
+                        break
+                if not decision_id:
+                    time.sleep(0.01)
+            assert decision_id
+            assert coordinator.submit(sid, decision_id, 'continue') is True
+        finally:
+            thread.join(timeout=wait_timeout + 5)
 
     assert not thread.is_alive()
     assert result['limit'] == 200

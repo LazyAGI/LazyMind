@@ -13,6 +13,7 @@ from channel_gateway.common.application.intents import (
 from channel_gateway.common.application.messages import (
     ChannelMessageService,
 )
+from channel_gateway.common.application.notifications import NotificationService
 from channel_gateway.common.application.routing import ChannelCommandRouter
 from channel_gateway.common.application.task_artifacts import (
     TaskArtifactMonitor,
@@ -58,6 +59,8 @@ from channel_gateway.wechat.runtime import WeChatRuntime
 from channel_gateway.wechat.service import (
     WeChatConnectionService,
 )
+from channel_gateway.wecom.runtime import WeComRuntime
+from channel_gateway.wecom.service import WeComService
 
 
 @dataclass(frozen=True)
@@ -151,6 +154,7 @@ class GatewayComponents:
     message_worker: MessageWorker
     delivery_worker: DeliveryWorker
     runtime_supervisors: tuple[RuntimeSupervisor, ...]
+    notifications: NotificationService
 
     def start(self) -> None:
         self.store.initialize()
@@ -279,6 +283,11 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
         tasks=lazymind,
     )
     providers = ProviderRegistry()
+    wecom_runtime = WeComRuntime(store, cipher)
+    wecom = WeComService(store, cipher, wecom_runtime)
+    providers.register('wecom', ProviderComponents(
+        connection=wecom, accounts=wecom, delivery=wecom,
+    ))
     providers.register(
         'wechat',
         ProviderComponents(
@@ -314,9 +323,11 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
         messages=messages,
         streams=providers,
     )
+    notifications = NotificationService(store, lazymind, feishu_accounts, wecom)
     delivery_worker = DeliveryWorker(
         store=store,
         providers=providers,
+        notifications=notifications,
     )
     wechat_accounts = AccountRuntimeSupervisor(
         provider='wechat',
@@ -330,6 +341,7 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
     )
     return GatewayComponents(
         store=store,
+        notifications=notifications,
         connections=ConnectionApplicationService(
             store=store,
             providers=providers,
@@ -347,5 +359,8 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
             feishu_accounts_runtime,
             feishu_connections,
             feishu_task_monitor,
+            wecom,
+            AccountRuntimeSupervisor(provider='wecom', store=store, runtime=wecom_runtime),
+            TaskArtifactMonitor(provider='wecom', store=store, credentials=wecom_runtime, tasks=lazymind),
         ),
     )

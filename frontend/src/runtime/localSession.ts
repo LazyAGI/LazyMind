@@ -3,7 +3,7 @@ import { apiUrl } from "./apiBase";
 import { runtimeFeatures } from "./features";
 import i18n from "@/i18n";
 
-let localSessionPromise: Promise<UserInfo | null> | null = null;
+const localSessionPromises = new Map<string, Promise<UserInfo | null>>();
 export let localSessionInitialized = false;
 
 export interface LocalSessionOptions {
@@ -30,21 +30,24 @@ export async function ensureLocalSession(
     return current;
   }
 
-  if (!localSessionPromise) {
-    localSessionPromise = (async () => {
+  const identity = AgentAppsAuth.getSessionIdentity();
+  if (!localSessionPromises.has(identity)) {
+    const pending = (async () => {
       const session = await requestLocalAdminSession(Boolean(options?.force));
+      if (AgentAppsAuth.getSessionIdentity() !== identity) throw new Error("STALE_AUTH_SESSION");
       if (!session?.token) {
         throw new Error(i18n.t("errors.2000509"));
       }
-      AgentAppsAuth.setUserInfo(session);
+      AgentAppsAuth.replaceLocalSession(session);
       localSessionInitialized = true;
       return AgentAppsAuth.getUserInfo();
     })().finally(() => {
-      localSessionPromise = null;
+      localSessionPromises.delete(identity);
     });
+    localSessionPromises.set(identity, pending);
   }
 
-  return localSessionPromise;
+  return localSessionPromises.get(identity)!;
 }
 
 export async function restoreLocalSessionAndGetToken(): Promise<string> {

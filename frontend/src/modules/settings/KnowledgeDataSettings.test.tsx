@@ -112,7 +112,7 @@ describe("KnowledgeDataSettings", () => {
     expect(mocks.navigate).not.toHaveBeenCalled();
   });
 
-  it("opens knowledge bases from the entire row and preserves the settings return context", async () => {
+  it("keeps knowledge, data and file rows in settings while search retains configuration links", async () => {
     render(<KnowledgeDataSettings
       controlsDisabled={false}
       documentParsingEnabled={false}
@@ -121,10 +121,14 @@ describe("KnowledgeDataSettings", () => {
       onDocumentParsingChange={vi.fn()}
     />);
 
-    const knowledgeRow = await screen.findByRole("link", { name: "打开知识库配置" });
-    fireEvent.click(knowledgeRow);
-
-    expect(mocks.navigate).toHaveBeenCalledWith("/lib/knowledge/list?from=settings-knowledge");
+    fireEvent.click(await screen.findByText("知识库"));
+    expect(screen.queryByRole("link", { name: "打开知识库配置" })).not.toBeInTheDocument();
+    for (const group of ["retrieval", "data", "file-access"]) {
+      const row = document.querySelector(`.settings-knowledge-group.is-${group}`)!;
+      expect(row.querySelector("a")).toBeNull();
+    }
+    expect(document.querySelector('a[href="/settings?section=knowledge&tool=web-search"]')).not.toBeNull();
+    expect(mocks.navigate).not.toHaveBeenCalled();
   });
 
   it("uses the reviewed localized copy instead of a backend tool description", async () => {

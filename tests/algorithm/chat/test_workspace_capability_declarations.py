@@ -17,14 +17,20 @@ def test_default_internal_tool_implementations_declare_no_host_paths():
     from lazymind.chat.engine.tools.vocab_learn import vocab_learn
     from lazymind.chat.engine.tools.ask_user import ask_user
     from lazymind.chat.engine.tools.lazy_kb import KBToolkit, kb_tmp_search
-    from lazymind.chat.engine.tools.file_resources import tools as workspace
     from lazymind.chat.engine.tools import subagent_chat_tools as tasks
     _assert_no_host_paths([
         calculator, list_data_sources, url_fetch, vocab_learn, ask_user, KBToolkit(), kb_tmp_search,
-        workspace.read_file_resource, workspace.search_file_resource,
         tasks.create_subagent, tasks.list_subagents,
         tasks.get_subagent_status, tasks.list_subagent_artifacts, tasks.get_subagent_artifacts,
     ])
+
+
+def test_local_file_resource_tools_declare_host_paths():
+    from lazymind.chat.engine.tools.file_resources import tools as workspace
+
+    manager = ToolManager([workspace.read_file_resource, workspace.search_file_resource])
+    assert len(manager.tools_info) == 2
+    assert {tool.runtime_metadata.host_file_access for tool in manager.tools_info.values()} == {HostFileAccess.DECLARED}
 
 
 def test_scoped_factories_preserve_declarations_when_registered(tmp_path):

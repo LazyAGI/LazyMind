@@ -5,11 +5,13 @@ import asyncio
 import json
 import os
 import re
+import sys
 import time
 import base64
 import types
 import tempfile
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -25,6 +27,7 @@ from lazyllm.tools.agent.base import (
     attachable_tool_observation,
 )
 from lazymind.chat.engine.tool_auth import inject_tool_config
+from lazymind.chat.engine.agent_runtime.env_runtime import inject_runtime_env
 
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,
@@ -35,8 +38,20 @@ from lazymind.chat.engine.agent_runtime import (
     normalize_attachments,
     render_attachment_content,
     make_cancel_stop_condition,
+    UserCancelledError,
 )
 from lazymind.chat.engine.prompts import add_standard_system_sections
+from lazymind.chat.engine.agent_runtime.active_context import (
+    classify_special_tool,
+    pin_task_goals_into_builder,
+)
+from lazymind.chat.engine.agent_runtime.workflow_compactor import (
+    make_workflow_history_compactor,
+)
+from lazymind.chat.engine.agent_runtime.compactors import (
+    commit_tool_result_plan,
+    plan_tool_result_compaction,
+)
 from lazymind.chat.engine.tools.file_resources.tools import (
     search_file_resource as grep, read_file_resource as read_file,
     list_skill_files,
@@ -71,13 +86,38 @@ from . import (
 )
 from . import tools as subagent_tools
 from .context import (
-    LARGE_TOOL_RESULT_FALLBACK_CHARS,
     LARGE_TOOL_RESULT_SCAN_THRESHOLD_BYTES,
     LARGE_TOOL_RESULT_TOKEN_THRESHOLD,
     SubAgentContext,
     set_context,
 )
 from .db import MemorySubAgentStore
+
+WORKFLOW_TOOL_FAILURE_LIMITS = {
+    'get_artifact': 2,
+    'save_artifacts': 2,
+    'validate_and_allocate_outline': 1,
+    'normalize_bid_outline_from_inputs': 1,
+    'validate_proposal_from_inputs': 1,
+}
+WORKFLOW_TOOL_CALL_LIMITS = {
+    'get_artifact': 6,
+    'save_artifacts': 8,
+    'validate_and_allocate_outline': 1,
+    'normalize_bid_outline_from_inputs': 2,
+    'validate_proposal_from_inputs': 2,
+    'validate_*': 2,
+}
+
+
+def _hard_constraints_from_params(params: Dict[str, Any]) -> str:
+    parts = []
+    for key in ('word_target', 'output_format', 'use_default_docx_template'):
+        value = params.get(key)
+        if value is not None and str(value).strip():
+            parts.append(f'{key}={value}')
+    return '; '.join(parts)
+
 
 DRAFT_STREAM_EVENT_TYPES = frozenset({
     'artifact_stream_start',
@@ -121,7 +161,9 @@ def _generate_display_plan(llm: Any, objective: str, scope: Optional[Dict[str, A
             'task_context_only': objective[:12000],
         }, ensure_ascii=False)
     )
-    response = llm.share(stream=False)(prompt)
+    # Streaming-only models still return an aggregated response through LazyLLM.
+    # Keep this background request's text and reasoning out of the agent event queue.
+    response = llm.share(stream={'_stream_sink': lambda event: None})(prompt)
     text = response if isinstance(response, str) else (
         response.get('content', '') if isinstance(response, dict) else ''
     )
@@ -193,9 +235,34 @@ async def merge_agent_and_stream_events(
         if agent_error is not None:
             raise agent_error
     finally:
-        for pending in (agent_task, stream_task):
-            if pending is not None and not pending.done():
+        original_error = sys.exc_info()[1]
+        pending_tasks = [task for task in (agent_task, stream_task) if task is not None]
+        for pending in pending_tasks:
+            if not pending.done():
                 pending.cancel()
+
+        async def close_source():
+            await asyncio.gather(*pending_tasks, return_exceptions=True)
+            await iterator.aclose()
+
+        cleanup = asyncio.create_task(close_source())
+        cancellation = None
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError as error:
+                if cancellation is None:
+                    cancellation = error
+            except Exception:
+                break
+        try:
+            cleanup.result()
+        except BaseException:
+            if original_error is None:
+                raise
+            LOG.exception('[SubAgent] stream cleanup failed')
+        if cancellation is not None and original_error is None:
+            raise cancellation
 
 
 def _resolve_workflow_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
@@ -353,6 +420,10 @@ def _resolve_runtime_tools(
         permission = WorkspaceContext.from_config(params)
         host_filesystem_enabled = bool(_cfg['trusted_local_mode']) or permission.active or permission.workflow_full_trust
         file_tools = FileSystemToolkit().get_flat_tools() if host_filesystem_enabled else {}
+        if host_filesystem_enabled:
+            from lazymind.chat.engine.tools.native_search import native_search, native_search_available
+            if native_search_available():
+                file_tools['native_search'] = native_search
         result = []
         for name in name_list:
             if name in {'kb', 'web_search'} and name not in default_by_name:
@@ -603,6 +674,9 @@ def _build_agentic_config(
         ).strip(),
         'is_subagent': True,
         'agent_type': effective_agent_type,
+        'workspace': str(task.get('workspace_path') or '').strip(),
+        'workspace_path': str(task.get('workspace_path') or '').strip(),
+        'workflow_step_id': str(params.get('step_id') or ''),
         'thinking_depth': str(
             params.get('_thinking_depth') or agentic_config.get('thinking_depth') or 'medium'
         ),
@@ -644,6 +718,14 @@ def _build_subagent_plan(
         show_tool_status=False,
         tool_prompt_appendices=tool_prompt_appendices,
         include_editable_writing=False,
+    )
+    parent_context = (ctx.params.get('parent_agentic_config') or {}).get('model_context')
+    pin_task_goals_into_builder(
+        builder,
+        parent_context,
+        task_goal=ctx.objective,
+        key_instructions=str((ctx.params or {}).get('instruction') or ''),
+        hard_constraints=_hard_constraints_from_params(ctx.params or {}),
     )
     builder.system(
         'subagent_role', 'SubAgent Role', (
@@ -863,6 +945,16 @@ def _build_subagent_plan(
         stop_tools=sorted(terminal_tool_names & available_tool_names),
         force_summarize_context=ctx.objective,
         execution_options=AgentExecutionOptions(
+            workspace=ctx.workspace_path or None,
+            history_compactor=(
+                make_workflow_history_compactor(
+                    llm_config=llm_config,
+                    keep_recent=int(_cfg['agentic_keep_full_turns']),
+                    workspace=ctx.workspace_path or None,
+                )
+                if str(ctx.agent_type or '') == 'workflow_step'
+                else None
+            ),
             tool_state_scope=f'subagent:{ctx.task_id}',
             preload_all_tools=str(ctx.agent_type or '') == 'workflow_step',
             enable_builtin_tools=False if (
@@ -880,6 +972,8 @@ def _build_subagent_plan(
             extra_stop_condition=make_cancel_stop_condition(),
             max_retries=max(1, int(_cfg['agentic_expanded_max_rounds']) - 1),
             llm_config=llm_config or {},
+            tool_failure_limits=WORKFLOW_TOOL_FAILURE_LIMITS,
+            tool_call_limits=WORKFLOW_TOOL_CALL_LIMITS,
         ),
     )
 
@@ -894,26 +988,25 @@ def _truncate_tool_result(ctx: SubAgentContext, result: Any, tool_name: str) -> 
     reasoning.
     """
     text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, default=str)
+    if classify_special_tool(tool_name) in ('skill', 'artifact'):
+        return text
     encoded = text.encode('utf-8', errors='replace')
     if len(encoded) <= LARGE_TOOL_RESULT_SCAN_THRESHOLD_BYTES:
         return text
     if estimate_tokens(text) < LARGE_TOOL_RESULT_TOKEN_THRESHOLD:
         return text
     try:
-        abs_path = ctx.write_large_content(text, hint=tool_name or 'tool_result')
-        rel_path = os.path.relpath(abs_path, ctx.workspace_path) if ctx.workspace_path else abs_path
-        size_kb = len(encoded) / 1024
-        return (
-            f'[Large result offloaded to file — {size_kb:.1f} KB]\n'
-            f'File path (relative to workspace): {rel_path}\n'
-            f'Use this path to reference the content in subsequent reasoning or tool calls.'
+        plan = plan_tool_result_compaction(
+            tool_name,
+            result,
+            workspace=ctx.workspace_path,
         )
+        committed = commit_tool_result_plan(plan, workspace=ctx.workspace_path)
+        if committed.compactor == 'spill':
+            return committed.content
     except Exception as exc:
         LOG.warning('[SubAgent] failed to offload large tool result for %s: %s', tool_name, exc)
-        # Fallback: truncate with a notice.
-        limit = LARGE_TOOL_RESULT_FALLBACK_CHARS
-        truncated = text[:limit]
-        return truncated + f'\n... [truncated — original {len(encoded) // 1024} KB]'
+    return text
 
 
 def _commit_prompt_only_text_output(
@@ -1047,9 +1140,8 @@ def _terminal_tool_failure(event: Dict[str, Any], terminal_tool_names: set[str])
 def _signal_task_cancel(task_id: str) -> bool:
     """Signal the sid-scoped worker Agent without masking the original failure."""
     try:
-        from lazyllm.common.queue import FileSystemQueue
-        lazyllm.globals._init_sid(sid=task_id)
-        FileSystemQueue(klass='cancel').enqueue(json.dumps({'tag': 'cancel'}))
+        from lazymind.chat.engine.agent_runtime.cancellation import request_cancel
+        request_cancel(task_id)
         return True
     except Exception:
         LOG.exception('failed to stop terminal workflow tool task %s', task_id)
@@ -1066,6 +1158,7 @@ async def run_subagent_stream(
     task_spec: Optional[Dict[str, Any]] = None,
     initial_steps: Optional[List[Dict[str, Any]]] = None,
     workspace_execution: Optional[Dict[str, Any]] = None,
+    user_env_vars: Optional[Dict[str, str]] = None,
 ):
     """Async generator yielding Task SSE lines.
 
@@ -1244,6 +1337,7 @@ async def run_subagent_stream(
         })
         inject_model_config(model_config)
         inject_tool_config(tool_config)
+        inject_runtime_env(user_env_vars)
         set_context(ctx)
 
         agentic_config = _build_agentic_config(task, params, effective_agent_type)
@@ -1273,6 +1367,9 @@ async def run_subagent_stream(
         if host_filesystem_enabled and effective_agent_type != 'workflow_step':
             from lazyllm.tools.agent import FileSystemToolkit
             subagent_tools_all.append(FileSystemToolkit())
+            from lazymind.chat.engine.tools.native_search import native_search, native_search_available
+            if native_search_available():
+                subagent_tools_all.append(native_search)
         runtime_configs = _tool_configs_for_runtime_tools(visible_runtime_tools)
         from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 
@@ -1341,8 +1438,11 @@ async def run_subagent_stream(
                     )
                     if steps:
                         await stream_events.put({'type': 'plan', 'steps': steps, 'scope_version': 2})
-                except Exception:
-                    LOG.warning('[SubAgent] Display plan unavailable; execution continues')
+                except Exception as exc:
+                    LOG.warning(
+                        f'[SubAgent] Display plan unavailable; execution continues '
+                        f'task_id={task_id} error_type={type(exc).__name__}'
+                    )
             display_plan_task = asyncio.create_task(generate_plan_in_background())
         if display_plan:
             ctx.db.append_step(task_id, step_seq, 'plan', {'steps': display_plan, 'scope_version': 2})
@@ -1369,34 +1469,132 @@ async def run_subagent_stream(
         merged_events = merge_agent_and_stream_events(
             executor.stream(llm, plan), stream_events,
         )
-        async for source, merged_payload in merged_events:
-            if source == 'stream':
-                pending_event = _drain_outbound_text()
-                if pending_event is not None:
-                    yield _sse(pending_event)
-                stream_event = dict(merged_payload)
-                stream_event['task_id'] = task_id
-                if stream_event.get('type') == 'plan':
-                    ctx.db.append_step(task_id, step_seq, 'plan', {
-                        'steps': stream_event['steps'], 'scope_version': 2,
-                    })
-                    step_seq += 1
-                if stream_event.get('type') == 'progress':
-                    progress = max(progress, int(stream_event.get('progress') or 0))
-                    stream_event['progress'] = progress
-                yield _sse(stream_event)
-                continue
-
-            kind, payload = merged_payload
-            if kind == 'event':
-                item = payload
-                tag = item.get('tag')
-                # Persist tool steps for resume / breakpoint recovery.
-                if tag in ('tool_calls', 'tool_results'):
+        async with aclosing(merged_events):
+            async for source, merged_payload in merged_events:
+                if source == 'stream':
                     pending_event = _drain_outbound_text()
                     if pending_event is not None:
                         yield _sse(pending_event)
-                    # Flush accumulated text/think as a single step before tool call.
+                    stream_event = dict(merged_payload)
+                    stream_event['task_id'] = task_id
+                    if stream_event.get('type') == 'plan':
+                        ctx.db.append_step(task_id, step_seq, 'plan', {
+                            'steps': stream_event['steps'], 'scope_version': 2,
+                        })
+                        step_seq += 1
+                    if stream_event.get('type') == 'progress':
+                        progress = max(progress, int(stream_event.get('progress') or 0))
+                        stream_event['progress'] = progress
+                    yield _sse(stream_event)
+                    continue
+
+                kind, payload = merged_payload
+                if kind == 'event':
+                    item = payload
+                    tag = item.get('tag')
+                    # Persist tool steps for resume / breakpoint recovery.
+                    if tag in ('tool_calls', 'tool_results'):
+                        pending_event = _drain_outbound_text()
+                        if pending_event is not None:
+                            yield _sse(pending_event)
+                        # Flush accumulated text/think as a single step before tool call.
+                        if _pending_think:
+                            ctx.db.append_step(task_id, step_seq, 'think', {'content': _pending_think})
+                            step_seq += 1
+                            _pending_think = ''
+                        if _pending_text:
+                            ctx.db.append_step(task_id, step_seq, 'text', {'content': _pending_text})
+                            step_seq += 1
+                            _pending_text = ''
+                        durable_step = _persist_step(ctx, step_seq, item)
+                        step_seq += 1
+                        if effective_agent_type == 'workflow_step' and tag == 'tool_results':
+                            terminal_error = _terminal_tool_failure(
+                                item, terminal_workflow_tools,
+                            )
+                            if terminal_error:
+                                # Agent execution runs in a worker thread. Cancelling this
+                                # async iterator alone does not stop subsequent React rounds.
+                                if _signal_task_cancel(task_id):
+                                    clear_cancel_queue = False
+                                raise RuntimeError(terminal_error)
+                            candidate_control = _workflow_control_from_tool_results(
+                                item, declared_workflow_tools,
+                            )
+                            if candidate_control:
+                                if workflow_control and workflow_control != candidate_control:
+                                    raise ValueError(
+                                        'Workflow attempt returned conflicting route decisions.'
+                                    )
+                                workflow_control = candidate_control
+                        # Forward tool steps as SSE events so the frontend can render them.
+                        if tag == 'tool_calls':
+                            calls = [
+                                {
+                                    'id': tc.get('id', ''),
+                                    'name': tc.get('name') or (tc.get('function') or {}).get('name', ''),
+                                    'args': tc.get('args') or (tc.get('function') or {}).get('arguments', {}),
+                                }
+                                for tc in (item.get('tool_calls') or [])
+                                if isinstance(tc, dict)
+                            ]
+                            if calls:
+                                workflow_tool_in_flight = effective_agent_type == 'workflow_step'
+                                yield _sse({'type': 'tool_calls', 'task_id': task_id, 'tool_calls': calls})
+                        elif tag == 'tool_results':
+                            results = [
+                                {
+                                    'id': tr.get('id', ''),
+                                    'name': tr.get('name', ''),
+                                    'result': str(tr.get('result', tr.get('content', '')))[:2000],
+                                }
+                                for tr in (item.get('tool_results') or [])
+                                if isinstance(tr, dict)
+                            ]
+                            if results:
+                                # Keep the small result for live UI rendering and send
+                                # Core the separately bounded/offloaded representation
+                                # used to reconstruct a resumed agent conversation.
+                                yield _sse({
+                                    'type': 'tool_results',
+                                    'task_id': task_id,
+                                    'tool_results': results,
+                                    'durable_tool_results': (
+                                        (durable_step or {}).get('tool_results') or []
+                                    ),
+                                })
+                            workflow_tool_in_flight = False
+                            source_event = _sources_event()
+                            if source_event is not None:
+                                yield _sse(source_event)
+                        # Drain artifact events emitted synchronously by tools.
+                        while emitted:
+                            ev = emitted.pop(0)
+                            ev['task_id'] = task_id
+                            yield _sse(ev)
+                        if tag == 'tool_results' and progress < 90:
+                            progress = min(90, progress + 15)
+                            yield _sse({'type': 'progress', 'task_id': task_id, 'progress': progress,
+                                        'current_phase': '执行中...'})
+                    # Translate all events (text/think/tool_calls/tool_results) via shared translator.
+                    for frame in translator.feed(item):
+                        # Tool calls/results already have compact structured SSE events. Some
+                        # workflow tools run nested streaming models (PPT page HTML is the
+                        # largest example); those internal tokens are implementation output,
+                        # not the SubAgent's user-facing execution log.
+                        if tag in ('tool_calls', 'tool_results') or workflow_tool_in_flight:
+                            continue
+                        ev_type = 'think' if frame.get('think') else 'text'
+                        content = frame.get(ev_type) or ''
+                        for buffered_event in _buffer_outbound_text(ev_type, content):
+                            yield _sse(buffered_event)
+                        if ev_type == 'think':
+                            _pending_think += content
+                        else:
+                            _pending_text += content
+                else:  # 'final' -- AgentExecutor propagates future exceptions before yielding this.
+                    final_result = payload
+                    # Flush any remaining accumulated text/think as the final step.
                     if _pending_think:
                         ctx.db.append_step(task_id, step_seq, 'think', {'content': _pending_think})
                         step_seq += 1
@@ -1405,103 +1603,6 @@ async def run_subagent_stream(
                         ctx.db.append_step(task_id, step_seq, 'text', {'content': _pending_text})
                         step_seq += 1
                         _pending_text = ''
-                    durable_step = _persist_step(ctx, step_seq, item)
-                    step_seq += 1
-                    if effective_agent_type == 'workflow_step' and tag == 'tool_results':
-                        terminal_error = _terminal_tool_failure(
-                            item, terminal_workflow_tools,
-                        )
-                        if terminal_error:
-                            # Agent execution runs in a worker thread. Cancelling this
-                            # async iterator alone does not stop subsequent React rounds.
-                            if _signal_task_cancel(task_id):
-                                clear_cancel_queue = False
-                            raise RuntimeError(terminal_error)
-                        candidate_control = _workflow_control_from_tool_results(
-                            item, declared_workflow_tools,
-                        )
-                        if candidate_control:
-                            if workflow_control and workflow_control != candidate_control:
-                                raise ValueError(
-                                    'Workflow attempt returned conflicting route decisions.'
-                                )
-                            workflow_control = candidate_control
-                    # Forward tool steps as SSE events so the frontend can render them.
-                    if tag == 'tool_calls':
-                        calls = [
-                            {
-                                'id': tc.get('id', ''),
-                                'name': tc.get('name') or (tc.get('function') or {}).get('name', ''),
-                                'args': tc.get('args') or (tc.get('function') or {}).get('arguments', {}),
-                            }
-                            for tc in (item.get('tool_calls') or [])
-                            if isinstance(tc, dict)
-                        ]
-                        if calls:
-                            workflow_tool_in_flight = effective_agent_type == 'workflow_step'
-                            yield _sse({'type': 'tool_calls', 'task_id': task_id, 'tool_calls': calls})
-                    elif tag == 'tool_results':
-                        results = [
-                            {
-                                'id': tr.get('id', ''),
-                                'name': tr.get('name', ''),
-                                'result': str(tr.get('result', tr.get('content', '')))[:2000],
-                            }
-                            for tr in (item.get('tool_results') or [])
-                            if isinstance(tr, dict)
-                        ]
-                        if results:
-                            # Keep the small result for live UI rendering and send
-                            # Core the separately bounded/offloaded representation
-                            # used to reconstruct a resumed agent conversation.
-                            yield _sse({
-                                'type': 'tool_results',
-                                'task_id': task_id,
-                                'tool_results': results,
-                                'durable_tool_results': (
-                                    (durable_step or {}).get('tool_results') or []
-                                ),
-                            })
-                        workflow_tool_in_flight = False
-                        source_event = _sources_event()
-                        if source_event is not None:
-                            yield _sse(source_event)
-                    # Drain artifact events emitted synchronously by tools.
-                    while emitted:
-                        ev = emitted.pop(0)
-                        ev['task_id'] = task_id
-                        yield _sse(ev)
-                    if tag == 'tool_results' and progress < 90:
-                        progress = min(90, progress + 15)
-                        yield _sse({'type': 'progress', 'task_id': task_id, 'progress': progress,
-                                    'current_phase': '执行中...'})
-                # Translate all events (text/think/tool_calls/tool_results) via shared translator.
-                for frame in translator.feed(item):
-                    # Tool calls/results already have compact structured SSE events. Some
-                    # workflow tools run nested streaming models (PPT page HTML is the
-                    # largest example); those internal tokens are implementation output,
-                    # not the SubAgent's user-facing execution log.
-                    if tag in ('tool_calls', 'tool_results') or workflow_tool_in_flight:
-                        continue
-                    ev_type = 'think' if frame.get('think') else 'text'
-                    content = frame.get(ev_type) or ''
-                    for buffered_event in _buffer_outbound_text(ev_type, content):
-                        yield _sse(buffered_event)
-                    if ev_type == 'think':
-                        _pending_think += content
-                    else:
-                        _pending_text += content
-            else:  # 'final' -- AgentExecutor propagates future exceptions before yielding this.
-                final_result = payload
-                # Flush any remaining accumulated text/think as the final step.
-                if _pending_think:
-                    ctx.db.append_step(task_id, step_seq, 'think', {'content': _pending_think})
-                    step_seq += 1
-                    _pending_think = ''
-                if _pending_text:
-                    ctx.db.append_step(task_id, step_seq, 'text', {'content': _pending_text})
-                    step_seq += 1
-                    _pending_text = ''
         stream_merge_active = False
 
         # Drain remaining artifact events.
@@ -1587,6 +1688,10 @@ async def run_subagent_stream(
             'summary': summary, 'cost': cost,
             **({'control': workflow_control} if workflow_control else {}),
         })
+        yield 'data: [DONE]\n\n'
+    except UserCancelledError:
+        yield _sse({'type': 'done', 'task_id': task_id, 'status': 'interrupted',
+                    'summary': 'stopped by user'})
         yield 'data: [DONE]\n\n'
     except Exception as exc:  # noqa: BLE001
         LOG.exception('[SubAgent] run failed')

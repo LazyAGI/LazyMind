@@ -125,6 +125,11 @@ def _translate(statement: str) -> str:
     sql = _FOR_LOCK_RE.sub('', sql)
     sql = _RETURNING_ALIAS_RE.sub('RETURNING *', sql)
     sql = re.sub(
+        r'CURRENT_TIMESTAMP\s*\+\s*make_interval\(secs\s*=>\s*\?\)',
+        "datetime(CURRENT_TIMESTAMP, '+' || ? || ' seconds')",
+        sql, flags=re.IGNORECASE,
+    )
+    sql = re.sub(
         r"CURRENT_TIMESTAMP\s*-\s*INTERVAL\s*'60 seconds'",
         "datetime(CURRENT_TIMESTAMP, '-60 seconds')",
         sql,
@@ -476,11 +481,20 @@ class SQLiteGatewayStore(GatewayStore):
             for statement in indexes:
                 connection.execute(statement)
             self._migrate_legacy_outbox(connection)
+            self._initialize_notifications(connection)
+            columns = {row['name'] for row in connection.execute('PRAGMA table_info(channel_notification_targets)')}
+            for name, default in (('label', ''), ('kind', 'conversation')):
+                if name not in columns:
+                    connection.execute(f'ALTER TABLE channel_notification_targets ADD COLUMN {name} '
+                                       f"TEXT NOT NULL DEFAULT '{default}'")
 
     @staticmethod
     def _migrate_columns(connection: _SQLiteConnection) -> None:
         additions = {
             'channel_accounts': {
+                'identity_metadata': "TEXT NOT NULL DEFAULT '{}'",
+                'archived_at': 'TIMESTAMPTZ',
+                'default_recipient_id': "TEXT NOT NULL DEFAULT ''",
                 'runtime_status': "VARCHAR(32) NOT NULL DEFAULT 'stopped'",
                 'last_poll_at': 'TIMESTAMPTZ',
                 'last_message_at': 'TIMESTAMPTZ',
@@ -490,6 +504,7 @@ class SQLiteGatewayStore(GatewayStore):
             },
             'channel_connection_sessions': {
                 'cleanup_pending': 'BOOLEAN NOT NULL DEFAULT FALSE',
+                'requested_account_id': 'TEXT',
             },
             'channel_inbox': {
                 'sensitive_payload_ciphertext': 'TEXT',
@@ -760,6 +775,7 @@ class SQLiteGatewayStore(GatewayStore):
         now = dt.datetime.now(dt.timezone.utc)
         lease_until = now + dt.timedelta(seconds=lease_seconds)
         with self._connect() as connection:
+            self._expire_notifications(connection)
             candidate = connection.execute(
                 """
                 SELECT outbox.id
@@ -780,7 +796,7 @@ class SQLiteGatewayStore(GatewayStore):
                     FROM channel_outbox AS earlier
                     WHERE earlier.account_id = outbox.account_id
                       AND earlier.order_key = outbox.order_key
-                      AND earlier.status NOT IN ('sent', 'dead')
+                      AND earlier.status NOT IN ('sent', 'dead', 'skipped', 'unknown')
                       AND earlier.created_sequence
                           < outbox.created_sequence
                 )

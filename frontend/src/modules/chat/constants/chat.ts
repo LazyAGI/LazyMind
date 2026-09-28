@@ -163,7 +163,7 @@ export interface ChatWorkflowStepFeedbackDetail {
   conversationId: string;
   feedbackId: string;
   historyId?: string;
-  message: string;
+  message?: string;
   status?: string;
 }
 

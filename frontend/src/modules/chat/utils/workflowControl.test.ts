@@ -88,3 +88,28 @@ it('never stacks the click acknowledgement on top of a live delivery strip', () 
   });
   expect(overlayInfoBanner('', { ...pending, consumed_at: '2026-09-14T00:00:00Z' })).toBeUndefined();
 });
+
+it('explains Codex cancellation limits without reporting that Workflow stop failed', () => {
+  const delivery = { id: 'cancel', kind: 'cancel' as const, status: 'failed' };
+  const binding = { bound: true, generation: 2, provider: 'codex' };
+  expect(overlayInfoBanner('', delivery, binding)).toEqual({ key: 'chat.workflowControlCodexStopped', tone: 'info' });
+  expect(deliveryBanner({ ...delivery, kind: 'continue' }, binding)?.tone).toBe('warning');
+  expect(deliveryBanner(delivery, { ...binding, provider: 'deepseek-harness' })?.tone).toBe('warning');
+});
+
+it('resolves completed Continue after saved edits invalidate the old execution', async () => {
+ const current = state();
+ current.continuation = 'awaiting_user';
+ current.admission = { can_begin: false, reason: 'edits_pending_continue' };
+ const write = vi.fn().mockResolvedValue(undefined);
+ const actions = controlActions(async () => current, write);
+ await actions.execute({ kind: 'continue', completedStepId: 'write_document' });
+ expect(write.mock.calls[0][0].kind).toBe('continue');
+ expect(write.mock.calls[0][0].step_id).toBeUndefined();
+ await actions.execute({ kind: 'rewind', stepId: 'outline' });
+ expect(write.mock.calls[1][0]).toMatchObject({ kind: 'rewind', step_id: 'outline' });
+ current.admission = { can_begin: false, reason: 'completed' };
+ current.continuation = 'completed';
+ await actions.execute({ kind: 'continue', completedStepId: 'write_document' });
+ expect(write.mock.calls[2][0]).toMatchObject({ kind: 'rewind', step_id: 'write_document' });
+});

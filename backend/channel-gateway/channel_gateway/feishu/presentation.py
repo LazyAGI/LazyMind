@@ -905,3 +905,19 @@ def _presentable_task_summary(value: str) -> str:
     if len(summary) > 800:
         return f'{summary[:800].rstrip()}…'
     return summary
+
+
+class FeishuNotificationRenderer:
+    """Render scheduled notifications as native Feishu cards."""
+
+    @staticmethod
+    def render(message: ClaimedOutbound) -> list[dict[str, Any]]:
+        title = str(message.metadata.get('title') or '定时任务通知')
+        content = presentable_feishu_text(message.text)
+        status = '✅ **任务完成**' if message.intent_kind != 'failed' else '⚠️ **任务失败**'
+        card = FeishuReplyRenderer.render(
+            provider_context=message.provider_context,
+            text=f'**{title}**\n\n{content}',
+            status=status,
+        )
+        return [{'kind': 'card', 'card': card}]

@@ -1,3 +1,4 @@
+import { writerOutlineDescription } from './writerOutlineDescription';
 import {
   BlockTypeSelect,
   BoldItalicUnderlineToggles,
@@ -33,7 +34,7 @@ import {
   MoreOutlined,
   PictureOutlined,
 } from '@ant-design/icons';
-import { Dropdown } from 'antd';
+import { Dropdown, message } from 'antd';
 import { createPortal } from 'react-dom';
 import '@mdxeditor/editor/style.css';
 import {
@@ -132,95 +133,12 @@ function WriterAnchorEditor(props: JsxEditorProps) {
   return <GenericJsxEditor {...props} />;
 }
 
-function attachOutlineInstructionControl(
-  heading: HTMLElement,
-  item: WriterMarkdownOutlineItem,
-  expanded: boolean,
-  onToggle: () => void,
-  labels: {
-    instructions: string;
-    targetChars: string;
-    contextRelations: string;
-    writingSubtasks: string;
-    subtaskType: (type: string) => string;
-  },
-): void {
-  const instructions = item.instructions;
-  if (!instructions || heading.querySelector('[data-writer-outline-control]')) return;
-
-  const panelId = `writer-outline-instructions-${item.anchorId}`;
-  const button = globalThis.document.createElement('button');
-  button.type = 'button';
-  button.className = 'writer-markdown-editor__heading-instruction-toggle';
-  button.dataset.writerOutlineControl = item.anchorId;
-  button.setAttribute('contenteditable', 'false');
-  button.setAttribute('aria-expanded', String(expanded));
-  button.setAttribute('aria-controls', panelId);
-  button.textContent = labels.instructions;
-
-  const panel = globalThis.document.createElement('div');
-  panel.id = panelId;
-  panel.className = 'writer-markdown-editor__heading-instructions';
-  panel.dataset.writerOutlinePanel = item.anchorId;
-  panel.setAttribute('contenteditable', 'false');
-  panel.hidden = !expanded;
-
-  const addRow = (label: string, values: string[]) => {
-    if (values.length === 0) return;
-    const row = globalThis.document.createElement('div');
-    row.className = 'writer-markdown-editor__heading-instruction-row';
-    const strong = globalThis.document.createElement('strong');
-    strong.textContent = label;
-    row.append(strong);
-    if (values.length === 1) {
-      const value = globalThis.document.createElement('span');
-      value.textContent = values[0];
-      row.append(value);
-    } else {
-      const list = globalThis.document.createElement('ul');
-      values.forEach((text) => {
-        const entry = globalThis.document.createElement('li');
-        entry.textContent = text;
-        list.append(entry);
-      });
-      row.append(list);
-    }
-    panel.append(row);
-  };
-
-  if (instructions.target_chars) {
-    addRow(labels.targetChars, [String(instructions.target_chars)]);
-  }
-  addRow(
-    labels.contextRelations,
-    instructions.context_relations.map((relation) => (
-      relation.guidance
-      || [relation.relation, relation.target_node_id].filter(Boolean).join(' / ')
-      || '-'
-    )),
-  );
-  addRow(
-    labels.writingSubtasks,
-    instructions.subtasks.map(
-      (subtask) => `${labels.subtaskType(subtask.subtask_type)} ${subtask.question}`,
-    ),
-  );
-
-  button.addEventListener('click', () => {
-    const expanded = button.getAttribute('aria-expanded') !== 'true';
-    button.setAttribute('aria-expanded', String(expanded));
-    panel.hidden = !expanded;
-    onToggle();
-  });
-  heading.append(button);
-  heading.insertAdjacentElement('afterend', panel);
-}
-
-function setOutlineInstructionControlsExpanded(root: HTMLElement, expanded: boolean): void {
-  root.querySelectorAll<HTMLButtonElement>('[data-writer-outline-control]')
-    .forEach((button) => button.setAttribute('aria-expanded', String(expanded)));
-  root.querySelectorAll<HTMLElement>('[data-writer-outline-panel]')
-    .forEach((panel) => { panel.hidden = !expanded; });
+function attachOutlineDescription(heading: HTMLElement, item: WriterMarkdownOutlineItem): void {
+  const description = writerOutlineDescription(item.instructions);
+  // Like heading numbering and image captions, this is display metadata, not a
+  // foreign DOM node for Lexical to remove or serialize into the document body.
+  if (description) heading.dataset.writerOutlineDescription = description;
+  else delete heading.dataset.writerOutlineDescription;
 }
 
 function internalWriterReferenceLink(target: EventTarget | null): HTMLAnchorElement | null {
@@ -382,6 +300,15 @@ function isEscaped(value: string, index: number): boolean {
 }
 
 function mdxMarkupLength(line: string, start: number): number {
+  const linkDestination = /\]\([ \t]*$/.exec(line.slice(0, start));
+  if (linkDestination && !isEscaped(line, linkDestination.index)) {
+    // Angle brackets delimit Markdown destinations; escaping '<' makes it
+    // part of the image URL and prevents the preview resource from matching.
+    const destination = line.slice(start).match(
+      /^<(?:\\.|[^<>\\])*>(?=[ \t]*(?:\)|["'(]))/,
+    );
+    if (destination) return destination[0].length;
+  }
   const markup = line.slice(start).match(
     /^(?:<!--.*?-->|<\/?[A-Za-z][A-Za-z0-9:._-]*(?=[\s/>])[^<>]*>|<(?:https?:\/\/|mailto:)[^<>\s]+>|<[^<>\s@]+@[^<>\s@]+>)/i,
   );
@@ -612,7 +539,6 @@ export function MarkdownArtifactEditor({
   const [renderErrorSource, setRenderErrorSource] = useState<string>();
   const [conflict, setConflict] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
-  const [outlineInstructionsExpanded, setOutlineInstructionsExpanded] = useState(false);
   const [pageWidth, setPageWidth] = useState<'default' | 'wide' | 'reading'>('default');
   const [selection, setSelection] = useState<MarkdownSelection | null>(null);
   const [selectionToolbar, setSelectionToolbar] = useState<FloatingToolbarAnchor | null>(null);
@@ -708,25 +634,6 @@ export function MarkdownArtifactEditor({
     ...markdownOutline.items.map((item) => item.level),
     6,
   );
-  const hasOutlineInstructions = markdownOutline.items.some((item) => Boolean(item.instructions));
-  const syncOutlineInstructionsExpanded = useCallback(() => {
-    const controls = Array.from(
-      rootRef.current?.querySelectorAll<HTMLButtonElement>('[data-writer-outline-control]') ?? [],
-    );
-    setOutlineInstructionsExpanded(
-      controls.length > 0 && controls.every(
-        (button) => button.getAttribute('aria-expanded') === 'true',
-      ),
-    );
-  }, []);
-  const expandAllOutlineInstructions = useCallback(() => {
-    if (rootRef.current) setOutlineInstructionControlsExpanded(rootRef.current, true);
-    setOutlineInstructionsExpanded(true);
-  }, []);
-  const collapseAllOutlineInstructions = useCallback(() => {
-    if (rootRef.current) setOutlineInstructionControlsExpanded(rootRef.current, false);
-    setOutlineInstructionsExpanded(false);
-  }, []);
   dirtyRef.current = dirty;
   draftMarkdownRef.current = draftMarkdown;
   savingRef.current = saving;
@@ -753,6 +660,7 @@ export function MarkdownArtifactEditor({
           delete element.dataset.writerSystemAnchor;
           delete element.dataset.writerHeadingMode;
           delete element.dataset.writerNumberingLabel;
+          delete element.dataset.writerOutlineDescription;
         });
       editable.querySelectorAll<HTMLElement>(
         '[data-editor-block-type="image"][data-writer-image-caption]',
@@ -820,15 +728,7 @@ export function MarkdownArtifactEditor({
           (candidate) => candidate.id === item.anchorId,
         );
         if (!heading) return;
-        attachOutlineInstructionControl(heading, item, false, syncOutlineInstructionsExpanded, {
-          instructions: t('chat.writerIR.outlineInstructions'),
-          targetChars: t('chat.writerIR.targetChars'),
-          contextRelations: t('chat.writerIR.contextRelations'),
-          writingSubtasks: t('chat.writerIR.writingSubtasks'),
-          subtaskType: (type) => t(`chat.writerIR.subtaskTypes.${type}`, {
-            defaultValue: type,
-          }),
-        });
+        attachOutlineDescription(heading, item);
       });
       if (chatPresentation) {
         editable.querySelectorAll<HTMLAnchorElement>(
@@ -887,7 +787,6 @@ export function MarkdownArtifactEditor({
     numbering,
     readOnly,
     sourceReferenceMap,
-    syncOutlineInstructionsExpanded,
     t,
   ]);
 
@@ -1705,8 +1604,12 @@ export function MarkdownArtifactEditor({
     const target = Array.from(
       rootRef.current?.querySelectorAll<HTMLElement>('[id]') ?? [],
     ).find((element) => element.id === anchorId) ?? null;
+    if (!target) {
+      void message.warning(t('chat.writerIR.referenceTargetMissing'));
+      return;
+    }
     scrollToMarkdownTarget(target);
-  }, [scrollToMarkdownTarget]);
+  }, [scrollToMarkdownTarget, t]);
 
   const navigateToDocumentTitle = useCallback(() => {
     const target = rootRef.current?.querySelector<HTMLElement>(
@@ -2146,11 +2049,7 @@ export function MarkdownArtifactEditor({
             <span role='status' aria-live='polite'>{readOnly ? t('chat.writerMarkdown.readOnly') : saveError ? t('chat.writerMarkdown.saveFailed') : savePaused && dirty ? t('chat.writerLocal.publishingPendingSave') : saving ? t(draftMarkdown !== savingDraftRef.current ? 'chat.writerIR.savingWithEdits' : 'chat.writerIR.saving') : t(dirty ? 'chat.writerLocal.pendingSave' : 'chat.writerMarkdown.saved')}</span>
             {toolbarActions}
             <WriterDocumentOptions width={pageWidth} onWidth={setPageWidth} sourceMode={editorMode === 'source'}
-              onSourceMode={() => setEditorMode(editorMode === 'rich' ? 'source' : 'rich')}>
-              {hasOutlineInstructions && <button type='button' onClick={outlineInstructionsExpanded ? collapseAllOutlineInstructions : expandAllOutlineInstructions}>
-                {t(outlineInstructionsExpanded ? 'chat.writerIR.collapseAllOutlineInstructions' : 'chat.writerIR.expandAllOutlineInstructions')}
-              </button>}
-            </WriterDocumentOptions>
+              onSourceMode={() => setEditorMode(editorMode === 'rich' ? 'source' : 'rich')} />
           </div>
           {editorMode === 'source' && (sourcePreview === undefined
             ? <div className='writer-markdown-editor__notice writer-markdown-editor__notice--error' role='alert'>

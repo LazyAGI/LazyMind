@@ -17,6 +17,8 @@ import {
 export type ResourceTab = "skills" | "workflows";
 
 interface UserSkillWorkflowSettingsProps {
+  activeView?: ResourceTab;
+  onViewChange?: (view: ResourceTab) => void;
   skillsEnabled: boolean;
   workflowsEnabled: boolean;
   groupSaving: ResourceTab | null;
@@ -97,6 +99,8 @@ function ResourceRow({
 }
 
 export default function UserSkillWorkflowSettings({
+  activeView,
+  onViewChange,
   skillsEnabled,
   workflowsEnabled,
   groupSaving,
@@ -106,7 +110,9 @@ export default function UserSkillWorkflowSettings({
   onChanged,
 }: UserSkillWorkflowSettingsProps) {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<ResourceTab>("skills");
+  const [localTab, setLocalTab] = useState<ResourceTab>("skills");
+  const activeTab = activeView ?? localTab;
+  const setActiveTab = onViewChange ?? setLocalTab;
   const [pageByTab, setPageByTab] = useState<Record<ResourceTab, number>>({ skills: 1, workflows: 1 });
   const [pageSize, setPageSize] = useState(6);
   const [skills, setSkills] = useState<SkillAssetRecord[]>([]);

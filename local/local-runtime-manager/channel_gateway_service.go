@@ -171,6 +171,7 @@ func channelGatewayEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_CHANNEL_GATEWAY_DATABASE_DSN=" + sqliteURL(paths.ChannelGatewayDBPath),
 		"LAZYMIND_CHANNEL_GATEWAY_CREDENTIAL_KEY_PATH=" + paths.ChannelGatewayKeyPath,
 		"LAZYMIND_CHANNEL_GATEWAY_CORE_BASE_URL=http://127.0.0.1:" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
+		"LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN=" + internalServiceToken(),
 	}
 }
 

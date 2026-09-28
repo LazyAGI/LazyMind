@@ -17,15 +17,16 @@ const axiosInstance: AxiosInstance = axios.create({
   timeout: 30000,
 });
 
-let isRefreshing = false;
-let refreshQueue: Array<(token: string) => void> = [];
-
-function processQueue(newToken: string) {
-  refreshQueue.forEach((cb) => cb(newToken));
-  refreshQueue = [];
+function authSessionIdentity() {
+  return AgentAppsAuth.getSessionIdentity?.() ?? JSON.stringify(AgentAppsAuth.getUserInfo());
 }
 
 function applyOptionalAuthHeader(config: any) {
+  const identity = authSessionIdentity();
+  if (config._authSession !== undefined && config._authSession !== identity) {
+    throw new Error("STALE_AUTH_SESSION");
+  }
+  config._authSession = identity;
   const authHeaders = AgentAppsAuth.getAuthHeaders();
   config.headers = config.headers ?? {};
   config.headers["Accept-Language"] =
@@ -98,6 +99,30 @@ const HTTP_STATUS_ERROR_CODE_MAP: Record<number, string> = {
 
 const GENERIC_REQUEST_ERROR_CODE = "2000509";
 const API_ERROR_MESSAGE_KEY = "api-request-error";
+
+// Obsidian root changes restart the local runtime. Requests already in flight
+// during that short transition are expected to fail transiently. Keep the
+// request/rejection semantics unchanged, but let the owning UI suppress the
+// generic toast while the transition is active.
+let transientRequestErrorSuppressionDepth = 0;
+
+export function setTransientRequestErrorsSuppressed(suppressed: boolean) {
+  transientRequestErrorSuppressionDepth = Math.max(
+    0,
+    transientRequestErrorSuppressionDepth + (suppressed ? 1 : -1),
+  );
+}
+
+function shouldSuppressTransientRequestError(error: AxiosError) {
+  if (transientRequestErrorSuppressionDepth <= 0) {
+    return false;
+  }
+  if (!error.response) {
+    return true;
+  }
+  const status = Number(error.response?.status);
+  return status >= 500 && status < 600;
+}
 
 const RAW_ERROR_MESSAGE_CODE_MAP: Record<string, string> = {
   "dataset name already exists": "2001102",
@@ -265,7 +290,7 @@ function extractBusinessEnvelopeErrorCode(responseData: any): string | undefined
 }
 
 async function restoreLocalSessionAndRetry(
-  originalRequest?: InternalAxiosRequestConfig & { _localSessionRetry?: boolean },
+  originalRequest?: InternalAxiosRequestConfig & { _authSession?: string; _localSessionRetry?: boolean },
 ) {
   if (!isLocalSessionEnabled()) {
     return null;
@@ -274,6 +299,7 @@ async function restoreLocalSessionAndRetry(
     return null;
   }
   const token = await restoreLocalSessionAndGetToken();
+  originalRequest._authSession = authSessionIdentity();
   originalRequest._localSessionRetry = true;
   originalRequest.headers = originalRequest.headers ?? {};
   originalRequest.headers.authorization = `Bearer ${token}`;
@@ -283,8 +309,11 @@ async function restoreLocalSessionAndRetry(
 export const handleError = async (error: AxiosError): Promise<any> => {
   if (isCanceledError(error)) return Promise.reject(error);
   
-  const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean; _localSessionRetry?: boolean; silentError?: boolean };
+  const originalRequest = error.config as InternalAxiosRequestConfig & { _authSession?: string; _retry?: boolean; _localSessionRetry?: boolean; silentError?: boolean };
   const silentError = Boolean(originalRequest?.silentError);
+  if (originalRequest?._authSession !== undefined && originalRequest._authSession !== authSessionIdentity()) {
+    return Promise.reject(error);
+  }
   
   if (error.response) {
     if (error.response.status === 403) {
@@ -344,6 +373,9 @@ export const handleError = async (error: AxiosError): Promise<any> => {
             console.error("Local admin session restore failed:", localSessionError);
           }
         }
+        if (originalRequest?._authSession !== undefined && originalRequest._authSession !== authSessionIdentity()) {
+          return Promise.reject(error);
+        }
         if (AgentAppsAuth.isLoggedIn()) {
           message.warning({
             key: API_ERROR_MESSAGE_KEY,
@@ -358,23 +390,12 @@ export const handleError = async (error: AxiosError): Promise<any> => {
 
       originalRequest._retry = true;
 
-      if (isRefreshing) {
-        return new Promise((resolve, reject) => {
-          refreshQueue.push((newToken: string) => {
-            if (originalRequest.headers) {
-              originalRequest.headers.authorization = `Bearer ${newToken}`;
-            }
-            axiosInstance(originalRequest).then(resolve).catch(reject);
-          });
-        });
-      }
-
-      isRefreshing = true;
+      const refreshIdentity = authSessionIdentity();
 
       try {
         const newAccessToken = await AgentAppsAuth.refreshAccessToken();
         
-        processQueue(newAccessToken);
+        if (authSessionIdentity() !== refreshIdentity) throw new Error("STALE_AUTH_SESSION");
 
         if (originalRequest.headers) {
           originalRequest.headers.authorization = `Bearer ${newAccessToken}`;
@@ -382,12 +403,13 @@ export const handleError = async (error: AxiosError): Promise<any> => {
 
         return await axiosInstance(originalRequest);
       } catch (refreshError) {
+        if (authSessionIdentity() !== refreshIdentity) return Promise.reject(refreshError);
         console.error("Token refresh failed:", refreshError);
 
         if (isLocalSessionEnabled()) {
           try {
             const token = await restoreLocalSessionAndGetToken();
-            processQueue(token);
+            originalRequest._authSession = authSessionIdentity();
             originalRequest.headers = originalRequest.headers ?? {};
             originalRequest.headers.authorization = `Bearer ${token}`;
             originalRequest._localSessionRetry = true;
@@ -397,11 +419,7 @@ export const handleError = async (error: AxiosError): Promise<any> => {
           }
         }
         
-        refreshQueue.forEach((cb) => {
-          cb("");
-        });
-        refreshQueue = [];
-        
+        if (authSessionIdentity() !== refreshIdentity) return Promise.reject(refreshError);
         message.warning({
           key: API_ERROR_MESSAGE_KEY,
           content:
@@ -410,11 +428,9 @@ export const handleError = async (error: AxiosError): Promise<any> => {
         });
         void AgentAppsAuth.logout();
         return Promise.reject(refreshError);
-      } finally {
-        isRefreshing = false;
       }
     } else {
-      if (!silentError) {
+      if (!silentError && !shouldSuppressTransientRequestError(error)) {
         message.error({
           key: API_ERROR_MESSAGE_KEY,
           content: getLocalizedErrorMessage(error),
@@ -422,14 +438,14 @@ export const handleError = async (error: AxiosError): Promise<any> => {
       }
     }
   } else if (error.request) {
-    if (!silentError) {
+    if (!silentError && !shouldSuppressTransientRequestError(error)) {
       message.error({
         key: API_ERROR_MESSAGE_KEY,
         content: localizeErrorCode(GENERIC_REQUEST_ERROR_CODE),
       });
     }
   } else {
-    if (!silentError) {
+    if (!silentError && !shouldSuppressTransientRequestError(error)) {
       message.error({
         key: API_ERROR_MESSAGE_KEY,
         content: getLocalizedErrorMessage(error),
@@ -453,6 +469,8 @@ axiosInstance.interceptors.request.use(
   handleError,
 );
 axiosInstance.interceptors.response.use((response) => {
+  const identity = (response.config as InternalAxiosRequestConfig & { _authSession?: string })._authSession;
+  if (identity !== undefined && identity !== authSessionIdentity()) return Promise.reject(new Error("STALE_AUTH_SESSION"));
   const businessErrorCode = extractBusinessEnvelopeErrorCode(response.data);
   if (!businessErrorCode) return response;
 

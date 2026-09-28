@@ -65,6 +65,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 }
 
 func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "codex-workflow-pair" {
+		return runCodexWorkflowPair(args[1:], stdout, stderr)
+	}
 	if len(args) > 0 && args[0] == "session" {
 		return runInternalSession(args[1:], os.Stdin, stdout)
 	}
@@ -149,13 +152,41 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 
 func runInternalSession(args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) != 1 {
-		return errors.New("usage: internal session <set|clear>")
+		return errors.New("usage: internal session <set|clear|renew|snapshot>")
 	}
 	store, err := credentials.NewStore("", "")
 	if err != nil {
 		return err
 	}
 	switch strings.ToLower(args[0]) {
+	case "snapshot":
+		value, err := store.DesktopSnapshot()
+		if err != nil {
+			return printJSON(stdout, map[string]bool{"ok": false})
+		}
+		return printJSON(stdout, map[string]any{"ok": true, "session": value})
+	case "renew":
+		body, err := io.ReadAll(io.LimitReader(stdin, maxInternalSessionBytes+1))
+		var input struct {
+			credentials.Credentials
+			UserID  string                   `json:"user_id"`
+			Pending *credentials.Credentials `json:"pending_session,omitempty"`
+		}
+		if err != nil || len(body) > maxInternalSessionBytes || json.Unmarshal(body, &input) != nil {
+			return printJSON(stdout, map[string]any{"ok": false, "code": "DESKTOP_SESSION_INVALID"})
+		}
+		value, err := store.RenewDesktopCandidate(context.Background(), input.Credentials, input.UserID, input.Pending)
+		if err != nil {
+			code := "DESKTOP_SESSION_RENEWAL_UNAVAILABLE"
+			if credentials.IsAuthenticationRequired(err) {
+				code = "DESKTOP_SESSION_AUTHENTICATION_REQUIRED"
+			}
+			if code == "DESKTOP_SESSION_RENEWAL_UNAVAILABLE" && value.AccessToken != "" {
+				return printJSON(stdout, map[string]any{"ok": false, "code": code, "pending_session": value})
+			}
+			return printJSON(stdout, map[string]any{"ok": false, "code": code})
+		}
+		return printJSON(stdout, map[string]any{"ok": true, "session": value})
 	case "set":
 		body, err := io.ReadAll(io.LimitReader(stdin, maxInternalSessionBytes+1))
 		if err != nil {
@@ -314,7 +345,13 @@ func runInternalCodex(ctx context.Context, action, binary string, bridge *mcpbri
 	default:
 		return fmt.Errorf("unsupported Codex action %q", action)
 	}
-	return printJSON(stdout, status)
+	if err := printJSON(stdout, status); err != nil {
+		return err
+	}
+	if action == "connect" && status.State != agentintegration.Enabled {
+		return fmt.Errorf("Codex plugin installation did not complete: %s", status.Message)
+	}
+	return nil
 }
 
 func runAssistant(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -577,6 +614,9 @@ func waitAgentDiscovery(ctx context.Context) bool {
 }
 
 func runMCP(ctx context.Context, args []string) error {
+	if len(args) == 1 && args[0] == "codex-workflow" {
+		return runCodexWorkflowMCP(ctx)
+	}
 	if len(args) != 1 || args[0] != "proxy" {
 		return errors.New("usage: lazymind mcp proxy")
 	}

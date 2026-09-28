@@ -13,6 +13,7 @@ import './index.scss';
 
 const WORKFLOW_ID_REGEX = /^[a-zA-Z][a-zA-Z0-9-_]*$/;
 const SKILL_PAGE_SIZE = 20;
+const SKILL_SEARCH_DEBOUNCE_MS = 300;
 
 function skillNameSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
@@ -35,10 +36,13 @@ interface NewWorkflowModalProps {
 
 export default function NewWorkflowModal({ open, onCancel, onCreated, initialSkill }: NewWorkflowModalProps) {
   const { t } = useTranslation();
+  const translate = useRef(t);
+  useEffect(() => { translate.current = t; }, [t]);
   const navigate = useNavigate();
   const formId = useId();
   const session = useRef(0);
   const skillRequest = useRef(0);
+  const skillSearchTimer = useRef<number>();
   const skillPagination = useRef({ keyword: '', page: 0, hasMore: true, loading: false });
   const nameEdited = useRef(false);
 
@@ -96,6 +100,7 @@ export default function NewWorkflowModal({ open, onCancel, onCreated, initialSki
   const showFields = mode === 'ai' || mode === 'blank' || skillSelected;
 
   const reset = useCallback((preset?: NewWorkflowModalProps['initialSkill'], nextMode: CreateMode = 'ai') => {
+    window.clearTimeout(skillSearchTimer.current);
     session.current += 1;
     skillRequest.current += 1;
     skillPagination.current = { keyword: '', page: 0, hasMore: true, loading: false };
@@ -108,7 +113,7 @@ export default function NewWorkflowModal({ open, onCancel, onCreated, initialSki
     setSkillError(false);
     setWorkflowId(preset ? newSkillWorkflowId(preset.name) : '');
     setIdError('');
-    setName(preset ? t('selfEvolutionRun.newWorkflowSuggestedName', { name: preset.name.replace(/助手$/, '') }).slice(0, 60) : '');
+    setName(preset ? translate.current('selfEvolutionRun.newWorkflowSuggestedName', { name: preset.name.replace(/助手$/, '') }).slice(0, 60) : '');
     nameEdited.current = false;
     setDescription('');
     setCreating(false);
@@ -120,15 +125,17 @@ export default function NewWorkflowModal({ open, onCancel, onCreated, initialSki
     setLinkedLoading(false);
     setLinkedError(false);
     setLinkedOpen(false);
-  }, [t]);
+  }, []);
 
   const initialSkillId = initialSkill?.id;
   const initialSkillName = initialSkill?.name;
+  // Translation refreshes on window focus must not start a new creation session.
   useEffect(() => {
     reset(open && initialSkillId ? { id: initialSkillId, name: initialSkillName ?? '' } : undefined);
     return () => {
       session.current += 1;
       skillRequest.current += 1;
+      window.clearTimeout(skillSearchTimer.current);
     };
   }, [open, initialSkillId, initialSkillName, reset]);
 
@@ -151,7 +158,7 @@ export default function NewWorkflowModal({ open, onCancel, onCreated, initialSki
         if (isCurrent()) setPreflight(result);
       })
       .catch(() => {
-        if (isCurrent()) setPreflightError(t('selfEvolutionRun.newWorkflowPreflightFailed'));
+        if (isCurrent()) setPreflightError(translate.current('selfEvolutionRun.newWorkflowPreflightFailed'));
       })
       .finally(() => {
         if (isCurrent()) setPreflightLoading(false);
@@ -159,7 +166,7 @@ export default function NewWorkflowModal({ open, onCancel, onCreated, initialSki
     return () => {
       cancelled = true;
     };
-  }, [open, mode, skillId, initialSkillId, initialSkillName, preflightRetry, t]);
+  }, [open, mode, skillId, initialSkillId, initialSkillName, preflightRetry]);
 
   useEffect(() => {
     if (!open || mode !== 'skill' || !skillId) return;
@@ -181,12 +188,12 @@ export default function NewWorkflowModal({ open, onCancel, onCreated, initialSki
         }
         setLinkedWorkflows(drafts.filter((draft) => draft.source_skill_id === skillId));
         if (!nameEdited.current) {
-          const base = t('selfEvolutionRun.newWorkflowSuggestedName', { name: skillName.replace(/助手$/, '') }).slice(0, 60);
+          const base = translate.current('selfEvolutionRun.newWorkflowSuggestedName', { name: skillName.replace(/助手$/, '') }).slice(0, 60);
           let suggested = base;
           let number = 2;
           const names = new Set(drafts.map((draft) => draft.name));
           while (names.has(suggested)) {
-            const suffix = t('selfEvolutionRun.newWorkflowSuggestedNameCopy', { number: number++ });
+            const suffix = translate.current('selfEvolutionRun.newWorkflowSuggestedNameCopy', { number: number++ });
             suggested = `${base.slice(0, Math.max(0, 60 - suffix.length))}${suffix}`;
           }
           setName(suggested);
@@ -198,7 +205,7 @@ export default function NewWorkflowModal({ open, onCancel, onCreated, initialSki
       }
     })();
     return () => { cancelled = true; };
-  }, [open, mode, skillId, skillName, initialSkillName, linkedRetry, t]);
+  }, [open, mode, skillId, skillName, initialSkillName, linkedRetry]);
 
   const handleCancel = () => {
     reset();
@@ -213,6 +220,7 @@ export default function NewWorkflowModal({ open, onCancel, onCreated, initialSki
 
   const loadSkillPage = async (keyword = skillPagination.current.keyword, restart = false) => {
     if (restart) {
+      window.clearTimeout(skillSearchTimer.current);
       skillRequest.current += 1;
       skillPagination.current = { keyword, page: 0, hasMore: true, loading: false };
       setSkillOptions([]);
@@ -221,21 +229,20 @@ export default function NewWorkflowModal({ open, onCancel, onCreated, initialSki
     const pagination = skillPagination.current;
     if (pagination.loading || !pagination.hasMore) return;
     pagination.loading = true;
-    const page = pagination.page + 1;
     const requestId = skillRequest.current;
+    const page = pagination.page + 1;
     setSkillLoading(true);
     setSkillError(false);
     try {
-      const result = await listSkillAssetsPage({ keyword, page, pageSize: SKILL_PAGE_SIZE, excludeBuiltinTemplates: true });
-      if (requestId === skillRequest.current) {
-        setSkillOptions((previous) => [...new Map([
-          ...(page === 1 ? [] : previous).map((option) => [option.value, option] as const),
-          ...result.records.map((record) => [record.id, { label: record.name, value: record.id }] as const),
-        ]).values()]);
-        pagination.page = page;
-        pagination.hasMore = result.records.length > 0 && page * (result.pageSize ?? SKILL_PAGE_SIZE) < result.total;
-        setSkillHasMore(pagination.hasMore);
-      }
+      const result = await listSkillAssetsPage({ keyword, nameOnly: true, page, pageSize: SKILL_PAGE_SIZE, excludeBuiltinTemplates: true });
+      if (requestId !== skillRequest.current) return;
+      setSkillOptions((previous) => [...new Map([
+        ...(page === 1 ? [] : previous).map((option) => [option.value, option] as const),
+        ...result.records.map((record) => [record.id, { label: record.name, value: record.id }] as const),
+      ]).values()]);
+      pagination.page = page;
+      pagination.hasMore = result.records.length > 0 && page * (result.pageSize ?? SKILL_PAGE_SIZE) < result.total;
+      setSkillHasMore(pagination.hasMore);
     } catch {
       if (requestId === skillRequest.current) setSkillError(true);
     } finally {
@@ -246,7 +253,24 @@ export default function NewWorkflowModal({ open, onCancel, onCreated, initialSki
     }
   };
 
-  const handleSkillSearch = (keyword: string) => { void loadSkillPage(keyword, true); };
+  const handleSkillSearch = (keyword: string) => {
+    window.clearTimeout(skillSearchTimer.current);
+    if (!keyword.trim()) {
+      void loadSkillPage('', true);
+      return;
+    }
+    // Invalidate old results and block pagination while waiting for the final query.
+    skillRequest.current += 1;
+    skillPagination.current = { keyword, page: 0, hasMore: true, loading: true };
+    setSkillOptions([]);
+    setSkillHasMore(true);
+    setSkillLoading(true);
+    setSkillError(false);
+    skillSearchTimer.current = window.setTimeout(() => {
+      skillPagination.current.loading = false;
+      void loadSkillPage(keyword);
+    }, SKILL_SEARCH_DEBOUNCE_MS);
+  };
 
   const handleSkillChange = (val: string | undefined, option?: { label: string; value: string } | { label: string; value: string }[]) => {
     setSkillId(val);
@@ -374,6 +398,7 @@ export default function NewWorkflowModal({ open, onCancel, onCreated, initialSki
       title={t('selfEvolutionRun.newWorkflowModalTitle')}
       open={open}
       onCancel={handleCancel}
+      maskClosable={false}
       footer={
         <div className="npm-footer">
           {mode === 'skill' && <span className="npm-footer-hint"><SafetyCertificateOutlined /> {t('selfEvolutionRun.newWorkflowSourcePreserved')}</span>}
@@ -422,7 +447,7 @@ export default function NewWorkflowModal({ open, onCancel, onCreated, initialSki
             loading={skillLoading}
             aria-busy={skillLoading}
             disabled={creating}
-            options={skillId && !skillOptions.some((option) => option.value === skillId)
+            options={skillId && !skillPagination.current.keyword.trim() && !skillOptions.some((option) => option.value === skillId)
               ? [{ label: skillName || skillId, value: skillId }, ...skillOptions]
               : skillOptions}
             filterOption={false}
@@ -519,12 +544,6 @@ export default function NewWorkflowModal({ open, onCancel, onCreated, initialSki
               </Button>
             </div>
             {preflight.summary && <p className="npm-preflight-summary">{preflight.summary}</p>}
-            {preflightIssues.length > 0 && <div className="npm-check-issues" role="alert">
-              {preflightIssues.map((check, index) => <div className="npm-check-issue" key={`${check.code}:${check.path}:${index}`}>
-                <ExclamationCircleOutlined />
-                <div><span>{check.message}</span>{check.suggestion && <small>{check.suggestion}</small>}</div>
-              </div>)}
-            </div>}
             <div id={`${formId}-checks`} className="npm-check-details" role="region" aria-label={t('selfEvolutionRun.newWorkflowCheckDetails')} hidden={!checksExpanded}>
               {checksExpanded && (preflight.checks?.length ? preflight.checks.map((check, index) => <div className="npm-check-row" key={`${check.code}:${check.path}:${index}`}>
                 {check.severity === 'error' || check.severity === 'warning' ? <ExclamationCircleOutlined className="npm-check-warning" /> : <CheckCircleOutlined className="npm-check-pass" />}

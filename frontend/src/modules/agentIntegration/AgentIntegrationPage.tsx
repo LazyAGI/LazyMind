@@ -1,3 +1,4 @@
+import { useSettingsDraft } from "@/modules/settings/SettingsNavigationGuard";
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { Alert, Button, Card, Input, Modal, Popover, Space, Spin, Switch, Tag, Tooltip, Typography, message } from "antd";
 import {
@@ -140,6 +141,11 @@ export default function AgentIntegrationPage() {
   const [bridgePlatformMismatch, setBridgePlatformMismatch] = useState(false);
   const [manualBindingTarget, setManualBindingTarget] = useState<DesktopAgentBindingTarget | null>(null);
   const [manualBindingPath, setManualBindingPath] = useState("");
+  const confirmBindingClose = useSettingsDraft({
+    dirty: manualBindingTarget !== null && manualBindingPath !== "",
+    saving: Boolean(manualBindingTarget && action === `binding:${manualBindingTarget}`),
+    discard: () => setManualBindingPath(""),
+  });
   const [externalConfigurationAgent, setExternalConfigurationAgent] = useState<DesktopAgent | null>(null);
   const [pendingLoginAgent, setPendingLoginAgent] = useState<DesktopAgent | null>(null);
   const refreshVersion = useRef(0);
@@ -423,10 +429,10 @@ export default function AgentIntegrationPage() {
         cancelText={t("common.cancel")}
         confirmLoading={Boolean(manualBindingTarget && action === `binding:${manualBindingTarget}`)}
         okButtonProps={{ disabled: manualBindingPath.trim() === "" }}
-        onCancel={() => {
+        onCancel={() => confirmBindingClose(() => {
           setManualBindingTarget(null);
           setManualBindingPath("");
-        }}
+        })}
         onOk={() => {
           if (manualBindingTarget && manualBindingPath.trim()) {
             void saveBinding(manualBindingTarget, manualBindingPath.trim());

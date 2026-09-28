@@ -2,12 +2,9 @@ package scheduler
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -21,14 +18,9 @@ import (
 )
 
 var (
-	// The chat UI treats everything through the final reasoning/tool block as
-	// collapsed process output. Dependency summaries must use exactly the same
-	// boundary, rather than deleting individual tags and accidentally retaining
-	// intermittent narration or raw tool payloads.
-	taskOutputProcessBoundaryPattern = regexp.MustCompile(`(?is)</(?:think|tp|trp|tool_call|tool_result)\s*>`)
-	errDependencyClaimLost           = &dependencyRuntimeError{"dependency task claim lost"}
-	errDependentTaskLaunchNoInputs   = &dependencyRuntimeError{"dependent task launch requires at least one input"}
-	errCreateDependentConversation   = &dependencyRuntimeError{"create dependent task conversation"}
+	errDependencyClaimLost         = &dependencyRuntimeError{"dependency task claim lost"}
+	errDependentTaskLaunchNoInputs = &dependencyRuntimeError{"dependent task launch requires at least one input"}
+	errCreateDependentConversation = &dependencyRuntimeError{"create dependent task conversation"}
 )
 
 const (
@@ -43,74 +35,11 @@ type dependencyRuntimeError struct{ message string }
 func (e *dependencyRuntimeError) Error() string { return e.message }
 
 func taskOutputBody(result string) string {
-	boundaries := taskOutputProcessBoundaryPattern.FindAllStringIndex(result, -1)
-	if len(boundaries) > 0 {
-		result = result[boundaries[len(boundaries)-1][1]:]
-	}
-	return strings.TrimSpace(result)
-}
-
-type artifactManifestItem struct {
-	ArtifactID   string `json:"artifact_id"`
-	Name         string `json:"name"`
-	MIMEType     string `json:"mime_type"`
-	SourceTaskID string `json:"source_task_id"`
-	Revision     int    `json:"revision"`
+	return taskcenter.TaskOutputBody(result)
 }
 
 func finalizeTaskOutput(ctx context.Context, db *gorm.DB, taskID, convID string) string {
-	if db == nil {
-		return ""
-	}
-	var history orm.ChatHistory
-	_ = db.WithContext(ctx).Where("conversation_id = ?", convID).Order("seq DESC").First(&history).Error
-	manifest := make([]artifactManifestItem, 0)
-	var convArts []orm.ConversationArtifact
-	_ = db.WithContext(ctx).Where("conversation_id = ?", convID).Order("created_at ASC").Find(&convArts).Error
-	for _, a := range convArts {
-		manifest = append(manifest, artifactManifestItem{ArtifactID: a.ID, Name: a.Filename, MIMEType: a.ContentType, SourceTaskID: taskID, Revision: 1})
-	}
-	var subArts []struct {
-		ID, Slot, ContentType string
-		Seq                   int
-	}
-	_ = db.WithContext(ctx).Table("sub_agent_artifacts sa").Select("sa.id, sa.slot, sa.content_type, sa.seq").Joins("JOIN sub_agent_tasks st ON st.id = sa.task_id").Where("st.conversation_id = ? AND sa.hidden = false", convID).Order("sa.created_at ASC").Scan(&subArts).Error
-	for _, a := range subArts {
-		manifest = append(manifest, artifactManifestItem{ArtifactID: a.ID, Name: a.Slot, MIMEType: a.ContentType, SourceTaskID: taskID, Revision: a.Seq})
-	}
-	manifestJSON, _ := json.Marshal(manifest)
-	answer := taskOutputBody(history.Result)
-	status := "ready"
-	if answer == "" && len(manifest) == 0 {
-		status = "empty"
-	}
-	h := sha256.Sum256(append([]byte(answer), manifestJSON...))
-	now := time.Now().UTC()
-	summary := answer
-	if len([]rune(summary)) > 2000 {
-		summary = string([]rune(summary)[:2000]) + "\n[摘要截断，完整内容可从来源任务读取]"
-	}
-	out := orm.TaskRunOutput{ID: common.GeneratePrefixedID("out_", 36), TaskID: taskID, ConversationID: convID, FinalAnswerText: answer, SummaryText: summary, ArtifactManifestJSON: manifestJSON, OutputStatus: status, ContentHash: hex.EncodeToString(h[:]), CreatedAt: now, UpdatedAt: now}
-	var existing orm.TaskRunOutput
-	if err := db.WithContext(ctx).Where("task_id = ?", taskID).First(&existing).Error; err == nil {
-		_ = db.WithContext(ctx).Model(&orm.TaskRunOutput{}).Where("id = ?", existing.ID).Updates(map[string]any{
-			"conversation_id":        convID,
-			"final_answer_text":      answer,
-			"summary_text":           summary,
-			"artifact_manifest_json": manifestJSON,
-			"output_status":          status,
-			"content_hash":           out.ContentHash,
-			"updated_at":             now,
-		}).Error
-	} else {
-		_ = db.WithContext(ctx).Create(&out).Error
-	}
-	if status == "ready" {
-		_ = taskcenter.UpdateTaskStatus(ctx, db, taskID, "succeeded")
-	} else {
-		_ = taskcenter.UpdateTaskFailure(ctx, db, taskID, "聊天服务未生成可用结果")
-	}
-	return status
+	return taskcenter.FinalizeScheduledOutput(ctx, db, taskID, convID)
 }
 
 func createWaitingScheduledTask(ctx context.Context, db *gorm.DB, s orm.UserSchedule, start, end time.Time, triggerType string) string {
@@ -246,6 +175,9 @@ func failDependentTaskClaim(ctx context.Context, db *gorm.DB, task orm.TaskCente
 		}
 		if result.RowsAffected != 1 {
 			return errDependencyClaimLost
+		}
+		if err := taskcenter.UpdateTaskFailure(ctx, tx, task.ID, reason); err != nil {
+			return err
 		}
 		return tx.Where("downstream_task_id = ?", task.ID).Delete(&orm.TaskRunInput{}).Error
 	})

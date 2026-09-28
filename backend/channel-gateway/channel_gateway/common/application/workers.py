@@ -6,6 +6,8 @@ import uuid
 from dataclasses import replace
 from typing import Callable
 
+import httpx
+
 from channel_gateway.common.application.messages import ChannelMessageService
 from channel_gateway.common.application.task_artifacts import (
     TASK_ARTIFACT_MONITOR_VERSION,
@@ -20,6 +22,8 @@ from channel_gateway.common.domain.chat import (
     inbox_provider_context,
 )
 from channel_gateway.common.errors import (
+    GatewayError,
+    ProviderRejectedError,
     LazyMindHTTPError,
     RetryableLazyMindError,
     RetryableProviderSideEffectError,
@@ -309,10 +313,12 @@ class DeliveryWorker:
         *,
         store: OutboxWorkRepository,
         providers: DeliveryProviderRegistry,
+        notifications=None,
         worker_count: int = 2,
     ):
         self._store = store
         self._providers = providers
+        self._notifications = notifications
         self._worker_count = max(1, worker_count)
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
@@ -339,6 +345,7 @@ class DeliveryWorker:
     def _run(self, claim_owner: str) -> None:
         while not self._stop.is_set():
             outbound = None
+            attempt_state = {'send_started': False}
             try:
                 outbound = self._store.claim_next_outbound(
                     claim_owner,
@@ -380,6 +387,7 @@ class DeliveryWorker:
                         provider,
                         claim_owner,
                         lease,
+                        attempt_state,
                     )
                     lease.ensure_owned()
                     if not self._store.complete_outbound(
@@ -397,17 +405,18 @@ class DeliveryWorker:
                     )
             except Exception as exc:
                 if outbound is not None:
-                    _logger.exception(
+                    _logger.warning(
                         'channel_outbound_failed outbox_id=%s attempt=%s',
                         outbound.outbox_id,
                         outbound.attempt_count,
                     )
-                    self._store.record_outbound_failure(
-                        outbound.outbox_id,
-                        claim_owner,
-                        error=exc.__class__.__name__,
-                        max_attempts=_MAX_OUTBOUND_ATTEMPTS,
-                    )
+                    if outbound.purpose == 'notification':
+                        self._notification_failed(outbound, claim_owner, exc, attempt_state['send_started'])
+                    else:
+                        self._store.record_outbound_failure(
+                            outbound.outbox_id, claim_owner, error=exc.__class__.__name__,
+                            max_attempts=_MAX_OUTBOUND_ATTEMPTS,
+                        )
                 else:
                     _logger.exception('channel_delivery_worker_failed')
                 self._stop.wait(1.0)
@@ -418,12 +427,18 @@ class DeliveryWorker:
         provider,
         claim_owner: str,
         lease: _LeaseHeartbeat,
+        attempt_state: dict,
     ) -> None:
         for part_index in range(
             outbound.next_part_index,
             len(outbound.rendered_parts),
         ):
             lease.ensure_owned()
+            if outbound.purpose == 'notification':
+                if self._notifications is None:
+                    raise RuntimeError('Notification verification is unavailable')
+                outbound = self._notifications.prepare(outbound)
+                attempt_state['send_started'] = False
             part = outbound.rendered_parts[part_index]
             saved_state = dict(
                 outbound.provider_state.get(str(part_index)) or {}
@@ -452,6 +467,7 @@ class DeliveryWorker:
                         f'lazymind:{outbound.outbox_id}:part:{part_index}',
                     )
                 )
+            attempt_state['send_started'] = True
             delivered_state = provider.send_part(
                 outbound,
                 part,
@@ -483,3 +499,36 @@ class DeliveryWorker:
                 part_index + 1,
             ):
                 raise RuntimeError('Cannot advance channel outbox')
+
+    def _notification_failed(self, outbound, owner, error, send_started):
+        if isinstance(error, ProviderRejectedError):
+            if not error.retryable:
+                reason = ('WECOM_CAPABILITY_REAUTH_REQUIRED'
+                          if str(error) == 'WECOM_CAPABILITY_REAUTH_REQUIRED'
+                          else 'NOTIFICATION_DELIVERY_FAILED')
+                self._store.finish_notification(outbound.outbox_id, owner, 'dead', reason)
+                return
+            send_started = False
+        if isinstance(error, GatewayError):
+            if error.code in (
+                'NOTIFICATIONS_DISABLED', 'NOTIFICATION_CHANNEL_DISABLED',
+                'NOTIFICATION_TARGET_UNAVAILABLE', 'NOTIFICATION_EVENT_INVALID',
+            ):
+                self._store.finish_notification(outbound.outbox_id, owner, 'skipped', error.code)
+                return
+            if not error.retryable:
+                self._store.finish_notification(outbound.outbox_id, owner, 'dead', 'NOTIFICATION_DELIVERY_FAILED')
+                return
+            send_started = False  # These adapters reject before sending.
+        cause = error
+        while cause.__cause__ is not None:
+            cause = cause.__cause__
+        if isinstance(cause, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
+            send_started = False
+        if send_started:
+            self._store.finish_notification(outbound.outbox_id, owner, 'unknown', 'NOTIFICATION_DELIVERY_UNKNOWN')
+        else:
+            self._store.record_outbound_failure(
+                outbound.outbox_id, owner, error='NOTIFICATION_DELIVERY_FAILED',
+                max_attempts=_MAX_OUTBOUND_ATTEMPTS,
+            )

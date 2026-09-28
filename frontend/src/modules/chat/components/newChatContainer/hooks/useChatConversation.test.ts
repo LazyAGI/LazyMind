@@ -11,17 +11,20 @@ import { CHAT_WORKFLOW_STEP_FEEDBACK_EVENT } from "@/modules/chat/constants/chat
 import type { ChatInputImperativeProps } from "../../ChatInput";
 import { useChatConversation } from "./useChatConversation";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
+import { ordinary } from "@/modules/chat/components/TaskCenter/ordinaryTestFixtures";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { streamManager } from "@/modules/chat/utils/StreamManager";
 import { emitConversationActivity, emitConversationListRefresh } from "@/modules/chat/utils/conversationActivity";
 
 const {
   listConversationsMock,
+  getHistoryMock,
   listToolAssetsMock,
   waitForRuntimeCapabilityMock,
   scrollMock,
 } = vi.hoisted(() => ({
   listConversationsMock: vi.fn(),
+  getHistoryMock: vi.fn(),
   listToolAssetsMock: vi.fn(),
   waitForRuntimeCapabilityMock: vi.fn(),
   scrollMock: {
@@ -69,6 +72,7 @@ vi.mock("../../ImageUpload", () => ({
 vi.mock("@/modules/chat/utils/request", () => ({
   ChatServiceApi: () => ({
     conversationServiceListConversations: listConversationsMock,
+    conversationServiceGetConversationHistory: getHistoryMock,
   }),
 }));
 
@@ -131,6 +135,7 @@ function createPreparedStream(clientConversationId: string) {
 describe("useChatConversation regeneration recovery", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    getHistoryMock.mockReset();
     scrollMock.isMouseScrollingRef.current = false;
     scrollMock.scrollToEnd.mockClear();
     scrollMock.scrollToEndImmediately.mockClear();
@@ -154,6 +159,184 @@ describe("useChatConversation regeneration recovery", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it.each([false, true])("restores the authoritative deletion decision (%s) after HTTP rejection", async (answered) => {
+    const { stream, listeners } = createMockStream();
+    const pending = {
+      ask_id: "delete-card", user_env_delete: { id: "env", name: "test_api_key" },
+      questions: [{ text: "Delete?", type: "boolean", choices: ["__ask_user_yes__", "__ask_user_no__"] }],
+    };
+    const savedAnswers = { 0: { type: "boolean", value: "__ask_user_no__" } };
+    getHistoryMock.mockResolvedValue({ data: { history: [{
+      id: "history-card", query: "Delete variable", answer: "", seq: 1,
+      ask_pending: pending, ask_answered: answered,
+    }] } });
+    const { result } = renderConversation({ onOpenSSE: vi.fn().mockReturnValue(stream) });
+    act(() => result.current.replaceMessageList("delete-conversation", [{
+      role: RoleTypes.ASSISTANT, history_id: "history-card", ask_pending: pending, ask_saved_answers: savedAnswers,
+    }]));
+    await act(async () => { await result.current.sendMessage({
+      text: "No", ask_answers_structured: { ask_id: pending.ask_id, questions: [] },
+    }); });
+    expect(result.current.messageList).toHaveLength(3);
+    await act(async () => {
+      listeners.get("error")?.({ type: "error", status: 409, data: "rejected" });
+    });
+    expect(getHistoryMock).toHaveBeenCalledWith({ name: "delete-conversation" });
+    const card = result.current.messageList[result.current.messageList.length - 1];
+    expect(card.ask_pending.ask_id).toBe("delete-card");
+    expect(Boolean(card.ask_answered)).toBe(answered);
+    if (!answered) expect(card.ask_saved_answers).toEqual(savedAnswers);
+    expect(result.current.messageList).toHaveLength(2);
+    expect(result.current.loading).toBe(false);
+    expect(message.error).toHaveBeenCalled();
+  });
+
+  it.each([false, true])("preserves older loaded history after deletion rejection (consumed=%s)", async (answered) => {
+    const { stream, listeners } = createMockStream();
+    const pending = { ask_id: "delete-card", user_env_delete: { id: "env", name: "test_api_key" }, questions: [] };
+    const history = Array.from({ length: 40 }, (_, index) => ({
+      id: `history-${index + 1}`, seq: index + 1,
+      query: `question-${index + 1}`, result: `answer-${index + 1}`,
+      ...(index === 39 ? { ask_pending: pending } : {}),
+    }));
+    const previousMessages = buildChatMessageListFromHistory([...history].reverse());
+    const latest = history.map((record) => record.id === "history-40"
+      ? { ...record, ask_answered: answered }
+      : record);
+    getHistoryMock.mockResolvedValue({ data: { history: latest.slice(-20).reverse(), next_page_token: "20" } });
+    const { result } = renderConversation({ onOpenSSE: vi.fn().mockReturnValue(stream) });
+    act(() => result.current.replaceMessageList("long-delete-chat", previousMessages));
+    await act(async () => { await result.current.sendMessage({
+      text: "No", ask_answers_structured: { ask_id: pending.ask_id, questions: [] },
+    }); });
+    expect(result.current.messageList).toHaveLength(82);
+    await act(async () => listeners.get("error")?.({ type: "error", status: 409 }));
+    expect(result.current.messageList).toHaveLength(80);
+    expect(result.current.messageList.map((item) => `${item.role}:${item.history_id}`))
+      .toEqual(previousMessages.map((item) => `${item.role}:${item.history_id}`));
+    expect(result.current.messageList.slice(0, 40)).toEqual(previousMessages.slice(0, 40));
+    expect(Boolean(result.current.messageList[79].ask_answered)).toBe(answered);
+    expect(result.current.conversationMessagesCache.current.get("long-delete-chat"))
+      .toEqual(result.current.messageList);
+  });
+
+  it.each([
+    ["http", "before_error"],
+    ["http", "during_recovery"],
+    ["open_failure", "before_error"],
+    ["open_failure", "during_recovery"],
+  ])("retains pages loaded %s/%s without keeping the failed submission", async (failure, timing) => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { stream, listeners } = createMockStream();
+    const pending = { ask_id: "delete-card", user_env_delete: { id: "env", name: "test_api_key" }, questions: [] };
+    const history = Array.from({ length: 40 }, (_, index) => ({
+      id: `history-${index + 1}`, seq: index + 1,
+      query: `question-${index + 1}`, result: `answer-${index + 1}`,
+      ...(index === 39 ? { ask_pending: pending } : {}),
+    }));
+    let resolveHistory!: (value: unknown) => void;
+    getHistoryMock.mockImplementation(() => new Promise((resolve) => { resolveHistory = resolve; }));
+    let rejectOpen!: (error: Error) => void;
+    const onOpenSSE = vi.fn(() => failure === "http"
+      ? stream : new Promise<typeof stream>((_, reject) => { rejectOpen = reject; }));
+    const { result } = renderConversation({ onOpenSSE });
+    act(() => result.current.replaceMessageList("concurrent-pagination", buildChatMessageListFromHistory(history.slice(-20).reverse())));
+    let submitted!: Promise<boolean>;
+    act(() => { submitted = result.current.sendMessage({
+      text: "No", ask_answers_structured: { ask_id: pending.ask_id, questions: [] },
+    }); });
+    await waitFor(() => expect(onOpenSSE).toHaveBeenCalledOnce());
+    if (failure === "http") await act(async () => { await submitted; });
+    const loadOlderPage = () => {
+      act(() => result.current.mergeHistoryPage("concurrent-pagination", history.slice(0, 20).reverse()));
+      expect(result.current.messageList).toHaveLength(82);
+    };
+    if (timing === "before_error") loadOlderPage();
+    act(() => {
+      if (failure === "http") listeners.get("error")?.({ type: "error", status: 409 });
+      else rejectOpen(new Error("request failed"));
+    });
+    await waitFor(() => expect(getHistoryMock).toHaveBeenCalledOnce());
+    if (timing === "during_recovery") loadOlderPage();
+    await act(async () => {
+      resolveHistory({ data: { history: history.slice(-20).reverse(), next_page_token: "20" } });
+      await submitted;
+    });
+    expect(result.current.messageList).toHaveLength(80);
+    expect(result.current.messageList.map((item) => `${item.role}:${item.history_id}`))
+      .toEqual(buildChatMessageListFromHistory([...history].reverse()).map((item) => `${item.role}:${item.history_id}`));
+    expect(result.current.messageList[79].ask_answered).not.toBe(true);
+    expect(result.current.conversationMessagesCache.current.get("concurrent-pagination"))
+      .toEqual(result.current.messageList);
+    expect(streamManager.getStreamState("concurrent-pagination")?.messageList)
+      .toEqual(result.current.messageList);
+  });
+
+  it("keeps a server-persisted failed submission while removing its optimistic duplicate", async () => {
+    const { stream, listeners } = createMockStream();
+    const pending = { ask_id: "delete-card", user_env_delete: { id: "env", name: "test_api_key" }, questions: [] };
+    const history = Array.from({ length: 40 }, (_, index) => ({
+      id: `history-${index + 1}`, seq: index + 1,
+      query: `question-${index + 1}`, result: `answer-${index + 1}`,
+      ...(index === 39 ? { ask_pending: pending } : {}),
+    }));
+    const persisted = {
+      id: "history-41", seq: 41, query: "No", result: "", run_status: "failed" as const,
+    };
+    getHistoryMock.mockResolvedValue({ data: { history: [
+      persisted,
+      ...history.slice(-19).reverse().map((record) => ({ ...record, ask_answered: true })),
+    ], next_page_token: "20" } });
+    const { result } = renderConversation({ onOpenSSE: vi.fn().mockReturnValue(stream) });
+    act(() => result.current.replaceMessageList("persisted-delete-failure", buildChatMessageListFromHistory([...history].reverse())));
+    await act(async () => { await result.current.sendMessage({
+      text: "No", ask_answers_structured: { ask_id: pending.ask_id, questions: [] },
+    }); });
+    await act(async () => listeners.get("error")?.({ type: "error", status: 503 }));
+    expect(result.current.messageList).toHaveLength(82);
+    expect(result.current.messageList.map((item) => item.history_id))
+      .toEqual(Array.from({ length: 41 }, (_, index) => [`history-${index + 1}`, `history-${index + 1}`]).flat());
+    expect(result.current.messageList[79].ask_answered).toBe(true);
+    expect(result.current.messageList[81].run_status).toBe("failed");
+  });
+
+  it("restores an unsubmitted deletion card when opening the request fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const pending = { ask_id: "delete-card", user_env_delete: { id: "env", name: "test_api_key" }, questions: [] };
+    getHistoryMock.mockResolvedValue({ data: { history: [{ id: "history-card", seq: 1, query: "Delete", ask_pending: pending }] } });
+    const { result } = renderConversation({
+      onOpenSSE: vi.fn().mockRejectedValue(new Error("unavailable")),
+    });
+    act(() => result.current.replaceMessageList("delete-open-failure", [{ role: RoleTypes.ASSISTANT, history_id: "history-card", ask_pending: pending }]));
+    await act(async () => {
+      expect(await result.current.sendMessage({ text: "No", ask_answers_structured: { ask_id: "delete-card", questions: [] } })).toBe(false);
+    });
+    const card = result.current.messageList[result.current.messageList.length - 1];
+    expect(card.ask_pending.ask_id).toBe("delete-card");
+    expect(card.ask_answered).not.toBe(true);
+  });
+
+  it.each(["unavailable", "newer_turn"])("does not restore stale local decisions when history is %s", async (scenario) => {
+    const { stream, listeners } = createMockStream();
+    const pending = { ask_id: "delete-card", user_env_delete: { id: "env", name: "test_api_key" }, questions: [] };
+    let resolve!: (value: unknown) => void;
+    let reject!: (reason: Error) => void;
+    getHistoryMock.mockImplementation(() => new Promise((res, rej) => { resolve = res; reject = rej; }));
+    const { result } = renderConversation({ onOpenSSE: vi.fn().mockReturnValue(stream) });
+    act(() => result.current.replaceMessageList("delete-late-history", [{ role: RoleTypes.ASSISTANT, ask_pending: pending }]));
+    await act(async () => { await result.current.sendMessage({ text: "No", ask_answers_structured: { ask_id: "delete-card", questions: [] } }); });
+    act(() => listeners.get("error")?.({ type: "error", status: 409 }));
+    if (scenario === "unavailable") {
+      await act(async () => reject(new Error("history unavailable")));
+      expect(result.current.messageList).toHaveLength(3);
+    } else {
+      const newer = [{ role: RoleTypes.ASSISTANT, delta: "newer turn" }];
+      act(() => result.current.replaceMessageList("delete-late-history", newer));
+      await act(async () => resolve({ data: { history: [{ id: "old-card", seq: 1, query: "Delete", ask_pending: pending }] } }));
+      expect(result.current.messageList).toEqual(newer);
+    }
   });
 
   it("loads authoritative group and parent metadata before showing a new conversation in history", async () => {
@@ -245,6 +428,74 @@ describe("useChatConversation regeneration recovery", () => {
     expect(result.current.messageList).toEqual([]);
     expect(scrollMock.resetUnread).toHaveBeenCalledOnce();
     expect(scrollMock.scrollToEndImmediately).toHaveBeenCalledOnce();
+  });
+
+  it.each(["succeeded", "failed"])("hydrates persisted %s workflow feedback by history id and deduplicates notices", async (status) => {
+    const { result } = renderConversation();
+    const feedback = status === "succeeded" ? "步骤已完成：结果已保存。" : "步骤未完成：请重试。";
+    const initial = buildChatMessageListFromHistory([{ id: "h1", query: "question", result: "original" }]);
+    const live = { role: RoleTypes.ASSISTANT, history_id: "live", delta: "streaming text" };
+    act(() => result.current.replaceMessageList("conversation-1", [...initial, live]));
+    getHistoryMock.mockResolvedValue({ data: { history: [{ id: "h1", result:
+      `original\n\n<!-- workflow-step-feedback:task-1 -->\n${feedback}\n\n<!-- workflow-step-feedback:task-2 -->\nother feedback`,
+    }] } });
+    const notify = () => window.dispatchEvent(new CustomEvent(CHAT_WORKFLOW_STEP_FEEDBACK_EVENT, { detail: {
+      conversationId: "conversation-1", feedbackId: "task-1", historyId: "h1", status,
+    } }));
+    await act(async () => { notify(); });
+    await act(async () => { notify(); });
+    expect(getHistoryMock).toHaveBeenCalledWith({ name: "conversation-1", anchorHistoryId: "h1" });
+    expect(result.current.messageList[1].delta).toBe(`original\n\n${feedback}`);
+    expect(result.current.messageList[1].workflow_step_feedback_ids).toEqual(["task-1"]);
+    expect(result.current.messageList[2]).toEqual(live);
+  });
+
+  it("does not insert late workflow feedback into another conversation", async () => {
+    let resolveHistory!: (value: unknown) => void;
+    getHistoryMock.mockReturnValue(new Promise((resolve) => { resolveHistory = resolve; }));
+    const { result } = renderConversation();
+    act(() => result.current.replaceMessageList("conversation-1", buildChatMessageListFromHistory([
+      { id: "h1", query: "first", result: "answer" },
+    ])));
+    act(() => window.dispatchEvent(new CustomEvent(CHAT_WORKFLOW_STEP_FEEDBACK_EVENT, { detail: {
+      conversationId: "conversation-1", feedbackId: "task-1", historyId: "h1",
+    } })));
+    const other = [{ role: RoleTypes.ASSISTANT, history_id: "h2", delta: "other" }];
+    act(() => result.current.replaceMessageList("conversation-2", other));
+    await act(async () => { resolveHistory({ data: { history: [{ id: "h1", result:
+      "answer\n\n<!-- workflow-step-feedback:task-1 -->\nfinished",
+    }] } }); });
+    expect(result.current.messageList).toEqual(other);
+    expect(result.current.conversationMessagesCache.current.get("conversation-1")?.[1].delta).toBe("answer\n\nfinished");
+  });
+
+  it.each(["offline", "missing feedback"])("keeps chat messages when feedback hydration has %s", async (failure) => {
+    const { result } = renderConversation();
+    const messages = [{ role: RoleTypes.ASSISTANT, history_id: "h1", delta: "live content" }];
+    act(() => result.current.replaceMessageList("conversation-1", messages));
+    if (failure === "offline") getHistoryMock.mockRejectedValue(new Error("offline"));
+    else getHistoryMock.mockResolvedValue({ data: { history: [{ id: "h1", result: "older content" }] } });
+    await act(async () => { window.dispatchEvent(new CustomEvent(CHAT_WORKFLOW_STEP_FEEDBACK_EVENT, { detail: {
+      conversationId: "conversation-1", feedbackId: "task-1", historyId: "h1",
+    } })); });
+    expect(getHistoryMock).toHaveBeenCalledOnce();
+    expect(result.current.messageList).toEqual(messages);
+  });
+
+  it("discards a feedback history response after unmount", async () => {
+    let resolveHistory!: (value: unknown) => void;
+    getHistoryMock.mockReturnValue(new Promise((resolve) => { resolveHistory = resolve; }));
+    const { result, unmount } = renderConversation();
+    act(() => result.current.replaceMessageList("conversation-1", []));
+    act(() => window.dispatchEvent(new CustomEvent(CHAT_WORKFLOW_STEP_FEEDBACK_EVENT, { detail: {
+      conversationId: "conversation-1", feedbackId: "task-1", historyId: "h1",
+    } })));
+    unmount();
+    const save = vi.spyOn(streamManager, "saveMessageList");
+    await act(async () => { resolveHistory({ data: { history: [{ id: "h1", result:
+      "<!-- workflow-step-feedback:task-1 -->\nfinished",
+    }] } }); });
+    expect(save).not.toHaveBeenCalled();
   });
 
   it("keeps a completed new turn when an older history page arrives", async () => {
@@ -545,6 +796,34 @@ describe("useChatConversation regeneration recovery", () => {
     });
   });
 
+  it("restores a failed ordinary task's setup and continue actions with empty session storage", async () => {
+    const onOpenSSE = vi.fn(() => createMockStream().stream);
+    const { result } = renderConversation({ onOpenSSE });
+    act(() => result.current.replaceMessageList("ordinary-capability", [
+      { role: RoleTypes.USER, delta: "generate image" },
+    ]));
+    expect(sessionStorage.length).toBe(0);
+    act(() => {
+      useTaskCenterStore.setState({ viewMode: "ordinary", activeConversationId: "ordinary-capability" });
+      useTaskCenterStore.getState().applyOrdinarySnapshot("ordinary-capability", ordinary("failed-task", {
+        status: "failed", agent_type: "workflow_step",
+        capability_dependency: { status: "blocked", required: ["image_generator"], missing: [{
+          id: "image_generator", label: "文生图模型", available: false,
+          settings_url: "/settings?section=models&target=image_generator", reason: "请配置文生图模型。",
+        }], message: "请完成配置后继续。" },
+      }));
+    });
+    expect(useTaskCenterStore.getState().getTasks("ordinary-capability")[0].summary).toBeUndefined();
+    expect(result.current.mediaCapabilityDependency).toMatchObject({
+      failure_id: "failed-task", conversation_id: "ordinary-capability",
+      missing: [expect.objectContaining({ settings_url: "/settings?section=models&target=image_generator" })],
+    });
+    await act(async () => { await result.current.continueAfterMediaCapabilityConfiguration(); });
+    expect(onOpenSSE).toHaveBeenCalledWith(expect.any(Array), ChatConversationsRequestActionEnum.ChatActionNext,
+      {}, expect.any(Object));
+    expect(result.current.mediaCapabilityDependency).toBeNull();
+  });
+
   it("sends a configuration-complete follow-up when the user continues", async () => {
     const { stream } = createMockStream();
     const onOpenSSE = vi.fn(() => stream);
@@ -767,6 +1046,7 @@ describe("useChatConversation regeneration recovery", () => {
           role: RoleTypes.USER,
           delta: "retry me",
           inputs: [{ input_type: "text", text: "retry me" }],
+          history_id: "history-1",
         },
         {
           role: RoleTypes.ASSISTANT,
@@ -880,7 +1160,7 @@ describe("useChatConversation regeneration recovery", () => {
           uri: "/uploads/brief.pdf",
         }),
       ]),
-      ChatConversationsRequestActionEnum.ChatActionRegeneration,
+      ChatConversationsRequestActionEnum.ChatActionNext,
       {},
       expect.objectContaining({
         __prepareClientConversationId: expect.any(Function),
@@ -1078,6 +1358,7 @@ describe("useChatConversation regeneration recovery", () => {
         data: JSON.stringify({
           code: 2001597,
           message: "provider-secret: model config unavailable",
+          data: { detail: { history_id: "persisted-preflight-history" } },
         }),
       });
     });
@@ -1104,6 +1385,13 @@ describe("useChatConversation regeneration recovery", () => {
     });
     expect(JSON.stringify(result.current.messageList)).not.toContain(
       "provider-secret",
+    );
+    expect(result.current.messageList.map(item => item.history_id)).toEqual([
+      "persisted-preflight-history", "persisted-preflight-history",
+    ]);
+    await act(async () => { await result.current.regenerate(); });
+    expect(onOpenSSE).toHaveBeenLastCalledWith(
+      expect.any(Array), ChatConversationsRequestActionEnum.ChatActionRegeneration, {}, expect.any(Object),
     );
   });
 
@@ -1223,6 +1511,83 @@ describe("useChatConversation regeneration recovery", () => {
     );
   });
 
+  it("does not replay the previous answer when a new turn is rejected before SSE", async () => {
+    const { stream, listeners } = createMockStream();
+    const onOpenResumeSSE = vi.fn();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream), onOpenResumeSSE });
+    act(() => result.current.replaceMessageList("conversation-1", buildChatMessageListFromHistory([
+      { id: "old-history", seq: 1, query: "old question", result: "old answer", run_status: "completed" },
+    ])));
+    await act(async () => { await result.current.sendMessage({ text: "new question" }); });
+    act(() => listeners.get("error")?.({ type: "error", status: 500, data: JSON.stringify({
+      code: 2000000,
+      message: "Unable to access user environment variables; check the credential key configuration",
+    }) }));
+    expect(onOpenResumeSSE).not.toHaveBeenCalled();
+    expect(result.current.streamRecovery.status).toBe("idle");
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.messageList.map(item => item.delta)).toEqual(["old question", "old answer", "new question", ""]);
+    expect(result.current.messageList.at(-1)?.run_terminal).toMatchObject({
+      status: "failed", reason: "runtime_failure", code: "user_env_unavailable", partial_output: false,
+    });
+  });
+
+  it.each([false, true])("retries an unpersisted rejected turn without replacing old history (repeat=%s)", async (repeat) => {
+    const { stream, listeners } = createMockStream();
+    const onOpenSSE = vi.fn(() => stream);
+    const { result } = renderConversation({ onOpenSSE });
+    const oldMessages = buildChatMessageListFromHistory([
+      { id: "old-history", seq: 1, query: "old question", result: "old answer", run_status: "completed" },
+    ]);
+    act(() => result.current.replaceMessageList("conversation-1", oldMessages));
+    const mentions = [{ type: "tool" as const, mention_id: "mention-1", resource_id: "test-tool", display_name: "test tool" }];
+    await act(async () => { await result.current.sendMessage({
+      text: "new question", mentions, citeHistoryIds: ["cited-history"],
+    }); });
+    const reject = () => listeners.get("error")?.({ type: "error", status: 500, data: JSON.stringify({
+      code: 2000000, message: "Internal error", data: { detail: { reason: "user_env_unavailable" } },
+    }) });
+    for (let attempt = 0; attempt < (repeat ? 2 : 1); attempt++) {
+      act(reject);
+      await act(async () => { await result.current.regenerate(); });
+      expect(onOpenSSE.mock.lastCall).toEqual([
+        [{ input_type: "text", text: "new question" }],
+        ChatConversationsRequestActionEnum.ChatActionNext,
+        {},
+        expect.objectContaining({ mentions, cite_history_ids: ["cited-history"] }),
+      ]);
+      expect(result.current.messageList.slice(0, 2)).toEqual(oldMessages);
+    }
+    const emit = (frame: object) => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "conversation-1", history_id: "new-history", seq: 2, ...frame,
+    } }) });
+    act(() => emit({ delta: "new answer" }));
+    act(() => emit({ finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop }));
+    expect(result.current.messageList.slice(0, 2)).toEqual(oldMessages);
+    expect(result.current.messageList[result.current.messageList.length - 1]).toMatchObject({
+      history_id: "new-history", delta: "new answer",
+    });
+    expect(result.current.messageList.filter(item => item.role === RoleTypes.USER)).toHaveLength(2);
+    await act(async () => { await result.current.regenerate(); });
+    expect(onOpenSSE).toHaveBeenLastCalledWith(
+      expect.any(Array), ChatConversationsRequestActionEnum.ChatActionRegeneration, {}, expect.any(Object),
+    );
+  });
+
+  it("merges repeated terminal frames into the same answer", async () => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList("conversation-1", []));
+    await act(async () => { await result.current.sendMessage({ text: "question" }); });
+    const emit = (frame: object) => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "conversation-1", history_id: "history-1", ...frame,
+    } }) });
+    act(() => emit({ delta: "answer" }));
+    act(() => emit({ finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop }));
+    act(() => emit({ finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop }));
+    expect(result.current.messageList.map(item => item.delta)).toEqual(["question", "answer"]);
+  });
+
   it("keeps status-zero failures on the existing stream recovery path", async () => {
     const clientConversationId = "55555555-5555-4555-8555-555555555555";
     const { listeners, onOpenSSE } = createPreparedStream(clientConversationId);
@@ -1247,6 +1612,23 @@ describe("useChatConversation regeneration recovery", () => {
     expect(result.current.streamRecovery.status).toBe("resuming");
     expect(onConversationIdChange).not.toHaveBeenCalled();
     expect(result.current.messageList[1].run_terminal).toBeUndefined();
+    unmount();
+  });
+
+  it("keeps temporary resume endpoint failures recoverable", async () => {
+    const { stream, listeners } = createMockStream();
+    const { result, unmount } = renderConversation({ onOpenResumeSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList("resume-conversation", [
+      { role: RoleTypes.USER, delta: "question", history_id: "h1" },
+      { role: RoleTypes.ASSISTANT, delta: "partial", history_id: "h1" },
+    ]));
+    await act(async () => { await result.current.openResumeSSE("resume-conversation"); });
+    act(() => listeners.get("error")?.({ type: "error", status: 503,
+      data: JSON.stringify({ code: 2000000, message: "Internal server error" }),
+    }));
+    expect(result.current.streamRecovery.status).toBe("resuming");
+    expect(result.current.messageList.at(-1)?.run_terminal).toBeUndefined();
+    expect(result.current.messageList.at(-1)?.delta).toBe("partial");
     unmount();
   });
 });

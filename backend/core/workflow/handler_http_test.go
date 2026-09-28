@@ -1012,3 +1012,56 @@ func TestCopyAcademicWorkflowHasDocumentedSteps(t *testing.T) {
 		}
 	}
 }
+
+func TestSaveWorkflowDraftRenameUsesVersionAndOwnership(t *testing.T) {
+	db := newHandlerTestDB(t)
+	id := "11111111-1111-4111-8111-111111111111"
+	seedWorkflowDraft(t, db, id, "owner")
+	for _, tc := range []struct {
+		name, user, body string
+		status           int
+	}{
+		{"other user", "other", `{"name":"Renamed","version":1}`, http.StatusNotFound},
+		{"missing version", "owner", `{"name":"Renamed"}`, http.StatusBadRequest},
+		{"empty name", "owner", `{"name":"  ","version":1}`, http.StatusBadRequest},
+		{"rename", "owner", `{"name":"Renamed","version":1}`, http.StatusOK},
+		{"stale rename", "owner", `{"name":"Stale","version":1}`, http.StatusConflict},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tc.body))
+			req = mux.SetURLVars(req, map[string]string{"draft_id": id})
+			req.Header.Set("X-User-Id", tc.user)
+			rec := httptest.NewRecorder()
+			SaveWorkflowDraft(rec, req)
+			if rec.Code != tc.status {
+				t.Fatalf("status=%d, body=%s", rec.Code, rec.Body)
+			}
+		})
+	}
+	var saved orm.WorkflowDraft
+	if err := db.First(&saved, "id=?", id).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.Name != "Renamed" || saved.Version != 2 || !strings.Contains(saved.StateYAMLContent, "__start__") {
+		t.Fatalf("saved=%+v", saved)
+	}
+}
+
+func TestSaveWorkflowDraftRejectsEditsDuringGeneration(t *testing.T) {
+	db := newHandlerTestDB(t)
+	id := "11111111-1111-4111-8111-111111111111"
+	seedWorkflowDraft(t, db, id, "owner")
+	for status := range generatingStatusesForResponse {
+		t.Run(status, func(t *testing.T) {
+			db.Model(&orm.WorkflowDraft{}).Where("id=?", id).Update("generate_status", status)
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"state_yaml_content":"overwritten","version":1}`))
+			req = mux.SetURLVars(req, map[string]string{"draft_id": id})
+			req.Header.Set("X-User-Id", "owner")
+			rec := httptest.NewRecorder()
+			SaveWorkflowDraft(rec, req)
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("status=%d, body=%s", rec.Code, rec.Body)
+			}
+		})
+	}
+}

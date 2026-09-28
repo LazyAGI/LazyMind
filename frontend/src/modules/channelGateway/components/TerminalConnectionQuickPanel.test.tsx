@@ -21,10 +21,14 @@ vi.mock('react-i18next', () => ({
         'channelGateway.terminal.feishuTitle': '飞书',
         'channelGateway.feishu.accountsEmpty': '暂无已连接的飞书账号',
         'channelGateway.wechat.accountStatusMap.connected': '已连接',
+        'channelGateway.wechat.accountStatusMap.pendingActivation': '待激活',
         'channelGateway.wechat.runtimeStatusMap.running': '运行中',
       };
       if (key === 'channelGateway.terminal.connectedCount') {
         return `${values?.count} 个已连接`;
+      }
+      if (key === 'channelGateway.terminal.connectedAndPendingCount') {
+        return `${values?.connected} 个已连接 · ${values?.pending} 个待激活`;
       }
       if (key === 'channelGateway.terminal.showAccountQr') {
         return `在下方重新展示${values?.account}的${values?.provider}二维码`;
@@ -36,6 +40,16 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('../api', () => ({
   listChannelAccounts: mocks.listChannelAccounts,
+  channelAccountLabel: (account: { label: string }) => account.label,
+  isChannelAccountPendingActivation: (account: { provider: string; status: string; capabilities?: { notification_ready?: boolean } }) => (
+    account.provider === 'wechat'
+    && account.status === 'connected'
+    && account.capabilities?.notification_ready === false
+  ),
+  isChannelAccountAvailable: (account: { provider: string; status: string; capabilities?: { notification_ready?: boolean } }) => (
+    account.status === 'connected'
+    && !(account.provider === 'wechat' && account.capabilities?.notification_ready === false)
+  ),
 }));
 
 vi.mock('../hooks/useChannelConnection', () => ({
@@ -70,6 +84,7 @@ describe('TerminalConnectionQuickPanel', () => {
             last_message_at: null,
             last_error: null,
             updated_at: '2026-08-14T08:00:00Z',
+            capabilities: { notification_ready: false },
           },
           {
             id: 'wechat-disconnected',
@@ -91,7 +106,7 @@ describe('TerminalConnectionQuickPanel', () => {
   it('shows account details below the provider tabs and keeps them exclusive with the QR flow', async () => {
     render(<TerminalConnectionQuickPanel onManage={vi.fn()} />);
 
-    const connectedButton = await screen.findByRole('button', { name: '1 个已连接' });
+    const connectedButton = await screen.findByRole('button', { name: '0 个已连接 · 1 个待激活' });
     expect(connectedButton).toHaveAttribute('aria-expanded', 'false');
     await waitFor(() => expect(mocks.startScan).toHaveBeenCalledTimes(1));
 
@@ -99,6 +114,7 @@ describe('TerminalConnectionQuickPanel', () => {
 
     expect(connectedButton).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('测试微信')).toBeInTheDocument();
+    expect(screen.getAllByText(/待激活/)).toHaveLength(2);
     expect(screen.queryByText('旧微信')).not.toBeInTheDocument();
     expect(mocks.startScan).toHaveBeenCalledTimes(1);
     const providerTabs = screen.getByRole('tablist');

@@ -27,8 +27,7 @@ echo ""
 echo "=== channel-gateway ==="
 if command -v python3 &>/dev/null; then
   PYTHONPATH=backend/channel-gateway \
-    python3 -m unittest discover \
-      -s backend/channel-gateway/tests -p 'test_*.py' -v 2>&1 \
+    python3 -m pytest tests/backend/channel-gateway/ -v --tb=short 2>&1 \
     || FAILED=1
 else
   echo "Skip (python3 not found)"

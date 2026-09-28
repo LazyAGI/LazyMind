@@ -431,6 +431,76 @@ components:
                         type: string
                     type: array
             type: object
+        AutomationGroupBatchCreateRequest:
+            additionalProperties: false
+            properties:
+                group:
+                    additionalProperties: false
+                    properties:
+                        name:
+                            type: string
+                        remark:
+                            type: string
+                        timezone:
+                            type: string
+                    required:
+                        - name
+                        - timezone
+                    type: object
+                tasks:
+                    items:
+                        additionalProperties: false
+                        properties:
+                            client_key:
+                                type: string
+                            cron_expr:
+                                type: string
+                            dependencies:
+                                items:
+                                    properties: {}
+                                    type: object
+                                type: array
+                            file_ids:
+                                items:
+                                    type: string
+                                type: array
+                            kb_ids:
+                                items:
+                                    type: string
+                                type: array
+                            name:
+                                type: string
+                            notification:
+                                $ref: '#/components/schemas/ScheduleNotificationUpdate'
+                            prompt_template:
+                                type: string
+                            remark:
+                                type: string
+                            timezone:
+                                type: string
+                        required:
+                            - client_key
+                            - name
+                            - cron_expr
+                            - prompt_template
+                        type: object
+                    type: array
+            required:
+                - group
+                - tasks
+            type: object
+        AutomationGroupBatchCreateResponse:
+            properties:
+                group_id:
+                    type: string
+                schedule_ids:
+                    additionalProperties:
+                        type: string
+                    type: object
+            required:
+                - group_id
+                - schedule_ids
+            type: object
         BatchAddACLData:
             properties:
                 count:
@@ -592,6 +662,41 @@ components:
             properties:
                 allowed:
                     type: boolean
+            type: object
+        Capabilities:
+            properties:
+                download:
+                    type: boolean
+                open:
+                    type: boolean
+                preview:
+                    type: boolean
+            required:
+                - download
+                - open
+                - preview
+            type: object
+        CapabilityDependency:
+            properties:
+                message:
+                    type: string
+                missing:
+                    items:
+                        $ref: '#/components/schemas/MissingCapability'
+                    type: array
+                required:
+                    items:
+                        type: string
+                    type: array
+                status:
+                    enum:
+                        - blocked
+                    type: string
+            required:
+                - message
+                - missing
+                - required
+                - status
             type: object
         ChatChunkResponse:
             properties:
@@ -1408,6 +1513,21 @@ components:
                 - used_amount
                 - remaining_amount
                 - missing_usage_count
+            type: object
+        CollectionPage:
+            properties:
+                next_cursor:
+                    nullable: true
+                    type: string
+                revision:
+                    format: int64
+                    type: integer
+                total:
+                    type: integer
+            required:
+                - next_cursor
+                - revision
+                - total
             type: object
         CompleteUploadRequest:
             properties:
@@ -2828,25 +2948,6 @@ components:
                 - group_id
                 - name
             type: object
-        OAuthCallbackRequest:
-            properties:
-                code:
-                    type: string
-                state:
-                    type: string
-            required:
-                - code
-                - state
-            type: object
-        OAuthResponse:
-            properties:
-                authorization_url:
-                    type: string
-                status:
-                    type: string
-            required:
-                - status
-            type: object
         CreateServerRequest:
             properties:
                 allowed_tools:
@@ -3852,6 +3953,48 @@ components:
                 - editable
                 - representation
                 - schema
+            type: object
+        DesktopNotificationAck:
+            additionalProperties: false
+            properties:
+                device_id:
+                    enum:
+                        - local
+                        - browser
+                    type: string
+                status:
+                    enum:
+                        - delivered
+                        - permission_denied
+                    type: string
+            required:
+                - device_id
+                - status
+            type: object
+        DesktopNotificationReceipt:
+            properties:
+                created_at:
+                    format: date-time
+                    type: string
+                device_id:
+                    type: string
+                notification_id:
+                    type: string
+                reason:
+                    type: string
+                status:
+                    type: string
+            type: object
+        DesktopNotifications:
+            properties:
+                device_id:
+                    type: string
+                items:
+                    items:
+                        $ref: '#/components/schemas/TaskNotification'
+                    type: array
+                next_cursor:
+                    type: string
             type: object
         DiscoverResponse:
             properties:
@@ -6420,6 +6563,9 @@ components:
                         permission_version:
                             format: int64
                             type: integer
+                        user_permission_version:
+                            format: int64
+                            type: integer
                     required:
                         - permission_mode
                         - permission_version
@@ -6513,6 +6659,30 @@ components:
                 - description
                 - term
             type: object
+        MissingCapability:
+            properties:
+                available:
+                    type: boolean
+                id:
+                    enum:
+                        - image_generator
+                        - image_editor
+                        - video_generator
+                        - ffmpeg
+                    type: string
+                label:
+                    type: string
+                reason:
+                    type: string
+                settings_url:
+                    type: string
+            required:
+                - available
+                - id
+                - label
+                - reason
+                - settings_url
+            type: object
         ModelFeaturesResponse:
             properties:
                 image_embed_enabled:
@@ -6522,6 +6692,387 @@ components:
             required:
                 - image_embed_enabled
                 - image_embed_required
+            type: object
+        NotificationClaim:
+            additionalProperties: false
+            properties:
+                outbox_id:
+                    type: string
+                retry:
+                    type: boolean
+            required:
+                - outbox_id
+            type: object
+        NotificationClaimResult:
+            properties:
+                granted:
+                    type: boolean
+            type: object
+        NotificationConfig:
+            additionalProperties: false
+            properties:
+                channels:
+                    additionalProperties: false
+                    maxProperties: 4
+                    minProperties: 1
+                    properties:
+                        desktop:
+                            additionalProperties: false
+                            properties:
+                                account_id:
+                                    maxLength: 256
+                                    type: string
+                                enabled:
+                                    type: boolean
+                                recipient_id:
+                                    maxLength: 256
+                                    type: string
+                            required:
+                                - enabled
+                            type: object
+                        feishu:
+                            additionalProperties: false
+                            properties:
+                                account_id:
+                                    maxLength: 256
+                                    type: string
+                                enabled:
+                                    type: boolean
+                                recipient_id:
+                                    maxLength: 256
+                                    type: string
+                            required:
+                                - enabled
+                            type: object
+                        wechat:
+                            additionalProperties: false
+                            properties:
+                                account_id:
+                                    maxLength: 256
+                                    type: string
+                                enabled:
+                                    type: boolean
+                                recipient_id:
+                                    maxLength: 256
+                                    type: string
+                            required:
+                                - enabled
+                            type: object
+                        wecom:
+                            additionalProperties: false
+                            properties:
+                                account_id:
+                                    maxLength: 256
+                                    type: string
+                                enabled:
+                                    type: boolean
+                                recipient_id:
+                                    maxLength: 256
+                                    type: string
+                            required:
+                                - enabled
+                            type: object
+                    type: object
+                events:
+                    additionalProperties: false
+                    properties:
+                        failed:
+                            additionalProperties: false
+                            properties:
+                                content:
+                                    enum:
+                                        - summary
+                                        - full
+                                    type: string
+                                enabled:
+                                    type: boolean
+                            required:
+                                - enabled
+                                - content
+                            type: object
+                        succeeded:
+                            additionalProperties: false
+                            properties:
+                                content:
+                                    enum:
+                                        - summary
+                                        - full
+                                    type: string
+                                enabled:
+                                    type: boolean
+                            required:
+                                - enabled
+                                - content
+                            type: object
+                        waiting:
+                            additionalProperties: false
+                            properties:
+                                content:
+                                    enum:
+                                        - summary
+                                        - full
+                                    type: string
+                                enabled:
+                                    type: boolean
+                            required:
+                                - enabled
+                                - content
+                            type: object
+                    required:
+                        - succeeded
+                        - failed
+                        - waiting
+                    type: object
+            required:
+                - events
+                - channels
+            type: object
+        NotificationError:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        detail:
+                            properties:
+                                reason:
+                                    type: string
+                                request_id:
+                                    type: string
+                                running_task_ids:
+                                    items:
+                                        type: string
+                                    type: array
+                            required:
+                                - reason
+                                - request_id
+                            type: object
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        NotificationPreferences:
+            properties:
+                defaults:
+                    $ref: '#/components/schemas/NotificationConfig'
+                enabled:
+                    type: boolean
+                revision:
+                    format: int64
+                    type: integer
+            required:
+                - enabled
+                - revision
+                - defaults
+            type: object
+        NotificationPreferencesPatch:
+            additionalProperties: false
+            properties:
+                confirm_running_task_ids:
+                    items:
+                        type: string
+                    type: array
+                defaults:
+                    $ref: '#/components/schemas/NotificationConfig'
+                enabled:
+                    type: boolean
+                revision:
+                    format: int64
+                    type: integer
+            required:
+                - revision
+            type: object
+        NotificationReferences:
+            properties:
+                items:
+                    items:
+                        properties:
+                            enabled:
+                                type: boolean
+                            id:
+                                type: string
+                            kind:
+                                enum:
+                                    - defaults
+                                    - schedule
+                                    - run
+                                type: string
+                            name:
+                                type: string
+                        type: object
+                    type: array
+                next_cursor:
+                    type: string
+                total:
+                    type: integer
+            type: object
+        OAuthCallbackRequest:
+            properties:
+                code:
+                    type: string
+                state:
+                    type: string
+            required:
+                - code
+                - state
+            type: object
+        OAuthResponse:
+            properties:
+                authorization_url:
+                    type: string
+                status:
+                    type: string
+            required:
+                - status
+            type: object
+        OrdinaryDisplayError:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        request_id:
+                            type: string
+                    required:
+                        - request_id
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        OrdinaryRunView:
+            properties:
+                final_artifacts:
+                    items:
+                        $ref: '#/components/schemas/PublicArtifact'
+                    type: array
+                final_output_refs:
+                    items:
+                        type: string
+                    type: array
+                revision:
+                    format: int64
+                    type: integer
+                run_id:
+                    type: string
+            required:
+                - revision
+                - run_id
+            type: object
+        OrdinaryTaskView:
+            properties:
+                agent_type:
+                    type: string
+                attempt_id:
+                    nullable: true
+                    type: string
+                capability_dependency:
+                    $ref: '#/components/schemas/CapabilityDependency'
+                conversation_id:
+                    type: string
+                display_key:
+                    type: string
+                execution_id:
+                    type: string
+                order:
+                    type: integer
+                pages:
+                    $ref: '#/components/schemas/Pages'
+                parallel_group_id:
+                    nullable: true
+                    type: string
+                plan_steps:
+                    description: Public subtask plan from scope-v2 plan events. Planned actions only; no inferred execution status or timing.
+                    items:
+                        maxLength: 100
+                        minLength: 1
+                        type: string
+                    maxItems: 5
+                    minItems: 3
+                    type: array
+                process_state:
+                    type: string
+                process_steps:
+                    items:
+                        $ref: '#/components/schemas/PublicProcessStep'
+                    type: array
+                progress_pct:
+                    description: Reported overall subtask progress, used to estimate plan position. Does not establish individual process step states. Omitted when unavailable.
+                    maximum: 100
+                    minimum: 0
+                    type: integer
+                revision:
+                    format: int64
+                    type: integer
+                run_id:
+                    type: string
+                schema_version:
+                    enum:
+                        - "1"
+                    type: integer
+                session_id:
+                    nullable: true
+                    type: string
+                sources:
+                    items:
+                        $ref: '#/components/schemas/PublicSource'
+                    type: array
+                stage_artifacts:
+                    items:
+                        $ref: '#/components/schemas/PublicArtifact'
+                    type: array
+                status:
+                    type: string
+                task_id:
+                    nullable: true
+                    type: string
+                timing:
+                    $ref: '#/components/schemas/Timing'
+                title:
+                    type: string
+                trigger_history_id:
+                    type: string
+                workflow_step_id:
+                    nullable: true
+                    type: string
+            required:
+                - attempt_id
+                - conversation_id
+                - display_key
+                - execution_id
+                - order
+                - pages
+                - parallel_group_id
+                - process_state
+                - revision
+                - run_id
+                - schema_version
+                - session_id
+                - status
+                - task_id
+                - timing
+                - title
+                - workflow_step_id
+            type: object
+        Pages:
+            properties:
+                process_steps:
+                    $ref: '#/components/schemas/CollectionPage'
+                sources:
+                    $ref: '#/components/schemas/CollectionPage'
+                stage_artifacts:
+                    $ref: '#/components/schemas/CollectionPage'
+            required:
+                - process_steps
+                - sources
+                - stage_artifacts
             type: object
         ParserConfig:
             properties:
@@ -7040,6 +7591,156 @@ components:
                 - session_id
                 - status
             type: object
+        PublicArtifact:
+            properties:
+                artifact_id:
+                    type: string
+                capabilities:
+                    $ref: '#/components/schemas/Capabilities'
+                content_type:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                download_url:
+                    type: string
+                inline_content:
+                    type: string
+                name:
+                    type: string
+                open_url:
+                    type: string
+                preview_kind:
+                    nullable: true
+                    type: string
+                preview_url:
+                    type: string
+                producer_display_key:
+                    type: string
+                revision:
+                    format: int64
+                    type: integer
+                size_bytes:
+                    format: int64
+                    nullable: true
+                    type: integer
+                state:
+                    type: string
+            required:
+                - artifact_id
+                - capabilities
+                - content_type
+                - created_at
+                - name
+                - preview_kind
+                - producer_display_key
+                - revision
+                - size_bytes
+                - state
+            type: object
+        PublicDisplayProgress:
+            properties:
+                event_key:
+                    maxLength: 128
+                    minLength: 1
+                    type: string
+                process_steps:
+                    items:
+                        $ref: '#/components/schemas/PublicProcessStep'
+                    maxItems: 100
+                    type: array
+                schema_version:
+                    enum:
+                        - 1
+                    type: integer
+                sources:
+                    items:
+                        $ref: '#/components/schemas/PublicSource'
+                    maxItems: 1000
+                    type: array
+            required:
+                - schema_version
+                - event_key
+            type: object
+        PublicProcessStep:
+            properties:
+                elapsed_ms:
+                    format: int64
+                    nullable: true
+                    type: integer
+                finished_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                order:
+                    maximum: 1000
+                    minimum: 0
+                    type: integer
+                revision:
+                    format: int64
+                    minimum: 1
+                    type: integer
+                started_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                status:
+                    enum:
+                        - pending
+                        - running
+                        - succeeded
+                        - failed
+                        - interrupted
+                        - canceled
+                    type: string
+                step_id:
+                    pattern: ^[A-Za-z0-9_.:-]{1,128}$
+                    type: string
+                summary:
+                    maxLength: 300
+                    type: string
+                title:
+                    maxLength: 100
+                    minLength: 1
+                    type: string
+            required:
+                - elapsed_ms
+                - finished_at
+                - order
+                - revision
+                - started_at
+                - status
+                - step_id
+                - title
+            type: object
+        PublicSource:
+            properties:
+                dataset_id:
+                    type: string
+                domain:
+                    nullable: true
+                    type: string
+                kind:
+                    type: string
+                platform:
+                    type: string
+                resource_id:
+                    type: string
+                snippet:
+                    type: string
+                source_id:
+                    type: string
+                title:
+                    type: string
+                url:
+                    type: string
+            required:
+                - domain
+                - kind
+                - platform
+                - source_id
+                - title
+            type: object
         Publication:
             properties:
                 artifact:
@@ -7329,6 +8030,47 @@ components:
                 - reason
                 - partial_output
             type: object
+        ScheduleNotificationReset:
+            additionalProperties: false
+            properties:
+                revision:
+                    format: int64
+                    type: integer
+            required:
+                - revision
+            type: object
+        ScheduleNotificationUpdate:
+            additionalProperties: false
+            properties:
+                clear:
+                    type: boolean
+                config:
+                    $ref: '#/components/schemas/NotificationConfig'
+                revision:
+                    format: int64
+                    type: integer
+            required:
+                - revision
+            type: object
+        ScheduleNotificationView:
+            properties:
+                availability:
+                    properties: {}
+                    type: object
+                config:
+                    allOf:
+                        - $ref: '#/components/schemas/NotificationConfig'
+                    nullable: true
+                configured:
+                    type: boolean
+                revision:
+                    format: int64
+                    type: integer
+            required:
+                - configured
+                - revision
+                - config
+            type: object
         SearchDatasetMemberRequest:
             properties:
                 is_all:
@@ -7405,6 +8147,8 @@ components:
                 create_time:
                     format: date-time
                     type: string
+                discovery_enabled:
+                    type: boolean
                 enabled:
                     type: boolean
                 id:
@@ -7436,6 +8180,7 @@ components:
             required:
                 - auth_type
                 - create_time
+                - discovery_enabled
                 - enabled
                 - id
                 - is_verified
@@ -7725,6 +8470,35 @@ components:
                 - session_id
                 - state_version
             type: object
+        SnapshotEvent:
+            properties:
+                data:
+                    $ref: '#/components/schemas/OrdinaryTaskView'
+                display_key:
+                    type: string
+                emitted_at:
+                    format: date-time
+                    type: string
+                event_id:
+                    type: string
+                revision:
+                    format: int64
+                    type: integer
+                schema_version:
+                    enum:
+                        - "1"
+                    type: integer
+                type:
+                    type: string
+            required:
+                - data
+                - display_key
+                - emitted_at
+                - event_id
+                - revision
+                - schema_version
+                - type
+            type: object
         StartTaskRequest:
             properties:
                 start_mode:
@@ -7844,6 +8618,35 @@ components:
                 - page
                 - page_size
             type: object
+        TaskCenterScheduleSummary:
+            properties:
+                cron_expr:
+                    type: string
+                enabled:
+                    type: boolean
+                id:
+                    type: string
+                last_run_at:
+                    format: date-time
+                    type: string
+                name:
+                    type: string
+                next_run_at:
+                    format: date-time
+                    type: string
+                run_count:
+                    type: integer
+                timezone:
+                    type: string
+            required:
+                - id
+                - name
+                - cron_expr
+                - timezone
+                - enabled
+                - run_count
+                - next_run_at
+            type: object
         TaskCenterTaskResponse:
             properties:
                 conversation_id:
@@ -7868,6 +8671,8 @@ components:
                 progress:
                     properties: {}
                     type: object
+                schedule:
+                    $ref: '#/components/schemas/TaskCenterScheduleSummary'
                 schedule_id:
                     type: string
                 schedule_name:
@@ -7958,6 +8763,110 @@ components:
                 total_document_size:
                     format: int64
                     type: integer
+            type: object
+        TaskNotification:
+            properties:
+                account_id:
+                    type: string
+                app_name:
+                    type: string
+                body:
+                    type: string
+                channel:
+                    enum:
+                        - desktop
+                        - wechat
+                        - feishu
+                        - wecom
+                    type: string
+                config_revision:
+                    format: int64
+                    type: integer
+                content:
+                    enum:
+                        - summary
+                        - full
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                event:
+                    enum:
+                        - succeeded
+                        - failed
+                        - waiting
+                    type: string
+                event_id:
+                    type: string
+                execution_id:
+                    type: string
+                gateway_id:
+                    type: string
+                navigation:
+                    properties:
+                        schedule_id:
+                            type: string
+                        task_id:
+                            type: string
+                        type:
+                            type: string
+                    type: object
+                notification_id:
+                    type: string
+                reason:
+                    type: string
+                recipient_id:
+                    type: string
+                schedule_id:
+                    type: string
+                status:
+                    enum:
+                        - pending
+                        - queued
+                        - sending
+                        - sent
+                        - failed
+                        - unknown
+                        - skipped
+                        - unavailable
+                    type: string
+                task_id:
+                    type: string
+                title:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+                user_id:
+                    type: string
+            required:
+                - notification_id
+                - task_id
+                - schedule_id
+                - event_id
+                - event
+                - channel
+                - title
+                - body
+                - status
+                - created_at
+            type: object
+        TaskNotifications:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/TaskNotification'
+                    type: array
+                snapshot:
+                    properties:
+                        config:
+                            allOf:
+                                - $ref: '#/components/schemas/NotificationConfig'
+                            nullable: true
+                        revision:
+                            format: int64
+                            type: integer
+                    type: object
             type: object
         TaskPayload:
             properties:
@@ -8050,6 +8959,67 @@ components:
                     type: string
             required:
                 - task_state
+            type: object
+        Timing:
+            properties:
+                execution_elapsed_ms:
+                    format: int64
+                    nullable: true
+                    type: integer
+                finished_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                measured_at:
+                    format: date-time
+                    type: string
+                started_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                thinking_elapsed_ms:
+                    format: int64
+                    nullable: true
+                    type: integer
+            required:
+                - execution_elapsed_ms
+                - finished_at
+                - measured_at
+                - started_at
+                - thinking_elapsed_ms
+            type: object
+        ToolConfigurationAction:
+            properties:
+                conversation_id:
+                    type: string
+                history_id:
+                    type: string
+                id:
+                    type: string
+                label:
+                    type: string
+                service:
+                    type: string
+                status:
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - conversation_id
+                - history_id
+                - id
+                - label
+                - service
+                - status
+                - version
+            type: object
+        ToolConfigurationListResponse:
+            properties:
+                actions:
+                    items:
+                        $ref: '#/components/schemas/ToolConfigurationAction'
+                    type: array
             type: object
         ToolGroup:
             properties:
@@ -9737,6 +10707,18 @@ components:
             properties:
                 artifact_saved:
                     type: boolean
+                cause:
+                    enum:
+                        - PANDOC_NOT_FOUND
+                        - PANDOC_NOT_EXECUTABLE
+                        - PANDOC_VERSION_UNSUPPORTED
+                        - PANDOC_TIMEOUT
+                        - PANDOC_INPUT_TOO_LARGE
+                        - PANDOC_OUTPUT_TOO_LARGE
+                        - PANDOC_TEMPLATE_INVALID
+                        - PANDOC_FILTER_FAILED
+                        - PANDOC_CONVERSION_FAILED
+                    type: string
                 code:
                     enum:
                         - IDENTITY_REQUIRED
@@ -10745,12 +11727,143 @@ components:
             required:
                 - id
             type: object
+        modelProviderBaseURLPresetItem:
+            properties:
+                api_key_required:
+                    type: boolean
+                key:
+                    type: string
+                label:
+                    type: string
+                value:
+                    type: string
+            required:
+                - key
+                - value
+            type: object
         okOpenAPIResponse:
             properties:
                 ok:
                     type: boolean
             required:
                 - ok
+            type: object
+        ordinaryArtifactData:
+            properties:
+                artifacts:
+                    items:
+                        $ref: '#/components/schemas/PublicArtifact'
+                    type: array
+                display_key:
+                    type: string
+                page:
+                    $ref: '#/components/schemas/CollectionPage'
+                revision:
+                    format: int64
+                    type: integer
+            required:
+                - display_key
+                - page
+                - revision
+            type: object
+        ordinaryArtifactResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/ordinaryArtifactData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        ordinaryTaskDetailData:
+            properties:
+                task:
+                    $ref: '#/components/schemas/OrdinaryTaskView'
+            required:
+                - task
+            type: object
+        ordinaryTaskDetailResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/ordinaryTaskDetailData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        ordinaryTaskListData:
+            properties:
+                runs:
+                    items:
+                        $ref: '#/components/schemas/OrdinaryRunView'
+                    type: array
+                tasks:
+                    items:
+                        $ref: '#/components/schemas/OrdinaryTaskView'
+                    type: array
+            type: object
+        ordinaryTaskListResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/ordinaryTaskListData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        ordinaryWorkflowData:
+            properties:
+                cursor:
+                    format: int64
+                    type: integer
+                revision:
+                    format: int64
+                    type: integer
+                runs:
+                    items:
+                        $ref: '#/components/schemas/OrdinaryRunView'
+                    type: array
+                schema_version:
+                    type: integer
+                session_id:
+                    type: string
+                status:
+                    type: string
+                tasks:
+                    items:
+                        $ref: '#/components/schemas/OrdinaryTaskView'
+                    type: array
+            required:
+                - cursor
+                - revision
+                - schema_version
+                - session_id
+                - status
+            type: object
+        ordinaryWorkflowResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/ordinaryWorkflowData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
             type: object
         patchConversationModelOpenAPIRequest:
             properties:
@@ -12721,6 +13834,12 @@ components:
             type: object
         userChatSettingsOpenAPIResponse:
             properties:
+                default_permission_mode:
+                    enum:
+                        - always_ask
+                        - ask_as_needed
+                        - allow_all
+                    type: string
                 enable_subagent:
                     type: boolean
                 enable_tool_retrieval:
@@ -12729,6 +13848,9 @@ components:
                     type: boolean
                 new_task:
                     $ref: '#/components/schemas/chatEntryDefaultsOpenAPI'
+                permission_version:
+                    format: int64
+                    type: integer
                 quick_question:
                     $ref: '#/components/schemas/chatEntryDefaultsOpenAPI'
                 updated_at:
@@ -12736,16 +13858,24 @@ components:
                 workflow_mode:
                     type: string
             required:
+                - default_permission_mode
                 - enable_subagent
                 - enable_tool_retrieval
                 - enable_workflow
                 - new_task
+                - permission_version
                 - quick_question
                 - updated_at
                 - workflow_mode
             type: object
         userChatSettingsPatchOpenAPIRequest:
             properties:
+                default_permission_mode:
+                    enum:
+                        - always_ask
+                        - ask_as_needed
+                        - allow_all
+                    type: string
                 enable_subagent:
                     type: boolean
                 enable_tool_retrieval:
@@ -12754,6 +13884,9 @@ components:
                     type: boolean
                 new_task:
                     $ref: '#/components/schemas/chatEntryDefaultsPatchOpenAPIRequest'
+                permission_version:
+                    format: int64
+                    type: integer
                 quick_question:
                     $ref: '#/components/schemas/chatEntryDefaultsPatchOpenAPIRequest'
                 workflow_mode:
@@ -12763,6 +13896,10 @@ components:
             properties:
                 base_url:
                     type: string
+                base_url_presets:
+                    items:
+                        $ref: '#/components/schemas/modelProviderBaseURLPresetItem'
+                    type: array
                 capabilities:
                     items:
                         type: string
@@ -12777,6 +13914,10 @@ components:
                     type: string
                 is_configured:
                     type: boolean
+                model_types:
+                    items:
+                        type: string
+                    type: array
                 name:
                     type: string
             required:
@@ -14388,6 +15529,77 @@ paths:
             summary: List agent thread steps
             tags:
                 - agent
+    /api/core/artifact-revisions/{id}:
+        get:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /artifact-revisions/{id}
+    /api/core/artifact-revisions/{id}:download-url:
+        post:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /artifact-revisions/{id}:download-url
+    /api/core/artifact-revisions:diff:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /artifact-revisions:diff
+    /api/core/artifacts/{id}:
+        get:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /artifacts/{id}
+    /api/core/artifacts/{id}/heads/{channel}:move:
+        post:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: channel
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /artifacts/{id}/heads/{channel}:move
+    /api/core/artifacts/{id}/revisions:
+        get:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /artifacts/{id}/revisions
     /api/core/automation-groups:
         get:
             responses:
@@ -14413,10 +15625,23 @@ paths:
             summary: DELETE /automation-groups/{group_id}
     /api/core/automation-groups:batch-create:
         post:
+            description: Each tasks[].notification belongs only to that concrete schedule. Omission keeps the current default snapshot. Any task, dependency, or notification failure rolls back the entire group.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/AutomationGroupBatchCreateRequest'
+                required: true
             responses:
                 "200":
-                    description: OK
-            summary: POST /automation-groups:batch-create
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/AutomationGroupBatchCreateResponse'
+                    description: Created task group
+            summary: Create a task group and save each task's optional notification draft atomically
+            tags:
+                - TaskNotifications
     /api/core/browser/extension/connect:
         get:
             responses:
@@ -16556,6 +17781,18 @@ paths:
             summary: Discard an ephemeral side conversation
             tags:
                 - conversations
+    /api/core/conversations/{conversation_id}/artifact-projection:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /conversations/{conversation_id}/artifact-projection
     /api/core/conversations/{conversation_id}/artifacts:
         get:
             parameters:
@@ -16603,7 +17840,16 @@ paths:
             summary: GET /conversations/{conversation_id}/dismissed-workflow-sessions
     /api/core/conversations/{conversation_id}/events:
         get:
+            description: With view=ordinary, every task connection starts with a current durable task_snapshot; workflow connections emit snapshot events. Reconnects hydrate snapshots without replaying raw execution logs. Workflow cursor expiration emits resync_required followed by snapshot. Conversation events carry only lifecycle identity and status fields. Omitting view preserves legacy SSE.
             parameters:
+                - in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - ordinary
+                        - developer
+                    type: string
                 - in: path
                   name: conversation_id
                   required: true
@@ -16611,8 +17857,20 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /conversations/{conversation_id}/events
+                    content:
+                        text/event-stream:
+                            schema:
+                                properties:
+                                    payload:
+                                        properties: {}
+                                        type: object
+                                    replayed:
+                                        type: boolean
+                                    type:
+                                        type: string
+                                type: object
+                    description: Server-sent events
+            summary: Stream public task snapshots or lifecycle notifications
     /api/core/conversations/{conversation_id}/fork-preview:
         post:
             operationId: previewConversationFork
@@ -16773,7 +18031,21 @@ paths:
             summary: PATCH /conversations/{conversation_id}/settings
     /api/core/conversations/{conversation_id}/tasks:
         get:
+            description: view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
             parameters:
+                - in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - ordinary
+                        - developer
+                    type: string
+                - in: query
+                  name: summary_only
+                  required: false
+                  schema:
+                    type: boolean
                 - in: path
                   name: conversation_id
                   required: true
@@ -16781,8 +18053,72 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /conversations/{conversation_id}/tasks
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ordinaryTaskListResponse'
+                    description: Public snapshot when view=ordinary; omitting view preserves the legacy response
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+            summary: List public task snapshots and explicit final outputs
+    /api/core/conversations/{conversation_id}/tool-configuration-actions:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+                - description: Optional history whose configuration cards should be returned.
+                  in: query
+                  name: history_id
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ToolConfigurationListResponse'
+                    description: Configuration actions
+            summary: List verified tool configuration actions
+            tags:
+                - conversations
     /api/core/conversations/{conversation_id}/workflow-sessions:
         get:
             parameters:
@@ -17129,6 +18465,9 @@ paths:
                                         - ask_as_needed
                                         - allow_all
                                     type: string
+                                user_permission_version:
+                                    format: int64
+                                    type: integer
                                 version:
                                     format: int64
                                     type: integer
@@ -17144,7 +18483,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/LocalWorkspacePermissionResponse'
                     description: Permission applies to next request
-            summary: Update workspace permission
+            summary: Update conversation permission and user default, with or without a workspace
     /api/core/conversations/{name}:
         delete:
             parameters:
@@ -22269,17 +23608,34 @@ paths:
             summary: Update MCP server
             tags:
                 - mcp_servers
+    /api/core/mcp_servers/{id}/oauth:
+        delete:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OAuthResponse'
+                    description: Authorization status
+            summary: Disconnect personal MCP authorization
+            tags:
+                - mcp_servers
     /api/core/mcp_servers/{id}/oauth/authorize:
         post:
             parameters:
-                -
-                    in: path
-                    name: id
-                    required: true
-                    schema:
-                        type: string
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
             responses:
-                '200':
+                "200":
                     content:
                         application/json:
                             schema:
@@ -22291,12 +23647,11 @@ paths:
     /api/core/mcp_servers/{id}/oauth/callback:
         post:
             parameters:
-                -
-                    in: path
-                    name: id
-                    required: true
-                    schema:
-                        type: string
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
             requestBody:
                 content:
                     application/json:
@@ -22304,32 +23659,13 @@ paths:
                             $ref: '#/components/schemas/OAuthCallbackRequest'
                 required: true
             responses:
-                '200':
+                "200":
                     content:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/OAuthResponse'
                     description: Authorization status
             summary: Complete personal MCP authorization
-            tags:
-                - mcp_servers
-    /api/core/mcp_servers/{id}/oauth:
-        delete:
-            parameters:
-                -
-                    in: path
-                    name: id
-                    required: true
-                    schema:
-                        type: string
-            responses:
-                '200':
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/OAuthResponse'
-                    description: Authorization status
-            summary: Disconnect personal MCP authorization
             tags:
                 - mcp_servers
     /api/core/mcp_servers/{id}/tools:
@@ -23580,6 +24916,91 @@ paths:
             summary: List user model providers that have groups
             tags:
                 - model_providers
+    /api/core/notification-account-references/{account_id}:
+        get:
+            description: Read owned defaults, schedules and active runs referencing an account. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+            parameters:
+                - in: path
+                  name: account_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: cursor
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: limit
+                  required: false
+                  schema:
+                    default: 20
+                    maximum: 100
+                    minimum: 1
+                    type: integer
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    code:
+                                        type: integer
+                                    data:
+                                        $ref: '#/components/schemas/NotificationReferences'
+                                type: object
+                    description: Success
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "413":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+            summary: Read owned defaults, schedules and active runs referencing an account
+            tags:
+                - TaskNotifications
     /api/core/personalization-setting:
         get:
             responses:
@@ -24116,10 +25537,57 @@ paths:
                     description: OK
             summary: GET /schedules
         post:
+            description: notification is optional. Omission retains legacy defaults on creation and preserves the rule on update. Send config or clear:true, not both. Updates compare notification.revision; conflicts roll back all task edits. Creation ignores the supplied revision. Runs and history are unchanged.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                cron_expr:
+                                    type: string
+                                dependencies:
+                                    items:
+                                        properties: {}
+                                        type: object
+                                    type: array
+                                file_ids:
+                                    items:
+                                        type: string
+                                    type: array
+                                group_id:
+                                    nullable: true
+                                    type: string
+                                kb_ids:
+                                    items:
+                                        type: string
+                                    type: array
+                                name:
+                                    type: string
+                                notification:
+                                    $ref: '#/components/schemas/ScheduleNotificationUpdate'
+                                prompt_template:
+                                    type: string
+                                remark:
+                                    type: string
+                                timezone:
+                                    type: string
+                            type: object
+                required: true
             responses:
                 "200":
-                    description: OK
-            summary: POST /schedules
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    id:
+                                        type: string
+                                    name:
+                                        type: string
+                                type: object
+                    description: Schedule
+            summary: Save schedule and optional notification draft atomically
+            tags:
+                - TaskNotifications
     /api/core/schedules/{schedule_id}:
         delete:
             parameters:
@@ -24133,6 +25601,66 @@ paths:
                     description: OK
             summary: DELETE /schedules/{schedule_id}
         put:
+            description: notification is optional. Omission retains legacy defaults on creation and preserves the rule on update. Send config or clear:true, not both. Updates compare notification.revision; conflicts roll back all task edits. Creation ignores the supplied revision. Runs and history are unchanged.
+            parameters:
+                - in: path
+                  name: schedule_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                cron_expr:
+                                    type: string
+                                dependencies:
+                                    items:
+                                        properties: {}
+                                        type: object
+                                    type: array
+                                file_ids:
+                                    items:
+                                        type: string
+                                    type: array
+                                group_id:
+                                    nullable: true
+                                    type: string
+                                kb_ids:
+                                    items:
+                                        type: string
+                                    type: array
+                                name:
+                                    type: string
+                                notification:
+                                    $ref: '#/components/schemas/ScheduleNotificationUpdate'
+                                prompt_template:
+                                    type: string
+                                remark:
+                                    type: string
+                                timezone:
+                                    type: string
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    id:
+                                        type: string
+                                    name:
+                                        type: string
+                                type: object
+                    description: Schedule
+            summary: Save schedule and optional notification draft atomically
+            tags:
+                - TaskNotifications
+    /api/core/schedules/{schedule_id}/notifications:
+        get:
+            description: Read configuration and current channel availability. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
             parameters:
                 - in: path
                   name: schedule_id
@@ -24141,8 +25669,222 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: PUT /schedules/{schedule_id}
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    code:
+                                        type: integer
+                                    data:
+                                        $ref: '#/components/schemas/ScheduleNotificationView'
+                                type: object
+                    description: Success
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "413":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+            summary: Read configuration and current channel availability
+            tags:
+                - TaskNotifications
+        put:
+            description: Update next-run configuration with an independent revision. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+            parameters:
+                - in: path
+                  name: schedule_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ScheduleNotificationUpdate'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    code:
+                                        type: integer
+                                    data:
+                                        $ref: '#/components/schemas/ScheduleNotificationView'
+                                type: object
+                    description: Success
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "413":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+            summary: Update next-run configuration with an independent revision
+            tags:
+                - TaskNotifications
+    /api/core/schedules/{schedule_id}/notifications:reset:
+        post:
+            description: Copy current defaults into this schedule. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+            parameters:
+                - in: path
+                  name: schedule_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ScheduleNotificationReset'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    code:
+                                        type: integer
+                                    data:
+                                        $ref: '#/components/schemas/ScheduleNotificationView'
+                                type: object
+                    description: Success
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "413":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+            summary: Copy current defaults into this schedule
+            tags:
+                - TaskNotifications
     /api/core/schedules/{schedule_id}:cancel:
         post:
             parameters:
@@ -24334,6 +26076,12 @@ paths:
                   required: false
                   schema:
                     type: integer
+                - description: When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count.
+                  in: query
+                  name: name_only
+                  required: false
+                  schema:
+                    type: boolean
             responses:
                 "200":
                     content:
@@ -24768,6 +26516,12 @@ paths:
                   required: false
                   schema:
                     type: integer
+                - description: When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count.
+                  in: query
+                  name: name_only
+                  required: false
+                  schema:
+                    type: boolean
             responses:
                 "200":
                     content:
@@ -25727,6 +27481,12 @@ paths:
                   required: false
                   schema:
                     type: integer
+                - description: When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count.
+                  in: query
+                  name: name_only
+                  required: false
+                  schema:
+                    type: boolean
             responses:
                 "200":
                     content:
@@ -25832,6 +27592,255 @@ paths:
             summary: Aggregate documents
             tags:
                 - documents
+    /api/core/task-center/desktop-notifications:
+        get:
+            description: 'System notifications: browser in all deployments; local native client in Local/Desktop only. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.'
+            parameters:
+                - in: query
+                  name: cursor
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: limit
+                  required: false
+                  schema:
+                    default: 20
+                    maximum: 100
+                    minimum: 1
+                    type: integer
+                - in: query
+                  name: device_id
+                  required: false
+                  schema:
+                    enum:
+                        - local
+                        - browser
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    code:
+                                        type: integer
+                                    data:
+                                        $ref: '#/components/schemas/DesktopNotifications'
+                                type: object
+                    description: Success
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "413":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+            summary: 'System notifications: browser in all deployments; local native client in Local/Desktop only'
+            tags:
+                - TaskNotifications
+    /api/core/task-center/desktop-notifications/{notification_id}:ack:
+        post:
+            description: Idempotent system-notification receipt; delivered means submitted, not seen by the user. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+            parameters:
+                - in: path
+                  name: notification_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/DesktopNotificationAck'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    code:
+                                        type: integer
+                                    data:
+                                        $ref: '#/components/schemas/DesktopNotificationReceipt'
+                                type: object
+                    description: Success
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "413":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+            summary: Idempotent system-notification receipt; delivered means submitted, not seen by the user
+            tags:
+                - TaskNotifications
+    /api/core/task-center/notification-events/{notification_id}:claim:
+        post:
+            description: Internal service token required; atomically grant one segment against the global gate. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+            parameters:
+                - in: path
+                  name: notification_id
+                  required: true
+                  schema:
+                    type: string
+                - in: header
+                  name: X-LazyMind-Internal-Token
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/NotificationClaim'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    code:
+                                        type: integer
+                                    data:
+                                        $ref: '#/components/schemas/NotificationClaimResult'
+                                type: object
+                    description: Success
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "413":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+            summary: Internal service token required; atomically grant one segment against the global gate
+            tags:
+                - TaskNotifications
     /api/core/task-center/schedules/{schedule_id}/tasks:
         get:
             parameters:
@@ -25910,6 +27919,78 @@ paths:
                                 $ref: '#/components/schemas/TaskCenterTaskResponse'
                     description: Task-center task
             summary: Get a task-center task
+    /api/core/task-center/tasks/{task_id}/notifications:
+        get:
+            description: Read immutable run configuration and delivery history. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    code:
+                                        type: integer
+                                    data:
+                                        $ref: '#/components/schemas/TaskNotifications'
+                                type: object
+                    description: Success
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "413":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+            summary: Read immutable run configuration and delivery history
+            tags:
+                - TaskNotifications
     /api/core/task-center/tasks/{task_id}:cancel:
         post:
             parameters:
@@ -25936,7 +28017,38 @@ paths:
             summary: POST /task-center/tasks/{task_id}:remove
     /api/core/tasks/{task_id}:
         get:
+            description: view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
             parameters:
+                - in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - ordinary
+                        - developer
+                    type: string
+                - in: query
+                  name: collection
+                  required: false
+                  schema:
+                    enum:
+                        - process_steps
+                        - sources
+                        - stage_artifacts
+                    type: string
+                - in: query
+                  name: cursor
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: limit
+                  required: false
+                  schema:
+                    default: 100
+                    maximum: 100
+                    minimum: 1
+                    type: integer
                 - in: path
                   name: task_id
                   required: true
@@ -25944,11 +28056,82 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /tasks/{task_id}
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ordinaryTaskDetailResponse'
+                    description: Public snapshot when view=ordinary; omitting view preserves the legacy response
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+            summary: Read a public task snapshot
     /api/core/tasks/{task_id}/artifacts:
         get:
+            description: view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
             parameters:
+                - in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - ordinary
+                        - developer
+                    type: string
+                - in: query
+                  name: collection
+                  required: false
+                  schema:
+                    enum:
+                        - process_steps
+                        - sources
+                        - stage_artifacts
+                    type: string
+                - in: query
+                  name: cursor
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: limit
+                  required: false
+                  schema:
+                    default: 100
+                    maximum: 100
+                    minimum: 1
+                    type: integer
                 - in: path
                   name: task_id
                   required: true
@@ -25956,11 +28139,60 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /tasks/{task_id}/artifacts
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ordinaryArtifactResponse'
+                    description: Public snapshot when view=ordinary; omitting view preserves the legacy response
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+            summary: Read public stage artifacts
     /api/core/tasks/{task_id}:stream:
         get:
+            description: With view=ordinary, every task connection starts with a current durable task_snapshot; workflow connections emit snapshot events. Reconnects hydrate snapshots without replaying raw execution logs. Workflow cursor expiration emits resync_required followed by snapshot. Conversation events carry only lifecycle identity and status fields. Omitting view preserves legacy SSE.
             parameters:
+                - in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - ordinary
+                        - developer
+                    type: string
                 - in: path
                   name: task_id
                   required: true
@@ -25968,8 +28200,12 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /tasks/{task_id}:stream
+                    content:
+                        text/event-stream:
+                            schema:
+                                $ref: '#/components/schemas/SnapshotEvent'
+                    description: Server-sent events
+            summary: Stream public task snapshots or lifecycle notifications
     /api/core/temp/uploads:
         post:
             requestBody:
@@ -26227,6 +28463,143 @@ paths:
             summary: Partially update quick-question and new-task defaults
             tags:
                 - user
+    /api/core/user/notification-preferences:
+        get:
+            description: Read scheduled-task notification defaults and global gate. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    code:
+                                        type: integer
+                                    data:
+                                        $ref: '#/components/schemas/NotificationPreferences'
+                                type: object
+                    description: Success
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "413":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+            summary: Read scheduled-task notification defaults and global gate
+            tags:
+                - TaskNotifications
+        patch:
+            description: Compare revision; closing requires the exact current affected run IDs. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/NotificationPreferencesPatch'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    code:
+                                        type: integer
+                                    data:
+                                        $ref: '#/components/schemas/NotificationPreferences'
+                                type: object
+                    description: Success
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "413":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+            summary: Compare revision; closing requires the exact current affected run IDs
+            tags:
+                - TaskNotifications
     /api/core/user/ui-preferences:
         get:
             responses:
@@ -27379,7 +29752,16 @@ paths:
                 - workflow-control
     /api/core/workflow-sessions/{session_id}/events:
         get:
+            description: With view=ordinary, every task connection starts with a current durable task_snapshot; workflow connections emit snapshot events. Reconnects hydrate snapshots without replaying raw execution logs. Workflow cursor expiration emits resync_required followed by snapshot. Conversation events carry only lifecycle identity and status fields. Omitting view preserves legacy SSE.
             parameters:
+                - in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - ordinary
+                        - developer
+                    type: string
                 - in: path
                   name: session_id
                   required: true
@@ -27387,8 +29769,12 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /workflow-sessions/{session_id}/events
+                    content:
+                        text/event-stream:
+                            schema:
+                                $ref: '#/components/schemas/ordinaryWorkflowResponse'
+                    description: Server-sent events
+            summary: Stream public task snapshots or lifecycle notifications
     /api/core/workflow-sessions/{session_id}/executions:begin:
         post:
             parameters:
@@ -27653,7 +30039,43 @@ paths:
             summary: POST /workflow-sessions/{session_id}/input-bindings
     /api/core/workflow-sessions/{session_id}/projection:
         get:
+            description: view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
             parameters:
+                - in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - ordinary
+                        - developer
+                    type: string
+                - in: query
+                  name: collection
+                  required: false
+                  schema:
+                    enum:
+                        - process_steps
+                        - sources
+                        - stage_artifacts
+                    type: string
+                - in: query
+                  name: cursor
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: limit
+                  required: false
+                  schema:
+                    default: 100
+                    maximum: 100
+                    minimum: 1
+                    type: integer
+                - in: query
+                  name: display_key
+                  required: false
+                  schema:
+                    type: string
                 - in: path
                   name: session_id
                   required: true
@@ -27661,8 +30083,48 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /workflow-sessions/{session_id}/projection
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ordinaryWorkflowResponse'
+                    description: Public snapshot when view=ordinary; omitting view preserves the legacy response
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OrdinaryDisplayError'
+                    description: Invalid request, missing resource or expired cursor
+            summary: Read public workflow attempts, including hosted attempts
     /api/core/workflow-sessions/{session_id}/slots:
         get:
             parameters:

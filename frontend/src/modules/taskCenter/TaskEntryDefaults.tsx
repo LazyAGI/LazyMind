@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSettingsDraft } from '@/modules/settings/SettingsNavigationGuard';
 import { Alert, Button, Radio, Select, Skeleton, Switch } from 'antd';
 import type { RadioChangeEvent } from 'antd';
 import {
@@ -130,12 +131,12 @@ export default function TaskEntryDefaults({
   );
 
   const persistProfiles = async () => {
-    if (savingRef.current) return;
+    if (savingRef.current) return false;
     const draft = cloneDefaults(profiles);
     const changedKinds = ENTRY_KINDS.filter(
       (kind) => !entryDefaultEquals(draft[kind], savedProfiles[kind]),
     );
-    if (changedKinds.length === 0) return;
+    if (changedKinds.length === 0) return true;
 
     savingRef.current = true;
     if (savedTimerRef.current != null) {
@@ -150,7 +151,7 @@ export default function TaskEntryDefaults({
         await ConversationSettingsApi().patchChatEntryDefault(kind, draft[kind], {
           signal: controller.signal,
         });
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted) return false;
         setSavedProfiles((current) => ({
           ...current,
           [kind]: cloneEntryDefault(draft[kind]),
@@ -158,9 +159,11 @@ export default function TaskEntryDefaults({
       }
       setSaveState('saved');
       savedTimerRef.current = window.setTimeout(() => setSaveState('idle'), 1600);
+      return true;
     } catch {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) return false;
       setSaveState('error');
+      return false;
     } finally {
       if (saveControllerRef.current === controller) {
         saveControllerRef.current = null;
@@ -168,6 +171,13 @@ export default function TaskEntryDefaults({
       savingRef.current = false;
     }
   };
+
+  useSettingsDraft({
+    dirty: hasUnsavedChanges,
+    saving: saveState === 'saving',
+    save: persistProfiles,
+    discard: () => setProfiles(cloneDefaults(savedProfiles)),
+  });
 
   const updateProfile = (
     kind: ChatEntryKind,

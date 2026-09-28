@@ -9,6 +9,7 @@ const HEADING_LINE_RE = /^(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+[ \t]*)?$/;
 
 export interface WriterMarkdownOutlineInstruction {
   node_id: string;
+  outline_description?: string;
   target_chars?: number;
   context_relations: Array<{
     relation: string;
@@ -17,6 +18,7 @@ export interface WriterMarkdownOutlineInstruction {
   }>;
   subtasks: Array<{
     subtask_id: string;
+    // extract is accepted only for historical artifacts/events; it is displayed as reason.
     subtask_type: 'retrieve' | 'extract' | 'reason';
     question: string;
     status: 'pending' | 'running' | 'completed' | 'retrying' | 'failed';
@@ -588,6 +590,9 @@ export function collectWriterMarkdownOutline(markdown: string): WriterMarkdownOu
           if (payload && typeof payload === 'object') {
             items[currentItemIndex].instructions = {
               node_id: items[currentItemIndex].anchorId.replace(/^block-/, ''),
+              outline_description: typeof payload.outline_description === 'string'
+                ? payload.outline_description.trim()
+                : undefined,
               target_chars: typeof payload.target_chars === 'number'
                 ? payload.target_chars
                 : undefined,

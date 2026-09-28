@@ -84,6 +84,20 @@ func TestReadZipSubdirectorySelectsSkillFromLargeRepositoryArchive(t *testing.T)
 	}
 }
 
+func TestReadZipSubdirectoryNormalizesDocumentFilename(t *testing.T) {
+	pkg, err := ReadZipSubdirectory(writeZip(t, map[string]string{
+		"repository-main/skills/target/skill.md":        "original document",
+		"repository-main/skills/target/references/a.md": "original reference",
+		"repository-main/skills/other/SKILL.md":         "unselected",
+	}), "skills/target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg.PackageRoot != "target" || string(pkg.Files["SKILL.md"]) != "original document" || string(pkg.Files["references/a.md"]) != "original reference" || len(pkg.Files) != 2 {
+		t.Fatalf("unexpected normalized package: %#v", pkg)
+	}
+}
+
 func TestReadZipSubdirectoryRejectsMissingSkillAndUnsafePrefix(t *testing.T) {
 	zipPath := writeZip(t, map[string]string{
 		"repository-main/skills/other/SKILL.md": "other",

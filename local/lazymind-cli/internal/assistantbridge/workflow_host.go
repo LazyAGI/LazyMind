@@ -63,7 +63,7 @@ func (s *Server) handleWorkflowHostBind(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	relayWorkflowHost(w, r, api, http.MethodPost, "/workflow-sessions/"+url.PathEscape(input.RunID)+"/host-binding", map[string]any{
-		"connector_id": pair.ConnectorID, "credential": pair.Token, "provider": "deepseek-harness",
+		"connector_id": pair.ConnectorID, "credential": pair.Token, "provider": pair.Provider,
 		"driver_session_id": input.Driver,
 	}, nil)
 }

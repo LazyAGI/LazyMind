@@ -16,7 +16,7 @@ from channel_gateway.common.domain.channel import account_view
 from channel_gateway.common.errors import GatewayError
 from channel_gateway.common.ports.providers import PayloadCipher
 from channel_gateway.common.ports.providers import RuntimeLease
-from channel_gateway.wechat.domain import WeChatConfig, WeChatError
+from channel_gateway.wechat.domain import WeChatConfig, WeChatError, WeChatRejectedError
 from channel_gateway.wechat.ports import (
     WeChatConnectionRepository,
     WeChatLoginClient,
@@ -24,6 +24,18 @@ from channel_gateway.wechat.ports import (
 
 
 _logger = logging.getLogger(__name__)
+
+
+def _wechat_account_label(result: dict) -> str:
+    profile = result.get('user_info') if isinstance(result.get('user_info'), dict) else {}
+    name = next((str(value or '').strip() for value in (
+        result.get('bot_name'), result.get('nickname'), result.get('display_name'),
+        result.get('name'), result.get('account_name'), profile.get('nickname'),
+        profile.get('display_name'), profile.get('name'),
+    ) if str(value or '').strip()), '')
+    return name[:128] or '微信机器人'
+
+
 _TERMINAL_STATUSES = {'connected', 'expired', 'canceled', 'failed'}
 _INVALID_SESSION_ERRORS = ('errcode=-14', 'session timeout')
 _REDIRECT_HOST_RE = re.compile(r'^[A-Za-z0-9.-]+$')
@@ -126,6 +138,8 @@ class WeChatConnectionService:
         *,
         owner_user_id: str,
         idempotency_key: str | None,
+        account_id: str | None = None,
+        credentials: dict | None = None,
     ) -> dict[str, Any]:
         normalized_idempotency_key = (idempotency_key or '').strip()
         if len(normalized_idempotency_key) > 128:
@@ -140,6 +154,7 @@ class WeChatConnectionService:
             provider='wechat',
             idempotency_key=normalized_idempotency_key or None,
             expires_at=expires_at,
+            requested_account_id=account_id,
         )
         if not created:
             return self._session_view(row)
@@ -274,7 +289,11 @@ class WeChatConnectionService:
         account = self._store.get_account(owner_user_id, account_id)
         if not account:
             raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '微信账号不存在或已解除连接')
-        if not self._store.delete_account(owner_user_id, account_id):
+        if not self._store.disconnect_account(
+            owner_user_id,
+            account_id,
+            retain_credentials=True,
+        ):
             raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '微信账号状态已经变化，请刷新后重试')
         if self._on_account_disconnected:
             self._on_account_disconnected(account_id)
@@ -283,6 +302,48 @@ class WeChatConnectionService:
             account_id,
             owner_user_id,
         )
+
+    def resume_account(self, owner_user_id: str, account_id: str) -> dict[str, Any]:
+        account = self._store.get_account(owner_user_id, account_id)
+        if not account or account.get('provider') != 'wechat':
+            raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '微信账号不存在')
+        if account.get('status') == 'connected':
+            return account_view(account)
+        ciphertext = str(account.get('credentials_ciphertext') or '')
+        if not ciphertext:
+            raise GatewayError(409, 'WECHAT_REAUTHORIZATION_REQUIRED', '微信凭据不可用，请重新扫码')
+        try:
+            credentials = self._cipher.decrypt(owner_user_id, ciphertext)
+        except Exception as exc:
+            raise GatewayError(409, 'WECHAT_REAUTHORIZATION_REQUIRED', '微信凭据不可用，请重新扫码') from exc
+        if not credentials.get('token') or not credentials.get('account_id'):
+            raise GatewayError(409, 'WECHAT_REAUTHORIZATION_REQUIRED', '微信凭据不可用，请重新扫码')
+        try:
+            self._wechat.notify_start(
+                base_url=str(credentials.get('base_url') or self._config.ilink_base_url),
+                token=str(credentials['token']),
+            )
+        except WeChatRejectedError as exc:
+            if not exc.retryable:
+                raise GatewayError(
+                    409,
+                    'WECHAT_REAUTHORIZATION_REQUIRED',
+                    '微信会话已失效，请重新扫码',
+                ) from exc
+            raise GatewayError(503, 'WECHAT_CONNECTION_UNAVAILABLE', '微信连接暂时不可用，请稍后重试', True) from exc
+        except WeChatError as exc:
+            raise GatewayError(503, 'WECHAT_CONNECTION_UNAVAILABLE', '微信连接暂时不可用，请稍后重试', True) from exc
+        resumed = self._store.resume_account(
+            owner_user_id, account_id, int(account.get('credential_revision') or 0), 'wechat'
+        )
+        if not resumed:
+            current = self._store.get_account(owner_user_id, account_id)
+            if current and current.get('status') == 'connected':
+                return account_view(current)
+            raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '微信账号状态已经变化，请刷新后重试')
+        if self._on_account_connected:
+            self._on_account_connected(account_id)
+        return account_view(resumed)
 
     def _start_worker(self, session_id: str, qr_version: int) -> None:
         key = (session_id, qr_version)
@@ -485,7 +546,12 @@ class WeChatConnectionService:
             'base_url': base_url.rstrip('/'),
             'saved_at': _utc_now().isoformat(),
         }
-        external_id_hash = hashlib.sha256(provider_account_id.encode('utf-8')).hexdigest()
+        external_id_hash = self._reconnect_identity_hash(
+            row,
+            provider_account_id,
+            authorized_user_id,
+        )
+        self._store.validate_reconnect(row['id'], row['owner_user_id'], 'wechat', external_id_hash)
         account = self._store.save_connected_account(
             session_id=row['id'],
             qr_version=row['qr_version'],
@@ -493,7 +559,7 @@ class WeChatConnectionService:
             owner_user_id=row['owner_user_id'],
             provider='wechat',
             external_id_hash=external_id_hash,
-            label='微信 ClawBot',
+            label=_wechat_account_label(result),
             credentials_ciphertext=self._cipher.encrypt(str(row['owner_user_id']), credentials),
             conflict_message='该微信身份已绑定到另一个 LazyMind 用户',
             connected_message='微信连接成功',
@@ -507,6 +573,27 @@ class WeChatConnectionService:
             )
             if self._on_account_connected:
                 self._on_account_connected(str(account['id']))
+
+    def _reconnect_identity_hash(
+        self,
+        row: dict[str, Any],
+        provider_account_id: str,
+        authorized_user_id: str,
+    ) -> str:
+        """Reuse the original identity when iLink rotates the bot id."""
+        requested_account_id = str(row.get('requested_account_id') or '')
+        owner_user_id = str(row.get('owner_user_id') or '')
+        if requested_account_id and owner_user_id:
+            account = self._store.get_account(owner_user_id, requested_account_id)
+            ciphertext = str(account.get('credentials_ciphertext') or '') if account else ''
+            if account and ciphertext:
+                try:
+                    previous = self._cipher.decrypt(owner_user_id, ciphertext)
+                except Exception:
+                    previous = {}
+                if str(previous.get('authorized_user_id') or '') == authorized_user_id:
+                    return str(account['external_id_hash'])
+        return hashlib.sha256(provider_account_id.encode('utf-8')).hexdigest()
 
     def _local_tokens(self, owner_user_id: str) -> tuple[str, ...]:
         tokens: list[str] = []

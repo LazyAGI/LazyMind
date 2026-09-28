@@ -55,6 +55,46 @@ def _notice(notice):
     return [notice] if notice else []
 
 
+@pytest.mark.parametrize('tool_name', ['set_session_env', 'set_user_env'])
+@pytest.mark.parametrize('value', ['synthetic-secret', 'hqjwsjdhgq'])
+def test_env_tool_logging_redacts_prepared_readonly_arguments(monkeypatch, tool_name, value):
+    from lazyllm.tools import ToolManager
+    from lazymind.chat.service.component.tool_rendering import _tool_call_frame_text
+
+    received = []
+
+    def configure(name: str, value: str):
+        '''Configure a test environment variable.
+
+        Args:
+            name: Variable name.
+            value: Variable value.
+        '''
+        received.append(value)
+        return {'name': name, 'ok': True}
+
+    configure.__name__ = tool_name
+    configure = fc_register(host_file='NONE')(configure)
+    messages = []
+    monkeypatch.setattr(lazyllm.LOG, 'info', lambda message, *args, **kwargs: messages.append(str(message)))
+    call = {
+        'id': 'env-redaction',
+        'function': {'name': tool_name, 'arguments': {'name': 'codex_probe_api_key', 'value': value}},
+    }
+    original_call = copy.deepcopy(call)
+    display, _ = _tool_call_frame_text(call)
+    assert value not in display
+    assert '<redacted>' in display
+    assert call == original_call
+    batch = ToolExecutionMiddleware(ToolManager([configure])).execute_with_records(call)
+    assert batch.records[0].disposition is ToolExecutionDisposition.EXECUTED
+    assert received == [value]
+    logs = '\n'.join(messages)
+    assert 'codex_probe_api_key' in logs
+    assert '<redacted>' in logs
+    assert value not in logs
+
+
 @pytest.mark.parametrize('result', [
     {'ok': True, 'value': {'items': ['same']}},
     {'ok': False, 'msg': 'same failure'},
@@ -469,3 +509,35 @@ def test_local_workspace_source_protocol_no_longer_creates_a_permission_binding(
     })
 
     assert not context.bound
+
+
+def test_call_quota_and_authorization_compose_without_counting_denied_calls():
+    from lazyllm.tools.agent import ToolManager, fc_register
+    from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolCallQuota
+
+    effects, authorization_calls = [], []
+
+    @fc_register(host_file='NONE')
+    def inspect_item(key: str):
+        '''Inspect an item.
+
+        Args:
+            key (str): Item identifier.
+        '''
+        effects.append(key)
+        return key
+
+    def authorize(item):
+        authorization_calls.append(item.call_id)
+        return 'deny' if item.call_id == 'denied' else 'allow'
+
+    middleware = ToolExecutionMiddleware(
+        ToolManager([inspect_item]), authorization_gate=authorize,
+        call_quota=ToolCallQuota({'inspect_item': 1}),
+    )
+    for call_id in ('denied', 'allowed', 'over-limit'):
+        middleware.execute_with_records({
+            'id': call_id, 'function': {'name': 'inspect_item', 'arguments': {'key': call_id}},
+        })
+    assert effects == ['allowed']
+    assert authorization_calls == ['denied', 'allowed']

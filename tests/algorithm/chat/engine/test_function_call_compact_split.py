@@ -21,6 +21,14 @@ VALID_SUMMARY = '\n'.join([
     'Touched summarizer.py; run_script exit 0.',
     '## Pending work',
     'Wire tests and lint.',
+    '## Active skills',
+    '[]',
+    '## Artifact coordinates',
+    '[]',
+    '## Citation map',
+    '[]',
+    '## Spill paths',
+    '[]',
 ])
 
 
@@ -139,7 +147,8 @@ def test_function_call_uses_structured_split_when_summary_shortens_history() -> 
     sent = compacted_prior + compacted_current
     counts = _tool_id_counts(sent)
     assert calls['n'] >= 1
-    assert is_runtime_summary_message(compacted_prior[0])
+    assert compacted_prior[0]['role'] == 'user'
+    assert any(is_runtime_summary_message(message) for message in compacted_prior)
     assert len(sent) != len(prior) + len(current)
     assert counts['c3a'] == 1
     assert counts['c3b'] == 1

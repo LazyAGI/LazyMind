@@ -152,6 +152,20 @@ export default function ContextUsageButton({
     return [t(key), ...rest].join(separator);
   };
 
+  const catalogNotice = report?.mcp_catalog ? (
+    <>
+      {report.mcp_catalog.source === "discovered_snapshot" ? (
+        <p className="context-usage-note">{t("chat.contextUsageMcpSnapshot")}</p>
+      ) : null}
+      {!report.mcp_catalog.complete ? (
+        <div className="context-usage-routing-state is-warning" role="status">
+          <ExclamationCircleFilled className="context-usage-routing-icon" />
+          <span>{t("chat.contextUsageMcpIncomplete", { services: report.mcp_catalog.missing_services.join(", ") })}</span>
+        </div>
+      ) : null}
+    </>
+  ) : null;
+
   const content = (
     <div className="context-usage-popover">
       <div className="context-usage-heading">
@@ -205,6 +219,7 @@ export default function ContextUsageButton({
               </div>
             </div>
           ) : null}
+          {catalogNotice}
           <div className="context-usage-segments" aria-hidden="true">
             {report.categories.map((category, index) => (
               <i
@@ -301,6 +316,7 @@ export default function ContextUsageButton({
                 {t("chat.contextUsageExport")}
               </Button>
             </div>
+            {catalogNotice}
             <Collapse
               items={report.categories.map((category) => ({
                 key: category.category_id,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import logging
 import threading
 import uuid
@@ -216,6 +217,10 @@ class FeishuConnectionService:
         *,
         owner_user_id: str,
         idempotency_key: str | None,
+        account_id: str | None = None,
+        credentials: dict | None = None,
+        create_new: bool = False,
+        reauthorize: bool = False,
     ) -> dict[str, Any]:
         key = (idempotency_key or '').strip()
         if len(key) > 128:
@@ -231,10 +236,37 @@ class FeishuConnectionService:
             provider='feishu',
             idempotency_key=key or None,
             expires_at=_utc_now() + _SESSION_TTL,
+            requested_account_id=account_id,
+            reuse_existing=not create_new,
+            state_ciphertext=self._cipher.encrypt(owner_user_id, {'reauthorize': True}) if reauthorize else None,
         )
+        if row['status'] == 'preparing' and row.get('requested_account_id'):
+            reused = self._reuse_account(row, allow_reauthorize=bool(account_id))
+            if reused:
+                return self._session_view(reused)
         if created:
             self._start_worker(session_id, row['qr_version'])
         return self._session_view(row)
+
+    def _reuse_account(
+        self, row: dict[str, Any], *, allow_reauthorize: bool = True,
+    ) -> dict[str, Any] | None:
+        account_id = row.get('requested_account_id')
+        if not account_id or int(row['qr_version']) > 1 or self._decrypt_state(row).get('reauthorize'):
+            return None
+        try:
+            self._accounts.resume_account(str(row['owner_user_id']), str(account_id))
+        except GatewayError as exc:
+            if exc.code == 'FEISHU_REAUTHORIZATION_REQUIRED':
+                if allow_reauthorize:
+                    return None
+                self._store.mark_failed(
+                    str(row['id']), int(row['qr_version']), code=exc.code, message=exc.message, retryable=False,
+                )
+            raise
+        return self._store.complete_reused_connection(
+            str(row['id']), str(row['owner_user_id']), str(account_id),
+        ) or self._store.get_session_internal(str(row['id']))
 
     def get_session(
         self,
@@ -402,7 +434,9 @@ class FeishuConnectionService:
                 not in ACTIVE_CONNECTION_SESSION_STATUSES
             ):
                 return
-            if row.get('provider_state_ciphertext'):
+            if row['status'] == 'preparing' and self._reuse_account(row):
+                return
+            if self._decrypt_state(row).get('qr_payload'):
                 self._store.mark_failed(
                     session_id,
                     qr_version,
@@ -435,6 +469,10 @@ class FeishuConnectionService:
                         )
                     ),
                     cancel_event=worker.cancel_event,
+                    create_new=not bool(row.get('requested_account_id')),
+                    app_id=(self._accounts.registration_app_id(
+                        str(row['owner_user_id']), str(row['requested_account_id']),
+                    ) if row.get('requested_account_id') else None),
                 )
                 keeper.ensure_owned()
             if (
@@ -568,7 +606,7 @@ class FeishuConnectionService:
             row['expires_at'],
             _utc_now() + dt.timedelta(seconds=expire_in),
         )
-        state = {'qr_payload': url}
+        state = {**self._decrypt_state(row), 'qr_payload': url}
         updated = self._store.set_qr_ready(
             session_id,
             self._cipher.encrypt(
@@ -576,7 +614,8 @@ class FeishuConnectionService:
                 state,
             ),
             expires_at,
-            '请使用飞书扫码并确认创建 LazyMind 助手',
+            ('请使用飞书扫码并授权原机器人' if row.get('requested_account_id')
+             else '请使用飞书扫码并确认创建 LazyMind 助手'),
         )
         if not updated:
             raise FeishuRuntimeError(
@@ -605,6 +644,24 @@ class FeishuConnectionService:
         runtime_fence,
     ) -> None:
         owner_user_id = str(row['owner_user_id'])
+        identity = hashlib.sha256(f'{registration.app_id}:{registration.owner_open_id}'.encode()).hexdigest()
+        self._store.validate_reconnect(row['id'], owner_user_id, 'feishu', identity)
+        credentials = FeishuAppCredentials(
+            app_id=registration.app_id,
+            app_secret=registration.app_secret,
+            provider_account_id=registration.owner_open_id,
+            provider_tenant_key=registration.tenant_key,
+            display_name=registration.owner_name,
+            bot_name=registration.bot_name,
+        )
+        if row.get('requested_account_id'):
+            keeper.ensure_owned()
+            self._accounts.reauthorize_account(
+                owner_user_id=owner_user_id, account_id=str(row['requested_account_id']),
+                session_id=str(row['id']), qr_version=int(row['qr_version']),
+                credentials=credentials, runtime_fence=runtime_fence,
+            )
+            return
         cleanup_started = self._store.begin_provisioning_cleanup(
             str(row['id']),
             int(row['qr_version']),
@@ -614,13 +671,6 @@ class FeishuConnectionService:
             raise FeishuRuntimeError(
                 'Feishu connection session changed during provisioning'
             )
-        credentials = FeishuAppCredentials(
-            app_id=registration.app_id,
-            app_secret=registration.app_secret,
-            provider_account_id=registration.owner_open_id,
-            provider_tenant_key=registration.tenant_key,
-            display_name=registration.owner_name,
-        )
         account = self._accounts.connect_registered_account(
             owner_user_id=owner_user_id,
             credentials=credentials,

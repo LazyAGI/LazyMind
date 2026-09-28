@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => {
   return {
     fetchSettingsOverview: vi.fn(),
     fetchUserUiPreferences: vi.fn(),
+    applySettingsChange: vi.fn(),
   };
 });
 
@@ -49,6 +50,7 @@ vi.mock("@/runtime/mode", () => ({
 vi.mock("./api", () => ({
   fetchSettingsOverview: mocks.fetchSettingsOverview,
   runSettingsChecks: vi.fn(),
+  applySettingsChange: mocks.applySettingsChange,
 }));
 
 vi.mock("@/modules/user/uiPreferencesApi", () => ({
@@ -58,6 +60,7 @@ vi.mock("@/modules/user/uiPreferencesApi", () => ({
 
 describe("SettingsPage developer preferences", () => {
   beforeEach(() => {
+    mocks.applySettingsChange.mockReset().mockResolvedValue({ key: "developer_mode_active", enabled: true, preferences: { developer_mode_active: true } });
     mocks.fetchSettingsOverview.mockReset().mockResolvedValue({
       controls: {},
       sections: [],
@@ -69,6 +72,27 @@ describe("SettingsPage developer preferences", () => {
       performance_stats_enabled: false,
       sensitive_word_filter_enabled: false,
     });
+  });
+
+  it("enables developer mode with one click and updates the switch after persistence", async () => {
+    render(<MemoryRouter initialEntries={["/settings?section=developer"]}><SettingsPage /></MemoryRouter>);
+    const toggle = await screen.findByRole("switch", { name: "settingsPage.developer.modeAria" });
+    fireEvent.click(toggle);
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
+    expect(mocks.applySettingsChange).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "settingsPage.developer.performanceAria" })).toBeEnabled();
+  });
+
+  it("retains the enabled switch when the disable confirmation is canceled", async () => {
+    mocks.fetchUserUiPreferences.mockResolvedValue({ developer_mode_active: true });
+    render(<MemoryRouter initialEntries={["/settings?section=developer"]}><SettingsPage /></MemoryRouter>);
+    const toggle = await screen.findByRole("switch", { name: "settingsPage.developer.modeAria" });
+    fireEvent.click(toggle);
+    await screen.findByText("settingsPage.change.consequence");
+    fireEvent.click(screen.getByText("settingsPage.cancel"));
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(mocks.applySettingsChange).not.toHaveBeenCalled();
   });
 
   it("shows performance stats beside sensitive-word filtering before developer mode is enabled", async () => {
@@ -87,5 +111,37 @@ describe("SettingsPage developer preferences", () => {
 
     expect(sensitiveSwitch).toBeDisabled();
     expect(performanceSwitch).toBeDisabled();
+  });
+
+  it("places environment variables immediately after MCP in Capabilities", async () => {
+    render(
+      <MemoryRouter initialEntries={["/settings?section=developer"]}>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+    const management = (await screen.findByText("settingsPage.navGroups.management")).closest(".settings-reference-nav-group") as HTMLElement;
+    const chat = screen.getByText("settingsPage.navGroups.chatKnowledge").closest(".settings-reference-nav-group") as HTMLElement;
+    const capabilities = screen.getByText("settingsPage.navGroups.capabilities").closest(".settings-reference-nav-group") as HTMLElement;
+    const env = within(capabilities).getByRole("button", { name: /settingsPage.sections.envVars/ });
+    const mcp = within(capabilities).getByRole("button", { name: /settingsPage.sections.mcp/ });
+    const assistants = within(capabilities).getByRole("button", { name: /settingsPage.sections.assistants/ });
+    expect(mcp.nextElementSibling).toBe(env);
+    expect(env.nextElementSibling).toBe(assistants);
+    expect(within(management).queryByRole("button", { name: /settingsPage.sections.envVars/ })).not.toBeInTheDocument();
+    expect(within(chat).queryByRole("button", { name: /settingsPage.sections.envVars/ })).not.toBeInTheDocument();
+  });
+
+  it("distinguishes MCP connections from system tools in navigation", async () => {
+    render(
+      <MemoryRouter initialEntries={["/settings?section=developer"]}>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+    const nav = await screen.findByRole("navigation", { name: "settingsPage.navAria" });
+    const systemTools = within(nav).getByRole("button", { name: /settingsPage.sections.systemTools/ });
+    const mcp = within(nav).getByRole("button", { name: /settingsPage.sections.mcp/ });
+    expect(within(systemTools).getByRole("img", { name: "tool" })).toBeInTheDocument();
+    expect(within(mcp).getByRole("img", { name: "apartment" })).toBeInTheDocument();
+    expect(within(mcp).queryByRole("img", { name: "tool" })).not.toBeInTheDocument();
   });
 });

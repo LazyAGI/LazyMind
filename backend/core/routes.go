@@ -409,6 +409,8 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- text -----
 	handleAPI(r, "POST", "/chat", []string{"qa.write"}, chat.Chat)
 	handleAPI(r, "GET", "/tools", []string{"qa.read"}, chat.ListTools)
+	handleAPI(r, "POST", "/internal/conversations/{conversation_id}/tool-configuration-actions", nil, chat.InternalToolConfiguration)
+	handleAPI(r, "GET", "/conversations/{conversation_id}/tool-configuration-actions", []string{"qa.read"}, chat.ListToolConfigurations)
 	handleAPI(r, "POST", "/tools/{tool_name}:disable", []string{"qa.read"}, chat.DisableTool)
 	handleAPI(r, "POST", "/tools/{tool_name}:enable", []string{"qa.read"}, chat.EnableTool)
 
@@ -569,6 +571,16 @@ func registerAllRoutes(r *mux.Router) {
 
 	// ----- Task Center -----
 	handleAPI(r, "GET", "/task-center/tasks", []string{"qa.read"}, taskcenter.ListTasks)
+	handleAPI(r, "GET", "/user/notification-preferences", []string{"qa.read"}, taskcenter.NotificationPreferences)
+	handleAPI(r, "GET", "/notification-account-references/{account_id}", []string{"qa.read"}, taskcenter.NotificationAccountReferences)
+	handleAPI(r, "POST", "/task-center/notification-events/{notification_id}:claim", []string{"qa.write"}, taskcenter.ClaimNotification)
+	handleAPI(r, "PATCH", "/user/notification-preferences", []string{"qa.write"}, taskcenter.NotificationPreferences)
+	handleAPI(r, "GET", "/schedules/{schedule_id}/notifications", []string{"qa.read"}, taskcenter.ScheduleNotifications)
+	handleAPI(r, "PUT", "/schedules/{schedule_id}/notifications", []string{"qa.write"}, taskcenter.ScheduleNotifications)
+	handleAPI(r, "POST", "/schedules/{schedule_id}/notifications:reset", []string{"qa.write"}, taskcenter.ScheduleNotifications)
+	handleAPI(r, "GET", "/task-center/tasks/{task_id}/notifications", []string{"qa.read"}, taskcenter.TaskNotifications)
+	handleAPI(r, "GET", "/task-center/desktop-notifications", []string{"qa.read"}, taskcenter.DesktopNotifications)
+	handleAPI(r, "POST", "/task-center/desktop-notifications/{notification_id}:ack", []string{"qa.write"}, taskcenter.AcknowledgeDesktopNotification)
 	handleAPI(r, "GET", "/task-center/tasks/{task_id}", []string{"qa.read"}, taskcenter.GetTaskByID)
 	handleAPI(r, "POST", "/task-center/tasks/{task_id}:cancel", []string{"qa.write"}, taskcenter.CancelTaskByID)
 	handleAPI(r, "POST", "/task-center/tasks/{task_id}:remove", []string{"qa.write"}, taskcenter.RemoveTaskHandler)
@@ -591,6 +603,10 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- User Chat Settings (quick-question/new-task defaults) -----
 	handleAPI(r, "GET", "/user/chat-settings", []string{"qa.read"}, chat.GetChatSettings)
 	handleAPI(r, "PATCH", "/user/chat-settings", []string{"qa.write"}, chat.PatchChatSettings)
+	handleAPI(r, "GET", "/user/env-vars", []string{"qa.read"}, chat.ListUserEnvironmentVariables)
+	handleAPI(r, "POST", "/user/env-vars", []string{"qa.write"}, chat.CreateUserEnvironmentVariable)
+	handleAPI(r, "PATCH", "/user/env-vars/{id}", []string{"qa.write"}, chat.PatchUserEnvironmentVariable)
+	handleAPI(r, "DELETE", "/user/env-vars/{id}", []string{"qa.write"}, chat.DeleteUserEnvironmentVariable)
 	// Legal consent is a login prerequisite and must not depend on optional QA permissions.
 	// The handlers still require the gateway-injected X-User-Id identity.
 	handleAPI(r, "GET", "/user/ui-preferences", []string{}, userprefs.GetUIPreferences)
@@ -880,6 +896,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/conversations:setChatHistory", []string{"qa.write"}, chat.SetChatHistory)
 	handleAPI(r, "POST", "/conversations:feedBackChatHistory", []string{"qa.write"}, chat.FeedBackChatHistory)
 	handleAPI(r, "PATCH", "/conversations/{name}:ask-answers", []string{"qa.write"}, chat.SaveAskAnswers)
+	handleAPI(r, "POST", "/conversations/{name}:env-input", []string{"qa.write"}, chat.SubmitEnvironmentInput)
 	handleAPI(r, "PATCH", "/conversations:editable-block", []string{"qa.write"}, chat.PatchEditableBlock)
 
 	handleAPI(r, "GET", "/conversation:switchStatus", []string{"qa.read"}, chat.GetMultiAnswersSwitchStatus)

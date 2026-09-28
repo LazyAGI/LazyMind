@@ -104,6 +104,127 @@
   border-right: none;
 }
 
+.workflow-generation-failure,
+.workflow-generation-notice {
+  flex-shrink: 0;
+  margin: 12px 16px 8px;
+  padding: 14px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+
+  &-header {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+  }
+
+  &-main {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1 1 280px;
+    min-width: 0;
+  }
+
+  &-icon {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    border-radius: 8px;
+    background: #fff1f0;
+    color: #cf1322;
+    font-size: 18px;
+  }
+
+  &-copy {
+    min-width: 0;
+
+    p {
+      margin: 4px 0 0;
+      color: #667085;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+  }
+
+  &-heading {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    color: #1f2937;
+    font-size: 14px;
+    line-height: 1.5;
+
+    strong { font-weight: 600; }
+  }
+
+  &-phase {
+    padding-left: 12px;
+    border-left: 1px solid #d9dde4;
+    color: #667085;
+    font-size: 12px;
+  }
+
+  &-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-left: auto;
+  }
+
+  &-dismiss.ant-btn { color: #667085; }
+
+  &-details {
+    margin-top: 14px;
+    padding: 12px 16px;
+    max-height: min(200px, 25vh);
+    overflow: auto;
+    overflow-wrap: anywhere;
+    overscroll-behavior: contain;
+    border: 1px solid #eef0f3;
+    border-radius: 6px;
+    background: #f8fafc;
+
+    &:focus-visible {
+      outline: 2px solid #1677ff;
+      outline-offset: 2px;
+    }
+
+    .workflow-generation-issue-summary {
+      color: #475467;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 12px;
+    }
+  }
+}
+
+.workflow-generation-notice {
+  &-icon {
+    background: #fff7e6;
+    color: #ad6800;
+  }
+
+  &-label {
+    padding: 1px 7px;
+    border-radius: 4px;
+    background: #fff7e6;
+    color: #ad6800;
+    font-size: 12px;
+    font-weight: 400;
+  }
+
+  &--error &-icon {
+    background: #fff1f0;
+    color: #cf1322;
+  }
+}
+
 .workflow-generation-background-banner {
   flex-shrink: 0;
   min-height: 48px;

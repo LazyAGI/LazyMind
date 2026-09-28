@@ -95,8 +95,10 @@ func TestRouteArtifactDualWritesOrdinaryTaskButExcludesWorkflowStep(t *testing.T
 	}
 	stateStore := &mockStateStore{}
 	for _, taskID := range []string{"ordinary", "workflow"} {
-		if err := routeEvent(ctx, db.DB, stateStore, TaskEvent{Type: "artifact", TaskID: taskID, ArtifactKey: "result", ContentType: "text", Seq: 1, Value: json.RawMessage(`{"text":"ok"}`)}); err != nil {
-			t.Fatal(err)
+		for attempt := 0; attempt < 2; attempt++ {
+			if err := routeEvent(ctx, db.DB, stateStore, TaskEvent{Type: "artifact", TaskID: taskID, ArtifactKey: "result", ContentType: "text", Seq: 1, Value: json.RawMessage(`{"text":"ok"}`)}); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	var bindings []orm.ArtifactBinding

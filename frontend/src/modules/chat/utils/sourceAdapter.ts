@@ -1,8 +1,11 @@
+import type { PublicSource } from "@/modules/chat/types/ordinaryTask";
+
 interface BaseChatSource {
   index?: string | number;
   citation_id?: string;
   display_index?: string | number;
   title?: string;
+  platform?: string;
   url?: string;
   content?: string;
   file_name?: string;
@@ -47,9 +50,10 @@ export function getSourceFaviconUrl(source: ChatSource) {
 
 function externalSourceTarget(source: ChatSource) {
   const target = source.url?.trim() || "";
-  if (target && !/^(?:javascript|data|vbscript):/i.test(target)) {
-    return target;
-  }
+  try {
+    const url = new URL(target);
+    if (["http:", "https:"].includes(url.protocol) && !url.username && !url.password) return target;
+  } catch { /* Keep unsafe or incomplete sources visible without an executable link. */ }
   return `#source-${encodeURIComponent(getSourceCitationId(source) || "unknown")}`;
 }
 
@@ -82,9 +86,8 @@ export function getSourceLabel(source: ChatSource) {
 }
 
 export function getSourceSubtitle(source: ChatSource) {
-  return isExternalSource(source)
-    ? externalHostname(source)
-    : source.group_name?.trim() || "";
+  const domain = isExternalSource(source) ? externalHostname(source) : source.group_name?.trim() || "";
+  return [...new Set([source.platform?.trim(), domain].filter(Boolean))].join(" · ");
 }
 
 export function getSourceEvidenceText(source: ChatSource) {
@@ -221,4 +224,12 @@ export function normalizeSourceMarkers(content: string) {
 
 export function stripRedundantSourceUrls(content: string) {
   return content.replace(REDUNDANT_SOURCE_URL_PATTERN, "$1");
+}
+
+export function publicSourcesToChatSources(sources: PublicSource[]): ChatSource[] {
+  return sources.map(source => source.kind === "knowledge" && source.resource_id
+    ? { source_type: "knowledge_base", citation_id: source.source_id, document_id: source.resource_id,
+        dataset_id: source.dataset_id, title: source.title, platform: source.platform, content: source.snippet }
+    : { source_type: "external", citation_id: source.source_id, title: source.title,
+        url: source.url, platform: source.platform, content: source.snippet });
 }

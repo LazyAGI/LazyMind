@@ -166,6 +166,9 @@ class WeChatConnectionRepository(Protocol):
     ) -> dict[str, Any] | None:
         ...
 
+    def validate_reconnect(self, session_id: str, owner: str, provider: str, identity: str) -> None:
+        ...
+
     def reserve_session(
         self,
         *,
@@ -174,6 +177,7 @@ class WeChatConnectionRepository(Protocol):
         provider: str,
         idempotency_key: str | None,
         expires_at: dt.datetime,
+        requested_account_id: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         ...
 
@@ -261,4 +265,20 @@ class WeChatConnectionRepository(Protocol):
         ...
 
     def delete_account(self, owner_user_id: str, account_id: str) -> bool:
+        ...
+
+    def resume_account(
+        self,
+        owner_user_id: str,
+        account_id: str,
+    ) -> dict[str, Any]:
+        ...
+
+    def disconnect_account(
+        self,
+        owner_user_id: str,
+        account_id: str,
+        *,
+        retain_credentials: bool = False,
+    ) -> bool:
         ...

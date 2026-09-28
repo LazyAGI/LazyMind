@@ -115,6 +115,7 @@ type documentActionErrorOpenAPIData struct {
 	ProviderSynced *bool  `json:"provider_synced,omitempty"`
 	ArtifactSaved  *bool  `json:"artifact_saved,omitempty"`
 	Retryable      *bool  `json:"retryable,omitempty"`
+	Cause          string `json:"cause,omitempty" enum:"PANDOC_NOT_FOUND,PANDOC_NOT_EXECUTABLE,PANDOC_VERSION_UNSUPPORTED,PANDOC_TIMEOUT,PANDOC_INPUT_TOO_LARGE,PANDOC_OUTPUT_TOO_LARGE,PANDOC_TEMPLATE_INVALID,PANDOC_FILTER_FAILED,PANDOC_CONVERSION_FAILED"`
 
 	Code string `json:"code" enum:"IDENTITY_REQUIRED,PERMISSION_DENIED,ARTIFACT_NOT_FOUND,REVISION_REQUIRED,REVISION_CONFLICT,DRAFT_VERSION_REQUIRED,DRAFT_VERSION_CONFLICT,SESSION_NOT_EDITABLE,DOCUMENT_ACTION_INVALID,DOCUMENT_ACTION_UNSUPPORTED,MODEL_CONFIG_REQUIRED,SELECTION_STALE,SELECTION_AMBIGUOUS,ARTIFACT_IN_USE,DOCUMENT_ACTION_FAILED,DOCUMENT_CONVERSION_FAILED,DOCUMENT_PROVIDERS_UNAVAILABLE,DOCUMENT_ACTION_RESULT_INVALID,DOCUMENT_ACTION_SAVE_FAILED,CROSS_REFERENCE_SELECTION_INVALID,CROSS_REFERENCE_TARGET_NOT_FOUND,PUBLICATION_NOT_FOUND,PUBLICATION_IN_PROGRESS,PUBLICATION_STATE_CONFLICT,PUBLICATION_RECOVERY_CLOSED,PUBLICATION_IDEMPOTENCY_CONFLICT,PUBLICATION_ALREADY_BOUND,PUBLICATION_OUTCOME_UNKNOWN,PROVIDER_SYNC_LOCAL_CONFLICT,PROVIDER_SYNC_LOCAL_PERSIST_FAILED,PROVIDER_CREDENTIALS_UNAVAILABLE,PROVIDER_BINDING_CONFLICT"`
 }
@@ -674,6 +675,10 @@ type exportConversationFilePathParams struct {
 
 type conversationPathParams struct {
 	Name string `path:"name"`
+}
+
+type toolConfigurationQueryParams struct {
+	HistoryID string `query:"history_id" desc:"Optional history whose configuration cards should be returned."`
 }
 
 type conversationModelPathParams struct {
@@ -1401,14 +1406,23 @@ type setSharedProviderOpenAPIRequest struct {
 }
 
 type userModelProviderOpenAPIItem struct {
-	ID                     string   `json:"id"`
-	DefaultModelProviderID string   `json:"default_model_provider_id"`
-	Name                   string   `json:"name"`
-	Description            string   `json:"description"`
-	BaseURL                string   `json:"base_url"`
-	Category               string   `json:"category"`
-	IsConfigured           bool     `json:"is_configured"`
-	Capabilities           []string `json:"capabilities"`
+	ID                     string                           `json:"id"`
+	DefaultModelProviderID string                           `json:"default_model_provider_id"`
+	Name                   string                           `json:"name"`
+	Description            string                           `json:"description"`
+	BaseURL                string                           `json:"base_url"`
+	BaseURLPresets         []modelProviderBaseURLPresetItem `json:"base_url_presets,omitempty"`
+	Category               string                           `json:"category"`
+	IsConfigured           bool                             `json:"is_configured"`
+	Capabilities           []string                         `json:"capabilities"`
+	ModelTypes             []string                         `json:"model_types"`
+}
+
+type modelProviderBaseURLPresetItem struct {
+	Key            string `json:"key"`
+	Value          string `json:"value"`
+	Label          string `json:"label,omitempty"`
+	APIKeyRequired *bool  `json:"api_key_required,omitempty"`
 }
 
 type listUserModelProvidersOpenAPIResponse struct {
@@ -1652,6 +1666,7 @@ type skillListQueryParams struct {
 	Tags     []string `query:"tags"`
 	Page     int32    `query:"page"`
 	PageSize int32    `query:"page_size"`
+	NameOnly bool     `query:"name_only" desc:"When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count."`
 }
 
 type installedSkillListQueryParams struct {
@@ -1661,6 +1676,7 @@ type installedSkillListQueryParams struct {
 	Tags     []string `query:"tags"`
 	Page     int32    `query:"page"`
 	PageSize int32    `query:"page_size"`
+	NameOnly bool     `query:"name_only" desc:"When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count."`
 }
 
 type shareListQueryParams struct {
@@ -2544,22 +2560,26 @@ type chatEntryDefaultsPatchOpenAPIRequest struct {
 }
 
 type userChatSettingsPatchOpenAPIRequest struct {
-	EnableToolRetrieval *bool                                 `json:"enable_tool_retrieval,omitempty"`
-	EnableWorkflow      *bool                                 `json:"enable_workflow,omitempty"`
-	WorkflowMode        *string                               `json:"workflow_mode,omitempty"`
-	EnableSubagent      *bool                                 `json:"enable_subagent,omitempty"`
-	QuickQuestion       *chatEntryDefaultsPatchOpenAPIRequest `json:"quick_question,omitempty"`
-	NewTask             *chatEntryDefaultsPatchOpenAPIRequest `json:"new_task,omitempty"`
+	DefaultPermissionMode *string                               `json:"default_permission_mode,omitempty" enum:"always_ask,ask_as_needed,allow_all"`
+	PermissionVersion     *int64                                `json:"permission_version,omitempty"`
+	EnableToolRetrieval   *bool                                 `json:"enable_tool_retrieval,omitempty"`
+	EnableWorkflow        *bool                                 `json:"enable_workflow,omitempty"`
+	WorkflowMode          *string                               `json:"workflow_mode,omitempty"`
+	EnableSubagent        *bool                                 `json:"enable_subagent,omitempty"`
+	QuickQuestion         *chatEntryDefaultsPatchOpenAPIRequest `json:"quick_question,omitempty"`
+	NewTask               *chatEntryDefaultsPatchOpenAPIRequest `json:"new_task,omitempty"`
 }
 
 type userChatSettingsOpenAPIResponse struct {
-	EnableToolRetrieval bool                     `json:"enable_tool_retrieval"`
-	EnableWorkflow      bool                     `json:"enable_workflow"`
-	WorkflowMode        string                   `json:"workflow_mode"`
-	EnableSubagent      bool                     `json:"enable_subagent"`
-	QuickQuestion       chatEntryDefaultsOpenAPI `json:"quick_question"`
-	NewTask             chatEntryDefaultsOpenAPI `json:"new_task"`
-	UpdatedAt           string                   `json:"updated_at"`
+	DefaultPermissionMode string                   `json:"default_permission_mode" enum:"always_ask,ask_as_needed,allow_all"`
+	PermissionVersion     int64                    `json:"permission_version"`
+	EnableToolRetrieval   bool                     `json:"enable_tool_retrieval"`
+	EnableWorkflow        bool                     `json:"enable_workflow"`
+	WorkflowMode          string                   `json:"workflow_mode"`
+	EnableSubagent        bool                     `json:"enable_subagent"`
+	QuickQuestion         chatEntryDefaultsOpenAPI `json:"quick_question"`
+	NewTask               chatEntryDefaultsOpenAPI `json:"new_task"`
+	UpdatedAt             string                   `json:"updated_at"`
 }
 
 type userUIPreferencesPatchOpenAPIRequest struct {
@@ -4695,6 +4715,13 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  mcpServerPathParams{},
 			RequestBody: jsonBodyOf(mcp.UpdateToolsRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Updated MCP server tools", mcp.ServerResponse{})},
+		},
+		{
+			Method: "GET", Path: "/conversations/{conversation_id}/tool-configuration-actions",
+			Summary: "List verified tool configuration actions", Tags: []string{"conversations"},
+			QueryParams: toolConfigurationQueryParams{},
+			PathParams:  conversationModelPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Configuration actions", chat.ToolConfigurationListResponse{})},
 		},
 		{
 			Method:      "PATCH",

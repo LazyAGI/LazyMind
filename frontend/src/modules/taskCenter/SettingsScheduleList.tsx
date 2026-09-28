@@ -1,3 +1,4 @@
+import ScheduleNotificationPanel from '@/modules/notifications/ScheduleNotificationPanel';
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Button, Empty, Modal, Skeleton, Switch, Tag, message } from 'antd';
@@ -99,8 +100,8 @@ export default function SettingsScheduleList({ schedulesEnabled, onChanged }: Se
         <h2>{t('settingsPage.tasks.scheduleTitle')}</h2>
         <p>{t('settingsPage.tasks.scheduleEnabledCount', { enabled: enabledCount, total: schedules.length })}</p>
       </div>
-      <button type="button" onClick={() => navigate('/task-center?tab=schedules')} aria-label={t('settingsPage.tasks.viewDetailsAria')}>
-        {t('settingsPage.tasks.viewDetails')}<RightOutlined />
+      <button type="button" onClick={() => navigate('/task-center?tab=schedules')} aria-label={t('notifications.manageSchedules')}>
+        {t('notifications.manageSchedules')}<RightOutlined />
       </button>
     </header>
     {loading ? <div className="settings-schedule-loading"><Skeleton active paragraph={{ rows: 3 }} /></div> : null}
@@ -126,6 +127,7 @@ export default function SettingsScheduleList({ schedulesEnabled, onChanged }: Se
             <p>{describeCron(schedule.cron_expr, (key) => t(key))}{nextRunText}</p>
           </div>
           <Tag className={`settings-schedule-status ${effectiveEnabled ? 'is-running' : !schedulesEnabled && schedule.enabled ? 'is-suspended' : 'is-disabled'}`}>{statusText}</Tag>
+          <ScheduleNotificationPanel scheduleId={schedule.id} compact />
           <Switch
             className="settings-ref-switch"
             checked={schedule.enabled}

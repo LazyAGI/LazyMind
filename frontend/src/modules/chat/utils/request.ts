@@ -121,6 +121,11 @@ export interface ContextUsageReport {
   categories: ContextUsageCategory[];
   estimation_version: string;
   preview_accuracy?: "deterministic" | "rule_only" | "llm_enhanced";
+  mcp_catalog?: {
+    source: "discovered_snapshot";
+    complete: boolean;
+    missing_services: string[];
+  };
   requires_llm?: boolean;
   llm_reason?: string;
 }
@@ -144,12 +149,12 @@ export function exportContextPrompt(payload: Record<string, unknown>) {
 
 // SubAgent task SSE endpoint. Granular execution events are streamed here so
 // they cannot crowd lifecycle events out of the conversation event channel.
-export const taskStreamUrl = (taskId: string) =>
-  `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}:stream`;
+export const taskStreamUrl = (taskId: string, view?: "ordinary" | "developer") =>
+  `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}:stream${view === "ordinary" ? "?view=ordinary" : ""}`;
 
 // Conversation-level events SSE endpoint.
-export const convEventsUrl = (conversationId: string) =>
-  `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/events`;
+export const convEventsUrl = (conversationId: string, view?: "ordinary" | "developer") =>
+  `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/events${view === "ordinary" ? "?view=ordinary" : ""}`;
 
 export function decideToolLimit(
   conversationId: string,
@@ -474,7 +479,7 @@ export function WorkflowSessionApi() {
     getControl(sessionId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/control`, options);
     },
-    control(sessionId: string, command: import('./workflowControl').WorkflowControlRequest, options?: RawAxiosRequestConfig) {
+    control(sessionId: string, command: import('./workflowControl').WorkflowControlRequest, options?: PublicationRequestOptions) {
       return axiosInstance.post(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/control`, command, options);
     },
     listDocumentProviders(options?: RawAxiosRequestConfig) {
@@ -507,7 +512,8 @@ export function WorkflowSessionApi() {
         { ...options, headers: { ...options?.headers, 'Workflow-Contract-Version': 'workflow.v1' } });
     },
     previewDocumentAction(artifactId: string, body: ApiCoreWorkflowArtifactsArtifactIdDocumentActionsPreviewPostRequest, options?: RawAxiosRequestConfig) {
-      return axiosInstance.post<DocumentActionPreviewOpenAPIResponse>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/document-actions:preview`, body, options);
+      return axiosInstance.post<DocumentActionPreviewOpenAPIResponse>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/document-actions:preview`, body,
+        { timeout: 10 * 60 * 1000, ...options });
     },
     executeDocumentAction(artifactId: string, body: ApiCoreWorkflowArtifactsArtifactIdDocumentActionsExecutePostRequest, options?: RawAxiosRequestConfig) {
       return axiosInstance.post<DocumentRewriteExecuteOpenAPIResponse>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/document-actions:execute`, body, options);
@@ -1346,6 +1352,8 @@ export interface ChatEntryDefaults {
 }
 
 export interface ChatSettingsResponse extends ConversationRuntimeSettings, ChatEntryDefaults {
+  default_permission_mode?: "always_ask" | "ask_as_needed" | "allow_all";
+  permission_version?: number;
   enable_tool_retrieval?: boolean;
   updated_at?: string;
 }

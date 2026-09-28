@@ -212,6 +212,13 @@ describe('StateGraphEditor workspace navigation', () => {
     ]));
   });
 
+  it('shows complete generation diagnostics in the log even without a skill analysis', async () => {
+    const logs = Array.from({ length: 12 }, (_, i) => `Warning ${i + 1}`).join('\n');
+    render(<StateGraphEditor {...initialProps} generationLog={logs} />);
+    fireEvent.click(button('sgeViewBrief'));
+    expect(screen.getByText(/Warning 1\s+Warning 2/).textContent).toBe(logs);
+  });
+
   it('preserves code, UI, and scenario navigation without saving', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<StateGraphEditor {...initialProps} onSave={onSave} />);

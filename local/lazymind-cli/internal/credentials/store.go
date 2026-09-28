@@ -41,14 +41,15 @@ func IsAuthenticationRequired(err error) bool {
 }
 
 type Credentials struct {
-	ServerURL    string  `json:"server_url"`
-	Username     string  `json:"username,omitempty"`
-	AccessToken  string  `json:"access_token"`
-	RefreshToken string  `json:"refresh_token"`
-	ExpiresIn    int64   `json:"expires_in"`
-	SavedAt      float64 `json:"saved_at"`
-	Role         string  `json:"role,omitempty"`
-	TenantID     string  `json:"tenant_id,omitempty"`
+	ServerURL      string  `json:"server_url"`
+	Username       string  `json:"username,omitempty"`
+	AccessToken    string  `json:"access_token"`
+	RefreshToken   string  `json:"refresh_token"`
+	ExpiresIn      int64   `json:"expires_in"`
+	SavedAt        float64 `json:"saved_at"`
+	Role           string  `json:"role,omitempty"`
+	TenantID       string  `json:"tenant_id,omitempty"`
+	DesktopHandoff string  `json:"desktop_handoff,omitempty"`
 }
 
 type Store struct {
@@ -136,6 +137,7 @@ func (s *Store) Save(value Credentials) error {
 		return errors.New("LazyMind access and refresh tokens are required")
 	}
 	value.ServerURL = server
+	value.DesktopHandoff = desktopFingerprint(value)
 	return s.withLock(func() error { return s.saveUnlocked(value) })
 }
 

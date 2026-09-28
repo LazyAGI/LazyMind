@@ -1,3 +1,7 @@
+import { describeCron, formatMonthDays, parseCadence, parseCronExpr, parseMonthDayField, sortMonthDays } from './scheduleTime';
+export { describeCron } from './scheduleTime';
+import type { NotificationUpdate } from '@/modules/notifications/api';
+import ScheduleNotificationPanel from '@/modules/notifications/ScheduleNotificationPanel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
@@ -24,7 +28,7 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadFile } from 'antd/es/upload/interface';
-import { AppstoreOutlined, CalendarOutlined, CheckCircleFilled, DeleteOutlined, EllipsisOutlined, FileTextOutlined, PlayCircleOutlined, PlusOutlined, SearchOutlined, UnorderedListOutlined, UploadOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, BellOutlined, CalendarOutlined, CheckCircleFilled, DeleteOutlined, EllipsisOutlined, FileTextOutlined, PlayCircleOutlined, PlusOutlined, SearchOutlined, SettingOutlined, UnorderedListOutlined, UploadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -98,52 +102,8 @@ function FieldLabel({ children }: { children: ReactNode }) {
 ──────────────────────────────────────────────── */
 const WEEKDAY_VALUES = [0, 1, 2, 3, 4, 5, 6];
 
-function parseCadence(value: string): { interval: number; unit?: 'week' | 'month'; cron: string } {
-  const match = value.match(/^@every:(\d+):(week|month);(.+)$/);
-  return match ? { interval: Math.max(1, Number(match[1])), unit: match[2] as 'week' | 'month', cron: match[3] } : { interval: 1, cron: value };
-}
-
 function withCadence(cron: string, interval: number, unit: 'week' | 'month'): string {
   return interval > 1 ? `@every:${interval}:${unit};${cron}` : cron;
-}
-
-function sortMonthDays(days: number[]): number[] {
-  return [...days].sort((a, b) => {
-    if (a > 0 && b < 0) return -1;
-    if (a < 0 && b > 0) return 1;
-    return a > 0 ? a - b : Math.abs(a) - Math.abs(b);
-  });
-}
-
-type TFunc = (key: string, options?: Record<string, unknown>) => string;
-
-function formatMonthDays(days: number[], t: TFunc): string {
-  const sorted = sortMonthDays(days);
-  const regular = sorted.filter((day) => day > 0);
-  const fromEnd = sorted.filter((day) => day < 0).map((day) => Math.abs(day));
-  const separator = t('taskCenter.scheduleListSeparator');
-  return [
-    regular.length ? t('taskCenter.cronMonthDays', { days: regular.join(separator) }) : '',
-    fromEnd.length ? t('taskCenter.cronMonthDaysFromEnd', { days: fromEnd.join(separator) }) : '',
-  ].filter(Boolean).join(separator);
-}
-
-function parseMonthDayField(field: string): number[] {
-  const days: number[] = [];
-  field.split(',').forEach((rawToken) => {
-    const token = rawToken.trim();
-    const range = token.match(/^(-?\d+)-(-?\d+)$/);
-    if (range) {
-      const start = Number(range[1]);
-      const end = Number(range[2]);
-      const step = start <= end ? 1 : -1;
-      for (let day = start; day !== end + step; day += step) days.push(day);
-      return;
-    }
-    const day = Number(token);
-    if (Number.isInteger(day)) days.push(day);
-  });
-  return sortMonthDays([...new Set(days.filter((day) => (day >= 1 && day <= 31) || (day >= -4 && day <= -1)))]);
 }
 
 function buildCronExpr(weekdays: number[], time: dayjs.Dayjs): string {
@@ -159,40 +119,9 @@ function buildMonthlyCronExpr(days: number[], time: dayjs.Dayjs): string {
   return `${time.minute()} ${time.hour()} ${days.join(',') || '1'} * *`;
 }
 
-function parseCronExpr(cron: string): { weekdays: number[]; time: dayjs.Dayjs } {
-  const parts = parseCadence(cron).cron.trim().split(/\s+/);
-  const minute = parseInt(parts[0] ?? '0', 10) || 0;
-  const hour = parseInt(parts[1] ?? '0', 10) || 0;
-  const dowStr = parts[4] ?? '*';
-  const weekdays =
-    dowStr === '*'
-      ? []
-      : dowStr.split(',').map((v) => parseInt(v, 10)).filter((v) => !isNaN(v));
-  return { weekdays, time: dayjs().hour(hour).minute(minute).second(0) };
-}
-
 function capitalize(s: string) {
   if (!s) return '';
   return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-export function describeCron(cron: string, t: TFunc): string {
-  const cadence = parseCadence(cron);
-  const fields = cadence.cron.trim().split(/\s+/);
-  if (fields.length === 5 && fields[2] !== '*') {
-    const days = formatMonthDays(parseMonthDayField(fields[2]), t);
-    const time = `${String(fields[1]).padStart(2, '0')}:${String(fields[0]).padStart(2, '0')}`;
-    return cadence.interval > 1
-      ? t('taskCenter.cronMonthlyInterval', { interval: cadence.interval, days, time })
-      : t('taskCenter.cronMonthly', { days, time });
-  }
-  const { weekdays, time } = parseCronExpr(cron);
-  const timeStr = time.format('HH:mm');
-  if (weekdays.length === 0) return t('taskCenter.cronDaily', { time: timeStr });
-  const sep = t('taskCenter.weekdaySeparator');
-  const labels = weekdays.map((d) => t(`taskCenter.weekdayFull${d}`)).join(sep);
-  const weekly = t('taskCenter.cronWeekdays', { days: labels, time: timeStr });
-  return cadence.interval > 1 ? t('taskCenter.cronWeeklyInterval', { interval: cadence.interval, schedule: weekly }) : weekly;
 }
 
 /* ────────────────────────────────────────────────
@@ -437,6 +366,10 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [notificationDraft, setNotificationDraft] = useState<NotificationUpdate>();
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [cardNotificationOpen, setCardNotificationOpen] = useState(false);
+  const [cardNotificationTarget, setCardNotificationTarget] = useState<Schedule | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
   const [fileList, setFileList] = useState<UploadFile[]>([]);
@@ -578,6 +511,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   };
 
   const handleOpenEdit = (record: Schedule) => {
+    setNotificationDraft(undefined); setNotificationOpen(false);
     setEditTarget(record);
     form.setFieldsValue({
       name: record.name || '',
@@ -603,6 +537,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
         .map((schedule) => schedule.id);
       const sourceScheduleIDs = Array.from(new Set<string>([...(values.source_schedule_ids ?? []), ...mentionedSourceIDs]));
       const payload = {
+        ...(notificationDraft ? { notification: notificationDraft } : {}),
         name: values.name.trim(),
         remark: values.remark ?? '',
         cron_expr: values.cron_expr || buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)),
@@ -640,6 +575,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   };
 
   const handleOpenModal = () => {
+    setNotificationDraft(undefined); setNotificationOpen(false);
     setEditTarget(null);
     form.resetFields();
     form.setFieldValue('cron_expr', buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)));
@@ -693,6 +629,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
         <label><Switch size='small' checked={schedule.enabled} onChange={(checked) => void (checked ? handleEnable(schedule.id) : handleDisable(schedule.id))} /> {schedule.enabled ? t('taskCenter.scheduleStatusEnabled') : t('taskCenter.scheduleStatusDisabled')}</label>
         <span>{t('taskCenter.scheduleRunTotal', { total: schedule.run_count ?? 0 })}</span>
         <div>
+          <Button icon={<SettingOutlined aria-hidden="true" />} onClick={() => { setCardNotificationTarget(schedule); setCardNotificationOpen(true); }}>{t('notifications.configure')}</Button>
           <Button className='schedule-run-button' icon={<PlayCircleOutlined />} onClick={() => void handleRunNow(schedule.id)}>{viewMode === 'large' ? t('taskCenter.scheduleRunNow') : null}</Button>
           <Dropdown
             trigger={['click']}
@@ -832,8 +769,10 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           <section><h3>{t('taskCenter.nextRunAt')}</h3><p>{selectedSchedule.next_run_at ? dayjs(selectedSchedule.next_run_at).format('YYYY/MM/DD HH:mm:ss') : '—'}</p></section>
           <section><h3>{t('taskCenter.lastRun')}</h3><p>{selectedSchedule.last_run_at ? dayjs(selectedSchedule.last_run_at).format('YYYY/MM/DD HH:mm:ss') : '—'}</p></section>
           <section><h3>{t('taskCenter.scheduleTaskCount')}</h3><ExpandedScheduleTasks scheduleId={selectedSchedule.id} /></section>
+          <ScheduleNotificationPanel key={selectedSchedule.id} scheduleId={selectedSchedule.id} title={selectedSchedule.name} />
         </div>}
       </Drawer>
+      {cardNotificationTarget && <ScheduleNotificationPanel key={cardNotificationTarget.id} compact editorOnly scheduleId={cardNotificationTarget.id} title={cardNotificationTarget.name} editorOpen={cardNotificationOpen} onEditorOpenChange={setCardNotificationOpen} />}
       <Modal
         title={t('taskCenter.scheduleDeleteConfirmTitle')}
         open={Boolean(deleteTarget)}
@@ -859,7 +798,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
         <p>{t('taskCenter.groupDeleteConfirmContent')}</p>
       </Modal>
       <Modal
-        title={editTarget?.name || t('taskCenter.scheduleNewTitle')}
+        title={<div className='schedule-create-heading'><span>{editTarget ? t('notifications.editSchedule') : t('notifications.newSchedule')}</span>{(creationType === 'task' || editTarget) && <Button icon={<BellOutlined />} onClick={() => setNotificationOpen(true)}>{t('notifications.title')}</Button>}</div>}
         open={modalOpen}
         zIndex={1100}
         onOk={() => void (creationType === 'group' ? handleBatchCreate() : handleCreate())}
@@ -951,6 +890,9 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           <Form.Item noStyle shouldUpdate={(previous, current) => previous.cron_expr !== current.cron_expr}>{({ getFieldValue }) => <Form.Item name='source_schedule_ids' label={<FieldLabel>{t('taskCenter.scheduleDependencies')}</FieldLabel>} extra={t('taskCenter.scheduleDependencyHelp')}>
             <Select mode='multiple' allowClear optionFilterProp='label' options={schedules.filter((schedule) => schedule.id !== editTarget?.id).map((schedule) => ({ value: schedule.id, label: dependencyLabel(schedule), disabled: scheduleFrequency(schedule.cron_expr) < scheduleFrequency(getFieldValue('cron_expr') || '* * * * *') }))} placeholder={t('taskCenter.scheduleDependencyPlaceholder')} />
           </Form.Item>}</Form.Item>
+          <Form.Item label={<FieldLabel>{t('notifications.reminder')}</FieldLabel>}>
+            {modalOpen && <ScheduleNotificationPanel key={`${modalKey}-${editTarget?.id || 'new'}`} compact draftMode scheduleId={editTarget?.id} title={form.getFieldValue('name') || t('notifications.newSchedule')} editorOpen={notificationOpen} onEditorOpenChange={setNotificationOpen} onDraftChange={setNotificationDraft} />}
+          </Form.Item>
         </Form>
         </> : <div className='group-create-editor'>
           <CreateFieldRow label={t('taskCenter.scheduleGroupName')} required><Input value={batchGroupName} onChange={(event) => setBatchGroupName(event.target.value)} placeholder={t('taskCenter.scheduleGroupNameRequired')} maxLength={128} /></CreateFieldRow>
@@ -984,6 +926,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
             <CreateFieldRow label={t('taskCenter.scheduleKbOptional')}><KnowledgeSelect value={task.kb_ids} onChange={(kbIDs) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, kb_ids: kbIDs } : item))} options={kbOptions} embeddingReady={embeddingReady} /></CreateFieldRow>
             <CreateFieldRow label={t('taskCenter.scheduleExecutionTime')} required><VisualScheduler value={task.cron_expr} onChange={(cronExpr) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, cron_expr: cronExpr, dependencies: (item.dependencies || []).filter((dependency) => { const internalSource = batchTasks.find((candidate) => candidate.client_key === dependency.source_client_key); const externalSource = schedules.find((candidate) => candidate.id === dependency.source_schedule_id); const source = internalSource || externalSource; return !source || scheduleFrequency(source.cron_expr) >= scheduleFrequency(cronExpr); }) } : item))} /></CreateFieldRow>
             <CreateFieldRow label={t('taskCenter.scheduleDependencies')}><div><Select mode='multiple' allowClear optionFilterProp='label' placeholder={t('taskCenter.scheduleDependencyPlaceholder')} value={(task.dependencies || []).map((dependency) => dependency.source_client_key ? `client:${dependency.source_client_key}` : `schedule:${dependency.source_schedule_id}`)} options={batchDependencyOptions(task, index)} onChange={(keys: string[]) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, dependencies: keys.map((key) => ({ source_client_key: key.startsWith('client:') ? key.slice(7) : undefined, source_schedule_id: key.startsWith('schedule:') ? key.slice(9) : '', window_type: 'between_target_fires', content_types: ['final_answer', 'artifacts'], incomplete_policy: 'wait_then_run_with_warning', max_wait_seconds: 7200 })) } : item))} /><div className='field-help'>{t('taskCenter.scheduleDependencyHelp')}</div></div></CreateFieldRow>
+            <CreateFieldRow label={t('notifications.reminder')}><ScheduleNotificationPanel key={`group-notification-${task.client_key}`} compact draftMode title={task.name || t('taskCenter.scheduleTaskNumber', { index: index + 1 })} onDraftChange={(notification) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, notification } : item))} /></CreateFieldRow>
           </section> }))} />
         </div>}
       </Modal>

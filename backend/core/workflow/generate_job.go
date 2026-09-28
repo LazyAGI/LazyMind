@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -299,11 +300,13 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, repor
 			"generate_status": generateStatusSkeletonDone,
 			"updated_at":      time.Now().UTC(),
 		}
+		skeletonResp.WorkflowYAML = ensureGeneratedWorkflowIDAvailable(ctx, db, draft, skeletonResp.WorkflowYAML)
 		setWorkflowYAMLUpdate(skeletonUpdates, skeletonResp.WorkflowYAML)
 		if err := saveGeneratedDraftUpdates(ctx, db, payload.DraftID, job, skeletonUpdates); err != nil {
 			if errors.Is(err, errWorkflowDraftGenerationCanceled) {
 				return asyncjob.Result{ErrorCode: generateErrCanceled}, err
 			}
+			_ = markGenerateFailedForAttempt(db, payload.DraftID, job, fmt.Sprintf("save skeleton: %s", err))
 			return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("save skeleton: %w", err)
 		}
 		progress++
@@ -586,6 +589,45 @@ func saveGeneratedDraftUpdates(ctx context.Context, db *gorm.DB, draftID string,
 		return err
 	}
 	return db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ? AND deleted_at IS NULL", draftID).Updates(updates).Error
+}
+
+func ensureGeneratedWorkflowIDAvailable(ctx context.Context, db *gorm.DB, draft orm.WorkflowDraft, workflowYAML string) string {
+	workflowID := extractWorkflowID(workflowYAML)
+	if strings.TrimSpace(workflowID) == "" {
+		return workflowYAML
+	}
+	availableID := nextGeneratedWorkflowID(ctx, db, draft.CreatedBy, draft.ID, workflowID)
+	if availableID == workflowID {
+		return workflowYAML
+	}
+	return replaceWorkflowYAMLID(workflowYAML, availableID)
+}
+
+func nextGeneratedWorkflowID(ctx context.Context, db *gorm.DB, userID, draftID, sourceID string) string {
+	base := strings.Trim(strings.TrimSpace(sourceID), "-")
+	if base == "" {
+		base = "workflow"
+	}
+	if len(base) > 245 {
+		base = strings.TrimRight(base[:245], "-")
+	}
+	for index := 1; ; index++ {
+		candidate := base
+		if index > 1 {
+			candidate = base + "-" + strconv.Itoa(index)
+		}
+		var draftCount int64
+		db.WithContext(ctx).Model(&orm.WorkflowDraft{}).
+			Where("created_by = ? AND plugin_id = ? AND deleted_at IS NULL AND id <> ?", userID, candidate, draftID). // workflow-naming: persistence
+			Count(&draftCount)
+		var resourceCount int64
+		db.WithContext(ctx).Model(&orm.WorkflowResource{}).
+			Where("owner_user_id = ? AND plugin_id = ? AND source_draft_id <> ?", userID, candidate, draftID). // workflow-naming: persistence
+			Count(&resourceCount)
+		if draftCount == 0 && resourceCount == 0 {
+			return candidate
+		}
+	}
 }
 
 func generateProgressBase(startPhase string) int64 {

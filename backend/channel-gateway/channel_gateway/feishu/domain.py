@@ -62,6 +62,7 @@ class FeishuAppRegistration:
     owner_open_id: str
     owner_name: str
     tenant_key: str
+    bot_name: str = ''
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +72,7 @@ class FeishuAppCredentials:
     provider_account_id: str
     provider_tenant_key: str
     display_name: str
+    bot_name: str = ''
 
 
 class FeishuAddressFactory:

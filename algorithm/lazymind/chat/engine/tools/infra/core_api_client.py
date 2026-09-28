@@ -48,7 +48,8 @@ def _current_user_headers() -> Dict[str, str]:
     return headers
 
 
-def post_core_api(
+def _write_core_api(
+    method: str,
     path: str,
     payload: Dict[str, Any],
     *, user_id: str | None = None,
@@ -64,7 +65,7 @@ def post_core_api(
         headers = _current_user_headers()
         if user_id is not None:
             headers['X-User-Id'] = user_id
-        response = session.post(url, json=payload, headers=headers, timeout=timeout)
+        response = getattr(session, method.lower())(url, json=payload, headers=headers, timeout=timeout)
 
     try:
         body = response.json()
@@ -72,17 +73,33 @@ def post_core_api(
         body = {'text': response.text}
 
     if not response.ok:
-        _raise_core_api_error('POST', url, response.status_code, body)
+        _raise_core_api_error(method, url, response.status_code, body)
 
     if isinstance(body, dict) and body.get('code') not in (None, 0):
         msg = body.get('msg') or body.get('message') or body
-        raise RuntimeError(f'POST {url} failed: {msg}')
+        raise RuntimeError(f'{method} {url} failed: {msg}')
 
     return {
         'persisted': 'core_api',
         'url': url,
         'response': body,
     }
+
+
+def post_core_api(
+    path: str,
+    payload: Dict[str, Any],
+    *, user_id: str | None = None,
+) -> Dict[str, Any]:
+    return _write_core_api('POST', path, payload, user_id=user_id)
+
+
+def patch_core_api(
+    path: str,
+    payload: Dict[str, Any],
+    *, user_id: str | None = None,
+) -> Dict[str, Any]:
+    return _write_core_api('PATCH', path, payload, user_id=user_id)
 
 
 def get_core_api(path: str, params: Dict[str, Any] | None = None, *, user_id: str | None = None) -> Dict[str, Any]:

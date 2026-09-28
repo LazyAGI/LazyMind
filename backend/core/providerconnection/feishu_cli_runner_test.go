@@ -142,7 +142,8 @@ func TestFeishuCLIConfigInitAcceptsVerificationURLFromStdout(t *testing.T) {
 		if got != "https://accounts.feishu.cn/oauth/v1/device/verify?flow_id=fixture" {
 			t.Fatalf("verification URL = %q", got)
 		}
-	case <-time.After(2 * time.Second):
+	// Process startup can be slow while the full backend suite runs concurrently.
+	case <-time.After(10 * time.Second):
 		t.Fatal("verification URL from stdout was not detected")
 	}
 }

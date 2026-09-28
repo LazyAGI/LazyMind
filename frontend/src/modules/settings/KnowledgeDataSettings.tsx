@@ -25,6 +25,7 @@ import type { StructuredAsset } from "@/modules/memory/shared";
 import ExternalServicesPage from "@/modules/modelProvider/pages/ExternalServicesPage";
 
 interface KnowledgeDataSettingsProps {
+  routeParams?: URLSearchParams;
   documentParsingEnabled: boolean;
   documentParsingSaving: boolean;
   controlsDisabled: boolean;
@@ -50,6 +51,7 @@ interface ToolGroupDefinition {
 }
 
 export default function KnowledgeDataSettings({
+  routeParams,
   documentParsingEnabled,
   documentParsingSaving,
   controlsDisabled,
@@ -63,13 +65,20 @@ export default function KnowledgeDataSettings({
   const [pendingTools, setPendingTools] = useState<Set<string>>(new Set());
   const requestSequence = useRef(0);
 
+  const withReturnContext = (destination: string) => {
+    const [path, query] = destination.split("?");
+    const params = new URLSearchParams(query);
+    const returnTo = routeParams?.get("return_to");
+    if (returnTo) params.set("return_to", returnTo);
+    return `${path}?${params}`;
+  };
+
   const toolGroups = useMemo<ToolGroupDefinition[]>(() => [
     {
       id: "retrieval",
       title: t("settingsPage.knowledge.groups.retrieval.title"),
       description: t("settingsPage.knowledge.groups.retrieval.description"),
       icon: <ReadOutlined />,
-      destination: "/lib/knowledge/list?from=settings-knowledge",
       tools: [
         { id: "kb", name: t("settingsPage.knowledge.groups.retrieval.kb.name"), description: t("settingsPage.knowledge.groups.retrieval.kb.description") },
       ],
@@ -79,7 +88,6 @@ export default function KnowledgeDataSettings({
       title: t("settingsPage.knowledge.groups.data.title"),
       description: t("settingsPage.knowledge.groups.data.description"),
       icon: <DatabaseOutlined />,
-      destination: "/databases",
       tools: [
         { id: "data_sources", name: t("settingsPage.knowledge.groups.data.dataSources.name"), description: t("settingsPage.knowledge.groups.data.dataSources.description") },
         { id: "external_db", name: t("settingsPage.knowledge.groups.data.externalDb.name"), description: t("settingsPage.knowledge.groups.data.externalDb.description") },
@@ -90,7 +98,6 @@ export default function KnowledgeDataSettings({
       title: t("settingsPage.knowledge.groups.fileAccess.title"),
       description: t("settingsPage.knowledge.groups.fileAccess.description"),
       icon: <FolderOpenOutlined />,
-      destination: "/cloud-documents",
       tools: [
         { id: "local_fs", name: t("settingsPage.knowledge.groups.fileAccess.localFs.name"), description: t("settingsPage.knowledge.groups.fileAccess.localFs.description") },
         { id: "cloud_files", name: t("settingsPage.knowledge.groups.fileAccess.cloudFiles.name"), description: t("settingsPage.knowledge.groups.fileAccess.cloudFiles.description") },
@@ -212,7 +219,7 @@ export default function KnowledgeDataSettings({
         <Link
           aria-label={t("settingsPage.knowledge.openConfigAria", { name: displayName })}
           className="settings-knowledge-row-link"
-          to={destination}
+          to={withReturnContext(destination)}
         />
       ) : null}
       <span className="settings-knowledge-tool-icon" aria-hidden="true">{group.icon}</span>
@@ -221,7 +228,7 @@ export default function KnowledgeDataSettings({
         <p>{definition.description}</p>
       </div>
       {definition.configurationOnly && destination ? (
-        <Link className="settings-knowledge-configure-link" to={destination}>
+        <Link className="settings-knowledge-configure-link" to={withReturnContext(destination)}>
           <Button size="small" type="link">{t("settingsPage.knowledge.configure")}</Button>
         </Link>
       ) : (

@@ -12,6 +12,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/common/taskdisplay"
 	"lazymind/core/state"
 	"lazymind/core/store"
 )
@@ -170,19 +171,22 @@ func prepareTaskEventForSSE(ev TaskEvent, workspacePath string) TaskEvent {
 // Reconnect protocol: DB snapshot (task_start + history progress + history artifacts) first,
 // then if terminal send done/error; if still running, replay/tail the state stream.
 func StreamTask(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("view") == "ordinary" {
+		taskdisplay.PrepareRequest(w, r)
+	}
 	taskID := common.PathVar(r, "task_id")
 	if taskID == "" {
-		common.ReplyErr(w, "task_id required", http.StatusBadRequest)
+		replyTaskError(w, r, "task_id required", http.StatusBadRequest)
 		return
 	}
 	db := store.DB()
 	if db == nil {
-		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		replyTaskError(w, r, "store not initialized", http.StatusInternalServerError)
 		return
 	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		common.ReplyErr(w, "streaming not supported", http.StatusInternalServerError)
+		replyTaskError(w, r, "streaming not supported", http.StatusInternalServerError)
 		return
 	}
 	ctx := r.Context()
@@ -191,17 +195,21 @@ func StreamTask(w http.ResponseWriter, r *http.Request) {
 	t, err := GetTask(ctx, db, taskID)
 	if err != nil {
 		if IsNotFound(err) {
-			common.ReplyErr(w, "task not found", http.StatusNotFound)
+			replyTaskError(w, r, "task not found", http.StatusNotFound)
 			return
 		}
-		common.ReplyErr(w, "query task failed", http.StatusInternalServerError)
+		replyTaskError(w, r, "query task failed", http.StatusInternalServerError)
 		return
 	}
 	if t.CreateUserID != requestUserID(r) {
-		common.ReplyErr(w, "task not found", http.StatusNotFound)
+		replyTaskError(w, r, "task not found", http.StatusNotFound)
 		return
 	}
 
+	if r.URL.Query().Get("view") == "ordinary" {
+		streamOrdinaryTask(w, r, db, taskID, flusher)
+		return
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
