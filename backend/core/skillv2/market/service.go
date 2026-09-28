@@ -879,6 +879,9 @@ func (s *Service) filesFromSource(ctx context.Context, source SourceInput) (map[
 	if err != nil {
 		return nil, err
 	}
+	if err := skillpackage.RejectExtraSkillPackages(pkg.Files); err != nil {
+		return nil, err
+	}
 	files := pkg.Files
 	if _, ok := files["SKILL.md"]; !ok {
 		return nil, fmt.Errorf("skill package must contain SKILL.md")

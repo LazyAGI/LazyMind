@@ -20,4 +20,10 @@ func init() {
 	registerAdditionalError("cannot delete original revision", http.StatusConflict, 2002950)
 	registerAdditionalErrorPattern("unsupported discovery field %q", "Unsupported discovery field", http.StatusBadRequest, 2002951)
 	registerAdditionalError("discovery value required", http.StatusBadRequest, 2002952)
+	registerAdditionalErrorPattern(
+		"skill package contains multiple SKILL.md files (%s); import the skill subdirectory URL instead",
+		"Skill package contains multiple SKILL.md files; import the skill subdirectory URL instead",
+		http.StatusBadRequest,
+		2003147,
+	)
 }
