@@ -49,7 +49,7 @@ func ClaimLocalOperation(ctx context.Context, db *gorm.DB, stateStore state.Stor
 			column string
 		}{
 			{&orm.LocalWorkspace{}, "id = ?", req.WorkspaceID, "version"},
-			{&orm.ConversationWorkspaceBinding{}, "conversation_id = ?", req.ConversationID, "permission_version"},
+			{&orm.Conversation{}, "id = ?", req.ConversationID, "permission_version"},
 		} {
 			if err := tx.Model(lock.model).Where(lock.where, lock.id).UpdateColumn(lock.column, gorm.Expr(lock.column)).Error; err != nil {
 				return err

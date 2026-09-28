@@ -582,7 +582,7 @@ def test_factory_captured_dependencies_cannot_read_bound_files(tmp_path, depende
             raise ValueError('stop before any network request')
     if dependency == 'env_store':
         tool = build_session_env_tool(OtherStore(), 'conversation')
-        arguments = {'name': 'FIXTURE_TOKEN', 'value': 'fake'}
+        arguments = {'name': 'FIXTURE_TOKEN'}
     else:
         tool = workflows._safe_session_tools(toolkit, session)[0]
         arguments = {}

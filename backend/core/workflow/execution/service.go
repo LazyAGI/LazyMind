@@ -138,6 +138,14 @@ func (s *Service) Complete(ctx context.Context, owner, sessionID, attemptID stri
 			return err
 		}
 		if controlstore.Controlled(*session) {
+			// Terminal execution supersedes its start/resume notification. Retire
+			// that notification atomically so completion can enqueue a fresh one,
+			// even when the controller only observed awaiting_executor and yielded.
+			if row.ExecutorHost == "lazymind" {
+				if err := controlstore.ConsumeContinuation(tx, sessionID, attemptID); err != nil {
+					return err
+				}
+			}
 			if err := controlstore.RefreshReviews(tx, session); err != nil {
 				return err
 			}

@@ -27,6 +27,7 @@ export interface Task {
   status: string;
   schedule_id?: string;
   schedule_name?: string;
+  schedule?: Pick<Schedule, 'id' | 'name' | 'cron_expr' | 'timezone' | 'enabled' | 'run_count' | 'last_run_at' | 'next_run_at'>;
   steps: StepInfo[];
   progress?: unknown;
   created_at: string;

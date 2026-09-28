@@ -24,6 +24,18 @@ beforeEach(() => {
 });
 
 describe('versioned workflow synchronization', () => {
+  it('clears automatic execution when a chat stop arrives as a waiting snapshot', () => {
+    const store = useWorkflowStore.getState();
+    store.setSession('c', { ...session(), status: 'active' });
+    store.setAutoRunning('c', true);
+    store.applyWorkflowEvent('c', 's', snapshot(1, 1, 'active'));
+    store.applyWorkflowEvent('c', 's', { type: 'workflow.patch', state_version: 2, cursor: 2,
+      payload: { status: 'waiting', user_stopped: true, nodes: { edit: { execution: 'interrupted' } } },
+    });
+    expect(useWorkflowStore.getState().sessionByConversation.c?.status).toBe('waiting');
+    expect(useWorkflowStore.getState().autoRunningByConversation.c).toBe(false);
+  });
+
   it('accepts global cursor gaps and legacy unversioned attempt events', () => {
     let state = reduceWorkflowEvent(emptyWorkflowProjection(), snapshot(8, 100, 'active'));
     state = reduceWorkflowEvent(state, { type: 'attempt.patch', state_version: 0, cursor: 105,

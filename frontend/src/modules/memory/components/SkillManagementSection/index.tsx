@@ -24,7 +24,6 @@ import {
   waitForSkillOrganize,
 } from "../../skillApi";
 import SkillAdminPublishModal from "./SkillAdminPublishModal";
-import CloudResourceTable from "./CloudResourceTable";
 import SkillInstalledView from "./SkillInstalledView";
 import SkillManagementNavigation from "./SkillManagementNavigation";
 import SkillDraftReviewPanel from "./SkillDraftReviewPanel";
@@ -57,7 +56,6 @@ export default function SkillManagementSection() {
   const organizePollingControllerRef = useRef<AbortController | null>(null);
   const navigate = useNavigate();
   const [newWorkflowOpen, setNewWorkflowOpen] = useState(false);
-  const [workflowSourceMode, setWorkflowSourceMode] = useState<"local" | "cloud">("local");
   const [selectedSkills, setSelectedSkills] = useState<Map<string, StructuredAsset>>(new Map());
   const [batchCallModeLoading, setBatchCallModeLoading] = useState(false);
   const batchCallModeLock = useRef(false);
@@ -938,7 +936,6 @@ export default function SkillManagementSection() {
       <SkillManagementToolbar
         t={t}
         skillView={skillView}
-        onSkillViewChange={handleSkillViewChange}
         installedCount={skillListTotal}
         onCreateSkill={openSkillCreateModal}
         organizeMode={organizeMode}
@@ -970,16 +967,11 @@ export default function SkillManagementSection() {
         onNewWorkflow={() => setNewWorkflowOpen(true)}
         pendingDraftCount={pendingDraftCount}
         onReviewDrafts={() => setDraftReviewOpen(true)}
-        workflowSourceMode={workflowSourceMode}
-        onWorkflowSourceModeChange={setWorkflowSourceMode}
       />
 
       {skillView === "installed" && cloudSkillError ? <Alert type="error" showIcon message={t("admin.memoryCloudLoadFailed")} action={<Button aria-label={t("common.retry")} onClick={() => void retryCloudSkills()}>{t("common.retry")}</Button>} /> : null}
       {skillView === "installed" && skillListError ? <Alert type="error" showIcon message={t("admin.memoryResourceLocalLoadFailed")} action={<Button aria-label={t("common.retry")} onClick={() => void refreshSkillAssets()}>{t("common.retry")}</Button>} /> : null}
       {skillView === "installed" && cloudSkillLoading ? <div role="status"><Spin size="small" /> {t("admin.memoryCloudLoading")}</div> : null}
-      {skillView === "cloud" ? (
-        <CloudResourceTable resourceType="skill" t={t} onDownloaded={() => refreshSkillAssets()} />
-      ) : null}
 
       {skillView === "installed" ? (
         <SkillInstalledView
@@ -1056,9 +1048,6 @@ export default function SkillManagementSection() {
 
       {skillView === "workflows" ? (
         <WorkflowInstalledView
-          sourceMode={workflowSourceMode}
-          onSourceModeChange={setWorkflowSourceMode}
-          hideSourceControl
           t={t}
           onNewWorkflow={() => setNewWorkflowOpen(true)}
           tableScroll={tableScroll}

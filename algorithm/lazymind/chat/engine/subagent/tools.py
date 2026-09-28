@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from typing import Any, Dict, List, Literal, Optional
@@ -380,7 +381,14 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
     msg = f"Artifact '{key}' saved."
     if out_of_range_warning:
         msg += f' WARNING: {out_of_range_warning}'
-    return {'status': 'ok', 'message': msg}
+    ack: Dict[str, Any] = {'status': 'ok', 'key': key, 'message': msg}
+    draft_path = ctx.draft_path(key)
+    if os.path.isfile(draft_path):
+        ack['path'] = draft_path
+    elif isinstance(built, dict) and built.get('path'):
+        ack['path'] = built['path']
+    _record_artifact_coord(key, path=str(ack.get('path') or ''), revision=str(seq))
+    return ack
 
 
 def resolve_artifact_files(arguments: dict) -> object:
@@ -573,8 +581,9 @@ def get_artifact(key: str, sort_order: Optional[int] = None, task_ref: Optional[
             When omitted but start_line is given, reads to the end of the file.
 
     Returns:
-        The artifact content (text, file path, or JSON description).
-        When start_line/end_line are given, returns a line-range view with total_lines.
+        Without start_line/end_line: a locator (key/revision/path/hash/total_lines).
+        The artifact body stays in the workspace; use a line range or read_file.
+        With start_line/end_line: a line-range view with total_lines.
     """
     ctx = require_context()
 
@@ -646,6 +655,7 @@ def get_artifact(key: str, sort_order: Optional[int] = None, task_ref: Optional[
             result = {
                 'status': 'ok', 'key': key, 'artifacts': artifacts,
             }
+            return result
         else:
             result = _get_public_workflow_artifacts(key, workflow_session_id, sort_order)
     elif sort_order is not None:
@@ -667,8 +677,93 @@ def get_artifact(key: str, sort_order: Optional[int] = None, task_ref: Optional[
 
     # Apply draft overlay and line-range slicing.
     if start_line is not None or end_line is not None:
-        return _apply_line_range(ctx, key, result, start_line, end_line)
-    return _apply_draft_overlay(ctx, key, result)
+        sliced = _apply_line_range(ctx, key, result, start_line, end_line)
+        _record_artifact_coord(
+            key,
+            path=str(sliced.get('path') or ''),
+            revision=str(sliced.get('revision') or ''),
+            range_text=f'{sliced.get("start_line")}-{sliced.get("end_line")}',
+            total_lines=sliced.get('total_lines'),
+        )
+        return sliced
+    return _materialize_artifact_locator(ctx, key, result)
+
+
+def _record_artifact_coord(
+    key: str,
+    *,
+    path: str = '',
+    revision: str = '',
+    range_text: str = '',
+    total_lines: Any = None,
+) -> None:
+    try:
+        import lazyllm
+        cfg = lazyllm.globals.get('agentic_config')
+    except Exception:
+        return
+    if not isinstance(cfg, dict):
+        return
+    coords = [item for item in (cfg.get('artifact_coords') or []) if isinstance(item, dict)]
+    entry: Dict[str, Any] = {'key': key, 'path': path, 'revision': revision, 'range': range_text}
+    if total_lines is not None:
+        entry['total_lines'] = total_lines
+    coords = [item for item in coords if str(item.get('key') or '') != key]
+    coords.append(entry)
+    cfg['artifact_coords'] = coords
+
+
+def _materialize_artifact_locator(ctx: Any, key: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep artifact bodies on disk; return key/path/hash/range metadata only."""
+    overlaid = _apply_draft_overlay(ctx, key, result)
+    if str(overlaid.get('status') or '') != 'ok':
+        return overlaid
+    text, original_type = _resolve_artifact_text(ctx, key)
+    path = ''
+    digest = ''
+    total_lines = 0
+    if text is not None:
+        if ctx.read_draft(key) is None:
+            ctx.write_draft(key, original_type, text, pending_commit=False)
+        path = ctx.draft_path(key)
+        digest = hashlib.sha256(text.encode('utf-8', errors='replace')).hexdigest()
+        total_lines = len(text.splitlines())
+    artifacts: List[Dict[str, Any]] = []
+    keep_value_keys = {'path', 'filename', 'url', 'type', 'size', 'caption'}
+    for item in overlaid.get('artifacts') or []:
+        if not isinstance(item, dict):
+            continue
+        cloned = dict(item)
+        raw_value = cloned.get('value')
+        value = dict(raw_value) if isinstance(raw_value, dict) else {}
+        loc_value = {name: value[name] for name in keep_value_keys if name in value}
+        if path and 'path' not in loc_value:
+            loc_value['path'] = path
+        cloned['value'] = loc_value
+        artifacts.append(cloned)
+        if not path:
+            path = str(loc_value.get('path') or '')
+    revision = ''
+    if artifacts:
+        last = artifacts[-1]
+        revision = str(last.get('seq') or last.get('revision') or '')
+    locator = {
+        'status': 'ok',
+        'key': key,
+        'path': path,
+        'hash': digest,
+        'revision': revision,
+        'total_lines': total_lines,
+        'artifacts': artifacts,
+        'message': (
+            'Artifact body is in the workspace. Pass start_line/end_line or read_file(path); '
+            'do not copy the full draft into the model context.'
+        ),
+    }
+    _record_artifact_coord(
+        key, path=path, revision=revision, total_lines=total_lines,
+    )
+    return locator
 
 
 def _resolve_artifact_text(
@@ -797,6 +892,11 @@ def _apply_line_range(
     sl = max(1, start_line) if start_line is not None else 1
     el = min(total, end_line) if end_line is not None else total
     slice_content = ''.join(lines[sl - 1:el])
+    locator_path = ''
+    try:
+        locator_path = ctx.draft_path(key)
+    except Exception:
+        locator_path = ''
     return {
         'status': 'ok',
         'key': key,
@@ -804,6 +904,7 @@ def _apply_line_range(
         'start_line': sl,
         'end_line': el,
         'total_lines': total,
+        'path': locator_path,
         '_from_draft': ctx.read_draft(key) is not None,
     }
 
@@ -859,6 +960,8 @@ def patch_artifact(
 
     Use patch_artifact for targeted edits (fix a paragraph, update a field). Use
     save_artifacts directly when rewriting the whole artifact from scratch.
+    The current draft is loaded inside this tool. Do not call get_artifact to
+    reconstruct old_str from the full body.
 
     To discard all uncommitted edits and revert to the last saved version, call
     discard_draft(key).
@@ -923,12 +1026,17 @@ def patch_artifact(
 
     ctx.write_draft(key, original_type, new_content, list_index)
     lines_changed = abs(new_content.count('\n') - content.count('\n'))
+    draft_path = ctx.draft_path(key, list_index)
+    _record_artifact_coord(key, path=draft_path)
     return {
         'status': 'ok',
+        'key': key,
+        'path': draft_path,
         'message': (
             f"Draft for '{key}' updated ({lines_changed} line(s) changed). "
             'Keep patching, or call discard_draft to abandon the edits. '
-            'The framework will commit them at the normal step boundary.'
+            'The framework will commit them at the normal step boundary. '
+            'Read the workspace path instead of copying the draft body.'
         ),
     }
 
@@ -978,7 +1086,8 @@ def _apply_str_replace(content: str, patch: Any) -> tuple[Optional[str], Optiona
     if count > 1:
         return None, (
             f'old_str matches {count} locations — it must be unique. '
-            'Expand old_str with more surrounding context to make it unique, then retry.'
+            'Expand old_str with more surrounding context and retry patch_artifact. '
+            'Do not call get_artifact to lift the full draft into the prompt.'
         )
 
     # Layer 2: normalize both sides and match.
@@ -993,8 +1102,9 @@ def _apply_str_replace(content: str, patch: Any) -> tuple[Optional[str], Optiona
         return content[:orig_idx] + new_str + content[orig_end:], None
 
     return None, (
-        'old_str not found in the current draft content. '
-        'Call get_artifact to read the current content, then construct old_str from the actual text.'
+        'old_str not found in the current draft. This tool already loaded the draft. '
+        'Retry patch_artifact with a shorter unique excerpt from your last write, '
+        'or use json_patch/json_merge. Do not call get_artifact to lift the full draft.'
     )
 
 
@@ -1529,11 +1639,7 @@ def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]
         return result_dict
 
     artifacts = result_dict.get('artifacts') or []
-    if not artifacts:
-        raise ToolExecutionError(f"No artifact found for slot '{slot}'.")
-
-    # Use the first (or only) artifact to resolve the path.
-    artifact = artifacts[0]
+    artifact = artifacts[0] if artifacts and isinstance(artifacts[0], dict) else {}
     value = artifact.get('value') or {}
     if isinstance(value, str):
         try:
@@ -1546,7 +1652,11 @@ def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]
     if isinstance(value.get('url'), str) and value.get('url'):
         signed_url = value['url']
 
-    path: Optional[str] = value.get('path') or value.get('url')
+    path: Optional[str] = (
+        result_dict.get('path')
+        or value.get('path')
+        or value.get('url')
+    )
     if not path or not isinstance(path, str):
         raise ToolExecutionError(f"Artifact '{slot}' has no resolvable path.")
 

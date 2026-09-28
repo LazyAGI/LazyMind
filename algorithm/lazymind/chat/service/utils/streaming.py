@@ -19,8 +19,8 @@ def sse_line(payload: Dict[str, Any]) -> str:
 def log_and_emit_frame(frame: Any, cost: float, query: str, session_id: str, tag: str = 'FRAME') -> str:
     LOG.debug(
         f'[ChatServer] [KB_CHAT_STREAM_{tag}] '
-        f'[query={query}] [session_id={session_id}] '
-        f'[cost={cost}] [data={json.dumps(frame, ensure_ascii=False, default=str)}]'
+        f'[query_length={len(query)}] [session_id={session_id}] '
+        f'[cost={cost}] [frame_type={type(frame).__name__}]'
     )
     return sse_line(response_payload(200, 'success', frame, cost))
 

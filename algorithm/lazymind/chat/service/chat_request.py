@@ -45,6 +45,7 @@ class ChatRuntimeOptions(BaseModel):
     ocr_config: Optional[Dict[str, Any]] = None
     tool_config: Optional[Dict[str, Union[str, List[str]]]] = None
     mcp_config: Optional[List[Dict[str, Any]]] = None
+    mcp_capabilities: Optional[List[Dict[str, Any]]] = None
     system_mcp_config: Optional[List[Dict[str, Any]]] = None
     context_usage_preview: bool = False
     context_prompt_export: bool = False
@@ -55,6 +56,7 @@ class ChatRuntimeOptions(BaseModel):
     mail_draft_patch: Optional[Dict[str, Any]] = None
     mail_mailbox_confirm: Optional[str] = None
     mail_mailbox_confirm_draft_id: Optional[str] = None
+    user_env_vars: Dict[str, str] = Field(default_factory=dict)
 
 
 class ChatPersonalizationOptions(BaseModel):

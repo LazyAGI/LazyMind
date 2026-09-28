@@ -133,16 +133,19 @@ type MultiAnswersSwitch struct {
 func (MultiAnswersSwitch) TableName() string { return "multi_answers_switches" }
 
 type Conversation struct {
-	TitleSource   string          `gorm:"column:title_source;type:varchar(16);not null;default:unknown"`
-	TitleRevision int64           `gorm:"column:title_revision;not null;default:0"`
-	ID            string          `gorm:"column:id;type:varchar(36);primaryKey"`
-	DisplayName   string          `gorm:"column:display_name;type:varchar(255)"`
-	ChannelID     string          `gorm:"column:channel_id;type:varchar(36);not null;default:default"`
-	SearchConfig  json.RawMessage `gorm:"column:search_config;type:json"`
-	ApplicationID string          `gorm:"column:application_id;type:varchar(64);default:''"`
-	Ext           json.RawMessage `gorm:"column:ext;type:json"`
-	Model         string          `gorm:"column:model;type:varchar(64);default:''"`
-	Models        json.RawMessage `gorm:"column:models;type:json"`
+	// Independent of directory binding. Empty legacy values resolve conservatively.
+	PermissionMode    string          `gorm:"column:permission_mode;type:varchar(32);not null;default:''"`
+	PermissionVersion int64           `gorm:"column:permission_version;not null;default:0"`
+	TitleSource       string          `gorm:"column:title_source;type:varchar(16);not null;default:unknown"`
+	TitleRevision     int64           `gorm:"column:title_revision;not null;default:0"`
+	ID                string          `gorm:"column:id;type:varchar(36);primaryKey"`
+	DisplayName       string          `gorm:"column:display_name;type:varchar(255)"`
+	ChannelID         string          `gorm:"column:channel_id;type:varchar(36);not null;default:default"`
+	SearchConfig      json.RawMessage `gorm:"column:search_config;type:json"`
+	ApplicationID     string          `gorm:"column:application_id;type:varchar(64);default:''"`
+	Ext               json.RawMessage `gorm:"column:ext;type:json"`
+	Model             string          `gorm:"column:model;type:varchar(64);default:''"`
+	Models            json.RawMessage `gorm:"column:models;type:json"`
 	// ChatModel* stores the conversation-scoped chat LLM selection. Historical
 	// rows keep these fields empty and continue to use the user's runtime default.
 	ChatModelMode     *string         `gorm:"column:chat_model_mode;type:varchar(16)"`

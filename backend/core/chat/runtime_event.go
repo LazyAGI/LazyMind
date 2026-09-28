@@ -211,8 +211,29 @@ func parseRunTerminal(raw json.RawMessage) (*RunTerminal, error) {
 	return &terminal, nil
 }
 
+func ensureRunTerminalDiagnosticID(event *ChatRuntimeEvent) {
+	if event == nil || event.Type != RuntimeEventRunFinished {
+		return
+	}
+	terminal, err := event.Terminal()
+	if err != nil || terminal == nil || strings.TrimSpace(terminal.DiagnosticID) != "" {
+		return
+	}
+	switch terminal.Reason {
+	case "model_failure", "model_incomplete", "runtime_failure":
+		terminal.DiagnosticID = newID("diag_")
+		event.Data = terminalJSON(terminal)
+	}
+}
+
 func failedRunEvent(runID, code string, partialOutput bool) *ChatRuntimeEvent {
-	terminal := RunTerminal{Status: "failed", Reason: "runtime_failure", Code: code, PartialOutput: partialOutput}
+	terminal := RunTerminal{
+		Status:        "failed",
+		Reason:        "runtime_failure",
+		Code:          code,
+		PartialOutput: partialOutput,
+		DiagnosticID:  newID("diag_"),
+	}
 	return runFinishedEvent(runID, terminal)
 }
 
@@ -276,6 +297,6 @@ func hasBusinessStreamPayload(chunk UpstreamStreamChunk) bool {
 	return chunk.Text != "" || chunk.ReasoningText != "" || len(chunk.Sources) > 0 ||
 		chunk.TaskCreated != nil || chunk.ArtifactCreated != nil || chunk.AskPending != nil ||
 		chunk.ToolLimitPending != nil || chunk.IntentUpdated != nil || chunk.WorkflowPreflightUpdated != nil ||
-		chunk.CapabilityDependency != nil ||
+		chunk.CapabilityDependency != nil || chunk.ToolConfiguration != nil ||
 		chunk.Heartbeat
 }

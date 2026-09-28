@@ -103,28 +103,30 @@ type ChatRetrievalOptions struct {
 }
 
 type ChatRuntimeOptions struct {
-	ToolPolicy                    string         `json:"tool_policy,omitempty"`
-	SourceReference               string         `json:"source_reference,omitempty"`
-	Debug                         bool           `json:"debug,omitempty"`
-	Reasoning                     bool           `json:"reasoning"`
-	ThinkingDepth                 string         `json:"thinking_depth,omitempty"`
-	Priority                      *int           `json:"priority,omitempty"`
-	Trace                         bool           `json:"trace,omitempty"`
-	EnvironmentContext            map[string]any `json:"environment_context,omitempty"`
-	LLMConfig                     map[string]any `json:"llm_config,omitempty"`
-	OCRConfig                     map[string]any `json:"ocr_config,omitempty"`
-	ToolConfig                    map[string]any `json:"tool_config,omitempty"`
-	MCPConfig                     []any          `json:"mcp_config,omitempty"`
-	SystemMCPConfig               []any          `json:"system_mcp_config,omitempty"`
-	ContextUsagePreview           bool           `json:"context_usage_preview,omitempty"`
-	ContextPromptExport           bool           `json:"context_prompt_export,omitempty"`
-	ContextPreviewAllowLLMRouting bool           `json:"context_preview_allow_llm_routing,omitempty"`
-	SkipSensitiveFilter           bool           `json:"skip_sensitive_filter,omitempty"`
-	MailDraftConfirmID            string         `json:"mail_draft_confirm_id,omitempty"`
-	MailDraftConfirmRevision      int            `json:"mail_draft_confirm_revision,omitempty"`
-	MailDraftPatch                map[string]any `json:"mail_draft_patch,omitempty"`
-	MailMailboxConfirm            string         `json:"mail_mailbox_confirm,omitempty"`
-	MailMailboxConfirmDraftID     string         `json:"mail_mailbox_confirm_draft_id,omitempty"`
+	ToolPolicy                    string            `json:"tool_policy,omitempty"`
+	SourceReference               string            `json:"source_reference,omitempty"`
+	Debug                         bool              `json:"debug,omitempty"`
+	Reasoning                     bool              `json:"reasoning"`
+	ThinkingDepth                 string            `json:"thinking_depth,omitempty"`
+	Priority                      *int              `json:"priority,omitempty"`
+	Trace                         bool              `json:"trace,omitempty"`
+	EnvironmentContext            map[string]any    `json:"environment_context,omitempty"`
+	LLMConfig                     map[string]any    `json:"llm_config,omitempty"`
+	OCRConfig                     map[string]any    `json:"ocr_config,omitempty"`
+	ToolConfig                    map[string]any    `json:"tool_config,omitempty"`
+	MCPConfig                     []any             `json:"mcp_config,omitempty"`
+	MCPCapabilities               []any             `json:"mcp_capabilities,omitempty"`
+	SystemMCPConfig               []any             `json:"system_mcp_config,omitempty"`
+	ContextUsagePreview           bool              `json:"context_usage_preview,omitempty"`
+	ContextPromptExport           bool              `json:"context_prompt_export,omitempty"`
+	ContextPreviewAllowLLMRouting bool              `json:"context_preview_allow_llm_routing,omitempty"`
+	SkipSensitiveFilter           bool              `json:"skip_sensitive_filter,omitempty"`
+	MailDraftConfirmID            string            `json:"mail_draft_confirm_id,omitempty"`
+	MailDraftConfirmRevision      int               `json:"mail_draft_confirm_revision,omitempty"`
+	MailDraftPatch                map[string]any    `json:"mail_draft_patch,omitempty"`
+	MailMailboxConfirm            string            `json:"mail_mailbox_confirm,omitempty"`
+	MailMailboxConfirmDraftID     string            `json:"mail_mailbox_confirm_draft_id,omitempty"`
+	UserEnvVars                   map[string]string `json:"user_env_vars,omitempty"`
 }
 
 type ChatPersonalizationOptions struct {
@@ -166,6 +168,7 @@ type LazyChatData struct {
 	WorkflowPreflightUpdated *WorkflowPreflightUpdatedEvent `json:"workflow_preflight_updated,omitempty"`
 	ModelContextUpdated      *ModelContextUpdatedEvent      `json:"model_context_updated,omitempty"`
 	CapabilityDependency     map[string]any                 `json:"capability_dependency,omitempty"`
+	ToolConfiguration        map[string]any                 `json:"tool_configuration,omitempty"`
 	Heartbeat                bool                           `json:"heartbeat,omitempty"`
 	ToolCallTurns            int64                          `json:"tool_call_turns"`
 	RuntimeEvent             *ChatRuntimeEvent              `json:"runtime_event,omitempty"`
@@ -218,13 +221,31 @@ type AskQuestion struct {
 // The frontend renders a clarification UI; the user's answers are sent as plain text
 // in the next chat turn's query — no special ask_response parameter is needed.
 type AskPendingEvent struct {
-	AskID       string           `json:"ask_id"`
-	Questions   []AskQuestion    `json:"questions"`
-	Title       string           `json:"title,omitempty"`
-	Description string           `json:"description,omitempty"`
-	MailDraft   map[string]any   `json:"mail_draft,omitempty"`
-	MailDrafts  []map[string]any `json:"mail_drafts,omitempty"`
-	ReviewHook  map[string]any   `json:"review_hook,omitempty"`
+	AskID         string                     `json:"ask_id"`
+	Questions     []AskQuestion              `json:"questions"`
+	Title         string                     `json:"title,omitempty"`
+	Description   string                     `json:"description,omitempty"`
+	MailDraft     map[string]any             `json:"mail_draft,omitempty"`
+	MailDrafts    []map[string]any           `json:"mail_drafts,omitempty"`
+	ReviewHook    map[string]any             `json:"review_hook,omitempty"`
+	UserEnvDelete *UserEnvDeleteConfirmation `json:"user_env_delete,omitempty"`
+	EnvInput      *EnvironmentInputRequest   `json:"env_input,omitempty"`
+}
+
+// EnvironmentInputRequest contains metadata only; values use a dedicated authenticated API.
+type EnvironmentInputRequest struct {
+	Name              string     `json:"name"`
+	Scope             string     `json:"scope"`
+	ID                string     `json:"id,omitempty"`
+	ExpectedUpdatedAt *time.Time `json:"expected_updated_at,omitempty"`
+	Description       *string    `json:"description,omitempty"`
+	Enabled           *bool      `json:"enabled,omitempty"`
+}
+
+type UserEnvDeleteConfirmation struct {
+	ID                string    `json:"id"`
+	Name              string    `json:"name"`
+	ExpectedUpdatedAt time.Time `json:"expected_updated_at"`
 }
 
 type ToolLimitPendingEvent struct {
@@ -262,9 +283,16 @@ type WorkflowPreflightUpdatedEvent struct {
 // ModelContextUpdatedEvent persists dual-track compression state on the conversation.
 // summary_text and covered_through_seq must be applied together (atomic ext write).
 type ModelContextUpdatedEvent struct {
-	SummaryText       string `json:"summary_text"`
-	CoveredThroughSeq int    `json:"covered_through_seq"`
-	Version           int    `json:"version,omitempty"`
+	SummaryText       string          `json:"summary_text"`
+	CoveredThroughSeq int             `json:"covered_through_seq"`
+	Version           int             `json:"version,omitempty"`
+	ActiveSkills      json.RawMessage `json:"active_skills,omitempty"`
+	ArtifactCoords    json.RawMessage `json:"artifact_coords,omitempty"`
+	SpillPaths        json.RawMessage `json:"spill_paths,omitempty"`
+	CitationMap       json.RawMessage `json:"citation_map,omitempty"`
+	TaskGoal          json.RawMessage `json:"task_goal,omitempty"`
+	KeyInstructions   json.RawMessage `json:"key_instructions,omitempty"`
+	HardConstraints   json.RawMessage `json:"hard_constraints,omitempty"`
 }
 
 // LazyChatResponse is one line emitted by the algorithm chat stream.
@@ -416,6 +444,7 @@ type UpstreamStreamChunk struct {
 	WorkflowPreflightUpdated *WorkflowPreflightUpdatedEvent `json:"workflow_preflight_updated,omitempty"`
 	ModelContextUpdated      *ModelContextUpdatedEvent      `json:"model_context_updated,omitempty"`
 	CapabilityDependency     map[string]any                 `json:"capability_dependency,omitempty"`
+	ToolConfiguration        map[string]any                 `json:"tool_configuration,omitempty"`
 	Heartbeat                bool                           `json:"heartbeat,omitempty"`
 	ToolCallTurns            int64                          `json:"tool_call_turns"`
 	ExternalEventSequence    int64                          `json:"external_event_sequence,omitempty"`
@@ -423,7 +452,16 @@ type UpstreamStreamChunk struct {
 	RuntimeEvent             *ChatRuntimeEvent              `json:"runtime_event,omitempty"`
 	PerformanceMetrics       *RunPerformanceMetrics         `json:"performance_metrics,omitempty"`
 	Err                      error                          `json:"-"`
+	ErrKind                  UpstreamStreamErrorKind        `json:"-"`
 }
+
+type UpstreamStreamErrorKind string
+
+const (
+	UpstreamStreamErrorTransport       UpstreamStreamErrorKind = "transport_error"
+	UpstreamStreamErrorProtocol        UpstreamStreamErrorKind = "protocol_error"
+	UpstreamStreamErrorMissingTerminal UpstreamStreamErrorKind = "missing_run_terminal"
+)
 
 type upstreamStreamLine struct {
 	Code int                 `json:"code"`
@@ -551,6 +589,19 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	if draftID, ok := body["mail_mailbox_confirm_draft_id"].(string); ok {
 		req.Runtime.MailMailboxConfirmDraftID = strings.TrimSpace(draftID)
 	}
+	if envVars, ok := body["user_env_vars"].(map[string]string); ok {
+		req.Runtime.UserEnvVars = envVars
+	} else if envVarsAny, ok := body["user_env_vars"].(map[string]any); ok {
+		envVars := make(map[string]string, len(envVarsAny))
+		for key, value := range envVarsAny {
+			if name := strings.TrimSpace(key); name != "" {
+				envVars[name] = fmt.Sprint(value)
+			}
+		}
+		if len(envVars) > 0 {
+			req.Runtime.UserEnvVars = envVars
+		}
+	}
 	if llmConfig, ok := body["llm_config"].(map[string]any); ok {
 		req.Runtime.LLMConfig = llmConfig
 	}
@@ -587,6 +638,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 		if len(tc) > 0 {
 			req.Runtime.ToolConfig = tc
 		}
+	}
+	if capabilities, ok := body["mcp_capabilities"].([]any); ok {
+		req.Runtime.MCPCapabilities = capabilities
 	}
 	if mcpConfig, ok := body["mcp_config"].([]any); ok {
 		req.Runtime.MCPConfig = mcpConfig
@@ -941,7 +995,7 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 					return
 				}
 				select {
-				case out <- UpstreamStreamChunk{Err: d.Err}:
+				case out <- UpstreamStreamChunk{Err: d.Err, ErrKind: upstreamStreamErrorKind(d.ErrKind)}:
 				case <-ctx.Done():
 				}
 				return
@@ -953,15 +1007,20 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 			isTerminalFrame := false
 			if terminalSeen && (hasBusinessStreamPayload(chunk) || chunk.RuntimeEvent != nil) {
 				chunk.Err = errors.New("algorithm emitted payload after run_finished")
+				chunk.ErrKind = UpstreamStreamErrorProtocol
 			}
 			if chunk.RuntimeEvent != nil {
 				if err := chunk.RuntimeEvent.Validate(req.Conversation.RunID); err != nil {
 					chunk.Err = err
+					chunk.ErrKind = UpstreamStreamErrorProtocol
 				} else if chunk.RuntimeEvent.Type == RuntimeEventRunFinished {
+					ensureRunTerminalDiagnosticID(chunk.RuntimeEvent)
 					if hasBusinessStreamPayload(chunk) {
 						chunk.Err = errors.New("algorithm combined run_finished with business payload")
+						chunk.ErrKind = UpstreamStreamErrorProtocol
 					} else if terminalSeen {
 						chunk.Err = errors.New("algorithm emitted duplicate run_finished")
+						chunk.ErrKind = UpstreamStreamErrorProtocol
 					} else {
 						terminalSeen = true
 						isTerminalFrame = true
@@ -984,7 +1043,7 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 			}
 			if chunk.Err != nil {
 				select {
-				case out <- UpstreamStreamChunk{Err: chunk.Err}:
+				case out <- UpstreamStreamChunk{Err: chunk.Err, ErrKind: chunk.ErrKind}:
 				case <-ctx.Done():
 				}
 				return
@@ -1000,7 +1059,10 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 		}
 		if !terminalSeen && ctx.Err() == nil {
 			select {
-			case out <- UpstreamStreamChunk{Err: errors.New("algorithm stream ended without run_finished")}:
+			case out <- UpstreamStreamChunk{
+				Err:     errors.New("algorithm stream ended without run_finished"),
+				ErrKind: UpstreamStreamErrorMissingTerminal,
+			}:
 			case <-ctx.Done():
 			}
 		} else if terminalChunk != nil && ctx.Err() == nil {
@@ -1011,6 +1073,17 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 		}
 	}()
 	return out, algorithmID, nil
+}
+
+func upstreamStreamErrorKind(kind lazyStreamErrorKind) UpstreamStreamErrorKind {
+	switch kind {
+	case lazyStreamErrorTransport:
+		return UpstreamStreamErrorTransport
+	case lazyStreamErrorProtocol:
+		return UpstreamStreamErrorProtocol
+	default:
+		return ""
+	}
 }
 
 func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {
@@ -1029,6 +1102,7 @@ func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {
 		WorkflowPreflightUpdated: data.WorkflowPreflightUpdated,
 		ModelContextUpdated:      data.ModelContextUpdated,
 		CapabilityDependency:     data.CapabilityDependency,
+		ToolConfiguration:        data.ToolConfiguration,
 		Heartbeat:                data.Heartbeat,
 		ToolCallTurns:            data.ToolCallTurns,
 		RuntimeEvent:             data.RuntimeEvent,

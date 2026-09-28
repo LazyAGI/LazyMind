@@ -120,7 +120,11 @@ func resolveHostAccessWorkspace(ctx context.Context, db *gorm.DB, userID, conver
 	var binding orm.ConversationWorkspaceBinding
 	if err := db.WithContext(ctx).Where("conversation_id = ?", conversationID).First(&binding).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return UnboundContext(), nil
+			value := UnboundContext()
+			if value != nil {
+				value.PermissionMode, value.PermissionVersion = conversationPermission(conversation, nil)
+			}
+			return value, nil
 		}
 		return nil, err
 	}
@@ -137,7 +141,8 @@ func resolveHostAccessWorkspace(ctx context.Context, db *gorm.DB, userID, conver
 	if workspace.Status != StatusActive {
 		return nil, Error("path_unavailable", 409, "conflict")
 	}
-	return snapshot(workspace, binding.PermissionMode, binding.PermissionVersion), nil
+	mode, version := conversationPermission(conversation, &binding)
+	return snapshot(workspace, mode, version), nil
 }
 
 func InternalPrepareOperationBatch(w http.ResponseWriter, r *http.Request) {

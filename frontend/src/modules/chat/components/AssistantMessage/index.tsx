@@ -37,8 +37,10 @@ import { WorkflowPanel } from "@/modules/chat/components/WorkflowPanel";
 import MultiAnswerDisplay, { type PreferenceType } from "../MultiAnswerDisplay";
 import FeedbackModal from "../FeedbackModal";
 import AskCard from "@/modules/chat/components/AskCard";
+import EnvInputCard from "@/modules/chat/components/EnvInputCard";
 import MailDraftCard from "@/modules/chat/components/MailDraftCard";
 import MailMailboxCard from "@/modules/chat/components/MailDraftCard/MailMailboxCard";
+import ToolConfigurationCard from "@/modules/chat/components/ToolConfigurationCard";
 import ToolLimitCard from "@/modules/chat/components/ToolLimitCard";
 import ChatExportActions from "../newChatContainer/components/ChatExportActions";
 import ArtifactDownloadButton from "@/modules/chat/components/ArtifactCollectorCard/ArtifactDownloadButton";
@@ -1324,6 +1326,30 @@ const AssistantMessage = (props: any) => {
     // Render ask_pending card if present
     if (item.ask_pending) {
       const askPending = item.ask_pending;
+      if (askPending.env_input) {
+        return (
+          <EnvInputCard
+            key={askPending.ask_id}
+            conversationId={sessionId}
+            historyId={item.history_id}
+            askId={askPending.ask_id}
+            input={askPending.env_input}
+            result={item.env_input_result}
+            disabled={runActive || !!hasLaterUserMessage || index !== length - 1 ||
+              (!!item.ask_answered && !item.env_input_result)}
+            onComplete={async (receipt) => {
+              updateMessage({ ...item, ask_answered: true, env_input_result: receipt });
+              await props.sendMessage?.(
+                t(`settingsPage.envVars.inputContinuation.${
+                  receipt.status === "configured" && receipt.enabled === false ? "disabled" : receipt.status
+                }`, {
+                  name: receipt.name, scope: t(`settingsPage.envVars.scope.${receipt.scope}`),
+                }),
+              );
+            }}
+          />
+        );
+      }
       const showAskCard = shouldRenderAskPending(
         item.ask_answered,
         index === length - 1,
@@ -1418,6 +1444,7 @@ const AssistantMessage = (props: any) => {
         );
       }
       if (!showAskCard) return null;
+      if (!askPending.user_env_delete && !askPending.questions?.length) return null;
       return (
         <AskCard
           key={askPending.ask_id}
@@ -1440,17 +1467,22 @@ const AssistantMessage = (props: any) => {
               );
             }
           }}
-          onSubmit={(payload) => {
+          onSubmit={async (payload) => {
             persistAskAnswersRef.current.cancel();
-            // Mark the card as answered in memory so it shows as disabled immediately.
+            const started = await props.sendMessage?.(payload.text, undefined, {
+              ask_answers_structured: payload.structured,
+            });
+            if (!started) return false;
+            // Deletion confirmations are consumed by Core; history remains authoritative.
+            if (askPending.user_env_delete) return true;
             updateMessage({
               ...item,
               ask_answered: true,
-              ask_saved_answers: undefined,
+              ask_saved_answers: Object.fromEntries(
+                payload.structured.questions.map((question, idx) => [idx, question.answer]),
+              ),
             });
-            props.sendMessage?.(payload.text, undefined, {
-              ask_answers_structured: payload.structured,
-            });
+            return true;
           }}
         />
       );
@@ -1524,6 +1556,8 @@ const AssistantMessage = (props: any) => {
       item.finish_reason ===
         ChatConversationsResponseFinishReasonEnum.FinishReasonStop);
 
+  const configurationTaskEnded = runCompleted || ["failed", "interrupted", "cancelled"].includes(item.run_status || "");
+
   const shouldUseMultiAnswerStyle =
     hasMultipleAnswers &&
     (item.selected_answer_index === undefined ||
@@ -1595,7 +1629,12 @@ const AssistantMessage = (props: any) => {
             />
             {renderForkAction()}
           </div>
-          {!item.fork_read_only && (item.ask_pending || index === length - 1) && renderBottom()}
+          {!item.fork_read_only && sessionId && item.history_id && <ToolConfigurationCard
+          conversationId={sessionId} historyId={item.history_id} active={!configurationTaskEnded && index === length - 1}
+          onContinue={configurationTaskEnded && index === length - 1 && props.sendMessage
+            ? () => props.sendMessage?.(t("toolConfiguration.continueMessage")) : undefined}
+        />}
+        {!item.fork_read_only && (item.ask_pending || index === length - 1) && renderBottom()}
           {index === length - 1 && workflowSession && sessionId && (
             <WorkflowPanel
               key={sessionId}
@@ -1651,6 +1690,11 @@ const AssistantMessage = (props: any) => {
           {runCompleted && !item.onboardingInfo && renderFooter()}
           {item.fork_read_only && !item.delta && <span>{t("chat.fork.emptyTerminal")}</span>}
         </div>
+        {!item.fork_read_only && sessionId && item.history_id && <ToolConfigurationCard
+          conversationId={sessionId} historyId={item.history_id} active={!configurationTaskEnded && index === length - 1}
+          onContinue={configurationTaskEnded && index === length - 1 && props.sendMessage
+            ? () => props.sendMessage?.(t("toolConfiguration.continueMessage")) : undefined}
+        />}
         {!item.fork_read_only && (item.ask_pending || index === length - 1) && renderBottom()}
         {index === length - 1 && workflowSession && sessionId && (
           <WorkflowPanel

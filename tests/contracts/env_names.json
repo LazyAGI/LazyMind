@@ -1,0 +1,170 @@
+[
+  {
+    "name": "SERVICE_BASE_URL",
+    "valid": true
+  },
+  {
+    "name": "AWS_REGION",
+    "valid": true
+  },
+  {
+    "name": "APP_ID",
+    "valid": true
+  },
+  {
+    "name": "a_api_key",
+    "valid": true
+  },
+  {
+    "name": "Mixed_Name",
+    "valid": true
+  },
+  {
+    "name": "MODEL_CONFIG_TOKEN",
+    "valid": true
+  },
+  {
+    "name": "CUSTOM_CERT_SECRET",
+    "valid": true
+  },
+  {
+    "name": "APP_CONFIG_PATH",
+    "valid": true
+  },
+  {
+    "name": "MY_HOME",
+    "valid": true
+  },
+  {
+    "name": "_x1",
+    "valid": true
+  },
+  {
+    "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "valid": true
+  },
+  {
+    "name": "",
+    "valid": false
+  },
+  {
+    "name": "11",
+    "valid": false
+  },
+  {
+    "name": "1_API_KEY",
+    "valid": false
+  },
+  {
+    "name": "with space",
+    "valid": false
+  },
+  {
+    "name": "a-b",
+    "valid": false
+  },
+  {
+    "name": "路径",
+    "valid": false
+  },
+  {
+    "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "valid": false
+  },
+  {
+    "name": "HTTP_PROXY",
+    "valid": false
+  },
+  {
+    "name": "http_proxy",
+    "valid": false
+  },
+  {
+    "name": "SSL_CERT_FILE",
+    "valid": false
+  },
+  {
+    "name": "BASH_ENV",
+    "valid": false
+  },
+  {
+    "name": "PATH",
+    "valid": false
+  },
+  {
+    "name": "PYTHONPATH",
+    "valid": false
+  },
+  {
+    "name": "LD_AUDIT",
+    "valid": false
+  },
+  {
+    "name": "DYLD_FRAMEWORK_PATH",
+    "valid": false
+  },
+  {
+    "name": "NODE_OPTIONS",
+    "valid": false
+  },
+  {
+    "name": "PERL5OPT",
+    "valid": false
+  },
+  {
+    "name": "GIT_CONFIG_COUNT",
+    "valid": false
+  },
+  {
+    "name": "NODE_TLS_REJECT_UNAUTHORIZED",
+    "valid": false
+  },
+  {
+    "name": "node_tls_reject_unauthorized",
+    "valid": false
+  },
+  {
+    "name": "NODE_PATH",
+    "valid": false
+  },
+  {
+    "name": "PYTHONINSPECT",
+    "valid": false
+  },
+  {
+    "name": "PYTHONBREAKPOINT",
+    "valid": false
+  },
+  {
+    "name": "OPENSSL_CONF",
+    "valid": false
+  },
+  {
+    "name": "OPENSSL_MODULES",
+    "valid": false
+  },
+  {
+    "name": "GIT_CONFIG_PARAMETERS",
+    "valid": false
+  },
+  {
+    "name": "GIT_SSL_NO_VERIFY",
+    "valid": false
+  },
+  {
+    "name": "GIT_SSL_CAINFO",
+    "valid": false
+  },
+  {
+    "name": "GIT_SSL_CAPATH",
+    "valid": false
+  },
+  {
+    "name": "NODE_API_KEY",
+    "valid": true
+  },
+  {
+    "name": "PYTHON_API_KEY",
+    "valid": true
+  }
+]

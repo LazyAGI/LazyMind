@@ -158,7 +158,8 @@ const manifest = {
     "core": executable("core"),
     "scan-control-plane": executable("scan-control-plane"),
     "file-watcher": executable("file-watcher"),
-    "caddy": executable("caddy")
+    "caddy": executable("caddy"),
+    "pandoc": executable("pandoc")
   },
   paths: {
     appRoot: "app",

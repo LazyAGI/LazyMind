@@ -7,6 +7,7 @@ import importlib
 
 _EXPORTS = {
     'build_schedule_toolkit': ('.schedule', 'build_schedule_toolkit'),
+    'native_search': ('.native_search', 'native_search'),
     'calculator': ('.calculator', 'calculator'),
     'ExternalDatabaseToolkit': ('.external_db', 'ExternalDatabaseToolkit'),
     'image_editor': ('.multimodal', 'image_editor'),

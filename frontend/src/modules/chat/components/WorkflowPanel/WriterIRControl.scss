@@ -1434,52 +1434,12 @@ th.writer-ir__table-cell {
 }
 
 .writer-ir__outline-instructions {
-  margin: 0 0 10px;
-  padding-left: 12px;
-  border-left: 2px solid #d8e2f0;
+  margin: 6px 0 12px;
   color: #5f6b7a;
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: 15px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
   user-select: text;
-}
-
-.writer-ir__outline-instructions > summary {
-  width: fit-content;
-  color: #47607d;
-  cursor: pointer;
-  font-weight: 600;
-  user-select: none;
-}
-
-.writer-ir__outline-instruction-body {
-  display: grid;
-  gap: 5px;
-  padding: 5px 0 1px;
-}
-
-.writer-ir__outline-instruction-row,
-.writer-ir__outline-instruction-group {
-  display: grid;
-  grid-template-columns: 86px minmax(0, 1fr);
-  gap: 8px;
-}
-
-.writer-ir__outline-instruction-group ul {
-  margin: 0;
-  padding-left: 18px;
-}
-
-.writer-ir__outline-subtask-type {
-  margin-right: 6px;
-  color: #245bdb;
-}
-
-@container writer-ir (max-width: 520px) {
-  .writer-ir__outline-instruction-row,
-  .writer-ir__outline-instruction-group {
-    grid-template-columns: 1fr;
-    gap: 1px;
-  }
 }
 
 .writer-ir__paragraph,

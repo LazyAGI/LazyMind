@@ -30,14 +30,16 @@ type Client struct {
 	interactionBaseURL string
 	HostProvider       string
 	RequireHostBinding bool
+	BindController     func(context.Context, string, string) error
 }
 
 type Projection struct {
-	Control        map[string]any `json:"control,omitempty"`
-	InteractionURL string         `json:"interaction_url"`
-	SessionID      string         `json:"session_id"`
-	StateVersion   int64          `json:"state_version"`
-	Projection     struct {
+	AgentInstruction string         `json:"agent_instruction,omitempty"`
+	Control          map[string]any `json:"control,omitempty"`
+	InteractionURL   string         `json:"interaction_url"`
+	SessionID        string         `json:"session_id"`
+	StateVersion     int64          `json:"state_version"`
+	Projection       struct {
 		Past       []string         `json:"past"`
 		Current    []string         `json:"current"`
 		Reachable  []string         `json:"reachable"`
@@ -59,11 +61,12 @@ type Projection struct {
 }
 
 type StartInput struct {
-	WorkflowID     string         `json:"workflow_id" jsonschema:"required,LazyMind Workflow identifier"`
-	RequestContext string         `json:"request_context,omitempty" jsonschema:"The user's task or desired outcome"`
-	InputBindings  map[string]any `json:"input_bindings,omitempty" jsonschema:"Prepared LazyMind input-resource bindings keyed by material ID"`
-	IdempotencyKey string         `json:"idempotency_key,omitempty" jsonschema:"Stable retry key; generated when omitted"`
-	SessionID      string         `json:"session_id,omitempty" jsonschema:"Optional stable session identifier"`
+	WorkflowID      string         `json:"workflow_id" jsonschema:"required,LazyMind Workflow identifier"`
+	RequestContext  string         `json:"request_context,omitempty" jsonschema:"The user's task or desired outcome"`
+	InputBindings   map[string]any `json:"input_bindings,omitempty" jsonschema:"Prepared LazyMind input-resource bindings keyed by material ID"`
+	IdempotencyKey  string         `json:"idempotency_key,omitempty" jsonschema:"Stable retry key; generated when omitted"`
+	SessionID       string         `json:"session_id,omitempty" jsonschema:"Optional stable session identifier"`
+	DriverSessionID string         `json:"driver_session_id,omitempty" jsonschema:"Codex only: current native thread UUID obtained from host context or current shell CODEX_THREAD_ID. Never invent an ID or use the Workflow session_id. Host request metadata takes precedence."`
 }
 
 type InputResource struct {
@@ -301,6 +304,14 @@ func (c *Client) State(ctx context.Context, sessionID string) (Projection, error
 		}
 	}
 	state.InteractionURL = strings.TrimRight(base, "/") + "/workflow-runs/" + url.PathEscape(sessionID)
+	if c.HostProvider == "codex" {
+		state.InteractionURL += "/embed"
+		if continuation, _ := state.Control["continuation"].(string); continuation == "awaiting_user" {
+			state.AgentInstruction = "Human review is required. Tell the user to review in the Workflow panel, then END this turn. Do not approve the review yourself, begin another step, or poll while waiting. Resume only on a new notification or explicit user input, and read workflow.state first."
+		} else if continuation == "awaiting_executor" || continuation == "stopped" || continuation == "completed" || continuation == "binding_required" {
+			state.AgentInstruction = "END this turn. Do not continue Workflow execution or poll while waiting. Resume only on a new notification or explicit user input, and read workflow.state first."
+		}
+	}
 	return state, nil
 }
 
@@ -408,6 +419,14 @@ func (c *Client) Start(ctx context.Context, input StartInput) (StartResult, erro
 	if input.WorkflowID == "" {
 		return StartResult{}, errors.New("workflow_id is required")
 	}
+	if c.HostProvider == "codex" && c.RequireHostBinding {
+		if !codexThreadPattern.MatchString(input.DriverSessionID) {
+			return StartResult{}, errors.New("Codex thread UUID is missing: obtain the current CODEX_THREAD_ID from the host shell and pass driver_session_id; never use the Workflow session_id")
+		}
+		if c.BindController == nil {
+			return StartResult{}, errors.New("Codex Workflow pairing is not configured")
+		}
+	}
 	if input.IdempotencyKey == "" {
 		var err error
 		input.IdempotencyKey, err = newID("mcp-start-")
@@ -445,6 +464,9 @@ func (c *Client) Start(ctx context.Context, input StartInput) (StartResult, erro
 			origin.ConversationID = strings.TrimSpace(invocation.ConversationID)
 		}
 	}
+	if origin.ExternalRef == "" && c.HostProvider == "codex" && c.RequireHostBinding {
+		origin.ExternalRef = "codex:" + input.DriverSessionID
+	}
 	if origin.ExternalRef != "" {
 		request["origin_ref"] = origin.ExternalRef
 	}
@@ -465,6 +487,11 @@ func (c *Client) Start(ctx context.Context, input StartInput) (StartResult, erro
 	if err := c.api.DoJSON(ctx, http.MethodPost, "/workflow-preparations/"+url.PathEscape(prepared.PreparationID)+":consume",
 		map[string]any{"session_id": input.SessionID}, &consumed); err != nil {
 		return StartResult{}, err
+	}
+	if c.HostProvider == "codex" && c.RequireHostBinding {
+		if err := c.BindController(ctx, consumed.SessionID, input.DriverSessionID); err != nil {
+			return StartResult{}, fmt.Errorf("workflow %s was created but controller binding failed: %w; retry workflow.start with idempotency_key=%s and session_id=%s", consumed.SessionID, err, input.IdempotencyKey, consumed.SessionID)
+		}
 	}
 	state, err := c.State(ctx, consumed.SessionID)
 	if err != nil {

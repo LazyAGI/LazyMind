@@ -291,6 +291,10 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 		return
 	}
 	applyMCPRuntimeConfig(r.Context(), db, userID, r.Header.Get("Authorization"), reqBody)
+	if err := applyUserEnvironmentRuntimeConfig(r.Context(), db, userID, reqBody); err != nil {
+		replyUserEnvError(w, err)
+		return
+	}
 	if agentConfig, ok := reqBody["agentic_config"].(map[string]any); ok {
 		if value, exists := agentConfig["enable_workflow"]; exists {
 			reqBody["enable_workflow"] = value
