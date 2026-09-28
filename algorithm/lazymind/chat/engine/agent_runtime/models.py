@@ -47,6 +47,9 @@ class AgentExecutionOptions:
     preload_all_tools: bool = False
     tool_state_scope: str = ''
     context_preview: bool = False
+    before_model_request: Optional[Callable[[], None]] = None
+    model_context_provider: Optional[Callable[[], Optional[str]]] = None
+    configuration_runtime: Any = None
     skills: Any = None
     prompt_skills: Optional[list[str]] = None
     excluded_skills: Optional[list[str]] = None

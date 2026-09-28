@@ -49,6 +49,9 @@ func newProviderCatalogServer(t *testing.T, result any) *providerCatalogServer {
 	spy := &providerCatalogServer{result: result}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if serveDynamicLLMRole(w, r) {
+			return
+		}
 		if r.URL.Path == "/api/document:inspect" && r.Method == "POST" {
 			spy.mu.Lock()
 			spy.inspections++

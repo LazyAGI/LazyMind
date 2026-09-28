@@ -344,6 +344,7 @@ export default function PdfTemporaryChat({
           showSkillDeposit={false}
           showConversationConfig={false}
           showModelSelector={false}
+          allowLocalWorkspace={false}
           fixedThinkingDepth="low"
         />
       </div>

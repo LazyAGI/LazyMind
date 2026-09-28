@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { documentPublicationTargetUrl, documentPublicationUrl } from './documentPublicationUrl';
 
 describe('document publication links', () => {
@@ -34,5 +34,25 @@ describe('document publication links', () => {
     expect(new URL(value!).searchParams.get('path')).toBe('C:\\My Vault\\中文 #1.md');
     expect(documentPublicationTargetUrl({ uri: 'obsidian://vlt_fixture/note.md' }, 'obsidian')).toBeUndefined();
     expect(documentPublicationTargetUrl({ meta: { local_path: 'relative.md' } }, 'obsidian')).toBeUndefined();
+  });
+  it('accepts the Electron renderer representation of an Obsidian open URL', () => {
+    const value = 'obsidian://open?path=%2FUsers%2Ftest%2FVault%2Fnote.md';
+    const BrowserURL = globalThis.URL;
+    class ElectronRendererURL {
+      href = value;
+      protocol = 'obsidian:';
+      host = '';
+      pathname = '//open';
+      hash = '';
+      username = '';
+      password = '';
+      searchParams = new BrowserURL(value).searchParams;
+    }
+    vi.stubGlobal('URL', ElectronRendererURL);
+    try {
+      expect(documentPublicationUrl(value, 'obsidian')).toBe(value);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

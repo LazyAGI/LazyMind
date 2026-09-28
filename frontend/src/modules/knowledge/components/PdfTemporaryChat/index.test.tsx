@@ -21,6 +21,7 @@ vi.mock("@/modules/chat/utils/sse", () => ({
   SSE: class { constructor(_url: string, options: { payload: string }) { requests.options.push(options); } },
 }));
 const chatActions = vi.hoisted(() => ({
+  allowLocalWorkspace: undefined as boolean | undefined,
   createNewChat: vi.fn(),
   sendMessage: vi.fn().mockResolvedValue(true),
   prepareMessage: vi.fn(),
@@ -28,7 +29,8 @@ const chatActions = vi.hoisted(() => ({
 vi.mock("@/modules/chat/components/newChatContainer", async () => {
   const React = await import("react");
   return {
-    default: React.forwardRef(({ onOpenSSE }: any, ref) => {
+    default: React.forwardRef(({ onOpenSSE, allowLocalWorkspace }: any, ref) => {
+      chatActions.allowLocalWorkspace = allowLocalWorkspace;
       React.useImperativeHandle(ref, () => ({
         createNewChat: chatActions.createNewChat,
         sendMessage: chatActions.sendMessage,
@@ -66,6 +68,7 @@ describe("document question context", () => {
 
   it.each(["pdf", "txt", "md", "docx", "html", "xlsx", "pptx"])("submits %s questions scoped to the active document", (extension) => {
     render(<PdfTemporaryChat datasetId="dataset-a" documentId={`document-${extension}`} fileName={`source.${extension}`} onClose={() => {}} />);
+    expect(chatActions.allowLocalWorkspace).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Ask document" }));
     const payload = JSON.parse(requests.options[0].payload);
     expect(payload.document_context).toEqual({

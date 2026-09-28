@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -84,6 +85,44 @@ func recoveryRequest(method, path string, body any, vars map[string]string) (*ht
 		req = mux.SetURLVars(req, vars)
 	}
 	return httptest.NewRecorder(), req
+}
+
+func TestArchiveConversationClearsSessionEnv(t *testing.T) {
+	db := recoveryTestDB(t)
+	seedRecoveryConversation(t, db, "conv-env", false)
+	seen := make(chan []string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/chat/session-env:clear" {
+			http.NotFound(w, r)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			ConversationIDs []string `json:"conversation_ids"`
+		}
+		_ = json.Unmarshal(body, &payload)
+		seen <- payload.ConversationIDs
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+
+	rec, req := recoveryRequest(
+		http.MethodPost, "/conversations/conv-env:archive",
+		nil, map[string]string{"name": "conv-env:archive"},
+	)
+	ArchiveConversation(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("archive status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	select {
+	case ids := <-seen:
+		if len(ids) != 1 || ids[0] != "conv-env" {
+			t.Fatalf("cleared ids=%v, want [conv-env]", ids)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for session env clear notification")
+	}
 }
 
 func TestConversationArchiveFolderLifecycle(t *testing.T) {

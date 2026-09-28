@@ -154,7 +154,7 @@ LAZYMIND_AGENT_HOST_ID = "` + adapter.hostID + `"
 	}
 
 	status := adapter.Status(context.Background())
-	if status.State != agentintegration.Enabled {
+	if status.State != agentintegration.Ready {
 		t.Fatalf("status=%#v", status)
 	}
 	if _, err := os.Stat(filepath.Join(codexHome, "list-command-ran")); !os.IsNotExist(err) {

@@ -4,13 +4,54 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"lazymind/agentconnector/internal/coreapi"
+	"lazymind/agentconnector/internal/credentials"
 )
+
+func TestStateUsesEmbeddedPanelOnlyForCodex(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/core/workflow-sessions/test-session/projection" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"session_id":"test-session"}`))
+	}))
+	defer server.Close()
+	store, err := credentials.NewStore(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(credentials.Credentials{ServerURL: server.URL, AccessToken: "test-access", RefreshToken: "test-refresh"}); err != nil {
+		t.Fatal(err)
+	}
+	api, err := coreapi.New(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range []string{"codex", "deepseek-harness", ""} {
+		for _, base := range []string{"", "https://panel.example.test/"} {
+			client := &Client{api: api, HostProvider: provider, interactionBaseURL: base}
+			state, err := client.State(context.Background(), "test-session")
+			if base == "" {
+				base = server.URL
+			}
+			want := strings.TrimRight(base, "/") + "/workflow-runs/test-session"
+			if provider == "codex" {
+				want += "/embed"
+			}
+			if err != nil || state.InteractionURL != want {
+				t.Fatalf("provider=%q url=%q want=%q err=%v", provider, state.InteractionURL, want, err)
+			}
+		}
+	}
+}
 
 func TestWorkflowListPublishesObjectInputSchema(t *testing.T) {
 	ctx := context.Background()
@@ -73,7 +114,7 @@ func TestWorkflowToolDescriptionsMatchExecutionFlow(t *testing.T) {
 	for _, tool := range listed.Tools {
 		got[tool.Name] = tool.Description
 	}
-	if !containsAll(got["workflow.start"], "Next call workflow.step.begin", "workflow_id", "revision_id") {
+	if !containsAll(got["workflow.start"], "open_in_codex", "interaction_url", "placement=bottom", "workflow.step.begin", "workflow_id", "revision_id") {
 		t.Fatalf("workflow.start description=%q", got["workflow.start"])
 	}
 	if !containsAll(got["workflow.get"], "inspecting package scripts", "tool_scripts", "compiled_graph") {

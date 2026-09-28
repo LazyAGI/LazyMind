@@ -556,3 +556,58 @@ def test_current_file_resources_are_required_without_legacy_name_preloads(scope)
     assert 'read_file' not in exposed
     with pytest.raises(ToolExecutionError):
         result._tools_manager.retrieval.load([], ['read_file_resource'])
+
+
+def grouped_agent(*, retrieval=False, preview=False, scope_name='chat'):
+    lazyllm.globals['agentic_config']['enable_tool_retrieval'] = retrieval
+    lazyllm.locals['_lazyllm_agent']['workspace'] = {}
+    manager = ToolManager([dict(name='MailToolkit', desc='Mail', tools=[search_mail, read_mail])])
+    result = SimpleNamespace(_tools_manager=manager, _skill_manager=None, _prompt='', _tools=manager._tools)
+    plan = SimpleNamespace(role=AgentRole.CHAT, stop_tools=[], prompt=SimpleNamespace(current_input='mail'),
+                           execution_options=AgentExecutionOptions(tool_state_scope=scope_name, context_preview=preview))
+    configure_tool_retrieval(result, plan)
+    return manager
+
+
+def test_committed_group_activation_survives_turns_without_history(scope):
+    manager = grouped_agent()
+    manager.sync_active_groups(history=[{'role': 'assistant', 'tool_calls': [
+        {'function': {'name': 'get_MailToolkit_methods', 'arguments': '{}'}}]}])
+    assert [d['function']['name'] for d in manager.tools_description] == ['get_MailToolkit_methods']
+    result = manager([{'id': 'activate', 'function': {'name': 'get_MailToolkit_methods', 'arguments': '{}'}}])
+    assert result[0]['ok'] is True
+    restored = grouped_agent()
+    assert {d['function']['name'] for d in restored.tools_description} == {'search_mail', 'read_mail'}
+    assert [d['function']['name'] for d in grouped_agent(scope_name='subagent').tools_description] == [
+        'get_MailToolkit_methods']
+    lazyllm.globals['agentic_config']['user_id'] = 'other'
+    assert [d['function']['name'] for d in grouped_agent().tools_description] == ['get_MailToolkit_methods']
+
+
+def test_group_activation_budget_and_storage_failures_do_not_commit(scope, monkeypatch):
+    manager = grouped_agent()
+    manager.tool_load_validator = lambda _: (_ for _ in ()).throw(ValueError('budget'))
+    with pytest.raises(ValueError, match='budget'):
+        manager.activate_group('MailToolkit')
+    assert manager.group_state_store.read() == {}
+    manager.tool_load_validator = None
+    monkeypatch.setattr('lazymind.chat.engine.agent_runtime.tool_retrieval.os.replace',
+                        lambda *args: (_ for _ in ()).throw(OSError('disk full')))
+    with pytest.raises(OSError):
+        manager.activate_group('MailToolkit')
+    assert lazyllm.locals['_lazyllm_agent']['workspace'].get('_active_groups', []) == []
+    assert manager.group_state_store.read() == {}
+
+
+def test_normal_activation_and_retrieval_unload_are_isolated(scope):
+    grouped_agent().activate_group('MailToolkit')
+    manager = grouped_agent(retrieval=True)
+    assert {d['function']['name'] for d in manager.tools_description} == {'search_tools', 'load_tools'}
+    manager.retrieval.load(['MailToolkit'], [])
+    manager.retrieval.load([], ['MailToolkit'])
+    assert {d['function']['name'] for d in grouped_agent().tools_description} == {'search_mail', 'read_mail'}
+    assert {d['function']['name'] for d in grouped_agent(retrieval=True).tools_description} == {
+        'search_tools', 'load_tools'}
+    preview = grouped_agent(preview=True)
+    with pytest.raises(RuntimeError):
+        preview.activate_group('MailToolkit')

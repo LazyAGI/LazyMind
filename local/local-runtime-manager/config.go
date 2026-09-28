@@ -214,6 +214,7 @@ type RuntimePaths struct {
 	MilvusLiteDBPath         string
 	LocalProxyBin            string
 	CaddyBin                 string
+	PandocBin                string
 	LocalProxyConfig         string
 	LocalProxyStopScript     string
 	CaddyConfig              string
@@ -378,11 +379,12 @@ func firstAvailableLocalPort(start int, attempts int) int {
 }
 
 type localPortAllocator struct {
-	used        map[int]struct{}
-	resolutions []PortResolution
-	err         error
-	errContext  bool
-	available   func(address string, port int) bool
+	used           map[int]struct{}
+	resolutions    []PortResolution
+	err            error
+	errContext     bool
+	available      func(address string, port int) bool
+	skipPortChecks bool
 }
 
 func newLocalPortAllocator() *localPortAllocator {
@@ -526,12 +528,18 @@ func (a *localPortAllocator) portAvailable(port int) bool {
 	if _, ok := a.used[port]; ok {
 		return false
 	}
+	if a.skipPortChecks {
+		return true
+	}
 	return localPortAvailable(port)
 }
 
 func (a *localPortAllocator) portAvailableOn(address string, port int) bool {
 	if _, ok := a.used[port]; ok {
 		return false
+	}
+	if a.skipPortChecks {
+		return true
 	}
 	return a.available(address, port)
 }
@@ -798,6 +806,10 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 }
 
 func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, RuntimePaths, error) {
+	return newRuntimeConfigWithOptions(opts, false)
+}
+
+func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool) (RuntimeConfig, RuntimePaths, error) {
 	profile, err := normalizeRuntimeProfile(firstNonEmpty(opts.Profile, os.Getenv(runtimeProfileEnvVar), "local"))
 	if err != nil {
 		return RuntimeConfig{}, RuntimePaths{}, err
@@ -925,6 +937,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		}
 	}
 	ports := newLocalPortAllocator()
+	ports.skipPortChecks = skipPortChecks
 	networkProfile, err := localNetworkProfile()
 	if err != nil {
 		return RuntimeConfig{}, RuntimePaths{}, err
@@ -1091,6 +1104,9 @@ func applyDesktopManifestPaths(paths *RuntimePaths) error {
 	}
 	if value := joinResource(manifest.Binaries["caddy"]); value != "" {
 		paths.CaddyBin = value
+	}
+	if value := joinResource(manifest.Binaries["pandoc"]); value != "" {
+		paths.PandocBin = value
 	}
 	if value := joinResource(manifest.Paths.LocalProxyConfig); value != "" {
 		paths.LocalProxyConfig = value

@@ -7,11 +7,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 	"lazymind/core/algo"
@@ -146,6 +149,10 @@ type documentActionFailure struct {
 	status int
 }
 
+type documentConversionFailure struct{ cause string }
+
+func (failure documentConversionFailure) Error() string { return failure.cause }
+
 func (failure documentActionFailure) Error() string { return failure.code }
 func documentFailure(code string, status int) error { return documentActionFailure{code, status} }
 func replyDocumentFailure(w http.ResponseWriter, err error) {
@@ -162,7 +169,12 @@ func replyDocumentFailure(w http.ResponseWriter, err error) {
 	case 409:
 		message = "revision conflict"
 	}
-	common.ReplyErrWithData(w, message, map[string]any{"code": failure.code}, failure.status)
+	data := map[string]any{"code": failure.code}
+	var conversion documentConversionFailure
+	if errors.As(err, &conversion) {
+		data["cause"] = conversion.cause
+	}
+	common.ReplyErrWithData(w, message, data, failure.status)
 }
 func decodeDocumentJSON(reader io.Reader, target any) error {
 	decoder := json.NewDecoder(reader)
@@ -321,7 +333,12 @@ func runDocumentRewrite(w http.ResponseWriter, r *http.Request, phase, owner str
 			replyDocumentFailure(w, documentFailure("DOCUMENT_ACTION_FAILED", 500))
 			return
 		}
-		if !workflowstore.RewriteModelAvailable(config) {
+		ready, err := workflowstore.RewriteModelAvailable(r.Context(), config)
+		if err != nil {
+			replyDocumentFailure(w, documentFailure("DOCUMENT_ACTION_FAILED", 502))
+			return
+		}
+		if !ready {
 			replyDocumentFailure(w, documentFailure("MODEL_CONFIG_REQUIRED", 400))
 			return
 		}
@@ -330,9 +347,18 @@ func runDocumentRewrite(w http.ResponseWriter, r *http.Request, phase, owner str
 	namespace, _ := json.Marshal([]any{owner, target.session.ID, target.revision.ID, *request.baseRevision, target.artifact.DraftVersion, documentRewriteReference})
 	digest := sha256.Sum256(namespace)
 	artifactStore := filepath.Join(subagent.WorkspaceRoot(), "document-actions", hex.EncodeToString(digest[:]))
-	artifact, _ := json.Marshal(map[string]json.RawMessage{"data": target.content.Value})
+	artifactPayload := map[string]any{"data": target.content.Value}
+	if phase == "preview" {
+		contexts, contextErr := documentWritingContexts(r.Context(), target)
+		if contextErr != nil {
+			replyDocumentFailure(w, documentFailure("DOCUMENT_ACTION_FAILED", 500))
+			return
+		}
+		artifactPayload["writing_contexts"] = contexts
+	}
+	artifact, _ := json.Marshal(artifactPayload)
 	response, status, err := algo.InvokeDocumentAction(r.Context(), algo.DocumentActionInvokeRequest{
-		Reference: documentRewriteReference, Phase: phase, Artifact: artifact, Arguments: request.arguments, ArtifactStore: artifactStore, LLMConfig: config,
+		Reference: documentRewriteReference, Phase: phase, Artifact: artifact, Arguments: request.arguments, ArtifactStore: artifactStore, LLMConfig: config, Timeout: 5 * time.Minute,
 	})
 	if err != nil {
 		replyDocumentFailure(w, documentUpstreamFailure(status, err))
@@ -391,6 +417,30 @@ func runDocumentRewrite(w http.ResponseWriter, r *http.Request, phase, owner str
 	}
 	NotifyWorkflowArtifactUpdated(r.Context(), target.db, saved.SessionID, saved.StepID, saved.SlotID, saved.Slot, saved.Revision, saved.ListIndex, "human")
 	common.ReplyOK(w, DocumentRewriteExecuteResult{ArtifactID: saved.ID, Revision: saved.Revision, DraftVersion: 1})
+}
+
+func documentWritingContexts(ctx context.Context, target *documentActionContext) ([]json.RawMessage, error) {
+	artifacts, err := workflowstore.New(target.db).ListArtifacts(ctx, target.owner, target.session.ID)
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(artifacts, func(i, j int) bool { return artifacts[i].CreatedAt.After(artifacts[j].CreatedAt) })
+	contexts := make([]json.RawMessage, 0)
+	for _, artifact := range artifacts {
+		if artifact.Validity != "effective" {
+			continue
+		}
+		var envelope struct {
+			Schema string          `json:"schema"`
+			Data   json.RawMessage `json:"data"`
+		}
+		if json.Unmarshal(artifact.Value, &envelope) != nil ||
+			envelope.Schema != "lazyllm.tools.writer.data_models.context.WritingContext" {
+			continue
+		}
+		contexts = append(contexts, envelope.Data)
+	}
+	return contexts, nil
 }
 
 func prepareDocumentAction(ctx context.Context, owner, id string, request documentActionRequest, checkLive bool) (*documentActionContext, error) {
@@ -515,6 +565,8 @@ func documentUpstreamFailure(status int, err error) error {
 		}
 		if json.Unmarshal(upstream.Body, &body) == nil {
 			switch {
+			case isSafePandocFailure(body.Detail.Code):
+				return fmt.Errorf("%w: %w", documentFailure("DOCUMENT_CONVERSION_FAILED", 502), documentConversionFailure{body.Detail.Code})
 			case status == 409 && (body.Detail.Code == "SELECTION_STALE" || body.Detail.Code == "SELECTION_AMBIGUOUS"):
 				return documentFailure(body.Detail.Code, 409)
 			case status == 422 && body.Detail.Code == "WORKFLOW_ACTION_INVALID":
@@ -530,6 +582,17 @@ func documentUpstreamFailure(status int, err error) error {
 		return documentFailure("DOCUMENT_ACTION_RESULT_INVALID", 502)
 	}
 	return documentFailure("DOCUMENT_ACTION_FAILED", 502)
+}
+
+func isSafePandocFailure(code string) bool {
+	switch code {
+	case "PANDOC_NOT_FOUND", "PANDOC_NOT_EXECUTABLE", "PANDOC_VERSION_UNSUPPORTED",
+		"PANDOC_TIMEOUT", "PANDOC_INPUT_TOO_LARGE", "PANDOC_OUTPUT_TOO_LARGE",
+		"PANDOC_TEMPLATE_INVALID", "PANDOC_FILTER_FAILED", "PANDOC_CONVERSION_FAILED":
+		return true
+	default:
+		return false
+	}
 }
 
 func commitDocumentRewrite(ctx context.Context, target *documentActionContext, request documentActionRequest, artifact *DocumentActionArtifact) (*orm.WorkflowSlotRevision, error) {

@@ -120,6 +120,18 @@ class GlobalRegistry:
     def snapshot(self) -> dict[str, list[ChildProcessInfo]]:
         return {k: list(v) for k, v in self._global_instances.items()}
 
+    async def list_active_instances(self) -> list[ChildProcessInfo]:
+        """Include unhealthy workers: they may still hold conversation credentials."""
+        async with AsyncSessionLocal() as session:
+            rows = await session.execute(select(RouterChildProcess).where(
+                RouterChildProcess.status.in_(['starting', 'healthy', 'unhealthy']),
+            ))
+            return [ChildProcessInfo(
+                instance_id=child.instance_id, algorithm_id=child.algorithm_id,
+                host=child.host, port=child.port, status=child.status,
+                failures=child.failures,
+            ) for child in rows.scalars().all()]
+
     # ------------------------------------------------------------------
     # Background loop (used by HealthChecker)
     # ------------------------------------------------------------------

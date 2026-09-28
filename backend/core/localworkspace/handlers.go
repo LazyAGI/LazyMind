@@ -88,8 +88,9 @@ func UpdateConversationPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		PermissionMode string `json:"permission_mode"`
-		Version        int64  `json:"version"`
+		PermissionMode        string `json:"permission_mode"`
+		Version               int64  `json:"version"`
+		UserPermissionVersion *int64 `json:"user_permission_version"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
 		common.ReplyAppErr(w, Error("invalid_selection", 400, "invalid request"))
@@ -106,6 +107,7 @@ func UpdateConversationPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conversationID, userID := mux.Vars(r)["conversation_id"], store.UserID(r)
+	var userVersion int64
 	err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		var conversation orm.Conversation
 		err := tx.Where("id = ? AND create_user_id = ?", conversationID, userID).First(&conversation).Error
@@ -116,32 +118,46 @@ func UpdateConversationPermission(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		var binding orm.ConversationWorkspaceBinding
-		if err := tx.Where("conversation_id = ?", conversationID).First(&binding).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return Error("workspace_not_found", 404, "resource not found")
-			}
+		bindingErr := tx.Where("conversation_id = ?", conversationID).First(&binding).Error
+		if bindingErr != nil && !errors.Is(bindingErr, gorm.ErrRecordNotFound) {
+			return bindingErr
+		}
+		var legacyBinding *orm.ConversationWorkspaceBinding
+		if bindingErr == nil {
+			legacyBinding = &binding
+		}
+		_, version := conversationPermission(conversation, legacyBinding)
+		if version != body.Version {
+			return Error("binding_conflict", 409, "conflict")
+		}
+		_, userVersion, err = UserPermission(r.Context(), tx, userID)
+		if err != nil {
 			return err
 		}
-		if _, err := ResolveActiveForBinding(r.Context(), tx, userID, binding.WorkspaceID); err != nil {
+		if body.UserPermissionVersion != nil {
+			userVersion = *body.UserPermissionVersion
+		}
+		userVersion, err = SaveUserPermission(r.Context(), tx, userID, body.PermissionMode, userVersion)
+		if err != nil {
 			return err
 		}
-		result := tx.Model(&orm.ConversationWorkspaceBinding{}).
-			Where("conversation_id = ? AND permission_version = ?", conversationID, body.Version).
+		result := tx.Model(&orm.Conversation{}).
+			Where("id = ? AND create_user_id = ? AND permission_version = ?", conversationID, userID, conversation.PermissionVersion).
 			Updates(map[string]any{"permission_mode": body.PermissionMode,
-				"permission_version": gorm.Expr("permission_version + 1"), "updated_at": time.Now().UTC()})
+				"permission_version": version + 1, "updated_at": time.Now().UTC()})
 		if result.Error != nil {
 			return result.Error
 		}
 		if result.RowsAffected == 0 {
 			return Error("binding_conflict", 409, "conflict")
 		}
-		return nil
+		return tx.Where("conversation_id = ? AND create_user_id = ?", conversationID, userID).Delete(&orm.ConversationToolGrant{}).Error
 	})
 	if replyError(w, err) {
 		return
 	}
 	common.ReplyOK(w, map[string]any{"permission_mode": body.PermissionMode,
-		"permission_version": body.Version + 1, "effective_at": "next_request"})
+		"permission_version": body.Version + 1, "user_permission_version": userVersion, "effective_at": "next_request"})
 }
 
 func replyError(w http.ResponseWriter, err error) bool {
@@ -231,7 +247,8 @@ func ConversationBinding(w http.ResponseWriter, r *http.Request) {
 	var binding orm.ConversationWorkspaceBinding
 	err = db.WithContext(r.Context()).Where("conversation_id = ?", conversationID).First(&binding).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		common.ReplyOK(w, map[string]any{"status": "none"})
+		mode, version := conversationPermission(conversation, nil)
+		common.ReplyOK(w, map[string]any{"status": "none", "permission_mode": mode, "permission_version": version})
 		return
 	}
 	if err != nil {
@@ -254,9 +271,10 @@ func ConversationBinding(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "request failed", 500)
 		return
 	}
+	mode, version := conversationPermission(conversation, &binding)
 	common.ReplyOK(w, BindingView{Status: workspace.Status, WorkspaceID: workspace.ID,
 		Workspace: &item, AffectedTaskCount: item.AffectedTaskCount,
-		PermissionMode: binding.PermissionMode, PermissionVersion: binding.PermissionVersion})
+		PermissionMode: mode, PermissionVersion: version})
 }
 
 func InternalRegister(w http.ResponseWriter, r *http.Request) {

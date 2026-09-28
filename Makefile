@@ -545,6 +545,15 @@ lazymind-cli-build:
 		exit 1; \
 	fi
 
+# Development entry point; released LazyMind installs the embedded plugin from
+# the existing Settings > External Agents > Codex connect button.
+.PHONY: codex-workflow-install
+codex-workflow-install:
+	pnpm --dir integrations/codex-workflow install --frozen-lockfile
+	pnpm --dir integrations/codex-workflow build
+	@$(MAKE) --no-print-directory assistant-bridge-start
+	@"$(LAZYMIND_CLI_BIN)" internal agent codex connect
+
 assistant-bridge-start: lazymind-cli-build
 ifeq ($(HOST_IS_WSL),1)
 	@sh local/scripts/assistant-bridge-wsl.sh start

@@ -74,7 +74,7 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
+		cfg, paths, err := newRuntimeConfigWithOptions(opts, true)
 		if err != nil {
 			return err
 		}
@@ -84,7 +84,7 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
+		cfg, paths, err := newRuntimeConfigWithOptions(opts, true)
 		if err != nil {
 			return err
 		}

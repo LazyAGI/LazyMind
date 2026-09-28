@@ -3,33 +3,9 @@ var module = { exports: {} }; var exports = module.exports;
 let react = require("react");
 let react_jsx_runtime = require("react/jsx-runtime");
 
-//#region src/protocol.ts
+//#region ../workflow-agent-core/src/protocol.ts
 function object(value) {
 	return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
-}
-const OPERATIONS = new Set([
-	"list",
-	"get",
-	"input_import",
-	"input_get",
-	"start",
-	"state",
-	"session_list",
-	"session_stop",
-	"session_resume",
-	"step_begin",
-	"step_claim",
-	"step_resume",
-	"step_complete",
-	"artifact_publish",
-	"artifact_list",
-	"artifact_get"
-]);
-function workflowOperation(name, serverName) {
-	const prefix = `mcp__${serverName}__workflow_`;
-	if (!name.startsWith(prefix)) return null;
-	const operation = name.slice(prefix.length).replace(/_[0-9a-f]{12}$/, "");
-	return OPERATIONS.has(operation) ? operation : null;
 }
 function interaction(value, trustedOrigin) {
 	const result = object(object(value)?.structuredContent);
@@ -61,6 +37,33 @@ function presentationRun(meta) {
 		...typeof value.operation === "string" ? { operation: value.operation } : {},
 		...typeof value.executionId === "string" ? { executionId: value.executionId } : {}
 	} : null;
+}
+
+//#endregion
+//#region src/events.ts
+const OPERATIONS = new Set([
+	"list",
+	"get",
+	"input_import",
+	"input_get",
+	"start",
+	"state",
+	"session_list",
+	"session_stop",
+	"session_resume",
+	"step_begin",
+	"step_claim",
+	"step_resume",
+	"step_complete",
+	"artifact_publish",
+	"artifact_list",
+	"artifact_get"
+]);
+function workflowOperation(name, serverName) {
+	const prefix = `mcp__${serverName}__workflow_`;
+	if (!name.startsWith(prefix)) return null;
+	const operation = name.slice(prefix.length).replace(/_[0-9a-f]{12}$/, "");
+	return OPERATIONS.has(operation) ? operation : null;
 }
 function visitTexts(value, into) {
 	const item = object(value);
@@ -111,7 +114,7 @@ function eventRun(event, serverName) {
 }
 
 //#endregion
-//#region src/client/window-store.ts
+//#region ../workflow-agent-core/src/panel-store.ts
 function runKey(run) {
 	return `${run.hostSessionId}\0${new URL(run.url).origin}\0${run.runId}`;
 }

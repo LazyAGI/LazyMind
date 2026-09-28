@@ -573,6 +573,7 @@ class _FakeReactAgent:
         self.last_kwargs = kwargs
         type(self).last_kwargs = kwargs
         self._tools_manager = _FakeToolManager()
+        self._skill_manager = None
 
     def _prepare_tool_context(self, current_input, history):
         return None

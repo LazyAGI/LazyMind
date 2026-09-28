@@ -41,15 +41,17 @@ def test_rejected_or_expired_call_has_no_effect(workspace_runtime, tmp_path, dec
     assert not any(action == 'claim' for action, _ in core.events)
 
 
-def test_unbound_context_uses_internal_cwd_and_asks(workspace_runtime, tmp_path):
-    middleware, core, _ = workspace_runtime()
+@pytest.mark.parametrize('mode', ['always_ask', 'ask_as_needed', 'allow_all'])
+def test_unbound_context_uses_internal_cwd_and_permission(workspace_runtime, tmp_path, mode):
+    middleware, core, _ = workspace_runtime(permission_mode=mode)
     middleware._workspace_permission = replace(middleware._workspace_permission,
         workspace_id='', root='', workspace_version=0, cwd=str(tmp_path))
     result = middleware.execute_with_records(call('write', path='result.txt', content='x'))
     assert result.results[0]['ok'], result.results
     assert (tmp_path / 'result.txt').read_text() == 'x'
-    assert any(action == 'approve' for action, _ in core.events)
-    assert next(iter(core.operations.values()))['payload']['workspace_id'] == ''
+    assert any(action == 'approve' for action, _ in core.events) == (mode != 'allow_all')
+    if core.operations:
+        assert next(iter(core.operations.values()))['payload']['workspace_id'] == ''
 
 
 def test_cancellation_before_execution_has_no_effect(workspace_runtime, tmp_path):

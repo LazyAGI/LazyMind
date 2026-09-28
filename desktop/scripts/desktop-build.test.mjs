@@ -73,7 +73,7 @@ for (const target of [
     try {
       const bin = path.join(root, "bin");
       mkdirSync(bin, { recursive: true });
-      for (const name of ["process-compose", "local-proxy", "core", "scan-control-plane", "file-watcher", "caddy"]) {
+      for (const name of ["process-compose", "local-proxy", "core", "scan-control-plane", "file-watcher", "caddy", "pandoc"]) {
         writeFileSync(path.join(bin, `${name}${target.suffix}`), name);
       }
       writeOfflineSkillFixtures(root);
@@ -92,7 +92,9 @@ for (const target of [
         offlineFeaturedSkills: true,
       });
       assert.equal(manifest.binaries.core, `bin/core${target.suffix}`);
+      assert.equal(manifest.binaries.pandoc, `bin/pandoc${target.suffix}`);
       assert.ok(manifest.checksums[`bin/core${target.suffix}`]);
+      assert.ok(manifest.checksums[`bin/pandoc${target.suffix}`]);
       assert.ok(manifest.checksums["builtin-skills/catalog.json"]);
       assert.ok(manifest.checksums["featured-skills/catalog.json"]);
       assert.equal(manifest.paths.historyInjectionArchive, "history-injection.zip");
@@ -132,11 +134,14 @@ test("macOS and Windows builds materialize offline assets before writing the run
   for (const source of [darwin, windows]) {
     const bundle = source.indexOf("builtin-skill-bundle");
     const historyPackage = source.indexOf("stage-history-injection-package.mjs");
+    const pandocPackage = source.indexOf("stage-pandoc.mjs");
     const manifest = source.indexOf("write-runtime-manifest.mjs");
     assert.ok(bundle >= 0, "build script must invoke the shared builtin Skill bundler");
     assert.ok(historyPackage >= 0, "build script must stage the ModelScope history package");
+    assert.ok(pandocPackage >= 0, "build script must stage the pinned Pandoc package");
     assert.ok(manifest > bundle, "builtin Skills must be materialized before the runtime manifest is written");
     assert.ok(manifest > historyPackage, "history samples must be downloaded before the runtime manifest is written");
+    assert.ok(manifest > pandocPackage, "Pandoc must be staged before the runtime manifest is written");
     assert.match(source, /builtin-sources\.yaml/);
     assert.match(source, /builtin-skills\.lock\.json/);
     assert.match(source, /featured-sources/);
@@ -170,6 +175,11 @@ test("macOS and Windows builds materialize offline assets before writing the run
   assert.doesNotMatch(darwin, /--exclude "\/Makefile"/);
   assert.doesNotMatch(windows, /robocopy\.exe[^\r\n]*'Makefile'/);
   assert.match(darwin, /desktop runtime repo marker is required/);
+  assert.match(darwin, /make_python_venv_relocatable/);
+  assert.match(darwin, /assert_no_absolute_symlinks "\$\{RUNTIME_ROOT\}"/);
+  assert.match(darwin, /python install --no-bin 3\.11\.15/);
+  assert.match(darwin, /cpython-3\.11\.15-macos-aarch64-none\/bin\/python3\.11/);
+  assert.doesNotMatch(darwin, /python find --managed-python/);
   assert.match(windows, /Desktop runtime repo marker Makefile is missing/);
   assert.match(windows, /skills\\\.runtime/);
   assert.match(darwin, /"\$\{ROOT\}\/" "\$\{RUNTIME_ROOT\}\/app\/"/);
@@ -691,6 +701,23 @@ test("selected Desktop folders become dynamic allowed roots without confirmation
   assert.match(handler, /replaceFileWatcherAllowedRoots\([\s\S]*saveAccessState\([\s\S]*allowedRoots/);
   assert.doesNotMatch(handler, /showMessageBox/);
   assert.doesNotMatch(handler, /restartRuntimeAfterFolderAccessChange/);
+});
+
+test("Desktop waits for the previous runtime monitor to close before restarting", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  const start = source.indexOf("async function restartRuntimeAfterFolderAccessChange()");
+  const end = source.indexOf("function logStartupContext()", start);
+  const restart = source.slice(start, end);
+
+  assert.ok(start >= 0 && end > start, "could not locate restartRuntimeAfterFolderAccessChange");
+  assert.match(restart, /monitor\.once\("close", onClose\)/);
+  assert.match(restart, /runtimeOwnershipHandoffTimeoutMs/);
+  const downCall = 'await runSidecar("down", [], { env: sidecarShutdownEnv() })';
+  assert.ok(restart.includes(downCall));
+  assert.ok(restart.indexOf('monitor.once("close", onClose)') < restart.indexOf(downCall));
+  assert.ok(restart.indexOf(downCall) < restart.indexOf("detachRuntimeMonitor()"));
+  assert.ok(restart.indexOf("await monitorClosed") < restart.indexOf("startRuntime()"));
+  assert.ok(restart.indexOf("await waitForRuntimeReady()") < restart.indexOf("window.webContents.reload()"));
 });
 
 test("Desktop discovery asks for consent before choosing roots and skips protected content folders", () => {
