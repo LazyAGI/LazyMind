@@ -297,11 +297,13 @@ export function useChannelConnection(provider: ChannelProvider) {
       mountedRef.current = false;
       clearPollTimer();
       const sessionId = sessionIdRef.current;
-      if (sessionId) {
+      // Feishu registration can keep provisioning after the user leaves this page.
+      // Cancel it only when the user explicitly presses Cancel.
+      if (sessionId && provider !== 'feishu') {
         void cancelConnectionSession(sessionId).catch(() => undefined);
       }
     };
-  }, [clearPollTimer, loadAccounts]);
+  }, [clearPollTimer, loadAccounts, provider]);
 
   return {
     t,

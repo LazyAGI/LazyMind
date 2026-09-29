@@ -110,7 +110,23 @@ export default function ScheduleNotificationPanel({ scheduleId, taskId: selected
       okText: t('notifications.confirmClose'), cancelText: t('notifications.cancel'), onOk: apply,
     });
   };
-  const cancelEditor = () => { if (!saving) { setDraft(config?.config); setError(''); setOpen(false); } };
+  const discardEditor = () => { setDraft(config?.config); setError(''); setOpen(false); };
+  const cancelEditor = () => {
+    if (saving) return;
+    if (draft !== undefined && config && JSON.stringify(draft) !== JSON.stringify(config.config)) {
+      Modal.confirm({
+        zIndex: 1600,
+        title: t('notifications.unsavedChangesTitle'),
+        content: t('notifications.unsavedChangesHint'),
+        okText: t('notifications.discardChanges'),
+        okButtonProps: { danger: true },
+        cancelText: t('notifications.continueEditing'),
+        onOk: discardEditor,
+      });
+      return;
+    }
+    discardEditor();
+  };
   const closeSettings = () => { setSettingsOpen(false); void getPreferences().then(p => setEnabled(p.enabled)).catch(() => setError('loadFailed')); };
   const errorView = error && <Alert type="error" message={t('notifications.' + error, { account: errorAccount || t('notifications.account'), defaultValue: t('notifications.saveFailed') })} action={<Button onClick={() => void load()}>{t('notifications.reload')}</Button>} />;
   const activeChannels = channels.filter(channel => config?.config?.channels[channel]?.enabled);

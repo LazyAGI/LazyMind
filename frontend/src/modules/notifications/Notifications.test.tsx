@@ -63,6 +63,36 @@ describe('notification settings and task UI', () => {
     expect(mocks.put).not.toHaveBeenCalled();
     expect(mocks.execution).not.toHaveBeenCalled();
   });
+  it('warns that notification changes are unsaved before closing the editor', async () => {
+    mocks.schedule.mockResolvedValue({ revision: 1, configured: true, config: defaults, availability: {} });
+    mount(<ScheduleNotificationPanel scheduleId='schedule-1' showHistory={false} summaryCard />);
+    const entry = await screen.findByRole('button', { name: 'notifications.configure' });
+    fireEvent.click(entry);
+    const waiting = await screen.findByRole('switch', { name: 'notifications.waiting' });
+    fireEvent.click(waiting);
+    expect(waiting).toBeChecked();
+
+    const close = document.querySelector<HTMLButtonElement>('.notification-editor-drawer .ant-drawer-close');
+    expect(close).not.toBeNull();
+    fireEvent.click(close!);
+    expect(Modal.confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'notifications.unsavedChangesTitle' }));
+    expect((await screen.findAllByText('notifications.unsavedChangesTitle')).length).toBeGreaterThan(0);
+    expect(mocks.put).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'notifications.continueEditing' }));
+    await waitFor(() => expect(screen.queryAllByText('notifications.unsavedChangesTitle')).toHaveLength(0));
+    expect(waiting).toBeChecked();
+
+    fireEvent.click(close!);
+    fireEvent.click(await screen.findByRole('button', { name: 'notifications.discardChanges' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'notifications.save' })).not.toBeInTheDocument());
+    expect(mocks.put).not.toHaveBeenCalled();
+    fireEvent.click(entry);
+    expect(await screen.findByRole('switch', { name: 'notifications.waiting' })).not.toBeChecked();
+    vi.mocked(Modal.confirm).mockClear();
+    fireEvent.click(document.querySelector<HTMLButtonElement>('.notification-editor-drawer .ant-drawer-close')!);
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'notifications.save' })).not.toBeInTheDocument());
+    expect(Modal.confirm).not.toHaveBeenCalled();
+  });
   it('loads the selected execution snapshot only inside the reminder sidebar', async () => {
     const { rerender } = mount(<ScheduleNotificationPanel scheduleId='schedule-1' taskId='run-1' showHistory={false} summaryCard />);
     await waitFor(() => expect(screen.getByRole('button', { name: 'notifications.configure' })).toBeEnabled());

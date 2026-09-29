@@ -274,9 +274,10 @@ def test_registration_adapter_distinguishes_reauthorization_from_creation(monkey
     def register(**kwargs):
         calls.append(kwargs)
         return {'client_id': app_id or 'cli_new', 'client_secret': 'synthetic-only',
-                'user_info': {'open_id': 'owner-open'}}
+                'user_info': {'open_id': 'owner-open', 'name': 'Alice'}}
 
     monkeypatch.setattr(registration.lark_oapi, 'register_app', register)
+    monkeypatch.setattr(registration, 'get_bot_name', lambda *_: '我的飞书机器人')
     result = registration.LarkAppRegistrar().register(
         on_qr_code=lambda *_: None, on_status_change=lambda *_: None,
         cancel_event=threading.Event(), create_new=create_new, app_id=app_id,
@@ -284,3 +285,59 @@ def test_registration_adapter_distinguishes_reauthorization_from_creation(monkey
     assert calls[0]['create_only'] is create_new
     assert calls[0].get('app_id') == app_id
     assert result.app_id == (app_id or 'cli_new')
+    assert result.bot_name == '我的飞书机器人'
+
+
+@pytest.mark.parametrize('generated_label', ['飞书账号', '飞书 · 商谈zy'])
+def test_existing_feishu_account_replaces_generated_label_with_bot_name(gateway, account, monkeypatch, generated_label):
+    from channel_gateway.feishu import accounts
+
+    row = account('feishu')
+    gateway.store.rename_account('owner', row['id'], generated_label)
+    calls = []
+    monkeypatch.setattr(accounts, 'get_bot_name', lambda app_id, app_secret: calls.append(app_id) or '我的飞书机器人')
+    service = gateway.components.delivery_worker._providers.accounts('feishu')
+
+    listed = service.list_accounts('owner')['items']
+    assert listed[0]['label'] == '我的飞书机器人'
+    assert len(calls) == 1
+    assert service.list_accounts('owner')['items'][0]['label'] == '我的飞书机器人'
+    assert len(calls) == 1
+
+    gateway.store.rename_account('owner', row['id'], '我自定义的名称')
+    assert service.list_accounts('owner')['items'][0]['label'] == '我自定义的名称'
+    assert len(calls) == 1
+    assert gateway.store.rename_generated_account('owner', row['id'], '错误覆盖', generated_label) is None
+
+
+def test_bot_name_probe_reads_bot_info_response(monkeypatch):
+    from types import SimpleNamespace
+    from channel_gateway.feishu import registration
+
+    class Client:
+        @staticmethod
+        def builder():
+            return Builder()
+
+        def request(self, request):
+            assert request.uri == '/open-apis/bot/v3/info'
+            return SimpleNamespace(
+                success=lambda: True,
+                raw=SimpleNamespace(content=b'{"code":0,"bot":{"app_name":"My Feishu Bot"}}'),
+            )
+
+    class Builder:
+        def app_id(self, value):
+            return self
+
+        def app_secret(self, value):
+            return self
+
+        def timeout(self, value):
+            return self
+
+        def build(self):
+            return Client()
+
+    monkeypatch.setattr(registration.lark_oapi, 'Client', Client)
+    assert registration.get_bot_name('cli_example', 'secret') == 'My Feishu Bot'

@@ -12,11 +12,12 @@ from channel_gateway.common.ports.providers import (
 from channel_gateway.feishu.domain import FeishuAppCredentials
 from channel_gateway.feishu.ports import FeishuAccountRepository
 from channel_gateway.feishu.groups import FeishuGroups
+from channel_gateway.feishu.registration import get_bot_name
 
 
 def _generated_feishu_label(value: str) -> bool:
     label = str(value or '').strip()
-    return label == '飞书账号' or label.startswith('飞书 · ou_')
+    return label == '飞书账号' or label.startswith('飞书 · ')
 
 
 class FeishuCredentialStore:
@@ -148,7 +149,24 @@ class FeishuAccountService:
 
     def list_accounts(self, owner_user_id: str) -> dict[str, Any]:
         rows = self._store.list_accounts(owner_user_id, 'feishu')
-        return {'items': [account_view(self._with_identity(row)) for row in rows]}
+        return {'items': [account_view(self._with_identity(
+            self._refresh_generated_label(owner_user_id, row),
+        )) for row in rows]}
+
+    def _refresh_generated_label(self, owner_user_id: str, account: dict[str, Any]) -> dict[str, Any]:
+        if not _generated_feishu_label(account.get('label', '')) or not account.get('credentials_ciphertext'):
+            return account
+        try:
+            loaded = FeishuCredentialStore(store=self._store, cipher=self._cipher).load_runtime_account(account['id'])
+        except RuntimeError:
+            return account
+        credentials = loaded['credentials']
+        bot_name = credentials.bot_name or get_bot_name(credentials.app_id, credentials.app_secret)
+        if not bot_name:
+            return account
+        return self._store.rename_generated_account(
+            owner_user_id, account['id'], bot_name, account['label'],
+        ) or self._store.get_account(owner_user_id, account['id']) or account
 
     def _with_identity(self, account: dict[str, Any]) -> dict[str, Any]:
         if account.get('credentials_ciphertext'):
@@ -264,8 +282,8 @@ class FeishuAccountService:
                 ), runtime_fence=runtime_fence,
             )
             if credentials.bot_name and _generated_feishu_label(account.get('label', '')):
-                renamed = self._store.rename_account(
-                    owner_user_id, account_id, credentials.bot_name,
+                renamed = self._store.rename_generated_account(
+                    owner_user_id, account_id, credentials.bot_name, account['label'],
                 )
                 if renamed:
                     account = renamed
