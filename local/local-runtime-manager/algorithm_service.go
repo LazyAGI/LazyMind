@@ -69,6 +69,15 @@ func algorithmProcessSpecs(cfg AlgorithmConfig) []AlgorithmServiceSpec {
 			HealthPath: "/healthz",
 		})
 	}
+	if cfg.RAGDisabled {
+		base := make([]AlgorithmServiceSpec, 0, 2)
+		for _, spec := range specs {
+			if spec.Name == chatProcessName || spec.Name == evoProcessName {
+				base = append(base, spec)
+			}
+		}
+		return base
+	}
 	return specs
 }
 
@@ -492,6 +501,9 @@ func (m *AlgorithmServiceManager) waitForDependencies(ctx context.Context, cfg R
 }
 
 func waitForRAGReadiness(ctx context.Context, cfg RuntimeConfig, timeout time.Duration) error {
+	if cfg.Algorithm.RAGDisabled {
+		return nil
+	}
 	for _, check := range ragReadinessChecks(cfg) {
 		if err := waitForHTTPOnly(ctx, check.port, check.path, check.label, timeout); err != nil {
 			return err
@@ -597,7 +609,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 	if err := ensureEditablePPTNodeModulesLink(exportSrc, exportDeps); err != nil {
 		fmt.Fprintf(os.Stderr, "editable-ppt node_modules link skipped: %v\n", err)
 	}
-	pythonPaths := []string{filepath.Join(paths.RepoRoot, "algorithm"), paths.RepoRoot}
+	pythonPaths := append([]string{filepath.Join(paths.RepoRoot, "algorithm"), paths.RepoRoot}, pythonComponentSites(paths)...)
 	lazyLLMSource := filepath.Join(paths.RepoRoot, "algorithm", "lazyllm")
 	if info, err := os.Stat(filepath.Join(lazyLLMSource, "lazyllm")); err == nil && info.IsDir() {
 		pythonPaths = append([]string{lazyLLMSource}, pythonPaths...)
@@ -749,7 +761,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 	if pandocPath := strings.TrimSpace(paths.PandocBin); pandocPath != "" {
 		env = append(env, "LAZYMIND_PANDOC_PATH="+pandocPath)
 	}
-	return env
+	return append(env, pythonComponentEnvironment(paths)...)
 }
 
 func ensureEditablePPTNodeModulesLink(exportSrc, exportDeps string) error {

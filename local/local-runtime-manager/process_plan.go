@@ -18,7 +18,7 @@ func buildRuntimeProcessPlan(cfg RuntimeConfig) runtimeProcessPlan {
 			frontendProcessName,
 		},
 	}
-	if cfg.MaintenanceMode != installerWarmupMaintenanceMode {
+	if cfg.MaintenanceMode != installerWarmupMaintenanceMode && !cfg.Algorithm.RAGDisabled {
 		plan.HostProcesses = append(plan.HostProcesses, scanControlPlaneProcessName, fileWatcherProcessName)
 	}
 	if cfg.ModeProfile.VectorStore.ManagedProcess {

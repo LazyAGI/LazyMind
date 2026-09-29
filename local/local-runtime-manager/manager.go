@@ -491,17 +491,10 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	failureContext.Phase = runtimeDiagnosticPhaseConfiguration
-	if paths.HistoryInjectionArchive != "" {
-		historyPreparationStartedAt := m.now()
-		m.progressf("extracting bundled history injection package")
-		m.startupEvent("phase.started", "history-injection-payload", historyPreparationStartedAt, nil)
-		if err := prepareBundledHistoryInjection(ctx, paths); err != nil {
-			m.startupEvent("phase.failed", "history-injection-payload", historyPreparationStartedAt, err)
-			return fmt.Errorf("prepare bundled history injection after %s: %w", m.now().Sub(historyPreparationStartedAt).Round(time.Millisecond), err)
-		}
-		m.startupEvent("phase.completed", "history-injection-payload", historyPreparationStartedAt, nil)
-		m.progressf("bundled history injection ready in %s", m.now().Sub(historyPreparationStartedAt).Round(time.Millisecond))
+	if err := m.prepareStartupHistoryInjection(ctx, paths); err != nil {
+		return err
 	}
+
 	relocationStartedAt := m.now()
 	failureContext.Phase = runtimeDiagnosticPhasePythonRelocation
 	m.progressf("checking relocatable desktop Python environments")

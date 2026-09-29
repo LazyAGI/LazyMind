@@ -108,12 +108,13 @@ function Materialize-OfflineSkills {
         '--output', (Join-Path $repoRoot 'skills\.runtime\builtin-skills'),
         '--featured-sources', (Join-Path $repoRoot 'skills\featured'),
         '--featured-output', (Join-Path $repoRoot 'skills\.runtime\featured-skills'),
-        '--frozen-lockfile'
+        '--frozen-lockfile',
+        '--catalog-only'
     )
     Push-Location (Join-Path $repoRoot 'backend\core')
     try {
         & go.exe @arguments
-        if ($LASTEXITCODE -ne 0) { throw "offline Skill materialization failed with exit code $LASTEXITCODE" }
+        if ($LASTEXITCODE -ne 0) { throw "Skill catalog materialization failed with exit code $LASTEXITCODE" }
     } finally {
         Pop-Location
     }

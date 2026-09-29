@@ -45,6 +45,10 @@ func PreflightSkillWorkflowConversion(w http.ResponseWriter, r *http.Request) {
 	}
 	snapshot, err := loadWorkflowSourceSkill(r.Context(), store.DB(), userID, strings.TrimSpace(body.SkillID))
 	if err != nil {
+		if isWorkflowBuiltinPackageDownload(err) {
+			common.ReplyErr(w, err.Error(), http.StatusBadGateway)
+			return
+		}
 		status := http.StatusInternalServerError
 		if isWorkflowSourceSkillNotFound(err) {
 			status = http.StatusNotFound
@@ -289,6 +293,10 @@ func ListSkillLinkedWorkflows(w http.ResponseWriter, r *http.Request) {
 	}
 	current, err := loadWorkflowSourceSkill(r.Context(), store.DB(), userID, skillID)
 	if err != nil {
+		if isWorkflowBuiltinPackageDownload(err) {
+			common.ReplyErr(w, err.Error(), http.StatusBadGateway)
+			return
+		}
 		if isWorkflowSourceSkillNotFound(err) {
 			common.ReplyErr(w, "skill not found", http.StatusNotFound)
 			return

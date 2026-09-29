@@ -7,7 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { stageHistoryInjectionPackage } from "./stage-history-injection-package.mjs";
+import { stageHistoryInjectionPackage, stageHistoryInjectionDescriptor } from "./stage-history-injection-package.mjs";
 
 const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
 const repositoryConfig = path.join(scriptsDir, "..", "history-injection-package.json");
@@ -92,4 +92,22 @@ test("rejects a package whose checksum does not match", async (t) => {
     /SHA-256 mismatch/,
   );
   assert.equal(existsSync(path.join(runtimeRoot, "history-injection.zip")), false);
+});
+
+
+test("deferred staging copies only metadata and removes a stale bundled archive", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "lazymind-history-deferred-"));
+  let requests = 0;
+  const server = createServer((_request, response) => { requests += 1; response.writeHead(503); response.end(); });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const config = JSON.parse(readFileSync(repositoryConfig, "utf8"));
+  config.url = `http://127.0.0.1:${server.address().port}/not-downloaded.zip`;
+  const configPath = path.join(root, "input.json");
+  writeFileSync(configPath, JSON.stringify(config));
+  writeFileSync(path.join(root, "history-injection.zip"), "stale installer payload");
+  const result = await stageHistoryInjectionDescriptor(root, { configPath });
+  assert.deepEqual(JSON.parse(readFileSync(result.descriptorPath, "utf8")), config);
+  assert.equal(existsSync(path.join(root, "history-injection.zip")), false);
+  assert.equal(requests, 0, "building a deferred installer must not download the examples");
 });

@@ -320,6 +320,11 @@ func writeCaddyfile(paths RuntimePaths, cfg RuntimeConfig) error {
 		file_server
 	}
 `, strconv.Quote(filepath.ToSlash(featuredAssetsRoot)))
+	if cfg.Profile == "desktop" {
+		if _, err := os.Stat(filepath.Join(paths.ResourcesRoot, "featured-skills", "downloads.json")); err == nil {
+			featuredAssetsHandle = fmt.Sprintf("\n\thandle /showcase-assets/* {\n\t\treverse_proxy http://127.0.0.1:%d\n\t}\n", cfg.LocalProxy.CoreHostPort)
+		}
+	}
 	proxy := "http://127.0.0.1:" + strconv.Itoa(cfg.LocalProxy.Port)
 	siteAddress := fmt.Sprintf("http://localhost:%d, http://127.0.0.1:%d", cfg.FrontendPort, cfg.FrontendPort)
 	bindAddress := "127.0.0.1"

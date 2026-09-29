@@ -10,6 +10,7 @@ vi.mock("@/components/auth", () => ({
 }));
 
 import {
+  restartRuntime,
   agentExecutableBindings,
   authorizeLocalWorkspace,
   agentIntegrationStatuses,
@@ -239,4 +240,14 @@ describe("browser Assistant Bridge session synchronization", () => {
     expect(JSON.parse(String(init.body))).toEqual({ path: "D:\\Agents\\cursor-agent.exe" });
   });
 
+});
+
+ it("preserves the page during component activation and returns the real restart error", async () => {
+  const restart = vi.fn().mockResolvedValue({ overallStatus: "ready" });
+  Object.defineProperty(window, "lazymindDesktop", { configurable: true, value: { restartRuntime: restart } });
+  expect(await restartRuntime({ reload: false })).toEqual({ ok: true });
+  expect(restart).toHaveBeenCalledWith({ reload: false });
+  const error = new Error("runtime did not become ready");
+  restart.mockRejectedValue(error);
+  expect(await restartRuntime({ reload: false })).toEqual({ ok: false, reason: "failed", error });
 });

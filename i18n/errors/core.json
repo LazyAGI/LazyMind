@@ -1879,5 +1879,14 @@
   "2003136": { "en-US": "Too many tool configuration actions", "zh-CN": "工具配置操作数量过多" },
   "2003137": { "en-US": "Could not acknowledge tool configuration", "zh-CN": "无法确认工具配置状态" },
   "2003138": { "en-US": "Unknown tool service", "zh-CN": "未知的工具服务" },
-  "2003139": { "en-US": "Tool configuration changed; retry", "zh-CN": "工具配置已发生变化，请重试" }
+  "2003139": { "en-US": "Tool configuration changed; retry", "zh-CN": "工具配置已发生变化，请重试" },
+  "2003147": {"en-US": "The Skill package could not be downloaded or verified. Retry, or update the Skill catalog if it keeps failing.", "zh-CN": "技能包下载或校验失败，请重试；若持续失败，请更新技能目录"},
+  "2003148": {"en-US": "PDF font download is only available in local mode", "zh-CN": "PDF 字体下载仅支持本地模式"},
+  "2003149": {"en-US": "PDF font preparation failed; check your network and retry", "zh-CN": "PDF 中文字体准备失败，请检查网络后重试"},
+  "2003150": {"en-US": "Dependency installation is only supported in desktop/local mode", "zh-CN": "依赖安装仅支持桌面或本地模式"},
+  "2003151": {"en-US": "Unknown Python dependency", "zh-CN": "未知的 Python 依赖组件"},
+  "2003152": {"en-US": "Dependency installation is already running", "zh-CN": "依赖组件正在安装，请稍候"},
+  "2003153": {"en-US": "Install the local knowledge component and restart local services first", "zh-CN": "请先安装本地知识库组件，并重启本地服务。"},
+  "2003154": {"en-US": "Resource download or verification failed", "zh-CN": "资源下载或校验失败"},
+  "2003155": {"en-US": "Python dependency installation failed", "zh-CN": "Python 依赖组件安装失败"}
 }

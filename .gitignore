@@ -24,6 +24,7 @@ dist/
 tmp/
 build
 *.lock
+!desktop/python-components/*-requirements.lock
 *.db
 *.sqlite3
 mkdocs.yml
@@ -88,6 +89,7 @@ build*
 lazyllm_cpp.egg-info/
 !build*.sh
 !build*.ps1
+!desktop/scripts/build-python-components.py
 !build_document.py
 !builder.py
 

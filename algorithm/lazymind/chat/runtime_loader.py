@@ -11,6 +11,7 @@ import urllib.request
 from types import ModuleType
 
 from lazymind.config import config
+from lazymind.common.optional_components import component_enabled, require_component
 
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,7 @@ def chat_runtime_status() -> str:
 def ensure_rag_runtime() -> ModuleType:
     """Load the concrete KB, temp retriever, and document reader stack once."""
     global _rag_module, _rag_loading, _rag_error
+    require_component('rag')
     with _rag_condition:
         if _rag_module is not None:
             return _rag_module
@@ -107,6 +109,8 @@ def ensure_rag_runtime() -> ModuleType:
 
 
 def rag_runtime_status() -> str:
+    if not component_enabled('rag'):
+        return 'not_installed'
     with _rag_condition:
         if _rag_module is not None:
             return 'ready'
@@ -133,9 +137,11 @@ def start_background_chat_runtime_warmup() -> None:
 
 def _wait_and_warm() -> None:
     try:
-        _wait_for_kb_runtime()
+        if component_enabled('rag'):
+            _wait_for_kb_runtime()
         ensure_chat_runtime()
-        ensure_rag_runtime()
+        if component_enabled('rag'):
+            ensure_rag_runtime()
     except Exception:
         logger.exception('Background Chat runtime warmup failed')
 

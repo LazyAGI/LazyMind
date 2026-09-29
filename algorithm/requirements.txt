@@ -43,7 +43,6 @@ sqlalchemy>=2.0.34,<3.0.0
 fsspec
 
 dashscope>=1.25.7
-volcengine-python-sdk[ark]>=4.0.6
 nbconvert==7.17.1
 # LazyLLM's Streamable HTTP client currently uses the MCP 1.x three-stream
 # context-manager contract. MCP 2.x changed that return shape and makes every
