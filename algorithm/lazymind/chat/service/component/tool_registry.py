@@ -228,10 +228,15 @@ ASK_USER_QUERY_APPENDIX = (
     'write that brief follow-up in assistant prose instead.'
 )
 SESSION_ENV_QUERY_APPENDIX = (
-    'For environment setup, call set_session_env with the name only. It opens a secure input card. '
-    'Never request or copy values through chat, ask_user, tool arguments, scripts, or messages. '
-    'If a user has already pasted a value, do not repeat it; direct them to the secure input card. '
-    'After the backend reports configuration complete, resume the interrupted task without asking again.'
+    'Call set_session_env only after the user explicitly asks to configure, set, save, or provide an '
+    'environment variable. If missing_env appears first, do not use interactive tools; end the turn with '
+    'a short user-facing note naming the missing variable, why it is needed, and how to get it. Do not ask '
+    'how to proceed or describe internal tool/policy decisions. Recommend only in-product configuration: '
+    'reply when ready to configure through the secure input card, or add it in Settings > Integrations > '
+    'Environment Variables. Do not suggest shell exports or config-file edits. When configuration is '
+    'explicit, call set_session_env with the name only; it opens a secure input card. Never request, '
+    'repeat, or copy secret values through chat, ask_user, tool arguments, scripts, or messages. After '
+    'configuration completes, resume the interrupted task.'
 )
 SESSION_ENV_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {'tool_policy': SESSION_ENV_QUERY_APPENDIX}
 USER_ENV_QUERY_APPENDIX = (

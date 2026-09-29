@@ -111,6 +111,79 @@ func TestChatResolvesExplicitBareSkillNameBeforeCallingUpstream(t *testing.T) {
 	}
 }
 
+func TestChatAsksUserToResolveAmbiguousBareSkillName(t *testing.T) {
+	db := orm.MigrateAllModelsForTest(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	t.Chdir(t.TempDir())
+	fixtureDB := &skilltestutil.TestDB{DB: db.DB}
+	for _, fixture := range []struct {
+		id       string
+		revision string
+		category string
+	}{
+		{"skill-design", "rev-design", "design"},
+		{"skill-external", "rev-external", "external"},
+	} {
+		skilltestutil.SeedSkillWithRevision(t, fixtureDB, fixture.id, fixture.revision)
+		if err := db.Model(&orm.SkillV2Skill{}).Where("id = ?", fixture.id).Updates(map[string]any{
+			"category":      fixture.category,
+			"skill_name":    "wechat-cover",
+			"relative_root": fixture.category + "/wechat-cover",
+		}).Error; err != nil {
+			t.Fatalf("update skill identity: %v", err)
+		}
+	}
+
+	upstreamCalled := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/chat/stream" {
+			upstreamCalled = true
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{}, "tool_groups": []any{}, "data": map[string]any{"items": []any{}}})
+	}))
+	defer server.Close()
+	for _, name := range []string{"LAZYMIND_CHAT_SERVICE_URL", "LAZYMIND_AUTH_SERVICE_URL", "LAZYMIND_SCAN_CONTROL_PLANE_URL"} {
+		t.Setenv(name, server.URL)
+	}
+
+	body := `{
+		"conversation_id":"ambiguous-skill-chat",
+		"query":"使用 wechat-cover skill，生成打工人职场的微信爆款封面",
+		"stream":true
+	}`
+	w := httptest.NewRecorder()
+	ChatConversations(w, sidechatRequest(http.MethodPost, "/api/core/conversations:chat", "user_001", body, nil))
+
+	if w.Code != http.StatusOK || upstreamCalled {
+		t.Fatalf("Chat status=%d upstreamCalled=%v body=%s", w.Code, upstreamCalled, w.Body.String())
+	}
+	if body := w.Body.String(); !strings.Contains(body, `"ask_pending"`) ||
+		!strings.Contains(body, `"skill_ambiguity"`) ||
+		!strings.Contains(body, `"status":"completed"`) ||
+		!strings.Contains(body, `"reason":"awaiting_user_input"`) {
+		t.Fatalf("missing skill ambiguity SSE card: %s", body)
+	}
+	var history orm.ChatHistory
+	if err := db.Where("conversation_id = ?", "ambiguous-skill-chat").First(&history).Error; err != nil {
+		t.Fatal(err)
+	}
+	if history.RunStatus != "completed" || !strings.Contains(string(history.Ext), `"skill_ambiguity"`) {
+		t.Fatalf("history not persisted as pending selection: status=%s ext=%s", history.RunStatus, history.Ext)
+	}
+	var ext struct {
+		AskPending AskPendingEvent `json:"ask_pending"`
+	}
+	if err := json.Unmarshal(history.Ext, &ext); err != nil {
+		t.Fatal(err)
+	}
+	if ext.AskPending.SkillAmbiguity == nil ||
+		!sameStrings(ext.AskPending.SkillAmbiguity.Candidates, []string{"design/wechat-cover", "external/wechat-cover"}) {
+		t.Fatalf("persisted candidates = %#v", ext.AskPending.SkillAmbiguity)
+	}
+}
+
 func TestChatResolvesExplicitBindingAfterMentioningManualSkill(t *testing.T) {
 	db := orm.MigrateAllModelsForTest(t)
 	store.Init(db.DB, nil, nil)
