@@ -235,14 +235,18 @@ export class StreamManager {
               result.ask_pending ||
               result.tool_limit_pending,
           );
-          if (this.isStreamFinished(conversationId) && hasBusinessPayload) {
+          const wasFinished = this.isStreamFinished(conversationId);
+          if (wasFinished && hasBusinessPayload) {
             console.error("Ignored payload emitted after run_finished");
             return false;
           }
           if (result.sources && result.sources.length > 0) {
             state.sources = result.sources;
           }
-          if (result.finish_reason) {
+          if (
+            result.finish_reason &&
+            (!wasFinished || result.finish_reason !== "FINISH_REASON_UNSPECIFIED")
+          ) {
             state.legacyFinishReason = result.finish_reason;
           }
           if (

@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
 import type { SlotRevision, WorkflowSession, WorkflowUI } from '@/modules/chat/store/workflowPanel';
-import { SlotEditingContext, WorkflowPanelTabActiveContext } from './slotEditingContext';
+import { SlotEditingContext, WorkflowPanelTabActiveContext, type SlotEditingContextValue } from './slotEditingContext';
 import { WorkflowPanel } from './index';
 import { controlActions, type WorkflowControlView } from '@/modules/chat/utils/workflowControl';
 import { loadWorkflowRunSnapshot } from '@/modules/chat/utils/loadWorkflowRun';
@@ -17,6 +17,7 @@ const fixture = vi.hoisted(() => ({
   setFocusedTab: vi.fn(),
   focusedTab: undefined as string | undefined,
   documentAction: vi.fn(),
+  registerFooterAction: undefined as SlotEditingContextValue['registerFooterAction'] | undefined,
 }));
 vi.mock('@/modules/chat/hooks/useWorkflow', () => ({
   useWorkflowSession: () => ({ session: fixture.session, loading: false, refresh: fixture.refresh }),
@@ -42,6 +43,7 @@ vi.mock('./SlotComponents', () => ({
   SlotMarkdownStream: () => null,
   SlotRenderer: ({ slotId, slot, readOnly, widget }: { widget?: { widgetType?: string }; slotId: string; slot: SlotRevision; readOnly?: boolean }) => {
     const context = useContext(SlotEditingContext);
+    fixture.registerFooterAction = context.registerFooterAction;
     const active = useContext(WorkflowPanelTabActiveContext);
     useEffect(() => {
       if (!active) return;
@@ -94,6 +96,23 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('shared workflow compact layout', () => {
+  it('keeps a replacement document action when the previous registration cleans up', async () => {
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    let unregisterOld!: () => void;
+    let unregisterNew!: () => void;
+    const onClick = vi.fn();
+    act(() => { unregisterOld = fixture.registerFooterAction!('copy', { label: '旧复制', onClick: vi.fn() }); });
+    act(() => { unregisterNew = fixture.registerFooterAction!('copy', { label: '新复制', onClick }); });
+    act(() => unregisterOld());
+
+    fireEvent.click(screen.getByRole('button', { name: '新复制' }));
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: '旧复制' })).not.toBeInTheDocument();
+    act(() => unregisterNew());
+    expect(screen.queryByRole('button', { name: '新复制' })).not.toBeInTheDocument();
+  });
+
   it('shows chapter progress until the full document exists, then folds process materials without losing their actions', async () => {
     fixture.ui.tabs![1].generation_process = { result_slot: 'document', slots: ['chapters', 'report'] };
     fixture.ui.tabs![1].slots = [

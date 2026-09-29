@@ -1,9 +1,10 @@
-import { useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { useContext, useMemo, type ReactNode } from 'react';
 import { Dropdown } from 'antd';
 import { CloudUploadOutlined, CopyOutlined, DownOutlined, DownloadOutlined, ExportOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { buildDocumentFooterItems } from './documentFooter';
-import { SlotEditingContext, type SlotFooterAction, type SlotEditingContextValue } from './slotEditingContext';
+import { SlotEditingContext, type SlotEditingContextValue } from './slotEditingContext';
+import { useSlotFooterActions } from './useSlotFooterActions';
 
 export function DocumentActions({ documentFooter, actionPending = false, runFooterAction }: {
   documentFooter: ReturnType<typeof buildDocumentFooterItems>;
@@ -104,28 +105,14 @@ export function DocumentActionScope({ inline, label, children }: {
   children: ReactNode;
 }) {
   const parent = useContext(SlotEditingContext);
-  const [actions, setActions] = useState<Map<string, SlotFooterAction>>(new Map());
-  const registerFooterAction = useCallback((key: string, action: SlotFooterAction | null) => {
-    setActions(previous => {
-      const next = new Map(previous);
-      if (action) next.set(key, action);
-      else next.delete(key);
-      return next;
-    });
-    return () => setActions(previous => {
-      if (previous.get(key) !== action) return previous;
-      const next = new Map(previous);
-      next.delete(key);
-      return next;
-    });
-  }, []);
+  const { footerActions, registerFooterAction } = useSlotFooterActions();
   const context = useMemo(() => inline ? { ...parent, registerFooterAction } : parent,
     [inline, parent, registerFooterAction]);
   return <SlotEditingContext.Provider value={context}>
     {inline ? <div className='workflow-panel__document-item' role='group' aria-label={label}>
       {children}
       <div className='workflow-panel__document-item-actions'>
-        <DocumentActions documentFooter={buildDocumentFooterItems(actions)}
+        <DocumentActions documentFooter={buildDocumentFooterItems(footerActions)}
           actionPending={parent.actionPending} runFooterAction={parent.runFooterAction} />
       </div>
     </div> : children}

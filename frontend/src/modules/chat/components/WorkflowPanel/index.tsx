@@ -6,6 +6,7 @@ import { workflowEmptyStateKey } from './external/workflowEmptyState';
 import { useSlotCollapse } from './external/useSlotCollapse';
 import { buildDocumentFooterItems } from './documentFooter';
 import { DocumentActions, DocumentActionScope } from './DocumentActions';
+import { useSlotFooterActions } from './useSlotFooterActions';
 import { getLocalizedErrorMessage } from "@/components/request";
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
@@ -56,7 +57,7 @@ import {
 } from './SlotComponents';
 import { SlideThumb } from './ppt/SlideThumb';
 import { WorkflowTabActions } from './actions/WorkflowTabActions';
-import { WorkflowPanelTabActiveContext, SlotEditingContext, type SlotFooterAction } from './slotEditingContext';
+import { WorkflowPanelTabActiveContext, SlotEditingContext } from './slotEditingContext';
 import { findWriterArtifactStream } from './writerArtifactStream';
 import { resolveCompletedContinueStep, resolveExternalContinueAction, resolveWorkflowContinueAction } from './workflowContinue';
 import { resolvePendingApprovalStep } from './workflowApproval';
@@ -1716,7 +1717,7 @@ export function WorkflowPanel({
   const flushFns = useRef<Map<string, () => Promise<boolean>>>(new Map());
   const [anySlotEditing, setAnySlotEditing] = useState(false);
   const [actionPending, setActionPending] = useState(false);
-  const [footerActions, setFooterActions] = useState<Map<string, SlotFooterAction>>(new Map());
+  const { footerActions, registerFooterAction, clearFooterActions } = useSlotFooterActions();
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const tabsRef = useRef<HTMLDivElement | null>(null);
   const tabsWheelCleanupRef = useRef<(() => void) | null>(null);
@@ -1823,23 +1824,6 @@ export function WorkflowPanel({
     };
   }, []);
 
-  const registerFooterAction = useCallback((key: string, action: SlotFooterAction | null) => {
-    setFooterActions((previous) => {
-      const next = new Map(previous);
-      if (action) next.set(key, action);
-      else next.delete(key);
-      return next;
-    });
-    return () => {
-      setFooterActions((previous) => {
-        if (!previous.has(key)) return previous;
-        const next = new Map(previous);
-        next.delete(key);
-        return next;
-      });
-    };
-  }, []);
-
   const flushPendingEdits = useCallback(async (flushKey?: string): Promise<boolean> => {
     const selectedFlusher = flushKey ? flushFns.current.get(flushKey) : undefined;
     const flushers = flushKey
@@ -1853,10 +1837,10 @@ export function WorkflowPanel({
   useEffect(() => {
     editingSlots.current.clear();
     flushFns.current.clear();
-    setFooterActions(new Map());
+    clearFooterActions();
     setAnySlotEditing(false);
     setActionPending(false);
-  }, [session?.session_id]);
+  }, [session?.session_id, clearFooterActions]);
 
   useEffect(() => {
     if (!session?.workflow_id) return;
