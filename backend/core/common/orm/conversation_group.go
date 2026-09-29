@@ -8,6 +8,7 @@ import (
 // ConversationGroup is a user-owned group or directory-bound project. Scope
 // is only used by ordinary groups as an inclusion rule for organizer runs.
 type ConversationGroup struct {
+	Collapsed      bool       `gorm:"column:collapsed;not null;default:false"`
 	IsTaskConv     bool       `gorm:"column:is_task_conv;not null;default:false;uniqueIndex:uk_conversation_groups_user_name,priority:2,where:kind = 'group';uniqueIndex:uk_conversation_projects_user_path,priority:2,where:kind = 'project' AND deleted_at IS NULL"`
 	Kind           string     `gorm:"column:kind;type:varchar(16);not null;default:group"`
 	WorkspaceID    *string    `gorm:"column:workspace_id;type:varchar(64)"`

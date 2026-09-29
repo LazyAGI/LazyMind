@@ -129,6 +129,21 @@ describe("StreamManager runtime terminal", () => {
     );
   });
 
+  it.each(["FINISH_REASON_STOP", "FINISH_REASON_UNKNOWN"])("delivers the final body with %s before rejecting later body frames", (finishReason) => {
+    const manager = new StreamManager();
+    const stream = new FakeSSE();
+    const onMessage = vi.fn();
+    manager.registerStream("conv", stream as any, { message: onMessage });
+
+    stream.emit({ conversation_id: "conv", history_id: "h1", delta: "partial answer", finish_reason: finishReason });
+
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(manager.isStreamFinished("conv")).toBe(true);
+    stream.emit({ conversation_id: "conv", history_id: "h1", delta: "late answer", finish_reason: "FINISH_REASON_UNSPECIFIED" });
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(manager.isStreamFinished("conv")).toBe(true);
+  });
+
   it("finishes a static response while preserving its model invocation flag", () => {
     const manager = new StreamManager();
     const stream = new FakeSSE();

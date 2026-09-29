@@ -276,8 +276,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         ...args,
         droppableContainers: args.droppableContainers.filter((container) =>
           container.data.current?.kind !== 'conversation-group' &&
-          container.data.current?.pinned === args.active.data.current?.pinned &&
-          container.data.current?.sortable?.containerId === args.active.data.current?.sortable?.containerId,
+          container.data.current?.pinned === args.active.data.current?.pinned,
         ),
       });
     };
@@ -732,7 +731,6 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       }
       const target = historyList.find((item) => item.conversation_id === over.id);
       if (!moved || !target || isConversationPinned(moved) !== isConversationPinned(target)) return;
-      if (compact && !isConversationPinned(moved) && getConversationGroup(moved.update_time) !== getConversationGroup(target.update_time)) return;
       const sourceIndex = historyList.indexOf(moved);
       const targetIndex = historyList.indexOf(target);
       reorderingConversationRef.current = true;
@@ -1174,19 +1172,26 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         );
       };
 
+      const normalNodes = conversationTree.filter(node => !isConversationPinned(node.conversation));
+      const dateOrderedNodes = groupedHistoryList.filter(group => group.key !== "pinned").flatMap(group => group.items);
+      const hasCrossDateOrder = normalNodes.some((node, index) => node !== dateOrderedNodes[index]);
+      const sections = hasCrossDateOrder && normalNodes.some(node => node.conversation.history_order != null)
+        ? [...groupedHistoryList.filter(group => group.key === "pinned"), { key: "manual", title: t("chat.recentConversations"), items: normalNodes }]
+        : groupedHistoryList;
+      const visibleSections = sections.filter(group => group.items.length > 0 && (pinnedOnly === undefined || (group.key === "pinned") === pinnedOnly));
       const content = compact ? (
+        <SortableContext items={visibleSections.flatMap(group => group.items.map(node => node.conversation.conversation_id || ""))} strategy={verticalListSortingStrategy}>
           <div className="record-groups">
-            {groupedHistoryList.filter(group => pinnedOnly === undefined || (group.key === "pinned") === pinnedOnly).map((group) => (
+            {visibleSections.map((group) => (
               <div className="record-group" key={group.key}>
                 <div className="record-group-title">{group.title}</div>
-                <SortableContext items={group.items.map((node) => node.conversation.conversation_id || "")} strategy={verticalListSortingStrategy}>
-                  <Row>
-                    {group.items.map((node) => renderNode(node))}
-                  </Row>
-                </SortableContext>
+                <Row>
+                  {group.items.map((node) => renderNode(node))}
+                </Row>
               </div>
             ))}
           </div>
+        </SortableContext>
       ) : <Row>{conversationTree.map((node) => renderNode(node))}</Row>;
       return compact ? content : (
         <SortableContext items={conversationTree.map((node) => node.conversation.conversation_id || "")} strategy={verticalListSortingStrategy}>
@@ -1195,6 +1200,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       );
     }
 
+    const showOrganizerEntry = compact && !showBatchExport && conversationFilters.filter === "normal";
     return (
       <DndContext sensors={sensors} collisionDetection={sameSectionCollision} onDragEnd={handleReorder}
         accessibility={{
@@ -1245,11 +1251,12 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         {compact && groupSection && !showBatchExport && <>{renderItem(true)}{groupSection(undefined, [conversationFilters.filter], conversationFilters.sources?.join(","))}</>}
         {!hideHeader && (
           <div className="record-header">
-            {(!compact || showBatchActions) && (
-              <div className="record-header-top">
+            {(!compact || showBatchActions || showOrganizerEntry) && (
+              <div className={classnames("record-header-top", { "record-header-top--organizer": showOrganizerEntry })}>
                 <div className="list-title">
                   {compact ? t("chat.recentConversations") : title || t("chat.chatHistory")}
                 </div>
+                {showOrganizerEntry && <ConversationGroups mode="organizer" onChanged={emitConversationGroupsChanged} />}
                 {showBatchActions && (
                   <div className="record-toolbar-actions">
                     {showBatchExport ? (
@@ -1328,7 +1335,6 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                 )}
               </div>
             )}
-            {compact && !showBatchExport && conversationFilters.filter === "normal" && <ConversationGroups mode="organizer" onChanged={emitConversationGroupsChanged} />}
             {!hideSearch && (
               <div className="record-toolbar">
                 <Search

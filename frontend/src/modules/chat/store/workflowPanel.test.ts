@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { load } from 'js-yaml';
 
 import {
   filterWorkflowTabs,
@@ -7,6 +10,19 @@ import {
 } from './workflowPanel';
 
 describe('hydrateWorkflowUI', () => {
+  it('loads the academic workflow process-material rule from its package configuration', () => {
+    const spec = load(readFileSync(resolve(process.cwd(), '../workflows/academic_research_pipeline/workflow.yaml'), 'utf8'));
+    const ui = hydrateWorkflowUI(spec);
+    const tab = ui.tabs?.find(tab => tab.id === 'draft');
+    expect(tab?.generation_process).toEqual({
+      result_slot: 'draft_document', slots: ['chapter_drafts', 'effective_outline_check_report'],
+    });
+    expect(tab?.slots.find(slot => slot.id === 'draft_document')?.widget?.readOnly).toBe(false);
+    for (const id of tab!.generation_process!.slots) {
+      expect(tab?.slots.find(slot => slot.id === id)?.widget?.readOnly).toBe(true);
+    }
+  });
+
   it('hydrates tab slot references with root slot list metadata', () => {
     const ui = hydrateWorkflowUI({
       slots: [

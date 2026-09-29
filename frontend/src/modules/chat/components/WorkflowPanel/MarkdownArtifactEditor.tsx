@@ -708,11 +708,13 @@ export function MarkdownArtifactEditor({
           const headingStyle = getComputedStyle(heading);
           const lineHeight = parseFloat(headingStyle.lineHeight)
             || parseFloat(headingStyle.fontSize) * 1.4 || 22;
-          const width = Math.min(24, Math.max(0, rect.left - surfaceRect.left - 4));
+          // Keep the hit area connected to the heading. A gap would clear the
+          // heading hover and hide the control before the pointer reaches it.
+          const width = Math.min(28, Math.max(0, rect.left - surfaceRect.left));
           return {
             anchorId: heading.id,
             top: rect.top - surfaceRect.top + surface.scrollTop + Math.max(0, (lineHeight - 22) / 2),
-            left: rect.left - surfaceRect.left + surface.scrollLeft - width - 4,
+            left: rect.left - surfaceRect.left + surface.scrollLeft - width,
             width,
           };
         }) : [];

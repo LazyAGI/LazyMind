@@ -1963,6 +1963,10 @@ components:
             type: object
         ConversationGroup:
             properties:
+                collapsed:
+                    default: false
+                    description: Whether this user-owned group is collapsed in the sidebar. Persists across devices.
+                    type: boolean
                 created_at:
                     format: date-time
                     type: string
@@ -2022,6 +2026,7 @@ components:
                 - created_at
                 - updated_at
                 - is_task_conv
+                - collapsed
             type: object
         ConversationGroupAssignRequest:
             properties:
@@ -2133,6 +2138,8 @@ components:
             properties:
                 before_group_id:
                     type: string
+                collapsed:
+                    type: boolean
                 pinned:
                     type: boolean
             type: object
@@ -17396,7 +17403,7 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ConversationGroupListResponse'
-                    description: Persist pinning and order within the user navigation
+                    description: Persist collapse state, pinning and order within the user navigation
                 "400":
                     content:
                         application/json:
@@ -17415,7 +17422,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
                     description: Name, membership, scope version or task conflict
-            summary: Persist pinning and order within the user navigation
+            summary: Persist collapse state, pinning and order within the user navigation
             tags:
                 - ConversationGroups
     /api/core/conversation-organizer-runs:

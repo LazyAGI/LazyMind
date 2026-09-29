@@ -2449,6 +2449,7 @@ const enUS = {
     conversationRelationBannerLabel: "Child conversation source",
     conversationSourceFrom: "Source: {{parent}}",
     conversationForkedFrom: "Branch source: {{parent}}",
+    conversationGroupSource: "Group: {{group}}",
     returnToParentConversation: "Return to main conversation",
     contextPanel: {
       resumeSideChat: "Continue side chat",
@@ -2496,6 +2497,8 @@ const enUS = {
       closeConfirmTitle: "Close and discard this side chat?",
       closeConfirmDescription:
         "This unsaved side chat will be deleted and cannot be recovered.",
+      closeRetainedConfirmTitle: "Close this side chat?",
+      closeRetainedConfirmDescription: "This side chat has been kept and will remain available in conversation history.",
       closeAndDiscard: "Close and discard",
       continue: "Continue side chat",
       generatingUnavailable:
@@ -3216,6 +3219,7 @@ const enUS = {
     workflowRowAria: "Row {{index}}",
     workflowImageAria: "Image {{index}}",
     workflowContentItemAria: "Content item {{index}}",
+    workflowGenerationProcess: "Generation details",
     workflowStatusAria: "Workflow status: {{status}}",
     workflowViewWorkflow: "View workflow",
     workflowMoreActions: "Workflow actions",

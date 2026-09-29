@@ -1596,6 +1596,10 @@ export const ConversationForkOriginSourceStatusEnum = {
 export type ConversationForkOriginSourceStatusEnum = typeof ConversationForkOriginSourceStatusEnum[keyof typeof ConversationForkOriginSourceStatusEnum];
 
 export interface ConversationGroup {
+    /**
+     * Whether this user-owned group is collapsed in the sidebar. Persists across devices.
+     */
+    'collapsed': boolean;
     'created_at': string;
     'created_by': ConversationGroupCreatedByEnum;
     'created_run_id'?: string;
@@ -1693,6 +1697,7 @@ export interface ConversationGroupMembershipResponse {
 }
 export interface ConversationGroupPlacementRequest {
     'before_group_id'?: string;
+    'collapsed'?: boolean;
     'pinned'?: boolean;
 }
 export interface ConversationGroupResponse {
@@ -10614,7 +10619,7 @@ export const ConversationGroupsApiAxiosParamCreator = function (configuration?: 
         },
         /**
          *
-         * @summary Persist pinning and order within the user navigation
+         * @summary Persist collapse state, pinning and order within the user navigation
          * @param {string} groupId
          * @param {ConversationGroupPlacementRequest} conversationGroupPlacementRequest
          * @param {*} [options] Override http request option.
@@ -10866,7 +10871,7 @@ export const ConversationGroupsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Persist pinning and order within the user navigation
+         * @summary Persist collapse state, pinning and order within the user navigation
          * @param {string} groupId
          * @param {ConversationGroupPlacementRequest} conversationGroupPlacementRequest
          * @param {*} [options] Override http request option.
@@ -11037,7 +11042,7 @@ export const ConversationGroupsApiFactory = function (configuration?: Configurat
         },
         /**
          *
-         * @summary Persist pinning and order within the user navigation
+         * @summary Persist collapse state, pinning and order within the user navigation
          * @param {ConversationGroupsApiUpdateConversationGroupPlacementRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -11339,7 +11344,7 @@ export class ConversationGroupsApi extends BaseAPI {
 
     /**
      *
-     * @summary Persist pinning and order within the user navigation
+     * @summary Persist collapse state, pinning and order within the user navigation
      * @param {ConversationGroupsApiUpdateConversationGroupPlacementRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}

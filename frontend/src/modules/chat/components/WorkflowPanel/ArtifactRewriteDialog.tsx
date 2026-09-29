@@ -406,7 +406,6 @@ export function ArtifactRewriteInlineDiff({
 }: ArtifactRewriteInlineDiffProps) {
   const { t } = useTranslation();
   const [overlay, setOverlay] = useState<HTMLDivElement | null>(null);
-  const [overlayStyle, setOverlayStyle] = useState<CSSProperties>();
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string>();
   const baseMarginBottomRef = useRef(0);
@@ -449,25 +448,33 @@ export function ArtifactRewriteInlineDiff({
     let frameId: number | undefined;
     const updatePosition = () => {
       const targetRect = target.getBoundingClientRect();
-      const containerRect = container.getBoundingClientRect();
       const computed = window.getComputedStyle(target);
-      setOverlayStyle({
-        top: targetRect.top - containerRect.top,
-        left: targetRect.left - containerRect.left,
-        width: targetRect.width,
+      Object.assign(overlay.style, {
+        width: `${targetRect.width}px`,
         fontFamily: computed.fontFamily,
         fontSize: computed.fontSize,
         fontWeight: computed.fontWeight,
         letterSpacing: computed.letterSpacing,
         lineHeight: computed.lineHeight,
-        textAlign: computed.textAlign as CSSProperties['textAlign'],
+        textAlign: computed.textAlign,
       });
       const extraHeight = Math.max(0, overlay.getBoundingClientRect().height - targetRect.height);
-      target.style.marginBottom = `${baseMarginBottomRef.current + extraHeight}px`;
+      const marginBottom = `${baseMarginBottomRef.current + extraHeight}px`;
+      if (target.style.marginBottom !== marginBottom) target.style.marginBottom = marginBottom;
+      // Reserving space can move the paragraph through scroll anchoring. Read
+      // its final position and update the DOM in the same scroll event, rather
+      // than letting the preview follow one animation frame behind the text.
+      const positionedTarget = target.getBoundingClientRect();
+      const layerRect = layer.getBoundingClientRect();
+      overlay.style.top = `${positionedTarget.top - layerRect.top}px`;
+      overlay.style.left = `${positionedTarget.left - layerRect.left}px`;
     };
     const schedulePosition = () => {
       if (frameId !== undefined) window.cancelAnimationFrame(frameId);
-      frameId = window.requestAnimationFrame(updatePosition);
+      frameId = window.requestAnimationFrame(() => {
+        frameId = undefined;
+        updatePosition();
+      });
     };
     const resizeObserver = new ResizeObserver(schedulePosition);
     resizeObserver.observe(target);
@@ -475,15 +482,15 @@ export function ArtifactRewriteInlineDiff({
     resizeObserver.observe(container);
     const mutationObserver = new MutationObserver(schedulePosition);
     mutationObserver.observe(surface, { childList: true, characterData: true, subtree: true });
-    surface.addEventListener('scroll', schedulePosition, { passive: true });
+    surface.addEventListener('scroll', updatePosition, { passive: true, capture: true });
     window.addEventListener('resize', schedulePosition);
-    schedulePosition();
+    updatePosition();
 
     return () => {
       if (frameId !== undefined) window.cancelAnimationFrame(frameId);
       resizeObserver.disconnect();
       mutationObserver.disconnect();
-      surface.removeEventListener('scroll', schedulePosition);
+      surface.removeEventListener('scroll', updatePosition, true);
       window.removeEventListener('resize', schedulePosition);
     };
   }, [layer, overlay, target]);
@@ -543,7 +550,7 @@ export function ArtifactRewriteInlineDiff({
 
   if (!layer) return null;
   return ReactDOM.createPortal(
-    <div ref={setOverlay} className='artifact-rewrite-inline-diff__overlay' style={overlayStyle}>
+    <div ref={setOverlay} className='artifact-rewrite-inline-diff__overlay'>
       <div className='artifact-rewrite-inline-diff__content' aria-live='polite'>
         {before}
         {renderInlineDiff(preview.preview.old_text, preview.preview.new_text)}

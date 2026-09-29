@@ -16,6 +16,7 @@ import (
 	"gorm.io/gorm/clause"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/conversationgroup"
 	"lazymind/core/store"
 )
 
@@ -94,6 +95,8 @@ func replyConversationOrderError(w http.ResponseWriter, r *http.Request, err err
 		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
 	case errors.Is(err, errConversationOrderConflict):
 		common.ReplyAppErr(w, common.NewAppError(http.StatusConflict, common.ErrCodeConflict, "Conversation order changed; refresh and retry"))
+	case errors.Is(err, conversationgroup.ErrConversationOrganizing):
+		common.ReplyAppErr(w, common.NewAppError(http.StatusConflict, common.ErrCodeConflict, "Conversation is being organized; retry later"))
 	default:
 		log.Ctx(r.Context()).Error().Err(err).Msg("Update conversation order failed")
 		common.ReplyAppErr(w, common.NewAppError(http.StatusInternalServerError, common.ErrCodeInternal, "Unable to update conversation order"))
@@ -197,7 +200,7 @@ func ReorderConversation(w http.ResponseWriter, r *http.Request) {
 
 func updateConversationPin(ctx context.Context, db *gorm.DB, userID, id string, pinned bool) (conversationOrderResult, error) {
 	result := conversationOrderResult{OrderUpdates: []conversationOrderUpdate{}}
-	err := conversationCheckpoint(ctx, db, "", func(tx *gorm.DB) error {
+	err := conversationgroup.UserTransaction(ctx, db, userID, func(tx *gorm.DB) error {
 		rows, err := lockConversationHistory(tx, userID)
 		if err != nil {
 			return err
@@ -211,6 +214,11 @@ func updateConversationPin(ctx context.Context, db *gorm.DB, userID, id string, 
 		}
 		if moved == nil {
 			return gorm.ErrRecordNotFound
+		}
+		if pinned {
+			if err := conversationgroup.DetachPinnedConversation(ctx, tx, userID, id); err != nil {
+				return err
+			}
 		}
 		result.ConversationID = id
 		if pinned == (moved.PinnedAt != nil) {

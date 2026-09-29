@@ -896,9 +896,16 @@
   background: #fff;
   font-size: 9px;
   font-weight: 700;
+  line-height: 1;
 
   .anticon {
-    font-size: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    font-size: 12px;
+    line-height: 1;
   }
 }
 
@@ -1127,9 +1134,16 @@
   color: #657286;
   background: #fff;
   font-size: 8px;
+  line-height: 1;
 
   .anticon {
-    font-size: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 10px;
+    height: 10px;
+    font-size: 10px;
+    line-height: 1;
   }
 }
 

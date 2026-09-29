@@ -250,6 +250,13 @@
           word-break: break-word;
         }
 
+        .chat-history-resource-mentions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          margin-bottom: 6px;
+        }
+
         .chat-history-mention {
           display: inline-flex;
           align-items: center;

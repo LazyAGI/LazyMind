@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -527,20 +526,11 @@ func createConversationForkAttempt(ctx context.Context, db *gorm.DB, caller doc.
 			}
 		}
 		now := time.Now().UTC()
-		var branchCount int64
-		if err := tx.Model(&orm.ConversationForkOrigin{}).Where("source_conversation_id = ?", c.ID).Count(&branchCount).Error; err != nil {
+		title, err := nextForkTitle(tx, caller.UserID, c)
+		if err != nil {
 			return err
 		}
-		suffix := fmt.Sprintf("（%d）", branchCount+1)
-		sourceTitle := c.DisplayName
-		for strings.HasSuffix(sourceTitle, " · Fork") {
-			sourceTitle = strings.TrimSuffix(sourceTitle, " · Fork")
-		}
-		title := []rune(sourceTitle)
-		if limit := maxConversationDisplayNameLength - len([]rune(suffix)); len(title) > limit {
-			title = title[:limit]
-		}
-		branch := orm.Conversation{ID: id, DisplayName: string(title) + suffix, ChannelID: c.ChannelID,
+		branch := orm.Conversation{ID: id, DisplayName: title, ChannelID: c.ChannelID,
 			ChatExecutor: ChatExecutorLazyMind, ThinkingDepth: config.ThinkingDepth, EnableWorkflow: config.EnableWorkflow,
 			EnableSubagent: config.EnableSubagent, WorkflowMode: &config.WorkflowMode, ChatTimes: int32(len(histories)),
 			BaseModel: orm.BaseModel{CreateUserID: caller.UserID, CreateUserName: c.CreateUserName, CreatedAt: now, UpdatedAt: now}}
@@ -564,7 +554,7 @@ func createConversationForkAttempt(ctx context.Context, db *gorm.DB, caller doc.
 		if err := tx.Create(&branch).Error; err != nil {
 			return err
 		}
-		if err := conversationgroup.InheritProject(ctx, tx, caller.UserID, c.ID, branch.ID); err != nil {
+		if err := inheritForkGroup(ctx, tx, caller.UserID, c.ID, branch.ID); err != nil {
 			return err
 		}
 		if err := tx.CreateInBatches(copied, 50).Error; err != nil {

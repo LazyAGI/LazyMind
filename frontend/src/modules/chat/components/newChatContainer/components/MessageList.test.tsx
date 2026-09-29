@@ -53,6 +53,34 @@ function selectMessageText(text: string) {
   fireEvent.mouseUp(selected);
 }
 
+describe("MessageList resource references", () => {
+  it.each([
+    ["skill", "last30days-cn", "last30days-cn", "/memory-management/skills/resource-1", "thunderbolt"],
+    ["workflow", "last30days-cn", "Last 30 Days Workflow", "/memory-management/workflows/resource-1", "appstore"],
+    ["skill", "请汇总近期信息", "last30days-cn", "/memory-management/skills/resource-1", "thunderbolt"],
+  ])("renders the persisted %s reference even when its name is not the question", (type, query, displayName, href, icon) => {
+    const messages = buildChatMessageListFromHistory([{
+      id: "referenced-history", query, result: "answer",
+      mentions: [{ mention_id: "mention-1", type, resource_id: "resource-1", display_name: displayName }],
+    }] as any);
+    render(<MessageList messageList={messages} sendMessage={vi.fn()} regenerate={vi.fn()} stopGeneration={vi.fn()}
+      updateAssistantMessage={vi.fn()} renderText={item => <span>{item.delta}</span>} />);
+
+    const reference = screen.getByRole("link", { name: new RegExp(displayName) });
+    expect(reference).toHaveAttribute("href", href);
+    expect(reference.querySelector(`[data-icon="${icon}"]`)).toBeInTheDocument();
+    expect(screen.getByText(query)).toBeInTheDocument();
+  });
+
+  it("does not infer a resource reference from ordinary message text", () => {
+    render(<MessageList messageList={buildChatMessageListFromHistory([{ id: "plain-history", query: "last30days-cn", result: "answer" }])}
+      sendMessage={vi.fn()} regenerate={vi.fn()} stopGeneration={vi.fn()} updateAssistantMessage={vi.fn()}
+      renderText={item => <span>{item.delta}</span>} />);
+    expect(screen.getByText("last30days-cn")).toBeInTheDocument();
+    expect(document.querySelector(".chat-history-mention")).toBeNull();
+  });
+});
+
 describe("MessageList side chat selection", () => {
   it("removes the entire failed reply on retry and shows a new failure if retry fails", () => {
     const failed = {

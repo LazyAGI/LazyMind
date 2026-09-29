@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { forwardRef, useEffect, useImperativeHandle } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import ChatLayout from "./index";
@@ -142,6 +142,7 @@ vi.mock("@/modules/chat/components/newChatContainer", () => ({
 vi.mock("@/modules/chat/components/SideChatPanel", () => ({
   default: (props: any) => {
     useEffect(() => { mocks.sideChatMounted(); }, []);
+    const [draft, setDraft] = useState("");
     mocks.latestSideChatPanelProps = props;
     return props.open && props.visible !== false ? (
       <div>
@@ -151,6 +152,7 @@ vi.mock("@/modules/chat/components/SideChatPanel", () => ({
           data-parent-id={props.parentConversationId}
           data-selected-text={props.source?.selectedText || ""}
         />
+        <input aria-label="Side chat draft" value={draft} onChange={event => setDraft(event.target.value)} />
         <button type="button" onClick={props.onClose}>Close side chat</button>
       </div>
     ) : null;
@@ -1205,6 +1207,7 @@ describe("ChatLayout conversation loading", () => {
     await openOverview();
     fireEvent.click(screen.getByTestId("conversation-menu-sidechat"));
     expect(mocks.latestSideChatPanelProps.source).toEqual({});
+    fireEvent.change(screen.getByLabelText("Side chat draft"), { target: { value: "unfinished follow-up" } });
     fireEvent.click(screen.getByRole("button", { name: "chat.sidebar.close" }));
     await openOverview();
     fireEvent.click(screen.getByTestId("conversation-menu-sidechat"));
@@ -1213,6 +1216,9 @@ describe("ChatLayout conversation loading", () => {
     fireEvent.click(screen.getByTestId("conversation-menu-overview"));
     expect(screen.getByTestId("artifact-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("side-chat-panel")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("conversation-menu-sidechat"));
+    expect(screen.getByLabelText("Side chat draft")).toHaveValue("unfinished follow-up");
+    expect(mocks.sideChatMounted).toHaveBeenCalledTimes(1);
   });
 
   it("starts a new side chat for each selection invocation, including the same text", async () => {
@@ -1244,5 +1250,11 @@ describe("ChatLayout conversation loading", () => {
     expect(mocks.latestChatContainerProps.onOpenSources).toBeUndefined();
     expect(screen.getByTestId("artifact-panel")).toBeInTheDocument();
     expect(screen.queryByRole("complementary", { name: "chat.contextPanel.title" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("conversation-menu-sidechat"));
+    const sideChat = screen.getByTestId("side-chat-panel");
+    expect(mocks.latestChatContainerProps.onOpenSources).toBeUndefined();
+    expect(mocks.latestSideChatPanelProps.onOpenSources).toBeUndefined();
+    expect(sideChat).toBeVisible();
+    expect(mocks.sideChatMounted).toHaveBeenCalledTimes(1);
   });
 });

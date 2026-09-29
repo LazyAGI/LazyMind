@@ -1588,6 +1588,27 @@ describe("useChatConversation regeneration recovery", () => {
     expect(result.current.messageList.map(item => item.delta)).toEqual(["question", "answer"]);
   });
 
+  it("ends generation when a model failure terminal also carries the final partial answer", async () => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList("conversation-1", []));
+    await act(async () => { await result.current.sendMessage({ text: "question" }); });
+    expect(result.current.isStreaming).toBe(true);
+
+    act(() => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "conversation-1", history_id: "history-1", delta: "partial answer",
+      finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonUnknown,
+      runtime_event: { type: "run_finished", run_id: "failed-run", data: {
+        status: "failed", reason: "model_failure", code: "provider_internal_error", partial_output: true,
+      } },
+    } }) }));
+
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.messageList[result.current.messageList.length - 1]).toMatchObject({ delta: "partial answer", run_status: "failed" });
+    expect(stream.close).toHaveBeenCalled();
+    expect(result.current.streamRecovery.status).toBe("idle");
+  });
+
   it("keeps status-zero failures on the existing stream recovery path", async () => {
     const clientConversationId = "55555555-5555-4555-8555-555555555555";
     const { listeners, onOpenSSE } = createPreparedStream(clientConversationId);
