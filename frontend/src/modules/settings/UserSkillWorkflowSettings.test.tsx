@@ -99,6 +99,16 @@ describe("UserSkillWorkflowSettings workflow controls", () => {
     expect(mocks.onGroupChange).toHaveBeenCalledWith("workflows", false, 1);
   });
 
+  it("temporarily locks controls without reporting the workflow master as off", async () => {
+    render(<UserSkillWorkflowSettings activeView="workflows" skillsEnabled workflowsEnabled
+      groupSaving={null} controlsDisabled onGroupChange={mocks.onGroupChange}
+      headingRef={createRef<HTMLHeadingElement>()} />);
+    await screen.findByText("AI 图片生成");
+    expect(screen.getByRole("switch", { name: "settingsPage.skills.toggleAria" })).toBeDisabled();
+    expect(screen.getByText("settingsPage.enabled")).toBeInTheDocument();
+    expect(screen.queryByText("settingsPage.skills.resourceSuspended")).not.toBeInTheDocument();
+  });
+
   it("loads skills beyond the server's 100-item page and searches the complete list", async () => {
     const records = Array.from({ length: 205 }, (_, index) => ({
       id: `skill-${index}`, name: `Skill ${index}`, description: "", isEnabled: true,

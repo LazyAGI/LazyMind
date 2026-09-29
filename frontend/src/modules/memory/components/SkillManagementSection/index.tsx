@@ -333,7 +333,7 @@ export default function SkillManagementSection() {
   }, [loadMarketCatalog, loadMarketTags, skillView]);
 
   useEffect(() => {
-    if (skillView !== "installed" && skillView !== "workflows") {
+    if (skillView !== "workflows") {
       return undefined;
     }
 

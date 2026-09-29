@@ -46,6 +46,7 @@ interface ResourceRowProps {
   meta: string;
   enabled: boolean;
   controlEnabled: boolean;
+  disabled?: boolean;
   controlLabel: string;
   loading: boolean;
   error?: string;
@@ -60,6 +61,7 @@ function ResourceRow({
   meta,
   enabled,
   controlEnabled,
+  disabled,
   controlLabel,
   loading,
   error,
@@ -88,7 +90,7 @@ function ResourceRow({
         className="settings-ref-switch"
         checked={enabled}
         loading={loading}
-        disabled={!controlEnabled || loading}
+        disabled={!controlEnabled || disabled || loading}
         onChange={onChange}
         aria-label={t("settingsPage.skills.toggleAria", {
           action: enabled ? t("settingsPage.confirm.disableState") : t("settingsPage.confirm.enableState"),
@@ -238,7 +240,8 @@ export default function UserSkillWorkflowSettings({
             description={skill.description}
             meta={skill.category || t("settingsPage.skills.personalSkill")}
             enabled={skill.isEnabled}
-            controlEnabled={skillsEnabled && !controlsDisabled}
+            controlEnabled={skillsEnabled}
+            disabled={controlsDisabled}
             controlLabel={t("settingsPage.skills.mySkills")}
             loading={saving.has(key)}
             error={rowErrors[key]}
@@ -257,7 +260,8 @@ export default function UserSkillWorkflowSettings({
             description={workflow.description || workflow.when_to_use}
             meta={t("settingsPage.skills.workflowMeta", { revision: workflow.revision_no })}
             enabled={workflow.enabled}
-            controlEnabled={workflowsEnabled && !controlsDisabled}
+            controlEnabled={workflowsEnabled}
+            disabled={controlsDisabled}
             controlLabel={t("settingsPage.skills.myWorkflows")}
             loading={saving.has(key)}
             error={rowErrors[key]}

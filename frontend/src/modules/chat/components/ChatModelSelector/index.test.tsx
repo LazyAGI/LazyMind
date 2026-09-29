@@ -137,12 +137,15 @@ describe("ChatModelSelector", () => {
     fetchCatalogMock.mockResolvedValue(catalog());
     render(<ChatModelSelector />);
     fireEvent.click(await screen.findByRole('button', { name: '当前模型：DeepSeek · DeepSeek-V3' }));
-    const deepseekIcon = await screen.findByAltText('DeepSeek');
-    const openaiIcon = screen.getByAltText('OpenAI');
+    const dialog = within(await screen.findByRole('dialog'));
+    const deepseekOption = dialog.getByRole('button', { name: /DeepSeek-V3/ });
+    const openaiOption = dialog.getByRole('button', { name: /GPT-4o/ });
+    const deepseekIcon = deepseekOption.querySelector('img');
+    const openaiIcon = openaiOption.querySelector('img');
     expect(deepseekIcon).toHaveAttribute('src', '/provider-icons/deepseek.svg');
     expect(openaiIcon).toHaveAttribute('src', '/provider-icons/openai.svg');
-    expect(deepseekIcon.closest('button')).toHaveTextContent('DeepSeek-V3');
-    expect(openaiIcon.closest('button')).toHaveTextContent('GPT-4o');
+    expect(deepseekIcon).toHaveAttribute('alt', '');
+    expect(openaiIcon).toHaveAttribute('alt', '');
     expect(document.querySelector('.chat-model-provider-heading img')).toBeNull();
   });
   afterEach(() => {

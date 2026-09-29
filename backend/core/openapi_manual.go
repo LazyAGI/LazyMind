@@ -6,7 +6,12 @@ func manualOpenAPISpec() map[string]any {
 		schemas[name] = schema
 	}
 	for path, operations := range notificationPaths() {
-		paths[path] = operations
+		if paths[path] == nil {
+			paths[path] = map[string]any{}
+		}
+		for method, operation := range operations.(map[string]any) {
+			paths[path].(map[string]any)[method] = operation
+		}
 	}
 	ordinarySchemas, ordinaryPaths := ordinaryTaskOpenAPI()
 	for name, schema := range ordinarySchemas {
@@ -53,6 +58,8 @@ func manualOpenAPISpec() map[string]any {
 
 func manualSchemas() map[string]any {
 	return map[string]any{
+		"AutomationGroupCreateRequest": objReq([]string{"name"}, prop("name", strSchema()), prop("remark", strSchema()), prop("timezone", strSchema())),
+		"ScheduleMoveRequest":          obj(prop("group_id", nullableSchema(strSchema())), prop("position", intSchema())),
 		"ChatExport": objReq([]string{"index", "title", "filename", "content_type", "start", "end", "export_id"},
 			prop("index", intSchema()), prop("title", strSchema()), prop("filename", strSchema()),
 			prop("content_type", enumStringSchema("text/markdown")), prop("start", intSchema()), prop("end", intSchema()), prop("export_id", strSchema())),
@@ -1062,6 +1069,17 @@ func manualPaths() map[string]any {
 		)},
 		"/workflow-drafts/{draft_id}:purge": map[string]any{"delete": op(
 			"Permanently delete a workflow draft", queryParams(param("path", "draft_id", true, strSchema())), nil, response(200, "Workflow permanently deleted", refSchema("CoreEmptyResponse")),
+		)},
+		"/schedules": map[string]any{"get": op(
+			"List schedules", queryParams(param("query", "include_disabled", false, boolSchema())), nil,
+			map[string]any{"description": "Schedules"},
+		)},
+		"/automation-groups": map[string]any{"post": op(
+			"Create an automation group", nil, jsonBody(refSchema("AutomationGroupCreateRequest"), true), map[string]any{"description": "Automation group"},
+		)},
+		"/schedules/{schedule_id}:move": map[string]any{"post": op(
+			"Move a schedule to an automation group", queryParams(param("path", "schedule_id", true, strSchema())),
+			jsonBody(refSchema("ScheduleMoveRequest"), true), map[string]any{"description": "Schedule moved"},
 		)},
 		"/task-center/tasks": map[string]any{"get": op(
 			"List task-center tasks", queryParams(

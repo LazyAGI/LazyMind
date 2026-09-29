@@ -173,5 +173,5 @@ it.each(['markdown', 'ir'] as const)('%s: keeps new edits while a fixed version 
   expect(api.saveDocumentArtifact.mock.calls[0][0]).toBe('published-identity');
   expect(api.saveDocumentArtifact.mock.calls[0][1]).toMatchObject({ base_revision: 4, base_draft_version: 1 });
   expect(JSON.stringify(api.saveDocumentArtifact.mock.calls[0][1].value)).toContain('发布期间新增中文');
-  expect(action?.statusText).toMatch(/新修改尚未发布|new edits are not published/i);
+  expect(action?.statusText).toMatch(/新修改尚未发布|newer edits have not been published/i);
 });

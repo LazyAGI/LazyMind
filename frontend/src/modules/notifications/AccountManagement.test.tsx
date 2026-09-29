@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { Modal, type ModalFuncProps } from 'antd';
 import { TerminalConnectionPage } from '@/modules/channelGateway';
-import type { ChannelAccount } from '@/modules/channelGateway/api';
+import type { ChannelAccount, ConnectionSession } from '@/modules/channelGateway/api';
 import RuleEditor from './RuleEditor';
 
 const mocks = vi.hoisted(() => ({ accounts: vi.fn(), detail: vi.fn(), refs: vi.fn(), archive: vi.fn(), rename: vi.fn(), groups: vi.fn(), targets: vi.fn(), create: vi.fn(), cancel: vi.fn() }));
@@ -122,13 +122,23 @@ it('selects same-name robots by account id without changing their display names'
 
 it('does not restart reauthorization when the account list refreshes after success', async () => {
   const connected = { ...original, status: 'connected', binding_status: 'connected', runtime_status: 'running' } as ChannelAccount;
-  mocks.create.mockResolvedValue({ id: 'reauthorize-session', provider: 'feishu', mode: 'qr_code', status: 'connected', allowed_actions: [], account: connected });
+  let completeSession!: (session: ConnectionSession) => void;
+  mocks.create.mockReturnValue(new Promise<ConnectionSession>(resolve => { completeSession = resolve; }));
   await mount();
 
   fireEvent.click(screen.getByRole('button', { name: 'notifications.reauthorize' }));
 
   await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
   const accountCallsAfterStart = mocks.accounts.mock.calls.length;
+  // Complete authorization only after recording the baseline: an immediately
+  // resolved session can refresh the accounts before waitFor above returns.
+  await act(async () => {
+    rows = [connected];
+    completeSession({ id: 'reauthorize-session', provider: 'feishu', mode: 'qr_code', status: 'connected',
+      revision: 1, message: '', qr: null, challenge: null, poll_after_ms: 0,
+      allowed_actions: [], account: connected, error: null });
+  });
   await waitFor(() => expect(mocks.accounts.mock.calls.length).toBeGreaterThan(accountCallsAfterStart));
+  expect(await screen.findByRole('button', { name: 'notifications.disconnect' })).toBeEnabled();
   expect(mocks.create).toHaveBeenCalledTimes(1);
 });

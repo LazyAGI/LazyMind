@@ -8207,6 +8207,7 @@ const zhCN = {
       E_MATERIAL_MULTIPLE_PRODUCERS: "素材“{{material}}”被多个步骤产出",
       E_MATERIAL_SELF_OVERWRITE: "步骤“{{node}}”不能同时消费并产出素材“{{material}}”",
       E_MATERIAL_PRODUCER_NOT_UPSTREAM: "素材“{{material}}”的产出步骤“{{producer}}”必须位于步骤“{{node}}”的上游",
+      E_RUNTIME_POST_CHECK_MATERIAL_NOT_PRODUCED: "步骤“{{node}}”的执行后检查引用了该步骤未产出的素材“{{material}}”",
       E_STEP_ID_REQUIRED: "步骤标识不能为空",
       E_STEP_DUPLICATE: "步骤标识“{{node}}”重复",
       E_STATE_STEP_MISSING: "步骤“{{node}}”缺少状态配置",
