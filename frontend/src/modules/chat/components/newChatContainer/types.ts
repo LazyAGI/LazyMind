@@ -37,6 +37,7 @@ export interface ChatImperativeProps {
 }
 
 export interface ChatContainerProps {
+  onIntentChange?: (intent: Record<string, unknown> | null) => void;
   sideChatAction?: ReactNode;
   onOpenSources?: (sources: import("@/modules/chat/utils/sourceAdapter").ChatSource[], summary?: string) => void;
   /** Keeps references accessible when another chat drawer occupies the right edge. */

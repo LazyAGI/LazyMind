@@ -359,6 +359,19 @@ describe("SideChatPanel", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("discards a generating draft when a new selection remounts the panel", async () => {
+    const props = { open: true, parentConversationId: "parent-1", source: { selectedText: "选文" }, onClose: vi.fn() };
+    const view = render(<SideChatPanel key="selection-1" {...props} />);
+    await screen.findByTestId("side-chat-conversation");
+    act(() => mocks.latestChatProps.onStreamingChange(true));
+    vi.mocked(createSideChat).mockResolvedValueOnce({ ...child, id: "child-2" });
+    view.rerender(<SideChatPanel key="selection-2" {...props} />);
+    await waitFor(() => expect(createSideChat).toHaveBeenCalledTimes(2));
+    expect(deleteSideChat).toHaveBeenCalledWith("child-1");
+    expect(mocks.closeStream).toHaveBeenCalledWith("child-1");
+    expect(mocks.warning).not.toHaveBeenCalled();
+  });
+
   it("rejects replacement of an active unretained draft", async () => {
     const view = await renderSideChat({ selectedText: "第一段" });
 

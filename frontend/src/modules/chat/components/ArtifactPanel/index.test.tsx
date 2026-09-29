@@ -52,6 +52,19 @@ function seed(items: ConversationArtifact[]) {
 }
 
 describe('ArtifactPanel', () => {
+  it('keeps both overview lists visible and collapsible when empty', () => {
+    seed([]);
+    const { container } = render(<ArtifactPanel sessionId="conv-1" overview />);
+    expect(screen.getByText('附件')).toBeInTheDocument();
+    expect(screen.getByText('产物')).toBeInTheDocument();
+    expect(container.querySelectorAll('details[open]')).toHaveLength(2);
+    expect(screen.queryByText('0')).not.toBeInTheDocument();
+    expect(screen.queryByText('暂无内容')).not.toBeInTheDocument();
+    expect(container.querySelectorAll('.artifact-panel__list:empty')).toHaveLength(2);
+    const summary = screen.getByText('附件');
+    fireEvent.click(summary);
+    expect(summary.closest('details')).not.toHaveAttribute('open');
+  });
   beforeEach(() => {
     artifactApi.listRevisions.mockReset();
     artifactApi.downloadRevisionUrl.mockReset();

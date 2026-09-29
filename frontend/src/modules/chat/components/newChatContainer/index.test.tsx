@@ -277,22 +277,15 @@ describe("ChatContainerComponent wheel forwarding", () => {
     expect(mocks.mergeHistoryPage).not.toHaveBeenCalled();
   });
 
-  it.each([false, true])("opens references with side-chat overlay=%s and closes only references", (overlay) => {
+  it.each([false, true])("never reserves a reference panel, including legacy overlay=%s", (overlay) => {
     const { container } = render(<ChatContainerComponent
       onOpenSSE={vi.fn()} parseErrorData={(data) => data} setIsChatContent={vi.fn()}
       setChatConfigFn={vi.fn()} conversationTrailEnabled={false} sourcePanelOverlay={overlay}
     />);
     fireEvent.click(screen.getByRole("button", { name: "open sources" }));
-    expect(screen.getByRole("complementary", { name: "references" })).toBeInTheDocument();
-    if (overlay) {
-      expect(screen.getByRole("dialog")).toHaveAttribute("data-z-index", "1100");
-      expect(container.querySelector(".has-source-panel")).toBeNull();
-    } else {
-      expect(screen.queryByRole("dialog")).toBeNull();
-      expect(container.querySelector(".has-source-panel")).not.toBeNull();
-    }
-    fireEvent.click(screen.getByRole("button", { name: "close sources" }));
     expect(screen.queryByRole("complementary", { name: "references" })).toBeNull();
+    expect(container.querySelector(".has-source-panel")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByTestId("message-container")).toBeInTheDocument();
   });
 

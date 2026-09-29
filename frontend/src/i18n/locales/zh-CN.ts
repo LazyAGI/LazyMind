@@ -2074,6 +2074,12 @@ const zhCN = {
   },
 
   chat: {
+    sidebar: {
+      expand: "展开", collapse: "收起",
+      overview: "概览", sidechat: "侧面聊天", open: "展开侧面面板", close: "收起侧面面板",
+      switch: "切换侧面面板", intent: "用户意图", intentEmpty: "对话生成的用户意图会显示在这里",
+      attachments: "附件", artifacts: "产物", empty: "暂无内容",
+    },
     exportCurrentGeneration: "本次生成",
     exportPreviousGeneration: "历史生成",
     exportUnknownGeneration: "生成版本未知",
@@ -9094,6 +9100,10 @@ const zhCN = {
 
     skills: {
       title: "技能与插件",
+      searchResources: "搜索名称或描述",
+      resourceName: "名称",
+      resourceInfo: "分类 / 版本",
+      resourceEnabled: "启用",
       description: "分别启停当前账号的个人技能和工作流。",
       mySkills: "我的技能",
       myWorkflows: "我的工作流",

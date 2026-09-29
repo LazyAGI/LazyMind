@@ -99,6 +99,34 @@ describe("UserSkillWorkflowSettings workflow controls", () => {
     expect(mocks.onGroupChange).toHaveBeenCalledWith("workflows", false, 1);
   });
 
+  it("loads skills beyond the server's 100-item page and searches the complete list", async () => {
+    const records = Array.from({ length: 205 }, (_, index) => ({
+      id: `skill-${index}`, name: `Skill ${index}`, description: "", isEnabled: true,
+    }));
+    mocks.listSkillAssetsPage.mockImplementation(async ({ page, pageSize }) => ({
+      records: records.slice((page - 1) * pageSize, page * pageSize), total: records.length, page, pageSize,
+    }));
+    render(<UserSkillWorkflowSettings skillsEnabled workflowsEnabled groupSaving={null}
+      controlsDisabled={false} onGroupChange={mocks.onGroupChange} headingRef={createRef<HTMLHeadingElement>()} />);
+    await screen.findByText("Skill 0");
+    expect(mocks.listSkillAssetsPage).toHaveBeenCalledTimes(3);
+    expect(mocks.listSkillAssetsPage).toHaveBeenLastCalledWith({ page: 3, pageSize: 100 });
+    fireEvent.change(screen.getByPlaceholderText("settingsPage.skills.searchResources"), { target: { value: "Skill 204" } });
+    expect(await screen.findByText("Skill 204")).toBeVisible();
+    expect(screen.queryByText("Skill 0")).not.toBeInTheDocument();
+  });
+
+  it("keeps workflows beyond 100 searchable", async () => {
+    mocks.listUserWorkflowSettings.mockResolvedValue(Array.from({ length: 105 }, (_, index) => ({
+      workflow_ref: `workflow-${index}`, name: `Workflow ${index}`, description: "", enabled: true,
+    })));
+    render(<UserSkillWorkflowSettings activeView="workflows" skillsEnabled workflowsEnabled groupSaving={null}
+      controlsDisabled={false} onGroupChange={mocks.onGroupChange} headingRef={createRef<HTMLHeadingElement>()} />);
+    await screen.findByText("Workflow 0");
+    fireEvent.change(screen.getByPlaceholderText("settingsPage.skills.searchResources"), { target: { value: "Workflow 104" } });
+    expect(await screen.findByText("Workflow 104")).toBeVisible();
+  });
+
   it("allows workflows to be enabled from their own master switch", async () => {
     render(<UserSkillWorkflowSettings
       skillsEnabled

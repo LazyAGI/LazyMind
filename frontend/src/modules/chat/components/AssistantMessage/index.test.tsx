@@ -751,6 +751,22 @@ describe("Fork message action", () => {
 
 
 describe("embedded reference details", () => {
+  it("opens references in a popover without asking the parent to open a sidebar", async () => {
+    const onOpenSources = vi.fn();
+    render(<AssistantMessage index={0} length={1} sendMessage={vi.fn()} regenerate={vi.fn()}
+      regenerateDisabled={false} stopGeneration={vi.fn()} renderText={() => null} updateMessage={vi.fn()}
+      onOpenSources={onOpenSources}
+      item={{ role: "assistant", history_id: "ref-test", delta: "Answer", run_status: "completed",
+        sources: [{ source_type: "external", title: "Reference example", url: "https://example.com", content: "Supporting evidence" }] }} />);
+    fireEvent.click(screen.getByRole("button", { name: "chat.references (1)" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "chat.references (1)" })).toHaveAttribute("aria-expanded", "true"));
+    expect(await screen.findByRole("dialog", { name: "chat.references" })).toBeInTheDocument();
+    expect(onOpenSources).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Reference example/ }));
+    expect(screen.getByRole("heading", { name: "Reference example" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "common.close" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "chat.references (1)" })).toHaveAttribute("aria-expanded", "false"));
+  });
   it("shows details inside the panel and returns to the list without opening another surface", () => {
     const open = vi.spyOn(window, "open").mockImplementation(() => null);
     const sources = [{ source_type: "external" as const, title: "Example source", url: "https://example.com/article", content: "Evidence excerpt" }];

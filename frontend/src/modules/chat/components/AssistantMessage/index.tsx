@@ -1,4 +1,4 @@
-import { Button, Divider, Flex, message, Modal, Spin, Tooltip } from "antd";
+import { Button, Divider, Flex, message, Modal, Popover, Spin, Tooltip } from "antd";
 import { trim, debounce } from "lodash";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
@@ -193,6 +193,59 @@ export function ChatSourcePanel({
     </aside>
   );
 }
+
+function ReferenceSourcesButton({ sources }: { sources?: ChatSourceCollection }) {
+  const { t } = useTranslation();
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+    const displaySources = getReferenceSources(sources);
+    if (!displaySources.length) return null;
+    return (
+      <Popover
+        trigger="click"
+        placement="topLeft"
+        open={sourcesOpen}
+        onOpenChange={setSourcesOpen}
+        destroyOnHidden
+        overlayClassName="chat-sources-popover"
+        content={
+          <div role="dialog" aria-label={t("chat.references")} onKeyDown={event => {
+            if (event.key === "Escape") { event.stopPropagation(); setSourcesOpen(false); }
+          }}>
+            <div className="chat-source-panel-header">
+              <h2 className="chat-source-panel-title">{t("chat.references")}<span className="chat-source-panel-count">{displaySources.length}</span></h2>
+              <Button type="text" icon={<CloseOutlined />} aria-label={t("common.close")} onClick={() => setSourcesOpen(false)} />
+            </div>
+            <ChatSourcePanel sources={displaySources} embedded onClose={() => setSourcesOpen(false)} />
+          </div>
+        }
+      >
+        <Button
+          className="tool-btn source-btn"
+          aria-expanded={sourcesOpen}
+          aria-haspopup="dialog"
+          onKeyDown={(event: KeyboardEvent<HTMLButtonElement>) => { if (event.key === "Escape") setSourcesOpen(false); }}
+          aria-label={`${t("chat.references")} (${displaySources.length})`}
+        >
+          <span className="chat-source-button-icons" aria-hidden="true">
+            {displaySources.slice(0, 3).map((source, sourceIndex) => (
+              <SourceFavicon
+                source={source}
+                compact
+                key={getSourceDedupKey(source, sourceIndex)}
+              />
+            ))}
+          </span>
+          <span className="chat-source-button-label">
+            {t("chat.references")}
+          </span>
+          <span className="chat-source-button-count">
+            {displaySources.length}
+          </span>
+        </Button>
+      </Popover>
+    );
+  }
+
 
 async function copyTextToClipboard(text: string) {
   const normalizedText = text.trim();
@@ -470,7 +523,6 @@ const AssistantMessage = (props: any) => {
     onCiteMessage,
     onOpenSideChat,
     hasLaterUserMessage,
-    onOpenSources,
   } = props;
   const selectionActionsRef = useRef<HTMLDivElement | null>(null);
   const citeSelectionTextRef = useRef("");
@@ -816,33 +868,7 @@ const AssistantMessage = (props: any) => {
   }
 
   function renderSourceButton(sources?: ChatSourceCollection) {
-    const displaySources = getReferenceSources(sources);
-    if (!displaySources.length) return null;
-    return (
-      <Tooltip title={`${t("chat.references")} (${displaySources.length})`}>
-        <Button
-          className="tool-btn source-btn"
-          onClick={() => onOpenSources?.(displaySources, String(item?.content || item?.delta || "").slice(0, 180))}
-          aria-label={`${t("chat.references")} (${displaySources.length})`}
-        >
-          <span className="chat-source-button-icons" aria-hidden="true">
-            {displaySources.slice(0, 3).map((source, sourceIndex) => (
-              <SourceFavicon
-                source={source}
-                compact
-                key={getSourceDedupKey(source, sourceIndex)}
-              />
-            ))}
-          </span>
-          <span className="chat-source-button-label">
-            {t("chat.references")}
-          </span>
-          <span className="chat-source-button-count">
-            {displaySources.length}
-          </span>
-        </Button>
-      </Tooltip>
-    );
+    return <ReferenceSourcesButton sources={sources} />;
   }
 
   function getCurrentFeedback(historyId?: string) {

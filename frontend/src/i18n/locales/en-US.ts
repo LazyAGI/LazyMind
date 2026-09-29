@@ -2124,6 +2124,12 @@ const enUS = {
 
   // Chat
   chat: {
+    sidebar: {
+      expand: "Expand", collapse: "Collapse",
+      overview: "Overview", sidechat: "Side chat", open: "Open side panel", close: "Collapse side panel",
+      switch: "Switch side panel", intent: "User intent", intentEmpty: "Intent from this conversation will appear here",
+      attachments: "Attachments", artifacts: "Artifacts", empty: "Nothing here yet",
+    },
     exportCurrentGeneration: "Current generation",
     exportPreviousGeneration: "Previous generation",
     exportUnknownGeneration: "Unknown generation",
@@ -9347,6 +9353,10 @@ const enUS = {
     },
 
     skills: {
+      searchResources: "Search name or description",
+      resourceName: "Name",
+      resourceInfo: "Category / version",
+      resourceEnabled: "Enabled",
       title: "Skills & plugins",
       description: "Enable or disable personal skills and workflows for the current account independently.",
       mySkills: "My skills",
