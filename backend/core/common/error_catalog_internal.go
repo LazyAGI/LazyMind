@@ -657,6 +657,9 @@ func init() {
 		"invalid multipart body", "pdf file is required", "artifact must be a pdf", "unsupported translated artifact format",
 		"unsupported document translation provider", "translation source is required",
 		"unsupported backend translation format", "translation layout manifest is required",
+		"skill selection is invalid or already answered", "skill selection metadata is invalid",
+		"skill selection is not one of the available candidates", "skill selection requires one answer",
+		"skill selection requires a selected Skill",
 	} {
 		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
 	}
