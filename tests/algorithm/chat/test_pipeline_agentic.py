@@ -181,7 +181,7 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch, mc
     assert agent_envs == [{'REDFOX_API_KEY': 'runtime-only-secret'}]
     instruction_idx = query.index('### User Instruction\n\nhello')
     assert instruction_idx >= 0
-    assert query.index('For environment setup, call set_session_env') > instruction_idx
+    assert query.index('Call set_session_env only after the user explicitly asks') > instruction_idx
     assert query.index('ATTENTION — `ask_user`') > instruction_idx
     assert 'answer:### Runtime Context' in body
     assert 'hello' in body

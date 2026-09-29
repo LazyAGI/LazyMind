@@ -47,9 +47,13 @@ def build_session_env_tool(
 
         This displays a dedicated value input card and ends the turn. The user
         submits directly to the backend, not through chat or ask_user. Only the
-        configured/canceled status reaches the next turn. Resume the original task
-        after configuration. Default to this tool unless persistence is explicit.
-        Never copy a value from chat into tool calls or ask_user answers.
+        configured/canceled status reaches the next turn. Use it only when the
+        user explicitly asks to configure, set, save, or provide an environment
+        variable. A missing_env result alone should get a short final
+        user-facing explanation; do not open this card or another interactive
+        card until the user asks to configure it. Resume the original task
+        after configuration. Never copy a value from chat into tool calls or
+        ask_user answers.
 
         Args:
             name: Exact, case-sensitive environment variable name (not its value).
