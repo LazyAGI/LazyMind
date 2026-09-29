@@ -14,6 +14,15 @@ const requiredDesktopServices = [
   "frontend",
 ];
 
+const ragDesktopServices = new Set([
+  "scan-control-plane",
+  "file-watcher",
+  "lazyllm-doc-server",
+  "lazyllm-parse-server",
+  "lazyllm-parse-worker",
+  "lazyllm-algo",
+]);
+
 function desktopRuntimeReady(status, belongsToDesktop) {
   if (
     status?.overallStatus !== "ready" ||
@@ -26,9 +35,12 @@ function desktopRuntimeReady(status, belongsToDesktop) {
   const services = status.services || {};
   const vectorStore = status.config?.modeProfile?.VectorStore || status.config?.modeProfile?.vectorStore;
   const managedVectorStore = vectorStore?.ManagedProcess ?? vectorStore?.managedProcess;
-  const required = managedVectorStore
-    ? [...requiredDesktopServices, "milvus-lite"]
+  const requiredServices = status.config?.algorithm?.RAGDisabled === true
+    ? requiredDesktopServices.filter((name) => !ragDesktopServices.has(name))
     : requiredDesktopServices;
+  const required = managedVectorStore
+    ? [...requiredServices, "milvus-lite"]
+    : requiredServices;
   return required.every((name) => ["running", "ready"].includes(services[name]?.status));
 }
 

@@ -520,10 +520,17 @@ const MessageList: React.FC<MessageListProps> = ({
           // Retried attempts remain in history, but only the current reply is shown.
           if (item.role === RoleTypes.ASSISTANT && item.archived_failure) return null;
           const historyId = item.history_id || item.id;
+          const pending = item.ask_pending;
+          const hasMailDraft = Boolean(
+            pending &&
+            (pending.mail_draft ||
+              (Array.isArray(pending.mail_drafts) && pending.mail_drafts.length)),
+          );
           const visibleItem =
             suppressAskPending &&
             item.role === RoleTypes.ASSISTANT &&
-            item.ask_pending
+            item.ask_pending &&
+            !hasMailDraft
               ? { ...item, ask_pending: undefined }
               : item;
           return (

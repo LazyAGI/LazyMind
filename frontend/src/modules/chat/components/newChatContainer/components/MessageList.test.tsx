@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { RoleTypes } from "@/modules/chat/constants/common";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import ChatMessageContent from "./ChatMessageContent";
 import MessageList from "./MessageList";
@@ -27,6 +28,16 @@ vi.mock("@/modules/identityAvatar", () => ({
 
 vi.mock("@/modules/chat/components/MarkdownViewer", () => ({
   default: ({ children }: { children?: React.ReactNode }) => <span>{children}</span>,
+}));
+
+vi.mock("@/modules/chat/components/MailDraftCard", () => ({
+  default: ({ draft }: { draft?: { subject?: string; draft_id?: string } }) => (
+    <div>{draft?.subject || draft?.draft_id}</div>
+  ),
+}));
+
+vi.mock("@/modules/chat/components/MailDraftCard/MailMailboxCard", () => ({
+  default: () => null,
 }));
 
 function selectMessageText(text: string) {
@@ -179,5 +190,57 @@ describe("MessageList capability configuration precedence", () => {
     expect(screen.getByText("配置文生图模型")).toBeInTheDocument();
     expect(screen.queryByText("文生图模型还没配置，你希望怎么处理？"))
       .not.toBeInTheDocument();
+  });
+
+  it("keeps a mail confirmation card while capability configuration is required", () => {
+    render(
+      <MessageList
+        messageList={[{
+          role: RoleTypes.ASSISTANT,
+          delta: "preview",
+          ask_pending: {
+            ask_id: "mail-ask",
+            mail_draft: { draft_id: "draft_1", subject: "send preview", status: "draft" },
+          },
+        }]}
+        suppressAskPending
+        capabilityConfigCard={<div>配置文生图模型</div>}
+        sendMessage={vi.fn()}
+        regenerate={vi.fn()}
+        stopGeneration={vi.fn()}
+        renderText={() => null}
+        updateAssistantMessage={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("send preview")).toBeInTheDocument();
+  });
+});
+
+describe("MessageList render isolation", () => {
+  it("keeps later messages when one assistant reply throws", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    render(
+      <MessageList
+        messageList={[
+          { role: RoleTypes.ASSISTANT, delta: "explode table", id: "broken" },
+          { role: RoleTypes.ASSISTANT, delta: "still here", id: "ok" },
+        ]}
+        sendMessage={vi.fn()}
+        regenerate={vi.fn()}
+        stopGeneration={vi.fn()}
+        renderText={(item) => {
+          if (String(item.delta || "").includes("explode")) {
+            throw new Error("bad table");
+          }
+          return <span>{item.delta}</span>;
+        }}
+        updateAssistantMessage={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("chat.messageRenderFailed")).toBeInTheDocument();
+    expect(screen.getByText("still here")).toBeInTheDocument();
+    errorSpy.mockRestore();
   });
 });

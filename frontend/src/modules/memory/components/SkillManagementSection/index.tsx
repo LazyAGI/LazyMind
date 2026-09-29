@@ -10,6 +10,7 @@ import { useMemoryManagementOutletContext } from "../../context";
 import type { SkillViewMode, StructuredAsset } from "../../shared";
 import type { MarketSkillAsset } from "./skillMarketMockData";
 import {
+  cancelSkillOrganizeTask,
   deleteSkillMarketItem,
   getRunningSkillOrganizeTask,
   getSkillMarketItem,
@@ -47,13 +48,31 @@ import {
   isSkillOrganizeEligible,
   MAX_SKILL_ORGANIZE_SELECTION,
 } from "./skillOrganizeRules";
+import { skillOrganizeErrorText } from "../../skillOrganizeCopy";
 import "./index.scss";
 
 const DEFAULT_MARKET_PAGE_SIZE = 8;
+
+function describeSkillOrganizeError(
+  error: unknown,
+  t: (key: string) => string,
+): string {
+  const response = (error as { response?: { data?: Record<string, unknown> } })?.response?.data;
+  const nested = response?.data;
+  const nestedRecord =
+    nested && typeof nested === "object" && nested !== null
+      ? (nested as { code?: unknown })
+      : undefined;
+  const nestedCode = nestedRecord ? String(nestedRecord.code || "") : "";
+  const message = typeof response?.message === "string" ? response.message.trim() : "";
+  return skillOrganizeErrorText(nestedCode, message, t);
+}
+
 export default function SkillManagementSection() {
   const listContentRef = useRef<HTMLDivElement>(null);
   const marketRequestIdRef = useRef(0);
   const organizePollingControllerRef = useRef<AbortController | null>(null);
+  const organizeRequestIdRef = useRef("");
   const navigate = useNavigate();
   const [newWorkflowOpen, setNewWorkflowOpen] = useState(false);
   const [selectedSkills, setSelectedSkills] = useState<Map<string, StructuredAsset>>(new Map());
@@ -70,6 +89,7 @@ export default function SkillManagementSection() {
   const [organizeStatus, setOrganizeStatus] = useState<SkillOrganizeStatus>("idle");
   const [organizeRunStatus, setOrganizeRunStatus] = useState<SkillOrganizeTaskStatus | "">("");
   const [organizeElapsedMs, setOrganizeElapsedMs] = useState(0);
+  const [organizeError, setOrganizeError] = useState("");
   const organizeStartedAtRef = useRef<number | null>(null);
   const [selectedOrganizeSkills, setSelectedOrganizeSkills] = useState<
     Map<string, StructuredAsset>
@@ -98,7 +118,6 @@ export default function SkillManagementSection() {
     openSkillShareCenter,
     incomingPendingCount,
     openSkillCreateModal,
-    hideUserGroupSurfaces,
     openModal,
     skillAssets,
     skillLoading,
@@ -597,9 +616,11 @@ export default function SkillManagementSection() {
           },
         );
         if (task.status === "failed") {
-          throw new Error("Skill organize task failed");
+          setOrganizeError(skillOrganizeErrorText(task.errorCode, task.error, t));
+          setOrganizeStatus("error");
+          return;
         }
-        if (task.status === "skipped") {
+        if (task.status === "cancelled" || task.status === "skipped") {
           setOrganizeStatus("skipped");
           return;
         }
@@ -610,6 +631,7 @@ export default function SkillManagementSection() {
           return;
         }
         console.error("Skill organize task failed:", error);
+        setOrganizeError(describeSkillOrganizeError(error, t));
         setOrganizeStatus("error");
       } finally {
         if (organizePollingControllerRef.current === pollingController) {
@@ -659,6 +681,27 @@ export default function SkillManagementSection() {
     return () => pollingController.abort();
   }, [followSkillOrganize]);
 
+  const cancelRunningSkillOrganize = async () => {
+    const requestId = organizeRequestIdRef.current;
+    organizePollingControllerRef.current?.abort();
+    organizePollingControllerRef.current = null;
+    if (!requestId) {
+      setOrganizeStatus("skipped");
+      setOrganizeSubmitting(false);
+      return;
+    }
+    try {
+      await cancelSkillOrganizeTask(requestId);
+      setOrganizeStatus("skipped");
+      setOrganizeError("");
+    } catch (error) {
+      setOrganizeError(describeSkillOrganizeError(error, t));
+      setOrganizeStatus("error");
+    } finally {
+      setOrganizeSubmitting(false);
+    }
+  };
+
   const handleOrganizeSubmit = async (mode: SkillOrganizeDepth) => {
     const skills = [...selectedOrganizeSkills.values()];
     if (mode !== organizeDepth || skills.some((skill) => !isSkillOrganizeEligible(skill, organizeDepth))) {
@@ -678,6 +721,7 @@ export default function SkillManagementSection() {
     organizePollingControllerRef.current = pollingController;
     setOrganizeSubmitting(true);
     setOrganizeStatus("running");
+    setOrganizeError("");
     // Exit selection mode immediately so the page stays usable while the
     // organize task runs in the background.
     cancelSkillOrganize();
@@ -690,6 +734,7 @@ export default function SkillManagementSection() {
       if (!result.requestId || !result.taskId) {
         throw new Error("Skill organize task was not accepted");
       }
+      organizeRequestIdRef.current = result.requestId;
       if (pollingController.signal.aborted) {
         return;
       }
@@ -702,6 +747,7 @@ export default function SkillManagementSection() {
         organizePollingControllerRef.current = null;
       }
       console.error("Skill organize task failed:", error);
+      setOrganizeError(describeSkillOrganizeError(error, t));
       setOrganizeStatus("error");
       setOrganizeSubmitting(false);
     }
@@ -942,6 +988,7 @@ export default function SkillManagementSection() {
         organizeStatus={organizeStatus}
         organizeRunStatus={organizeRunStatus}
         organizeElapsedMs={organizeElapsedMs}
+        organizeError={organizeError}
         organizeDisabledReason={organizeDisabledReason}
         organizeDisabled={
           skillLoading ||
@@ -951,6 +998,7 @@ export default function SkillManagementSection() {
         }
         onOrganizeSkills={startSkillOrganize}
         onOrganizeCancel={cancelSkillOrganize}
+        onOrganizeCancelRun={() => void cancelRunningSkillOrganize()}
         manualSkillReviewCount={manualSkillReviewCount}
         manualSkillReviewDisabled={manualSkillReviewButtonDisabled}
         manualSkillReviewDisabledReason={manualSkillReviewDisabledReason}
@@ -959,7 +1007,6 @@ export default function SkillManagementSection() {
         onMessageCenterClick={handleSkillMessageCenter}
         showMessageCenter={shouldShowSkillMessageCenter({
           skillView,
-          hideUserGroupSurfaces,
         })}
         isAdmin={isAdmin}
         marketFilters={marketFilters}

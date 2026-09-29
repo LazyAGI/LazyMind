@@ -274,6 +274,30 @@ func TestVerifyChangedLockEntriesFailsChangedSourceTreeMismatch(t *testing.T) {
 	}
 }
 
+func TestVerifyChangedLockEntriesPreviewBackfillDoesNotScopeUnchangedPackages(t *testing.T) {
+	baseA := testLockEntry("https://example.test/a.zip", "bsk_old_a")
+	baseB := testLockEntry("https://example.test/b.zip", "bsk_b")
+	currentA := testLockEntry(baseA.SourceURL, "bsk_new_a")
+	currentB := baseB
+	currentB.Content = "preview backfilled for catalog-only installs"
+	generatedB := currentB
+	generatedB.UID = "bsk_remote_update_b"
+	generatedB.TreeSHA256 = strings.Repeat("c", 64)
+
+	err := verifyChangedLockEntries(
+		testLockCatalog(baseA, baseB),
+		testLockCatalog(currentA, currentB),
+		testLockCatalog(currentA, generatedB),
+		[]sourceInput{{URL: baseA.SourceURL}, {URL: baseB.SourceURL}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if currentB.Content == "" {
+		t.Fatal("lock comparison must preserve catalog-only previews")
+	}
+}
+
 func TestVerifyChangedLockEntriesFailsChangedSourceMismatch(t *testing.T) {
 	base := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_old_a"))
 	current := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_current_a"))
@@ -422,6 +446,33 @@ func TestRunBuildsCatalogAndFrozenModeUsesVerifiedCache(t *testing.T) {
 	if err := run(context.Background(), opts, http.DefaultClient); err != nil {
 		t.Fatalf("frozen cached build failed: %v", err)
 	}
+	previewOutput := filepath.Join(root, "runtime-preview", "builtin-skills")
+	previousPackage := filepath.Join(previewOutput, "packages", "previous.zip")
+	if err := os.MkdirAll(filepath.Dir(previousPackage), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(previousPackage, []byte("existing package"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts.Output = previewOutput
+	opts.Cache = filepath.Join(root, "empty-cache")
+	opts.CatalogOnly = true
+	forbiddenClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("unexpected network request to %s", request.URL)
+	})}
+	if err := run(context.Background(), opts, forbiddenClient); err != nil {
+		t.Fatalf("catalog-only build made a network request or failed: %v", err)
+	}
+	preview := readCatalog(t, filepath.Join(previewOutput, "catalog.json")).Skills[0]
+	if preview.Content != catalog.Skills[0].Content {
+		t.Fatal("catalog-only build lost the locked SKILL.md preview")
+	}
+	if _, err := os.Stat(filepath.Join(previewOutput, filepath.FromSlash(preview.PackageFile))); !os.IsNotExist(err) {
+		t.Fatalf("remote package must be absent in catalog-only output: %v", err)
+	}
+	if body, err := os.ReadFile(previousPackage); err != nil || string(body) != "existing package" {
+		t.Fatalf("catalog-only build changed an existing package: %q, %v", body, err)
+	}
 }
 
 func TestRunPackagesBundledSkillsIntoTheCatalog(t *testing.T) {
@@ -480,14 +531,15 @@ skills: []
 	}
 }
 
-func TestRunAcceptsRemoteSourceMappingWithCategoryAndProvider(t *testing.T) {
+func TestRunAcceptsRemoteSourceMappingWithUIDCategoryAndProvider(t *testing.T) {
+	const uid = "bsk_STABLE_REMOTE_SKILL_UID"
 	archive := makeSkillZip(t)
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(archive)), ContentLength: int64(len(archive)), Header: make(http.Header)}, nil
 	})}
 	root := t.TempDir()
 	sources := filepath.Join(root, "sources.yaml")
-	if err := os.WriteFile(sources, []byte("schema_version: 1\nskills:\n  - source_url: https://example.test/demo.zip\n    category: search\n    provider: SkillHub\n"), 0o644); err != nil {
+	if err := os.WriteFile(sources, []byte("schema_version: 1\nskills:\n  - source_url: https://example.test/demo.zip\n    uid: "+uid+"\n    category: search\n    provider: SkillHub\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	opts := options{Sources: sources, Lock: filepath.Join(root, "lock.json"), Cache: filepath.Join(root, "cache"), Output: filepath.Join(root, "runtime", "builtin-skills")}
@@ -495,8 +547,8 @@ func TestRunAcceptsRemoteSourceMappingWithCategoryAndProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry := readCatalog(t, filepath.Join(opts.Output, "catalog.json")).Skills[0]
-	if entry.Category != "search" || entry.Provider != "SkillHub" {
-		t.Fatalf("category/provider = %q/%q", entry.Category, entry.Provider)
+	if entry.UID != uid || entry.Category != "search" || entry.Provider != "SkillHub" {
+		t.Fatalf("uid/category/provider = %q/%q/%q", entry.UID, entry.Category, entry.Provider)
 	}
 
 	opts.Output = filepath.Join(root, "runtime-frozen", "builtin-skills")
@@ -515,6 +567,20 @@ func TestBuiltinSourceManifestIncludesSelectedSkillHubAndGitHubSources(t *testin
 	sources, err := loadSources(sourcesPath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	const lubanUID = "bsk_C9F5AF4B5B3845FC6F1EB196EAB5"
+	foundLuban := false
+	for _, source := range sources.Skills {
+		if source.SourceURL != "https://skillhub.cn/skills/indiv-ebandao/luban-skill-pro" {
+			continue
+		}
+		foundLuban = true
+		if source.UID != lubanUID {
+			t.Fatalf("luban-skill-pro uid = %q, want %q", source.UID, lubanUID)
+		}
+	}
+	if !foundLuban {
+		t.Fatal("luban-skill-pro source is missing")
 	}
 	expected := []struct {
 		url      string
@@ -639,12 +705,27 @@ func TestRunAppliesPatchToDownloadedSkillAndFreezesProvenance(t *testing.T) {
 	if err := run(context.Background(), opts, http.DefaultClient); err != nil {
 		t.Fatalf("frozen patched build failed: %v", err)
 	}
+	opts.Output = filepath.Join(root, "runtime-preview", "builtin-skills")
+	opts.Cache = filepath.Join(root, "empty-cache")
+	opts.CatalogOnly = true
+	if err := run(context.Background(), opts, &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("unexpected network request to %s", request.URL)
+	})}); err != nil {
+		t.Fatalf("catalog-only patched build failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(opts.Output, "patches", "catalog.yaml")); err != nil {
+		t.Fatalf("patch assets missing from catalog-only output: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(opts.Output, filepath.FromSlash(entry.PackageFile))); !os.IsNotExist(err) {
+		t.Fatalf("remote patched package must be absent in catalog-only output: %v", err)
+	}
 
 	payload := filepath.Join(root, "patches", resolvedSkillUID(spec, "1.2.3"), "fix-script-v1", "files", "script.py")
 	if err := os.WriteFile(payload, []byte("print('drifted')\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	opts.Output = filepath.Join(root, "runtime-frozen-drift", "builtin-skills")
+	opts.CatalogOnly = false
 	if err := run(context.Background(), opts, http.DefaultClient); err == nil {
 		t.Fatal("frozen build accepted changed patch payload")
 	}

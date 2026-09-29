@@ -303,7 +303,32 @@ def _normalize_pdf_block_text(value: str) -> str:
     # complete paragraph and the renderer, not the source PDF, performs wrapping.
     value = re.sub(r'(?<=\w)-\s*\n\s*(?=[a-z])', '', value)
     value = re.sub(r'\s*\n\s*', ' ', value)
-    return re.sub(r'[ \t]+', ' ', value).strip()
+    value = re.sub(r'[ \t]+', ' ', value).strip()
+    # PDF extraction reports visual line wraps, so they are flattened above.
+    # Bullet markers are semantic, however: restore one item per line even when
+    # a translation provider changes the common bullet from "•" to "·".
+    value = re.sub(r'\s*[•●▪◦·]\s*', '\n· ', value)
+    return value.lstrip()
+
+
+def _looks_like_code_block(text: str, spans: list[dict[str, object]]) -> bool:
+    visible_spans = [span for span in spans if str(span.get('text', '')).strip()]
+    total_chars = sum(len(str(span.get('text', '')).strip()) for span in visible_spans)
+    monospace_chars = sum(
+        len(str(span.get('text', '')).strip())
+        for span in visible_spans
+        if (
+            int(span.get('flags', 0)) & fitz.TEXT_FONT_MONOSPACED
+            or re.search(r'(mono|courier|typewriter|newtxtt|cmtt|code)', str(span.get('font', '')), re.I)
+        )
+    )
+    if total_chars and monospace_chars / total_chars >= 0.7:
+        return True
+    return bool(re.match(
+        r'^(?:@\w+|async\s+def\b|def\b|class\b|import\b|from\b|if\b|elif\b|else\s*:|for\b|while\b|'
+        r'try\s*:|except\b|finally\s*:|with\b|return\b|raise\b|yield\b|[A-Za-z_]\w*\s*=)',
+        text,
+    ))
 
 
 def _protect_short_latin_terms(value: str) -> str:
@@ -321,6 +346,182 @@ def _protect_short_latin_terms(value: str) -> str:
     for source, target in terms.items():
         value = value.replace(source, target)
     return value
+
+
+def _balanced_heading_text(value: str, font: fitz.Font, font_size: float, max_width: float) -> str:
+    """Wrap mixed CJK/Latin headings into the fewest, visually balanced lines."""
+    value = re.sub(r'\s+', ' ', value).strip()
+    if not value or max_width <= 0:
+        return value
+    # Keep Latin identifiers intact while allowing CJK headings to wrap at each
+    # character. Leading whitespace remains attached to the following token and
+    # is removed only when that token starts a new line.
+    tokens = re.findall(r'\s*[A-Za-z0-9][A-Za-z0-9._/+:-]*|\s*[^\sA-Za-z0-9]', value)
+    if not tokens:
+        return value
+
+    segment_cache: dict[tuple[int, int], tuple[str, float]] = {}
+
+    def segment(start: int, end: int) -> tuple[str, float]:
+        key = (start, end)
+        if key not in segment_cache:
+            text = ''.join(tokens[start:end]).strip()
+            segment_cache[key] = (text, font.text_length(text, fontsize=font_size))
+        return segment_cache[key]
+
+    # First calculate the minimum number of lines required from every token.
+    token_count = len(tokens)
+    minimum_lines = [token_count + 1] * (token_count + 1)
+    minimum_lines[token_count] = 0
+    for start in range(token_count - 1, -1, -1):
+        for end in range(start + 1, token_count + 1):
+            _, width = segment(start, end)
+            if width > max_width and end > start + 1:
+                break
+            if width <= max_width:
+                minimum_lines[start] = min(minimum_lines[start], 1 + minimum_lines[end])
+
+    if minimum_lines[0] > token_count:
+        return value
+
+    # Among layouts with the fewest lines, minimize raggedness and heavily
+    # penalize an orphaned final character / very short final line.
+    best_cost = [float('inf')] * (token_count + 1)
+    best_break = [-1] * (token_count + 1)
+    best_cost[token_count] = 0.0
+    for start in range(token_count - 1, -1, -1):
+        for end in range(start + 1, token_count + 1):
+            text, width = segment(start, end)
+            if width > max_width and end > start + 1:
+                break
+            if width > max_width or minimum_lines[start] != 1 + minimum_lines[end]:
+                continue
+            unused = max_width - width
+            cost = unused * unused + best_cost[end]
+            if end == token_count and minimum_lines[0] > 1:
+                visible_chars = len(re.sub(r'\s+', '', text))
+                if visible_chars <= 1 or width < max_width * 0.22:
+                    cost += max_width * max_width * 100
+            if cost < best_cost[start]:
+                best_cost[start] = cost
+                best_break[start] = end
+
+    lines: list[str] = []
+    start = 0
+    while start < token_count and best_break[start] > start:
+        end = best_break[start]
+        lines.append(segment(start, end)[0])
+        start = end
+    return '\n'.join(lines) if start == token_count else value
+
+
+def _split_list_items(value: str) -> list[str]:
+    normalized = value.strip()
+    if not normalized.startswith('· '):
+        return []
+    items = [item.strip() for item in re.split(r'\n·\s*', normalized[2:]) if item.strip()]
+    return items
+
+
+def _protect_latin_word_wrapping(value: str) -> str:
+    """Give the PDF line breaker real word boundaries around Latin terms."""
+    latin_term = r'[A-Za-z][A-Za-z0-9_./+:-]*'
+    value = re.sub(rf'([\u3400-\u9fff])({latin_term})', r'\1 \2', value)
+    value = re.sub(rf'({latin_term})([\u3400-\u9fff])', r'\1 \2', value)
+    return value
+
+
+def _restore_source_latin_terms(value: str, source_text: str) -> str:
+    """Repair technical names split by a provider or an earlier PDF wrap."""
+    terms = {
+        match.group(0)
+        for match in re.finditer(r'[A-Za-z][A-Za-z0-9_.+]*', source_text)
+        if len(match.group(0)) >= 4 and (
+            any(character.isupper() for character in match.group(0)[1:])
+            or any(not character.isalpha() for character in match.group(0))
+        )
+    }
+    for term in sorted(terms, key=len, reverse=True):
+        broken = r'[\s-]*'.join(re.escape(character) for character in term)
+        value = re.sub(broken, term, value, flags=re.IGNORECASE)
+    return value
+
+
+def _wrap_mixed_text(value: str, font: fitz.Font, fontsize: float, max_width: float) -> str:
+    """Wrap CJK per character while keeping Latin technical terms atomic."""
+    wrapped_paragraphs: list[str] = []
+    for paragraph in value.splitlines() or [value]:
+        tokens = re.findall(
+            r'[A-Za-z][A-Za-z0-9_.+:/-]*(?:\s*\[[0-9,\s]+\])?|\[[0-9,\s]+\]|\s+|.',
+            paragraph,
+        )
+        lines: list[str] = []
+        current = ''
+        for token in tokens:
+            if token.isspace():
+                if '\u3000' in token:
+                    current += '\u3000' * token.count('\u3000')
+                    continue
+                if current and not current.endswith(' '):
+                    current += ' '
+                continue
+            candidate = current + token
+            if current and font.text_length(candidate, fontsize=fontsize) > max_width:
+                lines.append(current.rstrip())
+                current = token
+            else:
+                current = candidate
+        if current.rstrip():
+            lines.append(current.rstrip())
+        wrapped_paragraphs.append('\n'.join(lines))
+    return '\n'.join(wrapped_paragraphs)
+
+
+def _insert_list_textbox(
+    page: fitz.Page,
+    rect: fitz.Rect,
+    value: str,
+    *,
+    fontsize: float,
+    lineheight: float,
+    font: fitz.Font,
+    color: tuple[float, float, float],
+    overlay: bool = True,
+) -> float:
+    items = _split_list_items(value)
+    if not items:
+        return -1.0
+    indent = max(fontsize * 1.35, 4.5)
+    item_gap = max(fontsize * 0.3, 1.0)
+    cursor_y = rect.y0
+    for item in items:
+        body_rect = fitz.Rect(rect.x0 + indent, cursor_y, rect.x1, rect.y1)
+        item = _wrap_mixed_text(item, font, fontsize, body_rect.width)
+        remaining = page.insert_textbox(
+            body_rect,
+            item,
+            fontsize=fontsize,
+            lineheight=lineheight,
+            fontname='NotoSansCJK',
+            color=color,
+            align=fitz.TEXT_ALIGN_LEFT,
+            overlay=overlay,
+        )
+        if remaining < 0:
+            return remaining
+        used_height = body_rect.height - remaining
+        radius = max(fontsize * 0.16, 0.8)
+        page.draw_circle(
+            fitz.Point(rect.x0 + radius, cursor_y + fontsize * 0.55),
+            radius,
+            color=color,
+            fill=color,
+            overlay=overlay,
+        )
+        cursor_y += used_height + item_gap
+        if cursor_y > rect.y1:
+            return rect.y1 - cursor_y
+    return rect.y1 - cursor_y
 
 
 def _run_libreoffice_convert(source: Path, target: Path) -> None:
@@ -457,17 +658,51 @@ def render_pdf_translation(req: PDFTranslationRenderRequest) -> dict[str, object
             level = str(block.get('styleLevel') or 'body')
             if level not in {'title', 'heading', 'body', 'caption', 'footnote', 'reference'}:
                 level = 'body'
+            is_list = bool(_split_list_items(translated))
+            source_text = str(block.get('text') or '').strip()
+            source_indent = float(block.get('firstLineIndent') or 0)
+            indent_first_line = (
+                source_indent > float(block.get('fontSize') or 10.0) * 0.4
+                or (
+                    level == 'body'
+                    and not is_list
+                    and bool(re.match(r'^[A-Z“"(]', source_text))
+                )
+            )
             candidates.append({
                 'page': page_index,
                 'rect': rect,
                 'redaction_rect': redaction_rect,
                 'text': translated,
+                'source_text': source_text,
                 'level': level,
                 'source_size': max(3.0, min(24.0, float(block.get('fontSize') or 10.0))),
                 'bold': bool(block.get('bold')),
                 'align': str(block.get('align') or 'justify'),
                 'single_line': is_single_line,
+                'is_list': is_list,
+                'indent_first_line': indent_first_line,
             })
+
+        # A translated body block needs a visible paragraph gap when it follows
+        # a heading in the same column. Source PDFs often encode only a tiny
+        # baseline gap that becomes visually lost with CJK glyph metrics.
+        headings = [item for item in candidates if item['level'] in {'title', 'heading'}]
+        for candidate in candidates:
+            if candidate['level'] != 'body':
+                continue
+            preceding = [
+                heading for heading in headings
+                if heading['page'] == candidate['page']
+                and 0 <= candidate['rect'].y0 - heading['rect'].y1 <= max(14, candidate['source_size'] * 1.5)
+                and (candidate['rect'] & fitz.Rect(
+                    heading['rect'].x0, candidate['rect'].y0,
+                    heading['rect'].x1, candidate['rect'].y1,
+                )).width > 0
+            ]
+            if preceding:
+                top_gap = min(candidate['source_size'] * 0.6, candidate['rect'].height * 0.08)
+                candidate['rect'].y0 += top_gap
 
         # Plan typography once for the whole document. The median source size keeps
         # each semantic level close to the original design. Every block is then
@@ -503,14 +738,37 @@ def render_pdf_translation(req: PDFTranslationRenderRequest) -> dict[str, object
                 remaining = -1.0
                 while remaining < 0 and font_size >= minimum_sizes[level]:
                     is_bold = bool(candidate['bold'])
+                    measured_text = _protect_latin_word_wrapping(_restore_source_latin_terms(
+                        str(candidate['text']), str(candidate['source_text']),
+                    ))
+                    if candidate['indent_first_line']:
+                        measured_text = '\u3000\u3000' + measured_text
+                    if level in {'title', 'heading'} and not candidate['single_line']:
+                        measured_text = _balanced_heading_text(
+                            measured_text, translation_font, font_size, candidate['rect'].width,
+                        )
+                    elif not candidate['single_line'] and not candidate['is_list']:
+                        measured_text = _wrap_mixed_text(
+                            measured_text, translation_font, font_size, candidate['rect'].width,
+                        )
                     if candidate['single_line']:
-                        text_width = translation_font.text_length(str(candidate['text']), fontsize=font_size)
+                        text_width = translation_font.text_length(measured_text, fontsize=font_size)
                         line_height_limit = candidate['rect'].height * 1.05
                         remaining = candidate['rect'].width - text_width if font_size <= line_height_limit else -1.0
+                    elif candidate['is_list']:
+                        remaining = _insert_list_textbox(
+                            probe_page,
+                            candidate['rect'],
+                            measured_text,
+                            fontsize=font_size,
+                            lineheight=1.05,
+                            font=translation_font,
+                            color=(0, 0, 0),
+                        )
                     else:
                         remaining = probe_page.insert_textbox(
                             candidate['rect'],
-                            str(candidate['text']),
+                            measured_text,
                             fontsize=font_size,
                             lineheight=1.05 if level in {'body', 'caption'} else 1.0,
                             fontname='NotoSansCJK',
@@ -538,29 +796,55 @@ def render_pdf_translation(req: PDFTranslationRenderRequest) -> dict[str, object
             if font_size is None:
                 continue
             candidate['font_size'] = font_size
+            prepared_text = _protect_latin_word_wrapping(_restore_source_latin_terms(
+                str(candidate['text']), str(candidate['source_text']),
+            ))
+            if candidate['indent_first_line']:
+                prepared_text = '\u3000\u3000' + prepared_text
+            candidate['render_text'] = (
+                _balanced_heading_text(
+                    prepared_text, translation_font, font_size, candidate['rect'].width,
+                )
+                if level in {'title', 'heading'} and not candidate['single_line']
+                else _wrap_mixed_text(
+                    prepared_text, translation_font, font_size, candidate['rect'].width,
+                ) if not candidate['single_line'] and not candidate['is_list'] else prepared_text
+            )
             candidate['line_height'] = 1.0
             if not candidate['single_line'] and level in {'body', 'caption', 'footnote', 'reference'}:
                 # Font sizes are shared by semantic level, while line spacing may
                 # use the spare vertical room of each individual block. Probe in
-                # small increments and never exceed 1.5x.
+                # small increments and never exceed 2x. Sparse blocks can use
+                # their available height without changing the shared font size.
                 probe_page = probe_document[int(candidate['page'])]
-                for line_height_step in range(105, 151, 5):
+                for line_height_step in range(105, 201, 5):
                     line_height = line_height_step / 100
-                    remaining = probe_page.insert_textbox(
-                        candidate['rect'],
-                        str(candidate['text']),
-                        fontsize=font_size,
-                        lineheight=line_height,
-                        fontname='NotoSansCJK',
-                        color=(0, 0, 0),
-                        align=(
-                            fitz.TEXT_ALIGN_CENTER
-                            if candidate['align'] == 'center'
-                            else fitz.TEXT_ALIGN_JUSTIFY
-                        ),
-                        render_mode=2 if candidate['bold'] else 0,
-                        border_width=0.06 if candidate['bold'] else 0.05,
-                    )
+                    if candidate['is_list']:
+                        remaining = _insert_list_textbox(
+                            probe_page,
+                            candidate['rect'],
+                            str(candidate['render_text']),
+                            fontsize=font_size,
+                            lineheight=line_height,
+                            font=translation_font,
+                            color=(0, 0, 0),
+                        )
+                    else:
+                        remaining = probe_page.insert_textbox(
+                            candidate['rect'],
+                            str(candidate['render_text']),
+                            fontsize=font_size,
+                            lineheight=line_height,
+                            fontname='NotoSansCJK',
+                            color=(0, 0, 0),
+                            align=(
+                                fitz.TEXT_ALIGN_CENTER
+                                if candidate['align'] == 'center'
+                                else fitz.TEXT_ALIGN_JUSTIFY
+                            ),
+                            render_mode=2 if candidate['bold'] else 0,
+                            border_width=0.06 if candidate['bold'] else 0.05,
+                        )
                     if remaining < 0:
                         break
                     candidate['line_height'] = line_height
@@ -586,13 +870,13 @@ def render_pdf_translation(req: PDFTranslationRenderRequest) -> dict[str, object
             page_index = int(item['page'])
             page = document[page_index]
             if item['single_line']:
-                text_width = translation_font.text_length(str(item['text']), fontsize=float(item['font_size']))
+                text_width = translation_font.text_length(str(item['render_text']), fontsize=float(item['font_size']))
                 start_x = item['rect'].x0
                 if item['align'] == 'center':
                     start_x += max((item['rect'].width - text_width) / 2, 0)
                 page.insert_text(
                     fitz.Point(start_x, item['rect'].y1 - 0.5),
-                    str(item['text']),
+                    str(item['render_text']),
                     fontsize=float(item['font_size']),
                     fontname='NotoSansCJK',
                     color=(0, 0, 0),
@@ -601,10 +885,21 @@ def render_pdf_translation(req: PDFTranslationRenderRequest) -> dict[str, object
                     border_width=0.06 if item['bold'] else 0.05,
                 )
                 actual_remaining = item['rect'].width - text_width
+            elif item['is_list']:
+                actual_remaining = _insert_list_textbox(
+                    page,
+                    item['rect'],
+                    str(item['render_text']),
+                    fontsize=float(item['font_size']),
+                    lineheight=float(item['line_height']),
+                    font=translation_font,
+                    color=(0, 0, 0),
+                    overlay=True,
+                )
             else:
                 actual_remaining = page.insert_textbox(
                     item['rect'],
-                    str(item['text']),
+                    str(item['render_text']),
                     fontsize=float(item['font_size']),
                     lineheight=float(item['line_height']),
                     fontname='NotoSansCJK',
@@ -714,11 +1009,21 @@ def extract_pdf_translation_layout(req: PDFTranslationLayoutRequest) -> dict[str
                     in_references = True
                 elif re.match(r'^(appendix|[A-Z]\s+[A-Z][A-Z\s-]{4,})$', text):
                     in_references = False
+                text_rect = fitz.Rect(raw_block[:4])
+                rich_block = max(
+                    rich_blocks,
+                    key=lambda candidate: (
+                        text_rect & fitz.Rect(candidate.get('bbox', (0, 0, 0, 0)))
+                    ).get_area(),
+                    default={},
+                )
+                lines = rich_block.get('lines', [])
+                spans = [span for line in lines for span in line.get('spans', []) if span.get('text', '').strip()]
                 # Equations and code are semantic, non-prose content. Translating
                 # them both corrupts the expression and creates very narrow boxes
                 # that would force the document-wide body font to an unreadable
                 # size. Preserve these blocks verbatim in the source PDF.
-                is_code = bool(re.match(r'^(def|class|import|from)\s+\w+', text))
+                is_code = _looks_like_code_block(text, spans)
                 is_formula = (
                     len(text) <= 100
                     and ('=' in text or '√' in text or '∈' in text)
@@ -726,7 +1031,6 @@ def extract_pdf_translation_layout(req: PDFTranslationLayoutRequest) -> dict[str
                 )
                 if is_code or is_formula:
                     continue
-                text_rect = fitz.Rect(raw_block[:4])
                 text_area = max(text_rect.width * text_rect.height, 1.0)
                 is_caption = re.match(r'^(figure|fig\.|table)\s*\d', text, re.IGNORECASE) is not None
                 overlaps_figure = any(
@@ -745,23 +1049,88 @@ def extract_pdf_translation_layout(req: PDFTranslationLayoutRequest) -> dict[str
                     or text_rect.x0 < page.rect.width * 0.07
                     or text_rect.x1 > page.rect.width * 0.93
                 )
-                is_first_page_author_line = (
+                is_first_page_author_block = (
                     page_index == 0
-                    and text_rect.y1 < page.rect.height * 0.24
-                    and text_rect.height < 25
-                    and len(text) > 25
+                    and page.rect.height * 0.18 <= text_rect.y0
+                    and text_rect.y1 < page.rect.height * 0.76
+                    and text_rect.height < 30
+                    and len(text) < 100
                 )
-                if is_page_furniture or is_first_page_author_line:
+                is_first_page_legal_notice = (
+                    page_index == 0
+                    and text_rect.y0 > page.rect.height * 0.72
+                    and text_rect.x1 < page.rect.width * 0.52
+                    and bool(re.search(r'copyright|permission|isbn|doi\.org|proceedings', text, re.IGNORECASE))
+                )
+                if is_page_furniture or is_first_page_author_block or is_first_page_legal_notice:
                     continue
-                rich_block = max(
-                    rich_blocks,
-                    key=lambda candidate: (
-                        text_rect & fitz.Rect(candidate.get('bbox', (0, 0, 0, 0)))
-                    ).get_area(),
-                    default={},
+                visible_rich_lines = [
+                    line for line in lines
+                    if ''.join(span.get('text', '') for span in line.get('spans', [])).strip()
+                ]
+                first_line_top = (
+                    float(visible_rich_lines[0].get('bbox', (0, 0, 0, 0))[1])
+                    if visible_rich_lines else 0.0
                 )
-                lines = rich_block.get('lines', [])
-                spans = [span for line in lines for span in line.get('spans', []) if span.get('text', '').strip()]
+                inline_heading_lines = [
+                    line for line in visible_rich_lines
+                    if abs(float(line.get('bbox', (0, 0, 0, 0))[1]) - first_line_top) < 2
+                    and all(
+                        int(span.get('flags', 0)) & fitz.TEXT_FONT_BOLD
+                        for span in line.get('spans', []) if str(span.get('text', '')).strip()
+                    )
+                ]
+                inline_heading_text = ' '.join(
+                    ''.join(str(span.get('text', '')) for span in line.get('spans', [])).strip()
+                    for line in inline_heading_lines
+                ).strip()
+                body_lines = visible_rich_lines[len(inline_heading_lines):]
+                if re.match(r'^\d+(?:\.\d+)+\s+\S', inline_heading_text) and body_lines:
+                    heading_rect = fitz.Rect(inline_heading_lines[0].get('bbox'))
+                    for line in inline_heading_lines[1:]:
+                        heading_rect |= fitz.Rect(line.get('bbox'))
+                    body_rect = fitz.Rect(body_lines[0].get('bbox'))
+                    for line in body_lines[1:]:
+                        body_rect |= fitz.Rect(line.get('bbox'))
+                    heading_spans = [span for line in inline_heading_lines for span in line.get('spans', [])]
+                    body_spans = [span for line in body_lines for span in line.get('spans', [])]
+                    heading_size = statistics.median(float(span.get('size', 10)) for span in heading_spans)
+                    body_size = statistics.median(float(span.get('size', 10)) for span in body_spans)
+                    body_text = _normalize_pdf_block_text('\n'.join(
+                        ''.join(str(span.get('text', '')) for span in line.get('spans', []))
+                        for line in body_lines
+                    ))
+                    blocks.append({
+                        'id': f'native-block-{page_index + 1}-{block_index}',
+                        'page': page_index + 1,
+                        'pageWidth': page.rect.width,
+                        'pageHeight': page.rect.height,
+                        'bbox': [float(value) for value in heading_rect],
+                        'type': 'native_text_block',
+                        'text': inline_heading_text,
+                        'fontSize': heading_size,
+                        'bold': True,
+                        'align': 'justify',
+                        'styleLevel': 'heading',
+                        'firstLineIndent': 0.0,
+                    })
+                    block_index += 1
+                    blocks.append({
+                        'id': f'native-block-{page_index + 1}-{block_index}',
+                        'page': page_index + 1,
+                        'pageWidth': page.rect.width,
+                        'pageHeight': page.rect.height,
+                        'bbox': [float(value) for value in body_rect],
+                        'type': 'native_text_block',
+                        'text': body_text,
+                        'fontSize': body_size,
+                        'bold': False,
+                        'align': 'justify',
+                        'styleLevel': 'body',
+                        'firstLineIndent': 0.0,
+                    })
+                    block_index += 1
+                    continue
                 styled_chars = sum(max(len(span.get('text', '').strip()), 1) for span in spans)
                 source_font_size = (
                     sum(float(span.get('size', 10)) * max(len(span.get('text', '').strip()), 1) for span in spans)
@@ -815,6 +1184,14 @@ def extract_pdf_translation_layout(req: PDFTranslationLayoutRequest) -> dict[str
                     'bold': is_bold,
                     'align': 'center' if is_centered else 'justify',
                     'styleLevel': style_level,
+                    'firstLineIndent': max(
+                        0.0,
+                        float(lines[0].get('bbox', (text_rect.x0,))[0])
+                        - statistics.median([
+                            float(line.get('bbox', (text_rect.x0,))[0]) for line in lines[1:]
+                            if ''.join(span.get('text', '') for span in line.get('spans', [])).strip()
+                        ]),
+                    ) if len(lines) > 1 else 0.0,
                 })
                 block_index += 1
     finally:

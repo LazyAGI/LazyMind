@@ -20,4 +20,6 @@ func init() {
 	registerAdditionalError("cannot delete original revision", http.StatusConflict, 2002950)
 	registerAdditionalErrorPattern("unsupported discovery field %q", "Unsupported discovery field", http.StatusBadRequest, 2002951)
 	registerAdditionalError("discovery value required", http.StatusBadRequest, 2002952)
+	registerAdditionalError("skill organize task is not running", http.StatusConflict, 2003145)
+	registerAdditionalError("skill organize cancel failed", http.StatusBadGateway, 2003146)
 }

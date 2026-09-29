@@ -85,3 +85,128 @@ test("stages a cached, verified Pandoc executable into the runtime", async () =>
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("Windows extracts verified ZIPs using literal paths and propagates extraction errors", {
+  skip: process.platform !== "win32",
+}, async () => {
+  const { execFileSync } = await import("node:child_process");
+  const root = await mkdtemp(path.join(os.tmpdir(), "lazymind pandoc 中文 ' $ & [test]-"));
+  try {
+    const sourceDir = path.join(root, "source");
+    await mkdir(sourceDir);
+    const source = path.join(sourceDir, "pandoc.exe");
+    const archive = path.join(root, "fixture.zip");
+    await writeFile(source, "pandoc executable fixture");
+    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+      "$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory($env:TEST_PANDOC_SOURCE, $env:TEST_PANDOC_ZIP)",
+    ], { env: { ...process.env, TEST_PANDOC_SOURCE: sourceDir, TEST_PANDOC_ZIP: archive } });
+    const body = await readFile(archive);
+    const sha256 = createHash("sha256").update(body).digest("hex");
+    const configPath = path.join(root, "pandoc.json");
+    const target = {
+      fileName: "pandoc.zip", upstreamUrls: ["https://example.invalid/pandoc.zip"], sha256,
+      archivePath: "pandoc.exe", runtimePath: "bin/pandoc.exe",
+    };
+    const config = { schemaVersion: 1, name: "pandoc", version: "3.11", targets: { "windows-x64": target } };
+    await writeFile(configPath, JSON.stringify(config));
+    await writeFile(path.join(root, `${sha256}-pandoc.zip`), body);
+    const result = await stagePandoc(path.join(root, "runtime"), "windows-x64", {
+      cacheRoot: root, configPath, runVersion: async () => "pandoc 3.11\r\n",
+    });
+    assert.equal(await readFile(result.runtimePath, "utf8"), "pandoc executable fixture");
+
+    const invalid = Buffer.from("invalid zip");
+    target.sha256 = createHash("sha256").update(invalid).digest("hex");
+    await writeFile(configPath, JSON.stringify(config));
+    await writeFile(path.join(root, `${target.sha256}-pandoc.zip`), invalid);
+    await assert.rejects(stagePandoc(path.join(root, "runtime"), "windows-x64", {
+      cacheRoot: root, configPath,
+      runVersion: async () => { assert.fail("must not execute after extraction fails"); },
+    }), (error) => error.code === 1 && /powershell/i.test(error.message));
+    assert.equal(await readFile(result.runtimePath, "utf8"), "pandoc executable fixture");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// Hold an actual Windows handle without FILE_SHARE_DELETE, reproducing scanner
+// or recently executed image locks. stdin releases it, including on test failure.
+async function holdWindowsFile(filePath) {
+  const { spawn } = await import("node:child_process");
+  const { once } = await import("node:events");
+  const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+    "$ErrorActionPreference = 'Stop'; $file = [IO.File]::Open($env:TEST_LOCK_FILE, 'Open', 'Read', 'Read'); try { [Console]::WriteLine('LOCKED'); [Console]::Out.Flush(); [Console]::ReadLine() | Out-Null } finally { $file.Dispose() }",
+  ], { env: { ...process.env, TEST_LOCK_FILE: filePath }, stdio: ["pipe", "pipe", "pipe"] });
+  const closed = once(child, "close");
+  let stderr = "";
+  child.stderr.on("data", data => { stderr += data; });
+  try {
+    await Promise.race([
+      (async () => {
+        let output = "";
+        for await (const chunk of child.stdout) {
+          output += chunk;
+          if (output.includes("LOCKED")) return;
+        }
+        throw new Error(`Lock helper exited before locking: ${stderr}`);
+      })(),
+      closed.then(() => { throw new Error(`Lock helper failed: ${stderr}`); }),
+    ]);
+    let released = false;
+    return async () => {
+      if (!released) { released = true; child.stdin.end("\n"); }
+      await closed;
+    };
+  } catch (error) {
+    child.kill();
+    await closed;
+    throw error;
+  }
+}
+
+for (const locked of ["candidate", "installed", "persistent-candidate", "persistent-installed"]) {
+  test(`Windows Pandoc replacement handles a real ${locked} file lock`, {
+    skip: process.platform !== "win32", timeout: 30000,
+  }, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "pandoc-locked-"));
+    let release;
+    let timer;
+    try {
+      const runtime = path.join(root, "runtime");
+      const installed = path.join(runtime, "bin/pandoc.exe");
+      await mkdir(path.dirname(installed), { recursive: true });
+      await writeFile(installed, "previous executable");
+      const archiveBody = "verified fixture";
+      const sha256 = createHash("sha256").update(archiveBody).digest("hex");
+      const configPath = path.join(root, "config.json");
+      await writeFile(configPath, JSON.stringify({ schemaVersion: 1, name: "pandoc", version: "3.11", targets: {
+        "windows-x64": { fileName: "pandoc.zip", upstreamUrls: ["https://example.invalid/pandoc.zip"], sha256,
+          archivePath: "pandoc.exe", runtimePath: "bin/pandoc.exe" },
+      } }));
+      await writeFile(path.join(root, `${sha256}-pandoc.zip`), archiveBody);
+      const options = {
+        configPath, cacheRoot: root,
+        extractZip: async (_archive, destination) => { await writeFile(path.join(destination, "pandoc.exe"), "new executable"); },
+        runVersion: async candidate => {
+          const lockPath = locked.endsWith("candidate") ? candidate : installed;
+          release = await holdWindowsFile(lockPath);
+          const { rename } = await import("node:fs/promises");
+          await assert.rejects(rename(lockPath, `${lockPath}.probe`), error => ["EBUSY", "EPERM", "EACCES"].includes(error.code));
+          if (!locked.startsWith("persistent-")) timer = setTimeout(() => { void release(); }, 1600);
+          return "pandoc 3.11\n";
+        },
+      };
+      if (locked.startsWith("persistent-")) {
+        await assert.rejects(stagePandoc(runtime, "windows-x64", options), error => ["EBUSY", "EPERM", "EACCES"].includes(error.code));
+        assert.equal(await readFile(installed, "utf8"), "previous executable");
+      } else {
+        await stagePandoc(runtime, "windows-x64", options);
+        assert.equal(await readFile(installed, "utf8"), "new executable");
+      }
+    } finally {
+      clearTimeout(timer);
+      if (release) await release();
+      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 250 });
+    }
+  });
+}

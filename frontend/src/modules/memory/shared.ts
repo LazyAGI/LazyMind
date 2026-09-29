@@ -11,7 +11,7 @@ export type MemoryTab = "skills" | "experience" | "glossary";
 export type ModalMode = "add" | "edit" | "view";
 export type ShareableTab = "skills";
 export type ChangeProposalTab = "skills";
-export type SkillShareCenterTab = "incoming" | "outgoing";
+export type SkillShareCenterTab = "incoming" | "outgoing" | "organize";
 export type SkillShareAction = "accept" | "reject" | "preview";
 export type GlossarySource = "user" | "ai";
 
@@ -67,6 +67,7 @@ export interface StructuredAsset extends BaseAsset {
   callMode?: "manual" | "on_demand" | "priority";
   originalRevisionId?: string;
   originBuiltinSkillUid?: string;
+  sourceRefType?: string;
   field?: string;
   aliases?: string[];
   keywords?: string[];

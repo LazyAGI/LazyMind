@@ -717,6 +717,7 @@
   flex-direction: column;
   gap: 16px;
   min-height: 0;
+  padding: 0 24px 16px;
 }
 
 .memory-skill-market-scroll {
@@ -1110,6 +1111,10 @@
   .memory-skill-filter-controls,
   .memory-skill-installed-filters {
     flex-wrap: wrap;
+  }
+
+  .memory-skill-market {
+    padding-inline: 16px;
   }
 
   .memory-skill-organize-bar {

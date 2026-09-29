@@ -1002,6 +1002,62 @@ def test_search_merges_accounts_then_respects_limit(mail_auth):
     assert limited['items'][0]['id'] == 'b-new'
 
 
+class _WindowIMAP(_RecordingIMAP):
+    def __init__(self, uids: list[int]):
+        super().__init__()
+        self._uids = uids
+
+    def list(self, *args, **kwargs):
+        return 'OK', [b'(\\HasNoChildren) "/" INBOX']
+
+    def uid(self, command, *args):
+        self.calls.append((str(command).upper(), args))
+        if str(command).upper() == 'SEARCH':
+            ceiling = None
+            if 'UID' in args:
+                spec = str(args[args.index('UID') + 1])
+                if ':' in spec:
+                    ceiling = int(spec.split(':', 1)[1])
+            matched = [uid for uid in self._uids if ceiling is None or uid <= ceiling]
+            payload = ' '.join(str(uid) for uid in matched).encode('ascii')
+            return 'OK', [payload]
+        header = (
+            b'From: a@b.com\r\nTo: c@d.com\r\nSubject: hi\r\n'
+            b'Date: Wed, 2 Sep 2026 12:00:00 +0000\r\nMessage-ID: <x@y>\r\n\r\n'
+        )
+        meta = args[0] if args else ''
+        requested = [token for token in str(meta).split(',') if token.isdigit()]
+        rows = []
+        for uid in requested:
+            rows.append((f'1 (UID {uid} BODY[HEADER.FIELDS] {{10}}'.encode('ascii'), header))
+            rows.append(b')')
+        return 'OK', rows
+
+
+def test_imap_search_returns_requested_page_when_more_exist(mail_auth):
+    imap = _WindowIMAP(list(range(1, 81)))
+    with patch.object(_IMAPBackend, '_connect', return_value=imap):
+        result = MailToolkit().search(mailbox='user@qq.com', folder='inbox', limit=40)
+    assert result['requested'] == 40
+    assert result['returned'] == 40
+    assert result['has_more'] is True
+    assert result['next_before'] == '2026-09-02'
+    assert 'reason' not in result
+    assert result['items'][0]['id'].endswith('::80')
+
+
+def test_imap_search_reports_window_exhausted(mail_auth):
+    imap = _WindowIMAP(list(range(398, 430)))
+    with patch.object(_IMAPBackend, '_connect', return_value=imap):
+        result = MailToolkit().search(mailbox='user@qq.com', folder='inbox', limit=40)
+    assert result['requested'] == 40
+    assert result['returned'] == 32
+    assert result['has_more'] is False
+    assert result['reason'] == 'imap_window_exhausted'
+    assert result['oldest_date']
+    assert 'next_before' not in result
+
+
 def test_search_has_more_when_backend_reports_more(mail_auth):
     class FakeBackend:
         def search(self, **kwargs):
@@ -1014,6 +1070,7 @@ def test_search_has_more_when_backend_reports_more(mail_auth):
         result = MailToolkit().search(keyword='x', limit=3)
     assert len(result['items']) == 3
     assert result['has_more'] is True
+    assert result['next_before'] == '2026-09-09'
 
 
 def test_plain_error_text_unwraps_json_payloads():

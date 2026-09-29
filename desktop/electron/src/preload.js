@@ -36,7 +36,9 @@ function createDesktopBridge(ipcRenderer) {
     agentExecutableClear: (target) => ipcRenderer.invoke("lazymind:agentExecutableClear", target),
     assistantSessionSet: (session) => ipcRenderer.invoke("lazymind:assistantSessionSet", session),
     assistantSessionClear: () => ipcRenderer.invoke("lazymind:assistantSessionClear"),
-    restartRuntime: () => ipcRenderer.invoke("lazymind:restartRuntime"),
+    restartRuntime: (options) => options === undefined
+      ? ipcRenderer.invoke("lazymind:restartRuntime")
+      : ipcRenderer.invoke("lazymind:restartRuntime", { reload: options?.reload !== false }),
     resetRuntime: (scope) => ipcRenderer.invoke("lazymind:resetRuntime", scope),
     localFolderAccessStatus: () => ipcRenderer.invoke("lazymind:localFolderAccessStatus"),
     chooseLocalDiscoveryRoots: () => ipcRenderer.invoke("lazymind:chooseLocalDiscoveryRoots"),

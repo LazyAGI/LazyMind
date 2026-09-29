@@ -38,7 +38,7 @@ func TestRelocateDesktopPythonVenvs(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(venv, "Scripts", "python.exe"), []byte("uv-trampoline"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(venv, "pyvenv.cfg"), []byte("home = C:\\build\\"+homeName+"\nversion_info = 3.11\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(venv, "pyvenv.cfg"), []byte("home = C:\\build\\"+homeName+"\nexecutable = C:\\build\\old\\python.exe\nbase-prefix = C:\\build\\old\nversion_info = 3.11\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -52,6 +52,9 @@ func TestRelocateDesktopPythonVenvs(t *testing.T) {
 		}
 		if !strings.Contains(string(raw), "home = "+home) {
 			t.Fatalf("relocated config = %q, want home %q", raw, home)
+		}
+		if !strings.Contains(string(raw), "executable = "+filepath.Join(home, "python.exe")) || !strings.Contains(string(raw), "base-prefix = "+home) {
+			t.Fatalf("ancillary interpreter paths not relocated: %s", raw)
 		}
 		python, err := os.ReadFile(filepath.Join(venv, "Scripts", "python.exe"))
 		if err != nil {

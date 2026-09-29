@@ -528,6 +528,10 @@ def _render_preview_template(
     count = _tool_result_count(business_value)
     if count is not None:
         context['count'] = f'**{count}**'
+        requested = count
+        if isinstance(business_value, dict) and isinstance(business_value.get('requested'), int):
+            requested = business_value['requested']
+        context['requested'] = f'**{requested}**'
     context['value'] = f'**{preview_value}**'
     context['tool_name'] = f'**{tool_name}**'
     context['match'] = f'**{match_group or render_name}**'

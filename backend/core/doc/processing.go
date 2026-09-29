@@ -2,6 +2,7 @@ package doc
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -235,4 +236,61 @@ func EnsureParsed(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 	}
 	common.ReplyJSON(w, result)
+}
+
+// ReadDocument returns authorized document text for chat and other read-only
+// consumers. Unlike :content, this is a JSON endpoint: textual source files are
+// read directly, while binary PDFs use parsed root nodes. It intentionally does
+// not require semantic chunks or a vector index.
+func ReadDocument(w http.ResponseWriter, r *http.Request) {
+	datasetID, documentID := datasetIDFromPath(r), documentIDFromPath(r)
+	_, userID, ok := requireDatasetPermission(r, datasetID, acl.PermissionDatasetRead)
+	if !ok {
+		if userID == "" {
+			common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
+		} else {
+			replyDatasetForbidden(w)
+		}
+		return
+	}
+	service, err := NewDocumentService(DocumentServiceDeps{DB: store.DB(), LazyDB: store.LazyLLMDB()})
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	result, err := service.GetDocument(r.Context(), DocumentReadRequest{
+		UserID: userID, DatasetID: datasetID, DocumentID: documentID, IncludeContent: true,
+		Caller: DatasetCatalogCaller{UserID: userID, Authorization: r.Header.Get("Authorization"), TenantID: r.Header.Get("X-Tenant-Id"), UserRole: r.Header.Get("X-User-Role")},
+	})
+	if err != nil {
+		status := http.StatusInternalServerError
+		var serviceErr *DocumentServiceError
+		if errors.As(err, &serviceErr) {
+			switch serviceErr.Code {
+			case DocumentServiceInvalidArgument:
+				status = http.StatusBadRequest
+			case DocumentServiceForbidden:
+				status = http.StatusForbidden
+			case DocumentServiceNotFound:
+				status = http.StatusNotFound
+			case DocumentServiceUnavailable:
+				status = http.StatusServiceUnavailable
+			case DocumentServiceUnsupported:
+				status = http.StatusUnprocessableEntity
+			}
+		}
+		common.ReplyErr(w, err.Error(), status)
+		return
+	}
+	common.ReplyJSON(w, map[string]any{
+		"document_id":  result.Metadata.ID,
+		"dataset_id":   result.Metadata.DatasetID,
+		"file_name":    result.Metadata.Name,
+		"parse_status": result.Metadata.ParseStatus,
+		"content": map[string]any{
+			"text":      result.Content.Text,
+			"mime_type": result.Content.MIMEType,
+			"truncated": result.Content.Truncated,
+		},
+	})
 }

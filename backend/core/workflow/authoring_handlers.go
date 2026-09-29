@@ -135,6 +135,10 @@ func GetSkillConversionContext(w http.ResponseWriter, r *http.Request) {
 		snapshot, err = loadWorkflowSourceSkillRevision(r.Context(), store.DB(), userID, skillID, revisionID)
 	}
 	if err != nil {
+		if isWorkflowBuiltinPackageDownload(err) {
+			common.ReplyErr(w, err.Error(), http.StatusBadGateway)
+			return
+		}
 		common.ReplyErr(w, "plugin source skill not found", http.StatusNotFound)
 		return
 	}
@@ -277,8 +281,23 @@ func GetAuthoringWorkflowDiagnostics(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "not found", 404)
 		return
 	}
+	if err := builtinDraftPackageDownloadError(r.Context(), draft); err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadGateway)
+		return
+	}
 	finalized, final := finalizedAuthoringDraft(r.Context(), store.DB(), draft)
 	common.ReplyOK(w, authoringDiagnosticsForRequest(store.DB(), finalized, r, &final.Capabilities))
+}
+
+func builtinDraftPackageDownloadError(ctx context.Context, draft orm.WorkflowDraft) error {
+	if draft.SourceType != "skill" || !strings.HasPrefix(draft.SourceSkillRevisionID, "builtin:") {
+		return nil
+	}
+	_, err := loadWorkflowBuiltinSkillPackage(ctx, draft.SourceSkillID)
+	if isWorkflowBuiltinPackageDownload(err) {
+		return err
+	}
+	return nil
 }
 
 func PublishAuthoringWorkflow(w http.ResponseWriter, r *http.Request) {
@@ -302,6 +321,9 @@ func publishAuthoringWorkflow(ctx context.Context, db *gorm.DB, userID, draftID 
 	var draft orm.WorkflowDraft
 	if userID == "" || db.Where("id=? AND created_by=? AND deleted_at IS NULL", draftID, userID).First(&draft).Error != nil {
 		return nil, nil, &workflowServiceError{http.StatusNotFound, "not found"}
+	}
+	if err := builtinDraftPackageDownloadError(ctx, draft); err != nil {
+		return nil, nil, &workflowServiceError{http.StatusBadGateway, err.Error()}
 	}
 	final, err := finalizeAuthoringWorkflowDraft(ctx, db, &draft)
 	if err != nil {

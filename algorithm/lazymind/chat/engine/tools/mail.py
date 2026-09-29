@@ -104,6 +104,20 @@ def _fail(message: str) -> NoReturn:
     raise ToolExecutionError(message)
 
 
+def _search_continue_before(oldest: str) -> str:
+    text = (oldest or '').strip()
+    if not text:
+        return ''
+    try:
+        parsed = datetime.fromisoformat(text.replace('Z', '+00:00'))
+    except ValueError:
+        try:
+            parsed = datetime.strptime(text[:10], '%Y-%m-%d')
+        except ValueError:
+            return ''
+    return parsed.date().isoformat()
+
+
 def _clamp_limit(value: Any, default: int = _LIST_DEFAULT_LIMIT, maximum: int = _LIST_MAX_LIMIT) -> int:
     try:
         parsed = int(value)
@@ -850,6 +864,114 @@ def _quote_imap_string(value: str) -> str:
     return f'"{escaped}"'
 
 
+_SEARCH_PAGE_GUARD = 8
+_HEADER_FETCH_CHUNK = 30
+_HEADER_FETCH_SPEC = '(BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])'
+
+
+def _uid_tokens(data: Any) -> list[str]:
+    raw = data[0] if data else b''
+    if isinstance(raw, bytes):
+        text = raw.decode('ascii', 'replace')
+    else:
+        text = str(raw or '')
+    return [token for token in text.split() if token.isdigit()]
+
+
+def _search_criteria_with_uid_ceiling(criteria: list[str], ceiling: int | None) -> list[str]:
+    if ceiling is None:
+        return list(criteria)
+    return [*criteria, 'UID', f'1:{ceiling}']
+
+
+def _collect_matching_uids(client, criteria: list[str], limit: int) -> tuple[list[str], bool, bool]:
+    """Page UID SEARCH toward older mail until `limit` is filled or the server stops.
+
+    Returns UIDs to fetch (ascending, at most `limit`), whether older matches
+    remain, and whether the visible IMAP window was exhausted before `limit`.
+    """
+    collected: list[str] = []
+    seen: set[str] = set()
+    ceiling: int | None = None
+    has_more = False
+    exhausted = False
+    for _page in range(_SEARCH_PAGE_GUARD):
+        status, data = client.uid('SEARCH', *_search_criteria_with_uid_ceiling(criteria, ceiling))
+        if status != 'OK':
+            exhausted = True
+            break
+        fresh = [uid for uid in _uid_tokens(data) if uid not in seen]
+        if not fresh:
+            exhausted = True
+            break
+        seen.update(fresh)
+        collected.extend(fresh)
+        oldest = min(int(uid) for uid in fresh)
+        if len(collected) > limit:
+            has_more = True
+            break
+        if oldest <= 1:
+            exhausted = len(collected) <= limit
+            has_more = False
+            break
+        if len(collected) == limit:
+            probe_status, probe_data = client.uid(
+                'SEARCH',
+                *_search_criteria_with_uid_ceiling(criteria, oldest - 1),
+            )
+            probe_fresh = []
+            if probe_status == 'OK':
+                probe_fresh = [uid for uid in _uid_tokens(probe_data) if uid not in seen]
+            has_more = bool(probe_fresh)
+            exhausted = not has_more
+            break
+        ceiling = oldest - 1
+    else:
+        exhausted = len(collected) < limit
+        has_more = len(collected) > limit
+    ordered = sorted(collected, key=lambda item: int(item))
+    if len(ordered) > limit:
+        ordered = ordered[-limit:]
+        has_more = True
+        exhausted = False
+    short = exhausted and len(ordered) < limit and not has_more
+    return ordered, has_more, short
+
+
+def _iter_uid_fetch_payloads(fetched: Any) -> list[tuple[str, bytes]]:
+    results: list[tuple[str, bytes]] = []
+    if not fetched:
+        return results
+    for item in fetched:
+        if not isinstance(item, tuple) or len(item) < 2 or item[1] is None:
+            continue
+        meta = item[0]
+        meta_text = meta.decode('ascii', 'replace') if isinstance(meta, bytes) else str(meta or '')
+        match = re.search(r'\bUID (\d+)', meta_text)
+        raw = item[1]
+        payload = raw if isinstance(raw, (bytes, bytearray)) else bytes(raw)
+        results.append((match.group(1) if match else '', payload))
+    return results
+
+
+def _fetch_header_messages(client, uids: list[str]) -> dict[str, email.message.Message]:
+    found: dict[str, email.message.Message] = {}
+    for start in range(0, len(uids), _HEADER_FETCH_CHUNK):
+        part = uids[start:start + _HEADER_FETCH_CHUNK]
+        status, fetched = client.uid('FETCH', ','.join(part), _HEADER_FETCH_SPEC)
+        if status != 'OK':
+            continue
+        parsed = _iter_uid_fetch_payloads(fetched)
+        if len(parsed) == 1 and not parsed[0][0] and len(part) == 1:
+            parsed = [(part[0], parsed[0][1])]
+        elif parsed and len(parsed) == len(part) and all(not uid for uid, _raw in parsed):
+            parsed = [(part[index], parsed[index][1]) for index in range(len(part))]
+        for uid, raw in parsed:
+            if uid:
+                found[uid] = email.message_from_bytes(raw)
+    return found
+
+
 def _imap_search_args(filters: dict[str, str]) -> list[str]:
     fields: list[tuple[str, str]] = []
     for key, atom in (
@@ -1360,27 +1482,21 @@ class _IMAPBackend:
             items = []
             limit = _clamp_limit(filters.get('limit', _LIST_DEFAULT_LIMIT))
             has_more = False
+            searched_folders = 0
+            exhausted_folders = 0
             for folder in folders:
                 if not _select_mailbox(client, folder, readonly=True):
                     continue
-                status, data = client.uid('SEARCH', *criteria)
-                if status != 'OK':
-                    continue
-                ids = (data[0] or b'').split()
-                if len(ids) > limit:
-                    has_more = True
-                ids = ids[-limit:]
-                for uid in reversed(ids):
-                    status, fetched = client.uid(
-                        'FETCH',
-                        uid,
-                        '(BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])',
-                    )
-                    raw = _imap_payload(fetched)
-                    if status != 'OK' or raw is None:
+                uids, folder_more, folder_exhausted = _collect_matching_uids(client, criteria, limit)
+                searched_folders += 1
+                if folder_exhausted:
+                    exhausted_folders += 1
+                has_more = has_more or folder_more
+                headers = _fetch_header_messages(client, list(reversed(uids)))
+                for token in reversed(uids):
+                    msg = headers.get(token)
+                    if msg is None:
                         continue
-                    msg = email.message_from_bytes(raw)
-                    token = uid.decode('ascii')
                     items.append({
                         'id': _mail_ref(folder, token),
                         'folder': folder,
@@ -1393,13 +1509,27 @@ class _IMAPBackend:
                     })
             items.sort(key=lambda row: str(row.get('date') or ''), reverse=True)
             capped = items[:limit]
-            return {
+            dates = [str(row.get('date') or '') for row in capped if row.get('date')]
+            window_exhausted = (
+                searched_folders > 0
+                and exhausted_folders == searched_folders
+                and len(capped) < limit
+                and not has_more
+                and len(items) <= limit
+            )
+            payload = {
                 'provider': self.provider,
                 'mailbox': self.email,
                 'folders': folders,
                 'items': capped,
+                'requested': limit,
+                'returned': len(capped),
                 'has_more': has_more or len(items) > limit,
+                'window_exhausted': window_exhausted,
             }
+            if dates:
+                payload['oldest_date'] = min(dates)
+            return payload
         finally:
             try:
                 client.logout()
@@ -1878,7 +2008,11 @@ class MailToolkit:
             subject: Filter by subject.
             after: Inclusive start date, YYYY-MM-DD.
             before: Inclusive end date, YYYY-MM-DD.
-            limit: Max hits after merge. Default 50, maximum 100.
+            limit: How many emails to return in this call. Default 50, maximum 100.
+                Pass the count the user asked for; values above 100 are capped at 100.
+                If the user wants more messages than this result and has_more is true,
+                call search again with the same filters and before=next_before.
+                Skip ids already returned. One follow-up call still returns at most 100.
             mailbox: Optional email, connection id, or provider (netease163/qqmail/gmailimap).
                 Email/connection id match exactly. A provider name matches every enabled
                 account of that type. Empty searches all enabled mailboxes.
@@ -1887,6 +2021,12 @@ class MailToolkit:
             folder: Optional mailbox folder: inbox, sent, drafts, trash, junk, or all.
                 Default all searches Inbox plus Sent, Drafts, Trash, and Junk when present.
                 Result ids are folder::UID; pass that exact id to read.
+                Use inbox when the user asked for inbox mail.
+
+        When returned is less than requested and reason is imap_window_exhausted,
+        the server did not expose older mail. Say that in one sentence and stop.
+        Do not issue another search to hunt for those missing messages.
+        A further search is only for mail the user still wants when has_more is true.
         """
         requested = str(mailbox or '').strip()
         if requested:
@@ -1899,6 +2039,8 @@ class MailToolkit:
         errors: list[dict[str, Any]] = []
         capped = _clamp_limit(limit)
         has_more = False
+        searched_accounts = 0
+        exhausted_accounts = 0
         kwargs = {
             'keyword': str(keyword or '').strip(),
             'sender': str(sender or '').strip(),
@@ -1920,15 +2062,41 @@ class MailToolkit:
                 })
                 continue
             has_more = has_more or bool(result.get('has_more'))
+            searched_accounts += 1
+            if result.get('window_exhausted'):
+                exhausted_accounts += 1
             items.extend(item for item in (result.get('items') or []) if isinstance(item, dict))
         if not items and errors and len(errors) == len(accounts):
             _fail(errors[0]['error'])
         items.sort(key=lambda row: str(row.get('date') or ''), reverse=True)
+        returned_items = items[:capped]
+        dates = [str(row.get('date') or '') for row in returned_items if row.get('date')]
         payload: dict[str, Any] = {
-            'items': items[:capped],
+            'items': returned_items,
+            'requested': capped,
+            'returned': len(returned_items),
             'has_more': has_more or len(items) > capped,
             'mailboxes': [cred.get('email') or '' for cred in accounts],
         }
+        if dates:
+            payload['oldest_date'] = min(dates)
+        if payload['has_more']:
+            continue_before = _search_continue_before(str(payload.get('oldest_date') or ''))
+            if continue_before:
+                payload['next_before'] = continue_before
+        if (
+            payload['returned'] < capped
+            and not payload['has_more']
+            and searched_accounts > 0
+            and exhausted_accounts == searched_accounts
+            and not errors
+        ):
+            payload['reason'] = 'imap_window_exhausted'
+            payload['message'] = (
+                f'The mailbox only exposed {payload["returned"]} of the requested '
+                f'{capped} messages. Older mail is not available over IMAP. '
+                'Do not search again for the missing messages.'
+            )
         if errors:
             payload['errors'] = errors
         return payload

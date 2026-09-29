@@ -77,8 +77,20 @@ PPT 的 `lazymind-ppt-source` 元数据必须记录当前源 HTML 的 SHA-256；
    `conversationIds`。该 ID 列表用于 Docker 在下载前查询 PostgreSQL。
 6. 不要用 `git add -f` 提交任何内层或外层 ZIP。
 
-Desktop 的 Windows/macOS 构建脚本会校验并下载外层 ZIP，以固定名
-`resources/runtime/history-injection.zip` 放入安装包。Desktop 预热阶段会再次校验运行时清单中的 SHA-256，只解压外层 ZIP 内的 `history-injection/` 到用户数据目录，再启动 Core 完成数据库和产物注入；不修改已签名的应用目录。可用 `LAZYMIND_HISTORY_INJECTION_ENABLED=false` 整体关闭 Core 注入。
+Desktop 默认不再把案例 ZIP 放入安装包。Windows/macOS 构建脚本只复制发布描述文件，
+将 URL、大小和 SHA-256 写入运行时清单；构建阶段不下载案例。现有案例打包、上传 ModelScope、
+更新 `desktop/history-injection-package.json` 的流程保持不变，内置 Workflow 定义/执行脚本和 Skill 不变。
+
+安装后的 warmup（或首次普通启动）在 Python 准备之后、Core 启动之前下载并校验案例，
+缓存到 `<runtimeRoot>/cache/history-injection/<sha256>.zip`，将外层 ZIP 的 `history-injection/`
+解压到用户数据目录，再启动 Core 导入；不修改已签名应用目录。匹配的解压标记存在时即使 ZIP 缓存被清理，
+也无需联网；只缺解压目录时复用校验后的缓存。失败清理临时文件，保留之前的案例，允许基础服务继续启动，
+下次启动重试；用户取消整个启动则正常取消。单次下载最多等待 3 分钟，不提供断点续传。
+
+Actions 的 `defer_history` 和本地 `LAZYMIND_DESKTOP_DEFER_HISTORY` 默认开启；设为 false 恢复原有
+“构建时下载校验、安装包内置 ZIP、warmup 本地解压”方式，用于离线发行和体积对照。
+切换模式时构建脚本会清除相反模式的案例载荷，防止 `resume` 把旧 ZIP 带回精简包。
+`LAZYMIND_HISTORY_INJECTION_ENABLED=false` 仍用于关闭 Core 的案例注入；该开关不改变安装包构建方式。
 
 Docker 不在 Core 镜像构建阶段下载数据。`history-injection-init` 是复用 Chat/algorithm
 镜像的一次性容器：它先查询持久化 PostgreSQL；五条对话全部存在时直接退出，缺少时才把外层 ZIP 下载并缓存到
@@ -89,7 +101,7 @@ Core 或再次执行 `make up` 不会重复下载。
 ## 启动顺序
 
 ```text
-GitHub Action 下载外层 ZIP并写入安装包 → Desktop warmup 校验并解压到用户数据目录
+GitHub Action 只写案例下载元数据 → Desktop warmup 准备 Python → 下载/复用缓存、校验并解压到用户数据目录
 → Core 数据库迁移 → 内置 Workflow seed → 发现/解压内层 bundle ZIP → 登录本地 admin 获取 user_id
 → 校验 manifest/SHA-256 → 原子复制文件 → 单事务导入 SQL → Core 对外 healthy
 
@@ -98,3 +110,14 @@ Docker: history-injection-init 查询 PostgreSQL → 已存在则跳过；缺少
 ```
 
 注入按 conversation ID 幂等：同一用户已有该对话时仅补齐/校验文件；若相同 ID 已属于其他用户则拒绝覆盖。warmup 失败时安装器本身仍可完成，但 Core 日志会明确报告 bundle；普通首次启动也会再次执行同一流程，因此不是只能依赖安装器 warmup。
+
+
+## 案例后置安装回归（2026-09-20）
+
+- 精简构建：runtime 只有 `history-injection-package.json` 和 manifest 下载描述，不包含 `history-injection.zip`；已有源案例目录/ZIP 的排除规则继续有效。
+- 联网首次 warmup：下载发布的 74,408,904 字节（约 70.96 MiB）案例包，通过 SHA-256 后解压，Core 中出现原有五个案例及产物。
+- 再次启动：不重复下载或导入重复会话；移除下载缓存后离线启动仍可使用已装案例。
+- 首次断网/404/错误大小/坏 SHA：应用能启动，日志提示案例暂不可用；恢复网络重启后补齐，不激活半成品。
+- 升级案例版本：校验成功后替换案例缓存目录，原会话数据不由下载器删除；失败保留旧案例。
+- `defer_history=false`：恢复随安装包携带案例，断网 warmup 仍可注入。
+- Windows 安装器和 macOS 首次启动分别验证；案例内容、Workflow 执行能力和 Skill 内容回归保持原有流程。

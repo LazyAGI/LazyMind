@@ -17,6 +17,7 @@ func scopedRuntimeEnv(paths RuntimePaths, home string) []string {
 		"XDG_STATE_HOME=" + paths.XDGStateDir,
 		localHostHomeEnvVar + "=" + hostHomeDir(),
 		"PYTHONDONTWRITEBYTECODE=1",
+		"NUMBA_CACHE_DIR=" + filepath.Join(paths.XDGCacheDir, "numba"),
 	}
 }
 

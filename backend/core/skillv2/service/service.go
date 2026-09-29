@@ -22,6 +22,7 @@ import (
 	"lazymind/core/skillv2"
 	skilldistribution "lazymind/core/skillv2/distribution"
 	skillmetadata "lazymind/core/skillv2/metadata"
+	skillruntimeidentity "lazymind/core/skillv2/runtimeidentity"
 	skillsearch "lazymind/core/skillv2/search"
 	skillpackage "lazymind/core/skillv2/skillpackage"
 	skillsourceurl "lazymind/core/skillv2/sourceurl"
@@ -68,6 +69,9 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 		}
 	}
 	files := pkg.Files
+	requestedName := req.Name
+	runtimeAliases := []string{}
+	var skillExt []byte
 	if err := validateSkillFiles(files); err != nil {
 		return CreateSkillResponse{}, err
 	}
@@ -79,6 +83,12 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 		req.Name = meta.Name
 		req.Description = meta.Description
 		req.Category = skillmetadata.ExternalCategory
+		if strings.EqualFold(strings.TrimSpace(req.Source.Type), "url") && requestedName != "" && requestedName != req.Name {
+			skillExt, runtimeAliases, err = skillruntimeidentity.MergeAliases(nil, requestedName)
+			if err != nil {
+				return CreateSkillResponse{}, err
+			}
+		}
 	} else {
 		if err := validateSkillPackageMetadata(req.Name, req.Category, req.Description, files); err != nil {
 			return CreateSkillResponse{}, err
@@ -135,20 +145,23 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 			OriginBuiltinSkillUID: strings.TrimSpace(req.OriginBuiltinSkillUID),
 			Description:           req.Description,
 			Tags:                  tags,
-			Field:                 strings.TrimSpace(req.Field), Aliases: aliases, Keywords: keywords,
-			RelativeRoot:       path.Join(req.Category, req.Name),
-			SkillMDPath:        "SKILL.md",
-			HeadRevisionID:     &revisionID,
-			OriginalRevisionID: &revisionID,
-			Version:            1,
-			AutoEvo:            req.AutoEvo,
-			AutoEvoApplyStatus: "idle",
-			IsEnabled:          enabled,
-			CallMode:           callMode,
-			SortRank:           skillv2.NextSortRank(now),
-			UpdateStatus:       "up_to_date",
-			CreatedAt:          now,
-			UpdatedAt:          now,
+			Field:                 strings.TrimSpace(req.Field),
+			Aliases:               aliases,
+			Keywords:              keywords,
+			RelativeRoot:          path.Join(req.Category, req.Name),
+			SkillMDPath:           "SKILL.md",
+			HeadRevisionID:        &revisionID,
+			OriginalRevisionID:    &revisionID,
+			Version:               1,
+			AutoEvo:               req.AutoEvo,
+			AutoEvoApplyStatus:    "idle",
+			IsEnabled:             enabled,
+			CallMode:              callMode,
+			SortRank:              skillv2.NextSortRank(now),
+			UpdateStatus:          "up_to_date",
+			Ext:                   skillExt,
+			CreatedAt:             now,
+			UpdatedAt:             now,
 		}).Error; err != nil {
 			return err
 		}
@@ -185,7 +198,15 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 	if err != nil {
 		return CreateSkillResponse{}, mapCreateSkillIdentityConflict(err)
 	}
-	return CreateSkillResponse{SkillID: skillID, HeadRevisionID: revisionID, Warnings: normalizationWarnings}, nil
+	return CreateSkillResponse{
+		SkillID:              skillID,
+		HeadRevisionID:       revisionID,
+		SkillName:            req.Name,
+		Category:             req.Category,
+		CanonicalRuntimeName: path.Join(req.Category, req.Name),
+		Aliases:              runtimeAliases,
+		Warnings:             normalizationWarnings,
+	}, nil
 }
 
 var errSkillAlreadyExists = fmt.Errorf("skill already exists")
@@ -515,6 +536,17 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		}
 		if externalImport || req.Description != nil {
 			updates["description"] = nextDescription
+		}
+		if externalImport {
+			previousRuntimeName := path.Join(skill.Category, skill.SkillName)
+			nextRuntimeName := path.Join(nextCategory, nextName)
+			if previousRuntimeName != nextRuntimeName {
+				nextExt, _, err := skillruntimeidentity.MergeAliases(skill.Ext, previousRuntimeName)
+				if err != nil {
+					return err
+				}
+				updates["ext"] = nextExt
+			}
 		}
 		applySearchMetadata(updates, req)
 		if req.Tags != nil {
@@ -1853,6 +1885,7 @@ func (s *SkillService) summaryFor(ctx context.Context, row skillRow) (SkillSumma
 		Name:                  row.SkillName,
 		SkillName:             row.SkillName,
 		Category:              row.Category,
+		SourceRefType:         rowSourceRefType(ctx, s, row),
 		Description:           row.Description,
 		Tags:                  tags,
 		Field:                 row.Field, Aliases: aliases, Keywords: keywords, OriginalRevisionID: valueOrEmpty(row.OriginalRevisionID),
@@ -1866,6 +1899,18 @@ func (s *SkillService) summaryFor(ctx context.Context, row skillRow) (SkillSumma
 		TrashExpiresAt: row.TrashExpiresAt,
 		DeletedBy:      valueOrEmpty(row.DeletedBy),
 	}, nil
+}
+
+func rowSourceRefType(ctx context.Context, s *SkillService, row skillRow) string {
+	if row.HeadRevisionID == nil || strings.TrimSpace(*row.HeadRevisionID) == "" {
+		return ""
+	}
+	var revision skillRevisionRow
+	err := s.db.WithContext(ctx).Select("source_ref_type").Where("id = ?", *row.HeadRevisionID).Take(&revision).Error
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(revision.SourceRefType)
 }
 
 func markPendingSkillDraftAuto(ctx context.Context, tx *gorm.DB, skillID string, now time.Time) error {

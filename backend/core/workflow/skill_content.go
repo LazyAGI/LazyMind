@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -15,6 +16,7 @@ import (
 const builtinSkillIDPrefix = "builtin:"
 
 var errWorkflowSourceSkillNotFound = errors.New("plugin source skill not found")
+var errWorkflowBuiltinPackageDownload = errors.New("builtin skill package download failed")
 
 type skillPackageFile struct {
 	Path     string `json:"path"`
@@ -48,11 +50,15 @@ func isWorkflowSourceSkillNotFound(err error) bool {
 	return errors.Is(err, errWorkflowSourceSkillNotFound) || errors.Is(err, gorm.ErrRecordNotFound)
 }
 
+func isWorkflowBuiltinPackageDownload(err error) bool {
+	return errors.Is(err, errWorkflowBuiltinPackageDownload)
+}
+
 // loadWorkflowSourceSkill reads normal skills from the v2 revision store and
 // resolves immutable templates through the shared builtin package catalog.
 func loadWorkflowSourceSkill(ctx context.Context, db *gorm.DB, userID, skillID string) (workflowSourceSkillSnapshot, error) {
 	if strings.HasPrefix(skillID, builtinSkillIDPrefix) {
-		return loadWorkflowBuiltinSkillPackage(skillID)
+		return loadWorkflowBuiltinSkillPackage(ctx, skillID)
 	}
 
 	var skill struct {
@@ -115,14 +121,19 @@ func loadWorkflowSourceSkillRevision(ctx context.Context, db *gorm.DB, userID, s
 	return snapshot, nil
 }
 
-func loadWorkflowBuiltinSkillPackage(templateID string) (workflowSourceSkillSnapshot, error) {
+func loadWorkflowBuiltinSkillPackage(ctx context.Context, templateID string) (workflowSourceSkillSnapshot, error) {
 	id := strings.TrimPrefix(templateID, builtinSkillIDPrefix)
 	uid := strings.SplitN(id, ":", 2)[0]
-	pkg, found, err := skillbuiltin.PackageByUID(uid)
-	if err != nil {
+	if _, found, err := skillbuiltin.PackageByUID(uid); err != nil {
 		return workflowSourceSkillSnapshot{}, err
+	} else if !found {
+		return workflowSourceSkillSnapshot{}, errWorkflowSourceSkillNotFound
 	}
-	if !found {
+	pkg, err := skillbuiltin.AcquirePackageByUID(ctx, uid)
+	if err != nil {
+		return workflowSourceSkillSnapshot{}, fmt.Errorf("%w: %v", errWorkflowBuiltinPackageDownload, err)
+	}
+	if pkg == nil {
 		return workflowSourceSkillSnapshot{}, errWorkflowSourceSkillNotFound
 	}
 	snapshot := workflowSourceSkillSnapshot{SkillID: templateID, Name: pkg.Name, RevisionID: "builtin:" + uid}

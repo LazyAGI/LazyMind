@@ -345,7 +345,7 @@ def test_mail_search_preview_uses_search_filters_not_mailbox_copy():
     assert '正在搜索邮件：' in call_text
     assert 'user@163.com/INBOX/2026-05-27' in call_text
     assert '正在检索邮箱' not in call_text
-    assert '找到 **2** 封邮件。' in result_text
+    assert '找到 **2** 封邮件（请求 **2** 封）。' in result_text
     assert '邮箱检索完成' not in result_text
     assert '邮件搜索失败' in disabled_text
 

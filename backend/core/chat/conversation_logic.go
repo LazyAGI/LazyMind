@@ -2156,6 +2156,10 @@ func consumeRuntimeChunk(chunk UpstreamStreamChunk, runID string, partialOutput 
 		}
 		event := failedRunEvent(runID, code, partialOutput)
 		terminal, _ := event.Terminal()
+		if chunk.ErrKind == UpstreamStreamErrorTransport {
+			terminal.TransportDiagnostic = &RunTransportDiagnostic{Code: upstreamStreamFailureCode(chunk.Err)}
+			event.Data = terminalJSON(terminal)
+		}
 		return runtimeChunkDecision{Event: event, Terminal: terminal, Stop: true}, true
 	}
 	if chunk.RuntimeEvent == nil {
@@ -2195,6 +2199,13 @@ func resolveRuntimeChunkDecision(
 			ctx, stateStore, convID, historyID, runID,
 			decision.Terminal, "upstream_terminal",
 		)
+	}
+	// Keep the winning business decision immutable while retaining observations
+	// from a later transport failure in every terminal projection.
+	if normalized.TransportDiagnostic != nil && decision.Terminal.TransportDiagnostic == nil {
+		observed := *decision.Terminal
+		observed.TransportDiagnostic = normalized.TransportDiagnostic
+		decision.Terminal = &observed
 	}
 	decision.Event = runFinishedEvent(runID, *decision.Terminal)
 	return decision

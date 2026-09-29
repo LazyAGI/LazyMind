@@ -8,6 +8,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import threading
+import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock, patch
 
@@ -202,6 +205,11 @@ _DEFAULT_TASK = {
 }
 
 
+@pytest.fixture(autouse=True)
+def isolated_default_workspace(monkeypatch, tmp_path):
+    monkeypatch.setitem(_DEFAULT_TASK, 'workspace_path', str(tmp_path))
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -216,9 +224,11 @@ def _sse_to_events(raw: str) -> List[Dict[str, Any]]:
     return events
 
 
-async def _collect(gen) -> str:
+async def _collect(gen, on_chunk=None) -> str:
     parts = []
     async for chunk in gen:
+        if on_chunk is not None:
+            on_chunk(chunk)
         parts.append(chunk)
     return ''.join(parts)
 
@@ -239,7 +249,12 @@ def _install_fake_lazyllm(monkeypatch):
     fake_llm_mod.globals._init_sid = lambda sid: None
     fake_llm_mod.locals._init_sid = lambda sid: None
     monkeypatch.setattr(runner_mod, 'lazyllm', fake_llm_mod)
-    monkeypatch.setattr(runner_mod, 'AutoModel', lambda model: 'fake_llm')
+    model = MagicMock()
+    model.share.return_value.return_value = json.dumps({
+        'completed': True, 'requires_artifact': False, 'artifact_keys': [],
+        'reason': 'The requested text result was delivered.',
+    })
+    monkeypatch.setattr(runner_mod, 'AutoModel', lambda **_: model)
     monkeypatch.setattr(runner_mod, 'inject_model_config', lambda cfg: None)
     monkeypatch.setattr(runner_mod, 'set_context', lambda ctx: None)
 
@@ -277,6 +292,872 @@ def _install_fake_translator(monkeypatch):
             return []
 
     monkeypatch.setattr(runner_mod, 'AgentEventFrameTranslator', FakeTranslator)
+
+
+def test_created_artifact_task_without_output_slots_cannot_succeed(monkeypatch, tmp_path):
+    """Synthetic creation -> runner -> terminal regression; no real model or service."""
+    import lazymind.chat.engine.tools.subagent_chat_tools as chat_tools
+
+    monkeypatch.setattr(chat_tools, '_agentic_config', lambda: {'mode': 'manual'})
+    created = []
+    monkeypatch.setattr(chat_tools, '_write_agent_data', lambda tag, **kw: created.append(kw))
+    chat_tools.create_subagent(
+        agent_type='document_generation', title='Export document',
+        objective='Generate a PDF document and deliver the signed file.',
+    )
+    task = {**created[0], 'id': created[0]['task_id'], 'workspace_path': str(tmp_path)}
+    assert task['output_slots'] == []
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_translator(monkeypatch)
+    monkeypatch.setattr(
+        runner_mod, '_generate_display_plan',
+        lambda *_args, **_kwargs: ['Prepare task', 'Execute task', 'Deliver result'],
+    )
+    model = MagicMock()
+    model.share.return_value.return_value = json.dumps({
+        'completed': False, 'requires_artifact': True, 'artifact_keys': [],
+        'reason': 'The required input and PDF conversion capability were unavailable.',
+    })
+    monkeypatch.setattr(runner_mod, 'AutoModel', lambda **_: model)
+    _install_fake_drive(monkeypatch, [], final_value=(
+        'I cannot complete this task: the input file, PDF conversion, and signing '
+        'capabilities are unavailable. No artifact was produced.'
+    ))
+
+    raw = asyncio.run(_collect(runner_mod.run_subagent_stream(task['id'], task_spec=task)))
+    terminal = [event for event in _sse_to_events(raw) if event['type'] in {'done', 'error'}]
+    assert len(terminal) == 1
+    assert terminal[0]['status'] == 'failed', terminal
+    assert terminal[0]['current_phase'] == 'missing_required_artifacts'
+    _assert_silent_stream_call(model)
+    assert raw.endswith('data: [DONE]\n\n')
+
+
+@pytest.fixture
+def contract_delivery_harness(monkeypatch, tmp_path):
+    """Connect the real creation, runner, and parent query paths in memory."""
+    import lazymind.chat.engine.tools.subagent_chat_tools as chat_tools
+
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_translator(monkeypatch)
+    monkeypatch.setattr(chat_tools, '_agentic_config', lambda: {
+        'mode': 'auto', 'conversation_id': 'contract-regression',
+    })
+    contexts = []
+    monkeypatch.setattr(runner_mod, 'set_context', contexts.append)
+    monkeypatch.setattr(runner_mod.subagent_tools, 'require_context', lambda: contexts[-1])
+    model = MagicMock()
+    model.share.return_value.return_value = json.dumps({
+        'completed': False, 'requires_artifact': True, 'artifact_keys': [],
+        'reason': 'The required contract input and PDF tools were unavailable.',
+    })
+    monkeypatch.setattr(runner_mod, 'AutoModel', lambda **_: model)
+    projected = {}
+    observed = {}
+
+    class InMemoryCoreView:
+        def get_task_status(self, task_id):
+            return projected[task_id]
+
+        def list_tasks_by_conversation(self, _conversation_id):
+            return list(projected.values())
+
+    monkeypatch.setattr(chat_tools, 'TaskQueryDB', InMemoryCoreView)
+
+    def run(*, source_path=None, output_slots=None, params=None):
+        workspace = tmp_path / ('complete' if source_path else 'blocked')
+
+        class ControlledExecutor:
+            async def stream(self, _llm, _plan):
+                if source_path:
+                    from docx import Document
+
+                    source_text = source_path.read_text(encoding='utf-8')
+                    document = Document()
+                    document.add_heading('Contract summary', 0)
+                    document.add_paragraph(source_text)
+                    output_path = workspace / 'contract-summary.docx'
+                    document.save(output_path)
+                    saved = runner_mod.subagent_tools.save_artifacts([{
+                        'key': 'document', 'value': str(output_path),
+                        'content_type': 'file',
+                    }])
+                    assert saved['saved_count'] == 1
+                    yield 'final', 'The contract summary document was delivered.'
+                else:
+                    yield 'final', (
+                        'I cannot complete the PDF delivery: the contract input, '
+                        'PDF conversion, and signing tools are unavailable. No file was produced.'
+                    )
+
+        monkeypatch.setattr(runner_mod, 'AgentExecutor', ControlledExecutor)
+
+        def receive(tag, **created):
+            assert tag == 'task_created'
+            task_id = created['task_id']
+            task = {**created, 'id': task_id, 'workspace_path': str(workspace)}
+            observed['task'] = task
+            raw = asyncio.run(_collect(runner_mod.run_subagent_stream(task_id, task_spec=task)))
+            assert raw.endswith('data: [DONE]\n\n')
+            events = _sse_to_events(raw)
+            observed['events'] = events
+            row = {'task_id': task_id, 'title': created['title'],
+                   'status': 'running', 'artifacts': []}
+            for event in events:
+                if event['type'] == 'artifact':
+                    row['artifacts'].append({
+                        key: event[key] for key in ('slot', 'content_type', 'value', 'seq')
+                    })
+                elif event['type'] in {'done', 'error'}:
+                    row.update({key: event[key] for key in (
+                        'status', 'summary', 'current_phase',
+                    ) if key in event})
+            projected[task_id] = row
+
+        monkeypatch.setattr(chat_tools, '_write_agent_data', receive)
+        result = chat_tools.create_subagent(
+            agent_type='document_generation', title='Contract document',
+            objective=(
+                'Generate and deliver the contract PDF, then sign it.'
+                if source_path is None else
+                'Read the supplied contract terms and deliver a contract summary document.'
+            ),
+            params={**(params or {}), **({'source_path': str(source_path)} if source_path else {})},
+            output_slots=output_slots,
+        )
+        return result, observed, chat_tools
+
+    return run
+
+
+def test_contract_badcase_fails_through_parent_result(contract_delivery_harness):
+    parent_result, observed, chat_tools = contract_delivery_harness()
+    task = observed['task']
+    terminal = _terminal(observed['events'])
+    assert task['output_slots'] == []
+    assert terminal['status'] == 'failed'
+    assert terminal['current_phase'] == 'missing_required_artifacts'
+    assert not any(event['type'] == 'artifact' for event in observed['events'])
+    assert not list(Path(task['workspace_path']).rglob('*.pdf'))
+    assert parent_result['status'] == 'failed'
+    assert parent_result['task_status'] == 'failed'
+    assert parent_result['failure']['code'] == terminal['current_phase']
+    assert parent_result['failure']['message']
+    assert chat_tools.get_subagent_status(task['title'])['task']['status'] == 'failed'
+    assert chat_tools.get_subagent_artifacts(task['title'])['artifacts'] == []
+    print('BADCASE_EVIDENCE=' + json.dumps({
+        'case': 'A', 'objective': task['objective'], 'output_slots': task['output_slots'],
+        'contract': 'uncontracted artifact goal; semantic completion evaluation',
+        'terminal': terminal['status'], 'failure_code': parent_result['failure']['code'],
+        'artifact_count': 0, 'parent_status': parent_result['status'],
+        'failure_message': parent_result['failure']['message'],
+        'agent_final': 'explicit inability; no file produced',
+    }, ensure_ascii=False))
+
+
+def test_contract_document_is_delivered_to_parent(contract_delivery_harness, tmp_path):
+    from docx import Document
+
+    source = tmp_path / 'contract-terms.txt'
+    source.write_text('Parties: Alpha and Beta. Effective date: 2026-09-21.', encoding='utf-8')
+    parent_result, observed, chat_tools = contract_delivery_harness(
+        source_path=source, output_slots=['document'],
+        params={'output_slot_types': {'document': 'file'}},
+    )
+    task = observed['task']
+    terminal = _terminal(observed['events'])
+    assert task['output_slots'] == ['document']
+    assert terminal['status'] == 'succeeded'
+    assert parent_result['status'] == 'ok'
+    assert chat_tools.get_subagent_status(task['title'])['task']['status'] == 'succeeded'
+    artifacts = chat_tools.get_subagent_artifacts(task['title'], keys=['document'])['artifacts']
+    assert len(artifacts) == 1
+    assert parent_result['artifacts'] == artifacts
+    assert artifacts[0]['content_type'] == 'file'
+    delivered = artifacts[0]['value']
+    assert delivered['size'] > 0
+    assert [paragraph.text for paragraph in Document(delivered['path']).paragraphs][1] == source.read_text(
+        encoding='utf-8',
+    )
+    print('BADCASE_EVIDENCE=' + json.dumps({
+        'case': 'B', 'objective': task['objective'], 'output_slots': task['output_slots'],
+        'contract': task['params']['output_slot_types'],
+        'terminal': terminal['status'], 'failure_code': None,
+        'artifact_count': len(artifacts), 'artifact_type': artifacts[0]['content_type'],
+        'artifact_size': delivered['size'], 'document_readback': 'matched supplied input',
+        'parent_status': parent_result['status'],
+    }, ensure_ascii=False))
+
+
+@pytest.fixture
+def completion_case(monkeypatch, tmp_path):
+    import lazymind.chat.engine.tools.subagent_chat_tools as chat_tools
+
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_translator(monkeypatch)
+    monkeypatch.setattr(
+        runner_mod, '_generate_display_plan',
+        lambda *_args, **_kwargs: ['Prepare task', 'Execute task', 'Deliver result'],
+    )
+    monkeypatch.setattr(chat_tools, '_agentic_config', lambda: {'mode': 'manual'})
+    created, contexts = [], []
+    monkeypatch.setattr(chat_tools, '_write_agent_data', lambda tag, **kw: created.append(kw))
+    monkeypatch.setattr(runner_mod, 'set_context', contexts.append)
+    monkeypatch.setattr(runner_mod.subagent_tools, 'require_context', lambda: contexts[-1])
+    model = MagicMock()
+    monkeypatch.setattr(runner_mod, 'AutoModel', lambda **_: model)
+
+    def run(*, params=None, output_slots=None, save=None, verdict=None,
+            final='Delivered the requested result.', agent_type='document_generation',
+            objective='Generate a PDF document and deliver the signed file.', events=(), stopped=None,
+            previous_content_type=None, draft=None):
+        model.share.return_value.return_value = json.dumps(verdict or {
+            'completed': True, 'requires_artifact': True, 'artifact_keys': ['document'],
+            'reason': 'The requested document was delivered.',
+        })
+        chat_tools.create_subagent(
+            agent_type=agent_type, title='Task', objective=objective,
+            params=params, output_slots=output_slots,
+        )
+        task = {**created[-1], 'id': created[-1]['task_id'], 'workspace_path': str(tmp_path)}
+        if stopped:
+            task['status'] = stopped
+        if previous_content_type:
+            previous = tmp_path / 'previous.pdf'
+            previous.write_bytes(b'%PDF-1.4\nsynthetic prior deliverable\n')
+            task['artifacts'] = [{'slot': 'document', 'content_type': previous_content_type,
+                                  'seq': 1, 'value': {'path': str(previous), 'text': 'Prior result'}}]
+
+        class Executor:
+            async def stream(self, llm, plan):
+                for event in events:
+                    yield 'event', event
+                if draft:
+                    contexts[-1].write_draft('document', 'text', draft)
+                if save:
+                    key, content_type = save
+                    value = 'Useful analysis.'
+                    if content_type == 'file':
+                        (tmp_path / 'document.pdf').write_bytes(b'%PDF-1.4\nsynthetic fixture\n')
+                        value = 'document.pdf'
+                    runner_mod.subagent_tools._save_artifact(key, value, content_type)
+                yield 'final', final
+
+        monkeypatch.setattr(runner_mod, 'AgentExecutor', Executor)
+        raw = asyncio.run(_collect(runner_mod.run_subagent_stream(
+            task['id'], task_spec=task, resume=bool(previous_content_type),
+        )))
+        result = _sse_to_events(raw)
+        assert raw.endswith('data: [DONE]\n\n')
+        return result, model, task
+
+    return run
+
+
+def _terminal(events):
+    terminal = [event for event in events if event['type'] in {'done', 'error'}]
+    assert len(terminal) == 1
+    return terminal[0]
+
+
+async def _run_completion_review_scenario(
+    monkeypatch,
+    tmp_path,
+    model,
+    *,
+    agent_type='research',
+    objective='Explain the analysis in plain text.',
+    params=None,
+    output_slots=None,
+    artifacts=None,
+    final='Analysis delivered.',
+    before_final=None,
+    on_chunk=None,
+):
+    fake_llm = MagicMock()
+    fake_llm.globals._init_sid = lambda sid: None
+    fake_llm.locals._init_sid = lambda sid: None
+    monkeypatch.setattr(runner_mod, 'lazyllm', fake_llm)
+    monkeypatch.setattr(runner_mod, 'AutoModel', lambda **_: model)
+    monkeypatch.setattr(runner_mod, 'inject_model_config', lambda cfg: None)
+    monkeypatch.setattr(runner_mod, 'inject_tool_config', lambda cfg: None)
+    monkeypatch.setattr(runner_mod, 'inject_runtime_env', lambda cfg: None)
+    monkeypatch.setattr(runner_mod, 'set_context', lambda ctx: None)
+    monkeypatch.setattr(
+        runner_mod,
+        '_generate_display_plan',
+        lambda *_args, **_kwargs: ['Prepare task', 'Execute task', 'Deliver result'],
+    )
+    _install_fake_translator(monkeypatch)
+
+    class Executor:
+        async def stream(self, _llm, _plan):
+            if before_final is not None:
+                await before_final()
+            yield 'final', final
+
+    monkeypatch.setattr(runner_mod, 'AgentExecutor', Executor)
+    task = {
+        'id': 'completion-review-task',
+        'conversation_id': 'completion-review-conversation',
+        'agent_type': agent_type,
+        'objective': objective,
+        'params': params or {},
+        'workspace_path': str(tmp_path),
+        'input_slots': [],
+        'output_slots': output_slots or [],
+        'artifacts': artifacts or [],
+        'mode': 'auto',
+    }
+    raw = await _collect(
+        runner_mod.run_subagent_stream(task['id'], task_spec=task, resume=bool(artifacts)),
+        on_chunk=on_chunk,
+    )
+    return raw, _sse_to_events(raw)
+
+
+@pytest.mark.asyncio
+async def test_completion_review_does_not_block_event_loop(monkeypatch, tmp_path):
+    verdict = json.dumps({
+        'completed': True,
+        'requires_artifact': False,
+        'artifact_keys': [],
+        'reason': 'Analysis delivered.',
+    })
+
+    evaluation_finished = threading.Event()
+
+    class SlowModel:
+        def share(self, **_kwargs):
+            def call(_prompt):
+                time.sleep(0.2)
+                evaluation_finished.set()
+                return verdict
+
+            return call
+
+    timer = None
+    started = 0.0
+
+    async def timer_elapsed():
+        await asyncio.sleep(0.025)
+        return asyncio.get_running_loop().time() - started, evaluation_finished.is_set()
+
+    original_evaluate = runner_mod._evaluate_completion_async
+
+    async def timed_evaluate(*args, **kwargs):
+        nonlocal timer, started
+        started = asyncio.get_running_loop().time()
+        timer = asyncio.create_task(timer_elapsed())
+        await asyncio.sleep(0)
+        return await original_evaluate(*args, **kwargs)
+
+    monkeypatch.setattr(runner_mod, '_evaluate_completion_async', timed_evaluate)
+    _raw, events = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, SlowModel(),
+    )
+
+    assert timer is not None
+    elapsed, evaluator_already_finished = await timer
+    assert elapsed < 0.18
+    assert evaluator_already_finished is False
+    assert _terminal(events)['status'] == 'succeeded'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('provider', ['qwen', 'openai'])
+async def test_completion_review_supports_silent_streaming_models(monkeypatch, tmp_path, provider):
+    calls = []
+
+    class StreamingOnlyModel:
+        def share(self, **kwargs):
+            calls.append(kwargs)
+            if kwargs.get('stream') is False:
+                raise RuntimeError(f'{provider} provider requires streaming')
+            sink = kwargs['stream']['_stream_sink']
+
+            def call(_prompt):
+                sink({'reasoning_content': 'PRIVATE_COMPLETION_REASONING'})
+                return json.dumps({
+                    'completed': True,
+                    'requires_artifact': False,
+                    'artifact_keys': [],
+                    'reason': 'Analysis delivered.',
+                })
+
+            return call
+
+    raw, events = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, StreamingOnlyModel(),
+    )
+
+    assert _terminal(events)['status'] == 'succeeded'
+    assert calls and isinstance(calls[-1].get('stream'), dict)
+    assert 'PRIVATE_COMPLETION_REASONING' not in raw
+
+
+@pytest.mark.asyncio
+async def test_missing_resumed_file_is_not_completion_evidence(monkeypatch, tmp_path):
+    model = MagicMock()
+    missing = tmp_path / 'deleted.pdf'
+    raw, events = await _run_completion_review_scenario(
+        monkeypatch,
+        tmp_path,
+        model,
+        agent_type='document_generation',
+        objective='Deliver the requested document.',
+        params={'output_slot_types': {'document': 'file'}},
+        output_slots=['document'],
+        artifacts=[{
+            'slot': 'document',
+            'content_type': 'file',
+            'seq': 1,
+            'value': {'filename': 'deleted.pdf', 'path': str(missing), 'size': 12},
+        }],
+        final='The requested document was delivered.',
+    )
+
+    assert not missing.exists()
+    assert _terminal(events)['status'] == 'failed', raw
+    assert _terminal(events)['current_phase'] == 'missing_required_artifacts'
+    model.share.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_completion_review_discards_late_success(monkeypatch, tmp_path):
+    evaluation_started = threading.Event()
+
+    class SlowModel:
+        def share(self, **_kwargs):
+            def call(_prompt):
+                evaluation_started.set()
+                time.sleep(0.2)
+                return json.dumps({
+                    'completed': True,
+                    'requires_artifact': False,
+                    'artifact_keys': [],
+                    'reason': 'Late success must be ignored.',
+                })
+
+            return call
+
+    def cancel_check(_output):
+        if evaluation_started.is_set():
+            raise runner_mod.UserCancelledError('stopped during completion review')
+        return False
+
+    monkeypatch.setattr(runner_mod, 'make_cancel_stop_condition', lambda: cancel_check)
+    evaluation_boundary = 0.0
+
+    async def before_final():
+        nonlocal evaluation_boundary
+        evaluation_boundary = asyncio.get_running_loop().time()
+
+    raw, events = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, SlowModel(), before_final=before_final,
+    )
+
+    assert asyncio.get_running_loop().time() - evaluation_boundary < 0.15
+    assert _terminal(events)['status'] == 'interrupted'
+    await asyncio.sleep(0.25)
+    assert not any(event['status'] == 'succeeded' for event in events if 'status' in event)
+    assert 'Late success must be ignored.' not in raw
+
+
+@pytest.mark.asyncio
+async def test_completion_review_timeout_fails_closed_without_late_success(monkeypatch, tmp_path):
+    release_evaluation = threading.Event()
+    evaluation_finished = threading.Event()
+
+    class SlowModel:
+        def share(self, **_kwargs):
+            def call(_prompt):
+                release_evaluation.wait(timeout=1)
+                evaluation_finished.set()
+                return json.dumps({
+                    'completed': True,
+                    'requires_artifact': False,
+                    'artifact_keys': [],
+                    'reason': 'Late timeout success must be ignored.',
+                })
+
+            return call
+
+    terminal_boundary = 0.0
+    evaluator_finished_at_terminal = True
+
+    def record_terminal(chunk):
+        nonlocal terminal_boundary, evaluator_finished_at_terminal
+        if '"current_phase": "completion_evaluation_failed"' in chunk:
+            terminal_boundary = asyncio.get_running_loop().time()
+            evaluator_finished_at_terminal = evaluation_finished.is_set()
+
+    with runner_mod._cfg.temp('subagent_completion_evaluation_timeout', 0.05):
+        raw, events = await _run_completion_review_scenario(
+            monkeypatch,
+            tmp_path,
+            SlowModel(),
+            on_chunk=record_terminal,
+        )
+
+    assert terminal_boundary > 0
+    assert evaluator_finished_at_terminal is False
+    terminal = _terminal(events)
+    assert terminal['status'] == 'failed'
+    assert terminal['current_phase'] == 'completion_evaluation_failed'
+    release_evaluation.set()
+    await asyncio.sleep(0.05)
+    assert not any(event['status'] == 'succeeded' for event in events if 'status' in event)
+    assert 'Late timeout success must be ignored.' not in raw
+
+
+@pytest.mark.asyncio
+async def test_valid_resumed_file_is_completion_evidence(monkeypatch, tmp_path):
+    document = tmp_path / 'existing.pdf'
+    document.write_bytes(b'%PDF-1.4\nexisting delivery\n')
+    model = MagicMock()
+    _raw, events = await _run_completion_review_scenario(
+        monkeypatch,
+        tmp_path,
+        model,
+        agent_type='document_generation',
+        objective='Deliver the requested document.',
+        params={'output_slot_types': {'document': 'file'}},
+        output_slots=['document'],
+        artifacts=[{
+            'slot': 'document', 'content_type': 'file', 'seq': 1,
+            'value': {'filename': document.name, 'path': str(document), 'size': document.stat().st_size},
+        }],
+        final='The requested document was delivered.',
+    )
+
+    assert _terminal(events)['status'] == 'succeeded'
+    model.share.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('missing_index,expected', [(None, 'succeeded'), (1, 'failed')])
+async def test_resumed_file_list_requires_every_file(monkeypatch, tmp_path, missing_index, expected):
+    paths = [tmp_path / 'part-1.txt', tmp_path / 'part-2.txt']
+    for index, path in enumerate(paths):
+        if index != missing_index:
+            path.write_text(f'part {index + 1}', encoding='utf-8')
+    model = MagicMock()
+    _raw, events = await _run_completion_review_scenario(
+        monkeypatch,
+        tmp_path,
+        model,
+        agent_type='document_generation',
+        objective='Deliver every generated document.',
+        params={'output_slot_types': {'documents': 'file'}},
+        output_slots=['documents'],
+        artifacts=[{
+            'slot': 'documents', 'content_type': 'file_list', 'seq': 1,
+            'value': {'paths': [str(path) for path in paths]},
+        }],
+        final='Every requested document was delivered.',
+    )
+
+    assert _terminal(events)['status'] == expected
+    if expected == 'failed':
+        assert _terminal(events)['current_phase'] == 'missing_required_artifacts'
+    model.share.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('original_type', ['text', 'json'])
+async def test_deleted_offloaded_content_is_not_completion_evidence(
+    monkeypatch, tmp_path, original_type,
+):
+    missing = tmp_path / f'deleted-{original_type}.txt'
+    model = MagicMock()
+    _raw, events = await _run_completion_review_scenario(
+        monkeypatch,
+        tmp_path,
+        model,
+        objective='Deliver the requested report.',
+        params={'output_slot_types': {'report': original_type}},
+        output_slots=['report'],
+        artifacts=[{
+            'slot': 'report', 'content_type': 'file', 'seq': 1,
+            'value': {'type': original_type, 'path': str(missing), 'size': 1024},
+        }],
+        final='The requested report was delivered.',
+    )
+
+    assert _terminal(events)['status'] == 'failed'
+    assert _terminal(events)['current_phase'] == 'missing_required_artifacts'
+    model.share.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_artifact_v2_remote_blob_is_not_rejected_as_a_local_path(monkeypatch, tmp_path):
+    model = MagicMock()
+    _raw, events = await _run_completion_review_scenario(
+        monkeypatch,
+        tmp_path,
+        model,
+        agent_type='document_generation',
+        objective='Deliver the requested document.',
+        params={'output_slot_types': {'document': 'file'}},
+        output_slots=['document'],
+        artifacts=[{
+            'slot': 'document', 'content_type': 'file', 'seq': 1,
+            'v2_artifact_id': 'artifact-v2', 'v2_revision_id': 'revision-v2',
+            'value': {'filename': 'report.pdf', 'url': 'https://files.example.test/report.pdf'},
+        }],
+        final='The requested document was delivered.',
+    )
+
+    assert _terminal(events)['status'] == 'succeeded'
+    model.share.assert_not_called()
+
+
+def _assert_silent_stream_call(model):
+    assert model.share.call_count == 1
+    stream = model.share.call_args.kwargs.get('stream')
+    assert isinstance(stream, dict)
+    assert callable(stream.get('_stream_sink'))
+
+
+@pytest.mark.parametrize('params', [
+    {'required_output_artifact_keys': ['document']},
+    {'output_slot_types': {'document': 'file'}},
+])
+def test_structured_artifact_contract_without_slots_is_enforced(completion_case, params):
+    events, model, task = completion_case(params=params)
+    assert task['output_slots'] == ['document']
+    assert _terminal(events)['status'] == 'failed'
+    assert _terminal(events)['current_phase'] == 'missing_required_artifacts'
+    model.share.assert_not_called()
+
+
+@pytest.mark.parametrize('params', [{}, {'output_slot_types': {'document': 'file'}}])
+def test_created_artifact_task_succeeds_with_saved_deliverable(completion_case, params):
+    events, model, _ = completion_case(params=params, save=('document', 'file'))
+    assert _terminal(events)['status'] == 'succeeded'
+    artifacts = [event for event in events if event['type'] == 'artifact']
+    assert artifacts and artifacts[0]['content_type'] == 'file'
+    assert artifacts[0]['value']['size'] > 0
+    assert model.share.call_count == (0 if params else 1)
+
+
+@pytest.mark.parametrize('completed,expected', [(True, 'succeeded'), (False, 'failed')])
+def test_uncontracted_text_task_is_evaluated_without_creating_files(completion_case, completed, expected):
+    events, model, _ = completion_case(
+        agent_type='research', objective='Explain the analysis in plain text.',
+        final='The failure rate fell after retrying.' if completed else 'I cannot access the required input.',
+        verdict={'completed': completed, 'requires_artifact': False, 'artifact_keys': [],
+                 'reason': 'Analysis delivered.' if completed else 'Required input unavailable.'},
+    )
+    assert _terminal(events)['status'] == expected
+    assert not any(event['type'] == 'artifact' for event in events)
+    _assert_silent_stream_call(model)
+    if not completed:
+        assert _terminal(events)['current_phase'] == 'objective_incomplete'
+
+
+def test_missing_artifact_overrides_positive_evaluator_verdict(completion_case):
+    events, _, _ = completion_case()
+    assert _terminal(events)['status'] == 'failed'
+    assert _terminal(events)['current_phase'] == 'missing_required_artifacts'
+    assert _terminal(events)['summary'] == 'Required deliverables were not saved as artifacts.'
+
+
+def test_unrelated_artifact_does_not_complete_objective(completion_case):
+    events, _, _ = completion_case(save=('notes', 'text'))
+    assert _terminal(events)['status'] == 'failed'
+
+
+def test_explicit_output_slots_cannot_be_waived_by_evaluator(completion_case):
+    events, model, _ = completion_case(output_slots=['document'])
+    assert _terminal(events)['status'] == 'failed'
+    assert not any(event['type'] == 'artifact' for event in events)
+    model.share.assert_not_called()
+
+
+@pytest.mark.parametrize('completed,expected', [(True, 'succeeded'), (False, 'failed')])
+def test_failure_words_trigger_review_not_an_automatic_failure(completion_case, completed, expected):
+    events, model, _ = completion_case(
+        output_slots=['document'], save=('document', 'file'),
+        final='The first conversion failed.' if completed else 'I cannot complete the signature step.',
+        verdict={'completed': completed, 'requires_artifact': True, 'artifact_keys': ['document'],
+                 'reason': 'Retry succeeded.' if completed else 'Required signature was not completed.'},
+    )
+    assert _terminal(events)['status'] == expected
+    _assert_silent_stream_call(model)
+
+
+def test_recovered_tool_error_does_not_poison_completion(completion_case):
+    events, model, _ = completion_case(
+        output_slots=['document'], save=('document', 'file'), events=[
+            {'tag': 'tool_results', 'tool_results': [{'id': '1', 'name': 'convert', 'result': {'status': 'failed'}}]},
+            {'tag': 'tool_results', 'tool_results': [{'id': '2', 'name': 'convert', 'result': {'status': 'ok'}}]},
+        ],
+    )
+    assert _terminal(events)['status'] == 'succeeded'
+    model.share.assert_not_called()
+
+
+@pytest.mark.parametrize('stopped', ['canceled', 'interrupted'])
+def test_stopped_task_never_evaluates_or_succeeds(completion_case, stopped):
+    events, model, _ = completion_case(stopped=stopped)
+    assert _terminal(events)['status'] in {'canceled', 'interrupted'}
+    assert not any(event['type'] == 'task_start' for event in events)
+    model.share.assert_not_called()
+
+
+@pytest.mark.parametrize('params,save,expected', [
+    ({}, None, 'succeeded'),
+    ({'required_output_artifact_keys': ['document'], 'legacy_tools': ['publish']}, None, 'failed'),
+    ({'required_output_artifact_keys': ['document'], 'legacy_tools': ['publish']}, ('document', 'file'), 'succeeded'),
+    ({'required_output_artifact_keys': ['document'], 'output_slot_types': {'document': 'text'}}, None, 'succeeded'),
+    ({'required_output_artifact_keys': ['document'], 'output_slot_types': {'document': 'file'}}, None, 'failed'),
+    ({'required_output_artifact_keys': ['document'],
+      'workflow_runtime': {'publisher_owned_slots': ['document']}}, None, 'failed'),
+])
+def test_workflow_output_contracts_keep_their_existing_rules(completion_case, params, save, expected):
+    events, model, _ = completion_case(
+        agent_type='workflow_step', params=params, output_slots=['document'], save=save,
+    )
+    assert _terminal(events)['status'] == expected
+    model.share.assert_not_called()
+
+
+def test_text_cannot_replace_a_declared_file_artifact(completion_case):
+    events, _, _ = completion_case(
+        params={'output_slot_types': {'document': 'file'}}, save=('document', 'text'),
+    )
+    assert _terminal(events)['status'] == 'failed'
+    assert not any(event['type'] == 'artifact' for event in events)
+
+
+@pytest.mark.parametrize('content_type,expected', [('file', 'succeeded'), ('text', 'failed')])
+def test_resume_rechecks_the_declared_artifact_type(completion_case, content_type, expected):
+    events, model, _ = completion_case(
+        params={'output_slot_types': {'document': 'file'}}, previous_content_type=content_type,
+    )
+    assert _terminal(events)['status'] == expected
+    model.share.assert_not_called()
+
+
+def test_required_text_draft_is_committed_before_completion(completion_case):
+    events, model, _ = completion_case(output_slots=['document'], draft='The actual analysis.')
+    assert _terminal(events)['status'] == 'succeeded'
+    assert any(event['type'] == 'artifact' and event['value'].get('text') == 'The actual analysis.'
+               for event in events)
+    model.share.assert_not_called()
+
+
+def test_workflow_final_incomplete_report_is_reviewed(completion_case):
+    events, model, _ = completion_case(
+        agent_type='workflow_step', final='I cannot complete the required action.',
+        verdict={'completed': False, 'requires_artifact': False, 'artifact_keys': [],
+                 'reason': 'The required action was not completed.'},
+    )
+    assert _terminal(events)['status'] == 'failed'
+    assert _terminal(events)['current_phase'] == 'objective_incomplete'
+    _assert_silent_stream_call(model)
+
+
+def test_cancel_after_draft_publication_cannot_emit_success(monkeypatch, completion_case):
+    calls = 0
+
+    def check(_):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise runner_mod.UserCancelledError('stopped after artifact publication')
+
+    monkeypatch.setattr(runner_mod, 'make_cancel_stop_condition', lambda: check)
+    events, model, _ = completion_case(output_slots=['document'], draft='Completed analysis.')
+    assert any(event['type'] == 'artifact' for event in events)
+    assert _terminal(events)['status'] == 'interrupted'
+    model.share.assert_not_called()
+
+
+@pytest.mark.parametrize('response', [
+    'YES', '{}', '[]', '{"completed":"true"}',
+    json.dumps({'completed': True, 'requires_artifact': False, 'artifact_keys': [], 'reason': ''}),
+    json.dumps({'completed': True, 'requires_artifact': True, 'artifact_keys': 'document', 'reason': 'Done'}),
+])
+def test_invalid_completion_verdict_fails_closed(response):
+    model = MagicMock()
+    model.share.return_value.return_value = response
+    completed, _, phase = runner_mod._evaluate_completion(model, 'objective', [], [], 'result')
+    assert not completed
+    assert phase == 'completion_evaluation_failed'
+
+
+def test_completion_model_error_fails_closed():
+    model = MagicMock()
+    model.share.return_value.side_effect = RuntimeError('model unavailable')
+    completed, _, phase = runner_mod._evaluate_completion(model, 'objective', [], [], 'result')
+    assert not completed
+    assert phase == 'completion_evaluation_failed'
+
+
+@pytest.mark.parametrize('verdict,expected_phase', [
+    ({'completed': True, 'requires_artifact': False, 'artifact_keys': [],
+      'reason': 'Analysis delivered.'}, ''),
+    ({'completed': False, 'requires_artifact': True, 'artifact_keys': [],
+      'reason': 'The required PDF was not delivered.'}, 'missing_required_artifacts'),
+])
+def test_completion_review_keeps_reasoning_separate_from_json(monkeypatch, verdict, expected_phase):
+    from lazyllm import OnlineChatModule
+
+    llm = OnlineChatModule(source='deepseek', model='deepseek-v4-pro', api_key='test-key', stream=False)
+    original_formatter = llm._formatter
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.status_code = 200
+    chunks = [
+        {'role': 'assistant', 'content': ''},
+        {'reasoning_content': 'PRIVATE_COMPLETION_REASONING'},
+        {'content': json.dumps(verdict)},
+    ]
+    response.iter_lines.return_value = iter([
+        ('data: ' + json.dumps({'choices': [{'index': 0, 'delta': delta}]})).encode()
+        for delta in chunks
+    ] + [
+        b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',
+        b'data: [DONE]',
+    ])
+    post = MagicMock(return_value=response)
+    monkeypatch.setattr('requests.post', post)
+    enqueue = MagicMock(side_effect=AssertionError('Completion review leaked into agent stream'))
+    monkeypatch.setattr('lazyllm.FileSystemQueue.enqueue', enqueue)
+
+    completed, summary, phase = runner_mod._evaluate_completion(llm, 'Task objective', [], [], 'Result')
+
+    assert completed is verdict['completed']
+    assert verdict['reason'] in summary
+    assert phase == expected_phase
+    assert post.call_args.kwargs['json']['stream'] is True
+    assert llm._stream is False
+    assert llm._formatter is original_formatter
+    enqueue.assert_not_called()
+
+
+@pytest.mark.parametrize('during_evaluation', [False, True])
+def test_cancel_at_completion_boundary_cannot_be_revived(monkeypatch, completion_case, during_evaluation):
+    canceled = not during_evaluation
+
+    def check(_):
+        if canceled:
+            raise runner_mod.UserCancelledError('stopped by user')
+
+    async def evaluate(**_):
+        nonlocal canceled
+        canceled = True
+        return True, 'Late success verdict', ''
+
+    monkeypatch.setattr(runner_mod, 'make_cancel_stop_condition', lambda: check)
+    evaluate_mock = MagicMock(side_effect=evaluate)
+    monkeypatch.setattr(runner_mod, '_evaluate_completion_async', evaluate_mock)
+    events, _, _ = completion_case()
+    assert _terminal(events)['status'] == 'interrupted'
+    assert evaluate_mock.call_count == int(during_evaluation)
 
 
 def test_subagent_closes_agent_before_disposing_database(monkeypatch):
@@ -541,7 +1422,7 @@ def test_run_subagent_stream_happy_path(monkeypatch, display_plan):
     def capturing_set_context(ctx):
         ctx_holder.append(ctx)
         # Pre-populate saved keys to pass completeness check.
-        ctx._artifact_counts['result'] = 1
+        ctx.record_local_artifact('result', 'text', {'text': 'Completed result'}, 1)
 
     monkeypatch.setattr(runner_mod, 'set_context', capturing_set_context)
 
@@ -578,7 +1459,11 @@ def test_subagent_runtime_env_refreshes_without_entering_plan_or_events(monkeypa
     monkeypatch.setattr(runner_mod, 'AutoModel', lambda model: 'fake_llm')
     monkeypatch.setattr(runner_mod, 'inject_model_config', lambda cfg: None)
     monkeypatch.setattr(runner_mod, 'inject_tool_config', lambda cfg: None)
-    monkeypatch.setattr(runner_mod, 'set_context', lambda ctx: ctx._artifact_counts.update(result=1))
+    monkeypatch.setattr(
+        runner_mod,
+        'set_context',
+        lambda ctx: ctx.record_local_artifact('result', 'text', {'text': 'Completed result'}, 1),
+    )
     _install_fake_translator(monkeypatch)
     expected = {}
 
@@ -642,7 +1527,7 @@ def test_tool_result_sends_separate_resume_safe_payload(monkeypatch):
     }])
 
     def pre_save_ctx(ctx):
-        ctx._artifact_counts['result'] = 1
+        ctx.record_local_artifact('result', 'text', {'text': 'Completed result'}, 1)
 
     monkeypatch.setattr(runner_mod, 'set_context', pre_save_ctx)
 
@@ -730,7 +1615,7 @@ def test_run_subagent_stream_text_think_events(monkeypatch):
 
     # Pre-populate saved key.
     def pre_save_ctx(ctx):
-        ctx._artifact_counts['result'] = 1
+        ctx.record_local_artifact('result', 'text', {'text': 'Completed result'}, 1)
     monkeypatch.setattr(runner_mod, 'set_context', pre_save_ctx)
 
     async def run():
@@ -758,7 +1643,7 @@ def test_run_subagent_stream_coalesces_tiny_text_deltas(monkeypatch):
     ])
 
     def pre_save_ctx(ctx):
-        ctx._artifact_counts['result'] = 1
+        ctx.record_local_artifact('result', 'text', {'text': 'Completed result'}, 1)
     monkeypatch.setattr(runner_mod, 'set_context', pre_save_ctx)
 
     async def run():
@@ -796,7 +1681,7 @@ def test_workflow_tool_internal_text_is_not_forwarded(monkeypatch):
     ])
 
     def pre_save_ctx(ctx):
-        ctx._artifact_counts['result'] = 1
+        ctx.record_local_artifact('result', 'text', {'text': 'Completed result'}, 1)
     monkeypatch.setattr(runner_mod, 'set_context', pre_save_ctx)
 
     async def run():
@@ -826,7 +1711,7 @@ def test_workflow_tool_artifact_is_streamed_before_tool_returns(monkeypatch):
 
     def capture_context(ctx):
         context_holder['ctx'] = ctx
-        ctx._artifact_counts['result'] = 1
+        ctx.record_local_artifact('result', 'text', {'text': 'Completed result'}, 1)
 
     monkeypatch.setattr(runner_mod, 'set_context', capture_context)
 
@@ -894,7 +1779,7 @@ def test_run_subagent_stream_emits_task_scoped_source_snapshot(monkeypatch):
     )
 
     def pre_save_ctx(ctx):
-        ctx._artifact_counts['result'] = 1
+        ctx.record_local_artifact('result', 'text', {'text': 'Completed result'}, 1)
 
     monkeypatch.setattr(runner_mod, 'set_context', pre_save_ctx)
 
@@ -1056,7 +1941,7 @@ def test_display_plan_is_model_generated_and_bounded():
         runner_mod._generate_display_plan(llm, 'task')
 
 
-@pytest.mark.parametrize('source', ['qwen', 'openai'])
+@pytest.mark.parametrize('source', ['qwen', 'openai', 'deepseek'])
 def test_display_plan_collects_stream_without_emitting_agent_events(monkeypatch, source):
     from lazyllm import OnlineChatModule
 
@@ -1065,6 +1950,7 @@ def test_display_plan_collects_stream_without_emitting_agent_events(monkeypatch,
     response.__enter__.return_value = response
     response.status_code = 200
     chunks = [
+        {'role': 'assistant', 'content': ''},
         {'reasoning_content': 'Private planning reasoning'},
         {'content': '["Read inputs",'},
         {'content': '"Analyze data",'},
@@ -1136,7 +2022,8 @@ def test_unconfigured_retrieval_is_not_exposed_by_subagent(monkeypatch):
 
 def test_display_plan_does_not_delay_execution_and_is_persisted_live(monkeypatch):
     import threading
-    db = _install_fake_db(monkeypatch)
+    task = {**_DEFAULT_TASK, 'params': {'required_output_artifact_keys': []}, 'output_artifact_keys': []}
+    db = _install_fake_db(monkeypatch, task)
     _install_fake_lazyllm(monkeypatch)
     _install_fake_build(monkeypatch)
     _install_fake_translator(monkeypatch)
@@ -1158,8 +2045,10 @@ def test_display_plan_does_not_delay_execution_and_is_persisted_live(monkeypatch
 
     monkeypatch.setattr(runner_mod, '_generate_display_plan', generate)
     monkeypatch.setattr(runner_mod, 'AgentExecutor', Executor)
-    monkeypatch.setattr(runner_mod, '_evaluate_completion', lambda *_, **__: (True, 'done'))
-    task = {**_DEFAULT_TASK, 'params': {'required_output_artifact_keys': []}, 'output_artifact_keys': []}
+    async def complete(*_, **__):
+        return True, 'done', ''
+
+    monkeypatch.setattr(runner_mod, '_evaluate_completion_async', complete)
     raw = asyncio.run(_collect(runner_mod.run_subagent_stream(_DEFAULT_TASK_ID, task_spec=task)))
     events = _sse_to_events(raw)
     assert next(e for e in events if e['type'] == 'plan')['steps'] == outline

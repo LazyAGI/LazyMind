@@ -400,18 +400,38 @@ def install_lazyllm_sqlite_proxy():
             return
 
         import sqlalchemy
-        from lazyllm.tools.rag.parsing_service.queue import _SQLBasedQueue
-        from lazyllm.tools.rag.store.hybrid.map_store import MapStore
-        from lazyllm.tools.rag.store.segment.sqlite_store import SQLiteStore
-        from lazyllm.tools.rag.utils import _orm_to_dict
         from lazyllm.tools.sql.sql_manager import SqlManager
+        from lazymind.common.optional_components import component_enabled
 
         manager_engine = SqlManager.engine.fget
+
+        def proxied_manager_engine(manager):
+            if not manager._db_name.startswith('sqliteproxy://'):
+                return manager_engine(manager)
+            if manager._engine is None:
+                manager._engine = sqlalchemy.create_engine(
+                    'sqlite://',
+                    creator=lambda: connect(manager._db_name, check_same_thread=False),
+                    poolclass=sqlalchemy.pool.QueuePool,
+                    echo=False,
+                )
+            return manager._engine
+
+        SqlManager.engine = property(proxied_manager_engine)
+        if not component_enabled('rag'):
+            _adapter_installed = True
+            return
+
+        from lazyllm.tools.rag.parsing_service.queue import _SQLBasedQueue
+        from lazyllm.tools.rag.utils import _orm_to_dict
+        from lazyllm.tools.rag.store.hybrid.map_store import MapStore
+        from lazyllm.tools.rag.store.segment.sqlite_store import SQLiteStore
         sqlite_store_open = SQLiteStore._open_conn
         sqlite_store_dir = SQLiteStore.dir.fget
         map_store_open = MapStore._open_conn
         map_store_connect = MapStore.connect
         map_store_dir = MapStore.dir.fget
+
         queue_peek = _SQLBasedQueue.peek
 
         def proxied_queue_peek(queue, filter_by=None):
@@ -435,18 +455,6 @@ def install_lazyllm_sqlite_proxy():
                     finished_at = finished_at.astimezone().replace(tzinfo=None)
                 result['finished_at'] = finished_at
                 return result
-
-        def proxied_manager_engine(manager):
-            if not manager._db_name.startswith('sqliteproxy://'):
-                return manager_engine(manager)
-            if manager._engine is None:
-                manager._engine = sqlalchemy.create_engine(
-                    'sqlite://',
-                    creator=lambda: connect(manager._db_name, check_same_thread=False),
-                    poolclass=sqlalchemy.pool.QueuePool,
-                    echo=False,
-                )
-            return manager._engine
 
         def proxied_sqlite_store_open(store):
             if not store._db_path.startswith('sqliteproxy://'):
@@ -494,7 +502,6 @@ def install_lazyllm_sqlite_proxy():
                 return ''
             return map_store_dir(store)
 
-        SqlManager.engine = property(proxied_manager_engine)
         SQLiteStore._open_conn = proxied_sqlite_store_open
         SQLiteStore.dir = property(proxied_sqlite_store_dir)
         MapStore._open_conn = proxied_map_store_open

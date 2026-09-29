@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from threading import Event, Lock
 from time import perf_counter
 from typing import Any
 
 import lazyllm
 from lazyllm import AutoModel, LOG
+
+from lazymind.common.maintenance import MaintenanceCancelled, check_cancelled
 
 from lazymind.common.skill.remote_store import SkillRemoteStore
 from lazymind.common.skill.storage_key import parse_skill_key
@@ -38,6 +41,42 @@ _MISSING = object()
 ORG_STAGE_PLAN = 'organize_plan'
 ORG_STAGE_DRAFT = 'organize_draft'
 ORG_STAGE_APPLY = 'organize_apply'
+_cancel_events: dict[str, Event] = {}
+_cancel_guard = Lock()
+
+
+class SkillOrganizeCancelled(RuntimeError):
+    pass
+
+
+def arm_skill_organize_cancel(requestid: str) -> None:
+    with _cancel_guard:
+        _cancel_events[str(requestid)] = Event()
+
+
+def cancel_skill_organize(requestid: str) -> bool:
+    with _cancel_guard:
+        event = _cancel_events.get(str(requestid))
+    if event is None:
+        return False
+    event.set()
+    return True
+
+
+def disarm_skill_organize_cancel(requestid: str) -> None:
+    with _cancel_guard:
+        _cancel_events.pop(str(requestid), None)
+
+
+def _ensure_skill_organize_not_cancelled(requestid: str) -> None:
+    try:
+        check_cancelled()
+    except MaintenanceCancelled as exc:
+        raise SkillOrganizeCancelled('Skill organize was cancelled.') from exc
+    with _cancel_guard:
+        event = _cancel_events.get(str(requestid))
+    if event is not None and event.is_set():
+        raise SkillOrganizeCancelled('Skill organize was cancelled.')
 
 
 def _with_evolution_or_chat_llm(model_configs: dict[str, Any] | None) -> dict[str, Any]:
@@ -157,6 +196,7 @@ def run_skill_organize(
                 ),
             )
         finally:
+            disarm_skill_organize_cancel(request.requestid)
             _restore_agentic_config(previous_agentic_config)
 
 
@@ -173,6 +213,7 @@ def _run_skill_organize(
     started_perf = perf_counter()
     current_stage = 'pending'
     try:
+        _ensure_skill_organize_not_cancelled(request.requestid)
         source_skills = _load_source_skills(request, remote_store)
         metadata = load_search_metadata([source.key for source in source_skills])
         for source in source_skills:
@@ -184,6 +225,7 @@ def _run_skill_organize(
         write_stage_file(work_dir, taskid, STAGE_SUMMARY, summaries)
 
         current_stage = ORG_STAGE_PLAN
+        _ensure_skill_organize_not_cancelled(request.requestid)
         _record_skill_organize_stage_safely(
             request,
             taskid,
@@ -196,6 +238,7 @@ def _run_skill_organize(
         write_stage_file(work_dir, taskid, STAGE_PLAN, plan)
 
         current_stage = ORG_STAGE_DRAFT
+        _ensure_skill_organize_not_cancelled(request.requestid)
         _record_skill_organize_stage_safely(
             request,
             taskid,
@@ -208,6 +251,7 @@ def _run_skill_organize(
         write_stage_file(work_dir, taskid, STAGE_DRAFT, draft)
 
         current_stage = ORG_STAGE_APPLY
+        _ensure_skill_organize_not_cancelled(request.requestid)
         _record_skill_organize_stage_safely(
             request,
             taskid,
@@ -248,6 +292,11 @@ def _run_skill_organize(
             artifact_dir=artifact_dir,
         )
     except Exception as exc:
+        cancelled = isinstance(exc, SkillOrganizeCancelled)
+        status = 'cancelled' if cancelled else 'failed'
+        error_code = 'skill_organize_cancelled' if cancelled else (
+            'skill_organize_invalid_package' if isinstance(exc, ValueError) else 'skill_organize_failed'
+        )
         LOG.exception(f'[SkillOrganize] failed request={request.requestid} task={taskid}: {exc}')
         error_result = {
             'kind': 'skill_organize',
@@ -255,9 +304,11 @@ def _run_skill_organize(
             'requestid': request.requestid,
             'taskid': taskid,
             'userid': request.user_id,
-            'status': 'failed',
+            'status': status,
             'failed_stage': current_stage,
             'error': str(exc),
+            'error_code': error_code,
+            'skills': list(request.skills),
             'artifact_dir': artifact_dir,
             'started_at': started_at.isoformat(),
             'duration_ms': _duration_ms(started_perf),
@@ -347,7 +398,12 @@ def _load_source_skills(request: SkillOrganizeRequest, store: SkillRemoteStore) 
         files = store.list_files(category, name)
         content = files.get('SKILL.md')
         if not isinstance(content, str) or not content.strip():
-            raise ValueError(f'skill {name!r} does not contain SKILL.md')
+            files_preview = ', '.join(sorted(files)[:12]) or '(no files)'
+            raise ValueError(
+                f'Skill package {category}/{name} is missing SKILL.md at its package root '
+                f'(relative_root={category}/{name}). Files seen: {files_preview}. '
+                'Re-import the directory that contains SKILL.md, or use the skill subdirectory link.'
+            )
         result.append(SourceSkill(
             key=f'{category}/{name}',
             category=category,

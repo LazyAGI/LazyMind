@@ -26,6 +26,21 @@ func TestTranslateChunkWithRetryRecoversTransientFailure(t *testing.T) {
 	}
 }
 
+func TestBuildPDFTranslationDraftPreservesSourceLayoutAndTranslation(t *testing.T) {
+	manifest := translationLayoutManifest{Version: 2, Blocks: []translationLayoutBlock{{
+		ID: "block-1", Page: 2, PageWidth: 600, PageHeight: 800,
+		BBox: []float64{10, 20, 300, 80}, Type: "native_text_block", Text: "Source paragraph",
+	}}}
+	draft := buildPDFTranslationDraft("artifact-1", "", "zh", manifest, map[string]string{"block-1": "译文段落"})
+	if draft.ArtifactID != "artifact-1" || len(draft.Blocks) != 1 {
+		t.Fatalf("unexpected draft: %#v", draft)
+	}
+	block := draft.Blocks[0]
+	if block.SourceText != "Source paragraph" || block.TranslatedText != "译文段落" || block.Page != 2 || len(block.BBox) != 4 {
+		t.Fatalf("unexpected draft block: %#v", block)
+	}
+}
+
 func TestTranslateUnitsParallelPreservesOrderAndReportsWeightedProgress(t *testing.T) {
 	units := []translationWorkUnit{{ID: "a", Text: "123456"}, {ID: "b", Text: "abcdef"}}
 	var active atomic.Int32

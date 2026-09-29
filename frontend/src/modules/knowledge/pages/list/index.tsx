@@ -1,3 +1,4 @@
+import { useRAGComponent } from "@/modules/modelProvider/contexts/RAGComponentContext";
 import {
   FC,
   useState,
@@ -246,31 +247,21 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   }, [trackedMarketJobs]);
   const isCloudArchiveView = sourceCategory === "cloudArchive";
   const isOfficialView = sourceCategory === "official";
-  const createActionDisabled = false;
-  const createActionDisabledTooltip = isAdmin ? (
-    <span>
-      {embeddingReady === false
-        ? t("knowledge.embeddingNotReadyBannerAdmin")
-        : t("knowledge.multimodalEmbeddingNotReadyBannerAdmin")}
-      <a
-        href={modelSettingsPath}
-        style={{ marginLeft: 8, color: "#fff", textDecoration: "underline" }}
-        onClick={(e: MouseEvent<HTMLAnchorElement>) => {
-          e.preventDefault();
-          navigate(modelSettingsPath);
-        }}
-      >
-        {t("knowledge.goToConfig")}
-      </a>
-    </span>
-  ) : embeddingReady === false ? (
-    t("knowledge.embeddingNotReadyBanner")
-  ) : (
-    t("knowledge.multimodalEmbeddingNotReadyBanner")
-  );
+  const { availability: ragAvailability } = useRAGComponent();
+  const createActionDisabled = ragAvailability !== "ready";
+  const createActionDisabledTooltip = ragAvailability === "checking"
+    ? "正在检查本地知识库组件状态"
+    : ragAvailability === "error"
+      ? "无法确认组件状态，请重试后创建资料库"
+      : "请先安装本地知识库组件，并重启本地服务后创建资料库";
+
+  useEffect(() => {
+    if (createActionDisabled) createKnowledgeRef.current?.onClose();
+  }, [createActionDisabled]);
 
   useEffect(() => {
     if (
+      createActionDisabled ||
       syncCreateVm.cloudConnectionLoading ||
       !isCloudKnowledgeCreateRequest(location.search) ||
       cloudCreateRequestRef.current === location.search
@@ -295,6 +286,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       { replace: true },
     );
   }, [
+    createActionDisabled,
     location.pathname,
     location.search,
     navigate,
@@ -1601,6 +1593,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   async function onUpdate(
     data: Dataset & { processing_level?: ProcessingLevel },
   ): Promise<CoreDataset | void> {
+    if (!data.dataset_id && createActionDisabled) return;
     setLoading(true);
     try {
       if (data.dataset_id) {
@@ -1679,7 +1672,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           type="primary"
           icon={<PlusOutlined />}
           disabled={createActionDisabled}
-          onClick={() => createKnowledgeRef.current?.onOpen()}
+          onClick={() => { if (!createActionDisabled) createKnowledgeRef.current?.onOpen(); }}
         >
           {t("knowledge.createKnowledgeBase")}
         </Button>

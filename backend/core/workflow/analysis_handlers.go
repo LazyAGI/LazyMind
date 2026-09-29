@@ -124,7 +124,11 @@ func ConfirmWorkflowWorkflow(w http.ResponseWriter, r *http.Request) {
 	selectedJSON, _ := json.Marshal(map[string]any{"candidate": selected, "tool_mappings": toolMappings, "scripts": scriptReport})
 	var skillPackage map[string]any
 	if strings.HasPrefix(analysis.SourceSkillID, builtinSkillIDPrefix) {
-		snapshot, loadErr := loadWorkflowBuiltinSkillPackage(analysis.SourceSkillID)
+		snapshot, loadErr := loadWorkflowBuiltinSkillPackage(r.Context(), analysis.SourceSkillID)
+		if isWorkflowBuiltinPackageDownload(loadErr) {
+			common.ReplyErr(w, loadErr.Error(), http.StatusBadGateway)
+			return
+		}
 		if loadErr != nil || snapshot.TreeHash != analysis.SourceSkillTreeHash {
 			common.ReplyErr(w, "workflow confirmation stale", http.StatusConflict)
 			return

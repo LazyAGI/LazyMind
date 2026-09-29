@@ -38,8 +38,10 @@ interface SkillManagementToolbarProps {
   organizeStatus: SkillOrganizeStatus;
   organizeRunStatus?: SkillOrganizeTaskStatus | "";
   organizeElapsedMs?: number;
+  organizeError?: string;
   onOrganizeSkills: (mode: SkillOrganizeDepth) => void;
   onOrganizeCancel?: () => void;
+  onOrganizeCancelRun?: () => void;
   manualSkillReviewCount: number;
   manualSkillReviewDisabled: boolean;
   manualSkillReviewDisabledReason?: string;
@@ -72,8 +74,10 @@ export default function SkillManagementToolbar({
   organizeStatus,
   organizeRunStatus = "",
   organizeElapsedMs = 0,
+  organizeError = "",
   onOrganizeSkills,
   onOrganizeCancel,
+  onOrganizeCancelRun,
   manualSkillReviewCount,
   manualSkillReviewDisabled,
   manualSkillReviewDisabledReason,
@@ -163,7 +167,7 @@ export default function SkillManagementToolbar({
     running: t(skillOrganizeRunningTitleKey(organizeRunStatus)),
     success: t("admin.memorySkillOrganizeCompleted"),
     skipped: t("admin.memorySkillOrganizeSkipped"),
-    error: t("admin.memorySkillOrganizeFailed"),
+    error: organizeError || t("admin.memorySkillOrganizeFailed"),
   }[organizeStatus];
   const organizeElapsedHint =
     organizeStatus === "running" && organizeElapsedMs > 0
@@ -215,7 +219,7 @@ export default function SkillManagementToolbar({
         </button>
       </Dropdown>
 
-      <span className={`memory-skill-insight-card-wrap${organizeMode && onOrganizeCancel ? " is-cancellable" : ""}`}>
+      <span className={`memory-skill-insight-card-wrap${(organizeMode && onOrganizeCancel) || (organizeStatus === "running" && onOrganizeCancelRun) ? " is-cancellable" : ""}`}>
         <Tooltip title={organizeTooltip} trigger={["hover", "focus"]}>
           <span
             className="memory-skill-insight-card-tooltip"
@@ -251,7 +255,21 @@ export default function SkillManagementToolbar({
             </Dropdown>
           </span>
         </Tooltip>
-        {organizeMode && onOrganizeCancel ? (
+        {organizeStatus === "running" && onOrganizeCancelRun ? (
+          <button
+            type="button"
+            className="memory-skill-insight-card__dismiss"
+            aria-label={t("admin.memorySkillOrganizeCancelRun")}
+            title={t("admin.memorySkillOrganizeCancelRun")}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onOrganizeCancelRun();
+            }}
+          >
+            <CloseOutlined aria-hidden="true" />
+          </button>
+        ) : organizeMode && onOrganizeCancel ? (
           <button
             type="button"
             className="memory-skill-insight-card__dismiss"
