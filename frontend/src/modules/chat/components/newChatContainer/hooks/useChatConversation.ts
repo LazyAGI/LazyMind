@@ -24,7 +24,9 @@ import {
   type ChatWorkflowStepFeedbackDetail,
 } from "@/modules/chat/constants/chat";
 import { streamManager } from "@/modules/chat/utils/StreamManager";
+import { MailConfirmationReplayStore, mailConfirmationMetadata, mailConfirmationTurnSignature } from "@/modules/chat/utils/mailConfirmationReplay";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
+import type { RealtimeRefusal } from "@/modules/chat/utils/realtimeTransport";
 import UIUtils from "@/modules/chat/utils/ui";
 import {
   emitConversationActivity,
@@ -129,6 +131,7 @@ export function useChatConversation({
   const fileRef = useRef<any>(null);
   const currentConversationIdRef = useRef<string>("");
   const messageListRef = useRef<any[]>([]);
+  const mailConfirmationReplays = useRef(new MailConfirmationReplayStore());
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const conversationMessagesCache = useRef<Map<string, any[]>>(new Map());
   const ffmpegErrorBufferRef = useRef("");
@@ -1717,6 +1720,17 @@ export function useChatConversation({
       sources: [],
       model_mode: "value_engineering",
     };
+    const mailConfirmation = mailConfirmationMetadata(params);
+    if (mailConfirmation) {
+      Object.assign(userMessage, {
+        mail_confirmation: mailConfirmation,
+        mail_confirmation_replay_key: mailConfirmationReplays.current.put(
+          currentConversationIdRef.current,
+          mailConfirmationTurnSignature(userMessage),
+          { ...mailConfirmation, mail_draft_patch: params.mail_draft_patch },
+        ),
+      });
+    }
     const previousMessages = messageListRef.current;
     const confirmationConversationId = currentConversationIdRef.current;
     const isEnvConfirmation = !!params.ask_answers_structured && previousMessages.some(
@@ -1778,6 +1792,36 @@ export function useChatConversation({
         // Leave the card locked if the server's decision cannot be verified.
       }
     };
+    // Only a locally refused request is known to be unsent. Anything else may
+    // have reached the server and must go through normal stream recovery.
+    const handleMailSubmissionError = async (event?: CustomEvent) => {
+      const reason = (event as { reason?: RealtimeRefusal } | undefined)?.reason;
+      if (!reason) {
+        if (event?.type === "timeout") onTimeout(event);
+        else onError(event);
+        return;
+      }
+      clearStreamRecovery(confirmationConversationId);
+      stopStreamAfterReconciliation(confirmationConversationId);
+      const withoutSubmission = (list: any[]) => {
+        if (list[list.length - 2] !== userMessage || list[list.length - 1]?.role !== RoleTypes.ASSISTANT) return list;
+        const retainedMessages = list.slice(0, -2);
+        conversationMessagesCache.current.set(confirmationConversationId, retainedMessages);
+        streamManager.saveMessageList(confirmationConversationId, retainedMessages);
+        return retainedMessages;
+      };
+      if (currentConversationIdRef.current === confirmationConversationId) {
+        setMessageList((list) => {
+          const next = withoutSubmission(list);
+          messageListRef.current = next;
+          return next;
+        });
+      } else {
+        const cached = conversationMessagesCache.current.get(confirmationConversationId);
+        if (cached) withoutSubmission(cached);
+      }
+      params.onMailSubmissionRefused?.(reason);
+    };
     const newMessageList = [
       ...previousMessages,
       userMessage,
@@ -1825,7 +1869,7 @@ export function useChatConversation({
           ? { mail_mailbox_confirm_draft_id: params.mail_mailbox_confirm_draft_id }
           : {}),
       },
-      isEnvConfirmation ? restoreEnvConfirmation : undefined,
+      isEnvConfirmation ? restoreEnvConfirmation : params.onMailSubmissionRefused ? handleMailSubmissionError : undefined,
     );
     if (!opened) {
       if (isEnvConfirmation) await restoreEnvConfirmation();
@@ -2063,6 +2107,24 @@ export function useChatConversation({
       return false;
     }
 
+    let mailReplay;
+    if (userMessage?.mail_confirmation || userMessage?.mail_confirmation_replay_key) {
+      const previousAssistant = messageListRef.current[messageListRef.current.length - 1];
+      const metadata = mailConfirmationMetadata(userMessage.mail_confirmation);
+      if (metadata && ["failed", "interrupted"].includes(previousAssistant?.run_status)) {
+        mailReplay = mailConfirmationReplays.current.get(
+          userMessage.mail_confirmation_replay_key,
+          currentConversationIdRef.current,
+          mailConfirmationTurnSignature(userMessage),
+          metadata,
+        );
+      }
+      if (!mailReplay) {
+        message.warning(t("chat.mailDraft.retryNeedsPreview"));
+        return false;
+      }
+    }
+
     regenerateInProgressRef.current = true;
 
     const currentId = currentConversationIdRef.current;
@@ -2132,11 +2194,12 @@ export function useChatConversation({
           ? ChatConversationsRequestActionEnum.ChatActionRegeneration
           : ChatConversationsRequestActionEnum.ChatActionNext,
         !hasPersistedTurn ? {
+          ...mailReplay,
           ...(userMessage.mentions?.length ? { mentions: userMessage.mentions } : {}),
           ...(userMessage.cite_history_ids?.length
             ? { cite_history_ids: userMessage.cite_history_ids }
             : {}),
-        } : undefined,
+        } : mailReplay,
       );
       if (!opened) {
         messageListRef.current = previousMessageList;

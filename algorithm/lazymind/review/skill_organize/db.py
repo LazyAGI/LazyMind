@@ -39,21 +39,25 @@ def insert_skill_organize_result(
     engine = _get_app_conn()
     summary_value = _summary_value_sql(engine)
     with engine.begin() as conn:
-        conn.execute(
+        result = conn.execute(
             text(
                 f"""INSERT INTO {SKILL_REVIEW_RUN_STATS_TABLE}
                        (id, requestid, userid, status, started_at, duration_ms,
                         summary)
-                    VALUES
-                       (:id, :requestid, :userid, :status, :started_at,
-                        :duration_ms, {summary_value})
+                    SELECT :id, :requestid, :userid, :status, :started_at,
+                           :duration_ms, {summary_value}
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM {SKILL_REVIEW_RUN_STATS_TABLE}
+                        WHERE requestid = :requestid AND userid = :userid AND status = 'cancelled'
+                    )
                     ON CONFLICT (id) DO UPDATE SET
                        requestid = EXCLUDED.requestid,
                        userid = EXCLUDED.userid,
                        status = EXCLUDED.status,
                        started_at = EXCLUDED.started_at,
                        duration_ms = EXCLUDED.duration_ms,
-                       summary = EXCLUDED.summary"""
+                       summary = EXCLUDED.summary
+                    WHERE {SKILL_REVIEW_RUN_STATS_TABLE}.status NOT IN ('cancelled', 'completed', 'failed', 'skipped')"""
             ),
             {
                 'id': record_id,
@@ -65,7 +69,15 @@ def insert_skill_organize_result(
                 'summary': summary,
             },
         )
-    return 1
+    return result.rowcount
+
+
+def is_skill_organize_cancelled(requestid: str, user_id: str) -> bool:
+    with _get_app_conn().connect() as conn:
+        return conn.execute(text(
+            f"SELECT 1 FROM {SKILL_REVIEW_RUN_STATS_TABLE} "
+            "WHERE requestid = :requestid AND userid = :userid AND status = 'cancelled' LIMIT 1"
+        ), {'requestid': requestid, 'userid': user_id}).first() is not None
 
 
 def _summary_value_sql(engine: Engine) -> str:

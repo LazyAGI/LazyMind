@@ -127,6 +127,7 @@ class AgentEventFrameTranslator:
         self.language = _preview_language(query)
         self._pending_previews: dict[str, str] = {}
         self._mail_drafts: dict[str, dict[str, Any]] = {}
+        self._ordinary_ask: dict[str, Any] | None = None
         self.streamed_text = False
         self.ask_pending_emitted = False
         self.capability_dependency_emitted = False
@@ -192,23 +193,32 @@ class AgentEventFrameTranslator:
             )
             if self.capability_dependency_emitted and not has_mail_draft:
                 return frames
-            if isinstance(mail_draft, dict) and mail_draft.get('draft_id'):
-                self._mail_drafts[str(mail_draft['draft_id'])] = mail_draft
+            if not has_mail_draft or ask_data.get('mail_draft_only') is False:
+                self._ordinary_ask = {
+                    key: value for key, value in ask_data.items()
+                    if key not in {'mail_draft', 'mail_drafts', 'mail_draft_only', 'mail_mailbox_choice'}
+                }
             if isinstance(extra_drafts, list):
                 for item in extra_drafts:
                     if isinstance(item, dict) and item.get('draft_id'):
                         self._mail_drafts[str(item['draft_id'])] = item
-            if self._mail_drafts:
-                drafts = list(self._mail_drafts.values())
-                ask_data['mail_drafts'] = drafts
-                ask_data['mail_draft'] = drafts[-1]
-            awaiting_user = any(
-                str(item.get('status') or '') != 'sent'
+            if isinstance(mail_draft, dict) and mail_draft.get('draft_id'):
+                self._mail_drafts[str(mail_draft['draft_id'])] = mail_draft
+            if self._ordinary_ask is not None:
+                ask_data = dict(self._ordinary_ask)
+            drafts = list(self._mail_drafts.values())
+            ask_data['mail_drafts'] = drafts
+            ask_data['mail_draft_only'] = self._ordinary_ask is None
+            if drafts:
+                ask_data['mail_draft'] = mail_draft if isinstance(mail_draft, dict) else drafts[-1]
+            awaiting_user = self._ordinary_ask is not None or any(
+                item.get('requires_confirmation', str(item.get('status') or '') not in {
+                    'sent', 'sending',
+                })
                 for item in self._mail_drafts.values()
-            ) if self._mail_drafts else True
-            if awaiting_user:
-                self.ask_pending_emitted = True
-                self.run.ask_pending = True
+            )
+            self.ask_pending_emitted = bool(awaiting_user)
+            self.run.ask_pending = bool(awaiting_user)
             frames.append(_stream_frame(extra={'ask_pending': ask_data}))
             return frames
         if event_type == 'tool_configuration':

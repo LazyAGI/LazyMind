@@ -78,6 +78,7 @@ _MAX_CARD_ATTACHMENT_BYTES = 15 * 1024 * 1024
 _MAX_CARD_ATTACHMENT_COUNT = 5
 _MAX_CARD_ATTACHMENT_TOTAL_BYTES = 20 * 1024 * 1024
 _IMAP_TIMEOUT_SECONDS = 20
+_DELIVERY_UNKNOWN_WARNING = 'Mail delivery is unknown. Resending can send a duplicate.'
 _LIST_DEFAULT_LIMIT = 50
 _LIST_MAX_LIMIT = 100
 _TRANSFER_URL_RE = re.compile(
@@ -128,32 +129,45 @@ def _clamp_limit(value: Any, default: int = _LIST_DEFAULT_LIMIT, maximum: int = 
     return min(parsed, maximum)
 
 
-def _plain_error_text(value: Any) -> str:
-    if value is None:
+def _plain_error_text(value: Any, depth: int = 0) -> str:
+    if value is None or depth >= 12:
         return ''
+
+    def extract(nested: Any) -> str:
+        return _plain_error_text(nested, depth + 1)
+
     if isinstance(value, dict):
         if value.get('ok') is False:
-            text = _plain_error_text(
+            text = extract(
                 value.get('last_error') or value.get('value') or value.get('msg') or value.get('error')
             )
             if text:
                 return text
-        for key in ('last_error', 'message', 'msg', 'error', 'detail', 'reason'):
-            text = _plain_error_text(value.get(key))
+        for key in ('last_error', 'message', 'msg', 'error', 'detail', 'reason', 'result', 'data'):
+            text = extract(value.get(key))
             if text:
                 return text
         nested = value.get('value')
         if nested is not None and nested is not value:
-            return _plain_error_text(nested)
+            return extract(nested)
         return ''
     if isinstance(value, (list, tuple)):
-        return ''
+        return '; '.join(filter(None, (extract(item) for item in value)))
     text = str(value).strip()
-    if text.startswith('{') or text.startswith('['):
+    if text.startswith(('"', '{', '[')):
         try:
-            return _plain_error_text(json.loads(text))
+            return extract(json.loads(text))
         except json.JSONDecodeError:
-            return text
+            pass
+    # Tool wrappers may prefix or suffix an otherwise valid JSON error.
+    for match in re.finditer(r'[\[{]', text):
+        try:
+            nested, _ = json.JSONDecoder().raw_decode(text[match.start():])
+        except json.JSONDecodeError:
+            continue
+        return extract(nested)
+    if '{' in text or text.startswith('['):
+        return ''
     return text
 
 
@@ -700,7 +714,12 @@ def _resolve_attachment_paths(
     return resolved
 
 
-def _write_outgoing_attachments(items: Any) -> list[str]:
+def _outgoing_attachment_name(item: Any) -> str:
+    filename = item.get('filename') if isinstance(item, dict) else ''
+    return os.path.basename(str(filename or '').strip()) or 'attachment.bin'
+
+
+def _write_outgoing_attachments(items: Any, *, written_paths: list[str] | None = None) -> list[str]:
     if not items:
         return []
     if not isinstance(items, (list, tuple)):
@@ -709,12 +728,12 @@ def _write_outgoing_attachments(items: Any) -> list[str]:
         _fail(
             f'At most {_MAX_CARD_ATTACHMENT_COUNT} card-uploaded attachments are allowed.'
         )
-    written: list[str] = []
+    written = written_paths if written_paths is not None else []
     total = 0
     for item in items:
         if not isinstance(item, dict):
             _fail('Each uploaded mail attachment must be an object with filename and content_base64.')
-        filename = os.path.basename(str(item.get('filename') or '').strip()) or 'attachment.bin'
+        filename = _outgoing_attachment_name(item)
         raw_b64 = str(item.get('content_base64') or '').strip()
         if not raw_b64:
             _fail(f'Uploaded mail attachment {filename} is empty.')
@@ -735,8 +754,18 @@ def _write_outgoing_attachments(items: Any) -> list[str]:
                 f'{_MAX_CARD_ATTACHMENT_TOTAL_BYTES // (1024 * 1024)}MB in total.'
             )
         target = _unique_outgoing_path(filename)
-        with open(target, 'wb') as handle:
-            handle.write(data)
+        created = False
+        try:
+            with open(target, 'xb') as handle:
+                created = True
+                handle.write(data)
+        except OSError:
+            if created:
+                try:
+                    os.unlink(target)
+                except OSError:
+                    pass
+            raise
         written.append(target)
     return written
 
@@ -1250,9 +1279,29 @@ def _apply_confirm_patch(draft: dict[str, Any]) -> dict[str, Any]:
         draft['body'] = str(patch.get('body') or '')
     if 'attachment_paths' in patch or 'attachments' in patch:
         existing = [str(path) for path in (draft.get('attachment_paths') or []) if str(path).strip()]
-        paths = _resolve_attachment_paths(patch.get('attachment_paths'), existing_paths=existing)
-        paths.extend(_write_outgoing_attachments(patch.get('attachments')))
-        draft['attachment_paths'] = paths
+        requested = patch.get('attachment_paths', existing)
+        draft['attachment_error'] = 'Attachments could not be prepared. Select the attachments again or remove them explicitly.'
+        draft['attachment_paths'] = _coerce_path_list(requested)
+        uploads = patch.get('attachments')
+        upload_items = uploads if isinstance(uploads, (list, tuple)) else ([uploads] if uploads else [])
+        upload_names = [_outgoing_attachment_name(item) for item in upload_items]
+        pending = list(draft.get('pending_attachment_names') or []) if 'attachment_paths' not in patch else []
+        for name in upload_names:
+            if name in pending:
+                pending.remove(name)
+        draft['pending_attachment_names'] = pending + upload_names
+        paths = _resolve_attachment_paths(requested, existing_paths=existing)
+        written: list[str] = []
+        try:
+            _write_outgoing_attachments(uploads, written_paths=written)
+        finally:
+            # A later upload can fail after earlier files are fully saved.
+            draft['attachment_paths'] = paths + written
+            draft['pending_attachment_names'] = pending + upload_names[len(written):]
+        if draft['pending_attachment_names']:
+            _fail('Attachments still need to be reuploaded or explicitly removed: '
+                  + ', '.join(draft['pending_attachment_names']))
+        draft['attachment_error'] = ''
     return draft
 
 
@@ -1872,7 +1921,7 @@ def _build_message(draft: dict[str, Any], mailbox: str) -> EmailMessage:
     message.set_content(str(draft.get('body') or ''))
     for path in draft.get('attachment_paths') or []:
         if not os.path.isfile(path):
-            continue
+            _fail(f'Attachment file was not found: {os.path.basename(path)}')
         ctype, encoding = mimetypes.guess_type(path)
         if ctype is None or encoding is not None:
             ctype = 'application/octet-stream'
@@ -1898,18 +1947,26 @@ def _preview(draft: dict[str, Any]) -> dict[str, Any]:
         'cc': draft.get('cc') or [],
         'subject': draft.get('subject') or '',
         'body': draft.get('body') or '',
-        'attachments': [os.path.basename(path) for path in draft.get('attachment_paths') or []],
+        'attachments': [os.path.basename(path) for path in draft.get('attachment_paths') or []]
+        + list(draft.get('pending_attachment_names') or []),
+        'attachment_paths': list(draft.get('attachment_paths') or []),
+        'pending_attachment_names': list(draft.get('pending_attachment_names') or []),
         'in_reply_to': draft.get('in_reply_to') or '',
         'status': status,
         'sent_at': draft.get('sent_at') or '',
         'last_error': _plain_error_text(draft.get('last_error')),
-        'requires_confirmation': status not in {'sent'},
+        'requires_confirmation': status in {'draft', 'failed', 'partial_sent', 'needs_mailbox', 'delivery_unknown'},
+        'retryable': status in {'failed', 'partial_sent', 'delivery_unknown'},
         'requires_reauth': bool(draft.get('requires_reauth')),
         'reauth_path': _REAUTH_PATH if draft.get('requires_reauth') else '',
         'delivery_unknown': status == 'delivery_unknown',
-        'error_code': 'partial_sent' if status == 'partial_sent' else '',
+        'error_code': ('attachment_error' if draft.get('attachment_error') else status)
+        if status in {'failed', 'partial_sent', 'delivery_unknown'} else '',
+        'message_id': draft.get('provider_message_id') or '',
         'accepted_recipients': list(draft.get('accepted_recipients') or []),
         'refused_recipients': list(draft.get('pending_recipients') or []),
+        'accepted': list(draft.get('accepted_recipients') or []),
+        'refused': list(draft.get('pending_recipients') or []),
         'mailboxes': list(draft.get('mailboxes') or []),
     }
 
@@ -1919,13 +1976,15 @@ def _emit_draft_card(draft: dict[str, Any]) -> dict[str, Any]:
     _write_agent_data(
         'ask_pending',
         ask_id=str(uuid.uuid4()),
-        title='邮件发送预览',
-        description='确认后才会发送。发送失败可重新发送；若投递结果未知，不要轻易重试以免重复发送。',
+        title='邮件已发送' if preview['status'] == 'sent' else '邮件发送预览',
+        description=('邮件已发送，无需再次确认。' if preview['status'] == 'sent' else
+                     '确认后才会发送。发送失败可重新发送；若投递结果未知，请先核实收件情况。'),
         questions=[{
-            'text': '确认发送这封邮件？',
+            'text': ('投递结果未知，重新发送可能导致重复邮件。仍要重新发送？'
+                     if preview['delivery_unknown'] else '确认发送这封邮件？'),
             'type': 'boolean',
             'choices': ['是', '否'],
-        }],
+        }] if preview['requires_confirmation'] else [],
         mail_draft=preview,
     )
     return preview
@@ -2258,7 +2317,12 @@ class MailToolkit:
                 'No recipients. The To field is empty. Do not retry send. '
                 'Ask the user to provide at least one email address.'
             )
-        paths = _resolve_attachment_paths(attachment_paths)
+        attachment_error = ''
+        paths = _coerce_path_list(attachment_paths)
+        try:
+            paths = _resolve_attachment_paths(paths)
+        except (ToolExecutionError, OSError) as orig:
+            attachment_error = _plain_error_text(orig) or 'Attachments could not be prepared.'
         now = _iso(datetime.now(timezone.utc))
         if cred is None:
             draft = {
@@ -2279,8 +2343,12 @@ class MailToolkit:
                 'created_at': now,
                 'updated_at': now,
             }
+            draft['last_error'] = draft['attachment_error'] = attachment_error
             _save_draft(draft)
-            return _emit_mailbox_card(draft)
+            preview = _emit_mailbox_card(draft)
+            if attachment_error:
+                _fail(attachment_error)
+            return preview
         draft = {
             'draft_id': f'draft_{uuid.uuid4().hex[:16]}',
             'revision': 1,
@@ -2298,8 +2366,12 @@ class MailToolkit:
             'created_at': now,
             'updated_at': now,
         }
+        if attachment_error:
+            draft.update(status='failed', last_error=attachment_error, attachment_error=attachment_error)
         _save_draft(draft)
         preview = _emit_draft_card(draft)
+        if attachment_error:
+            _fail(attachment_error)
         return preview
 
     @fc_register(host_file='NONE')
@@ -2333,41 +2405,43 @@ class MailToolkit:
         """
         if not str(draft_id or '').strip():
             raise ToolExecutionError('draft_id is required')
+        with _locked_draft(draft_id):
+            return self._update_draft_locked(draft_id, to, subject, body, cc, attachment_paths, in_reply_to, mailbox)
+
+    def _update_draft_locked(self, draft_id, to, subject, body, cc, attachment_paths, in_reply_to, mailbox):
         draft = _load_draft(draft_id)
         if str(draft.get('status') or '') == 'sent':
             _fail('Cannot update a draft that was already sent.')
+        if draft.get('status') == 'sending':
+            _fail('Mail delivery is still pending. Recover the send result before editing this draft.')
+        delivery_unknown = draft.get('status') == 'delivery_unknown'
+        delivery_warning = _plain_error_text(draft.get('last_error'))
         cred = _resolve_sending_account(
             mailbox,
             draft_id=str(draft.get('draft_id') or ''),
             draft_mailbox=str(draft.get('mailbox') or draft.get('provider') or ''),
         )
-        if cred is None:
-            hint = str(mailbox or draft.get('mailbox') or draft.get('provider') or '')
-            draft['status'] = 'needs_mailbox'
-            draft['mailbox'] = ''
-            draft['provider'] = ''
-            draft['mailboxes'] = _mailbox_choice_rows(_lookup_accounts(hint) or None)
-            draft['revision'] = _draft_revision(draft) + 1
-            draft['updated_at'] = _iso(datetime.now(timezone.utc))
-            _save_draft(draft)
-            return _emit_mailbox_card(draft)
-        draft['mailbox'] = cred['email']
-        draft['provider'] = cred['provider']
+        if cred is not None:
+            draft['mailbox'] = cred['email']
+            draft['provider'] = cred['provider']
         if str(draft.get('status') or '') == 'needs_mailbox':
             draft['status'] = 'draft'
         if to is not None:
             recipients = _split_addresses(to)
             if not recipients:
                 raise ToolExecutionError('at least one recipient is required')
+            if _address_set(recipients) != _address_set(draft.get('to')):
+                draft['pending_recipients'] = []
             draft['to'] = recipients
         if cc is not None:
-            draft['cc'] = _split_addresses(cc)
+            new_cc = _split_addresses(cc)
+            if _address_set(new_cc) != _address_set(draft.get('cc')):
+                draft['pending_recipients'] = []
+            draft['cc'] = new_cc
         if subject is not None:
             draft['subject'] = str(subject).strip()
         if body is not None:
             draft['body'] = str(body)
-        if attachment_paths is not None:
-            draft['attachment_paths'] = _resolve_attachment_paths(attachment_paths)
         if in_reply_to is not None:
             draft['in_reply_to'] = str(in_reply_to or '').strip()
         draft['revision'] = _draft_revision(draft) + 1
@@ -2375,6 +2449,27 @@ class MailToolkit:
         draft['last_error'] = ''
         draft['requires_reauth'] = False
         draft['updated_at'] = _iso(datetime.now(timezone.utc))
+        if attachment_paths is not None:
+            draft['attachment_paths'] = _coerce_path_list(attachment_paths)
+            draft['pending_attachment_names'] = []
+            try:
+                draft['attachment_paths'] = _resolve_attachment_paths(attachment_paths)
+                draft['attachment_error'] = ''
+            except (ToolExecutionError, OSError) as orig:
+                draft['attachment_error'] = _plain_error_text(orig) or 'Attachments could not be prepared.'
+        if draft.get('attachment_error'):
+            draft.update(status='failed', last_error=draft['attachment_error'])
+        if delivery_unknown:
+            draft['status'] = 'delivery_unknown'
+            draft['last_error'] = delivery_warning or 'Mail delivery is unknown. Resending can send a duplicate.'
+            if draft.get('attachment_error'):
+                draft['last_error'] += ' ' + draft['attachment_error']
+        if cred is None:
+            hint = str(mailbox or draft.get('mailbox') or draft.get('provider') or '')
+            draft.update(status='needs_mailbox', mailbox='', provider='',
+                         mailboxes=_mailbox_choice_rows(_lookup_accounts(hint) or None))
+            _save_draft(draft)
+            return _emit_mailbox_card(draft)
         _save_draft(draft)
         return _emit_draft_card(draft)
 
@@ -2393,7 +2488,18 @@ class MailToolkit:
     def _send_draft_locked(self, draft_id: str) -> dict[str, Any]:
         draft = _load_draft(draft_id)
         if str(draft.get('status') or '') == 'sent':
-            _fail('This draft was already sent.')
+            return _emit_draft_card(draft)
+        prior_delivery_unknown = draft.get('status') == 'delivery_unknown'
+        if draft.get('status') == 'sending':
+            draft['status'] = 'delivery_unknown'
+            draft['revision'] = _draft_revision(draft) + 1
+            draft['last_error'] = (
+                'Mail delivery is unknown after an interrupted send. Verify delivery with the recipient; '
+                'resending can send a duplicate. Confirm the new preview to resend anyway.'
+            )
+            _save_draft(draft)
+            _emit_draft_card(draft)
+            _fail('Mail delivery is unknown. Confirm the new preview before explicitly resending this draft.')
         cred = _resolve_sending_account(
             '',
             draft_id=str(draft.get('draft_id') or ''),
@@ -2430,13 +2536,31 @@ class MailToolkit:
                 f'This preview is stale. The draft is now revision {expected_revision}. '
                 'Confirm the latest preview card; do not send from an older card.'
             )
-        _apply_confirm_patch(draft)
-        draft['attachment_paths'] = _resolve_attachment_paths(draft.get('attachment_paths'))
+        try:
+            _apply_confirm_patch(draft)
+            if draft.get('attachment_error'):
+                _fail(draft['attachment_error'])
+            draft['attachment_paths'] = _resolve_attachment_paths(draft.get('attachment_paths'))
+            message = _build_message(draft, cred['email'])
+        except Exception as orig:
+            draft['status'] = 'delivery_unknown' if prior_delivery_unknown else 'failed'
+            draft['revision'] = expected_revision + 1
+            draft['last_error'] = _plain_error_text(orig) or 'Failed to prepare the email. Review the draft and attachments.'
+            if prior_delivery_unknown:
+                draft['last_error'] = f"{_DELIVERY_UNKNOWN_WARNING} {draft['last_error']}"
+            _save_draft(draft)
+            _emit_draft_card(draft)
+            error = ToolExecutionError(draft['last_error'])
+            error.delivery_unknown = prior_delivery_unknown
+            raise error from orig
         to_addrs, cc_addrs = _pending_to_cc(draft)
         recipients = to_addrs + cc_addrs
         if not recipients:
-            draft['status'] = 'failed'
+            draft['status'] = 'delivery_unknown' if prior_delivery_unknown else 'failed'
+            draft['revision'] = expected_revision + 1
             draft['last_error'] = 'No recipients. Add at least one address in To, then confirm again.'
+            if prior_delivery_unknown:
+                draft['last_error'] = f"{_DELIVERY_UNKNOWN_WARNING} {draft['last_error']}"
             _save_draft(draft)
             _emit_draft_card(draft)
             _fail(
@@ -2445,17 +2569,21 @@ class MailToolkit:
             )
         draft['status'] = 'sending'
         _save_draft(draft)
-        message = _build_message(draft, cred['email'])
         try:
             result = _backend(cred).send(message)
-        except ToolExecutionError as orig:
-            unknown = bool(getattr(orig, 'delivery_unknown', False))
+        except Exception as orig:
+            unknown = prior_delivery_unknown or bool(getattr(orig, 'delivery_unknown', False)) or not isinstance(orig, ToolExecutionError)
             draft['status'] = 'delivery_unknown' if unknown else 'failed'
+            draft['revision'] = expected_revision + 1
             draft['last_error'] = _plain_error_text(orig) or 'Failed to send the email.'
+            if prior_delivery_unknown:
+                draft['last_error'] = f"{_DELIVERY_UNKNOWN_WARNING} {draft['last_error']}"
             draft['requires_reauth'] = 'Re-authorize' in str(orig)
             _save_draft(draft)
             _emit_draft_card(draft)
-            raise
+            error = ToolExecutionError(draft['last_error'])
+            error.delivery_unknown = unknown
+            raise error from orig
         if result.get('partial_sent'):
             refused = [
                 str(item.get('address') or '').strip()
@@ -2464,7 +2592,8 @@ class MailToolkit:
             ]
             accepted = [str(addr).strip() for addr in (result.get('accepted') or []) if str(addr).strip()]
             draft['status'] = 'partial_sent'
-            draft['accepted_recipients'] = accepted
+            draft['revision'] = expected_revision + 1
+            draft['accepted_recipients'] = list(dict.fromkeys([*draft.get('accepted_recipients', []), *accepted]))
             draft['pending_recipients'] = refused
             draft['last_error'] = (
                 'Some recipients were rejected after others were already accepted. '
@@ -2473,28 +2602,14 @@ class MailToolkit:
             )
             draft['sent_at'] = result.get('sent_at') or ''
             _save_draft(draft)
-            _emit_draft_card(draft)
-            return {
-                'status': 'partial_sent',
-                'draft_id': draft['draft_id'],
-                'revision': _draft_revision(draft),
-                'accepted': accepted,
-                'refused': refused,
-                'mailbox': cred['email'],
-            }
+            return _emit_draft_card(draft)
         sent_at = result.get('sent_at') or _iso(datetime.now(timezone.utc))
         draft['status'] = 'sent'
         draft['sent_at'] = sent_at
         draft['last_error'] = ''
         draft['pending_recipients'] = []
+        draft['accepted_recipients'] = list(dict.fromkeys([*draft.get('accepted_recipients', []), *recipients]))
+        draft['requires_reauth'] = False
         draft['provider_message_id'] = result.get('id') or ''
         _save_draft(draft)
-        _emit_draft_card(draft)
-        return {
-            'status': 'sent',
-            'draft_id': draft['draft_id'],
-            'revision': _draft_revision(draft),
-            'sent_at': sent_at,
-            'message_id': result.get('id') or '',
-            'mailbox': cred['email'],
-        }
+        return _emit_draft_card(draft)

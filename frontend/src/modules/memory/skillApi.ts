@@ -180,6 +180,11 @@ export interface SkillOrganizeTaskRecord {
   failedStage: string;
   mode: string;
   skills: string[];
+  pendingReview?: boolean;
+}
+
+export interface SkillOrganizeCancelResult {
+  pendingReview: boolean;
 }
 
 export interface ShareSkillPayload {
@@ -293,6 +298,7 @@ export interface SkillReviewTaskStatusRecord {
   failedStage?: string;
   mode?: string;
   skills?: string[];
+  pendingReview?: boolean;
 }
 
 export interface SkillReviewTaskListResult {
@@ -911,6 +917,7 @@ const normalizeSkillReviewTaskStatus = (
     failedStage: toStringValue(raw?.failed_stage, ""),
     mode: toStringValue(raw?.mode, ""),
     skills: toStringArray(raw?.skills),
+    pendingReview: toBoolean(raw?.pending_review),
   };
 };
 
@@ -1134,10 +1141,12 @@ export async function listSkillOrganizeTasks(
     }));
 }
 
-export async function cancelSkillOrganizeTask(requestId: string): Promise<void> {
-  await axiosInstance.post(`${coreBasePath}/skill_organize:cancel`, {
+export async function cancelSkillOrganizeTask(requestId: string): Promise<SkillOrganizeCancelResult> {
+  const response = await axiosInstance.post(`${coreBasePath}/skill_organize:cancel`, {
     requestid: requestId,
   });
+  const payload = toRawObject(unwrapEnvelope<unknown>(response.data));
+  return {pendingReview: toBoolean(payload?.pending_review)};
 }
 
 export async function listSkillTags(): Promise<string[]> {

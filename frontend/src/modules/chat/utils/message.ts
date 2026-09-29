@@ -12,6 +12,7 @@ import { RoleTypes } from "@/modules/chat/constants/common";
 import { splitThinkingContent } from "@/modules/chat/utils/thinking";
 import type { ChatMention } from "@/modules/chat/components/ChatInput/MentionEditor";
 import type { ChatSourceCollection } from "@/modules/chat/utils/sourceAdapter";
+import { mailConfirmationMetadata, mailConfirmationTurnSignature, type MailConfirmationMetadata } from "./mailConfirmationReplay";
 
 const CITE_MESSAGE_PATTERN = /<cite_message>([\s\S]*?)<\/cite_message>\s*/i;
 const CITE_MESSAGE_GLOBAL_PATTERN =
@@ -83,7 +84,7 @@ export function unansweredMailDrafts(
   });
 }
 
-function mailDraftsFromAskPending(askPending: any): any[] {
+export function mailDraftsFromAskPending(askPending: any): any[] {
   if (!askPending || typeof askPending !== "object") {
     return [];
   }
@@ -110,6 +111,9 @@ function mergeMailDraftRecord(current: any, incoming: any) {
     return incoming;
   }
   if (!incoming) {
+    return current;
+  }
+  if (current.status === "sent" || Number(incoming.revision || 1) < Number(current.revision || 1)) {
     return current;
   }
   const merged = { ...current, ...incoming };
@@ -139,6 +143,7 @@ export function mergeAskPending(previous: any, incoming: any) {
   return {
     ...previous,
     ...incoming,
+    mail_draft_only: incoming.mail_draft_only ?? (mailDraftsFromAskPending(incoming).length > 0),
     mail_draft: drafts[drafts.length - 1] || incoming.mail_draft || previous.mail_draft,
     mail_drafts: drafts.length ? drafts : undefined,
   };
@@ -167,6 +172,7 @@ export type ConversationHistoryRecord = Omit<
     second_thinking_time_s?: number | string;
     tool_call_turns?: number | string;
     mentions?: ChatMention[] | null;
+    mail_confirmation?: MailConfirmationMetadata;
     execution?: ExternalExecutionProjection;
     external_user_only?: boolean;
     run_id?: string;
@@ -326,6 +332,7 @@ export function buildChatMessageListFromHistory(
 
     list.push({
       role: RoleTypes.USER,
+      mail_confirmation: mailConfirmationMetadata(record.mail_confirmation),
       history_id: record.id,
       seq: record.seq,
       delta: displayQuery,
@@ -593,5 +600,14 @@ export function mergeChatMessageLists(
     return true;
   });
 
-  return [...api, ...unpersistedTail];
+  const reconciled = api.map(item => {
+    if (item.role !== RoleTypes.USER || !item.mail_confirmation) return item;
+    const previous = cached.find(candidate => candidate.role === RoleTypes.USER &&
+      messageKey(candidate) === messageKey(item) && candidate.mail_confirmation_replay_key);
+    if (!previous || !messageKey(item) ||
+        JSON.stringify(mailConfirmationMetadata(previous.mail_confirmation)) !== JSON.stringify(mailConfirmationMetadata(item.mail_confirmation)) ||
+        mailConfirmationTurnSignature(previous) !== mailConfirmationTurnSignature(item)) return item;
+    return { ...item, mail_confirmation_replay_key: previous.mail_confirmation_replay_key };
+  });
+  return [...reconciled, ...unpersistedTail];
 }

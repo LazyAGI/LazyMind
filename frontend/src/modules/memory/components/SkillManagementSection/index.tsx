@@ -48,7 +48,7 @@ import {
   isSkillOrganizeEligible,
   MAX_SKILL_ORGANIZE_SELECTION,
 } from "./skillOrganizeRules";
-import { skillOrganizeErrorText } from "../../skillOrganizeCopy";
+import { skillOrganizeErrorDetails, skillOrganizeErrorText } from "../../skillOrganizeCopy";
 import "./index.scss";
 
 const DEFAULT_MARKET_PAGE_SIZE = 8;
@@ -57,15 +57,8 @@ function describeSkillOrganizeError(
   error: unknown,
   t: (key: string) => string,
 ): string {
-  const response = (error as { response?: { data?: Record<string, unknown> } })?.response?.data;
-  const nested = response?.data;
-  const nestedRecord =
-    nested && typeof nested === "object" && nested !== null
-      ? (nested as { code?: unknown })
-      : undefined;
-  const nestedCode = nestedRecord ? String(nestedRecord.code || "") : "";
-  const message = typeof response?.message === "string" ? response.message.trim() : "";
-  return skillOrganizeErrorText(nestedCode, message, t);
+  const detail = skillOrganizeErrorDetails(error);
+  return skillOrganizeErrorText(detail.code, detail.message, t);
 }
 
 export default function SkillManagementSection() {
@@ -73,6 +66,9 @@ export default function SkillManagementSection() {
   const marketRequestIdRef = useRef(0);
   const organizePollingControllerRef = useRef<AbortController | null>(null);
   const organizeRequestIdRef = useRef("");
+  const organizeCancellingRef = useRef(false);
+  const cancelledSkillRefreshRef = useRef<AbortController | null>(null);
+  const organizeGenerationRef = useRef(0);
   const navigate = useNavigate();
   const [newWorkflowOpen, setNewWorkflowOpen] = useState(false);
   const [selectedSkills, setSelectedSkills] = useState<Map<string, StructuredAsset>>(new Map());
@@ -90,6 +86,9 @@ export default function SkillManagementSection() {
   const [organizeRunStatus, setOrganizeRunStatus] = useState<SkillOrganizeTaskStatus | "">("");
   const [organizeElapsedMs, setOrganizeElapsedMs] = useState(0);
   const [organizeError, setOrganizeError] = useState("");
+  const [organizeBlockingSkills, setOrganizeBlockingSkills] = useState<string[]>([]);
+  const [organizeDraftConflict, setOrganizeDraftConflict] = useState(false);
+  const [organizePendingReviewWarning, setOrganizePendingReviewWarning] = useState(false);
   const organizeStartedAtRef = useRef<number | null>(null);
   const [selectedOrganizeSkills, setSelectedOrganizeSkills] = useState<
     Map<string, StructuredAsset>
@@ -166,8 +165,44 @@ export default function SkillManagementSection() {
     return () => { current = false; };
   }, [skillLoading, skillAssets, organizeStatus, draftReviewOpen]);
 
+  useEffect(() => {
+    const latest = new Map<string, StructuredAsset>(skillAssets.map((skill: StructuredAsset) => [skill.id, skill]));
+    const reconcile = (previous: Map<string, StructuredAsset>, organize: boolean) => {
+      const next = new Map(previous);
+      let changed = false;
+      previous.forEach((skill, id) => {
+        const current = latest.get(id) ?? skill;
+        if (organize && !isSkillOrganizeEligible(current, organizeDepth)) {
+          next.delete(id);
+          changed = true;
+        } else if (current !== skill) {
+          next.set(id, current);
+          changed = true;
+        }
+      });
+      return changed ? next : previous;
+    };
+    setSelectedSkills((previous) => reconcile(previous, false));
+    setSelectedOrganizeSkills((previous) => reconcile(previous, true));
+  }, [skillAssets, organizeDepth]);
+
   const refreshSkillAssetsRef = useRef(refreshSkillAssets);
   const skillListPageRef = useRef(skillListPage);
+
+  const refreshCancelledSkillAssets = useCallback(() => {
+    cancelledSkillRefreshRef.current?.abort();
+    const controller = new AbortController();
+    cancelledSkillRefreshRef.current = controller;
+    // Release task controls independently of refreshing the cleaned-up drafts.
+    void refreshSkillAssetsRef.current({
+      page: skillListPageRef.current,
+      preserveChangeProposals: true,
+      background: true,
+      signal: controller.signal,
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) console.error("Refresh cancelled skill drafts failed:", error);
+    });
+  }, []);
 
   const isAdmin = isAdminRole(AgentAppsAuth.getUserInfo()?.role);
 
@@ -189,6 +224,8 @@ export default function SkillManagementSection() {
   useEffect(
     () => () => {
       organizePollingControllerRef.current?.abort();
+      cancelledSkillRefreshRef.current?.abort();
+      organizeGenerationRef.current += 1;
     },
     [],
   );
@@ -392,6 +429,7 @@ export default function SkillManagementSection() {
   }, [marketBuiltinAssets, marketSkillSource, marketTags]);
 
   const messageCenterCount = incomingPendingCount;
+  const hasPendingOrganizeDrafts = pendingDraftCount > 0 || skillAssets.some((skill: StructuredAsset) => skill.draft?.hasUncommittedDraft);
   const manualSkillReviewCount = manualSkillReviewSummary?.qualifiedSessionCount ?? 0;
   const manualSkillReviewButtonBusy =
     manualSkillReviewRunning ||
@@ -499,6 +537,7 @@ export default function SkillManagementSection() {
   const startSkillOrganize = (mode: SkillOrganizeDepth) => {
     if (organizeSubmitting) return;
     if (organizeMode && mode === organizeDepth) return;
+    organizeGenerationRef.current += 1;
 
     if (mode === "deep") {
       if (!organizeLockedInternalRef.current) {
@@ -536,6 +575,9 @@ export default function SkillManagementSection() {
     }
 
     setOrganizeDepth(mode);
+    setOrganizeError("");
+    setOrganizeBlockingSkills([]);
+    setOrganizeDraftConflict(false);
     setOrganizeStatus("idle");
     setOrganizeMode(true);
   };
@@ -585,6 +627,11 @@ export default function SkillManagementSection() {
       pollingController: AbortController,
       seed?: { status?: string; startedAt?: number },
     ) => {
+      const isCurrent = () => !pollingController.signal.aborted && organizePollingControllerRef.current === pollingController;
+      if (!isCurrent()) return;
+      organizeGenerationRef.current += 1;
+      cancelledSkillRefreshRef.current?.abort();
+      organizeRequestIdRef.current = requestId;
       setOrganizeSubmitting(true);
       setOrganizeStatus("running");
       const startedAt = seed?.startedAt ?? Date.now();
@@ -603,7 +650,7 @@ export default function SkillManagementSection() {
           requestId,
           pollingController.signal,
           (progress) => {
-            if (pollingController.signal.aborted) {
+            if (!isCurrent()) {
               return;
             }
             if (!isSkillOrganizeTerminalStatus(progress.status)) {
@@ -615,29 +662,33 @@ export default function SkillManagementSection() {
             setOrganizeElapsedMs(Math.max(0, Date.now() - origin));
           },
         );
+        if (!isCurrent()) return;
         if (task.status === "failed") {
           setOrganizeError(skillOrganizeErrorText(task.errorCode, task.error, t));
+          setOrganizeDraftConflict(task.errorCode === "skill_organize_draft_conflict");
           setOrganizeStatus("error");
           return;
         }
         if (task.status === "cancelled" || task.status === "skipped") {
           setOrganizeStatus("skipped");
+          if (task.pendingReview) setOrganizePendingReviewWarning(true);
+          if (task.status === "cancelled") refreshCancelledSkillAssets();
           return;
         }
         await refreshSkillAssetsRef.current({ page: skillListPageRef.current });
+        if (!isCurrent()) return;
         setOrganizeStatus("success");
       } catch (error) {
-        if (pollingController.signal.aborted) {
+        if (!isCurrent()) {
           return;
         }
         console.error("Skill organize task failed:", error);
         setOrganizeError(describeSkillOrganizeError(error, t));
         setOrganizeStatus("error");
       } finally {
-        if (organizePollingControllerRef.current === pollingController) {
+        if (isCurrent()) {
           organizePollingControllerRef.current = null;
-        }
-        if (!pollingController.signal.aborted) {
+          organizeRequestIdRef.current = "";
           setOrganizeSubmitting(false);
           setOrganizeRunStatus("");
           setOrganizeElapsedMs(0);
@@ -645,7 +696,7 @@ export default function SkillManagementSection() {
         }
       }
     },
-    [],
+    [refreshCancelledSkillAssets],
   );
 
   useEffect(() => {
@@ -657,7 +708,7 @@ export default function SkillManagementSection() {
         const task = await getRunningSkillOrganizeTask(
           pollingController.signal,
         );
-        if (!task || pollingController.signal.aborted) {
+        if (!task || pollingController.signal.aborted || organizePollingControllerRef.current !== pollingController) {
           if (organizePollingControllerRef.current === pollingController) {
             organizePollingControllerRef.current = null;
           }
@@ -683,22 +734,28 @@ export default function SkillManagementSection() {
 
   const cancelRunningSkillOrganize = async () => {
     const requestId = organizeRequestIdRef.current;
-    organizePollingControllerRef.current?.abort();
-    organizePollingControllerRef.current = null;
-    if (!requestId) {
-      setOrganizeStatus("skipped");
-      setOrganizeSubmitting(false);
-      return;
-    }
+    const pollingController = organizePollingControllerRef.current;
+    if (!requestId || !pollingController || organizeCancellingRef.current) return;
+    organizeCancellingRef.current = true;
     try {
-      await cancelSkillOrganizeTask(requestId);
+      const result = await cancelSkillOrganizeTask(requestId);
+      if (organizePollingControllerRef.current !== pollingController) return;
+      pollingController.abort();
+      organizePollingControllerRef.current = null;
+      organizeRequestIdRef.current = "";
       setOrganizeStatus("skipped");
       setOrganizeError("");
-    } catch (error) {
-      setOrganizeError(describeSkillOrganizeError(error, t));
-      setOrganizeStatus("error");
-    } finally {
+      if (result?.pendingReview) setOrganizePendingReviewWarning(true);
       setOrganizeSubmitting(false);
+      setOrganizeRunStatus("");
+      setOrganizeElapsedMs(0);
+      organizeStartedAtRef.current = null;
+      refreshCancelledSkillAssets();
+    } catch (error) {
+      if (organizePollingControllerRef.current !== pollingController) return;
+      setOrganizeError(describeSkillOrganizeError(error, t));
+    } finally {
+      organizeCancellingRef.current = false;
     }
   };
 
@@ -717,11 +774,14 @@ export default function SkillManagementSection() {
     }
 
     organizePollingControllerRef.current?.abort();
+    cancelledSkillRefreshRef.current?.abort();
     const pollingController = new AbortController();
     organizePollingControllerRef.current = pollingController;
     setOrganizeSubmitting(true);
     setOrganizeStatus("running");
     setOrganizeError("");
+    setOrganizeBlockingSkills([]);
+    setOrganizeDraftConflict(false);
     // Exit selection mode immediately so the page stays usable while the
     // organize task runs in the background.
     cancelSkillOrganize();
@@ -734,19 +794,21 @@ export default function SkillManagementSection() {
       if (!result.requestId || !result.taskId) {
         throw new Error("Skill organize task was not accepted");
       }
-      organizeRequestIdRef.current = result.requestId;
-      if (pollingController.signal.aborted) {
+      if (pollingController.signal.aborted || organizePollingControllerRef.current !== pollingController) {
         return;
       }
       await followSkillOrganize(result.requestId, pollingController);
     } catch (error) {
-      if (pollingController.signal.aborted) {
+      if (pollingController.signal.aborted || organizePollingControllerRef.current !== pollingController) {
         return;
       }
       if (organizePollingControllerRef.current === pollingController) {
         organizePollingControllerRef.current = null;
       }
       console.error("Skill organize task failed:", error);
+      const detail = skillOrganizeErrorDetails(error);
+      setOrganizeBlockingSkills(detail.blockingSkills);
+      setOrganizeDraftConflict(detail.code === "skill_organize_draft_conflict");
       setOrganizeError(describeSkillOrganizeError(error, t));
       setOrganizeStatus("error");
       setOrganizeSubmitting(false);
@@ -973,7 +1035,16 @@ export default function SkillManagementSection() {
         <SkillDraftReviewPanel
           t={t}
           onClose={() => setDraftReviewOpen(false)}
-          onApplied={() => refreshSkillAssets({ preserveChangeProposals: true })}
+          onApplied={async () => {
+            const generation = organizeGenerationRef.current;
+            const clearDraftConflict = organizeStatus === "error" && organizeDraftConflict;
+            await refreshSkillAssets({ preserveChangeProposals: true });
+            if (!clearDraftConflict || organizeGenerationRef.current !== generation || organizePollingControllerRef.current) return;
+            setOrganizeBlockingSkills([]);
+            setOrganizeDraftConflict(false);
+            setOrganizeError("");
+            setOrganizeStatus((status) => status === "error" ? "idle" : status);
+          }}
           onPendingCountChange={setPendingDraftCount}
           onApplyingChange={setDraftApplying}
           onOpenSkill={(id) => navigate(`/memory-management/skills/${encodeURIComponent(id)}`)}
@@ -998,7 +1069,7 @@ export default function SkillManagementSection() {
         }
         onOrganizeSkills={startSkillOrganize}
         onOrganizeCancel={cancelSkillOrganize}
-        onOrganizeCancelRun={() => void cancelRunningSkillOrganize()}
+        onOrganizeCancelRun={organizeRunStatus ? () => void cancelRunningSkillOrganize() : undefined}
         manualSkillReviewCount={manualSkillReviewCount}
         manualSkillReviewDisabled={manualSkillReviewButtonDisabled}
         manualSkillReviewDisabledReason={manualSkillReviewDisabledReason}
@@ -1015,6 +1086,22 @@ export default function SkillManagementSection() {
         pendingDraftCount={pendingDraftCount}
         onReviewDrafts={() => setDraftReviewOpen(true)}
       />
+
+      {skillView === "installed" && (organizeError || organizePendingReviewWarning || hasPendingOrganizeDrafts) ? (
+        <Alert
+          className="memory-skill-organize-notice"
+          type={organizeError || organizePendingReviewWarning ? "warning" : "info"}
+          showIcon
+          message={organizeError || t(organizePendingReviewWarning ? "admin.memorySkillOrganizeCancelledPendingReview" : "admin.memorySkillOrganizePendingDraftHint")}
+          description={organizeBlockingSkills.length || (organizeError && organizePendingReviewWarning) ? <>
+            {organizeError && organizePendingReviewWarning ? <p>{t("admin.memorySkillOrganizeCancelledPendingReview")}</p> : null}
+            {organizeBlockingSkills.length ? <ul>{organizeBlockingSkills.map((path) => <li key={path}>{path}</li>)}</ul> : null}
+          </> : undefined}
+          action={organizeDraftConflict || hasPendingOrganizeDrafts
+            ? <Button onClick={() => { cancelSkillOrganize(); setDraftReviewOpen(true); }}>{t("admin.memorySkillDraftReviewTitle")}</Button>
+            : undefined}
+        />
+      ) : null}
 
       {skillView === "installed" && cloudSkillError ? <Alert type="error" showIcon message={t("admin.memoryCloudLoadFailed")} action={<Button aria-label={t("common.retry")} onClick={() => void retryCloudSkills()}>{t("common.retry")}</Button>} /> : null}
       {skillView === "installed" && skillListError ? <Alert type="error" showIcon message={t("admin.memoryResourceLocalLoadFailed")} action={<Button aria-label={t("common.retry")} onClick={() => void refreshSkillAssets()}>{t("common.retry")}</Button>} /> : null}

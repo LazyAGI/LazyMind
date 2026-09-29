@@ -37,6 +37,15 @@ export function skillOrganizeErrorText(
   rawMessage: string,
   t: (key: string) => string,
 ): string {
+  const typedErrors: Record<string, string> = {
+    skill_organize_model_unavailable: "admin.memorySkillOrganizeModelUnavailable",
+    skill_organize_model_transport: "admin.memorySkillOrganizeModelUnavailable",
+    skill_organize_model_response: "admin.memorySkillOrganizeModelResponse",
+    skill_organize_model_timeout: "admin.memorySkillOrganizeModelTimeout",
+    skill_organize_invalid_package: "admin.memorySkillOrganizeInvalidPackage",
+    skill_organize_invalid_plan: "admin.memorySkillOrganizeInvalidPlan",
+  };
+  if (typedErrors[errorCode]) return t(typedErrors[errorCode]);
   if (errorCode === "skill_organize_draft_conflict") {
     return t("admin.memorySkillOrganizeDraftConflict");
   }
@@ -58,4 +67,17 @@ export function skillOrganizeErrorText(
     return rawMessage;
   }
   return t("admin.memorySkillOrganizeFailed");
+}
+
+export function skillOrganizeErrorDetails(error: unknown) {
+  const response = (error as { response?: { data?: Record<string, unknown> } } | null)?.response?.data;
+  const data = response?.data;
+  const detail = data && typeof data === "object" ? data as Record<string, unknown> : response;
+  return {
+    code: typeof detail?.code === "string" ? detail.code : "",
+    message: typeof response?.message === "string" ? response.message : "",
+    blockingSkills: Array.isArray(detail?.blocking_skills)
+      ? [...new Set(detail.blocking_skills.filter((value): value is string => typeof value === "string" && value.trim().length > 0))]
+      : [],
+  };
 }

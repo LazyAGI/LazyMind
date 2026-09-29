@@ -6,8 +6,43 @@ import (
 	"strings"
 	"testing"
 
+	"lazymind/core/common/orm"
 	"lazymind/core/skillv2/testutil"
 )
+
+func TestCancelledOrganizerCannotMutatePackageRoots(t *testing.T) {
+	for _, operation := range []string{"mkdir", "move", "trash"} {
+		t.Run(operation, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+			if err := db.Table("skills").Where("id = ?", "skill1").Updates(map[string]any{"skill_name": "demo", "relative_root": "internal/demo", "category": "internal"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			testutil.MustCreate(t, db, &orm.SkillReviewStats{ID: "cancel", RequestID: "org_cancel", UserID: "user_001", Status: "cancelled", StartedAt: "2026-09-29", Summary: `{}`})
+			seedRunningMaintenanceTask(t, db, "org_next", "user_001")
+			h := NewHandler(HandlerDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+			rec := httptest.NewRecorder()
+			url := "/remote_fs?user_id=user_001&task_id=org_cancel"
+			switch operation {
+			case "mkdir":
+				h.Dir(rec, httptest.NewRequest(http.MethodPost, url, strings.NewReader(`{"path":"skills/internal/zombie","recursive":true}`)))
+			case "move":
+				h.Move(rec, httptest.NewRequest(http.MethodPost, url, strings.NewReader(`{"from":"skills/internal/demo","to":"skills/internal/zombie"}`)))
+			case "trash":
+				h.Trash(rec, httptest.NewRequest(http.MethodPost, url, strings.NewReader(`{"path":"skills/internal/demo"}`)))
+			}
+			if rec.Code == http.StatusOK {
+				t.Fatalf("cancelled %s accepted", operation)
+			}
+			if n := testutil.CountRows(t, db, "skills", "relative_root = ? AND deleted_at IS NULL", "internal/demo"); n != 1 {
+				t.Fatal("source skill mutated")
+			}
+			if n := testutil.CountRows(t, db, "skills", "relative_root = ?", "internal/zombie"); n != 0 {
+				t.Fatal("zombie created a package")
+			}
+		})
+	}
+}
 
 func TestRemoteFSReadView_TaskModes(t *testing.T) {
 	db := testutil.NewTestDB(t)

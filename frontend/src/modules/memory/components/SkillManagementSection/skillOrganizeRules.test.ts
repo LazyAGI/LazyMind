@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { isSkillOrganizeEligible } from "./skillOrganizeRules";
 
 describe("organization scope", () => {
+  it.each(["light", "deep"] as const)("%s excludes pending drafts until accepted", (mode) => {
+    const skill = {category: "internal", draft: {hasUncommittedDraft: true, taskId: "org_previous", version: 1}};
+    expect(isSkillOrganizeEligible(skill, mode)).toBe(false);
+    expect(isSkillOrganizeEligible({...skill, draft: {...skill.draft, hasUncommittedDraft: false}}, mode)).toBe(true);
+  });
   it.each(["internal", "external", "learning", ""])("light accepts editable installed category %s", (category) => {
     expect(isSkillOrganizeEligible({ category }, "light")).toBe(true);
     expect(isSkillOrganizeEligible({ category, originBuiltinSkillUid: "builtin" }, "light")).toBe(true);

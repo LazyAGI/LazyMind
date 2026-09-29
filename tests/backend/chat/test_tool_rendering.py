@@ -306,6 +306,41 @@ def test_non_mail_structured_failure_keeps_value_preview():
     assert '42' in detail
 
 
+@pytest.mark.parametrize('value', [
+    'ToolExecutionError: {"error": {"message": "Attachment unavailable"}}',
+    {'result': {'error': {'message': 'Attachment unavailable'}}},
+    '[{"message": "Attachment unavailable"}]',
+])
+def test_mail_failure_preview_unwraps_errors(value):
+    text = _tool_result_frame_text({
+        'id': 'mail', 'name': 'MailToolkit_send_draft',
+        'result': {'ok': False, 'value': value},
+    }, 'en')
+    preview = text.split('</trp>', 1)[0]
+    assert 'Attachment unavailable' in preview
+    assert '{' not in preview
+
+
+def test_mail_failure_preview_unwraps_serialized_failure_inside_success_envelope():
+    text = _tool_result_frame_text({
+        'id': 'mail', 'name': 'MailToolkit_send_draft',
+        'result': {'ok': True, 'value': json.dumps({'ok': False, 'error': 'Attachment unavailable'})},
+    }, 'en')
+    preview = text.split('</trp>', 1)[0]
+    assert 'Attachment unavailable' in preview
+    assert 'Email sent' not in preview
+
+
+@pytest.mark.parametrize('status', ['failed', 'partial_sent', 'delivery_unknown'])
+def test_mail_unsuccessful_receipt_never_renders_as_sent(status):
+    text = _tool_result_frame_text({
+        'id': 'mail', 'name': 'MailToolkit_send_draft',
+        'result': {'ok': True, 'value': json.dumps({'status': status, 'last_error': 'Delivery needs attention'})},
+    }, 'en')
+    preview = text.split('</trp>', 1)[0]
+    assert 'Delivery needs attention' in preview
+
+
 def test_mail_search_preview_uses_search_filters_not_mailbox_copy():
     tool_call = {
         'id': 'call-mail-search',

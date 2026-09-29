@@ -31,8 +31,8 @@ vi.mock("@/modules/chat/components/MarkdownViewer", () => ({
 }));
 
 vi.mock("@/modules/chat/components/MailDraftCard", () => ({
-  default: ({ draft }: { draft?: { subject?: string; draft_id?: string } }) => (
-    <div>{draft?.subject || draft?.draft_id}</div>
+  default: ({ draft, disabled }: { draft?: { subject?: string; draft_id?: string; status?: string }; disabled?: boolean }) => (
+    <div>{draft?.subject || draft?.draft_id}<button disabled={disabled || draft?.status === "sent"}>Send {draft?.subject}</button></div>
   ),
 }));
 
@@ -54,6 +54,53 @@ function selectMessageText(text: string) {
 }
 
 describe("MessageList side chat selection", () => {
+  it.each(["live", "history"])("keeps an unanswered composite question usable after a mail confirmation (%s)", (mode) => {
+    const draft = { draft_id: "a", subject: "Mail A", status: "draft" };
+    const composite = { ask_id: "question", mail_draft_only: false, mail_draft: draft,
+      questions: [{ text: "Which date?", type: "text" }] };
+    const receipt = { ask_id: "receipt", mail_draft_only: true, mail_draft: { ...draft, status: "sent" } };
+    const messages = mode === "history" ? buildChatMessageListFromHistory([
+      { id: "h2", query: "Confirm mail", ask_pending: receipt },
+      { id: "h1", query: "Plan and mail", ask_pending: composite },
+    ] as any) : [
+      { role: RoleTypes.ASSISTANT, ask_pending: composite },
+      { role: RoleTypes.USER, delta: "Confirm mail" },
+      { role: RoleTypes.ASSISTANT, ask_pending: receipt },
+    ];
+    render(<MessageList messageList={messages} sendMessage={vi.fn()} regenerate={vi.fn()}
+      stopGeneration={vi.fn()} renderText={() => null} updateAssistantMessage={vi.fn()} />);
+    const answer = screen.getByPlaceholderText("chat.askCardInputPlaceholder");
+    expect(answer).toBeEnabled();
+    fireEvent.change(answer, { target: { value: "Friday" } });
+    expect(screen.getByRole("button", { name: "chat.askCardSubmit" })).toBeEnabled();
+    expect(screen.getAllByRole("button", { name: "Send Mail A" }).every(button => (button as HTMLButtonElement).disabled)).toBe(true);
+  });
+
+  it("only enables the latest copy of an unanswered composite question", () => {
+    const composite = { ask_id: "question", mail_draft_only: false,
+      mail_draft: { draft_id: "a", subject: "Mail A", status: "draft" },
+      questions: [{ text: "Which date?", type: "text" }] };
+    render(<MessageList messageList={[
+      { role: RoleTypes.ASSISTANT, ask_pending: composite },
+      { role: RoleTypes.ASSISTANT, ask_pending: composite },
+    ]} sendMessage={vi.fn()} regenerate={vi.fn()} stopGeneration={vi.fn()}
+      renderText={() => null} updateAssistantMessage={vi.fn()} />);
+    const answers = screen.getAllByPlaceholderText("chat.askCardInputPlaceholder");
+    expect(answers[0]).toBeDisabled();
+    expect(answers[1]).toBeEnabled();
+  });
+
+  it("disables a superseded preview after history reload without blocking sibling drafts", () => {
+    const pending = (draft_id: string, subject: string, status = "draft") => ({ draft_id, subject, status });
+    render(<MessageList messageList={[
+      { role: RoleTypes.ASSISTANT, ask_pending: { ask_id: "old", mail_drafts: [pending("a", "Old A"), pending("b", "Other B")] } },
+      { role: RoleTypes.USER, delta: "Confirmed A" },
+      { role: RoleTypes.ASSISTANT, ask_pending: { ask_id: "new", mail_draft: pending("a", "Sent A", "sent") } },
+    ]} sendMessage={vi.fn()} regenerate={vi.fn()} stopGeneration={vi.fn()} renderText={() => null} updateAssistantMessage={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Send Old A" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send Sent A" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send Other B" })).toBeEnabled();
+  });
   it("removes the entire failed reply on retry and shows a new failure if retry fails", () => {
     const failed = {
       result: "old partial reply",

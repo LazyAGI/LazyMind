@@ -84,17 +84,20 @@ type skillReviewRunResponse struct {
 }
 
 type skillReviewTaskStatusResponse struct {
-	Task               taskResponse             `json:"task"`
-	RequestID          string                   `json:"requestid"`
-	Status             string                   `json:"status"`
-	RunStatus          string                   `json:"run_status,omitempty"`
-	ResultCount        int64                    `json:"result_count"`
-	WhenToUseConflicts []whenToUseConflictGroup `json:"when_to_use_conflicts,omitempty"`
-	Error              string                   `json:"error,omitempty"`
-	ErrorCode          string                   `json:"error_code,omitempty"`
-	FailedStage        string                   `json:"failed_stage,omitempty"`
-	Mode               string                   `json:"mode,omitempty"`
-	Skills             []string                 `json:"skills,omitempty"`
+	Task                taskResponse             `json:"task"`
+	RequestID           string                   `json:"requestid"`
+	Status              string                   `json:"status"`
+	RunStatus           string                   `json:"run_status,omitempty"`
+	ResultCount         int64                    `json:"result_count"`
+	WhenToUseConflicts  []whenToUseConflictGroup `json:"when_to_use_conflicts,omitempty"`
+	Error               string                   `json:"error,omitempty"`
+	ErrorCode           string                   `json:"error_code,omitempty"`
+	ErrorCategory       string                   `json:"error_category,omitempty"`
+	PendingReview       bool                     `json:"pending_review"`
+	CancellationDetails map[string]any           `json:"cancellation_details,omitempty"`
+	FailedStage         string                   `json:"failed_stage,omitempty"`
+	Mode                string                   `json:"mode,omitempty"`
+	Skills              []string                 `json:"skills,omitempty"`
 }
 
 type skillReviewTaskListResponse struct {
@@ -253,10 +256,11 @@ func listSkillTasks(w http.ResponseWriter, r *http.Request, taskType, errorLabel
 			message = "skill organize failed"
 		}
 		common.ReplyErrWithData(w, message, map[string]any{
-			"code":         failed.ErrorCode,
-			"error":        failed.Error,
-			"failed_stage": failed.FailedStage,
-			"status":       failed.Status,
+			"code":           failed.ErrorCode,
+			"error":          failed.Error,
+			"error_category": failed.ErrorCategory,
+			"failed_stage":   failed.FailedStage,
+			"status":         failed.Status,
 		}, http.StatusInternalServerError)
 		return
 	}
@@ -380,11 +384,12 @@ func applySkillOrganizeDetails(resp *skillReviewTaskStatusResponse, task orm.Res
 	resp.Mode = strings.TrimSpace(request.Mode)
 	resp.Skills = request.Skills
 	var parsed struct {
-		Error       string   `json:"error"`
-		ErrorCode   string   `json:"error_code"`
-		FailedStage string   `json:"failed_stage"`
-		Mode        string   `json:"mode"`
-		Skills      []string `json:"skills"`
+		Error         string   `json:"error"`
+		ErrorCode     string   `json:"error_code"`
+		ErrorCategory string   `json:"error_category"`
+		FailedStage   string   `json:"failed_stage"`
+		Mode          string   `json:"mode"`
+		Skills        []string `json:"skills"`
 	}
 	if strings.TrimSpace(summary) != "" {
 		_ = json.Unmarshal([]byte(summary), &parsed)
@@ -400,6 +405,28 @@ func applySkillOrganizeDetails(resp *skillReviewTaskStatusResponse, task orm.Res
 		resp.Error = strings.TrimSpace(task.ErrorMessage)
 	}
 	resp.ErrorCode = strings.TrimSpace(parsed.ErrorCode)
+	if resp.ErrorCode == "" {
+		resp.ErrorCode = strings.TrimSpace(task.ErrorCode)
+	}
+	resp.ErrorCategory = strings.TrimSpace(parsed.ErrorCategory)
+	var recovery struct {
+		PendingReview bool           `json:"pending_review"`
+		Details       map[string]any `json:"cancellation_details"`
+	}
+	_ = json.Unmarshal([]byte(summary), &recovery)
+	if recovery.Details == nil {
+		_ = json.Unmarshal(task.ResultJSON, &recovery)
+	}
+	resp.CancellationDetails = recovery.Details
+	pending, _ := recovery.Details["pending_review"].(bool)
+	resp.PendingReview = recovery.PendingReview || pending
+	if resp.ErrorCode == "skill_organize_cancelled" || task.ErrorCode == "skill_organize_cancelled" {
+		resp.Status, resp.RunStatus, resp.ErrorCategory = "cancelled", "cancelled", "cancelled"
+		resp.ErrorCode = "skill_organize_cancelled"
+		if task.ErrorMessage != "" {
+			resp.Error = task.ErrorMessage
+		}
+	}
 	resp.FailedStage = strings.TrimSpace(parsed.FailedStage)
 }
 
@@ -429,6 +456,18 @@ func settleFinishedSkillOrganizeReservation(ctx context.Context, db *gorm.DB, ta
 }
 
 func findSkillReviewTaskStats(ctx context.Context, db *gorm.DB, userID string, task orm.ResourceUpdateTask, requestID string) (skillReviewStatsRow, bool, error) {
+	if task.TaskType == orm.ResourceUpdateTaskTypeOrganizeSkill {
+		var cancelled skillReviewStatsRow
+		err := db.WithContext(ctx).Table("skill_review_stats").
+			Where("userid = ? AND requestid = ? AND status = ?", strings.TrimSpace(userID), strings.TrimSpace(requestID), orm.SkillReviewStatsStatusCancelled).
+			Take(&cancelled).Error
+		if err == nil {
+			return cancelled, true, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return skillReviewStatsRow{}, false, err
+		}
+	}
 	query := db.WithContext(ctx).
 		Table("skill_review_stats").
 		Select("id, requestid, userid, status, started_at, duration_ms, summary").

@@ -148,7 +148,9 @@ func logWorkerFinishedTask(task orm.ResourceUpdateTask, outcome taskOutcome) {
 
 func (w *Worker) recoverExpiredRunning(ctx context.Context, now time.Time) (int, error) {
 	var candidates []orm.ResourceUpdateTask
-	if err := w.db.WithContext(ctx).Select("id", "user_id").Where("status = ? AND locked_until <= ?", orm.ResourceUpdateTaskStatusRunning, now).Limit(w.cfg.WorkerBatchSize).Find(&candidates).Error; err != nil {
+	// Skill organizers are owned by the algorithm service, not this worker.
+	// Their reservation and rollback history must survive a hung model call.
+	if err := w.db.WithContext(ctx).Select("id", "user_id").Where("status = ? AND locked_until <= ? AND task_type <> ?", orm.ResourceUpdateTaskStatusRunning, now, orm.ResourceUpdateTaskTypeOrganizeSkill).Limit(w.cfg.WorkerBatchSize).Find(&candidates).Error; err != nil {
 		return 0, err
 	}
 	recovered := 0

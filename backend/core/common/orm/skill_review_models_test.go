@@ -15,11 +15,12 @@ func TestSkillReviewStatsActiveScope(t *testing.T) {
 		t.Fatalf("create skill_review_stats: %v", err)
 	}
 	for id, status := range map[string]string{
-		"review-draft":   SkillReviewStatsStatusReviewDraft,
-		"organize-draft": SkillReviewStatsStatusOrganizeDraft,
-		"completed":      "completed",
-		"skipped":        "skipped",
-		"failed":         "failed",
+		"review-draft":      SkillReviewStatsStatusReviewDraft,
+		"organize-draft":    SkillReviewStatsStatusOrganizeDraft,
+		"completed":         "completed",
+		"skipped":           "skipped",
+		"failed":            "failed",
+		"cancelled-pending": "pending",
 	} {
 		if err := db.Table("skill_review_stats").Create(map[string]any{"id": id, "requestid": id, "userid": "user-1", "status": status}).Error; err != nil {
 			t.Fatalf("insert status %q: %v", status, err)
@@ -29,6 +30,11 @@ func TestSkillReviewStatsActiveScope(t *testing.T) {
 		"id": "duplicate-completed", "requestid": "review-draft", "userid": "user-1", "status": SkillReviewStatsStatusCompleted,
 	}).Error; err != nil {
 		t.Fatalf("insert completed duplicate: %v", err)
+	}
+	if err := db.Table("skill_review_stats").Create(map[string]any{
+		"id": "cancelled-terminal", "requestid": "cancelled-pending", "userid": "user-1", "status": "cancelled",
+	}).Error; err != nil {
+		t.Fatal(err)
 	}
 
 	var ids []string

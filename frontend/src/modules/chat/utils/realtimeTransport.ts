@@ -5,7 +5,14 @@ export interface RealtimeFrame {
   id: string;
   status?: number;
   data?: string;
+  /** Set only when the request was refused locally and never left the browser. */
+  reason?: RealtimeRefusal;
 }
+
+export type RealtimeRefusal = 'offline' | 'payload_too_large';
+
+// Must match ws.SetReadLimit in backend/core/realtime/handler.go.
+export const MAX_REALTIME_FRAME_BYTES = 16 << 20;
 
 interface StreamRequest {
   method: string;
@@ -39,6 +46,25 @@ export function openRealtimeStream(request: StreamRequest, receive: (frame: Real
   if (!target) return null;
   const headers = new Headers(request.headers);
   const authorization = headers.get('Authorization') || '';
+  const message = {
+    type: 'open', id: String(++nextID), method: request.method, path: target.path,
+    authorization, payload: request.payload,
+    language: headers.get('Accept-Language') || '',
+    last_event_id: headers.get('Last-Event-ID') || '',
+  };
+  // A POST written while offline is buffered and delivered when the network
+  // returns; an oversized frame resets the shared socket. Refuse both locally.
+  if (request.method === 'POST') {
+    let reason: RealtimeRefusal | undefined;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) reason = 'offline';
+    else if (new TextEncoder().encode(JSON.stringify(message)).length > MAX_REALTIME_FRAME_BYTES) reason = 'payload_too_large';
+    if (reason) {
+      // Deliver after the caller has attached its stream listeners.
+      const status = reason === 'payload_too_large' ? 413 : 0;
+      const timer = setTimeout(() => receive({ type: 'error', id: message.id, status, reason }), 0);
+      return () => clearTimeout(timer);
+    }
+  }
   const key = JSON.stringify([target.socket, authorization]);
   let connection = connections.get(key);
   if (!connection) {
@@ -53,12 +79,7 @@ export function openRealtimeStream(request: StreamRequest, receive: (frame: Real
     }
     connections.set(key, connection);
   }
-  return connection.open({
-    type: 'open', id: String(++nextID), method: request.method, path: target.path,
-    authorization, payload: request.payload,
-    language: headers.get('Accept-Language') || '',
-    last_event_id: headers.get('Last-Event-ID') || '',
-  }, receive);
+  return connection.open(message, receive);
 }
 
 class RealtimeConnection {

@@ -7,6 +7,15 @@ import { cloudResource, deferred, installDesktopTestDOM, localSkill } from "@/te
 const mocks = vi.hoisted(() => ({
   mode: "desktop", session: vi.fn(), list: vi.fn(), local: vi.fn(), patch: vi.fn(), upload: vi.fn(), download: vi.fn(),
 }));
+const memoryContext = vi.hoisted(() => ({current: null as any}));
+vi.mock("../../context", async (load) => {
+  const actual = await load<typeof import("../../context")>();
+  return {...actual, useMemoryManagementOutletContext: () => {
+    const context = actual.useMemoryManagementOutletContext();
+    memoryContext.current = context;
+    return context;
+  }};
+});
 vi.mock("@/runtime/mode", async (load) => ({ ...await load<object>(), isDesktopRuntime: () => mocks.mode === "desktop" }));
 vi.mock("@/runtime/features", async (load) => {
   const actual = await load<typeof import("@/runtime/features")>();
@@ -50,6 +59,30 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Desktop 我的技能 local and Cloud integration", () => {
+  it.each(["resolve", "reject"] as const)("keeps background cleanup refresh nonblocking and ignores aborted %s", async (outcome) => {
+    mount();
+    await screen.findByText("local-only", {exact: true});
+    await act(async () => {});
+    const pending = deferred<{records: ReturnType<typeof localSkill>[]; total: number; page: number; pageSize: number}>();
+    const controller = new AbortController();
+    mocks.local.mockImplementationOnce(() => pending.promise);
+    let refresh!: Promise<void>;
+    act(() => {
+      refresh = memoryContext.current.refreshSkillAssets({background: true, signal: controller.signal, preserveChangeProposals: true});
+    });
+    expect(memoryContext.current.skillLoading).toBe(false);
+    controller.abort();
+    await act(async () => {
+      if (outcome === "resolve") pending.resolve({records: [localSkill("stale-draft")], total: 1, page: 1, pageSize: 6});
+      else pending.reject(new Error("cancelled cleanup refresh"));
+      await refresh;
+    });
+    expect(memoryContext.current.skillLoading).toBe(false);
+    expect(memoryContext.current.skillListError).toBe(false);
+    expect(screen.queryByText("stale-draft", {exact: true})).not.toBeInTheDocument();
+    expect(screen.getByText("local-only", {exact: true})).toBeVisible();
+  });
+
   it.each(["desktop", "cloud", "local"].flatMap((mode) =>
     ["signed_in", "signed_out"].map((state) => ({ mode, state })),
   ))("isolates real navigation and Cloud access in $mode / $state", async ({ mode, state }) => {

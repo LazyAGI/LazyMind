@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import lazyllm
+
 from lazymind.chat.engine.tools.infra.core_api_client import post_core_api
 from lazymind.review.skill_organize.schemas import SearchMetadata
 
@@ -23,4 +25,8 @@ def load_search_metadata(skill_keys: list[str]) -> dict[str, dict[str, Any]]:
 
 
 def update_search_metadata(updates: list[dict[str, Any]]) -> None:
-    post_core_api('/internal/skills:metadata:update', {'updates': updates})
+    payload = {'updates': updates}
+    task_id = (lazyllm.globals.get('agentic_config') or {}).get('task_id')
+    if task_id:
+        payload['task_id'] = task_id
+    post_core_api('/internal/skills:metadata:update', payload)

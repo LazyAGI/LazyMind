@@ -231,3 +231,118 @@ def test_cancel_before_plan_records_cancelled_summary(monkeypatch):
     assert summary['status'] == 'cancelled'
     assert summary['error_code'] == 'skill_organize_cancelled'
     assert summary['skills'] == [SOURCE.key]
+
+
+@pytest.mark.parametrize('mode', ['light', 'deep'])
+@pytest.mark.parametrize('error,category', [(ConnectionError('connection reset'), 'model_transport'), (TimeoutError('model timeout'), 'model_timeout')])
+def test_model_transport_failure_keeps_category_in_organize_stats(monkeypatch, mode, error, category):
+    from lazymind.review.service import skill_organize as service
+    captured = []
+    request = SkillOrganizeRequest(requestid='org_transport', user_id='u', skills=[SOURCE.key], mode=mode)
+    monkeypatch.setattr(service, '_load_source_skills', lambda *_: [SOURCE])
+    monkeypatch.setattr(service, 'load_search_metadata', lambda _: {SOURCE.key: {}})
+    monkeypatch.setattr(service, 'insert_skill_organize_result', lambda **kw: captured.append(kw['organize_result']) or 1)
+
+    def llm(*args, **kwargs):
+        raise error
+
+    result = service._run_skill_organize(request, llm, taskid='org_transport_run', remote_store=None)
+    assert not result.success
+    assert captured[-1]['error_code'] == 'skill_organize_' + category
+    assert captured[-1]['error_category'] == category
+
+
+def test_deep_materializer_preserves_transport_category():
+    plan = SkillOrganizePlan(plans=[dict(
+        type='refactor', source_keys=[SOURCE.key], target_name='demo', target_description='After.',
+        step_handling_policy='keep_steps', reason='Clarify',
+    )])
+
+    def llm(*args, **kwargs):
+        raise TimeoutError('model timed out')
+
+    with pytest.raises(Exception) as caught:
+        materialize_fs_draft(plan, [SOURCE], llm, mode='deep', max_retries=1)
+    assert getattr(caught.value, 'category', None) == 'model_timeout'
+
+
+@pytest.mark.parametrize('persisted', [False, True])
+def test_cancel_releases_worker_while_model_is_stuck(monkeypatch, persisted):
+    from threading import Event
+    from concurrent.futures import ThreadPoolExecutor
+    from lazymind.review.service import skill_organize as service
+    entered, release = Event(), Event()
+    db_cancelled = Event()
+    captured = []
+    request = SkillOrganizeRequest(requestid='org_stuck', user_id='u', skills=[SOURCE.key])
+
+    def llm(*args, **kwargs):
+        entered.set()
+        release.wait(5)
+        return {'plans': [dict(type='keep', source_keys=[SOURCE.key], reason='Clear')]}
+
+    monkeypatch.setattr(service, 'AutoModel', lambda **_: llm)
+    monkeypatch.setattr(service, 'inject_model_config', lambda *_: None)
+    monkeypatch.setattr(service, '_load_source_skills', lambda *_: [SOURCE])
+    monkeypatch.setattr(service, 'load_search_metadata', lambda _: {SOURCE.key: {}})
+    monkeypatch.setattr(service, 'insert_skill_organize_result', lambda **kw: captured.append(kw['organize_result']) or 1)
+    from lazymind.review.skill_organize import db
+    monkeypatch.setattr(db, 'is_skill_organize_cancelled', lambda *_: db_cancelled.is_set())
+    event = service.arm_skill_organize_cancel(request.requestid)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(service.run_skill_organize, request, 'org_stuck_run', remote_store=object(), cancel_event=event)
+        try:
+            assert entered.wait(2)
+            if persisted:
+                db_cancelled.set()
+            else:
+                assert service.cancel_skill_organize(request.requestid)
+            result = future.result(timeout=1)
+            assert not result.success
+            assert captured[-1]['status'] == 'cancelled'
+            assert executor.submit(lambda: 'next operation').result(timeout=1) == 'next operation'
+        finally:
+            release.set()
+
+
+def test_model_initialization_failure_finishes_stats(monkeypatch):
+    from lazymind.review.service import skill_organize as service
+    request = SkillOrganizeRequest(requestid='org_init', user_id='u', skills=[SOURCE.key])
+    recorded = []
+    monkeypatch.setattr(service, 'inject_model_config', lambda *_: None)
+
+    def unavailable(**kwargs):
+        raise RuntimeError('provider is unavailable')
+
+    monkeypatch.setattr(service, 'AutoModel', unavailable)
+    monkeypatch.setattr(service, 'insert_skill_organize_result', lambda **kw: recorded.append(kw['organize_result']) or 1)
+    result = service.run_skill_organize(request, 'org_init_run', remote_store=object())
+    assert not result.success
+    assert recorded[-1]['status'] == 'failed'
+    assert recorded[-1]['error_code'] == 'skill_organize_model_transport'
+
+
+def test_cancelled_pending_submission_does_not_start_worker(monkeypatch):
+    import asyncio
+    import json
+    from lazymind.review.api import skill_organize_routes as routes
+    from lazymind.review.service import skill_organize as service
+    monkeypatch.setattr(service, 'record_skill_organize_pending', lambda *_: 0)
+    monkeypatch.setattr(service, 'run_skill_organize', lambda *_args, **_kwargs: None)
+    request = SkillOrganizeRequest(requestid='org_late_pending', user_id='u', skills=[SOURCE.key])
+    response = asyncio.run(routes.skill_organize(request))
+    assert response.status_code == 409
+    assert json.loads(response.body)['data']['status'] == 'cancelled'
+
+
+def test_cancel_events_are_user_scoped():
+    from lazymind.review.service import skill_organize as service
+    first = service.arm_skill_organize_cancel('org_shared', user_id='first')
+    second = service.arm_skill_organize_cancel('org_shared', user_id='second')
+    try:
+        assert service.cancel_skill_organize('org_shared', user_id='first')
+        assert first.is_set()
+        assert not second.is_set()
+    finally:
+        service.disarm_skill_organize_cancel('org_shared', first, user_id='first')
+        service.disarm_skill_organize_cancel('org_shared', second, user_id='second')

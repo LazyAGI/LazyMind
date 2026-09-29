@@ -38,7 +38,7 @@ import MultiAnswerDisplay, { type PreferenceType } from "../MultiAnswerDisplay";
 import FeedbackModal from "../FeedbackModal";
 import AskCard from "@/modules/chat/components/AskCard";
 import EnvInputCard from "@/modules/chat/components/EnvInputCard";
-import MailDraftCard from "@/modules/chat/components/MailDraftCard";
+import MailDraftCard, { type MailDraftPreview } from "@/modules/chat/components/MailDraftCard";
 import MessagePartBoundary from "@/modules/chat/components/MessagePartBoundary";
 import MailMailboxCard from "@/modules/chat/components/MailDraftCard/MailMailboxCard";
 import ToolConfigurationCard from "@/modules/chat/components/ToolConfigurationCard";
@@ -46,6 +46,7 @@ import ToolLimitCard from "@/modules/chat/components/ToolLimitCard";
 import ChatExportActions from "../newChatContainer/components/ChatExportActions";
 import ArtifactDownloadButton from "@/modules/chat/components/ArtifactCollectorCard/ArtifactDownloadButton";
 import RunStatusCard from "@/modules/chat/components/RunStatusCard";
+import type { RealtimeRefusal } from "@/modules/chat/utils/realtimeTransport";
 import {
   type ChatSource,
   type ChatSourceCollection,
@@ -524,6 +525,8 @@ const AssistantMessage = (props: any) => {
     onOpenSideChat,
     hasLaterUserMessage,
   } = props;
+  const currentItemRef = useRef(item);
+  currentItemRef.current = item;
   const selectionActionsRef = useRef<HTMLDivElement | null>(null);
   const citeSelectionTextRef = useRef("");
   const translationConfiguredRef = useRef(false);
@@ -1386,52 +1389,77 @@ const AssistantMessage = (props: any) => {
         index === length - 1,
         !!hasLaterUserMessage,
       );
-      const isReadOnly = isAskPendingReadOnly(
-        item.ask_answered,
-        index === length - 1,
-        !!hasLaterUserMessage,
-      );
+      const hasMailDrafts = Boolean(askPending.mail_draft || askPending.mail_drafts?.length);
+      const independentQuestion = hasMailDrafts && askPending.mail_draft_only === false;
+      // A mail confirmation is a later user turn, but does not answer this question.
+      const isReadOnly = independentQuestion
+        ? Boolean(item.ask_answered || props.supersededAskPending)
+        : isAskPendingReadOnly(
+            item.ask_answered,
+            index === length - 1,
+            !!hasLaterUserMessage,
+          );
+      let mailCards: ReactNode = null;
       if (askPending.mail_draft || (askPending.mail_drafts && askPending.mail_drafts.length)) {
-        const drafts =
+        const drafts: MailDraftPreview[] =
           askPending.mail_drafts && askPending.mail_drafts.length
             ? askPending.mail_drafts
             : askPending.mail_draft
               ? [askPending.mail_draft]
               : [];
-        const remainingDrafts = unansweredMailDrafts(
-          { mail_drafts: drafts },
-          item.answered_mail_draft_ids,
-        );
-        if (remainingDrafts.length) {
         const mailReadOnly = mailDraftCardsReadOnly(
           props.disabled,
-          item.ask_answered,
+          askPending.mail_draft_only === false ? false : item.ask_answered,
         );
-        const markDraftAnswered = (confirmedId: string) => {
+        const markDraftAnswered = (confirmedId: string, submittedDraft: MailDraftPreview) => {
+          const currentItem = currentItemRef.current;
+          if (currentItem.ask_pending?.ask_id !== askPending.ask_id) return;
+          const currentPending = currentItem.ask_pending;
+          const currentDrafts: MailDraftPreview[] = currentPending.mail_drafts?.length
+            ? currentPending.mail_drafts : currentPending.mail_draft ? [currentPending.mail_draft] : [];
+          const currentDraft = currentDrafts.find((draft) => draft.draft_id === confirmedId);
+          // Composite asks retain the ordinary ask_id across newer mail receipts.
+          if (!currentDraft || Number(currentDraft.revision || 1) !== Number(submittedDraft.revision || 1)
+            || currentDraft.status !== submittedDraft.status) return;
           const nextAnswered = Array.from(
             new Set([
-              ...(item.answered_mail_draft_ids || []),
+              ...(currentItem.answered_mail_draft_ids || []),
               String(confirmedId || "").trim(),
             ]),
           ).filter(Boolean);
           updateMessage({
-            ...item,
+            ...currentItem,
             answered_mail_draft_ids: nextAnswered,
-            ask_answered:
-              unansweredMailDrafts({ mail_drafts: drafts }, nextAnswered)
+            ask_answered: askPending.mail_draft_only === false ? currentItem.ask_answered :
+              unansweredMailDrafts({ mail_drafts: currentDrafts }, nextAnswered)
                 .length === 0,
           });
         };
-        return (
-          <div className="mail-draft-card-list" key={askPending.ask_id}>
-            {remainingDrafts.map((draft) => {
+        const unmarkDraftAnswered = (confirmedId: string) => {
+          const currentItem = currentItemRef.current;
+          if (currentItem.ask_pending?.ask_id !== askPending.ask_id) return;
+          const nextAnswered = (currentItem.answered_mail_draft_ids || [])
+            .filter((id: string) => id !== confirmedId);
+          updateMessage({
+            ...currentItem,
+            answered_mail_draft_ids: nextAnswered,
+            ask_answered: askPending.mail_draft_only === false ? currentItem.ask_answered : false,
+          });
+        };
+        mailCards = (
+          <div className="mail-draft-card-list" key="mail-drafts">
+            {drafts.map((draft) => {
               const draftId = String(draft.draft_id || "").trim();
+              const draftSuperseded = (props.supersededMailDraftIds || []).includes(draftId);
+              const draftReadOnly = mailReadOnly ||
+                (item.answered_mail_draft_ids || []).includes(draftId) ||
+                draftSuperseded;
               if (String(draft.status || "") === "needs_mailbox") {
                 return (
                   <MailMailboxCard
                     key={draftId || askPending.ask_id}
                     draft={draft}
-                    disabled={mailReadOnly}
+                    disabled={draftReadOnly}
                     onConfirm={async (mailbox, confirmedId) => {
                       const started = await props.sendMessage?.(
                         t("chat.mailMailbox.confirmQuery", { mailbox }),
@@ -1442,8 +1470,9 @@ const AssistantMessage = (props: any) => {
                         },
                       );
                       if (started) {
-                        markDraftAnswered(confirmedId);
+                        markDraftAnswered(confirmedId, draft);
                       }
+                      return Boolean(started);
                     }}
                   />
                 );
@@ -1452,9 +1481,10 @@ const AssistantMessage = (props: any) => {
                 <MailDraftCard
                   key={draftId || askPending.ask_id}
                   draft={draft}
-                  disabled={mailReadOnly}
+                  disabled={draftReadOnly}
+                  superseded={draftSuperseded}
                   conversationFiles={conversationFiles}
-                  onConfirm={async (confirmedId, revision, patch) => {
+                  onConfirm={async (confirmedId, revision, patch, onRefused) => {
                     const started = await props.sendMessage?.(
                       t("chat.mailDraft.confirmQuery"),
                       undefined,
@@ -1462,22 +1492,29 @@ const AssistantMessage = (props: any) => {
                         mail_draft_confirm_id: confirmedId,
                         mail_draft_confirm_revision: revision,
                         ...(patch ? { mail_draft_patch: patch } : {}),
+                        onMailSubmissionRefused: (reason: RealtimeRefusal) => {
+                          unmarkDraftAnswered(confirmedId);
+                          onRefused?.(reason);
+                        },
                       },
                     );
                     if (started) {
-                      markDraftAnswered(confirmedId);
+                      markDraftAnswered(confirmedId, draft);
                     }
+                    return Boolean(started);
                   }}
                 />
               );
             })}
           </div>
         );
-        }
+        if (askPending.mail_draft_only !== false) return mailCards;
       }
-      if (!showAskCard) return null;
-      if (!askPending.user_env_delete && !askPending.questions?.length) return null;
+      if (!showAskCard) return mailCards;
+      if (!askPending.user_env_delete && !askPending.questions?.length) return mailCards;
       return (
+        <>
+        {mailCards}
         <AskCard
           key={askPending.ask_id}
           askPending={askPending}
@@ -1507,8 +1544,9 @@ const AssistantMessage = (props: any) => {
             if (!started) return false;
             // Deletion confirmations are consumed by Core; history remains authoritative.
             if (askPending.user_env_delete) return true;
+            if (currentItemRef.current.ask_pending?.ask_id !== askPending.ask_id) return true;
             updateMessage({
-              ...item,
+              ...currentItemRef.current,
               ask_answered: true,
               ask_saved_answers: Object.fromEntries(
                 payload.structured.questions.map((question, idx) => [idx, question.answer]),
@@ -1517,6 +1555,7 @@ const AssistantMessage = (props: any) => {
             return true;
           }}
         />
+        </>
       );
     }
     // Show stop button while still streaming (no card present).

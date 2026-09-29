@@ -20,6 +20,7 @@ const (
 	SkillReviewStatsStatusCompleted       = "completed"
 	SkillReviewStatsStatusSkipped         = "skipped"
 	SkillReviewStatsStatusFailed          = "failed"
+	SkillReviewStatsStatusCancelled       = "cancelled"
 )
 
 var skillReviewStatsActiveStatuses = []string{
@@ -60,7 +61,7 @@ func IsSkillReviewStatsActiveStatus(status string) bool {
 }
 
 // SkillReviewStatsActiveScope selects known algorithm execution stages. A
-// successful terminal row closes the logical request even if an older Core
+// completed or cancelled terminal row closes the logical request even if an older Core
 // version retried the same requestid and left a later stage row behind.
 func SkillReviewStatsActiveScope(db *gorm.DB) *gorm.DB {
 	return db.
@@ -71,7 +72,7 @@ func SkillReviewStatsActiveScope(db *gorm.DB) *gorm.DB {
 			WHERE terminal_stats.userid = skill_review_stats.userid
 			  AND terminal_stats.requestid = skill_review_stats.requestid
 			  AND terminal_stats.status IN ?
-		)`, []string{SkillReviewStatsStatusCompleted, SkillReviewStatsStatusSkipped})
+		)`, []string{SkillReviewStatsStatusCompleted, SkillReviewStatsStatusSkipped, SkillReviewStatsStatusCancelled})
 }
 
 type SkillReviewResult struct {

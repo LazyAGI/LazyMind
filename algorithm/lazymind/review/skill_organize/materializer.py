@@ -17,7 +17,8 @@ from lazymind.review.skill_organize.schemas import (
     SourceSkill,
 )
 from lazymind.review.skill_organize.validator import validate_fs_draft, validate_plan
-from lazymind.review.traj_to_skill.json_call import call_json
+from lazymind.review.traj_to_skill.json_call import call_json, ModelJSONError
+from lazymind.common.maintenance import MaintenanceCancelled
 
 
 def materialize_fs_draft(
@@ -52,7 +53,7 @@ def materialize_fs_draft(
     all_upserts = []
     by_key = {item.key: item for item in source_skills}
     partials: list[SkillFsDraft | None] = [None] * len(plan.plans)
-    errors: list[str] = []
+    errors: list[Exception] = []
 
     with ThreadPoolExecutor(max_workers=max(1, max_workers)) as executor:
         futures = {
@@ -63,12 +64,20 @@ def materialize_fs_draft(
             index, item = futures[fut]
             try:
                 partials[index] = fut.result()
+            except MaintenanceCancelled:
+                for pending in futures:
+                    pending.cancel()
+                raise
             except Exception as exc:
                 LOG.warning(f'[SkillOrganize] failed to materialize plan item {index} {item.source_keys}: {exc}')
-                errors.append(f'plans[{index}] {item.source_keys}: {exc}')
+                errors.append(exc)
 
     if errors:
-        raise ValueError('failed to materialize fs draft: ' + '; '.join(errors))
+        error = next((exc for exc in errors if getattr(exc, 'category', '') in ('model_transport', 'model_timeout')), errors[0])
+        raise ModelJSONError(
+            'failed to materialize fs draft: ' + '; '.join(str(exc) for exc in errors),
+            category=getattr(error, 'category', 'model_response'),
+        ) from error
 
     for partial in partials:
         if partial is None:
@@ -126,13 +135,18 @@ def _materialize_upsert_skill(
             )
             validate_fs_draft(SkillFsDraft(upsert_skills=[item]), sources, mode='deep')
             return item
+        except MaintenanceCancelled:
+            raise
         except Exception as exc:
             last_error = exc
             LOG.warning(
                 f'[SkillOrganize] materialize {plan.type} '
                 f'{plan.source_keys} attempt {attempt + 1} failed: {exc}'
             )
-    raise ValueError(f'failed to materialize valid upsert skill for {plan.source_keys}: {last_error}') from last_error
+    raise ModelJSONError(
+        f'failed to materialize valid upsert skill for {plan.source_keys}: {last_error}',
+        category=getattr(last_error, 'category', 'model_response'),
+    ) from last_error
 
 
 def _merge_delete_keys(plan: SkillPlan) -> list[str]:

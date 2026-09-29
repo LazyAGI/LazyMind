@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"path"
@@ -169,6 +170,7 @@ func createSkillOrganizeReservation(ctx context.Context, db *gorm.DB, userID, re
 		TriggerID:    "skill_organize:" + strings.TrimSpace(userID) + ":" + strings.TrimSpace(requestID),
 		Status:       orm.ResourceUpdateTaskStatusRunning,
 		RequestJSON:  requestJSON,
+		ResultJSON:   json.RawMessage(`{"organize_rollback_version":1}`),
 		NextRunAt:    now,
 		LockedBy:     "skill-organize-admission",
 		LockedUntil:  &lockedUntil,
@@ -188,11 +190,18 @@ func noteSkillOrganizeAccepted(ctx context.Context, db *gorm.DB, taskID, resultI
 	if err != nil {
 		return err
 	}
-	return db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).Where("id = ?", taskID).Updates(map[string]any{
+	result := db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).Where("id = ? AND status = ?", taskID, orm.ResourceUpdateTaskStatusRunning).Updates(map[string]any{
 		"result_id":    strings.TrimSpace(resultID),
 		"request_json": requestJSON,
 		"updated_at":   time.Now().UTC(),
-	}).Error
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return taskguard.ErrOrganizeNotRunning
+	}
+	return nil
 }
 
 func finishSkillOrganizeReservation(ctx context.Context, db *gorm.DB, taskID, status, resultID string, taskErr error) error {
@@ -205,7 +214,7 @@ func finishSkillOrganizeReservation(ctx context.Context, db *gorm.DB, taskID, st
 	if status == orm.ResourceUpdateTaskStatusFailed {
 		errorCode = "skill_organize_call_failed"
 	}
-	return db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).Where("id = ?", taskID).Updates(map[string]any{
+	return db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).Where("id = ? AND status = ?", taskID, orm.ResourceUpdateTaskStatusRunning).Updates(map[string]any{
 		"status":        status,
 		"result_id":     strings.TrimSpace(resultID),
 		"error_code":    errorCode,
@@ -397,32 +406,147 @@ func CancelSkillOrganize(w http.ResponseWriter, r *http.Request) {
 		replyError(w, "requestid is required", http.StatusBadRequest)
 		return
 	}
-	var task orm.ResourceUpdateTask
-	err := db.WithContext(r.Context()).
-		Where("user_id = ? AND task_type = ? AND status = ?", userID, orm.ResourceUpdateTaskTypeOrganizeSkill, orm.ResourceUpdateTaskStatusRunning).
-		Order("created_at DESC").
-		Take(&task).Error
+	err := cancelSkillOrganizeReservation(r.Context(), db, userID, requestID)
+	if errors.Is(err, taskguard.ErrOrganizeNotRunning) || errors.Is(err, gorm.ErrRecordNotFound) {
+		replyError(w, "skill organize task is not running", http.StatusConflict)
+		return
+	}
 	if err != nil {
-		replyError(w, "skill organize task is not running", http.StatusConflict)
+		replyError(w, "skill organize cancel failed", http.StatusInternalServerError)
 		return
 	}
-	storedID := ""
-	var stored struct {
-		RequestID string `json:"requestid"`
-	}
-	_ = json.Unmarshal(task.RequestJSON, &stored)
-	storedID = strings.TrimSpace(stored.RequestID)
-	if storedID != "" && storedID != requestID {
-		replyError(w, "skill organize task is not running", http.StatusConflict)
-		return
-	}
-	resp, status, callErr := algo.CancelSkillOrganize(r.Context(), algo.SkillOrganizeCancelRequest{
+	// Persistence is authoritative, including when another algorithm process
+	// owns the model call. Notification only shortens cooperative cancellation.
+	ctx, cancel := context.WithTimeout(r.Context(), 250*time.Millisecond)
+	defer cancel()
+	_, _, _ = algo.CancelSkillOrganize(ctx, algo.SkillOrganizeCancelRequest{
 		RequestID: requestID,
 		UserID:    userID,
 	})
-	if callErr != nil || status >= 300 || resp == nil || !resp.Data.Cancelled {
-		replyError(w, "skill organize cancel failed", http.StatusBadGateway)
+	var task orm.ResourceUpdateTask
+	if err := db.WithContext(r.Context()).Where("user_id = ? AND trigger_id = ? AND task_type = ?", userID, "skill_organize:"+userID+":"+requestID, orm.ResourceUpdateTaskTypeOrganizeSkill).Take(&task).Error; err != nil {
+		replyError(w, "skill organize cancellation status unavailable", http.StatusInternalServerError)
 		return
 	}
-	common.ReplyOK(w, map[string]any{"status": "cancelled", "requestid": requestID})
+	var result struct {
+		Details map[string]any `json:"cancellation_details"`
+	}
+	_ = json.Unmarshal(task.ResultJSON, &result)
+	pending, _ := result.Details["pending_review"].(bool)
+	common.ReplyOK(w, map[string]any{"status": "cancelled", "requestid": requestID, "pending_review": pending, "cancellation_details": result.Details})
+}
+
+func cancelSkillOrganizeReservation(ctx context.Context, db *gorm.DB, userID, requestID string) error {
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Model(&orm.ResourceUpdateTask{}).Where("user_id = ? AND task_type = ? AND trigger_id = ?", userID, orm.ResourceUpdateTaskTypeOrganizeSkill, "skill_organize:"+userID+":"+requestID)
+		if err := query.UpdateColumn("updated_at", gorm.Expr("updated_at")).Error; err != nil {
+			return err
+		}
+		var task orm.ResourceUpdateTask
+		if err := query.Take(&task).Error; err != nil {
+			return err
+		}
+		if task.Status == orm.ResourceUpdateTaskStatusSkipped && task.ErrorCode == "skill_organize_cancelled" {
+			return nil
+		}
+		if task.Status != orm.ResourceUpdateTaskStatusRunning {
+			return taskguard.ErrOrganizeNotRunning
+		}
+		statsQuery := tx.Model(&orm.SkillReviewStats{}).Where("userid = ? AND requestid = ?", userID, requestID)
+		if err := statsQuery.UpdateColumn("duration_ms", gorm.Expr("duration_ms")).Error; err != nil {
+			return err
+		}
+		var stats []orm.SkillReviewStats
+		if err := statsQuery.Find(&stats).Error; err != nil {
+			return err
+		}
+		for _, row := range stats {
+			if row.Status == "completed" || row.Status == "failed" || row.Status == "skipped" {
+				return taskguard.ErrOrganizeNotRunning
+			}
+		}
+		details, err := taskguard.PrepareOrganizeCancellation(ctx, tx, task)
+		if err != nil {
+			return err
+		}
+		message := "Skill organize was cancelled."
+		if details != nil {
+			message += " Changes were retained for review because rollback was incomplete; affected skills are disabled and trashed sources remain recoverable."
+		}
+		now := time.Now().UTC()
+		if len(stats) == 0 {
+			id := task.ResultID
+			if id == "" {
+				id = task.ID
+			}
+			stats = []orm.SkillReviewStats{{ID: id, RequestID: requestID, UserID: userID, StartedAt: now.Format(time.RFC3339Nano)}}
+		}
+		for _, row := range stats {
+			summary := map[string]any{}
+			_ = json.Unmarshal([]byte(row.Summary), &summary)
+			if summary == nil {
+				summary = map[string]any{}
+			}
+			summary["status"] = "cancelled"
+			summary["error_code"] = "skill_organize_cancelled"
+			summary["error_category"] = "cancelled"
+			summary["error"] = message
+			if details != nil {
+				summary["cancellation_details"] = details
+				summary["pending_review"] = true
+			}
+			encoded, err := json.Marshal(summary)
+			if err != nil {
+				return err
+			}
+			row.Status, row.Summary = "cancelled", string(encoded)
+			if err := tx.Save(&row).Error; err != nil {
+				return err
+			}
+		}
+		// Only drafts still owned by this run are disposable after full rollback.
+		taskIDs := []string{requestID}
+		if task.ResultID != "" {
+			taskIDs = append(taskIDs, task.ResultID)
+		}
+		ids := tx.Table("skill_drafts AS d").Select("d.skill_id").Joins("JOIN skills AS s ON s.id = d.skill_id").Where("s.owner_user_id = ? AND d.task_id IN ?", userID, taskIDs)
+		updates := map[string]any{"task_id": "", "conversation_id": nil, "version": gorm.Expr("version + 1"), "updated_at": now}
+		if details == nil {
+			if err := tx.Exec("DELETE FROM skill_draft_entries WHERE skill_id IN (?)", ids).Error; err != nil {
+				return err
+			}
+			updates["draft_updated_at"] = nil
+		} else {
+			// Do not expose a renamed package's old published identity to runtime
+			// discovery while its coherent replacement draft awaits review.
+			var retained []orm.SkillV2Skill
+			if err := tx.Where("id IN (?)", ids).Find(&retained).Error; err != nil {
+				return err
+			}
+			details["retained_skills"] = retained
+			if err := tx.Model(&orm.SkillV2Skill{}).Where("id IN (?)", ids).Updates(map[string]any{"is_enabled": false, "call_mode": "manual"}).Error; err != nil {
+				return err
+			}
+			updates["draft_status"], updates["draft_updated_at"] = "pending_confirm", now
+			result := map[string]any{}
+			if err := json.Unmarshal(task.ResultJSON, &result); err != nil {
+				result = map[string]any{"original_result": string(task.ResultJSON)}
+			}
+			if result == nil {
+				result = map[string]any{}
+			}
+			result["cancellation_details"] = details
+			encoded, err := json.Marshal(result)
+			if err != nil {
+				return err
+			}
+			if err := tx.Model(&orm.ResourceUpdateTask{}).Where("id = ?", task.ID).UpdateColumn("result_json", json.RawMessage(encoded)).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Table("skill_drafts").Where("skill_id IN (?)", ids).Updates(updates).Error; err != nil {
+			return err
+		}
+		return tx.Model(&orm.ResourceUpdateTask{}).Where("id = ?", task.ID).Updates(map[string]any{"status": orm.ResourceUpdateTaskStatusSkipped, "error_code": "skill_organize_cancelled", "error_message": message, "locked_by": "", "locked_until": nil, "finished_at": now, "updated_at": now}).Error
+	})
 }

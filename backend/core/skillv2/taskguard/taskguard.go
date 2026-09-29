@@ -84,6 +84,59 @@ type draftState struct {
 	EntryCount   int64  `gorm:"column:entry_count"`
 }
 
+var ErrOrganizeNotRunning = errors.New("skill organize task is not running")
+
+// LockOrganizeTask must run in the caller's write transaction. The no-op
+// updates serialize writes with cancellation on both PostgreSQL and SQLite.
+func LockOrganizeTask(ctx context.Context, tx *gorm.DB, userID, taskID string) error {
+	if taskKind(taskID) != "organize" {
+		return nil
+	}
+	var reservation orm.ResourceUpdateTask
+	if tx.Migrator().HasTable(&orm.ResourceUpdateTask{}) {
+		query := tx.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).
+			Where("user_id = ? AND task_type = ? AND (trigger_id = ? OR result_id = ?)", userID, orm.ResourceUpdateTaskTypeOrganizeSkill, "skill_organize:"+userID+":"+taskID, taskID)
+		if err := query.UpdateColumn("updated_at", gorm.Expr("updated_at")).Error; err != nil {
+			return err
+		}
+		err := query.Take(&reservation).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err == nil && reservation.Status != orm.ResourceUpdateTaskStatusRunning {
+			return ErrOrganizeNotRunning
+		}
+	}
+	if tx.Migrator().HasTable(&orm.SkillReviewStats{}) {
+		query := tx.WithContext(ctx).Model(&orm.SkillReviewStats{}).
+			Where("userid = ? AND (requestid = ? OR id = ?)", userID, taskID, taskID)
+		if err := query.UpdateColumn("duration_ms", gorm.Expr("duration_ms")).Error; err != nil {
+			return err
+		}
+		var rows []orm.SkillReviewStats
+		if err := query.Find(&rows).Error; err != nil {
+			return err
+		}
+		active := false
+		for _, row := range rows {
+			if row.Status == "cancelled" {
+				return ErrOrganizeNotRunning
+			}
+			active = active || orm.IsSkillReviewStatsActiveStatus(row.Status)
+		}
+		if len(rows) > 0 && !active {
+			return ErrOrganizeNotRunning
+		}
+		if active {
+			return nil
+		}
+	}
+	if reservation.ID != "" {
+		return nil
+	}
+	return ErrOrganizeNotRunning
+}
+
 // EvaluateSkillOperation is the single policy entry point for Skill task and
 // draft admission. Callers provide facts only and must not duplicate its rules.
 func EvaluateSkillOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, req SkillOperationRequest) (SkillOperationDecision, error) {

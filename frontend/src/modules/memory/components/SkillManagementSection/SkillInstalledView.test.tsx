@@ -118,6 +118,14 @@ const renderViewWith = (overrides: Partial<React.ComponentProps<typeof SkillInst
 );
 
 describe("SkillInstalledView organize rules", () => {
+  it.each(["light", "deep"] as const)("keeps pending drafts visible but disabled in %s", (organizeDepth) => {
+    renderViewWith({
+      organizeMode: true, organizeDepth,
+      dataSource: [{...skills[0], draft: {hasUncommittedDraft: true, taskId: "org_previous", version: 1}}, skills[1]],
+    });
+    expect(screen.getByRole("checkbox", {name: "admin.memorySkillOrganizePendingDraftRow"})).toBeDisabled();
+    expect(screen.getByText("admin.memorySkillOrganizePendingDraftRow")).toBeVisible();
+  });
   it("does not constrain the list to a stale measured height after optimization", () => {
     const records = Array.from({ length: 9 }, (_, index) => createSkill(`skill-${index}`, "external"));
     const { container } = renderViewWith({

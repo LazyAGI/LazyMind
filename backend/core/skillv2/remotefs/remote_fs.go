@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 
 	skillhttperr "lazymind/core/skillv2/httperr"
@@ -450,7 +451,7 @@ func (h *Handler) Move(w http.ResponseWriter, r *http.Request) {
 	}
 	if from.relPath == "" || to.relPath == "" {
 		if from.relPath == "" && to.relPath == "" {
-			if err := h.movePackageRoot(r.Context(), userID, from, to); err != nil {
+			if err := h.movePackageRoot(r.Context(), userID, from, to, task); err != nil {
 				writeHTTPError(w, err)
 				return
 			}
@@ -534,12 +535,17 @@ func (h *Handler) Trash(w http.ResponseWriter, r *http.Request) {
 		writeHTTPError(w, err)
 		return
 	}
-	svc := skillservice.NewSkillService(skillservice.SkillServiceDeps{
-		DB:        h.db,
-		BlobStore: h.blobStore.service,
-		Clock:     h.clock,
+	err = h.db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := h.lockOrganizeTask(r.Context(), tx, userID, r.URL.Query().Get("task_id")); err != nil {
+			return err
+		}
+		if err := taskguard.RecordOrganizeMutation(r.Context(), tx, userID, r.URL.Query().Get("task_id"), skill.ID, taskguard.OrganizeTrash); err != nil {
+			return err
+		}
+		svc := skillservice.NewSkillService(skillservice.SkillServiceDeps{DB: tx, BlobStore: h.blobStore.service, Clock: h.clock})
+		return svc.TrashSkill(r.Context(), skillservice.DeleteSkillRequest{SkillID: skill.ID, UserID: userID})
 	})
-	if err := svc.TrashSkill(r.Context(), skillservice.DeleteSkillRequest{SkillID: skill.ID, UserID: userID}); err != nil {
+	if err != nil {
 		writeHTTPError(w, err)
 		return
 	}
@@ -728,6 +734,12 @@ func (h *Handler) listSkills(w http.ResponseWriter, r *http.Request, userID, cat
 }
 
 func (h *Handler) createEmptyPackage(ctx context.Context, tx *gorm.DB, userID string, parsed remotePath, task remoteTask) error {
+	if err := h.lockOrganizeTask(ctx, tx, userID, task.ID); err != nil {
+		return err
+	}
+	if strings.HasPrefix(task.ID, "org_") {
+		return conflict("organize cannot create an empty package")
+	}
 	var conflicts int64
 	if err := tx.WithContext(ctx).Model(&skillRow{}).
 		Where("owner_user_id = ? AND relative_root = ? AND deleted_at IS NULL", userID, parsed.packageRoot()).
@@ -775,7 +787,20 @@ func (h *Handler) createEmptyPackage(ctx context.Context, tx *gorm.DB, userID st
 	}).Error
 }
 
+func (h *Handler) lockOrganizeTask(ctx context.Context, tx *gorm.DB, userID, taskID string) error {
+	if err := taskguard.LockOrganizeTask(ctx, tx, userID, taskID); err != nil {
+		if errors.Is(err, taskguard.ErrOrganizeNotRunning) {
+			return conflict(err.Error())
+		}
+		return err
+	}
+	return nil
+}
+
 func (h *Handler) claimTask(ctx context.Context, tx *gorm.DB, skillID, userID string, task remoteTask) error {
+	if err := h.lockOrganizeTask(ctx, tx, userID, task.ID); err != nil {
+		return err
+	}
 	decision, err := taskguard.EvaluateSkillOperation(ctx, tx, h.stateStore, taskguard.SkillOperationRequest{
 		UserID:        userID,
 		SkillID:       skillID,
@@ -1035,10 +1060,16 @@ func (h *Handler) deleteMergedPath(tx *gorm.DB, skillID, relPath string, entries
 	}).Error
 }
 
-func (h *Handler) movePackageRoot(ctx context.Context, userID string, from, to remotePath) error {
+func (h *Handler) movePackageRoot(ctx context.Context, userID string, from, to remotePath, task remoteTask) error {
 	return h.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := h.lockOrganizeTask(ctx, tx, userID, task.ID); err != nil {
+			return err
+		}
 		skill, err := h.skillForPathInDB(ctx, tx, userID, from)
 		if err != nil {
+			return err
+		}
+		if err := taskguard.RecordOrganizeMutation(ctx, tx, userID, task.ID, skill.ID, taskguard.OrganizeRename); err != nil {
 			return err
 		}
 		var conflicts int64
@@ -1049,6 +1080,57 @@ func (h *Handler) movePackageRoot(ctx context.Context, userID string, from, to r
 		}
 		if conflicts > 0 {
 			return conflict("skill already exists")
+		}
+		if strings.HasPrefix(task.ID, "org_") {
+			if err := h.claimTask(ctx, tx, skill.ID, userID, task); err != nil {
+				return err
+			}
+			entry, err := h.entryForPath(ctx, tx, skill.ID, skill.SkillMDPath, task)
+			if err != nil {
+				return err
+			}
+			if entry.BlobHash == nil {
+				return badRequest("skill document has no content")
+			}
+			var source skillBlobRow
+			if err := tx.Where("hash = ?", *entry.BlobHash).Take(&source).Error; err != nil {
+				return err
+			}
+			data, err := h.blobData(source)
+			if err != nil {
+				return err
+			}
+			parsed, err := skillmetadata.Parse(data)
+			if err != nil {
+				return err
+			}
+			// Keep a complete identity-correct draft in the same transaction as
+			// the root move, including when cancellation precedes the next write.
+			fields := map[string]any{}
+			normalized := strings.ReplaceAll(string(data), "\r\n", "\n")
+			if strings.HasPrefix(normalized, "---\n") {
+				rest := strings.TrimPrefix(normalized, "---\n")
+				if err := yaml.Unmarshal([]byte(rest[:strings.Index(rest, "\n---")]), &fields); err != nil {
+					return err
+				}
+			}
+			if fields == nil {
+				fields = map[string]any{}
+			}
+			fields["name"], fields["category"] = to.skillName, to.category
+			header, err := yaml.Marshal(fields)
+			if err != nil {
+				return err
+			}
+			content := []byte(fmt.Sprintf("---\n%s---\n%s", header, parsed.Body))
+			blob, err := h.blobStore.service.Put(ctx, tx, skill.SkillMDPath, content, h.clock)
+			if err != nil {
+				return err
+			}
+			hash := blob.Hash
+			if err := tx.Save(&skillDraftEntryRow{SkillID: skill.ID, Path: skill.SkillMDPath, Op: "upsert", EntryType: "file", BlobHash: &hash, Size: blob.Size, Mime: blob.Mime, FileType: blob.FileType, Binary: blob.Binary, Mode: entry.Mode, UpdatedAt: h.clock.Now()}).Error; err != nil {
+				return err
+			}
 		}
 		if err := tx.Model(&skillRow{}).Where("id = ? AND deleted_at IS NULL", skill.ID).Updates(map[string]any{
 			"category":      to.category,

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SSE, Method } from './sse';
-import { realtimeURL } from './realtimeTransport';
+import { MAX_REALTIME_FRAME_BYTES, realtimeURL } from './realtimeTransport';
 
 class Socket {
   static OPEN = 1;
@@ -84,6 +84,29 @@ describe('multiplexed realtime transport', () => {
     expect(socket.sent).toHaveLength(1);
     expect(Socket.instances).toHaveLength(1);
     expect(xhr).not.toHaveBeenCalled();
+  });
+
+  it('refuses a chat POST while offline so it is never delivered when the network returns', async () => {
+    const error = vi.fn();
+    stream('/conversations/c1/events');
+    const socket = Socket.instances[0]; socket.connected();
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    stream('/conversations:chat', { method: Method.POST, payload: '{"conversation_id":"c1"}', callbacks: { error } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(error).toHaveBeenCalledWith(expect.objectContaining({ status: 0, reason: 'offline' }));
+    expect(socket.sent.filter((message) => message.method === 'POST')).toHaveLength(0);
+  });
+
+  it('refuses a chat POST larger than the socket read limit instead of resetting the socket', async () => {
+    const error = vi.fn();
+    stream('/conversations/c1/events');
+    const socket = Socket.instances[0]; socket.connected();
+    const payload = JSON.stringify({ blob: 'a'.repeat(MAX_REALTIME_FRAME_BYTES) });
+    stream('/conversations:chat', { method: Method.POST, payload, callbacks: { error } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(error).toHaveBeenCalledWith(expect.objectContaining({ status: 413, reason: 'payload_too_large' }));
+    expect(socket.sent.filter((message) => message.method === 'POST')).toHaveLength(0);
+    expect(socket.readyState).toBe(1);
   });
 
   it('preserves non-200 status and response body', () => {

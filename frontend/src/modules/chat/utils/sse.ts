@@ -7,7 +7,7 @@
 
 import { timer, Subscription } from "rxjs";
 import { applySkipSensitiveFilterToChatPayload } from "@/utils/sensitiveWordFilter";
-import { openRealtimeStream, type RealtimeFrame } from "./realtimeTransport";
+import { openRealtimeStream, type RealtimeFrame, type RealtimeRefusal } from "./realtimeTransport";
 
 /** Default timeout for the SSE connection. */
 const DEFAULT_TIMEOUT = 2000;
@@ -80,6 +80,7 @@ type CustomEventReadyStateChangeType = CustomEvent & {
 type CustomEventErrorType = CustomEvent & {
   data: unknown;
   status: number;
+  reason?: RealtimeRefusal;
 };
 
 /** Custom data event types. */
@@ -433,6 +434,7 @@ class SSE {
       const error = new CustomEvent(TriggerEvent.ERROR) as CustomEventErrorType;
       error.status = frame.status ?? this.realtimeStatus;
       error.data = this.realtimeErrorBody;
+      if (frame.reason) error.reason = frame.reason;
       this.close();
       this.dispatchEvent(error);
     } else if (frame.type === "end") {

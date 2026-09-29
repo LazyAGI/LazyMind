@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +21,24 @@ func maintenanceReview(t *testing.T, db *gorm.DB, id, user string, now time.Time
 	insertTask(t, db, orm.ResourceUpdateTask{ID: id, TaskType: orm.ResourceUpdateTaskTypeGenerateReview, ResourceType: orm.ResourceUpdateResourceTypeMemory, UserID: user,
 		TriggerType: "manual", TriggerID: id, Status: "pending", NextRunAt: now, LaneKey: MemoryMaintenanceLaneKey(user), LanePriority: MemoryReviewLanePriority,
 		LaneOrderAt: now, CreatedAt: now, UpdatedAt: now})
+}
+
+func TestExpiredSkillOrganizeReservationRemainsCancellable(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	now := time.Now().UTC()
+	expired := now.Add(-time.Hour)
+	insertTask(t, db, orm.ResourceUpdateTask{ID: "external-organizer", UserID: "u1", TaskType: orm.ResourceUpdateTaskTypeOrganizeSkill, Status: orm.ResourceUpdateTaskStatusRunning, LockedUntil: &expired, ResultJSON: json.RawMessage(`{"organize_rollback_version":1}`), CreatedAt: expired, UpdatedAt: expired})
+	w := NewWorker(db, Config{WorkerBatchSize: 10}, "worker")
+	if n, err := w.recoverExpiredRunning(context.Background(), now); err != nil || n != 0 {
+		t.Fatalf("recovered external reservation: %d %v", n, err)
+	}
+	var task orm.ResourceUpdateTask
+	if err := db.Where("id = ?", "external-organizer").Take(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != orm.ResourceUpdateTaskStatusRunning || !strings.Contains(string(task.ResultJSON), "organize_rollback_version") {
+		t.Fatalf("reservation clobbered: %#v", task)
+	}
 }
 
 func TestOrganizerWaitsForClaimedReviewThenLeadsPendingReviews(t *testing.T) {

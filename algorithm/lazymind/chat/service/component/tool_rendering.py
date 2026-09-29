@@ -407,32 +407,44 @@ def _tool_result_status(result: Any) -> str:
     return 'ok'
 
 
-def _human_failure_text(value: Any) -> str:
-    if value is None:
+def _human_failure_text(value: Any, depth: int = 0) -> str:
+    if value is None or depth >= 12:
         return ''
+
+    def extract(nested: Any) -> str:
+        return _human_failure_text(nested, depth + 1)
+
     if isinstance(value, dict):
         if value.get('ok') is False:
-            text = _human_failure_text(
+            text = extract(
                 value.get('last_error') or value.get('value') or value.get('msg') or value.get('error')
             )
             if text:
                 return text
-        for key in ('last_error', 'message', 'msg', 'error', 'detail', 'reason'):
-            text = _human_failure_text(value.get(key))
+        for key in ('last_error', 'message', 'msg', 'error', 'detail', 'reason', 'result', 'data'):
+            text = extract(value.get(key))
             if text:
                 return text
         nested = value.get('value')
         if nested is not None and nested is not value:
-            return _human_failure_text(nested)
+            return extract(nested)
         return ''
     if isinstance(value, (list, tuple)):
-        return ''
+        return '; '.join(filter(None, (extract(item) for item in value)))
     text = str(value).strip()
-    if text.startswith('{') or text.startswith('['):
+    if text.startswith(('"', '{', '[')):
         try:
-            return _human_failure_text(json.loads(text))
+            return extract(json.loads(text))
         except json.JSONDecodeError:
-            return text
+            pass
+    for match in re.finditer(r'[\[{]', text):
+        try:
+            nested, _ = json.JSONDecoder().raw_decode(text[match.start():])
+        except json.JSONDecodeError:
+            continue
+        return extract(nested)
+    if '{' in text or text.startswith('['):
+        return ''
     return text
 
 
@@ -607,6 +619,32 @@ def _tool_result_count(value: Any) -> int | None:
 
 def _tool_result_preview(tool_name: str, result: Any, value: str = '', language: str = 'en') -> str:
     status = _tool_result_status(result)
+    if _tool_name_starts(tool_name, 'MailToolkit_'):
+        payload = _normalized_success_business_value(result)
+        mail_status = payload.get('status') if isinstance(payload, dict) else ''
+        if (status == 'failed' or (isinstance(payload, dict) and payload.get('ok') is False)
+                or mail_status in {'failed', 'partial_sent', 'delivery_unknown'}):
+            detail = _human_failure_text(payload) or ('邮件操作失败，请检查邮件卡片。' if language == 'zh'
+                                                      else 'Mail operation failed. Review the mail card.')
+            detail = _truncate_tool_result_preview(detail)
+            if mail_status in {'partial_sent', 'delivery_unknown'}:
+                return _ensure_trailing_newline(detail)
+            result = {'ok': False, 'value': detail}
+            value = detail
+            status = 'failed'
+            preview = _render_preview_template(
+                tool_name, value,
+                _language_templates(language, _TOOL_RESULT_FAILURE_TEMPLATES, _ZH_TOOL_RESULT_FAILURE_TEMPLATES),
+                _language_fallback(language, _TOOL_RESULT_FAILURE_FALLBACK_TEMPLATE,
+                                   _ZH_TOOL_RESULT_FAILURE_FALLBACK_TEMPLATE),
+                result,
+            )
+            return preview if detail in preview else _ensure_trailing_newline(f'{preview.rstrip()} {detail}')
+        elif _tool_name_is(tool_name, 'MailToolkit_send_draft') and mail_status in {
+            'draft', 'needs_mailbox', 'sending',
+        }:
+            return _ensure_trailing_newline('邮件尚未确认发送完成。' if language == 'zh'
+                                           else 'Mail delivery has not been confirmed.')
     if status == 'needs_approval':
         return _render_preview_template(
             tool_name,

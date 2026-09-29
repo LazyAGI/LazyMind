@@ -617,11 +617,14 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         page?: number;
         pageSize?: number;
         preserveChangeProposals?: boolean;
+        background?: boolean;
+        signal?: AbortSignal;
       } = {},
     ) => {
+      if (options.signal?.aborted) return;
       const requestId = skillListRequestIdRef.current + 1;
       skillListRequestIdRef.current = requestId;
-      setSkillLoading(true);
+      setSkillLoading(!options.background);
       setSkillListError(false);
 
       try {
@@ -639,6 +642,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
           ...listOptions,
           page: requestedPage,
         });
+        if (skillListRequestIdRef.current !== requestId || options.signal?.aborted) return;
         const cloudRows = isDesktopRuntime() && skillView === "installed" ? cloudOnlySkills : [];
         const maxPage = Math.max(
           1,
@@ -653,7 +657,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
 
         const start = (result.page - 1) * result.pageSize;
         const cloudPage = cloudRows.slice(Math.max(0, start - result.total), Math.max(0, start + result.pageSize - result.total));
-        if (skillListRequestIdRef.current !== requestId) {
+        if (skillListRequestIdRef.current !== requestId || options.signal?.aborted) {
           return;
         }
 
@@ -667,7 +671,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
           );
         }
       } catch (error) {
-        if (skillListRequestIdRef.current !== requestId) {
+        if (skillListRequestIdRef.current !== requestId || options.signal?.aborted) {
           return;
         }
         setSkillListError(true);
@@ -679,7 +683,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         }
         console.error("Load skill assets failed:", error);
       } finally {
-        if (skillListRequestIdRef.current === requestId) {
+        if (skillListRequestIdRef.current === requestId && !options.signal?.aborted) {
           setSkillLoading(false);
           setSkillsInitialized(true);
         }

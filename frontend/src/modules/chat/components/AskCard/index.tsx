@@ -24,6 +24,7 @@ export interface AskPending {
   env_input?: import("../EnvInputCard").EnvironmentInput;
   mail_draft?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview;
   mail_drafts?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview[];
+  mail_draft_only?: boolean;
 }
 
 export interface AskAnsweredQuestion {
