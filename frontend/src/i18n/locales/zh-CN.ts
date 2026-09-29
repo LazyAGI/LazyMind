@@ -2706,6 +2706,7 @@ const zhCN = {
         service_unavailable: "模型服务当前过载或暂时不可用。",
         provider_internal_error: "模型服务处理请求时发生内部错误。",
         provider_rejected: "模型服务请求失败，具体原因未识别。",
+        request_rejected: "对话请求被服务端拒绝，请检查服务配置和日志后重试。",
         protocol_error: "模型服务返回了无法解析的响应。",
         transport_error: "无法稳定连接到模型服务。",
         length: "回答达到长度限制，未完整生成。",

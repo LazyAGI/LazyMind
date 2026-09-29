@@ -2773,6 +2773,7 @@ const enUS = {
         service_unavailable: "The model service is overloaded or temporarily unavailable.",
         provider_internal_error: "The model service encountered an internal processing error.",
         provider_rejected: "The model service request failed for an unrecognized reason.",
+        request_rejected: "The server rejected the chat request. Check the service configuration and logs, then retry.",
         protocol_error: "The model service returned an invalid response.",
         transport_error: "A stable connection to the model service could not be established.",
         length: "The response reached a length limit and is incomplete.",
