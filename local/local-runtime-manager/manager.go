@@ -1765,7 +1765,7 @@ func envDuration(name string, fallback time.Duration) time.Duration {
 
 func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths, asJSON bool) (string, error) {
 	_ = ctx
-	state, err := readOrNewState(paths, cfg)
+	state, persistedState, err := readStatusState(paths, cfg)
 	if err != nil {
 		return "", err
 	}
@@ -1798,6 +1798,7 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 		Config:         snapshotRuntimeConfig(cfg),
 		Services:       state.Services,
 		Diagnostic:     state.Diagnostic,
+		PersistedState: persistedState,
 	}
 	resp.Services = normalizeRuntimeServices(resp.Services, cfg)
 	plan := buildRuntimeProcessPlan(cfg)

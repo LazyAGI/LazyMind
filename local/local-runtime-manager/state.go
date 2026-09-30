@@ -74,6 +74,14 @@ type StatusResponse struct {
 	Config         RuntimeConfigSnapshot          `json:"config,omitempty"`
 	Services       map[string]RuntimeServiceState `json:"services"`
 	Diagnostic     *RuntimeDiagnostic             `json:"diagnostic,omitempty"`
+	PersistedState *PersistedRuntimeStatus        `json:"persistedState,omitempty"`
+}
+
+type PersistedRuntimeStatus struct {
+	OverallStatus string                         `json:"overallStatus"`
+	Services      map[string]RuntimeServiceState `json:"services"`
+	Diagnostic    *RuntimeDiagnostic             `json:"diagnostic,omitempty"`
+	UpdatedAt     string                         `json:"updatedAt"`
 }
 
 const legacyComposeServiceName = "docker" + "-stack"
@@ -218,11 +226,57 @@ func readOrNewState(paths RuntimePaths, cfg RuntimeConfig) (RuntimeState, error)
 		}
 		return RuntimeState{}, err
 	}
+	return prepareRuntimeState(st, cfg), nil
+}
+
+func readStatusState(paths RuntimePaths, cfg RuntimeConfig) (RuntimeState, *PersistedRuntimeStatus, error) {
+	st, err := readRuntimeState(paths.StateFile)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return defaultRuntimeState(cfg, cfg.ProcessComposePort, paths.RunDirTokenFile), nil, nil
+		}
+		return RuntimeState{}, nil, err
+	}
+	persisted := projectPersistedRuntimeStatus(st)
+	return prepareRuntimeState(st, cfg), &persisted, nil
+}
+
+func prepareRuntimeState(st RuntimeState, cfg RuntimeConfig) RuntimeState {
 	if st.ProcessCompose.APIPort == 0 {
 		st.ProcessCompose.APIPort = cfg.ProcessComposePort
 	}
 	st.Services = normalizeRuntimeServices(st.Services, applyStateConfig(cfg, st))
-	return st, nil
+	return st
+}
+
+func projectPersistedRuntimeStatus(st RuntimeState) PersistedRuntimeStatus {
+	return PersistedRuntimeStatus{
+		OverallStatus: st.OverallStatus,
+		Services:      cloneRuntimeServices(st.Services),
+		Diagnostic:    cloneRuntimeDiagnostic(st.Diagnostic),
+		UpdatedAt:     st.UpdatedAt,
+	}
+}
+
+func cloneRuntimeServices(services map[string]RuntimeServiceState) map[string]RuntimeServiceState {
+	clone := make(map[string]RuntimeServiceState, len(services))
+	for name, service := range services {
+		clone[name] = service
+	}
+	return clone
+}
+
+func cloneRuntimeDiagnostic(diagnostic *RuntimeDiagnostic) *RuntimeDiagnostic {
+	if diagnostic == nil {
+		return nil
+	}
+	clone := *diagnostic
+	if diagnostic.Details != nil {
+		details := *diagnostic.Details
+		details.BlockingServices = append([]string(nil), diagnostic.Details.BlockingServices...)
+		clone.Details = &details
+	}
+	return &clone
 }
 
 func normalizeRuntimeServices(services map[string]RuntimeServiceState, cfg RuntimeConfig) map[string]RuntimeServiceState {
