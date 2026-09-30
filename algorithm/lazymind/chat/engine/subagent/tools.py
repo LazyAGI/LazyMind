@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlparse
 
@@ -342,6 +343,15 @@ def artifact_is_deliverable(ctx: Any, artifact: Dict[str, Any]) -> bool:
     return False
 
 
+@dataclass
+class _PreparedArtifact:
+    key: str
+    original_type: str
+    content_type: str
+    value: Dict[str, Any]
+    warning: Optional[str] = None
+
+
 def _save_artifact(key: str, value: Any, content_type: str = 'text',
                    source_tool: Optional[str] = None,
                    sort_order: Optional[int] = None,
@@ -398,7 +408,26 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
     Returns:
         A confirmation that the artifact was saved.
     """
+    return _publish_artifact(_prepare_artifact(
+        key, value, content_type, source_tool, sort_order, caption,
+        internal_publish=internal_publish, publisher_list_index=publisher_list_index,
+    ))
+
+
+def _prepare_artifact(key: str, value: Any, content_type: str = 'text',
+                      source_tool: Optional[str] = None,
+                      sort_order: Optional[int] = None,
+                      caption: Optional[str] = None,
+                      *, internal_publish: bool = False,
+                      publisher_list_index: Optional[int] = None,
+                      slot_orders: Optional[Dict[str, List[int]]] = None) -> _PreparedArtifact:
+    """Validate and materialize an artifact without allocating a revision or emitting it."""
     ctx = require_context()
+    validate_storage_id(key)
+    try:
+        ctx.draft_path(key)
+    except ValueError as exc:
+        raise ToolExecutionError(str(exc)) from exc
     policy = (ctx.params or {}).get('workflow_runtime') or {}
     publisher_owned_slots = {
         str(slot).strip()
@@ -443,13 +472,19 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
     # Translate sort_order → list_index via Go core API.
     out_of_range_warning: Optional[str] = None
     if sort_order is not None and publisher_list_index is None:
-        list_index, resolve_err = _resolve_list_index_from_sort_order(key, sort_order)
+        list_index, resolve_err = _resolve_list_index_from_sort_order(key, sort_order, slot_orders)
         if list_index is not None:
             built['list_index'] = list_index
         elif resolve_err:
             out_of_range_warning = resolve_err
     if caption is not None:
         built['caption'] = str(caption)
+    return _PreparedArtifact(key, ct, actual_ct, built, out_of_range_warning)
+
+
+def _publish_artifact(artifact: _PreparedArtifact) -> Dict[str, Any]:
+    ctx = require_context()
+    key, ct, actual_ct, built = artifact.key, artifact.original_type, artifact.content_type, artifact.value
     seq = ctx.next_artifact_seq(key)
     ctx.record_local_artifact(key, actual_ct, built, seq)
     ctx.emit({
@@ -463,8 +498,8 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
     # list_index is embedded in built when sort_order resolved successfully.
     _write_artifact_draft(ctx, key, ct, actual_ct, built, built.get('list_index'))
     msg = f"Artifact '{key}' saved."
-    if out_of_range_warning:
-        msg += f' WARNING: {out_of_range_warning}'
+    if artifact.warning:
+        msg += f' WARNING: {artifact.warning}'
     ack: Dict[str, Any] = {'status': 'ok', 'key': key, 'message': msg}
     draft_path = ctx.draft_path(key)
     if os.path.isfile(draft_path):
@@ -480,6 +515,7 @@ def resolve_artifact_files(arguments: dict) -> object:
     from copy import deepcopy
 
     resolved = deepcopy(arguments)
+    _validate_artifact_batch(resolved.get('artifacts'))
     from lazymind.chat.engine.tools.workspace_context import get_tool_resolution_context
 
     request = get_tool_resolution_context()
@@ -518,13 +554,15 @@ def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
     Always pass a list, including when saving a single artifact. Every item MUST
     contain ``key`` and ``value``. The payload field is named ``value`` — never
     ``content`` or ``data``. Optional fields are content_type, source_tool,
-    sort_order, and caption. Keeping all writes in one model turn prevents a step
-    with many outputs from exhausting the ReAct tool-turn budget.
+    sort_order, and caption. Batch all ready outputs (up to 50 entries per call),
+    including multiple items with the same key for a list slot. Keeping all writes
+    in one model turn prevents a step with many outputs from exhausting the ReAct
+    tool-turn budget.
 
     Correct example::
 
-        {"artifacts": [{"key": "result", "value": "Final output",
-                        "content_type": "text", "caption": "Result"}]}
+        {"artifacts": [{"key": "report", "value": "Final output", "content_type": "text"},
+                       {"key": "summary", "value": {"ok": true}, "content_type": "json"}]}
     """
     from lazymind.chat.engine.tools.workspace_context import get_tool_resolution_context
 
@@ -532,12 +570,37 @@ def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
     if request is not None:
         if not request.managed_roots or os.path.realpath(require_context().workspace_path) != request.managed_roots[0]:
             raise ToolExecutionError('The artifact task workspace changed after file authorization.')
+    _validate_artifact_batch(artifacts)
+    slot_orders: Dict[str, List[int]] = {}
+    # Complete validation/materialization before publishing any revision. A bad
+    # later entry must not leave earlier entries saved and duplicated on retry.
+    # Workspace copies may remain on failure; publication is not a DB transaction.
+    prepared = [
+        _prepare_artifact(
+            key=str(item['key']),
+            value=item['value'],
+            content_type=str(item.get('content_type') or 'text'),
+            source_tool=item.get('source_tool'),
+            sort_order=item.get('sort_order'),
+            caption=item.get('caption'),
+            slot_orders=slot_orders,
+        )
+        for item in artifacts
+    ]
+    results = [_publish_artifact(artifact) for artifact in prepared]
+    return {
+        'status': 'ok',
+        'saved_count': len(results),
+        'results': results,
+    }
+
+
+def _validate_artifact_batch(artifacts: Any) -> None:
     if not isinstance(artifacts, list) or not artifacts:
         raise ToolExecutionError('artifacts must be a non-empty list.')
     if len(artifacts) > 50:
         raise ToolExecutionError('At most 50 artifacts may be saved at once.')
 
-    results: List[Dict[str, Any]] = []
     for index, item in enumerate(artifacts):
         if not isinstance(item, dict):
             raise ToolExecutionError(f'artifacts[{index}] must be an object.')
@@ -551,20 +614,6 @@ def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
                 f'artifacts[{index}] requires key and value. '
                 'Use: {"artifacts":[{"key":"<output key>","value":"<actual content>"}]}',
             )
-        saved = _save_artifact(
-            key=str(item['key']),
-            value=item['value'],
-            content_type=str(item.get('content_type') or 'text'),
-            source_tool=item.get('source_tool'),
-            sort_order=item.get('sort_order'),
-            caption=item.get('caption'),
-        )
-        results.append(saved)
-    return {
-        'status': 'ok',
-        'saved_count': len(results),
-        'results': results,
-    }
 
 
 def _write_artifact_draft(
@@ -600,7 +649,7 @@ def _write_artifact_draft(
 
 
 def _resolve_list_index_from_sort_order(
-    slot: str, sort_order: int
+    slot: str, sort_order: int, slot_orders: Optional[Dict[str, List[int]]] = None,
 ) -> tuple[Optional[int], Optional[str]]:
     """Translate sort_order → list_index for a list-slot artifact.
 
@@ -618,12 +667,17 @@ def _resolve_list_index_from_sort_order(
         session_id: str = cfg.get('workflow_session_id', '')
         if not session_id:
             return None, None
-        order_response = _workflow_client().get_slot_order(session_id, slot).result
-        raw_order = (
-            order_response.get('order_list')
-            if isinstance(order_response, dict) else None
-        )
-        order = [int(value) for value in (raw_order or [])]
+        if slot_orders is not None and slot in slot_orders:
+            order = slot_orders[slot]
+        else:
+            order_response = _workflow_client().get_slot_order(session_id, slot).result
+            raw_order = (
+                order_response.get('order_list')
+                if isinstance(order_response, dict) else None
+            )
+            order = [int(value) for value in (raw_order or [])]
+            if slot_orders is not None:
+                slot_orders[slot] = order
         if not order:
             # No durable list order means this is either a single-cardinality
             # slot or the first append into an empty list.
@@ -642,6 +696,8 @@ def _resolve_list_index_from_sort_order(
             )
         return order[sort_order - 1], None
     except Exception:
+        if slot_orders is not None:
+            slot_orders[slot] = []
         return None, None
 
 

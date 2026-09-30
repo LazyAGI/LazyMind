@@ -891,7 +891,9 @@ def _build_subagent_plan(
             '"content_type":"text","caption":"<optional label>"}]}\n'
             'The payload field MUST be named value. Never use content, data, body, or text '
             'as a replacement for value. key and value are required inside EVERY artifacts item.\n'
-            'For multiple outputs, put all entries in the same artifacts array. Do not make a '
+            'For multiple outputs, put all ready entries in the same artifacts array, including '
+            'multiple items sharing a list-slot key. Save up to 50 entries per call; split larger '
+            'sets into batches of at most 50. Do not make a '
             'small test/placeholder save before saving the real output.'
         )
         output_lines.append(
