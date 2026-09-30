@@ -38,6 +38,9 @@ function ProviderIcon({ provider }: { provider: ChannelProvider }) {
   if (provider === 'wechat') {
     return <WechatOutlined />;
   }
+  if (provider === 'wecom') {
+    return <img className="wecom-official-icon" src="/wecom-notification.png" alt="" aria-hidden="true" />;
+  }
   return (
     <img
       className="feishu-official-icon"
@@ -66,7 +69,8 @@ function formatExpiry(value?: string | null) {
 }
 
 function accountProvider(account: ChannelAccount): ChannelProvider {
-  return account.provider === 'feishu' ? 'feishu' : 'wechat';
+  if (account.provider === 'feishu' || account.provider === 'wecom') return account.provider;
+  return 'wechat';
 }
 
 function formatAccountTime(value?: string | null) {
@@ -259,13 +263,12 @@ export default function TerminalConnectionQuickPanel({
     setAccountsLoading(true);
     setAccountsError(false);
     try {
-      const [wechat, feishu] = await Promise.all([
-        listChannelAccounts('wechat'),
-        listChannelAccounts('feishu'),
-      ]);
+      const results = await Promise.all(
+        (['wechat', 'wecom', 'feishu'] as ChannelProvider[]).map((item) => listChannelAccounts(item)),
+      );
       if (accountRequestRef.current === requestId) {
         setAccounts(
-          [...wechat.items, ...feishu.items]
+          results.flatMap((result) => result.items)
             .filter((account) => account.status === 'connected')
             .sort((left, right) => (
               dayjs(right.updated_at).valueOf() - dayjs(left.updated_at).valueOf()
@@ -345,7 +348,7 @@ export default function TerminalConnectionQuickPanel({
 
       <div className="terminal-quick-body">
         <div className="terminal-quick-tabs" role="tablist" aria-label={t('channelGateway.terminal.providerLabel')}>
-          {(['wechat', 'feishu'] as ChannelProvider[]).map((item) => (
+          {(['wechat', 'wecom', 'feishu'] as ChannelProvider[]).map((item) => (
             <button
               key={item}
               type="button"

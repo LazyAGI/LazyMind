@@ -1642,19 +1642,23 @@ const enUS = {
       expiresAt: "Expires at {{time}}",
       wechatQuickDescription:
         "Connect a WeChat account by QR code to continue LazyMind conversations and receive task results.",
+      wecomQuickDescription:
+        "Create and connect a WeCom AI bot by QR code to continue LazyMind conversations and tasks.",
       feishuQuickDescription:
         "Create and connect a dedicated Feishu assistant to continue LazyMind conversations and tasks.",
       providerLabel: "Choose a messaging channel",
       wechatTitle: "WeChat",
       wechatHint: "Connect a WeChat account by QR code",
+      wecomTitle: "WeCom",
+      wecomHint: "Create an AI bot by QR code",
       feishuTitle: "Feishu",
       feishuHint: "Create a dedicated assistant by QR code",
       viewAccounts: "View Connected Channels ({{count}})",
       accountsTitle: "Connected Channel Accounts",
       accountsHint:
-        "Shows WeChat and Feishu accounts connected to the current LazyMind account.",
+        "Shows WeChat, WeCom, and Feishu accounts connected to the current LazyMind account.",
       accountsEmpty:
-        "No channel accounts are connected yet. Choose WeChat or Feishu to connect one.",
+        "No channel accounts are connected yet. Choose a channel to connect one.",
       refreshAccounts: "Refresh List",
       loadAccountsFailed: "Failed to load connected channel accounts. Please try again.",
       provider: "Channel",
@@ -1791,6 +1795,10 @@ const enUS = {
       refreshQr: "Refresh QR",
       cancelScan: "Cancel Connection",
       closePanel: "Close",
+      accountsEmpty: "No WeCom account is connected yet. Generate a QR code to connect one.",
+      challengePrompt: "Enter the verification code requested by WeCom",
+      challengePlaceholder: "Verification code",
+      submitChallenge: "Submit Code",
       loadAccountsFailed: "Failed to load WeCom accounts",
       startFailed: "Failed to start WeCom QR session",
       pollFailed: "Failed to poll WeCom QR status",
@@ -1803,6 +1811,8 @@ const enUS = {
       connectSuccessVisual: "Connected",
       connectFailedVisual: "Not connected",
       sessionStatusMap: { preparing: "Preparing", waiting_scan: "Waiting for scan", scanned: "Scanned", verification_required: "Verification required", confirming: "Connecting", connected: "Connected", expired: "Expired", canceled: "Canceled", failed: "Failed" },
+      accountStatusMap: { connected: "Connected", disconnected: "Disconnected" },
+      runtimeStatusMap: { running: "Running", starting: "Starting", stopped: "Stopped", degraded: "Degraded", failed: "Failed" },
     },
     feishu: {
       title: "Feishu Channel",

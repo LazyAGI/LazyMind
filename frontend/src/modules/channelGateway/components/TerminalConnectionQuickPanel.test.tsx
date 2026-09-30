@@ -18,7 +18,11 @@ vi.mock('react-i18next', () => ({
         'channelGateway.terminal.refreshAccounts': '刷新列表',
         'channelGateway.terminal.showQr': '展示二维码',
         'channelGateway.terminal.wechatTitle': '微信',
+        'channelGateway.terminal.wecomTitle': '企业微信',
         'channelGateway.terminal.feishuTitle': '飞书',
+        'channelGateway.wecom.accountsEmpty': '暂无已连接的企业微信账号',
+        'channelGateway.wecom.accountStatusMap.connected': '已连接',
+        'channelGateway.wecom.runtimeStatusMap.running': '运行中',
         'channelGateway.feishu.accountsEmpty': '暂无已连接的飞书账号',
         'channelGateway.wechat.accountStatusMap.connected': '已连接',
         'channelGateway.wechat.accountStatusMap.pendingActivation': '待激活',
@@ -139,5 +143,36 @@ describe('TerminalConnectionQuickPanel', () => {
     expect(screen.queryByRole('region', { name: '已连接终端账号' })).not.toBeInTheDocument();
     expect(connectedButton).toHaveAttribute('aria-expanded', 'false');
     await waitFor(() => expect(mocks.startScan).toHaveBeenCalledTimes(2));
+  });
+
+  it('shows the WeCom connection tab and connected WeCom accounts', async () => {
+    mocks.listChannelAccounts.mockImplementation((provider: string) => Promise.resolve({
+      items: provider === 'wecom' ? [{
+        id: 'wecom-connected',
+        provider: 'wecom',
+        label: '测试企业微信机器人',
+        status: 'connected',
+        runtime_status: 'running',
+        connected_at: '2026-08-14T08:00:00Z',
+        last_poll_at: null,
+        last_message_at: null,
+        last_error: null,
+        updated_at: '2026-08-14T08:00:00Z',
+      }] : [],
+    }));
+
+    render(<TerminalConnectionQuickPanel onManage={vi.fn()} />);
+
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['微信', '企业微信', '飞书']);
+    expect(mocks.listChannelAccounts).toHaveBeenCalledWith('wecom');
+
+    fireEvent.click(screen.getByRole('tab', { name: '企业微信' }));
+    expect(screen.getByRole('tab', { name: '企业微信' })).toHaveAttribute('aria-selected', 'true');
+    await waitFor(() => expect(mocks.startScan).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(await screen.findByRole('button', { name: '1 个已连接' }));
+    expect(screen.getByText('测试企业微信机器人')).toBeInTheDocument();
+    expect(screen.getByText(/已连接 · 运行中/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '在下方重新展示测试企业微信机器人的企业微信二维码' })).toBeInTheDocument();
   });
 });
