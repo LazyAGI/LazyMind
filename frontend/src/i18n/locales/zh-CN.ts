@@ -8515,6 +8515,8 @@ const zhCN = {
       title: "确认关闭功能",
       failedTitle: "设置未能完成",
       consequence: "关闭后，新任务将无法使用该功能，正在执行的任务不受影响。",
+      developerConsequence: "当前有任务正在运行。关闭后将隐藏开发者功能，正在执行的任务不受影响。",
+      taskCheckFailed: "暂时无法确认是否有任务正在运行，开发者模式保持开启。请重试。",
       saveFailed: "保存结果未确认，当前开关暂保持原状态。请重试以核对并保存。",
     },
     unsaved: {

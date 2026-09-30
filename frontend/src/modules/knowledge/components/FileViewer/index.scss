@@ -211,6 +211,10 @@
 
 .file-viewer-selection-translate-wrap {
   position: absolute;
+  display: flex;
+  flex-wrap: wrap;
+  width: max-content;
+  max-width: 100%;
   z-index: 40;
   transform: translateX(-50%);
 }

@@ -8768,6 +8768,8 @@ const enUS = {
       title: "Confirm disabling this feature",
       failedTitle: "Setting could not be completed",
       consequence: "New tasks will no longer use this feature. Tasks already running are not affected.",
+      developerConsequence: "Tasks are currently running. Turning developer mode off hides developer features without affecting those tasks.",
+      taskCheckFailed: "Running tasks could not be checked. Developer mode remains on. Please retry.",
       saveFailed: "The save could not be confirmed. The switch still shows its previous state. Retry to verify and save.",
     },
     unsaved: {

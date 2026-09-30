@@ -57,7 +57,7 @@ export default function PdfTemporaryChat({
   const chatRef = useRef<ChatImperativeProps>(null);
   const initialConversationIdRef = useRef(newPreviewConversationId());
   const conversationIdRef = useRef(initialConversationIdRef.current);
-  const preparedSelectionRef = useRef("");
+  const preparedSelectionRef = useRef<DocumentChatSelection>();
   const handledTranslationRequestRef = useRef(0);
   const pendingTranslationRef = useRef<(DocumentTranslationRequest & { conversationId: string }) | null>(null);
   const [conversationId, setConversationId] = useState(initialConversationIdRef.current);
@@ -116,7 +116,7 @@ export default function PdfTemporaryChat({
       setConversationCreated(true);
       touchCachedPdfChat(documentId, conversationToLoad);
       setSaved(false);
-      preparedSelectionRef.current = "";
+      preparedSelectionRef.current = undefined;
       chatRef.current?.replaceMessageList(conversationToLoad, list);
       if (statusResponse.data?.is_generating) {
         chatRef.current?.openResumeSSE?.(conversationToLoad);
@@ -129,8 +129,7 @@ export default function PdfTemporaryChat({
 
   useEffect(() => {
     if (!selection) return;
-    const selectionKey = `${selection.source}:${selection.page}:${selection.segmentId}:${selection.text}:${selection.bbox?.join(",") || ""}`;
-    if (preparedSelectionRef.current === selectionKey) return;
+    if (preparedSelectionRef.current === selection) return;
     let attempts = 0;
     const sendWhenReady = () => {
       if (!chatRef.current && attempts < 10) {
@@ -139,7 +138,7 @@ export default function PdfTemporaryChat({
         return;
       }
       if (!chatRef.current) return;
-      preparedSelectionRef.current = selectionKey;
+      preparedSelectionRef.current = selection;
       chatRef.current.prepareMessage({
         text: "",
         citeMessage: selection.text,
@@ -232,7 +231,7 @@ export default function PdfTemporaryChat({
     conversationIdRef.current = nextId;
     setConversationCreated(false);
     setSaved(false);
-    preparedSelectionRef.current = "";
+    preparedSelectionRef.current = undefined;
     setRestartKey((key) => key + 1);
     onConversationChange?.(undefined);
     return nextId;

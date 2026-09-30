@@ -246,7 +246,7 @@ func (s *DocumentService) GetDocument(ctx context.Context, req DocumentReadReque
 		if err != nil {
 			return DocumentReadResult{}, err
 		}
-		if strings.TrimSpace(content.Text) == "" && strings.Contains(strings.ToLower(content.MIMEType), "pdf") {
+		if strings.TrimSpace(content.Text) == "" {
 			request, requestErr := http.NewRequestWithContext(ctx, http.MethodPost, "/documents:ensure-parsed", nil)
 			if requestErr != nil {
 				return DocumentReadResult{}, requestErr

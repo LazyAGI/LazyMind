@@ -3,7 +3,9 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { Spin, message, Empty } from "antd";
@@ -33,6 +35,7 @@ import {
 import { normalizeProxyableUrl } from "@/modules/knowledge/utils/request";
 import { isSingleEnglishWord } from "@/modules/knowledge/api/translation";
 import { paragraphSelectionsOverlap } from "./paragraphSelection";
+import { extractPdfSelectionContext } from "@/components/ui/pdfSelectionContext";
 
 import "./index.scss";
 
@@ -109,8 +112,17 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
   const [content, setContent] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [mediaObjectUrl, setMediaObjectUrl] = useState("");
-  const [textSelectionAction, setTextSelectionAction] = useState<{ text: string; left: number; top: number } | null>(null);
+  const [textSelectionAction, setTextSelectionAction] = useState<{ text: string; context: string; left: number; top: number } | null>(null);
   const [paragraphSelections, setParagraphSelections] = useState<PdfTextSelection[]>([]);
+  const textSelectionActionRef = useRef<HTMLSpanElement>(null);
+
+  useLayoutEffect(() => {
+    const toolbar = textSelectionActionRef.current;
+    if (!textSelectionAction || !toolbar || !toolbar.parentElement?.clientWidth) return;
+    const halfWidth = toolbar.offsetWidth / 2;
+    const left = Math.max(halfWidth, Math.min(textSelectionAction.left, toolbar.parentElement.clientWidth - halfWidth));
+    if (left !== textSelectionAction.left) setTextSelectionAction({ ...textSelectionAction, left });
+  }, [textSelectionAction]);
 
   useEffect(()=>{if(props.paragraphSelectionMode){setTextSelectionAction(null);setParagraphSelections([])}},[props.paragraphSelectionMode]);
 
@@ -199,22 +211,26 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
       selection.removeAllRanges();
       return;
     }
-    if (fileType === "pdf" || !props.onPdfTranslateSelection) return;
+    if (fileType === "pdf" || (!props.onPdfSelection && !props.onPdfTranslateSelection)) return;
     const selection = window.getSelection();
     const text = selection?.toString().trim() || "";
-    if (!selection || selection.isCollapsed || !text) {
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed || !text) {
       setTextSelectionAction(null);
       return;
     }
     const container = event.currentTarget;
     if (!container.contains(selection.anchorNode) || !container.contains(selection.focusNode)) return;
+    const ancestor = selection.getRangeAt(0).commonAncestorContainer;
+    const element = ancestor instanceof Element ? ancestor : ancestor.parentElement;
+    const contextElement = element?.closest("p, li, pre, td, th, blockquote") || element;
     const rect = container.getBoundingClientRect();
     setTextSelectionAction({
       text,
+      context: extractPdfSelectionContext(contextElement?.textContent || "", text),
       left: Math.min(Math.max(event.clientX - rect.left, 52), rect.width - 52),
       top: Math.max(event.clientY - rect.top - 42, 8),
     });
-  }, [fileType, props.onPdfTranslateSelection, props.paragraphSelectionMode, t]);
+  }, [fileType, props.onPdfSelection, props.onPdfTranslateSelection, props.paragraphSelectionMode, t]);
 
   const getFileData = useCallback(
     async (
@@ -492,14 +508,27 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
       <div className="file-viewer-content" onMouseUp={handlePreviewSelection}>
         {textSelectionAction&&!props.paragraphSelectionMode ? (
           <span
+            ref={textSelectionActionRef}
             className="file-viewer-selection-translate-wrap"
             style={{ left: textSelectionAction.left, top: textSelectionAction.top }}
-            title={!props.translationConfigured&&!isSingleEnglishWord(textSelectionAction.text) ? t("knowledge.translationConfigureTip") : undefined}
           >
-            <button
+            {props.onPdfSelection ? <button
+              type="button"
+              className="file-viewer-selection-translate"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                props.onPdfSelection?.({ text: textSelectionAction.text, context: textSelectionAction.context, page: 1 });
+                window.getSelection()?.removeAllRanges();
+                setTextSelectionAction(null);
+              }}
+            >
+              {t("knowledge.askPdfSelection")}
+            </button> : null}
+            {props.onPdfTranslateSelection ? <button
               type="button"
               className="file-viewer-selection-translate"
               disabled={!props.translationConfigured&&!isSingleEnglishWord(textSelectionAction.text)}
+              title={!props.translationConfigured&&!isSingleEnglishWord(textSelectionAction.text) ? t("knowledge.translationConfigureTip") : undefined}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
                 props.onPdfTranslateSelection?.({ text: textSelectionAction.text, page: 1 });
@@ -508,7 +537,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
               }}
             >
               {t("knowledge.translateSelection")}
-            </button>
+            </button> : null}
             {props.onAddVocabularySelection && isSingleEnglishWord(textSelectionAction.text) ? <button
               type="button"
               className="file-viewer-selection-translate"

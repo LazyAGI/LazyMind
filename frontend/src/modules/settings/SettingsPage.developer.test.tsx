@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { ConfigProvider } from "antd";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => {
     fetchSettingsOverview: vi.fn(),
     fetchUserUiPreferences: vi.fn(),
     applySettingsChange: vi.fn(),
+    listTasks: vi.fn(),
   };
 });
 
@@ -58,8 +60,14 @@ vi.mock("@/modules/user/uiPreferencesApi", () => ({
   patchUserUiPreferences: vi.fn(),
 }));
 
+vi.mock("@/modules/taskCenter/api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/modules/taskCenter/api")>(),
+  listTasks: mocks.listTasks,
+}));
+
 describe("SettingsPage developer preferences", () => {
   beforeEach(() => {
+    mocks.listTasks.mockReset().mockResolvedValue({ items: [], total: 0 });
     mocks.applySettingsChange.mockReset().mockResolvedValue({ key: "developer_mode_active", enabled: true, preferences: { developer_mode_active: true } });
     mocks.fetchSettingsOverview.mockReset().mockResolvedValue({
       controls: {},
@@ -74,25 +82,55 @@ describe("SettingsPage developer preferences", () => {
     });
   });
 
-  it("enables developer mode with one click and updates the switch after persistence", async () => {
+  it("enables developer mode only after confirmation and persistence", async () => {
+    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter initialEntries={["/settings?section=developer"]}><SettingsPage /></MemoryRouter></ConfigProvider>);
+    const toggle = await screen.findByRole("switch", { name: "settingsPage.developer.modeAria" });
+    fireEvent.click(toggle);
+    await screen.findByText("settingsPage.confirm.developerEnableContent");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(mocks.applySettingsChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("switch", { name: "settingsPage.developer.performanceAria" })).toBeDisabled();
+    fireEvent.click(screen.getByText("settingsPage.confirmEnable"));
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
+    expect(mocks.applySettingsChange).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mocks.listTasks).not.toHaveBeenCalled();
+    expect(screen.getByRole("switch", { name: "settingsPage.developer.performanceAria" })).toBeEnabled();
+  });
+
+  it("keeps developer mode and its child controls off when enabling is canceled", async () => {
     render(<MemoryRouter initialEntries={["/settings?section=developer"]}><SettingsPage /></MemoryRouter>);
     const toggle = await screen.findByRole("switch", { name: "settingsPage.developer.modeAria" });
     fireEvent.click(toggle);
-    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
-    expect(mocks.applySettingsChange).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "settingsPage.developer.performanceAria" })).toBeEnabled();
+    await screen.findByText("settingsPage.confirm.developerEnableContent");
+    fireEvent.click(screen.getByText("settingsPage.cancel"));
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(mocks.applySettingsChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("switch", { name: "settingsPage.developer.performanceAria" })).toBeDisabled();
   });
 
   it("retains the enabled switch when the disable confirmation is canceled", async () => {
     mocks.fetchUserUiPreferences.mockResolvedValue({ developer_mode_active: true });
+    mocks.listTasks.mockResolvedValue({ items: [{ id: "background-task" }], total: 1 });
     render(<MemoryRouter initialEntries={["/settings?section=developer"]}><SettingsPage /></MemoryRouter>);
     const toggle = await screen.findByRole("switch", { name: "settingsPage.developer.modeAria" });
     fireEvent.click(toggle);
-    await screen.findByText("settingsPage.change.consequence");
+    await screen.findByText("settingsPage.change.developerConsequence");
     fireEvent.click(screen.getByText("settingsPage.cancel"));
     expect(toggle).toHaveAttribute("aria-checked", "true");
     expect(mocks.applySettingsChange).not.toHaveBeenCalled();
+  });
+
+  it("disables developer mode without a confirmation when no tasks are running", async () => {
+    mocks.fetchUserUiPreferences.mockResolvedValue({ developer_mode_active: true });
+    mocks.applySettingsChange.mockResolvedValue({ key: "developer_mode_active", enabled: false, preferences: { developer_mode_active: false } });
+    render(<MemoryRouter initialEntries={["/settings?section=developer"]}><SettingsPage /></MemoryRouter>);
+    const toggle = await screen.findByRole("switch", { name: "settingsPage.developer.modeAria" });
+    fireEvent.click(toggle);
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mocks.listTasks).toHaveBeenCalledWith({ status: "running", page_size: 1 });
+    expect(screen.getByRole("switch", { name: "settingsPage.developer.performanceAria" })).toBeDisabled();
   });
 
   it("shows performance stats beside sensitive-word filtering before developer mode is enabled", async () => {

@@ -412,6 +412,98 @@ func TestDocumentServiceListDocumentChunksUsesRequestedGroup(t *testing.T) {
 	}
 }
 
+func TestDocumentServiceGetDocumentReadsParsedContentForAllFormats(t *testing.T) {
+	cases := []struct {
+		name     string
+		mimeType string
+	}{
+		{"source.pdf", "application/pdf"},
+		{"source.doc", "application/msword"},
+		{"source.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+		{"source.xls", "application/vnd.ms-excel"},
+		{"source.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+		{"source.ppt", "application/vnd.ms-powerpoint"},
+		{"source.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"},
+		{"source.png", "image/png"},
+		{"source.md", "application/octet-stream"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			db := newDocumentTestDB(t)
+			if err := db.AutoMigrate(&orm.DocumentProcessingState{}); err != nil {
+				t.Fatalf("migrate processing state: %v", err)
+			}
+			rootReads := 0
+			installDocumentServiceTransport(t, func(r *http.Request) (int, string) {
+				if r.URL.Path != "/v1/chunks" || r.URL.Query().Get("kb_id") != "kb-dataset-1" ||
+					r.URL.Query().Get("doc_id") != "lazy-doc-1" || r.URL.Query().Get("group") != RootNodeGroup {
+					t.Errorf("unexpected parsed content request: %s", r.URL)
+					return http.StatusBadRequest, `{"message":"unexpected request"}`
+				}
+				rootReads++
+				return http.StatusOK, `{"items":[{"chunk_id":"root-1","content":"[{\"content\":\"Parsed document body\"}]","number":1}],"total":1}`
+			})
+			t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
+			seedDocumentServiceDataset(t, db, "dataset-1", "user-1", time.Now().UTC())
+			seedDocumentServiceDocument(t, db, "dataset-1", "doc-1", "user-1", documentExt{
+				OriginalFilename: tt.name, ContentType: tt.mimeType,
+			})
+			if err := db.Model(&orm.Document{}).Where("id = ?", "doc-1").Updates(map[string]any{
+				"lazyllm_doc_id": "lazy-doc-1", "display_name": tt.name,
+			}).Error; err != nil {
+				t.Fatalf("set parsed document: %v", err)
+			}
+			if err := db.Create(&readonlyorm.LazyLLMDocRow{
+				DocID: "lazy-doc-1", Filename: tt.name, UploadStatus: "SUCCESS",
+			}).Error; err != nil {
+				t.Fatalf("create parsed document: %v", err)
+			}
+			result, err := mustDocumentService(t, db).GetDocument(context.Background(), DocumentReadRequest{
+				UserID: "user-1", DatasetID: "dataset-1", DocumentID: "doc-1", IncludeContent: true,
+			})
+			if err != nil {
+				t.Fatalf("GetDocument: %v", err)
+			}
+			if result.Content == nil || result.Content.Text != "Parsed document body" || result.Content.MIMEType != tt.mimeType {
+				t.Fatalf("unexpected parsed content: %+v", result.Content)
+			}
+			if rootReads == 0 {
+				t.Fatal("document read did not use parsed content")
+			}
+		})
+	}
+}
+
+func TestDocumentServiceGetDocumentParsedContentChecksPermissionAndDataset(t *testing.T) {
+	db := newDocumentTestDB(t)
+	installDocumentServiceTransport(t, func(r *http.Request) (int, string) {
+		if strings.Contains(r.URL.Path, "/chunks") {
+			t.Errorf("unauthorized document must not request parsed content: %s", r.URL)
+		}
+		return http.StatusNotFound, `{"message":"not found"}`
+	})
+	seedDocumentServiceDataset(t, db, "dataset-owned", "user-1", time.Now().UTC())
+	seedDocumentServiceDataset(t, db, "dataset-other", "user-2", time.Now().UTC())
+	seedDocumentServiceDocument(t, db, "dataset-other", "doc-other", "user-2", documentExt{
+		OriginalFilename: "source.docx", ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	})
+	service := mustDocumentService(t, db)
+	for _, tt := range []struct {
+		datasetID string
+		code      DocumentServiceErrorCode
+	}{
+		{"dataset-other", DocumentServiceForbidden},
+		{"dataset-owned", DocumentServiceNotFound},
+	} {
+		_, err := service.GetDocument(context.Background(), DocumentReadRequest{
+			UserID: "user-1", DatasetID: tt.datasetID, DocumentID: "doc-other", IncludeContent: true,
+		})
+		if documentServiceCode(err) != tt.code {
+			t.Fatalf("dataset %s error = %v, want %s", tt.datasetID, err, tt.code)
+		}
+	}
+}
+
 func TestDocumentServiceGetDocumentLoadsRecordOnceForEveryExpansionCombination(t *testing.T) {
 	db := newDocumentTestDB(t)
 	installDocumentServiceTransport(t, func(r *http.Request) (int, string) {
