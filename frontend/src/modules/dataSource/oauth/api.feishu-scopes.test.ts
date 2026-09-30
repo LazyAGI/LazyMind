@@ -17,7 +17,7 @@ beforeEach(() => {
   } });
 });
 
-it("requests exactly the original OAuth permissions for a newly added account", async () => {
+it("requests the default OAuth permissions including document search for a newly added account", async () => {
   await requestFeishuDataSourceAuthorizeUrl({
     tenantId: "", appId: "cli_fixture", appSecret: "fixture-secret", scopes: FEISHU_DEFAULT_SCOPES,
   });
@@ -25,7 +25,7 @@ it("requests exactly the original OAuth permissions for a newly added account", 
   expect(request.provider).toBe("feishu");
   expect(request.cloudOAuthAuthorizeURLBody.scope.split(" ").sort()).toEqual([
     "offline_access", "drive:drive", "drive:drive:readonly", "drive:drive.metadata:readonly",
-    "wiki:wiki", "wiki:wiki:readonly", "wiki:node:retrieve", "docx:document",
+    "wiki:wiki", "wiki:wiki:readonly", "wiki:node:retrieve", "docx:document", "search:docs:read",
   ].sort());
 });
 

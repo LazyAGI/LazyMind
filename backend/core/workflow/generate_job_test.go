@@ -9,6 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"lazymind/core/algo"
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/graphengine"
@@ -24,6 +25,65 @@ steps: []
 `)
 	if err == nil {
 		t.Fatal("expected placeholder skeleton to be rejected")
+	}
+}
+
+func TestMergeWorkflowRepairResponsePreservesBaseForEmptyFields(t *testing.T) {
+	base := workflowRepairSnapshot{
+		WorkflowYAML: "id: original\n",
+		StateYAML:    "steps: original\n",
+		ScenarioMD:   "# Original\n",
+		Scripts:      map[string]string{"scripts/run.py": "print('old')\n"},
+	}
+	merged := mergeWorkflowRepairResponse(base, &algo.RepairStateMachineResponse{
+		WorkflowYAML: "id: repaired\n",
+		StateYAML:    "",
+		ScenarioMD:   "   ",
+		Scripts:      nil,
+	})
+
+	if merged.WorkflowYAML != "id: repaired\n" {
+		t.Fatalf("workflow_yaml = %q", merged.WorkflowYAML)
+	}
+	if merged.StateYAML != base.StateYAML {
+		t.Fatalf("state_yaml = %q, want base", merged.StateYAML)
+	}
+	if merged.ScenarioMD != base.ScenarioMD {
+		t.Fatalf("scenario_md = %q, want base", merged.ScenarioMD)
+	}
+	if merged.Scripts["scripts/run.py"] != "print('old')\n" {
+		t.Fatalf("scripts were not preserved: %#v", merged.Scripts)
+	}
+
+	merged = mergeWorkflowRepairResponse(base, &algo.RepairStateMachineResponse{
+		Scripts: map[string]string{},
+	})
+	if merged.Scripts["scripts/run.py"] != "print('old')\n" {
+		t.Fatalf("empty scripts map should preserve base scripts: %#v", merged.Scripts)
+	}
+}
+
+func TestMergeWorkflowRepairResponseMergesReturnedScripts(t *testing.T) {
+	base := workflowRepairSnapshot{
+		WorkflowYAML: "id: original\n",
+		StateYAML:    "steps: original\n",
+		ScenarioMD:   "# Original\n",
+		Scripts: map[string]string{
+			"scripts/run.py":    "print('old')\n",
+			"scripts/helper.py": "VALUE = 1\n",
+		},
+	}
+	merged := mergeWorkflowRepairResponse(base, &algo.RepairStateMachineResponse{
+		Scripts: map[string]string{"scripts/run.py": "print('new')\n"},
+	})
+
+	if len(merged.Scripts) != 2 ||
+		merged.Scripts["scripts/run.py"] != "print('new')\n" ||
+		merged.Scripts["scripts/helper.py"] != "VALUE = 1\n" {
+		t.Fatalf("scripts = %#v, want path-level merge", merged.Scripts)
+	}
+	if base.Scripts["scripts/run.py"] != "print('old')\n" {
+		t.Fatalf("base scripts were mutated: %#v", base.Scripts)
 	}
 }
 

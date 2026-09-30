@@ -1,6 +1,7 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ForkCreateRequest, ForkPreview, ForkResult } from "@/api/generated/core-client";
+import { CONVERSATION_GROUPS_CHANGED_EVENT } from "../../conversationOrganizer/api";
 
 const state = vi.hoisted(() => ({ user: "u1", location: { key: "A" }, navigate: vi.fn(), preview: vi.fn(), create: vi.fn() }));
 vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getUserInfo: () => state.user ? { userId: state.user } : null }, AUTH_USER_CHANGE_EVENT: "fork-test-auth" }));
@@ -17,6 +18,24 @@ beforeEach(() => { sessionStorage.clear(); state.user = "u1"; window.dispatchEve
 afterEach(cleanup);
 
 describe("Fork creation state", () => {
+  it("refreshes group membership only after the fork has been created", async () => {
+    const pending = deferred<ForkResult>();
+    state.create.mockReturnValue(pending.promise);
+    const refreshGroups = vi.fn();
+    window.addEventListener(CONVERSATION_GROUPS_CHANGED_EVENT, refreshGroups);
+    try {
+      const { result } = renderHook(() => useForkConversation("grouped-source"));
+      act(() => { void result.current.begin("h1"); });
+      await waitFor(() => expect(state.create).toHaveBeenCalledTimes(1));
+      expect(refreshGroups).not.toHaveBeenCalled();
+      await act(async () => pending.resolve(created()));
+      expect(refreshGroups).toHaveBeenCalledTimes(1);
+      expect(state.navigate).toHaveBeenCalledWith(expect.stringContaining("branch"));
+    } finally {
+      window.removeEventListener(CONVERSATION_GROUPS_CHANGED_EVENT, refreshGroups);
+    }
+  });
+
   it("creates and navigates with one click, automatically accepting exact suggested legacy values", async () => {
     state.preview.mockResolvedValue({ ...preview(), config_issues: [
       { field: "thinking_depth", suggested_value: "high", requires_confirmation: true },

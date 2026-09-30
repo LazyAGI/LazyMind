@@ -506,6 +506,10 @@ func purgeConversation(ctxDB *gorm.DB, conversationID, userID string) error {
 			}
 		}
 
+		// Keep fork provenance so surviving descendants retain their root and
+		// used branch numbers. SourceTitleSnapshot names this branch's parent,
+		// not the purged branch; no message or artifact content is stored there.
+		// loadForkOrigin hides that snapshot when its source is unavailable.
 		deletions := []struct {
 			model any
 			where string
@@ -515,7 +519,6 @@ func purgeConversation(ctxDB *gorm.DB, conversationID, userID string) error {
 			{&orm.ChatHistory{}, "conversation_id IN ?", []any{conversationIDs}},
 			{&orm.MultiAnswersChatHistory{}, "conversation_id IN ?", []any{conversationIDs}},
 			{&orm.ConversationArtifact{}, "conversation_id IN ? AND create_user_id = ?", []any{conversationIDs, userID}},
-			{&orm.ConversationForkOrigin{}, "conversation_id IN ?", []any{conversationIDs}},
 			{&orm.ConversationIdleEvent{}, "session_id IN ? AND user_id = ?", []any{conversationIDs, userID}},
 			{&orm.EpisodeMemory{}, "conversation_id IN ? AND user_id = ?", []any{conversationIDs, userID}},
 		}

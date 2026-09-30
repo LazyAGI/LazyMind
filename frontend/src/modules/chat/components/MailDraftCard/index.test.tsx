@@ -18,6 +18,27 @@ vi.mock("@/modules/chat/store/taskCenter", () => ({
 }));
 
 describe("MailDraftCard", () => {
+  it.each([
+    ["draft", "chat.mailDraft.confirmSend"],
+    ["failed", "chat.mailDraft.resend"],
+    ["delivery_unknown", "chat.mailDraft.resendAnyway"],
+  ])("keeps %s sending behind an explicit confirmation", (status, action) => {
+    const onConfirm = vi.fn();
+    render(<MemoryRouter><MailDraftCard draft={{ draft_id: "draft-state", revision: 3,
+      to: ["team@example.com"], subject: "Review", status }} onConfirm={onConfirm} /></MemoryRouter>);
+    expect(onConfirm).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: "chat.mailDraft.subject" }), { target: { value: "Updated review" } });
+    fireEvent.click(screen.getByRole("button", { name: action }));
+    expect(onConfirm).toHaveBeenCalledWith("draft-state", 3, expect.objectContaining({ subject: "Updated review" }));
+  });
+
+  it("renders a sent message as read-only without a send action", () => {
+    render(<MemoryRouter><MailDraftCard draft={{ draft_id: "sent", to: ["team@example.com"],
+      subject: "Delivered", status: "sent" }} onConfirm={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByText("Delivered")).toBeVisible();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "chat.mailDraft.confirmSend" })).not.toBeInTheDocument();
+  });
   it("lets the user add and remove attachments before confirm", async () => {
     const onConfirm = vi.fn();
     const { container } = render(

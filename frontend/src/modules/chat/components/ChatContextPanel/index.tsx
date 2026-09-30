@@ -1,8 +1,8 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { type MouseEventHandler, useEffect, useId, useRef, useState } from "react";
 import { CloseOutlined } from "@ant-design/icons";
 import { Button } from "antd";
 import { useTranslation } from "react-i18next";
-import SideChatPanel, { type SideChatPanelProps } from "../SideChatPanel";
+import SideChatPanel, { type SideChatPanelProps, type SideChatPanelRef } from "../SideChatPanel";
 import { ChatSourcePanel } from "../AssistantMessage";
 import { getSourceDedupKey, type ChatSource } from "@/modules/chat/utils/sourceAdapter";
 import "./index.scss";
@@ -13,12 +13,14 @@ export interface SourceRequest {
   summary?: string;
 }
 
-export default function ChatContextPanel({ sideChat, sourceRequest, visible, resumeRequest, onStateChange }: {
+export default function ChatContextPanel({ sideChat, sourceRequest, visible, resumeRequest, onStateChange, width, onResizeStart }: {
   sideChat?: SideChatPanelProps;
   sourceRequest?: SourceRequest;
   visible: boolean;
   resumeRequest?: number;
   onStateChange?: (state: { collapsed: boolean; unread: boolean }) => void;
+  width?: number;
+  onResizeStart?: MouseEventHandler<HTMLDivElement>;
 }) {
   const { t } = useTranslation();
   const id = useId();
@@ -30,6 +32,7 @@ export default function ChatContextPanel({ sideChat, sourceRequest, visible, res
   const returnFocus = useRef<HTMLElement | null>(null);
   const sideTab = useRef<HTMLButtonElement>(null);
   const sourcesTab = useRef<HTMLButtonElement>(null);
+  const sideChatPanel = useRef<SideChatPanelRef>(null);
 
   const selectTab = (next: "side" | "sources") => {
     setTab(next);
@@ -71,12 +74,17 @@ export default function ChatContextPanel({ sideChat, sourceRequest, visible, res
   }, [resumeRequest]);
 
   const collapse = () => {
+    if (sideChat) {
+      sideChatPanel.current?.requestClose();
+      return;
+    }
     setCollapsed(true);
     returnFocus.current?.focus();
   };
 
   return (
     <aside className={`chat-context-panel${collapsed ? " is-collapsed" : ""}`} hidden={!visible}
+      style={width && !collapsed ? { width } : undefined}
       aria-label={t("chat.contextPanel.title")}
       onKeyDown={event => {
         if (event.key === "Escape") { event.stopPropagation(); collapse(); }
@@ -89,10 +97,11 @@ export default function ChatContextPanel({ sideChat, sourceRequest, visible, res
           else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
         }
       }}>
+      {onResizeStart && <div className="chat-context-resize-handle" onMouseDown={onResizeStart} />}
       <div className="chat-context-surface" hidden={collapsed}>
         <header className="chat-context-header">
           <div role="tablist" aria-label={t("chat.contextPanel.title")} onKeyDown={event => {
-            if (!sideChat || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+            if (!sideChat || !references || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
             event.preventDefault();
             const next = event.key === "Home" ? "side" : event.key === "End" ? "sources" : tab === "side" ? "sources" : "side";
             selectTab(next);
@@ -102,22 +111,23 @@ export default function ChatContextPanel({ sideChat, sourceRequest, visible, res
               aria-selected={tab === "side"} tabIndex={tab === "side" ? 0 : -1} onClick={() => selectTab("side")}>
               {t("chat.sideChat.title")}{unread && <span className="chat-context-unread" aria-label={t("chat.contextPanel.newReply")} />}
             </button>}
-            <button ref={sourcesTab} role="tab" id={`${id}-sources-tab`} aria-controls={`${id}-sources`}
+            {references && <button ref={sourcesTab} role="tab" id={`${id}-sources-tab`} aria-controls={`${id}-sources`}
               aria-selected={tab === "sources"} tabIndex={tab === "sources" ? 0 : -1} onClick={() => selectTab("sources")}>
               {t("chat.references")} {!!references?.sources.length && <span className="chat-context-count">{references.sources.length}</span>}
-            </button>
+            </button>}
           </div>
           <Button type="text" icon={<CloseOutlined />} aria-label={t("chat.contextPanel.collapse")} onClick={collapse} />
         </header>
         <div role="tabpanel" id={`${id}-side`} aria-labelledby={`${id}-side-tab`} hidden={tab !== "side"} className="chat-context-content">
-          {sideChat && <SideChatPanel {...sideChat} embedded visible={visible && sideChat.visible !== false && !collapsed && tab === "side"}
+          {sideChat && <SideChatPanel {...sideChat} ref={sideChatPanel} embedded visible={visible && sideChat.visible !== false && !collapsed && tab === "side"}
+            closeConfirmationVisible={visible && !collapsed}
             onOpenSources={(sources, summary) => { setReferences({ sources, summary, origin: "side" }); setTab("sources"); }}
             onStreamingChange={next => {
               if (streaming.current && !next && (tab !== "side" || collapsed || !visible)) setUnread(true);
               streaming.current = next;
             }} />}
         </div>
-        <div role="tabpanel" id={`${id}-sources`} aria-labelledby={`${id}-sources-tab`} hidden={tab !== "sources"} className="chat-context-content">
+        {references && <div role="tabpanel" id={`${id}-sources`} aria-labelledby={`${id}-sources-tab`} hidden={tab !== "sources"} className="chat-context-content">
           {references?.sources.length ? <>
             <div className="chat-context-origin">
               <strong>{t(references.origin === "side" ? "chat.contextPanel.sideSources" : "chat.contextPanel.mainSources")}</strong>
@@ -125,7 +135,7 @@ export default function ChatContextPanel({ sideChat, sourceRequest, visible, res
             </div>
             <ChatSourcePanel key={references.sources.map(getSourceDedupKey).join("|")} sources={references.sources} embedded onClose={collapse} />
           </> : <p className="chat-context-empty">{t("chat.contextPanel.noSources")}</p>}
-        </div>
+        </div>}
       </div>
     </aside>
   );

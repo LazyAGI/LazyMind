@@ -37,6 +37,37 @@ test("requires a managed Milvus process to be ready", () => {
   assert.equal(desktopRuntimeReady(status, true), true);
 });
 
+test("accepts the slim runtime service plan before RAG installation", () => {
+  const status = readyDesktopStatus({
+    config: {
+      frontendPort: 8090,
+      algorithm: { RAGDisabled: true },
+      modeProfile: { VectorStore: { ManagedProcess: false } },
+    },
+    services: Object.fromEntries([
+      "process-supervisor", "sqlite-server", "local-proxy", "auth-service",
+      "channel-gateway", "core", "frontend", "chat",
+    ].map((name) => [name, { status: "running" }])),
+  });
+  assert.equal(desktopRuntimeReady(status, true), true);
+  assert.equal(desktopRuntimeReady(status, false), false);
+  assert.equal(desktopRuntimeReady({ ...status, ownerMatched: false }, true), false);
+  status.services.chat.status = "starting";
+  assert.equal(desktopRuntimeReady(status, true), false);
+  status.services.chat.status = "running";
+  delete status.services.core;
+  assert.equal(desktopRuntimeReady(status, true), false);
+  status.services.core = { status: "running" };
+  status.config.modeProfile.VectorStore.ManagedProcess = true;
+  assert.equal(desktopRuntimeReady(status, true), false);
+  status.services["milvus-lite"] = { status: "running" };
+  assert.equal(desktopRuntimeReady(status, true), true);
+  status.config.algorithm.RAGDisabled = false;
+  assert.equal(desktopRuntimeReady(status, true), false);
+  delete status.config.algorithm;
+  assert.equal(desktopRuntimeReady(status, true), false);
+});
+
 test("rejects a complete runtime that is not owned by this Desktop", () => {
   assert.equal(desktopRuntimeReady(readyDesktopStatus(), false), false);
   assert.equal(desktopRuntimeReady(readyDesktopStatus({ ownerMatched: false }), true), false);

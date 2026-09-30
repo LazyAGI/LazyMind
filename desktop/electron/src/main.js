@@ -118,7 +118,7 @@ const externalRuntimeURL = desktopDevURL
   )
   : "";
 const isExternalRuntimeDev = Boolean(desktopDevURL && externalRuntimeURL);
-const desktopTarget = isWindows ? "windows-x64" : "darwin-arm64";
+const desktopTarget = isWindows ? "windows-x64" : (process.arch === "x64" ? "darwin-x64" : "darwin-arm64");
 const ownerToken = randomUUID();
 const localWorkspaceCandidates = new Map();
 const internalServiceToken = randomBytes(32).toString("base64url");
@@ -200,6 +200,8 @@ let frontendOpeningAllowed = false;
 let tray;
 let rendererReadyWait;
 let runtimeProcess;
+let runtimeRestartPromise;
+let runtimeStopping = false;
 let agentHostProcess;
 let agentHostRestartTimer;
 let agentHostStableTimer;
@@ -587,7 +589,15 @@ function captureSidecarChunk(source, chunk) {
         updateStartupState({
           status: "starting",
           phase: "Preparing sample conversations",
-          message: "Verifying and unpacking the bundled sample conversations...",
+          message: "Downloading if needed, verifying and unpacking sample conversations...",
+          progress: null,
+        });
+      }
+      if (event?.phase === "history-injection-payload" && event?.event === "phase.skipped") {
+        updateStartupState({
+          status: "starting",
+          phase: "Starting local services",
+          message: "Sample conversations are unavailable. They will be retried on the next launch.",
           progress: null,
         });
       }
@@ -677,7 +687,7 @@ function runSidecar(command, extra = [], options = {}) {
       windowsHide: isWindows,
     }, (error, stdout, stderr) => {
       if (error) {
-        error.message = `${error.message}\n${stderr || ""}`;
+        error.message = `${error.message}\n${stdout || ""}\n${stderr || ""}`;
         reject(error);
         return;
       }
@@ -821,7 +831,7 @@ function runConnectorJSON(args, timeout, input) {
 }
 
 function scheduleAgentHostRestart() {
-  if (isQuitting || isInstallerWarmup || agentHostRestartTimer) {
+  if (runtimeStopping || isQuitting || isInstallerWarmup || agentHostRestartTimer) {
     return;
   }
   const delay = Math.min(1000 * (2 ** Math.min(agentHostRestartAttempts, 5)), agentHostRestartMaxDelayMs);
@@ -835,7 +845,7 @@ function scheduleAgentHostRestart() {
 }
 
 function startAgentHost() {
-  if (agentHostProcess || isQuitting || isInstallerWarmup || !fs.existsSync(agentConnectorPath)) {
+  if (runtimeStopping || agentHostProcess || isQuitting || isInstallerWarmup || !fs.existsSync(agentConnectorPath)) {
     return;
   }
   clearTimeout(agentHostRestartTimer);
@@ -877,7 +887,7 @@ async function runInstallerWarmup() {
     fs.mkdirSync(desktopLogsDir, { recursive: true });
     fs.appendFileSync(warmupLogPath, `[${new Date().toISOString()}] ${message}\n`);
   };
-  log(`starting offline installer warmup with timeout ${timeoutSeconds}s`);
+  log(`starting installer warmup with timeout ${timeoutSeconds}s`);
   await runInstallerWarmupLifecycle({
     startRuntime: () => runSidecar("up", maintenanceArgs, {
       timeout: timeoutSeconds * 1000,
@@ -1093,6 +1103,7 @@ function detachRuntimeMonitor() {
   proc.stdout?.removeAllListeners("data");
   proc.stderr?.removeAllListeners("data");
   proc.removeAllListeners("exit");
+  proc.removeAllListeners("close");
   proc.removeAllListeners("error");
   proc.stdout?.destroy();
   proc.stderr?.destroy();
@@ -1139,6 +1150,7 @@ function spawnDetachedShutdownHelper(reason) {
 }
 
 async function readStatus(options = {}) {
+  if (runtimeStopping && currentStatus) return currentStatus;
   if (isExternalRuntimeDev) {
     currentStatus = desktopDevRuntimeStatus(externalRuntimeURL);
     return currentStatus;
@@ -1244,34 +1256,53 @@ function resolveRequestedLocalFolder(folderPath, status, accessState) {
   return resolved;
 }
 
-async function restartRuntimeAfterFolderAccessChange() {
-  const monitor = runtimeProcess;
-  let monitorClosed = Promise.resolve();
-  if (monitor) {
-    monitorClosed = new Promise((resolve, reject) => {
-      let timeout;
-      const onClose = () => {
-        clearTimeout(timeout);
-        resolve();
-      };
-      timeout = setTimeout(() => {
-        monitor.removeListener("close", onClose);
-        reject(new Error("Timed out waiting for the previous desktop runtime monitor to exit"));
-      }, runtimeOwnershipHandoffTimeoutMs);
-      monitor.once("close", onClose);
-    });
-  }
+function restartRuntimeAfterFolderAccessChange({ reload = true } = {}) {
+  if (runtimeRestartPromise) return runtimeRestartPromise;
+  runtimeRestartPromise = (async () => {
+    runtimeStopping = true;
+    clearTimeout(agentHostRestartTimer);
+    clearTimeout(agentHostStableTimer);
+    agentHostRestartTimer = undefined;
+    agentHostStableTimer = undefined;
+    agentHostProcess?.kill();
+    appendStartupLog("desktop", "runtime restart: stopping services and auxiliary processes");
+    const monitor = runtimeProcess;
+    let monitorClosed = Promise.resolve();
+    if (monitor) {
+      monitorClosed = new Promise((resolve, reject) => {
+        let timeout;
+        const onClose = () => {
+          clearTimeout(timeout);
+          resolve();
+        };
+        timeout = setTimeout(() => {
+          monitor.removeListener("close", onClose);
+          reject(new Error("Timed out waiting for the previous desktop runtime monitor to exit"));
+        }, runtimeOwnershipHandoffTimeoutMs);
+        monitor.once("close", onClose);
+      });
+    }
 
-  await runSidecar("down", [], { env: sidecarShutdownEnv() });
-  detachRuntimeMonitor();
-  await monitorClosed;
-  startRuntime();
-  const status = await waitForRuntimeReady();
-  const window = activeWindow();
-  if (window && !window.isDestroyed()) {
-    window.webContents.reload();
-  }
-  return status;
+    try {
+      await Promise.all([runSidecar("down", [], { env: sidecarShutdownEnv() }), monitorClosed]);
+      detachRuntimeMonitor();
+      runtimeStopping = false;
+      startRuntime();
+      const status = await waitForRuntimeReady();
+      const window = activeWindow();
+      if (reload && window && !window.isDestroyed()) window.webContents.reload();
+      startAgentHost();
+      appendStartupLog("desktop", "runtime restart completed");
+      return status;
+    } catch (error) {
+      appendStartupLog("error", `runtime restart failed: ${serializeError(error)}`);
+      throw error;
+    } finally {
+      runtimeStopping = false;
+      runtimeRestartPromise = undefined;
+    }
+  })();
+  return runtimeRestartPromise;
 }
 
 function logStartupContext() {
@@ -1313,9 +1344,11 @@ function startRuntime() {
     detached: false,
     windowsHide: isWindows,
   });
+  const startedProcess = runtimeProcess;
   runtimeProcess.stdout?.on("data", (chunk) => captureSidecarChunk("sidecar.stdout", chunk));
   runtimeProcess.stderr?.on("data", (chunk) => captureSidecarChunk("sidecar.stderr", chunk));
   runtimeProcess.once("error", (error) => {
+    if (runtimeProcess !== startedProcess) return;
     runtimeProcessExit = { error: serializeError(error), detail: serializeError(error) };
     runtimeProcess = null;
     setStartupFailure(error, "Could not start desktop runtime sidecar");
@@ -1323,6 +1356,7 @@ function startRuntime() {
   // `close` fires after stdout/stderr are drained, so the final Go error cannot
   // race with ownership/status handling below.
   runtimeProcess.once("close", (code, signal) => {
+    if (runtimeProcess !== startedProcess) return;
     const detail = sidecarFailureDetail() || runtimeProcessExit?.detail || "";
     runtimeProcessExit = { code, signal, at: new Date().toISOString(), detail };
     appendStartupLog("sidecar", `local-runtime-manager exited with code ${code ?? "null"} signal ${signal ?? "null"}`);
@@ -1681,6 +1715,7 @@ function loadingHTML() {
     .dot { width: 7px; height: 7px; border-radius: 50%; background: #cbd5e1; flex: 0 0 auto; }
     .step.running .dot { background: #2563eb; }
     .step.ready .dot { background: #16a34a; }
+    .step.stale .dot { background: #eab308; }
     .step.failed .dot { background: #dc2626; }
     .step-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .log {
@@ -1781,7 +1816,8 @@ function loadingHTML() {
     }
     function serviceClass(status) {
       if (status === "running" || status === "ready") return "ready";
-      if (status === "failed" || status === "stale") return "failed";
+      if (status === "stale") return "stale";
+      if (status === "failed") return "failed";
       if (status === "starting") return "running";
       return "";
     }
@@ -2505,8 +2541,8 @@ ipcMain.on("lazymind:notificationSessionRestore", (event, value) => {
   event.returnValue = !isQuitting && isTrustedNotificationSender(event, mainWindow, notificationFrontendOrigin())
     ? notificationSession.restore(value) : null;
 });
-ipcMain.handle("lazymind:restartRuntime", async () => {
-  return restartRuntimeAfterFolderAccessChange();
+ipcMain.handle("lazymind:restartRuntime", async (_event, options) => {
+  return restartRuntimeAfterFolderAccessChange({ reload: options?.reload !== false });
 });
 ipcMain.handle("lazymind:resetRuntime", async (_event, scope = "kb") => {
   await runSidecar("reset", ["--scope", scope]);

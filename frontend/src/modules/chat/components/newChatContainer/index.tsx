@@ -11,7 +11,7 @@ import {
 import type { WheelEvent as ReactWheelEvent } from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
-import { Drawer, message } from "antd";
+import { message } from "antd";
 import { ChatConversationsResponseFinishReasonEnum } from "@/api/generated/chatbot-client";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
 import { RoleTypes } from "@/modules/chat/constants/common";
@@ -23,7 +23,6 @@ import ChatInput, {
 } from "../ChatInput";
 import "./index.scss";
 import MessageList from "./components/MessageList";
-import { ChatSourcePanel } from "../AssistantMessage";
 import ChatMessageContent from "./components/ChatMessageContent";
 import ScrollToBottomButton from "./components/ScrollToBottomButton";
 import ConversationTrail from "./components/ConversationTrail";
@@ -37,7 +36,6 @@ import type { ChatContainerProps, ChatImperativeProps } from "./types";
 import { useConversationTrail } from "./hooks/useConversationTrail";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import { mergeConversationTrailIntoMessageList } from "@/modules/chat/utils/message";
-import type { ChatSource } from "@/modules/chat/utils/sourceAdapter";
 import { foldSessionPerformanceStats } from "@/modules/chat/utils/performanceStats";
 import {
   DEVELOPER_ACTIVE_EVENT,
@@ -160,6 +158,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       onStreamingChange,
       onRequestPendingChange,
       onOpenSideChat,
+      onIntentChange,
     } = props;
 
     const { clearPendingMessage: clearStorePendingMessage } =
@@ -178,7 +177,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       workspacePermissionSavingRef.current = saving;
       setWorkspacePermissionSaving(saving);
     }, []);
-    const [sourcePanelSources, setSourcePanelSources] = useState<ChatSource[]>([]);
     const skillDepositWasReadyRef = useRef(false);
     const skillDepositMessageCountRef = useRef(0);
     const [developerModeActive, setDeveloperModeActive] = useState(isDeveloperModeActive());
@@ -220,9 +218,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       };
     }, []);
 
-    useEffect(() => {
-      setSourcePanelSources([]);
-    }, [sessionId]);
 
     const {
       thinkingCollapseMap,
@@ -277,7 +272,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       if (modelSelectionSavingRef.current || workspacePermissionSavingRef.current) {
         return;
       }
-      setSourcePanelSources([]);
+
       void conversation.regenerate();
     }, [conversation.regenerate]);
 
@@ -350,6 +345,11 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
         return false;
       }
     };
+
+    useEffect(() => {
+      const latest = conversation.messageList.findLast(item => item.intent_updated?.scope === "conversation");
+      onIntentChange?.(latest?.intent_updated?.intent_context ?? null);
+    }, [sessionId, conversation.messageList, onIntentChange]);
 
     const trailRefreshKey = `${conversation.messageList.length}:${conversation.isStreaming ? "streaming" : "idle"}`;
     const conversationTrail = useConversationTrail({
@@ -553,19 +553,12 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       });
     }, [clearCiteMessages, sendMessage, t]);
 
-    const sourcePanel = !props.onOpenSources && sourcePanelSources.length > 0 ? (
-      <ChatSourcePanel
-        sources={sourcePanelSources}
-        onClose={() => setSourcePanelSources([])}
-      />
-    ) : null;
-
     return (
       <div
         className="chat-chat-container"
         onWheelCapture={handleConversationWheel}
       >
-        <div className={`chat-box${sourcePanelSources.length && !props.onOpenSources && !props.sourcePanelOverlay ? " has-source-panel" : ""}`}>
+        <div className="chat-box">
           <div className="chat-main-column">
             <MessageList
               onFork={props.onFork}
@@ -586,7 +579,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
                   }
                   continueLoading={conversation.mediaCapabilityChecking}
                   onContinue={() => {
-                    setSourcePanelSources([]);
+
                     void conversation.continueAfterMediaCapabilityConfiguration();
                   }}
                 />
@@ -608,7 +601,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               updateAssistantMessage={conversation.updateAssistantMessage}
               onCiteMessage={handleAddCiteMessage}
               onOpenSideChat={onOpenSideChat}
-              onOpenSources={props.onOpenSources ?? setSourcePanelSources}
               onScroll={conversation.scroll.handleScroll}
               chatContentRef={conversation.scroll.chatContentRef}
               sessionId={sessionId}
@@ -702,20 +694,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               runInBackground={runInBackground}
             />
           </div>
-          {!props.sourcePanelOverlay && sourcePanel}
         </div>
-        <Drawer
-          open={Boolean(props.sourcePanelOverlay && sourcePanelSources.length)}
-          onClose={() => setSourcePanelSources([])}
-          closable={false}
-          mask={false}
-          width="min(360px, 100vw)"
-          zIndex={1100}
-          rootClassName="chat-source-drawer-root"
-          styles={{ body: { padding: 0, display: "flex" } }}
-        >
-          {props.sourcePanelOverlay && sourcePanel}
-        </Drawer>
         <ConversationTrail
           key={sessionId || "new-conversation"}
           items={conversationTrail.items}

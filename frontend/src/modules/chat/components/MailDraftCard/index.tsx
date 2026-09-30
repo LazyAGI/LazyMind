@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Input, Space, Typography, message } from "antd";
+import { MailOutlined, PaperClipOutlined, SendOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
+import { useTaskCenterStore, type ConversationArtifact } from "@/modules/chat/store/taskCenter";
 import { getArtifactFilename } from "@/modules/chat/utils/artifactLinks";
 import "./index.scss";
 
 const MAX_MAIL_ATTACHMENT_BYTES = 15 * 1024 * 1024;
 const MAX_MAIL_ATTACHMENT_COUNT = 5;
 const MAX_MAIL_ATTACHMENT_TOTAL_BYTES = 20 * 1024 * 1024;
+const EMPTY_MAIL_ARTIFACTS: ConversationArtifact[] = [];
 
 export interface MailDraftPreview {
   draft_id?: string;
@@ -170,7 +172,7 @@ export default function MailDraftCard({
   );
   const artifacts = useTaskCenterStore((state) => {
     const conversationId = state.activeConversationId;
-    return conversationId ? (state.artifactsByConversation[conversationId] ?? []) : [];
+    return conversationId ? (state.artifactsByConversation[conversationId] ?? EMPTY_MAIL_ARTIFACTS) : EMPTY_MAIL_ARTIFACTS;
   });
   const artifactChoices = useMemo(() => {
     const seen = new Set<string>();
@@ -280,8 +282,11 @@ export default function MailDraftCard({
   };
 
   return (
-    <div className="mail-draft-card">
-      <Typography.Title level={5}>{t("chat.mailDraft.title")}</Typography.Title>
+    <div className={`mail-draft-card${sent ? " is-sent" : ""}`}>
+      <header className="mail-draft-header">
+        <span className="mail-draft-header-icon" aria-hidden="true"><MailOutlined /></span>
+        <Typography.Title level={5}>{t("chat.mailDraft.title")}</Typography.Title>
+      </header>
       <dl>
         {draft.mailbox ? (
           <div>
@@ -295,6 +300,7 @@ export default function MailDraftCard({
             {editable ? (
               <Input
                 className="mail-draft-address"
+                aria-label={t("chat.mailDraft.to")}
                 value={to}
                 onChange={(event) => setTo(event.target.value)}
               />
@@ -309,6 +315,7 @@ export default function MailDraftCard({
             {editable ? (
               <Input
                 className="mail-draft-address"
+                aria-label={t("chat.mailDraft.cc")}
                 value={cc}
                 onChange={(event) => setCc(event.target.value)}
               />
@@ -321,7 +328,7 @@ export default function MailDraftCard({
           <dt>{t("chat.mailDraft.subject")}</dt>
           <dd>
             {editable ? (
-              <Input value={subject} onChange={(event) => setSubject(event.target.value)} />
+              <Input aria-label={t("chat.mailDraft.subject")} value={subject} onChange={(event) => setSubject(event.target.value)} />
             ) : (
               draft.subject || "-"
             )}
@@ -332,6 +339,7 @@ export default function MailDraftCard({
           <dd>
             {editable ? (
               <Input.TextArea
+                aria-label={t("chat.mailDraft.body")}
                 autoSize={{ minRows: 4, maxRows: 12 }}
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
@@ -347,7 +355,8 @@ export default function MailDraftCard({
             <ul className="mail-draft-attachments">
               {attachments.map((item) => (
                 <li key={item.key}>
-                  <span>{item.name}</span>
+                  <PaperClipOutlined aria-hidden="true" />
+                  <span title={item.name}>{item.name}</span>
                   {editable ? (
                     <Button
                       type="link"
@@ -363,7 +372,7 @@ export default function MailDraftCard({
               ))}
             </ul>
             {editable ? (
-              <Space wrap>
+              <Space wrap className="mail-draft-file-actions">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -373,7 +382,7 @@ export default function MailDraftCard({
                     void handleUpload(event.target.files);
                   }}
                 />
-                <Button onClick={() => fileInputRef.current?.click()}>
+                <Button icon={<PaperClipOutlined aria-hidden="true" />} onClick={() => fileInputRef.current?.click()}>
                   {t("chat.mailDraft.uploadAttachment")}
                 </Button>
                 {conversationFiles.length ? (
@@ -451,10 +460,11 @@ export default function MailDraftCard({
         />
       ) : null}
       {!sent && !disabled ? (
-        <Space>
+        <footer className="mail-draft-footer">
           {failed || deliveryUnknown ? (
             <Button
               type="primary"
+              icon={<SendOutlined aria-hidden="true" />}
               disabled={!draftId || !hasRecipient}
               onClick={() => onConfirm(draftId, revision, patch)}
             >
@@ -463,13 +473,14 @@ export default function MailDraftCard({
           ) : (
             <Button
               type="primary"
+              icon={<SendOutlined aria-hidden="true" />}
               disabled={!draftId || !hasRecipient}
               onClick={() => onConfirm(draftId, revision, patch)}
             >
               {t("chat.mailDraft.confirmSend")}
             </Button>
           )}
-        </Space>
+        </footer>
       ) : null}
     </div>
   );

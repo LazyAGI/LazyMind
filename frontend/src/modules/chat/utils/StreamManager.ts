@@ -226,12 +226,6 @@ export class StreamManager {
         const parsed = JSON.parse(data);
         const result = parsed?.result;
         if (result) {
-          if (result.sources && result.sources.length > 0) {
-            state.sources = result.sources;
-          }
-          if (result.finish_reason) {
-            state.legacyFinishReason = result.finish_reason;
-          }
           const runtimeEvent = result.runtime_event;
           const hasBusinessPayload = Boolean(
             result.delta ||
@@ -241,9 +235,19 @@ export class StreamManager {
               result.ask_pending ||
               result.tool_limit_pending,
           );
-          if (this.isStreamFinished(conversationId) && hasBusinessPayload) {
+          const wasFinished = this.isStreamFinished(conversationId);
+          if (wasFinished && hasBusinessPayload) {
             console.error("Ignored payload emitted after run_finished");
             return false;
+          }
+          if (result.sources && result.sources.length > 0) {
+            state.sources = result.sources;
+          }
+          if (
+            result.finish_reason &&
+            (!wasFinished || result.finish_reason !== "FINISH_REASON_UNSPECIFIED")
+          ) {
+            state.legacyFinishReason = result.finish_reason;
           }
           if (
             result.history_id &&

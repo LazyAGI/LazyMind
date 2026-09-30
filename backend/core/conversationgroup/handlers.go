@@ -33,6 +33,7 @@ var ErrConversationGroupNotFound = errors.New("conversation group not found")
 var ErrConversationOrganizing = errors.New("conversation is locked by organizer")
 
 type GroupDTO struct {
+	Collapsed        bool      `json:"collapsed"`
 	IsTaskConv       bool      `json:"is_task_conv"`
 	Kind             string    `json:"kind"`
 	WorkspaceID      *string   `json:"workspace_id,omitempty"`
@@ -189,7 +190,7 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 		Select("g.*, COUNT(c.id) AS member_count, (SELECT COUNT(*) FROM conversation_group_members tm JOIN conversations tc ON tc.id=tm.conversation_id WHERE tm.group_id=g.id AND tc.deleted_at IS NULL AND tc.parent_conversation_id IS NULL) AS total_member_count").
 		Joins("LEFT JOIN conversation_group_members m ON m.group_id = g.id").
 		Joins("LEFT JOIN (?) c ON c.id=m.conversation_id", activeGroupConversations(store.DB().WithContext(r.Context()), sourceIDs)).
-		Where("g.user_id = ? AND g.deleted_at IS NULL", uid).Group("g.id").Order("g.pinned DESC, g.sort_order ASC, g.created_at ASC, g.id")
+		Where("g.user_id = ? AND g.deleted_at IS NULL", uid).Group("g.id").Order("CASE WHEN g.pinned = TRUE THEN 0 ELSE 1 END, g.sort_order ASC, g.created_at ASC, g.id")
 	if raw, present := r.URL.Query()["is_task_conv"]; present {
 		if len(raw) != 1 || (raw[0] != "true" && raw[0] != "false") {
 			common.ReplyErr(w, "invalid query", 400)
@@ -595,7 +596,7 @@ func RequireOrganizerUnlocked(ctx context.Context, tx *gorm.DB, uid string, ids 
 }
 
 func groupDTO(g orm.ConversationGroup, count int64) GroupDTO {
-	return GroupDTO{IsTaskConv: g.IsTaskConv, Kind: g.Kind, WorkspaceID: g.WorkspaceID, Path: g.ProjectPath, TotalMemberCount: count, Pinned: g.Pinned, SortOrder: g.SortOrder, ID: g.ID, Name: g.Name, Scope: g.Scope, Version: g.Version, MemberCount: count, CreatedBy: g.CreatedBy, CreatedRunID: g.CreatedRunID, CreatedAt: g.CreatedAt, UpdatedAt: g.UpdatedAt}
+	return GroupDTO{Collapsed: g.Collapsed, IsTaskConv: g.IsTaskConv, Kind: g.Kind, WorkspaceID: g.WorkspaceID, Path: g.ProjectPath, TotalMemberCount: count, Pinned: g.Pinned, SortOrder: g.SortOrder, ID: g.ID, Name: g.Name, Scope: g.Scope, Version: g.Version, MemberCount: count, CreatedBy: g.CreatedBy, CreatedRunID: g.CreatedRunID, CreatedAt: g.CreatedAt, UpdatedAt: g.UpdatedAt}
 }
 func userID(r *http.Request) string { u, _ := user(r); return u }
 func isUnique(err error) bool {

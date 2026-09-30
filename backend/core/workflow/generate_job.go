@@ -112,6 +112,65 @@ type workflowDraftRepairPayload struct {
 	RepairRunID  string           `json:"repair_run_id,omitempty"`
 }
 
+type workflowRepairSnapshot struct {
+	WorkflowYAML string
+	StateYAML    string
+	ScenarioMD   string
+	Scripts      map[string]string
+}
+
+func mergeWorkflowRepairResponse(base workflowRepairSnapshot, resp *algo.RepairStateMachineResponse) workflowRepairSnapshot {
+	if resp == nil {
+		return cloneWorkflowRepairSnapshot(base)
+	}
+	next := cloneWorkflowRepairSnapshot(base)
+	if strings.TrimSpace(resp.WorkflowYAML) != "" {
+		next.WorkflowYAML = resp.WorkflowYAML
+	}
+	if strings.TrimSpace(resp.StateYAML) != "" {
+		next.StateYAML = resp.StateYAML
+	}
+	if strings.TrimSpace(resp.ScenarioMD) != "" {
+		next.ScenarioMD = resp.ScenarioMD
+	}
+	if len(resp.Scripts) > 0 {
+		if next.Scripts == nil {
+			next.Scripts = map[string]string{}
+		}
+		for path, content := range resp.Scripts {
+			next.Scripts[path] = content
+		}
+	}
+	return next
+}
+
+func cloneWorkflowRepairSnapshot(value workflowRepairSnapshot) workflowRepairSnapshot {
+	value.Scripts = cloneStringMap(value.Scripts)
+	return value
+}
+
+func cloneStringMap(value map[string]string) map[string]string {
+	if value == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(value))
+	for key, item := range value {
+		cloned[key] = item
+	}
+	return cloned
+}
+
+func scriptsFromDraft(scriptsJSON string) map[string]string {
+	var scripts map[string]string
+	if json.Unmarshal([]byte(scriptsJSON), &scripts) != nil {
+		return map[string]string{}
+	}
+	if scripts == nil {
+		return map[string]string{}
+	}
+	return scripts
+}
+
 // RegisterWorkflowDraftGenerateJob registers the async job handler.
 // Call this once at startup (e.g. from main.go).
 func RegisterWorkflowDraftGenerateJob() {
@@ -1465,52 +1524,42 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 	}
 
 	if payload.Target == "scripts" || payload.Target == "full" {
-		var scripts map[string]string
-		if json.Unmarshal([]byte(draft.ScriptsContent), &scripts) != nil {
-			scripts = map[string]string{}
+		snapshot := workflowRepairSnapshot{
+			WorkflowYAML: draft.WorkflowYAMLContent,
+			StateYAML:    draft.StateYAMLContent,
+			ScenarioMD:   draft.ScenarioContent,
+			Scripts:      scriptsFromDraft(draft.ScriptsContent),
 		}
-		workflowYAML, stateYAML, scenarioMD := draft.WorkflowYAMLContent, draft.StateYAMLContent, draft.ScenarioContent
 		var allWarnings []string
 		if payload.Target == "full" {
-			stateResp, callErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{WorkflowYAML: workflowYAML, StateYAML: stateYAML, RepairHint: payload.RepairHint, Warnings: payload.Warnings, Diagnostics: payload.Diagnostics, Target: "statemachine", LLMConfig: llmConfig})
+			stateResp, callErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{WorkflowYAML: snapshot.WorkflowYAML, StateYAML: snapshot.StateYAML, ScenarioMD: snapshot.ScenarioMD, Scripts: snapshot.Scripts, RepairHint: payload.RepairHint, Warnings: payload.Warnings, Diagnostics: payload.Diagnostics, Target: "statemachine", LLMConfig: llmConfig})
 			if callErr != nil {
 				restoreStatus(callErr.Error())
 				return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, callErr
 			}
-			stateYAML = stateResp.StateYAML
-			if stateResp.WorkflowYAML != "" {
-				workflowYAML = stateResp.WorkflowYAML
-			}
+			snapshot = mergeWorkflowRepairResponse(snapshot, stateResp)
 			allWarnings = append(allWarnings, stateResp.RemainingWarnings...)
-			scenarioResp, callErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{WorkflowYAML: workflowYAML, StateYAML: stateYAML, RepairHint: payload.RepairHint, Target: "scenario", LLMConfig: llmConfig})
+			scenarioResp, callErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{WorkflowYAML: snapshot.WorkflowYAML, StateYAML: snapshot.StateYAML, ScenarioMD: snapshot.ScenarioMD, Scripts: snapshot.Scripts, RepairHint: payload.RepairHint, Target: "scenario", LLMConfig: llmConfig})
 			if callErr != nil {
 				restoreStatus(callErr.Error())
 				return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, callErr
 			}
-			scenarioMD = scenarioResp.ScenarioMD
-			if scenarioMD == "" {
-				scenarioMD = scenarioResp.StateYAML
+			if scenarioResp.ScenarioMD == "" && scenarioResp.StateYAML != "" {
+				scenarioResp.ScenarioMD = scenarioResp.StateYAML
+				scenarioResp.StateYAML = ""
 			}
+			snapshot = mergeWorkflowRepairResponse(snapshot, scenarioResp)
 		}
-		scriptResp, callErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{WorkflowYAML: workflowYAML, StateYAML: stateYAML, ScenarioMD: scenarioMD, Scripts: scripts, RepairHint: payload.RepairHint, Target: "scripts", LLMConfig: llmConfig})
+		scriptResp, callErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{WorkflowYAML: snapshot.WorkflowYAML, StateYAML: snapshot.StateYAML, ScenarioMD: snapshot.ScenarioMD, Scripts: snapshot.Scripts, RepairHint: payload.RepairHint, Target: "scripts", LLMConfig: llmConfig})
 		if callErr != nil {
 			restoreStatus(callErr.Error())
 			return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, callErr
 		}
-		if scriptResp.WorkflowYAML != "" {
-			workflowYAML = scriptResp.WorkflowYAML
-		}
-		if scriptResp.StateYAML != "" {
-			stateYAML = scriptResp.StateYAML
-		}
-		if scriptResp.ScenarioMD != "" {
-			scenarioMD = scriptResp.ScenarioMD
-		}
-		scripts = scriptResp.Scripts
+		snapshot = mergeWorkflowRepairResponse(snapshot, scriptResp)
 		allWarnings = append(allWarnings, scriptResp.RemainingWarnings...)
-		scriptsBytes, _ := json.Marshal(scripts)
+		scriptsBytes, _ := json.Marshal(snapshot.Scripts)
 		scriptsJSON := string(scriptsBytes)
-		afterDiagnostics := diagnoseWorkflowWithProfile(workflowYAML, stateYAML, scenarioMD, scriptsJSON, graphengine.ProfilePublish)
+		afterDiagnostics := diagnoseWorkflowWithProfile(snapshot.WorkflowYAML, snapshot.StateYAML, snapshot.ScenarioMD, scriptsJSON, graphengine.ProfilePublish)
 		if payload.RepairRunID != "" {
 			_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=?", payload.RepairRunID).Update("diagnostics_after_json", diagnosticsJSON(afterDiagnostics)).Error
 		}
@@ -1518,12 +1567,12 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 			restoreStatus("repair validation failed")
 			return asyncjob.Result{ErrorCode: "repair_validation_failed"}, fmt.Errorf("repair validation failed")
 		}
-		if err := updateWorkflowGenerationScriptAudit(db.WithContext(ctx), draft.ID, draft.SourceAnalysisID, "", scripts); err != nil {
+		if err := updateWorkflowGenerationScriptAudit(db.WithContext(ctx), draft.ID, draft.SourceAnalysisID, "", snapshot.Scripts); err != nil {
 			restoreStatus("save repaired script audit: " + err.Error())
 			return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("save repaired script audit: %w", err)
 		}
-		updates := map[string]any{"state_yaml_content": stateYAML, "scenario_content": scenarioMD, "scripts_content": scriptsJSON, "generate_status": payload.PrevStatus, "generate_warning": mergeWarnings(currentGenerateWarning(db, draft.ID), strings.Join(allWarnings, "; ")), "version": draft.Version + 1, "updated_at": time.Now().UTC()}
-		setWorkflowYAMLUpdate(updates, workflowYAML)
+		updates := map[string]any{"state_yaml_content": snapshot.StateYAML, "scenario_content": snapshot.ScenarioMD, "scripts_content": scriptsJSON, "generate_status": payload.PrevStatus, "generate_warning": mergeWarnings(currentGenerateWarning(db, draft.ID), strings.Join(allWarnings, "; ")), "version": draft.Version + 1, "updated_at": time.Now().UTC()}
+		setWorkflowYAMLUpdate(updates, snapshot.WorkflowYAML)
 		result := db.Model(&orm.WorkflowDraft{}).Where("id = ? AND version = ? AND deleted_at IS NULL", draft.ID, payload.DraftVersion).Updates(updates)
 		if result.Error != nil || result.RowsAffected != 1 {
 			if payload.RepairRunID != "" {
@@ -1548,6 +1597,8 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 		resp, err := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{
 			WorkflowYAML: draft.WorkflowYAMLContent,
 			StateYAML:    draft.StateYAMLContent,
+			ScenarioMD:   draft.ScenarioContent,
+			Scripts:      scriptsFromDraft(draft.ScriptsContent),
 			RepairHint:   scenarioHint,
 			Target:       "scenario",
 			Warnings:     payload.Warnings,
@@ -1562,6 +1613,9 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 		scenarioMD := resp.ScenarioMD
 		if scenarioMD == "" {
 			scenarioMD = resp.StateYAML
+		}
+		if strings.TrimSpace(scenarioMD) == "" {
+			scenarioMD = draft.ScenarioContent
 		}
 		if err := validateGeneratedScenarioContent(scenarioMD, draft.StateYAMLContent); err != nil {
 			restoreStatus("repair validation failed: " + err.Error())
@@ -1603,6 +1657,8 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 	resp, err := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{
 		WorkflowYAML: draft.WorkflowYAMLContent,
 		StateYAML:    draft.StateYAMLContent,
+		ScenarioMD:   draft.ScenarioContent,
+		Scripts:      scriptsFromDraft(draft.ScriptsContent),
 		RepairHint:   payload.RepairHint,
 		Target:       payload.Target,
 		Warnings:     payload.Warnings,
@@ -1622,11 +1678,15 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 	if resp.WorkflowYAML != "" {
 		finalWorkflowYAML = resp.WorkflowYAML
 	}
+	finalStateYAML := draft.StateYAMLContent
+	if strings.TrimSpace(resp.StateYAML) != "" {
+		finalStateYAML = resp.StateYAML
+	}
 	profile := graphengine.ProfileEditor
 	if payload.Target == "statemachine" || payload.Target == "full" {
 		profile = graphengine.ProfilePublish
 	}
-	afterDiagnostics := diagnoseWorkflowWithProfile(finalWorkflowYAML, resp.StateYAML, draft.ScenarioContent, draft.ScriptsContent, profile)
+	afterDiagnostics := diagnoseWorkflowWithProfile(finalWorkflowYAML, finalStateYAML, draft.ScenarioContent, draft.ScriptsContent, profile)
 	if payload.RepairRunID != "" {
 		_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=?", payload.RepairRunID).Update("diagnostics_after_json", diagnosticsJSON(afterDiagnostics)).Error
 	}
@@ -1635,7 +1695,7 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 		return asyncjob.Result{ErrorCode: "repair_validation_failed"}, fmt.Errorf("repair validation failed")
 	}
 	updates := map[string]any{
-		"state_yaml_content": resp.StateYAML,
+		"state_yaml_content": finalStateYAML,
 		"generate_warning":   newWarning,
 		"generate_status":    payload.PrevStatus,
 		"version":            draft.Version + 1,

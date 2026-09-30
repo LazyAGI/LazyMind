@@ -41,6 +41,17 @@ function RbacAuthHandler:access(conf)
   local path = kong.request.get_path()
   local auth = kong.request.get_header("Authorization") or ""
 
+  -- The realtime handler authorizes EVERY operation using its original method
+  -- and path. No cookie or caller-supplied identity authenticates this upgrade.
+  if method == "GET" and path == "/api/core/realtime/connect"
+      and string.lower(kong.request.get_header("Upgrade") or "") == "websocket" then
+    kong.service.request.clear_header("X-User-Id")
+    kong.service.request.clear_header("X-User-Name")
+    kong.service.request.clear_header("X-Tenant-Id")
+    kong.service.request.clear_header("X-User-Role")
+    return
+  end
+
   local base = _strip_trailing_slash(conf.auth_service_url or "http://auth-service:8000")
   local url = base .. "/api/authservice/auth/authorize"
   local body = cjson.encode({ method = method, path = path })

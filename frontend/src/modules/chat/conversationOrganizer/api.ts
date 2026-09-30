@@ -37,6 +37,6 @@ export async function correctOrganizerItem(runId: string, conversationId: string
   return (await client.correctConversationOrganizerItem({ runId, conversationId, conversationOrganizerCorrectionRequest: input })).data.run;
 }
 
-export async function updateGroupPlacement(groupId: string, input: { pinned?: boolean; before_group_id?: string }) { return (await client.updateConversationGroupPlacement({ groupId, conversationGroupPlacementRequest: input })).data.groups; }
+export async function updateGroupPlacement(groupId: string, input: { collapsed?: boolean; pinned?: boolean; before_group_id?: string }) { return (await client.updateConversationGroupPlacement({ groupId, conversationGroupPlacementRequest: input })).data.groups; }
 
 export async function renameGroupConversation(id: string, title: string, revision: number) { return (await new DefaultApi(new Configuration({ basePath: BASE_URL }), BASE_URL, axiosInstance).apiCoreConversationsNameTitlePatch({ name: id, apiCoreConversationsNameTitlePatchRequest: { display_name: title, title_revision: revision } })).data; }

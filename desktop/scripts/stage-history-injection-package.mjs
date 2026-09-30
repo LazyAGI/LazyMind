@@ -8,6 +8,7 @@ import {
   rename,
   rm,
   stat,
+  writeFile,
 } from "node:fs/promises";
 import { createReadStream, createWriteStream } from "node:fs";
 import { Readable, Transform } from "node:stream";
@@ -32,13 +33,15 @@ export async function sha256File(filePath) {
   return hash.digest("hex");
 }
 
-function validateConfig(config, configPath) {
+export function validateConfig(config, configPath) {
   if (config?.version !== 1) {
     throw new Error(`unsupported history injection package config version in ${configPath}`);
   }
   const parsedURL = new URL(config.url);
-  if (!new Set(["https:", "http:"]).has(parsedURL.protocol)) {
-    throw new Error(`history injection package URL must use HTTP(S): ${config.url}`);
+  const loopback = parsedURL.hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(parsedURL.hostname);
+  if (parsedURL.username || parsedURL.password ||
+      (parsedURL.protocol !== "https:" && !(parsedURL.protocol === "http:" && loopback))) {
+    throw new Error(`history injection package URL must use HTTPS: ${config.url}`);
   }
   if (!/^[a-f0-9]{64}$/.test(config.sha256 || "")) {
     throw new Error(`history injection package SHA-256 is invalid in ${configPath}`);
@@ -146,12 +149,33 @@ export async function stageHistoryInjectionPackage(runtimeRoot, options = {}) {
   }
   await rm(runtimePath, { force: true });
   await rename(temporaryRuntimePath, runtimePath);
+  await rm(path.join(runtimeRoot, "history-injection-package.json"), { force: true });
   console.log(`History injection package staged: ${runtimePath}`);
   return { config, cachePath, runtimePath };
 }
 
+// Keep the published example archive external; the installer carries only its
+// immutable URL, size and checksum. No network access is needed during staging.
+export async function stageHistoryInjectionDescriptor(runtimeRoot, options = {}) {
+  if (!runtimeRoot) throw new Error("runtime root is required");
+  const configPath = options.configPath || defaultConfigPath;
+  const config = JSON.parse(await readFile(configPath, "utf8"));
+  validateConfig(config, configPath);
+  await mkdir(runtimeRoot, { recursive: true });
+  const descriptorPath = path.join(runtimeRoot, "history-injection-package.json");
+  const temporaryPath = `${descriptorPath}.${process.pid}.tmp`;
+  await writeFile(temporaryPath, `${JSON.stringify(config, null, 2)}\n`);
+  await rm(descriptorPath, { force: true });
+  await rename(temporaryPath, descriptorPath);
+  await rm(path.join(runtimeRoot, config.runtimeFileName), { force: true });
+  console.log(`History examples deferred to installation warmup: ${config.url}`);
+  return { config, descriptorPath };
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  stageHistoryInjectionPackage(process.argv[2]).catch((error) => {
+  const stage = process.env.LAZYMIND_DESKTOP_DEFER_HISTORY === "false"
+    ? stageHistoryInjectionPackage : stageHistoryInjectionDescriptor;
+  stage(process.argv[2]).catch((error) => {
     console.error(error);
     process.exitCode = 1;
   });

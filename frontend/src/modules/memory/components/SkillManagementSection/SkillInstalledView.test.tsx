@@ -118,6 +118,18 @@ const renderViewWith = (overrides: Partial<React.ComponentProps<typeof SkillInst
 );
 
 describe("SkillInstalledView organize rules", () => {
+  it("does not constrain the list to a stale measured height after optimization", () => {
+    const records = Array.from({ length: 9 }, (_, index) => createSkill(`skill-${index}`, "external"));
+    const { container } = renderViewWith({
+      dataSource: records, skillAssets: records, total: 9,
+      columns: [{ key: "name", dataIndex: "name", title: "Name" }],
+      tableScroll: { x: 656, y: 120 },
+      selectedSkillIds: ["skill-0", "skill-1"],
+      onSkillSelectionChange: vi.fn(), onBatchCallMode: vi.fn(),
+    });
+    expect(container.querySelectorAll("tr[data-row-key]")).toHaveLength(9);
+    expect(container.querySelector(".ant-table-body")).toHaveStyle({ maxHeight: "100%" });
+  });
   it("enables all editable local skill checkboxes in light mode", () => {
     renderView([]);
     expect(screen.getAllByRole("checkbox", { name: "select skill" })).toHaveLength(3);

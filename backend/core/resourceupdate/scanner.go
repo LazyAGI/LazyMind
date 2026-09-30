@@ -17,19 +17,16 @@ import (
 )
 
 type Scanner struct {
-	db                      *gorm.DB
-	cfg                     Config
-	clock                   clockFunc
-	workerID                string
-	distributionAutoUpdater *skillDistributionAutoUpdater
+	db       *gorm.DB
+	cfg      Config
+	clock    clockFunc
+	workerID string
 }
 
 type ScannerRunResult struct {
-	SkillResultsExpired        int
-	SkillTasksCreated          int
-	SkillDraftTasksCreated     int
-	SkillDistributionsApplied  int
-	SkillDistributionConflicts int
+	SkillResultsExpired    int
+	SkillTasksCreated      int
+	SkillDraftTasksCreated int
 }
 
 type autoApplyTrigger struct {
@@ -64,19 +61,11 @@ func (s *Scanner) RunOnce(ctx context.Context) (ScannerRunResult, error) {
 		result.SkillDraftTasksCreated = created
 		return nil
 	})
-	if err == nil && s.distributionAutoUpdater != nil {
-		autoUpdates, updateErr := s.distributionAutoUpdater.RunOnce(ctx, s.cfg.WorkerBatchSize)
-		result.SkillDistributionsApplied = autoUpdates.Applied
-		result.SkillDistributionConflicts = autoUpdates.PendingReview
-		err = updateErr
-	}
-	if err == nil && (result.SkillResultsExpired > 0 || result.SkillTasksCreated > 0 || result.SkillDraftTasksCreated > 0 || result.SkillDistributionsApplied > 0 || result.SkillDistributionConflicts > 0) {
+	if err == nil && (result.SkillResultsExpired > 0 || result.SkillTasksCreated > 0 || result.SkillDraftTasksCreated > 0) {
 		resourceUpdateInfo(logEventResultScanDone).
 			Int("skill_results_expired", result.SkillResultsExpired).
 			Int("skill_tasks_created", result.SkillTasksCreated).
 			Int("skill_draft_tasks_created", result.SkillDraftTasksCreated).
-			Int("skill_distributions_applied", result.SkillDistributionsApplied).
-			Int("skill_distribution_conflicts", result.SkillDistributionConflicts).
 			Msg(logEventResultScanDone)
 	}
 	return result, err

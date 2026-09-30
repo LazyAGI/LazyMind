@@ -501,6 +501,17 @@ components:
                 - group_id
                 - schedule_ids
             type: object
+        AutomationGroupCreateRequest:
+            properties:
+                name:
+                    type: string
+                remark:
+                    type: string
+                timezone:
+                    type: string
+            required:
+                - name
+            type: object
         BatchAddACLData:
             properties:
                 count:
@@ -1952,6 +1963,10 @@ components:
             type: object
         ConversationGroup:
             properties:
+                collapsed:
+                    default: false
+                    description: Whether this user-owned group is collapsed in the sidebar. Persists across devices.
+                    type: boolean
                 created_at:
                     format: date-time
                     type: string
@@ -2011,6 +2026,7 @@ components:
                 - created_at
                 - updated_at
                 - is_task_conv
+                - collapsed
             type: object
         ConversationGroupAssignRequest:
             properties:
@@ -2122,6 +2138,8 @@ components:
             properties:
                 before_group_id:
                     type: string
+                collapsed:
+                    type: boolean
                 pinned:
                     type: boolean
             type: object
@@ -8029,6 +8047,14 @@ components:
                 - status
                 - reason
                 - partial_output
+            type: object
+        ScheduleMoveRequest:
+            properties:
+                group_id:
+                    nullable: true
+                    type: string
+                position:
+                    type: integer
             type: object
         ScheduleNotificationReset:
             additionalProperties: false
@@ -15646,10 +15672,16 @@ paths:
                     description: OK
             summary: GET /automation-groups
         post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/AutomationGroupCreateRequest'
+                required: true
             responses:
                 "200":
-                    description: OK
-            summary: POST /automation-groups
+                    description: Automation group
+            summary: Create an automation group
     /api/core/automation-groups/{group_id}:
         delete:
             parameters:
@@ -17371,7 +17403,7 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ConversationGroupListResponse'
-                    description: Persist pinning and order within the user navigation
+                    description: Persist collapse state, pinning and order within the user navigation
                 "400":
                     content:
                         application/json:
@@ -17390,7 +17422,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
                     description: Name, membership, scope version or task conflict
-            summary: Persist pinning and order within the user navigation
+            summary: Persist collapse state, pinning and order within the user navigation
             tags:
                 - ConversationGroups
     /api/core/conversation-organizer-runs:
@@ -25583,10 +25615,16 @@ paths:
             summary: POST /published-workflows/{workflow_ref:.+}:rollback
     /api/core/schedules:
         get:
+            parameters:
+                - in: query
+                  name: include_disabled
+                  required: false
+                  schema:
+                    type: boolean
             responses:
                 "200":
-                    description: OK
-            summary: GET /schedules
+                    description: Schedules
+            summary: List schedules
         post:
             description: notification is optional. Omission retains legacy defaults on creation and preserves the rule on update. Send config or clear:true, not both. Updates compare notification.revision; conflicts roll back all task edits. Creation ignores the supplied revision. Runs and history are unchanged.
             requestBody:
@@ -25968,10 +26006,16 @@ paths:
                   required: true
                   schema:
                     type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ScheduleMoveRequest'
+                required: true
             responses:
                 "200":
-                    description: OK
-            summary: POST /schedules/{schedule_id}:move
+                    description: Schedule moved
+            summary: Move a schedule to an automation group
     /api/core/schedules/{schedule_id}:run-now:
         post:
             parameters:

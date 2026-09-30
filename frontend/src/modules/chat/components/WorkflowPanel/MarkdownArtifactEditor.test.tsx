@@ -124,6 +124,7 @@ vi.mock('@ant-design/icons', () => ({
 }));
 
 vi.mock('antd', () => ({
+  Segmented: () => null,
   Space: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   Button: ({ children, disabled, loading, onClick }: { children: React.ReactNode; disabled?: boolean; loading?: boolean; onClick?: () => void }) => <button disabled={disabled || loading} onClick={onClick}>{children}</button>,
   Alert: ({ message }: { message: React.ReactNode }) => <div role='alert'>{message}</div>,
@@ -348,6 +349,29 @@ describe('MarkdownArtifactEditor MDX compatibility', () => {
     await waitFor(() => expect(screen.queryByRole('button', {
       name: 'chat.writerIR.numberingSettings',
     })).not.toBeInTheDocument());
+  });
+
+  it.each([12, 40])('keeps the unordered heading control connected to the heading across a %spx gutter', async (gutter) => {
+    render(<MarkdownArtifactEditor markdown={'<a id="block-sec-1"></a>\n## Heading'}
+      sourceRevision={1} onSave={async () => 1}
+      numbering={{ entries: { 'sec-1': { mode: 'unordered', label: '' } } }} />);
+    const surface = document.querySelector<HTMLElement>('.writer-markdown-editor__surface')!;
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({ ...rect(), left: 100, width: 400 });
+    const heading = document.createElement('h2');
+    heading.textContent = 'Heading';
+    vi.spyOn(heading, 'getBoundingClientRect').mockReturnValue({ ...rect(), left: 100 + gutter });
+    screen.getByTestId('markdown-editable').append(heading);
+    const control = await screen.findByRole('button', { name: 'chat.writerIR.numberingSettings' });
+    // Moving straight from the heading into the control must not cross a dead zone
+    // which hides the button before the pointer can reach it.
+    expect(parseFloat(control.style.left) + parseFloat(control.style.width)).toBe(gutter);
+    fireEvent.mouseOver(heading);
+    fireEvent.mouseOut(heading, { relatedTarget: control });
+    fireEvent.mouseOver(control, { relatedTarget: heading });
+    expect(control).toHaveAttribute('data-visible', 'true');
+    fireEvent.click(control);
+    expect(control).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('dialog', { name: 'chat.writerIR.numberingSettings' })).toBeInTheDocument();
   });
 
   it('shows the level on empty headings and removes the hint when text is entered', async () => {

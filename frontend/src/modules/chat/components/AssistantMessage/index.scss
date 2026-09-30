@@ -397,6 +397,18 @@
   }
 }
 
+.chat-sources-popover {
+  max-width: calc(100vw - 24px);
+  .ant-popover-inner { padding: 0; overflow: hidden; border-radius: 12px; }
+  [role="dialog"] { width: min(420px, calc(100vw - 24px)); }
+  .chat-source-panel { height: auto; border: 0; width: 100%; }
+  .chat-source-panel-header { min-height: 48px; padding: 8px 14px; }
+  .chat-source-panel-title { font-size: 13px; }
+  .chat-source-panel-body { max-height: min(460px, 60vh); background: #fff; padding: 8px; overscroll-behavior: contain; }
+  .chat-source-list { border: 0; border-radius: 6px; }
+  .chat-source-detail { overflow-wrap: anywhere; }
+}
+
 .chat-source-panel {
   display: flex;
   min-width: 0;

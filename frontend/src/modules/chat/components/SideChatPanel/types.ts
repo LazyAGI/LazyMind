@@ -38,6 +38,8 @@ export interface SideChatPanelProps {
   open: boolean;
   /** Hide the drawer during navigation without discarding its conversation. */
   visible?: boolean;
+  /** A reference panel can request closing the side chat while its body is hidden. */
+  closeConfirmationVisible?: boolean;
   parentConversationId: string;
   source?: SideChatSource | null;
   onClose: () => void;
@@ -47,6 +49,10 @@ export interface SideChatPanelProps {
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
   returnFocusRef?: RefObject<HTMLElement | null>;
+}
+
+export interface SideChatPanelRef {
+  requestClose: () => void;
 }
 
 export type SideChatCreateBody = CreateSidechatOpenAPIRequest;

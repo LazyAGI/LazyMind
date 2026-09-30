@@ -1,5 +1,6 @@
 import { useConversationUnreadStore } from "@/modules/chat/store/conversationUnread";
 import { lazy, Suspense } from "react";
+import { ConfigProvider } from "antd";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -201,15 +202,33 @@ describe("MainLayout conversation removal", () => {
     });
   });
 
-  it("shows unread answers only for the current conversation and clears the product badge", () => {
+  it("does not restore an old selection from a non-navigation event after returning home", async () => {
+    render(<MemoryRouter initialEntries={["/agent/chat/home/old"]}><MainLayout /><LocationProbe /></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: "LazyMind" }));
+    await waitFor(() => expect(mocks.latestRecordListProps.currentSessionId).toBe(""));
+    act(() => window.dispatchEvent(new CustomEvent(CHAT_SELECT_CONVERSATION_EVENT, {
+      detail: { conversationId: "old", source: "sidebar" },
+    })));
+    expect(screen.getByTestId("location-path")).toHaveTextContent(/^\/agent\/chat\/home$/);
+    expect(mocks.latestRecordListProps.currentSessionId).toBe("");
+  });
+
+  it("ignores a late chat selection after leaving the chat page", async () => {
+    render(<MemoryRouter initialEntries={["/task-center"]}><MainLayout /><LocationProbe /></MemoryRouter>);
+    act(() => window.dispatchEvent(new CustomEvent(CHAT_SELECT_CONVERSATION_EVENT, {
+      detail: { conversationId: "old", source: "chat" },
+    })));
+    expect(screen.getByTestId("location-path")).toHaveTextContent("/task-center");
+    expect(mocks.latestRecordListProps.currentSessionId).toBe("");
+  });
+
+  it("keeps the home logo free of unread notifications without clearing conversation unread state", () => {
     useConversationUnreadStore.setState({ counts: { current: 2, other: 5 } });
     render(<MemoryRouter initialEntries={["/agent/chat/home/current"]}><MainLayout /></MemoryRouter>);
     const logo = screen.getByRole("button", { name: "LazyMind", exact: true });
-    expect(logo.querySelector(".ant-badge-count")).toHaveTextContent("2");
-    expect(within(logo).getByRole("status")).toHaveTextContent("chat.unreadAnswers");
-    act(() => useConversationUnreadStore.getState().setCount("current", 0));
+    expect(logo.querySelector(".ant-badge-count")).not.toBeInTheDocument();
     expect(within(logo).queryByRole("status")).not.toBeInTheDocument();
-    expect(useConversationUnreadStore.getState().counts.other).toBe(5);
+    expect(useConversationUnreadStore.getState().counts).toEqual({ current: 2, other: 5 });
     useConversationUnreadStore.setState({ counts: {} });
   });
 
@@ -243,10 +262,12 @@ describe("MainLayout resizable navigation", () => {
   function renderLayout(path = "/agent/chat/home") {
     return render(
       <MemoryRouter initialEntries={[path]}>
+        <ConfigProvider theme={{ token: { motion: false } }}>
         <MainLayout />
         <LocationProbe />
         <Link to="/memory-management/workflows/draft-1">Open workflow</Link>
         <Link to="/task-center">Open tasks</Link>
+        </ConfigProvider>
       </MemoryRouter>,
     );
   }
@@ -280,11 +301,48 @@ describe("MainLayout resizable navigation", () => {
     expect(navigation).toHaveStyle({ width: "72px" });
     expect(navigation).toContainElement(screen.getByRole("button", { name: "layout.expandMenu" }));
     for (const name of [
-      "layout.newChat", "layout.newTask", "layout.resourceLib", "layout.aiEvolution",
+      "common.create", "layout.resourceLib", "layout.aiEvolution",
       "layout.taskCenter", "layout.searchConversations", "layout.conversationHistory", "layout.settings",
     ]) {
       expect(screen.getByRole("button", { name })).toBeVisible();
     }
+  });
+
+  it("offers both conversation modes from one compact create button and closes after selection", async () => {
+    renderLayout("/agent/chat/home/current");
+    fireEvent.click(screen.getByRole("button", { name: "layout.collapseMenu" }));
+    expect(screen.queryByRole("button", { name: "layout.newChat" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "layout.newTask" })).not.toBeInTheDocument();
+    const create = screen.getByRole("button", { name: "common.create" });
+    expect(document.querySelectorAll(".sider-primary-action button")).toHaveLength(1);
+
+    fireEvent.click(create);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "layout.newTask" }));
+    expect(readChatConversationFilters().filter).toBe("task");
+    expect(screen.getByTestId("location-path")).toHaveTextContent("/agent/chat/home");
+    expect(screen.getByRole("button", { name: "common.create" })).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "common.create" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "layout.newChat" }));
+    expect(readChatConversationFilters().filter).toBe("normal");
+    expect(screen.getByRole("button", { name: "common.create" })).toHaveAttribute("aria-expanded", "false");
+    expect(resizeHandle()).toHaveAttribute("aria-valuenow", "72");
+  });
+
+  it.each([
+    ["layout.taskCenter", "layout.taskCenter"],
+    ["layout.searchConversations", "layout.searchConversations"],
+    ["layout.conversationHistory", "layout.conversationHistory"],
+    ["layout.settings", "layout.settings"],
+    ["layout.terminalConnection", "layout.terminalConnection"],
+    ["layout.expandMenu", "layout.expandMenu"],
+    ["common.create", "common.create"],
+  ])("shows a prompt tooltip for the compact %s icon without native title delays", async (name, label) => {
+    renderLayout("/memory-management/workflows/draft-1");
+    const button = screen.getByRole("button", { name });
+    expect(button).not.toHaveAttribute("title");
+    fireEvent.mouseEnter(button);
+    await waitFor(() => expect(screen.getByRole("tooltip", { name: label })).toBeVisible(), { timeout: 500 });
   });
 
   it("resizes with the keyboard, clamps both limits and restores defaults on route changes", () => {
@@ -349,9 +407,11 @@ describe("MainLayout resizable navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "layout.settings" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "layout.settings" }));
     expect(resizeHandle()).toHaveAttribute("aria-valuenow", "72");
-    fireEvent.click(screen.getByRole("button", { name: "layout.newTask" }));
+    fireEvent.click(screen.getByRole("button", { name: "common.create" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "layout.newTask" }));
     expect(resizeHandle()).toHaveAttribute("aria-valuenow", "72");
-    fireEvent.click(screen.getByRole("button", { name: "layout.newChat" }));
+    fireEvent.click(screen.getByRole("button", { name: "common.create" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "layout.newChat" }));
     expect(resizeHandle()).toHaveAttribute("aria-valuenow", "72");
     act(() => mocks.latestRecordListProps.onSelected({ conversation_id: "another-conversation" }));
     expect(screen.getByTestId("location-path")).toHaveTextContent("/agent/chat/home/another-conversation");
@@ -456,9 +516,10 @@ describe("MainLayout resizable navigation", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "layout.settings" }));
     expect(screen.getByTestId("location-path")).toHaveTextContent("/settings");
     fireEvent.click(screen.getByRole("link", { name: "Open workflow" }));
-    fireEvent.click(screen.getByRole("button", { name: "layout.newTask" }));
+    fireEvent.click(screen.getByRole("button", { name: "common.create" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "layout.newTask" }));
     expect(screen.getByTestId("location-path")).toHaveTextContent("/agent/chat/home");
-    expect(screen.getByRole("button", { name: "layout.newTask" })).toHaveAttribute("aria-pressed", "true");
+    expect(readChatConversationFilters().filter).toBe("task");
   });
 
   it("preserves the narrow navigation while a workflow page is still loading", () => {
@@ -475,7 +536,7 @@ describe("MainLayout resizable navigation", () => {
       </MemoryRouter>,
     );
     expect(resizeHandle()).toHaveAttribute("aria-valuenow", "72");
-    expect(screen.getByRole("button", { name: "layout.newChat" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "common.create" })).toBeVisible();
     expect(screen.queryByText("Entire page loading")).not.toBeInTheDocument();
   });
 });

@@ -129,6 +129,53 @@ describe("StreamManager runtime terminal", () => {
     );
   });
 
+  it.each(["FINISH_REASON_STOP", "FINISH_REASON_UNKNOWN"])("delivers the final body with %s before rejecting later body frames", (finishReason) => {
+    const manager = new StreamManager();
+    const stream = new FakeSSE();
+    const onMessage = vi.fn();
+    manager.registerStream("conv", stream as any, { message: onMessage });
+
+    stream.emit({ conversation_id: "conv", history_id: "h1", delta: "partial answer", finish_reason: finishReason });
+
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(manager.isStreamFinished("conv")).toBe(true);
+    stream.emit({ conversation_id: "conv", history_id: "h1", delta: "late answer", finish_reason: "FINISH_REASON_UNSPECIFIED" });
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(manager.isStreamFinished("conv")).toBe(true);
+  });
+
+  it.each([
+    ["empty", {}],
+    ["sources", { sources: [{ title: "Reference", url: "https://example.com" }] }],
+  ])("keeps a legacy terminal after a nonterminal %s frame and resets only on registration", (_name, payload) => {
+    const manager = new StreamManager();
+    const stream = new FakeSSE();
+    const onMessage = vi.fn();
+    manager.registerStream("conv", stream as any, { message: onMessage });
+    stream.emit({ conversation_id: "conv", history_id: "h1", delta: "final", finish_reason: "FINISH_REASON_STOP" });
+    stream.emit({ conversation_id: "conv", history_id: "h1", ...payload, finish_reason: "FINISH_REASON_UNSPECIFIED" });
+
+    expect(manager.isStreamFinished("conv")).toBe(true);
+    expect(manager.getStreamState("conv")?.legacyFinishReason).toBe("FINISH_REASON_STOP");
+    if ("sources" in payload) expect(manager.getStreamState("conv")?.sources).toEqual(payload.sources);
+    expect(onMessage).toHaveBeenCalledTimes(2);
+    stream.emit({ conversation_id: "conv", history_id: "h1", delta: "late", finish_reason: "FINISH_REASON_UNSPECIFIED" });
+    expect(onMessage).toHaveBeenCalledTimes(2);
+
+    stream.emit({ conversation_id: "conv", history_id: "h1", runtime_event: terminal("r1"), finish_reason: "FINISH_REASON_UNSPECIFIED" });
+    expect(manager.getAggregatedRunTerminal("conv")?.status).toBe("completed");
+    expect(manager.isStreamFinished("conv")).toBe(true);
+
+    const nextStream = new FakeSSE();
+    manager.registerStream("conv", nextStream as any, { message: onMessage });
+    expect(manager.isStreamFinished("conv")).toBe(false);
+    expect(manager.getStreamState("conv")?.legacyFinishReason).toBeUndefined();
+    expect(manager.getStreamState("conv")?.runTerminals).toEqual({});
+    nextStream.emit({ conversation_id: "conv", history_id: "h2", delta: "next answer", finish_reason: "FINISH_REASON_UNSPECIFIED" });
+    expect(onMessage).toHaveBeenCalledTimes(4);
+    expect(manager.isStreamFinished("conv")).toBe(false);
+  });
+
   it("finishes a static response while preserving its model invocation flag", () => {
     const manager = new StreamManager();
     const stream = new FakeSSE();

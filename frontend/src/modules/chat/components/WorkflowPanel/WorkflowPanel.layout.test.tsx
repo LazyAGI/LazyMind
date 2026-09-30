@@ -2,8 +2,8 @@ import React, { useContext, useEffect } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
-import type { WorkflowSession, WorkflowUI } from '@/modules/chat/store/workflowPanel';
-import { SlotEditingContext, WorkflowPanelTabActiveContext } from './slotEditingContext';
+import type { SlotRevision, WorkflowSession, WorkflowUI } from '@/modules/chat/store/workflowPanel';
+import { SlotEditingContext, WorkflowPanelTabActiveContext, type SlotEditingContextValue } from './slotEditingContext';
 import { WorkflowPanel } from './index';
 import { controlActions, type WorkflowControlView } from '@/modules/chat/utils/workflowControl';
 import { loadWorkflowRunSnapshot } from '@/modules/chat/utils/loadWorkflowRun';
@@ -16,6 +16,8 @@ const fixture = vi.hoisted(() => ({
   setApprovalPreference: vi.fn(async () => {}),
   setFocusedTab: vi.fn(),
   focusedTab: undefined as string | undefined,
+  documentAction: vi.fn(),
+  registerFooterAction: undefined as SlotEditingContextValue['registerFooterAction'] | undefined,
 }));
 vi.mock('@/modules/chat/hooks/useWorkflow', () => ({
   useWorkflowSession: () => ({ session: fixture.session, loading: false, refresh: fixture.refresh }),
@@ -39,19 +41,31 @@ vi.mock('./SlotComponents', () => ({
   isWriterIrSource: () => false,
   SlotDownloadContext: React.createContext(true),
   SlotMarkdownStream: () => null,
-  SlotRenderer: ({ slotId, slot, readOnly, widget }: { widget?: { widgetType?: string }; slotId: string; slot: { artifact_value?: { text?: string } }; readOnly?: boolean }) => {
+  SlotRenderer: ({ slotId, slot, readOnly, widget }: { widget?: { widgetType?: string }; slotId: string; slot: SlotRevision; readOnly?: boolean }) => {
     const context = useContext(SlotEditingContext);
+    fixture.registerFooterAction = context.registerFooterAction;
     const active = useContext(WorkflowPanelTabActiveContext);
     useEffect(() => {
       if (!active) return;
+      if (slot.document) {
+        const key = `${slotId}:${slot.list_index ?? -1}`;
+        const kinds = slot.document.editable ? ['copy', 'download', 'publish'] : ['copy', 'download'];
+        const unregister = kinds.map(kind => context.registerFooterAction(`${key}:${kind}`, {
+          label: { copy: '复制内容', download: '下载', publish: '发布' }[kind]!,
+          onClick: () => fixture.documentAction(key, kind, 'markdown'),
+          ...(kind === 'download' ? { menuLabel: '选择下载格式', menu: [{ key: 'text', label: '纯文本',
+            onClick: () => fixture.documentAction(key, kind, 'text') }] } : {}),
+        }));
+        return () => unregister.forEach(remove => remove());
+      }
       const unregisterFlush = context.registerFlush(slotId, fixture.flush);
       const unregisterAction = context.registerFooterAction(slotId, {
         label: '发布', onClick: vi.fn(), statusText: '已写回云文档', statusTone: 'success',
         statusLink: { href: 'https://example.com/document', label: '打开云文档' },
       });
       return () => { unregisterFlush(); unregisterAction(); };
-    }, [active, context.registerFlush, context.registerFooterAction, slotId]);
-    return <article onDoubleClick={() => context.setEditing(slotId, true)} data-widget={widget?.widgetType} data-readonly={Boolean(readOnly)} data-value={slot.artifact_value?.text}>正文 {slotId}</article>;
+    }, [active, context.registerFlush, context.registerFooterAction, slotId, slot.document, slot.list_index]);
+    return <article onDoubleClick={() => context.setEditing(slotId, true)} data-widget={widget?.widgetType} data-readonly={Boolean(readOnly)} data-value={(slot.artifact_value as { text?: string })?.text}>正文 {slotId}</article>;
   },
 }));
 
@@ -82,6 +96,118 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('shared workflow compact layout', () => {
+  it('keeps a replacement document action when the previous registration cleans up', async () => {
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    let unregisterOld!: () => void;
+    let unregisterNew!: () => void;
+    const onClick = vi.fn();
+    act(() => { unregisterOld = fixture.registerFooterAction!('copy', { label: '旧复制', onClick: vi.fn() }); });
+    act(() => { unregisterNew = fixture.registerFooterAction!('copy', { label: '新复制', onClick }); });
+    act(() => unregisterOld());
+
+    fireEvent.click(screen.getByRole('button', { name: '新复制' }));
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: '旧复制' })).not.toBeInTheDocument();
+    act(() => unregisterNew());
+    expect(screen.queryByRole('button', { name: '新复制' })).not.toBeInTheDocument();
+  });
+
+  it('shows chapter progress until the full document exists, then folds process materials without losing their actions', async () => {
+    fixture.ui.tabs![1].generation_process = { result_slot: 'document', slots: ['chapters', 'report'] };
+    fixture.ui.tabs![1].slots = [
+      { id: 'document', label: '全文', type: 'file' },
+      { id: 'chapters', label: '分章稿', type: 'file', cardinality: 'list' },
+      { id: 'report', label: '检查报告', type: 'text' },
+    ];
+    const doc = (slot: string, editable = false): SlotRevision => ({
+      slot_id: slot, slot, list_index: -1, step_id: 'write_document', selected: true, revision: 1,
+      artifact_id: slot, artifact_value: { text: slot },
+      document: { representation: 'markdown', editable, capabilities: ['convert_document'] },
+    } as SlotRevision);
+    fixture.session.slots = [doc('chapters'), doc('report')];
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    expect(screen.getByText('正文 chapters')).toBeVisible();
+    expect(screen.queryByRole('button', { name: '生成过程' })).not.toBeInTheDocument();
+
+    fixture.session = { ...fixture.session, slots: [doc('document', true), ...fixture.session.slots!] };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getByText('正文 document')).toBeVisible();
+    const toggle = screen.getByRole('button', { name: '生成过程' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('正文 chapters')).not.toBeInTheDocument();
+    expect(screen.queryByText('正文 report')).not.toBeInTheDocument();
+    const footer = within(screen.getByRole('group', { name: '工作流会话操作' }));
+    expect(footer.getAllByRole('button', { name: '复制内容' })).toHaveLength(1);
+    fireEvent.click(toggle);
+    await waitFor(() => expect(screen.getByText('正文 chapters')).toBeVisible());
+    expect(screen.getByText('正文 report')).toBeVisible();
+    fireEvent.click(within(screen.getByRole('group', { name: '检查报告' }))
+      .getByRole('button', { name: '下载' }));
+    expect(fixture.documentAction).toHaveBeenLastCalledWith('report:-1', 'download', 'markdown');
+    expect(footer.getAllByRole('button', { name: '复制内容' })).toHaveLength(1);
+
+    // A normal refresh preserves the user's expanded view.
+    fixture.session = { ...fixture.session, slots: [...fixture.session.slots!] };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    // If the full result is invalidated, progress is visible again.
+    fixture.session = { ...fixture.session, slots: [doc('chapters'), doc('report')] };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.queryByRole('button', { name: '生成过程' })).not.toBeInTheDocument();
+    expect(screen.getByText('正文 chapters')).toBeVisible();
+  });
+
+  it.each(['running', 'pending'])('keeps process material visible while the producer is %s even with an older result', async status => {
+    fixture.ui.tabs![1].generation_process = { result_slot: 'document', slots: ['report'] };
+    fixture.ui.tabs![1].slots.push({ id: 'report', label: '检查报告', type: 'text' });
+    fixture.session.slots!.push({ ...fixture.session.slots![0], slot_id: 'report', slot: 'report' });
+    fixture.session.steps = fixture.session.steps!.map(step => step.step_id === 'write_document' ? { ...step, status } : step);
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: /^成稿/, selected: true });
+    expect(screen.getByText('正文 report')).toBeVisible();
+    expect(screen.queryByRole('button', { name: '生成过程' })).not.toBeInTheDocument();
+  });
+
+  it('keeps main document actions in the footer and scopes chapter/report actions to their own documents', async () => {
+    fixture.ui.tabs![1].slots = [
+      { id: 'document', label: '论文初稿', type: 'file' },
+      { id: 'chapters', label: '分章稿', type: 'file', cardinality: 'list' },
+      { id: 'report', label: '检查报告', type: 'text' },
+    ];
+    const doc = (slot: string, list_index: number, editable = false): SlotRevision => ({
+      slot_id: slot, slot, list_index, step_id: 'write_document', selected: true, revision: 1,
+      artifact_id: `${slot}-${list_index}`, artifact_value: { text: slot },
+      document: { representation: 'markdown', editable, capabilities: ['convert_document'] },
+    } as SlotRevision);
+    fixture.session.slots = [doc('document', -1, true), ...Array.from({ length: 7 }, (_, i) => doc('chapters', i)), doc('report', -1)];
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    const footer = within(screen.getByRole('group', { name: '工作流会话操作' }));
+    await waitFor(() => expect(footer.getAllByRole('button', { name: '复制内容' })).toHaveLength(1));
+    expect(footer.getAllByRole('button', { name: '下载' })).toHaveLength(1);
+    expect(footer.getAllByRole('button', { name: '发布' })).toHaveLength(1);
+    const chapter = within(screen.getByRole('group', { name: '分章稿 · 4' }));
+    fireEvent.click(chapter.getByRole('button', { name: '复制内容' }));
+    expect(fixture.documentAction).toHaveBeenLastCalledWith('chapters:3', 'copy', 'markdown');
+    fireEvent.click(chapter.getByRole('button', { name: '选择下载格式' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '纯文本' }));
+    expect(fixture.documentAction).toHaveBeenLastCalledWith('chapters:3', 'download', 'text');
+    fireEvent.click(within(screen.getByRole('group', { name: '检查报告' })).getByRole('button', { name: '下载' }));
+    expect(fixture.documentAction).toHaveBeenLastCalledWith('report:-1', 'download', 'markdown');
+    fireEvent.click(footer.getByRole('button', { name: '复制内容' }));
+    expect(fixture.documentAction).toHaveBeenLastCalledWith('document:-1', 'copy', 'markdown');
+    fireEvent.click(screen.getByRole('tab', { name: '写作准备' }));
+    expect(screen.queryByRole('button', { name: '复制内容' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '成稿' }));
+    await waitFor(() => expect(within(screen.getByRole('group', { name: '工作流会话操作' })).getAllByRole('button', { name: '下载' })).toHaveLength(1));
+    // Revisions of the same document update without accumulating old actions.
+    fixture.session = { ...fixture.session, slots: fixture.session.slots!.map(slot => ({ ...slot, revision: 2 })) };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getAllByRole('button', { name: '复制内容' })).toHaveLength(9);
+  });
+
   it.each(['native', 'codex'] as const)('follows steps until the user selects a tab on %s', async surface => {
     const props = surface === 'codex' ? { embedded: true, externalPresentation: { activities: {}, compactEmptyStates: false } } : {};
     fixture.session = { ...fixture.session, status: 'active', current_step_id: 'prepare' };

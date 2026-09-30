@@ -51,6 +51,18 @@ func relocateDesktopPythonVenvs(cfg RuntimeConfig, paths RuntimePaths) error {
 		if !rewritten {
 			return fmt.Errorf("desktop Python venv config has no home entry: %s", configPath)
 		}
+		for i, line := range lines {
+			key, _, ok := strings.Cut(line, "=")
+			if !ok {
+				continue
+			}
+			switch strings.TrimSpace(key) {
+			case "executable", "base-executable":
+				lines[i] = strings.TrimSpace(key) + " = " + filepath.Join(newHome, "python.exe")
+			case "base-prefix", "base-exec-prefix":
+				lines[i] = strings.TrimSpace(key) + " = " + newHome
+			}
+		}
 		if err := replaceRelocatableFileIfChanged(configPath, []byte(strings.Join(lines, "\n")), 0o644, desktopPythonReplaceTimeout); err != nil {
 			return fmt.Errorf("rewrite desktop Python venv config %s: %w", configPath, err)
 		}

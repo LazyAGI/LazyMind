@@ -28,6 +28,7 @@ func NewHandler(cfg config.Config) http.Handler {
 		TLSHandshakeTimeout: cfg.Timeouts.Connect, ResponseHeaderTimeout: cfg.Timeouts.Read,
 		ExpectContinueTimeout: cfg.Timeouts.Write, ForceAttemptHTTP2: true,
 	}
+	streamTransport := transport.Clone()
 	client := &http.Client{Transport: transport, Timeout: 15 * time.Second}
 	workspaces := newWorkspaceHandler(cfg, client)
 	mux.HandleFunc("/_local/healthz", healthz)
@@ -42,17 +43,21 @@ func NewHandler(cfg config.Config) http.Handler {
 	mux.HandleFunc("/_local/workspaces:authorize", workspaces.authorizeWorkspace)
 	mux.HandleFunc("/_local/workspaces:reauthorize", workspaces.reauthorizeWorkspace)
 	mux.Handle("/api/", &apiProxyHandler{
-		routes:    cfg.Routes,
-		rbac:      auth.NewRBACAdapter(cfg.Auth.AuthServiceURL, nil),
-		transport: transport,
+		routes:          cfg.Routes,
+		rbac:            auth.NewRBACAdapter(cfg.Auth.AuthServiceURL, nil),
+		transport:       transport,
+		streamTransport: streamTransport,
+		streamSlots:     make(chan struct{}, 32),
 	})
 	return newCORSHandler(mux, cfg.CORS.AllowedOrigins)
 }
 
 type apiProxyHandler struct {
-	routes    []config.RouteConfig
-	rbac      *auth.RBACAdapter
-	transport http.RoundTripper
+	routes          []config.RouteConfig
+	rbac            *auth.RBACAdapter
+	transport       http.RoundTripper
+	streamTransport http.RoundTripper
+	streamSlots     chan struct{}
 }
 
 func (h *apiProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -64,7 +69,9 @@ func (h *apiProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if match.Route.Public {
+	realtimeUpgrade := req.Method == http.MethodGet && req.URL.EscapedPath() == "/api/core/realtime/connect" &&
+		strings.EqualFold(req.Header.Get("Upgrade"), "websocket")
+	if match.Route.Public || realtimeUpgrade {
 		// Never forward caller-supplied identity across an unauthenticated route.
 		req.Header.Del("X-User-Id")
 		req.Header.Del("X-User-Name")
@@ -98,6 +105,18 @@ func (h *apiProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.Transport = h.transport
+	if h.streamTransport != nil && (strings.Contains(req.Header.Get("Accept"), "text/event-stream") ||
+		strings.EqualFold(req.Header.Get("Upgrade"), "websocket")) {
+		select {
+		case h.streamSlots <- struct{}{}:
+			defer func() { <-h.streamSlots }()
+		default:
+			w.Header().Set("Retry-After", "1")
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "realtime connection limit reached"})
+			return
+		}
+		proxy.Transport = h.streamTransport
+	}
 	proxy.FlushInterval = -1
 	proxy.ErrorHandler = h.errorHandler
 	proxy.Director = func(outReq *http.Request) {

@@ -201,7 +201,7 @@ interface LazyMindDesktopBridge {
   agentExecutableClear?: (target: DesktopAgentBindingTarget) => Promise<unknown> | unknown;
   assistantSessionSet?: (session: LocalAssistantSession) => Promise<unknown> | unknown;
   assistantSessionClear?: () => Promise<unknown> | unknown;
-  restartRuntime?: () => Promise<unknown> | unknown;
+  restartRuntime?: (options?: { reload?: boolean }) => Promise<unknown> | unknown;
   resetRuntime?: (scope?: "kb" | "all") => Promise<unknown> | unknown;
   localFolderAccessStatus?: () => Promise<DesktopLocalFolderAccessState> | DesktopLocalFolderAccessState;
   chooseLocalDiscoveryRoots?: () => Promise<DesktopLocalFolderAccessState> | DesktopLocalFolderAccessState;
@@ -608,8 +608,15 @@ async function callLocalAssistantBridge(
   }
 }
 
-export function restartRuntime(): Promise<DesktopBridgeResult> {
-  return callDesktopBridge("restartRuntime");
+export async function restartRuntime(options?: { reload?: boolean }): Promise<DesktopBridgeResult> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.restartRuntime) return { ok: false, reason: "unavailable" };
+  try {
+    await bridge.restartRuntime(options);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: "failed", error };
+  }
 }
 
 export function resetRuntime(scope?: "kb" | "all"): Promise<DesktopBridgeResult> {

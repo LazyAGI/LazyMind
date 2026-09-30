@@ -1,10 +1,14 @@
 import {
+  forwardRef,
   useCallback,
   useEffect,
   useId,
   useMemo,
+  useImperativeHandle,
   useRef,
   useState,
+  type ComponentType,
+  type ReactNode,
 } from "react";
 import {
   CheckOutlined,
@@ -48,6 +52,7 @@ import {
 import type {
   SideChatConversation,
   SideChatPanelProps,
+  SideChatPanelRef,
   SideChatSource,
 } from "./types";
 import "./index.scss";
@@ -56,6 +61,7 @@ export type {
   OnOpenSideChat,
   SideChatConversation,
   SideChatPanelProps,
+  SideChatPanelRef,
   SideChatSource,
 } from "./types";
 
@@ -91,12 +97,13 @@ function SideChatSurface({ embedded, ...props }: import("antd").DrawerProps & { 
   </section>;
 }
 
-export default function SideChatPanel({
+const SideChatPanel = forwardRef<SideChatPanelRef, SideChatPanelProps>(function SideChatPanel({
   embedded,
   onOpenSources,
   onStreamingChange,
   open,
   visible = true,
+  closeConfirmationVisible = visible,
   parentConversationId,
   source,
   onClose,
@@ -106,7 +113,7 @@ export default function SideChatPanel({
   multimodalEmbeddingReady,
   rerankReady,
   returnFocusRef,
-}: SideChatPanelProps) {
+}, ref) {
   const { t } = useTranslation();
   const tRef = useRef(t);
   tRef.current = t;
@@ -404,6 +411,7 @@ export default function SideChatPanel({
       setPhase("ready");
       message.success(t("chat.sideChat.retainSuccess"));
       onRetained?.(saved);
+      return true;
     } catch (error) {
       setPhase("ready");
       setActionError(getLocalizedErrorMessage(error));
@@ -424,6 +432,7 @@ export default function SideChatPanel({
       } catch (error) {
         setPhase("ready");
         setActionError(getLocalizedErrorMessage(error));
+        if (!visibleRef.current) setDiscardConfirmOpen(true);
         return;
       }
     } else if (current) {
@@ -440,12 +449,10 @@ export default function SideChatPanel({
       message.warning(t("chat.sideChat.generatingUnavailable"));
       return;
     }
-    if (hasMessagesRef.current && !retainedRef.current) {
-      setDiscardConfirmOpen(true);
-      return;
-    }
-    void discardAndClose();
-  }, [discardAndClose, t]);
+    setDiscardConfirmOpen(true);
+  }, [t]);
+
+  useImperativeHandle(ref, () => ({ requestClose: handleClose }), [handleClose]);
 
   const handleClear = useCallback(async () => {
     const current = childRef.current;
@@ -680,20 +687,32 @@ export default function SideChatPanel({
       </Modal>
 
       <Modal
-        open={open && visible && discardConfirmOpen}
-        title={t("chat.sideChat.closeConfirmTitle")}
-        okText={t("chat.sideChat.closeAndDiscard")}
+        open={open && closeConfirmationVisible && discardConfirmOpen}
+        title={t(retained ? "chat.sideChat.closeRetainedConfirmTitle" : "chat.sideChat.closeConfirmTitle")}
+        okText={t(retained ? "chat.sideChat.close" : "chat.sideChat.closeAndDiscard")}
         cancelText={t("chat.sideChat.continue")}
-        okButtonProps={{ danger: true }}
-        onOk={() => {
-          setDiscardConfirmOpen(false);
-          void discardAndClose();
-        }}
+        okButtonProps={{ danger: !retained, disabled: busy }}
+        cancelButtonProps={{ disabled: busy }}
+        maskClosable={!busy}
+        keyboard={!busy}
+        onOk={() => void discardAndClose()}
         onCancel={() => setDiscardConfirmOpen(false)}
+        confirmLoading={phase === "closing"}
+        footer={(_: ReactNode, { OkBtn, CancelBtn }: { OkBtn: ComponentType; CancelBtn: ComponentType }) => <>
+          <CancelBtn />
+          <OkBtn />
+          {!retained && <Button type="primary" loading={phase === "retaining"} disabled={!hasMessages || (busy && phase !== "retaining")}
+            onClick={async () => { if (await handleRetain()) await discardAndClose(); }}>
+            {t("chat.sideChat.retain")}
+          </Button>}
+        </>}
         destroyOnHidden
       >
-        <p>{t("chat.sideChat.closeConfirmDescription")}</p>
+        <p>{t(retained ? "chat.sideChat.closeRetainedConfirmDescription" : "chat.sideChat.closeConfirmDescription")}</p>
+        {actionError && <Alert type="error" showIcon message={actionError} />}
       </Modal>
     </>
   );
-}
+});
+
+export default SideChatPanel;

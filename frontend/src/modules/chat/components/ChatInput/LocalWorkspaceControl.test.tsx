@@ -408,6 +408,25 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     expect(onChange.mock.calls.every(([id]) => id === undefined)).toBe(true);
   });
 
+  it("selects an already authorized folder without asking for first-use authorization again", async () => {
+    mocks.listWorkspaces.mockResolvedValue([alpha]);
+    mocks.selectWorkspaceCandidate.mockResolvedValue({
+      canceled: false,
+      selection_token: "repeat-selection",
+      display_name: alpha.display_name,
+      path: alpha.path,
+    });
+    const onChange = vi.fn();
+    render(<LocalWorkspaceControl onChange={onChange} />);
+
+    await waitFor(() => expect(mocks.listWorkspaces).toHaveBeenCalled());
+    await openWorkspacePicker();
+
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(alpha.workspace_id, "ask_as_needed"));
+    expect(screen.queryByText("chat.workspace.authorizeTitle")).not.toBeInTheDocument();
+    expect(mocks.authorizeWorkspace).not.toHaveBeenCalled();
+  });
+
   it("uses one workspace menu and keeps the permission mode beside it", async () => {
     mocks.listWorkspaces.mockResolvedValue([alpha]);
     render(<LocalWorkspaceControl onChange={vi.fn()} />);
@@ -579,16 +598,39 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     expect(mocks.updateWorkspacePermission).not.toHaveBeenCalled();
   });
 
-  it("searches active and inactive grants from the access manager", async () => {
-    mocks.listWorkspaces.mockResolvedValueOnce([]).mockResolvedValueOnce([alpha, { ...beta, status: "revoked" }]).mockResolvedValue([]);
+  it("searches manageable grants without showing revoked workspaces", async () => {
+    const revoked = { ...alpha, workspace_id: "revoked-workspace", path: "/revoked-workspace", status: "revoked" as const };
+    mocks.listWorkspaces.mockResolvedValueOnce([]).mockResolvedValueOnce([alpha, { ...beta, status: "path_unavailable" }, revoked]).mockResolvedValue([]);
     render(<LocalWorkspaceControl onChange={vi.fn()} />);
     await openWorkspaceManager();
     expect(await screen.findByText(beta.path)).toBeInTheDocument();
+    expect(screen.queryByText(revoked.path)).not.toBeInTheDocument();
 
     const search = screen.getByPlaceholderText("chat.workspace.search");
     fireEvent.change(search, { target: { value: "beta" } });
     fireEvent.keyDown(search, { key: "Enter", code: "Enter" });
-    await waitFor(() => expect(mocks.listWorkspaces).toHaveBeenLastCalledWith({ query: "beta", includeInactive: true }));
+    await waitFor(() => expect(mocks.listWorkspaces).toHaveBeenLastCalledWith({ query: "beta", includeInactive: true, excludeRevoked: true }));
+  });
+
+  it("removes a revoked workspace from authorization management immediately", async () => {
+    mocks.listWorkspaces.mockResolvedValue([alpha]);
+    mocks.revokeWorkspace.mockResolvedValue({ version: alpha.version + 1, stop_failed_count: 0 });
+    let confirm: (() => Promise<void>) | undefined;
+    vi.spyOn(Modal, "confirm").mockImplementation(((config: { onOk?: () => Promise<void> }) => {
+      confirm = config.onOk;
+      return { destroy: vi.fn(), update: vi.fn() };
+    }) as typeof Modal.confirm);
+    render(<LocalWorkspaceControl onChange={vi.fn()} />);
+    await openWorkspaceManager();
+    const manager = (await screen.findByText("chat.workspace.manageTitle")).closest<HTMLElement>("[role=dialog]");
+    if (!manager) throw new Error("workspace access dialog missing");
+    expect(await within(manager).findByText(alpha.path)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "chat.workspace.revoke" }));
+
+    await act(async () => { await confirm?.(); });
+
+    expect(mocks.revokeWorkspace).toHaveBeenCalledWith(alpha.workspace_id, alpha.version);
+    expect(within(manager).queryByText(alpha.path)).not.toBeInTheDocument();
   });
 
   it("closes access management and ignores its pending list when the conversation changes", async () => {
@@ -613,8 +655,8 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
   });
 
   it("reauthorizes an inactive grant without binding it to the draft", async () => {
-    const revoked = { ...alpha, status: "revoked" as const };
-    mocks.listWorkspaces.mockResolvedValueOnce([]).mockResolvedValueOnce([revoked]);
+    const unavailable = { ...alpha, status: "path_unavailable" as const };
+    mocks.listWorkspaces.mockResolvedValueOnce([]).mockResolvedValueOnce([unavailable]);
     mocks.prepareWorkspaceReauthorization.mockResolvedValue({ canceled: false, selection_token: "renew", display_name: "Alpha", path: alpha.path });
     const onChange = vi.fn();
     render(<LocalWorkspaceControl onChange={onChange} />);

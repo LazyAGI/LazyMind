@@ -18,6 +18,7 @@ import process from "node:process";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const execFile = promisify(execFileCallback);
@@ -145,16 +146,23 @@ async function defaultExtractZip(archivePath, destination, platform = process.pl
     return;
   }
   if (platform === "win32") {
-    const command = "param($archive,$destination) Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force";
+    // powershell.exe -Command does not bind trailing CLI arguments to param().
+    // Pass paths as child-only environment data, keeping them out of PowerShell code.
+    // The destination is a fresh temp directory; .NET avoids wildcard handling in archive cmdlets.
+    const command = "$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory($env:LAZYMIND_PANDOC_ARCHIVE, $env:LAZYMIND_PANDOC_DESTINATION)";
     await execFile("powershell.exe", [
       "-NoLogo",
       "-NoProfile",
       "-NonInteractive",
       "-Command",
       command,
-      archivePath,
-      destination,
-    ]);
+    ], {
+      env: {
+        ...process.env,
+        LAZYMIND_PANDOC_ARCHIVE: archivePath,
+        LAZYMIND_PANDOC_DESTINATION: destination,
+      },
+    });
     return;
   }
   throw new Error(`Pandoc ZIP extraction is unsupported on ${platform}`);
@@ -164,6 +172,25 @@ function expectedPlatform(target) {
   if (target.startsWith("darwin-")) return "darwin";
   if (target.startsWith("windows-")) return "win32";
   return "";
+}
+
+// A finished --version process or a Windows scanner can retain a file handle.
+// Replace in one rename: never delete the installed executable before promotion.
+async function replaceExecutable(source, destination, platform) {
+  const maxRetries = 10;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rename(source, destination);
+      return;
+    } catch (error) {
+      if (platform !== "win32" || !["EBUSY", "EPERM", "EACCES"].includes(error.code) || attempt >= maxRetries) {
+        throw error;
+      }
+      const waitMs = Math.min(250 * (attempt + 1), 1000);
+      console.warn(`Pandoc executable replacement blocked (${error.code}); retry ${attempt + 1}/${maxRetries} in ${waitMs}ms`);
+      await delay(waitMs);
+    }
+  }
 }
 
 export async function stagePandoc(runtimeRoot, target, options = {}) {
@@ -216,12 +243,12 @@ export async function stagePandoc(runtimeRoot, target, options = {}) {
     if (firstLine !== `pandoc ${selected.version}`) {
       throw new Error(`Pandoc version mismatch: got ${JSON.stringify(firstLine)}, want "pandoc ${selected.version}"`);
     }
-    await rm(runtimePath, { force: true });
-    await rename(temporaryRuntimePath, runtimePath);
+    await replaceExecutable(temporaryRuntimePath, runtimePath, platform);
     console.log(`Pandoc ${selected.version} staged: ${runtimePath}`);
     return { cachePath, runtimePath, selected };
   } finally {
-    await rm(extractionRoot, { recursive: true, force: true });
+    // Windows scanners may briefly retain handles after extraction/execution.
+    await rm(extractionRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 250 });
   }
 }
 

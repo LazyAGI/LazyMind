@@ -67,16 +67,11 @@ function UserMessageWithMentions({ text, mentions }: { text: string; mentions?: 
     const end = start >= 0 ? start + displayName.length : -1;
     if (end >= 0) cursor = end;
     return { mention, start, end };
-  }).filter((item) => item.start >= 0).sort((a, b) => a.start - b.start);
-  if (ranges.length === 0) return <>{text}</>;
-  cursor = 0;
-  const content: React.ReactNode[] = [];
-  ranges.forEach(({ mention, start, end }, index) => {
-    if (start < cursor) return;
-    if (start > cursor) content.push(text.slice(cursor, start));
+  }).sort((a, b) => a.start - b.start);
+  const renderReference = (mention: ChatMention, index: number) => {
     const href = mentionHref(mention);
     const label = `${mention.display_name}\n${mention.type}\nID: ${mention.resource_id}`;
-    content.push(
+    return (
       <Tooltip title={<span style={{ whiteSpace: "pre-line" }}>{label}</span>} key={`${mention.mention_id}-${index}`}>
         <a
           className="chat-history-mention"
@@ -93,12 +88,25 @@ function UserMessageWithMentions({ text, mentions }: { text: string; mentions?: 
           {MENTION_ICONS[mention.type] || <BookOutlined />}
           <span>{mention.display_name}</span>
         </a>
-      </Tooltip>,
+      </Tooltip>
     );
+  };
+  cursor = 0;
+  const content: React.ReactNode[] = [];
+  ranges.filter(({ start }) => start >= 0).forEach(({ mention, start, end }, index) => {
+    if (start < cursor) return;
+    if (start > cursor) content.push(text.slice(cursor, start));
+    content.push(renderReference(mention, index));
     cursor = end;
   });
   if (cursor < text.length) content.push(text.slice(cursor));
-  return <>{content}</>;
+  const boundReferences = ranges.filter(({ mention, start }) => start < 0 && mention.display_name?.trim());
+  return <>
+    {boundReferences.length > 0 && <div className="chat-history-resource-mentions">
+      {boundReferences.map(({ mention }, index) => renderReference(mention, index))}
+    </div>}
+    {content}
+  </>;
 }
 
 interface MessageListProps {

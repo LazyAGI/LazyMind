@@ -1,3 +1,4 @@
+import PythonComponentDependencies from "./PythonComponentDependencies";
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import {
   Alert,
@@ -367,6 +368,7 @@ export default function DependencyInstallSection() {
 
   return (
     <>
+      <PythonComponentDependencies />
       <section
         className="model-provider-service-category"
         id="ffmpeg-dependency"
@@ -415,7 +417,7 @@ export default function DependencyInstallSection() {
                 <span className="model-provider-service-logo" aria-hidden="true">
                   <img
                     alt=""
-                    className="model-provider-dependency-inline-icon"
+                    className="model-provider-dependency-inline-icon is-loaded"
                     src={DEPENDENCY_ICON_DATA_URL}
                   />
                 </span>

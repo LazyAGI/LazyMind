@@ -840,6 +840,18 @@
     }
   }
 
+  &__generation-process.ant-collapse {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #f8fafc;
+
+    > .ant-collapse-item > .ant-collapse-header {
+      color: #64748b;
+      font-size: 12px;
+      align-items: center;
+    }
+  }
+
   &__auto-grid {
     display: flex;
     flex-direction: column;
@@ -1027,6 +1039,14 @@
     flex: 1 1 auto;
     min-width: 0;
     gap: 12px;
+  }
+
+  &__document-item-actions {
+    margin-top: 8px;
+
+    &:empty {
+      display: none;
+    }
   }
 
   &__footer-meta {

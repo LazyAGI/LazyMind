@@ -2124,6 +2124,12 @@ const enUS = {
 
   // Chat
   chat: {
+    sidebar: {
+      expand: "Expand", collapse: "Collapse",
+      overview: "Overview", sidechat: "Side chat", open: "Open side panel", close: "Collapse side panel",
+      switch: "Switch side panel", intent: "User intent", intentEmpty: "Intent from this conversation will appear here",
+      attachments: "Attachments", artifacts: "Artifacts", empty: "Nothing here yet",
+    },
     exportCurrentGeneration: "Current generation",
     exportPreviousGeneration: "Previous generation",
     exportUnknownGeneration: "Unknown generation",
@@ -2443,6 +2449,7 @@ const enUS = {
     conversationRelationBannerLabel: "Child conversation source",
     conversationSourceFrom: "Source: {{parent}}",
     conversationForkedFrom: "Branch source: {{parent}}",
+    conversationGroupSource: "Group: {{group}}",
     returnToParentConversation: "Return to main conversation",
     contextPanel: {
       resumeSideChat: "Continue side chat",
@@ -2490,6 +2497,8 @@ const enUS = {
       closeConfirmTitle: "Close and discard this side chat?",
       closeConfirmDescription:
         "This unsaved side chat will be deleted and cannot be recovered.",
+      closeRetainedConfirmTitle: "Close this side chat?",
+      closeRetainedConfirmDescription: "This side chat has been kept and will remain available in conversation history.",
       closeAndDiscard: "Close and discard",
       continue: "Continue side chat",
       generatingUnavailable:
@@ -2773,6 +2782,7 @@ const enUS = {
         service_unavailable: "The model service is overloaded or temporarily unavailable.",
         provider_internal_error: "The model service encountered an internal processing error.",
         provider_rejected: "The model service request failed for an unrecognized reason.",
+        request_rejected: "The server rejected the chat request. Check the service configuration and logs, then retry.",
         protocol_error: "The model service returned an invalid response.",
         transport_error: "A stable connection to the model service could not be established.",
         length: "The response reached a length limit and is incomplete.",
@@ -3209,6 +3219,7 @@ const enUS = {
     workflowRowAria: "Row {{index}}",
     workflowImageAria: "Image {{index}}",
     workflowContentItemAria: "Content item {{index}}",
+    workflowGenerationProcess: "Generation details",
     workflowStatusAria: "Workflow status: {{status}}",
     workflowViewWorkflow: "View workflow",
     workflowMoreActions: "Workflow actions",
@@ -4079,6 +4090,13 @@ const enUS = {
     marketTaskAdded: "Added to background tasks",
     marketTaskAddedDescription: "{{name}} will be downloaded, chunked, and vectorized in the background.",
     marketTaskCompleted: "Task completed",
+    marketUpdateStarted: "Update started",
+    marketUpdateStartedDescription: "{{name}} has been added to background updates.",
+    marketUpdateAllStarted: "Batch update started",
+    marketUpdateAllStartedDescription: "{{count}} knowledge bases have been added to background updates.",
+    marketUpdateCompleted: "Update complete",
+    marketUpdateCompletedDescription: "{{name}} is ready to use in conversations.",
+    marketUpdateViewDetails: "View details",
     squareTypeTabs: "Knowledge types",
     industryKnowledge: "Domain Knowledge Bases",
     evaluationKnowledge: "LazyMind Evaluation Sets",
@@ -8451,6 +8469,7 @@ const enUS = {
       E_MATERIAL_MULTIPLE_PRODUCERS: "Material {{material}} is produced by multiple steps",
       E_MATERIAL_SELF_OVERWRITE: "Step {{node}} cannot consume and produce material {{material}}",
       E_MATERIAL_PRODUCER_NOT_UPSTREAM: "Producer {{producer}} of material {{material}} must be upstream of step {{node}}",
+      E_RUNTIME_POST_CHECK_MATERIAL_NOT_PRODUCED: "Post-step check for step {{node}} references material {{material}}, which the step does not produce",
       E_STEP_ID_REQUIRED: "Step id is required",
       E_STEP_DUPLICATE: "Duplicate step id: {{node}}",
       E_STATE_STEP_MISSING: "Step {{node}} has no state configuration",
@@ -9347,6 +9366,10 @@ const enUS = {
     },
 
     skills: {
+      searchResources: "Search name or description",
+      resourceName: "Name",
+      resourceInfo: "Category / version",
+      resourceEnabled: "Enabled",
       title: "Skills & plugins",
       description: "Enable or disable personal skills and workflows for the current account independently.",
       mySkills: "My skills",

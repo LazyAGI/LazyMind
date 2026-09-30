@@ -216,6 +216,8 @@ Windows 使用 `make local-win-down`。完整配置见 [快速开始](docs/quick
 
 ### 构建桌面应用
 
+Mac 本地打包并上传 RAG 依赖，请按 [Mac 构建、上传与安装验证流程](desktop/INSTALL.zh-CN.md) 操作。文档包含构建环境、原始组件 ZIP 的位置、ModelScope 上传及安装后测试步骤。
+
 | 平台 | 命令 | 产物 |
 |------|------|------|
 | macOS arm64 | `make desktop-darwin-arm64` | macOS 桌面应用 |

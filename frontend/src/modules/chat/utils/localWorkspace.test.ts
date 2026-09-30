@@ -35,6 +35,13 @@ it("passes search and inactive filters to Core", async () => {
     params: { query: "project", include_inactive: true },
   });
 });
+it("requests manageable workspaces without revoked grants", async () => {
+  vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [] } } });
+  await listWorkspaces({ includeInactive: true, excludeRevoked: true });
+  expect(axiosInstance.get).toHaveBeenCalledWith("/api/core/local-workspaces", {
+    params: { include_inactive: true, exclude_revoked: true },
+  });
+});
 
 it("loads bounded Core approval summaries through the encoded conversation route", async () => {
   const signal = new AbortController().signal;

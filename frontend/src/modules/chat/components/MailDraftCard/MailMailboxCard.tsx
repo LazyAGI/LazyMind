@@ -44,7 +44,7 @@ export default function MailMailboxCard({
   const choices = mailboxChoices(draft);
 
   return (
-    <div className="mail-draft-card">
+    <div className="mail-draft-card mail-mailbox-card">
       <Typography.Title level={5}>{t("chat.mailMailbox.title")}</Typography.Title>
       <Typography.Paragraph type="secondary">
         {t("chat.mailMailbox.description")}

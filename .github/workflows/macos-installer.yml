@@ -34,6 +34,11 @@ env:
   GOPROXY: https://proxy.golang.org,direct
   PIP_INDEX_URL: https://pypi.org/simple
   UV_DEFAULT_INDEX: https://pypi.org/simple
+  LAZYMIND_DESKTOP_DEFER_HISTORY: "true"
+  LAZYMIND_DESKTOP_DEFER_PYTHON: "true"
+  LAZYMIND_PYTHON_COMPONENT_BASE_URL: ${{ vars.LAZYMIND_PYTHON_COMPONENT_BASE_URL }}
+  LAZYMIND_DESKTOP_SHARE_PYTHON: "false"
+  LAZYMIND_DESKTOP_PRUNE_PYTHON: "true"
 
 jobs:
   build-macos-installer:
@@ -557,6 +562,27 @@ jobs:
           spctl --assess --type open --context context:primary-signature --verbose=4 "${final_path}"
           echo "installer_path=${final_path}" >> "${GITHUB_OUTPUT}"
           echo "artifact_name=$(basename "${final_path}")" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload optional Python components
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-python-components
+          path: desktop/dist/python-components/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload PDF font and final runtime reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-desktop-optional-resources
+          path: |
+            desktop/dist/pdf-font/
+            desktop/build/*/final-runtime-size.json
+            desktop/build/*/runtime/config/python-sharing.json
+            desktop/dist/mac*/LazyMind.app/Contents/Resources/runtime/config/python-sharing.json
+          if-no-files-found: ignore
 
       - name: Upload final notarized installer
         if: steps.release.outputs.official_release == 'true' && steps.dmg_notarization.outputs.status == 'Accepted'

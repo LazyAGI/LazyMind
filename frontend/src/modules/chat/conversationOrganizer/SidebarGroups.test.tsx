@@ -1,11 +1,12 @@
 import { act, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { useState } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SidebarGroups, { type GroupBatchSelection } from "./SidebarGroups";
 import * as api from "./api";
 import { CONVERSATION_DRAG, GROUP_DRAG } from "./drag";
 const t = (key: string, values?: { name?: string }) => values?.name ? `${key} ${values.name}` : key;
+vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getUserInfo: () => ({ userId: "sidebar-owner" }) }, AUTH_USER_CHANGE_EVENT: "sidebar-user-change" }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t }) }));
 vi.mock("@/components/request", () => ({ axiosInstance: {}, BASE_URL: "" }));
 vi.mock("@/modules/chat/utils/request", () => ({ ChatServiceApi: () => ({ conversationServiceGetConversationDetail: vi.fn().mockResolvedValue({ data: { conversation: { display_name: "a对话0", title_revision: 1 } } }) }) }));
@@ -21,10 +22,103 @@ function BatchGroups() {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
+  vi.mocked(api.updateGroupPlacement).mockImplementation(async (id, input) => groups.map(group => group.id === id ? { ...group, ...input } : group));
   vi.mocked(api.getConversationGroup).mockImplementation(async id => ({ group: groups.find(g => g.id === id)!, conversations: Array.from({ length: 6 }, (_, i) => ({ conversation_id: `${id}-${i}`, display_name: `${id}对话${i}`, pinned_at: "", membership_revision: 1 })), nextPageToken: "", total: 6 }));
   vi.mocked(api.listConversationGroups).mockResolvedValue(groups);
 });
+afterEach(() => vi.restoreAllMocks());
 describe("group sidebar", () => {
+  it.each([false, true])("shows each member's update date without inventing missing dates (batch: %s)", async (batch) => {
+    vi.mocked(api.getConversationGroup).mockResolvedValue({
+      group: groups[0],
+      conversations: [
+        { conversation_id: "dated", display_name: "有时间", membership_revision: 1, updated_at: "2026-09-29T03:13:00Z" },
+        { conversation_id: "missing", display_name: "无时间", membership_revision: 1 },
+        { conversation_id: "invalid", display_name: "无效时间", membership_revision: 1, updated_at: "invalid" },
+      ],
+      nextPageToken: "",
+      total: 3,
+    });
+    render(<MemoryRouter><SidebarGroups groups={[groups[0]]} onEdit={vi.fn()} onRemove={vi.fn()} batchSelection={batch ? { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn(), onMembersChange: vi.fn() } : undefined} /></MemoryRouter>);
+    const dated = (await screen.findByText("有时间")).closest(".conversation-group-member")!;
+    expect(dated.querySelector("time")).toHaveTextContent("09/29");
+    expect(dated.querySelector("time")).toHaveAttribute("datetime", "2026-09-29T03:13:00Z");
+    for (const title of ["无时间", "无效时间"]) {
+      expect(screen.getByText(title).closest(".conversation-group-member")!.querySelector("time")).toBeNull();
+    }
+  });
+
+  it("reads collapse state from the backend instead of legacy browser storage", async () => {
+    localStorage.setItem("lazymind:collapsed-conversation-groups:sidebar-owner", '["b"]');
+    render(<MemoryRouter><SidebarGroups groups={[{ ...groups[0], collapsed: true }, { ...groups[1], collapsed: false }]} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
+    expect(await screen.findByTitle("旅行")).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByTitle("学习")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.queryByText("a对话0")).not.toBeInTheDocument();
+  });
+
+  it("saves both collapse and expansion through the placement API", async () => {
+    const view = renderGroups();
+    fireEvent.click(await screen.findByTitle("旅行"));
+    await waitFor(() => expect(api.updateGroupPlacement).toHaveBeenCalledWith("a", { collapsed: true }));
+    await waitFor(() => expect(screen.getByTitle("旅行")).toHaveAttribute("aria-expanded", "false"));
+    expect(api.emitConversationGroupsChanged).toHaveBeenCalled();
+    expect(localStorage.getItem("lazymind:collapsed-conversation-groups:sidebar-owner")).toBeNull();
+    view.unmount();
+    render(<MemoryRouter><SidebarGroups groups={[{ ...groups[0], collapsed: true }]} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
+    fireEvent.click(await screen.findByTitle("旅行"));
+    await waitFor(() => expect(api.updateGroupPlacement).toHaveBeenLastCalledWith("a", { collapsed: false }));
+    await waitFor(() => expect(screen.getByTitle("旅行")).toHaveAttribute("aria-expanded", "true"));
+  });
+
+  it("keeps the saved state on failure and allows retry without duplicate in-flight requests", async () => {
+    let reject!: (reason: Error) => void;
+    vi.mocked(api.updateGroupPlacement).mockReturnValueOnce(new Promise((_, fail) => { reject = fail; }));
+    renderGroups();
+    const button = await screen.findByTitle("旅行");
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(api.updateGroupPlacement).toHaveBeenCalledTimes(1);
+    expect(button).toBeDisabled();
+    await act(async () => reject(new Error("Request failed")));
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    expect(button).toBeEnabled();
+    expect(api.emitConversationGroupsChanged).not.toHaveBeenCalled();
+    fireEvent.click(button);
+    await waitFor(() => expect(button).toHaveAttribute("aria-expanded", "false"));
+  });
+
+  it("applies refreshed server state and temporarily expands search results without saving", async () => {
+    const renderSidebar = (collapsed: boolean, searchText = "") => <MemoryRouter><SidebarGroups groups={[{ ...groups[0], collapsed }]} searchText={searchText} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>;
+    const view = render(renderSidebar(false));
+    expect(await screen.findByTitle("旅行")).toHaveAttribute("aria-expanded", "true");
+    view.rerender(renderSidebar(true));
+    expect(screen.getByTitle("旅行")).toHaveAttribute("aria-expanded", "false");
+    view.rerender(renderSidebar(true, "旅行"));
+    await waitFor(() => expect(screen.getByTitle("旅行")).toHaveAttribute("aria-expanded", "true"));
+    view.rerender(renderSidebar(true));
+    expect(screen.getByTitle("旅行")).toHaveAttribute("aria-expanded", "false");
+    expect(api.updateGroupPlacement).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("saves ordinary group pin changes from pinned=%s", async pinned => {
+    render(<MemoryRouter><SidebarGroups groups={[{ ...groups[0], pinned }]} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
+    await screen.findByTitle("旅行");
+    expect(Boolean(screen.queryByText("conversationOrganizer.pinnedGroups"))).toBe(pinned);
+    fireEvent.click(screen.getByRole("button", { name: "conversationOrganizer.groupMore 旅行" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: pinned ? /conversationOrganizer\.unpinGroup/ : /conversationOrganizer\.pinGroup/ }));
+    await waitFor(() => expect(api.updateGroupPlacement).toHaveBeenCalledWith("a", { pinned: !pinned }));
+    expect(api.emitConversationGroupsChanged).toHaveBeenCalled();
+  });
+
+  it("places pinned groups before ordinary groups and preserves their collapsed state", async () => {
+    const view = render(<MemoryRouter><SidebarGroups groups={[groups[0], { ...groups[1], pinned: true, collapsed: true }]} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
+    await screen.findByTitle("旅行");
+    expect(Array.from(view.container.querySelectorAll(".conversation-group-name")).map(node => node.textContent)).toEqual(["学习", "旅行"]);
+    expect(screen.getByTitle("学习")).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("b对话0")).not.toBeInTheDocument();
+  });
+
   it("shows a project folder and rejects member drag operations", async () => {
     const project = { ...groups[0], kind: "project", path: "/work/project" } as api.ConversationGroup;
     render(<MemoryRouter><SidebarGroups groups={[project]} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
@@ -119,9 +213,9 @@ describe("group sidebar", () => {
     expect(api.assignConversation).not.toHaveBeenCalled();
     expect(group.closest('[draggable]')).toHaveAttribute('draggable', 'false');
     fireEvent.click(group);
-    expect(screen.queryByRole('checkbox', { name: 'a对话5' })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('checkbox', { name: 'a对话5' })).not.toBeInTheDocument());
     fireEvent.click(group);
-    expect(screen.getByRole('checkbox', { name: 'a对话5' })).toBeChecked();
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'a对话5' })).toBeChecked());
     expect(screen.queryByRole('button', { name: 'conversationOrganizer.newGroup' })).not.toBeInTheDocument();
   });
   it('keeps the group bubble icon while expanding and collapsing members', async () => {
@@ -130,7 +224,7 @@ describe("group sidebar", () => {
     expect(group).toHaveAttribute('aria-expanded', 'true');
     expect(group.querySelector('[data-icon="message"]')).not.toBeNull();
     fireEvent.click(group);
-    expect(group).toHaveAttribute('aria-expanded', 'false');
+    await waitFor(() => expect(group).toHaveAttribute('aria-expanded', 'false'));
     expect(group.querySelector('[data-icon="message"]')).not.toBeNull();
     expect(screen.queryByText('a对话0')).not.toBeInTheDocument();
   });
@@ -216,27 +310,33 @@ it("rejects conversation drops into projects and keeps project members immovable
 });
 
 it.each([
-  ["b", "p", 105, "p"],
-  ["b", "p", 125, "c"],
-  ["p", "a", 105, "a"],
-  ["p", "a", 125, "b"],
-])("orders %s around %s within the mixed list", async (source, targetID, clientY, anchor) => {
+  ["b", "p", 105, "p", false],
+  ["b", "p", 125, "c", false],
+  ["p", "a", 105, "a", false],
+  ["p", "a", 125, "b", false],
+  ["b", "pin", 105, "pin", true],
+  ["b", "pin", 125, "pinned-group", true],
+  ["pinned-group", "pin", 105, "pin", true],
+  ["pinned-group", "a", 125, "p", false],
+])("orders %s around %s within the mixed list", async (source, targetID, clientY, anchor, pinned) => {
   const mixed = [
     { id: "a", name: "A", kind: "group", pinned: false },
     { id: "p", name: "P", kind: "project", path: "/work/p", pinned: false },
     { id: "task", name: "Task", kind: "group", is_task_conv: true, pinned: false },
-    { id: "pin", name: "Pin", kind: "group", pinned: true },
+    { id: "pin", name: "Pin", kind: "project", pinned: true },
+    { id: "pinned-group", name: "Pinned group", kind: "group", pinned: true },
     { id: "b", name: "B", kind: "group", pinned: false },
     { id: "c", name: "C", kind: "group", pinned: false },
   ] as api.ConversationGroup[];
   vi.mocked(api.getConversationGroup).mockImplementation(async id => ({ group: mixed.find(g => g.id === id)!, conversations: [], nextPageToken: "" }));
   render(<MemoryRouter><SidebarGroups groups={mixed} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
-  const target = (await screen.findByTitle(targetID === "p" ? "/work/p" : "A")).closest(".conversation-group")!;
+  const targetGroup = mixed.find(group => group.id === targetID)!;
+  const target = (await screen.findByTitle(targetGroup.path || targetGroup.name)).closest(".conversation-group")!;
   vi.spyOn(target.querySelector(".conversation-group-row")!, "getBoundingClientRect").mockReturnValue({ top: 100, height: 32 } as DOMRect);
   fireEvent.drop(target, { dataTransfer: transfer(GROUP_DRAG, "task") });
   expect(api.updateGroupPlacement).not.toHaveBeenCalled();
   const drop = createEvent.drop(target, { dataTransfer: transfer(GROUP_DRAG, source) });
   Object.defineProperty(drop, "clientY", { value: clientY });
   fireEvent(target, drop);
-  await waitFor(() => expect(api.updateGroupPlacement).toHaveBeenCalledWith(source, { pinned: false, before_group_id: anchor }));
+  await waitFor(() => expect(api.updateGroupPlacement).toHaveBeenCalledWith(source, { pinned, before_group_id: anchor }));
 });

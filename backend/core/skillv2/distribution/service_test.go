@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -61,6 +62,28 @@ func TestPrepareCommitAndRollbackDistributionUpgrade(t *testing.T) {
 	}
 	if current := fixture.currentArchive(t); current != fixture.baseArchive {
 		t.Fatalf("distribution after rollback = %q", current)
+	}
+}
+
+func TestDistributionStatusReadsMetadataAndExplicitPrepareAcquiresPackage(t *testing.T) {
+	fixture := newUpgradeFixture(t, "old\n", "old\n", "new\n")
+	provider := &recordingPackageProvider{packageFiles: fixture.latest}
+	service := skilldistribution.NewService(skilldistribution.ServiceDeps{
+		DB: fixture.db.DB, Blobs: fixture.blobs, Provider: provider,
+	})
+	status, err := service.GetStatus(context.Background(), skilldistribution.StatusRequest{SkillID: "skill1", UserID: "user_001"})
+	if err != nil || !status.UpdateAvailable || provider.acquisitions != 0 {
+		t.Fatalf("metadata status=%#v acquisitions=%d err=%v", status, provider.acquisitions, err)
+	}
+	_, err = service.Prepare(context.Background(), skilldistribution.PrepareRequest{SkillID: "skill1", UserID: "user_001"})
+	if !errors.Is(err, skilldistribution.ErrPackageUnavailable) || provider.acquisitions != 0 {
+		t.Fatalf("implicit prepare err=%v acquisitions=%d", err, provider.acquisitions)
+	}
+	prepared, err := service.Prepare(context.Background(), skilldistribution.PrepareRequest{
+		SkillID: "skill1", UserID: "user_001", DownloadPackage: true,
+	})
+	if err != nil || prepared.DraftVersion == 0 || provider.acquisitions != 1 {
+		t.Fatalf("explicit prepare=%#v acquisitions=%d err=%v", prepared, provider.acquisitions, err)
 	}
 }
 
@@ -366,6 +389,25 @@ func skillContent(body string) string {
 
 type staticProvider struct {
 	pkg skilldistribution.Package
+}
+
+type recordingPackageProvider struct {
+	packageFiles skilldistribution.Package
+	acquisitions int
+}
+
+func (provider *recordingPackageProvider) Latest(uid string) (skilldistribution.Package, bool, error) {
+	metadata := provider.packageFiles
+	metadata.Files = nil
+	return metadata, uid == metadata.UID, nil
+}
+
+func (provider *recordingPackageProvider) Acquire(_ context.Context, uid string) (skilldistribution.Package, error) {
+	provider.acquisitions++
+	if uid != provider.packageFiles.UID {
+		return skilldistribution.Package{}, errors.New("unknown package")
+	}
+	return provider.packageFiles, nil
 }
 
 type revisionCommitter struct {

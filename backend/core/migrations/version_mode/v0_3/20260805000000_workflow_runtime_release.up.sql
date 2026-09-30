@@ -1901,6 +1901,7 @@ CREATE TABLE conversation_opening_backfills (
 -- +migrate Dialect postgres,sqlite
 -- Active conversation groups and incremental organizer
 CREATE TABLE conversation_groups (
+ collapsed BOOLEAN NOT NULL DEFAULT FALSE,
  is_task_conv BOOLEAN NOT NULL DEFAULT FALSE,
  kind VARCHAR(16) NOT NULL DEFAULT 'group', workspace_id VARCHAR(64), project_path TEXT,
  pinned BOOLEAN NOT NULL DEFAULT FALSE, sort_order BIGINT NOT NULL DEFAULT 0,

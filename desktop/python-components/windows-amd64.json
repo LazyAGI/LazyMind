@@ -1,0 +1,53 @@
+{
+  "arch": "amd64",
+  "baseFingerprint": "e2a487e276524fb0c73111fa6239477756041085dc6869e3840442baf3ea1daa",
+  "components": {
+    "rag": {
+      "arch": "amd64",
+      "baseFingerprint": "e2a487e276524fb0c73111fa6239477756041085dc6869e3840442baf3ea1daa",
+      "filename": "lazymind-python-rag-windows-amd64-cp311-e262c0d2f05fe09d.zip",
+      "id": "rag",
+      "packages": {
+        "blis": "0.7.11",
+        "bm25s": "0.1.10",
+        "cachetools": "7.2.0",
+        "catalogue": "2.0.10",
+        "cloudpathlib": "0.25.0",
+        "confection": "0.1.5",
+        "cymem": "2.0.13",
+        "faiss-cpu": "1.15.1",
+        "langcodes": "3.5.1",
+        "milvus-lite": "3.0",
+        "murmurhash": "1.0.15",
+        "nltk": "3.10.3",
+        "orjson": "3.12.0",
+        "preshed": "3.0.13",
+        "pyarrow": "25.0.1",
+        "pymilvus": "3.0.0",
+        "pystemmer": "2.2.0.3",
+        "sentencepiece": "0.2.2",
+        "smart-open": "7.7.1",
+        "spacy": "3.7.5",
+        "spacy-legacy": "3.0.12",
+        "spacy-loggers": "1.0.5",
+        "srsly": "2.5.3",
+        "thinc": "8.2.5",
+        "typer-slim": "0.24.0",
+        "wasabi": "1.1.3",
+        "weasel": "0.4.3",
+        "wrapt": "2.4.1"
+      },
+      "platform": "windows",
+      "pythonAbi": "cp311",
+      "revision": "e262c0d2f05fe09db1b20c23058dbed6e8cb52ea7541dd846021e19e07c6b324",
+      "schemaVersion": 1,
+      "sha256": "258944a85d5aa29c0eb662ab21888c5c2894fdfb2c503d51f2129efa4e083bed",
+      "sizeBytes": 69342263,
+      "unpackedBytes": 271444467,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/lazymind-python-rag-windows-amd64-cp311-e262c0d2f05fe09d.zip"
+    }
+  },
+  "platform": "windows",
+  "pythonAbi": "cp311",
+  "schemaVersion": 1
+}

@@ -28,7 +28,7 @@ func TestLoadWorkflowBuiltinSkill(t *testing.T) {
 	if err != nil || content != "guide" || name != "references/guide" {
 		t.Fatalf("child content=%q name=%q err=%v", content, name, err)
 	}
-	snapshot, err := loadWorkflowBuiltinSkillPackage("builtin:" + uid)
+	snapshot, err := loadWorkflowBuiltinSkillPackage(context.Background(), "builtin:"+uid)
 	if err != nil || snapshot.TreeHash == "" || len(snapshot.Files) != 2 {
 		t.Fatalf("builtin snapshot=%#v err=%v", snapshot, err)
 	}
@@ -83,11 +83,17 @@ func useWorkflowBuiltinCatalog(t *testing.T) string {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(body)
+	archiveSHA := hex.EncodeToString(digest[:])
+	cacheRoot := t.TempDir()
+	if err := os.Rename(archivePath, filepath.Join(cacheRoot, archiveSHA+".zip")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAZYMIND_BUILTIN_SKILL_CACHE", cacheRoot)
 	uid := "bsk_workflow"
 	catalog := skillbuiltin.Catalog{SchemaVersion: skillbuiltin.CatalogSchemaVersion, Skills: []skillbuiltin.CatalogSkill{{
 		Key: "deep-research", UID: uid, SourceURL: "builtin://research/deep-research", ResolvedURL: "builtin://research/deep-research",
 		Version: "1.0.0", Name: "deep-research", Description: "research", Category: "research",
-		ArchiveSHA256: hex.EncodeToString(digest[:]), TreeSHA256: skillpackage.TreeHash(files), ArchiveSize: int64(len(body)), PackageFile: "packages/workflow.zip",
+		ArchiveSHA256: archiveSHA, TreeSHA256: skillpackage.TreeHash(files), ArchiveSize: int64(len(body)), PackageFile: "packages/workflow.zip", Content: string(files["SKILL.md"]),
 	}}}
 	catalogBody, err := json.Marshal(catalog)
 	if err != nil {

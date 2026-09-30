@@ -324,7 +324,9 @@ export default function SkillInstalledView({
               />
             ),
           }}
-          scroll={tableScroll}
+          // Let the existing flex layout own the viewport height. A cached pixel
+          // measurement from selection/review mode can leave only two rows visible.
+          scroll={{ x: tableScroll?.x ?? 656, y: "100%" }}
         />
       </div>
     </div>

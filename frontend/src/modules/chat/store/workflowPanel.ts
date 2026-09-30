@@ -471,6 +471,8 @@ export interface TabDef {
   label: string;
   layout?: 'grid' | 'list' | 'vertical' | 'composite' | 'horizontal';
   slots: SlotDef[];
+  /** List layout: fold intermediate materials after the result is available. */
+  generation_process?: { result_slot: string; slots: string[] };
   /** Composite layout tree (format C) or legacy array (will be normalised at runtime). */
   composite_layout?: CompositePanelNode | CompositeLayoutNode[];
   /** Composite mode: global tab-bar position. */

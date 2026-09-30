@@ -10,7 +10,7 @@ describe('dataset duplicate-name error copy', () => {
 
     expect(catalog['2001102']).toEqual({
       'en-US': 'A dataset with this name already exists. Use a unique name.',
-      'zh-CN': '数据集名称已存在，请使用未被占用的名称',
+      'zh-CN': '知识库名称已存在，请使用未被占用的名称',
     });
   });
 });
