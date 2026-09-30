@@ -130,6 +130,7 @@ func NotificationPreferences(w http.ResponseWriter, r *http.Request) {
 			replyNotificationError(w, r, err)
 			return
 		}
+		clearNotificationDefaultTargets(req.Defaults)
 	}
 	var result orm.UserNotificationPreferences
 	err := notificationTx(r.Context(), db, func(tx *gorm.DB) error {
@@ -382,16 +383,6 @@ func NotificationAccountReferences(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		return nil
-	}
-	prefs, err := ReadNotificationPreferences(r.Context(), db, owner)
-	if err != nil {
-		replyNotificationError(w, r, err)
-		return
-	}
-	raw := string(prefs.Defaults)
-	if err = appendReference(&raw, "defaults", "defaults", "默认通知配置"); err != nil {
-		replyNotificationError(w, r, err)
-		return
 	}
 	var schedules []orm.UserSchedule
 	if err = db.Where("user_id = ? AND notification_config IS NOT NULL", owner).Order("id").Find(&schedules).Error; err != nil {

@@ -105,7 +105,8 @@ func TestNotificationSchedulerGatewayEndToEnd(t *testing.T) {
 	}
 	preferences := a.data("GET", "/user/notification-preferences", "owner", nil)
 	a.data("PATCH", "/user/notification-preferences", "owner", map[string]any{"revision": preferences["revision"], "defaults": config})
-	a.schedule("e2e-daily", false)
+	schedulePath := a.schedule("e2e-daily", false)
+	a.save(schedulePath, config)
 	response := a.request("POST", "/schedules/e2e-daily:run-now", "owner", nil)
 	if response.Code != 200 {
 		t.Fatalf("run-now failed: %s", response.Body.String())

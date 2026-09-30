@@ -156,6 +156,21 @@ describe('notification settings and task UI', () => {
     fireEvent.click(screen.getByRole('button', { name: 'notifications.confirmClose' }));
     await waitFor(() => expect(mocks.patch).toHaveBeenCalledTimes(1));
   });
+  it('saves only channel switches from settings even when old defaults contain targets', async () => {
+    const legacy = { ...defaults, channels: { ...defaults.channels, feishu: { enabled: false, account_id: 'account', recipient_id: 'group' } } };
+    mocks.prefs.mockResolvedValue({ revision: 3, enabled: true, defaults: legacy });
+    mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: provider === 'feishu' ? [{ id: 'account', provider, status: 'connected' }] : [] }));
+    mocks.patch.mockResolvedValue({ revision: 4, enabled: true, defaults: { ...legacy, channels: { ...legacy.channels, feishu: { enabled: true } } } });
+    mount(<NotificationSettings />);
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'notifications.feishu' }));
+
+    await waitFor(() => expect(mocks.patch).toHaveBeenCalledWith(expect.objectContaining({
+      revision: 3,
+      defaults: expect.objectContaining({ channels: expect.objectContaining({ feishu: { enabled: true } }) }),
+    })));
+    expect(screen.queryByRole('combobox', { name: 'notifications.recipient' })).not.toBeInTheDocument();
+  });
   it('leaves an old unconfigured task unchanged on viewing and canceling', async () => {
     mount(<ScheduleNotificationPanel scheduleId="old" />);
     expect(await screen.findByText('notifications.unconfigured')).toBeInTheDocument();
@@ -196,30 +211,24 @@ describe('notification settings and task UI', () => {
     fireEvent.click(await screen.findByText('Two'));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ channels: expect.objectContaining({ feishu: { enabled: true, account_id: 'a', recipient_id: 'two' } }) }));
   });
-  it('requires a complete target before enabling a default channel', async () => {
+  it('enables a global channel without selecting a task recipient', async () => {
     mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: provider === 'feishu' ? [{ id: 'a', provider: 'feishu', label: 'Account A', status: 'connected' }] : [] }));
-    mocks.targets.mockResolvedValue({ items: [{ recipient_id: 'group-a', label: 'Group A', available: true }], next_cursor: '' });
     const onChange = vi.fn(); mount(<RuleEditor value={defaults} onChange={onChange} />);
 
     fireEvent.click(await screen.findByRole('switch', { name: 'notifications.feishu' }));
-    expect(onChange).not.toHaveBeenCalled();
-    fireEvent.mouseDown(await screen.findByRole('combobox', { name: 'notifications.account' }));
-    fireEvent.click(await screen.findByText('Account A'));
-    await waitFor(() => expect(mocks.targets).toHaveBeenCalledWith('a'));
-    expect(onChange).not.toHaveBeenCalled();
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'notifications.recipient' }));
-    fireEvent.click(await screen.findByText('Group A'));
-
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ channels: expect.objectContaining({ feishu: { enabled: true, account_id: 'a', recipient_id: 'group-a' } }) }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ channels: expect.objectContaining({ feishu: { enabled: true } }) }));
+    expect(screen.queryByRole('combobox', { name: 'notifications.account' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'notifications.recipient' })).not.toBeInTheDocument();
+    expect(mocks.targets).not.toHaveBeenCalled();
   });
-  it('preserves the saved target when a default channel is toggled', async () => {
+  it('drops a legacy default target when its global channel is toggled', async () => {
     mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: provider === 'feishu' ? [{ id: 'a', provider: 'feishu', label: 'Account A', status: 'connected' }] : [] }));
     defaults.channels.feishu = { enabled: true, account_id: 'a', recipient_id: 'group-a' };
     const onChange = vi.fn(); mount(<RuleEditor value={defaults} onChange={onChange} />);
 
     fireEvent.click(await screen.findByRole('switch', { name: 'notifications.feishu' }));
 
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ channels: expect.objectContaining({ feishu: { enabled: false, account_id: 'a', recipient_id: 'group-a' } }) }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ channels: expect.objectContaining({ feishu: { enabled: false } }) }));
   });
   it('allows replacing an unavailable selected account with another connected account', async () => {
     mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: provider === 'feishu' ? [

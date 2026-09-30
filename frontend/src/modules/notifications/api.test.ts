@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { availabilityError, emptyRule, getPreferences, getScheduleNotifications, notificationError, patchPreferences, putScheduleNotifications, retryNotice, ruleError } from './api';
+import { availabilityError, channelSwitchDefaults, emptyRule, getPreferences, getScheduleNotifications, notificationError, patchPreferences, putScheduleNotifications, retryNotice, ruleError, taskRuleFromDefaults } from './api';
 import { createConnectionSession } from '@/modules/channelGateway/api';
 const http = vi.hoisted(() => ({ request: vi.fn(), defaults: {}, post: vi.fn() }));
 vi.mock('@/components/request', () => ({ BASE_URL: '', axiosInstance: http }));
@@ -42,6 +42,13 @@ describe('notification API contracts', () => {
     expect(ruleError(config)).toBe('NOTIFICATION_TARGET_REQUIRED');
     config.channels.wecom = { enabled: true, account_id: 'a' };
     expect(ruleError(config)).toBeUndefined();
+  });
+  it('keeps global channel switches separate from task recipients', () => {
+    const config = emptyRule();
+    config.channels.wecom = { enabled: true, account_id: 'old-account', recipient_id: 'old-group' };
+    expect(channelSwitchDefaults(config).channels.wecom).toEqual({ enabled: true });
+    expect(taskRuleFromDefaults(config).channels.wecom).toEqual({ enabled: false });
+    expect(config.channels.wecom).toEqual({ enabled: true, account_id: 'old-account', recipient_id: 'old-group' });
   });
   it('extracts safe reasons without displaying raw errors', () => {
     expect(notificationError({ response: { data: { data: { detail: { reason: 'NOTIFICATION_CONFIRMATION_REQUIRED', running_task_ids: ['r'] } } } } })).toEqual({ reason: 'NOTIFICATION_CONFIRMATION_REQUIRED', running_task_ids: ['r'] });

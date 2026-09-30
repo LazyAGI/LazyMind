@@ -69,6 +69,16 @@ export function notificationError(error: unknown): { reason: string; running_tas
 export function emptyRule(): NotificationConfig {
   return { events: { succeeded: { enabled: true, content: 'summary' }, failed: { enabled: true, content: 'summary' }, waiting: { enabled: false, content: 'summary' } }, channels: { desktop: { enabled: false } } };
 }
+export function channelSwitchDefaults(config: NotificationConfig): NotificationConfig {
+  const channels = { ...config.channels };
+  providers.forEach(provider => { if (channels[provider]) channels[provider] = { enabled: channels[provider].enabled }; });
+  return { ...config, channels };
+}
+export function taskRuleFromDefaults(config: NotificationConfig): NotificationConfig {
+  const channels = { ...config.channels };
+  providers.forEach(provider => { if (channels[provider]) channels[provider] = { enabled: false }; });
+  return { ...config, channels };
+}
 export function ruleError(config: NotificationConfig, defaults = false): string | undefined {
   if ((defaults || Object.values(config.channels).some(c => c?.enabled)) && !events.some(e => config.events[e].enabled)) return 'NOTIFICATION_EVENT_REQUIRED';
   if (!defaults && providers.some(p => config.channels[p]?.enabled && !config.channels[p]?.account_id)) return 'NOTIFICATION_TARGET_REQUIRED';
