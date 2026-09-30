@@ -153,6 +153,7 @@ def test_upgrade_and_repeated_initialization_preserve_legacy_data(gateway, accou
     with gateway.store._connect() as connection:
         connection.execute('ALTER TABLE channel_accounts DROP COLUMN identity_metadata')
         connection.execute('ALTER TABLE channel_accounts DROP COLUMN archived_at')
+        connection.execute('ALTER TABLE channel_accounts DROP COLUMN label_custom')
     restored = build_components(gateway.settings)
     try:
         restored.store.initialize()
@@ -162,6 +163,7 @@ def test_upgrade_and_repeated_initialization_preserve_legacy_data(gateway, accou
         assert old['credentials_ciphertext'] == row['credentials_ciphertext']
         assert old['identity_metadata'] == '{}'
         assert old['archived_at'] is None
+        assert not old['label_custom']
         assert listed(gateway)[0]['identity']['authorized_name'] == 'Legacy owner'
         with restored.store._connect() as connection:
             assert connection.execute('SELECT id FROM channel_outbox WHERE id = %s', (reply['id'],)).fetchone()

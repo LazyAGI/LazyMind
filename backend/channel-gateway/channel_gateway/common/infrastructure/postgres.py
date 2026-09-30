@@ -414,6 +414,8 @@ class GatewayStore:
             )
             connection.execute('ALTER TABLE channel_accounts ADD COLUMN IF NOT EXISTS identity_metadata TEXT '
                                "NOT NULL DEFAULT '{}'")
+            connection.execute('ALTER TABLE channel_accounts ADD COLUMN IF NOT EXISTS label_custom BOOLEAN '
+                               'NOT NULL DEFAULT FALSE')
             connection.execute('ALTER TABLE channel_accounts ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ')
             self._initialize_notifications(connection)
             connection.execute('ALTER TABLE channel_accounts ADD COLUMN IF NOT EXISTS default_recipient_id TEXT '
@@ -568,10 +570,19 @@ class GatewayStore:
     def rename_account(self, owner: str, account_id: str, label: str):
         with self._connect() as connection:
             return connection.execute('''
-                UPDATE channel_accounts SET label = %s, updated_at = CURRENT_TIMESTAMP
+                UPDATE channel_accounts SET label = %s, label_custom = TRUE, updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s AND owner_user_id = %s AND provider = 'feishu' AND archived_at IS NULL
                 RETURNING *
             ''', (label, account_id, owner)).fetchone()
+
+    def rename_generated_account(self, owner: str, account_id: str, label: str, expected_label: str):
+        with self._connect() as connection:
+            return connection.execute('''
+                UPDATE channel_accounts SET label = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s AND owner_user_id = %s AND provider = 'feishu'
+                  AND label = %s AND label_custom = FALSE AND archived_at IS NULL
+                RETURNING *
+            ''', (label, account_id, owner, expected_label)).fetchone()
 
     def archive_account(self, owner: str, account_id: str) -> None:
         """Remove only an unbound record from active use; never delete its message history."""

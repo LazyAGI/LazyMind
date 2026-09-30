@@ -77,7 +77,7 @@ export function channelAccountLabel(account: ChannelAccount): string {
   if (!candidate || candidate === '飞书' || internalId.test(candidate)) {
     return '飞书账号';
   }
-  return candidate;
+  return storedLabel;
 }
 
 export function isChannelAccountPendingActivation(account: ChannelAccount): boolean {
@@ -136,7 +136,4 @@ export async function cancelConnectionSession(sessionId: string): Promise<void> 
 
 export async function listNotificationGroups(accountId: string, cursor = '') {
   return (await channelAccountsApi.listNotificationGroups({ accountId, cursor, limit: 100 })).data;
-}
-export async function updateDefaultRecipient(accountId: string, recipientId: string): Promise<ChannelAccount> {
-  return (await channelAccountsApi.setDefaultRecipient({ accountId, setDefaultRecipientRequest: { recipient_id: recipientId } })).data;
 }

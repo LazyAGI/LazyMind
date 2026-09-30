@@ -208,13 +208,29 @@ func TestNotificationPreferencesAllowChannelSwitchWithoutTaskRecipient(t *testin
 	a := newNotificationAPI(t)
 	prefs := a.data("GET", "/user/notification-preferences", "owner", nil)
 	config := notificationConfig(false)
-	config["channels"].(map[string]any)["wecom"] = map[string]any{"enabled": true}
+	config["channels"].(map[string]any)["wecom"] = map[string]any{"enabled": true, "account_id": "old-account", "recipient_id": "old-group"}
 
 	saved := a.data("PATCH", "/user/notification-preferences", "owner",
 		map[string]any{"revision": prefs["revision"], "defaults": config})
 	channel := notificationObject(t, notificationObject(t, notificationObject(t, saved["defaults"])["channels"])["wecom"])
 	if channel["enabled"] != true || channel["account_id"] != nil || channel["recipient_id"] != nil {
 		t.Fatalf("settings switch unexpectedly selected a task recipient: %#v", channel)
+	}
+	var persisted orm.UserNotificationPreferences
+	if err := a.db.First(&persisted, "user_id = ?", "owner").Error; err != nil || strings.Contains(string(persisted.Defaults), "old-account") {
+		t.Fatalf("settings retained a task target: %v, %s", err, persisted.Defaults)
+	}
+	legacy, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.db.Model(&persisted).Update("defaults", string(legacy)).Error; err != nil {
+		t.Fatal(err)
+	}
+	view := a.data("GET", "/user/notification-preferences", "owner", nil)
+	channel = notificationObject(t, notificationObject(t, notificationObject(t, view["defaults"])["channels"])["wecom"])
+	if channel["account_id"] != nil || channel["recipient_id"] != nil {
+		t.Fatalf("legacy settings exposed a task target: %#v", channel)
 	}
 }
 
@@ -337,6 +353,42 @@ func TestNotificationResetAffectsOnlySelectedSchedule(t *testing.T) {
 	}
 	if after := a.data("GET", second, "owner", nil); !reflect.DeepEqual(after, secondBefore) {
 		t.Fatal("reset changed another schedule")
+	}
+}
+
+func TestNotificationResetDoesNotInheritLegacyGlobalRecipient(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		channel map[string]any
+	}{
+		{"saved target", map[string]any{"enabled": true, "account_id": "old-account", "recipient_id": "old-group"}},
+		{"missing account", map[string]any{"enabled": true}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			a := newNotificationAPI(t)
+			path := a.schedule("legacy-reset", false)
+			defaults := notificationConfig(true)
+			defaults["channels"].(map[string]any)["wecom"] = test.channel
+			raw, err := json.Marshal(defaults)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := a.db.Save(&orm.UserNotificationPreferences{
+				UserID: "owner", Enabled: true, Revision: 1, Defaults: raw, UpdatedAt: time.Now().UTC(),
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			before := a.data("GET", path, "owner", nil)
+			got := a.data("POST", path+":reset", "owner", map[string]any{"revision": before["revision"]})
+			channels := notificationObject(t, notificationObject(t, got["config"])["channels"])
+			wecom := notificationObject(t, channels["wecom"])
+			if wecom["enabled"] != false || wecom["account_id"] != nil || wecom["recipient_id"] != nil {
+				t.Fatalf("reset inherited a global recipient: %#v", wecom)
+			}
+			if notificationObject(t, channels["desktop"])["enabled"] != true {
+				t.Fatal("reset lost the desktop default")
+			}
+		})
 	}
 }
 

@@ -1,7 +1,8 @@
 import { Configuration as CoreConfiguration, TaskNotificationsApi } from '@/api/generated/core-client';
 import { Configuration as GatewayConfiguration, TaskNotificationsApi as GatewayNotificationsApi, ChannelAccountsApi } from '@/api/generated/channel-gateway-client';
+import type { RawAxiosRequestConfig } from 'axios';
 import { axiosInstance, BASE_URL } from '@/components/request';
-import { listNotificationGroups, updateDefaultRecipient, type ChannelAccount, type ChannelProvider } from '@/modules/channelGateway/api';
+import { listNotificationGroups, type ChannelAccount, type ChannelProvider } from '@/modules/channelGateway/api';
 
 export const providers: ChannelProvider[] = ['feishu', 'wecom', 'wechat'];
 export const channels = ['desktop', ...providers] as const;
@@ -44,8 +45,11 @@ export const patchPreferences = async (patch: Partial<Preferences> & { revision:
   unwrap<Preferences>((await coreClient.apiCoreUserNotificationPreferencesPatch({ notificationPreferencesPatch: patch })).data as Preferences | { data: Preferences });
 export const getScheduleNotifications = async (scheduleId: string) =>
   unwrap<ScheduleNotifications>((await coreClient.apiCoreSchedulesScheduleIdNotificationsGet({ scheduleId })).data as ScheduleNotifications | { data: ScheduleNotifications });
-export const putScheduleNotifications = async (scheduleId: string, revision: number, config: NotificationConfig | null) =>
-  unwrap<ScheduleNotifications>((await coreClient.apiCoreSchedulesScheduleIdNotificationsPut({ scheduleId, scheduleNotificationUpdate: { revision, ...(config === null ? { clear: true } : { config }) } })).data as ScheduleNotifications | { data: ScheduleNotifications });
+export const putScheduleNotifications = async (scheduleId: string, revision: number, config: NotificationConfig | null, silentError = false) =>
+  unwrap<ScheduleNotifications>((await coreClient.apiCoreSchedulesScheduleIdNotificationsPut(
+    { scheduleId, scheduleNotificationUpdate: { revision, ...(config === null ? { clear: true } : { config }) } },
+    silentError ? ({ silentError: true } as RawAxiosRequestConfig) : undefined,
+  )).data as ScheduleNotifications | { data: ScheduleNotifications });
 export const getExecutionNotifications = async (taskId: string) =>
   unwrap<ExecutionNotifications>((await coreClient.apiCoreTaskCenterTasksTaskIdNotificationsGet({ taskId })).data as ExecutionNotifications | { data: ExecutionNotifications });
 export const getAttempts = async (taskId: string, cursor = ''): Promise<Page<Attempt>> =>
@@ -65,9 +69,19 @@ export function notificationError(error: unknown): { reason: string; running_tas
 export function emptyRule(): NotificationConfig {
   return { events: { succeeded: { enabled: true, content: 'summary' }, failed: { enabled: true, content: 'summary' }, waiting: { enabled: false, content: 'summary' } }, channels: { desktop: { enabled: false } } };
 }
+export function channelSwitchDefaults(config: NotificationConfig): NotificationConfig {
+  const channels = { ...config.channels };
+  providers.forEach(provider => { if (channels[provider]) channels[provider] = { enabled: channels[provider].enabled }; });
+  return { ...config, channels };
+}
+export function taskRuleFromDefaults(config: NotificationConfig): NotificationConfig {
+  const channels = { ...config.channels };
+  providers.forEach(provider => { if (channels[provider]) channels[provider] = { enabled: false }; });
+  return { ...config, channels };
+}
 export function ruleError(config: NotificationConfig, defaults = false): string | undefined {
   if ((defaults || Object.values(config.channels).some(c => c?.enabled)) && !events.some(e => config.events[e].enabled)) return 'NOTIFICATION_EVENT_REQUIRED';
-  if (!defaults && providers.some(p => config.channels[p]?.enabled && !config.channels[p]?.account_id)) return 'NOTIFICATION_TARGET_REQUIRED';
+  if (!defaults && providers.some(p => config.channels[p]?.enabled && (!config.channels[p]?.account_id || !config.channels[p]?.recipient_id))) return 'NOTIFICATION_TARGET_REQUIRED';
 }
 export function availabilityError(value: ScheduleNotifications | undefined): { reason: string; provider: ChannelProvider; account_id: string } | undefined {
   if (!value?.config) return undefined;
@@ -81,4 +95,3 @@ export function availabilityError(value: ScheduleNotifications | undefined): { r
 }
 
 export const getGroups = listNotificationGroups;
-export const setDefaultRecipient = updateDefaultRecipient;

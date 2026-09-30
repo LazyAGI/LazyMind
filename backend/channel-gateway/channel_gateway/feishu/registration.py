@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 from collections.abc import Callable
 from typing import Any
@@ -84,6 +85,38 @@ def _owner_name(app_id: str, app_secret: str, owner_open_id: str) -> str:
         return ''
     user = response.data.user
     return str(getattr(user, 'name', '') or getattr(user, 'en_name', '') or '').strip()
+
+
+def get_bot_name(app_id: str, app_secret: str) -> str:
+    """Read the Feishu bot's display name, which register_app does not return."""
+    client = (
+        lark_oapi.Client.builder()
+        .app_id(app_id)
+        .app_secret(app_secret)
+        .timeout(5)
+        .build()
+    )
+    request = (
+        lark_oapi.BaseRequest.builder()
+        .http_method(lark_oapi.HttpMethod.GET)
+        .uri('/open-apis/bot/v3/info')
+        .token_types({lark_oapi.AccessTokenType.TENANT})
+        .build()
+    )
+    try:
+        response = client.request(request)
+        if not response.success():
+            return ''
+        payload = json.loads(response.raw.content)
+    except Exception:
+        return ''
+    if not isinstance(payload, dict) or payload.get('code') != 0:
+        return ''
+    data = payload.get('data') if isinstance(payload.get('data'), dict) else {}
+    bot = payload.get('bot') or data.get('bot') or {}
+    if not isinstance(bot, dict):
+        return ''
+    return str(bot.get('bot_name') or bot.get('app_name') or '').strip()
 
 
 def _menu_payload() -> list[BotMenuNode]:
@@ -288,6 +321,8 @@ class LarkAppRegistrar:
             result.get('bot_name'), result.get('app_name'), result.get('application_name'),
             bot_info.get('bot_name'), bot_info.get('name'), bot_info.get('display_name'),
         ) if str(value or '').strip()), '')
+        if not bot_name:
+            bot_name = get_bot_name(app_id, app_secret)
         return FeishuAppRegistration(
             app_id=app_id,
             app_secret=app_secret,
