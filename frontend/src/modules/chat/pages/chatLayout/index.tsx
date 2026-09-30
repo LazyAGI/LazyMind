@@ -395,18 +395,16 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const hasConversationWorkflow = hasWorkflowSession || hasDismissedWorkflow ||
     tasks.some((task) => task.agent_type === "workflow_step");
   const taskDisplayCount = useMemo(
-    () =>
-      taskCenterDisplayCount(
-        tasks,
-        workflowSession?.steps,
-        developerModeActive,
-        workflowMilestoneCount,
-      ),
+    () => {
+      const count = taskCenterDisplayCount(tasks, workflowSession?.steps, developerModeActive, workflowMilestoneCount);
+      return !developerModeActive && workflowUI?.task_presentation?.grouped ? Math.min(count, 1) : count;
+    },
     [
       developerModeActive,
       tasks,
       workflowMilestoneCount,
       workflowSession?.steps,
+      workflowUI?.task_presentation?.grouped,
     ],
   );
   const hasActiveSideChat = Boolean(sessionId && sideChats[sessionId]);

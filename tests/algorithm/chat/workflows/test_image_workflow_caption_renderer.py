@@ -12,7 +12,7 @@ def _repo_root() -> Path:
 
 
 def _load_tools():
-    path = _repo_root() / 'workflows' / 'image-workflow' / 'scripts' / 'tools.py'
+    path = _repo_root() / 'algorithm' / 'lazymind' / 'chat' / 'engine' / 'tools' / 'infra' / 'image_workflow_support.py'
     spec = importlib.util.spec_from_file_location('image_workflow_tools', path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)

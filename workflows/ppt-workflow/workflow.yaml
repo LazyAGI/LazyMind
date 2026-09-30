@@ -24,6 +24,8 @@ when_to_use: >
 
 runtime:
   publisher_owned_slots:
+    - style_previews
+    - style_selection
     - deck_outline
     - slide_outline
     - background_prompts
@@ -33,6 +35,30 @@ runtime:
   collects_knowledge: true
   completed_edit_step: generate_ppt
   completed_edit_routing: |
+    For an explicit request to revise a completed deck, infer the earliest
+    affected Workflow stage from the user's requested change; do not ask the
+    user to choose an internal step. When several rules match, choose the
+    earliest stage in Workflow order so Runtime reruns that stage and every
+    later applicable stage. Select only an exact rewindable step returned by
+    Runtime. If the inferred target is absent because that conditional stage
+    was skipped on the first run, rewind to analyze_requirements, which owns
+    the applicability markers, so it can make the stage applicable from the
+    new explicit request.
+
+    Route changes to presentation goal, audience, tone, slide count, global
+    constraints, deck-wide visual direction, or whether AI backgrounds are
+    enabled to analyze_requirements.
+    Route requests to add, replace, refresh, research, or cite source material
+    to collect_materials. Route requests to rewrite the deck-wide or selected
+    AI-background prompt plan to plan_background_prompts. Route requests to
+    regenerate existing AI background images without changing their approved
+    prompts to generate_backgrounds. Route changes to deck structure, section
+    order, page sequence, or the deck outline to build_outline. Route requests
+    to rewrite one or more editable per-page generation briefs to
+    plan_page_prompts. Route slide rendering, page content, layout, element,
+    foreground image, ordinary background, and page-scoped visual changes to
+    generate_ppt.
+
     For a request to insert or add a whole slide into an already generated deck,
     first call read_artifact(artifact_ref='ppt_capability_requirements') to inspect
     the saved capability marker. When its content is exactly
@@ -46,6 +72,8 @@ runtime:
       tool: check_ppt_workflow_capabilities
       arguments:
         capability_requirements: ppt_capability_requirements
+        style_flow: style_flow
+        generate_background_images: generate_background_images
   clarification_fields:
     - id: topic
       label: 主题
@@ -98,6 +126,15 @@ runtime:
       choices:
         - 启用｜为每页生成独立 AI 底图
         - 不启用｜使用纯色、渐变和矢量装饰
+    - id: style_flow
+      label: 风格确定方式
+      question: 整体风格希望怎么确定？
+      type: single
+      choice_policy: fixed
+      allow_other: false
+      choices:
+        - 直接生成一套｜AI 根据需求确定一套整体风格并继续
+        - 先看三套方案｜先生成三套风格预览，由我选择后继续
 
 tool_scripts:
   - path: scripts/tools.py
@@ -106,6 +143,8 @@ tool_scripts:
       - ppt_register_material_images
       - ppt_generate_material_images
       - ppt_publish_background_prompts
+      - ppt_prepare_style_choices
+      - ppt_prepare_style
       - ppt_generate_background_images
       - check_ppt_workflow_capabilities
       - ppt_attach_material_images
@@ -142,6 +181,8 @@ steps:
     label: Analyze Requirements
   - id: collect_materials
     label: Collect Materials
+  - id: choose_style
+    label: Choose Style
   - id: plan_background_prompts
     label: Plan Background Prompts
   - id: generate_backgrounds
@@ -166,6 +207,27 @@ slots:
     cardinality: single
     exposed: false
     summary_max_chars: 80
+
+  - id: style_flow
+    label: Style Flow
+    type: text
+    cardinality: single
+    exposed: false
+    summary_max_chars: 40
+
+  - id: generate_background_images
+    label: Generate Background Images
+    type: text
+    cardinality: single
+    exposed: false
+    summary_max_chars: 40
+
+  - id: skip_style_choices
+    label: Skip Style Choices
+    type: text
+    cardinality: single
+    exposed: false
+    summary_max_chars: 40
 
   - id: skip_background_images
     label: Skip AI Backgrounds
@@ -201,6 +263,18 @@ slots:
     type: image
     cardinality: list
     ordered: true
+
+  - id: style_previews
+    label: Style Previews
+    type: text
+    cardinality: single
+    summary_max_chars: 500
+
+  - id: style_selection
+    label: Selected Style
+    type: text
+    cardinality: single
+    summary_max_chars: 80
 
   - id: background_images
     label: AI Background Images
@@ -243,11 +317,19 @@ slots:
     summary_max_chars: 1200
 
 ui:
+  tab_visibility_ready_material: ppt_capability_requirements
   slots:
     requirement_analysis:
       widgetType: text-markdown
     material_summary:
       widgetType: text-markdown
+    style_previews:
+      widgetType: html-slide
+      maxHeight: 620
+      readOnly: true
+    style_selection:
+      widgetType: text-markdown
+      readOnly: false
     background_prompts:
       widgetType: text-markdown
       maxHeight: 420
@@ -277,15 +359,26 @@ ui:
     - id: materials
       step_id: collect_materials
       label: Materials
+      hide_when_material: skip_material_collection
       layout: list
       slots:
         - id: uploaded_materials
         - id: material_summary
         - id: material_images
 
+    - id: style
+      step_id: choose_style
+      label: Style
+      hide_when_material: skip_style_choices
+      layout: list
+      slots:
+        - id: style_previews
+        - id: style_selection
+
     - id: background_prompts
       step_id: plan_background_prompts
       label: Background Prompts
+      hide_when_material: skip_background_images
       layout: composite
       slot_scope: step
       composite_tab_position: left
@@ -302,6 +395,7 @@ ui:
     - id: background_images
       step_id: generate_backgrounds
       label: Background Images
+      hide_when_material: skip_background_images
       layout: composite
       slot_scope: step
       composite_tab_position: left
@@ -372,6 +466,7 @@ i18n:
     steps:
       analyze_requirements: {label: 需求分析}
       collect_materials: {label: 收集素材}
+      choose_style: {label: 选择风格}
       build_outline: {label: 大纲}
       plan_page_prompts: {label: 每页提示词}
       plan_background_prompts: {label: 底图提示词}
@@ -380,6 +475,7 @@ i18n:
     tabs:
       analysis: {label: 分析}
       materials: {label: 素材}
+      style: {label: 风格}
       outline: {label: 大纲}
       page_prompts: {label: 每页提示词}
       background_prompts: {label: 底图提示词}
@@ -389,6 +485,8 @@ i18n:
       requirement_analysis: {label: 需求分析}
       material_summary: {label: 素材摘要}
       material_images: {label: 素材图片}
+      style_previews: {label: 风格预览}
+      style_selection: {label: 已选风格}
       background_prompts: {label: 底图提示词}
       background_images: {label: AI 底图}
       deck_outline: {label: 大纲}

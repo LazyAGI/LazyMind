@@ -48,6 +48,18 @@ def _tool_names(contribution):
     return names
 
 
+@pytest.mark.parametrize('workflow_id', ['writer-workflow', 'image-workflow', 'ppt-workflow', 'product_solution_delivery'])
+def test_manager_never_injects_domain_navigation_tools(workflow_id):
+    with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory:
+        client_factory.return_value.get_state.return_value = {
+            'session_id': 'session-1', 'status': 'active', 'state_version': 3,
+        }
+        contribution = resolve_workflow_injection({'session_id': 'session-1', 'workflow_id': workflow_id})
+    product_tools = {'get_product_stage_options', 'read_product_project_artifact', 'relay_product_stage'}
+    names = _tool_names(contribution)
+    assert names & product_tools == set()
+
+
 def test_mentioned_workflow_is_injected_as_authoritative_selection():
     catalog = [{
         'workflow_ref': 'builtin:image-workflow',
@@ -674,6 +686,40 @@ def test_active_workflow_forwards_current_edit_request_and_focus_to_step():
     command = toolkit.advance_step.call_args.args[2][0]
     assert command.user_input == '把这一页标题改成期末练习'
     assert 'sort order 2' in command.runtime_instruction
+
+
+def test_manager_preserves_continue_for_all_workflows():
+    toolkit = MagicMock()
+    toolkit.get_ready_steps.return_value = {
+        'session_id': 'session-1', 'state_version': 7,
+        'ready_steps': ['analyze_requirements'],
+        'retryable_steps': [], 'rewindable_steps': [], 'continue_steps': [],
+    }
+    toolkit.advance_step.return_value = {'status': 'succeeded'}
+    with patch('lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit',
+               return_value=toolkit), patch(
+        'lazymind.chat.workflow.workflow_manager._client',
+    ) as client_factory:
+        client_factory.return_value.get_state.return_value = {
+            'status': 'waiting', 'state_version': 7,
+            'projection': {'ready': ['analyze_requirements']},
+        }
+        ppt = resolve_workflow_injection(
+            {'session_id': 'session-1', 'workflow_id': 'ppt-workflow'},
+            conversation_id='conversation-1', current_query='继续',
+        )
+        lazyllm.globals['agentic_config'].update(ppt.agentic_config_patch)
+        _tool(ppt, 'advance_step')(['analyze_requirements'])
+
+        writer = resolve_workflow_injection(
+            {'session_id': 'session-1', 'workflow_id': 'writer'},
+            conversation_id='conversation-1', current_query='继续',
+        )
+        lazyllm.globals['agentic_config'].update(writer.agentic_config_patch)
+        _tool(writer, 'advance_step')(['analyze_requirements'])
+
+    assert toolkit.advance_step.call_args_list[0].args[2][0].user_input == '继续'
+    assert toolkit.advance_step.call_args_list[1].args[2][0].user_input == '继续'
 
 
 def test_dynamic_trigger_defaults_request_context_to_current_query():

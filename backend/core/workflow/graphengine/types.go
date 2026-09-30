@@ -109,20 +109,38 @@ type PostStepCheck struct {
 // Workflow package. Hosts consume this policy instead of branching on a
 // particular workflow id.
 type RuntimePolicy struct {
-	PublisherOwnedSlots       []string             `json:"publisher_owned_slots,omitempty" yaml:"publisher_owned_slots,omitempty"`
-	ExclusiveToolCapabilities []string             `json:"exclusive_tool_capabilities,omitempty" yaml:"exclusive_tool_capabilities,omitempty"`
-	CollectsKnowledge         bool                 `json:"collects_knowledge,omitempty" yaml:"collects_knowledge,omitempty"`
-	CompletedEditStep         string               `json:"completed_edit_step,omitempty" yaml:"completed_edit_step,omitempty"`
-	CompletedEditRouting      string               `json:"completed_edit_routing,omitempty" yaml:"completed_edit_routing,omitempty"`
-	CompletedContinueSteps    []string             `json:"completed_continue_steps,omitempty" yaml:"completed_continue_steps,omitempty"`
-	ClarificationFields       []ClarificationField `json:"clarification_fields,omitempty" yaml:"clarification_fields,omitempty"`
-	PostStepChecks            []PostStepCheck      `json:"post_step_checks,omitempty" yaml:"post_step_checks,omitempty"`
+	// These contracts are pinned to the package revision, never inferred from its ID.
+	TriggerInputs             *[]string                 `json:"trigger_inputs,omitempty" yaml:"trigger_inputs,omitempty"`
+	ExecutionLimits           map[string]ExecutionLimit `json:"execution_limits,omitempty" yaml:"execution_limits,omitempty"`
+	TransactionalOutputs      bool                      `json:"transactional_outputs,omitempty" yaml:"transactional_outputs,omitempty"`
+	Publication               *PublicationPolicy        `json:"publication,omitempty" yaml:"publication,omitempty"`
+	PublishedInputAliases     map[string]string         `json:"published_input_aliases,omitempty" yaml:"published_input_aliases,omitempty"`
+	HostExtensions            []string                  `json:"host_extensions,omitempty" yaml:"host_extensions,omitempty"`
+	PublisherOwnedSlots       []string                  `json:"publisher_owned_slots,omitempty" yaml:"publisher_owned_slots,omitempty"`
+	ExclusiveToolCapabilities []string                  `json:"exclusive_tool_capabilities,omitempty" yaml:"exclusive_tool_capabilities,omitempty"`
+	CollectsKnowledge         bool                      `json:"collects_knowledge,omitempty" yaml:"collects_knowledge,omitempty"`
+	CompletedEditStep         string                    `json:"completed_edit_step,omitempty" yaml:"completed_edit_step,omitempty"`
+	CompletedEditRouting      string                    `json:"completed_edit_routing,omitempty" yaml:"completed_edit_routing,omitempty"`
+	CompletedContinueSteps    []string                  `json:"completed_continue_steps,omitempty" yaml:"completed_continue_steps,omitempty"`
+	ClarificationFields       []ClarificationField      `json:"clarification_fields,omitempty" yaml:"clarification_fields,omitempty"`
+	PostStepChecks            []PostStepCheck           `json:"post_step_checks,omitempty" yaml:"post_step_checks,omitempty"`
 }
 
 func (p RuntimePolicy) IsZero() bool {
-	return len(p.PublisherOwnedSlots) == 0 && len(p.ExclusiveToolCapabilities) == 0 && !p.CollectsKnowledge &&
+	return p.TriggerInputs == nil && len(p.ExecutionLimits) == 0 && !p.TransactionalOutputs && p.Publication == nil && len(p.PublishedInputAliases) == 0 && len(p.HostExtensions) == 0 && len(p.PublisherOwnedSlots) == 0 && len(p.ExclusiveToolCapabilities) == 0 && !p.CollectsKnowledge &&
 		p.CompletedEditStep == "" && p.CompletedEditRouting == "" && len(p.CompletedContinueSteps) == 0 && len(p.ClarificationFields) == 0 &&
 		len(p.PostStepChecks) == 0
+}
+
+type ExecutionLimit struct {
+	Rounds    int            `json:"rounds" yaml:"rounds"`
+	Timeout   int            `json:"timeout" yaml:"timeout"`
+	ToolCalls map[string]int `json:"tool_calls,omitempty" yaml:"tool_calls,omitempty"`
+}
+
+type PublicationPolicy struct {
+	Step          string   `json:"step" yaml:"step"`
+	RequiredSlots []string `json:"required_slots" yaml:"required_slots"`
 }
 
 type CompiledStateGraph struct {

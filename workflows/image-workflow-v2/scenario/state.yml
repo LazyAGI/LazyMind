@@ -1,0 +1,677 @@
+initial: __start__
+
+transitions:
+  __start__: [{to: classify_request}]
+  classify_request:
+    - {to: ordinary_prepare, when: route_plan.route is ordinary}
+    - {to: edit_prepare, when: route_plan.route is edit}
+    - {to: meme_brief, when: route_plan.route is meme}
+  ordinary_prepare: [{to: ordinary_generate}]
+  ordinary_generate: [{to: __end__}]
+  edit_prepare: [{to: edit_candidate}]
+  edit_candidate: [{to: __end__}]
+  meme_brief:
+    - {to: meme_preflight, when: meme_brief_data.brief_status is approved}
+  meme_preflight: [{to: canonical_character}]
+  canonical_character: [{to: build_identity_anchors}]
+  build_identity_anchors: [{to: understand_states}]
+  understand_states: [{to: design_best_performances}]
+  design_best_performances:
+    - {to: plan_static, when: meme_brief_data.delivery_mode is static}
+    - {to: plan_dynamic, when: meme_brief_data.delivery_mode is dynamic}
+  plan_static: [{to: render_static}]
+  render_static: [{to: caption_static}]
+  caption_static: [{to: review_pack}]
+  plan_dynamic: [{to: render_keyframes}]
+  render_keyframes: [{to: video_canary}]
+  video_canary: [{to: render_dynamic}]
+  render_dynamic: [{to: caption_dynamic}]
+  caption_dynamic: [{to: review_pack}]
+  review_pack: [{to: __end__}]
+
+steps:
+  classify_request:
+    label: Classify Final Deliverable
+    route: choice
+    prompt: |
+      Classify {{user_input}} only by the requested FINAL deliverable.
+      A final meme/reaction/sticker
+      always uses meme even when an upload or searched image is its source.
+      Ordinary means a new non-meme image. Edit means a local change to one
+      authoritative existing image whose final deliverable is not a meme.
+      Call classify_image_request exactly once with no arguments. The package
+      tool reads the immutable launch request, applies the final-deliverable
+      priority rules above, and publishes route_plan atomically. Do not call
+      save_artifacts or attempt to write route_plan yourself. Stop immediately
+      after the tool succeeds. The workflow engine owns the branch decision and
+      selects the sole transition matching route_plan.route; never choose,
+      describe, or advance the next step yourself.
+    tools: [classify_image_request]
+    terminal_tools: [classify_image_request]
+    outputs: [{material: route_plan, required: true}]
+    acceptance_criteria: route_plan contains exactly one supported route, a rationale, and delivery_mode=static|dynamic|unspecified for meme or not_applicable otherwise; after it is saved, the workflow engine selects the sole matching transition.
+
+  ordinary_prepare:
+    label: Prepare Ordinary Image
+    prompt: |
+      Call prepare_ordinary_request exactly once with no arguments. The package
+      tool reads the effective user request and publishes a factual
+      material_summary after retrieving any requested web/knowledge-base references,
+      plus an ordinary_prompt that preserves every requested
+      subject, composition, style, ratio, and text constraint. Do not call
+      save_artifacts or rewrite either output yourself. Stop immediately after
+      the tool succeeds. KB and web retrieval are independent: a failed or empty
+      source is recorded in retrieval_results and the material summary, not a
+      failure of this step. Retain successful references from other sources.
+      Never claim a failed source supplied evidence.
+    tools: [prepare_ordinary_request]
+    terminal_tools: [prepare_ordinary_request]
+    inputs:
+      - {material: route_plan, required: true}
+      - {material: source_image, required: false}
+    outputs:
+      - {material: material_images, required: false}
+      - {material: material_summary, required: true}
+      - {material: ordinary_prompt, required: true}
+    acceptance_criteria: The prompt is usable and all saved web images came verbatim from validated selected results.
+
+  ordinary_generate:
+    label: Generate Ordinary Image
+    prompt: |
+      Call generate_ordinary_image exactly once with no arguments. The package
+      tool reads the approved prompt and optional references, derives the ratio
+      from the immutable launch request, calls Baoyu with Seedream 5.0, verifies
+      the returned local file, and publishes ordinary_output atomically. Do not
+      call save_artifacts, retry, switch providers, or synthesize an image URL.
+      Stop immediately after the tool succeeds.
+    terminal_tools: [generate_ordinary_image]
+    tools: [generate_ordinary_image]
+    inputs:
+      - {material: route_plan, required: true}
+      - {material: ordinary_prompt, required: true}
+      - {material: material_images, required: false}
+      - {material: source_image, required: false}
+    outputs: [{material: ordinary_output, required: true}]
+    acceptance_criteria: At least one generated image is saved and no hidden retry occurred.
+
+  edit_prepare:
+    label: Prepare Local Edit
+    prompt: |
+      Build the local-edit contract from the user's request in {{user_input}}.
+      Inspect the bound source_image. When an upload exists, do not pass or copy
+      a source path: publish_edit_contract reads the exact current input binding.
+      When no upload exists and search was explicitly requested, search and
+      validate one direct image URL and pass it as source_url.
+      Call publish_edit_contract with requested_edit, edit_scope, preserve and
+      do_not. Use the smallest sufficient edit scope and preserve all unrequested
+      content, identity, framing, lighting, style, geometry and text. The tool
+      validates the source and publishes both authoritative_image and edit_contract.
+      Do not call save_artifacts. Stop after the publisher succeeds.
+    terminal_tools: [publish_edit_contract]
+    tools: [web_search, image_search_and_validate, validate_image_ref, multimodal, publish_edit_contract]
+    inputs:
+      - {material: route_plan, required: true}
+      - {material: source_image, required: false}
+    outputs:
+      - {material: authoritative_image, required: true}
+      - {material: edit_contract, required: true}
+    acceptance_criteria: One valid authoritative image and a complete four-part edit contract exist.
+
+  edit_candidate:
+    label: Generate and Review Edit
+    mode: human
+    rerun_when: The user rejects the candidate and explicitly chooses a same-model retry or another configured model with more precise edit instructions.
+    prompt: |
+      Call generate_edit_candidate exactly once with no arguments. The package
+      tool reads the authoritative image and complete edit contract, calls Baoyu
+      with Seedream 5.0, verifies the returned local file, and publishes the new
+      edit_candidate atomically without overwriting the source. Do not call
+      save_artifacts, retry, switch providers, or synthesize an image URL. Stop
+      for visual user approval after the tool succeeds. On rejection, record the
+      user's explicit choice and rewind this step.
+    terminal_tools: [generate_edit_candidate]
+    tools: [generate_edit_candidate]
+    inputs:
+      - {material: authoritative_image, required: true}
+      - {material: edit_contract, required: true}
+    outputs: [{material: edit_candidate, required: true}]
+    acceptance_criteria: A new candidate exists and the user explicitly accepts it before completion.
+
+  meme_brief:
+    label: Confirm Meme Brief
+    mode: human
+    route: choice
+    rerun_when: The user rejects any caption, communication purpose, or action design, supplies a correction, or changes delivery mode, character source, states, count, or cost profile. Rebuild the complete proposal from the latest user feedback while preserving every accepted item unchanged.
+    prompt: |
+      This step is complete only after save_validated_meme_brief returns successfully for
+      the complete meme_brief_data JSON object. Never end with prose such as
+      "the plan is ready" or "the plan is being synchronized" and never wait
+      for a separate chat reply before calling that terminal tool. The runtime
+      validates the complete brief against the immutable launch request before
+      committing it. The workflow's Continue gate is the human review checkpoint
+      after the complete brief has been saved.
+
+      Build meme_brief_data JSON from {{user_input}} with delivery_mode exactly
+      static or dynamic, caption_mode=caption|no_text, ordered distinct states,
+      one exact caption, one communication_purpose, and one action per state,
+      caption_source=provided|proposed,
+      caption_review_status=pending|approved|needs_revision, character source,
+      requested_count, planned_count, count_status, allowed_count,
+      requires_count_decision, brief_status=approved|blocked, and cost_profile.
+      caption_source and caption_review_status are mandatory TOP-LEVEL fields in
+      meme_brief_data. They may also be repeated on each state, but state-level
+      fields never replace the two required top-level fields. Before calling the
+      validator, verify the object has this exact structural shape:
+
+      {
+        "delivery_mode": "dynamic",
+        "caption_mode": "caption",
+        "caption_source": "provided",
+        "caption_review_status": "approved",
+        "character_source": "uploaded_image",
+        "requested_count": 5,
+        "allowed_count": 5,
+        "planned_count": 5,
+        "count_status": "compliant",
+        "requires_count_decision": false,
+        "brief_status": "approved",
+        "states": [
+          {
+            "state": "happy",
+            "caption": "开心啦",
+            "communication_purpose": "表达轻松愉快的情绪",
+            "action": "角色面对镜头开心跳起并挥动双手",
+            "caption_source": "provided",
+            "caption_review_status": "approved"
+          }
+        ],
+        "cost_profile": {}
+      }
+
+      Replace the example state list with the complete ordered request; do not
+      copy the example as a one-state result. First copy every caption supplied
+      by the user directly from {{user_input}} in the same order and language.
+      Preserve each supplied caption verbatim: never translate, romanize,
+      normalize, paraphrase, or replace it with an English state label. If exact
+      captions were present in the launch request, use caption_source=provided and
+      caption_review_status=approved at the top level and on every state.
+      If delivery mode is missing, ask instead of guessing; never plan both.
+
+      For dynamic delivery, default caption_mode to caption unless the user
+      explicitly requests no text. When the user already supplied exact captions,
+      preserve them verbatim and map them to the matching states. Otherwise,
+      proactively write one concise, natural caption for every state using the
+      user's theme, communication setting, and language. Captions must be distinct,
+      immediately readable, and suitable for the requested context. For every
+      state, communication_purpose must state the concrete conversational goal and
+      action must describe one concise, visually readable body action. Do not
+      duplicate the caption as either field. Present the complete ordered proposal
+      and ask whether the user approves this concrete scheme; do not first ask the
+      user to invent or provide subtitle content.
+
+      Set caption_review_status=pending for a newly proposed set. On explicit user
+      approval set it to approved without rewriting any caption. If the user says
+      the proposal is unsatisfactory, set it to needs_revision, preserve every
+      accepted caption, and only then ask for exact replacement text for the
+      rejected states. After receiving replacements, show the complete revised set
+      for approval and keep the step blocked until caption_review_status=approved.
+      If caption_mode is no_text, set caption_source=provided and
+      caption_review_status=approved with an empty caption for every state.
+      When the launch request already supplies every exact caption and action and
+      explicitly says the requirements are complete or asks for direct execution,
+      treat that as approval of the supplied scheme: use caption_source=provided,
+      caption_review_status=approved, and preserve the supplied items verbatim.
+
+      The static limit is 12 and the dynamic limit is 5.
+      When requested_count exceeds its mode limit, preserve the exact request,
+      set planned_count to the limit, count_status=over_limit,
+      requires_count_decision=true, and decision_options exactly to reduce the
+      count or split it into compliant batches. Do not debate, invent, silently
+      drop states, choose an option, or start generation. When it is within the
+      limit, set planned_count=requested_count, count_status=compliant, and
+      requires_count_decision=false. Set brief_status=approved only when the count
+      is compliant and caption_review_status=approved; otherwise set it to
+      blocked. Save the brief and stop for user review and Continue approval.
+      Call save_validated_meme_brief exactly once with the complete JSON object
+      shown above. The tool reads the immutable launch request, rejects missing
+      fields, reduced counts, reordered or rewritten supplied captions, and saves
+      the only authoritative brief. If validation rejects the brief, correct the
+      complete object and call save_validated_meme_brief again; never continue with a partial
+      or placeholder brief. Do not return any assistant prose until save_validated_meme_brief
+      has succeeded. A response without that successful terminal call is a failed
+      step, not an approval handoff.
+      When rerunning after rejection, apply the user's latest corrections to the
+      rejected states and preserve all accepted captions, communication purposes,
+      actions, state order, and delivery settings. After saving, the approval
+      handoff must ask in Chinese: “表情包方案已生成，请在方案页查看每个状态的文案、沟通目的和动作设计。是否继续生成锚点图？如需调整，请直接告诉我修改要求。”
+    terminal_tools: [save_validated_meme_brief]
+    tools: [save_validated_meme_brief]
+    inputs:
+      - {material: route_plan, required: true}
+      - {material: source_image, required: false}
+    outputs: [{material: meme_brief_data, required: true}]
+    acceptance_criteria: One delivery mode and a complete ordered state list exist; every state has one non-duplicative caption, communication purpose, and action design; dynamic delivery defaults to one proposed caption per state unless no_text was explicit; every caption is approved or no_text is explicit; brief_status is approved only after both caption approval and count compliance; save_validated_meme_brief confirms requested_count and state count match the immutable launch request and preserves supplied captions verbatim; the user explicitly approves the complete scheme before generation can continue.
+
+  meme_preflight:
+    label: Preflight Media Runtime
+    mode: auto
+    prompt: |
+      Execute only this deterministic preflight step. Do not inspect workflow
+      history, choose or advance another step, or discuss downstream generation.
+      First require meme_brief_data.brief_status=approved,
+      caption_review_status=approved, count_status=compliant, and
+      requires_count_decision=false. Then immediately call
+      image_media_preflight exactly once with require_image_editing=true,
+      require_video=true only when delivery_mode is dynamic, and
+      require_caption=true unless caption_mode is no_text. When ready is true,
+      immediately save the exact tool result as preflight_report. If the brief,
+      captions, or count are unresolved, or ready is false, stop
+      without calling any paid media tool.
+      Never retry, rewind, or call a workflow control tool.
+    terminal_tools: [save_artifacts]
+    tools: [image_media_preflight]
+    inputs: [{material: meme_brief_data, required: true}]
+    outputs: [{material: preflight_report, required: true}]
+    acceptance_criteria: preflight_report.ready is true; otherwise the workflow fails closed before paid calls.
+
+  canonical_character:
+    label: Confirm Canonical Character
+    mode: auto
+    prompt: |
+      Establish exactly one identity-safe canonical character. When source_image
+      is present, treat the user's uploaded image as authoritative: use its
+      resolved input-resource path directly, inspect it once with multimodal, and
+      save that exact unchanged source as canonical_character_image. Never
+      substitute an attachment basename, generate a replacement, normalize the
+      pose or expression, remove props or backgrounds, or call image_editor or
+      image_generator. The purpose of this gate is to confirm character identity,
+      not to redesign the reference image. If only text exists, generate exactly
+      one neutral full-body candidate with image_generator. Do not begin state
+      production. Save exactly one candidate and stop; the next human checkpoint
+      reviews the completed 2x2 eye-and-mouth anchor sheet.
+    terminal_tools: [save_artifacts]
+    tools: [multimodal, image_generator]
+    inputs:
+      - {material: meme_brief_data, required: true}
+      - {material: preflight_report, required: true}
+      - {material: source_image, required: false}
+    outputs: [{material: canonical_character_image, required: true}]
+    acceptance_criteria: With an upload, the exact unchanged source is the sole canonical character; without an upload, one neutral generated candidate exists.
+
+  build_identity_anchors:
+    label: Build Eye and Mouth Anchors
+    mode: human
+    rerun_when: The user rejects the anchor sheet or supplies corrections to identity, eye state, mouth state, composition, or consistency. Rebuild the four anchors from the canonical character using the latest user feedback and replace the selected anchor artifacts.
+    prompt: |
+      Inspect canonical_character_image with multimodal before writing anything.
+      Pass the literal material key "canonical_character_image" as the image
+      argument; let the runtime resolve it. Never copy, transcribe, or reconstruct
+      the resolved local path shown in Workflow Material Bindings.
+      Derive one concise, model-ready character_identity_prompt only from stable
+      identity evidence visibly present in that approved image. It must describe
+      immutable appearance: character type, color and marking layout, facial
+      geometry, body proportions, line and rendering style, and any visibly stable
+      wearable or distinguishing feature. Record facial construction as a visible
+      component inventory and topology independent of the current expression,
+      including each component's shape, color, relationship to adjacent features,
+      and visibly absent internal structure. Explicitly separate those immutable
+      traits from mutable pose, expression, camera, background, furniture,
+      handheld objects, and other scene props.
+      Omit every uncertain feature and never import a template style or invent
+      unseen attributes.
+
+      Then call image_editor exactly four times, always using
+      canonical_character_image as the sole visual reference. Create four separate
+      close face anchor images in this exact order: 1 open eyes and closed mouth;
+      2 open eyes and open mouth; 3 closed eyes and closed mouth; 4 closed eyes and
+      open mouth. Change only the required eye and mouth states. Preserve the
+      approved character identity, face geometry, palette, markings, proportions,
+      accessories, line style, rendering style, framing, and background across all
+      four images. Do not add unrequested internal facial features, overlay text,
+      props, gestures, or any other expression change unless visibly required by
+      the requested eye/mouth state.
+      Each call must return one image only; never combine multiple states inside an
+      editor output and do not retry a call.
+
+      Save the four distinct editor outputs to face_anchor_images in the required
+      order. Call compose_character_anchor_sheet exactly once with those four
+      outputs in the same order and the labels Open eyes / closed mouth, Open eyes
+      / open mouth, Closed eyes / closed mouth, Closed eyes / open mouth. Save its
+      returned local_path as face_anchor_grid. Save character_identity_prompt,
+      face_anchor_images, and face_anchor_grid together, then stop. When rerunning
+      after rejection, apply the user's latest anchor corrections without changing
+      accepted identity traits. After saving, the approval handoff must ask in
+      Chinese: “锚点图已生成，请查看参考图和2×2嘴眼锚点图。是否继续生成静态表情图？如需调整，请直接告诉我需要修改的锚点要求。”
+    tools: [multimodal, image_editor, compose_character_anchor_sheet]
+    terminal_tools: [save_artifacts]
+    inputs: [{material: canonical_character_image, required: true}]
+    outputs:
+      - {material: character_identity_prompt, required: true}
+      - {material: face_anchor_images, required: true}
+      - {material: face_anchor_grid, required: true}
+    acceptance_criteria: One grounded identity lock, exactly four distinct ordered eye/mouth anchor images, and one 2x2 review grid exist; no editor call was retried; the user explicitly approves the anchor result before static image generation can continue.
+
+  understand_states:
+    label: Understand Communication States
+    mode: auto
+    prompt: |
+      Read meme_brief_data.states and preserve every item's exact state and
+      caption values without translating, paraphrasing, renaming, or dropping
+      them. Preserve the approved order. For every approved state, create exactly
+      one broad state_performance_proposition. Preserve each approved
+      communication_purpose and action from the brief as the authoritative intent;
+      do not replace them with a different concept. Each state_specs item must contain
+      state, caption, communication_purpose, emotional_direction, intensity,
+      readable body_language_cues, and ambiguity_risks. Express emotional
+      differences through posture, head angle, limb gesture, timing, and scene
+      interaction. Do not propose changing the canonical face drawing, eye or
+      mouth state, facial fills or highlights, or visible facial components. Do
+      not yet choose detailed
+      composition, props, backgrounds, keyframes, or generation prompts. Save the
+      ordered list as state_specs JSON.
+    terminal_tools: [save_artifacts]
+    inputs:
+      - {material: meme_brief_data, required: true}
+      - {material: character_identity_prompt, required: true}
+    outputs: [{material: state_specs, required: true}]
+    acceptance_criteria: Every requested state has exactly one distinct, broadly reusable proposition, and every item preserves the exact state and caption from meme_brief_data.states in the same order.
+
+  design_best_performances:
+    label: Design Best Performances
+    route: choice
+    prompt: |
+      Read meme_brief_data.states and state_specs in their approved order. Turn
+      each state proposition into exactly one BestPerformance adapted to the
+      approved character. Preserve each exact state and caption without
+      translating, paraphrasing, renaming, or dropping either value. Use the
+      approved action from the brief as the exact main_full_body_action. Each item
+      must contain non-empty state, caption, main_full_body_action,
+      facial_performance, responsive_prop_or_environment, and causal_chain
+      fields. facial_performance must say to preserve the canonical face exactly
+      as drawn and must not introduce any state-specific facial construction,
+      component-visibility, interior-detail, fill, or highlight change. Make each state readable from
+      body pose, head angle, limb gesture, and motion instead. Never embed a
+      signed URL or local path in JSON. Do not ask the
+      image model to render words inside a prop or background. Optimize
+      attractiveness, cuteness, emotional
+      force, and instant readability while preserving identity. Do not invent
+      restrictive backstory. Save ordered best_performances JSON exactly once.
+      After that artifact is saved, call select_meme_delivery_route exactly once
+      with the exact meme_brief_data.delivery_mode. That terminal tool owns the
+      static/dynamic branch decision; never choose or advance the next step yourself.
+    tools: [select_meme_delivery_route]
+    terminal_tools: [select_meme_delivery_route]
+    inputs:
+      - {material: meme_brief_data, required: true}
+      - {material: character_identity_prompt, required: true}
+      - {material: state_specs, required: true}
+    outputs: [{material: best_performances, required: true}]
+    acceptance_criteria: Every state has one complete, distinct, identity-safe BestPerformance with the exact approved state and caption and a non-empty facial performance; no signed URL, local path, or model-rendered text instruction is embedded; select_meme_delivery_route returns the sole control.next_step matching the approved delivery mode after best_performances is saved.
+
+  plan_static:
+    label: Plan Static Hero Frames
+    mode: auto
+    prompt: |
+      Read character_identity_prompt and every BestPerformance in the approved
+      order. Preserve each exact state and caption and never replace the approved
+      character's species, coat pattern, palette, proportions, accessories, or
+      line style with a generic character. Design exactly one decisive text-free
+      hero frame per state. Save static_plan as an actual JSON array, never as a
+      quoted string or Python repr. Every array item must contain state_id,
+      caption, identity references, English image_prompt, and composition. Do not
+      plan keyframes or video. Do not choose
+      a caption box before seeing the rendered image. Each prompt must prohibit
+      model-rendered overlay text.
+    terminal_tools: [save_artifacts]
+    inputs:
+      - {material: meme_brief_data, required: true}
+      - {material: best_performances, required: true}
+      - {material: character_identity_prompt, required: true}
+    outputs: [{material: static_plan, required: true}]
+    acceptance_criteria: There is exactly one text-free hero-frame plan per state and no caption box is preselected.
+
+  render_static:
+    label: Render Text-Free Hero Frames
+    mode: auto
+    prompt: |
+      Edit from the approved canonical character for every planned hero frame.
+      Call image_editor exactly once per state and pass canonical_character_image
+      as the sole source image. Never call image_generator and never render from
+      text alone. Preserve the exact coat
+      pattern, palette, facial proportions, line style, and body proportions.
+      Save only successful text-free results to hero_no_text in state order. Do
+      not automatically retry and never substitute an input image for a failed
+      output.
+    tools: [image_editor]
+    terminal_tools: [save_artifacts]
+    inputs:
+      - {material: static_plan, required: true}
+      - {material: canonical_character_image, required: true}
+    outputs: [{material: hero_no_text, required: true}]
+    acceptance_criteria: One and only one text-free hero result exists per successful state-generation call.
+
+  caption_static:
+    label: Caption Static Results
+    mode: auto
+    prompt: |
+      Inspect each actual hero image with multimodal. If caption_mode is caption,
+      select stable natural whitespace on that image and call meme_add_caption
+      once with the exact caption and chosen normalized box. If no_text, keep the
+      text-free image unchanged. Save final images to static_final in state order.
+      Never cover the face, main gesture, or interaction prop.
+    tools: [multimodal, meme_add_caption]
+    terminal_tools: [save_artifacts]
+    inputs:
+      - {material: meme_brief_data, required: true}
+      - {material: hero_no_text, required: true}
+    outputs: [{material: static_final, required: true}]
+    acceptance_criteria: Final images preserve order and captions, when enabled, use post-render whitespace analysis.
+
+  plan_dynamic:
+    label: Plan Key Images and Motion
+    mode: auto
+    prompt: |
+      Read character_identity_prompt and every BestPerformance in the approved
+      order. Treat character_identity_prompt as one immutable identity lock and
+      copy it unchanged into every planned state. Preserve each exact state and
+      caption. For every BestPerformance plan exactly ONE decisive text-free key
+      image.
+      The image must preserve the approved character, clearly identify the state,
+      and provide a strong first frame from which the complete action can animate.
+      Save dynamic_plan as an actual JSON array, never as a quoted string or
+      Python repr. Every array item must contain state_id equal to the exact
+      approved state, caption equal to the exact approved caption, identity_lock
+      exactly equal to character_identity_prompt, exactly one English
+      key_image_prompt, and one English motion_prompt. The key-image prompt must
+      combine the unchanged identity lock with only the body pose, head angle,
+      limb gesture, and minimum scene interaction required by that state. The
+      canonical face drawing is immutable: keep its component visibility,
+      open/closed states, fills and highlights, interior details, relative
+      geometry, colors, and line style exactly unchanged. This rule overrides
+      any conflicting facial-performance wording from earlier artifacts. The
+      motion prompt must
+      start from the key image's exact pose and composition, describe only the
+      temporal body action and readable payoff, keep the face drawing unchanged,
+      and must not restate or redesign the character's appearance. It must not require any other
+      still image. Key images contain no overlay text. Save the optional skip_remaining_dynamic
+      artifact as the JSON boolean true only when the pack contains exactly one
+      state. For packs with two or more states, do not save this artifact at all;
+      never save the string "false" because non-empty text is truthy at runtime.
+    terminal_tools: [save_artifacts]
+    inputs:
+      - {material: meme_brief_data, required: true}
+      - {material: best_performances, required: true}
+      - {material: character_identity_prompt, required: true}
+    outputs:
+      - {material: dynamic_plan, required: true}
+      - {material: skip_remaining_dynamic, required: false}
+    acceptance_criteria: Each state has the exact same grounded identity_lock, exactly one key-image prompt, and one motion-only prompt that starts from that image without redefining appearance.
+
+  render_keyframes:
+    label: Render Key Images
+    mode: human
+    rerun_when: The user rejects one or more static key images or supplies corrected pose, composition, scene, or identity-preservation requirements. Regenerate the rejected static images from the canonical character using the latest user feedback and preserve accepted images unchanged.
+    prompt: |
+      Render exactly one identity-consistent text-free key image per state by
+      calling image_editor exactly N times for N states. For every call pass the
+      approved canonical_character_image as the sole source image and use that
+      state's saved main_full_body_action as the only state-specific change.
+      At the provider boundary the runtime deliberately rebuilds a source-grounded
+      prompt from the canonical image and that body action, instead of forwarding
+      any planner-generated facial or appearance language. Never call image_generator and
+      never render from text alone. The identity_lock must be byte-for-byte the
+      same in every state. At the provider boundary the runtime appends a generic
+      facial-invariance contract to the saved prompt. Treat appearance, palette,
+      markings, proportions, rendering style, and the complete face drawing as
+      immutable. The face must keep the same component visibility, open/closed
+      states, fills and highlights, interior details, relative geometry, colors,
+      and line style as the canonical source. State differences must be conveyed
+      only by body pose, head angle, limb gesture, and minimum scene interaction.
+      Save exactly one successful tool output per
+      state to master_keyframes in state order, with caption
+      <state_id>/key-image. Do not automatically retry and never substitute an
+      input image for a failed output. When rerunning after rejection, regenerate
+      only the rejected state images and keep accepted state images unchanged.
+      After saving, the approval handoff must ask in Chinese: “静态表情图已生成，请在图片制作页查看全部图片。是否继续制作视频？如需调整，请直接告诉我需要重做的表情和修改要求。”
+    tools: [image_editor]
+    terminal_tools: [save_artifacts]
+    inputs:
+      - {material: dynamic_plan, required: true}
+      - {material: canonical_character_image, required: true}
+      - {material: best_performances, required: true}
+    outputs: [{material: master_keyframes, required: true}]
+    acceptance_criteria: The list contains exactly one ordered key image per state, every call uses the same canonical source and shared identity lock, and every caption identifies its state; the user explicitly approves all static key images before video generation can continue.
+
+  video_canary:
+    label: Generate and Review Video Canary
+    mode: auto
+    prompt: |
+      Generate exactly one canary video for the first state. Pass that state's
+      only key image as the strict hard first-frame/reference image and use its
+      saved motion-only prompt verbatim. At the provider boundary, the runtime
+      combines that motion-only prompt with the same saved identity_lock; the
+      planner must not rewrite either part. Preserve the supplied frame's character
+      design, exact facial feature topology and visible component inventory, body
+      proportions, framing, and rendering style throughout. Keep the complete
+      first-frame face drawing unchanged in every frame, including component
+      visibility, open/closed states, fills and highlights, interior details,
+      relative geometry, colors, and line style. The runtime uses a square 1:1
+      canvas, a locked camera, and no visible provider watermark. Treat the head
+      and face as a stable cel and convey the state only through a small controlled
+      torso, limb, or tail movement. Return smoothly to the starting pose for a
+      clean loop. Animate the action without reinterpreting appearance.
+      Do not create or require any additional still images.
+      Save the video as canary_video and its state id as canary_state_id. Do not
+      automatically retry or switch models. The complete set of videos is reviewed
+      together at the next human checkpoint.
+    tools: [video_generator]
+    terminal_tools: [save_artifacts]
+    inputs:
+      - {material: dynamic_plan, required: true}
+      - {material: master_keyframes, required: true}
+      - {material: best_performances, required: true}
+    outputs:
+      - {material: canary_video, required: true}
+      - {material: canary_state_id, required: true}
+    acceptance_criteria: Exactly one first-state canary exists before the remaining videos are generated.
+
+  render_dynamic:
+    label: Render Remaining Videos
+    mode: human
+    rerun_when: The user rejects one or more videos or supplies corrected motion requirements. Target the earliest video-producing step for each rejected state, regenerate only those videos from their approved static key images using the latest user feedback, and preserve accepted videos unchanged.
+    skip_if: {material: skip_remaining_dynamic}
+    prompt: |
+      Read canary_state_id first. After canary generation, generate exactly one
+      video only for every state whose state_id is different from canary_state_id.
+      Never submit the canary state again in this step.
+      Start immediately by emitting independent video_generator calls for the next
+      batch of at most three states. After that batch returns, save each successful
+      result once in state order, then immediately generate the next batch until no
+      states remain. For every video_generator call, pass the one corresponding
+      master_keyframes image through the tool's `urls` argument as exactly one
+      image value. Never put a key-image path or URL inside `prompt`, and never
+      omit `urls`. Use the corresponding saved motion-only prompt verbatim in
+      `prompt`. At the provider boundary, the runtime combines
+      it with that state's unchanged identity_lock. Preserve the supplied frame's
+      character design, exact facial feature topology and visible component
+      inventory, body proportions, framing, and rendering style throughout.
+      Keep the complete first-frame face drawing unchanged in every frame,
+      including component visibility, open/closed states, fills and highlights,
+      interior details, relative geometry, colors, and line style. The runtime
+      uses a square 1:1 canvas, a locked camera, and no visible provider watermark.
+      Treat the head and face as a stable cel and convey the state only through a
+      small controlled torso, limb, or tail movement. Return smoothly to the
+      starting pose for a clean loop. Animate the action without reinterpreting
+      appearance. Do not
+      create or require any additional still images. Save videos to
+      remaining_videos in state order. On the initial run, do not regenerate the
+      canary. When rerunning after rejection, use the latest user correction and
+      regenerate only the rejected states; if the rejected state is the canary,
+      rewind video_canary first so its replacement is saved in canary_video.
+      Preserve all accepted videos unchanged. Do not automatically retry failures.
+      Never invent, guess, or save placeholder video paths. Save only successful
+      video_generator outputs returned by this task.
+      Do not discuss batching choices before calling the tools. After all videos
+      are available, the approval handoff must ask in Chinese: “视频已生成，请在图片制作页查看全部动态效果。是否继续制作GIF？如需调整，请直接告诉我需要重做的视频和修改要求。”
+    tools: [video_generator]
+    terminal_tools: [save_artifacts]
+    inputs:
+      - {material: dynamic_plan, required: true}
+      - {material: master_keyframes, required: true}
+      - {material: canary_video, required: true}
+      - {material: canary_state_id, required: true}
+      - {material: best_performances, required: true}
+    outputs: [{material: remaining_videos, required: true}]
+    acceptance_criteria: The canary and every remaining state have exactly one ordered video matching dynamic_plan, and the user explicitly approves the complete video set before GIF conversion can continue.
+
+  caption_dynamic:
+    label: Caption and Convert GIFs
+    mode: auto
+    prompt: |
+      Export the approved canary and every successful remaining video to a final
+      captioned GIF exactly once, in original state order. For each state call
+      meme_video_to_captioned_gif exactly once with that state's exact approved
+      caption. The runtime fixes fps=10, width=320, caption placement, colors, and
+      stroke ratio to safe deterministic values before the call. Do not supply or
+      tune those optional style arguments. This atomic tool performs both
+      conversion and local caption rendering; do not call video_to_gif or meme_add_caption
+      separately and do not create an intermediate deliverable.
+      Resolve every video artifact to the real absolute local file copied into
+      the current SubAgent workspace inputs directory before calling
+      meme_video_to_captioned_gif. Never pass a /static-files/ URL, a signed URL
+      with query parameters, or a bare filename. Save only each successful
+      meme_video_to_captioned_gif local_path to gif_output. The runtime rejects raw
+      or uncaptioned GIFs. Never translate, romanize, paraphrase, or omit captions.
+    tools: [meme_video_to_captioned_gif]
+    terminal_tools: [save_artifacts]
+    inputs:
+      - {material: meme_brief_data, required: true}
+      - {material: dynamic_plan, required: true}
+      - {material: canary_video, required: true}
+      - {material: remaining_videos, required: false}
+    outputs: [{material: gif_output, required: true}]
+    acceptance_criteria: One ordered final GIF exists per successful video; every output is provenance-checked as the atomic converter-captioner result and contains its exact approved caption.
+
+  review_pack:
+    label: Review Final Pack
+    mode: auto
+    prompt: |
+      Perform one whole-pack review of the available static_final or gif_output.
+      Check identity, state readability, action uniqueness, prop/environment
+      causality, caption accuracy and safety, and obvious media defects. Save
+      pack_review JSON with overall_status, passed_state_ids, and failed_units.
+      Set overall_status=approved only when passed_state_ids exactly contains every
+      requested state in original order and failed_units is empty. Otherwise set
+      overall_status=needs_rework. The runtime rejects a contradictory approval.
+      Every failed unit must name the smallest asset and earliest step to rewind;
+      never request rebuilding the whole pack for one failed state. Save the review
+      and complete without adding another human approval checkpoint.
+    tools: [multimodal]
+    terminal_tools: [save_artifacts]
+    inputs:
+      - {material: static_final, required: false}
+      - {material: gif_output, required: false}
+      - {material: meme_brief_data, required: true}
+      - {material: best_performances, required: true}
+    outputs: [{material: pack_review, required: true}]
+    acceptance_criteria: One final review covers every delivered item; approval is allowed only when all requested states pass in order and failed_units is empty, while any rework is scoped to the smallest failed unit.

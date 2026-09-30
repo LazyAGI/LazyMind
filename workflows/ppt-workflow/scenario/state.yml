@@ -10,16 +10,32 @@ transitions:
         skip_material_collection was not saved because uploaded sources,
         knowledge-base/web research, citations, current facts, real photos,
         product evidence, cases, data, or reference images are still needed.
+    - to: choose_style
+      when: >
+        skip_material_collection was saved and style_flow is exactly
+        preview_choice.
     - to: plan_background_prompts
       when: >
-        skip_material_collection was saved and ppt_capability_requirements is
-        exactly AI_BACKGROUND_IMAGES: enabled.
+        skip_material_collection was saved, style_flow is exactly auto, and
+        ppt_capability_requirements is exactly AI_BACKGROUND_IMAGES: enabled.
     - to: build_outline
       when: >
-        skip_material_collection was saved and ppt_capability_requirements is
-        exactly AI_BACKGROUND_IMAGES: disabled.
+        skip_material_collection was saved, style_flow is exactly auto, and
+        ppt_capability_requirements is exactly AI_BACKGROUND_IMAGES: disabled.
 
   collect_materials:
+    - to: choose_style
+      when: style_flow is exactly preview_choice.
+    - to: plan_background_prompts
+      when: >
+        style_flow is exactly auto and ppt_capability_requirements is exactly
+        AI_BACKGROUND_IMAGES: enabled.
+    - to: build_outline
+      when: >
+        style_flow is exactly auto and ppt_capability_requirements is exactly
+        AI_BACKGROUND_IMAGES: disabled.
+
+  choose_style:
     - to: plan_background_prompts
       when: >
         ppt_capability_requirements is exactly AI_BACKGROUND_IMAGES: enabled.
@@ -52,6 +68,8 @@ steps:
 
       User request:
       {{user_input}}
+      A bare continue/继续 is approval to proceed. Use launch_user_input from the
+      execution context and bound prior artifacts to retain the existing requirements.
 
       {{runtime_instruction}}
 
@@ -75,9 +93,10 @@ steps:
 
       Startup clarification contract:
       - The Chat host collects presentation topic, exact slide count, target
-        customer/audience, visual style, and whether per-slide AI background
-        generation is enabled before creating this workflow session. Extract
-        all five faithfully from {{user_input}}; clarification
+        customer/audience, visual style, whether to generate one style directly
+        or preview three choices, and whether per-slide AI background generation
+        is enabled before creating this workflow session. Extract all six
+        faithfully from {{user_input}}; clarification
         answers may have been merged into the original request.
       - Do not replace an explicitly supplied value with a generic default.
       - Do not interpret the phrase "make a PPT" itself as a presentation topic,
@@ -117,6 +136,9 @@ steps:
         (default: no — do not invent this need)
       - AI background generation: record exactly enabled or disabled from the
         startup answer. This is independent from foreground material images.
+      - Style flow: record exactly auto when the user chose direct generation,
+        or preview_choice when the user chose three previews. This decision is
+        independent from AI background generation.
 
       If the user already attached a PDF/PPTX/report or pasted key facts, fold the
       usable numbers and claims into the brief. collect_materials will reuse
@@ -131,7 +153,19 @@ steps:
                 per-slide AI backgrounds, otherwise
                 'AI_BACKGROUND_IMAGES: disabled',
         )
-        When and only when that marker is disabled, also save:
+        save_artifact(
+          key='style_flow', content_type='text',
+          value='auto' for direct generation, otherwise 'preview_choice',
+        )
+        save_artifact(
+          key='generate_background_images', content_type='text',
+          value='enabled' if AI backgrounds are enabled, otherwise 'disabled',
+        )
+        When and only when style_flow is auto, also save:
+          save_artifact(
+            key='skip_style_choices', content_type='text', value='skip',
+          )
+        When and only when AI background generation is disabled, also save:
           save_artifact(
             key='skip_background_images', content_type='text', value='skip',
           )
@@ -159,6 +193,10 @@ steps:
     outputs:
       - material: requirement_analysis
       - material: ppt_capability_requirements
+      - material: style_flow
+      - material: generate_background_images
+      - material: skip_style_choices
+        required: false
       - material: skip_background_images
         required: false
       - material: skip_material_collection
@@ -168,7 +206,9 @@ steps:
       topic, exact slide count, target customer/audience, communication tone,
       explicit visual constraints, structure, constraints, and assumptions.
       ppt_capability_requirements must be exactly AI_BACKGROUND_IMAGES: enabled
-      or AI_BACKGROUND_IMAGES: disabled. Executor must run the configured
+      or AI_BACKGROUND_IMAGES: disabled. style_flow must be exactly auto or
+      preview_choice and must not be inferred from the background setting.
+      Executor must run the configured
       deterministic check exactly once before this Attempt can pass.
 
   collect_materials:
@@ -191,6 +231,8 @@ steps:
 
       Original user request:
       {{user_input}}
+      A bare continue/继续 is approval to proceed. Use launch_user_input from the
+      execution context and bound prior artifacts to retain the existing requirements.
 
       {{runtime_instruction}}
 
@@ -263,9 +305,21 @@ steps:
             missing after KB image retrieval, or when no applicable KB is available.
             Then register only the necessary results with
             [{"url":..., "caption":..., "source":"web"}, ...] for at most one selected material image per planned slide.
-            If image search is unavailable or returns no usable URL, do not
-            retry repeatedly and do not fail the step. Record the gap in
-            material_summary and continue without material_images.
+            If a selected image URL is expired, inaccessible (for example
+            HTTP 403/404), or returns a page instead of a valid image, discard
+            that candidate and call ppt_search_web_images again for the same
+            slide subject. Select a different image URL/source from the fresh
+            results, then download/register that replacement. Do not repeatedly
+            retry the broken URL, invent a URL, or restart this whole step.
+            One broken link does not mean image search failed: try the fresh
+            candidate before deciding to omit an optional image. Preserve all
+            facts and images already collected successfully. Count replacement
+            searches toward the retrieval budget below and reserve budget for
+            this recovery when selecting image candidates.
+            If image search itself is unavailable or the fresh search yields
+            no usable replacement, record the gap in material_summary and
+            continue without that optional image. An AI background is not a
+            substitute for a real photo/product/reference image the user required.
          c) AI-generated material images — ONLY when the user explicitly asks
             to generate/create material images for the deck (e.g. "生成素材图",
             "用 AI 画几张参考图", "AI generate reference images"). Then call:
@@ -341,6 +395,70 @@ steps:
       as individual image-list artifacts so the Materials tab can preview them
       and later steps can embed them in HTML.
 
+  choose_style:
+    label: Choose Style
+    mode: human
+    skip_if: {material: skip_style_choices}
+    prompt: |
+      Generate exactly three deck-wide visual style previews, publish them for
+      comparison, and stop for the user's choice. Do not build the outline,
+      generate AI backgrounds, or render final slides in this step.
+
+      Requirement analysis:
+      {{requirement_analysis}}
+
+      Material summary (may be empty):
+      {{material_summary}}
+
+      Style flow (must be preview_choice in this step):
+      {{style_flow}}
+
+      AI backgrounds:
+      {{generate_background_images}}
+
+      Original user request:
+      {{user_input}}
+      A bare continue/继续 is approval to proceed. Use launch_user_input from the
+      execution context and bound prior artifacts to retain the existing requirements.
+
+      {{runtime_instruction}}
+
+      Call ppt_prepare_style_choices exactly once. Pass the merged request,
+      positive page count, audience/scene, only the user's explicit style
+      direction as style_hint, generate_background_images=true only when the
+      hidden value is enabled, and omit unused optional arguments. The tool
+      creates exactly three distinct but request-compatible previews, publishes
+      one read-only comparison, and initializes editable style_selection to the
+      recommended candidate A.
+
+      On a retry after previews were already generated, first call ppt_find_deck
+      and pass its deck_dir so the tool reuses the same three previews. Never
+      create another deck merely because the step was resumed.
+
+      The user confirms by leaving A unchanged or editing style_selection to B
+      or C, then clicking Save and Continue. Do not ask the user to edit JSON.
+      Stop immediately after ppt_prepare_style_choices succeeds.
+    tools:
+      - ppt_find_deck
+      - ppt_prepare_style_choices
+    inputs:
+      - material: requirement_analysis
+        required: true
+      - material: material_summary
+        required: false
+      - material: style_flow
+        required: true
+      - material: generate_background_images
+        required: true
+    outputs:
+      - material: style_previews
+        required: true
+      - material: style_selection
+        required: true
+    acceptance_criteria: |
+      Exactly three preview choices A, B, and C are visible. style_selection is
+      one editable, non-empty A/B/C value and the step waits for human approval.
+
   build_outline:
     label: Build Outline
     mode: auto
@@ -361,6 +479,14 @@ steps:
 
       Original user request:
       {{user_input}}
+      A bare continue/继续 is approval to proceed. Use launch_user_input from the
+      execution context and bound prior artifacts to retain the existing requirements.
+
+      Style flow:
+      {{style_flow}}
+
+      Selected preview (A/B/C when applicable):
+      {{style_selection}}
 
       {{runtime_instruction}}
 
@@ -385,8 +511,8 @@ steps:
       Stop after that one insertion publication call. Never call
       ppt_build_outline for a whole-slide insertion.
 
-      When AI backgrounds were enabled, first call ppt_find_deck to locate the
-      deck prepared by the background-prompt step. Then call ppt_build_outline
+      When AI backgrounds were enabled OR style_flow is preview_choice, first
+      call ppt_find_deck to locate the already prepared deck. Then call ppt_build_outline
       once with its deck_dir:
 
       ppt_build_outline — pass only these (omit unused optionals; never pass null):
@@ -396,6 +522,8 @@ steps:
            topic=<short topic>,
            role / audience / scene=<from analysis>,
            style_hint=<ONLY visual constraints explicitly stated by the user>,
+           style_flow=<exact hidden auto or preview_choice value>,
+           style_selection=<exact A/B/C value only for preview_choice>,
            generate_background_images=<true only when startup answer enabled it>,
            key_points_json='["point1","point2"]'  (JSON string, or omit)
            outline_markdown=<REQUIRED: your concise content outline, one ## heading
@@ -413,14 +541,15 @@ steps:
       from requirement_analysis into style_hint. The PPT runtime selects one
       deck-wide style and applies that same contract to every page.
 
-      This call reuses the prepared deck and saves your Markdown without a nested
-      model call. Internal structure, schema validation, image bindings, shared
-      style and rendering are all deferred to generate_ppt. This step only plans
+      This call reuses the prepared deck, locks one authoritative deck-wide style,
+      and saves your Markdown. Internal structure, schema validation, image
+      bindings and rendering are deferred to generate_ppt. This step only plans
       user-visible content; keep page headings clear and content concise.
       This step never generates AI backgrounds; the dedicated stages before it
       already published prompts and images. When AI backgrounds were
-      disabled and those steps were skipped, do not call ppt_find_deck: call
-      ppt_build_outline without deck_dir so it initializes the deck itself.
+      disabled and those steps were skipped, style_flow determines deck reuse:
+      preview_choice reuses the preview deck; auto calls ppt_build_outline without
+      deck_dir so it initializes the deck and creates one unique style first.
 
       This is an atomic step. If ppt_build_outline fails, report that exact tool
       error and stop so only this Workflow step fails and can be retried.
@@ -447,6 +576,10 @@ steps:
         required: false
       - material: ppt_capability_requirements
         required: true
+      - material: style_flow
+        required: true
+      - material: style_selection
+        required: false
     outputs:
       - material: deck_outline
     acceptance_criteria: |
@@ -472,6 +605,8 @@ steps:
 
       Original user request:
       {{user_input}}
+      A bare continue/继续 is approval to proceed. Use launch_user_input from the
+      execution context and bound prior artifacts to retain the existing requirements.
 
       {{runtime_instruction}}
 
@@ -531,20 +666,33 @@ steps:
       Existing background prompts, if this is a targeted revision:
       {{background_prompts}}
 
+      Style flow:
+      {{style_flow}}
+
+      Selected preview (A/B/C when applicable):
+      {{style_selection}}
+
       Original/current user request:
       {{user_input}}
+      A bare continue/继续 is approval to proceed. Use launch_user_input from the
+      execution context and bound prior artifacts to retain the existing requirements.
 
       {{runtime_instruction}}
 
-      On the first full run, call ppt_init_deck once using the analyzed request,
-      exact positive page_count N, audience/scene/style, and
-      generate_background_images=true and ppt_mode=fast. Editable PPT export
-      does not require standard mode; do not select standard. Then call
-      ppt_publish_background_prompts with that deck_dir and exactly N objects:
+      Before authoring prompts, lock one authoritative deck-wide style:
+      - For auto, call ppt_prepare_style without deck_dir, pass style_flow=auto,
+        the analyzed request, exact page count/audience/scene, the user's explicit
+        style direction, and generate_background_images=true.
+      - For preview_choice, call ppt_find_deck, then ppt_prepare_style with that
+        deck_dir, style_flow=preview_choice, and the exact A/B/C style_selection.
+      Reuse the returned style_spec as the fixed series contract. The style choice
+      is independent of whether AI backgrounds are enabled.
+
+      Then call ppt_publish_background_prompts with that deck_dir and exactly N objects:
         [{"page_no":1,"prompt":"..."}, ..., {"page_no":N,"prompt":"..."}]
 
-      On a targeted rerun, call ppt_find_deck instead of ppt_init_deck, then
-      publish only the selected page objects into that existing deck.
+      On a targeted rerun, call ppt_find_deck and ppt_prepare_style with that
+      deck_dir, then publish only the selected page objects into that existing deck.
 
       Whole-slide insertion into an existing deck: call ppt_find_deck, read the
       two adjacent page outlines with ppt_read_page_outline when available, and
@@ -608,14 +756,18 @@ steps:
       After ppt_publish_background_prompts succeeds, stop. This step does not
       require approval by default; the generated backgrounds step follows.
     tools:
-      - ppt_init_deck
       - ppt_find_deck
+      - ppt_prepare_style
       - ppt_read_page_outline
       - ppt_publish_background_prompts
     inputs:
       - material: requirement_analysis
         required: true
       - material: material_summary
+        required: false
+      - material: style_flow
+        required: true
+      - material: style_selection
         required: false
     outputs:
       - material: background_prompts
@@ -647,6 +799,8 @@ steps:
 
       Original/current user request:
       {{user_input}}
+      A bare continue/继续 is approval to proceed. Use launch_user_input from the
+      execution context and bound prior artifacts to retain the existing requirements.
 
       {{runtime_instruction}}
 
@@ -715,6 +869,8 @@ steps:
 
       Original user request:
       {{user_input}}
+      A bare continue/继续 is approval to proceed. Use launch_user_input from the
+      execution context and bound prior artifacts to retain the existing requirements.
 
       {{runtime_instruction}}
 

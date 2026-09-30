@@ -250,7 +250,8 @@ class AgentExecutor:
             CitationResultMiddleware(agent._tools_manager),
             failure_policy=FailureRetryPolicy(options.tool_failure_limits),
             call_quota=ToolCallQuota(options.tool_call_limits),
-            expanded_round_limit=max(2, int(_cfg['agentic_expanded_max_rounds'])),
+            expanded_round_limit=(options.expanded_round_limit if options.expanded_round_limit is not None
+                                  else max(2, int(_cfg['agentic_expanded_max_rounds']))),
             cancel_check=options.extra_stop_condition,
             repeat_monitor=repeat_monitor,
             notice_buffer=notice_buffer,

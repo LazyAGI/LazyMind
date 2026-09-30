@@ -1,110 +1,148 @@
 initial: __start__
 
 transitions:
-  __start__: [{to: retrieve_product_evidence}]
-  retrieve_product_evidence: [{to: build_direction_outline}]
+  __start__: [{to: route_product_stage}]
+  route_product_stage:
+    - {to: build_direction_outline, when: 父 Router 的 selected_stage 是 direction}
+    - {to: analyze_competitive_position, when: 父 Router 的 selected_stage 是 competitive}
+    - {to: route_design_scope, when: 父 Router 的 selected_stage 是 design}
+    - {to: build_prd_outline, when: 父 Router 的 selected_stage 是 prd}
+    - {to: build_interactive_prototype, when: 父 Router 的 selected_stage 是 prototype}
+    - {to: build_review_outline, when: 父 Router 的 selected_stage 是 review}
+    - {to: build_handoff_outline, when: 父 Router 的 selected_stage 是 handoff}
   build_direction_outline: [{to: write_direction_document}]
-  write_direction_document: [{to: analyze_competitive_position}]
-  analyze_competitive_position: [{to: build_design_outline}]
+  write_direction_document: [{to: finalize_product_delivery}]
+  analyze_competitive_position: [{to: finalize_product_delivery}]
+  route_design_scope:
+    - {to: collect_design_light_evidence, when: 第二层 Router 的 overall_effort 是 light}
+    - {to: collect_design_heavy_evidence, when: 第二层 Router 的 overall_effort 是 heavy}
+  collect_design_light_evidence: [{to: build_design_outline}]
+  collect_design_heavy_evidence: [{to: build_design_outline}]
   build_design_outline: [{to: write_design_document}]
-  write_design_document: [{to: build_prd_outline}]
+  write_design_document: [{to: finalize_product_delivery}]
   build_prd_outline: [{to: write_prd_document}]
-  write_prd_document: [{to: build_interactive_prototype}]
-  build_interactive_prototype: [{to: build_review_outline}]
+  write_prd_document: [{to: finalize_product_delivery}]
+  build_interactive_prototype: [{to: finalize_product_delivery}]
   build_review_outline: [{to: write_review_document}]
-  write_review_document: [{to: build_handoff_outline}]
+  write_review_document: [{to: finalize_product_delivery}]
   build_handoff_outline: [{to: write_handoff_document}]
   write_handoff_document: [{to: finalize_product_delivery}]
   finalize_product_delivery: [{to: __end__}]
 
 steps:
-  retrieve_product_evidence:
-    label: 资料与知识库检索
+  route_product_stage:
+    route: choice
+    label: 产品阶段 Router
+    mode: auto
     prompt: |
       {{runtime_instruction}}
 
-      Workflow preflight has already collected every required answer. Do not ask again and do not
-      infer defaults. First call normalize_product_parameters with the exact external product_goal,
-      stage_chain, execution_depth, word_target and reference_sample_choice values. Save its
-      execution_plan JSON and every returned top-level skip_* value to the matching optional output;
-      do not create a skip material absent from the tool result. Persist these small planning outputs
-      together immediately before profiling files or starting any search; do not defer or batch them
-      with the later evidence outputs. The UI uses this first artifact update to reveal only the
-      planned stage tabs.
-
-      Then perform one shared evidence pass for all stages in execution_plan.stage_chain. The
-      execution plan and this prompt already define the evidence boundary; do not load full child
-      Skill contracts. If product_materials or reference_sample files are bound, call
-      profile_product_materials with their exact Workflow paths as one JSON array. Never call
-      read_user_attachment and never materialize scalar parameters as files. If no files are bound,
-      call it with [] so resource_profiles still exists. The tool result already includes inline
-      profiles plus a resource_profiles file path: never read that path. Persist that exact path as
-      resource_profiles with content_type="file". Use the inline profiles to write material_digest
-      as Markdown text; never pass JSON/Markdown content to a file slot.
-
-      Search only when evidence can change a planned-stage decision. Use the selected knowledge
-      bases through kb with inherited runtime scope; never enumerate or guess kb_ids and do not
-      impose a fixed query-count cap. Use web_search for current public facts, especially when
-      competitive is planned; use url_fetch only when a relevant result needs more detail. Missing
-      or unconfigured providers are recorded once and are not retried indefinitely. When runtime
-      context does not expose a selected knowledge-base scope, make zero kb calls: do not probe kb
-      to discover whether a selection exists. If the first kb call reports missing scope,
-      unavailable configuration or a transport failure, stop that channel immediately; never
-      enumerate knowledge bases or guess identifiers as recovery.
-
-      Register only actual results as WEB-001... and KB-001..., with title/source, URL or document
-      label, date when available, query provenance, excerpt, fact/inference status and limitations.
-      Save research_evidence, research_log and material_digest as text, while resource_profiles is
-      always the exact file path returned by profile_product_materials. Never claim a search
-      succeeded when it did not.
-    tools: [normalize_product_parameters, profile_product_materials, web_search, url_fetch, kb]
+      Call load_product_skill_contract(stage_id="router") once. Apply its authoritative priority:
+      explicit stage > deterministic rule > model recommendation. Route the original business request,
+      not a later Continue/Confirm acknowledgement or the launcher description. "由 Router 判断" is
+      not an explicit choice. Choose the smallest useful entry; a new project need not start at direction.
+      Missing facts remain draft gaps, not a reason to run earlier stages. This Session executes only
+      selected_stage; a shortest forward stage_chain is planning metadata and requires explicit authorization.
+      Use selected_stage, route_source, route_reason, confidence (explicit/high/low), alternatives,
+      stage_chain and stage_chain_authorized. The Host restores explicit intent from immutable bindings.
+      For bound upstream_<selected_stage>, choose entry_action=revise_document and preserve its structure;
+      use revise_outline only for an explicit structural change, otherwise create_document without a baseline.
+      Reuse workspace_seed identity, exact selected versions, prior decisions and stage preferences.
+      Use stage_approval.request_context as the latest change request and product_goal as the project goal.
+      Do not request reuploads or new windows. Continue/document approval does not accept all proposals.
+      Absent options use project defaults: auto depth, stage length, supplied reference sample or default
+      structure. Do not ask the portable Skill's separate sample question or claim an upload occurred.
+      The Router does no external retrieval. Call profile_product_materials once with a JSON array
+      of actual bound file paths from upstream_*, product_materials and reference_sample; never slot labels,
+      scalar values, embedded:// resources or read_user_attachment. When none exist, pass [] exactly.
+      Preserve selected versions and fact/proposed/accepted labels. Pass its returned resource_profiles
+      path unchanged to publish_product_route with the routing record and exact scalar inputs.
+      Do not read or save the profiles yourself. With no file materials the publisher can also create an
+      honest empty inventory if the path is omitted; never fabricate paths or successful searches.
+      Omit absent optional scalars or use an empty string, never "default", "stage-specific" or placeholders.
+      The terminal publisher validates and saves every Router output and returns control.next_step;
+      other branches are pruned and UI hide markers are not routing. Repair all reported fields together
+      and retry once if needed. After success stop, with no save_artifacts, recap or visible Skill receipt.
+    tools: [load_product_skill_contract, publish_product_route, profile_product_materials]
+    terminal_tools: [publish_product_route]
     inputs:
       - {material: product_goal, required: true}
-      - {material: stage_chain, required: true}
-      - {material: execution_depth, required: true}
-      - {material: word_target, required: true}
-      - {material: reference_sample_choice, required: true}
+      - {material: requested_stage, required: false}
+      - {material: execution_depth, required: false}
+      - {material: word_target, required: false}
+      - {material: reference_sample_choice, required: false}
       - {material: product_materials, required: false}
       - {material: reference_sample, required: false}
+      - {material: workspace_seed, required: false}
+      - {material: stage_approval, required: false}
+      - {material: upstream_direction, required: false}
+      - {material: upstream_competitive, required: false}
+      - {material: upstream_design, required: false}
+      - {material: upstream_prd, required: false}
+      - {material: upstream_prototype, required: false}
+      - {material: upstream_review, required: false}
+      - {material: upstream_handoff, required: false}
     outputs:
+      - {material: reuse_product_structure, required: false}
+      - {material: routing_record}
       - {material: execution_plan}
-      - {material: skip_direction, required: false}
-      - {material: skip_competitive, required: false}
-      - {material: skip_design, required: false}
-      - {material: skip_prd, required: false}
-      - {material: skip_prototype, required: false}
-      - {material: skip_review, required: false}
-      - {material: skip_handoff, required: false}
+      - {material: routing_summary}
+      - {material: hide_direction, required: false}
+      - {material: hide_competitive, required: false}
+      - {material: hide_design, required: false}
+      - {material: hide_prd, required: false}
+      - {material: hide_prototype, required: false}
+      - {material: hide_review, required: false}
+      - {material: hide_handoff, required: false}
       - {material: research_evidence}
       - {material: research_log}
       - {material: material_digest}
       - {material: resource_profiles}
     acceptance_criteria: |
-      Preflight parameters normalize deterministically; one honest evidence pass covers the planned
-      chain, every WEB/KB ID maps to a real result, and user files are profiled exactly once.
+      The parent routing record satisfies the source contract, exactly one business-stage edge is
+      selected, the closed evidence handoff contains no invented retrieval, and user files are
+      profiled exactly once.
 
   build_direction_outline:
+    skip_if: {all: [{material: upstream_direction}, {material: reuse_product_structure}]}
     label: 产品方向大纲生成
-    mode: human
-    skip_if: {material: skip_direction}
+    mode: auto
     rerun_when: 用户要求重新生成、调整或局部修改产品方向大纲。
-    prompt: |
+    prompt: &writer_outline_prompt |
       {{runtime_instruction}}
 
-      On first generation call product_writer_generate_outline_from_inputs(
-      user_request="{{user_input}}", stage_id="direction"). The business bridge resolves every
-      bound input and performs Writer context preparation, generation, normalization, validation and
-      context refresh. Do not call generic file/Artifact tools or any lower-level Writer tool. Save
-      writing_task, writing_context, outline, outline_report and approved_context respectively as
-      direction_task, direction_context, direction_outline, direction_outline_report and
-      direction_context_approved. On rerun revise the latest direction_outline only with
-      document_slot="direction_outline". The editable Markdown is the sole structural source. Stop
-      for user editing and Continue approval.
-    tools: [product_writer_generate_outline_from_inputs, product_writer_revise_markdown]
-    inputs:
+      Call load_product_skill_contract() once without stage_id; its stage_id is S, resolved
+      from the bound execution_plan. Follow that child contract and its listed packaged references;
+      never pass embedded:// references to generic file tools.
+      For first generation call product_writer_generate_outline_from_inputs(
+      user_request="{{user_input}}", stage_id=S) once. The bridge resolves authoritative bound
+      inputs, prepares context, validates the outline, and saves all five typed outputs.
+      For an explicit outline revision call product_writer_revise_and_publish using the exact
+      existing file/context paths, requested change and document_slot=S + "_outline".
+      Preserve the user's latest Markdown and unaffected sections. Reuse an upstream same-stage
+      baseline instead of recreating generic structure. For design, retain the approved scope and
+      selected light/heavy evidence, including validated escalation and unresolved hard gates.
+      The bridge publishes S_task, S_context, S_outline, S_outline_report and S_context_approved.
+      These names mean the returned stage id plus the suffix. Never call save_artifacts,
+      reconstruct paths, or pass JSON contents as a filename. Stop after successful publication;
+      the Host controls subsequent execution.
+    tools: &writer_outline_tools [load_product_skill_contract, product_writer_generate_outline_from_inputs, product_writer_revise_and_publish]
+    terminal_tools: &outline_publishers [product_writer_generate_outline_from_inputs, product_writer_revise_and_publish]
+    inputs: &writer_outline_inputs
       - {material: execution_plan, required: true}
       - {material: research_evidence, required: true}
       - {material: resource_profiles, required: true}
+      - {material: product_materials, required: false}
+      - {material: reference_sample, required: false}
+      - {material: workspace_seed, required: false}
+      - {material: stage_approval, required: false}
+      - {material: upstream_direction, required: false}
+      - {material: upstream_competitive, required: false}
+      - {material: upstream_design, required: false}
+      - {material: upstream_prd, required: false}
+      - {material: upstream_prototype, required: false}
+      - {material: upstream_review, required: false}
+      - {material: upstream_handoff, required: false}
     outputs:
       - {material: direction_task}
       - {material: direction_context}
@@ -116,37 +154,67 @@ steps:
   write_direction_document:
     label: 产品方向文档生成
     mode: human
-    skip_if: {material: skip_direction}
     rerun_when: 用户要求修改、补充或局部重写产品方向文档。
-    prompt: |
+    prompt: &writer_document_prompt |
       {{runtime_instruction}}
 
-      Use the latest approved direction_outline as the only structure. On first generation call
-      product_writer_generate_document_from_inputs(stage_id="direction"). The business bridge reads
-      immutable bound inputs, plans sections, streams/resumes Writer checkpoints, assembles the
-      draft and refreshes context. It publishes each optional chapter directly to direction_chapters;
-      do not save that slot again. Do not call generic file/Artifact lookup tools or reconstruct
-      intermediate paths. Save its section_plan, document and writing_context paths respectively as
-      direction_section_plan, direction_document and direction_context_final. Chapter publish
-      warnings are non-blocking; do not retry generation or call another tool for them. On rerun use targeted revision only with
-      document_slot="direction_document". Stop for user editing and Continue approval.
-    tools: [product_writer_generate_document_from_inputs, product_writer_revise_markdown]
+      Call load_product_skill_contract() once without stage_id; its stage_id is S, resolved
+      from the bound execution_plan. Follow that child contract and shared presentation rules.
+      Use S_outline when present; otherwise reuse upstream_S structure and revise its baseline.
+      The S prefix means the returned stage id, not a literal slot name.
+      For first generation call product_writer_generate_document_from_inputs(stage_id=S) once.
+      For targeted revision call product_writer_revise_and_publish with exact existing file/context
+      paths, the change request and document_slot=S + "_document". Preserve unaffected content
+      and decisions. The bridge publishes S_section_plan, S_document, S_document_html,
+      S_context_final and optional chapters; do not save these outputs again or reconstruct paths.
+      HTML is deterministically rendered from the same Markdown, never rewritten by a second model.
+      Non-blocking chapter warnings do not justify regeneration. Read only the returned exact
+      file path when needed to ground the assessment. For design preserve the selected scope,
+      evidence branch and risk gates; for handoff apply the stricter readiness checks.
+      Completion requires this exact order: generate/revise, validate the assessment, save the assessment.
+      Only the normalized S_assessment is passed to save_artifacts; a file alone is not completion.
+      Use validate_product_stage_assessment(value={"stage": S, "status": "draft", ...}) with the
+      stage inside value, never as a sibling argument. Follow its stage-aware schema and report
+      child-decided facts; omit optional empty collections and never invent alternate nesting.
+      Repair all reported invalid paths together and retry once only. Never finish with an unsaved
+      assessment. Checks need actual evidence; unperformed checks are not-checked. Missing or
+      conflicting required inputs keep draft status. Decisions remain proposed; the Host records
+      system provenance at relay, never a fabricated user acceptance_ref. Only handoff may claim
+      implementation readiness after its required checks and dependencies pass.
+      Never pass artifact/workspace/Writer paths as reference_paths; omit reference_paths on the
+      first load. Keep assessments and traces internal. After saving, return one natural status
+      sentence (at most 80 Chinese characters); no JSON, paths, chapter lists, diagnostics or recap.
+    tools: &writer_document_tools [read_file, load_product_skill_contract, validate_product_stage_assessment, product_writer_generate_document_from_inputs, product_writer_revise_and_publish]
     inputs:
+      - {material: resource_profiles, required: false}
+      - {material: research_evidence, required: false}
       - {material: execution_plan, required: true}
-      - {material: direction_task, required: true}
-      - {material: direction_outline, required: true}
-      - {material: direction_context_approved, required: true}
+      - {material: direction_task, required: true, alternatives: [upstream_direction]}
+      - {material: direction_outline, required: true, alternatives: [upstream_direction]}
+      - {material: direction_context_approved, required: true, alternatives: [upstream_direction]}
+      - {material: product_materials, required: false}
+      - {material: reference_sample, required: false}
+      - {material: workspace_seed, required: false}
+      - {material: stage_approval, required: false}
+      - {material: upstream_direction, required: false}
+      - {material: upstream_competitive, required: false}
+      - {material: upstream_design, required: false}
+      - {material: upstream_prd, required: false}
+      - {material: upstream_prototype, required: false}
+      - {material: upstream_review, required: false}
+      - {material: upstream_handoff, required: false}
     outputs:
+      - {material: direction_assessment}
       - {material: direction_section_plan, required: false}
       - {material: direction_chapters, required: false}
       - {material: direction_document}
+      - {material: direction_document_html}
       - {material: direction_context_final}
     acceptance_criteria: The editable direction brief follows the approved outline and preserves evidence and decision status.
 
   analyze_competitive_position:
     label: 竞品与生态位分析
     mode: human
-    skip_if: {material: skip_competitive}
     prompt: |
       {{runtime_instruction}}
 
@@ -154,51 +222,228 @@ steps:
       stage contract and never source snapshots. Then call
       load_product_stage_inputs(stage_id="competitive") once and use only its material contents;
       never call read_file, get_artifact, find_artifact, grep or list_artifacts for Workflow inputs.
+      When upstream_competitive is present, revise that project's existing report according to the
+      latest stage_approval.request_context, preserving unaffected findings and their original
+      evidence dates; do not treat old public facts as newly verified. No re-upload or new window
+      is needed to continue this shared project view.
       The returned research_evidence, material_digest and optional approved direction_document are
       the closed evidence set. The report must answer both current-product comparison and full
       ecosystem positioning across direct, indirect, substitute, status-quo and adjacent options.
-      Preserve WEB/KB IDs and distinguish verified fact, user claim, inference, recommendation and
-      unknown. Generate one compact responsive self-contained HTML with comparison table, ecosystem
-      visual, evidence limits, product implications and collapsed evidence. Include clickable links
-      only for sources actually present in the bound evidence; no evidence means an honest no-source
-      notice, not invented URLs. Call write_product_artifact_file with filename=
-      "competitive-analysis.html" and validate_as="competitive". It returns only an exact local
-      file path. Save that returned path verbatim as competitive_analysis with
-      content_type="file"; never save or repeat the HTML source as the file value. Stop for approval.
-    tools: [load_product_skill_contract, load_product_stage_inputs, write_product_artifact_file]
+      Generate one logical report with two synchronized representations: a compact responsive
+      self-contained interactive HTML (the default view) and a Markdown document (the editable and
+      downloadable view). Both must contain the same facts, recommendations, evidence dates,
+      uncertainty and section semantics; do not independently invent or omit conclusions. Start
+      with a plain-Chinese conclusion: what the market looks like, where this product should compete,
+      and what the team should do next. Then show the comparison table, ecosystem position and product
+      implications. Put research method, source limits and unresolved questions in one collapsed
+      “依据与待确认” section at the end. Do not show workflow terms, evidence grades, tool states,
+      artifact fields, English status values, or WEB-NNN/KB-NNN notation. When a real source exists,
+      present its human title and link; when none exists, say only “本轮未使用外部资料，关键判断仍待验证”.
+      Separate facts from recommendations through section headings and natural sentences, never by
+      prefixing every paragraph with status labels. Both formats must be visually rich: use tables,
+      a real SVG quadrant/coordinate chart when its axes and points are supported, and a dated event
+      timeline when numeric trend data is insufficient. Markdown uses GFM tables, fenced Mermaid
+      diagrams and only real bound images; HTML uses accessible inline SVG and interactive details.
+      Call write_product_artifact_bundle(html_filename="competitive-analysis.html",
+      markdown_filename="competitive-analysis.md", validate_as="competitive") once with both
+      complete bodies. Save its returned html_path verbatim as competitive_analysis and its returned
+      markdown_path verbatim as competitive_analysis_markdown, both with content_type="file"; never
+      save or repeat source bodies as file values. Stop for approval.
+      Follow the shared contract completion rules: validate and save competitive_assessment
+      before completing, with the stage inside value. Keep the assessment and runtime trace internal.
+    tools: &html_stage_tools [load_product_skill_contract, validate_product_stage_assessment, load_product_stage_inputs, write_product_artifact_bundle]
     inputs:
       - {material: execution_plan, required: true}
       - {material: research_evidence, required: true}
       - {material: research_log, required: true}
       - {material: material_digest, required: true}
-      - {material: direction_document, required: false}
+      - {material: product_materials, required: false}
+      - {material: reference_sample, required: false}
+      - {material: workspace_seed, required: false}
+      - {material: stage_approval, required: false}
+      - {material: upstream_direction, required: false}
+      - {material: upstream_competitive, required: false}
+      - {material: upstream_design, required: false}
+      - {material: upstream_prd, required: false}
+      - {material: upstream_prototype, required: false}
+      - {material: upstream_review, required: false}
+      - {material: upstream_handoff, required: false}
     outputs:
+      - {material: competitive_assessment}
       - {material: competitive_analysis}
-    acceptance_criteria: The HTML covers comparison and ecosystem positioning with traceable evidence and product implications.
+      - {material: competitive_analysis_markdown}
+    acceptance_criteria: The synchronized HTML and Markdown lead with the same readable market conclusion, use evidence-bound visuals, and keep research details separate.
 
-  build_design_outline:
-    label: 产品方案大纲生成
-    mode: human
-    skip_if: {material: skip_design}
-    rerun_when: 用户要求重新生成、调整或局部修改产品方案大纲。
+  route_design_scope:
+    route: choice
+    label: 产品方案内部 Router
+    mode: auto
     prompt: |
       {{runtime_instruction}}
 
-      On first generation call product_writer_generate_outline_from_inputs(
-      user_request="{{user_input}}", stage_id="design"). The bridge resolves all bound evidence and
-      approved upstream artifacts and performs the complete outline pipeline. Do not call generic
-      file/Artifact tools or lower-level Writer tools. Save writing_task, writing_context, outline,
-      outline_report and approved_context respectively as design_task, design_context,
-      design_outline, design_outline_report and design_context_approved. On rerun revise only the
-      latest design_outline with document_slot="design_outline"; never restore user-deleted
-      sections. Stop for user editing and Continue approval.
-    tools: [product_writer_generate_outline_from_inputs, product_writer_revise_markdown]
+      Call load_product_skill_contract(stage_id="design", reference_paths=[
+      "references/boundary-and-routing.md", "references/evidence-and-effort.md",
+      "references/human-in-the-loop.md", "references/multi-source-research.md"]).
+      Classify actual changed objects: mechanism domains are domain_state, behavior_policy_trust,
+      ia_semantics; experience domains are journey_interaction_service, ui_visual_system,
+      content_communication. Assign primary and linked domains, then light/heavy per decision using
+      cost/reversibility, divergence, impact/coupling and uncertainty; never average away risk.
+      privacy, identity, permission, silent_write, cross_tenant and high_loss_irreversible force
+      behavior_policy_trust to heavy. Parent execution_depth must not overwrite this choice.
+      Preserve original request scope, heavy intent and hard gates when the latest input is Continue/Confirm.
+      Use bound evidence only, with no retrieval or invented verification; uncertain trust/divergence/gates
+      require heavy research next. Call publish_design_route_compact exactly once with short scalar strings:
+      comma-separated canonical primary_domains, linked_domains, heavy_domains and hard_gates, plus a
+      Chinese decision_summary of at most 120 characters. Omit empty fields; never use objects or arrays.
+      The Host restores risk gates, validates decisions/escalation triggers, saves Chinese results and
+      selects one native outgoing edge. Stop after publication; do not rewrite or save outputs yourself.
+      Business decisions retain their separate confirmation boundary.
+    tools: [load_product_skill_contract, publish_design_route_compact]
+    terminal_tools: [publish_design_route_compact]
     inputs:
+      - {material: routing_record, required: true}
       - {material: execution_plan, required: true}
       - {material: research_evidence, required: true}
+      - {material: material_digest, required: true}
+      - {material: product_materials, required: false}
+      - {material: reference_sample, required: false}
+      - {material: workspace_seed, required: false}
+      - {material: stage_approval, required: false}
+      - {material: upstream_direction, required: false}
+      - {material: upstream_competitive, required: false}
+      - {material: upstream_design, required: false}
+      - {material: upstream_prd, required: false}
+      - {material: upstream_prototype, required: false}
+      - {material: upstream_review, required: false}
+      - {material: upstream_handoff, required: false}
+    outputs:
+      - {material: design_routing_record}
+      - {material: design_effort_route}
+      - {material: design_routing_summary}
+    acceptance_criteria: |
+      The record activates only actual primary/linked design domains, assigns every subdecision one
+      validated effort, honors all hard gates, and selects exactly one light or heavy edge.
+
+  collect_design_light_evidence:
+    label: 产品方案轻量取证
+    mode: auto
+    prompt: |
+      {{runtime_instruction}}
+
+      Call load_product_skill_contract(stage_id="design") with reference_paths omitted. The Host loads
+      all active primary/linked domain methods. Domain ids are not paths; only exact missing references/*.md
+      from available_resources may be batched in one supplementary call. If explicitly offloaded, read only
+      the returned file in pages (limit=80, advance offset until EOF), rather than loading the contract again.
+      Follow the authorized light route, first checking bound current-product facts. Use inherited kb and
+      web_search/url_fetch only where evidence can change a scoped decision; no inactive domains or future
+      stages. Record actual WEB-NNN/KB-NNN sources and separate facts, inference, recommendations and unknowns.
+      For sustained counterexamples, practice divergence or trust risk, call validate_design_escalation
+      and save design_escalation. Preserve scope, triggering evidence and affected decisions; load their
+      heavy methods and fulfill heavy requirements here, without returning to the Router. Unrelated
+      light decisions stay light. A scope change or hard gate requires explicit scoped user confirmation
+      and its source before a high-risk default. Save the complete packet and gaps as design_light_evidence;
+      the Writer must consume the effective upgraded record.
+    tools: [validate_design_escalation, load_product_skill_contract, read_file, web_search, url_fetch, kb]
+    inputs: &design_evidence_inputs
+      - {material: design_routing_record, required: true}
+      - {material: research_evidence, required: true}
+      - {material: research_log, required: true}
+      - {material: material_digest, required: true}
+      - {material: product_materials, required: false}
+      - {material: reference_sample, required: false}
+      - {material: workspace_seed, required: false}
+      - {material: stage_approval, required: false}
+      - {material: upstream_direction, required: false}
+      - {material: upstream_competitive, required: false}
+      - {material: upstream_design, required: false}
+      - {material: upstream_prd, required: false}
+      - {material: upstream_prototype, required: false}
+      - {material: upstream_review, required: false}
+      - {material: upstream_handoff, required: false}
+    outputs:
+      - {material: design_escalation, required: false}
+      - {material: design_light_evidence}
+    acceptance_criteria: |
+      Evidence stays within the approved design scope, supports each light decision at an honest
+      conclusion strength, and exposes any trigger that requires escalation.
+
+  collect_design_heavy_evidence:
+    label: 产品方案重型取证
+    mode: auto
+    prompt: |
+      {{runtime_instruction}}
+
+      Call load_product_skill_contract(stage_id="design") with reference_paths omitted; it loads all
+      active domain methods. Read the complete result. Only an explicit "Large result offloaded to file"
+      with a File path authorizes read_file on that path, in pages of 80 lines through EOF. Otherwise do
+      not read_file. Domain ids and available_resources are package identifiers, not runtime file paths.
+      Batch only genuinely missing exact references/*.md entries in one supplementary contract call.
+      Inspect callable tools: if web_search exists make at least one real attempt; otherwise attempt kb
+      only when callable AND exact inherited kb_ids exist. Never enumerate, guess or substitute KB ids.
+      If neither exists call publish_design_heavy_unavailable({}) immediately. A failed read_file proves
+      nothing about search availability. Close a failed KB channel; url_fetch accepts only exact URLs
+      from successful search or bound evidence, never invented/example URLs.
+      Verify current-product facts then compare genuinely different product forms. Follow every active
+      domain's heavy minimum sample/output requirements. Distinguish current fact, external fact,
+      inference, proposed default, project preference and unknown. Preserve responsibility, rollback
+      and human review for hard gates. Tool success alone is not completed domain research.
+      Submit a Chinese packet to publish_design_heavy_evidence: a compact decisions list for a routed
+      subdecision with decision_id, finding, counterevidence, conditions, remaining_gaps and source_refs.
+      source_refs must be exact returned URLs, DOIs or knowledge-document ids from the live citation
+      registry, never guessed WEB-NNN/KB-NNN ids or citation indices. Keep ids and proper nouns unchanged.
+      Also supply actual tool_statuses and retrieval_status. Report failed/unavailable/limited honestly;
+      missing evidence stays unknown/E0. Registered source bindings are at most provisional E1 until
+      human semantic review; never claim E2/E3 or accept a decision. The Host validates sources and
+      coverage and renders the evidence packet; do not save model-authored evidence directly.
+      When no tools/sources are usable, publish_design_heavy_unavailable with {} gives a bounded gap
+      packet. Do not loop, fabricate tool calls, retry malformed publication field by field, or use generic
+      artifact tools to bypass the publisher. Repair all reported errors together once if necessary.
+      After either terminal publisher succeeds stop immediately; no save_artifacts or extra recap.
+      For zero usable locators use publish_design_heavy_unavailable() with exactly {} and no value,
+      decisions, tool_statuses or source placeholders. Only when retrieval returns a usable exact
+      locator call publish_design_heavy_evidence with one top-level value object under 700 characters;
+      include at most one concise decision and never nest decisions inside tool_statuses. The Host
+      fills missing routed decisions as unknown gaps. No retrieved counterexample is not proof of
+      correctness; incomplete domain minimums cannot become “no gaps”. A plan is not completion;
+      finish through one of the two publisher paths, without repeated searches after failure.
+    tools: [load_product_skill_contract, read_file, web_search, url_fetch, kb, publish_design_heavy_evidence, publish_design_heavy_unavailable]
+    terminal_tools: [publish_design_heavy_unavailable]
+    inputs: *design_evidence_inputs
+    outputs:
+      - {material: design_heavy_evidence}
+    acceptance_criteria: |
+      Heavy evidence satisfies the activated domain contracts or explicitly lowers the conclusion
+      ceiling, includes contrary evidence, and records all hard-gate confirmations and boundaries.
+
+  build_design_outline:
+    skip_if: {all: [{material: upstream_design}, {material: reuse_product_structure}]}
+    label: 产品方案大纲生成
+    mode: auto
+    rerun_when: 用户要求重新生成、调整或局部修改产品方案大纲。
+    prompt: *writer_outline_prompt
+    tools: [load_product_skill_contract, read_file, product_writer_generate_outline_from_inputs, product_writer_revise_and_publish]
+    terminal_tools: *outline_publishers
+    inputs:
+      - {material: execution_plan, required: true}
+      - {material: design_routing_record, required: true}
+      - {material: research_evidence, required: true}
       - {material: resource_profiles, required: true}
-      - {material: direction_document, required: false}
-      - {material: competitive_analysis, required: false}
+      - material: design_light_evidence
+        required: true
+        alternatives:
+          - {material: design_heavy_evidence}
+      - {material: product_materials, required: false}
+      - {material: reference_sample, required: false}
+      - {material: workspace_seed, required: false}
+      - {material: stage_approval, required: false}
+      - {material: upstream_direction, required: false}
+      - {material: upstream_competitive, required: false}
+      - {material: upstream_design, required: false}
+      - {material: upstream_prd, required: false}
+      - {material: upstream_prototype, required: false}
+      - {material: upstream_review, required: false}
+      - {material: upstream_handoff, required: false}
+      - {material: design_escalation, required: false}
     outputs:
       - {material: design_task}
       - {material: design_context}
@@ -210,54 +455,47 @@ steps:
   write_design_document:
     label: 产品方案文档生成
     mode: human
-    skip_if: {material: skip_design}
     rerun_when: 用户要求修改、补充或局部重写产品方案文档。
-    prompt: |
-      {{runtime_instruction}}
-
-      Use the latest approved design_outline as the only structure. On first generation call
-      product_writer_generate_document_from_inputs(stage_id="design"). It publishes each optional
-      chapter directly to design_chapters; do not save that slot again. Save its section_plan,
-      document and writing_context paths respectively as design_section_plan, design_document and
-      design_context_final. Chapter publish warnings are non-blocking; do not retry generation or
-      call another tool for them. The bridge owns file binding,
-      section planning, checkpoint streaming, assembly and context refresh; do not call generic
-      file/Artifact tools or reconstruct intermediate paths. On rerun use targeted revision only
-      with document_slot="design_document". Stop for user editing and Continue approval.
-    tools: [product_writer_generate_document_from_inputs, product_writer_revise_markdown]
+    prompt: *writer_document_prompt
+    tools: *writer_document_tools
     inputs:
+      - {material: resource_profiles, required: false}
+      - {material: research_evidence, required: false}
       - {material: execution_plan, required: true}
-      - {material: design_task, required: true}
-      - {material: design_outline, required: true}
-      - {material: design_context_approved, required: true}
+      - {material: design_task, required: true, alternatives: [upstream_design]}
+      - {material: design_outline, required: true, alternatives: [upstream_design]}
+      - {material: design_context_approved, required: true, alternatives: [upstream_design]}
+      - {material: product_materials, required: false}
+      - {material: reference_sample, required: false}
+      - {material: workspace_seed, required: false}
+      - {material: stage_approval, required: false}
+      - {material: upstream_direction, required: false}
+      - {material: upstream_competitive, required: false}
+      - {material: upstream_design, required: false}
+      - {material: upstream_prd, required: false}
+      - {material: upstream_prototype, required: false}
+      - {material: upstream_review, required: false}
+      - {material: upstream_handoff, required: false}
+      - {material: design_escalation, required: false}
+      - {material: design_routing_record, required: true}
     outputs:
+      - {material: design_assessment}
       - {material: design_section_plan, required: false}
       - {material: design_chapters, required: false}
       - {material: design_document}
+      - {material: design_document_html}
       - {material: design_context_final}
     acceptance_criteria: The editable product design follows the approved outline and actual upstream decisions.
 
   build_prd_outline:
+    skip_if: {all: [{material: upstream_prd}, {material: reuse_product_structure}]}
     label: PRD 大纲生成
-    mode: human
-    skip_if: {material: skip_prd}
+    mode: auto
     rerun_when: 用户要求重新生成、调整或局部修改 PRD 大纲。
-    prompt: |
-      {{runtime_instruction}}
-
-      On first generation call product_writer_generate_outline_from_inputs(
-      user_request="{{user_input}}", stage_id="prd"). The bridge resolves bound evidence and the
-      approved design document and performs the complete outline pipeline. Do not call generic
-      file/Artifact tools or lower-level Writer tools. Save writing_task, writing_context, outline,
-      outline_report and approved_context respectively as prd_task, prd_context, prd_outline,
-      prd_outline_report and prd_context_approved. Do not invent missing product rules. On rerun
-      revise only the latest prd_outline with document_slot="prd_outline". Stop for approval.
-    tools: [product_writer_generate_outline_from_inputs, product_writer_revise_markdown]
-    inputs:
-      - {material: execution_plan, required: true}
-      - {material: research_evidence, required: true}
-      - {material: resource_profiles, required: true}
-      - {material: design_document, required: false}
+    prompt: *writer_outline_prompt
+    tools: *writer_outline_tools
+    terminal_tools: *outline_publishers
+    inputs: *writer_outline_inputs
     outputs:
       - {material: prd_task}
       - {material: prd_context}
@@ -269,87 +507,105 @@ steps:
   write_prd_document:
     label: PRD 文档生成
     mode: human
-    skip_if: {material: skip_prd}
     rerun_when: 用户要求修改、补充或局部重写 PRD。
-    prompt: |
-      {{runtime_instruction}}
-
-      Use the latest approved prd_outline as the only structure. On first generation call
-      product_writer_generate_document_from_inputs(stage_id="prd"). It publishes each optional
-      chapter directly to prd_chapters; do not save that slot again. Save its section_plan, document
-      and writing_context paths respectively as prd_section_plan, prd_document and prd_context_final.
-      Chapter publish warnings are non-blocking; do not retry generation or call another tool for
-      them. The bridge owns file binding, section
-      planning, checkpoint streaming, assembly and context refresh; do not call generic
-      file/Artifact tools. Do not turn unknown product rules into facts. On rerun use targeted
-      revision only with document_slot="prd_document". Stop for user editing and Continue approval.
-    tools: [product_writer_generate_document_from_inputs, product_writer_revise_markdown]
+    prompt: *writer_document_prompt
+    tools: *writer_document_tools
     inputs:
+      - {material: resource_profiles, required: false}
+      - {material: research_evidence, required: false}
       - {material: execution_plan, required: true}
-      - {material: prd_task, required: true}
-      - {material: prd_outline, required: true}
-      - {material: prd_context_approved, required: true}
+      - {material: prd_task, required: true, alternatives: [upstream_prd]}
+      - {material: prd_outline, required: true, alternatives: [upstream_prd]}
+      - {material: prd_context_approved, required: true, alternatives: [upstream_prd]}
+      - {material: product_materials, required: false}
+      - {material: reference_sample, required: false}
+      - {material: workspace_seed, required: false}
+      - {material: stage_approval, required: false}
+      - {material: upstream_direction, required: false}
+      - {material: upstream_competitive, required: false}
+      - {material: upstream_design, required: false}
+      - {material: upstream_prd, required: false}
+      - {material: upstream_prototype, required: false}
+      - {material: upstream_review, required: false}
+      - {material: upstream_handoff, required: false}
     outputs:
+      - {material: prd_assessment}
       - {material: prd_section_plan, required: false}
       - {material: prd_chapters, required: false}
       - {material: prd_document}
+      - {material: prd_document_html}
       - {material: prd_context_final}
     acceptance_criteria: The editable PRD follows the approved outline and distinguishes confirmed rules from gaps.
 
   build_interactive_prototype:
     label: 交互原型生成
     mode: human
-    skip_if: {material: skip_prototype}
     prompt: |
       {{runtime_instruction}}
 
       Call load_product_skill_contract(stage_id="prototype") once, then call
       load_product_stage_inputs(stage_id="prototype") once. Use the returned material_digest and
       available approved design_document/prd_document contents; never read bound paths with generic
-      file or artifact tools. Conflicts or missing core behavior
+      file or artifact tools. Also read the returned upstream_design/upstream_prd content as the
+      shared project's bound source versions. When upstream_prototype exists, it is this project's
+      prior prototype: preserve unaffected interactions and apply stage_approval.request_context
+      without starting a different project or asking the user to upload that prototype again.
+      Selecting a source does not itself mean it has been accepted. Conflicts or missing core behavior
       must remain visible rather than being silently decided. Build a self-contained HTML/CSS/JS
       prototype with a stated fidelity level, main path, meaningful interaction, and relevant empty,
-      loading, success, failure, validation, permission and recovery states. Call
-      write_product_artifact_file(filename="prototype.html", validate_as="prototype"). Save its
-      returned path verbatim as prototype with content_type="file"; never save or repeat the HTML
-      source as the file value. Preserve uncertain behavior as a visible limitation and stop for approval.
+      loading, success, failure, validation, permission and recovery states.
+      Preserve the prototype contract and existing information structure. Within the prototype,
+      use a compact page-flow overview and a key-state gallery only when they clarify the actual
+      task; reuse real bound project images when available, and never invent screenshots, dates,
+      metrics or decorative visuals. The interactive screens remain the primary artifact.
+      All user-visible text must be natural Chinese product copy. Do not display workflow step names,
+      artifact fields, English status values, evidence grades, source-system notation or internal
+      decision IDs. Explain uncertainty as “待确认” beside the affected interaction; put prototype
+      fidelity, assumptions and test limits in one collapsed “原型说明” area, separate from the main
+      user journey. Necessary product or engineering terms must have a short Chinese explanation.
+      Produce two synchronized representations of one prototype result. The self-contained HTML is
+      the default interactive experience. The Markdown companion documents the same screen list,
+      main/exception flows, states, rules, assumptions, limitations and review tasks. Use GFM tables
+      and fenced Mermaid flow/state/sequence diagrams in Markdown; use interactive screens plus
+      accessible inline SVG/HTML flow and state visuals in HTML. Only use real bound images. Call
+      write_product_artifact_bundle(html_filename="prototype.html",
+      markdown_filename="prototype.md", validate_as="prototype") once with both complete bodies.
+      Save html_path verbatim as prototype and markdown_path verbatim as prototype_markdown, both
+      with content_type="file"; never save or repeat source bodies as file values. Preserve uncertain
+      behavior as a visible limitation and stop for approval.
       Do not claim production readiness or browser visual QA that did not occur.
-    tools: [load_product_skill_contract, load_product_stage_inputs, write_product_artifact_file]
+      Follow the shared contract completion rules: validate and save prototype_assessment
+      before completing, with the stage inside value. Keep the assessment and runtime trace internal.
+    tools: *html_stage_tools
     inputs:
       - {material: execution_plan, required: true}
       - {material: material_digest, required: true}
-      - {material: design_document, required: false}
-      - {material: prd_document, required: false}
+      - {material: product_materials, required: false}
+      - {material: reference_sample, required: false}
+      - {material: workspace_seed, required: false}
+      - {material: stage_approval, required: false}
+      - {material: upstream_direction, required: false}
+      - {material: upstream_competitive, required: false}
+      - {material: upstream_design, required: false}
+      - {material: upstream_prd, required: false}
+      - {material: upstream_prototype, required: false}
+      - {material: upstream_review, required: false}
+      - {material: upstream_handoff, required: false}
     outputs:
+      - {material: prototype_assessment}
       - {material: prototype}
-    acceptance_criteria: The standalone prototype maps to approved upstream rules and exposes key states and limits.
+      - {material: prototype_markdown}
+    acceptance_criteria: The synchronized HTML and Markdown map to approved upstream rules, expose the same key states and limits, and use plain Chinese product copy without workflow jargon.
 
   build_review_outline:
+    skip_if: {all: [{material: upstream_review}, {material: reuse_product_structure}]}
     label: 方案评审大纲生成
-    mode: human
-    skip_if: {material: skip_review}
+    mode: auto
     rerun_when: 用户要求重新生成、调整或局部修改评审大纲。
-    prompt: |
-      {{runtime_instruction}}
-
-      On first generation call product_writer_generate_outline_from_inputs(
-      user_request="{{user_input}}", stage_id="review"). The bridge resolves every approved upstream
-      artifact and performs the complete outline pipeline. Do not call generic file/Artifact tools
-      or lower-level Writer tools. Save writing_task, writing_context, outline, outline_report and
-      approved_context respectively as review_task, review_context, review_outline,
-      review_outline_report and review_context_approved. The review is read-only and must name exact
-      reviewed versions and uncovered scope. On rerun revise only the latest review_outline with
-      document_slot="review_outline". Stop for approval.
-    tools: [product_writer_generate_outline_from_inputs, product_writer_revise_markdown]
-    inputs:
-      - {material: execution_plan, required: true}
-      - {material: research_evidence, required: true}
-      - {material: resource_profiles, required: true}
-      - {material: direction_document, required: false}
-      - {material: competitive_analysis, required: false}
-      - {material: design_document, required: false}
-      - {material: prd_document, required: false}
-      - {material: prototype, required: false}
+    prompt: *writer_outline_prompt
+    tools: *writer_outline_tools
+    terminal_tools: *outline_publishers
+    inputs: *writer_outline_inputs
     outputs:
       - {material: review_task}
       - {material: review_context}
@@ -361,59 +617,45 @@ steps:
   write_review_document:
     label: 方案评审报告生成
     mode: human
-    skip_if: {material: skip_review}
     rerun_when: 用户要求修改、补充或局部重写评审报告。
-    prompt: |
-      {{runtime_instruction}}
-
-      Use the latest approved review_outline as the only structure. On first generation call
-      product_writer_generate_document_from_inputs(stage_id="review"). It publishes each optional
-      chapter directly to review_chapters; do not save that slot again. Save its section_plan,
-      document and writing_context paths respectively as review_section_plan, review_document and
-      review_context_final. Chapter publish warnings are non-blocking; do not retry generation or
-      call another tool for them. The bridge owns file binding,
-      section planning, checkpoint streaming, assembly and context refresh; do not call generic
-      file/Artifact tools. Preserve severity, evidence, affected layer and recommended action, and
-      never silently modify reviewed upstream artifacts. On rerun use targeted revision only with
-      document_slot="review_document". Stop for user editing and Continue approval.
-    tools: [product_writer_generate_document_from_inputs, product_writer_revise_markdown]
+    prompt: *writer_document_prompt
+    tools: *writer_document_tools
     inputs:
+      - {material: resource_profiles, required: false}
+      - {material: research_evidence, required: false}
       - {material: execution_plan, required: true}
-      - {material: review_task, required: true}
-      - {material: review_outline, required: true}
-      - {material: review_context_approved, required: true}
+      - {material: review_task, required: true, alternatives: [upstream_review]}
+      - {material: review_outline, required: true, alternatives: [upstream_review]}
+      - {material: review_context_approved, required: true, alternatives: [upstream_review]}
+      - {material: product_materials, required: false}
+      - {material: reference_sample, required: false}
+      - {material: workspace_seed, required: false}
+      - {material: stage_approval, required: false}
+      - {material: upstream_direction, required: false}
+      - {material: upstream_competitive, required: false}
+      - {material: upstream_design, required: false}
+      - {material: upstream_prd, required: false}
+      - {material: upstream_prototype, required: false}
+      - {material: upstream_review, required: false}
+      - {material: upstream_handoff, required: false}
     outputs:
+      - {material: review_assessment}
       - {material: review_section_plan, required: false}
       - {material: review_chapters, required: false}
       - {material: review_document}
+      - {material: review_document_html}
       - {material: review_context_final}
     acceptance_criteria: The review report is traceable, prioritized and does not mutate reviewed artifacts.
 
   build_handoff_outline:
+    skip_if: {all: [{material: upstream_handoff}, {material: reuse_product_structure}]}
     label: 研发交付大纲生成
-    mode: human
-    skip_if: {material: skip_handoff}
+    mode: auto
     rerun_when: 用户要求重新生成、调整或局部修改研发交付大纲。
-    prompt: |
-      {{runtime_instruction}}
-
-      On first generation call product_writer_generate_outline_from_inputs(
-      user_request="{{user_input}}", stage_id="handoff"). The bridge resolves approved dependencies
-      and performs the complete outline pipeline. Do not call generic file/Artifact tools or
-      lower-level Writer tools. Save writing_task, writing_context, outline, outline_report and
-      approved_context respectively as handoff_task, handoff_context, handoff_outline,
-      handoff_outline_report and handoff_context_approved. Do not invent architecture, effort or
-      release commitments. On rerun revise only the latest handoff_outline with
-      document_slot="handoff_outline". Stop for approval.
-    tools: [product_writer_generate_outline_from_inputs, product_writer_revise_markdown]
-    inputs:
-      - {material: execution_plan, required: true}
-      - {material: research_evidence, required: true}
-      - {material: resource_profiles, required: true}
-      - {material: design_document, required: false}
-      - {material: prd_document, required: false}
-      - {material: prototype, required: false}
-      - {material: review_document, required: false}
+    prompt: *writer_outline_prompt
+    tools: *writer_outline_tools
+    terminal_tools: *outline_publishers
+    inputs: *writer_outline_inputs
     outputs:
       - {material: handoff_task}
       - {material: handoff_context}
@@ -425,32 +667,33 @@ steps:
   write_handoff_document:
     label: 研发交付文档生成
     mode: human
-    skip_if: {material: skip_handoff}
     rerun_when: 用户要求修改、补充或局部重写研发交付文档。
-    prompt: |
-      {{runtime_instruction}}
-
-      Use the latest approved handoff_outline as the only structure. On first generation call
-      product_writer_generate_document_from_inputs(stage_id="handoff"). It publishes each optional
-      chapter directly to handoff_chapters; do not save that slot again. Save its section_plan,
-      document and writing_context paths respectively as handoff_section_plan, handoff_document and
-      handoff_context_final. Chapter publish warnings are non-blocking; do not retry generation or
-      call another tool for them. The bridge owns file binding,
-      section planning, checkpoint streaming, assembly and context refresh; do not call generic
-      file/Artifact tools. On rerun use targeted revision only with
-      document_slot="handoff_document". Readiness
-      may be ready or ready-with-open-items only when the source contract's necessary inputs and
-      checks actually pass; otherwise mark it blocked. Stop for user approval.
-    tools: [product_writer_generate_document_from_inputs, product_writer_revise_markdown]
+    prompt: *writer_document_prompt
+    tools: *writer_document_tools
     inputs:
+      - {material: resource_profiles, required: false}
+      - {material: research_evidence, required: false}
       - {material: execution_plan, required: true}
-      - {material: handoff_task, required: true}
-      - {material: handoff_outline, required: true}
-      - {material: handoff_context_approved, required: true}
+      - {material: handoff_task, required: true, alternatives: [upstream_handoff]}
+      - {material: handoff_outline, required: true, alternatives: [upstream_handoff]}
+      - {material: handoff_context_approved, required: true, alternatives: [upstream_handoff]}
+      - {material: product_materials, required: false}
+      - {material: reference_sample, required: false}
+      - {material: workspace_seed, required: false}
+      - {material: stage_approval, required: false}
+      - {material: upstream_direction, required: false}
+      - {material: upstream_competitive, required: false}
+      - {material: upstream_design, required: false}
+      - {material: upstream_prd, required: false}
+      - {material: upstream_prototype, required: false}
+      - {material: upstream_review, required: false}
+      - {material: upstream_handoff, required: false}
     outputs:
+      - {material: handoff_assessment}
       - {material: handoff_section_plan, required: false}
       - {material: handoff_chapters, required: false}
       - {material: handoff_document}
+      - {material: handoff_document_html}
       - {material: handoff_context_final}
     acceptance_criteria: The handoff package is traceable and gives a non-inflated implementation-readiness conclusion.
 
@@ -459,25 +702,62 @@ steps:
     prompt: |
       {{runtime_instruction}}
 
-      Call load_product_stage_inputs(stage_id="delivery") once. It returns compact presence,
-      filename, type, size and available revision metadata rather than full document bodies. Use
-      only those returned descriptors;
-      never read Workflow files with generic file/artifact tools and do not load the full router
-      contract. Produce a concise delivery_summary listing planned, completed and skipped stages, each actual LazyMind
-      Artifact revision, evidence/material gaps, approval state, readiness boundary and valid next
-      choices. The Workflow session, slots and revision history are the machine-readable record; do
-      not reconstruct a second Workspace/Manifest JSON contract. Never claim skipped or failed work
-      was completed, and never expose runtime trace or internal paths.
-    tools: [load_product_stage_inputs]
+      Call publish_product_handoff_state() once with exactly {} and no arguments. It consumes the
+      bound selected-stage assessment, workspace_seed and host stage_approval without inventing
+      acceptance events. It reads only the bound one-stage output, builds the source Skill's internal
+      Artifact Manifest and shared Product Workspace snapshot, and atomically saves stage_manifest,
+      workspace_state and the user-safe delivery_summary. This publisher is the sole completion path;
+      never call save_artifacts and never print or reconstruct its JSON. The tool result is already the
+      complete visible Chinese delivery summary, so stop immediately after it succeeds without adding
+      assessment fields, paths, chapter lists, tool diagnostics or another recap. This is a hard stage boundary: the
+      current Session ends in awaiting-stage-confirmation. The host's product-stage-relay operation
+      handles explicit continue/switch-stage/finish, creates the next Session with exact upstream
+      revisions and preserves this Session. Do not rewind a finished stage to simulate a new stage.
+    tools: [publish_product_handoff_state]
+    terminal_tools: [publish_product_handoff_state]
     inputs:
+      - {material: routing_record, required: true}
       - {material: execution_plan, required: true}
+      - {material: design_routing_record, required: false}
       - {material: direction_document, required: false}
+      - {material: direction_document_html, required: false}
       - {material: competitive_analysis, required: false}
+      - {material: competitive_analysis_markdown, required: false}
       - {material: design_document, required: false}
+      - {material: design_document_html, required: false}
       - {material: prd_document, required: false}
+      - {material: prd_document_html, required: false}
       - {material: prototype, required: false}
+      - {material: prototype_markdown, required: false}
       - {material: review_document, required: false}
+      - {material: review_document_html, required: false}
       - {material: handoff_document, required: false}
+      - {material: handoff_document_html, required: false}
+      - {material: product_materials, required: false}
+      - {material: reference_sample, required: false}
+      - {material: workspace_seed, required: false}
+      - {material: stage_approval, required: false}
+      - {material: direction_assessment, required: false}
+      - {material: competitive_assessment, required: false}
+      - {material: design_assessment, required: false}
+      - {material: prd_assessment, required: false}
+      - {material: prototype_assessment, required: false}
+      - {material: review_assessment, required: false}
+      - {material: handoff_assessment, required: false}
+      - {material: upstream_direction, required: false}
+      - {material: upstream_competitive, required: false}
+      - {material: upstream_design, required: false}
+      - {material: upstream_prd, required: false}
+      - {material: upstream_prototype, required: false}
+      - {material: upstream_review, required: false}
+      - {material: upstream_handoff, required: false}
+      - {material: material_digest, required: false}
+      - {material: design_escalation, required: false}
     outputs:
       - {material: delivery_summary}
-    acceptance_criteria: The summary matches the approved execution plan and only actual stage outputs.
+      - {material: stage_manifest}
+      - {material: workspace_state}
+    acceptance_criteria: |
+      Exactly one selected-stage artifact is registered, the Workspace stops at
+      awaiting-stage-confirmation, and the visible summary offers continue/switch/export/finish
+      without exposing the internal contracts.

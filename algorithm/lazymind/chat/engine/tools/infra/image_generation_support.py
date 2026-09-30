@@ -167,6 +167,27 @@ def run_image_model(
     image_size: str = _DEFAULT_IMAGE_SIZE,
     batch_size: int = _DEFAULT_BATCH_SIZE,
 ) -> Dict[str, Any]:
+    model = AutoModel(model=role)
+    return run_image_model_instance(
+        model,
+        prompt,
+        files=files,
+        image_size=image_size,
+        batch_size=batch_size,
+    )
+
+
+def run_image_model_instance(
+    model: Any,
+    prompt: str,
+    *,
+    files: Optional[List[str]] = None,
+    image_size: str = _DEFAULT_IMAGE_SIZE,
+    batch_size: int = _DEFAULT_BATCH_SIZE,
+    metadata: Optional[Dict[str, Any]] = None,
+    model_call_options: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Run a concrete image model and normalize its output for LazyMind."""
     text = str(prompt or '').strip()
     if not text:
         raise ToolExecutionError('prompt is required')
@@ -183,8 +204,9 @@ def run_image_model(
     }
     if files:
         call_kwargs['files'] = files
+    if model_call_options:
+        call_kwargs.update(model_call_options)
 
-    model = AutoModel(model=role)
     raw = model(text, stream_output=False, **call_kwargs)
     temp_paths = _parse_generated_files(raw)
     if not temp_paths:
@@ -195,10 +217,13 @@ def run_image_model(
     _register_generated_image_paths(paths)
     images = [_build_image_payload(path, label=basename_from_path(path)) for path in paths]
     primary = images[0]
-    return {
+    payload = {
         'prompt': text,
         'image_size': size,
         'batch_size': count,
         'images': images,
         **primary,
     }
+    if metadata:
+        payload.update(metadata)
+    return payload

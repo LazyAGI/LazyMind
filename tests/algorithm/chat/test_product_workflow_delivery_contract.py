@@ -1,6 +1,7 @@
 import importlib.util
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import lazyllm
@@ -132,6 +133,7 @@ def test_document_bridge_keeps_required_paths_and_hides_raw_chapter_list():
 
     with (
         mock.patch.object(bridge, '_runtime_stage', return_value='design'),
+        mock.patch.object(bridge, 'require_context', return_value=SimpleNamespace(params={})),
         mock.patch.object(bridge, '_stage_contract'),
         mock.patch.object(bridge, '_required_bound_file', side_effect=[
             '/workspace/task.json', '/workspace/outline.md', '/workspace/context.json',
@@ -179,15 +181,13 @@ def test_product_document_tabs_use_non_composite_collapsed_chapter_lists():
         assert document_tab['layout'] == 'list'
         assert 'composite_layout' not in document_tab
         assert [slot['id'] for slot in document_tab['slots']] == [
-            f'{stage}_document', chapter_slot,
+            f'{stage}_document_html', f'{stage}_document', chapter_slot,
         ]
         assert workflow['ui']['slots'][chapter_slot]['collapsed'] is True
 
         prompt = ' '.join(
             state['steps'][f'write_{stage}_document']['prompt'].split()
         )
-        assert f'directly to {chapter_slot}' in prompt
-        assert 'do not save that slot again' in prompt
-        assert 'Chapter publish warnings are non-blocking' in prompt
-        assert 'do not retry generation or call another tool for them' in prompt
+        assert 'optional chapters; do not save these outputs again' in prompt
+        assert 'Non-blocking chapter warnings do not justify regeneration' in prompt
         assert 'chapter_files' not in prompt

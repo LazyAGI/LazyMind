@@ -63,6 +63,7 @@ def workflow_package_input_types(package: Dict[str, Any]) -> Dict[str, str]:
 
 def load_workflow_package_tools(
     package: Dict[str, Any], names: List[str], workflow_id: str, revision_id: str,
+    *, package_root: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """Load named callables from an already validated Workflow package."""
     files = package.get('files') if isinstance(package.get('files'), dict) else {}
@@ -98,19 +99,28 @@ def load_workflow_package_tools(
         if (
             not path.startswith('scripts/')
             or not path.endswith('.py')
-            or path.startswith('scripts/tests/')
-            or '/__tests__/' in path
+            or any(part in {'tests', '__tests__'} for part in path.split('/')[:-1])
+            or Path(path).name.startswith('test_')
+            or Path(path).name.endswith('_test.py')
+            or Path(path).name == 'conftest.py'
             or '..' in path.split('/')
             or '\\' in path
-            or (allowed is not None and path not in allowed)
+            or (allowed is not None and not remaining.intersection(allowed.get(path, set())))
         ):
             continue
         encoded = files[path]
-        source = base64.b64decode(encoded) if isinstance(encoded, str) else bytes(encoded)
+        # Core represents an empty blob as null, including legacy __init__.py.
+        source = (
+            b'' if encoded is None
+            else base64.b64decode(encoded) if isinstance(encoded, str) else bytes(encoded)
+        )
         module = types.ModuleType(
             f'_lazymind_workflow_{revision_id.replace("-", "_")}_{len(resolved)}'
         )
-        module.__file__ = f'{workflow_id}@{revision_id}/{path}'
+        module.__file__ = (
+            str(package_root / path) if package_root is not None
+            else f'{workflow_id}@{revision_id}/{path}'
+        )
         exec(compile(source.decode('utf-8'), module.__file__, 'exec'), module.__dict__)
         for name in tuple(remaining):
             if allowed is not None and name not in allowed[path]:

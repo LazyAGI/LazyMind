@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -100,6 +101,7 @@ class StyleRenderingRecipeTest(unittest.TestCase):
 
         self.assertEqual(state['steps']['plan_background_prompts']['mode'], 'auto')
         self.assertEqual(state['steps']['build_outline']['mode'], 'auto')
+        self.assertEqual(state['steps']['choose_style']['mode'], 'human')
         self.assertEqual(state['steps']['plan_page_prompts']['mode'], 'human')
         self.assertEqual(state['steps']['generate_backgrounds']['mode'], 'human')
         self.assertEqual(state['steps']['generate_ppt']['mode'], 'human')
@@ -124,30 +126,19 @@ class StyleRenderingRecipeTest(unittest.TestCase):
         self.assertEqual(slots['background_prompts']['cardinality'], 'list')
         self.assertIn('background_prompts', workflow['runtime']['publisher_owned_slots'])
         self.assertEqual(
-            state['transitions']['collect_materials'],
-            [
-                {
-                    'to': 'plan_background_prompts',
-                    'when': (
-                        'ppt_capability_requirements is exactly '
-                        'AI_BACKGROUND_IMAGES: enabled.\n'
-                    ),
-                },
-                {
-                    'to': 'build_outline',
-                    'when': (
-                        'ppt_capability_requirements is exactly '
-                        'AI_BACKGROUND_IMAGES: disabled.\n'
-                    ),
-                },
-            ],
+            [edge['to'] for edge in state['transitions']['collect_materials']],
+            ['choose_style', 'plan_background_prompts', 'build_outline'],
+        )
+        self.assertEqual(
+            [edge['to'] for edge in state['transitions']['choose_style']],
+            ['plan_background_prompts', 'build_outline'],
         )
         self.assertEqual(state['steps']['analyze_requirements']['route'], 'choice')
         self.assertEqual(state['steps']['collect_materials']['route'], 'choice')
         self.assertNotIn('skip_if', state['steps']['collect_materials'])
         self.assertEqual(
             [edge['to'] for edge in state['transitions']['analyze_requirements']],
-            ['collect_materials', 'plan_background_prompts', 'build_outline'],
+            ['collect_materials', 'choose_style', 'plan_background_prompts', 'build_outline'],
         )
         self.assertEqual(
             state['transitions']['generate_backgrounds'],
@@ -209,9 +200,13 @@ class StyleRenderingRecipeTest(unittest.TestCase):
             'tool': 'check_ppt_workflow_capabilities',
             'arguments': {
                 'capability_requirements': 'ppt_capability_requirements',
+                'style_flow': 'style_flow',
+                'generate_background_images': 'generate_background_images',
             },
         }])
         self.assertFalse(slots['ppt_capability_requirements']['exposed'])
+        self.assertFalse(slots['style_flow']['exposed'])
+        self.assertFalse(slots['generate_background_images']['exposed'])
 
 
 class OutlineReferenceImageRepairTest(unittest.TestCase):
@@ -725,3 +720,122 @@ class ApprovedOutlineInputTest(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertIn('authoritative', model.call_args.args[0])
             self.assertIn('保留用户新增条目', json.loads(model.call_args.args[1])['approved_page_briefs'])
+
+
+class TaskModelIsolationAndMetaCopyTest(unittest.TestCase):
+    @staticmethod
+    def _outline(title: str = '结构化大纲') -> dict:
+        return {
+            'pages': [{
+                'page_no': 1,
+                'page_kind': 'cover',
+                'title': title,
+                'subtitle': '可靠提交',
+                'bullets': [{'head': '目标', 'detail': '验证任务级模型隔离'}],
+                'narrative': '面向读者呈现核心结论。',
+                'data_points': [],
+                'visual_hints': '居中标题配合简洁卡片',
+                'use_table': None,
+                'use_image': None,
+            }],
+        }
+
+    @staticmethod
+    def _deck(root: Path, name: str) -> Path:
+        deck = root / name
+        deck.mkdir()
+        fixtures = {
+            'task_pack.json': {'params': {'language': 'zh-Hans', 'page_count': 1}},
+            'info_pack.json': {'user_query': '生成一页测试幻灯片', 'user_assets': {}},
+            'style_spec.json': {
+                'palette': {'primary': '#2563EB'},
+                'typography': {'font_family': 'Noto Sans SC'},
+            },
+        }
+        for filename, payload in fixtures.items():
+            (deck / filename).write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
+        return deck
+
+    def test_two_concurrent_outline_tasks_keep_their_own_model(self):
+        barrier = threading.Barrier(2)
+        errors: list[Exception] = []
+
+        def generate(deck: Path, title: str) -> None:
+            def task_llm(*_args, **kwargs):
+                self.assertEqual(kwargs['request_name'], 'outline')
+                barrier.wait(2)
+                return json.dumps(self._outline(title), ensure_ascii=False)
+
+            try:
+                self.assertEqual(run_stage.cmd_outline(deck, llm_call=task_llm), 0)
+            except Exception as exc:  # pragma: no cover - assertion aid
+                errors.append(exc)
+
+        with tempfile.TemporaryDirectory() as temp, patch.object(run_stage, '_ok', return_value=0):
+            root = Path(temp)
+            first_deck = self._deck(root, 'first')
+            second_deck = self._deck(root, 'second')
+            first = threading.Thread(target=generate, args=(first_deck, '任务 A'))
+            second = threading.Thread(target=generate, args=(second_deck, '任务 B'))
+            first.start()
+            second.start()
+            first.join(3)
+            second.join(3)
+
+            self.assertFalse(errors)
+            self.assertEqual(json.loads((first_deck / 'outline.json').read_text())['pages'][0]['title'], '任务 A')
+            self.assertEqual(json.loads((second_deck / 'outline.json').read_text())['pages'][0]['title'], '任务 B')
+
+    def test_reader_visible_fields_reject_production_meta_copy(self):
+        outline = self._outline()
+        outline['pages'][0]['narrative'] = '本页作为开场，用于商务定位，并预告后续内容。'
+        outline['pages'][0]['bullets'][0]['detail'] = '画面采用左右布局，营造专业感。'
+
+        self.assertTrue(run_stage._contains_production_meta_copy(
+            outline['pages'][0]['narrative'],
+        ))
+        self.assertEqual(
+            run_stage._production_meta_copy_paths(outline['pages'][0]),
+            ['narrative', 'bullets[0].detail'],
+        )
+
+    def test_page_query_drops_internal_slide_intent(self):
+        query = run_stage._build_deterministic_page_query({
+            'page_no': 1,
+            'page_outline': {
+                'title': '商汤科技',
+                'slide_intent': '本页用于商务开场定位',
+                'narrative': '坚持原创，让人工智能引领人类进步。',
+                'visual_hints': '左侧标题，右侧品牌主视觉',
+            },
+            'style_spec': {},
+        })
+
+        self.assertNotIn('本页用于商务开场定位', query)
+        self.assertIn('坚持原创，让人工智能引领人类进步。', query)
+        self.assertIn('visual_hints only as internal layout guidance', query)
+
+    def test_page_query_strips_legacy_meta_copy_from_all_visible_fields(self):
+        query = run_stage._build_deterministic_page_query({
+            'page_no': 1,
+            'page_outline': {
+                'title': '本页用于介绍产品定位',
+                'subtitle': '可见副标题',
+                'bullets': [
+                    {'head': '核心能力', 'detail': '画面采用三栏布局进行展示'},
+                ],
+                'data_points': [
+                    {'label': '覆盖率', 'value': '90%', 'context': '向观众说明增长趋势'},
+                ],
+                'visual_hints': '三栏布局',
+            },
+            'style_spec': {},
+        })
+
+        self.assertNotIn('本页用于介绍产品定位', query)
+        self.assertNotIn('画面采用三栏布局进行展示', query)
+        self.assertNotIn('向观众说明增长趋势', query)
+        self.assertIn('可见副标题', query)
+        self.assertIn('核心能力', query)
+        self.assertIn('90%', query)
+        self.assertIn('三栏布局', query)

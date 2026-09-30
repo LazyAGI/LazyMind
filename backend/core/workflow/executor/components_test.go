@@ -790,3 +790,30 @@ func TestAttemptContextHasNoLocalWorkspaceRootContract(t *testing.T) {
 		}
 	}
 }
+
+func TestDBArtifactSinkUsesPinnedAtomicOutputContractForCopiedPackage(t *testing.T) {
+	db := executorComponentDB(t, &orm.WorkflowSession{}, &orm.WorkflowRevision{}, &orm.WorkflowSlotRevision{}, &orm.WorkflowHumanArtifact{}, &orm.WorkflowSlotOrder{}, &orm.WorkflowEvent{})
+	if err := db.Create(&orm.WorkflowRevision{ID: "revision", CompiledGraph: json.RawMessage(`{"runtime":{"transactional_outputs":true},"material_types":{"report":"text"},"material_cardinalities":{"report":"single"},"nodes":{"write":{"outputs":["report"]}}}`)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSession{ID: "session", WorkflowID: "renamed-document-package", WorkflowRevisionID: "revision", StateVersion: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSlotRevision{ID: "prior", SessionID: "session", SlotID: "report", Slot: "report", Revision: 1, Selected: true, Validity: "effective", ChangeSource: "human"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	sink := DBArtifactSink{DB: db}
+	ctx := AttemptContext{AttemptID: "attempt", SessionID: "session", StepID: "write", AttemptNo: 1, DeclaredOutputs: []string{"report"}, OutputCardinality: map[string]string{"report": "single"}}
+	if err := sink.Save(t.Context(), ctx, Artifact{Slot: "report", ContentType: "text", Seq: 1, Value: json.RawMessage(`{"text":"new output"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	var selected []orm.WorkflowSlotRevision
+	db.Where("selected = ?", true).Find(&selected)
+	if len(selected) != 1 || selected[0].ID != "prior" {
+		t.Fatalf("unfinished output leaked into selection: %+v", selected)
+	}
+	var pending orm.WorkflowSlotRevision
+	if err := db.Where("producer_attempt_id = ?", "attempt").First(&pending).Error; err != nil || pending.Selected {
+		t.Fatalf("pending=%+v err=%v", pending, err)
+	}
+}

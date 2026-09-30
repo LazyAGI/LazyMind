@@ -43,6 +43,9 @@ class WorkflowAgentContribution:
     agentic_config_patch: Dict[str, Any]
     runtime_context: str
     runtime_policy: Optional[Dict[str, Any]] = None
+    # Trusted host extensions may explicitly adopt a server-created successor.
+    # This callback is never exposed as a model tool.
+    bind_successor: Optional[Callable[[Dict[str, Any]], None]] = None
 
 
 @dataclass(frozen=True)
@@ -1090,6 +1093,17 @@ def build_workflow_discovery_context(
     return WorkflowDiscoveryContext(activations, prompt)
 
 
+def _trigger_input_contract(package: Dict[str, Any]):
+    runtime = package.get('runtime') or (package.get('compiled_graph') or {}).get('runtime') or {}
+    return runtime.get('trigger_inputs')
+
+
+def _trigger_input_types(package: Dict[str, Any]) -> Dict[str, str]:
+    inputs = workflow_package_input_types(package)
+    declared = _trigger_input_contract(package)
+    return inputs if declared is None else {key: value for key, value in inputs.items() if key in declared}
+
+
 def _workflow_trigger_tools(
     activations: List[Dict[str, Any]], allowed_refs: set[str], current_query: str = '',
     conversation_id: str = '', session_holder: Optional[Dict[str, str]] = None,
@@ -1130,7 +1144,7 @@ def _workflow_trigger_tools(
         if allowed_refs:
             try:
                 package_hint = _client().get_workflow(workflow_id, revision_id).result
-                input_types_hint = workflow_package_input_types(package_hint)
+                input_types_hint = _trigger_input_types(package_hint)
             except Exception as exc:
                 LOG.debug('Could not preload Workflow %s input contract: %s', workflow_id, exc)
 
@@ -1186,7 +1200,11 @@ def _workflow_trigger_tools(
                     }
                 client = _client()
                 package = bound_package or client.get_workflow(bound_id, bound_revision).result
-                input_types = workflow_package_input_types(package)
+                input_types = _trigger_input_types(package)
+                if _trigger_input_contract(package) is not None and set(input_bindings or {}) - input_types.keys():
+                    raise WorkflowClientError(
+                        'WORKFLOW_INPUT_NOT_EXPOSED', 'Use only inputs advertised by this package.',
+                    )
                 resolved_bindings: Dict[str, Any] = {}
                 for material_id, attachment_ref in (input_bindings or {}).items():
                     binding = str(attachment_ref or '').strip()
@@ -1467,6 +1485,23 @@ def resolve_workflow_injection(
         ]
     session_holder: Dict[str, str] = {'session_id': session_id}
 
+    def bind_successor(result: Dict[str, Any]) -> None:
+        target = str(result.get('session_id') or '')
+        if (not target or result.get('source_session_id') != session_holder['session_id']
+                or result.get('workflow_id') != workflow_id
+                or (conversation_id and result.get('conversation_id') != conversation_id)
+                or (revision_id and result.get('workflow_revision_id') != revision_id)):
+            raise WorkflowClientError(
+                'WORKFLOW_SESSION_HANDOFF_INVALID',
+                'Successor must preserve the bound conversation and package revision.',
+            )
+        # Authorize and refresh through the same SDK before changing the turn binding.
+        state = _client().get_state(target)
+        if state.get('session_id') != target:
+            raise WorkflowClientError('WORKFLOW_SESSION_HANDOFF_INVALID', 'Successor session could not be verified.')
+        session_holder['session_id'] = target
+        _agentic_config()['workflow_session_id'] = target
+
     @fc_register(host_file='NONE')
     def selected_session_id() -> str:
         return session_holder.get('session_id', '')
@@ -1564,7 +1599,7 @@ def resolve_workflow_injection(
         else:
             tools = [authoring_group]
     if session_id:
-        tools = _safe_session_tools(toolkit, session_id)
+        tools = _safe_session_tools(toolkit, selected_session_id)
         patch.update({
             'workflow_id': workflow_id,
             'workflow_session_id': session_id,
@@ -1574,7 +1609,7 @@ def resolve_workflow_injection(
             'focused_tab': context.get('focused_tab') or '',
             'focused_sort_order': context.get('focused_sort_order'),
         })
-        tools.append(_handoff_tool(session_id))
+        tools.append(_handoff_tool(selected_session_id))
         session_projection = (
             projection.get('projection')
             if isinstance(projection.get('projection'), dict) else {}
@@ -1663,7 +1698,7 @@ def resolve_workflow_injection(
             # user-requested continuous run can keep advancing.  Only the
             # explicit hand-off variant transfers ownership and ends the turn.
             tools, ['advance_step_and_hand_off'],
-            patch, runtime_context, runtime_policy,
+            patch, runtime_context, runtime_policy, bind_successor,
         )
 
     del disabled_builtin_workflows

@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  createPptMultiSelectionOverlay,
   dataElOccurrenceIndex,
   fitSlideFrame,
   forwardSlideFrameWheel,
+  markImplicitPptSelectionGroups,
   pptClickedText,
+  pptDomPath,
+  resolvePptHoverCandidate,
 } from './SlotHtmlSlide';
 
 function setScrollMetrics(
@@ -65,6 +69,88 @@ describe('PPT HTML element selection', () => {
     const heading = document.querySelector<HTMLElement>('h2')!;
 
     expect(pptClickedText(section, heading)).toBe('核心玩法');
+  });
+
+  it('renders one union frame and count for a multi-selection', () => {
+    document.body.innerHTML = `
+      <div data-el="bullet-1">一</div>
+      <div data-el="bullet-2">二</div>
+      <div data-el="bullet-3">三</div>
+    `;
+    const targets = Array.from(document.querySelectorAll<HTMLElement>('[data-el]'));
+    targets.forEach((target, index) => {
+      const left = 100 + index * 240;
+      vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({
+        x: left, y: 200, left, top: 200, right: left + 200, bottom: 400,
+        width: 200, height: 200, toJSON: () => ({}),
+      });
+    });
+
+    const overlay = createPptMultiSelectionOverlay(targets)!;
+
+    expect(overlay).toHaveClass('lazymind-ppt-edit-multi-selection-overlay');
+    expect(overlay).toHaveTextContent('已选 3 个元素');
+    overlay.remove();
+  });
+
+  it('recognizes an old same-row flex family as an implicit group', () => {
+    document.body.innerHTML = `
+      <div id="row" style="display:flex">
+        <div data-el="bullet-1">一</div>
+        <div data-el="bullet-2">二</div>
+        <div data-el="bullet-3">三</div>
+      </div>
+    `;
+    const row = document.querySelector<HTMLElement>('#row')!;
+    const targets = Array.from(row.querySelectorAll<HTMLElement>('[data-el]'));
+    targets.forEach((target, index) => {
+      const left = 100 + index * 220;
+      vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({
+        x: left, y: 100, left, top: 100, right: left + 200, bottom: 300,
+        width: 200, height: 200, toJSON: () => ({}),
+      });
+    });
+
+    markImplicitPptSelectionGroups(document);
+
+    expect(row).toHaveAttribute('data-lazymind-selection-group', 'true');
+    expect(resolvePptHoverCandidate(row)?.targets).toEqual(targets);
+  });
+
+  it('selects all elements that share an explicit data-group', () => {
+    document.body.innerHTML = `
+      <section>
+        <div data-el="card-1" data-group="cards">一</div>
+        <div data-el="card-2" data-group="cards">二</div>
+        <div data-el="footer">页脚</div>
+      </section>
+    `;
+    const cards = Array.from(document.querySelectorAll<HTMLElement>('[data-group="cards"]'));
+
+    expect(resolvePptHoverCandidate(cards[0])).toEqual({ targets: cards, scope: 'group' });
+  });
+
+  it('adds a stable DOM path target for an old visual without data-el', () => {
+    document.body.innerHTML = `
+      <main><h1 data-el="title">标题</h1><div id="art"><svg><text>X</text></svg></div></main>
+    `;
+    const art = document.querySelector<HTMLElement>('#art')!;
+    const svg = document.querySelector<HTMLElement>('svg')!;
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({
+      x: 800, y: 100, left: 800, top: 100, right: 1500, bottom: 700,
+      width: 700, height: 600, toJSON: () => ({}),
+    });
+    vi.spyOn(art, 'getBoundingClientRect').mockReturnValue({
+      x: 790, y: 90, left: 790, top: 90, right: 1510, bottom: 710,
+      width: 720, height: 620, toJSON: () => ({}),
+    });
+
+    markImplicitPptSelectionGroups(document);
+
+    expect(art).toHaveAttribute('data-lazymind-selection-target', 'visual');
+    expect(art.dataset.lazymindSelectionEl).toMatch(/^__lazymind_auto_div_/);
+    expect(pptDomPath(art)).toEqual([0, 1]);
+    expect(resolvePptHoverCandidate(svg)).toEqual({ targets: [art], scope: 'item' });
   });
 });
 

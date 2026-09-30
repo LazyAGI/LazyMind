@@ -800,3 +800,28 @@ def test_preflight_does_not_reject_large_requested_documents(tmp_path):
     )
 
     assert result['execution_plan']['word_target'] == 50000
+
+
+def test_publication_validation_checks_bound_bodies_before_any_output(tmp_path):
+    tools = _load_contract_tools(tmp_path)
+    remote = {'direction_document': '# Direction', 'direction_document_html': '<h1>Direction</h1>',
+              'direction_assessment': {'stage': 'direction', 'status': 'draft'}}
+    tools.require_context = lambda: types.SimpleNamespace(params={'remote_inputs': remote})
+    manifest = {'stage': 'direction', 'workspace_id': 'workspace',
+                'host_artifact': {'slot': 'direction_document', **tools._bound_artifact_descriptor(remote['direction_document'])},
+                'representations': {kind: {'slot': slot, **tools._bound_artifact_descriptor(remote[slot])}
+                                    for kind, slot in tools.STAGE_REPRESENTATIONS['direction'].items()}}
+    handoff = {'stage_manifest': manifest, 'workspace_state': {'workspace_id': 'workspace', 'current_run': {'selected_stage': 'direction'}},
+               'delivery_summary': 'done'}
+    tools._validate_product_publication(handoff)
+    remote['direction_document'] = '# Changed after manifest'
+    saved = []
+    tools.build_product_handoff_state = lambda: handoff
+    tools._publish_values = lambda *args: saved.append(args)
+    with pytest.raises(ValueError, match='CONTENT_MISMATCH'):
+        tools.publish_product_handoff_state()
+    assert saved == []
+    del remote['direction_document_html']
+    with pytest.raises(ValueError):
+        tools.publish_product_handoff_state()
+    assert saved == []

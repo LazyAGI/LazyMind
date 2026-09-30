@@ -42,6 +42,7 @@ import (
 	"lazymind/core/mcp"
 	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
+	"lazymind/core/product"
 	coreproviderconnection "lazymind/core/providerconnection"
 	"lazymind/core/realtime"
 	"lazymind/core/remotefs"
@@ -652,6 +653,12 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/workflow-preparations", []string{"qa.write"}, workflowFacade.Prepare)
 	handleAPI(r, "POST", "/workflow-preparations/{preparation_id}:consume", []string{"qa.write"}, workflowFacade.Consume)
 	handleAPI(r, "GET", "/workflow-sessions", []string{"qa.read"}, workflowFacade.ListSessions)
+	// Domain endpoints compose the generic storage API.
+	productHandler := product.Handler{Store: product.New(corestore.DB())}
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/product-stage-relay", []string{"qa.read"}, productHandler.ProductStageRelay)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/product-stage-relay", []string{"qa.write"}, productHandler.ProductStageRelay)
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/product-artifacts/{stage}", []string{"qa.read"}, productHandler.ProductProjectArtifact)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/product-decisions/{decision_id}", []string{"qa.write"}, productHandler.ProductDecision)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:advance-step", []string{"qa.write"}, workflowFacade.Command(http.HandlerFunc(workflow.TransitionWorkflowSession)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:advance-step-and-hand-off", []string{"qa.write"}, workflowFacade.Command(http.HandlerFunc(workflow.TransitionWorkflowSession)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin", []string{"qa.write"}, hostedHandler.Begin)

@@ -3,17 +3,42 @@
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import json
 import re
 import uuid
 import zlib
+
 from functools import lru_cache
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal, Union
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from lazymind.chat.engine.subagent.context import require_context
+def _save_artifact(*args, **kwargs):
+    # Pure contract readers/validators remain usable without the execution host.
+    from lazymind.chat.engine.subagent.tools import _save_artifact as save
+    return save(*args, **kwargs)
+
+
+def _publish_values(values: list[tuple[str, Any, str]], source_tool: str) -> list[str]:
+    for key, content, kind in values:
+        _save_artifact(key=key, value=content, content_type=kind,
+                       source_tool=source_tool, internal_publish=True)
+    return [key for key, _, _ in values]
+
+
+def _publication_enabled() -> bool:
+    try:
+        params = getattr(require_context(), "params", None) or {}
+    except RuntimeError:
+        return False
+    owned = (params.get("workflow_runtime") or {}).get("publisher_owned_slots") or []
+    return {"workspace_state", "stage_manifest"} <= set(owned)
+
 
 
 PACKAGE_RELEASE = "psd-2026-08-11-portable-lazymind-competitive-analysis-v1"
@@ -27,6 +52,15 @@ STAGE_SKILLS = {
     "handoff": "prepare-development-handoff",
 }
 STAGE_ORDER = tuple(STAGE_SKILLS)
+STAGE_RELAYS = {
+    "direction": {"competitive", "design", "review"},
+    "competitive": {"design", "review"},
+    "design": {"prd", "prototype", "review", "handoff"},
+    "prd": {"prototype", "review", "handoff"},
+    "prototype": {"review", "handoff"},
+    "review": {"handoff"},
+    "handoff": set(),
+}
 TEXT_STAGES = {"direction", "design", "prd", "review", "handoff"}
 STAGE_ALIASES = {
     "direction": {"direction", "shape-product-direction", "产品方向", "方向梳理"},
@@ -39,6 +73,260 @@ STAGE_ALIASES = {
     "review": {"review", "review-product-artifact", "方案评审", "产品评审", "评审"},
     "handoff": {"handoff", "prepare-development-handoff", "研发交付", "开发交付"},
 }
+STAGE_DISPLAY_LABELS = {
+    "direction": "产品方向", "competitive": "竞品与生态位", "design": "产品方案",
+    "prd": "PRD", "prototype": "交互原型", "review": "方案评审", "handoff": "研发交付",
+}
+STAGE_USER_OUTCOMES = {
+    "direction": "目标用户、核心问题与产品范围",
+    "competitive": "与同类产品的差异，以及适合切入的位置",
+    "design": "功能如何运作、关键流程、界面与文案",
+    "prd": "团队可以评审和执行的需求说明",
+    "prototype": "关键流程的可操作交互示意",
+    "review": "方案中的缺口、冲突与推进风险",
+    "handoff": "研发实现与验收需要的信息",
+}
+DESIGN_DOMAINS = {
+    "domain_state": "领域对象、数据语义与状态",
+    "behavior_policy_trust": "行为、规则、权限与信任",
+    "ia_semantics": "信息架构与语义",
+    "journey_interaction_service": "用户旅程、交互与用户可见服务流程",
+    "ui_visual_system": "界面、视觉与设计系统",
+    "content_communication": "内容与沟通",
+}
+DESIGN_HARD_GATE_LABELS = {
+    "privacy": "隐私",
+    "identity": "身份",
+    "permission": "权限",
+    "silent_write": "静默写入",
+    "cross_tenant": "跨租户隔离",
+    "high_loss_irreversible": "高损失且不可逆",
+}
+DESIGN_HARD_GATES = set(DESIGN_HARD_GATE_LABELS)
+
+DESIGN_DOMAIN_REFERENCES = {
+    "domain_state": ["domain-model.md"],
+    "behavior_policy_trust": ["product-behavior-decisions.md"],
+    "ia_semantics": ["information-architecture.md"],
+    "journey_interaction_service": ["journey-interaction.md"],
+    "ui_visual_system": ["ui-quick-decisions.md", "ui-heavy-research.md"],
+    "content_communication": ["content-communication.md"],
+}
+DESIGN_DOMAIN_EVIDENCE_GAPS = {
+    "domain_state": "对象定义、数据来源、状态迁移、不变量、并发冲突和异常恢复",
+    "behavior_policy_trust": "授权主体、触发条件、作用范围、拒绝/撤销、审计记录和责任归属",
+    "ia_semantics": "用户心智模型、命名歧义、信息归属、检索路径和跨角色可发现性",
+    "journey_interaction_service": "触发入口、关键路径、等待/失败反馈、人工接管和服务恢复",
+    "ui_visual_system": "真实界面层级、组件状态、跨尺寸可读性、无障碍和设计系统约束",
+    "content_communication": "受众、发送时机、信息层级、敏感内容暴露和误解后的纠正路径",
+}
+DESIGN_DOMAIN_HEAVY_REQUIREMENTS = {
+    "domain_state": [
+        "核验当前对象全集、数据来源、状态迁移、不变量和异常恢复",
+        "给出外部对照、冲突边界及可验证的数据/状态规格",
+    ],
+    "behavior_policy_trust": [
+        "跨至少六个不同产品形态记录真实做法、参数和来源",
+        "补齐场景映射、产品定位、规律锚点、交互对比、条件化推荐、行为 token、验收和分层来源八类产出",
+    ],
+    "ia_semantics": [
+        "使用真实截图或官方文档核验当前结构、对象全集、术语和入口",
+        "至少比较页内调整、改名串联、终态重构三档成本方案及升级条件",
+    ],
+    "journey_interaction_service": [
+        "实测当前关键路径、等待/失败/撤销/恢复状态和人工接管点",
+        "覆盖差异产品形态并给出逐场景服务边界、可见反馈和验收",
+    ],
+    "ui_visual_system": [
+        "至少覆盖官方材料、真实界面及一种一手用户反馈来源",
+        "记录可量化视觉参数，并提供继承当前真实风格的现状/建议对比和实现验收",
+    ],
+    "content_communication": [
+        "核验当前真实文案、受众、触发时机、敏感信息暴露和失败沟通",
+        "用可追溯来源说明措辞差异、适用条件、纠错路径和无障碍要求",
+    ],
+}
+DESIGN_ESCALATION_TRIGGERS = {
+    "sustained_counterexamples", "practice_divergence", "trust_risk",
+}
+
+
+class ProductAssessmentDecision(BaseModel):
+    """One product decision reported by a child Skill."""
+
+    model_config = ConfigDict(extra="allow")
+
+    decision_id: str = Field(
+        default="",
+        description="Stable decision identifier. Omit only when the validator should allocate one.",
+    )
+    status: Literal["proposed", "accepted", "reopened", "superseded"] = "proposed"
+    value: Any = None
+    accepted_by: str = ""
+    acceptance_ref: str = ""
+    hard_gates: list[str] = Field(default_factory=list)
+    risk: str = ""
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_status(cls, value: Any) -> Any:
+        aliases = {
+            "pending": "proposed", "draft": "proposed", "unconfirmed": "proposed",
+            "approved": "proposed", "confirmed": "proposed",
+        }
+        return aliases.get(str(value or "proposed").strip().lower(), value or "proposed")
+
+
+class ProductAssessmentDependency(BaseModel):
+    """A versioned dependency claim with a locatable source."""
+
+    model_config = ConfigDict(extra="allow")
+
+    artifact_type: str = ""
+    source_slot: str = ""
+    artifact_id: str | None = None
+    version: str | None = None
+    status: Literal["available", "missing", "outdated", "conflict"] | None = None
+    evidence: str = ""
+    handling: str = ""
+
+
+class ProductAssessmentQuestion(BaseModel):
+    """An unresolved question; blocking and HITL semantics remain explicit."""
+
+    model_config = ConfigDict(extra="allow")
+
+    question_id: str = ""
+    question: str = ""
+    blocking: bool = False
+    confirmation: Literal["hard-stop", "confirmation-required", "advisory"] | None = None
+    decision_id: str = ""
+
+
+class ProductAssessmentCheck(BaseModel):
+    """One evidence-backed quality check."""
+
+    model_config = ConfigDict(extra="allow")
+
+    status: Literal["passed", "failed", "not-checked"] = "not-checked"
+    evidence: str = ""
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_status(cls, value: Any) -> Any:
+        aliases = {
+            "pass": "passed", "success": "passed", "ok": "passed",
+            "fail": "failed", "error": "failed",
+            "pending": "not-checked", "unchecked": "not-checked",
+            "not_checked": "not-checked", "not checked": "not-checked",
+        }
+        return aliases.get(str(value or "not-checked").strip().lower(), value or "not-checked")
+
+
+class _ProductStageAssessmentBase(BaseModel):
+    """Shared, model-visible schema for child-stage quality output."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["draft", "reviewable"] = "draft"
+    execution_depth: Literal["light", "minimum-fill", "full"] | None = None
+    decisions: list[ProductAssessmentDecision] = Field(default_factory=list)
+    dependencies: list[ProductAssessmentDependency] = Field(default_factory=list)
+    open_questions: list[Union[str, ProductAssessmentQuestion]] = Field(default_factory=list)
+    quality_notes: list[str] = Field(default_factory=list)
+    checks: dict[str, ProductAssessmentCheck] = Field(default_factory=dict)
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_artifact_status(cls, value: Any) -> Any:
+        aliases = {
+            "complete": "reviewable", "completed": "reviewable", "done": "reviewable",
+            "pending": "draft", "incomplete": "draft",
+        }
+        return aliases.get(str(value or "draft").strip().lower(), value or "draft")
+
+    @field_validator("decisions", "dependencies", "open_questions", "quality_notes", mode="before")
+    @classmethod
+    def normalize_array_fields(cls, value: Any) -> Any:
+        if value in (None, ""):
+            return []
+        return value if isinstance(value, list) else [value]
+
+    @field_validator("checks", mode="before")
+    @classmethod
+    def normalize_checks(cls, value: Any) -> Any:
+        if value in (None, ""):
+            return {}
+        if not isinstance(value, list):
+            return value
+        normalized: dict[str, Any] = {}
+        for index, item in enumerate(value, 1):
+            if not isinstance(item, dict):
+                normalized[f"check_{index}"] = item
+                continue
+            name = str(
+                item.get("name") or item.get("check_id") or item.get("id") or f"check_{index}"
+            ).strip()
+            normalized[name] = {
+                key: nested for key, nested in item.items()
+                if key not in {"name", "check_id", "id"}
+            }
+        return normalized
+
+
+class ProductNonHandoffAssessment(_ProductStageAssessmentBase):
+    """Quality result for stages that cannot claim implementation readiness."""
+
+    stage: Literal["direction", "competitive", "design", "prd", "prototype", "review"]
+    implementation_readiness: Literal["not-assessed", "blocked"] = "not-assessed"
+
+    @field_validator("implementation_readiness", mode="before")
+    @classmethod
+    def normalize_readiness(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            value = value.get("status") or value.get("value") or value.get("readiness")
+        aliases = {
+            "not_assessed": "not-assessed", "not assessed": "not-assessed",
+            # A child model cannot promote a non-handoff artifact to implementation-ready.
+            # Conservatively demote common overclaims instead of spending another model turn.
+            "ready": "not-assessed", "ready-with-open-items": "not-assessed",
+            "ready_with_open_items": "not-assessed",
+        }
+        return aliases.get(str(value or "not-assessed").strip().lower(), value or "not-assessed")
+
+
+class ProductHandoffAssessment(_ProductStageAssessmentBase):
+    """Handoff is the only child allowed to assess implementation readiness."""
+
+    stage: Literal["handoff"]
+    implementation_readiness: Literal[
+        "not-assessed", "blocked", "ready-with-open-items", "ready"
+    ] = "not-assessed"
+
+    @field_validator("implementation_readiness", mode="before")
+    @classmethod
+    def normalize_readiness(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            value = value.get("status") or value.get("value") or value.get("readiness")
+        aliases = {
+            "not_assessed": "not-assessed", "not assessed": "not-assessed",
+            "ready_with_open_items": "ready-with-open-items",
+        }
+        return aliases.get(str(value or "not-assessed").strip().lower(), value or "not-assessed")
+
+
+ProductStageAssessmentInput = Annotated[
+    Union[ProductNonHandoffAssessment, ProductHandoffAssessment],
+    Field(discriminator="stage"),
+]
+for _assessment_model in (
+    ProductAssessmentDecision, ProductAssessmentDependency, ProductAssessmentQuestion,
+    ProductAssessmentCheck, _ProductStageAssessmentBase,
+    ProductNonHandoffAssessment, ProductHandoffAssessment,
+):
+    # Workflow packages are exec'd into synthetic modules that are not guaranteed to
+    # exist in sys.modules. Resolve postponed annotations while this namespace is intact.
+    _assessment_model.model_rebuild(_types_namespace=globals())
 ROUTER_REFERENCES = (
     "references/stage-registry.md",
     "references/routing.md",
@@ -49,6 +337,32 @@ ROUTER_REFERENCES = (
     "assets/artifact-template.json",
     "assets/workspace-template.json",
 )
+
+# The Router gets a compact projection; full Workspace/Manifest references remain hashed
+# but would exceed the large-result threshold and waste its inference deadline.
+ROUTER_RUNTIME_CONTRACT = """# Product stage Router contract
+
+Priority: explicit requested_stage/stage approval/original request > high-confidence deterministic
+rule > model recommendation. Missing inputs never overturn explicit intent. Choose the smallest
+useful stage; a new project need not start at direction and an existing same-stage artifact is a
+revision baseline. Missing facts stay gaps, not mandatory preceding stages.
+
+Canonical stages:
+- direction: clarify users, problem and scope
+- competitive: competitor comparison and ecosystem positioning
+- design: mechanisms, rules, flows, UI and acceptance
+- prd: requirements document
+- prototype: interactive/HTML prototype
+- review: audit a product artifact
+- handoff: development handoff
+
+Routing record: selected_stage; route_source (explicit/deterministic/model/fallback); route_reason;
+confidence (explicit/high/low); alternatives (at most two stages); stage_chain (shortest authorized
+forward plan, otherwise empty); stage_chain_authorized (true only for explicit authorization).
+Only selected_stage executes. Chains never cross confirmation boundaries. The Router does no
+external research and loads no child Skill; design alone enters the six-domain scope/effort Router.
+Publish the Host-normalized record; never replace restored explicit intent with model preference.
+"""
 
 # LazyMind executes this source with a synthetic __file__ and does not guarantee a
 # filesystem checkout for sibling resources. The build script replaces this block with
@@ -1167,6 +1481,9 @@ def _resource_files() -> dict[str, str]:
         for key, content in value.items()
     ):
         raise RuntimeError("Embedded product Skill contract bundle must be a text mapping")
+    # Native host contracts stay upstream; all stages load the shared presentation contract.
+    root = Path(__file__).resolve().parent.parent / "contracts"
+    value["references/rich-text-presentation.md"] = (root / "rich-text-presentation.md").read_text(encoding="utf-8")
     return value
 
 
@@ -1191,7 +1508,7 @@ def _digest(paths: list[str]) -> str:
 
 
 def validate_product_execution_plan(value: dict[str, Any]) -> dict[str, Any]:
-    """Validate and normalize a single-stage, partial-chain, or full-chain plan."""
+    """Validate a plan while authorizing exactly one stage for this Workflow session."""
 
     if not isinstance(value, dict):
         return {"valid": False, "errors": ["execution plan must be an object"]}
@@ -1202,8 +1519,12 @@ def validate_product_execution_plan(value: dict[str, Any]) -> dict[str, Any]:
         return {"valid": False, "errors": ["stage_chain must be an array"]}
     stages = [str(item or "").strip().lower() for item in requested]
     errors: list[str] = []
-    if not stages:
-        errors.append("stage_chain must contain at least one stage")
+    legacy = "selected_stage" not in value and not _publication_enabled()
+    selected = str(value.get("selected_stage") or (stages[0] if stages else "")).strip().lower()
+    if not selected:
+        errors.append("selected_stage is required")
+    if selected and selected not in STAGE_SKILLS:
+        errors.append(f"unsupported selected_stage: {selected}")
     unknown = [stage for stage in stages if stage not in STAGE_SKILLS]
     if unknown:
         errors.append("unsupported stages: " + ", ".join(unknown))
@@ -1213,27 +1534,1433 @@ def validate_product_execution_plan(value: dict[str, Any]) -> dict[str, Any]:
     positions = [STAGE_ORDER.index(stage) for stage in known]
     if positions != sorted(positions):
         errors.append("stage_chain must follow the canonical forward stage order")
+    invalid_relays = [
+        f"{current}->{following}"
+        for current, following in zip(known, known[1:])
+        if following not in STAGE_RELAYS[current]
+    ]
+    if invalid_relays and not legacy:
+        errors.append("unsupported stage relay: " + ", ".join(invalid_relays))
+    if stages and selected and stages[0] != selected:
+        errors.append("selected_stage must be the first planned stage")
+    if not legacy and len(stages) > 1 and value.get("stage_chain_authorized") is not True:
+        errors.append("multi-stage plans require explicit stage_chain_authorized=true")
     if errors:
         return {"valid": False, "errors": errors}
-    mode = "full" if tuple(stages) == STAGE_ORDER else ("single" if len(stages) == 1 else "chain")
+    if legacy:
+        mode = "full" if tuple(stages) == STAGE_ORDER else ("single" if len(stages) == 1 else "chain")
+        plan = {**value, "selected_stage": selected, "stage_chain": stages, "execution_mode": mode, "stage_cursor": 0}
+        skipped = {f"skip_{stage}": f"Stage {stage} is outside the approved execution plan."
+                   for stage in STAGE_ORDER if stage not in stages}
+        return {"valid": True, "errors": [], "execution_plan": plan, "skip_flags": skipped, **skipped}
     normalized = dict(value)
     normalized.update({
-        "selected_stage": stages[0],
+        "selected_stage": selected,
         "stage_chain": stages,
-        "execution_mode": mode,
+        "planned_stage_chain": stages or [selected],
+        "execution_scope": [selected],
+        "execution_mode": "single-stage",
         "stage_cursor": 0,
     })
-    skip_flags = {
-        f"skip_{stage}": f"Stage {stage} is outside the approved execution plan."
-        for stage in STAGE_ORDER if stage not in stages
-    }
     return {
         "valid": True,
         "errors": [],
         "execution_plan": normalized,
-        "skip_flags": skip_flags,
-        **skip_flags,
     }
+
+
+def _normalize_stage(raw: Any) -> str:
+    value = str(raw or "").strip().lower().replace("_", "-")
+    return next((key for key, aliases in STAGE_ALIASES.items() if value in aliases), value)
+
+
+def _runtime_json_value(value: Any) -> Any:
+    """Decode trusted scalar inputs using the Router's bounded path policy."""
+    return _bound_artifact_payload(value, keys=("data", "value", "text", "path"), empty=None, bounded=True)
+
+
+def _stage_intent_text(raw: Any) -> str:
+    """Exclude the launcher's capability list only when extracting explicit stage intent."""
+
+    text = str(raw or "").strip()
+    envelope = re.match(
+        r"^(?:original workflow request|original request)\s*:\s*|"
+        r"^(?:原始需求|原始请求)\s*[：:]\s*",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if envelope:
+        text = text[envelope.end():].lstrip()
+
+    # The launcher may be separated from the real request by either one line
+    # break or a blank line. Check the shortest prefix first, then the first
+    # paragraph, so both desktop templates remain compatible.
+    boundaries = [match.end() for match in re.finditer(r"\n", text)]
+    for boundary in boundaries:
+        launcher_text = text[:boundary].strip()
+        launcher = re.sub(r"\s+", " ", launcher_text).lower()
+        if (
+            "产品方案交付" in launcher
+            and "完整能力" in launcher
+            and "功能包括" in launcher
+        ):
+            return text[boundary:].strip()
+        # Once a non-launcher paragraph is complete, it is the business brief.
+        if text[boundary - 1:boundary + 1] == "\n\n":
+            break
+    return text
+
+
+def _explicit_stage_from_text(raw: Any, *, strong_only: bool = False) -> str:
+    """Extract only a clearly commanded stage, never a merely mentioned artifact."""
+
+    text = re.sub(r"\s+", " ", _stage_intent_text(raw).lower())
+    if not text:
+        return ""
+    candidates: list[tuple[int, int, str]] = []
+    prefix_control = re.compile(
+        r"(?:直接从|必须进入|明确进入|切换到|切换至|选择|进入|转到|从|先做|先分析|"
+        r"只做|本轮(?:执行|进入)?|当前(?:阶段|入口)(?:是|为)?|作为入口|开始(?:做|写)?|"
+        r"请(?:执行|生成|编写|制作|做|给我)?|我要|我想要|希望|需要|给我|编写|写|生成|制作|做)"
+        r"[^，。；;！？!?\n]{0,28}$"
+    )
+    suffix_control = re.compile(r"^(?:阶段)?(?:开始|作为入口|执行|产物|文档|报告|方案)")
+    negative = re.compile(r"(?:不|不要|无需|不用|跳过|并非|不是)[^，。；;！？!?\n]{0,8}$")
+    for stage, aliases in STAGE_ALIASES.items():
+        for alias in sorted(aliases, key=len, reverse=True):
+            pattern = re.compile(
+                rf"(?<![0-9a-z]){re.escape(alias.lower())}(?![0-9a-z])"
+                if alias.isascii() else re.escape(alias.lower())
+            )
+            for match in pattern.finditer(text):
+                before = text[max(0, match.start() - 48):match.start()]
+                after = text[match.end():match.end() + 16]
+                if negative.search(before):
+                    continue
+                prefix = prefix_control.search(before)
+                suffix = suffix_control.search(after)
+                if not prefix and not suffix:
+                    continue
+                score = 3 if re.search(r"(?:直接|必须|明确|只做)", before) else 2
+                if strong_only and score < 3:
+                    continue
+                candidates.append((-score, match.start(), stage))
+    return min(candidates)[2] if candidates else ""
+
+
+def _effective_explicit_stage(requested_stage: Any, product_goal: Any) -> tuple[str, str]:
+    params: dict[str, Any] = {}
+    try:
+        current = require_context()
+        if isinstance(getattr(current, "params", None), dict):
+            params = current.params
+    except RuntimeError:
+        pass
+    # A direct command in the current user message is newer and more explicit
+    # than a prefilled or stale stage binding carried into the same run.
+    direct_runtime_stage = _explicit_stage_from_text(
+        params.get("user_input"), strong_only=True,
+    )
+    if direct_runtime_stage:
+        return direct_runtime_stage, "original runtime request"
+    requested = _normalize_stage(requested_stage)
+    if requested in STAGE_SKILLS:
+        return requested, "requested_stage"
+    remote = params.get("remote_inputs") or {}
+    if isinstance(remote, dict):
+        approval = _runtime_json_value(remote.get("stage_approval"))
+        if isinstance(approval, dict):
+            approved = _normalize_stage(approval.get("selected_stage") or approval.get("stage"))
+            if approved in STAGE_SKILLS:
+                return approved, "stage_approval"
+    runtime_stage = _explicit_stage_from_text(params.get("user_input"))
+    if runtime_stage:
+        return runtime_stage, "original runtime request"
+    goal_stage = _explicit_stage_from_text(product_goal)
+    return (goal_stage, "product_goal") if goal_stage else ("", "")
+
+
+def _normalize_route_source(raw: Any) -> str:
+    value = re.sub(r"[\s_-]+", " ", str(raw or "").strip().lower())
+    if value in {"explicit", "deterministic", "model", "fallback"}:
+        return value
+    if "explicit" in value or "user selection" in value or "显式" in value:
+        return "explicit"
+    if "deterministic" in value or "rule" in value or "规则" in value:
+        return "deterministic"
+    if "model" in value or "recommend" in value or "模型" in value:
+        return "model"
+    if "fallback" in value or "回退" in value:
+        return "fallback"
+    return value
+
+
+def _normalize_route_alternatives(value: Any, selected: str) -> list[Any]:
+    raw = value if isinstance(value, list) else _parse_stage_chain(value) if value else []
+    normalized: list[Any] = []
+    seen = {selected}
+    for alternative in raw:
+        item = dict(alternative) if isinstance(alternative, dict) else alternative
+        stage = _normalize_stage(
+            item.get("stage") or item.get("stage_id") if isinstance(item, dict) else item
+        )
+        if stage not in STAGE_SKILLS or stage in seen:
+            continue
+        seen.add(stage)
+        if isinstance(item, dict):
+            item["stage"] = stage
+            item.pop("stage_id", None)
+            normalized.append(item)
+        else:
+            normalized.append(stage)
+        if len(normalized) == 2:
+            break
+    return normalized
+
+
+def _normalize_route_chain(value: Any, selected: str, authorized: bool) -> list[str]:
+    raw = _parse_stage_chain(value) if isinstance(value, str) else value or []
+    if not isinstance(raw, list) or not authorized:
+        return []
+    stages: list[str] = []
+    for item in raw:
+        stage = _normalize_stage(item)
+        if stage in STAGE_SKILLS and stage not in stages:
+            stages.append(stage)
+    if selected in stages:
+        stages = stages[stages.index(selected):]
+    elif stages:
+        stages.insert(0, selected)
+    else:
+        return []
+    valid = [selected]
+    for following in stages[1:]:
+        if following not in STAGE_RELAYS[valid[-1]]:
+            break
+        valid.append(following)
+    return valid if len(valid) > 1 else []
+
+
+def _normalize_execution_depth(raw: Any) -> str:
+    value = str(raw or "").strip().lower()
+    aliases = {
+        "auto": "auto", "standard": "auto", "default": "auto", "由当前阶段判断": "auto", "自动判断": "auto",
+        "light": "light", "轻量": "light", "轻量模式": "light", "精简": "light",
+        "复用现有": "light", "minimum-fill": "minimum-fill", "最小补齐": "minimum-fill",
+        "最小补齐模式": "minimum-fill", "补齐": "minimum-fill", "full": "full",
+        "完整": "full", "完整模式": "full", "完整执行": "full",
+    }
+    normalized = aliases.get(value)
+    if not normalized:
+        raise ValueError("execution_depth must be auto, light, minimum-fill, or full")
+    return normalized
+
+
+def _normalize_reference_sample(raw: Any, *, text_stage: bool) -> str:
+    value = str(raw or "").strip().lower()
+    aliases = {
+        "provided": "provided", "已提供": "provided", "有样例": "provided",
+        "none-confirmed": "none-confirmed", "none": "none-confirmed", "无样例": "none-confirmed",
+        "default": "none-confirmed",
+        "默认结构": "none-confirmed", "使用默认结构": "none-confirmed",
+        "不使用参考样例": "none-confirmed", "不提供参考样例": "none-confirmed",
+        "不使用样例": "none-confirmed", "not-required": "not-required",
+        "不需要": "not-required", "不适用": "not-required",
+    }
+    status = aliases.get(value)
+    if status is None:
+        raise ValueError("reference_sample_choice must be provided, none-confirmed, or not-required")
+    if text_stage and status not in {"provided", "none-confirmed"}:
+        raise ValueError(
+            "reference_sample_choice must be provided or none-confirmed for text stages"
+        )
+    return status or "not-required"
+
+
+def _normalize_word_target(raw: Any, *, text_stage: bool) -> int | None:
+    value = str(raw or "").replace(",", "").strip().lower()
+    match = re.search(r"\d+", value)
+    if text_stage and not match:
+        raise ValueError("word_target is required when the selected stage produces text")
+    target = int(match.group()) if match else None
+    if text_stage and target is not None and target < 300:
+        raise ValueError("word_target must be at least 300 Chinese characters")
+    return target
+
+
+def validate_product_route(
+    value: dict[str, Any],
+    product_goal: str,
+    execution_depth: str = "",
+    word_target: str = "",
+    reference_sample_choice: str = "",
+    requested_stage: str = "",
+) -> dict[str, Any]:
+    """Normalize route source/alternatives and restore explicit intent from authoritative inputs."""
+
+    if not isinstance(value, dict):
+        raise ValueError("routing record must be an object")
+    if "selected_stage" not in value and isinstance(value.get("routing_record"), dict):
+        # Some small models mirror the public result envelope inside the
+        # schema's ``value`` argument. Accept that harmless wrapper so the
+        # user's full stage chain is not dropped during normalization.
+        value = dict(value["routing_record"])
+    # The immutable user choice outranks model wording. Recover it before
+    # validating the model field so a non-canonical alias such as
+    # ``product_scheme`` cannot reject an otherwise explicit design route.
+    explicit_request, explicit_origin = _effective_explicit_stage(requested_stage, product_goal)
+    selected = explicit_request or _normalize_stage(value.get("selected_stage"))
+    if selected not in STAGE_SKILLS:
+        raise ValueError(f"Unsupported selected_stage: {selected or '<empty>'}")
+
+    source = _normalize_route_source(value.get("route_source"))
+    if explicit_request:
+        source = "explicit"
+    if source not in {"explicit", "deterministic", "model", "fallback"}:
+        raise ValueError("route_source must be explicit, deterministic, model, or fallback")
+    confidence = str(value.get("confidence") or "").strip().lower()
+    if explicit_request:
+        confidence = "explicit"
+    elif source == "deterministic":
+        confidence = "high"
+    elif confidence not in {"explicit", "high", "low"} and source in {"model", "fallback"}:
+        confidence = "low"
+    if confidence not in {"explicit", "high", "low"}:
+        raise ValueError("confidence must be explicit, high, or low")
+    if source == "explicit" and confidence != "explicit":
+        raise ValueError("an explicit route must use confidence=explicit")
+    origin_labels = {
+        "requested_stage": "已绑定的阶段选择",
+        "stage_approval": "人工阶段确认",
+        "original runtime request": "用户原始请求",
+        "product_goal": "产品目标",
+    }
+    reason = (
+        f"系统已根据{origin_labels.get(explicit_origin, '用户输入')}保留用户明确选择的"
+        f"「{STAGE_DISPLAY_LABELS.get(selected, selected)}」阶段。"
+        if explicit_request else
+        str(value.get("route_reason") or "").strip()
+    )
+    if not reason:
+        raise ValueError("route_reason is required")
+
+    normalized_alternatives = (
+        [] if explicit_request
+        else _normalize_route_alternatives(value.get("alternatives"), selected)
+    )
+    chain = _normalize_route_chain(
+        value.get("stage_chain"), selected, value.get("stage_chain_authorized") is True,
+    )
+    plan_result = validate_product_execution_plan({
+        "selected_stage": selected,
+        "stage_chain": chain,
+        "stage_chain_authorized": bool(len(chain) > 1),
+    })
+    if not plan_result["valid"]:
+        raise ValueError("; ".join(plan_result["errors"]))
+
+    goal = str(product_goal or "").strip()
+    if not goal:
+        raise ValueError("product_goal is required before starting the Workflow")
+    defaults = {"direction": 1400, "design": 3500, "prd": 4500, "review": 1800, "handoff": 3500}
+    blank_depth = execution_depth is None or not str(execution_depth).strip()
+    blank_target = word_target is None or not str(word_target).strip()
+    blank_sample = reference_sample_choice is None or not str(reference_sample_choice).strip()
+    depth = _normalize_execution_depth("auto" if blank_depth else execution_depth)
+    text_stage = selected in TEXT_STAGES
+    target = _normalize_word_target(
+        defaults.get(selected) if text_stage and blank_target else word_target, text_stage=text_stage,
+    ) if text_stage else None
+    remote = getattr(require_context(), "params", {}).get("remote_inputs") or {}
+    has_sample = _bound_artifact_descriptor(remote.get("reference_sample"))["present"] if isinstance(remote, dict) else False
+    sample_choice = reference_sample_choice
+    if blank_sample or str(sample_choice).strip().lower() == "default":
+        sample_choice = "provided" if text_stage and has_sample else "none-confirmed" if text_stage else "not-required"
+    sample_status = _normalize_reference_sample(
+        sample_choice, text_stage=text_stage,
+    )
+    if not text_stage:
+        sample_status = "not-required"
+
+    routing_record = dict(value)
+    routing_record.update({
+        "selected_stage": selected,
+        "route_source": source,
+        "route_reason": reason,
+        "confidence": confidence,
+        "alternatives": normalized_alternatives,
+        "stage_chain": chain,
+        "stage_chain_authorized": bool(len(chain) > 1),
+    })
+    execution_plan = dict(plan_result["execution_plan"])
+    execution_plan.update({
+        "product_goal": goal,
+        "execution_depth": depth,
+        "word_target": target,
+        "reference_sample_status": sample_status,
+        "preference_sources": {
+            "execution_depth": "project-default" if blank_depth else "explicit-input",
+            "word_target": ("not-applicable" if not text_stage else
+                            "project-default" if blank_target else "explicit-input"),
+            "reference_sample": ("not-required" if not text_stage else "bound-reference-sample" if blank_sample and has_sample else
+                                 "project-default" if blank_sample else "explicit-input"),
+        },
+        "default_policy": "Reuse project inputs and stage defaults without additional setup; defaults are not fabricated user confirmations.",
+    })
+    planned = " → ".join(
+        STAGE_DISPLAY_LABELS.get(item, item)
+        for item in execution_plan["planned_stage_chain"]
+    )
+    stage_label = STAGE_DISPLAY_LABELS.get(selected, selected)
+    stage_outcome = STAGE_USER_OUTCOMES.get(selected, "这一阶段需要确认的结果")
+    if source == "explicit":
+        selection_note = "已根据你的要求，从这里开始。"
+    elif confidence == "low":
+        selection_note = "根据目前的信息，建议从这里开始；如果与你的预期不一致，可以调整。"
+    else:
+        selection_note = "根据你描述的目标，从这里开始最合适。"
+    if len(execution_plan["planned_stage_chain"]) > 1:
+        continuation_note = (
+            f"接下来计划：{planned}。每一步完成后都会停下来，请你确认是否继续。"
+        )
+    else:
+        continuation_note = "完成后会停下来，请你确认是否继续。"
+    summary = (
+        f"## {stage_label}\n\n{selection_note}\n\n"
+        f"**本阶段会明确**\n\n{stage_outcome}\n\n{continuation_note}"
+    )
+    hide_flags = {
+        f"hide_{stage}": f"本轮父 Router 选择了 {selected}，不展示 {stage} 阶段。"
+        for stage in STAGE_ORDER if stage != selected
+    }
+    return {
+        "routing_record": routing_record,
+        "execution_plan": execution_plan,
+        "routing_summary": summary,
+        "ui_hide_flags": hide_flags,
+        **hide_flags,
+    }
+
+
+def _router_profile_summary(resource_profiles_path: str) -> tuple[str, str, str]:
+    context = require_context()
+    workspace = Path(str(getattr(context, "workspace_path", "") or "")).resolve()
+    path = Path(str(resource_profiles_path or "")).expanduser().resolve(strict=True)
+    try:
+        path.relative_to(workspace)
+    except ValueError as exc:
+        raise ValueError("resource_profiles_path must stay inside the active Workflow workspace") from exc
+    parsed = json.loads(path.read_text(encoding="utf-8"))
+    profiles = parsed if isinstance(parsed, list) else []
+    lines: list[str] = []
+    display_names: list[str] = []
+    for index, profile in enumerate(profiles[:12], 1):
+        if not isinstance(profile, dict):
+            lines.append(f"- 材料 {index}：{str(profile)[:320]}")
+            display_names.append(f"资料 {index}")
+            continue
+        name = next((
+            str(profile.get(key) or "").strip()
+            for key in ("filename", "name", "title", "resource_name", "id")
+            if str(profile.get(key) or "").strip()
+        ), f"材料 {index}")
+        detail = next((
+            profile.get(key) for key in (
+                "summary", "description", "content_summary", "key_points", "facts", "outline",
+            ) if profile.get(key) not in (None, "", [])
+        ), "已完成资料画像；未明确的信息保持未知。")
+        if not isinstance(detail, str):
+            detail = json.dumps(detail, ensure_ascii=False, default=str)
+        lines.append(f"- **{name}**：{detail[:600]}")
+        if name == f"材料 {index}":
+            kind = next((
+                label for keyword, label in (
+                    ("评审", "方案评审"), ("原型", "交互原型"),
+                    ("PRD", "需求文档"), ("产品方案", "产品方案"),
+                    ("产品方向", "产品方向"), ("竞品", "竞品资料"),
+                ) if keyword in detail
+            ), f"资料 {index}")
+            display_names.append(kind)
+        else:
+            display_names.append(name)
+    inherited = (
+        "\n".join(lines)
+        if lines else "- 本次没有绑定可读取的产品材料；后续阶段只能基于产品目标并标注事实缺口。"
+    )
+    if display_names:
+        visible_materials = (
+            "- 你的产品目标\n"
+            + "\n".join(f"- {name}" for name in display_names)
+        )
+        context_note = "这些资料会直接沿用；需要你确认的内容会单独标出。"
+    else:
+        visible_materials = "- 你的产品目标"
+        context_note = "暂未附加其他资料，可以先继续；需要补充或验证的内容会在方案中标出。"
+    evidence = (
+        "## 已收到的内容\n\n"
+        f"{visible_materials}\n\n{context_note}"
+    )
+    digest = "## 输入材料摘要\n\n" + inherited
+    research_log = (
+        "## 资料检索记录\n\n"
+        "父 Router 未执行外部检索。需要的公开证据将在选定业务阶段内按其证据规则获取。"
+    )
+    return evidence, digest, research_log
+
+
+_ROUTER_FILE_MATERIAL_SLOTS = {
+    "product_materials", "reference_sample", "upstream_direction", "upstream_competitive",
+    "upstream_design", "upstream_prd", "upstream_prototype", "upstream_review",
+    "upstream_handoff",
+}
+
+
+def _resolved_router_profiles_path(resource_profiles_path: str, remote_inputs: Any) -> str:
+    """Accept a real profiler output, or create an honest empty inventory when no files exist."""
+
+    context = require_context()
+    workspace_value = str(getattr(context, "workspace_path", "") or "").strip()
+    if not workspace_value:
+        raise ValueError("active Workflow workspace is required for resource profiles")
+    workspace = Path(workspace_value).resolve()
+
+    def valid_profiles(path: Path) -> bool:
+        try:
+            path.relative_to(workspace)
+            return isinstance(json.loads(path.read_text(encoding="utf-8")), list)
+        except (OSError, ValueError, json.JSONDecodeError):
+            return False
+
+    candidate = str(resource_profiles_path or "").strip()
+    if candidate and not candidate.startswith("embedded:"):
+        try:
+            path = Path(candidate).expanduser().resolve(strict=True)
+            if valid_profiles(path):
+                return str(path)
+        except (OSError, ValueError):
+            pass
+
+    # Recover only this product profiler's actual output. A broad workspace scan
+    # could pick a later Writer profile from an unrelated stage or requirement.
+    recovered: list[Path] = []
+    try:
+        recovered = sorted(
+            (path.resolve() for path in workspace.glob("product-writer/resource-profiles-*/resource_profiles.json")
+             if path.is_file() and valid_profiles(path.resolve())),
+            key=lambda path: path.stat().st_mtime_ns,
+            reverse=True,
+        )
+    except OSError:
+        recovered = []
+    if recovered:
+        return str(recovered[0])
+
+    bound_files = []
+    if isinstance(remote_inputs, dict):
+        bound_files = [
+            slot for slot in _ROUTER_FILE_MATERIAL_SLOTS
+            if _bound_artifact_descriptor(remote_inputs.get(slot))["present"]
+        ]
+    if bound_files:
+        raise ValueError(
+            "profile_product_materials must run for the bound file slots: "
+            + ", ".join(sorted(bound_files))
+        )
+    path = workspace / "router-empty-resource-profiles.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("[]\n", encoding="utf-8")
+    return str(path)
+
+
+def _product_entry_step(stage: str, inputs: dict[str, Any], reuse_structure: bool = True) -> str:
+    if reuse_structure and stage in TEXT_STAGES and stage != "design" and _bound_artifact_descriptor(inputs.get(f"upstream_{stage}"))["present"]:
+        return f"write_{stage}_document"
+    return {"direction": "build_direction_outline", "competitive": "analyze_competitive_position",
+            "design": "route_design_scope", "prd": "build_prd_outline",
+            "prototype": "build_interactive_prototype", "review": "build_review_outline",
+            "handoff": "build_handoff_outline"}[stage]
+
+
+def _scalar(value: Any) -> str:
+    for _ in range(3):
+        if isinstance(value, dict):
+            value = value.get('data', value.get('text', value))
+        elif isinstance(value, str) and value.strip().startswith('"'):
+            try:
+                value = json.loads(value)
+            except ValueError:
+                break
+        else:
+            break
+    if isinstance(value, (dict, list)):
+        raise ValueError('PRODUCT_INPUT_INVALID: scalar input must be text')
+    return str(value or '').strip()
+
+
+def _normalize_bound_product_inputs(params: dict[str, Any]) -> list[str]:
+    """Normalize known scalar aliases in the execution projection, never mutate input resources."""
+    inputs = dict(params.get('remote_inputs') or {})
+    aliases = {
+        'execution_depth': {
+            '': 'auto', 'auto': 'auto', 'standard': 'auto', 'default': 'auto',
+            '自动判断': 'auto', '由当前阶段判断': 'auto',
+            'light': 'light', '轻量': 'light', '轻量模式': 'light', '精简': 'light', '复用现有': 'light',
+            'minimum-fill': 'minimum-fill', '最小补齐': 'minimum-fill', '最小补齐模式': 'minimum-fill',
+            '补齐': 'minimum-fill', 'full': 'full', '完整': 'full', '完整模式': 'full', '完整执行': 'full',
+        },
+        'reference_sample_choice': {
+            '': '', 'default': '', 'none': 'none-confirmed', 'none-confirmed': 'none-confirmed',
+            '默认结构': 'none-confirmed', '使用默认结构': 'none-confirmed', '无样例': 'none-confirmed',
+            '不使用参考样例': 'none-confirmed', '不提供参考样例': 'none-confirmed', '不使用样例': 'none-confirmed',
+            'provided': 'provided', '已提供': 'provided', '有样例': 'provided',
+            'not-required': 'not-required', '不需要': 'not-required', '不适用': 'not-required',
+        },
+    }
+    changed = []
+    for field, values in aliases.items():
+        if field not in inputs:
+            continue
+        raw = _scalar(inputs[field]).lower()
+        if raw not in values:
+            raise ValueError(f'PRODUCT_INPUT_INVALID: {field} has an unsupported value')
+        normalized = values[raw]
+        if field == 'reference_sample_choice' and normalized == '':
+            normalized = 'provided' if inputs.get('reference_sample') else 'none-confirmed'
+        if normalized != inputs[field]:
+            inputs[field] = normalized
+            changed.append(field)
+    if 'word_target' in inputs:
+        raw = _scalar(inputs['word_target']).replace(',', '')
+        if raw.lower() in ('default', 'stage-specific', 'not-applicable', '不适用'):
+            inputs['word_target'] = ''
+            changed.append('word_target')
+        elif (inputs.get('requested_stage') in TEXT_STAGES and raw
+              and (not re.search(r'\d+', raw) or int(re.search(r'\d+', raw)[0]) < 300)):
+            raise ValueError('PRODUCT_INPUT_INVALID: word_target must be at least 300')
+    params['remote_inputs'] = inputs
+    return changed
+
+
+
+def publish_product_route(
+    value: dict[str, Any],
+    product_goal: str = "",
+    resource_profiles_path: str = "",
+    execution_depth: str = "",
+    word_target: str = "",
+    reference_sample_choice: str = "",
+    requested_stage: str = "",
+) -> dict[str, Any]:
+    """Validate and atomically publish the parent Router outputs, then end the Router step.
+
+    Use the exact ``resource_profiles`` path returned by ``profile_product_materials``. Common
+    model wording drift is normalized, while an explicit user stage is restored by the Host.
+    """
+
+    # Host bindings override model placeholders; absent scalars use project defaults.
+    # Explicit stage intent is independently recovered from the original request.
+    try:
+        params = dict(getattr(require_context(), "params", {}) or {})
+        _normalize_bound_product_inputs(params)
+        remote_inputs = params.get("remote_inputs") or {}
+    except RuntimeError:
+        remote_inputs = {}
+    if isinstance(remote_inputs, dict) and "product_goal" in remote_inputs:
+        product_goal = _runtime_json_value(remote_inputs.get("product_goal")) or ""
+        execution_depth = _runtime_json_value(remote_inputs.get("execution_depth")) \
+            if "execution_depth" in remote_inputs else ""
+        word_target = _runtime_json_value(remote_inputs.get("word_target")) \
+            if "word_target" in remote_inputs else ""
+        reference_sample_choice = _runtime_json_value(remote_inputs.get("reference_sample_choice")) \
+            if "reference_sample_choice" in remote_inputs else ""
+        requested_stage = _runtime_json_value(remote_inputs.get("requested_stage")) \
+            if "requested_stage" in remote_inputs else ""
+
+    route = validate_product_route(
+        value,
+        product_goal,
+        execution_depth,
+        word_target,
+        reference_sample_choice,
+        requested_stage,
+    )
+    selected = route["routing_record"]["selected_stage"]
+    has_baseline = selected in TEXT_STAGES and _bound_artifact_descriptor(remote_inputs.get(f"upstream_{selected}"))["present"]
+    action = str(value.get("entry_action") or ("revise_document" if has_baseline else "create_document"))
+    if action not in {"create_document", "revise_document", "revise_outline"}:
+        raise ValueError("entry_action must be create_document, revise_document or revise_outline")
+    # Explicit requests to change structure must not be swallowed by the reuse default.
+    try:
+        params = getattr(require_context(), "params", {}) or {}
+    except RuntimeError:
+        params = {}
+    approval = _runtime_json_value(remote_inputs.get("stage_approval"))
+    stage_request = approval.get("request_context", "") if isinstance(approval, dict) and approval.get("selected_stage", approval.get("stage")) == selected else ""
+    request_text = str(stage_request or params.get("user_input") or product_goal)
+    structure_requests = re.finditer(
+        r"(?:调整|修改|重做|重新生成|重写)[^，。；,\n]{0,8}(?:大纲|结构)|(?:revise|rewrite|change).{0,16}(?:outline|structure)",
+        request_text, re.I,
+    )
+    if any(not re.search(r"(?:不|不要|无需|不必|不用)(?:再)?\s*$|(?:do not|don't|never)\s*$",
+                         request_text[max(0, match.start() - 12):match.start()], re.I)
+           for match in structure_requests):
+        action = "revise_outline" if has_baseline else "create_document"
+    reuse_structure = has_baseline and action == "revise_document"
+    route["routing_record"]["entry_action"] = action if has_baseline else "create_document"
+    route["execution_plan"]["entry_action"] = route["routing_record"]["entry_action"]
+    resource_profiles_path = _resolved_router_profiles_path(
+        resource_profiles_path, remote_inputs,
+    )
+    research_evidence, material_digest, research_log = _router_profile_summary(resource_profiles_path)
+    artifacts: list[tuple[str, Any, str]] = [
+        ("routing_record", route["routing_record"], "json"),
+        ("execution_plan", route["execution_plan"], "json"),
+        ("routing_summary", route["routing_summary"], "text"),
+        ("research_evidence", research_evidence, "text"),
+        ("research_log", research_log, "text"),
+        ("material_digest", material_digest, "text"),
+        ("resource_profiles", resource_profiles_path, "file"),
+    ]
+    artifacts.extend(
+        (key, content, "text")
+        for key, content in route["ui_hide_flags"].items()
+    )
+    if reuse_structure:
+        artifacts.append(("reuse_product_structure", "沿用同一项目已选正文的结构，直接修订", "text"))
+    saved = _publish_values(artifacts, "publish_product_route")
+    return {
+        "status": "published",
+        "selected_stage": route["routing_record"]["selected_stage"],
+        "control": {"next_step": _product_entry_step(route["routing_record"]["selected_stage"], remote_inputs, reuse_structure)},
+        "route_source": route["routing_record"]["route_source"],
+        "saved_slots": saved,
+        "message": "Parent Router outputs were validated and saved; stop this step now.",
+    }
+
+
+def validate_design_route(value: dict[str, Any]) -> dict[str, Any]:
+    """Validate the design child Router's six-domain scope and per-decision effort."""
+
+    if not isinstance(value, dict):
+        raise ValueError("design routing record must be an object")
+    primary = list(dict.fromkeys(value.get("primary_domains") or []))
+    linked = list(dict.fromkeys(value.get("linked_domains") or []))
+    unknown = [item for item in [*primary, *linked] if item not in DESIGN_DOMAINS]
+    if unknown:
+        raise ValueError("unsupported design domains: " + ", ".join(unknown))
+    if not primary:
+        raise ValueError("primary_domains must contain at least one of the six design domains")
+    if set(primary) & set(linked):
+        raise ValueError("a design domain cannot be both primary and linked")
+
+    decisions = value.get("decisions") or value.get("subdecisions") or []
+    if not isinstance(decisions, list) or not decisions:
+        raise ValueError("decisions must contain at least one scoped design decision")
+    normalized_decisions: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for index, raw in enumerate(decisions, 1):
+        if not isinstance(raw, dict):
+            raise ValueError(f"decision {index} must be an object")
+        item = dict(raw)
+        decision_id = str(item.get("decision_id") or f"DES-{index:03d}").strip()
+        if decision_id in seen_ids:
+            raise ValueError(f"duplicate decision_id: {decision_id}")
+        seen_ids.add(decision_id)
+        domain = str(item.get("primary_domain") or "").strip()
+        if domain not in primary:
+            raise ValueError(f"decision {decision_id} primary_domain must be a primary domain")
+        decision_linked = list(dict.fromkeys(item.get("linked_domains") or []))
+        invalid_linked = [
+            linked_domain for linked_domain in decision_linked
+            if linked_domain not in {*primary, *linked} or linked_domain == domain
+        ]
+        if invalid_linked:
+            raise ValueError(
+                f"decision {decision_id} has inactive or self-linked domains: "
+                + ", ".join(invalid_linked)
+            )
+        effort = str(item.get("effort") or "").strip().lower()
+        if effort not in {"light", "heavy"}:
+            raise ValueError(f"decision {decision_id} effort must be light or heavy")
+        reasons = item.get("effort_reasons") or []
+        if not isinstance(reasons, list) or not reasons:
+            raise ValueError(f"decision {decision_id} needs effort_reasons")
+        hard_gates = list(dict.fromkeys(item.get("hard_gates") or []))
+        invalid_gates = [gate for gate in hard_gates if gate not in DESIGN_HARD_GATES]
+        if invalid_gates:
+            raise ValueError("unsupported hard gates: " + ", ".join(invalid_gates))
+        if hard_gates and effort != "heavy":
+            raise ValueError(f"decision {decision_id} has a hard gate and must be heavy")
+        item.update({
+            "decision_id": decision_id,
+            "primary_domain": domain,
+            "linked_domains": decision_linked,
+            "effort": effort,
+            "hard_gates": hard_gates,
+        })
+        normalized_decisions.append(item)
+
+    overall = "heavy" if any(item["effort"] == "heavy" for item in normalized_decisions) else "light"
+    requested_overall = str(value.get("overall_effort") or overall).strip().lower()
+    if requested_overall != overall:
+        raise ValueError(f"overall_effort must be {overall} for the declared decisions")
+    triggers = value.get("escalation_triggers") or []
+    if not isinstance(triggers, list) or set(triggers) != DESIGN_ESCALATION_TRIGGERS:
+        raise ValueError(
+            "escalation_triggers must be sustained_counterexamples, practice_divergence, "
+            "and trust_risk"
+        )
+
+    normalized = dict(value)
+    normalized.update({
+        "primary_domains": primary,
+        "linked_domains": linked,
+        "decisions": normalized_decisions,
+        "overall_effort": overall,
+        "escalation_triggers": triggers,
+    })
+    primary_labels = "、".join(DESIGN_DOMAINS[item] for item in primary)
+    linked_labels = "、".join(DESIGN_DOMAINS[item] for item in linked) or "无"
+    heavy_count = sum(item["effort"] == "heavy" for item in normalized_decisions)
+    effort_label = "需要深入核验" if overall == "heavy" else "可直接整理"
+    hard_gates = sorted({
+        gate for item in normalized_decisions for gate in item["hard_gates"]
+    })
+    gate_labels = "、".join(DESIGN_HARD_GATE_LABELS[gate] for gate in hard_gates) or "未触发"
+    summary = (
+        f"## 本阶段需要关注什么\n\n- 重点设计：{primary_labels}\n- 同时需要考虑：{linked_labels}\n"
+        f"- 分析方式：{effort_label}\n- 需要确认：{len(normalized_decisions)} 项"
+        f"（其中 {heavy_count} 项需要重点核验）\n"
+        f"- 需要特别注意：{gate_labels}\n\n"
+        "范围已经整理完成，将按上述重点继续完善方案；实际业务决定会单独列出供确认。"
+    )
+    return {
+        "design_routing_record": normalized,
+        "design_effort_route": overall,
+        "design_routing_summary": summary,
+    }
+
+
+def publish_design_route(value: dict[str, Any]) -> dict[str, Any]:
+    """Validate and atomically publish the second-layer Router in deterministic Chinese UI form."""
+
+    route = validate_design_route(value)
+    return _publish_design_route(route, source_tool="publish_design_route")
+
+
+def _publish_design_route(route: dict[str, Any], *, source_tool: str) -> dict[str, Any]:
+    """Persist one already-normalized child route as an atomic Host-owned result."""
+
+    _publish_values([
+        (key, route[key], kind) for key, kind in (
+            ("design_routing_record", "json"), ("design_effort_route", "text"),
+            ("design_routing_summary", "text"),
+        )
+    ], source_tool)
+    return {
+        "status": "published",
+        "overall_effort": route["design_effort_route"],
+        "control": {"next_step": "collect_design_" + route["design_effort_route"] + "_evidence"},
+        "saved_slots": [
+            "design_routing_record", "design_effort_route", "design_routing_summary",
+        ],
+        "message": "方案范围和研究路径已使用中文摘要保存；请立即结束当前步骤。",
+    }
+
+
+_DESIGN_DOMAIN_ALIASES = {
+    "domain_state": {"domain_state", "domain state", "领域对象", "数据语义", "状态", "数据模型"},
+    "behavior_policy_trust": {
+        "behavior_policy_trust", "behavior policy trust", "行为规则权限信任", "行为", "规则",
+        "权限", "信任", "安全",
+    },
+    "ia_semantics": {"ia_semantics", "ia semantics", "信息架构", "语义", "导航", "分类"},
+    "journey_interaction_service": {
+        "journey_interaction_service", "journey interaction service", "用户旅程", "交互",
+        "服务流程", "流程",
+    },
+    "ui_visual_system": {"ui_visual_system", "ui visual system", "界面", "视觉", "设计系统", "ui"},
+    "content_communication": {
+        "content_communication", "content communication", "内容", "沟通", "文案", "通知",
+    },
+}
+_DESIGN_GATE_ALIASES = {
+    "privacy": {"privacy", "隐私", "敏感内容", "敏感数据"},
+    "identity": {"identity", "身份", "实名认证", "账号归属"},
+    "permission": {"permission", "权限", "授权", "访问控制", "角色控制"},
+    "silent_write": {"silent_write", "silent write", "静默写入", "自动写入"},
+    "cross_tenant": {"cross_tenant", "cross tenant", "跨租户", "租户隔离"},
+    "high_loss_irreversible": {
+        "high_loss_irreversible", "high loss irreversible", "高损失且不可逆", "不可逆高损失",
+    },
+}
+
+
+def _compact_tokens(raw: Any) -> list[str]:
+    """Parse a short comma/pipe separated Router argument without accepting nested JSON."""
+
+    return list(dict.fromkeys(
+        token.strip().lower().replace("-", "_")
+        for token in re.split(r"\s*(?:,|，|、|\||;|；|\n)\s*", str(raw or ""))
+        if token.strip()
+    ))
+
+
+def _canonical_compact_values(raw: Any, aliases: dict[str, set[str]]) -> list[str]:
+    result: list[str] = []
+    for token in _compact_tokens(raw):
+        normalized = token.replace("_", " ")
+        match = next((
+            canonical for canonical, values in aliases.items()
+            if token == canonical or normalized in {value.lower().replace("_", " ") for value in values}
+            or token in {value.lower().replace("-", "_") for value in values}
+        ), "")
+        if match and match not in result:
+            result.append(match)
+    return result
+
+
+def _design_bound_text(slot: str, key: str) -> str:
+    try:
+        remote = (getattr(require_context(), "params", {}) or {}).get("remote_inputs") or {}
+    except RuntimeError:
+        return ""
+    value = _runtime_json_value(remote.get(slot)) if isinstance(remote, dict) else None
+    return str(value.get(key) or "").strip() if isinstance(value, dict) else ""
+
+
+def _design_product_goal() -> str:
+    """Read the immutable project goal inherited from the first Router."""
+    return _design_bound_text("execution_plan", "product_goal")
+
+
+def _design_stage_request() -> str:
+    """Include the latest user-authorized stage change, not just the project goal."""
+    return _design_bound_text("stage_approval", "request_context")[:8000]
+
+
+def _design_scope_evidence(text: str) -> str:
+    """Exclude explicit unchanged-scope lists, not statements of missing safeguards."""
+    terms = r"(?:流程|权限|数据|能力|隐私|身份|授权|静默写入|跨租户(?:隔离)?|不可逆(?:损失)?|高损失|信任)"
+    scope_list = terms + r"(?:[/、及与或和\s]+" + terms + r")*"
+    end = r"(?=[，。；,;\n]|$)"
+    value = re.sub(r"(?:不新增|不变更|不调整|不改变|不涉及|未涉及)(?:任何)?" + scope_list
+                   + r"(?:变更|改动|变化)?" + end, "", str(text or ""))
+    return re.sub(r"(?:无|没有|不存在|未触发)(?:任何)?" + scope_list
+                  + r"(?:风险|闸门|门槛)" + end, "", value)
+
+
+def _infer_design_domains(text: str) -> list[str]:
+    """Conservatively recover a usable scope when a small model omits compact fields."""
+
+    lowered = _design_scope_evidence(text).lower()
+    keyword_groups = {
+        "domain_state": ("数据", "状态", "对象", "字段", "模型", "schema", "state", "entity"),
+        "behavior_policy_trust": (
+            "隐私", "身份", "权限", "授权", "角色", "信任", "安全", "租户", "privacy",
+            "identity", "permission", "tenant", "policy", "auth",
+        ),
+        "ia_semantics": ("信息架构", "导航", "分类", "检索", "语义", "taxonomy", "navigation"),
+        "journey_interaction_service": (
+            "流程", "旅程", "交互", "同步", "操作", "反馈", "workflow", "journey", "interaction",
+        ),
+        "ui_visual_system": ("界面", "视觉", "布局", "组件", "设计系统", " ui", "visual"),
+        "content_communication": ("内容", "文案", "通知", "消息", "沟通", "copy", "content"),
+    }
+    return [domain for domain, keywords in keyword_groups.items() if any(key in lowered for key in keywords)]
+
+
+def _infer_design_hard_gates(text: str) -> list[str]:
+    lowered = _design_scope_evidence(text).lower()
+    return [
+        gate for gate, aliases in _DESIGN_GATE_ALIASES.items()
+        if any(alias.lower().replace("_", " ") in lowered.replace("_", " ") for alias in aliases)
+    ]
+
+
+def publish_design_route_compact(
+    primary_domains: str = "",
+    linked_domains: str = "",
+    heavy_domains: str = "",
+    hard_gates: str = "",
+    decision_summary: str = "",
+) -> dict[str, Any]:
+    """Publish the second Router from five short scalar fields; never pass a nested JSON object.
+
+    Use comma-separated canonical IDs for domain and gate fields. The Host checks the project goal
+    and latest stage request, retains explicitly declared risks, and creates decision objects.
+    """
+
+    product_goal = _design_product_goal()
+    stage_request = _design_stage_request()
+    routing_context = "\n".join((product_goal, stage_request))
+    short_summary = re.sub(r"\s+", " ", str(decision_summary or "").strip())[:240]
+    primary = _canonical_compact_values(primary_domains, _DESIGN_DOMAIN_ALIASES)
+    linked = _canonical_compact_values(linked_domains, _DESIGN_DOMAIN_ALIASES)
+    heavy = _canonical_compact_values(heavy_domains, _DESIGN_DOMAIN_ALIASES)
+    declared_gates = _canonical_compact_values(hard_gates, _DESIGN_GATE_ALIASES)
+    # The summary explains a route; it is not a risk declaration. Infer only
+    # from authoritative requests and retain the model's structured hard_gates.
+    supported_gates = _infer_design_hard_gates(routing_context)
+    # An explicitly declared risk must not be silently downgraded merely because
+    # keyword matching misses a paraphrase. The one recognizable copy-the-entire-
+    # contract failure is filtered when the request supports a narrower set.
+    gates = (supported_gates if len(declared_gates) == len(DESIGN_HARD_GATES) and supported_gates
+             else list(dict.fromkeys([*supported_gates, *declared_gates])))
+
+    inferred = _infer_design_domains(routing_context)
+    if not primary:
+        primary = inferred[:2] or ["journey_interaction_service"]
+        linked = list(dict.fromkeys([*linked, *inferred[2:]]))
+    elif len(primary) == len(DESIGN_DOMAINS) and inferred and len(inferred) < len(DESIGN_DOMAINS):
+        # Selecting all six domains usually means the model copied the option
+        # list instead of classifying changed product objects. Preserve a
+        # focused three-domain primary scope and keep the remaining supported
+        # domains linked.
+        primary = inferred[:3]
+        linked = list(dict.fromkeys([*inferred[3:], *linked]))
+    if gates and "behavior_policy_trust" not in primary:
+        primary.insert(0, "behavior_policy_trust")
+    linked = [item for item in linked if item not in primary]
+    heavy = [item for item in heavy if item in primary]
+    if gates and "behavior_policy_trust" not in heavy:
+        heavy.append("behavior_policy_trust")
+
+    decisions: list[dict[str, Any]] = []
+    active = [*primary, *linked]
+    for index, domain in enumerate(primary, 1):
+        decision_gates = gates if domain == "behavior_policy_trust" else []
+        effort = "heavy" if domain in heavy or decision_gates else "light"
+        reason = (
+            f"触发不可补偿风险门槛：{'、'.join(DESIGN_HARD_GATE_LABELS[item] for item in decision_gates)}"
+            if decision_gates else
+            (short_summary or "影响或不确定性需要重型取证")
+            if effort == "heavy" else
+            "该主责范围当前未触发硬门槛，先按局部、可逆、低成本方式验证"
+        )
+        decisions.append({
+            "decision_id": f"DES-{index:03d}",
+            "decision_question": f"{DESIGN_DOMAINS[domain]}应如何满足当前产品目标并保持可验证？",
+            "primary_domain": domain,
+            "linked_domains": [item for item in active if item != domain],
+            "effort": effort,
+            "effort_reasons": [reason],
+            "hard_gates": decision_gates,
+        })
+
+    route = validate_design_route({
+        "primary_domains": primary,
+        "linked_domains": linked,
+        "decisions": decisions,
+        "overall_effort": "heavy" if any(item["effort"] == "heavy" for item in decisions) else "light",
+        "escalation_triggers": sorted(DESIGN_ESCALATION_TRIGGERS),
+        "routing_basis": short_summary,
+    })
+    return _publish_design_route(route, source_tool="publish_design_route_compact")
+
+
+def _bounded_evidence_text(value: Any, *, limit: int = 600) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip())[:limit]
+
+
+def _current_attempt_sources() -> list[dict[str, Any]]:
+    """Read sources from the live citation registry, falling back to the task snapshot."""
+
+    sources: Any = []
+    try:
+        import lazyllm
+        from lazymind.chat.service.utils.citations import materialize_source_views
+
+        agentic_config = lazyllm.globals.get("agentic_config") or {}
+        citation_state = agentic_config.get("citation_state")
+        if isinstance(citation_state, dict):
+            sources = materialize_source_views(citation_state)
+    except Exception:
+        sources = []
+
+    if not sources:
+        context = require_context()
+        database = getattr(context, "db", None)
+        if database is not None and hasattr(database, "load_task"):
+            try:
+                task = database.load_task(str(getattr(context, "task_id", "") or "")) or {}
+                sources = task.get("sources") or []
+            except Exception:
+                sources = []
+
+    normalized: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for position, source in enumerate(sources if isinstance(sources, list) else [], 1):
+        if not isinstance(source, dict):
+            continue
+        source_id = _bounded_evidence_text(
+            source.get("index") or source.get("citation_id") or source.get("source_id")
+            or f"SRC-{position:03d}",
+            limit=80,
+        )
+        url = _bounded_evidence_text(source.get("url"), limit=1000)
+        identity = (source_id, url)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        keys = {
+            _bounded_evidence_text(source.get(key), limit=1000)
+            for key in ("url", "doi", "doc_id", "document_id")
+        }
+        keys.discard("")
+        if url:
+            keys.add(url.rstrip("/"))
+        normalized.append({
+            "source_id": source_id,
+            "title": _bounded_evidence_text(source.get("title") or "未命名来源", limit=160),
+            "url": url,
+            "keys": keys,
+        })
+    return normalized
+
+
+def _resolve_submitted_sources(
+    refs: Any,
+    sources: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    source_by_key: dict[str, dict[str, Any]] = {}
+    for source in sources:
+        for key in source.get("keys") or []:
+            source_by_key[str(key)] = source
+    resolved: list[dict[str, Any]] = []
+    rejected: list[str] = []
+    seen_ids: set[str] = set()
+    for raw_ref in refs if isinstance(refs, list) else []:
+        ref = _bounded_evidence_text(raw_ref, limit=1000)
+        source = source_by_key.get(ref) or source_by_key.get(ref.rstrip("/"))
+        if source is None:
+            if ref:
+                rejected.append(ref)
+            continue
+        source_id = str(source["source_id"])
+        if source_id not in seen_ids:
+            seen_ids.add(source_id)
+            resolved.append(source)
+    return resolved, rejected
+
+
+def publish_design_heavy_evidence(value: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Publish Chinese evidence from compact findings and registered URL/DOI/document locators.
+
+    Host matching rejects guessed source IDs/indices; bound findings stay provisional E1 pending
+    human semantic review, unbound claims stay E0. The Host renders the Markdown packet.
+    """
+
+    context = require_context()
+    remote_inputs = (getattr(context, "params", {}) or {}).get("remote_inputs") or {}
+    if not isinstance(remote_inputs, dict):
+        raise ValueError("design evidence publisher requires Workflow material bindings")
+    raw_route = _runtime_json_value(remote_inputs.get("design_routing_record"))
+    if not isinstance(raw_route, dict):
+        raise ValueError("design evidence publisher requires the bound design_routing_record")
+    route = validate_design_route(raw_route)["design_routing_record"]
+    if route.get("overall_effort") != "heavy":
+        raise ValueError("design heavy evidence publisher requires a heavy routing record")
+
+    sources = _current_attempt_sources()
+    source_summary = "、".join(str(item["title"]) for item in sources) or "本轮未使用外部资料"
+    payload = value if isinstance(value, dict) else {}
+    submitted_decisions: dict[str, dict[str, Any]] = {}
+    submission_warnings: list[str] = []
+    raw_decisions = payload.get("decisions")
+    for raw in raw_decisions if isinstance(raw_decisions, list) else []:
+        if not isinstance(raw, dict):
+            submission_warnings.append("忽略了非对象形式的决定记录")
+            continue
+        decision_id = _bounded_evidence_text(raw.get("decision_id"), limit=80)
+        if not decision_id or decision_id in submitted_decisions:
+            submission_warnings.append("忽略了缺少 ID 或重复的决定记录")
+            continue
+        submitted_decisions[decision_id] = raw
+
+    allowed_tool_states = {"succeeded", "partial", "failed", "unavailable", "not_used"}
+    raw_tool_statuses = payload.get("tool_statuses")
+    raw_tool_statuses = raw_tool_statuses if isinstance(raw_tool_statuses, dict) else {}
+    tool_statuses: dict[str, tuple[str, str]] = {}
+    for tool in ("web_search", "url_fetch", "kb"):
+        raw_status = raw_tool_statuses.get(tool)
+        if isinstance(raw_status, dict):
+            status = _bounded_evidence_text(raw_status.get("status"), limit=40).lower()
+            note = _bounded_evidence_text(raw_status.get("note"), limit=240)
+        else:
+            status = _bounded_evidence_text(raw_status, limit=40).lower()
+            note = ""
+        if status not in allowed_tool_states:
+            status = "not_used"
+        tool_statuses[tool] = (status, note)
+
+    requested_retrieval_status = _bounded_evidence_text(
+        payload.get("retrieval_status"), limit=40,
+    ).lower()
+    if requested_retrieval_status not in {"completed", "limited", "unavailable"}:
+        requested_retrieval_status = "limited"
+
+    decisions = route.get("decisions") or []
+    decision_rows: list[dict[str, Any]] = []
+    matched_source_ids: set[str] = set()
+    used_source_ids: set[str] = set()
+    rejected_refs: list[str] = []
+    for decision in decisions:
+        decision_id = str(decision.get("decision_id") or "未编号")
+        submitted = submitted_decisions.get(decision_id) or {}
+        bound_sources, rejected = _resolve_submitted_sources(
+            submitted.get("source_refs"), sources,
+        )
+        rejected_refs.extend(rejected)
+        finding = _bounded_evidence_text(submitted.get("finding"))
+        matched_source_ids.update(
+            str(source["source_id"]) for source in bound_sources
+        )
+        if finding:
+            used_source_ids.update(str(source["source_id"]) for source in bound_sources)
+        counterevidence = _bounded_evidence_text(submitted.get("counterevidence"))
+        lists = {
+            key: [text for item in submitted.get(key, [])
+                  if (text := _bounded_evidence_text(item, limit=300))][:8]
+            if isinstance(submitted.get(key), list) else []
+            for key in ("conditions", "remaining_gaps")
+        }
+        decision_rows.append({
+            "route": decision,
+            "finding": finding,
+            "counterevidence": counterevidence,
+            **lists,
+            "bound_sources": bound_sources,
+            "evidence_ceiling": "E1" if bound_sources and finding else "E0",
+        })
+
+    routed_ids = {
+        str(decision.get("decision_id") or "未编号") for decision in decisions
+    }
+    missing_submissions = sorted(routed_ids - set(submitted_decisions))
+    unknown_submissions = sorted(set(submitted_decisions) - routed_ids)
+    if missing_submissions:
+        submission_warnings.append(
+            "以下路由决定没有执行者记录，已按未知补齐：" + "、".join(missing_submissions)
+        )
+    if unknown_submissions:
+        submission_warnings.append(
+            "忽略了不属于已批准路由的决定：" + "、".join(unknown_submissions)
+        )
+
+    tool_report_has_result = any(
+        status in {"succeeded", "partial"} for status, _note in tool_statuses.values()
+    )
+    mechanical_coverage = bool(decision_rows) and all(
+        row["bound_sources"] and row["finding"] and row["counterevidence"]
+        and row["conditions"]
+        for row in decision_rows
+    )
+    retrieval_status = (
+        "unavailable"
+        if requested_retrieval_status == "unavailable" and not sources
+        else "limited"
+    )
+    if requested_retrieval_status == "completed":
+        downgrade_reasons = [message for failed, message in (
+            (not sources, "运行时没有登记可用来源"),
+            (not tool_report_has_result, "没有工具被报告为成功或部分成功"),
+            (missing_submissions, "存在漏交决定"),
+            (rejected_refs, "存在被拒绝的来源定位符"),
+            (not mechanical_coverage, "逐决定来源、发现、反方或差异条件覆盖不完整"),
+            (True, "领域最低要求和来源语义绑定仍待人审"),
+        ) if failed]
+        submission_warnings.append(
+            "执行者报告 completed，但" + "；".join(downgrade_reasons)
+            + "，受控状态保持 limited"
+        )
+    elif requested_retrieval_status == "unavailable" and sources:
+        submission_warnings.append(
+            "执行者报告 unavailable，但运行时存在登记来源；受控状态记为 limited 并等待人审"
+        )
+
+    overall_ceiling = "E1" if used_source_ids else "E0"
+    conclusion = (
+        "> 已找到可参考的资料，但资料与具体产品决定之间仍需人工核对。下面的建议不会自动变成正式规则。"
+        if used_source_ids else
+        "> 本轮未使用外部资料。下面列出的是需要补充信息和确认的事项，不会自动变成正式规则。"
+    )
+    lines = [
+        "# 产品方案：调研与决策依据",
+        "",
+        "## 先看结论",
+        "",
+        conclusion,
+        "",
+        "## 本次参考资料",
+        "",
+        f"- 资料：{source_summary}",
+        "- 使用说明：资料只能帮助判断，是否采用仍由负责人结合当前产品情况确认。",
+        "",
+        "<details>",
+        "<summary>查看本次资料检查记录</summary>",
+        "",
+    ]
+    status_labels = {
+        "succeeded": "成功", "partial": "部分成功", "failed": "失败",
+        "unavailable": "不可用", "not_used": "未使用/未报告",
+    }
+    for tool, (status, note) in tool_statuses.items():
+        suffix = f"；{note}" if note else ""
+        tool_labels = {"web_search": "公开资料检索", "url_fetch": "资料页面读取", "kb": "项目知识库"}
+        lines.append(f"- {tool_labels[tool]}：{status_labels[status]}{suffix}")
+    if submission_warnings or rejected_refs:
+        lines.extend(["", "### 需要留意的检查结果"])
+        lines.extend(f"- {warning}" for warning in submission_warnings)
+        if rejected_refs:
+            lines.append(
+                "- 拒绝未在本次运行来源登记表中出现的定位符："
+                + "、".join(dict.fromkeys(rejected_refs))
+            )
+
+    lines.extend(["", f"- 资料检查结果：{'有资料可供核对' if used_source_ids else '本轮没有可用的外部资料'}", "", "</details>"])
+    lines.extend(["", "## 需要确认的决定"])
+    for row in decision_rows:
+        decision = row["route"]
+        decision_id = str(decision.get("decision_id") or "未编号")
+        question = str(decision.get("decision_question") or "未提供决定问题")
+        domain = str(decision.get("primary_domain") or "未知领域")
+        gates = [
+            gate for gate in (decision.get("hard_gates") or [])
+            if gate in DESIGN_HARD_GATE_LABELS
+        ]
+        gate_text = "、".join(
+            f"{gate}（{DESIGN_HARD_GATE_LABELS[gate]}）" for gate in gates
+        ) or "无"
+        owner = "产品负责人、数据/安全责任人及权限责任人" if gates else "产品负责人"
+        gap_focus = DESIGN_DOMAIN_EVIDENCE_GAPS.get(
+            domain,
+            "现状事实、触发条件、作用范围、失败恢复和责任边界",
+        )
+        gate_gap = (
+            "；并缺少对"
+            + "、".join(DESIGN_HARD_GATE_LABELS[gate] for gate in gates)
+            + "风险的责任人、人工复核及回滚证据"
+            if gates else ""
+        )
+        source_names = "、".join(
+            str(source["title"]) for source in row["bound_sources"]
+        ) or "本轮没有可用资料"
+        fields = [
+            ("相关方面", DESIGN_DOMAINS.get(domain, "产品整体")),
+            ("需要重点把关的风险", gate_text), ("可参考资料", source_names),
+        ]
+        for label, value, fallback in (
+            ("当前判断", row["finding"], "信息不足，暂不做决定。"),
+            ("可能的不同情况", row["counterevidence"], "尚未取得反例，不能据此认为没有例外。"),
+            ("适用条件", "；".join(row["conditions"]), "需补充产品形态、角色、数据敏感度、权限模型和失败损失后再判断。"),
+        ):
+            fields.append((label, (value or fallback) + ("（仍需验证）" if value and not row["bound_sources"] else "")))
+        fields.extend([
+            ("还缺少", f"可核对的{gap_focus}信息、外部对照和反例{gate_gap}。"),
+            ("其他待补充", "；".join(row["remaining_gaps"]) or "暂无补充，但仍需由负责人复核。"),
+            ("建议确认人", owner),
+            ("确认内容", "允许做什么、何时触发、影响范围、谁负责，以及失败后如何恢复。"),
+            ("确认前不会启用", "自动执行、后台自动写入、跨身份或跨租户共享，以及不可逆默认值。"),
+        ])
+        lines.extend(["", f"### {question}", "", *(f"- {label}：{value}" for label, value in fields)])
+
+    active_heavy_domains = list(dict.fromkeys([
+        domain
+        for row in decision_rows
+        if row["route"].get("effort") == "heavy"
+        for domain in [
+            str(row["route"].get("primary_domain") or ""),
+            *[str(item) for item in (row["route"].get("linked_domains") or [])],
+        ]
+        if domain in DESIGN_DOMAINS
+    ] + [
+        str(domain) for domain in (route.get("linked_domains") or [])
+        if str(domain) in DESIGN_DOMAINS
+    ]))
+    lines.extend(["", "## 进入正式方案前还要补齐", ""])
+    for domain in active_heavy_domains:
+        lines.append(f"### {DESIGN_DOMAINS.get(domain, domain)}")
+        for requirement in DESIGN_DOMAIN_HEAVY_REQUIREMENTS.get(domain, []):
+            lines.append(f"- [ ] {requirement}")
+        lines.append("- 当前状态：以上内容尚未确认，确认前不会写入正式方案。")
+
+    active_gates = sorted({
+        gate
+        for decision in decisions
+        for gate in (decision.get("hard_gates") or [])
+        if gate in DESIGN_HARD_GATE_LABELS
+    })
+    lines.extend(["", "## 上线前需要确认的风险", ""])
+    for gate, label in sorted(DESIGN_HARD_GATE_LABELS.items()):
+        affected = any(gate in (decision.get("hard_gates") or []) for decision in decisions)
+        note = ("需要确认；确认时要指定负责人，并保留撤销或恢复方案。" if affected else
+                "当前信息未显示有此风险；如果后续出现相关情况，需要新增安全确认。")
+        lines.append(f"- {label}：{note}")
+
+    lines.extend([
+        "",
+        "## 分歧、反例与适用条件",
+        "",
+        "- 每个事项已分别列出可能的不同情况；没有记录不代表没有例外。",
+        "- 更新判断的条件：补充可核对的资料、检查相反案例，并由负责人确认。",
+        "",
+        "## 下一步确认清单",
+        "",
+        "- 是否先按草稿继续讨论；草稿不会作为上线或默认行为依据。",
+        "- 是否补充当前产品事实、真实界面、实际流程、权限规则和可核对的外部资料。",
+        "- 出现隐私、身份、权限、后台自动写入、跨租户或不可逆风险时，是否已经指定负责人和恢复方案。",
+    ])
+    if sources:
+        lines.extend(["", "## 参考资料明细", ""])
+        for source in sources:
+            label = str(source['title'])
+            if source["url"]:
+                label += f" · {source['url']}"
+            binding = (
+                "已关联到上面的待确认事项，仍需负责人核对"
+                if source["source_id"] in matched_source_ids else "暂未关联到具体事项"
+            )
+            lines.append(f"- {label} · {binding}")
+
+    packet = "\n".join(lines).strip() + "\n"
+    _save_artifact(
+        key="design_heavy_evidence",
+        value=packet,
+        content_type="text",
+        source_tool="publish_design_heavy_evidence",
+        internal_publish=True,
+    )
+    return {
+        "status": "published",
+        "evidence_ceiling": overall_ceiling,
+        "decision_count": len(decisions),
+        "hard_gates": active_gates,
+        "registered_source_count": len(sources),
+        "bound_source_count": len(matched_source_ids),
+        "e1_source_count": len(used_source_ids),
+        "rejected_source_ref_count": len(rejected_refs),
+        "retrieval_status": retrieval_status,
+        "message": "调研与待确认事项已整理，请等待负责人确认。",
+        "_agent_control": {
+            "stop": True,
+            "reason": "workflow_publisher_completed",
+            "final_text": "调研与待确认事项已整理，等待确认。",
+        },
+    }
+
+
+def publish_design_heavy_unavailable(
+    value: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Publish the deterministic E0 gap packet with no arguments or value={}.
+
+    Non-empty value is rejected; this fallback cannot introduce unverified findings."""
+
+    if value not in (None, {}):
+        raise ValueError("value must be omitted or an empty object")
+
+    return publish_design_heavy_evidence({"retrieval_status": "unavailable"})
 
 
 def _parse_stage_chain(raw: str) -> list[str]:
@@ -1266,6 +2993,47 @@ def _parse_stage_chain(raw: str) -> list[str]:
     return stages
 
 
+def validate_design_escalation(value: dict[str, Any]) -> dict[str, Any]:
+    """Upgrade scoped design decisions in-place without adding another Router."""
+    if not isinstance(value, dict):
+        raise ValueError("design escalation must be an object")
+    remote = getattr(require_context(), "params", {}).get("remote_inputs") or {}
+    _assert_current_stage("design", remote)
+    original = _mapping(remote.get("design_routing_record"))
+    if not original:
+        raise ValueError("design escalation requires the bound design_routing_record")
+    baseline = validate_design_route(original)["design_routing_record"]
+    trigger = value.get("trigger")
+    if trigger not in DESIGN_ESCALATION_TRIGGERS:
+        raise ValueError("escalation needs a registered trigger")
+    if not value.get("reason") or not value.get("evidence"):
+        raise ValueError("escalation requires reason and locatable evidence")
+    updates = value.get("decisions") or []
+    if not isinstance(updates, list) or not updates:
+        raise ValueError("escalation must identify affected decisions")
+    decisions = {item["decision_id"]: copy.deepcopy(item) for item in baseline["decisions"]}
+    for change in updates:
+        if not isinstance(change, dict) or change.get("decision_id") not in decisions:
+            raise ValueError("escalation cannot create or change decision scope")
+        item = decisions[change["decision_id"]]
+        if change.get("effort", "heavy") != "heavy":
+            raise ValueError("escalation must be monotonic to heavy")
+        for key in ("primary_domain", "linked_domains", "decision_question"):
+            if key in change and change[key] != item.get(key):
+                raise ValueError("escalation cannot change approved decision scope")
+        item["effort"] = "heavy"
+        item["hard_gates"] = sorted(set(item.get("hard_gates") or []) | set(change.get("hard_gates") or []))
+        item["effort_reasons"] = [*item.get("effort_reasons", []), str(value["reason"])]
+    baseline["decisions"] = list(decisions.values())
+    baseline["overall_effort"] = "heavy"
+    effective = validate_design_route(baseline)["design_routing_record"]
+    return {"design_escalation": {
+        "trigger": trigger, "reason": value["reason"], "evidence": value["evidence"],
+        "effective_route": effective, "scope_unchanged": True,
+        "risk_confirmation_required": any(item["hard_gates"] for item in effective["decisions"]),
+    }}
+
+
 def normalize_product_parameters(
     product_goal: str,
     stage_chain: str,
@@ -1273,58 +3041,35 @@ def normalize_product_parameters(
     word_target: str,
     reference_sample_choice: str,
 ) -> dict[str, Any]:
-    """Normalize mandatory chat preflight answers into deterministic runtime gates."""
+    """Keep upstream preflight calls compatible; new packages authorize one stage."""
 
     goal = str(product_goal or "").strip()
     if not goal:
         raise ValueError("product_goal is required before starting the Workflow")
     stages = _parse_stage_chain(stage_chain)
-    plan_result = validate_product_execution_plan({"stage_chain": stages})
+    modern = _publication_enabled()
+    if modern and len(stages) != 1:
+        raise ValueError(
+            "stage_chain must contain exactly one stage; multi-stage plans are routed "
+            "one stage per Workflow session"
+        )
+    plan_result = validate_product_execution_plan({
+        "selected_stage": stages[0],
+        "stage_chain": [],
+    } if modern else {"stage_chain": stages})
     if not plan_result["valid"]:
         raise ValueError("; ".join(plan_result["errors"]))
-
-    depth_raw = str(execution_depth or "").strip().lower()
-    depth_aliases = {
-        "light": "light", "轻量": "light", "轻量模式": "light", "精简": "light",
-        "复用现有": "light",
-        "minimum-fill": "minimum-fill", "最小补齐": "minimum-fill",
-        "最小补齐模式": "minimum-fill", "补齐": "minimum-fill",
-        "full": "full", "完整": "full", "完整模式": "full", "完整执行": "full",
-    }
-    depth = depth_aliases.get(depth_raw)
-    if not depth:
-        raise ValueError("execution_depth must be light, minimum-fill, or full")
-
+    depth = _normalize_execution_depth(execution_depth)
     has_text_stage = bool(set(stages) & TEXT_STAGES)
-    target_text = str(word_target or "").replace(",", "").strip().lower()
-    target: int | None = None
-    if has_text_stage:
-        match = re.search(r"\d+", target_text)
-        if not match:
-            raise ValueError("word_target is required when the plan contains a text stage")
-        target = int(match.group())
-        if target < 300:
-            raise ValueError("word_target must be at least 300 Chinese characters")
-    elif target_text not in {"", "not-applicable", "n/a", "不适用"}:
-        match = re.search(r"\d+", target_text)
-        target = int(match.group()) if match else None
-
-    sample_raw = str(reference_sample_choice or "").strip().lower()
-    sample_aliases = {
-        "provided": "provided", "已提供": "provided", "有样例": "provided",
-        "none-confirmed": "none-confirmed", "无样例": "none-confirmed",
-        "默认结构": "none-confirmed", "使用默认结构": "none-confirmed",
-        "不使用参考样例": "none-confirmed", "不提供参考样例": "none-confirmed",
-        "不使用样例": "none-confirmed",
-        "not-required": "not-required", "不需要": "not-required", "不适用": "not-required",
-    }
-    sample_status = sample_aliases.get(sample_raw)
-    if has_text_stage and sample_status not in {"provided", "none-confirmed"}:
-        raise ValueError(
-            "reference_sample_choice must be provided or none-confirmed for text stages"
-        )
-    if not has_text_stage:
-        sample_status = sample_status or "not-required"
+    if not modern and has_text_stage:
+        if not str(word_target or "").strip():
+            raise ValueError("word_target is required for text stages")
+        if not str(reference_sample_choice or "").strip():
+            raise ValueError("reference_sample_choice is required for text stages")
+    target = _normalize_word_target(word_target, text_stage=has_text_stage)
+    sample_status = _normalize_reference_sample(
+        reference_sample_choice, text_stage=has_text_stage,
+    )
 
     execution_plan = dict(plan_result["execution_plan"])
     execution_plan.update({
@@ -1335,53 +3080,160 @@ def normalize_product_parameters(
     })
     return {
         "execution_plan": execution_plan,
-        "skip_flags": plan_result["skip_flags"],
-        **plan_result["skip_flags"],
+        **({"skip_flags": plan_result["skip_flags"], **plan_result["skip_flags"]} if not modern else {}),
     }
 
 
 def load_product_skill_contract(
-    stage_id: str,
+    stage_id: str = "",
+    reference_paths: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Load one compact packaged router or stage contract without calling a model."""
+    """Load one compact packaged router or stage contract without calling a model.
 
+    Args:
+        stage_id: Parent Router or canonical stage id; omitted uses the bound execution plan.
+        reference_paths: Optional exact ``references/*.md`` resources selected from a prior
+            call's ``available_resources``. Absolute paths, Workflow input/output paths and
+            Writer-returned artifact paths are ignored and reported; traversal is rejected.
+            Omit this argument on the first design-stage call because bound Router domains are
+            loaded automatically.
+    """
+
+    if not stage_id:
+        bound = (getattr(require_context(), "params", {}) or {}).get("remote_inputs") or {}
+        stage_id = _mapping(bound.get("execution_plan")).get("selected_stage", "")
     raw_stage = str(stage_id or "").strip().lower().replace("_", "-")
     normalized = next((
         key for key, aliases in STAGE_ALIASES.items() if raw_stage in aliases
     ), raw_stage)
     if normalized not in {"router", *STAGE_SKILLS}:
         raise ValueError(f"Unsupported stage_id: {stage_id!r}")
+    if normalized != "router":
+        current_context = require_context()
+        bound = getattr(current_context, "params", {}).get("remote_inputs") or {}
+        _assert_current_stage(normalized, bound)
 
     resources = _resource_files()
+    available_resources: list[str] = []
+    ignored_reference_paths: list[str] = []
+    requested_paths = (
+        [reference_paths]
+        if isinstance(reference_paths, str)
+        else (reference_paths or [])
+    )
+    normalized_requested_paths: list[str] = []
+    for requested in requested_paths:
+        relative = str(requested).strip().replace("\\", "/")
+        if ".." in Path(relative).parts:
+            raise ValueError("reference_paths must stay inside the selected child Skill")
+        normalized_requested_paths.append(relative)
     skill_name = "product-solution-delivery"
     if normalized == "router":
         paths = ["SKILL.md", *ROUTER_REFERENCES]
+        ignored_reference_paths.extend(normalized_requested_paths)
     else:
         skill_name = STAGE_SKILLS[normalized]
         child_prefix = f"children/{skill_name}"
-        paths = [f"{child_prefix}/SKILL.md"]
-        references = sorted(
-            path
-            for path in resources
-            if path.startswith(f"{child_prefix}/references/") and path.endswith(".md")
+        available_resources = sorted(
+            path for path in resources if path.startswith(f"{child_prefix}/")
         )
-        for path in references:
-            relative_parts = Path(path).parts
-            if "source-snapshots" in relative_parts:
+        allowed_reference_resources = {
+            path for path in available_resources
+            if path.startswith(f"{child_prefix}/references/") and path.endswith(".md")
+        }
+        paths = [
+            f"{child_prefix}/SKILL.md",
+            "references/rich-text-presentation.md",
+        ]
+        # The design Skill deliberately loads domain methods only after its second
+        # Router selects relevant decisions. Other children have one mandatory contract.
+        mandatory = {
+            "direction": ["direction-brief.md"],
+            "competitive": ["artifact-contract.md", "research-and-evidence.md", "visualization-rules.md"],
+            "design": [
+                "human-in-the-loop.md", "multi-source-research.md",
+                "boundary-and-routing.md", "evidence-and-effort.md",
+            ],
+            "prd": ["prd-contract.md"],
+            "prototype": ["prototype-contract.md"],
+            "review": ["review-contract.md"],
+            "handoff": ["handoff-contract.md"],
+        }
+        for name in mandatory[normalized]:
+            path = f"{child_prefix}/references/{name}"
+            if path in resources:
+                paths.append(path)
+        if normalized == "design":
+            route = _bound_artifact_payload(bound.get("design_routing_record"))
+            if isinstance(route, dict):
+                domains = set(route.get("primary_domains") or []) | set(route.get("linked_domains") or [])
+                for decision in route.get("decisions") or []:
+                    if isinstance(decision, dict):
+                        domains.add(decision.get("primary_domain"))
+                        domains.update(decision.get("linked_domains") or [])
+                for domain, names in DESIGN_DOMAIN_REFERENCES.items():
+                    if domain in domains:
+                        paths.extend(f"{child_prefix}/references/{name}" for name in names)
+        for relative in normalized_requested_paths:
+            if Path(relative).is_absolute() or re.match(r"^[A-Za-z]:/", relative):
+                ignored_reference_paths.append(relative)
+                continue
+            path = (
+                relative
+                if relative.startswith(child_prefix + "/")
+                else f"{child_prefix}/{relative}"
+            )
+            if path not in allowed_reference_resources:
+                ignored_reference_paths.append(relative)
                 continue
             paths.append(path)
 
-    unique_paths: list[str] = []
-    seen: set[str] = set()
-    for path in paths:
-        if path not in seen:
-            seen.add(path)
-            unique_paths.append(path)
+    unique_paths = list(dict.fromkeys(paths))
 
     sections = []
-    for path in unique_paths:
-        sections.append(f"\n\n--- BEGIN {path} ---\n{_safe_read(path)}\n--- END {path} ---")
+    if normalized == "router":
+        sections.append(ROUTER_RUNTIME_CONTRACT)
+    else:
+        for path in unique_paths:
+            sections.append(f"\n\n--- BEGIN {path} ---\n{_safe_read(path)}\n--- END {path} ---")
 
+    trace = {
+        "package_release": PACKAGE_RELEASE,
+        "host_profile": "lazymind",
+        "parent_skill": "product-solution-delivery",
+        "selected_stage": normalized if normalized != "router" else None,
+        "selected_child_skill": skill_name if normalized != "router" else None,
+        "selected_child_loaded": normalized != "router",
+        "loaded_resources": unique_paths,
+        "ignored_reference_paths": ignored_reference_paths,
+        "contract_sha256": _digest(unique_paths),
+        "capabilities": {"resource_read": True, "child_invoke": False},
+        "capability_evidence": {"resource_read": "embedded bundle decoded and resources read"},
+    }
+    try:
+        context = require_context()
+        if isinstance(getattr(context, "params", None), dict):
+            context.params.setdefault("product_skill_loads", {})[normalized] = trace
+    except RuntimeError:
+        pass
+    adapter_override = (
+        "\n\n--- BEGIN LAZYMIND HOST ADAPTER OVERRIDES ---\n"
+        "These runtime rules are authoritative where the portable parent contract differs:\n"
+        "- The user has authorized one shared project in one window and the default artifact "
+        "structure when no reference sample is bound. Do not ask the separate reference-sample "
+        "question and do not enter awaiting-reference-sample. Record none-confirmed instead.\n"
+        "- A Router only selects scope and prepares bound context. It never performs external "
+        "retrieval; evidence work belongs to the selected business-stage evidence step.\n"
+        "- Host execution limits for rounds, deadlines, repeated calls and per-tool counts are "
+        "hard ceilings and cannot be relaxed by contract prose.\n"
+        "--- END LAZYMIND HOST ADAPTER OVERRIDES ---"
+    )
+    warning = (
+        "Ignored reference_paths that were not exact packaged references/*.md entries in "
+        f"available_resources: {ignored_reference_paths}"
+        if ignored_reference_paths
+        else ""
+    )
     return {
         "package_release": PACKAGE_RELEASE,
         "stage_id": normalized,
@@ -1392,29 +3244,69 @@ def load_product_skill_contract(
             if normalized != "router"
             else "embedded://product-solution-delivery"
         ),
-        "contract_text": "".join(sections).lstrip(),
+        "contract_text": "".join(sections).lstrip() + adapter_override,
+        "runtime_trace": trace,
+        "available_resources": available_resources,
+        "ignored_reference_paths": ignored_reference_paths,
+        "warning": warning,
     }
 
+
+SHARED_UPSTREAM_SLOTS = (
+    "upstream_direction", "upstream_competitive", "upstream_design",
+    "upstream_prd", "upstream_prototype", "upstream_review", "upstream_handoff",
+)
 
 PRODUCT_STAGE_INPUT_SLOTS = {
     "competitive": (
         "execution_plan", "research_evidence", "material_digest", "direction_document",
-    ),
-    "prototype": ("execution_plan", "material_digest", "design_document", "prd_document"),
+        "workspace_seed", "stage_approval",
+    ) + SHARED_UPSTREAM_SLOTS,
+    "prototype": (
+        "execution_plan", "material_digest", "design_document", "prd_document",
+        "workspace_seed", "stage_approval",
+    ) + SHARED_UPSTREAM_SLOTS,
     "delivery": (
-        "execution_plan", "direction_document", "competitive_analysis", "design_document",
-        "prd_document", "prototype", "review_document", "handoff_document",
-    ),
+        "routing_record", "execution_plan", "design_routing_record", "direction_document",
+        "competitive_analysis", "design_document", "prd_document", "prototype",
+        "review_document", "handoff_document",
+        "workspace_seed", "stage_approval",
+    ) + SHARED_UPSTREAM_SLOTS,
+}
+
+STAGE_ARTIFACTS = {
+    "direction": ("direction_document", "direction-brief", "产品方向说明"),
+    "competitive": ("competitive_analysis", "competitive-analysis", "竞品与生态位报告"),
+    "design": ("design_document", "product-design-spec", "产品方案"),
+    "prd": ("prd_document", "prd", "产品需求文档"),
+    "prototype": ("prototype", "prototype", "交互原型"),
+    "review": ("review_document", "review-report", "产品方案评审报告"),
+    "handoff": ("handoff_document", "development-handoff", "研发交付文档"),
+}
+STAGE_REPRESENTATIONS = {
+    stage: {"html": slot if stage not in TEXT_STAGES else slot + "_html",
+            "markdown": slot if stage in TEXT_STAGES else slot + "_markdown"}
+    for stage, (slot, _, _) in STAGE_ARTIFACTS.items()
+}
+ELIGIBLE_NEXT_STAGES = {
+    "direction": ["competitive", "design", "review"],
+    "competitive": ["design", "review"],
+    "design": ["prd", "prototype", "review", "handoff"],
+    "prd": ["prototype", "review", "handoff"],
+    "prototype": ["review", "handoff"],
+    "review": ["direction", "design", "prd", "prototype", "handoff"],
+    "handoff": ["review"],
 }
 
 
-def _bound_artifact_payload(value: Any) -> Any:
+def _bound_artifact_payload(
+    value: Any, *, keys: tuple[str, ...] = ("path", "value", "data", "text"),
+    empty: Any = "", bounded: bool = False,
+) -> Any:
     current = value
     for _ in range(5):
         if isinstance(current, dict):
-            nested = next((
-                current[key] for key in ("data", "text") if key in current
-            ), current)
+            nested = next((current[key] for key in keys if key in current), current)
             if nested is current:
                 return current
             current = nested
@@ -1423,14 +3315,17 @@ def _bound_artifact_payload(value: Any) -> Any:
             return current
         text = str(current or "").strip()
         if not text:
-            return ""
-        try:
-            candidate = Path(text).expanduser().resolve()
-            if candidate.is_file():
-                current = candidate.read_text(encoding="utf-8")
-                continue
-        except OSError:
-            pass
+            return empty
+        if not bounded or ("\n" not in text and len(text) < 4096):
+            try:
+                candidate = Path(text).expanduser()
+                if not bounded:
+                    candidate = candidate.resolve()
+                if candidate.is_file():
+                    current = candidate.read_text(encoding="utf-8")
+                    continue
+            except OSError:
+                pass
         try:
             current = json.loads(text)
         except json.JSONDecodeError:
@@ -1438,46 +3333,276 @@ def _bound_artifact_payload(value: Any) -> Any:
     return current
 
 
+
 def _bound_artifact_descriptor(value: Any) -> dict[str, Any]:
-    """Describe a delivery input without loading its potentially large document body."""
+    """Check real content, not merely a truthy path or a transport metadata envelope."""
     current = value
-    descriptor: dict[str, Any] = {"present": True}
+    descriptor: dict[str, Any] = {"present": False}
+    path_expected = False
     for _ in range(6):
         if isinstance(current, dict):
-            for key in ("filename", "content_type", "seq", "revision", "version"):
+            for key in (
+                "filename", "content_type", "seq", "revision", "version",
+                "revision_id", "artifact_id", "resource_id", "content_hash",
+            ):
                 if current.get(key) not in (None, ""):
                     descriptor[key] = current[key]
             if current.get("path"):
                 current = current["path"]
+                path_expected = True
                 continue
             nested = next((
                 current[key] for key in ("value", "data", "text") if key in current
             ), None)
             if nested is None:
                 descriptor.setdefault("content_type", "json")
-                descriptor["size_bytes"] = len(json.dumps(current, ensure_ascii=False))
+                descriptor["reason"] = "No readable document body in transport metadata"
                 return descriptor
             current = nested
             continue
         if isinstance(current, list):
             descriptor.setdefault("content_type", "list")
             descriptor["item_count"] = len(current)
+            entries = [_bound_artifact_descriptor(item) for item in current]
+            descriptor["present"] = any(item["present"] for item in entries)
+            descriptor["items"] = entries
             return descriptor
         text = str(current or "").strip()
+        if not text:
+            descriptor["reason"] = "Empty artifact content"
+            return descriptor
         try:
             candidate = Path(text).expanduser().resolve()
             if candidate.is_file():
+                content = candidate.read_bytes()
                 descriptor.setdefault("filename", candidate.name)
                 descriptor.setdefault("content_type", candidate.suffix.lstrip(".") or "file")
-                descriptor["size_bytes"] = candidate.stat().st_size
+                descriptor["size_bytes"] = len(content)
+                descriptor["present"] = bool(content.strip())
+                descriptor["content_sha256"] = hashlib.sha256(content).hexdigest()
+                if not descriptor["present"]:
+                    descriptor["reason"] = "Empty artifact file"
                 return descriptor
         except OSError:
             pass
+        if path_expected or text.startswith(("/", "~/", "file://")):
+            descriptor["reason"] = "Artifact file is missing or unreadable"
+            return descriptor
         descriptor.setdefault("content_type", "text")
-        descriptor["size_bytes"] = len(text.encode("utf-8"))
+        raw_text = str(current or "")
+        descriptor["size_bytes"] = len(raw_text.encode("utf-8"))
+        descriptor["present"] = True
+        descriptor["content_sha256"] = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
         return descriptor
     descriptor.setdefault("content_type", "unknown")
     return descriptor
+
+
+def _assert_current_stage(stage: str, remote: dict[str, Any]) -> None:
+    plan = _bound_artifact_payload(remote.get("execution_plan"))
+    if not isinstance(plan, dict) or not plan:
+        return  # Direct standalone callers do not have a Workflow execution plan.
+    selected = plan.get("selected_stage")
+    if not selected:
+        chain = plan.get("stage_chain") or []
+        selected = chain[0] if isinstance(chain, list) and len(chain) == 1 else None
+    if _normalize_stage(selected) != stage:
+        raise ValueError("stage_id must match execution_plan.selected_stage for this session")
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    result = _bound_artifact_payload(value)
+    return result if isinstance(result, dict) else {}
+
+
+def _upstream_value(remote: dict[str, Any], stage: str) -> Any:
+    slot = STAGE_ARTIFACTS[stage][0]
+    value = remote.get(slot)
+    return value if _bound_artifact_descriptor(value)["present"] else remote.get("upstream_" + stage)
+
+
+def _plain_assessment_value(value: Any) -> Any:
+    """Convert model-validated tool arguments into ordinary immutable containers."""
+    if isinstance(value, BaseModel):
+        # Do not let schema defaults become substantive decision fields. The runtime
+        # validator reapplies control defaults after converting the explicitly supplied data.
+        return value.model_dump(exclude_none=True, exclude_defaults=True)
+    if isinstance(value, list):
+        return [_plain_assessment_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _plain_assessment_value(item) for key, item in value.items()}
+    return value
+
+
+def _assessment_error(errors: list[str]) -> ValueError:
+    return ValueError(
+        "stage assessment has invalid fields; repair every listed field in one retry: "
+        + "; ".join(errors)
+    )
+
+
+def validate_product_stage_assessment(
+    value: ProductStageAssessmentInput,
+    stage: Literal[
+        "direction", "competitive", "design", "prd", "prototype", "review", "handoff"
+    ] | None = None,
+) -> dict[str, Any]:
+    """Normalize a stage-aware child assessment; put stage inside value.
+
+    Report all semantic errors together for one retry. Optional collections default safely;
+    non-handoff readiness is restricted. The redundant stage argument is for legacy callers."""
+    stage_hint = _normalize_stage(stage) if stage else ""
+    raw = _plain_assessment_value(value)
+    if not isinstance(raw, dict):
+        raise ValueError("stage assessment must be an object")
+    result = copy.deepcopy(raw)
+    errors: list[str] = []
+    notes: list[str] = []
+
+    stage = _normalize_stage(result.get("stage") or result.get("stage_id"))
+    if stage not in STAGE_SKILLS:
+        errors.append("stage: expected direction, competitive, design, prd, prototype, review, or handoff")
+    else:
+        if stage_hint and stage_hint != stage:
+            errors.append(
+                f"stage: redundant tool argument {stage_hint!r} must match value.stage {stage!r}"
+            )
+        context = require_context()
+        remote = getattr(context, "params", {}).get("remote_inputs") or {}
+        _assert_current_stage(stage, remote)
+        result["stage"] = stage
+
+    status = result.get("status", "draft")
+    if not isinstance(status, str) or status not in {"draft", "reviewable"}:
+        errors.append("status: expected draft or reviewable; acceptance is a separate user event")
+        status = "draft"
+    result["status"] = status
+
+    if result.get("execution_depth"):
+        try:
+            depth = _normalize_execution_depth(result["execution_depth"])
+            if depth == "auto":
+                errors.append("execution_depth: child must resolve auto to light, minimum-fill, or full")
+            else:
+                result["execution_depth"] = depth
+        except (TypeError, ValueError):
+            errors.append("execution_depth: expected light, minimum-fill, or full")
+
+    for key in ("decisions", "dependencies", "open_questions", "quality_notes"):
+        current = result.get(key, [])
+        if current is None:
+            current = []
+        if not isinstance(current, list):
+            errors.append(f"{key}: expected an array")
+            current = []
+        result[key] = current
+
+    for index, item in enumerate(result["dependencies"]):
+        if not isinstance(item, dict):
+            errors.append(f"dependencies[{index}]: expected an object")
+
+    normalized_decisions: list[dict[str, Any]] = []
+    for index, item in enumerate(result["decisions"], 1):
+        if not isinstance(item, dict):
+            errors.append(f"decisions[{index - 1}]: expected an object")
+            continue
+        decision = copy.deepcopy(item)
+        # Deferral is a server-recorded human action, never a child assessment claim.
+        decision.pop("deferred", None)
+        decision.pop("deferral_ref", None)
+        if not str(decision.get("decision_id") or "").strip():
+            decision["decision_id"] = f"{stage.upper() if stage else 'STAGE'}-DEC-{index:03d}"
+            notes.append(
+                f"Allocated stable decision_id {decision['decision_id']} for an unlabelled proposed decision."
+            )
+        decision_status = decision.get("status", "proposed")
+        if not isinstance(decision_status, str) or decision_status not in {
+            "proposed", "accepted", "reopened", "superseded",
+        }:
+            errors.append(
+                f"decisions[{index - 1}].status: expected proposed, accepted, reopened, or superseded"
+            )
+            decision_status = "proposed"
+        decision["status"] = decision_status
+        if decision_status == "accepted":
+            if not decision.get("accepted_by") or not decision.get("acceptance_ref"):
+                # Missing evidence cannot establish acceptance. Downgrading is safer and faster
+                # than asking the model to fabricate an approval reference in a retry.
+                decision["status"] = "proposed"
+                decision.pop("accepted_by", None)
+                decision.pop("acceptance_ref", None)
+                notes.append(
+                    f"Decision {decision['decision_id']} stayed proposed because no sourced acceptance event was bound."
+                )
+            else:
+                risk = decision.get("risk")
+                risky = bool(decision.get("hard_gates")) or (
+                    isinstance(risk, str) and risk in {"high", "irreversible"}
+                )
+                if risky and decision.get("accepted_by") == "delegated-ai":
+                    errors.append(
+                        f"decisions[{index - 1}]: high-risk or irreversible decisions cannot be accepted by delegated-ai"
+                    )
+        normalized_decisions.append(decision)
+    result["decisions"] = normalized_decisions
+
+    checks = result.get("checks") or {}
+    if not isinstance(checks, dict):
+        errors.append("checks: expected an object mapping check names to {status, evidence}")
+        checks = {}
+    normalized_checks: dict[str, dict[str, Any]] = {}
+    status_aliases = {
+        "pass": "passed", "success": "passed", "ok": "passed",
+        "fail": "failed", "error": "failed", "pending": "not-checked",
+        "unchecked": "not-checked", "not_checked": "not-checked", "not checked": "not-checked",
+    }
+    for name, check in checks.items():
+        if not isinstance(check, dict):
+            errors.append(f"checks.{name}: expected {{status, evidence}}")
+            continue
+        normalized = copy.deepcopy(check)
+        raw_check_status = normalized.get("status", "not-checked")
+        check_status = status_aliases.get(
+            str(raw_check_status or "not-checked").strip().lower(), raw_check_status or "not-checked",
+        )
+        if not isinstance(check_status, str) or check_status not in {
+            "passed", "failed", "not-checked",
+        }:
+            errors.append(f"checks.{name}.status: expected passed, failed, or not-checked")
+            continue
+        if check_status == "passed" and not str(normalized.get("evidence") or "").strip():
+            check_status = "not-checked"
+            notes.append(f"Check {name} stayed not-checked because it had no locatable evidence.")
+        normalized["status"] = check_status
+        normalized_checks[str(name)] = normalized
+    result["checks"] = normalized_checks
+
+    readiness = result.get("implementation_readiness", "not-assessed")
+    if isinstance(readiness, dict):
+        readiness = readiness.get("status") or readiness.get("value") or readiness.get("readiness")
+    readiness_aliases = {
+        "not_assessed": "not-assessed", "not assessed": "not-assessed",
+        "ready_with_open_items": "ready-with-open-items",
+    }
+    readiness = readiness_aliases.get(
+        str(readiness or "not-assessed").strip().lower(), readiness or "not-assessed",
+    )
+    if not isinstance(readiness, str) or readiness not in {
+        "not-assessed", "blocked", "ready-with-open-items", "ready",
+    }:
+        errors.append(
+            "implementation_readiness: expected not-assessed, blocked, ready-with-open-items, or ready"
+        )
+        readiness = "not-assessed"
+    if stage and stage != "handoff" and readiness not in {"not-assessed", "blocked"}:
+        errors.append("implementation_readiness: only the handoff child may report ready states")
+        readiness = "not-assessed"
+    result["implementation_readiness"] = readiness
+
+    result["quality_notes"].extend(note for note in notes if note not in result["quality_notes"])
+    if errors:
+        raise _assessment_error(errors)
+    return result
 
 
 def load_product_stage_inputs(stage_id: str) -> dict[str, Any]:
@@ -1494,10 +3619,14 @@ def load_product_stage_inputs(stage_id: str) -> dict[str, Any]:
     remote = (context.params or {}).get("remote_inputs") or {}
     if not isinstance(remote, dict):
         remote = {}
+    if normalized != "delivery":
+        _assert_current_stage(normalized, remote)
     materials = {
         slot: (
             _bound_artifact_descriptor(remote[slot])
-            if normalized == "delivery" and slot != "execution_plan"
+            if normalized == "delivery" and slot in {
+                artifact_slot for artifact_slot, _, _ in STAGE_ARTIFACTS.values()
+            }
             else _bound_artifact_payload(remote[slot])
         )
         for slot in PRODUCT_STAGE_INPUT_SLOTS[normalized]
@@ -1511,6 +3640,673 @@ def load_product_stage_inputs(stage_id: str) -> dict[str, Any]:
             slot for slot in PRODUCT_STAGE_INPUT_SLOTS[normalized] if slot not in materials
         ],
     }
+
+
+def _valid_approval(event: Any) -> bool:
+    return bool(
+        isinstance(event, dict)
+        and all(event.get(key) for key in ("approval_id", "action", "stage", "source", "reference"))
+        and (event["source"] in {"user-interface", "user-message"} or (
+            event["source"] == "product-workflow-default"
+            and event["action"] == "auto-accept-decision"
+            and event.get("approved_by") == "product-workflow-default"
+        ))
+    )
+
+
+def _version_key(artifact: dict[str, Any]) -> tuple[int, int]:
+    match = re.fullmatch(r"(\d+)\.(\d+)", str(artifact.get("version") or ""))
+    if not match:
+        raise ValueError("workspace artifact version must use MAJOR.MINOR")
+    return int(match[1]), int(match[2])
+
+
+def _stable_digest(value: Any) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def _decision_content(decision: dict[str, Any]) -> dict[str, Any]:
+    """Compare a decision without confusing acceptance metadata with its substance."""
+    return {key: value for key, value in decision.items() if key not in {
+        "status", "accepted_by", "acceptance_ref", "reopens", "pending_revisions", "deferred", "deferral_ref",
+    }}
+
+
+def _decision_approval_matches(
+    event: dict[str, Any], decision: dict[str, Any], *, stage: str, workspace_id: str,
+    descriptor: dict[str, Any], artifacts: list[dict[str, Any]],
+) -> bool:
+    """Match the exact server-snapshotted decision and its reviewed artifact baseline."""
+    snapshot = event.get("decision_snapshot_json")
+    digest = event.get("decision_hash") or event.get("expected_decision_hash")
+    if not isinstance(snapshot, str) or digest != "sha256:" + hashlib.sha256(snapshot.encode()).hexdigest():
+        return False
+    try:
+        if json.loads(snapshot) != _decision_content(decision):
+            return False
+    except (TypeError, ValueError):
+        return False
+    if event.get("stage") != stage or event.get("workspace_id") != workspace_id:
+        return False
+    if not descriptor.get("present") or event.get("content_sha256") != descriptor.get("content_sha256"):
+        return False
+    return any(
+        artifact.get("artifact_id") == event.get("artifact_id")
+        and artifact.get("artifact_type") == STAGE_ARTIFACTS[stage][1]
+        and artifact.get("version") == event.get("version")
+        and artifact.get("host_artifact", {}).get("content_sha256") == event.get("content_sha256")
+        for artifact in artifacts
+    )
+
+
+def _hard_stop_questions(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    questions: dict[str, dict[str, Any]] = {}
+    for decision in decisions:
+        if not isinstance(decision, dict):
+            continue
+        candidates = [decision, *decision.get("pending_revisions", [])]
+        for candidate in candidates:
+            if not isinstance(candidate, dict) or candidate.get("status") in {"accepted", "superseded"}:
+                continue
+            if not candidate.get("hard_gates") and candidate.get("risk") not in {"high", "irreversible"}:
+                continue
+            decision_id = str(candidate.get("decision_id") or decision.get("decision_id") or "unknown")
+            label = str(candidate.get("decision_question") or candidate.get("question") or
+                        candidate.get("value") or decision_id)[:200]
+            questions[decision_id] = {
+                "question_id": "HITL-" + decision_id, "decision_id": decision_id,
+                "question": f"高风险决定“{label}”尚未得到明确确认；可先保留草稿或暂缓，不能作为实施就绪的已确认基线。",
+                "blocking": True, "confirmation": "hard-stop",
+            }
+    return list(questions.values())
+
+
+def _merge_workspace_decisions(
+    previous: list[dict[str, Any]], current: list[dict[str, Any]], history: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Keep one baseline per decision ID; proposals cannot replace accepted decisions."""
+    merged: dict[str, dict[str, Any]] = {}
+    history = copy.deepcopy(history)
+    for item in [*previous, *current]:
+        if not isinstance(item, dict) or not item.get("decision_id"):
+            continue
+        item = copy.deepcopy(item)
+        key = item["decision_id"]
+        old = merged.get(key)
+        if old is None:
+            merged[key] = item
+        elif old == item:
+            continue
+        elif old.get("status") == "accepted" and item.get("status") != "accepted":
+            if _decision_content(old) != _decision_content(item):
+                proposals = old.setdefault("pending_revisions", [])
+                if item not in proposals:
+                    proposals.append(item)
+        else:
+            if old not in history:
+                history.append(copy.deepcopy(old))
+            merged[key] = item
+    return list(merged.values()), history
+
+
+def _assessment_record(
+    manifest: dict[str, Any], *, source: str, execution_depth: Any,
+) -> dict[str, Any]:
+    """Bind reported assessment results to real content, without claiming they ran."""
+    result = {
+        "source": source,
+        "content_sha256": manifest["host_artifact"].get("content_sha256"),
+        "dependencies_sha256": _stable_digest(manifest.get("dependencies", [])),
+        "status": "reviewable" if manifest["status"] == "accepted" else manifest["status"],
+        "execution_depth": execution_depth,
+        **{key: copy.deepcopy(manifest.get(key)) for key in (
+            "decisions", "open_questions", "quality_notes", "checks", "implementation_readiness",
+        )},
+    }
+    result["fingerprint"] = _stable_digest(result)
+    return result
+
+
+def _dependencies_for_stage(
+    stage: str, remote: dict[str, Any], workspace: dict[str, Any], assessment: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Bind selected upstream revisions; one alternative satisfies a required group."""
+    required_groups = {
+        "direction": [], "competitive": [("direction",)], "design": [("direction",)],
+        "prd": [("design",)], "prototype": [("design", "prd")],
+        "review": [tuple(key for key in STAGE_SKILLS if key != "review")],
+        "handoff": [("design",)],
+    }
+    dependencies: list[dict[str, Any]] = []
+    artifacts = workspace.get("artifacts") or []
+    bindings = workspace.get("host_artifact_bindings") or []
+    for group in required_groups[stage]:
+        resolved: list[dict[str, Any]] = []
+        for upstream in group:
+            slot, kind, _ = STAGE_ARTIFACTS[upstream]
+            descriptor = _bound_artifact_descriptor(_upstream_value(remote, upstream))
+            if not descriptor["present"]:
+                continue
+            binding = next((item for item in reversed(bindings) if isinstance(item, dict) and (
+                item.get("slot_id") == slot or item.get("material_id") == "upstream_" + upstream
+            )), {})
+            candidates = [item for item in artifacts if isinstance(item, dict) and item.get("artifact_type") == kind]
+            matched = next((item for item in reversed(candidates) if (
+                (binding.get("revision_id") and item.get("host_artifact", {}).get("revision_id") == binding["revision_id"])
+                or item.get("host_artifact", {}).get("content_sha256") == descriptor.get("content_sha256")
+            )), None)
+            state = "available"
+            if matched and matched.get("status") in {"needs-update", "superseded"}:
+                state = "outdated"
+            if stage == "handoff" and (not matched or matched.get("status") != "accepted"):
+                state = "conflict"
+            resolved.append({
+                "kind": "required", "artifact_type": kind,
+                "artifact_id": matched["artifact_id"] if matched else (
+                    "external-" + str(descriptor.get("content_sha256") or "unknown")[:24]
+                ),
+                "version": matched["version"] if matched else str(binding.get("revision") or descriptor.get("revision") or "unversioned"),
+                "status": state,
+                "source_slot": "upstream_" + upstream if remote.get("upstream_" + upstream) else slot,
+                "host_revision": binding,
+                "handling": "Use only this bound revision; request user baseline selection for conflicts.",
+            })
+        # An attached equivalent input is valid only after the child identifies the
+        # actual bound material and records what part supplies the necessary contract.
+        if not resolved:
+            for item in assessment.get("dependencies", []):
+                if not isinstance(item, dict) or not item.get("evidence"):
+                    continue
+                if item.get("artifact_type") not in {STAGE_ARTIFACTS[key][1] for key in group}:
+                    continue
+                source_slot = str(item.get("source_slot") or "")
+                source_value = remote.get(source_slot)
+                if source_slot == "product_goal":
+                    source_value = _mapping(remote.get("execution_plan")).get("product_goal")
+                source = _bound_artifact_descriptor(source_value)
+                if not source["present"] or source_slot in {"research_evidence", "material_digest"}:
+                    continue
+                resolved.append({
+                    "kind": "required", "artifact_type": item["artifact_type"],
+                    "artifact_id": "external-" + str(source.get("content_sha256") or source_slot)[:24],
+                    "version": str(item.get("version") or "unversioned"),
+                    "status": "available" if stage != "handoff" else "conflict",
+                    "source_slot": source_slot, "evidence": item["evidence"],
+                    "handling": "Equivalent input supplied by user; acceptance requires a separate sourced user event.",
+                })
+                break
+        if resolved:
+            dependencies.extend(resolved)
+        else:
+            dependencies.append({
+                "kind": "required", "artifact_type": "|".join(STAGE_ARTIFACTS[key][1] for key in group),
+                "artifact_id": None, "version": None, "status": "missing",
+                "handling": "补充所需材料、转入上游阶段，或保留明确标注缺口的草稿。",
+            })
+    # Additional selected upstream materials stay version-bound even when supplemental.
+    already = {item["source_slot"] for item in dependencies if item.get("source_slot")}
+    for upstream, (slot, kind, _) in STAGE_ARTIFACTS.items():
+        if upstream == stage or slot in already or "upstream_" + upstream in already:
+            continue
+        descriptor = _bound_artifact_descriptor(_upstream_value(remote, upstream))
+        if not descriptor["present"]:
+            continue
+        matched = next((item for item in reversed(artifacts) if isinstance(item, dict)
+                        and item.get("artifact_type") == kind
+                        and item.get("host_artifact", {}).get("content_sha256") == descriptor.get("content_sha256")), None)
+        dependencies.append({
+            "kind": "supplemental", "artifact_type": kind,
+            "artifact_id": matched["artifact_id"] if matched else "external-" + str(descriptor.get("content_sha256"))[:24],
+            "version": matched["version"] if matched else "unversioned",
+            "status": "outdated" if matched and matched.get("status") in {"needs-update", "superseded"} else "available",
+            "source_slot": slot, "handling": "Keep selected upstream content and its acceptance labels.",
+        })
+    return dependencies
+
+
+def build_product_handoff_state(assessment: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Build the internal Manifest/Workspace handoff for one completed stage."""
+
+    context = require_context()
+    remote = (context.params or {}).get("remote_inputs") or {}
+    if not isinstance(remote, dict):
+        remote = {}
+    routing = _bound_artifact_payload(remote.get("routing_record"))
+    plan = _bound_artifact_payload(remote.get("execution_plan"))
+    if not isinstance(routing, dict):
+        routing = {}
+    if not isinstance(plan, dict):
+        plan = {}
+    selected = _normalize_stage(plan.get("selected_stage") or routing.get("selected_stage"))
+    if selected not in STAGE_ARTIFACTS:
+        raise ValueError("A valid single selected_stage is required for finalization")
+
+    session_id = str((context.params or {}).get("session_id") or "temporary-session")
+    slot, artifact_type, title = STAGE_ARTIFACTS[selected]
+    descriptor = _bound_artifact_descriptor(remote.get(slot))
+    representations = {
+        kind: {"slot": representation_slot, "source_session_id": session_id,
+               **_bound_artifact_descriptor(remote.get(representation_slot))}
+        for kind, representation_slot in STAGE_REPRESENTATIONS[selected].items()
+    }
+    missing_representations = [
+        kind for kind, representation in representations.items()
+        if not representation["present"]
+    ]
+    present = descriptor["present"] and not missing_representations
+    raw_assessment = _mapping(remote.get(selected + "_assessment")) or assessment
+    assessed = validate_product_stage_assessment(raw_assessment or {
+        "stage": selected, "status": "draft",
+        "quality_notes": ["尚未收到当前原子 Skill 的质量评估，不因文件存在而推断可评审。"],
+    })
+    if assessed["stage"] != selected:
+        raise ValueError("assessment stage must match the selected stage")
+    workspace = copy.deepcopy(_mapping(remote.get("workspace_seed")))
+    if workspace and (workspace.get("visibility") != "agent-internal" or not workspace.get("workspace_id")):
+        raise ValueError("workspace_seed must be an internal Workspace with workspace_id")
+    workspace_id = workspace.get("workspace_id") or f"workspace-{uuid.uuid5(uuid.NAMESPACE_URL, session_id).hex}"
+    artifacts = workspace.setdefault("artifacts", [])
+    if not isinstance(artifacts, list):
+        raise ValueError("workspace artifacts must be an array")
+    approvals = [item for item in workspace.get("approvals", []) if _valid_approval(item)]
+    for event in [*workspace.get("approval_events", []), _mapping(remote.get("stage_approval"))]:
+        if _valid_approval(event) and not any(old["approval_id"] == event["approval_id"] for old in approvals):
+            approvals.append(event)
+    old_decisions, decision_history = _merge_workspace_decisions(
+        workspace.get("decisions") or [], [], workspace.get("decision_history") or [],
+    )
+    decisions = assessed["decisions"]
+    for index, decision in enumerate(decisions):
+        decision.setdefault("status", "proposed")
+        previous = next((old for old in old_decisions if old.get("decision_id") == decision["decision_id"]), None)
+        if previous:
+            # A downstream rewrite cannot erase a known hard-stop classification.
+            if previous.get("hard_gates"):
+                decision["hard_gates"] = list(dict.fromkeys([*previous["hard_gates"], *(decision.get("hard_gates") or [])]))
+            if previous.get("risk") in {"high", "irreversible"}:
+                decision["risk"] = previous["risk"]
+        unchanged_accepted = previous and previous.get("status") == "accepted" and all(
+            previous.get(key) == decision.get(key) for key in ("value", "accepted_by", "acceptance_ref")
+        ) and _decision_content(previous) == _decision_content(decision)
+        if previous and previous.get("status") == "accepted" and (
+            _decision_content(previous) == _decision_content(decision)
+        ) and decision.get("status") in {"proposed", "accepted"}:
+            # Reusing an existing accepted baseline needs no new acceptance event.
+            # The child cannot rewrite its accepted_by/reference while doing so.
+            decisions[index] = decision = copy.deepcopy(previous)
+            unchanged_accepted = True
+        evidence = None
+        if decision.get("status") == "accepted" and not unchanged_accepted:
+            evidence = next((event for event in approvals if event["reference"] == decision.get("acceptance_ref")
+                             and event["action"] in {"accept-decision", "decision-acceptance", "delegate-decision"}
+                             and event.get("decision_id") == decision["decision_id"]
+                             and _decision_approval_matches(event, decision, stage=selected,
+                                 workspace_id=workspace_id, descriptor=descriptor, artifacts=artifacts)), None)
+            if evidence and decision.get("accepted_by") == "delegated-ai":
+                if (evidence["action"] != "delegate-decision" or evidence.get("reversible") is not True
+                        or decision.get("hard_gates") or decision.get("risk") in {"high", "irreversible"}):
+                    evidence = None
+            elif evidence and evidence.get("approved_by") != decision.get("accepted_by"):
+                evidence = None
+            if not evidence:
+                decision["status"] = "proposed"
+                decision.pop("accepted_by", None)
+                decision.pop("acceptance_ref", None)
+                assessed["quality_notes"].append("A proposed decision was not promoted without a sourced user acceptance event.")
+        if previous and previous.get("status") == "accepted" and not unchanged_accepted and not evidence:
+            decision["status"] = "proposed"
+            decision["reopens"] = previous["decision_id"]
+    dependencies = _dependencies_for_stage(selected, remote, workspace, assessed)
+    missing = [item for item in dependencies if item["kind"] == "required" and item["status"] != "available"]
+    # Host-owned HITL gates are derived from the current decision baseline. A child
+    # may copy an older assessment, but that must not resurrect a resolved gate.
+    # All independently reported business blockers remain untouched.
+    open_questions = [copy.deepcopy(item) for item in assessed["open_questions"] if not (
+        isinstance(item, dict) and item.get("confirmation") == "hard-stop"
+        and isinstance(item.get("decision_id"), str) and bool(item["decision_id"])
+        and item.get("question_id") == "HITL-" + item["decision_id"]
+    )]
+    combined_decisions, _ = _merge_workspace_decisions(old_decisions, decisions, [])
+    if selected == "design":
+        design_route = _mapping(remote.get("design_escalation")).get("effective_route") or _mapping(remote.get("design_routing_record"))
+        # The child assessment must not hide a hard gate already found by Router 2.
+        for routed in design_route.get("decisions", []):
+            if not isinstance(routed, dict) or not routed.get("hard_gates"):
+                continue
+            existing = next((item for item in combined_decisions if item.get("decision_id") == routed.get("decision_id")), None)
+            if existing is None:
+                pending = {**copy.deepcopy(routed), "status": "proposed"}
+                combined_decisions.append(pending)
+                decisions.append(copy.deepcopy(pending))
+            else:
+                known_gates = set(existing.get("hard_gates") or [])
+                if existing.get("status") == "accepted" and not set(routed["hard_gates"]).issubset(known_gates):
+                    pending = {**_decision_content(existing), "status": "proposed", "reopens": existing["decision_id"],
+                               "hard_gates": sorted(known_gates | set(routed["hard_gates"]))}
+                    existing.setdefault("pending_revisions", []).append(pending)
+                    decisions = [item for item in decisions if item.get("decision_id") != existing["decision_id"]]
+                    decisions.append(pending)
+                else:
+                    existing["hard_gates"] = sorted(known_gates | set(routed["hard_gates"]))
+    open_questions.extend(_hard_stop_questions(combined_decisions))
+    if not present:
+        detail = "、".join(missing_representations) or "主产物"
+        open_questions.append({"question_id": "ARTIFACT-MISSING", "question": f"{title} 尚未形成完整的 HTML 与 Markdown 双格式产物（缺少：{detail}）。", "blocking": True})
+    for index, dependency in enumerate(missing, 1):
+        open_questions.append({
+            "question_id": f"DEP-{index:03d}", "blocking": True,
+            "question": f"必要输入 {dependency['artifact_type']} 当前为 {dependency['status']}。",
+        })
+    checks = assessed["checks"]
+    for check in checks.values():
+        # This describes who supplied the assertion, not whether a browser/tool
+        # actually executed it. A digest binds it to content but is not evidence.
+        check["evidence_source"] = "child-assessment"
+        claimed_digest = check.get("artifact_sha256")
+        if claimed_digest and claimed_digest != descriptor.get("content_sha256"):
+            check["reported_status"] = check["status"]
+            check["status"] = "not-checked"
+            check["binding_status"] = "mismatch"
+            open_questions.append({
+                "question_id": "CHECK-CONTENT-MISMATCH", "blocking": True,
+                "question": "核验依据绑定了其他产物内容，需要针对当前版本重新核验。",
+            })
+        else:
+            check["artifact_sha256"] = descriptor.get("content_sha256")
+            check["binding_status"] = "current-content"
+    if present and selected in {"prototype", "competitive"}:
+        body = _bound_artifact_payload(remote.get(slot))
+        errors = (_validate_prototype(str(body)) if selected == "prototype"
+                  else _validate_competitive_report(str(body)))
+        for index, error in enumerate(errors, 1):
+            open_questions.append({"question_id": f"HTML-{index:03d}", "question": error, "blocking": True})
+        checks["host_static_validation"] = {
+            "status": "failed" if errors else "passed",
+            "evidence": "; ".join(errors) if errors else "Embedded HTML structure validation passed; interactions were not executed.",
+            "evidence_source": "workflow-finalizer",
+            "validator": "_validate_" + ("prototype" if selected == "prototype" else "competitive_report"),
+            "artifact_sha256": descriptor.get("content_sha256"),
+            "binding_status": "current-content",
+        }
+    if selected == "prototype" and assessed["status"] == "reviewable":
+        for check in ("interaction_desktop", "interaction_mobile"):
+            if checks.get(check, {}).get("status") != "passed":
+                open_questions.append({"question_id": check, "question": "原型尚缺真实桌面或移动视口交互走查。", "blocking": True})
+    blocking = not present or bool(missing) or any(
+        isinstance(item, dict) and item.get("blocking") is True for item in open_questions
+    ) or any(item["status"] == "failed" for item in checks.values())
+    status = "draft" if blocking else assessed["status"]
+    readiness = "blocked" if blocking else assessed["implementation_readiness"]
+    if selected == "handoff" and readiness in {"ready", "ready-with-open-items"}:
+        required_checks = ("rules", "acceptance", "traceability", "risks", "resources")
+        verified = all(checks.get(key, {}).get("status") == "passed" for key in required_checks)
+        assigned = all(isinstance(item, dict) and item.get("owner") and item.get("handling") for item in open_questions)
+        if not verified:
+            readiness = "not-assessed"
+            assessed["quality_notes"].append("研发就绪门禁未全部记录可定位的核验依据。")
+        elif open_questions:
+            readiness = "ready-with-open-items" if assigned else "blocked"
+    previous_versions = [item for item in artifacts if item.get("artifact_type") == artifact_type]
+    previous = max(previous_versions, key=_version_key) if previous_versions else None
+    representation_digest = _stable_digest({
+        kind: value.get("content_sha256") for kind, value in representations.items()
+    })
+    identical = (
+        previous and present
+        and previous.get("host_artifact", {}).get("content_sha256") == descriptor.get("content_sha256")
+        and previous.get("representation_digest", representation_digest) == representation_digest
+        and previous.get("dependencies") == dependencies
+    )
+    version = previous["version"] if identical else (
+        f"{_version_key(previous)[0]}.{_version_key(previous)[1] + 1}" if previous else "1.0"
+    )
+    artifact_id = previous["artifact_id"] if identical else (
+        "artifact-" + uuid.uuid5(uuid.NAMESPACE_URL, ":".join((
+            workspace_id, selected, version, session_id, str(descriptor.get("content_sha256")),
+            representation_digest,
+            hashlib.sha256(json.dumps(dependencies, sort_keys=True).encode()).hexdigest(),
+        ))).hex
+    )
+    manifest = {
+        "schema_version": "1.1",
+        "stage": selected,
+        "visibility": "agent-internal",
+        "artifact_id": artifact_id,
+        "artifact_type": artifact_type,
+        "title": title,
+        "version": version,
+        "status": status,
+        "source_skill": STAGE_SKILLS[selected],
+        "workspace_id": workspace_id,
+        "supersedes": previous.get("supersedes") if identical else previous.get("artifact_id") if previous else None,
+        "decisions": decisions,
+        "dependencies": dependencies,
+        "open_questions": open_questions,
+        "quality_notes": [
+            "Registered the readable content digest; host revision is recorded only when supplied by the host.",
+            *assessed["quality_notes"],
+        ],
+        "checks": checks,
+        "implementation_readiness": readiness,
+        "eligible_next_stages": ELIGIBLE_NEXT_STAGES[selected],
+        "host_artifact": {"slot": slot, "source_session_id": session_id, **descriptor},
+        "representations": representations,
+        "representation_digest": representation_digest,
+    }
+    record = _assessment_record(
+        manifest, source="child-assessment" if raw_assessment else "missing-child-assessment",
+        execution_depth=assessed.get("execution_depth") or plan.get("execution_depth"),
+    )
+    prior_record = copy.deepcopy(previous.get("assessment_record")) if identical else None
+    history = copy.deepcopy(previous.get("assessment_history", [])) if identical else []
+    if identical and not prior_record:
+        prior_record = _assessment_record(previous, source="legacy-registration", execution_depth=None)
+        prior_record.update({"revision": 1, "assessment_id": "assessment-" + _stable_digest({
+            "artifact_id": artifact_id, "revision": 1, "fingerprint": prior_record["fingerprint"],
+        })[:32]})
+    assessment_changed = not prior_record or prior_record.get("fingerprint") != record["fingerprint"]
+    if assessment_changed:
+        record["revision"] = int(prior_record.get("revision", 0)) + 1 if prior_record else 1
+        record["assessment_id"] = "assessment-" + _stable_digest({
+            "artifact_id": artifact_id, "revision": record["revision"], "fingerprint": record["fingerprint"],
+        })[:32]
+        if prior_record:
+            history.append({
+                **prior_record, "artifact_status": previous["status"],
+                "accepted_by": previous.get("accepted_by"), "acceptance_ref": previous.get("acceptance_ref"),
+            })
+    else:
+        record = prior_record
+    manifest["assessment_record"] = record
+    manifest["assessment_history"] = history
+    if identical and previous.get("status") == "accepted":
+        if status == "reviewable":
+            manifest["status"] = "accepted"
+            for key in ("accepted_by", "acceptance_ref"):
+                if previous.get(key):
+                    manifest[key] = previous[key]
+        else:
+            manifest["acceptance_recheck_required"] = True
+    elif identical and previous.get("acceptance_recheck_required"):
+        # Passing a later recheck cannot silently reapply the historical approval.
+        manifest["acceptance_recheck_required"] = True
+    if identical:
+        # Content and assessment have separate lifecycles: unchanged content keeps
+        # its logical version while fresh quality results replace only its view.
+        artifacts[artifacts.index(previous)] = manifest
+        if assessment_changed and status == "draft":
+            # The content revision is unchanged, but consumers must not continue
+            # treating an invalidated quality baseline as ready for implementation.
+            changed_ids = {artifact_id}
+            invalidated: set[str] = set()
+            while changed_ids:
+                invalidated.update(changed_ids)
+                next_changed: set[str] = set()
+                for existing in artifacts:
+                    if existing["artifact_id"] in changed_ids or existing.get("status") == "superseded":
+                        continue
+                    for dependency in existing.get("dependencies", []):
+                        if dependency.get("artifact_id") in changed_ids:
+                            dependency["status"] = "conflict"
+                            dependency["handling"] = "Upstream assessment changed; resolve its quality findings before confirming this baseline."
+                            existing["status"] = "needs-update"
+                            existing["implementation_readiness"] = "blocked"
+                            next_changed.add(existing["artifact_id"])
+                changed_ids = next_changed - invalidated
+    elif present:
+        changed_ids = {previous["artifact_id"]} if previous else set()
+        invalidated: set[str] = set()
+        if previous:
+            previous["status"] = "superseded"
+        while changed_ids:
+            invalidated.update(changed_ids)
+            next_changed: set[str] = set()
+            for existing in artifacts:
+                if existing.get("status") == "superseded":
+                    continue
+                for dependency in existing.get("dependencies", []):
+                    if dependency.get("artifact_id") in changed_ids:
+                        dependency["status"] = "outdated"
+                        existing["status"] = "needs-update"
+                        existing["implementation_readiness"] = "blocked"
+                        next_changed.add(existing["artifact_id"])
+            changed_ids = next_changed - invalidated
+        artifacts.append(manifest)
+    design_route = _bound_artifact_payload(remote.get("design_routing_record"))
+    escalation = _mapping(remote.get("design_escalation"))
+    if selected == "design" and isinstance(escalation.get("effective_route"), dict):
+        design_route = escalation["effective_route"]
+    trace = load_product_skill_contract(selected)["runtime_trace"]
+    trace.update({
+        "execution_mode": "workflow-native" if session_id != "temporary-session" else "skill-only",
+        "state_backend": "workflow-artifact-slots" if session_id != "temporary-session" else "in-context",
+        "loaded_at": "finalization-contract-validation",
+    })
+    recommended_next = ELIGIBLE_NEXT_STAGES[selected][0] if ELIGIBLE_NEXT_STAGES[selected] else None
+    # This loader confirms contract availability now, not that an earlier model obeyed it.
+    merged_decisions, decision_history = _merge_workspace_decisions(old_decisions, decisions, decision_history)
+    workspace.update({
+        "schema_version": "1.1",
+        "visibility": "agent-internal",
+        "workspace_id": workspace_id,
+        "workspace_mode": workspace.get("workspace_mode", "shared-project"),
+        "name": workspace.get("name") or str(plan.get("product_goal") or title)[:80],
+        "project_overview": workspace.get("project_overview") or {
+            "user_goal": str(plan.get("product_goal") or ""),
+            "target_users": [],
+            "business_context": "",
+            "scope": [],
+            "non_goals": [],
+            "constraints": [],
+        },
+        "decisions": merged_decisions,
+        "decision_history": decision_history,
+        "materials": workspace.get("materials") or [],
+        "artifacts": artifacts,
+        "version_dependencies": [
+            {"artifact_id": item["artifact_id"], "version": item["version"], "dependencies": item.get("dependencies", [])}
+            for item in artifacts
+        ],
+        "approvals": approvals,
+        "approval_events": approvals,
+        "current_run": {
+            "skill_trace": trace,
+            "hard_stop_policy": "explicit-decision",
+            "run_status": "awaiting-stage-confirmation" if present else "blocked",
+            "selected_stage": selected,
+            "route_source": routing.get("route_source"),
+            "route_reason": routing.get("route_reason", ""),
+            "confidence": routing.get("confidence"),
+            "execution_depth": assessed.get("execution_depth") or plan.get("execution_depth"),
+            "stage_chain": plan.get("planned_stage_chain") or [selected],
+            "stage_cursor": 0,
+            "active_artifact_id": artifact_id if present else None,
+            "reference_sample": {
+                "status": plan.get("reference_sample_status", "not-required"),
+                "artifact_type": artifact_type,
+                "material_ids": [],
+                "inherit": [],
+            },
+            "design_router": design_route if selected == "design" else None,
+            "pending_transition": None,
+            "recommended_next_stage": recommended_next,
+            "available_actions": ["continue", "switch-stage", "export", "finish"] if present else (
+                ["switch-stage", "export", "finish"] if artifacts else ["switch-stage", "finish"]
+            ),
+        },
+    })
+    completion = {"draft": "草稿，仍有待确认或补充项", "reviewable": "可以评审", "accepted": "已经确认"}.get(manifest["status"], "需要更新") if present else "尚未形成有效产物"
+    readiness = {
+        "not-ready": "还需补充后才能交给研发",
+        "partially-ready": "部分内容已经具备实施条件",
+        "ready": "已经具备实施条件",
+    }.get(manifest["implementation_readiness"], "需要进一步确认")
+    stage_label = STAGE_DISPLAY_LABELS.get(selected, selected)
+    next_stages = "、".join(STAGE_DISPLAY_LABELS.get(item, item) for item in ELIGIBLE_NEXT_STAGES[selected])
+    recommendation_line = (
+        f"- 建议下一步：{STAGE_DISPLAY_LABELS.get(recommended_next, recommended_next)}\n"
+        if recommended_next else ""
+    )
+    summary = (
+        f"## {stage_label}已完成\n\n- 当前版本：{title} v{version}（{completion}）\n"
+        f"- 当前状态：{readiness}\n"
+        f"{recommendation_line}"
+        f"- 接下来可以进入：{next_stages}\n\n"
+        "内容已经保存到当前项目。你可以继续下一阶段、调整当前内容，或者先停在这里；"
+        "已有材料和产物都会保留。"
+    )
+    if open_questions:
+        readable_questions: list[str] = []
+        for item in open_questions:
+            if isinstance(item, dict):
+                question = str(item.get("question") or "").strip()
+                readable_questions.append(question or "有一项待确认问题尚未补充说明")
+            else:
+                readable_questions.append(str(item).strip() or "有一项待确认问题尚未补充说明")
+        summary += "\n\n待处理：" + "；".join(readable_questions)
+    return {
+        "stage_manifest": manifest,
+        "workspace_state": workspace,
+        "delivery_summary": summary,
+    }
+
+
+def _validate_product_publication(handoff: dict[str, Any]) -> None:
+    """Validate domain consistency before emitting any of the finalizer's outputs."""
+    remote = (require_context().params or {}).get("remote_inputs") or {}
+    manifest, workspace = handoff["stage_manifest"], handoff["workspace_state"]
+    stage = manifest.get("stage")
+    if (stage not in STAGE_ARTIFACTS or not workspace.get("workspace_id")
+            or manifest.get("workspace_id") != workspace["workspace_id"]
+            or workspace.get("current_run", {}).get("selected_stage") != stage):
+        raise ValueError("PRODUCT_PUBLICATION_INVALID: inconsistent stage or workspace")
+    if not _mapping(remote.get(stage + "_assessment")):
+        raise ValueError("PRODUCT_PUBLICATION_INCOMPLETE: missing bound stage assessment")
+    expected = {"body": (STAGE_ARTIFACTS[stage][0], manifest.get("host_artifact") or {})}
+    expected.update({kind: (slot, (manifest.get("representations") or {}).get(kind) or {})
+                     for kind, slot in STAGE_REPRESENTATIONS[stage].items()})
+    for slot, recorded in expected.values():
+        actual = _bound_artifact_descriptor(remote.get(slot))
+        if not actual.get("present"):
+            raise ValueError(f"PRODUCT_PUBLICATION_INCOMPLETE: {slot}")
+        if (recorded.get("slot") != slot or not actual.get("content_sha256")
+                or recorded.get("content_sha256") != actual["content_sha256"]):
+            raise ValueError(f"PRODUCT_PUBLICATION_CONTENT_MISMATCH: {slot}")
+    if not handoff.get("delivery_summary"):
+        raise ValueError("PRODUCT_PUBLICATION_INCOMPLETE: delivery_summary")
+
+
+def publish_product_handoff_state() -> str:
+    """Build and publish the deterministic one-stage handoff as one terminal operation."""
+
+    handoff = build_product_handoff_state()
+    _validate_product_publication(handoff)
+    _publish_values([
+        (key, handoff[key], kind) for key, kind in (
+            ("stage_manifest", "json"), ("workspace_state", "json"), ("delivery_summary", "text"),
+        )
+    ], "publish_product_handoff_state")
+    return handoff["delivery_summary"]
 
 
 class _PrototypeParser(HTMLParser):
@@ -1595,6 +4391,14 @@ def write_product_artifact(
         raise ValueError("validate_as must be 'none', 'prototype', or 'competitive'")
 
     context = require_context()
+    remote = getattr(context, "params", {}).get("remote_inputs") or {}
+    if remote.get("execution_plan"):
+        selected = _mapping(remote.get("execution_plan")).get("selected_stage")
+        if validate_as == "none":
+            validate_as = _normalize_stage(selected)
+        if validate_as not in {"prototype", "competitive"}:
+            raise ValueError("file artifact generation is only available for the selected HTML stage")
+        _assert_current_stage(validate_as, remote)
     if not context.workspace_path:
         raise RuntimeError("The active Workflow workspace is unavailable")
     output_root = Path(context.workspace_path) / "product-solution-delivery" / "artifacts"
@@ -1635,3 +4439,41 @@ def write_product_artifact_file(
     """
     result = write_product_artifact(filename, content, validate_as)
     return str(result["path"])
+
+
+def write_product_artifact_bundle(
+    html_filename: str,
+    html_content: str,
+    markdown_filename: str,
+    markdown_content: str,
+    validate_as: str,
+) -> dict[str, str]:
+    """Publish both HTML and Markdown bodies of one logical stage artifact in one bounded call.
+
+    Validate HTML and return exact file paths, never source bodies as filenames."""
+    if validate_as not in {"prototype", "competitive"}:
+        raise ValueError("validate_as must be 'prototype' or 'competitive'")
+    markdown_name = Path(str(markdown_filename or "")).name
+    if not markdown_name or markdown_name in {".", ".."}:
+        raise ValueError("markdown_filename must contain a safe file name")
+    if Path(markdown_name).suffix.lower() not in {".md", ".markdown"}:
+        raise ValueError("markdown_filename must end in .md or .markdown")
+    if not isinstance(markdown_content, str) or not markdown_content.strip():
+        raise ValueError("markdown_content must be a non-empty string")
+    if not re.search(r"^#\s+\S", markdown_content, flags=re.M):
+        raise ValueError("markdown_content must contain one document title")
+
+    html = write_product_artifact(html_filename, html_content, validate_as)
+    output_root = Path(html["path"]).parent
+    markdown_path = output_root / f"{uuid.uuid4().hex}-{markdown_name}"
+    try:
+        markdown_path.write_text(markdown_content.strip() + "\n", encoding="utf-8")
+    except Exception:
+        # The HTML file is not published to a Workflow slot until this tool returns;
+        # remove the orphan so callers cannot observe a partial logical artifact.
+        Path(html["path"]).unlink(missing_ok=True)
+        raise
+    return {
+        "html_path": str(Path(html["path"]).resolve()),
+        "markdown_path": str(markdown_path.resolve()),
+    }

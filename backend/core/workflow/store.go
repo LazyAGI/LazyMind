@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"lazymind/core/workflow/publication"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -1298,7 +1300,11 @@ func UpdateSelectedHumanArtifactValue(
 		if expectedDraftVersion == nil {
 			return ErrDraftVersionRequired
 		}
-		requiresCopyOnWrite := selected.ChangeSource != "human"
+		transactionalOutputs, err := publication.PublicationEnabled(tx, *session)
+		if err != nil {
+			return err
+		}
+		requiresCopyOnWrite := selected.ChangeSource != "human" || transactionalOutputs
 		if controlstore.Controlled(*session) {
 			sealed, err := controlstore.IsSealedRevision(tx, sessionID, selected.ID)
 			if err != nil {
@@ -1629,10 +1635,20 @@ func SaveHumanArtifactValue(ctx context.Context, db *gorm.DB,
 	sessionID, slotID, artifactKey, stepID string, attempt int, cardinality string, listIndex *int,
 	contentType string, value json.RawMessage, caption *string, baseRevision *int, baseDraft *int64, draft bool,
 ) (*orm.WorkflowSlotRevision, int64, bool, error) {
+	frozen, directory, err := publication.SnapshotEdit(db.WithContext(ctx), sessionID, contentType, value)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	value = frozen
+	defer func() {
+		if err != nil && directory != "" {
+			_ = os.RemoveAll(directory)
+		}
+	}()
 	var revision *orm.WorkflowSlotRevision
 	var version int64
 	var inPlace bool
-	err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+	err = common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
 		revision = nil
 		version = 0
 		inPlace = false

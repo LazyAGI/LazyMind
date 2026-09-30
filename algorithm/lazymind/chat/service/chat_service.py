@@ -1456,8 +1456,10 @@ async def _handle_chat_impl(
         workflow_activations=workflow.activations,
         conversation_history=agent_history,
     )
-    workflow_tools = workflow_contribution.tools
     agentic_config.update(workflow_contribution.agentic_config_patch)
+    from lazymind.chat.host_extensions.registry import apply_host_extensions
+    apply_host_extensions(workflow_contribution, effective_workflow_context, agentic_config)
+    workflow_tools = workflow_contribution.tools
     workflow_turn_is_bound = _workflow_turn_is_bound(
         effective_workflow_context,
         explicit_resource_payload.get('workflow_refs'),

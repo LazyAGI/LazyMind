@@ -327,7 +327,7 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 	}
 	handOff := req.HandOff
 	nodeDef := graph.Nodes[req.TargetStepID]
-	params := WorkflowStepParams{WorkflowID: req.WorkflowID, WorkflowRef: req.WorkflowRef, RevisionID: req.WorkflowRevisionID, RevisionNo: req.WorkflowRevisionNo, TreeHash: req.WorkflowTreeHash, RemoteRoot: req.WorkflowRemoteRoot, StepID: req.TargetStepID, UserInput: req.UserInput, IsColdStart: true, HandOff: &handOff, PreflightID: req.PreflightID, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, UserID: req.UserID, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, RequiredOutputs: nodeDef.RequiredOutputs, Capabilities: nodeDef.Capabilities, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, TerminalToolsOnly: nodeDef.TerminalToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
+	params := WorkflowStepParams{WorkflowID: req.WorkflowID, WorkflowRef: req.WorkflowRef, RevisionID: req.WorkflowRevisionID, RevisionNo: req.WorkflowRevisionNo, TreeHash: req.WorkflowTreeHash, RemoteRoot: req.WorkflowRemoteRoot, StepID: req.TargetStepID, UserInput: req.UserInput, LaunchUserInput: req.UserInput, CurrentUserInput: req.UserInput, IsColdStart: true, HandOff: &handOff, PreflightID: req.PreflightID, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, UserID: req.UserID, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, RequiredOutputs: nodeDef.RequiredOutputs, Capabilities: nodeDef.Capabilities, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, TerminalToolsOnly: nodeDef.TerminalToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
 	inputKeys := graphengine.Materials(nodeDef.Input)
 	for _, optional := range nodeDef.OptionalInputs {
 		inputKeys = append(inputKeys, optional.Material)
@@ -602,12 +602,14 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			}
 			return graphErr
 		}
+		currentInputs := make(map[string]string, len(targets))
 		for i := range targets {
+			currentInputs[targets[i].TaskID] = targets[i].UserInput
 			if strings.TrimSpace(targets[i].UserInput) == "" {
 				targets[i].UserInput = sessionIntentText(session.IntentContext)
 			}
 		}
-		snapshot, snapshotErr := loadRuntimeSnapshot(ctx, tx, session.ID)
+		snapshot, snapshotErr := loadRuntimeSnapshot(ctx, tx, session.ID, graph)
 		if snapshotErr != nil {
 			return snapshotErr
 		}
@@ -673,7 +675,7 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				return invalidErr
 			}
 			var reloadErr error
-			snapshot, reloadErr = loadRuntimeSnapshot(ctx, tx, session.ID)
+			snapshot, reloadErr = loadRuntimeSnapshot(ctx, tx, session.ID, graph)
 			if reloadErr != nil {
 				return reloadErr
 			}
@@ -762,7 +764,7 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				for _, optional := range nodeDef.OptionalInputs {
 					inputKeys = append(inputKeys, optional.Material)
 				}
-				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, Capabilities: nodeDef.Capabilities, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, TerminalToolsOnly: nodeDef.TerminalToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
+				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, LaunchUserInput: sessionIntentText(session.IntentContext), CurrentUserInput: currentInputs[target.TaskID], HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, Capabilities: nodeDef.Capabilities, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, TerminalToolsOnly: nodeDef.TerminalToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
 				params.HostedTaskID = req.HostedTaskID
 				var launchErr error
 				stepObjective := workflowStepObjectiveWithRuntimeBoundaries(nodeDef.Prompt, target.Objective, target.UserInput, nodeDef.Capabilities, nodeDef.LegacyTools, nodeDef.TerminalTools)
@@ -964,10 +966,15 @@ func attemptInputBindingFromWitness(tx *gorm.DB, sessionID, attemptID string,
 	}
 	var revision orm.WorkflowSlotRevision
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Select("id", "human_artifact_id").
+		Select("id", "human_artifact_id", "content_snapshot").
 		Where("id = ? AND session_id = ?", witness.RevisionID, sessionID).
-		First(&revision).Error; err != nil || revision.HumanArtifactID == nil ||
-		*revision.HumanArtifactID == "" {
+		First(&revision).Error; err != nil {
+		return value
+	}
+	if revision.HumanArtifactID == nil || *revision.HumanArtifactID == "" {
+		if len(revision.ContentSnapshot) > 0 {
+			value.ContentHash = fmt.Sprintf("sha256:%x", sha256.Sum256(revision.ContentSnapshot))
+		}
 		return value
 	}
 	var artifact orm.WorkflowHumanArtifact

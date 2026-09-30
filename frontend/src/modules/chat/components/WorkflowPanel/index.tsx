@@ -1,3 +1,5 @@
+import { WorkflowExtensions } from '../../extensions/WorkflowExtensions';
+import { groupDownloadActions } from './groupDownloadActions';
 import { WorkflowApprovalActions } from './WorkflowApprovalActions';
 import { CompactWorkflowEmptyStatesContext, type ExternalWorkflowPresentation } from './external/presentation';
 import { activeExecutionTasks } from './external/useExecutionActivity';
@@ -1932,8 +1934,13 @@ export function WorkflowPanel({
     session.status === 'failed' ||
     session.status === 'stopped';
   const documentFooter = useMemo(
-    () => buildDocumentFooterItems(footerActions),
-    [footerActions],
+    () => buildDocumentFooterItems(ui?.group_downloads
+      ? groupDownloadActions(footerActions, key => {
+        const slot = tabs.flatMap(tab => tab.slots).find(item => key.split(':').includes(item.id));
+        return slot?.label || (i18n.language.startsWith('en') ? 'Artifact' : '产物');
+      }, (action, callback) => { if (action.flushBeforeAction) void runFooterAction(callback, action.flushKey); else callback(); })
+      : footerActions),
+    [footerActions, ui?.group_downloads, tabs, i18n.language, runFooterAction],
   );
   const displayStatus = autoRunning ? 'active' : session.status;
   const externalControl = controlAdapter?.control;
@@ -2303,6 +2310,8 @@ export function WorkflowPanel({
       {/* Body */}
       {!collapsed && (
         <div className='workflow-panel__body' key={session.session_id}>
+          <WorkflowExtensions names={ui?.extensions} session={session} disabled={actionPending}
+            beforeAction={flushPendingEdits} onRefresh={refresh} onSendMessage={onSendMessage} />
           {hasTabs ? (
             tabs.map((tab, idx) => {
               const preview = externalPresentation && !anySlotEditing ? executionPreview(session, tab, activities) : session;

@@ -6,6 +6,7 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type RefObject,
 } from 'react';
 import ReactDOM from 'react-dom';
 import { diffWordsWithSpace } from 'diff';
@@ -75,6 +76,8 @@ interface ArtifactRewriteDialogProps {
   terminology?: 'polish' | 'edit';
   /** Optional layer override for selections opened inside a full-screen modal. */
   portalZIndex?: number;
+  /** Keep the form open while the user adds/removes targets inside this surface. */
+  interactionRootRef?: RefObject<HTMLElement>;
   requestPreview?: (
     instruction: string,
     selection: ArtifactRewriteSelection,
@@ -134,6 +137,7 @@ export function ArtifactRewriteDialog({
   onPreviewReady,
   terminology = 'polish',
   portalZIndex,
+  interactionRootRef,
   requestPreview: requestPreviewOverride,
 }: ArtifactRewriteDialogProps) {
   const { t } = useTranslation();
@@ -212,12 +216,16 @@ export function ArtifactRewriteDialog({
     if (!open) return undefined;
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target;
-      if (!(target instanceof Node) || formRef.current?.contains(target)) return;
+      if (
+        !(target instanceof Node)
+        || formRef.current?.contains(target)
+        || (selection?.type === 'ppt_html' && interactionRootRef?.current?.contains(target))
+      ) return;
       close();
     };
     document.addEventListener('mousedown', handlePointerDown);
     return () => document.removeEventListener('mousedown', handlePointerDown);
-  }, [close, open]);
+  }, [close, interactionRootRef, open, selection?.type]);
 
   const requestPreview = useCallback(async () => {
     const trimmedInstruction = instruction.trim();
@@ -246,12 +254,18 @@ export function ArtifactRewriteDialog({
                   el: selection.el,
                   ...(selection.index ? { index: selection.index } : {}),
                   ...(selection.group ? { group: selection.group } : {}),
+                  ...(selection.dom_path ? { dom_path: selection.dom_path } : {}),
+                  ...(selection.tag ? { tag: selection.tag } : {}),
                   ...(selection.selectedText
                     ? { selected_text: selection.selectedText }
                     : {}),
                   ...(selection.computed_style
                     ? { computed_style: selection.computed_style }
                     : {}),
+                  ...(selection.targets?.length
+                    ? { targets: selection.targets }
+                    : {}),
+                  ...(selection.scope ? { scope: selection.scope } : {}),
                 } }
               : selection.type === 'ir'
                 ? { type: 'ir', selection_ranges: [{ node_id: selection.node_id, selected_text: selection.selectedText }] }
