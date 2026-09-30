@@ -19,9 +19,12 @@ from lazymind.common.maintenance import MaintenanceCancelled
 
 
 class ModelJSONError(ValueError):
-    def __init__(self, message: str, *, category: str):
-        super().__init__(message)
+    def __init__(self, message: str, category: str):
+        super().__init__(message, category)
         self.category = category
+
+    def __str__(self) -> str:
+        return str(self.args[0])
 
 
 _cancel_check = ContextVar('review_model_cancel_check', default=None)
