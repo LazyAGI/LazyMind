@@ -11,16 +11,16 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                'success': {'en': 'kb_search completed with '
                                  '{result.total} relevant items.',
                            'zh': 'kb_search 完成，共找到 {result.total} 条相关内容。'},
-               'failure': {'en': 'kb_search could not find results for {value}.',
-                           'zh': 'kb_search 未能找到 {value} 的结果。'}},
+               'failure': {'en': 'kb_search failed for {value}.',
+                           'zh': 'kb_search 检索失败：{value}。'}},
  'kb_tmp_search': {'argument': 'semantic_query',
                    'call': {'en': 'Using kb_tmp_search for {value}.',
                             'zh': '正在用 kb_tmp_search 检索 {value}。'},
                    'success': {'en': 'kb_tmp_search completed with '
                                      '{result.total} relevant items.',
                                'zh': 'kb_tmp_search 完成，共找到 {result.total} 条相关内容。'},
-                   'failure': {'en': 'kb_tmp_search could not find results for {value}.',
-                               'zh': 'kb_tmp_search 未能找到 {value} 的结果。'}},
+                   'failure': {'en': 'kb_tmp_search failed for {value}.',
+                               'zh': 'kb_tmp_search 检索失败：{value}。'}},
  'parse_uploaded_files': {'argument': 'files',
                           'call': {'en': 'Parsing uploaded documents: {value}.',
                                    'zh': '正在解析上传文档：{value}。'},
@@ -55,8 +55,8 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                                          '{result.total} document segments.',
                                    'zh': 'kb_keyword_search 完成，共找到 {result.total} '
                                          '条文档片段。'},
-                       'failure': {'en': 'kb_keyword_search could not find {value}.',
-                                   'zh': 'kb_keyword_search 未能找到 {value}。'}},
+                       'failure': {'en': 'kb_keyword_search failed for {value}.',
+                                   'zh': 'kb_keyword_search 检索失败：{value}。'}},
  'KBToolkit_read_document': {
      'argument': 'document_id',
      'call': {'en': 'Reading knowledge base document {value}.', 'zh': '正在读取知识库文档 {value}。'},

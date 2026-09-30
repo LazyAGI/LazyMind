@@ -262,8 +262,9 @@ def _workspace_spill_target(
     ):
         raise ValueError('invalid workspace tool-result reference')
     resolved = os.path.realpath(os.path.join(workspace, *relative_path.parts))
+    spill_root = os.path.join(workspace, 'tool_spills')
     try:
-        inside_workspace = os.path.commonpath((workspace, resolved)) == workspace
+        inside_workspace = os.path.commonpath((spill_root, resolved)) == spill_root
     except ValueError:
         inside_workspace = False
     if not inside_workspace or not os.path.isfile(resolved):
@@ -368,6 +369,15 @@ def resolve_text_target(
     user_id, conversation_id = _current_artifact_scope()
 
     workspace = os.path.realpath(chat_agent_workspace(user_id, conversation_id))
+    if key.startswith('workspace://'):
+        cfg = _agentic_config()
+        if cfg.get('agent_type') == 'workflow_step':
+            active_workspace = str(cfg.get('workflow_workspace_path') or '').strip()
+            if not active_workspace:
+                raise ValueError('workflow workspace is unavailable')
+        else:
+            active_workspace = str(cfg.get('_subagent_workspace') or workspace).strip()
+        return _workspace_spill_target(key, workspace=os.path.realpath(active_workspace))
     store = FileResourceStore(workspace)
     manifest = _resolve_file_resource(store, key)
     if manifest:

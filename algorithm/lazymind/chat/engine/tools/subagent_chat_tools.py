@@ -189,6 +189,9 @@ def create_subagent(
     cfg = _agentic_config()
     params['_enable_tool_retrieval'] = bool(cfg.get('enable_tool_retrieval'))
     params['_thinking_depth'] = str(cfg.get('thinking_depth') or 'medium')
+    filters = cfg.get('filters')
+    if isinstance(filters, dict) and filters:
+        params['filters'] = deepcopy(filters)
     environment_context = cfg.get('environment_context')
     if isinstance(environment_context, dict) and environment_context:
         params[SUBAGENT_ENVIRONMENT_CONTEXT_KEY] = deepcopy(environment_context)

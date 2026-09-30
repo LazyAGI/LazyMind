@@ -765,6 +765,16 @@ def test_kb_empty_results_take_precedence_over_success_templates(tool_name, expe
     assert '共找到 **0** 条' not in result_text
 
 
+@pytest.mark.parametrize('tool_name', ['KBToolkit_kb_search', 'KBToolkit_kb_keyword_search', 'KBToolkit_kb_tmp_search'])
+def test_kb_execution_failure_is_not_rendered_as_no_matches(tool_name):
+    text = _tool_result_frame_text(
+        {'id': 'failed-search', 'name': tool_name, 'result': {'ok': False, 'msg': 'search failed'}},
+        'zh', 'sample input',
+    )
+    assert '检索失败' in text
+    assert '未能找到' not in text
+
+
 def test_kb_total_normalizes_json_string_and_nested_result_value():
     result_text = _tool_result_frame_text(
         {
