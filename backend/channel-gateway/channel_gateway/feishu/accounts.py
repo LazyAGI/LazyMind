@@ -15,9 +15,14 @@ from channel_gateway.feishu.groups import FeishuGroups
 from channel_gateway.feishu.registration import get_bot_name
 
 
-def _generated_feishu_label(value: str) -> bool:
-    label = str(value or '').strip()
-    return label == '飞书账号' or label.startswith('飞书 · ')
+def _generated_feishu_label(account: dict[str, Any], credentials: FeishuAppCredentials) -> bool:
+    if account.get('label_custom'):
+        return False
+    label = str(account.get('label') or '').strip()
+    return label == '飞书账号' or any(
+        label == f'飞书 · {value}' for value in
+        (credentials.display_name, credentials.provider_account_id) if value
+    )
 
 
 class FeishuCredentialStore:
@@ -154,13 +159,18 @@ class FeishuAccountService:
         )) for row in rows]}
 
     def _refresh_generated_label(self, owner_user_id: str, account: dict[str, Any]) -> dict[str, Any]:
-        if not _generated_feishu_label(account.get('label', '')) or not account.get('credentials_ciphertext'):
+        label = str(account.get('label') or '').strip()
+        if account.get('label_custom') or not account.get('credentials_ciphertext') or not (
+            label == '飞书账号' or label.startswith('飞书 · ')
+        ):
             return account
         try:
             loaded = FeishuCredentialStore(store=self._store, cipher=self._cipher).load_runtime_account(account['id'])
         except RuntimeError:
             return account
         credentials = loaded['credentials']
+        if not _generated_feishu_label(account, credentials):
+            return account
         bot_name = credentials.bot_name or get_bot_name(credentials.app_id, credentials.app_secret)
         if not bot_name:
             return account
@@ -281,7 +291,7 @@ class FeishuAccountService:
                     owner_user_id, asdict(credentials),
                 ), runtime_fence=runtime_fence,
             )
-            if credentials.bot_name and _generated_feishu_label(account.get('label', '')):
+            if credentials.bot_name and _generated_feishu_label(account, credentials):
                 renamed = self._store.rename_generated_account(
                     owner_user_id, account_id, credentials.bot_name, account['label'],
                 )

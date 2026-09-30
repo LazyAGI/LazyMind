@@ -493,6 +493,7 @@ class SQLiteGatewayStore(GatewayStore):
         additions = {
             'channel_accounts': {
                 'identity_metadata': "TEXT NOT NULL DEFAULT '{}'",
+                'label_custom': 'BOOLEAN NOT NULL DEFAULT FALSE',
                 'archived_at': 'TIMESTAMPTZ',
                 'default_recipient_id': "TEXT NOT NULL DEFAULT ''",
                 'runtime_status': "VARCHAR(32) NOT NULL DEFAULT 'stopped'",

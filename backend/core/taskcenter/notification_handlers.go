@@ -278,6 +278,8 @@ func ScheduleNotifications(w http.ResponseWriter, r *http.Request) {
 				replyNotificationError(w, r, err)
 				return
 			}
+			converted := taskNotificationDefaults(*req.Config)
+			req.Config = &converted
 		}
 		prepared, err := PrepareScheduleNotificationUpdate(r.Context(), owner, req)
 		if err != nil {

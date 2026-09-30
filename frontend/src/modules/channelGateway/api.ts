@@ -77,7 +77,7 @@ export function channelAccountLabel(account: ChannelAccount): string {
   if (!candidate || candidate === '飞书' || internalId.test(candidate)) {
     return '飞书账号';
   }
-  return candidate;
+  return storedLabel;
 }
 
 export function isChannelAccountPendingActivation(account: ChannelAccount): boolean {

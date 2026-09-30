@@ -49,6 +49,19 @@ func clearNotificationDefaultTargets(config *NotificationConfig) {
 	}
 }
 
+// Global channel flags never select a recipient for an individual task.
+func taskNotificationDefaults(defaults NotificationConfig) NotificationConfig {
+	channels := make(map[string]NotificationChannelRule, len(defaults.Channels))
+	for provider, channel := range defaults.Channels {
+		if provider != "desktop" {
+			channel = NotificationChannelRule{Enabled: false}
+		}
+		channels[provider] = channel
+	}
+	defaults.Channels = channels
+	return defaults
+}
+
 func DefaultNotificationConfig() NotificationConfig {
 	return NotificationConfig{
 		Events:   map[string]NotificationEventRule{"succeeded": {true, "summary"}, "failed": {true, "summary"}, "waiting": {false, "summary"}},
@@ -102,13 +115,7 @@ func InitializeScheduleNotifications(ctx context.Context, db *gorm.DB, schedule 
 	if err := json.Unmarshal(prefs.Defaults, &config); err != nil {
 		return err
 	}
-	for provider := range config.Channels {
-		if provider == "desktop" {
-			continue
-		}
-		// A global channel switch authorizes delivery; each task chooses its target.
-		config.Channels[provider] = NotificationChannelRule{Enabled: false}
-	}
+	config = taskNotificationDefaults(config)
 	raw, err := json.Marshal(config)
 	if err != nil {
 		return err

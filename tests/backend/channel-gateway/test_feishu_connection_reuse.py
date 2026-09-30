@@ -288,12 +288,15 @@ def test_registration_adapter_distinguishes_reauthorization_from_creation(monkey
     assert result.bot_name == '我的飞书机器人'
 
 
-@pytest.mark.parametrize('generated_label', ['飞书账号', '飞书 · 商谈zy'])
-def test_existing_feishu_account_replaces_generated_label_with_bot_name(gateway, account, monkeypatch, generated_label):
+@pytest.mark.parametrize('generated_label,display_name', [
+    ('飞书账号', ''), ('飞书 · 商谈zy', '商谈zy'), ('飞书 · ou_legacy', ''),
+])
+def test_existing_feishu_account_replaces_generated_label_with_bot_name(gateway, account, monkeypatch, generated_label, display_name):
     from channel_gateway.feishu import accounts
 
-    row = account('feishu')
-    gateway.store.rename_account('owner', row['id'], generated_label)
+    row = account('feishu', display_name=display_name, provider_account_id='ou_legacy')
+    with gateway.store._connect() as connection:
+        connection.execute('UPDATE channel_accounts SET label = %s WHERE id = %s', (generated_label, row['id']))
     calls = []
     monkeypatch.setattr(accounts, 'get_bot_name', lambda app_id, app_secret: calls.append(app_id) or '我的飞书机器人')
     service = gateway.components.delivery_worker._providers.accounts('feishu')
@@ -308,6 +311,16 @@ def test_existing_feishu_account_replaces_generated_label_with_bot_name(gateway,
     assert service.list_accounts('owner')['items'][0]['label'] == '我自定义的名称'
     assert len(calls) == 1
     assert gateway.store.rename_generated_account('owner', row['id'], '错误覆盖', generated_label) is None
+
+
+def test_custom_feishu_name_with_legacy_prefix_survives_account_list(gateway, account):
+    row = account('feishu', display_name='项目组', bot_name='官方机器人')
+    gateway.store.rename_account('owner', row['id'], '飞书 · 项目组')
+    service = gateway.components.delivery_worker._providers.accounts('feishu')
+
+    assert service.list_accounts('owner')['items'][0]['label'] == '飞书 · 项目组'
+    assert gateway.store.get_account('owner', row['id'])['label_custom']
+    assert gateway.store.rename_generated_account('owner', row['id'], '错误覆盖', '飞书 · 项目组') is None
 
 
 def test_bot_name_probe_reads_bot_info_response(monkeypatch):
