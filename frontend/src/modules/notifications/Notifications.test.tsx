@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Modal } from 'antd';
+import { message, Modal } from 'antd';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import NotificationSettings from './NotificationSettings';
 import ScheduleNotificationPanel from './ScheduleNotificationPanel';
@@ -47,6 +47,23 @@ describe('notification settings and task UI', () => {
     await waitFor(() => expect(mocks.put).toHaveBeenCalledWith('schedule-1', 0, defaults));
     expect(mocks.runs).not.toHaveBeenCalled();
     expect(mocks.execution).not.toHaveBeenCalled();
+  });
+  it('replaces the generic request error with recipient guidance for WeCom', async () => {
+    const config = emptyRule();
+    config.channels.wecom = { enabled: true, account_id: 'wecom-account' };
+    mocks.schedule.mockResolvedValue({ revision: 1, configured: true, config, availability: {} });
+    mocks.accounts.mockImplementation((provider: string) => Promise.resolve({
+      items: provider === 'wecom' ? [{ id: 'wecom-account', provider, label: '企业微信机器人', status: 'connected' }] : [],
+    }));
+    mocks.put.mockRejectedValue({ response: { status: 422, data: { code: 2000103, data: { detail: { reason: 'WECOM_NOTIFICATION_TARGET_UNAVAILABLE' } } } } });
+    const toast = vi.spyOn(message, 'error').mockImplementation(() => ({ then: vi.fn() }) as never);
+    mount(<ScheduleNotificationPanel scheduleId="schedule-1" showHistory={false} summaryCard />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'notifications.configure' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'notifications.save' }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('notifications.selectWecomRecipientHint', 6));
+    expect(mocks.put).toHaveBeenCalledWith('schedule-1', 1, config, true);
   });
   it('shows the configured channel and events in one entry and leaves saved rules intact on cancel', async () => {
     mocks.schedule.mockResolvedValue({ revision: 1, configured: true, config: defaults, availability: {} });

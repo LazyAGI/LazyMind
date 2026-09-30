@@ -22,6 +22,8 @@ describe('notification API contracts', () => {
     http.request.mockResolvedValue({ data: { data: value } });
     await putScheduleNotifications('a/b', 0, emptyRule());
     expect(http.request).toHaveBeenLastCalledWith(expect.objectContaining({ method: 'PUT', url: '/api/core/schedules/a%2Fb/notifications', data: JSON.stringify({ revision: 0, config: emptyRule() }) }));
+    await putScheduleNotifications('a/b', 0, emptyRule(), true);
+    expect(http.request).toHaveBeenLastCalledWith(expect.objectContaining({ method: 'PUT', silentError: true }));
   });
   it('sends public WeCom credentials and original account ID on reconnect', async () => {
     http.post.mockResolvedValue({ data: { status: 'connected' } });

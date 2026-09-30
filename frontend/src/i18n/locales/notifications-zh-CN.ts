@@ -115,6 +115,7 @@ export default {
   "disconnected": "已断开",
   "chooseAccount": "选择账号",
   "chooseRecipient": "选择接收对象",
+  "selectWecomRecipientHint": "请先在企业微信的“接收对象”中选择会话，再保存通知配置。若没有可选会话，请先在目标群内 @机器人发送一条消息。",
   "noTargets": "暂无可用接收对象，请先通过此账号与应用对话，再刷新。",
   "noWecomTargets": "暂无最近会话。请先把机器人加入目标群，并在群内 @机器人发送一条消息，然后点击刷新。",
   "refresh": "刷新",

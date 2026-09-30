@@ -1,5 +1,6 @@
 import { Configuration as CoreConfiguration, TaskNotificationsApi } from '@/api/generated/core-client';
 import { Configuration as GatewayConfiguration, TaskNotificationsApi as GatewayNotificationsApi, ChannelAccountsApi } from '@/api/generated/channel-gateway-client';
+import type { RawAxiosRequestConfig } from 'axios';
 import { axiosInstance, BASE_URL } from '@/components/request';
 import { listNotificationGroups, updateDefaultRecipient, type ChannelAccount, type ChannelProvider } from '@/modules/channelGateway/api';
 
@@ -44,8 +45,11 @@ export const patchPreferences = async (patch: Partial<Preferences> & { revision:
   unwrap<Preferences>((await coreClient.apiCoreUserNotificationPreferencesPatch({ notificationPreferencesPatch: patch })).data as Preferences | { data: Preferences });
 export const getScheduleNotifications = async (scheduleId: string) =>
   unwrap<ScheduleNotifications>((await coreClient.apiCoreSchedulesScheduleIdNotificationsGet({ scheduleId })).data as ScheduleNotifications | { data: ScheduleNotifications });
-export const putScheduleNotifications = async (scheduleId: string, revision: number, config: NotificationConfig | null) =>
-  unwrap<ScheduleNotifications>((await coreClient.apiCoreSchedulesScheduleIdNotificationsPut({ scheduleId, scheduleNotificationUpdate: { revision, ...(config === null ? { clear: true } : { config }) } })).data as ScheduleNotifications | { data: ScheduleNotifications });
+export const putScheduleNotifications = async (scheduleId: string, revision: number, config: NotificationConfig | null, silentError = false) =>
+  unwrap<ScheduleNotifications>((await coreClient.apiCoreSchedulesScheduleIdNotificationsPut(
+    { scheduleId, scheduleNotificationUpdate: { revision, ...(config === null ? { clear: true } : { config }) } },
+    silentError ? ({ silentError: true } as RawAxiosRequestConfig) : undefined,
+  )).data as ScheduleNotifications | { data: ScheduleNotifications });
 export const getExecutionNotifications = async (taskId: string) =>
   unwrap<ExecutionNotifications>((await coreClient.apiCoreTaskCenterTasksTaskIdNotificationsGet({ taskId })).data as ExecutionNotifications | { data: ExecutionNotifications });
 export const getAttempts = async (taskId: string, cursor = ''): Promise<Page<Attempt>> =>

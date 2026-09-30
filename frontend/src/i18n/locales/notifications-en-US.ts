@@ -115,6 +115,7 @@ export default {
   "disconnected": "Disconnected",
   "chooseAccount": "Choose account",
   "chooseRecipient": "Choose recipient",
+  "selectWecomRecipientHint": "Choose a conversation in WeCom’s Recipient field before saving. If none is listed, @mention the bot in the target group first.",
   "noTargets": "No available recipients. Start a conversation through this account, then refresh.",
   "noWecomTargets": "No recent conversations. Add the bot to the target group, @mention it once, then refresh.",
   "refresh": "Refresh",
