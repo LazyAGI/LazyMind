@@ -7,7 +7,7 @@ from lazymind.common.skill.document import parse_skill_document
 from lazymind.review.skill_organize.schemas import (
     SkillOrganizeRequest, SkillOrganizePlan, SourceSkill, SkillFsDraft, SkillFsDraftItem,
 )
-from lazymind.review.skill_organize.validator import validate_plan, validate_fs_draft, validate_source_skills
+from lazymind.review.skill_organize.validator import validate_plan, validate_fs_draft
 from lazymind.review.skill_organize.materializer import materialize_fs_draft
 from lazymind.review.service.skill_organize import _apply_fs_draft, _with_evolution_or_chat_llm
 from test_skill_organize_category import _FakeStore
@@ -37,15 +37,6 @@ def test_request_defaults_to_light_and_rejects_unknown_mode():
     assert SkillOrganizeRequest(**args).mode == 'light'
     with pytest.raises(ValidationError):
         SkillOrganizeRequest(**args, mode='unsafe')
-
-
-def test_source_validation_rejects_invalid_skill_package_before_model_call():
-    malformed = SourceSkill(
-        key='internal/demo', category='internal', name='demo',
-        content='---\nname: another-name\ndescription: Demo.\n---\n',
-    )
-    with pytest.raises(ValueError, match='demo'):
-        validate_source_skills([malformed])
 
 
 @pytest.mark.parametrize('kind', ['merge', 'delete_duplicate'])

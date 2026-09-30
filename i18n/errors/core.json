@@ -1888,5 +1888,12 @@
   "2003152": {"en-US": "Dependency installation is already running", "zh-CN": "依赖组件正在安装，请稍候"},
   "2003153": {"en-US": "Install the local knowledge component and restart local services first", "zh-CN": "请先安装本地知识库组件，并重启本地服务。"},
   "2003154": {"en-US": "Resource download or verification failed", "zh-CN": "资源下载或校验失败"},
-  "2003155": {"en-US": "Python dependency installation failed", "zh-CN": "Python 依赖组件安装失败"}
+  "2003155": {"en-US": "Python dependency installation failed", "zh-CN": "Python 依赖组件安装失败"},
+  "2003156": {"en-US": "The answer does not match an unanswered question card", "zh-CN": "答案与待回答的问题卡片不匹配"},
+  "2003157": {"en-US": "The question card does not belong to the requesting user", "zh-CN": "该问题卡片不属于当前用户"},
+  "2003158": {"en-US": "The skill organize cancellation status is unavailable", "zh-CN": "暂时无法获取技能整理取消状态"},
+  "2003159": {"en-US": "The Skill document has no content", "zh-CN": "技能文档没有内容"},
+  "2003160": {"en-US": "The skill organize rollback owner does not match", "zh-CN": "技能整理回滚的所有者不匹配"},
+  "2003161": {"en-US": "The skill organize rollback contains an unknown mutation", "zh-CN": "技能整理回滚包含未知变更"},
+  "2003162": {"en-US": "The Skill changed during organize rollback", "zh-CN": "技能在整理回滚期间发生了变化"}
 }
