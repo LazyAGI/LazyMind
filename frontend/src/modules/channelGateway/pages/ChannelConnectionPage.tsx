@@ -372,12 +372,12 @@ function AccountDisclosure({ account, onReconnect, onChanged }: { account: Chann
   const binding = account.binding_status || detail?.binding_status;
   const unbound = binding === 'unbound';
   const provisioning = account.status === 'provisioning';
-  const pendingActivation = isChannelAccountPendingActivation(detail || account);
+  const pendingActivation = isChannelAccountPendingActivation(account);
   useEffect(() => {
     let active = true;
     void getAccountDetail(account.id).then(value => { if (active) setDetail(value); }).catch(() => {});
     return () => { active = false; };
-  }, [account.id, account.default_recipient_id]);
+  }, [account.id, account.default_recipient_id, account.status, account.runtime_status, account.capabilities?.notification_ready]);
   const load = async () => {
     setBusy(true); setError(false);
     try {
@@ -452,10 +452,10 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
     return () => { active = false; };
   }, [refresh]);
   useEffect(() => {
-    if (!accounts.some(account => account.provider === 'feishu' && account.status === 'provisioning')) return;
+    if (loading || !accounts.some(account => account.status === 'provisioning' || isChannelAccountPendingActivation(account))) return;
     const timer = window.setTimeout(onChanged, 2000);
     return () => window.clearTimeout(timer);
-  }, [accounts, onChanged]);
+  }, [accounts, loading, onChanged]);
   const select = (p: ChannelProvider) => {
     setProvider(p); setReconnectId(undefined); setConnectedAccount(undefined);
     if (!embedded) { const params = new URLSearchParams(searchParams); params.set('provider', p); setSearchParams(params, { replace: true }); }

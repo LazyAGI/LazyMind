@@ -74,4 +74,31 @@ describe('channel connection workspace', () => {
     expect(providerTab).toHaveTextContent('notifications.pendingActivation');
     expect(document.querySelector('.notification-account-manager > header')).not.toHaveTextContent('notifications.availableCount');
   });
+
+  it('updates WeChat activation status and counts without reloading the page', async () => {
+    let notificationReady = false;
+    const account = {
+      id: 'wechat-activating', provider: 'wechat', label: '微信 ClawBot', status: 'connected',
+      runtime_status: 'running', updated_at: '2026-09-21',
+      capabilities: { notification_ready: false },
+    };
+    mocks.accounts.mockImplementation((provider: string) => Promise.resolve({
+      items: provider === 'wechat'
+        ? [{ ...account, capabilities: { notification_ready: notificationReady } }]
+        : [],
+    }));
+    mocks.detail.mockResolvedValue({ ...account, default_recipient: null, notification_reference_count: 0 });
+
+    render(<MemoryRouter><TerminalConnectionPage initialProvider="wechat" /></MemoryRouter>);
+
+    await screen.findByText('微信 ClawBot');
+    expect(document.querySelector('.notification-provider-tabs button[aria-pressed="true"]')).toHaveTextContent('notifications.pendingActivation');
+    notificationReady = true;
+
+    await waitFor(() => {
+      expect(document.querySelector('.notification-provider-tabs button[aria-pressed="true"]')).toHaveTextContent('notifications.connected');
+      expect(document.querySelector('.notification-account-manager > header')).toHaveTextContent('notifications.availableCount');
+      expect(document.querySelector('.notification-account summary .ant-tag')).toHaveTextContent('notifications.connected');
+    }, { timeout: 5000 });
+  });
 });
