@@ -75,7 +75,7 @@ def insert_skill_organize_result(
 def is_skill_organize_cancelled(requestid: str, user_id: str) -> bool:
     with _get_app_conn().connect() as conn:
         return conn.execute(text(
-            f"SELECT 1 FROM {SKILL_REVIEW_RUN_STATS_TABLE} "
+            f'SELECT 1 FROM {SKILL_REVIEW_RUN_STATS_TABLE} '
             "WHERE requestid = :requestid AND userid = :userid AND status = 'cancelled' LIMIT 1"
         ), {'requestid': requestid, 'userid': user_id}).first() is not None
 

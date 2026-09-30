@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import { Alert, Button, Input, Space, Typography, message } from "antd";
+import { Alert, Button, Input, Select, Space, Typography, message } from "antd";
 import { MailOutlined, PaperClipOutlined, SendOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -14,6 +14,7 @@ const MAX_MAIL_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const MAX_MAIL_ATTACHMENT_COUNT = 5;
 const MAX_MAIL_ATTACHMENT_TOTAL_BYTES = 10 * 1024 * 1024;
 const EMPTY_MAIL_ARTIFACTS: ConversationArtifact[] = [];
+const EMAIL_ADDRESS_PATTERN = /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/u;
 
 export interface MailDraftPreview {
   draft_id?: string;
@@ -149,6 +150,36 @@ function stringList(value: unknown): string[] {
   return [];
 }
 
+function addressList(value: string): string[] {
+  return value
+    .split(/[,;，；]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function mergeAddresses(values: string[], search: string): string[] {
+  const seen = new Set<string>();
+  return [...values, ...addressList(search)]
+    .map((address) => address.trim())
+    .filter((address) => {
+      const key = address.toLowerCase();
+      if (!address || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function hasInvalidAddress(addresses: string[]): boolean {
+  return addresses.some((address) => !EMAIL_ADDRESS_PATTERN.test(address));
+}
+
+function isRecipientValidationError(value: string): boolean {
+  const normalized = value.toLowerCase();
+  return normalized.includes("no recipients")
+    || normalized.includes("no valid recipients")
+    || normalized.includes("at least one recipient is required");
+}
+
 function attachmentsFromDraft(names: unknown, paths?: unknown, pendingNames?: unknown): LocalAttachment[] {
   const references = stringList(paths);
   const pending = new Set(stringList(pendingNames));
@@ -186,13 +217,16 @@ export default function MailDraftCard({
   const [uploading, setUploading] = useState(false);
   const uploadGeneration = useRef(0);
   const lastError = formatMailError(draft.last_error);
+  const staleRecipientError = isRecipientValidationError(lastError);
   const failed =
     !sent &&
     !deliveryUnknown &&
     (draft.status === "failed" || partialSent || Boolean(lastError));
   const editable = !sent && !sending && !disabled && !submitting && !submitted;
-  const [to, setTo] = useState(stringList(draft.to).join(", "));
-  const [cc, setCc] = useState(stringList(draft.cc).join(", "));
+  const [to, setTo] = useState<string[]>(() => stringList(draft.to));
+  const [toSearch, setToSearch] = useState("");
+  const [cc, setCc] = useState<string[]>(() => stringList(draft.cc));
+  const [ccSearch, setCcSearch] = useState("");
   const [subject, setSubject] = useState(draft.subject || "");
   const [body, setBody] = useState(draft.body || "");
   const [attachments, setAttachments] = useState<LocalAttachment[]>(
@@ -239,8 +273,10 @@ export default function MailDraftCard({
   const currentSnapshotKey = useRef(snapshotKey);
   currentSnapshotKey.current = snapshotKey;
   useEffect(() => {
-    setTo(snapshot.to.join(", "));
-    setCc(snapshot.cc.join(", "));
+    setTo(snapshot.to);
+    setToSearch("");
+    setCc(snapshot.cc);
+    setCcSearch("");
     setSubject(snapshot.subject);
     setBody(snapshot.body);
     setAttachments(attachmentsFromDraft(snapshot.attachments, snapshot.attachmentPaths, snapshot.pendingAttachmentNames));
@@ -252,9 +288,11 @@ export default function MailDraftCard({
     setUploading(false);
   }, [snapshot]);
 
+  const toAddresses = mergeAddresses(to, toSearch);
+  const ccAddresses = mergeAddresses(cc, ccSearch);
   const patch: MailDraftPatch = {
-    to,
-    cc,
+    to: toAddresses.join(", "),
+    cc: ccAddresses.join(", "),
     subject,
     body,
     attachment_paths: attachments
@@ -267,7 +305,18 @@ export default function MailDraftCard({
         content_base64: item.content_base64 || "",
       })),
   };
-  const hasRecipient = Boolean(to.trim());
+  const recipientRequired = toAddresses.length === 0;
+  const toAddressInvalid = !recipientRequired && hasInvalidAddress(toAddresses);
+  const ccAddressInvalid = Boolean(cc.length || ccSearch.trim()) && (
+    ccAddresses.length === 0 || hasInvalidAddress(ccAddresses)
+  );
+  const recipientInvalid = toAddressInvalid || ccAddressInvalid;
+  const recipientError = recipientRequired
+    ? "chat.mailDraft.recipientRequired"
+    : recipientInvalid
+      ? "chat.mailDraft.recipientInvalid"
+      : "";
+  const recipientsValid = !recipientError;
   const hasPendingAttachments = attachments.some((item) => item.source === "pending");
   const attachedNames = new Set(attachments.map((item) => item.name));
 
@@ -337,7 +386,7 @@ export default function MailDraftCard({
   };
 
   const handleConfirm = async () => {
-    if (!editable || uploading || hasPendingAttachments || submittingRef.current || !draftId || !hasRecipient) return;
+    if (!editable || uploading || hasPendingAttachments || submittingRef.current || !draftId || !recipientsValid) return;
     submittingRef.current = true;
     setSubmitting(true);
     setSubmitError("");
@@ -384,14 +433,30 @@ export default function MailDraftCard({
           <dt>{t("chat.mailDraft.to")}</dt>
           <dd>
             {editable ? (
-              <Input
+              <Select
                 className="mail-draft-address"
                 aria-label={t("chat.mailDraft.to")}
+                mode="tags"
+                searchValue={toSearch}
+                status={recipientRequired || toAddressInvalid ? "error" : undefined}
                 value={to}
-                onChange={(event: ChangeEvent<HTMLInputElement>) => setTo(event.target.value)}
+                suffixIcon={null}
+                tokenSeparators={[",", ";", "，", "；"]}
+                onChange={(values) => {
+                  setTo(mergeAddresses(values, ""));
+                  setToSearch("");
+                }}
+                onInputKeyDown={(event) => {
+                  if (event.key === "Enter" && toSearch.trim() && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    setTo(mergeAddresses(to, toSearch));
+                    setToSearch("");
+                  }
+                }}
+                onSearch={setToSearch}
               />
             ) : (
-              to || "-"
+              toAddresses.join(", ") || "-"
             )}
           </dd>
         </div>
@@ -399,14 +464,30 @@ export default function MailDraftCard({
           <dt>{t("chat.mailDraft.cc")}</dt>
           <dd>
             {editable ? (
-              <Input
+              <Select
                 className="mail-draft-address"
                 aria-label={t("chat.mailDraft.cc")}
+                mode="tags"
+                searchValue={ccSearch}
+                status={ccAddressInvalid ? "error" : undefined}
                 value={cc}
-                onChange={(event: ChangeEvent<HTMLInputElement>) => setCc(event.target.value)}
+                suffixIcon={null}
+                tokenSeparators={[",", ";", "，", "；"]}
+                onChange={(values) => {
+                  setCc(mergeAddresses(values, ""));
+                  setCcSearch("");
+                }}
+                onInputKeyDown={(event) => {
+                  if (event.key === "Enter" && ccSearch.trim() && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    setCc(mergeAddresses(cc, ccSearch));
+                    setCcSearch("");
+                  }
+                }}
+                onSearch={setCcSearch}
               />
             ) : (
-              cc || "-"
+              ccAddresses.join(", ") || "-"
             )}
           </dd>
         </div>
@@ -522,13 +603,13 @@ export default function MailDraftCard({
       ) : null}
       {submitError ? <Alert type="error" showIcon message={t(submitError)} /> : null}
       {hasPendingAttachments ? <Alert type="warning" showIcon message={t("chat.mailDraft.attachmentPending")} /> : null}
-      {!hasRecipient && !sent ? (
-        <Alert type="error" showIcon message={t("chat.mailDraft.recipientRequired")} />
+      {recipientError && !sent ? (
+        <Alert type="error" showIcon message={t(recipientError)} />
       ) : null}
-      {partialSent ? (
+      {partialSent && !recipientError ? (
         <Alert type="warning" showIcon message={lastError || t("chat.mailDraft.partialSent")} />
       ) : null}
-      {failed && !partialSent ? (
+      {failed && !partialSent && !recipientError && !staleRecipientError ? (
         <Alert type="error" showIcon message={lastError || t("chat.mailDraft.sendFailed")} />
       ) : null}
       {deliveryUnknown ? (
@@ -557,7 +638,7 @@ export default function MailDraftCard({
             <Button
               type="primary"
               icon={<SendOutlined aria-hidden="true" />}
-              disabled={!draftId || !hasRecipient || uploading || hasPendingAttachments}
+              disabled={!draftId || !recipientsValid || uploading || hasPendingAttachments}
               onClick={() => void handleConfirm()}
             >
               {deliveryUnknown ? t("chat.mailDraft.resendAnyway") : t("chat.mailDraft.resend")}
@@ -566,7 +647,7 @@ export default function MailDraftCard({
             <Button
               type="primary"
               icon={<SendOutlined aria-hidden="true" />}
-              disabled={!draftId || !hasRecipient || uploading || hasPendingAttachments}
+              disabled={!draftId || !recipientsValid || uploading || hasPendingAttachments}
               onClick={() => void handleConfirm()}
             >
               {t("chat.mailDraft.confirmSend")}

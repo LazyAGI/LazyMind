@@ -242,6 +242,23 @@ def test_compose_accepts_string_attachment_path(mail_auth, tmp_path):
     assert result['attachments'] == ['attachment_test.txt']
 
 
+def test_compose_accepts_inline_artifact_workspace_path(mail_auth, monkeypatch):
+    from lazymind.chat.engine.tools import chat_artifact
+
+    monkeypatch.setattr(chat_artifact, '_write_agent_data', lambda *_args, **_kwargs: None)
+    artifact = chat_artifact.save_chat_artifact('spring.txt', '春天来了')
+
+    preview = MailToolkit().compose_draft(
+        to='a@b.com',
+        subject='chat artifact',
+        body='body',
+        attachment_paths=artifact['workspace_path'],
+    )
+
+    assert preview['attachments'] == ['spring.txt']
+    assert Path(preview['attachment_paths'][0]).read_text(encoding='utf-8') == '春天来了'
+
+
 def test_compose_rejects_path_outside_workspace(mail_auth, tmp_path):
     outside = tmp_path / 'outside.txt'
     outside.write_text('secret', encoding='utf-8')
@@ -364,6 +381,36 @@ def test_send_reset_after_data_is_delivery_unknown(mail_auth):
             MailToolkit().send_draft('draft_unk')
     saved = _load_draft('draft_unk')
     assert saved['status'] == 'delivery_unknown'
+
+
+def test_send_reset_while_submitting_data_is_delivery_unknown(mail_auth):
+    draft = {
+        'draft_id': 'draft_unk_during_data',
+        'revision': 1,
+        'to': ['a@b.com'],
+        'cc': [],
+        'subject': 'hi',
+        'body': 'body',
+        'attachment_paths': [],
+        'in_reply_to': '',
+        'status': 'draft',
+        'sent_at': '',
+        'last_error': '',
+    }
+    _save_draft(draft)
+    lazyllm.globals['agentic_config']['mail_draft_confirm_id'] = draft['draft_id']
+    lazyllm.globals['agentic_config']['mail_draft_confirm_revision'] = 1
+
+    class ResetDuringDataSMTP(_FakeSMTP):
+        def send(self, payload):
+            if bytes(payload).endswith(b'.\r\n'):
+                raise ConnectionResetError('Connection reset while awaiting DATA acknowledgement')
+            return None
+
+    with patch('lazymind.chat.engine.tools.mail.smtplib.SMTP_SSL', ResetDuringDataSMTP):
+        with pytest.raises(ToolExecutionError, match='delivery is unknown'):
+            MailToolkit().send_draft(draft['draft_id'])
+    assert _load_draft(draft['draft_id'])['status'] == 'delivery_unknown'
 
 
 def test_imap_before_date_is_inclusive():
@@ -690,6 +737,8 @@ def test_mail_internal_drafts_require_full_identity(mail_auth, missing):
     lazyllm.globals['agentic_config'].pop(missing)
     with pytest.raises(ToolExecutionError, match='user_id.*conversation_id'):
         _draft_dir()
+
+
 def test_imap_search_args_quote_and_charset():
     assert _imap_search_args({'keyword': '合同'}) == [
         'CHARSET', 'UTF-8', 'ALL', 'TEXT', '"合同"',
@@ -1152,9 +1201,10 @@ def test_unknown_retry_failure_keeps_duplicate_warning_and_requires_new_confirma
     elif failure == 'recipients':
         cfg['mail_draft_patch']['to'] = []
     build = patch('lazymind.chat.engine.tools.mail._build_message', side_effect=ValueError('Invalid header'))
-    with patch('lazymind.chat.engine.tools.mail._IMAPBackend.send', side_effect=ToolExecutionError('SMTP unavailable')) as send, patch(
-        'lazymind.chat.engine.tools.mail._write_agent_data',
-    ) as emit:
+    with patch(
+        'lazymind.chat.engine.tools.mail._IMAPBackend.send',
+        side_effect=ToolExecutionError('SMTP unavailable'),
+    ) as send, patch('lazymind.chat.engine.tools.mail._write_agent_data') as emit:
         with build if failure == 'build' else nullcontext():
             with pytest.raises(ToolExecutionError):
                 MailToolkit().send_draft('unknown_retry')
@@ -1164,7 +1214,10 @@ def test_unknown_retry_failure_keeps_duplicate_warning_and_requires_new_confirma
         assert card['delivery_unknown'] is True
         assert 'duplicate' in card['last_error'].lower()
         assert card['body'] == 'edited'
-        expected = {'attachment': 'base64', 'build': 'Invalid header', 'recipients': 'No recipients', 'smtp': 'SMTP unavailable'}
+        expected = {
+            'attachment': 'base64', 'build': 'Invalid header',
+            'recipients': 'No recipients', 'smtp': 'SMTP unavailable',
+        }
         assert expected[failure] in card['last_error']
         with pytest.raises(ToolExecutionError, match='stale'):
             MailToolkit().send_draft('unknown_retry')
@@ -1423,7 +1476,9 @@ def test_partial_send_accumulates_accepted_recipients_across_retries(mail_auth):
         for _ in replies:
             receipt = MailToolkit().send_draft(card['draft_id'])
             cfg['mail_draft_confirm_revision'] = receipt['revision']
-    assert [call.args[0]['To'] for call in send.call_args_list] == ['a@b.com, b@b.com, c@b.com', 'b@b.com, c@b.com', 'c@b.com']
+    assert [call.args[0]['To'] for call in send.call_args_list] == [
+        'a@b.com, b@b.com, c@b.com', 'b@b.com, c@b.com', 'c@b.com',
+    ]
     assert receipt['accepted_recipients'] == ['a@b.com', 'b@b.com', 'c@b.com']
     assert receipt['status'] == 'sent'
 
@@ -1450,6 +1505,16 @@ def test_card_upload_rejects_too_many_files(mail_auth):
     ]
     with pytest.raises(ToolExecutionError, match='At most 5'):
         _write_outgoing_attachments(items)
+
+
+def test_card_upload_uses_realtime_safe_ten_megabyte_limit(mail_auth):
+    import base64
+    content = b'x' * (10 * 1024 * 1024 + 1)
+    with pytest.raises(ToolExecutionError, match='10MB'):
+        _write_outgoing_attachments([{
+            'filename': 'too-large.bin',
+            'content_base64': base64.b64encode(content).decode('ascii'),
+        }])
 
 
 def test_card_upload_rejects_malformed_base64(mail_auth):

@@ -1927,10 +1927,11 @@ async def _handle_chat_impl(
     else:
         workspace_policy = (
             f'Use `{workspace}` as the single working directory for all generated and intermediate files. '
-            'When a skill requires an output directory, create it under this workspace and pass its absolute '
-            'path to skill scripts. Treat files outside this workspace as read-only inputs. Use `read`, '
-            '`grep`, `write`, and `ls` to inspect and update workspace files, then publish completed files '
-            'with `save_chat_artifact`.'
+            'This unbound chat does not provide `write` or other host filesystem tools. Use '
+            '`search_file_resource` and `read_file_resource` for available conversation files. '
+            'Create text or JSON downloads with `save_chat_artifact`. When another tool such as '
+            'MailToolkit_compose_draft needs the generated file, pass the returned `workspace_path`. '
+            'Do not invent paths or call tools that are not registered.'
         )
     prompt_builder.system(
         'chat_workspace',

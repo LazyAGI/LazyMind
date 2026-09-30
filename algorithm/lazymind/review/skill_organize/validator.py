@@ -32,6 +32,10 @@ def validate_source_skills(skills: list[SourceSkill], *, mode: str = 'light') ->
             raise ValueError('source skill has empty name')
         if not skill.content.strip():
             raise ValueError(f'source skill {skill.name!r} has empty content')
+        try:
+            require_valid_skill_document(skill.content, expected_name=skill.name)
+        except ValueError as exc:
+            raise ValueError(f'source skill package {skill.key!r} is invalid: {exc}') from exc
 
 
 def validate_plan(plan: SkillOrganizePlan, source_skills: list[SourceSkill], *, mode: str = 'light') -> None:

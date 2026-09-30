@@ -35,6 +35,39 @@
     &:hover { border-color: #dce2e9; }
     &:focus { border-color: #8ab5f4; background: #fff; box-shadow: 0 0 0 2px #edf4ff; }
   }
+  .mail-draft-address.ant-select {
+    width: 100%;
+
+    .ant-select-selector {
+      min-height: 32px;
+      padding: 2px 7px;
+      border-color: transparent;
+      border-radius: 5px;
+      background: #fafbfc;
+      box-shadow: none;
+    }
+
+    &:hover .ant-select-selector { border-color: #dce2e9; }
+    &.ant-select-focused .ant-select-selector {
+      border-color: #8ab5f4;
+      background: #fff;
+      box-shadow: 0 0 0 2px #edf4ff;
+    }
+
+    .ant-select-selection-overflow { gap: 3px 2px; }
+    .ant-select-selection-item {
+      height: 24px;
+      margin: 0;
+      padding-inline: 7px 4px;
+      border: 1px solid #dce7f5;
+      border-radius: 6px;
+      background: #f1f6fc;
+      color: #385777;
+      font-size: 12px;
+      line-height: 22px;
+    }
+    .ant-select-selection-search-input { font-size: 13px; }
+  }
   textarea.ant-input { line-height: 1.85; padding: 8px 10px; resize: vertical; }
   pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.85; }
   > .ant-alert { margin: 0 20px 14px; border-radius: 7px; font-size: 12px; }

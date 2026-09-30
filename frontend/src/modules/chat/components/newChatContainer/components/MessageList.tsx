@@ -265,6 +265,29 @@ function UserCitationPreview({ citeMessages }: { citeMessages: string[] }) {
   );
 }
 
+function mailboxAddresses(value: unknown) {
+  const values = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/[,;]/)
+      : [];
+  return values.map((item) => String(item).trim().toLowerCase()).filter(Boolean);
+}
+
+function mailboxDraftKey(draft: any) {
+  return JSON.stringify({
+    to: mailboxAddresses(draft?.to),
+    cc: mailboxAddresses(draft?.cc),
+    subject: String(draft?.subject || "").trim(),
+    body: String(draft?.body || ""),
+    inReplyTo: String(draft?.in_reply_to || "").trim(),
+    mailboxes: (Array.isArray(draft?.mailboxes) ? draft.mailboxes : [])
+      .map((item: any) => String(item?.email || "").trim().toLowerCase())
+      .filter(Boolean)
+      .sort(),
+  });
+}
+
 const MessageList: React.FC<MessageListProps> = ({
   onFork,
   forkPending,
@@ -303,6 +326,17 @@ const MessageList: React.FC<MessageListProps> = ({
     messageList.forEach((message, index) => {
       if (message.role !== RoleTypes.ASSISTANT || message.archived_failure) return;
       for (const draft of mailDraftsFromAskPending(message.ask_pending)) latest.set(String(draft.draft_id), index);
+    });
+    return latest;
+  }, [messageList]);
+  const latestMailboxCards = useMemo(() => {
+    const latest = new Map<string, string>();
+    messageList.forEach((message, index) => {
+      if (message.role !== RoleTypes.ASSISTANT || message.archived_failure) return;
+      for (const draft of mailDraftsFromAskPending(message.ask_pending)) {
+        if (String(draft.status || "") !== "needs_mailbox") continue;
+        latest.set(mailboxDraftKey(draft), `${index}:${String(draft.draft_id || "")}`);
+      }
     });
     return latest;
   }, [messageList]);
@@ -582,6 +616,11 @@ const MessageList: React.FC<MessageListProps> = ({
                   supersededMailDraftIds={mailDraftsFromAskPending(pending)
                     .map((draft) => String(draft.draft_id))
                     .filter((id) => (latestMailCards.get(id) ?? index) > index)}
+                  hiddenMailDraftIds={mailDraftsFromAskPending(pending)
+                    .filter((draft) => String(draft.status || "") === "needs_mailbox")
+                    .filter((draft) => latestMailboxCards.get(mailboxDraftKey(draft)) !==
+                      `${index}:${String(draft.draft_id || "")}`)
+                    .map((draft) => String(draft.draft_id || ""))}
                   onPreferenceSelect={onPreferenceSelect}
                   onCiteMessage={(text: string) =>
                     onCiteMessage?.(text, item.history_id || item.id)

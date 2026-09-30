@@ -37,7 +37,9 @@ vi.mock("@/modules/chat/components/MailDraftCard", () => ({
 }));
 
 vi.mock("@/modules/chat/components/MailDraftCard/MailMailboxCard", () => ({
-  default: () => null,
+  default: ({ draft }: { draft?: { subject?: string; draft_id?: string } }) => (
+    <div>Mailbox {draft?.subject || draft?.draft_id}</div>
+  ),
 }));
 
 function selectMessageText(text: string) {
@@ -100,6 +102,28 @@ describe("MessageList side chat selection", () => {
     expect(screen.getByRole("button", { name: "Send Old A" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Send Sent A" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Send Other B" })).toBeEnabled();
+  });
+  it("shows only the latest duplicate mailbox picker while preserving distinct drafts", () => {
+    const picker = (draft_id: string, subject: string) => ({
+      ask_id: `ask-${draft_id}`,
+      mail_draft: {
+        draft_id,
+        status: "needs_mailbox",
+        to: "team@example.com",
+        subject,
+        body: "Same body",
+        mailboxes: [{ email: "sender@example.com", provider: "qqmail" }],
+      },
+    });
+    render(<MessageList messageList={[
+      { role: RoleTypes.ASSISTANT, ask_pending: picker("old", "Repeated") },
+      { role: RoleTypes.ASSISTANT, ask_pending: picker("different", "Distinct") },
+      { role: RoleTypes.ASSISTANT, ask_pending: picker("latest", "Repeated") },
+    ]} sendMessage={vi.fn()} regenerate={vi.fn()} stopGeneration={vi.fn()}
+      renderText={() => null} updateAssistantMessage={vi.fn()} />);
+
+    expect(screen.getAllByText("Mailbox Repeated")).toHaveLength(1);
+    expect(screen.getByText("Mailbox Distinct")).toBeVisible();
   });
   it("removes the entire failed reply on retry and shows a new failure if retry fails", () => {
     const failed = {

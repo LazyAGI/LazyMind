@@ -2462,13 +2462,13 @@ export default function ModelProviderPage({
             ]}
           >
             <AutoComplete
-              allowClear
               options={remoteModels.map((item) => ({ value: item.name }))}
               filterOption={(input, option) =>
                 String(option?.value || "").toLowerCase().includes(input.trim().toLowerCase())
               }
             >
               <Input
+                allowClear
                 autoComplete="off"
                 autoCorrect="off"
                 maxLength={120}

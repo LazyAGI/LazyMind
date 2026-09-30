@@ -643,8 +643,10 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
         elif _tool_name_is(tool_name, 'MailToolkit_send_draft') and mail_status in {
             'draft', 'needs_mailbox', 'sending',
         }:
-            return _ensure_trailing_newline('邮件尚未确认发送完成。' if language == 'zh'
-                                           else 'Mail delivery has not been confirmed.')
+            return _ensure_trailing_newline(
+                '邮件尚未确认发送完成。' if language == 'zh'
+                else 'Mail delivery has not been confirmed.'
+            )
     if status == 'needs_approval':
         return _render_preview_template(
             tool_name,

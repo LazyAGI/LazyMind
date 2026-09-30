@@ -2388,6 +2388,7 @@ const enUS = {
       resendAnyway: "Resend anyway",
       confirmQuery: "Please send the mail draft I just confirmed.",
       recipientRequired: "To is empty. Add at least one email address before sending.",
+      recipientInvalid: "To or Cc contains an invalid email address. Check it before sending.",
       sendFailed: "Send failed. The draft and attachments were kept so you can resend.",
       submitFailed: "The send request could not be submitted. Your edits were kept. Please retry.",
       submitOffline: "You are offline, so the mail was not sent. Your edits and attachments were kept. Click Confirm send again once you are back online.",
@@ -6525,6 +6526,7 @@ const enUS = {
       "Add the skill description and usage guidance here.",
     memorySkillUploadSuccess: '"{{name}}" has been added to My Skills',
     memorySkillUploadFailed: "Failed to upload skill",
+    memorySkillUploadInvalidPackage: "Invalid skill package. Make sure its root contains a valid SKILL.md.",
     memorySkillUploadAlreadyExists: "Skill name already exists and cannot be created",
     memorySkillUploadAlreadyExistsNamed:
       'Skill name "{{name}}" already exists and cannot be created',

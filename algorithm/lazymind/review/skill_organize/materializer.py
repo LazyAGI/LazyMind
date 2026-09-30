@@ -73,7 +73,10 @@ def materialize_fs_draft(
                 errors.append(exc)
 
     if errors:
-        error = next((exc for exc in errors if getattr(exc, 'category', '') in ('model_transport', 'model_timeout')), errors[0])
+        error = next(
+            (exc for exc in errors if getattr(exc, 'category', '') in ('model_transport', 'model_timeout')),
+            errors[0],
+        )
         raise ModelJSONError(
             'failed to materialize fs draft: ' + '; '.join(str(exc) for exc in errors),
             category=getattr(error, 'category', 'model_response'),

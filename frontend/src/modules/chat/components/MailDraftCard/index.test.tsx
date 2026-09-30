@@ -103,6 +103,16 @@ describe("MailDraftCard", () => {
     expect(screen.queryByText("big.bin")).not.toBeInTheDocument();
   });
 
+  it("allows exactly five uploaded attachments", async () => {
+    const { container } = render(<MailDraftCard draft={editableDraft} onConfirm={vi.fn()} />);
+    const files = Array.from({ length: 5 }, (_, index) => new File([String(index)], `${index}.txt`));
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files } });
+    for (const file of files) {
+      expect(await screen.findByText(file.name)).toBeVisible();
+    }
+    expect(screen.getByRole("button", { name: "chat.mailDraft.confirmSend" })).toBeEnabled();
+  });
+
   it.each([
     ['Failed to send the email: {"message":"SMTP rejected"}', "SMTP rejected"],
     [{ ok: false, value: { message: "Mailbox unavailable" } }, "Mailbox unavailable"],
@@ -272,32 +282,117 @@ describe("MailDraftCard", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByDisplayValue("a@b.com, c@d.com")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("e@f.com")).toBeInTheDocument();
+    expect(screen.getByText("a@b.com", { selector: ".ant-select-selection-item-content" })).toBeVisible();
+    expect(screen.getByText("c@d.com", { selector: ".ant-select-selection-item-content" })).toBeVisible();
+    expect(screen.getByText("e@f.com", { selector: ".ant-select-selection-item-content" })).toBeVisible();
     expect(screen.getByText("notes.txt")).toBeInTheDocument();
   });
 
-  it("prefills recipients in a full-width field and ignores enter selection", () => {
+  it("creates removable recipient tags with Enter", () => {
+    const onConfirm = vi.fn();
     const { container } = render(
       <MemoryRouter>
         <MailDraftCard
           draft={{
             draft_id: "draft_to",
             revision: 1,
-            to: ["firmach@163.com", "a@b.com"],
+            to: [],
             cc: [],
             subject: "hi",
             body: "body",
             status: "draft",
           }}
-          onConfirm={vi.fn()}
+          onConfirm={onConfirm}
         />
       </MemoryRouter>,
     );
 
-    const recipient = screen.getByDisplayValue("firmach@163.com, a@b.com");
+    const recipient = screen.getByRole("combobox", { name: "chat.mailDraft.to" });
+    fireEvent.change(recipient, { target: { value: "firmach@163.com" } });
+    fireEvent.keyDown(recipient, { key: "Enter", code: "Enter" });
+    const tag = screen.getByText("firmach@163.com", { selector: ".ant-select-selection-item-content" });
+    expect(tag).toBeVisible();
     expect(container.querySelector(".mail-draft-address")).toBeTruthy();
-    fireEvent.keyDown(recipient, { key: "Enter" });
-    expect(screen.getByDisplayValue("firmach@163.com, a@b.com")).toBeInTheDocument();
+
+    fireEvent.click(tag.closest(".ant-select-selection-item")!.querySelector(".ant-select-selection-item-remove")!);
+    expect(screen.queryByText("firmach@163.com", { selector: ".ant-select-selection-item-content" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "chat.mailDraft.confirmSend" })).toBeDisabled();
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("turns semicolon-separated recipients into tags", () => {
+    render(<MailDraftCard draft={{ ...editableDraft, to: [] }} onConfirm={vi.fn()} />);
+    const recipient = screen.getByRole("combobox", { name: "chat.mailDraft.to" });
+    fireEvent.change(recipient, { target: { value: "first@example.com;second@example.org;" } });
+
+    expect(screen.getByText("first@example.com", { selector: ".ant-select-selection-item-content" })).toBeVisible();
+    expect(screen.getByText("second@example.org", { selector: ".ant-select-selection-item-content" })).toBeVisible();
+  });
+
+  it("shows only the localized frontend error when an empty recipient also has a backend failure", () => {
+    render(
+      <MailDraftCard
+        draft={{
+          ...editableDraft,
+          to: [],
+          status: "failed",
+          last_error: "No recipients. Add at least one address in To, then confirm again.",
+        }}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.getByRole("alert")).toHaveTextContent("chat.mailDraft.recipientRequired");
+    expect(screen.queryByText(/No recipients/)).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "chat.mailDraft.to" }), {
+      target: { value: "fixed@example.com" },
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("validates To and Cc addresses before submitting", () => {
+    const onConfirm = vi.fn();
+    render(<MailDraftCard draft={editableDraft} onConfirm={onConfirm} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "chat.mailDraft.to" }), {
+      target: { value: "valid@example.com, not-an-email" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "chat.mailDraft.confirmSend" }));
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("chat.mailDraft.recipientInvalid");
+
+    fireEvent.change(screen.getByRole("combobox", { name: "chat.mailDraft.to" }), {
+      target: { value: "valid@example.com" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "chat.mailDraft.cc" }), {
+      target: { value: "broken@" },
+    });
+    expect(screen.getByRole("button", { name: "chat.mailDraft.confirmSend" })).toBeDisabled();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("submits multiple valid recipients separated by commas or semicolons", () => {
+    const onConfirm = vi.fn();
+    render(<MailDraftCard draft={{ ...editableDraft, to: [] }} onConfirm={onConfirm} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "chat.mailDraft.to" }), {
+      target: { value: "first@example.com; second@example.org" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "chat.mailDraft.cc" }), {
+      target: { value: "copy@example.net" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "chat.mailDraft.confirmSend" }));
+
+    expect(onConfirm).toHaveBeenCalledWith(
+      "stable",
+      1,
+      expect.objectContaining({
+        to: "first@example.com, second@example.org",
+        cc: "copy@example.net",
+      }),
+      expect.any(Function),
+    );
   });
 });

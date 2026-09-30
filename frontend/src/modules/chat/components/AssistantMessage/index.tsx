@@ -1407,6 +1407,9 @@ const AssistantMessage = (props: any) => {
             : askPending.mail_draft
               ? [askPending.mail_draft]
               : [];
+        const visibleDrafts = drafts.filter(
+          (draft) => !(props.hiddenMailDraftIds || []).includes(String(draft.draft_id || "").trim()),
+        );
         const mailReadOnly = mailDraftCardsReadOnly(
           props.disabled,
           askPending.mail_draft_only === false ? false : item.ask_answered,
@@ -1448,7 +1451,7 @@ const AssistantMessage = (props: any) => {
         };
         mailCards = (
           <div className="mail-draft-card-list" key="mail-drafts">
-            {drafts.map((draft) => {
+            {visibleDrafts.map((draft) => {
               const draftId = String(draft.draft_id || "").trim();
               const draftSuperseded = (props.supersededMailDraftIds || []).includes(draftId);
               const draftReadOnly = mailReadOnly ||

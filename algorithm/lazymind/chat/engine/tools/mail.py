@@ -74,9 +74,9 @@ _EMAIL_RE = re.compile(r'[^,\s;]+@[^,\s;]+')
 _COMMON_ATTACHMENT_EXTS = set(CHAT_ATTACHMENT_EXTENSIONS) | {
     '.zip', '.rar', '.7z', '.xlsx', '.xls', '.csv', '.ppt', '.odt', '.rtf',
 }
-_MAX_CARD_ATTACHMENT_BYTES = 15 * 1024 * 1024
+_MAX_CARD_ATTACHMENT_BYTES = 10 * 1024 * 1024
 _MAX_CARD_ATTACHMENT_COUNT = 5
-_MAX_CARD_ATTACHMENT_TOTAL_BYTES = 20 * 1024 * 1024
+_MAX_CARD_ATTACHMENT_TOTAL_BYTES = 10 * 1024 * 1024
 _IMAP_TIMEOUT_SECONDS = 20
 _DELIVERY_UNKNOWN_WARNING = 'Mail delivery is unknown. Resending can send a duplicate.'
 _LIST_DEFAULT_LIMIT = 50
@@ -1280,7 +1280,9 @@ def _apply_confirm_patch(draft: dict[str, Any]) -> dict[str, Any]:
     if 'attachment_paths' in patch or 'attachments' in patch:
         existing = [str(path) for path in (draft.get('attachment_paths') or []) if str(path).strip()]
         requested = patch.get('attachment_paths', existing)
-        draft['attachment_error'] = 'Attachments could not be prepared. Select the attachments again or remove them explicitly.'
+        draft['attachment_error'] = (
+            'Attachments could not be prepared. Select the attachments again or remove them explicitly.'
+        )
         draft['attachment_paths'] = _coerce_path_list(requested)
         uploads = patch.get('attachments')
         upload_items = uploads if isinstance(uploads, (list, tuple)) else ([uploads] if uploads else [])
@@ -1827,14 +1829,17 @@ class _IMAPBackend:
                 orig_send = smtp.send
 
                 def tracked_send(payload):
-                    orig_send(payload)
                     blob = (
                         payload if isinstance(payload, (bytes, bytearray))
                         else str(payload).encode('utf-8', 'replace')
                     )
                     if blob.endswith(b'.\r\n') or blob.endswith(b'.\n'):
                         nonlocal data_submitted
+                        # Once the SMTP DATA terminator is handed to the socket,
+                        # a disconnect can mean the server accepted the message
+                        # but its acknowledgement never reached us.
                         data_submitted = True
+                    orig_send(payload)
 
                 smtp.send = tracked_send
                 refused = smtp.sendmail(self.email, recipients, message.as_bytes())
@@ -2545,7 +2550,9 @@ class MailToolkit:
         except Exception as orig:
             draft['status'] = 'delivery_unknown' if prior_delivery_unknown else 'failed'
             draft['revision'] = expected_revision + 1
-            draft['last_error'] = _plain_error_text(orig) or 'Failed to prepare the email. Review the draft and attachments.'
+            draft['last_error'] = (
+                _plain_error_text(orig) or 'Failed to prepare the email. Review the draft and attachments.'
+            )
             if prior_delivery_unknown:
                 draft['last_error'] = f"{_DELIVERY_UNKNOWN_WARNING} {draft['last_error']}"
             _save_draft(draft)
@@ -2572,7 +2579,11 @@ class MailToolkit:
         try:
             result = _backend(cred).send(message)
         except Exception as orig:
-            unknown = prior_delivery_unknown or bool(getattr(orig, 'delivery_unknown', False)) or not isinstance(orig, ToolExecutionError)
+            unknown = (
+                prior_delivery_unknown
+                or bool(getattr(orig, 'delivery_unknown', False))
+                or not isinstance(orig, ToolExecutionError)
+            )
             draft['status'] = 'delivery_unknown' if unknown else 'failed'
             draft['revision'] = expected_revision + 1
             draft['last_error'] = _plain_error_text(orig) or 'Failed to send the email.'

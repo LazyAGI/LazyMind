@@ -173,6 +173,8 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch, mc
     workspace = chat_service.chat_agent_workspace('user-1', 'conversation-1')
     assert agent_calls[0]['kwargs']['workspace'] == workspace
     assert f'Use `{workspace}` as the single working directory' in agent_calls[0]['kwargs']['prompt']
+    assert 'does not provide `write` or other host filesystem tools' in agent_calls[0]['kwargs']['prompt']
+    assert '`workspace_path`' in agent_calls[0]['kwargs']['prompt']
     assert '## Attached Files' not in agent_calls[0]['kwargs']['prompt']
     query = agent_queries[0]
     assert 'Enabled user-level variables: ["REDFOX_API_KEY"]' in query

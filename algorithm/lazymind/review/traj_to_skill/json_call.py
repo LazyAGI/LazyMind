@@ -67,6 +67,7 @@ def _call_model(llm, prompt):
     check_model_cancelled()
     return worker.get_result()
 
+
 # Approximate token usage by summing prompt/response string lengths across LLM calls.
 TOTAL_INPUT_TOKEN_CHARS = 0
 TOTAL_OUTPUT_TOKEN_CHARS = 0

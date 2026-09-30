@@ -7,7 +7,7 @@ from lazymind.common.skill.document import parse_skill_document
 from lazymind.review.skill_organize.schemas import (
     SkillOrganizeRequest, SkillOrganizePlan, SourceSkill, SkillFsDraft, SkillFsDraftItem,
 )
-from lazymind.review.skill_organize.validator import validate_plan, validate_fs_draft
+from lazymind.review.skill_organize.validator import validate_plan, validate_fs_draft, validate_source_skills
 from lazymind.review.skill_organize.materializer import materialize_fs_draft
 from lazymind.review.service.skill_organize import _apply_fs_draft, _with_evolution_or_chat_llm
 from test_skill_organize_category import _FakeStore
@@ -37,6 +37,15 @@ def test_request_defaults_to_light_and_rejects_unknown_mode():
     assert SkillOrganizeRequest(**args).mode == 'light'
     with pytest.raises(ValidationError):
         SkillOrganizeRequest(**args, mode='unsafe')
+
+
+def test_source_validation_rejects_invalid_skill_package_before_model_call():
+    malformed = SourceSkill(
+        key='internal/demo', category='internal', name='demo',
+        content='---\nname: another-name\ndescription: Demo.\n---\n',
+    )
+    with pytest.raises(ValueError, match='demo'):
+        validate_source_skills([malformed])
 
 
 @pytest.mark.parametrize('kind', ['merge', 'delete_duplicate'])
@@ -144,6 +153,29 @@ def test_service_passes_mode_through_every_stage(monkeypatch):
     result = service._run_skill_organize(request, None, taskid='task-1', remote_store=None)
     assert result.success
     assert recorded == [('plan', 'deep'), ('draft', 'deep'), ('apply', 'deep')]
+
+
+def test_apply_validation_failure_is_not_reported_as_invalid_source_package(monkeypatch):
+    from lazymind.review.service import skill_organize as service
+    captured = {}
+    request = SkillOrganizeRequest(requestid='org-apply-invalid', user_id='u', skills=[SOURCE.key])
+    plan = SkillOrganizePlan(plans=[dict(type='keep', source_keys=[SOURCE.key], reason='Already clear')])
+    monkeypatch.setattr(service, '_load_source_skills', lambda *_: [SOURCE])
+    monkeypatch.setattr(service, 'load_search_metadata', lambda _: {SOURCE.key: {}})
+    monkeypatch.setattr(service, 'write_stage_file', lambda *_: None)
+    monkeypatch.setattr(service, '_record_skill_organize_stage_safely', lambda *_: None)
+    monkeypatch.setattr(service, 'build_organize_plan', lambda *_args, **_kwargs: plan)
+    monkeypatch.setattr(service, 'materialize_fs_draft', lambda *_args, **_kwargs: SkillFsDraft())
+    monkeypatch.setattr(service, '_apply_fs_draft', lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        ValueError('generated draft is inconsistent'),
+    ))
+    monkeypatch.setattr(service, 'insert_skill_organize_result', lambda **kwargs: captured.update(kwargs) or 1)
+
+    result = service._run_skill_organize(request, None, taskid='task-apply-invalid', remote_store=None)
+
+    assert not result.success
+    assert captured['organize_result']['error_code'] == 'skill_organize_invalid_plan'
+    assert captured['organize_result']['error_category'] == 'invalid_plan'
 
 
 def test_light_keeps_imported_frontmatter_but_plans_from_system_metadata():

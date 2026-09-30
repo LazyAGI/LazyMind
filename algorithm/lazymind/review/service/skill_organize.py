@@ -344,9 +344,11 @@ def _run_skill_organize(
         cancelled = isinstance(exc, MaintenanceCancelled)
         status = 'cancelled' if cancelled else 'failed'
         category = getattr(exc, 'category', '')
-        error_code = 'skill_organize_cancelled' if cancelled else 'skill_organize_' + category if category else (
-            'skill_organize_invalid_package' if isinstance(exc, ValueError) else 'skill_organize_failed'
-        )
+        if cancelled:
+            category = 'cancelled'
+        elif not category and isinstance(exc, ValueError):
+            category = 'invalid_package' if current_stage == 'pending' else 'invalid_plan'
+        error_code = 'skill_organize_' + category if category else 'skill_organize_failed'
         LOG.exception(f'[SkillOrganize] failed request={request.requestid} task={taskid}: {exc}')
         error_result = {
             'kind': 'skill_organize',
@@ -358,7 +360,7 @@ def _run_skill_organize(
             'failed_stage': current_stage,
             'error': str(exc),
             'error_code': error_code,
-            'error_category': 'cancelled' if cancelled else category or ('invalid_package' if isinstance(exc, ValueError) else 'internal'),
+            'error_category': category or 'internal',
             'skills': list(request.skills),
             'artifact_dir': artifact_dir,
             'started_at': started_at.isoformat(),

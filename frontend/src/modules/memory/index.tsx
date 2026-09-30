@@ -89,7 +89,7 @@ import {
   type SkillDraftPreviewRecord,
 } from "./skillApi";
 import { buildSkillZipBlob } from "./skillPackage";
-import { uploadSkillTempFile } from "./skillUpload";
+import { isInvalidSkillPackageError, uploadSkillTempFile } from "./skillUpload";
 import { uploadCloudSkill, downloadCloudResource } from "./cloudResourceApi";
 import { isSkillAlreadyExistsError } from "./skillUploadError";
 import {
@@ -2426,6 +2426,10 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   };
 
   const showSkillUploadError = (error: unknown, candidateName?: string) => {
+    if (isInvalidSkillPackageError(error)) {
+      message.error(t("admin.memorySkillUploadInvalidPackage"));
+      return;
+    }
     if (!isSkillAlreadyExistsError(error)) {
       message.error(t("admin.memorySkillUploadFailed"));
       return;
