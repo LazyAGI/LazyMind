@@ -10,6 +10,21 @@ vi.mock('react-i18next', async importOriginal => { const t = (key: string) => ke
 beforeEach(() => { vi.clearAllMocks(); mocks.accounts.mockResolvedValue({ items: [] }); mocks.cancel.mockResolvedValue(undefined); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 describe('channel connection workspace', () => {
+  it('keeps recipient configuration in individual tasks', async () => {
+    const account = { id: 'legacy', provider: 'feishu', label: 'Bot', status: 'connected', runtime_status: 'running', updated_at: '2026-09-17', default_recipient_id: 'old-group' };
+    mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: provider === 'feishu' ? [account] : [] }));
+    mocks.detail.mockResolvedValue({ ...account, default_recipient: { recipient_id: 'old-group', label: '旧群' }, notification_reference_count: 0 });
+    mocks.refs.mockResolvedValue({ items: [], total: 0, next_cursor: '' });
+
+    render(<MemoryRouter><TerminalConnectionPage initialProvider="feishu" /></MemoryRouter>);
+    await screen.findByText('Bot');
+    const disclosure = document.querySelector('details')!;
+    disclosure.open = true; fireEvent(disclosure, new Event('toggle'));
+    await screen.findByText('notifications.accountInformation');
+    expect(disclosure).not.toHaveTextContent('旧群');
+    expect(screen.queryByRole('button', { name: 'notifications.setDefaultRecipient' })).not.toBeInTheDocument();
+  });
+
   it('starts WeCom connection through the QR flow without exposing credentials', async () => {
     mocks.create.mockResolvedValue({ id: 'session', provider: 'wecom', mode: 'qr_code', status: 'connected', allowed_actions: [] });
     render(<MemoryRouter><TerminalConnectionPage initialProvider="wecom" /></MemoryRouter>);

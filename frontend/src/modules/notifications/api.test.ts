@@ -35,12 +35,14 @@ describe('notification API contracts', () => {
     await retryNotice('notice/a', 'operation', true);
     expect(http.request).toHaveBeenLastCalledWith(expect.objectContaining({ method: 'POST', url: '/api/channel-gateway/v1/task-notifications/notice%2Fa:retry', data: JSON.stringify({ idempotency_key: 'operation', confirm_duplicate_risk: true }) }));
   });
-  it('requires events and an external account but allows its default recipient', () => {
+  it('requires events and an explicit task recipient', () => {
     const config = emptyRule(); Object.values(config.events).forEach(e => { e.enabled = false; });
     expect(ruleError(config)).toBeUndefined(); expect(ruleError(config, true)).toBe('NOTIFICATION_EVENT_REQUIRED');
     config.events.succeeded.enabled = true; config.channels.wecom = { enabled: true };
     expect(ruleError(config)).toBe('NOTIFICATION_TARGET_REQUIRED');
     config.channels.wecom = { enabled: true, account_id: 'a' };
+    expect(ruleError(config)).toBe('NOTIFICATION_TARGET_REQUIRED');
+    config.channels.wecom = { enabled: true, account_id: 'a', recipient_id: 'group' };
     expect(ruleError(config)).toBeUndefined();
   });
   it('keeps global channel switches separate from task recipients', () => {

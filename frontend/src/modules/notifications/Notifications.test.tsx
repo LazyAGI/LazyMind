@@ -55,7 +55,6 @@ describe('notification settings and task UI', () => {
     mocks.accounts.mockImplementation((provider: string) => Promise.resolve({
       items: provider === 'wecom' ? [{ id: 'wecom-account', provider, label: '企业微信机器人', status: 'connected' }] : [],
     }));
-    mocks.put.mockRejectedValue({ response: { status: 422, data: { code: 2000103, data: { detail: { reason: 'WECOM_NOTIFICATION_TARGET_UNAVAILABLE' } } } } });
     const toast = vi.spyOn(message, 'error').mockImplementation(() => ({ then: vi.fn() }) as never);
     mount(<ScheduleNotificationPanel scheduleId="schedule-1" showHistory={false} summaryCard />);
 
@@ -63,7 +62,7 @@ describe('notification settings and task UI', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'notifications.save' }));
 
     await waitFor(() => expect(toast).toHaveBeenCalledWith('notifications.selectWecomRecipientHint', 6));
-    expect(mocks.put).toHaveBeenCalledWith('schedule-1', 1, config, true);
+    expect(mocks.put).not.toHaveBeenCalled();
   });
   it('shows the configured channel and events in one entry and leaves saved rules intact on cancel', async () => {
     mocks.schedule.mockResolvedValue({ revision: 1, configured: true, config: defaults, availability: {} });

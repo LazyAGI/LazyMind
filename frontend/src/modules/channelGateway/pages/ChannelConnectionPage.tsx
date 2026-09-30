@@ -26,8 +26,7 @@ import {
 import dayjs from 'dayjs';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
-import { getAccountDetail, getReferences, setDefaultRecipient, notificationError, providers, type AccountDetail, type Reference } from '@/modules/notifications/api';
-import TargetPicker from '@/modules/notifications/TargetPicker';
+import { getAccountDetail, getReferences, providers, type AccountDetail, type Reference } from '@/modules/notifications/api';
 import ChannelBrand from '@/modules/notifications/ChannelBrand';
 import '@/modules/notifications/index.scss';
 
@@ -377,7 +376,7 @@ function AccountDisclosure({ account, onReconnect, onChanged }: { account: Chann
     let active = true;
     void getAccountDetail(account.id).then(value => { if (active) setDetail(value); }).catch(() => {});
     return () => { active = false; };
-  }, [account.id, account.default_recipient_id, account.status, account.runtime_status, account.capabilities?.notification_ready]);
+  }, [account.id, account.status, account.runtime_status, account.capabilities?.notification_ready]);
   const load = async () => {
     setBusy(true); setError(false);
     try {
@@ -410,11 +409,11 @@ function AccountDisclosure({ account, onReconnect, onChanged }: { account: Chann
     } finally { setBusy(false); }
   };
   return <details className="notification-account" onToggle={e => { if (e.currentTarget.open && !busy) void load(); }}>
-    <summary><ChannelBrand channel={account.provider as ChannelProvider} avatar={account.avatar_url} /><div className="notification-grow"><strong>{channelAccountLabel(account)}</strong><small>{detail?.default_recipient?.label || t('notifications.noPrimary')} · {t('notifications.taskReferenceCount', { count: detail?.notification_reference_count || 0 })}</small></div><Tag color={provisioning || pendingActivation ? 'warning' : account.status === 'connected' ? 'success' : 'default'}>{t('notifications.' + (provisioning ? 'connecting' : binding === 'unbound' ? 'unbound' : pendingActivation ? 'pendingActivation' : account.status === 'connected' ? 'connected' : 'disconnected'))}</Tag></summary>
+    <summary><ChannelBrand channel={account.provider as ChannelProvider} avatar={account.avatar_url} /><div className="notification-grow"><strong>{channelAccountLabel(account)}</strong><small>{t('notifications.taskReferenceCount', { count: detail?.notification_reference_count || 0 })}</small></div><Tag color={provisioning || pendingActivation ? 'warning' : account.status === 'connected' ? 'success' : 'default'}>{t('notifications.' + (provisioning ? 'connecting' : binding === 'unbound' ? 'unbound' : pendingActivation ? 'pendingActivation' : account.status === 'connected' ? 'connected' : 'disconnected'))}</Tag></summary>
     {busy && <Spin size="small" />}
     {error && <p role="alert">{t('notifications.loadFailed')} <Button onClick={() => void load()}>{t('notifications.retry')}</Button></p>}
     {detail && <div className="notification-account-details">
-      <div><small>{t('notifications.accountInformation')}</small><strong>{channelAccountLabel(account)}</strong><p>{t('notifications.primary')}：{detail.default_recipient?.label || t('notifications.noPrimary')}</p></div>
+      <div><small>{t('notifications.accountInformation')}</small><strong>{channelAccountLabel(account)}</strong></div>
       <div><small>{t('notifications.runtime')}</small><strong>{t(`channelGateway.${account.provider}.runtimeStatusMap.${detail.runtime_status}`)}</strong><p>{t(provisioning ? 'notifications.connectionInProgressHint' : pendingActivation ? 'notifications.pendingActivationHint' : account.status === 'connected' ? 'notifications.connectionAvailableHint' : 'notifications.connectionStoppedHint')}</p></div>
       <div><small>{t('notifications.connectedAt')}</small><strong>{formatTime(detail.connected_at)}</strong><p>{t('notifications.authorizationTimeHint')}</p></div>
       <div><small>{t('notifications.lastMessageAt')}</small><strong>{formatTime(detail.last_message_at)}</strong><p>{t('notifications.lastMessageHint')}</p></div>
@@ -441,8 +440,6 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
   const [reconnectId, setReconnectId] = useState<string>();
   const [refresh, setRefresh] = useState(0);
   const onChanged = useCallback(() => setRefresh(n => n + 1), []);
-  const [choosingDefault, setChoosingDefault] = useState(false);
-  const [savingDefault, setSavingDefault] = useState(false);
   const [connectedAccount, setConnectedAccount] = useState<ChannelAccount>();
   const onConnected = useCallback((account?: ChannelAccount) => { setConnectedAccount(account); setReconnectId(undefined); setRefresh(n => n + 1); }, []);
   useEffect(() => {
@@ -463,12 +460,7 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
   return <div className="notification-connections">
     <header className="notification-heading"><LinkOutlined /><div><h2>{t('notifications.connectTitle')}</h2><p>{t('notifications.connectHint')}</p></div><Tag className="notification-connection-count"><LinkOutlined />{t('notifications.enabledCount', { count: accounts.filter(isChannelAccountAvailable).length })}</Tag></header>
     {error && <p role="alert">{t('notifications.loadFailed')}</p>}
-    {connectedAccount && <Alert type="success" message={`${channelAccountLabel(connectedAccount)} · ${t('notifications.connected')}`} action={<Space><Button onClick={() => setChoosingDefault(true)}>{t('notifications.setDefaultRecipient')}</Button>{onUseAccount && <Button onClick={() => onUseAccount(connectedAccount)}>{t('notifications.returnUseAccount')}</Button>}</Space>} />}
-    {choosingDefault && connectedAccount && <TargetPicker provider={connectedAccount.provider as ChannelProvider} accounts={[connectedAccount]} current={{ enabled: true, account_id: connectedAccount.id }} disabled={savingDefault} onClose={() => setChoosingDefault(false)} onSave={async target => {
-      setSavingDefault(true);
-      try { const updated = await setDefaultRecipient(connectedAccount.id, target.recipient_id!); setConnectedAccount(updated); setChoosingDefault(false); onChanged(); }
-      catch (error) { const reason = notificationError(error).reason; message.error(t(reason === 'FEISHU_GROUPS_UNAVAILABLE' ? 'notifications.groupPermissionHint' : reason === 'NOTIFICATION_TARGET_UNAVAILABLE' ? 'notifications.recipientNoLongerAvailable' : 'notifications.defaultSaveFailed')); } finally { setSavingDefault(false); }
-    }} />}
+    {connectedAccount && <Alert type="success" message={`${channelAccountLabel(connectedAccount)} · ${t('notifications.connected')}`} action={onUseAccount && <Button onClick={() => onUseAccount(connectedAccount)}>{t('notifications.returnUseAccount')}</Button>} />}
     <nav className="notification-provider-tabs" aria-label={t('notifications.channels')}>{providers.map(p => {
       const providerAccounts = accounts.filter(a => a.provider === p);
       const count = providerAccounts.filter(isChannelAccountAvailable).length;

@@ -137,6 +137,3 @@ export async function cancelConnectionSession(sessionId: string): Promise<void> 
 export async function listNotificationGroups(accountId: string, cursor = '') {
   return (await channelAccountsApi.listNotificationGroups({ accountId, cursor, limit: 100 })).data;
 }
-export async function updateDefaultRecipient(accountId: string, recipientId: string): Promise<ChannelAccount> {
-  return (await channelAccountsApi.setDefaultRecipient({ accountId, setDefaultRecipientRequest: { recipient_id: recipientId } })).data;
-}

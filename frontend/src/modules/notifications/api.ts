@@ -2,7 +2,7 @@ import { Configuration as CoreConfiguration, TaskNotificationsApi } from '@/api/
 import { Configuration as GatewayConfiguration, TaskNotificationsApi as GatewayNotificationsApi, ChannelAccountsApi } from '@/api/generated/channel-gateway-client';
 import type { RawAxiosRequestConfig } from 'axios';
 import { axiosInstance, BASE_URL } from '@/components/request';
-import { listNotificationGroups, updateDefaultRecipient, type ChannelAccount, type ChannelProvider } from '@/modules/channelGateway/api';
+import { listNotificationGroups, type ChannelAccount, type ChannelProvider } from '@/modules/channelGateway/api';
 
 export const providers: ChannelProvider[] = ['feishu', 'wecom', 'wechat'];
 export const channels = ['desktop', ...providers] as const;
@@ -81,7 +81,7 @@ export function taskRuleFromDefaults(config: NotificationConfig): NotificationCo
 }
 export function ruleError(config: NotificationConfig, defaults = false): string | undefined {
   if ((defaults || Object.values(config.channels).some(c => c?.enabled)) && !events.some(e => config.events[e].enabled)) return 'NOTIFICATION_EVENT_REQUIRED';
-  if (!defaults && providers.some(p => config.channels[p]?.enabled && !config.channels[p]?.account_id)) return 'NOTIFICATION_TARGET_REQUIRED';
+  if (!defaults && providers.some(p => config.channels[p]?.enabled && (!config.channels[p]?.account_id || !config.channels[p]?.recipient_id))) return 'NOTIFICATION_TARGET_REQUIRED';
 }
 export function availabilityError(value: ScheduleNotifications | undefined): { reason: string; provider: ChannelProvider; account_id: string } | undefined {
   if (!value?.config) return undefined;
@@ -95,4 +95,3 @@ export function availabilityError(value: ScheduleNotifications | undefined): { r
 }
 
 export const getGroups = listNotificationGroups;
-export const setDefaultRecipient = updateDefaultRecipient;

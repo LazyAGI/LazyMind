@@ -2,7 +2,6 @@ import { BellOutlined, FileTextOutlined, RightOutlined, SafetyCertificateOutline
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Button, Drawer, message, Modal, Select, Spin, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
-import { extractErrorCode, getLocalizedErrorMessage } from '@/components/request';
 import { listScheduleTasks, type Task } from '@/modules/taskCenter/api';
 import { channelAccountLabel } from '@/modules/channelGateway/api';
 import RuleEditor from './RuleEditor';
@@ -71,27 +70,25 @@ export default function ScheduleNotificationPanel({ scheduleId, taskId: selected
   const save = async (value = draft) => {
     if (!config || value === undefined || saving) return;
     const reason = value ? ruleError(value) : undefined;
-    if (reason) { setError(reason); return; }
-    const needsWecomRecipient = Boolean(value?.channels.wecom?.enabled && value.channels.wecom.account_id && !value.channels.wecom.recipient_id);
+    if (reason) {
+      setError(reason);
+      if (reason === 'NOTIFICATION_TARGET_REQUIRED' && value?.channels.wecom?.enabled && !value.channels.wecom.recipient_id) {
+        message.error(t('notifications.selectWecomRecipientHint'), 6);
+      }
+      return;
+    }
     setSaving(true); setError('');
     try {
       if (draftMode) {
         onDraftChange?.({ revision: config.revision, ...(value === null ? { clear: true } : { config: value }) });
         setConfig({ ...config, config: value, configured: value !== null });
-      } else if (scheduleId) setConfig(await (needsWecomRecipient
-        ? putScheduleNotifications(scheduleId, config.revision, value, true)
-        : putScheduleNotifications(scheduleId, config.revision, value)));
+      } else if (scheduleId) setConfig(await putScheduleNotifications(scheduleId, config.revision, value));
       setOpen(false);
     }
     catch (e) {
       const detail = notificationError(e);
       const reason = detail.reason === 'NOTIFICATION_CONFIG_CONFLICT' ? 'conflict' : detail.reason;
       setError(reason); setConflict(detail.reason === 'NOTIFICATION_CONFIG_CONFLICT');
-      if (needsWecomRecipient) {
-        const status = (e as { response?: { status?: number } })?.response?.status;
-        const missingTarget = status === 400 || extractErrorCode(e) === '2000103' || detail.reason === 'WECOM_NOTIFICATION_TARGET_UNAVAILABLE' || detail.reason === 'NOTIFICATION_TARGET_REQUIRED';
-        message.error(missingTarget ? t('notifications.selectWecomRecipientHint') : getLocalizedErrorMessage(e), 6);
-      }
       const provider = ({
         WECHAT_NOTIFICATION_CONTEXT_REQUIRED: 'wechat',
         WECOM_NOTIFICATION_TARGET_UNAVAILABLE: 'wecom',
