@@ -163,7 +163,9 @@ def save_chat_artifact(
 
     artifact_id = str(uuid.uuid4())
     user_id, conversation_id = _current_artifact_scope()
-    workspace_path = os.path.join('.generated_artifacts', artifact_id, safe_name)
+    # Tool results are model-facing locators, so keep their separator stable
+    # across hosts while the resolver maps them to the native filesystem.
+    workspace_path = f'.generated_artifacts/{artifact_id}/{safe_name}'
     _, mirrored_path = _resolve_workspace_path(workspace_path, user_id, conversation_id)
     mirrored_dir = os.path.dirname(mirrored_path)
     temporary = os.path.join(mirrored_dir, f'.{uuid.uuid4().hex[:8]}.tmp')
