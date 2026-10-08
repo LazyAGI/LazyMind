@@ -1,3 +1,4 @@
+import type { RawAxiosRequestConfig } from 'axios';
 import {
   ChannelAccountsApiFactory,
   Configuration,
@@ -130,8 +131,9 @@ export async function refreshConnectionSession(
   return response.data;
 }
 
-export async function cancelConnectionSession(sessionId: string): Promise<void> {
-  await connectionSessionsApi.cancelConnectionSession({ sessionId });
+export async function cancelConnectionSession(sessionId: string, options?: { silentError?: boolean }): Promise<void> {
+  const requestOptions: RawAxiosRequestConfig & { silentError?: boolean } = options || {};
+  await connectionSessionsApi.cancelConnectionSession({ sessionId }, requestOptions);
 }
 
 export async function listNotificationGroups(accountId: string, cursor = '') {

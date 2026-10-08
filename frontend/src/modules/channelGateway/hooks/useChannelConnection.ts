@@ -45,6 +45,7 @@ export function useChannelConnection(provider: ChannelProvider) {
   });
   const pollTimerRef = useRef<number | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const cancellableSessionIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
 
   const clearPollTimer = useCallback(() => {
@@ -81,12 +82,23 @@ export function useChannelConnection(provider: ChannelProvider) {
       }
       setSession(next);
       sessionIdRef.current = next?.id ?? null;
+      cancellableSessionIdRef.current = next && !TERMINAL_STATUSES.has(next.status)
+        && next.allowed_actions.includes('cancel') ? next.id : null;
       if (!next || next.status !== 'verification_required') {
         setChallengeValue('');
       }
     },
     [],
   );
+
+  const cancelCurrentSessionSilently = useCallback(async () => {
+    const sessionId = cancellableSessionIdRef.current;
+    if (!sessionId) return;
+    cancellableSessionIdRef.current = null;
+    // The provider may finish or another panel may cancel before this request
+    // reaches the server. Cleanup errors must not appear as navigation errors.
+    await cancelConnectionSession(sessionId, { silentError: true }).catch(() => undefined);
+  }, []);
 
   const schedulePoll = useCallback(
     (sessionId: string, delayMs: number) => {
@@ -130,13 +142,7 @@ export function useChannelConnection(provider: ChannelProvider) {
     setSessionStarting(true);
     clearPollTimer();
     try {
-      if (sessionIdRef.current) {
-        try {
-          await cancelConnectionSession(sessionIdRef.current);
-        } catch {
-          // ignore cancel failures when starting a new session
-        }
-      }
+      await cancelCurrentSessionSilently();
       const next = await createConnectionSession(provider, {
         idempotencyKey: uuidv4(),
         ...options,
@@ -162,6 +168,7 @@ export function useChannelConnection(provider: ChannelProvider) {
     }
   }, [
     applySession,
+    cancelCurrentSessionSilently,
     clearPollTimer,
     loadAccounts,
     provider,
@@ -178,11 +185,16 @@ export function useChannelConnection(provider: ChannelProvider) {
     }
     setActionLoading(true);
     clearPollTimer();
+    cancellableSessionIdRef.current = null;
     try {
-      await cancelConnectionSession(sessionId);
+      await cancelConnectionSession(sessionId, { silentError: true });
+      if (!mountedRef.current) return;
       applySession(null);
       message.success(t(`${translationKey}.cancelSuccess`));
     } catch (error) {
+      if (!mountedRef.current) return;
+      cancellableSessionIdRef.current = sessionId;
+      schedulePoll(sessionId, 1000);
       message.error(
         getErrorMessage(error, t(`${translationKey}.cancelFailed`)),
       );
@@ -191,7 +203,7 @@ export function useChannelConnection(provider: ChannelProvider) {
         setActionLoading(false);
       }
     }
-  }, [actionLoading, applySession, clearPollTimer, t, translationKey]);
+  }, [actionLoading, applySession, clearPollTimer, schedulePoll, t, translationKey]);
 
   const disconnectAccount = useCallback(async (accountId: string) => {
     if (disconnectingAccountId) {
@@ -296,14 +308,13 @@ export function useChannelConnection(provider: ChannelProvider) {
     return () => {
       mountedRef.current = false;
       clearPollTimer();
-      const sessionId = sessionIdRef.current;
       // Feishu registration can keep provisioning after the user leaves this page.
       // Cancel it only when the user explicitly presses Cancel.
-      if (sessionId && provider !== 'feishu') {
-        void cancelConnectionSession(sessionId).catch(() => undefined);
+      if (provider !== 'feishu') {
+        void cancelCurrentSessionSilently();
       }
     };
-  }, [clearPollTimer, loadAccounts, provider]);
+  }, [cancelCurrentSessionSilently, clearPollTimer, loadAccounts, provider]);
 
   return {
     t,
