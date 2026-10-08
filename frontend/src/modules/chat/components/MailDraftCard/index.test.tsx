@@ -122,6 +122,43 @@ describe("MailDraftCard", () => {
     expect(screen.getByRole("alert").textContent).not.toMatch(/[{}]/);
   });
 
+  it("localizes a server-rejected recipient instead of exposing the SMTP response", () => {
+    render(
+      <MailDraftCard
+        draft={{
+          ...editableDraft,
+          status: "failed",
+          error_code: "recipient_rejected",
+          last_error: "Failed to send the email: (550, b'The recipient may contain a non-existent account')",
+        }}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("chat.mailDraft.recipientRejected");
+    expect(screen.queryByText(/non-existent account|Failed to send/)).not.toBeInTheDocument();
+  });
+
+  it("keeps delivery-unknown dominant when a retry is rejected", () => {
+    render(
+      <MailDraftCard
+        draft={{
+          ...editableDraft,
+          status: "delivery_unknown",
+          delivery_unknown: true,
+          error_code: "recipient_rejected",
+          last_error: "Mail delivery is unknown. Failed to send: 550 b'user unknown'",
+        }}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.getByRole("alert")).toHaveTextContent("chat.mailDraft.deliveryUnknown");
+    expect(screen.getByRole("alert")).toHaveTextContent("chat.mailDraft.recipientRejected");
+    expect(screen.queryByText(/user unknown|Failed to send/)).not.toBeInTheDocument();
+  });
+
   it("does not permit sending while a sending snapshot is shown", () => {
     render(<MailDraftCard draft={{ ...editableDraft, status: "sending" }} onConfirm={vi.fn()} />);
     expect(screen.queryByRole("button", { name: "chat.mailDraft.confirmSend" })).not.toBeInTheDocument();

@@ -2347,6 +2347,7 @@ const zhCN = {
       confirmQuery: "请发送刚才确认的邮件草稿。",
       recipientRequired: "收件人为空，请至少填写一个邮箱地址后再发送。",
       recipientInvalid: "收件人或抄送中包含无效的邮箱地址，请检查后再发送。",
+      recipientRejected: "部分收件人可能不存在或无法接收邮件，请检查收件人地址后重新发送。",
       sendFailed: "发送失败，草稿和附件已保留，可以重新发送。",
       submitFailed: "发送请求未能提交，编辑内容已保留，请重试。",
       submitOffline: "网络已断开，邮件没有发送。编辑内容和附件已保留，恢复网络后请再次点击确认发送。",

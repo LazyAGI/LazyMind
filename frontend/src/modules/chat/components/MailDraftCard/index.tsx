@@ -218,6 +218,7 @@ export default function MailDraftCard({
   const uploadGeneration = useRef(0);
   const lastError = formatMailError(draft.last_error);
   const staleRecipientError = isRecipientValidationError(lastError);
+  const recipientRejected = draft.error_code === "recipient_rejected";
   const failed =
     !sent &&
     !deliveryUnknown &&
@@ -609,15 +610,20 @@ export default function MailDraftCard({
       {partialSent && !recipientError ? (
         <Alert type="warning" showIcon message={lastError || t("chat.mailDraft.partialSent")} />
       ) : null}
-      {failed && !partialSent && !recipientError && !staleRecipientError ? (
+      {recipientRejected && !deliveryUnknown && !partialSent && !recipientError ? (
+        <Alert type="error" showIcon message={t("chat.mailDraft.recipientRejected")} />
+      ) : null}
+      {failed && !partialSent && !recipientError && !staleRecipientError && !recipientRejected ? (
         <Alert type="error" showIcon message={lastError || t("chat.mailDraft.sendFailed")} />
       ) : null}
       {deliveryUnknown ? (
         <Alert
           type="warning"
           showIcon
-          message={lastError || t("chat.mailDraft.deliveryUnknown")}
-          description={lastError ? t("chat.mailDraft.deliveryUnknown") : undefined}
+          message={recipientRejected ? t("chat.mailDraft.deliveryUnknown") : (lastError || t("chat.mailDraft.deliveryUnknown"))}
+          description={recipientRejected
+            ? t("chat.mailDraft.recipientRejected")
+            : (lastError ? t("chat.mailDraft.deliveryUnknown") : undefined)}
         />
       ) : null}
       {draft.requires_reauth ? (

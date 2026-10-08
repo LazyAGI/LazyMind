@@ -512,6 +512,44 @@ def test_send_rejects_refused_recipients(mail_auth):
             MailToolkit().send_draft('draft_bad')
     saved = _load_draft('draft_bad')
     assert saved['status'] == 'failed'
+    assert saved['error_code'] == 'recipient_rejected'
+    assert "b'user unknown'" not in saved['last_error']
+    assert 'user unknown' in saved['last_error']
+
+
+def test_send_classifies_nonexistent_recipient_reported_after_data(mail_auth):
+    draft = {
+        'draft_id': 'draft_nonexistent',
+        'revision': 1,
+        'to': ['nobody@invalid.example'],
+        'cc': [],
+        'subject': 'hi',
+        'body': 'body',
+        'attachment_paths': [],
+        'in_reply_to': '',
+        'status': 'draft',
+        'sent_at': '',
+        'last_error': '',
+    }
+    _save_draft(draft)
+    lazyllm.globals['agentic_config']['mail_draft_confirm_id'] = 'draft_nonexistent'
+    lazyllm.globals['agentic_config']['mail_draft_confirm_revision'] = 1
+
+    class RefuseAfterDataSMTP(_FakeSMTP):
+        def sendmail(self, from_addr, to_addrs, msg, *args, **kwargs):
+            raise smtplib.SMTPDataError(
+                550,
+                b'The recipient may contain a non-existent account, please check the recipient address.',
+            )
+
+    with patch('lazymind.chat.engine.tools.mail.smtplib.SMTP_SSL', RefuseAfterDataSMTP):
+        with pytest.raises(ToolExecutionError):
+            MailToolkit().send_draft('draft_nonexistent')
+
+    saved = _load_draft('draft_nonexistent')
+    assert saved['status'] == 'failed'
+    assert saved['error_code'] == 'recipient_rejected'
+    assert "b'The recipient" not in saved['last_error']
 
 
 def test_send_applies_confirm_patch(mail_auth):

@@ -22,6 +22,7 @@ const (
 	TriggerSkillReview   SkillOperation = "trigger_skill_review"
 	TriggerSkillOrganize SkillOperation = "trigger_skill_organize"
 	StartUserEdit        SkillOperation = "start_user_edit"
+	ResolveSkillDraft    SkillOperation = "resolve_skill_draft"
 	WriteSkillDraft      SkillOperation = "write_skill_draft"
 	AutoUpdateSkill      SkillOperation = "auto_update_skill"
 )
@@ -34,6 +35,7 @@ const (
 	ReasonTaskStatusUnavailable  = "skill_task_status_unavailable"
 	ReasonTaskNotRunning         = "skill_task_not_running"
 	ReasonUserManagedDraft       = "skill_user_managed_draft"
+	DraftStatusResolved          = "resolved"
 
 	DispositionReject = "reject"
 	DispositionDefer  = "defer"
@@ -74,12 +76,14 @@ type SkillOperationDecision struct {
 	BlockingSkills []string
 	DraftTaskID    string
 	DraftVersion   int64
+	ResolutionTask *RunningSkillTask
 }
 
 type draftState struct {
 	SkillID      string `gorm:"column:skill_id"`
 	RelativeRoot string `gorm:"column:relative_root"`
 	TaskID       string `gorm:"column:task_id"`
+	DraftStatus  string `gorm:"column:draft_status"`
 	Version      int64  `gorm:"column:version"`
 	EntryCount   int64  `gorm:"column:entry_count"`
 }
@@ -184,24 +188,22 @@ func EvaluateSkillOperation(ctx context.Context, db *gorm.DB, stateStore state.S
 		if running != nil {
 			return maintenanceBlockedDecision(req, running), nil
 		}
+		return evaluateUserDraftAccess(ctx, db, stateStore, req)
+
+	case ResolveSkillDraft:
 		draft, err := loadSingleDraftState(ctx, db, req.UserID, req.SkillID)
 		if err != nil {
 			return SkillOperationDecision{}, err
 		}
-		if draft == nil || draft.EntryCount == 0 || strings.TrimSpace(draft.TaskID) == "" {
-			return allowedDecision(), nil
+		if running != nil {
+			if running.Type == "skill_organize" && draft != nil && draft.EntryCount > 0 && taskMatchesRunning(draft.TaskID, running) {
+				decision := allowedDraftDecision(draft)
+				decision.ResolutionTask = running
+				return decision, nil
+			}
+			return maintenanceBlockedDecision(req, running), nil
 		}
-		if isMaintenanceTaskID(draft.TaskID) {
-			return allowedDecision(), nil
-		}
-		active, err := isConversationActiveByTaskID(ctx, stateStore, draft.TaskID)
-		if err != nil {
-			return unavailableDecision(req, "无法确认 Skill Editor 是否仍在编辑"), err
-		}
-		if active {
-			return blockedDecision(req, ReasonDraftStillEditing, "Skill Editor 正在编辑该草稿", nil, nil), nil
-		}
-		return allowedDecision(), nil
+		return evaluateLoadedUserDraftAccess(ctx, stateStore, req, draft)
 
 	case WriteSkillDraft:
 		if req.SkillID == "" || req.TaskID == "" {
@@ -218,6 +220,9 @@ func EvaluateSkillOperation(ctx context.Context, db *gorm.DB, stateStore state.S
 					return maintenanceBlockedDecision(req, running), nil
 				}
 				return blockedDecision(req, ReasonTaskNotRunning, "当前 Skill 任务已不在运行中", nil, nil), nil
+			}
+			if draft != nil && draft.EntryCount == 0 && draft.DraftStatus == DraftStatusResolved && draft.TaskID == req.TaskID {
+				return blockedDecision(req, ReasonDraftOwnedByOtherTask, "草稿已经由用户处理", nil, running), nil
 			}
 			if taskKind(req.TaskID) == "review" {
 				return allowedDecision(), nil
@@ -275,6 +280,31 @@ func EvaluateSkillOperation(ctx context.Context, db *gorm.DB, stateStore state.S
 	default:
 		return SkillOperationDecision{}, fmt.Errorf("unsupported skill operation %q", req.Operation)
 	}
+}
+
+func evaluateUserDraftAccess(ctx context.Context, db *gorm.DB, stateStore state.Store, req SkillOperationRequest) (SkillOperationDecision, error) {
+	draft, err := loadSingleDraftState(ctx, db, req.UserID, req.SkillID)
+	if err != nil {
+		return SkillOperationDecision{}, err
+	}
+	return evaluateLoadedUserDraftAccess(ctx, stateStore, req, draft)
+}
+
+func evaluateLoadedUserDraftAccess(ctx context.Context, stateStore state.Store, req SkillOperationRequest, draft *draftState) (SkillOperationDecision, error) {
+	if draft == nil || draft.EntryCount == 0 || strings.TrimSpace(draft.TaskID) == "" {
+		return allowedDraftDecision(draft), nil
+	}
+	if isMaintenanceTaskID(draft.TaskID) {
+		return allowedDraftDecision(draft), nil
+	}
+	active, err := isConversationActiveByTaskID(ctx, stateStore, draft.TaskID)
+	if err != nil {
+		return unavailableDecision(req, "无法确认 Skill Editor 是否仍在编辑"), err
+	}
+	if active {
+		return blockedDecision(req, ReasonDraftStillEditing, "Skill Editor 正在编辑该草稿", nil, nil), nil
+	}
+	return allowedDraftDecision(draft), nil
 }
 
 func findRunningSkillMaintenanceTask(ctx context.Context, db *gorm.DB, userID string) (*RunningSkillTask, error) {
@@ -373,11 +403,11 @@ func loadDraftStates(ctx context.Context, db *gorm.DB, userID string, skillIDs [
 	var rows []draftState
 	err := db.WithContext(ctx).
 		Table("skills AS s").
-		Select("s.id AS skill_id, s.relative_root, COALESCE(d.task_id, '') AS task_id, COALESCE(d.version, 0) AS version, COUNT(e.skill_id) AS entry_count").
+		Select("s.id AS skill_id, s.relative_root, COALESCE(d.task_id, '') AS task_id, COALESCE(d.draft_status, '') AS draft_status, COALESCE(d.version, 0) AS version, COUNT(e.skill_id) AS entry_count").
 		Joins("LEFT JOIN skill_drafts AS d ON d.skill_id = s.id").
 		Joins("LEFT JOIN skill_draft_entries AS e ON e.skill_id = s.id").
 		Where("s.owner_user_id = ? AND s.deleted_at IS NULL AND s.id IN ?", userID, skillIDs).
-		Group("s.id, s.relative_root, d.task_id, d.version").
+		Group("s.id, s.relative_root, d.task_id, d.draft_status, d.version").
 		Find(&rows).Error
 	if err != nil {
 		return nil, err

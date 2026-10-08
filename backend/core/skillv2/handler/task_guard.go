@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -37,10 +38,14 @@ func MaintenanceTaskStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func ensureUserDraftWriteAllowed(w http.ResponseWriter, r *http.Request, db *gorm.DB, userID, skillID string) bool {
+	return ensureUserDraftOperationAllowed(w, r, db, userID, skillID, taskguard.StartUserEdit)
+}
+
+func ensureUserDraftOperationAllowed(w http.ResponseWriter, r *http.Request, db *gorm.DB, userID, skillID string, operation taskguard.SkillOperation) bool {
 	decision, err := taskguard.EvaluateSkillOperation(r.Context(), db, store.State(), taskguard.SkillOperationRequest{
 		UserID:    userID,
 		SkillID:   skillID,
-		Operation: taskguard.StartUserEdit,
+		Operation: operation,
 	})
 	if err != nil {
 		replyTaskGuardUnavailable(w, decision)
@@ -55,6 +60,102 @@ func ensureUserDraftWriteAllowed(w http.ResponseWriter, r *http.Request, db *gor
 		return false
 	}
 	return true
+}
+
+type draftResolutionGuardError struct {
+	decision    taskguard.SkillOperationDecision
+	unavailable bool
+}
+
+func (e *draftResolutionGuardError) Error() string { return e.decision.Message }
+
+func resolveUserDraft(
+	w http.ResponseWriter,
+	r *http.Request,
+	db *gorm.DB,
+	userID string,
+	skillID string,
+	resolve func(*gorm.DB, taskguard.SkillOperationDecision) (any, error),
+) (any, bool) {
+	var output any
+	err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		decision, err := taskguard.EvaluateSkillOperation(r.Context(), tx, store.State(), taskguard.SkillOperationRequest{
+			UserID: userID, SkillID: skillID, Operation: taskguard.ResolveSkillDraft,
+		})
+		if err != nil {
+			return &draftResolutionGuardError{decision: decision, unavailable: true}
+		}
+		if !decision.Allowed {
+			return &draftResolutionGuardError{decision: decision}
+		}
+		if decision.ResolutionTask != nil {
+			err = taskguard.LockOrganizeTask(r.Context(), tx, userID, decision.DraftTaskID)
+			if errors.Is(err, taskguard.ErrOrganizeNotRunning) {
+				decision, err = taskguard.EvaluateSkillOperation(r.Context(), tx, store.State(), taskguard.SkillOperationRequest{
+					UserID: userID, SkillID: skillID, Operation: taskguard.ResolveSkillDraft,
+				})
+				if err != nil {
+					return &draftResolutionGuardError{decision: decision, unavailable: true}
+				}
+				if !decision.Allowed {
+					return &draftResolutionGuardError{decision: decision}
+				}
+				if decision.ResolutionTask != nil {
+					if err = taskguard.LockOrganizeTask(r.Context(), tx, userID, decision.DraftTaskID); err != nil {
+						return err
+					}
+				}
+			} else if err != nil {
+				return err
+			}
+		}
+
+		lock := tx.Model(&orm.SkillV2Draft{}).Where("skill_id = ? AND version = ?", skillID, decision.DraftVersion)
+		if decision.DraftTaskID == "" {
+			lock = lock.Where("task_id = ''")
+		} else {
+			lock = lock.Where("task_id = ?", decision.DraftTaskID)
+		}
+		result := lock.UpdateColumn("updated_at", gorm.Expr("updated_at"))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("stale draft version")
+		}
+
+		output, err = resolve(tx, decision)
+		if err != nil {
+			return err
+		}
+		if decision.ResolutionTask != nil {
+			result = tx.Model(&orm.SkillV2Draft{}).Where("skill_id = ?", skillID).Updates(map[string]any{
+				"draft_status": taskguard.DraftStatusResolved,
+				"task_id":      decision.DraftTaskID,
+			})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return errors.New("stale draft version")
+			}
+		}
+		return nil
+	})
+	if err == nil {
+		return output, true
+	}
+	var guardErr *draftResolutionGuardError
+	if errors.As(err, &guardErr) {
+		if guardErr.unavailable {
+			replyTaskGuardUnavailable(w, guardErr.decision)
+		} else {
+			replyTaskGuardBlocked(w, guardErr.decision)
+		}
+		return nil, false
+	}
+	replyServiceError(w, err)
+	return nil, false
 }
 
 func takeOverUserDraft(r *http.Request, db *gorm.DB, userID, skillID string) error {

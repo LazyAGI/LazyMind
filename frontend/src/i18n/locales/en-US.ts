@@ -2399,6 +2399,7 @@ const enUS = {
       confirmQuery: "Please send the mail draft I just confirmed.",
       recipientRequired: "To is empty. Add at least one email address before sending.",
       recipientInvalid: "To or Cc contains an invalid email address. Check it before sending.",
+      recipientRejected: "One or more recipients may not exist or cannot receive mail. Check the addresses before resending.",
       sendFailed: "Send failed. The draft and attachments were kept so you can resend.",
       submitFailed: "The send request could not be submitted. Your edits were kept. Please retry.",
       submitOffline: "You are offline, so the mail was not sent. Your edits and attachments were kept. Click Confirm send again once you are back online.",
