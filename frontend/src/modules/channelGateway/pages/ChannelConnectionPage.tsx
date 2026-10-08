@@ -26,7 +26,7 @@ import {
 import dayjs from 'dayjs';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
-import { getAccountDetail, getReferences, providers, type AccountDetail, type Reference } from '@/modules/notifications/api';
+import { getAccountDetail, getReferences, getTargets, notificationError, providers, type AccountDetail, type Reference } from '@/modules/notifications/api';
 import ChannelBrand from '@/modules/notifications/ChannelBrand';
 import '@/modules/notifications/index.scss';
 
@@ -150,6 +150,7 @@ export function ChannelConnectionPage({ provider, accountId, createNew, autoStar
   const [botId, setBotId] = useState('');
   const [botSecret, setBotSecret] = useState('');
   const [refreshingAuthorization, setRefreshingAuthorization] = useState(false);
+  const [authorizationError, setAuthorizationError] = useState<string>();
   const copy = (name: string) => {
     if (provider === 'feishu' && accountId) {
       if (['newConnectionTitle', 'guideTitle', 'readyTitle', 'stepConfirmTitle', 'sessionStatusMap.confirming'].includes(name)) return 'notifications.reauthorize';
@@ -180,7 +181,7 @@ export function ChannelConnectionPage({ provider, accountId, createNew, autoStar
       onConnected?.(session.account || undefined);
     }
   }, [session?.status, session?.account, onConnected]);
-  useEffect(() => { setBotId(''); setBotSecret(''); }, [provider, accountId]);
+  useEffect(() => { setBotId(''); setBotSecret(''); setAuthorizationError(undefined); }, [provider, accountId]);
   const step = currentStep(session);
   const hasAccounts = accounts.length > 0;
   const activeScan = isActiveScan(session);
@@ -214,13 +215,16 @@ export function ChannelConnectionPage({ provider, accountId, createNew, autoStar
       <Button type="primary" loading={refreshingAuthorization} disabled={sessionStarting} onClick={async () => {
         if (!accountId || refreshingAuthorization) return;
         setRefreshingAuthorization(true);
+        setAuthorizationError(undefined);
         try {
           const account = await resumeChannelAccount(accountId, { silentError: true });
+          await getTargets(account.id);
           onConnected?.(account);
         } catch (error) {
-          message.error(getLocalizedErrorMessage(error) || t('notifications.loadFailed'));
+          setAuthorizationError(notificationError(error).reason);
         } finally { setRefreshingAuthorization(false); }
       }}>{t('notifications.wecomRefreshAuthorization')}</Button>
+      {authorizationError && <Alert type="error" showIcon message={t(`notifications.${authorizationError}`)} description={['WECOM_CAPABILITY_REAUTH_REQUIRED', 'WECOM_REAUTHORIZATION_REQUIRED'].includes(authorizationError) ? t('notifications.wecomReauthorizeStepHint') : undefined} />}
       <details className="wecom-original-credentials">
         <summary>{t('notifications.wecomUpdateCredentials')}</summary>
         <Title level={5}>{t('notifications.wecomRestoreCredentialsTitle')}</Title>

@@ -1,8 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import { Modal, type ModalFuncProps } from 'antd';
+import { message, Modal, type ModalFuncProps } from 'antd';
 import { TerminalConnectionPage } from '@/modules/channelGateway';
+import { ChannelConnectionPage } from '@/modules/channelGateway/pages/ChannelConnectionPage';
 import { channelAccountLabel, type ChannelAccount, type ConnectionSession } from '@/modules/channelGateway/api';
 import RuleEditor from './RuleEditor';
 
@@ -213,6 +214,7 @@ it('refreshes original WeCom connection after permission recovery without asking
   fireEvent.click(within(disclosure).getByRole('button', { name: 'notifications.wecomRepairAuthorization' }));
   fireEvent.click(await screen.findByRole('button', { name: 'notifications.wecomRefreshAuthorization' }));
   await waitFor(() => expect(mocks.resume).toHaveBeenCalledWith(original.id, { silentError: true }));
+  expect(mocks.targets).toHaveBeenCalledWith(original.id);
   expect(mocks.create).not.toHaveBeenCalled();
   expect(mocks.archive).not.toHaveBeenCalled();
   expect(screen.queryByRole('heading', { name: 'notifications.wecomRestorePermissionTitle' })).not.toBeInTheDocument();
@@ -247,4 +249,37 @@ it('renames only the selected WeCom account and shows its original full Bot ID w
   expect(rows[1].identity?.bot_id).toBe('aibot_beta_654321');
   expect(mocks.create).not.toHaveBeenCalled();
   expect(mocks.archive).not.toHaveBeenCalled();
+});
+
+it('keeps WeCom permission recovery open when the original bot remains unauthorized after reconnecting', async () => {
+  const account = { ...original, provider: 'wecom', label: 'Team robot', status: 'connected', binding_status: 'connected', runtime_status: 'running' } as ChannelAccount;
+  rows = [account];
+  mocks.resume.mockResolvedValue(account);
+  mocks.targets.mockRejectedValue({ response: { data: { error: { code: 'WECOM_CAPABILITY_REAUTH_REQUIRED' } } } });
+  const onConnected = vi.fn();
+  const errorToast = vi.spyOn(message, 'error');
+  render(<MemoryRouter><ChannelConnectionPage provider="wecom" accountId={original.id} onConnected={onConnected} /></MemoryRouter>);
+  fireEvent.click(screen.getByRole('button', { name: 'notifications.wecomRefreshAuthorization' }));
+  expect(await screen.findByText('notifications.WECOM_CAPABILITY_REAUTH_REQUIRED')).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'notifications.wecomRestorePermissionTitle' })).toBeVisible();
+  expect(mocks.targets).toHaveBeenCalledWith(original.id);
+  expect(onConnected).not.toHaveBeenCalled();
+  expect(errorToast).not.toHaveBeenCalled();
+  expect(mocks.create).not.toHaveBeenCalled();
+});
+
+it('waits for an original WeCom bot messaging permission check before completing recovery', async () => {
+  const account = { ...original, provider: 'wecom', label: 'Team robot', status: 'connected', binding_status: 'connected', runtime_status: 'running' } as ChannelAccount;
+  rows = [account];
+  mocks.resume.mockResolvedValue(account);
+  let finishPermissionCheck!: (result: { items: []; next_cursor: string }) => void;
+  mocks.targets.mockReturnValue(new Promise(resolve => { finishPermissionCheck = resolve; }));
+  const onConnected = vi.fn();
+  render(<MemoryRouter><ChannelConnectionPage provider="wecom" accountId={original.id} onConnected={onConnected} /></MemoryRouter>);
+  fireEvent.click(screen.getByRole('button', { name: 'notifications.wecomRefreshAuthorization' }));
+  await waitFor(() => expect(mocks.targets).toHaveBeenCalledWith(original.id));
+  expect(onConnected).not.toHaveBeenCalled();
+  await act(async () => { finishPermissionCheck({ items: [], next_cursor: '' }); });
+  expect(onConnected).toHaveBeenCalledWith(account);
+  expect(mocks.create).not.toHaveBeenCalled();
 });
