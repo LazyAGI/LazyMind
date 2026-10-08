@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { cancelConnectionSession, channelAccountLabel, type ChannelAccount } from './api';
+import { cancelConnectionSession, createConnectionSession, refreshConnectionSession, submitConnectionChallenge, channelAccountLabel, type ChannelAccount } from './api';
 
-const http = vi.hoisted(() => ({ request: vi.fn(), defaults: {} }));
+const http = vi.hoisted(() => ({ request: vi.fn(), post: vi.fn(), defaults: {} }));
 vi.mock('@/components/request', () => ({ BASE_URL: '', axiosInstance: http }));
-beforeEach(() => { vi.clearAllMocks(); http.request.mockResolvedValue({ data: {} }); });
+beforeEach(() => { vi.clearAllMocks(); http.request.mockResolvedValue({ data: {} }); http.post.mockResolvedValue({ data: {} }); });
 
 function feishu(label: string, authorizedName = ''): ChannelAccount {
   return {
@@ -38,4 +38,15 @@ it('passes quiet cleanup errors through the generated cancellation request', asy
   });
   await cancelConnectionSession('session/a');
   expect(http.request.mock.lastCall![0].silentError).toBeUndefined();
+  await refreshConnectionSession('session/a', { silentError: true });
+  expect(http.request.mock.lastCall![0].silentError).toBe(true);
+  await submitConnectionChallenge('session/a', '1234', 'numeric_code', { silentError: true });
+  expect(http.request.mock.lastCall![0].silentError).toBe(true);
+});
+
+it('lets the active panel own QR creation errors without a global navigation toast', async () => {
+  await createConnectionSession('wechat', { idempotencyKey: 'operation', silentError: true });
+  expect(http.post).toHaveBeenCalledWith('/api/channel-gateway/v1/connection-sessions', { provider: 'wechat' }, {
+    headers: { 'Idempotency-Key': 'operation' }, silentError: true,
+  });
 });

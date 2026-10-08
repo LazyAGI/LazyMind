@@ -93,15 +93,19 @@ export function isChannelAccountAvailable(account: ChannelAccount): boolean {
 
 export async function createConnectionSession(
   provider: ChannelProvider,
-  options?: { createNew?: boolean; reauthorize?: boolean; idempotencyKey?: string; accountId?: string; credentials?: { bot_id: string; secret: string } },
+  options?: { createNew?: boolean; reauthorize?: boolean; idempotencyKey?: string; accountId?: string; credentials?: { bot_id: string; secret: string }; silentError?: boolean },
 ): Promise<ConnectionSession> {
+  const requestOptions: RawAxiosRequestConfig & { silentError?: boolean } = {
+    headers: options?.idempotencyKey ? { 'Idempotency-Key': options.idempotencyKey } : undefined,
+    silentError: options?.silentError,
+  };
   const response = await axiosInstance.post<ConnectionSession>(`${BASE_URL}/api/channel-gateway/v1/connection-sessions`, {
     provider,
     ...(options?.reauthorize ? { reauthorize: true } : {}),
     ...(options?.createNew ? { create_new: true } : {}),
     ...(options?.accountId ? { account_id: options.accountId } : {}),
     ...(options?.credentials ? { credentials: options.credentials } : {}),
-  }, { headers: options?.idempotencyKey ? { 'Idempotency-Key': options.idempotencyKey } : undefined });
+  }, requestOptions);
   return response.data;
 }
 
@@ -116,18 +120,22 @@ export async function submitConnectionChallenge(
   sessionId: string,
   value: string,
   type = 'numeric_code',
+  options?: { silentError?: boolean },
 ): Promise<ConnectionSession> {
+  const requestOptions: RawAxiosRequestConfig & { silentError?: boolean } = options || {};
   const response = await connectionSessionsApi.submitConnectionChallenge({
     sessionId,
     connectionChallengeSubmit: { type, value },
-  });
+  }, requestOptions);
   return response.data;
 }
 
 export async function refreshConnectionSession(
   sessionId: string,
+  options?: { silentError?: boolean },
 ): Promise<ConnectionSession> {
-  const response = await connectionSessionsApi.refreshConnectionSession({ sessionId });
+  const requestOptions: RawAxiosRequestConfig & { silentError?: boolean } = options || {};
+  const response = await connectionSessionsApi.refreshConnectionSession({ sessionId }, requestOptions);
   return response.data;
 }
 
