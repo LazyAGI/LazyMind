@@ -37,7 +37,6 @@ def _wechat_account_label(result: dict) -> str:
 
 
 _TERMINAL_STATUSES = {'connected', 'expired', 'canceled', 'failed'}
-_INVALID_SESSION_ERRORS = ('errcode=-14', 'session timeout')
 _REDIRECT_HOST_RE = re.compile(r'^[A-Za-z0-9.-]+$')
 
 
@@ -159,9 +158,10 @@ class WeChatConnectionService:
         if not created:
             return self._session_view(row)
         try:
-            qrcode, qr_payload, base_url = self._wechat.start_login(
-                self._local_tokens(owner_user_id),
-            )
+            # Saved tokens make iLink return binded_redirect without credentials
+            # or an account identity. QR login must obtain fresh authorization;
+            # retained credentials are restored through resume_account instead.
+            qrcode, qr_payload, base_url = self._wechat.start_login()
         except WeChatError as exc:
             _logger.warning('wechat_start_login_failed session_id=%s error=%s', session_id, exc)
             self._store.mark_failed(
@@ -240,9 +240,7 @@ class WeChatConnectionService:
         if not refreshable:
             raise GatewayError(409, 'INVALID_STATE', '当前连接会话不能刷新二维码')
         try:
-            qrcode, qr_payload, base_url = self._wechat.start_login(
-                self._local_tokens(owner_user_id),
-            )
+            qrcode, qr_payload, base_url = self._wechat.start_login()
         except WeChatError as exc:
             _logger.warning('wechat_refresh_login_failed session_id=%s error=%s', session_id, exc)
             raise GatewayError(
@@ -502,8 +500,8 @@ class WeChatConnectionService:
                         session_id,
                         qr_version,
                         code='ACCOUNT_ALREADY_BOUND',
-                        message='该微信 ClawBot 已绑定，请使用原有凭据或重新创建',
-                        retryable=False,
+                        message='该微信账号已有绑定，请重新生成二维码完成授权，或在原账号点击“重新连接”',
+                        retryable=True,
                     )
                     return
                 _logger.info(
@@ -594,34 +592,6 @@ class WeChatConnectionService:
                 if str(previous.get('authorized_user_id') or '') == authorized_user_id:
                     return str(account['external_id_hash'])
         return hashlib.sha256(provider_account_id.encode('utf-8')).hexdigest()
-
-    def _local_tokens(self, owner_user_id: str) -> tuple[str, ...]:
-        tokens: list[str] = []
-        for account in self._store.list_accounts(
-            owner_user_id,
-            'wechat',
-        )[:10]:
-            last_error = str(account.get('last_error') or '').lower()
-            if any(error in last_error for error in _INVALID_SESSION_ERRORS):
-                continue
-            ciphertext = str(account.get('credentials_ciphertext') or '')
-            if not ciphertext:
-                continue
-            try:
-                credentials = self._cipher.decrypt(
-                    owner_user_id,
-                    ciphertext,
-                )
-            except Exception:
-                _logger.warning(
-                    'wechat_local_token_decrypt_failed account_id=%s',
-                    account.get('id'),
-                )
-                continue
-            token = str(credentials.get('token') or '').strip()
-            if token:
-                tokens.append(token)
-        return tuple(tokens)
 
     def _decrypt_session_state(self, row: dict[str, Any]) -> dict[str, Any]:
         ciphertext = str(row.get('provider_state_ciphertext') or '')
