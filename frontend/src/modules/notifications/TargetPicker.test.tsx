@@ -22,17 +22,16 @@ it('constrains long account labels inside the inline notification grid', () => {
   expect(accountSelect.closest('label')).toHaveClass('notification-target-field');
   expect(accountSelect.closest('.ant-select')).toHaveClass('notification-target-select');
 });
-it('copies an explicit default with a readable group name', async () => {
+it('requires a task recipient even when the account has a legacy default', async () => {
   const save = vi.fn();
   render(<TargetPicker provider="feishu" accounts={[account]} current={{ enabled: true, account_id: 'a' }} onSave={save} onClose={() => {}} />);
-  await screen.findByText('产品日报群');
-  // Selecting the default starts another validation request; wait for a usable save action.
-  await waitFor(() => {
-    const button = screen.getByRole('button', { name: 'notifications.save' });
-    expect(button).toBeEnabled();
-    fireEvent.click(button);
-    expect(save).toHaveBeenCalledWith({ enabled: true, account_id: 'a', recipient_id: 'oc_daily' });
-  });
+  await waitFor(() => expect(mocks.groups).toHaveBeenCalledWith('a'));
+  expect(screen.getByRole('button', { name: 'notifications.save' })).toBeDisabled();
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: 'notifications.recipient' }));
+  fireEvent.click(await screen.findByText('产品日报群'));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'notifications.save' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'notifications.save' }));
+  expect(save).toHaveBeenCalledWith({ enabled: true, account_id: 'a', recipient_id: 'oc_daily' });
 });
 it('preserves a saved recipient when the connection default differs', async () => {
   const save = vi.fn();
@@ -48,13 +47,13 @@ it('retains known recipients when group permission is missing', async () => {
   await screen.findByText('notifications.groupPermissionHint');
   await waitFor(() => expect(screen.getByRole('button', { name: 'notifications.save' })).toBeEnabled());
 });
-it('resolves the default even when it is outside the first page', async () => {
+it('resolves a saved task recipient even when it is outside the first page', async () => {
   mocks.groups.mockResolvedValue({ items: [], next_cursor: '' });
   mocks.targets.mockImplementation((_account: string, _cursor = '', recipient = '') => Promise.resolve({
     items: recipient ? [{ recipient_id: 'oc_daily', label: '后页默认群', available: true }] : [], next_cursor: '',
   }));
   const save = vi.fn();
-  render(<TargetPicker provider="feishu" accounts={[account]} current={{ enabled: true, account_id: 'a' }} onSave={save} onClose={() => {}} />);
+  render(<TargetPicker provider="feishu" accounts={[account]} current={{ enabled: true, account_id: 'a', recipient_id: 'oc_daily' }} onSave={save} onClose={() => {}} />);
   await screen.findByText('后页默认群');
   fireEvent.click(screen.getByRole('button', { name: 'notifications.save' }));
   expect(save).toHaveBeenCalledWith({ enabled: true, account_id: 'a', recipient_id: 'oc_daily' });

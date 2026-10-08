@@ -142,8 +142,11 @@ def test_send_draft_is_idempotent_after_success(mail_auth):
         return_value={'id': 'm1', 'sent_at': '2026-09-01T00:00:00+00:00'},
     ) as send:
         first = MailToolkit().send_draft('draft_once')
-        with pytest.raises(ToolExecutionError, match='already sent'):
-            MailToolkit().send_draft('draft_once')
+        second = MailToolkit().send_draft('draft_once')
+    assert second == first
+    assert first['body'] == 'body'
+    assert first['message_id'] == 'm1'
+    assert first['requires_confirmation'] is False
     assert first['status'] == 'sent'
     assert send.call_count == 1
 
@@ -237,6 +240,23 @@ def test_compose_accepts_string_attachment_path(mail_auth, tmp_path):
         attachment_paths=str(attachment),
     )
     assert result['attachments'] == ['attachment_test.txt']
+
+
+def test_compose_accepts_inline_artifact_workspace_path(mail_auth, monkeypatch):
+    from lazymind.chat.engine.tools import chat_artifact
+
+    monkeypatch.setattr(chat_artifact, '_write_agent_data', lambda *_args, **_kwargs: None)
+    artifact = chat_artifact.save_chat_artifact('spring.txt', '春天来了')
+
+    preview = MailToolkit().compose_draft(
+        to='a@b.com',
+        subject='chat artifact',
+        body='body',
+        attachment_paths=artifact['workspace_path'],
+    )
+
+    assert preview['attachments'] == ['spring.txt']
+    assert Path(preview['attachment_paths'][0]).read_text(encoding='utf-8') == '春天来了'
 
 
 def test_compose_rejects_path_outside_workspace(mail_auth, tmp_path):
@@ -361,6 +381,36 @@ def test_send_reset_after_data_is_delivery_unknown(mail_auth):
             MailToolkit().send_draft('draft_unk')
     saved = _load_draft('draft_unk')
     assert saved['status'] == 'delivery_unknown'
+
+
+def test_send_reset_while_submitting_data_is_delivery_unknown(mail_auth):
+    draft = {
+        'draft_id': 'draft_unk_during_data',
+        'revision': 1,
+        'to': ['a@b.com'],
+        'cc': [],
+        'subject': 'hi',
+        'body': 'body',
+        'attachment_paths': [],
+        'in_reply_to': '',
+        'status': 'draft',
+        'sent_at': '',
+        'last_error': '',
+    }
+    _save_draft(draft)
+    lazyllm.globals['agentic_config']['mail_draft_confirm_id'] = draft['draft_id']
+    lazyllm.globals['agentic_config']['mail_draft_confirm_revision'] = 1
+
+    class ResetDuringDataSMTP(_FakeSMTP):
+        def send(self, payload):
+            if bytes(payload).endswith(b'.\r\n'):
+                raise ConnectionResetError('Connection reset while awaiting DATA acknowledgement')
+            return None
+
+    with patch('lazymind.chat.engine.tools.mail.smtplib.SMTP_SSL', ResetDuringDataSMTP):
+        with pytest.raises(ToolExecutionError, match='delivery is unknown'):
+            MailToolkit().send_draft(draft['draft_id'])
+    assert _load_draft(draft['draft_id'])['status'] == 'delivery_unknown'
 
 
 def test_imap_before_date_is_inclusive():
@@ -687,6 +737,8 @@ def test_mail_internal_drafts_require_full_identity(mail_auth, missing):
     lazyllm.globals['agentic_config'].pop(missing)
     with pytest.raises(ToolExecutionError, match='user_id.*conversation_id'):
         _draft_dir()
+
+
 def test_imap_search_args_quote_and_charset():
     assert _imap_search_args({'keyword': '合同'}) == [
         'CHARSET', 'UTF-8', 'ALL', 'TEXT', '"合同"',
@@ -956,7 +1008,7 @@ def test_send_draft_is_idempotent_under_concurrency(mail_auth):
         for worker in workers:
             worker.join()
     assert send_count['n'] == 1
-    assert any('already sent' in item for item in errors)
+    assert errors == []
     assert _load_draft('draft_race')['status'] == 'sent'
 
 
@@ -1079,6 +1131,358 @@ def test_plain_error_text_unwraps_json_payloads():
     assert '{' not in _plain_error_text(envelope)
 
 
+@pytest.mark.parametrize('value', [
+    'ToolExecutionError: {"error": {"message": "Attachment unavailable"}}',
+    {'result': {'ok': False, 'value': '{"detail": "Attachment unavailable"}'}},
+    '[{"message": "Attachment unavailable"}]',
+    '"{\\"message\\": \\"Attachment unavailable\\"}"',
+])
+def test_plain_error_text_unwraps_prefixed_and_nested_errors(value):
+    assert _plain_error_text(value) == 'Attachment unavailable'
+
+
+@pytest.mark.parametrize('status', ['sent', 'sending'])
+def test_terminal_or_inflight_card_has_no_send_question(mail_auth, status):
+    from lazymind.chat.engine.tools.mail import _emit_draft_card
+    with patch('lazymind.chat.engine.tools.mail._write_agent_data') as emit:
+        card = _emit_draft_card({'draft_id': 'receipt', 'status': status})
+    assert card['requires_confirmation'] is False
+    assert emit.call_args.kwargs['questions'] == []
+
+
+def test_interrupted_send_requires_new_explicit_confirmation(mail_auth):
+    _save_draft({'draft_id': 'uncertain', 'revision': 1, 'status': 'sending', 'to': ['a@b.com'],
+                 'last_error': 'Previous partial delivery. Retry refused addresses.'})
+    lazyllm.globals['agentic_config'].update(mail_draft_confirm_id='uncertain', mail_draft_confirm_revision=1)
+    with patch('lazymind.chat.engine.tools.mail._IMAPBackend.send', return_value={'id': 'resent'}) as send:
+        with pytest.raises(ToolExecutionError, match='delivery|Delivery'):
+            MailToolkit().send_draft('uncertain')
+        with pytest.raises(ToolExecutionError, match='stale'):
+            MailToolkit().send_draft('uncertain')
+        send.assert_not_called()
+        saved = _load_draft('uncertain')
+        assert saved['status'] == 'delivery_unknown'
+        assert saved['revision'] == 2
+        assert 'unknown' in saved['last_error']
+        lazyllm.globals['agentic_config']['mail_draft_confirm_revision'] = saved['revision']
+        assert MailToolkit().send_draft('uncertain')['status'] == 'sent'
+        send.assert_called_once()
+
+
+def test_unknown_card_warns_and_update_preserves_unknown_delivery(mail_auth):
+    from lazymind.chat.engine.tools.mail import _emit_draft_card
+    draft = {'draft_id': 'unknown', 'revision': 2, 'status': 'delivery_unknown', 'to': ['a@b.com'],
+             'last_error': 'Delivery unknown. Resending can send a duplicate.'}
+    _save_draft(draft)
+    with patch('lazymind.chat.engine.tools.mail._write_agent_data') as emit:
+        card = _emit_draft_card(draft)
+    assert card['requires_confirmation'] is True
+    assert card['retryable'] is True
+    assert card['delivery_unknown'] is True
+    assert emit.call_args.kwargs['questions']
+    updated = MailToolkit().update_draft('unknown', body='edited')
+    assert updated['revision'] == 3
+    assert updated['status'] == 'delivery_unknown'
+    assert updated['last_error'] == draft['last_error']
+
+
+@pytest.mark.parametrize('failure', ['attachment', 'build', 'recipients', 'smtp'])
+def test_unknown_retry_failure_keeps_duplicate_warning_and_requires_new_confirmation(mail_auth, failure):
+    from contextlib import nullcontext
+
+    _save_draft({'draft_id': 'unknown_retry', 'revision': 2, 'status': 'delivery_unknown',
+                 'to': ['a@b.com'], 'body': 'original', 'attachment_paths': [],
+                 'last_error': 'Delivery unknown. Resending can send a duplicate.'})
+    cfg = lazyllm.globals['agentic_config']
+    cfg.update(mail_draft_confirm_id='unknown_retry', mail_draft_confirm_revision=2,
+               mail_draft_patch={'body': 'edited'})
+    if failure == 'attachment':
+        cfg['mail_draft_patch']['attachments'] = [{'filename': 'bad.txt', 'content_base64': '@@@'}]
+    elif failure == 'recipients':
+        cfg['mail_draft_patch']['to'] = []
+    build = patch('lazymind.chat.engine.tools.mail._build_message', side_effect=ValueError('Invalid header'))
+    with patch(
+        'lazymind.chat.engine.tools.mail._IMAPBackend.send',
+        side_effect=ToolExecutionError('SMTP unavailable'),
+    ) as send, patch('lazymind.chat.engine.tools.mail._write_agent_data') as emit:
+        with build if failure == 'build' else nullcontext():
+            with pytest.raises(ToolExecutionError):
+                MailToolkit().send_draft('unknown_retry')
+        card = emit.call_args.kwargs['mail_draft']
+        assert card['revision'] == 3
+        assert card['status'] == 'delivery_unknown'
+        assert card['delivery_unknown'] is True
+        assert 'duplicate' in card['last_error'].lower()
+        assert card['body'] == 'edited'
+        expected = {
+            'attachment': 'base64', 'build': 'Invalid header',
+            'recipients': 'No recipients', 'smtp': 'SMTP unavailable',
+        }
+        assert expected[failure] in card['last_error']
+        with pytest.raises(ToolExecutionError, match='stale'):
+            MailToolkit().send_draft('unknown_retry')
+        assert send.call_count == (1 if failure == 'smtp' else 0)
+        cfg.update(mail_draft_confirm_revision=card['revision'], mail_draft_patch={
+            'to': ['a@b.com'], 'attachment_paths': [],
+        })
+        send.side_effect = None
+        send.return_value = {'id': 'confirmed-retry'}
+        assert MailToolkit().send_draft('unknown_retry')['status'] == 'sent'
+
+
+@pytest.mark.parametrize('via_update', [False, True])
+def test_partial_recipient_edits_never_resend_to_accepted_addresses(mail_auth, via_update):
+    card = MailToolkit().compose_draft(['accepted@b.com', 'refused@b.com'], 'subject', 'body', cc=['acceptedcc@b.com'])
+    cfg = lazyllm.globals['agentic_config']
+    cfg.update(mail_draft_confirm_id=card['draft_id'], mail_draft_confirm_revision=card['revision'])
+    with patch('lazymind.chat.engine.tools.mail._IMAPBackend.send', side_effect=[
+        {'partial_sent': True, 'accepted': ['accepted@b.com', 'acceptedcc@b.com'],
+         'refused': [{'address': 'refused@b.com'}]},
+        {'id': 'retry'},
+    ]) as send:
+        partial = MailToolkit().send_draft(card['draft_id'])
+        edits = {'to': ['ACCEPTEDCC@b.com', 'refused@b.com', 'new@b.com'], 'cc': ['ACCEPTED@b.com']}
+        if via_update:
+            partial = MailToolkit().update_draft(card['draft_id'], **edits)
+        else:
+            cfg['mail_draft_patch'] = edits
+        cfg['mail_draft_confirm_revision'] = partial['revision']
+        receipt = MailToolkit().send_draft(card['draft_id'])
+    retry = send.call_args.args[0]
+    assert retry['To'] == 'refused@b.com, new@b.com'
+    assert retry['Cc'] is None
+    assert receipt['accepted_recipients'] == ['accepted@b.com', 'acceptedcc@b.com', 'refused@b.com', 'new@b.com']
+
+
+@pytest.mark.parametrize('failure', ['missing', 'upload', 'build'])
+def test_attachment_failure_preserves_edits_and_blocks_silent_retry(mail_auth, failure):
+    card = MailToolkit().compose_draft('a@b.com', 'old', 'old')
+    draft_id = card['draft_id']
+    cfg = lazyllm.globals['agentic_config']
+    cfg.update(mail_draft_confirm_id=draft_id, mail_draft_confirm_revision=1)
+    cfg['mail_draft_patch'] = {'body': 'edited body', 'subject': 'edited subject'}
+    if failure == 'missing':
+        cfg['mail_draft_patch']['attachment_paths'] = ['missing.pdf']
+    elif failure == 'upload':
+        cfg['mail_draft_patch']['attachments'] = [{'filename': 'bad.txt', 'content_base64': '@@@'}]
+    with patch('lazymind.chat.engine.tools.mail._IMAPBackend.send') as send, patch(
+        'lazymind.chat.engine.tools.mail._write_agent_data',
+    ) as emit:
+        build = patch('lazymind.chat.engine.tools.mail._build_message', side_effect=OSError('Attachment disappeared'))
+        from contextlib import nullcontext
+        with build if failure == 'build' else nullcontext():
+            with pytest.raises(ToolExecutionError):
+                MailToolkit().send_draft(draft_id)
+        saved = _load_draft(draft_id)
+        assert saved['body'] == 'edited body'
+        assert saved['subject'] == 'edited subject'
+        assert saved['status'] == 'failed'
+        emitted = emit.call_args.kwargs['mail_draft']
+        assert emitted['last_error']
+        assert emitted['requires_confirmation'] is True
+        assert emitted['body'] == 'edited body'
+        if failure != 'build':
+            cfg.pop('mail_draft_patch')
+            with pytest.raises(ToolExecutionError):
+                MailToolkit().send_draft(draft_id)
+        send.assert_not_called()
+
+
+def test_build_message_rejects_disappeared_attachment(mail_auth):
+    with pytest.raises((ToolExecutionError, OSError)):
+        _build_message({'to': ['a@b.com'], 'attachment_paths': ['missing.pdf']}, 'user@qq.com')
+
+
+def test_update_attachment_failure_keeps_revision_edits_and_allows_explicit_removal(mail_auth):
+    original = MailToolkit().compose_draft('a@b.com', 'old', 'old')
+    failed = MailToolkit().update_draft(original['draft_id'], body='edited', attachment_paths=['missing.pdf'])
+    assert failed['status'] == 'failed'
+    assert failed['body'] == 'edited'
+    assert failed['revision'] == 2
+    assert failed['attachments'] == ['missing.pdf']
+    cfg = lazyllm.globals['agentic_config']
+    cfg.update(mail_draft_confirm_id=failed['draft_id'], mail_draft_confirm_revision=1)
+    with patch('lazymind.chat.engine.tools.mail._IMAPBackend.send', return_value={'id': 'sent'}) as send:
+        with pytest.raises(ToolExecutionError, match='stale'):
+            MailToolkit().send_draft(failed['draft_id'])
+        send.assert_not_called()
+        cfg.update(mail_draft_confirm_revision=2, mail_draft_patch={'attachment_paths': []})
+        receipt = MailToolkit().send_draft(failed['draft_id'])
+    assert receipt['status'] == 'sent'
+    assert receipt['body'] == 'edited'
+    assert receipt['attachments'] == []
+
+
+def test_compose_attachment_failure_emits_saved_full_card(mail_auth):
+    with patch('lazymind.chat.engine.tools.mail._write_agent_data') as emit:
+        with pytest.raises(ToolExecutionError, match='not found'):
+            MailToolkit().compose_draft('a@b.com', 'subject', 'body', attachment_paths=['missing.pdf'])
+    card = emit.call_args.kwargs['mail_draft']
+    assert card['status'] == 'failed'
+    assert card['attachments'] == ['missing.pdf']
+    assert _load_draft(card['draft_id'])['body'] == 'body'
+
+
+def test_upload_only_patch_preserves_existing_attachments(mail_auth):
+    import base64
+    path = Path(chat_agent_workspace('u1', 'c1')) / 'existing.txt'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('existing')
+    draft = {'attachment_paths': [str(path)]}
+    lazyllm.globals['agentic_config']['mail_draft_patch'] = {
+        'attachments': [{'filename': 'new.txt', 'content_base64': base64.b64encode(b'new').decode()}],
+    }
+    _apply_confirm_patch(draft)
+    assert [os.path.basename(item) for item in draft['attachment_paths']] == ['existing.txt', 'new.txt']
+
+
+@pytest.mark.parametrize('failure', ['base64', 'empty', 'size', 'total', 'io', 'partial_write', 'malformed'])
+def test_mixed_upload_failure_reports_only_unsaved_files(mail_auth, monkeypatch, failure):
+    import base64
+    import builtins
+    from lazymind.chat.engine.tools import mail
+
+    encoded = base64.b64encode(b'file').decode()
+    files = [{'filename': name, 'content_base64': encoded} for name in ['saved.txt', 'failed.txt', 'later.txt']]
+    if failure == 'base64':
+        files[1]['content_base64'] = '@@@'
+    elif failure == 'empty':
+        files[1]['content_base64'] = ''
+    elif failure == 'size':
+        monkeypatch.setattr(mail, '_MAX_CARD_ATTACHMENT_BYTES', 5)
+        files[1]['content_base64'] = base64.b64encode(b'too large').decode()
+    elif failure == 'total':
+        monkeypatch.setattr(mail, '_MAX_CARD_ATTACHMENT_TOTAL_BYTES', 5)
+    elif failure == 'malformed':
+        files[1] = 'not an upload'
+    else:
+        real_open = builtins.open
+
+        class PartialWrite:
+            def __init__(self, handle):
+                self.handle = handle
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                self.handle.close()
+
+            def write(self, data):
+                self.handle.write(data[:1])
+                raise OSError('Disk full')
+
+        def failing_open(path, mode='r', *args, **kwargs):
+            if os.path.basename(path) == 'failed.txt' and ('w' in mode or 'x' in mode):
+                if failure == 'partial_write':
+                    return PartialWrite(real_open(path, mode, *args, **kwargs))
+                raise OSError('Disk full')
+            return real_open(path, mode, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, 'open', failing_open)
+    card = MailToolkit().compose_draft('a@b.com', 'subject', 'body')
+    cfg = lazyllm.globals['agentic_config']
+    cfg.update(mail_draft_confirm_id=card['draft_id'], mail_draft_confirm_revision=card['revision'],
+               mail_draft_patch={'body': 'edited', 'attachments': files})
+    with patch('lazymind.chat.engine.tools.mail._IMAPBackend.send') as send, patch(
+        'lazymind.chat.engine.tools.mail._write_agent_data',
+    ) as emit:
+        with pytest.raises(ToolExecutionError):
+            MailToolkit().send_draft(card['draft_id'])
+        failed = emit.call_args.kwargs['mail_draft']
+        assert failed['body'] == 'edited'
+        assert [os.path.basename(path) for path in failed['attachment_paths']] == ['saved.txt']
+        assert Path(failed['attachment_paths'][0]).read_bytes() == b'file'
+        assert not Path(failed['attachment_paths'][0]).with_name('failed.txt').exists()
+        expected = ['attachment.bin' if failure == 'malformed' else 'failed.txt', 'later.txt']
+        assert failed['pending_attachment_names'] == expected
+        assert failed['attachments'] == ['saved.txt', *expected]
+        assert _load_draft(card['draft_id'])['attachment_paths'] == failed['attachment_paths']
+        cfg.pop('mail_draft_patch')
+        cfg['mail_draft_confirm_revision'] = failed['revision']
+        with pytest.raises(ToolExecutionError):
+            MailToolkit().send_draft(card['draft_id'])
+        send.assert_not_called()
+
+
+def test_upload_only_retry_keeps_other_pending_files_until_explicit_removal(mail_auth):
+    import base64
+    from lazymind.chat.engine.tools.mail import _preview
+
+    draft = {'attachment_paths': [], 'pending_attachment_names': ['one.txt', 'two.txt']}
+    cfg = lazyllm.globals['agentic_config']
+    cfg['mail_draft_patch'] = {
+        'attachments': [{'filename': 'one.txt', 'content_base64': base64.b64encode(b'one').decode()}],
+    }
+    with pytest.raises(ToolExecutionError, match='Attachments'):
+        _apply_confirm_patch(draft)
+    assert _preview(draft)['attachments'] == ['one.txt', 'two.txt']
+    assert draft['pending_attachment_names'] == ['two.txt']
+    cfg['mail_draft_patch'] = {'attachment_paths': draft['attachment_paths'], 'attachments': []}
+    _apply_confirm_patch(draft)
+    assert draft['pending_attachment_names'] == []
+    assert draft['attachment_error'] == ''
+
+
+@pytest.mark.parametrize('uploads,names', [
+    ([{'filename': f'{index}.txt', 'content_base64': 'eA=='} for index in range(6)],
+     [f'{index}.txt' for index in range(6)]),
+    ({'filename': 'wrong-shape.txt', 'content_base64': 'eA=='}, ['wrong-shape.txt']),
+])
+def test_batch_upload_rejection_preserves_all_pending_names(mail_auth, uploads, names):
+    draft = {'attachment_paths': []}
+    lazyllm.globals['agentic_config']['mail_draft_patch'] = {'attachments': uploads}
+    with pytest.raises(ToolExecutionError):
+        _apply_confirm_patch(draft)
+    assert draft['attachment_paths'] == []
+    assert draft['pending_attachment_names'] == names
+
+
+def test_upload_retry_receipt_retains_saved_files_and_replaces_pending_name(mail_auth):
+    card = MailToolkit().compose_draft('a@b.com', 'subject', 'body')
+    cfg = lazyllm.globals['agentic_config']
+    cfg.update(mail_draft_confirm_id=card['draft_id'], mail_draft_confirm_revision=card['revision'],
+               mail_draft_patch={'attachments': [
+                   {'filename': 'saved.txt', 'content_base64': 'eA=='},
+                   {'filename': 'retry.txt', 'content_base64': '@@@'},
+               ]})
+    with patch('lazymind.chat.engine.tools.mail._IMAPBackend.send') as blocked_send:
+        with pytest.raises(ToolExecutionError):
+            MailToolkit().send_draft(card['draft_id'])
+        blocked_send.assert_not_called()
+    failed = _load_draft(card['draft_id'])
+    cfg.update(mail_draft_confirm_revision=failed['revision'], mail_draft_patch={
+        'attachments': [{'filename': 'retry.txt', 'content_base64': 'eQ=='}],
+    })
+    with patch('lazymind.chat.engine.tools.mail._IMAPBackend.send', return_value={'id': 'complete'}) as send:
+        receipt = MailToolkit().send_draft(card['draft_id'])
+    assert receipt['status'] == 'sent'
+    assert receipt['attachments'] == ['saved.txt', 'retry.txt']
+    assert receipt['pending_attachment_names'] == []
+    assert len(receipt['attachment_paths']) == 2
+    assert [part.get_payload(decode=True) for part in send.call_args.args[0].iter_attachments()] == [b'x', b'y']
+
+
+def test_partial_send_accumulates_accepted_recipients_across_retries(mail_auth):
+    card = MailToolkit().compose_draft(['a@b.com', 'b@b.com', 'c@b.com'], 'subject', 'body')
+    cfg = lazyllm.globals['agentic_config']
+    cfg.update(mail_draft_confirm_id=card['draft_id'], mail_draft_confirm_revision=1)
+    replies = [
+        {'partial_sent': True, 'accepted': ['a@b.com'], 'refused': [{'address': 'b@b.com'}, {'address': 'c@b.com'}]},
+        {'partial_sent': True, 'accepted': ['b@b.com'], 'refused': [{'address': 'c@b.com'}]},
+        {'id': 'complete'},
+    ]
+    with patch('lazymind.chat.engine.tools.mail._IMAPBackend.send', side_effect=replies) as send:
+        for _ in replies:
+            receipt = MailToolkit().send_draft(card['draft_id'])
+            cfg['mail_draft_confirm_revision'] = receipt['revision']
+    assert [call.args[0]['To'] for call in send.call_args_list] == [
+        'a@b.com, b@b.com, c@b.com', 'b@b.com, c@b.com', 'c@b.com',
+    ]
+    assert receipt['accepted_recipients'] == ['a@b.com', 'b@b.com', 'c@b.com']
+    assert receipt['status'] == 'sent'
+
+
 def test_bodystructure_keeps_duplicate_filenames():
     raw = (
         '1 (UID 12 BODYSTRUCTURE (('
@@ -1101,6 +1505,16 @@ def test_card_upload_rejects_too_many_files(mail_auth):
     ]
     with pytest.raises(ToolExecutionError, match='At most 5'):
         _write_outgoing_attachments(items)
+
+
+def test_card_upload_uses_realtime_safe_ten_megabyte_limit(mail_auth):
+    import base64
+    content = b'x' * (10 * 1024 * 1024 + 1)
+    with pytest.raises(ToolExecutionError, match='10MB'):
+        _write_outgoing_attachments([{
+            'filename': 'too-large.bin',
+            'content_base64': base64.b64encode(content).decode('ascii'),
+        }])
 
 
 def test_card_upload_rejects_malformed_base64(mail_auth):
@@ -1142,10 +1556,36 @@ def test_partial_send_retries_only_refused_recipients(mail_auth):
         assert first['status'] == 'partial_sent'
         saved = _load_draft('draft_partial')
         assert saved['pending_recipients'] == ['bad@b.com']
+        with pytest.raises(ToolExecutionError, match='stale'):
+            MailToolkit().send_draft('draft_partial')
+        assert len(seen) == 1
+        lazyllm.globals['agentic_config']['mail_draft_confirm_revision'] = first['revision']
         second = MailToolkit().send_draft('draft_partial')
     assert second['status'] == 'sent'
     assert seen[0] == ['ok@b.com', 'bad@b.com']
     assert seen[1] == ['bad@b.com']
+
+
+@pytest.mark.parametrize('unknown', [False, True])
+def test_send_attempt_consumes_confirmation_on_failure(mail_auth, unknown):
+    card = MailToolkit().compose_draft('a@b.com', 'subject', 'body')
+    cfg = lazyllm.globals['agentic_config']
+    cfg.update(mail_draft_confirm_id=card['draft_id'], mail_draft_confirm_revision=card['revision'])
+    error = ToolExecutionError('Delivery unknown' if unknown else 'SMTP unavailable')
+    error.delivery_unknown = unknown
+    with patch('lazymind.chat.engine.tools.mail._IMAPBackend.send', side_effect=error) as send:
+        with pytest.raises(ToolExecutionError):
+            MailToolkit().send_draft(card['draft_id'])
+        failed = _load_draft(card['draft_id'])
+        assert failed['revision'] > card['revision']
+        with pytest.raises(ToolExecutionError, match='unknown|stale'):
+            MailToolkit().send_draft(card['draft_id'])
+        assert send.call_count == 1
+        cfg['mail_draft_confirm_revision'] = failed['revision']
+        send.side_effect = None
+        send.return_value = {'id': 'retry'}
+        assert MailToolkit().send_draft(card['draft_id'])['status'] == 'sent'
+        assert send.call_count == 2
 
 
 def test_confirm_patch_clears_pending_recipients_when_to_or_cc_changes(mail_auth):

@@ -120,7 +120,9 @@ def save_chat_artifact(
 
     Text and JSON values are stored directly. For any other generated attachment, use
     ``content_type='file'`` and pass its main-Agent workspace path as ``content``. Call
-    once for each requested artifact. This does not create a SubAgent task.
+    once for each requested artifact. Text and JSON results also include a relative
+    ``workspace_path`` that can be passed to another tool, such as a mail attachment.
+    This does not create a SubAgent task.
 
     After a successful call, mention the saved file in the final answer by copying
     ``file_markdown`` verbatim so the filename appears as a downloadable Markdown
@@ -160,21 +162,45 @@ def save_chat_artifact(
     metadata = _artifact_metadata(encoded_value, change_summary, logical_key)
 
     artifact_id = str(uuid.uuid4())
-    _write_agent_data(
-        'artifact_created',
-        artifact_id=artifact_id,
-        filename=safe_name,
-        content_type=normalized_type,
-        value=value,
-        caption=normalized_caption,
-        **metadata,
+    user_id, conversation_id = _current_artifact_scope()
+    # Tool results are model-facing locators, so keep their separator stable
+    # across hosts while the resolver maps them to the native filesystem.
+    workspace_path = f'.generated_artifacts/{artifact_id}/{safe_name}'
+    _, mirrored_path = _resolve_workspace_path(workspace_path, user_id, conversation_id)
+    mirrored_dir = os.path.dirname(mirrored_path)
+    temporary = os.path.join(mirrored_dir, f'.{uuid.uuid4().hex[:8]}.tmp')
+    mirrored_bytes = (
+        str(content if content is not None else '').encode('utf-8')
+        if normalized_type == 'text'
+        else json.dumps(content, ensure_ascii=False, indent=2).encode('utf-8')
     )
+    os.makedirs(mirrored_dir, exist_ok=False)
+    try:
+        with open(temporary, 'xb') as handle:
+            handle.write(mirrored_bytes)
+        os.replace(temporary, mirrored_path)
+        _write_agent_data(
+            'artifact_created',
+            artifact_id=artifact_id,
+            filename=safe_name,
+            content_type=normalized_type,
+            value=value,
+            caption=normalized_caption,
+            **metadata,
+        )
+    except Exception:
+        shutil.rmtree(mirrored_dir, ignore_errors=True)
+        raise
     return {
         'artifact_id': artifact_id,
         'filename': safe_name,
         'content_type': normalized_type,
+        'workspace_path': workspace_path,
         'file_markdown': _file_markdown(safe_name, artifact_id),
-        'message': f"Saved downloadable artifact '{safe_name}'.",
+        'message': (
+            f"Saved downloadable artifact '{safe_name}'. Pass workspace_path to another "
+            'tool when it needs the generated file, including MailToolkit_compose_draft.'
+        ),
     }
 
 

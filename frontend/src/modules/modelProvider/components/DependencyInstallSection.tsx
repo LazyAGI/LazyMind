@@ -417,7 +417,7 @@ export default function DependencyInstallSection() {
                 <span className="model-provider-service-logo" aria-hidden="true">
                   <img
                     alt=""
-                    className="model-provider-dependency-inline-icon"
+                    className="model-provider-dependency-inline-icon is-loaded"
                     src={DEPENDENCY_ICON_DATA_URL}
                   />
                 </span>

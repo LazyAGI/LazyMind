@@ -1,5 +1,27 @@
 import "./src/test/setup";
 import "@testing-library/jest-dom";
+import { transferableAbortController } from "node:util";
+
+// Node's fetch/Request reject jsdom's AbortSignal despite its matching shape.
+// Keep the controller and signal in the same realm as the Fetch API used by routers.
+const fetchController = transferableAbortController();
+Object.defineProperty(globalThis, "AbortController", {
+  configurable: true, writable: true, value: fetchController.constructor,
+});
+Object.defineProperty(globalThis, "AbortSignal", {
+  configurable: true, writable: true, value: fetchController.signal.constructor,
+});
+
+// jsdom does not perform layout. Selection/highlight tests still need the browser
+// geometry APIs to exist; tests asserting coordinates can override these stubs.
+Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+  configurable: true, writable: true,
+  value: () => new DOMRect(),
+});
+Object.defineProperty(Range.prototype, "getClientRects", {
+  configurable: true, writable: true,
+  value: () => Object.assign([], { item: () => null }),
+});
 
 function createMemoryStorage(): Storage {
   const store = new Map<string, string>();

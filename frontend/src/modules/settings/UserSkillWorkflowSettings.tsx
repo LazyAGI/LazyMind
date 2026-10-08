@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ReactNode, RefObject } from "react";
-import { Alert, Empty, Pagination, Skeleton, Switch, Tag, message } from "antd";
+import type { ChangeEvent, ReactNode, RefObject } from "react";
+import { Alert, Empty, Input, Pagination, Skeleton, Switch, message } from "antd";
 import { ApartmentOutlined, AppstoreOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import {
@@ -15,6 +15,17 @@ import {
 } from "@/modules/workflow/workflowDraftApi";
 
 export type ResourceTab = "skills" | "workflows";
+
+async function loadAllSkills(): Promise<SkillAssetRecord[]> {
+  const records = new Map<string, SkillAssetRecord>();
+  for (let page = 1; ; page += 1) {
+    const response = await listSkillAssetsPage({ page, pageSize: 100 });
+    const previousSize = records.size;
+    response.records.forEach((record) => records.set(record.id, record));
+    if (records.size >= (response.total ?? records.size)) return [...records.values()];
+    if (records.size === previousSize) throw new Error("Incomplete skill pagination");
+  }
+}
 
 interface UserSkillWorkflowSettingsProps {
   activeView?: ResourceTab;
@@ -35,6 +46,7 @@ interface ResourceRowProps {
   meta: string;
   enabled: boolean;
   controlEnabled: boolean;
+  disabled?: boolean;
   controlLabel: string;
   loading: boolean;
   error?: string;
@@ -49,6 +61,7 @@ function ResourceRow({
   meta,
   enabled,
   controlEnabled,
+  disabled,
   controlLabel,
   loading,
   error,
@@ -61,29 +74,23 @@ function ResourceRow({
     : enabled
       ? t("settingsPage.enabled")
       : t("settingsPage.disabled");
-  const statusClass = !controlEnabled
-    ? " is-suspended"
-    : enabled
-      ? " is-enabled"
-      : "";
-
   return (
-    <div className={`settings-skill-resource-row${enabled ? "" : " is-disabled"}${controlEnabled ? "" : " is-master-paused"}`}>
+    <tr className={controlEnabled ? "" : "is-master-paused"}>
+      <td><div className="settings-resource-name">
       <span className="settings-skill-resource-icon" aria-hidden="true">{icon}</span>
       <div className="settings-skill-resource-copy">
         <h2>{title}</h2>
         <p>{description || t("settingsPage.skills.noDescription")}</p>
-        <span className="settings-skill-resource-meta">{meta}</span>
         {error ? <span className="settings-skill-resource-error" role="alert">{error}</span> : null}
       </div>
-      <Tag className={`settings-skill-resource-status${statusClass}`}>
-        {status}
-      </Tag>
+      </div></td>
+      <td className="settings-resource-category">{meta}</td>
+      <td>
       <Switch
         className="settings-ref-switch"
         checked={enabled}
         loading={loading}
-        disabled={!controlEnabled || loading}
+        disabled={!controlEnabled || disabled || loading}
         onChange={onChange}
         aria-label={t("settingsPage.skills.toggleAria", {
           action: enabled ? t("settingsPage.confirm.disableState") : t("settingsPage.confirm.enableState"),
@@ -94,7 +101,8 @@ function ResourceRow({
       <span id={`${id}-resource-state`} className="settings-screenreader-status">
         {controlEnabled ? status : t("settingsPage.skills.resourceSuspended", { status })}
       </span>
-    </div>
+      </td>
+    </tr>
   );
 }
 
@@ -114,7 +122,8 @@ export default function UserSkillWorkflowSettings({
   const activeTab = activeView ?? localTab;
   const setActiveTab = onViewChange ?? setLocalTab;
   const [pageByTab, setPageByTab] = useState<Record<ResourceTab, number>>({ skills: 1, workflows: 1 });
-  const [pageSize, setPageSize] = useState(6);
+  const [pageSize, setPageSize] = useState(12);
+  const [keyword, setKeyword] = useState("");
   const [skills, setSkills] = useState<SkillAssetRecord[]>([]);
   const [workflows, setWorkflows] = useState<UserWorkflowSetting[]>([]);
   const [loading, setLoading] = useState(true);
@@ -127,10 +136,10 @@ export default function UserSkillWorkflowSettings({
     setLoadError(false);
     try {
       const [skillResponse, workflowResponse] = await Promise.all([
-        listSkillAssetsPage({ page: 1, pageSize: 200 }),
+        loadAllSkills(),
         listUserWorkflowSettings(),
       ]);
-      setSkills(skillResponse.records);
+      setSkills(skillResponse);
       setWorkflows(workflowResponse);
     } catch {
       setLoadError(true);
@@ -201,7 +210,9 @@ export default function UserSkillWorkflowSettings({
     }
   };
 
-  const activeResources = activeTab === "skills" ? skills : workflows;
+  const activeResources = (activeTab === "skills" ? skills : workflows).filter((item) =>
+    `${item.name} ${item.description ?? ""}`.toLocaleLowerCase().includes(keyword.trim().toLocaleLowerCase()),
+  );
   const activeGroupEnabled = activeTab === "skills" ? skillsEnabled : workflowsEnabled;
   const activeGroupSaving = groupSaving === activeTab;
   const activeGroupTotal = activeTab === "skills" ? skills.length : workflows.length;
@@ -230,6 +241,7 @@ export default function UserSkillWorkflowSettings({
             meta={skill.category || t("settingsPage.skills.personalSkill")}
             enabled={skill.isEnabled}
             controlEnabled={skillsEnabled}
+            disabled={controlsDisabled}
             controlLabel={t("settingsPage.skills.mySkills")}
             loading={saving.has(key)}
             error={rowErrors[key]}
@@ -249,6 +261,7 @@ export default function UserSkillWorkflowSettings({
             meta={t("settingsPage.skills.workflowMeta", { revision: workflow.revision_no })}
             enabled={workflow.enabled}
             controlEnabled={workflowsEnabled}
+            disabled={controlsDisabled}
             controlLabel={t("settingsPage.skills.myWorkflows")}
             loading={saving.has(key)}
             error={rowErrors[key]}
@@ -303,6 +316,19 @@ export default function UserSkillWorkflowSettings({
         </button>
       </nav>
 
+      <div className="settings-resource-toolbar">
+        <Input.Search
+          allowClear
+          value={keyword}
+          placeholder={t("settingsPage.skills.searchResources")}
+          aria-label={t("settingsPage.skills.searchResources")}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => {
+            setKeyword(event.target.value);
+            setPageByTab({ skills: 1, workflows: 1 });
+          }}
+        />
+      </div>
+
       {loading ? (
         <div className="settings-skill-resource-loading" aria-label={t("settingsPage.skills.loadingAria")}><Skeleton active paragraph={{ rows: 5 }} /></div>
       ) : loadError ? (
@@ -315,13 +341,22 @@ export default function UserSkillWorkflowSettings({
         />
       ) : rows.length ? (
         <>
-          <div className="settings-skill-resource-list">{rows}</div>
+          <div className="settings-resource-table-wrap">
+            <table className="settings-resource-table">
+              <thead><tr>
+                <th>{t("settingsPage.skills.resourceName")}</th>
+                <th>{t("settingsPage.skills.resourceInfo")}</th>
+                <th>{t("settingsPage.skills.resourceEnabled")}</th>
+              </tr></thead>
+              <tbody>{rows}</tbody>
+            </table>
+          </div>
           <footer className="settings-skill-resource-pagination">
             <Pagination
               current={activePage}
               pageSize={pageSize}
               total={activeResources.length}
-              pageSizeOptions={[6, 12, 20, 50]}
+              pageSizeOptions={[12, 20, 50, 100]}
               showSizeChanger
               showTotal={(total: number) => t("settingsPage.skills.totalItems", { total })}
               onChange={(page: number) => setPageByTab((current) => ({ ...current, [activeTab]: page }))}

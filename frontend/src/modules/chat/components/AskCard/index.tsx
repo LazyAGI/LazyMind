@@ -25,6 +25,7 @@ export interface AskPending {
   skill_ambiguity?: { requested_name: string; candidates: string[]; original_query: string };
   mail_draft?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview;
   mail_drafts?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview[];
+  mail_draft_only?: boolean;
 }
 
 export interface AskAnsweredQuestion {

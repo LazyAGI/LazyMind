@@ -1,3 +1,4 @@
+import json
 import re
 
 from typing import Any, Dict, List, Literal, Union
@@ -208,7 +209,15 @@ _REFERENCE_COLLECTION_KEY = ('memory-reference-collection',)
 
 def _normalize_refs(refs: Union[str, List[str]]) -> list[str]:
     if isinstance(refs, str):
-        raw_items = [refs]
+        raw_items: list[Any] = [refs]
+        if refs.lstrip().startswith('['):
+            try:
+                decoded = json.loads(refs)
+            except (TypeError, ValueError):
+                pass
+            else:
+                if isinstance(decoded, list):
+                    raw_items = decoded
     elif isinstance(refs, list):
         raw_items = refs
     else:

@@ -3,14 +3,73 @@ from __future__ import annotations
 import json
 import re
 import threading
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 import jsonschema
+import httpx
+import requests
 from json_repair import repair_json
-from lazyllm import LOG
+from lazyllm import LOG, Thread
 from pydantic import BaseModel, TypeAdapter
 
 from lazymind.review.traj_to_skill.config import DEFAULT_LLM_CALL_TIMEOUT_SECONDS
+from lazymind.common.maintenance import MaintenanceCancelled
+
+
+class ModelJSONError(ValueError):
+    def __init__(self, message: str, category: str):
+        super().__init__(message, category)
+        self.category = category
+
+    def __str__(self) -> str:
+        return str(self.args[0])
+
+
+_cancel_check = ContextVar('review_model_cancel_check', default=None)
+
+
+@contextmanager
+def cancellable_model_calls(check):
+    token = _cancel_check.set(check)
+    try:
+        yield
+    finally:
+        _cancel_check.reset(token)
+
+
+def check_model_cancelled():
+    check = _cancel_check.get()
+    if check is not None:
+        check()
+
+
+def _transport_category(exc: Exception) -> str:
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, (TimeoutError, requests.exceptions.Timeout, httpx.TimeoutException)):
+            return 'model_timeout'
+        exc = exc.__cause__ or exc.__context__
+    return 'model_transport'
+
+
+def _call_model(llm, prompt):
+    check_model_cancelled()
+    kwargs = dict(response_format={'type': 'json_object'}, timeout=DEFAULT_LLM_CALL_TIMEOUT_SECONDS)
+    if _cancel_check.get() is None:
+        return llm(prompt, **kwargs)
+    # A provider may ignore its timeout. Only the transport remains in this
+    # daemon; cancellation releases the organizer worker and discards its result.
+    worker = Thread(target=llm, args=(prompt,), kwargs=kwargs, daemon=True)
+    worker.start()
+    while worker.is_alive():
+        worker.join(0.05)
+        check_model_cancelled()
+    check_model_cancelled()
+    return worker.get_result()
+
 
 # Approximate token usage by summing prompt/response string lengths across LLM calls.
 TOTAL_INPUT_TOKEN_CHARS = 0
@@ -31,25 +90,29 @@ def call_json(
 
     last_error: Exception | None = None
     last_raw: Any = None
+    category = 'model_transport'
     for round in range(max_retries):
         try:
             if round > 0:
                 LOG.warning(f'LLM JSON call failed after {round} attempts, retrying...')
-            raw = llm(
-                prompt,
-                response_format={'type': 'json_object'},
-                timeout=DEFAULT_LLM_CALL_TIMEOUT_SECONDS,
-            )
+            category = 'model_transport'
+            raw = _call_model(llm, prompt)
+            category = 'model_response'
             last_raw = raw
             _record_token_usage(prompt, raw)
             parsed = _json_object(raw)
             return _validate_json_object(parsed, schema)
+        except MaintenanceCancelled:
+            raise
         except Exception as exc:
+            if category == 'model_transport':
+                category = _transport_category(exc)
             last_error = exc
 
     snippet = re.sub(r'\s+', ' ', str(last_raw or '')).strip()[:500]
-    raise ValueError(
-        f'LLM JSON call failed after {max_retries} attempts: {last_error}; response={snippet}'
+    raise ModelJSONError(
+        f'LLM JSON call failed after {max_retries} attempts: {last_error}; response={snippet}',
+        category=category,
     ) from last_error
 
 

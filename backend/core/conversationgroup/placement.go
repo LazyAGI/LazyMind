@@ -13,10 +13,11 @@ import (
 // An anchor, rather than a client-supplied full list, preserves concurrent new groups.
 func UpdateGroupPlacement(w http.ResponseWriter, r *http.Request) {
 	var input struct {
+		Collapsed     *bool   `json:"collapsed"`
 		Pinned        *bool   `json:"pinned"`
 		BeforeGroupID *string `json:"before_group_id"`
 	}
-	if json.NewDecoder(r.Body).Decode(&input) != nil || (input.Pinned == nil && input.BeforeGroupID == nil) {
+	if json.NewDecoder(r.Body).Decode(&input) != nil || (input.Collapsed == nil && input.Pinned == nil && input.BeforeGroupID == nil) {
 		common.ReplyErr(w, "invalid body", 400)
 		return
 	}
@@ -25,6 +26,14 @@ func UpdateGroupPlacement(w http.ResponseWriter, r *http.Request) {
 		var current orm.ConversationGroup
 		if err := tx.Where("id=? AND user_id=? AND deleted_at IS NULL", id, uid).Take(&current).Error; err != nil {
 			return err
+		}
+		if input.Collapsed != nil {
+			if err := tx.Model(&current).UpdateColumn("collapsed", *input.Collapsed).Error; err != nil {
+				return err
+			}
+		}
+		if input.Pinned == nil && input.BeforeGroupID == nil {
+			return nil
 		}
 		pinned := current.Pinned
 		if input.Pinned != nil {

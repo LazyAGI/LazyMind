@@ -102,7 +102,7 @@ async function openControls(depth = "最高") {
 async function openModels() {
   await openControls();
   fireEvent.click(screen.getByRole("button", { name: "选择模型" }));
-  return screen.findByRole("button", { name: "OpenAI GPT-4o" });
+  return screen.findByRole("button", { name: "GPT-4o" });
 }
 
 describe("ChatModelSelector combined thinking depth controls", () => {
@@ -263,7 +263,7 @@ describe("ChatModelSelector combined thinking depth controls", () => {
     const chooseModel = screen.getByRole("button", { name: "选择模型" });
     expect(chooseModel).toBeEnabled();
     fireEvent.click(chooseModel);
-    expect(screen.getByRole("button", { name: "OpenAI GPT-4o" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "GPT-4o" })).toBeEnabled();
   });
 
   it("preserves model search after expanding the compact controls", async () => {
@@ -274,8 +274,8 @@ describe("ChatModelSelector combined thinking depth controls", () => {
     expect(screen.queryByRole("button", { name: "重置思考深度为中" })).not.toBeInTheDocument();
     fireEvent.change(search, { target: { value: "OpenAI" } });
 
-    expect(screen.getByRole("button", { name: "OpenAI GPT-4o" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "DeepSeek deepseek-v4-pro" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "GPT-4o" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "deepseek-v4-pro" })).not.toBeInTheDocument();
     fireEvent.keyDown(search, { key: "Escape" });
     await openControls();
     expect(screen.getByRole("slider", { name: "思考深度" })).toBeInTheDocument();
@@ -341,7 +341,7 @@ describe("ChatModelSelector combined thinking depth controls", () => {
       />,
     );
 
-    const option = screen.queryByRole("button", { name: "OpenAI GPT-4o" });
+    const option = screen.queryByRole("button", { name: "GPT-4o" });
     if (option) {
       expect(option).toBeDisabled();
       fireEvent.click(option);

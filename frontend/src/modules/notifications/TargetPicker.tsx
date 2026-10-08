@@ -4,9 +4,9 @@ import { useTranslation } from 'react-i18next';
 import { channelAccountLabel, type ChannelAccount, type ChannelProvider } from '@/modules/channelGateway/api';
 import { getTargets, getGroups, type ChannelRule, type Target } from './api';
 
-export default function TargetPicker({ provider, accounts, current, onSave, onClose, inline = false, disabled = false, completeOnly = false }: {
+export default function TargetPicker({ provider, accounts, current, onSave, onClose, inline = false, disabled = false }: {
   provider: ChannelProvider; accounts: ChannelAccount[]; current?: ChannelRule;
-  onSave: (target: ChannelRule) => void; onClose: () => void; inline?: boolean; disabled?: boolean; completeOnly?: boolean;
+  onSave: (target: ChannelRule) => void; onClose: () => void; inline?: boolean; disabled?: boolean;
 }) {
   const { t } = useTranslation();
   const [accountId, setAccountId] = useState(current?.account_id);
@@ -46,23 +46,14 @@ export default function TargetPicker({ provider, accounts, current, onSave, onCl
         if (active) { mergeFresh(page.items); setGroupCursor(page.next_cursor); }
       }).catch(() => { if (active) setGroupError(true); }).finally(() => { if (active) setGroupLoading(false); });
     }
-    const selected = recipientId || accounts.find(account => account.id === accountId)?.default_recipient_id;
-    if (selected) getTargets(accountId, '', selected).then(page => {
+    if (recipientId) getTargets(accountId, '', recipientId).then(page => {
       if (active) mergeFresh(page.items);
     }).catch(() => { if (active) setError(true); });
     return () => { active = false; requestGeneration.current += 1; };
   }, [accountId, refresh, provider, targetScope, recipientId]);
   useEffect(() => { if (inline) { setAccountId(current?.account_id); setRecipientId(current?.recipient_id); } }, [inline, current?.account_id, current?.recipient_id]);
-  useEffect(() => {
-    if (loading || recipientId || !accountId) return;
-    const defaultId = accounts.find(account => account.id === accountId)?.default_recipient_id;
-    if (defaultId && targets.some(target => target.recipient_id === defaultId && target.available !== false)) {
-      setRecipientId(defaultId);
-      if (inline) onSave({ enabled: true, account_id: accountId, recipient_id: defaultId });
-    }
-  }, [loading, recipientId, accountId, accounts, targets, inline, onSave]);
   const fields =     <div className="notification-target-picker">
-      <label className="notification-target-field">{t('notifications.account')}<Select className="notification-target-select" disabled={disabled || loading} aria-label={t('notifications.account')} value={provider === 'feishu' && !accounts.some(a => a.id === accountId && a.status === 'connected') ? undefined : accountId} placeholder={t('notifications.chooseAccount')} onChange={(value: string) => { setAccountId(value); setRecipientId(undefined); if (inline && !completeOnly) onSave({ enabled: true, account_id: value }); }} options={accounts.filter(a => a.status === 'connected').map(a => ({ value: a.id, label: channelAccountLabel(a) }))} /></label>
+      <label className="notification-target-field">{t('notifications.account')}<Select className="notification-target-select" disabled={disabled || loading} aria-label={t('notifications.account')} value={provider === 'feishu' && !accounts.some(a => a.id === accountId && a.status === 'connected') ? undefined : accountId} placeholder={t('notifications.chooseAccount')} onChange={(value: string) => { setAccountId(value); setRecipientId(undefined); if (inline) onSave({ enabled: true, account_id: value }); }} options={accounts.filter(a => a.status === 'connected').map(a => ({ value: a.id, label: channelAccountLabel(a) }))} /></label>
       <label className="notification-target-field">{t('notifications.recipient')}<Select className="notification-target-select" showSearch optionFilterProp="label" aria-label={t('notifications.recipient')} value={recipientId} placeholder={t('notifications.chooseRecipient')} loading={loading} disabled={disabled || !accountId} onOpenChange={(open: boolean) => { if (open && !loading) setRefresh(n => n + 1); }} onChange={(value: string) => { setRecipientId(value); if (inline) onSave({ enabled: true, account_id: accountId, recipient_id: value }); }} options={targets.map(target => ({ value: target.recipient_id, label: target.kind === 'conversation' ? [t('notifications.directConversation'), target.label !== target.recipient_id ? target.label : ''].filter(Boolean).join(' · ') : target.label, disabled: target.available === false }))} /></label>
       {groupLoading && <p>{t('notifications.loadingGroups')}</p>}
       {!loading && !groupLoading && accountId && !targets.some(target => target.available !== false) && <p>{t(provider === 'feishu' ? 'notifications.noGroups' : provider === 'wecom' ? 'notifications.noWecomTargets' : 'notifications.noTargets')}</p>}

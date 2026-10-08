@@ -1,5 +1,8 @@
 .chat-context-panel {
+  position: relative;
+  box-sizing: border-box;
   width: clamp(400px, 30vw, 440px);
+  max-width: 100%;
   flex: 0 0 auto;
   min-height: 0;
   border-left: 1px solid #e3e9f2;
@@ -7,6 +10,10 @@
   z-index: 45;
   [hidden], &[hidden] { display: none !important; }
   &.is-collapsed { width: 0; border: 0; }
+  .chat-context-resize-handle {
+    position: absolute; left: 0; top: 0; width: 5px; height: 100%; cursor: col-resize; z-index: 20;
+    &:hover, &:active { background: rgba(47, 107, 255, 0.18); }
+  }
   .chat-context-surface { display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .chat-context-header {
     display: flex; justify-content: space-between; align-items: center;

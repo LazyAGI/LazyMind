@@ -230,3 +230,29 @@ def test_skill_organize_result_upsert_with_sqlite(monkeypatch):
     assert row['userid'] == 'u2'
     assert row['status'] == 'completed'
     assert json.loads(row['summary'])['items'] == [2]
+
+
+def test_cancelled_organize_stats_cannot_be_revived(monkeypatch):
+    _, organize_db = _load_review_modules(monkeypatch)
+    engine = _sqlite_engine()
+    monkeypatch.setattr(organize_db, '_get_app_conn', lambda: engine)
+    for status in ('organize_plan', 'cancelled', 'organize_apply', 'failed', 'completed'):
+        organize_db.insert_skill_organize_result(
+            record_id='org_cancel_run', requestid='org_cancel', user_id='u',
+            organize_result={'status': status, 'error_code': 'skill_organize_cancelled' if status == 'cancelled' else ''},
+        )
+    with engine.connect() as conn:
+        row = conn.execute(text('SELECT status, summary FROM skill_review_stats')).mappings().one()
+    assert row['status'] == 'cancelled'
+    assert json.loads(row['summary'])['error_code'] == 'skill_organize_cancelled'
+
+
+def test_cancelled_request_tombstone_blocks_late_pending_record(monkeypatch):
+    _, organize_db = _load_review_modules(monkeypatch)
+    engine = _sqlite_engine()
+    monkeypatch.setattr(organize_db, '_get_app_conn', lambda: engine)
+    for record, status in [('org_cancel', 'cancelled'), ('org_cancel_late_run', 'pending')]:
+        organize_db.insert_skill_organize_result(record_id=record, requestid='org_cancel', user_id='u', organize_result={'status': status})
+    with engine.connect() as conn:
+        rows = conn.execute(text('SELECT status FROM skill_review_stats')).scalars().all()
+    assert rows == ['cancelled']

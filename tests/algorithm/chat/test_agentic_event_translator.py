@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from lazymind.chat.service.component import AgentEventFrameTranslator
 from lazymind.chat.service.component.tool_rendering import (
     _tool_call_frame_text,
@@ -601,6 +603,7 @@ def test_translator_accumulates_mail_draft_cards():
         'mail_draft': {'draft_id': 'draft_two', 'subject': 'two'},
     })
     assert len(first[0]['ask_pending']['mail_drafts']) == 1
+    assert first[0]['ask_pending']['mail_draft_only'] is True
     drafts = second[0]['ask_pending']['mail_drafts']
     assert [item['draft_id'] for item in drafts] == ['draft_one', 'draft_two']
     assert second[0]['ask_pending']['mail_draft']['draft_id'] == 'draft_two'
@@ -642,3 +645,78 @@ def test_translator_keeps_mail_draft_after_capability_marker():
     })
     assert dropped == []
     assert kept[0]['ask_pending']['mail_draft']['draft_id'] == 'draft_keep'
+
+
+def test_translator_clears_mail_wait_after_all_receipts_but_preserves_other_questions():
+    for other_question in (False, True):
+        translator = AgentEventFrameTranslator(query='send mail')
+        if other_question:
+            translator.feed({'tag': 'ask_pending', 'questions': [{'text': 'Other question'}]})
+        for draft_id in ('one', 'two'):
+            translator.feed({'tag': 'ask_pending', 'mail_draft': {'draft_id': draft_id, 'status': 'draft'}})
+        first = translator.feed({'tag': 'ask_pending', 'mail_draft': {'draft_id': 'one', 'status': 'sent'}})
+        assert first[0]['ask_pending']['mail_draft']['draft_id'] == 'one'
+        assert translator.run.ask_pending is True
+        translator.feed({'tag': 'ask_pending', 'mail_draft': {'draft_id': 'two', 'status': 'sent'}})
+        assert translator.ask_pending_emitted is other_question
+        assert translator.run.ask_pending is other_question
+
+
+@pytest.mark.parametrize('mail_first', [False, True])
+def test_translator_composite_ask_preserves_ordinary_question_and_latest_mail_cards(mail_first):
+    translator = AgentEventFrameTranslator(query='mail and question')
+    ordinary = {
+        'tag': 'ask_pending', 'ask_id': 'ordinary-1', 'title': 'Choose a date',
+        'description': 'Scheduling question', 'questions': [{'text': 'Which date?', 'type': 'text'}],
+    }
+    mail = {
+        'tag': 'ask_pending', 'ask_id': 'mail-1', 'title': 'Mail preview',
+        'questions': [{'text': 'Confirm mail?', 'type': 'boolean'}],
+        'mail_draft': {'draft_id': 'one', 'status': 'draft', 'revision': 1},
+    }
+    for event in ([mail, ordinary] if mail_first else [ordinary, mail]):
+        frames = translator.feed(event)
+    composite = frames[0]['ask_pending']
+    for key in ('ask_id', 'title', 'description', 'questions'):
+        assert composite[key] == ordinary[key]
+    assert composite['mail_draft_only'] is False
+    assert composite['mail_drafts'] == [mail['mail_draft']]
+    assert translator.run.ask_pending is True
+
+    latest = translator.feed({
+        **mail, 'ask_id': 'mail-receipt', 'questions': [],
+        'mail_draft': {'draft_id': 'one', 'status': 'sent', 'revision': 1},
+    })[0]['ask_pending']
+    assert latest['ask_id'] == 'ordinary-1'
+    assert latest['questions'] == ordinary['questions']
+    assert latest['mail_drafts'][0]['status'] == 'sent'
+    assert latest['mail_draft_only'] is False
+    assert translator.run.ask_pending is True
+    assert composite['mail_drafts'][0]['status'] == 'draft'
+
+    newer = {**ordinary, 'ask_id': 'ordinary-2', 'title': 'Choose a place'}
+    latest = translator.feed(newer)[0]['ask_pending']
+    assert latest['ask_id'] == 'ordinary-2'
+    assert latest['title'] == 'Choose a place'
+    assert latest['mail_drafts'][0]['status'] == 'sent'
+
+
+def test_translator_recognizes_explicit_composite_ask_and_plain_asks():
+    translator = AgentEventFrameTranslator(query='question')
+    plain = translator.feed({'tag': 'ask_pending', 'ask_id': 'plain', 'questions': [{'text': 'Question'}]})[0]['ask_pending']
+    assert plain['mail_draft_only'] is False
+    assert plain['mail_drafts'] == []
+    composite = {
+        'tag': 'ask_pending', 'ask_id': 'composite', 'mail_draft_only': False,
+        'questions': [{'text': 'Another question'}],
+        'mail_drafts': [{'draft_id': 'one', 'status': 'draft'}],
+    }
+    translator.feed(composite)
+    latest = translator.feed({
+        'tag': 'ask_pending', 'ask_id': 'receipt',
+        'mail_draft': {'draft_id': 'one', 'status': 'sent'},
+    })[0]['ask_pending']
+    assert latest['ask_id'] == 'composite'
+    assert latest['questions'] == composite['questions']
+    assert latest['mail_drafts'][0]['status'] == 'sent'
+    assert latest['mail_draft_only'] is False

@@ -7,6 +7,7 @@
 
 import { timer, Subscription } from "rxjs";
 import { applySkipSensitiveFilterToChatPayload } from "@/utils/sensitiveWordFilter";
+import { openRealtimeStream, type RealtimeFrame, type RealtimeRefusal } from "./realtimeTransport";
 
 /** Default timeout for the SSE connection. */
 const DEFAULT_TIMEOUT = 2000;
@@ -79,6 +80,7 @@ type CustomEventReadyStateChangeType = CustomEvent & {
 type CustomEventErrorType = CustomEvent & {
   data: unknown;
   status: number;
+  reason?: RealtimeRefusal;
 };
 
 /** Custom data event types. */
@@ -149,6 +151,11 @@ class SSE {
   /** The XHR connection. */
   public xhr: XMLHttpRequest | null = null;
 
+  private cancelRealtime: (() => void) | null = null;
+  private realtimeStatus = 0;
+  private realtimeErrorBody = "";
+  private realtimeDecoder = new TextDecoder();
+
   /** The ready state of the XHR connection. */
   public readyState: number;
 
@@ -193,7 +200,7 @@ class SSE {
 
   /** Set the timeout for the connection. */
   private setTimeoutFun(): void {
-    if (!this.xhr) {
+    if (!this.xhr && !this.cancelRealtime) {
       return;
     }
 
@@ -384,6 +391,10 @@ class SSE {
     const data = this.xhr.responseText.substring(this.progress);
     this.progress += data.length;
 
+    this.consumeData(data);
+  }
+
+  private consumeData(data: string): void {
     /** Split the data into parts. */
     const parts = (this.chunk + data).split(/(\r\n|\r|\n){2}/g);
 
@@ -392,16 +403,48 @@ class SSE {
 
     /** Dispatch the event for each part. */
     parts.forEach((part) => {
-      if (part.trim().length > 0) {
+      if (this.readyState !== this.CLOSED && part.trim().length > 0) {
         this.dispatchEvent(this.parseEventChunk(part) as CustomEventType);
       }
     });
 
     /** Reset the timeout for the connection. */
-    this.resetTimeout();
+    if (this.readyState !== this.CLOSED) this.resetTimeout();
 
     /** Set the chunk of data. */
     this.chunk = lastPart;
+  }
+
+  private onRealtimeFrame(frame: RealtimeFrame): void {
+    if (this.readyState === this.CLOSED) return;
+    if (frame.type === "heartbeat") {
+      this.resetTimeout();
+    } else if (frame.type === "headers") {
+      this.realtimeStatus = frame.status || 0;
+      if (this.realtimeStatus === 200) {
+        this.dispatchEvent(new CustomEvent(TriggerEvent.OPEN));
+        if (this.readyState !== this.CLOSED) this.setReadyState(this.OPEN);
+      }
+    } else if (frame.type === "data") {
+      const bytes = Uint8Array.from(atob(frame.data || ""), (char) => char.charCodeAt(0));
+      const data = this.realtimeDecoder.decode(bytes, { stream: true });
+      if (this.realtimeStatus === 200) this.consumeData(data);
+      else this.realtimeErrorBody += data;
+    } else if (frame.type === "error" || (frame.type === "end" && this.realtimeStatus !== 200)) {
+      const error = new CustomEvent(TriggerEvent.ERROR) as CustomEventErrorType;
+      error.status = frame.status ?? this.realtimeStatus;
+      error.data = this.realtimeErrorBody;
+      if (frame.reason) error.reason = frame.reason;
+      this.close();
+      this.dispatchEvent(error);
+    } else if (frame.type === "end") {
+      this.consumeData(this.realtimeDecoder.decode());
+      this.dispatchEvent(this.parseEventChunk(this.chunk) as CustomEventType);
+      this.chunk = "";
+      this.close();
+      // Read subscriptions ending without a terminal event must reconnect.
+      if (this.method === Method.GET) this.dispatchEvent(new CustomEvent(TriggerEvent.ERROR));
+    }
   }
 
   /**
@@ -499,12 +542,25 @@ class SSE {
   /** Start the connection. */
   public stream(): void {
     /** If the XHR connection exists, return. */
-    if (this.xhr) {
+    if (this.xhr || this.cancelRealtime) {
       return;
     }
 
     /** Set the ready state to connecting. */
     this.setReadyState(this.CONNECTING);
+
+    this.realtimeDecoder = new TextDecoder();
+    this.realtimeStatus = 0;
+    this.realtimeErrorBody = "";
+    this.chunk = "";
+    this.progress = 0;
+    this.cancelRealtime = openRealtimeStream({
+      url: this.url, method: this.method, headers: this.headers, payload: this.payload,
+    }, (frame) => this.onRealtimeFrame(frame));
+    if (this.cancelRealtime) {
+      this.resetTimeout();
+      return;
+    }
 
     /** Create a new XHR connection. */
     this.xhr = new XMLHttpRequest();
@@ -552,6 +608,9 @@ class SSE {
     /** Cancel the timeout subscription. */
     this.timeoutSubscription?.unsubscribe();
     this.timeoutSubscription = null;
+    const cancelRealtime = this.cancelRealtime;
+    this.cancelRealtime = null;
+    cancelRealtime?.();
     /** If the XHR connection does not exist, return. */
     if (this.readyState === this.CLOSED) {
       return;

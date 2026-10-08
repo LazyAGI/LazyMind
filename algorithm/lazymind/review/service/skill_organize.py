@@ -10,6 +10,7 @@ import lazyllm
 from lazyllm import AutoModel, LOG
 
 from lazymind.common.maintenance import MaintenanceCancelled, check_cancelled
+from lazymind.review.traj_to_skill.json_call import ModelJSONError, cancellable_model_calls, check_model_cancelled
 
 from lazymind.common.skill.remote_store import SkillRemoteStore
 from lazymind.common.skill.storage_key import parse_skill_key
@@ -41,40 +42,45 @@ _MISSING = object()
 ORG_STAGE_PLAN = 'organize_plan'
 ORG_STAGE_DRAFT = 'organize_draft'
 ORG_STAGE_APPLY = 'organize_apply'
-_cancel_events: dict[str, Event] = {}
+_cancel_events: dict[tuple[str, str], Event] = {}
 _cancel_guard = Lock()
 
 
-class SkillOrganizeCancelled(RuntimeError):
+class SkillOrganizeCancelled(MaintenanceCancelled):
     pass
 
 
-def arm_skill_organize_cancel(requestid: str) -> None:
+def arm_skill_organize_cancel(requestid: str, *, user_id: str = '') -> Event:
     with _cancel_guard:
-        _cancel_events[str(requestid)] = Event()
+        event = Event()
+        _cancel_events[(user_id, str(requestid))] = event
+        return event
 
 
-def cancel_skill_organize(requestid: str) -> bool:
+def cancel_skill_organize(requestid: str, *, user_id: str = '') -> bool:
     with _cancel_guard:
-        event = _cancel_events.get(str(requestid))
+        event = _cancel_events.get((user_id, str(requestid)))
     if event is None:
         return False
     event.set()
     return True
 
 
-def disarm_skill_organize_cancel(requestid: str) -> None:
+def disarm_skill_organize_cancel(requestid: str, event: Event | None = None, *, user_id: str = '') -> None:
     with _cancel_guard:
-        _cancel_events.pop(str(requestid), None)
+        key = (user_id, str(requestid))
+        if event is None or _cancel_events.get(key) is event:
+            _cancel_events.pop(key, None)
 
 
 def _ensure_skill_organize_not_cancelled(requestid: str) -> None:
+    check_model_cancelled()
     try:
         check_cancelled()
     except MaintenanceCancelled as exc:
         raise SkillOrganizeCancelled('Skill organize was cancelled.') from exc
     with _cancel_guard:
-        event = _cancel_events.get(str(requestid))
+        event = _cancel_events.get(('', str(requestid)))
     if event is not None and event.is_set():
         raise SkillOrganizeCancelled('Skill organize was cancelled.')
 
@@ -113,19 +119,23 @@ def record_skill_organize_pending(request: SkillOrganizeRequest, taskid: str) ->
     )
 
 
-def record_skill_organize_failed(request: SkillOrganizeRequest, taskid: str, error: str) -> int:
+def record_skill_organize_failed(request: SkillOrganizeRequest, taskid: str, error: str | Exception) -> int:
     work_dir = _resolve_artifact_dir(request.artifact_dir)
     artifact_dir = str(work_dir / taskid) if work_dir is not None else ''
     now = datetime.now()
+    cancelled = isinstance(error, MaintenanceCancelled)
+    category = 'cancelled' if cancelled else getattr(error, 'category', 'internal')
     failed_result = {
         'kind': 'skill_organize',
         'mode': request.mode,
         'requestid': request.requestid,
         'taskid': taskid,
         'userid': request.user_id,
-        'status': 'failed',
+        'status': 'cancelled' if cancelled else 'failed',
         'skills': request.skills,
-        'error': error,
+        'error': str(error),
+        'error_code': 'skill_organize_' + category if category != 'internal' else 'skill_organize_failed',
+        'error_category': category,
         'artifact_dir': artifact_dir,
         'started_at': now.isoformat(),
         'duration_ms': 0,
@@ -180,13 +190,44 @@ def run_skill_organize(
     taskid: str | None = None,
     *,
     remote_store: SkillRemoteStore | None = None,
+    cancel_event: Event | None = None,
 ) -> SkillOrganizeResult:
     resolved_taskid = taskid or build_skill_organize_taskid(request.requestid)
-    with lazyllm.new_session(resolved_taskid):
-        inject_model_config(_with_evolution_or_chat_llm(request.model_configs))
-        llm = AutoModel(model='llm')
+    event_user = request.user_id
+    with _cancel_guard:
+        event = cancel_event if cancel_event is not None else _cancel_events.get((event_user, request.requestid))
+        if event is None:
+            event_user = ''
+            event = _cancel_events.get((event_user, request.requestid))
+    next_cancel_poll = 0.0
+    poll_lock = Lock()
+
+    def ensure_active():
+        nonlocal next_cancel_poll
+        check_cancelled()
+        if event is not None and event.is_set():
+            raise SkillOrganizeCancelled('Skill organize was cancelled.')
+        if cancel_event is not None:
+            from lazymind.review.skill_organize.db import is_skill_organize_cancelled
+            with poll_lock:
+                if perf_counter() >= next_cancel_poll:
+                    next_cancel_poll = perf_counter() + 0.25
+                    if is_skill_organize_cancelled(request.requestid, request.user_id):
+                        event.set()
+            if event.is_set():
+                raise SkillOrganizeCancelled('Skill organize was cancelled.')
+
+    with lazyllm.new_session(resolved_taskid), cancellable_model_calls(ensure_active):
         previous_agentic_config = _set_skill_remote_context(request)
         try:
+            ensure_active()
+            try:
+                inject_model_config(_with_evolution_or_chat_llm(request.model_configs))
+                llm = AutoModel(model='llm')
+            except MaintenanceCancelled:
+                raise
+            except Exception as exc:
+                raise ModelJSONError(f'Model initialization failed: {exc}', category='model_transport') from exc
             return _run_skill_organize(
                 request,
                 llm,
@@ -195,8 +236,15 @@ def run_skill_organize(
                     existing_skill_keys=request.skills if request.mode == 'light' else (),
                 ),
             )
+        except Exception as exc:
+            LOG.exception(f'[SkillOrganize] failed to start task={resolved_taskid}: {exc}')
+            inserted_count = record_skill_organize_failed(request, resolved_taskid, exc)
+            return SkillOrganizeResult(
+                success=False, requestid=request.requestid, taskid=resolved_taskid,
+                inserted_count=inserted_count, error=str(exc),
+            )
         finally:
-            disarm_skill_organize_cancel(request.requestid)
+            disarm_skill_organize_cancel(request.requestid, event, user_id=event_user)
             _restore_agentic_config(previous_agentic_config)
 
 
@@ -264,6 +312,7 @@ def _run_skill_organize(
             },
         )
         fs_apply = _apply_fs_draft(draft, remote_store, source_skills, mode=request.mode)
+        _ensure_skill_organize_not_cancelled(request.requestid)
         write_stage_file(work_dir, taskid, STAGE_VALIDATION, {'status': 'completed', 'fs_apply': fs_apply})
 
         organize_result = _build_organize_result(
@@ -292,11 +341,14 @@ def _run_skill_organize(
             artifact_dir=artifact_dir,
         )
     except Exception as exc:
-        cancelled = isinstance(exc, SkillOrganizeCancelled)
+        cancelled = isinstance(exc, MaintenanceCancelled)
         status = 'cancelled' if cancelled else 'failed'
-        error_code = 'skill_organize_cancelled' if cancelled else (
-            'skill_organize_invalid_package' if isinstance(exc, ValueError) else 'skill_organize_failed'
-        )
+        category = getattr(exc, 'category', '')
+        if cancelled:
+            category = 'cancelled'
+        elif not category and isinstance(exc, ValueError):
+            category = 'invalid_package' if current_stage == 'pending' else 'invalid_plan'
+        error_code = 'skill_organize_' + category if category else 'skill_organize_failed'
         LOG.exception(f'[SkillOrganize] failed request={request.requestid} task={taskid}: {exc}')
         error_result = {
             'kind': 'skill_organize',
@@ -308,6 +360,7 @@ def _run_skill_organize(
             'failed_stage': current_stage,
             'error': str(exc),
             'error_code': error_code,
+            'error_category': category or 'internal',
             'skills': list(request.skills),
             'artifact_dir': artifact_dir,
             'started_at': started_at.isoformat(),
@@ -454,6 +507,7 @@ def _apply_fs_draft(
     upserted_keys: list[str] = []
     deleted_keys: list[str] = []
     for item, source_category, source_name, target_storage_category, target_name in upsert_operations:
+        check_model_cancelled()
         if item.source_key == item.target_key:
             before, after = same_key_snapshots[item.source_key]
             store.replace_files(source_category, source_name, before, after)
@@ -468,6 +522,7 @@ def _apply_fs_draft(
         upserted_keys.append(item.target_key)
 
     for key, category, name in delete_operations:
+        check_model_cancelled()
         store.remove(category, name)
         deleted_keys.append(key)
 
@@ -476,6 +531,7 @@ def _apply_fs_draft(
         for item in draft.upsert_skills if item.search_metadata.model_dump(exclude_none=True)
     ]
     if metadata_updates:
+        check_model_cancelled()
         update_search_metadata(metadata_updates)
 
     return {

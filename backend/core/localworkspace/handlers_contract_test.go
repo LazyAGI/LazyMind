@@ -102,6 +102,48 @@ func TestWorkspaceListAndBindingRemainOwnerScoped(t *testing.T) {
 	}
 }
 
+func TestWorkspaceManagementListExcludesRevokedButKeepsUnavailable(t *testing.T) {
+	db, grant := workspaceFixture(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	list := func() []PublicWorkspace {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/local-workspaces?include_inactive=true&exclude_revoked=true", nil)
+		request.Header.Set("X-User-Id", "owner")
+		response := httptest.NewRecorder()
+		List(response, request)
+		var body struct {
+			Data struct {
+				Items []PublicWorkspace `json:"items"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if response.Code != 200 {
+			t.Fatalf("list=%d %s", response.Code, response.Body.String())
+		}
+		return body.Data.Items
+	}
+
+	if items := list(); len(items) != 1 || items[0].WorkspaceID != grant.WorkspaceID {
+		t.Fatalf("active items=%+v", items)
+	}
+	if err := db.Model(&orm.LocalWorkspace{}).Where("id = ?", grant.WorkspaceID).Update("status", StatusPathUnavailable).Error; err != nil {
+		t.Fatal(err)
+	}
+	if items := list(); len(items) != 1 || items[0].Status != StatusPathUnavailable {
+		t.Fatalf("unavailable items=%+v", items)
+	}
+	if err := db.Model(&orm.LocalWorkspace{}).Where("id = ?", grant.WorkspaceID).Update("status", StatusRevoked).Error; err != nil {
+		t.Fatal(err)
+	}
+	if items := list(); len(items) != 0 {
+		t.Fatalf("revoked items=%+v", items)
+	}
+}
+
 func TestInternalWorkspaceRegistrationRequiresHostTokenAndReauthorizesRevokedPath(t *testing.T) {
 	db, grant := workspaceFixture(t)
 	store.Init(db.DB, nil, nil)

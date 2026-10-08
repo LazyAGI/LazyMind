@@ -21,10 +21,19 @@ describe("skillOrganizeCopy", () => {
       skillOrganizeErrorText("", "review failed: Skill name '写作' is invalid", t),
     ).toBe("admin.memorySkillOrganizeFailed");
     expect(skillOrganizeErrorText("skill_organize_invalid_package", "missing SKILL.md", t)).toBe(
-      "admin.memorySkillOrganizeFailed",
+      "admin.memorySkillOrganizeInvalidPackage",
     );
     expect(skillOrganizeErrorText("skill_organize_draft_conflict", "draft conflict", t)).toBe(
       "admin.memorySkillOrganizeDraftConflict",
     );
+  });
+  it.each([
+    ["skill_organize_model_unavailable", "ModelUnavailable"],
+    ["skill_organize_model_timeout", "ModelTimeout"],
+    ["skill_organize_invalid_plan", "InvalidPlan"],
+    ["skill_organize_model_transport", "ModelUnavailable"],
+    ["skill_organize_model_response", "ModelResponse"],
+  ])("displays typed failure %s without relying on message language", (code, suffix) => {
+    expect(skillOrganizeErrorText(code, "provider failure", t)).toBe(`admin.memorySkillOrganize${suffix}`);
   });
 });

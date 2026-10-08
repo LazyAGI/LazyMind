@@ -4,12 +4,17 @@ import type { SkillOrganizeDepth } from "../../skillApi";
 export const MIN_SKILL_ORGANIZE_SELECTION = 2;
 export const MAX_SKILL_ORGANIZE_SELECTION = 20;
 
-export const isSkillOrganizeEligible = (
+export const isSkillOrganizeInScope = (
   skill: Pick<StructuredAsset, "category" | "originBuiltinSkillUid" | "readonly" | "cloudResourceId">,
   mode: SkillOrganizeDepth = "light",
 ) => !skill.readonly && !skill.cloudResourceId && (
   mode === "light" || (skill.category === "internal" && !skill.originBuiltinSkillUid)
 );
+
+export const isSkillOrganizeEligible = (
+  skill: Pick<StructuredAsset, "category" | "originBuiltinSkillUid" | "readonly" | "cloudResourceId" | "draft">,
+  mode: SkillOrganizeDepth = "light",
+) => isSkillOrganizeInScope(skill, mode) && !skill.draft?.hasUncommittedDraft;
 
 export const canSubmitSkillOrganize = (selectedCount: number) =>
   selectedCount >= MIN_SKILL_ORGANIZE_SELECTION &&

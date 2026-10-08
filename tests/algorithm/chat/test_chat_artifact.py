@@ -78,6 +78,44 @@ def test_save_chat_artifact_emits_logical_key_and_hash(monkeypatch):
     assert event['idempotency_key']
 
 
+@pytest.mark.parametrize(
+    ('content_type', 'content', 'expected'),
+    [
+        ('text', '春天来了', '春天来了'),
+        ('json', {'season': 'spring'}, '{\n  "season": "spring"\n}'),
+    ],
+)
+def test_save_inline_artifact_exposes_workspace_path(
+    tmp_path, monkeypatch, content_type, content, expected,
+):
+    monkeypatch.setitem(
+        conversation_workspace._cfg._impl, 'agentic_workspace', str(tmp_path),
+    )
+    monkeypatch.setattr(
+        chat_artifact, '_current_artifact_scope', lambda: ('user-1', 'conversation-1'),
+    )
+    emitted = []
+    monkeypatch.setattr(
+        chat_artifact,
+        '_write_agent_data',
+        lambda tag, **payload: emitted.append({'tag': tag, **payload}),
+    )
+
+    result = chat_artifact.save_chat_artifact(
+        'spring.txt' if content_type == 'text' else 'spring.json',
+        content,
+        content_type=content_type,
+    )
+
+    assert result['workspace_path'].startswith('.generated_artifacts/')
+    workspace = Path(conversation_workspace.chat_agent_workspace('user-1', 'conversation-1'))
+    mirrored = workspace / result['workspace_path']
+    assert mirrored.read_text(encoding='utf-8') == expected
+    assert emitted[0]['value'] == (
+        {'text': content} if content_type == 'text' else {'data': content}
+    )
+
+
 def test_save_chat_artifact_file_rejects_source_outside_agent_workspace(
     tmp_path, monkeypatch,
 ):
@@ -113,7 +151,6 @@ def test_workspace_file_tools_share_chat_agent_workspace(tmp_path, monkeypatch):
     assert Path(written['path']) == workspace / 'bid_output' / 'outline.json'
     assert '{"chapters": []}' in loaded['text']
     assert listing['entries'] == ['outline.json']
-
 
 
 def test_read_file_accepts_only_current_workflow_attempt_workspace(tmp_path, monkeypatch):

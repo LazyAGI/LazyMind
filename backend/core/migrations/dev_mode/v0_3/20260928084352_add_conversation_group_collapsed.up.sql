@@ -1,0 +1,1 @@
+ALTER TABLE conversation_groups ADD COLUMN collapsed BOOLEAN NOT NULL DEFAULT FALSE;

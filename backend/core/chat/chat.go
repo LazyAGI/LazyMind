@@ -227,6 +227,7 @@ type AskPendingEvent struct {
 	Description    string                     `json:"description,omitempty"`
 	MailDraft      map[string]any             `json:"mail_draft,omitempty"`
 	MailDrafts     []map[string]any           `json:"mail_drafts,omitempty"`
+	MailDraftOnly  *bool                      `json:"mail_draft_only,omitempty"`
 	ReviewHook     map[string]any             `json:"review_hook,omitempty"`
 	UserEnvDelete  *UserEnvDeleteConfirmation `json:"user_env_delete,omitempty"`
 	EnvInput       *EnvironmentInputRequest   `json:"env_input,omitempty"`

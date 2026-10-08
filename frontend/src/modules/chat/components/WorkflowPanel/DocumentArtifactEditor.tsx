@@ -435,7 +435,10 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     try { remembered = localStorage.getItem('writer-publish-provider'); } catch { /* Storage preferences are optional. */ }
     const preferred = providers.find(provider => provider.id === slot.provider)?.id ?? providers.find(provider => provider.id === remembered)?.id ?? providers[0]?.id;
     const authorizationStatus = (provider: string) => availability.states[provider] === 'ready' ? '' : String(i18n.t(availability.states[provider] === 'chat-disabled' ? 'chat.writerLocal.feishuChatDisabledShort' : availability.states[provider] === 'authorize' ? 'chat.writerLocal.authorizeShort' : availability.states[provider] === 'failed' ? 'chat.writerLocal.platformFailed' : 'chat.writerLocal.checking'));
-    const confirmedStatus = publicationStatus?.signature === currentSignature ? publicationStatus.text : '';
+    // Saving edits advances the local identity, not the published cloud version.
+    const confirmedStatus = publicationStatus
+      ? publicationStatus.signature === currentSignature ? publicationStatus.text : String(i18n.t('chat.writerLocal.publishedWithEdits'))
+      : '';
     // Slot metadata may still describe the version before the latest local save.
     const synced = slot.write_back_state === 'synced_clean' && slotSignature === currentSignature;
     const successStatus = busy || publicationBlocked ? '' : hasLocalChanges

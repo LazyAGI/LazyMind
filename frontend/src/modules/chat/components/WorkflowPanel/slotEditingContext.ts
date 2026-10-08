@@ -32,6 +32,8 @@ export interface SlotFooterAction {
 }
 
 export interface SlotEditingContextValue {
+  actionPending?: boolean;
+  runFooterAction?: (action: () => void | Promise<void>, flushKey?: string) => Promise<void>;
   registerSnapshot?: (key: string, read: () => unknown) => () => void;
   getSnapshot?: (key: string) => unknown;
   setEditing: (key: string, editing: boolean) => void;

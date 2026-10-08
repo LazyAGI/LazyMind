@@ -130,11 +130,10 @@ func TestDispatchNotificationsSkipsExternalRowsWithoutTargets(t *testing.T) {
 	}
 }
 
-func TestInitializeScheduleNotificationsPropagatesGatewayFailure(t *testing.T) {
+func TestInitializeScheduleNotificationsIgnoresLegacyGlobalTarget(t *testing.T) {
+	called := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("include_references") != "false" {
-			t.Error("resolution may call back into Core")
-		}
+		called = true
 		http.Error(w, "unavailable", http.StatusServiceUnavailable)
 	}))
 	defer server.Close()
@@ -147,11 +146,18 @@ func TestInitializeScheduleNotificationsPropagatesGatewayFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	schedule := orm.UserSchedule{ID: "schedule", UserID: "owner"}
-	if err := InitializeScheduleNotifications(t.Context(), db, &schedule); err == nil {
-		t.Fatal("gateway failure silently disabled notifications")
+	if err := InitializeScheduleNotifications(t.Context(), db, &schedule); err != nil {
+		t.Fatal(err)
 	}
-	if schedule.NotificationConfig != nil {
-		t.Fatal("failed resolution mutated config")
+	if called || schedule.NotificationConfig == nil {
+		t.Fatal("global defaults attempted to select a task target")
+	}
+	var saved NotificationConfig
+	if err := json.Unmarshal([]byte(*schedule.NotificationConfig), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if channel := saved.Channels["wechat"]; channel.Enabled || channel.AccountID != "" || channel.RecipientID != "" {
+		t.Fatalf("new task inherited a global target: %#v", channel)
 	}
 }
 

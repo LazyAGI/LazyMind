@@ -133,6 +133,75 @@ function createPreparedStream(clientConversationId: string) {
 }
 
 describe("useChatConversation regeneration recovery", () => {
+  it("replays the exact mail confirmation only on explicit failed-run retry", async () => {
+    const { stream, listeners } = createMockStream();
+    const onOpenSSE = vi.fn(() => stream);
+    const { result } = renderConversation({ onOpenSSE });
+    const confirmation = { mail_draft_confirm_id: "draft-retry", mail_draft_confirm_revision: 3,
+      mail_draft_patch: { subject: "Edited subject", body: "Edited body", to: "recipient@example.com",
+        attachment_paths: ["/workspace/report.pdf"], attachments: [{ filename: "local.txt", content_base64: "bG9jYWw=" }] } };
+    const original = structuredClone(confirmation);
+    act(() => result.current.replaceMessageList("mail-retry-conversation", []));
+    await act(async () => { expect(await result.current.sendMessage({ text: "Confirm mail", ...confirmation })).toBe(true); });
+    await act(async () => {
+      listeners.get("message")?.({ data: JSON.stringify({ result: {
+        conversation_id: "mail-retry-conversation", history_id: "mail-history", seq: 1,
+        finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+        runtime_event: { type: "run_finished", run_id: "mail-run", data: { status: "failed", reason: "model_failure", code: "transport_error", partial_output: false } },
+      } }) });
+    });
+    expect(onOpenSSE).toHaveBeenCalledTimes(1);
+    expect(result.current.messageList.at(-1)?.run_status).toBe("failed");
+    expect(JSON.stringify(result.current.messageList)).not.toContain("bG9jYWw=");
+    confirmation.mail_draft_patch.subject = "Unconfirmed later edit";
+    const originalMessages = result.current.messageList;
+    act(() => result.current.replaceMessageList("different-conversation", originalMessages));
+    await act(async () => { expect(await result.current.regenerate()).toBe(false); });
+    expect(onOpenSSE).toHaveBeenCalledTimes(1);
+    for (const changedUser of [
+      { ...originalMessages[0], delta: "Changed confirmation text" },
+      { ...originalMessages[0], mail_confirmation: { ...originalMessages[0].mail_confirmation, mail_draft_confirm_revision: 4 } },
+    ]) {
+      act(() => result.current.replaceMessageList("mail-retry-conversation", [changedUser, originalMessages[1]]));
+      await act(async () => { expect(await result.current.regenerate()).toBe(false); });
+      expect(onOpenSSE).toHaveBeenCalledTimes(1);
+    }
+    act(() => result.current.replaceMessageList("mail-retry-conversation", originalMessages));
+    await act(async () => { expect(await result.current.regenerate()).toBe(true); });
+    expect(onOpenSSE).toHaveBeenLastCalledWith(expect.any(Array),
+      ChatConversationsRequestActionEnum.ChatActionRegeneration, {}, expect.objectContaining(original));
+  });
+
+  it("drops a locally refused mail confirmation and returns control to the card", async () => {
+    const { stream, listeners } = createMockStream();
+    const onOpenSSE = vi.fn(() => stream);
+    const onMailSubmissionRefused = vi.fn();
+    const { result } = renderConversation({ onOpenSSE });
+    const card = { role: RoleTypes.ASSISTANT, history_id: "card", ask_pending: { ask_id: "mail-card" } };
+    act(() => result.current.replaceMessageList("mail-offline", [card]));
+    await act(async () => { expect(await result.current.sendMessage({ text: "Confirm mail",
+      mail_draft_confirm_id: "draft", mail_draft_confirm_revision: 1, onMailSubmissionRefused })).toBe(true); });
+    expect(result.current.messageList).toHaveLength(3);
+    await act(async () => listeners.get("error")?.({ type: "error", status: 0, reason: "offline" }));
+    expect(onMailSubmissionRefused).toHaveBeenCalledWith("offline");
+    expect(result.current.messageList).toEqual([card]);
+    expect(result.current.loading).toBe(false);
+    expect(getHistoryMock).not.toHaveBeenCalled();
+    expect(onOpenSSE).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["failed", "interrupted", "completed"])("does not replay a restored mail confirmation without its payload (%s)", async (status) => {
+    const onOpenSSE = vi.fn(() => createMockStream().stream);
+    const { result } = renderConversation({ onOpenSSE });
+    const restored = buildChatMessageListFromHistory([{ id: "mail-history", query: "Confirm mail",
+      run_status: status, mail_confirmation: { mail_draft_confirm_id: "draft-retry", mail_draft_confirm_revision: 3 },
+    }] as any);
+    act(() => result.current.replaceMessageList("mail-restored", restored));
+    await act(async () => { expect(await result.current.regenerate()).toBe(false); });
+    expect(onOpenSSE).not.toHaveBeenCalled();
+    expect(message.warning).toHaveBeenCalledWith("chat.mailDraft.retryNeedsPreview");
+  });
+
   beforeEach(() => {
     sessionStorage.clear();
     getHistoryMock.mockReset();
@@ -1586,6 +1655,27 @@ describe("useChatConversation regeneration recovery", () => {
     act(() => emit({ finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop }));
     act(() => emit({ finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop }));
     expect(result.current.messageList.map(item => item.delta)).toEqual(["question", "answer"]);
+  });
+
+  it("ends generation when a model failure terminal also carries the final partial answer", async () => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList("conversation-1", []));
+    await act(async () => { await result.current.sendMessage({ text: "question" }); });
+    expect(result.current.isStreaming).toBe(true);
+
+    act(() => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "conversation-1", history_id: "history-1", delta: "partial answer",
+      finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonUnknown,
+      runtime_event: { type: "run_finished", run_id: "failed-run", data: {
+        status: "failed", reason: "model_failure", code: "provider_internal_error", partial_output: true,
+      } },
+    } }) }));
+
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.messageList[result.current.messageList.length - 1]).toMatchObject({ delta: "partial answer", run_status: "failed" });
+    expect(stream.close).toHaveBeenCalled();
+    expect(result.current.streamRecovery.status).toBe("idle");
   });
 
   it("keeps status-zero failures on the existing stream recovery path", async () => {

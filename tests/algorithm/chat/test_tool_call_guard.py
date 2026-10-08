@@ -411,6 +411,25 @@ def test_workspace_authorization_unknown_decision_is_fail_closed():
     assert batch.results[0]['ok'] is False
 
 
+def test_invalid_host_path_is_not_authorization_unavailable(workspace_runtime, monkeypatch):
+    import errno
+    from lazymind.chat.engine.tools import host_access_guard
+
+    middleware, core, _ = workspace_runtime()
+
+    def invalid_path(path):
+        raise OSError(errno.EINVAL, 'sensitive path must not be exposed')
+    monkeypatch.setattr(host_access_guard, 'identity', invalid_path)
+    batch = middleware.execute_with_records({
+        'id': 'invalid-path',
+        'function': {'name': 'read', 'arguments': {'path': 'notes.txt'}},
+    })
+    assert batch.records[0].reason == 'path_invalid'
+    assert batch.results[0]['ok'] is False
+    assert 'sensitive path' not in str(batch.results)
+    assert core.events == []
+
+
 def _workspace_middleware(monkeypatch, *, cancel_check=None, extra_tools=()):
     from lazyllm.tools.agent import ToolManager
     from lazyllm.tools.agent import FileSystemToolkit

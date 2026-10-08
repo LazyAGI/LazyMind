@@ -57,6 +57,23 @@ def test_read_memory_reference_reads_multiple_refs():
     assert store_cls.return_value.read_reference.call_count == 2
 
 
+def test_read_memory_reference_accepts_json_encoded_ref_list():
+    refs = [
+        'references/output-file-delivery.md',
+        'references/search-exhaustive-coverage.md',
+    ]
+    tools = MemoryTools()
+    with patch('lazymind.chat.engine.tools.memory.MemoryStore') as store_cls:
+        store_cls.return_value.read_reference.side_effect = ['output', 'search']
+        payload = tools.read_memory_reference(
+            '["references/output-file-delivery.md", '
+            '"references/search-exhaustive-coverage.md"]'
+        )
+
+    assert [item['ref'] for item in payload['items']] == refs
+    assert store_cls.return_value.read_reference.call_count == 2
+
+
 def test_read_memory_reference_rejects_too_many_refs():
     refs = [f'references/topic-{idx}.md' for idx in range(MAX_REFERENCE_READ_COUNT + 1)]
     with pytest.raises(ToolExecutionError, match='At most'):

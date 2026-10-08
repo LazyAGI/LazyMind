@@ -5,7 +5,8 @@ from lazyllm import LOG
 from lazymind.review.skill_organize.prompts import organize_plan_prompt
 from lazymind.review.skill_organize.schemas import SkillOrganizePlan, SkillSummary, SourceSkill
 from lazymind.review.skill_organize.validator import validate_plan
-from lazymind.review.traj_to_skill.json_call import call_json
+from lazymind.review.traj_to_skill.json_call import call_json, ModelJSONError
+from lazymind.common.maintenance import MaintenanceCancelled
 
 
 def build_organize_plan(
@@ -24,7 +25,12 @@ def build_organize_plan(
             plan = SkillOrganizePlan.model_validate(payload)
             validate_plan(plan, source_skills, mode=mode)
             return plan
+        except MaintenanceCancelled:
+            raise
         except Exception as exc:
             last_error = exc
             LOG.warning(f'[SkillOrganize] plan attempt {attempt + 1} failed: {exc}')
-    raise ValueError(f'failed to build valid organize plan: {last_error}') from last_error
+    raise ModelJSONError(
+        f'failed to build valid organize plan: {last_error}',
+        category=getattr(last_error, 'category', 'model_response'),
+    ) from last_error

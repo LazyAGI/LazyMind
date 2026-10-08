@@ -3,6 +3,8 @@ import { Popover, type TooltipRef } from "antd";
 import dayjs from "dayjs";
 import { useTranslation } from "react-i18next";
 import { useConversationRunningStore } from "@/modules/chat/store/conversationRunning";
+import { ChatServiceApi } from "../utils/request";
+import { CONVERSATION_RELATION_FORK, getConversationRelation, type ConversationRelation } from "../utils/conversationRelation";
 import "./ConversationPreview.scss";
 
 interface ConversationPreviewProps {
@@ -12,17 +14,19 @@ interface ConversationPreviewProps {
   updateTime?: string;
   isTask?: boolean;
   relation?: string;
+  groupName?: string;
   disabled?: boolean;
   children: ReactElement<HTMLAttributes<HTMLElement>>;
 }
 
 export default function ConversationPreview({
-  conversationId, title, summary, updateTime, isTask, relation, disabled, children,
+  conversationId, title, summary, updateTime, isTask, relation, groupName, disabled, children,
 }: ConversationPreviewProps) {
   const { t } = useTranslation();
   const ref = useRef<TooltipRef>(null);
   const [open, setOpen] = useState(false);
   const [layout, setLayout] = useState({ offset: 8, width: 300 });
+  const [source, setSource] = useState<{ id: string; relation: ConversationRelation | null } | null>(null);
   const entry = useConversationRunningStore(state => state.entries[conversationId]);
   const status = entry?.status === "idle" ? entry.terminalStatus : entry?.status;
   const statusLabels = {
@@ -33,6 +37,18 @@ export default function ConversationPreview({
     canceled: "chat.conversationCanceled",
   };
   const updated = updateTime ? dayjs(updateTime) : null;
+  const sourceRelation = source?.id === conversationId && source.relation?.relationType === CONVERSATION_RELATION_FORK
+    ? t("chat.conversationForkedFrom", { parent: source.relation.parentDisplayName }) : "";
+
+  useEffect(() => {
+    if (!open || disabled || !groupName || source?.id === conversationId) return;
+    let disposed = false;
+    const controller = new AbortController();
+    void ChatServiceApi().conversationServiceGetConversationDetail({ conversation: conversationId }, { signal: controller.signal }).then(response => {
+      if (!disposed) setSource({ id: conversationId, relation: getConversationRelation(response.data.conversation) });
+    }).catch(() => undefined);
+    return () => { disposed = true; controller.abort(); };
+  }, [open, disabled, groupName, conversationId, source]);
 
   useEffect(() => {
     if (!open) return;
@@ -79,6 +95,8 @@ export default function ConversationPreview({
         {status && <span>{t(statusLabels[status])}</span>}
       </div>
       {relation && <div className="record-preview-relation">{relation}</div>}
+      {groupName && <div className="record-preview-relation">{t("chat.conversationGroupSource", { group: groupName, defaultValue: "所属分组：{{group}}" })}</div>}
+      {sourceRelation && <div className="record-preview-relation">{sourceRelation}</div>}
       {updated?.isValid() && <time className="record-preview-time" dateTime={updateTime}>{t("chat.conversationPreviewUpdated", { time: updated.format("YYYY/MM/DD HH:mm") })}</time>}
     </section>}
   >{cloneElement(children, {

@@ -22,7 +22,7 @@ func TestGroupPlacementPersistsAndDoesNotChangeOrganizerVersion(t *testing.T) {
 		if id == "other" {
 			uid = "other-user"
 		}
-		row := orm.ConversationGroup{ID: id, UserID: uid, Name: id, NormalizedName: id, Version: 7, CreatedAt: now.Add(time.Duration(i) * time.Second), UpdatedAt: now}
+		row := orm.ConversationGroup{ID: id, Kind: KindProject, UserID: uid, Name: id, NormalizedName: id, Version: 7, CreatedAt: now.Add(time.Duration(i) * time.Second), UpdatedAt: now}
 		if err := db.Create(&row).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -138,7 +138,7 @@ func TestMixedGroupProjectPlacement(t *testing.T) {
 		{ID: "project", Kind: KindProject, SortOrder: 2},
 		{ID: "b", Kind: KindGroup, SortOrder: 3},
 		{ID: "task", Kind: KindProject, IsTaskConv: true, SortOrder: 10},
-		{ID: "pinned", Kind: KindGroup, Pinned: true, SortOrder: 20},
+		{ID: "pinned", Kind: KindProject, Pinned: true, SortOrder: 20},
 	} {
 		row.UserID, row.Name, row.NormalizedName = "u", row.ID, row.ID
 		if err := db.Create(&row).Error; err != nil {

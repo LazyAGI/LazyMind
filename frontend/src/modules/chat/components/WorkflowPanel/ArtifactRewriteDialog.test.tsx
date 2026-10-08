@@ -284,6 +284,34 @@ describe('ArtifactRewriteDialog', () => {
     });
   });
 
+  it('keeps a rewrite preview attached during inner scrolling without waiting for a frame', async () => {
+    const host = document.createElement('div');
+    host.innerHTML = '<div class="writer-markdown-editor__surface"><p>Selected text</p></div><div class="rewrite-layer"></div>';
+    document.body.append(host);
+    const surface = host.firstElementChild as HTMLElement;
+    const target = surface.firstElementChild as HTMLElement;
+    const layer = host.lastElementChild as HTMLElement;
+    const box = (top: number, left = 100, width = 400, height = 40) =>
+      ({ top, left, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) });
+    vi.spyOn(host, 'getBoundingClientRect').mockReturnValue(box(100));
+    vi.spyOn(layer, 'getBoundingClientRect').mockReturnValue(box(100));
+    vi.spyOn(target, 'getBoundingClientRect').mockImplementation(() => box(200 - surface.scrollTop));
+    try {
+      const { unmount } = render(<ArtifactRewriteInlineDiff target={target} layer={layer} sessionId='session'
+        slotId='draft_document' listIndex={-1} onApplied={vi.fn()} onReject={vi.fn()} preview={readyPreview} />);
+      const overlay = layer.firstElementChild as HTMLElement;
+      await waitFor(() => expect(overlay.style.top).toBe('100px'));
+      surface.scrollTop = 60;
+      fireEvent.scroll(surface);
+      expect(overlay.style.top).toBe('40px');
+      fireEvent.mouseMove(overlay, { clientX: 200, clientY: 180 });
+      expect(overlay.style.top).toBe('40px');
+      unmount();
+      expect(target).not.toHaveAttribute('style');
+      expect(target).not.toHaveClass('artifact-rewrite-inline-diff');
+    } finally { cleanup(); host.remove(); vi.restoreAllMocks(); }
+  });
+
   it('returns both revision baselines after applying a preview', async () => {
     workflowApi.patchSlotItem.mockResolvedValue({
       data: {

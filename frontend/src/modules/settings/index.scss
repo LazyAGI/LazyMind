@@ -595,7 +595,7 @@
     break-inside: avoid;
   }
 }
-.settings-skill-resources { overflow: hidden; border: 1px solid rgba(205, 219, 238, .96); border-radius: 12px; background: rgba(255, 255, 255, .95); box-shadow: 0 12px 30px rgba(44, 81, 132, .06); }
+.settings-skill-resources { overflow: hidden; border: 1px solid #ededed; border-radius: 10px; background: #fff; }
 .settings-skill-resources-head { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 18px 20px; }
 .settings-skill-resources-title-icon,
 .settings-skill-resource-icon { display: inline-flex; align-items: center; justify-content: center; border: 1px solid #d7e4f5; border-radius: 9px; color: var(--settings-blue); background: #f1f7ff; }
@@ -1487,4 +1487,38 @@
   .settings-dashboard-control,
   .settings-dashboard-model-control { width: 100%; min-width: 0; justify-content: flex-start; }
   .settings-dashboard-quick-action.ant-btn { min-width: 104px; }
+}
+.settings-resource-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px 20px 12px;
+  .ant-input-search { width: min(100%, 300px); }
+}
+.settings-resource-table-wrap {
+  margin: 0 20px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  overflow: auto;
+}
+.settings-resource-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  text-align: left;
+  th { background: #fafafa; color: #666; font-weight: 500; font-size: 12px; }
+  th, td { padding: 12px 16px; border-bottom: 1px solid #f0f0f0; }
+  th:first-child { width: 65%; }
+  th:last-child { width: 84px; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover { background: #fafbfc; }
+  .settings-resource-name { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .settings-skill-resource-icon { width: 32px; height: 32px; flex: 0 0 32px; border-radius: 6px; background: #f5f6f8; color: #687487; font-size: 16px; }
+  .settings-skill-resource-copy { min-width: 0; }
+  .settings-skill-resource-copy h2 { font-size: 13px; font-weight: 500; margin: 0 0 3px; }
+  .settings-skill-resource-copy p { margin: 0; color: #90949c; }
+  .settings-resource-category { color: #8a8f98; font-size: 12px; }
+  .is-master-paused { background: #fafafa; }
+}
+@media (max-width: 600px) {
+  .settings-resource-table { min-width: 440px; }
 }

@@ -69,6 +69,34 @@ it('a paused account only exposes reconnect in its card footer', async () => {
   expect(screen.queryByRole('button', { name: 'notifications.reauthorize' })).not.toBeInTheDocument();
 });
 
+it('shows an in-progress Feishu connection instead of offering a conflicting reconnect', async () => {
+  let status = 'provisioning';
+  mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: provider === 'feishu' ? [{ ...original, status }] : [] }));
+  mocks.detail.mockImplementation(() => Promise.resolve({ ...original, status, notification_reference_count: 0 }));
+  render(<MemoryRouter><TerminalConnectionPage initialProvider="feishu" /></MemoryRouter>);
+  await screen.findByText(original.label);
+  const disclosure = document.querySelector('details')!;
+  disclosure.open = true; fireEvent(disclosure, new Event('toggle'));
+  expect(screen.getAllByText('notifications.connecting').length).toBeGreaterThan(0);
+  expect(within(disclosure).getByText('notifications.connectionInProgressHint')).toBeInTheDocument();
+  expect(within(disclosure).queryByRole('button', { name: 'notifications.reconnect' })).not.toBeInTheDocument();
+  expect(mocks.resume).not.toHaveBeenCalled();
+
+  status = 'connected';
+  await waitFor(() => expect(within(disclosure).getByRole('button', { name: 'notifications.disconnect' })).toBeInTheDocument(), { timeout: 4000 });
+  expect(mocks.resume).not.toHaveBeenCalled();
+});
+
+it('keeps Feishu registration running when the connection page closes', async () => {
+  mocks.create.mockResolvedValue({ id: 'active-registration', provider: 'feishu', mode: 'qr_code',
+    status: 'waiting_scan', poll_after_ms: 1000, allowed_actions: ['cancel'] });
+  const view = mount();
+  fireEvent.click(await screen.findByRole('button', { name: /channelGateway.feishu.startScan/ }));
+  await screen.findByText('channelGateway.feishu.sessionStatusMap.waiting_scan');
+  view.unmount();
+  expect(mocks.cancel).not.toHaveBeenCalled();
+});
+
 it('shows the QR connection design directly and preserves explicit new-robot intent', async () => {
   mount(); await screen.findByText(original.label);
   expect(mocks.create).not.toHaveBeenCalled();

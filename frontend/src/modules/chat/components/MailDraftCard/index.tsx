@@ -1,14 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Input, Space, Typography, message } from "antd";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { Alert, Button, Input, Select, Space, Typography, message } from "antd";
+import { MailOutlined, PaperClipOutlined, SendOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
+import { useTaskCenterStore, type ConversationArtifact } from "@/modules/chat/store/taskCenter";
 import { getArtifactFilename } from "@/modules/chat/utils/artifactLinks";
+import type { RealtimeRefusal } from "@/modules/chat/utils/realtimeTransport";
 import "./index.scss";
 
-const MAX_MAIL_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+// Base64 attachments travel in one realtime frame (MAX_REALTIME_FRAME_BYTES);
+// 10MB raw grows to about 13.4MB and leaves room for the draft text.
+const MAX_MAIL_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const MAX_MAIL_ATTACHMENT_COUNT = 5;
-const MAX_MAIL_ATTACHMENT_TOTAL_BYTES = 20 * 1024 * 1024;
+const MAX_MAIL_ATTACHMENT_TOTAL_BYTES = 10 * 1024 * 1024;
+const EMPTY_MAIL_ARTIFACTS: ConversationArtifact[] = [];
+const EMAIL_ADDRESS_PATTERN = /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/u;
 
 export interface MailDraftPreview {
   draft_id?: string;
@@ -19,6 +25,8 @@ export interface MailDraftPreview {
   subject?: string;
   body?: string;
   attachments?: string[];
+  attachment_paths?: string[];
+  pending_attachment_names?: string[];
   in_reply_to?: string;
   status?: string;
   sent_at?: string;
@@ -54,14 +62,26 @@ export interface MailConversationFile {
 interface MailDraftCardProps {
   draft: MailDraftPreview;
   disabled?: boolean;
+  /** A newer card for the same draft carries the authoritative status. */
+  superseded?: boolean;
   conversationFiles?: MailConversationFile[];
-  onConfirm: (draftId: string, revision: number, patch?: MailDraftPatch) => void;
+  onConfirm: (
+    draftId: string,
+    revision: number,
+    patch?: MailDraftPatch,
+    onRefused?: (reason: RealtimeRefusal) => void,
+  ) => boolean | void | Promise<boolean | void>;
 }
+
+const SUBMIT_REFUSAL_MESSAGES: Record<RealtimeRefusal, string> = {
+  offline: "chat.mailDraft.submitOffline",
+  payload_too_large: "chat.mailDraft.submitTooLarge",
+};
 
 type LocalAttachment = {
   key: string;
   name: string;
-  source: "draft" | "upload" | "conversation" | "artifact";
+  source: "draft" | "upload" | "conversation" | "artifact" | "pending";
   path?: string;
   content_base64?: string;
 };
@@ -91,14 +111,14 @@ function readFileBase64(file: File): Promise<string> {
   });
 }
 
-function formatMailError(value: unknown): string {
-  if (value == null || value === "") {
+function formatMailError(value: unknown, depth = 0): string {
+  if (value == null || value === "" || depth > 8) {
     return "";
   }
   if (typeof value === "object") {
     const record = value as Record<string, unknown>;
-    for (const key of ["last_error", "message", "msg", "error", "detail", "reason"]) {
-      const nested = formatMailError(record[key]);
+    for (const key of ["last_error", "message", "msg", "error", "detail", "reason", "value"]) {
+      const nested = formatMailError(record[key], depth + 1);
       if (nested) {
         return nested;
       }
@@ -106,9 +126,10 @@ function formatMailError(value: unknown): string {
     return "";
   }
   const text = String(value).trim();
-  if (text.startsWith("{") || text.startsWith("[")) {
+  const jsonStart = text.search(/[\[{]/);
+  if (jsonStart >= 0) {
     try {
-      return formatMailError(JSON.parse(text));
+      return formatMailError(JSON.parse(text.slice(jsonStart)), depth + 1);
     } catch {
       return "";
     }
@@ -129,21 +150,54 @@ function stringList(value: unknown): string[] {
   return [];
 }
 
-function attachmentsFromDraft(names: unknown): LocalAttachment[] {
+function addressList(value: string): string[] {
+  return value
+    .split(/[,;，；]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function mergeAddresses(values: string[], search: string): string[] {
+  const seen = new Set<string>();
+  return [...values, ...addressList(search)]
+    .map((address) => address.trim())
+    .filter((address) => {
+      const key = address.toLowerCase();
+      if (!address || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function hasInvalidAddress(addresses: string[]): boolean {
+  return addresses.some((address) => !EMAIL_ADDRESS_PATTERN.test(address));
+}
+
+function isRecipientValidationError(value: string): boolean {
+  const normalized = value.toLowerCase();
+  return normalized.includes("no recipients")
+    || normalized.includes("no valid recipients")
+    || normalized.includes("at least one recipient is required");
+}
+
+function attachmentsFromDraft(names: unknown, paths?: unknown, pendingNames?: unknown): LocalAttachment[] {
+  const references = stringList(paths);
+  const pending = new Set(stringList(pendingNames));
   return stringList(names)
     .map((name) => String(name || "").trim())
     .filter(Boolean)
-    .map((name) => ({
-      key: `draft:${name}`,
+    .map((name, index) => ({
+      key: `draft:${references[index] || name}`,
       name,
-      source: "draft" as const,
-      path: name,
+      source: pending.has(name) ? "pending" as const : "draft" as const,
+      path: references[index] || name,
     }));
 }
 
 export default function MailDraftCard({
   draft,
   disabled,
+  superseded,
   conversationFiles = [],
   onConfirm,
 }: MailDraftCardProps) {
@@ -155,22 +209,32 @@ export default function MailDraftCard({
   const deliveryUnknown =
     draft.status === "delivery_unknown" || Boolean(draft.delivery_unknown);
   const partialSent = draft.status === "partial_sent";
+  const sending = draft.status === "sending";
+  const submittingRef = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const uploadGeneration = useRef(0);
   const lastError = formatMailError(draft.last_error);
+  const staleRecipientError = isRecipientValidationError(lastError);
   const failed =
     !sent &&
     !deliveryUnknown &&
     (draft.status === "failed" || partialSent || Boolean(lastError));
-  const editable = !sent && !disabled;
-  const [to, setTo] = useState(stringList(draft.to).join(", "));
-  const [cc, setCc] = useState(stringList(draft.cc).join(", "));
+  const editable = !sent && !sending && !disabled && !submitting && !submitted;
+  const [to, setTo] = useState<string[]>(() => stringList(draft.to));
+  const [toSearch, setToSearch] = useState("");
+  const [cc, setCc] = useState<string[]>(() => stringList(draft.cc));
+  const [ccSearch, setCcSearch] = useState("");
   const [subject, setSubject] = useState(draft.subject || "");
   const [body, setBody] = useState(draft.body || "");
   const [attachments, setAttachments] = useState<LocalAttachment[]>(
-    () => attachmentsFromDraft(draft.attachments),
+    () => attachmentsFromDraft(draft.attachments, draft.attachment_paths, draft.pending_attachment_names),
   );
   const artifacts = useTaskCenterStore((state) => {
     const conversationId = state.activeConversationId;
-    return conversationId ? (state.artifactsByConversation[conversationId] ?? []) : [];
+    return conversationId ? (state.artifactsByConversation[conversationId] ?? EMPTY_MAIL_ARTIFACTS) : EMPTY_MAIL_ARTIFACTS;
   });
   const artifactChoices = useMemo(() => {
     const seen = new Set<string>();
@@ -195,21 +259,44 @@ export default function MailDraftCard({
       });
   }, [artifacts]);
 
+  // Stream/history snapshots often contain new arrays with unchanged contents.
+  // Only an actual server-side change should replace the user's local edits.
+  const snapshotKey = JSON.stringify({
+    draftId, revision, status: draft.status, lastError,
+    to: stringList(draft.to), cc: stringList(draft.cc),
+    subject: draft.subject || "", body: draft.body || "",
+    attachments: stringList(draft.attachments),
+    attachmentPaths: stringList(draft.attachment_paths),
+    pendingAttachmentNames: stringList(draft.pending_attachment_names),
+  });
+  const snapshot = useMemo(() => JSON.parse(snapshotKey), [snapshotKey]);
+  const currentSnapshotKey = useRef(snapshotKey);
+  currentSnapshotKey.current = snapshotKey;
   useEffect(() => {
-    setTo(stringList(draft.to).join(", "));
-    setCc(stringList(draft.cc).join(", "));
-    setSubject(draft.subject || "");
-    setBody(draft.body || "");
-    setAttachments(attachmentsFromDraft(draft.attachments));
-  }, [draft.body, draft.cc, draft.draft_id, draft.revision, draft.subject, draft.to, draft.attachments]);
+    setTo(snapshot.to);
+    setToSearch("");
+    setCc(snapshot.cc);
+    setCcSearch("");
+    setSubject(snapshot.subject);
+    setBody(snapshot.body);
+    setAttachments(attachmentsFromDraft(snapshot.attachments, snapshot.attachmentPaths, snapshot.pendingAttachmentNames));
+    setSubmitted(false);
+    setSubmitError("");
+    setSubmitting(false);
+    submittingRef.current = false;
+    uploadGeneration.current += 1;
+    setUploading(false);
+  }, [snapshot]);
 
+  const toAddresses = mergeAddresses(to, toSearch);
+  const ccAddresses = mergeAddresses(cc, ccSearch);
   const patch: MailDraftPatch = {
-    to,
-    cc,
+    to: toAddresses.join(", "),
+    cc: ccAddresses.join(", "),
     subject,
     body,
     attachment_paths: attachments
-      .filter((item) => item.source !== "upload")
+      .filter((item) => item.source !== "upload" && item.source !== "pending")
       .map((item) => item.path || item.name),
     attachments: attachments
       .filter((item) => item.source === "upload" && item.content_base64)
@@ -218,7 +305,19 @@ export default function MailDraftCard({
         content_base64: item.content_base64 || "",
       })),
   };
-  const hasRecipient = Boolean(to.trim());
+  const recipientRequired = toAddresses.length === 0;
+  const toAddressInvalid = !recipientRequired && hasInvalidAddress(toAddresses);
+  const ccAddressInvalid = Boolean(cc.length || ccSearch.trim()) && (
+    ccAddresses.length === 0 || hasInvalidAddress(ccAddresses)
+  );
+  const recipientInvalid = toAddressInvalid || ccAddressInvalid;
+  const recipientError = recipientRequired
+    ? "chat.mailDraft.recipientRequired"
+    : recipientInvalid
+      ? "chat.mailDraft.recipientInvalid"
+      : "";
+  const recipientsValid = !recipientError;
+  const hasPendingAttachments = attachments.some((item) => item.source === "pending");
   const attachedNames = new Set(attachments.map((item) => item.name));
 
   const addNamedFile = (name: string, source: "conversation" | "artifact", path?: string) => {
@@ -238,50 +337,91 @@ export default function MailDraftCard({
   };
 
   const handleUpload = async (files: FileList | null) => {
-    if (!files?.length) {
+    if (!files?.length || uploading) {
       return;
     }
-    const currentUploads = attachments.filter((item) => item.source === "upload");
-    const next: LocalAttachment[] = [];
-    for (const file of Array.from(files)) {
-      if (currentUploads.length + next.length >= MAX_MAIL_ATTACHMENT_COUNT) {
-        message.error(t("chat.mailDraft.attachmentTooMany"));
-        break;
+    const generation = uploadGeneration.current;
+    setUploading(true);
+    try {
+      const currentUploads = attachments.filter((item) => item.source === "upload");
+      const next: LocalAttachment[] = [];
+      for (const file of Array.from(files)) {
+        if (currentUploads.length + next.length >= MAX_MAIL_ATTACHMENT_COUNT) {
+          message.error(t("chat.mailDraft.attachmentTooMany"));
+          break;
+        }
+        if (file.size > MAX_MAIL_ATTACHMENT_BYTES) {
+          message.error(t("chat.mailDraft.attachmentTooLarge"));
+          continue;
+        }
+        const used = currentUploads.reduce(
+          (sum, item) => sum + Math.floor(((item.content_base64 || "").length * 3) / 4),
+          0,
+        ) + next.reduce((sum, item) => sum + Math.floor(((item.content_base64 || "").length * 3) / 4), 0);
+        if (used + file.size > MAX_MAIL_ATTACHMENT_TOTAL_BYTES) {
+          message.error(t("chat.mailDraft.attachmentTotalTooLarge"));
+          break;
+        }
+        const content_base64 = await readFileBase64(file);
+        next.push({
+          key: `upload:${file.name}:${file.size}:${file.lastModified}`,
+          name: file.name,
+          source: "upload",
+          content_base64,
+        });
       }
-      if (file.size > MAX_MAIL_ATTACHMENT_BYTES) {
-        message.error(t("chat.mailDraft.attachmentTooLarge"));
-        continue;
+      if (next.length && generation === uploadGeneration.current) {
+        setAttachments((current) => {
+          const kept = current.filter((item) => item.source !== "pending" || !next.some((upload) => upload.name === item.name));
+          const names = new Set(kept.map((item) => item.name));
+          return [...kept, ...next.filter((item) => !names.has(item.name))];
+        });
       }
-      const used = currentUploads.reduce(
-        (sum, item) => sum + Math.floor(((item.content_base64 || "").length * 3) / 4),
-        0,
-      ) + next.reduce((sum, item) => sum + Math.floor(((item.content_base64 || "").length * 3) / 4), 0);
-      if (used + file.size > MAX_MAIL_ATTACHMENT_TOTAL_BYTES) {
-        message.error(t("chat.mailDraft.attachmentTotalTooLarge"));
-        break;
-      }
-      const content_base64 = await readFileBase64(file);
-      next.push({
-        key: `upload:${file.name}:${file.size}:${file.lastModified}`,
-        name: file.name,
-        source: "upload",
-        content_base64,
-      });
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } catch {
+      message.error(t("chat.mailDraft.attachmentReadFailed"));
+    } finally {
+      if (generation === uploadGeneration.current) setUploading(false);
     }
-    if (next.length) {
-      setAttachments((current) => {
-        const names = new Set(current.map((item) => item.name));
-        return [...current, ...next.filter((item) => !names.has(item.name))];
-      });
-    }
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
+  };
+
+  const handleConfirm = async () => {
+    if (!editable || uploading || hasPendingAttachments || submittingRef.current || !draftId || !recipientsValid) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    setSubmitError("");
+    const submittedSnapshotKey = snapshotKey;
+    let refused = false;
+    const handleRefused = (reason: RealtimeRefusal) => {
+      refused = true;
+      if (currentSnapshotKey.current !== submittedSnapshotKey) return;
+      submittingRef.current = false;
+      setSubmitting(false);
+      setSubmitted(false);
+      setSubmitError(SUBMIT_REFUSAL_MESSAGES[reason] || "chat.mailDraft.submitFailed");
+    };
+    try {
+      const started = await onConfirm(draftId, revision, patch, handleRefused);
+      if (currentSnapshotKey.current === submittedSnapshotKey && !refused) {
+        setSubmitted(started !== false);
+        if (started === false) setSubmitError("chat.mailDraft.submitFailed");
+      }
+    } catch {
+      if (currentSnapshotKey.current === submittedSnapshotKey) setSubmitError("chat.mailDraft.submitFailed");
+    } finally {
+      if (currentSnapshotKey.current === submittedSnapshotKey) {
+        submittingRef.current = false;
+        setSubmitting(false);
+      }
     }
   };
 
   return (
-    <div className="mail-draft-card">
-      <Typography.Title level={5}>{t("chat.mailDraft.title")}</Typography.Title>
+    <div className={`mail-draft-card${sent ? " is-sent" : ""}`}>
+      <header className="mail-draft-header">
+        <span className="mail-draft-header-icon" aria-hidden="true"><MailOutlined /></span>
+        <Typography.Title level={5}>{t(sent ? "chat.mailDraft.sentTitle" : "chat.mailDraft.title")}</Typography.Title>
+      </header>
       <dl>
         {draft.mailbox ? (
           <div>
@@ -293,13 +433,30 @@ export default function MailDraftCard({
           <dt>{t("chat.mailDraft.to")}</dt>
           <dd>
             {editable ? (
-              <Input
+              <Select
                 className="mail-draft-address"
+                aria-label={t("chat.mailDraft.to")}
+                mode="tags"
+                searchValue={toSearch}
+                status={recipientRequired || toAddressInvalid ? "error" : undefined}
                 value={to}
-                onChange={(event) => setTo(event.target.value)}
+                suffixIcon={null}
+                tokenSeparators={[",", ";", "，", "；"]}
+                onChange={(values) => {
+                  setTo(mergeAddresses(values, ""));
+                  setToSearch("");
+                }}
+                onInputKeyDown={(event) => {
+                  if (event.key === "Enter" && toSearch.trim() && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    setTo(mergeAddresses(to, toSearch));
+                    setToSearch("");
+                  }
+                }}
+                onSearch={setToSearch}
               />
             ) : (
-              stringList(draft.to).join(", ") || "-"
+              toAddresses.join(", ") || "-"
             )}
           </dd>
         </div>
@@ -307,13 +464,30 @@ export default function MailDraftCard({
           <dt>{t("chat.mailDraft.cc")}</dt>
           <dd>
             {editable ? (
-              <Input
+              <Select
                 className="mail-draft-address"
+                aria-label={t("chat.mailDraft.cc")}
+                mode="tags"
+                searchValue={ccSearch}
+                status={ccAddressInvalid ? "error" : undefined}
                 value={cc}
-                onChange={(event) => setCc(event.target.value)}
+                suffixIcon={null}
+                tokenSeparators={[",", ";", "，", "；"]}
+                onChange={(values) => {
+                  setCc(mergeAddresses(values, ""));
+                  setCcSearch("");
+                }}
+                onInputKeyDown={(event) => {
+                  if (event.key === "Enter" && ccSearch.trim() && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    setCc(mergeAddresses(cc, ccSearch));
+                    setCcSearch("");
+                  }
+                }}
+                onSearch={setCcSearch}
               />
             ) : (
-              stringList(draft.cc).join(", ") || "-"
+              ccAddresses.join(", ") || "-"
             )}
           </dd>
         </div>
@@ -321,9 +495,9 @@ export default function MailDraftCard({
           <dt>{t("chat.mailDraft.subject")}</dt>
           <dd>
             {editable ? (
-              <Input value={subject} onChange={(event) => setSubject(event.target.value)} />
+              <Input aria-label={t("chat.mailDraft.subject")} value={subject} onChange={(event: ChangeEvent<HTMLInputElement>) => setSubject(event.target.value)} />
             ) : (
-              draft.subject || "-"
+              subject || "-"
             )}
           </dd>
         </div>
@@ -332,12 +506,13 @@ export default function MailDraftCard({
           <dd>
             {editable ? (
               <Input.TextArea
+                aria-label={t("chat.mailDraft.body")}
                 autoSize={{ minRows: 4, maxRows: 12 }}
                 value={body}
-                onChange={(event) => setBody(event.target.value)}
+                onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setBody(event.target.value)}
               />
             ) : (
-              <pre>{draft.body || ""}</pre>
+              <pre>{body}</pre>
             )}
           </dd>
         </div>
@@ -347,7 +522,8 @@ export default function MailDraftCard({
             <ul className="mail-draft-attachments">
               {attachments.map((item) => (
                 <li key={item.key}>
-                  <span>{item.name}</span>
+                  <PaperClipOutlined aria-hidden="true" />
+                  <span title={item.name}>{item.name}</span>
                   {editable ? (
                     <Button
                       type="link"
@@ -363,7 +539,7 @@ export default function MailDraftCard({
               ))}
             </ul>
             {editable ? (
-              <Space wrap>
+              <Space wrap className="mail-draft-file-actions">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -373,7 +549,7 @@ export default function MailDraftCard({
                     void handleUpload(event.target.files);
                   }}
                 />
-                <Button onClick={() => fileInputRef.current?.click()}>
+                <Button loading={uploading} icon={<PaperClipOutlined aria-hidden="true" />} onClick={() => fileInputRef.current?.click()}>
                   {t("chat.mailDraft.uploadAttachment")}
                 </Button>
                 {conversationFiles.length ? (
@@ -422,13 +598,18 @@ export default function MailDraftCard({
           message={t("chat.mailDraft.sentAt", { time: formatMailTime(draft.sent_at || "") })}
         />
       ) : null}
-      {!hasRecipient && !sent ? (
-        <Alert type="error" showIcon message={t("chat.mailDraft.recipientRequired")} />
+      {!superseded && (sending || submitting || submitted) ? (
+        <Alert type="info" showIcon message={t("chat.mailDraft.sending")} />
       ) : null}
-      {partialSent ? (
+      {submitError ? <Alert type="error" showIcon message={t(submitError)} /> : null}
+      {hasPendingAttachments ? <Alert type="warning" showIcon message={t("chat.mailDraft.attachmentPending")} /> : null}
+      {recipientError && !sent ? (
+        <Alert type="error" showIcon message={t(recipientError)} />
+      ) : null}
+      {partialSent && !recipientError ? (
         <Alert type="warning" showIcon message={lastError || t("chat.mailDraft.partialSent")} />
       ) : null}
-      {failed && !partialSent ? (
+      {failed && !partialSent && !recipientError && !staleRecipientError ? (
         <Alert type="error" showIcon message={lastError || t("chat.mailDraft.sendFailed")} />
       ) : null}
       {deliveryUnknown ? (
@@ -436,6 +617,7 @@ export default function MailDraftCard({
           type="warning"
           showIcon
           message={lastError || t("chat.mailDraft.deliveryUnknown")}
+          description={lastError ? t("chat.mailDraft.deliveryUnknown") : undefined}
         />
       ) : null}
       {draft.requires_reauth ? (
@@ -450,26 +632,28 @@ export default function MailDraftCard({
           }
         />
       ) : null}
-      {!sent && !disabled ? (
-        <Space>
+      {editable ? (
+        <footer className="mail-draft-footer">
           {failed || deliveryUnknown ? (
             <Button
               type="primary"
-              disabled={!draftId || !hasRecipient}
-              onClick={() => onConfirm(draftId, revision, patch)}
+              icon={<SendOutlined aria-hidden="true" />}
+              disabled={!draftId || !recipientsValid || uploading || hasPendingAttachments}
+              onClick={() => void handleConfirm()}
             >
               {deliveryUnknown ? t("chat.mailDraft.resendAnyway") : t("chat.mailDraft.resend")}
             </Button>
           ) : (
             <Button
               type="primary"
-              disabled={!draftId || !hasRecipient}
-              onClick={() => onConfirm(draftId, revision, patch)}
+              icon={<SendOutlined aria-hidden="true" />}
+              disabled={!draftId || !recipientsValid || uploading || hasPendingAttachments}
+              onClick={() => void handleConfirm()}
             >
               {t("chat.mailDraft.confirmSend")}
             </Button>
           )}
-        </Space>
+        </footer>
       ) : null}
     </div>
   );

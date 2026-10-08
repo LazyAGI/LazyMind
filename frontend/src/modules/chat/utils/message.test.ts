@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ChatConversationsResponseFinishReasonEnum } from "@/api/generated/chatbot-client";
 import { RoleTypes } from "@/modules/chat/constants/common";
+import { MailConfirmationReplayStore } from "./mailConfirmationReplay";
 import {
   buildChatMessageListFromHistory,
   getCitationFromText,
@@ -18,6 +19,49 @@ import {
   stripAskUserReceipt,
   stripCitationFromText,
 } from "./message";
+
+describe("mail confirmation replay isolation", () => {
+  const payload = { mail_draft_confirm_id: "draft", mail_draft_confirm_revision: 2,
+    mail_draft_patch: { body: "original", attachments: [{ filename: "a.txt", content_base64: "YWJj" }] } };
+  it("snapshots payloads and rejects conversation, turn and revision mutations", () => {
+    const store = new MailConfirmationReplayStore();
+    const input = structuredClone(payload);
+    const key = store.put("conversation-a", "turn-a", input);
+    input.mail_draft_patch.body = "changed";
+    expect(store.get(key, "conversation-a", "turn-a", payload)).toEqual(payload);
+    expect(store.get(key, "conversation-b", "turn-a", payload)).toBeUndefined();
+    expect(store.get(key, "conversation-a", "turn-b", payload)).toBeUndefined();
+    expect(store.get(key, "conversation-a", "turn-a", { ...payload, mail_draft_confirm_revision: 3 })).toBeUndefined();
+    const replay = store.get(key, "conversation-a", "turn-a", payload)!;
+    replay.mail_draft_patch!.body = "mutated retry";
+    expect(store.get(key, "conversation-a", "turn-a", payload)).toEqual(payload);
+  });
+  it("bounds retention and never substitutes a newer payload for an evicted turn", () => {
+    const store = new MailConfirmationReplayStore(1, 2048);
+    const first = store.put("a", "first", payload);
+    store.put("a", "second", payload);
+    expect(store.get(first, "a", "first", payload)).toBeUndefined();
+    const oversized = store.put("a", "large", { ...payload, mail_draft_patch: { body: "x".repeat(2048) } });
+    expect(store.get(oversized, "a", "large", payload)).toBeUndefined();
+  });
+});
+
+describe("mail confirmation history reconciliation", () => {
+  it("retains only the matching unchanged turn's volatile replay key", () => {
+    const metadata = { mail_draft_confirm_id: "draft", mail_draft_confirm_revision: 2 };
+    const api = buildChatMessageListFromHistory([{ id: "history", query: "Confirm", mail_confirmation: metadata }]);
+    const cached = api.map(item => ({ ...item }));
+    cached[0].mail_confirmation_replay_key = "volatile-key";
+    expect(mergeChatMessageLists(api, cached)[0].mail_confirmation_replay_key).toBe("volatile-key");
+    for (const changed of [
+      { ...api[0], delta: "Edited request" },
+      { ...api[0], mail_confirmation: { ...metadata, mail_draft_confirm_revision: 3 } },
+      { ...api[0], mail_confirmation: undefined },
+    ]) {
+      expect(mergeChatMessageLists([changed, api[1]], cached)[0].mail_confirmation_replay_key).toBeUndefined();
+    }
+  });
+});
 
 describe("normalizeImportedUserText", () => {
   it("shows only the request body from an existing Codex transport envelope", () => {
@@ -84,6 +128,28 @@ describe("mailDraftCardsReadOnly", () => {
 });
 
 describe("mergeAskPending", () => {
+  it("keeps ordinary questions distinguishable when mail cards precede them", () => {
+    const merged = mergeAskPending(
+      { ask_id: "mail", mail_draft: { draft_id: "a", status: "sent" } },
+      { ask_id: "question", questions: [{ text: "Which report next?", type: "text" }] },
+    );
+    expect(merged.mail_draft_only).toBe(false);
+    expect(merged.questions[0].text).toBe("Which report next?");
+    expect(merged.mail_drafts).toHaveLength(1);
+  });
+  it("does not regress a sent receipt when an older preview arrives late", () => {
+    const previous = { mail_draft: { draft_id: "a", revision: 2, status: "sent", attachments: ["report.pdf"] } };
+    const merged = mergeAskPending(previous, { mail_draft: { draft_id: "a", revision: 1, status: "draft", attachments: [] } });
+    expect(merged.mail_draft).toEqual(previous.mail_draft);
+  });
+  it("keeps sent terminal at the same revision", () => {
+    const merged = mergeAskPending(
+      { mail_draft: { draft_id: "a", revision: 2, status: "sent", attachments: ["report.pdf"] } },
+      { mail_draft: { draft_id: "a", revision: 2, status: "draft", attachments: [] } },
+    );
+    expect(merged.mail_draft.status).toBe("sent");
+    expect(merged.mail_draft.attachments).toEqual(["report.pdf"]);
+  });
   it("keeps every mail draft card from later stream frames", () => {
     const merged = mergeAskPending(
       { ask_id: "a1", mail_draft: { draft_id: "draft_one", subject: "one" } },

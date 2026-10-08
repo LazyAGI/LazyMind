@@ -16,6 +16,21 @@ export interface SkillTempUploadResult {
   fileUrl?: string;
 }
 
+function flattenErrorText(value: unknown, depth = 0): string {
+  if (value == null || depth > 6) return "";
+  if (typeof value !== "object") return String(value);
+  return Object.values(value as Record<string, unknown>)
+    .map((item) => flattenErrorText(item, depth + 1))
+    .filter(Boolean)
+    .join(" ");
+}
+
+export function isInvalidSkillPackageError(error: unknown): boolean {
+  const response = (error as { response?: { status?: number; data?: unknown } } | null)?.response;
+  if (response?.status !== 422) return false;
+  return /skill[ _-]?(?:md|package)|SKILL\.md/i.test(flattenErrorText(response.data));
+}
+
 export async function uploadSkillTempFile(
   file: File,
   options?: { chunkSize?: number; timeout?: number; silentError?: boolean },

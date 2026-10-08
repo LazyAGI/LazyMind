@@ -48,6 +48,8 @@ export interface SendMessageParams {
   };
   mail_mailbox_confirm?: string;
   mail_mailbox_confirm_draft_id?: string;
+  /** Called when a mail confirmation was refused before it left the browser. */
+  onMailSubmissionRefused?: (reason: import("@/modules/chat/utils/realtimeTransport").RealtimeRefusal) => void;
 }
 
 export interface ChatInputImperativeProps {

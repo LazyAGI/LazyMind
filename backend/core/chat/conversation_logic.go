@@ -530,6 +530,9 @@ func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[
 		askRewriteIdx = i
 		break
 	}
+	if askAnswersStructured != nil {
+		askRewriteIdx = submittedAskHistoryIndex(histories, askAnswersStructured)
+	}
 
 	out := make([]map[string]any, 0, len(histories)*2)
 	for idx, h := range histories {
@@ -922,6 +925,9 @@ func buildChatHistoryExt(raw map[string]any, query string) json.RawMessage {
 		return nil
 	}
 	ext := map[string]any{"input": input}
+	if confirmation := mailConfirmationHistoryMetadata(raw); confirmation != nil {
+		ext["mail_confirmation"] = confirmation
+	}
 	if mentions, ok := raw["mentions"].([]any); ok && len(mentions) > 0 {
 		ext["mentions"] = mentions
 	}
@@ -952,10 +958,16 @@ func buildChatHistoryExtWithTrail(
 
 	if target.IsRegeneration && target.Existing != nil {
 		var previous struct {
-			Trail json.RawMessage `json:"trail"`
+			Trail            json.RawMessage `json:"trail"`
+			MailConfirmation map[string]any  `json:"mail_confirmation"`
 		}
-		if json.Unmarshal(target.Existing.Ext, &previous) == nil && len(previous.Trail) > 0 {
-			ext["trail"] = json.RawMessage(previous.Trail)
+		if json.Unmarshal(target.Existing.Ext, &previous) == nil {
+			if len(previous.Trail) > 0 {
+				ext["trail"] = json.RawMessage(previous.Trail)
+			}
+			if confirmation := mailConfirmationHistoryMetadata(previous.MailConfirmation); confirmation != nil {
+				ext["mail_confirmation"] = confirmation
+			}
 		}
 	}
 	// Regeneration reuses the existing user turn. A citation tag embedded in
@@ -4203,85 +4215,92 @@ func submitObjectiveVocabularyAnswers(ctx context.Context, db *gorm.DB, owner st
 	if !ok {
 		return "", nil
 	}
-	for index := len(histories) - 1; index >= 0; index-- {
-		var ext map[string]any
-		if len(histories[index].Ext) == 0 || json.Unmarshal(histories[index].Ext, &ext) != nil {
-			continue
-		}
-		pending, _ := ext["ask_pending"].(map[string]any)
-		if pending == nil {
-			continue
-		}
-		hook, _ := pending["review_hook"].(map[string]any)
-		if hook == nil || hook["kind"] != "vocabulary_review_objective" {
-			return "", nil
-		}
-		if fmt.Sprint(payload["ask_id"]) != fmt.Sprint(pending["ask_id"]) {
-			return "", errors.New("vocabulary review answer does not match the pending card")
-		}
-		questions, _ := payload["questions"].([]any)
-		items, _ := hook["items"].([]any)
-		sessionID := strings.TrimSpace(fmt.Sprint(hook["session_id"]))
-		service := vocabulary.New(db)
-		for _, rawItem := range items {
-			itemMap, _ := rawItem.(map[string]any)
-			questionIndex, _ := strconv.Atoi(fmt.Sprint(itemMap["question_index"]))
-			if questionIndex < 0 || questionIndex >= len(questions) {
-				return "", errors.New("vocabulary review answer is incomplete")
-			}
-			question, _ := questions[questionIndex].(map[string]any)
-			answer, _ := question["answer"].(map[string]any)
-			response := strings.TrimSpace(fmt.Sprint(answer["value"]))
-			if response == "" || response == "<nil>" {
-				return "", errors.New("vocabulary review answer is incomplete")
-			}
-			wordID := strings.TrimSpace(fmt.Sprint(itemMap["word_id"]))
-			var item vocabulary.ReviewSessionItem
-			var err error
-			if wordID != "" && wordID != "<nil>" {
-				var active vocabulary.ReviewSession
-				active, item, err = service.ActiveSessionItemByWord(ctx, owner, wordID)
-				if err == nil && active.ID != sessionID {
-					err = errors.New("vocabulary review answer does not match the active session")
-				}
-			} else {
-				// Backward compatibility for cards created before word-based hooks.
-				itemID := strings.TrimSpace(fmt.Sprint(itemMap["review_item_id"]))
-				item, err = service.SessionItem(ctx, owner, sessionID, itemID)
-			}
-			if err != nil {
-				return "", err
-			}
-			err = service.RecordSessionAnswer(ctx, owner, sessionID, item.WordID, item.Term, vocabulary.ReviewRequest{CardID: item.CardID, Response: response, RowVersion: item.RowVersion, PreviewedAt: item.PreviewedAt, IdempotencyKey: uuid.NewString()})
-			if err != nil {
-				return "", err
-			}
-		}
-		next, err := service.PreviewReviewSession(ctx, owner, 5)
-		if err != nil {
-			return "", err
-		}
-		if next.Session.ID != sessionID {
-			return "", errors.New("vocabulary review session changed while recording answers")
-		}
-		if len(next.Questions) > 0 {
-			lines := []string{
-				"The user answered the previous review batch. The backend graded and registered it. Do not repeat, re-grade, or ask about the previous batch again.",
-				"The backend returned the following candidates for the next batch. Select suitable words and a question type, then call ask_words to continue:",
-			}
-			for _, question := range next.Questions {
-				lines = append(lines, fmt.Sprintf("- %s：%s", question.Word.Term, question.Word.Meaning))
-			}
-			lines = append(lines, "These words are candidates only. A word is issued for this batch only when it is passed to ask_words.")
-			return strings.Join(lines, "\n"), nil
-		}
-		report, err := service.CompleteReviewSession(ctx, owner, sessionID)
-		if err != nil {
-			return "", err
-		}
-		return formatVocabularyReviewReport(report), nil
+	matched := submittedAskHistoryIndex(histories, payload)
+	if matched < 0 {
+		return "", errors.New("answer does not match an unanswered question card")
 	}
-	return "", nil
+	index := matched
+	var ext map[string]any
+	if len(histories[index].Ext) == 0 || json.Unmarshal(histories[index].Ext, &ext) != nil {
+		return "", nil
+	}
+	pending, _ := ext["ask_pending"].(map[string]any)
+	if pending == nil {
+		return "", nil
+	}
+	hook, _ := pending["review_hook"].(map[string]any)
+	if hook == nil || hook["kind"] != "vocabulary_review_objective" {
+		return "", nil
+	}
+	if db == nil || db.WithContext(ctx).Where(
+		"id = ? AND create_user_id = ? AND deleted_at IS NULL", histories[index].ConversationID, owner,
+	).First(&orm.Conversation{}).Error != nil {
+		return "", errors.New("question card does not belong to the requesting user")
+	}
+	if fmt.Sprint(payload["ask_id"]) != fmt.Sprint(pending["ask_id"]) {
+		return "", errors.New("vocabulary review answer does not match the pending card")
+	}
+	questions, _ := payload["questions"].([]any)
+	items, _ := hook["items"].([]any)
+	sessionID := strings.TrimSpace(fmt.Sprint(hook["session_id"]))
+	service := vocabulary.New(db)
+	for _, rawItem := range items {
+		itemMap, _ := rawItem.(map[string]any)
+		questionIndex, _ := strconv.Atoi(fmt.Sprint(itemMap["question_index"]))
+		if questionIndex < 0 || questionIndex >= len(questions) {
+			return "", errors.New("vocabulary review answer is incomplete")
+		}
+		question, _ := questions[questionIndex].(map[string]any)
+		answer, _ := question["answer"].(map[string]any)
+		response := strings.TrimSpace(fmt.Sprint(answer["value"]))
+		if response == "" || response == "<nil>" {
+			return "", errors.New("vocabulary review answer is incomplete")
+		}
+		wordID := strings.TrimSpace(fmt.Sprint(itemMap["word_id"]))
+		var item vocabulary.ReviewSessionItem
+		var err error
+		if wordID != "" && wordID != "<nil>" {
+			var active vocabulary.ReviewSession
+			active, item, err = service.ActiveSessionItemByWord(ctx, owner, wordID)
+			if err == nil && active.ID != sessionID {
+				err = errors.New("vocabulary review answer does not match the active session")
+			}
+		} else {
+			// Backward compatibility for cards created before word-based hooks.
+			itemID := strings.TrimSpace(fmt.Sprint(itemMap["review_item_id"]))
+			item, err = service.SessionItem(ctx, owner, sessionID, itemID)
+		}
+		if err != nil {
+			return "", err
+		}
+		err = service.RecordSessionAnswer(ctx, owner, sessionID, item.WordID, item.Term, vocabulary.ReviewRequest{CardID: item.CardID, Response: response, RowVersion: item.RowVersion, PreviewedAt: item.PreviewedAt, IdempotencyKey: uuid.NewString()})
+		if err != nil {
+			return "", err
+		}
+	}
+	next, err := service.PreviewReviewSession(ctx, owner, 5)
+	if err != nil {
+		return "", err
+	}
+	if next.Session.ID != sessionID {
+		return "", errors.New("vocabulary review session changed while recording answers")
+	}
+	if len(next.Questions) > 0 {
+		lines := []string{
+			"The user answered the previous review batch. The backend graded and registered it. Do not repeat, re-grade, or ask about the previous batch again.",
+			"The backend returned the following candidates for the next batch. Select suitable words and a question type, then call ask_words to continue:",
+		}
+		for _, question := range next.Questions {
+			lines = append(lines, fmt.Sprintf("- %s：%s", question.Word.Term, question.Word.Meaning))
+		}
+		lines = append(lines, "These words are candidates only. A word is issued for this batch only when it is passed to ask_words.")
+		return strings.Join(lines, "\n"), nil
+	}
+	report, err := service.CompleteReviewSession(ctx, owner, sessionID)
+	if err != nil {
+		return "", err
+	}
+	return formatVocabularyReviewReport(report), nil
 }
 
 func formatVocabularyReviewReport(report vocabulary.ReviewSessionReport) string {
@@ -4298,43 +4317,56 @@ func formatVocabularyReviewReport(report vocabulary.ReviewSessionReport) string 
 	return strings.Join(lines, "\n")
 }
 
-// markLastAskPendingAnswered finds the most recent history entry that has
-// ask_pending in ext, sets ask_answered=true, and stores the submitted answers
-// so the complete question/answer card remains visible after page reload.
+// markLastAskPendingAnswered marks the submitted card in the request's owned
+// conversation histories, even when newer mail receipts have been appended.
 func markLastAskPendingAnswered(ctx context.Context, db *gorm.DB, histories []orm.ChatHistory, structured any) {
 	if db == nil {
 		return
 	}
-	for i := len(histories) - 1; i >= 0; i-- {
-		h := &histories[i]
-		if len(h.Ext) == 0 {
-			continue
+	payload, ok := structured.(map[string]any)
+	if !ok {
+		return
+	}
+	matched := submittedAskHistoryIndex(histories, payload)
+	if matched < 0 || histories[matched].ConversationID == "" {
+		return
+	}
+	h := histories[matched]
+	// An answer autosave for the same card can commit after the histories were
+	// loaded. Retry against the fresh row only while it still holds this
+	// unanswered card; any other change means the submission is stale.
+	for attempt := 0; attempt < 3; attempt++ {
+		var ext map[string]any
+		if err := json.Unmarshal(h.Ext, &ext); err != nil {
+			return
 		}
-		var m map[string]any
-		if err := json.Unmarshal(h.Ext, &m); err != nil {
-			continue
-		}
-		if m["ask_pending"] == nil {
-			continue
-		}
-		if answered, _ := m["ask_answered"].(bool); answered {
-			break
-		}
-		if pending, _ := m["ask_pending"].(map[string]any); pending["env_input"] != nil {
-			break
-		}
-		m["ask_answered"] = true
+		ext["ask_answered"] = true
 		if answers := submittedAskAnswers(structured); answers != nil {
-			m["ask_saved_answers"] = answers
+			ext["ask_saved_answers"] = answers
 		}
-		updated, err := json.Marshal(m)
+		updated, err := json.Marshal(ext)
 		if err != nil {
-			break
+			return
 		}
-		db.WithContext(ctx).Model(&orm.ChatHistory{}).
-			Where("id = ?", h.ID).
+		// The caller loaded these histories only after validating conversation ownership.
+		// Match both that scope and its snapshot so a stale submission cannot overwrite a newer card.
+		result := db.WithContext(ctx).Model(&orm.ChatHistory{}).
+			Where("id = ? AND conversation_id = ?", h.ID, h.ConversationID).
+			Where("CAST(ext AS TEXT) = ?", string(h.Ext)).
 			Update("ext", updated)
-		break
+		if result.Error != nil || result.RowsAffected > 0 {
+			return
+		}
+		var current orm.ChatHistory
+		if err := db.WithContext(ctx).
+			Where("id = ? AND conversation_id = ?", h.ID, h.ConversationID).
+			First(&current).Error; err != nil {
+			return
+		}
+		if submittedAskHistoryIndex([]orm.ChatHistory{current}, payload) != 0 {
+			return
+		}
+		h = current
 	}
 }
 
@@ -4419,28 +4451,44 @@ func validateWorkspaceAskSubmission(histories []orm.ChatHistory, raw map[string]
 	if submission == nil {
 		return nil
 	}
+	if submittedAskHistoryIndex(histories, submission) >= 0 {
+		return nil
+	}
+	return common.ResolveAppError("invalid request", http.StatusBadRequest)
+}
+
+func submittedAskHistoryIndex(histories []orm.ChatHistory, submission map[string]any) int {
+	submittedID, _ := submission["ask_id"].(string)
+	if strings.TrimSpace(submittedID) == "" {
+		return -1
+	}
 	for i := len(histories) - 1; i >= 0; i-- {
 		ext := map[string]any{}
 		if json.Unmarshal(histories[i].Ext, &ext) != nil {
 			continue
 		}
-		if answered, _ := ext["ask_answered"].(bool); answered {
+		pending, _ := ext["ask_pending"].(map[string]any)
+		pendingID, _ := pending["ask_id"].(string)
+		if pending == nil || strings.TrimSpace(pendingID) != strings.TrimSpace(submittedID) {
 			continue
 		}
-		pending, _ := ext["ask_pending"].(map[string]any)
-		if pending == nil {
-			continue
+		if answered, _ := ext["ask_answered"].(bool); answered {
+			return -1
 		}
 		if validAskSubmission(pending, submission) {
-			return nil
+			return i
 		}
-		return common.ResolveAppError("invalid request", http.StatusBadRequest)
+		return -1
 	}
-	return common.ResolveAppError("invalid request", http.StatusBadRequest)
+	return -1
 }
 
 func validAskSubmission(pending, submission map[string]any) bool {
 	if pending["env_input"] != nil {
+		return false
+	}
+	mailOnly, marked := pending["mail_draft_only"].(bool)
+	if mailOnly || (!marked && (pending["mail_draft"] != nil || pending["mail_drafts"] != nil)) {
 		return false
 	}
 	pendingID, _ := pending["ask_id"].(string)

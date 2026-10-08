@@ -29,6 +29,7 @@ const EMPTY_ARTIFACTS: ConversationArtifact[] = [];
 
 interface Props {
   sessionId: string;
+  overview?: boolean;
   onClose?: () => void;
 }
 
@@ -53,6 +54,7 @@ function fileMeta(file: ArtifactFile, t: (key: string) => string): string {
 
 export default function ArtifactPanel({
   sessionId,
+  overview = false,
   onClose,
 }: Props) {
   const { t } = useTranslation();
@@ -100,7 +102,7 @@ export default function ArtifactPanel({
 
   return (
     <div className="artifact-panel">
-      <div className="artifact-panel__header">
+      {!overview && <div className="artifact-panel__header">
         <span className="artifact-panel__title">
           {t('chat.artifactPanelTitle')}
           <span className="artifact-panel__count">{files.length}</span>
@@ -115,7 +117,7 @@ export default function ArtifactPanel({
             <RightOutlined />
           </button>
         )}
-      </div>
+      </div>}
 
       {selected ? (
         view === 'versions' ? (
@@ -138,18 +140,20 @@ export default function ArtifactPanel({
             onOpenVersions={() => setView('versions')}
           />
         )
-      ) : files.length === 0 ? (
+      ) : files.length === 0 && !overview ? (
         <div className="artifact-panel__empty">{t('chat.artifactPanelEmpty')}</div>
       ) : (
         <div className="artifact-panel__content">
-          <p className="artifact-panel__intro">{t('chat.artifactPanelVisibleHint')}</p>
+          {!overview && <p className="artifact-panel__intro">{t('chat.artifactPanelVisibleHint')}</p>}
           <ArtifactGroup
-            title={t('chat.artifactPanelUploads')}
+            collapsible={overview}
+            title={t(overview ? 'chat.sidebar.attachments' : 'chat.artifactPanelUploads')}
             files={uploads}
             onSelect={selectFile}
           />
           <ArtifactGroup
-            title={t('chat.artifactPanelPublished')}
+            collapsible={overview}
+            title={t(overview ? 'chat.sidebar.artifacts' : 'chat.artifactPanelPublished')}
             files={published}
             onSelect={selectFile}
           />
@@ -160,19 +164,22 @@ export default function ArtifactPanel({
 }
 
 function ArtifactGroup({
+  collapsible = false,
   title,
   files,
   onSelect,
 }: {
+  collapsible?: boolean;
   title: string;
   files: ArtifactFile[];
   onSelect: (id: string) => void;
 }) {
   const { t } = useTranslation();
-  if (files.length === 0) return null;
+  if (files.length === 0 && !collapsible) return null;
+  const Wrapper = collapsible ? 'details' : 'section';
   return (
-    <section className="artifact-panel__group" aria-label={title}>
-      <h3 className="artifact-panel__group-title">{title}</h3>
+    <Wrapper className="artifact-panel__group" aria-label={title} {...(collapsible ? { open: true } : {})}>
+      {collapsible ? <summary>{title}{files.length > 0 && <span>{files.length}</span>}</summary> : <h3 className="artifact-panel__group-title">{title}</h3>}
       <div className="artifact-panel__list" role="list">
         {files.map((file) => {
           const key = file.id;
@@ -197,7 +204,7 @@ function ArtifactGroup({
           );
         })}
       </div>
-    </section>
+    </Wrapper>
   );
 }
 

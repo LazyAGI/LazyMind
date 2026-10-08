@@ -14,6 +14,7 @@ from lazymind.review.skill_organize.schemas import SkillOrganizeRequest
 from lazymind.review.service.skill_organize import (
     arm_skill_organize_cancel,
     cancel_skill_organize,
+    disarm_skill_organize_cancel,
 )
 
 router = APIRouter()
@@ -37,8 +38,13 @@ async def skill_organize(payload: SkillOrganizeRequest):
     loop = asyncio.get_running_loop()
     taskid = build_skill_organize_taskid(payload.requestid)
     try:
-        record_skill_organize_pending(payload, taskid)
-        arm_skill_organize_cancel(payload.requestid)
+        inserted = record_skill_organize_pending(payload, taskid)
+        if inserted == 0:
+            return JSONResponse(status_code=409, content={
+                'code': 409, 'msg': 'skill organize was cancelled',
+                'data': {'status': 'cancelled', 'requestid': payload.requestid, 'taskid': taskid},
+            })
+        cancel_event = arm_skill_organize_cancel(payload.requestid, user_id=payload.user_id)
     except Exception as exc:
         LOG.exception(f'[SkillOrganize] failed to create pending skill organize task: {exc}')
         return JSONResponse(
@@ -53,10 +59,11 @@ async def skill_organize(payload: SkillOrganizeRequest):
     try:
         future = loop.run_in_executor(
             background_executor,
-            partial(run_skill_organize, payload, taskid),
+            partial(run_skill_organize, payload, taskid, cancel_event=cancel_event),
         )
     except Exception as exc:
         LOG.exception(f'[SkillOrganize] failed to submit skill organize task: {exc}')
+        disarm_skill_organize_cancel(payload.requestid, cancel_event, user_id=payload.user_id)
         try:
             record_skill_organize_failed(payload, taskid, f'skill organize submit failed: {exc}')
         except Exception as insert_exc:
@@ -93,7 +100,7 @@ class SkillOrganizeCancelBody(BaseModel):
 
 @router.post('/api/chat/skill_organize:cancel', summary='Cancel a running skill organize job')
 async def skill_organize_cancel(payload: SkillOrganizeCancelBody):
-    cancelled = cancel_skill_organize(payload.requestid)
+    cancelled = cancel_skill_organize(payload.requestid, user_id=payload.user_id)
     return JSONResponse(
         status_code=200,
         content={

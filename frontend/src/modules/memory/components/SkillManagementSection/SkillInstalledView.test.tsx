@@ -118,6 +118,26 @@ const renderViewWith = (overrides: Partial<React.ComponentProps<typeof SkillInst
 );
 
 describe("SkillInstalledView organize rules", () => {
+  it.each(["light", "deep"] as const)("keeps pending drafts visible but disabled in %s", (organizeDepth) => {
+    renderViewWith({
+      organizeMode: true, organizeDepth,
+      dataSource: [{...skills[0], draft: {hasUncommittedDraft: true, taskId: "org_previous", version: 1}}, skills[1]],
+    });
+    expect(screen.getByRole("checkbox", {name: "admin.memorySkillOrganizePendingDraftRow"})).toBeDisabled();
+    expect(screen.getByText("admin.memorySkillOrganizePendingDraftRow")).toBeVisible();
+  });
+  it("does not constrain the list to a stale measured height after optimization", () => {
+    const records = Array.from({ length: 9 }, (_, index) => createSkill(`skill-${index}`, "external"));
+    const { container } = renderViewWith({
+      dataSource: records, skillAssets: records, total: 9,
+      columns: [{ key: "name", dataIndex: "name", title: "Name" }],
+      tableScroll: { x: 656, y: 120 },
+      selectedSkillIds: ["skill-0", "skill-1"],
+      onSkillSelectionChange: vi.fn(), onBatchCallMode: vi.fn(),
+    });
+    expect(container.querySelectorAll("tr[data-row-key]")).toHaveLength(9);
+    expect(container.querySelector(".ant-table-body")).toHaveStyle({ maxHeight: "100%" });
+  });
   it("enables all editable local skill checkboxes in light mode", () => {
     renderView([]);
     expect(screen.getAllByRole("checkbox", { name: "select skill" })).toHaveLength(3);

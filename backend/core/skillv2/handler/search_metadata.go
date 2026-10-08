@@ -12,11 +12,13 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	skillservice "lazymind/core/skillv2/service"
+	"lazymind/core/skillv2/taskguard"
 )
 
 type metadataIdentity struct {
 	UserID    string `json:"user_id"`
 	SessionID string `json:"session_id"`
+	TaskID    string `json:"task_id"`
 }
 
 func metadataUser(ctx context.Context, db *gorm.DB, r *http.Request, identity metadataIdentity) (string, error) {
@@ -112,10 +114,16 @@ func InternalMetadataUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err = db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := taskguard.LockOrganizeTask(r.Context(), tx, userID, strings.TrimSpace(req.TaskID)); err != nil {
+			return err
+		}
 		svc := newSkillService(tx)
 		for _, update := range req.Updates {
 			row, err := ownedMetadataSkill(r.Context(), tx, userID, update.SkillKey)
 			if err != nil {
+				return err
+			}
+			if err := taskguard.RecordOrganizeMutation(r.Context(), tx, userID, strings.TrimSpace(req.TaskID), row.ID, taskguard.OrganizeMetadata); err != nil {
 				return err
 			}
 			_, err = svc.PatchSkill(r.Context(), skillservice.PatchSkillRequest{SkillID: row.ID, UserID: userID, Field: update.Field, Tags: update.Tags, Aliases: update.Aliases, Keywords: update.Keywords})

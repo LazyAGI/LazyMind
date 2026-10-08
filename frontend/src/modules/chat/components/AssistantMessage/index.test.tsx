@@ -9,9 +9,93 @@ import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import { axiosInstance } from "@/components/request";
 import enUS from "@/i18n/locales/en-US";
 import zhCN from "@/i18n/locales/zh-CN";
-import { axiosInstance } from "@/components/request";
 import AssistantMessage, { ChatSourcePanel, externalProviderDisplayName } from "./index";
 import EnvInputCard, { type EnvironmentInputResult } from "../EnvInputCard";
+
+describe("mail draft lifecycle", () => {
+  const draft = { draft_id: "mail-one", revision: 1, status: "draft", to: ["test@example.com"],
+    subject: "Mail receipt", body: "Review body", attachments: ["report.pdf"] };
+  const ask = { ask_id: "mail-ask", questions: [{ text: "Legacy mail confirmation", type: "boolean", choices: ["Yes", "No"] }], mail_draft: draft };
+  function setup(item: any, sendMessage = vi.fn().mockResolvedValue(true)) {
+    const props = { index: 0, length: 1, sendMessage, regenerate: vi.fn(), regenerateDisabled: false,
+      stopGeneration: vi.fn(), renderText: () => null };
+    function Harness() {
+      const [current, setCurrent] = useState(item);
+      return <AssistantMessage {...props} item={current} updateMessage={setCurrent} />;
+    }
+    render(<Harness />);
+    return sendMessage;
+  }
+  it("keeps the edited card after confirmation without falling through to AskCard", async () => {
+    const send = setup({ role: "assistant", ask_pending: ask });
+    fireEvent.change(screen.getByRole("textbox", { name: "chat.mailDraft.subject" }), { target: { value: "Edited subject" } });
+    fireEvent.click(screen.getByRole("button", { name: "chat.mailDraft.confirmSend" }));
+    await waitFor(() => expect(send).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.queryByRole("button", { name: "chat.mailDraft.confirmSend" })).not.toBeInTheDocument());
+    expect(screen.getByText("Edited subject")).toBeVisible();
+    expect(screen.getByText("report.pdf")).toBeVisible();
+    expect(screen.queryByText("Legacy mail confirmation")).not.toBeInTheDocument();
+  });
+  it("shows a sent receipt and attachments restored from history", () => {
+    setup({ role: "assistant", ask_pending: { ...ask, mail_draft: { ...draft, status: "sent", sent_at: "2026-09-29T10:00:00Z" } } });
+    expect(screen.getByText("Mail receipt")).toBeVisible();
+    expect(screen.getByText("report.pdf")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "chat.mailDraft.confirmSend" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Legacy mail confirmation")).not.toBeInTheDocument();
+  });
+  it("shows an independent ordinary question alongside a mail receipt", () => {
+    setup({ role: "assistant", ask_pending: { ...ask, mail_draft_only: false, mail_draft: { ...draft, status: "sent" } } });
+    expect(screen.getByText("Mail receipt")).toBeVisible();
+    expect(screen.getByText("Legacy mail confirmation")).toBeVisible();
+  });
+  it("keeps sibling drafts usable after one is confirmed", async () => {
+    const send = setup({ role: "assistant", ask_pending: { ...ask, mail_drafts: [draft, { ...draft, draft_id: "mail-two", subject: "Second mail" }] } });
+    fireEvent.click(screen.getAllByRole("button", { name: "chat.mailDraft.confirmSend" })[0]);
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "chat.mailDraft.confirmSend" })).toHaveLength(1));
+    expect(screen.getByText("Mail receipt")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "chat.mailDraft.confirmSend" }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls[1][2].mail_draft_confirm_id).toBe("mail-two");
+  });
+  it("does not replace a newer receipt when submission acknowledgement arrives late", async () => {
+    let resolve!: (started: boolean) => void;
+    let deliver!: () => void;
+    function Harness() {
+      const [item, setItem] = useState<any>({ role: "assistant", ask_pending: ask });
+      deliver = () => setItem({ role: "assistant", ask_pending: { ...ask, ask_id: "sent-receipt", mail_draft: { ...draft, status: "sent", subject: "Latest receipt" } } });
+      return <AssistantMessage item={item} index={0} length={1}
+        sendMessage={() => new Promise<boolean>((done) => { resolve = done; })} regenerate={vi.fn()}
+        stopGeneration={vi.fn()} renderText={() => null} updateMessage={setItem} />;
+    }
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "chat.mailDraft.confirmSend" }));
+    act(() => deliver());
+    await act(async () => { resolve(true); });
+    expect(screen.getByText("Latest receipt")).toBeVisible();
+    expect(screen.queryByText("Mail receipt")).not.toBeInTheDocument();
+  });
+  it.each([1, 2])("keeps a newer failed composite receipt retryable after a late acknowledgement (revision %s)", async (revision) => {
+    let resolve!: (started: boolean) => void;
+    let deliver!: () => void;
+    const composite = { ...ask, ask_id: "ordinary-question", mail_draft_only: false };
+    function Harness() {
+      const [item, setItem] = useState<any>({ role: "assistant", ask_pending: composite });
+      deliver = () => setItem({ role: "assistant", ask_pending: { ...composite,
+        mail_draft: { ...draft, revision, status: "failed", last_error: "SMTP rejected" },
+      } });
+      return <AssistantMessage item={item} index={0} length={1}
+        sendMessage={() => new Promise<boolean>((done) => { resolve = done; })}
+        regenerate={vi.fn()} stopGeneration={vi.fn()} renderText={() => null} updateMessage={setItem} />;
+    }
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "chat.mailDraft.confirmSend" }));
+    act(() => deliver());
+    await act(async () => { resolve(true); });
+    expect(screen.getByRole("button", { name: "chat.mailDraft.resend" })).toBeEnabled();
+    expect(screen.getByText("SMTP rejected")).toBeVisible();
+    expect(screen.getByText("Legacy mail confirmation")).toBeVisible();
+  });
+});
 
 vi.mock("react-i18next", () => ({
   initReactI18next: {
@@ -751,6 +835,22 @@ describe("Fork message action", () => {
 
 
 describe("embedded reference details", () => {
+  it("opens references in a popover without asking the parent to open a sidebar", async () => {
+    const onOpenSources = vi.fn();
+    render(<AssistantMessage index={0} length={1} sendMessage={vi.fn()} regenerate={vi.fn()}
+      regenerateDisabled={false} stopGeneration={vi.fn()} renderText={() => null} updateMessage={vi.fn()}
+      onOpenSources={onOpenSources}
+      item={{ role: "assistant", history_id: "ref-test", delta: "Answer", run_status: "completed",
+        sources: [{ source_type: "external", title: "Reference example", url: "https://example.com", content: "Supporting evidence" }] }} />);
+    fireEvent.click(screen.getByRole("button", { name: "chat.references (1)" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "chat.references (1)" })).toHaveAttribute("aria-expanded", "true"));
+    expect(await screen.findByRole("dialog", { name: "chat.references" })).toBeInTheDocument();
+    expect(onOpenSources).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Reference example/ }));
+    expect(screen.getByRole("heading", { name: "Reference example" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "common.close" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "chat.references (1)" })).toHaveAttribute("aria-expanded", "false"));
+  });
   it("shows details inside the panel and returns to the list without opening another surface", () => {
     const open = vi.spyOn(window, "open").mockImplementation(() => null);
     const sources = [{ source_type: "external" as const, title: "Example source", url: "https://example.com/article", content: "Evidence excerpt" }];

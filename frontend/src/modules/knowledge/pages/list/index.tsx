@@ -235,6 +235,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const marketRequestSeqRef = useRef(0);
   const finishedMarketJobIds = useRef(new Set<string>());
   const activeMarketTaskCount = Object.keys(trackedMarketJobs).length;
+  const availableUpdateCount = officialItems.filter((item) => item.updateAvailable).length;
   const marketTaskRefreshKey = `${Object.keys(trackedMarketJobs).sort().join(",")}:${marketTaskRevision}`;
   const activeMarketJobTypes = useMemo(() => {
     const types: Record<string, "install" | "update"> = {};
@@ -873,8 +874,8 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         });
         taskNotification.open({
           ...marketTaskNoticeOptions,
-          message: t("knowledge.marketTaskAdded"),
-          description: t("knowledge.marketTaskAddedDescription", { name: item.name }),
+          message: t("knowledge.marketUpdateStarted"),
+          description: t("knowledge.marketUpdateStartedDescription", { name: item.name }),
         });
         void loadKnowledgeMarket();
       } catch {
@@ -1074,13 +1075,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       });
       taskNotification.open({
         ...marketTaskNoticeOptions,
-        message: t("knowledge.marketTaskAdded"),
-        description: t("knowledge.taskTypeUpdateAll"),
+        message: t("knowledge.marketUpdateAllStarted"),
+        description: t("knowledge.marketUpdateAllStartedDescription", { count: availableUpdateCount }),
       });
     } catch {
       // The shared request interceptor displays the localized error.
     }
-  }, [t, taskNotification, trackMarketJob]);
+  }, [availableUpdateCount, t, taskNotification, trackMarketJob]);
 
   useEffect(() => {
     const jobs = Object.values(trackedMarketJobs);
@@ -1176,10 +1177,32 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
             message: t("knowledge.marketTaskFailed", { name: result.job.name }),
           });
         } else {
+          const isUpdate = result.job.jobType === "update";
           taskNotification.open({
             ...marketTaskNoticeOptions,
-            message: t("knowledge.marketTaskCompleted"),
-            description: result.job.name,
+            message: t(isUpdate
+              ? "knowledge.marketUpdateCompleted"
+              : result.job.jobType === "updateAll"
+                ? "knowledge.updateAllChecked"
+                : "knowledge.marketTaskCompleted"),
+            description: isUpdate
+              ? t("knowledge.marketUpdateCompletedDescription", { name: result.job.name })
+              : result.job.name,
+            actions: isUpdate ? (
+              <Button
+                type="link"
+                className="knowledge-task-notification-detail"
+                onClick={() => {
+                  if (result.detail.dataset_id) {
+                    navigate(`/lib/knowledge/detail/${encodeURIComponent(result.detail.dataset_id)}`);
+                  } else {
+                    setMarketTaskModalOpen(true);
+                  }
+                }}
+              >
+                {t("knowledge.marketUpdateViewDetails")}
+              </Button>
+            ) : undefined,
           });
         }
       });
@@ -1203,7 +1226,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       controller.abort();
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [loadKnowledgeMarket, t, taskNotification, trackedMarketJobs]);
+  }, [loadKnowledgeMarket, navigate, t, taskNotification, trackedMarketJobs]);
 
   useEffect(() => {
     if (!officialItems.some((item) => item.active)) return;
@@ -1859,14 +1882,16 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               <Button
                 type="primary"
                 disabled={
-                  !officialItems.some((item) => item.installed) ||
+                  availableUpdateCount === 0 ||
                   Object.values(trackedMarketJobs).some(
                     (job) => job.jobType === "updateAll",
                   )
                 }
                 onClick={handleUpdateAllOfficial}
               >
-                {t("knowledge.updateAllWithCount", { count: officialItems.filter((item) => item.updateAvailable).length })}
+                {availableUpdateCount > 0
+                  ? t("knowledge.updateAllWithCount", { count: availableUpdateCount })
+                  : t("knowledge.updateAll")}
               </Button>
             ) : null}
             <KnowledgeMineFilterPopover

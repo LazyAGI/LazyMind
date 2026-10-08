@@ -2,11 +2,58 @@ package resourceupdate
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"lazymind/core/common/orm"
 )
+
+func TestOrganizeErrorCategorySurvivesTaskAPIProjection(t *testing.T) {
+	var response skillReviewTaskStatusResponse
+	applySkillOrganizeDetails(&response, orm.ResourceUpdateTask{TaskType: orm.ResourceUpdateTaskTypeOrganizeSkill}, `{"error":"provider offline","error_code":"skill_organize_model_transport","error_category":"model_transport","failed_stage":"organize_plan"}`)
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["error_code"] != "skill_organize_model_transport" || payload["error_category"] != "model_transport" {
+		t.Fatalf("category lost: %s", encoded)
+	}
+}
+
+func TestCancelledOrganizeTaskOverridesLateStats(t *testing.T) {
+	response := skillReviewTaskStatusResponse{Status: "failed", RunStatus: "failed"}
+	applySkillOrganizeDetails(&response, orm.ResourceUpdateTask{TaskType: orm.ResourceUpdateTaskTypeOrganizeSkill, Status: orm.ResourceUpdateTaskStatusSkipped, ErrorCode: "skill_organize_cancelled"}, `{"error_code":"skill_organize_model_transport","error_category":"model_transport"}`)
+	if response.Status != "cancelled" || response.ErrorCode != "skill_organize_cancelled" {
+		t.Fatalf("late result overrode cancellation: %#v", response)
+	}
+}
+
+func TestCancelledOrganizePendingReviewExposedWithAndWithoutStats(t *testing.T) {
+	for _, summary := range []string{"", `{"pending_review":true,"cancellation_details":{"pending_review":true,"rollback_status":"incomplete"}}`} {
+		var response skillReviewTaskStatusResponse
+		applySkillOrganizeDetails(&response, orm.ResourceUpdateTask{TaskType: orm.ResourceUpdateTaskTypeOrganizeSkill, ErrorCode: "skill_organize_cancelled", ResultJSON: json.RawMessage(`{"cancellation_details":{"pending_review":true,"rollback_status":"incomplete"}}`)}, summary)
+		if !response.PendingReview || response.CancellationDetails["rollback_status"] != "incomplete" || response.Status != "cancelled" {
+			t.Fatalf("warning lost: %#v", response)
+		}
+	}
+}
+
+func TestOrganizeCancellationStatsDominateDifferentRunIDs(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	insertSkillReviewStats(t, db, map[string]any{"id": "cancelled", "requestid": "org_req", "userid": "u", "status": "cancelled", "started_at": "2026-09-29", "summary": map[string]any{"error_code": "skill_organize_cancelled"}})
+	insertSkillReviewStats(t, db, map[string]any{"id": "late", "requestid": "org_req", "userid": "u", "status": "organize_plan", "started_at": "2026-09-30", "summary": map[string]any{}})
+	for _, resultID := range []string{"", "late"} {
+		row, found, err := findSkillReviewTaskStats(context.Background(), db, "u", orm.ResourceUpdateTask{TaskType: orm.ResourceUpdateTaskTypeOrganizeSkill, ResultID: resultID}, "org_req")
+		if err != nil || !found || row.Status != "cancelled" {
+			t.Fatalf("cancelled request revived for result %q: %#v %v", resultID, row, err)
+		}
+	}
+}
 
 // TestTaskToResponse maps all ORM task fields to the response DTO.
 func TestTaskToResponse(t *testing.T) {

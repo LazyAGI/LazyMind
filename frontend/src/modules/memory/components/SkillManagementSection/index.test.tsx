@@ -17,7 +17,7 @@ const skillApiMocks = vi.hoisted(() => ({
   listSkillOrganizeTasks: vi.fn(),
   waitForSkillOrganize: vi.fn(),
 }));
-const viewMocks = vi.hoisted(() => ({ props: {} as Record<string, any> }));
+const viewMocks = vi.hoisted(() => ({ props: {} as Record<string, any>, review: {} as Record<string, any> }));
 const contextMocks = vi.hoisted(() => ({
   useMemoryManagementOutletContext: vi.fn(),
 }));
@@ -25,7 +25,7 @@ const contextMocks = vi.hoisted(() => ({
 vi.mock("../../skillApi", () => skillApiMocks);
 vi.mock("../../context", () => contextMocks);
 vi.mock("./skillDraftReview", () => ({ listPendingSkillDrafts: vi.fn().mockResolvedValue([]) }));
-vi.mock("./SkillDraftReviewPanel", () => ({ default: () => null }));
+vi.mock("./SkillDraftReviewPanel", () => ({ default: (props: Record<string, any>) => { viewMocks.review = props; return <span>draft-review</span>; } }));
 vi.mock("@/components/auth", () => ({
   AgentAppsAuth: { getUserInfo: () => ({ role: "user" }) },
 }));
@@ -34,14 +34,17 @@ vi.mock("./SkillManagementToolbar", () => ({
     organizeDisabled,
     organizeStatus,
     onOrganizeSkills,
+    onOrganizeCancelRun,
   }: {
     organizeDisabled: boolean;
     organizeStatus: string;
     onOrganizeSkills: (mode: "light" | "deep") => void;
+    onOrganizeCancelRun: () => void;
   }) => (
     <div>
       <button onClick={() => onOrganizeSkills("light")}>organize</button>
       <button onClick={() => onOrganizeSkills("deep")}>organize-deep</button>
+      <button onClick={onOrganizeCancelRun}>cancel-run</button>
       <span data-testid="organize-status">{organizeStatus}</span>
       <span data-testid="organize-disabled">{String(organizeDisabled)}</span>
     </div>
@@ -74,7 +77,7 @@ describe("SkillManagementSection organize task recovery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     skillApiMocks.getRunningSkillOrganizeTask.mockResolvedValue(null);
-    refreshSkillAssets.mockResolvedValue(undefined);
+    refreshSkillAssets.mockReset().mockResolvedValue(undefined);
     contextMocks.useMemoryManagementOutletContext.mockReturnValue({
       t: (key: string, options?: Record<string, unknown>) => options ? `${key}: ${JSON.stringify(options)}` : key,
       openSkillShareCenter: vi.fn(),
@@ -113,6 +116,166 @@ describe("SkillManagementSection organize task recovery", () => {
       manualSkillReviewRunning: false,
       handleRunManualSkillReview: vi.fn(),
     });
+  });
+
+  it("shows blocking skills from a 409 and opens existing draft review with refresh after acceptance", async () => {
+    skillApiMocks.organizeSkills.mockRejectedValue({response: {status: 409, data: {message: "draft conflict", data: {
+      code: "skill_organize_draft_conflict", blocking_skills: ["skills/internal/B", "skills/internal/C"],
+    }}}});
+    render(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", {name: "organize"}));
+    act(() => viewMocks.props.onOrganizeSelectionChange(["B", "C"].map(id => ({id, name: id, category: "internal"})), true));
+    await act(async () => viewMocks.props.onOrganizeSubmit("light"));
+    expect(screen.getByText("skills/internal/B")).toBeVisible();
+    expect(screen.getByText("skills/internal/C")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", {name: "admin.memorySkillDraftReviewTitle"}));
+    expect(screen.getByText("draft-review")).toBeVisible();
+    await act(async () => viewMocks.review.onApplied());
+    expect(refreshSkillAssets).toHaveBeenCalledWith({preserveChangeProposals: true});
+  });
+
+  it("cancels a recovered task and ignores late polling after a new task starts", async () => {
+    let resolveOld!: (task: unknown) => void;
+    let confirmCancel!: () => void;
+    let rejectRefresh!: (error: Error) => void;
+    refreshSkillAssets.mockImplementationOnce(() => new Promise((_resolve, reject) => {rejectRefresh = reject;}));
+    skillApiMocks.getRunningSkillOrganizeTask.mockResolvedValue({requestId: "old", status: "organize_draft"});
+    skillApiMocks.waitForSkillOrganize.mockImplementation(() => new Promise(resolve => {resolveOld = resolve;}));
+    skillApiMocks.cancelSkillOrganizeTask.mockImplementation(() => new Promise<void>(resolve => {confirmCancel = resolve;}));
+    render(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("organize-status")).toHaveTextContent("running"));
+    fireEvent.click(screen.getByRole("button", {name: "cancel-run"}));
+    expect(screen.getByTestId("organize-disabled")).toHaveTextContent("true");
+    await act(async () => confirmCancel());
+    await waitFor(() => expect(screen.getByTestId("organize-disabled")).toHaveTextContent("false"));
+    expect(skillApiMocks.cancelSkillOrganizeTask).toHaveBeenCalledWith("old");
+    expect(refreshSkillAssets).toHaveBeenCalledWith({page: 1, preserveChangeProposals: true, background: true, signal: expect.any(AbortSignal)});
+    const refreshSignal = refreshSkillAssets.mock.calls[0][0].signal as AbortSignal;
+    skillApiMocks.organizeSkills.mockResolvedValue({requestId: "new", taskId: "new-task"});
+    skillApiMocks.waitForSkillOrganize.mockReturnValue(new Promise(() => {}));
+    fireEvent.click(screen.getByRole("button", {name: "organize"}));
+    act(() => viewMocks.props.onOrganizeSelectionChange(["A", "B"].map(id => ({id, name: id, category: "internal"})), true));
+    act(() => { void viewMocks.props.onOrganizeSubmit("light"); });
+    await waitFor(() => expect(skillApiMocks.waitForSkillOrganize).toHaveBeenCalledWith("new", expect.any(AbortSignal), expect.any(Function)));
+    expect(refreshSignal.aborted).toBe(true);
+    await act(async () => rejectRefresh(new Error("late refresh failure")));
+    await act(async () => resolveOld({status: "completed"}));
+    expect(screen.getByTestId("organize-status")).toHaveTextContent("running");
+    expect(screen.getByTestId("organize-disabled")).toHaveTextContent("true");
+    expect(refreshSkillAssets).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a running task's later failure when draft acceptance refresh finishes", async () => {
+    const context = contextMocks.useMemoryManagementOutletContext.getMockImplementation()!();
+    contextMocks.useMemoryManagementOutletContext.mockReturnValue({...context, skillAssets: [{id: "draft", draft: {hasUncommittedDraft: true}}]});
+    let finishTask!: (task: unknown) => void;
+    let finishRefresh!: () => void;
+    skillApiMocks.getRunningSkillOrganizeTask.mockResolvedValue({requestId: "running", status: "organize_draft"});
+    skillApiMocks.waitForSkillOrganize.mockImplementation(() => new Promise(resolve => {finishTask = resolve;}));
+    refreshSkillAssets.mockImplementationOnce(() => new Promise<void>(resolve => {finishRefresh = resolve;}));
+    render(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("organize-status")).toHaveTextContent("running"));
+    fireEvent.click(screen.getByRole("button", {name: "admin.memorySkillDraftReviewTitle"}));
+    let applied!: Promise<void>;
+    act(() => { applied = viewMocks.review.onApplied(); });
+    await act(async () => finishTask({status: "failed", errorCode: "skill_organize_model_timeout", error: "timeout"}));
+    await act(async () => { finishRefresh(); await applied; });
+    act(() => viewMocks.review.onClose());
+    expect(screen.getByTestId("organize-status")).toHaveTextContent("error");
+    expect(screen.getByText("admin.memorySkillOrganizeModelTimeout")).toBeVisible();
+  });
+
+  it("refreshes cancelled partial drafts so the same skills can be organized again", async () => {
+    const drafts = ["A", "B"].map(id => ({id, name: id, category: "internal", draft: {hasUncommittedDraft: true, taskId: "old", version: 1}}));
+    const context = contextMocks.useMemoryManagementOutletContext.getMockImplementation()!();
+    contextMocks.useMemoryManagementOutletContext.mockReturnValue({...context, skillAssets: drafts});
+    skillApiMocks.getRunningSkillOrganizeTask.mockResolvedValue({requestId: "old", status: "organize_draft"});
+    skillApiMocks.waitForSkillOrganize.mockReturnValue(new Promise(() => {}));
+    skillApiMocks.cancelSkillOrganizeTask.mockResolvedValue(undefined);
+    const {rerender} = render(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("organize-status")).toHaveTextContent("running"));
+    act(() => viewMocks.props.onSkillSelectionChange(drafts, true));
+    refreshSkillAssets.mockImplementationOnce(async () => {
+      contextMocks.useMemoryManagementOutletContext.mockReturnValue({...context, skillAssets: drafts.map(skill => ({...skill, draft: {...skill.draft, hasUncommittedDraft: false}}))});
+      rerender(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    });
+    fireEvent.click(screen.getByRole("button", {name: "cancel-run"}));
+    await waitFor(() => expect(screen.getByTestId("organize-disabled")).toHaveTextContent("false"));
+    fireEvent.click(screen.getByRole("button", {name: "organize"}));
+    expect(screen.getByTestId("selected")).toHaveTextContent(/^A,B$/);
+  });
+
+  it("keeps polling and blocks new work when cancellation fails, then permits a confirmed retry", async () => {
+    skillApiMocks.getRunningSkillOrganizeTask.mockResolvedValue({requestId: "old", status: "organize_draft"});
+    skillApiMocks.waitForSkillOrganize.mockReturnValue(new Promise(() => {}));
+    skillApiMocks.cancelSkillOrganizeTask.mockRejectedValueOnce(new Error("offline")).mockResolvedValue(undefined);
+    render(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("organize-status")).toHaveTextContent("running"));
+    const signal = skillApiMocks.waitForSkillOrganize.mock.calls[0][1] as AbortSignal;
+    fireEvent.click(screen.getByRole("button", {name: "cancel-run"}));
+    await screen.findByText("admin.memorySkillOrganizeFailed");
+    expect(signal.aborted).toBe(false);
+    expect(screen.getByTestId("organize-disabled")).toHaveTextContent("true");
+    fireEvent.click(screen.getByRole("button", {name: "cancel-run"}));
+    await waitFor(() => expect(screen.getByTestId("organize-disabled")).toHaveTextContent("false"));
+    expect(signal.aborted).toBe(true);
+  });
+
+  it("displays a typed failure reported by task polling", async () => {
+    skillApiMocks.getRunningSkillOrganizeTask.mockResolvedValue({requestId: "failed-model", status: "organize_plan"});
+    skillApiMocks.waitForSkillOrganize.mockResolvedValue({status: "failed", errorCode: "skill_organize_model_transport", error: "provider unavailable"});
+    render(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    expect(await screen.findByText("admin.memorySkillOrganizeModelUnavailable")).toBeVisible();
+  });
+
+  it.each(["response", "polling"])("warns about retained drafts via %s without blocking other organize work", async (source) => {
+    skillApiMocks.getRunningSkillOrganizeTask.mockResolvedValue({requestId: "old", status: "organize_draft"});
+    skillApiMocks.waitForSkillOrganize.mockReturnValue(source === "polling"
+      ? Promise.resolve({status: "cancelled", pendingReview: true})
+      : new Promise(() => {}));
+    skillApiMocks.cancelSkillOrganizeTask.mockResolvedValue({pendingReview: true});
+    render(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    if (source === "response") {
+      await waitFor(() => expect(screen.getByTestId("organize-status")).toHaveTextContent("running"));
+      fireEvent.click(screen.getByRole("button", {name: "cancel-run"}));
+    }
+    expect(await screen.findByText("admin.memorySkillOrganizeCancelledPendingReview")).toBeVisible();
+    expect(screen.getByTestId("organize-disabled")).toHaveTextContent("false");
+    fireEvent.click(screen.getByRole("button", {name: "organize"}));
+    expect(viewMocks.props.organizeMode).toBe(true);
+    expect(screen.getByText("admin.memorySkillOrganizeCancelledPendingReview")).toBeVisible();
+    act(() => viewMocks.props.onOrganizeSelectionChange(["A", "B"].map(id => ({id, name: id, category: "internal"})), true));
+    skillApiMocks.organizeSkills.mockResolvedValue({requestId: "next", taskId: "next-task"});
+    skillApiMocks.waitForSkillOrganize.mockResolvedValue({status: "failed", errorCode: "skill_organize_model_timeout", error: "timeout"});
+    await act(async () => viewMocks.props.onOrganizeSubmit("light"));
+    expect(skillApiMocks.organizeSkills).toHaveBeenCalledWith(["skills/internal/A", "skills/internal/B"], "light");
+    expect(screen.getByText("admin.memorySkillOrganizeModelTimeout")).toBeVisible();
+    expect(screen.getByText("admin.memorySkillOrganizeCancelledPendingReview")).toBeVisible();
+  });
+
+  it("does not warn about preserved drafts after a complete cancellation rollback", async () => {
+    skillApiMocks.getRunningSkillOrganizeTask.mockResolvedValue({requestId: "old", status: "organize_draft"});
+    skillApiMocks.waitForSkillOrganize.mockResolvedValue({status: "cancelled", pendingReview: false});
+    render(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("organize-status")).toHaveTextContent("skipped"));
+    expect(screen.queryByText("admin.memorySkillOrganizeCancelledPendingReview")).not.toBeInTheDocument();
+    expect(screen.getByTestId("organize-disabled")).toHaveTextContent("false");
+  });
+
+  it("refreshes selected draft eligibility after accepting one of three packages", async () => {
+    const drafts = ["A", "B", "C"].map(id => ({id, name: id, category: "internal", draft: {hasUncommittedDraft: true, taskId: "org_previous", version: 1}}));
+    const context = contextMocks.useMemoryManagementOutletContext.getMockImplementation()!();
+    contextMocks.useMemoryManagementOutletContext.mockReturnValue({...context, skillAssets: drafts});
+    const {rerender} = render(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    await act(async () => {});
+    act(() => viewMocks.props.onSkillSelectionChange(drafts, true));
+    const accepted = {...drafts[0], draft: {...drafts[0].draft, hasUncommittedDraft: false}};
+    contextMocks.useMemoryManagementOutletContext.mockReturnValue({...context, skillAssets: [accepted, drafts[1], drafts[2]]});
+    rerender(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", {name: "organize"}));
+    expect(screen.getByTestId("selected")).toHaveTextContent(/^A$/);
+    expect(screen.getByText("admin.memorySkillOrganizePendingDraftHint")).toBeVisible();
   });
 
   it("restores and follows a running organize task when the page mounts", async () => {

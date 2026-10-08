@@ -10,7 +10,7 @@ from .text_window import RESULT_BYTE_BUDGET, grep_lines, load_text_lines, read_l
 
 
 def build_resource_read_tools() -> list:
-    """Bind file readers to attachments and this conversation's file resources."""
+    """Bind readers to attachments, conversation resources, and active execution spills."""
     def scoped_read_file(target: str, offset: int = 1, limit: int = 2000,
                          turn: Optional[int] = None) -> Dict[str, Any]:
         return _read_file(target, offset, limit, turn, resources_only=True)
@@ -60,7 +60,7 @@ def read_file_resource(
     After search_file_resource, pass offset near the hit line to inspect surrounding context.
 
     Args:
-        target: A resource id, attachment name, workspace path, remote://skills/... URI,
+        target: A resource id, attachment name, workspace://tool_spills/... URI, workspace path, remote://skills/... URI,
             or local PDF/Office absolute path.
         offset: 1-based first line (default 1).
         limit: Maximum lines to return (default 2000, max 4000).

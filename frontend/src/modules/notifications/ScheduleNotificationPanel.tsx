@@ -1,6 +1,6 @@
 import { BellOutlined, FileTextOutlined, RightOutlined, SafetyCertificateOutlined, SettingOutlined, WarningOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Drawer, Modal, Select, Spin, Tag } from 'antd';
+import { Alert, Button, Drawer, message, Modal, Select, Spin, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { listScheduleTasks, type Task } from '@/modules/taskCenter/api';
 import { channelAccountLabel } from '@/modules/channelGateway/api';
@@ -9,7 +9,7 @@ import NotificationSummary from './NotificationSummary';
 import NotificationSettings from './NotificationSettings';
 import NotificationHistory from './NotificationHistory';
 import ChannelBrand from './ChannelBrand';
-import { availabilityError, channels, events, emptyRule, getAccountDetail, getPreferences, getScheduleNotifications, notificationError, putScheduleNotifications, ruleError, type ChannelName, type ChannelRule, type AccountDetail, type NotificationConfig, type ScheduleNotifications, type NotificationUpdate } from './api';
+import { availabilityError, channels, events, emptyRule, getAccountDetail, getPreferences, getScheduleNotifications, notificationError, putScheduleNotifications, ruleError, taskRuleFromDefaults, type ChannelName, type ChannelRule, type AccountDetail, type NotificationConfig, type ScheduleNotifications, type NotificationUpdate } from './api';
 
 function ConfiguredChannel({ channel, rule, unavailable }: { channel: ChannelName; rule: ChannelRule; unavailable: boolean }) {
   const { t } = useTranslation();
@@ -51,7 +51,7 @@ export default function ScheduleNotificationPanel({ scheduleId, taskId: selected
     setLoading(true); setError(''); setErrorAccount('');
     try {
       const [c, p] = await Promise.all([scheduleId ? getScheduleNotifications(scheduleId) : Promise.resolve(undefined), getPreferences()]);
-      const current = c || { revision: 0, configured: true, config: p.defaults, availability: {} };
+      const current = c || { revision: 0, configured: true, config: taskRuleFromDefaults(p.defaults), availability: {} };
       const issue = availabilityError(current);
       setConfig(current); setDraft(current.config); setEnabled(p.enabled); setConflict(false); setError(issue?.reason || '');
       if (issue?.account_id) {
@@ -70,7 +70,13 @@ export default function ScheduleNotificationPanel({ scheduleId, taskId: selected
   const save = async (value = draft) => {
     if (!config || value === undefined || saving) return;
     const reason = value ? ruleError(value) : undefined;
-    if (reason) { setError(reason); return; }
+    if (reason) {
+      setError(reason);
+      if (reason === 'NOTIFICATION_TARGET_REQUIRED' && value?.channels.wecom?.enabled && !value.channels.wecom.recipient_id) {
+        message.error(t('notifications.selectWecomRecipientHint'), 6);
+      }
+      return;
+    }
     setSaving(true); setError('');
     try {
       if (draftMode) {
@@ -110,7 +116,23 @@ export default function ScheduleNotificationPanel({ scheduleId, taskId: selected
       okText: t('notifications.confirmClose'), cancelText: t('notifications.cancel'), onOk: apply,
     });
   };
-  const cancelEditor = () => { if (!saving) { setDraft(config?.config); setError(''); setOpen(false); } };
+  const discardEditor = () => { setDraft(config?.config); setError(''); setOpen(false); };
+  const cancelEditor = () => {
+    if (saving) return;
+    if (draft !== undefined && config && JSON.stringify(draft) !== JSON.stringify(config.config)) {
+      Modal.confirm({
+        zIndex: 1600,
+        title: t('notifications.unsavedChangesTitle'),
+        content: t('notifications.unsavedChangesHint'),
+        okText: t('notifications.discardChanges'),
+        okButtonProps: { danger: true },
+        cancelText: t('notifications.continueEditing'),
+        onOk: discardEditor,
+      });
+      return;
+    }
+    discardEditor();
+  };
   const closeSettings = () => { setSettingsOpen(false); void getPreferences().then(p => setEnabled(p.enabled)).catch(() => setError('loadFailed')); };
   const errorView = error && <Alert type="error" message={t('notifications.' + error, { account: errorAccount || t('notifications.account'), defaultValue: t('notifications.saveFailed') })} action={<Button onClick={() => void load()}>{t('notifications.reload')}</Button>} />;
   const activeChannels = channels.filter(channel => config?.config?.channels[channel]?.enabled);
@@ -149,7 +171,7 @@ export default function ScheduleNotificationPanel({ scheduleId, taskId: selected
       {taskId ? <NotificationHistory key={taskId} taskId={taskId} /> : <p>{t('notifications.noHistory')}</p>}</>}
     </>}
     </>}
-    <Drawer className="notification-editor-drawer" zIndex={1200} width={680} open={open} title={<><div>{t('notifications.configure')}</div><small>{title} · {t('notifications.onlyThisTask')}</small></>} onClose={cancelEditor} footer={<div className="notification-footer"><Button className="notification-restore-defaults" type="link" disabled={loading || saving || conflict} onClick={async () => { setLoading(true); try { const p = await getPreferences(); setDraft(p.defaults); setEnabled(p.enabled); } catch { setError('loadFailed'); } finally { setLoading(false); } }}>{t('notifications.restoreGlobalDefaults')}</Button><div className="notification-footer-actions"><Button disabled={saving} onClick={cancelEditor}>{t('notifications.cancel')}</Button><Button type="primary" loading={saving} disabled={draft === undefined || loading || conflict} onClick={() => void save()}>{t('notifications.save')}</Button></div></div>}>
+    <Drawer className="notification-editor-drawer" zIndex={1200} width={680} open={open} title={<><div>{t('notifications.configure')}</div><small>{title} · {t('notifications.onlyThisTask')}</small></>} onClose={cancelEditor} footer={<div className="notification-footer"><Button className="notification-restore-defaults" type="link" disabled={loading || saving || conflict} onClick={async () => { setLoading(true); try { const p = await getPreferences(); setDraft(taskRuleFromDefaults(p.defaults)); setEnabled(p.enabled); } catch { setError('loadFailed'); } finally { setLoading(false); } }}>{t('notifications.restoreGlobalDefaults')}</Button><div className="notification-footer-actions"><Button disabled={saving} onClick={cancelEditor}>{t('notifications.cancel')}</Button><Button type="primary" loading={saving} disabled={draft === undefined || loading || conflict} onClick={() => void save()}>{t('notifications.save')}</Button></div></div>}>
       {errorView}
       {loading ? <Spin /> : draft !== undefined && <><Alert className="notification-task-info" type={enabled ? 'info' : 'warning'} showIcon message={t('notifications.' + (enabled ? 'draftSaveHint' : 'paused'))} action={!enabled && <Button onClick={() => setSettingsOpen(true)}>{t('notifications.openSettings')}</Button>} /><div className="notification-task-overview"><span className="notification-task-overview-icon"><BellOutlined /></span><div className="notification-grow"><h3>{t('notifications.taskOverview')}</h3><NotificationSummary value={draft} /></div><Tag className="notification-task-channel-count" color="blue">{t('notifications.configuredChannelCount', { count: channels.filter(channel => draft?.channels[channel]?.enabled).length })}</Tag></div><RuleEditor variant="task" value={draft || emptyRule()} onChange={next => void change(next)} disabled={saving || conflict} /></>}
       {open && selectedTaskId && <section><h3>{t('taskCenter.currentExecutionNotifications')}</h3><NotificationHistory key={selectedTaskId} taskId={selectedTaskId} /></section>}

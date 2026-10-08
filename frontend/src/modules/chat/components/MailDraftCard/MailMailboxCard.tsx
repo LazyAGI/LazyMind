@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Button, Space, Typography } from "antd";
+import { useRef, useState } from "react";
+import { Alert, Button, Space, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 import type { MailDraftPreview } from "./index";
 import "./index.scss";
@@ -12,7 +12,7 @@ export interface MailMailboxChoice {
 interface MailMailboxCardProps {
   draft: MailDraftPreview;
   disabled?: boolean;
-  onConfirm: (mailbox: string, draftId: string) => void;
+  onConfirm: (mailbox: string, draftId: string) => boolean | void | Promise<boolean | void>;
 }
 
 function mailboxChoices(draft: MailDraftPreview): MailMailboxChoice[] {
@@ -40,11 +40,30 @@ export default function MailMailboxCard({
 }: MailMailboxCardProps) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState("");
+  const submittingRef = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitFailed, setSubmitFailed] = useState(false);
   const draftId = String(draft.draft_id || "").trim();
   const choices = mailboxChoices(draft);
+  const locked = disabled || submitting || submitted;
+  const handleConfirm = async () => {
+    if (locked || submittingRef.current || !choices.some((choice) => choice.email === selected)) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    setSubmitFailed(false);
+    try {
+      setSubmitted((await onConfirm(selected, draftId)) !== false);
+    } catch {
+      setSubmitFailed(true);
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  };
 
   return (
-    <div className="mail-draft-card">
+    <div className="mail-draft-card mail-mailbox-card">
       <Typography.Title level={5}>{t("chat.mailMailbox.title")}</Typography.Title>
       <Typography.Paragraph type="secondary">
         {t("chat.mailMailbox.description")}
@@ -59,7 +78,7 @@ export default function MailMailboxCard({
                 key={email}
                 type={active ? "primary" : "default"}
                 block
-                disabled={disabled}
+                disabled={locked}
                 onClick={() => setSelected(email)}
               >
                 {item.provider ? `${email} (${item.provider})` : email}
@@ -72,12 +91,15 @@ export default function MailMailboxCard({
           {t("chat.mailMailbox.empty")}
         </Typography.Paragraph>
       )}
-      {!disabled ? (
+      {submitFailed ? <Alert type="error" message={t("chat.mailDraft.submitFailed")} /> : null}
+      {!disabled && !submitted ? (
         <Button
           type="primary"
           style={{ marginTop: 16 }}
-          disabled={!draftId || !selected}
-          onClick={() => onConfirm(selected, draftId)}
+          aria-label={t("chat.mailMailbox.confirm")}
+          loading={submitting}
+          disabled={!draftId || !choices.some((choice) => choice.email === selected) || submitting}
+          onClick={() => void handleConfirm()}
         >
           {t("chat.mailMailbox.confirm")}
         </Button>

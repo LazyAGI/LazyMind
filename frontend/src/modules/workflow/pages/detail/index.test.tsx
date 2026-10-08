@@ -94,14 +94,15 @@ describe('workflow draft lifecycle', () => {
     const details = await screen.findByRole('button', { name: 'selfEvolutionRun.workflowDetailShowSuggestions' });
     expect(screen.getByRole('status')).toHaveTextContent('selfEvolutionRun.workflowDetailCompletedTitle');
     expect(details).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.getByText('selfEvolutionRun.workflowDetailWarningLogHint')).not.toBeVisible();
+    expect(screen.getByText('selfEvolutionRun.workflowDetailSuggestionsHint')).toBeVisible();
+    expect(screen.getByText('temporary provider error')).not.toBeVisible();
     expect(screen.queryByText('Request failed')).not.toBeInTheDocument();
     fireEvent.click(details);
     expect(details).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('region', { name: 'selfEvolutionRun.workflowDetailShowSuggestions' })).toHaveAttribute('id', details.getAttribute('aria-controls'));
-    expect(screen.getByText('selfEvolutionRun.workflowDetailWarningLogHint')).toBeVisible();
+    expect(screen.getByText('temporary provider error')).toBeVisible();
     fireEvent.click(details);
-    expect(screen.getByText('selfEvolutionRun.workflowDetailWarningLogHint')).not.toBeVisible();
+    expect(screen.getByText('temporary provider error')).not.toBeVisible();
     expect(mocks.props.generationLog).toContain(warning);
     expect(mocks.generate).not.toHaveBeenCalled();
   });

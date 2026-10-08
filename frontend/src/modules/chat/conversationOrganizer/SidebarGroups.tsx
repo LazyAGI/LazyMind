@@ -4,6 +4,7 @@ import { Button, Checkbox, Dropdown } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import dayjs from "dayjs";
 import type { ConversationGroupMember } from "@/api/generated/core-client";
 import { getChatConversationPath } from "@/modules/chat/constants/chat";
 import { assignConversation, getConversationGroup, listConversationGroups, updateGroupPlacement, emitConversationGroupsChanged, type ConversationGroup } from "./api";
@@ -11,6 +12,7 @@ import ConversationMembership from "./ConversationMembership";
 import ConversationTitleEditor from "../components/ConversationTitleEditor";
 import ConversationGroupDropZone from "./ConversationGroupDropZone";
 import { CONVERSATION_DRAG, GROUP_DRAG, readConversationDrag, startConversationDrag } from "./drag";
+const isGroupPinned = (group: ConversationGroup) => Boolean(group.pinned);
 
 export type GroupBatchSelection = {
   checkedIds: string[];
@@ -23,7 +25,25 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(groups.filter(g => g.collapsed).map(g => g.id)));
+  useEffect(() => { setCollapsed(new Set(groups.filter(g => g.collapsed).map(g => g.id))); }, [groups]);
+  const collapsePending = useRef(false);
+  const toggleCollapsed = async (id: string) => {
+    if (collapsePending.current || busy) return;
+    collapsePending.current = true;
+    setBusy(true);
+    try {
+      const updated = await updateGroupPlacement(id, { collapsed: !collapsed.has(id) });
+      const group = updated.find(g => g.id === id);
+      if (group) setCollapsed(previous => {
+        const next = new Set(previous);
+        if (group.collapsed) next.add(id); else next.delete(id);
+        return next;
+      });
+      emitConversationGroupsChanged();
+    } catch { /* The shared request interceptor displays the error; retain the saved state. */ }
+    finally { collapsePending.current = false; setBusy(false); }
+  };
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [members, setMembers] = useState<Record<string, ConversationGroupMember[]>>({});
   const pageCounts = useRef<Record<string, number>>({});
@@ -130,29 +150,29 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
         if (source && source !== g.id) {
           const sourceGroup = groups.find(group => group.id === source);
           if (!sourceGroup || Boolean(sourceGroup.is_task_conv) !== Boolean(g.is_task_conv)) return;
-          const bucket = groups.filter(group => Boolean(group.is_task_conv) === Boolean(g.is_task_conv) && Boolean(group.pinned) === Boolean(g.pinned) && group.id !== source);
+          const bucket = groups.filter(group => Boolean(group.is_task_conv) === Boolean(g.is_task_conv) && isGroupPinned(group) === isGroupPinned(g) && group.id !== source);
           const row = e.currentTarget.querySelector(".conversation-group-row")!.getBoundingClientRect();
           const after = e.clientY > row.top + row.height / 2;
           const anchor = after ? bucket[bucket.findIndex(group => group.id === g.id) + 1]?.id || "" : g.id;
-          await placement(source, { pinned: g.pinned, before_group_id: anchor });
+          await placement(source, { pinned: isGroupPinned(g), before_group_id: anchor });
         }
         else if (g.kind !== "project" && conversation && Boolean(conversation.isTaskConv) === Boolean(g.is_task_conv) && !groups.some(group => group.id === conversation.groupId && group.kind === "project") && conversation.groupId !== g.id) { await moveMember(g.id, conversation.id); }
       } catch { /* The shared request interceptor displays the API error. */ }
     }}>
       <div className={`conversation-group-row ${selected ? "is-selected" : ""}`} draggable={!batchSelection && !searchText && !busy} onDragStart={e => { e.dataTransfer.setData(GROUP_DRAG, g.id); e.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { setDropTarget(''); setMemberDropTarget(null); }}>
         {batchSelection && <Checkbox aria-label={t('conversationOrganizer.selectAllInGroup', { name: g.name })} title={t('conversationOrganizer.selectAllInGroup', { name: g.name })} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} disabled={Boolean(selectingGroup) || !members[g.id] || (!all.length && !tokens[g.id])} onChange={event => void selectGroup(g, event.target.checked)} />}
-        <button className="conversation-group-name" title={g.path || g.name} aria-expanded={open} onClick={() => toggle(setCollapsed, g.id)}>{g.kind === "project" ? <FolderOpenOutlined /> : <MessageOutlined />}<span>{g.name}</span></button>
+        <button className="conversation-group-name" title={g.path || g.name} aria-expanded={open} disabled={busy} onClick={() => void toggleCollapsed(g.id)}>{g.kind === "project" ? <FolderOpenOutlined /> : <MessageOutlined />}<span>{g.name}</span></button>
         {selectingGroup === g.id && <LoadingOutlined aria-label={t('common.loading')} />}
         {!batchSelection && <><Button type="text" size="small" icon={<PlusOutlined />} aria-label={t("conversationOrganizer.newChatInNamedGroup", { name: g.name })} onClick={() => onNew?.(g.id)} />
         <Dropdown trigger={["click"]} menu={{ items: [
           { key: "open", label: t(g.kind === "project" ? "conversationProject.open" : "conversationOrganizer.openGroup"), onClick: () => navigate(`/agent/chat/groups/${g.id}`) },
-          { key: "pin", icon: <PushpinOutlined />, label: t(g.kind === "project" ? (g.pinned ? "conversationProject.unpin" : "conversationProject.pin") : g.pinned ? "conversationOrganizer.unpinGroup" : "conversationOrganizer.pinGroup"), onClick: () => void placement(g.id, { pinned: !g.pinned }) },
+          { key: "pin", icon: <PushpinOutlined />, label: t(g.kind === "project" ? (g.pinned ? "conversationProject.unpin" : "conversationProject.pin") : (g.pinned ? "conversationOrganizer.unpinGroup" : "conversationOrganizer.pinGroup")), onClick: () => void placement(g.id, { pinned: !g.pinned }) },
           { key: "edit", label: t(g.kind === "project" ? "conversationProject.edit" : "conversationOrganizer.editGroup"), onClick: () => onEdit(g) },
           { key: "remove", danger: true, label: t(g.kind === "project" ? "conversationProject.remove" : "conversationOrganizer.removeGroup"), onClick: () => onRemove(g) },
         ] }}><Button type="text" size="small" icon={<EllipsisOutlined />} aria-label={t("conversationOrganizer.groupMore", { name: g.name })} /></Dropdown></>}
       </div>
       {open && <div className="conversation-group-members">
-        {visible.map(c => <ConversationPreview key={c.conversation_id} conversationId={c.conversation_id} title={c.display_name || c.conversation_id} summary={c.summary} updateTime={c.updated_at} isTask={Boolean(c.is_task_conv)} disabled={Boolean(batchSelection) || renamingId === c.conversation_id}><div className={`conversation-group-member ${c.conversation_id === currentConversationId ? "active" : ""} ${memberDropTarget?.id === c.conversation_id ? `member-drop-${memberDropTarget.position}` : ''}`} draggable={g.kind !== "project" && renamingId !== c.conversation_id && !batchSelection && !searchText && !busy}
+        {visible.map(c => <ConversationPreview key={c.conversation_id} conversationId={c.conversation_id} title={c.display_name || c.conversation_id} summary={c.summary} updateTime={c.updated_at} isTask={Boolean(c.is_task_conv)} groupName={g.name} disabled={Boolean(batchSelection) || renamingId === c.conversation_id}><div className={`conversation-group-member ${c.conversation_id === currentConversationId ? "active" : ""} ${memberDropTarget?.id === c.conversation_id ? `member-drop-${memberDropTarget.position}` : ''}`} draggable={g.kind !== "project" && renamingId !== c.conversation_id && !batchSelection && !searchText && !busy}
           onDragStart={e => startConversationDrag(e, c.conversation_id, g.id, Boolean(c.is_task_conv))}
           onDragEnd={() => { setDropTarget(''); setMemberDropTarget(null); }}
           onDragOver={e => {
@@ -171,7 +191,9 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
             const row = e.currentTarget.getBoundingClientRect();
             void moveMember(g.id, source.id, { target_conversation_id: c.conversation_id, position: e.clientY > row.top + row.height / 2 ? 'after' : 'before' });
           }}>
-          <>{batchSelection ? <Checkbox className="conversation-group-batch-checkbox" checked={batchSelection.checkedIds.includes(c.conversation_id)} onChange={event => batchSelection.onToggle(c.conversation_id, event.target.checked)}><span title={c.display_name}>{c.display_name || c.conversation_id}</span></Checkbox> : renamingId === c.conversation_id ? <ConversationTitleEditor key={c.conversation_id} conversationId={c.conversation_id} initialTitle={c.display_name} onClose={() => setRenamingId(null)} /> : <><button onClick={() => navigate(getChatConversationPath(c.conversation_id))}>{c.display_name || c.conversation_id}</button><ConversationMembership onRename={() => setRenamingId(c.conversation_id)} pinned={Boolean(c.pinned_at)} isTaskConv={Boolean(c.is_task_conv)} conversationId={c.conversation_id} groupId={g.id} groupKind={g.kind} title={c.display_name} /></>}</>
+          {batchSelection ? <Checkbox className="conversation-group-batch-checkbox" checked={batchSelection.checkedIds.includes(c.conversation_id)} onChange={event => batchSelection.onToggle(c.conversation_id, event.target.checked)}><span title={c.display_name}>{c.display_name || c.conversation_id}</span></Checkbox> : renamingId === c.conversation_id ? <ConversationTitleEditor key={c.conversation_id} conversationId={c.conversation_id} initialTitle={c.display_name} onClose={() => setRenamingId(null)} /> : <button onClick={() => navigate(getChatConversationPath(c.conversation_id))}>{c.display_name || c.conversation_id}</button>}
+          {renamingId !== c.conversation_id && c.updated_at && dayjs(c.updated_at).isValid() && <time className="conversation-group-member-time" dateTime={c.updated_at}>{dayjs(c.updated_at).format("MM/DD")}</time>}
+          {!batchSelection && renamingId !== c.conversation_id && <ConversationMembership onRename={() => setRenamingId(c.conversation_id)} pinned={Boolean(c.pinned_at)} isTaskConv={Boolean(c.is_task_conv)} conversationId={c.conversation_id} groupId={g.id} groupKind={g.kind} title={c.display_name} />}
           {g.kind !== "project" && !batchSelection && !searchText && renamingId !== c.conversation_id && <span className="conversation-member-drag-handle" title={t('conversationOrganizer.memberDragHint')}><HolderOutlined /></span>}
         </div></ConversationPreview>)}
         {(batchSelection ? Boolean(tokens[g.id]) : all.length > 5 || tokens[g.id]) && <Button type="link" size="small" className="conversation-group-more" disabled={Boolean(selectingGroup)} onClick={() => void more(g)}>{t(!batchSelection && expanded.has(g.id) && !tokens[g.id] ? "conversationOrganizer.showLess" : "conversationOrganizer.showMore")}</Button>}
@@ -181,12 +203,12 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
   const visibleGroups = groups.filter(g => !matches || matches.has(g.id));
   return <>
     {showTypeHeading && <div className="conversation-groups-heading">{t(isTaskConv ? "chat.taskConversation" : "chat.normalConversation")}</div>}
-    {visibleGroups.some(g => g.pinned) && <><div className="conversation-groups-heading">{t("conversationOrganizer.pinnedGroups")}</div>{visibleGroups.filter(g => g.pinned).map(block)}</>}
+    {visibleGroups.some(isGroupPinned) && <><div className="conversation-groups-heading">{t("conversationOrganizer.pinnedGroups")}</div>{visibleGroups.filter(isGroupPinned).map(block)}</>}
     <div className="conversation-groups-heading"><span>{t("conversationOrganizer.groups")}</span>{!batchSelection && <Dropdown trigger={["click"]} menu={{ items: [
       ...(!projectsOnly ? [{ key: "group", label: t("conversationOrganizer.newGroup"), disabled: namesLocked, onClick: () => onEdit("new") }] : []),
       ...(includeProjects ? [{ key: "project", label: t("conversationProject.new"), onClick: () => onEdit("new-project") }] : []),
     ] }}><Button type="text" size="small" icon={<PlusOutlined />} aria-label={t("conversationOrganizer.newGroup")} /></Dropdown>}</div>
-    {visibleGroups.filter(g => !g.pinned).map(block)}
+    {visibleGroups.filter(g => !isGroupPinned(g)).map(block)}
     {!visibleGroups.length && <div className="conversation-group-empty" title={t(searchText ? "conversationOrganizer.noSearchResults" : "conversationOrganizer.emptyGroups")}>{t(searchText ? "conversationOrganizer.noSearchResults" : "conversationOrganizer.emptyGroups")}</div>}
   </>;
 }

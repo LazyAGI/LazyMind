@@ -22,7 +22,7 @@ def registered(gateway, account, feishu):
     return gateway.store.get_account('owner', row['id'])
 
 
-def run_registration(gateway, monkeypatch, session_id, effect=None, app_id='synthetic-original-app'):
+def run_registration(gateway, monkeypatch, session_id, effect=None, app_id='synthetic-original-app', bot_name=''):
     service = gateway.components.delivery_worker._providers.connection('feishu')
     options = []
 
@@ -32,7 +32,7 @@ def run_registration(gateway, monkeypatch, session_id, effect=None, app_id='synt
         if effect:
             effect()
         return FeishuAppRegistration(app_id, 'synthetic-rotated-secret',
-                                     'synthetic-original-app', 'Test user', '')
+                                     'synthetic-original-app', 'Test user', '', bot_name)
 
     monkeypatch.setattr(service._registrar, 'register', register)
     row = gateway.store.get_session_internal(session_id)
@@ -66,6 +66,17 @@ def test_reauthorization_rotates_only_original_credentials_preserving_history(
     with gateway.store._connect() as connection:
         assert connection.execute('SELECT id FROM channel_outbox WHERE id = %s', (reply['id'],)).fetchone()
         assert connection.execute('SELECT id FROM channel_inbox WHERE id = %s', (reply['inbox_id'],)).fetchone()
+    assert feishu['started'] == [row['id']]
+
+
+def test_reauthorization_preserves_custom_feishu_name_with_legacy_prefix(gateway, registered, feishu, monkeypatch):
+    row = registered
+    gateway.store.rename_account('owner', row['id'], '飞书 · Test user')
+    session = connect(gateway, account_id=row['id'], reauthorize=True).json()
+
+    run_registration(gateway, monkeypatch, session['id'], bot_name='官方机器人')
+
+    assert gateway.store.get_account('owner', row['id'])['label'] == '飞书 · Test user'
     assert feishu['started'] == [row['id']]
 
 

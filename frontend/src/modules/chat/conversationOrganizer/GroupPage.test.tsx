@@ -19,6 +19,16 @@ const detail = (id: string, task: boolean) => ({ group: { id, name: id, kind: "g
 beforeEach(() => { vi.clearAllMocks(); sessionStorage.clear(); });
 function SwitchGroup() { const navigate = useNavigate(); return <button onClick={() => navigate('/groups/task')}>Switch to task</button>; }
 function view(id = 'chat') { return render(<MemoryRouter initialEntries={['/groups/' + id]}><SwitchGroup /><Routes><Route path="/groups/:groupId" element={<GroupPage />} /><Route path="/agent/chat/home" element={<div>Home</div>} /></Routes></MemoryRouter>); }
+it.each([false, true])("saves ordinary group pin changes from pinned=%s in group detail", async pinned => {
+  const response = detail("chat", false);
+  response.group.pinned = pinned;
+  vi.mocked(api.getConversationGroup).mockResolvedValue(response);
+  view();
+  fireEvent.click(await screen.findByRole("button", { name: "conversationOrganizer.groupMore" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: pinned ? "conversationOrganizer.unpinGroup" : "conversationOrganizer.pinGroup" }));
+  await waitFor(() => expect(api.updateGroupPlacement).toHaveBeenCalledWith("chat", { pinned: !pinned }));
+  expect(api.emitConversationGroupsChanged).toHaveBeenCalled();
+});
 it.each(["group", "project"])("opens task %s in task mode and starts a task there", async kind => {
   const response = detail("task", true);
   response.group.kind = kind;

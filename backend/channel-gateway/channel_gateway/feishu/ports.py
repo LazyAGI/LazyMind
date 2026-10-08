@@ -177,6 +177,9 @@ class FeishuAccountRepository(AccountCredentialRepository, Protocol):
     def rename_account(self, owner: str, account_id: str, label: str):
         ...
 
+    def rename_generated_account(self, owner: str, account_id: str, label: str, expected_label: str):
+        ...
+
     def archive_account(self, owner: str, account_id: str) -> None:
         ...
 

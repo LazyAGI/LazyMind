@@ -7,6 +7,7 @@ import type { SkillTreeNode, StructuredAsset } from "../../shared";
 import {
   canSubmitSkillOrganize,
   isSkillOrganizeEligible,
+  isSkillOrganizeInScope,
   MAX_SKILL_ORGANIZE_SELECTION,
 } from "./skillOrganizeRules";
 import { getSkillCallModeMenuItems } from "./SkillCallModeControl";
@@ -90,7 +91,7 @@ export default function SkillInstalledView({
   const organizeActionTitle = t(organizeDepth === "light" ? "admin.memorySkillOrganizeLight" : "admin.memorySkillOrganizeDeep");
   const organizeActionScope = t(organizeDepth === "light" ? "admin.memorySkillOrganizeLightScope" : "admin.memorySkillOrganizeDeepScope");
   const tableData = isDeepOrganize
-    ? dataSource.filter((row) => isSkillOrganizeEligible(row, "deep"))
+    ? dataSource.filter((row) => isSkillOrganizeInScope(row, "deep"))
     : dataSource;
   const pagination = getLocalizedTablePagination(
     {
@@ -105,7 +106,17 @@ export default function SkillInstalledView({
     },
     t,
   );
-  const visibleColumns = columns.filter((column) => column.key !== "tags");
+  const visibleColumns: ColumnsType<SkillTreeNode> = columns.filter((column) => column.key !== "tags");
+  if (organizeMode && tableData.some((record) => record.draft?.hasUncommittedDraft)) {
+    visibleColumns.push({
+      key: "organizeDraftStatus",
+      title: t("admin.memorySkillPendingDrafts"),
+      width: 180,
+      render: (_, record) => record.draft?.hasUncommittedDraft
+        ? t("admin.memorySkillOrganizePendingDraftRow", {name: record.name})
+        : null,
+    });
+  }
   const canSubmitOrganize = canSubmitSkillOrganize(
     selectedOrganizeSkillIds.length,
   );
@@ -285,6 +296,8 @@ export default function SkillInstalledView({
                       "aria-label": t(
                         eligible
                           ? "admin.memorySkillOrganizeSelectRow"
+                          : record.draft?.hasUncommittedDraft
+                            ? "admin.memorySkillOrganizePendingDraftRow"
                           : record.readonly || record.cloudResourceId
                             ? "admin.memorySkillOrganizeLocalEditableOnlyRow"
                             : "admin.memorySkillOrganizeInternalOnlyRow",
@@ -324,7 +337,9 @@ export default function SkillInstalledView({
               />
             ),
           }}
-          scroll={tableScroll}
+          // Let the existing flex layout own the viewport height. A cached pixel
+          // measurement from selection/review mode can leave only two rows visible.
+          scroll={{ x: tableScroll?.x ?? 656, y: "100%" }}
         />
       </div>
     </div>

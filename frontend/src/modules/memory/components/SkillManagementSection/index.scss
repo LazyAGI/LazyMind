@@ -6,6 +6,27 @@
   min-height: 0;
 }
 
+.memory-skill-organize-notice {
+  flex-wrap: wrap;
+  gap: 8px;
+
+  .ant-alert-content {
+    min-width: min(240px, 100%);
+    overflow-wrap: anywhere;
+  }
+
+  .ant-alert-action {
+    margin-inline-start: 0;
+    max-width: 100%;
+
+    .ant-btn {
+      height: auto;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+  }
+}
+
 .memory-skill-toolbar {
   display: flex;
   align-items: flex-end;

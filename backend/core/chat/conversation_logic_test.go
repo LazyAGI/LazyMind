@@ -21,6 +21,60 @@ import (
 	"lazymind/core/vocabulary"
 )
 
+func TestMailConfirmationHistoryKeepsConsentWithoutPayload(t *testing.T) {
+	raw := map[string]any{
+		"mail_draft_confirm_id": "draft-retry", "mail_draft_confirm_revision": 3,
+		"mail_draft_patch": map[string]any{"body": "private-edited-body", "attachments": []any{
+			map[string]any{"filename": "local.txt", "content_base64": "private-upload-base64"},
+		}},
+	}
+	ext := buildChatHistoryExt(raw, "Confirm mail")
+	if strings.Contains(string(ext), "private-") {
+		t.Fatalf("history persisted the transient mail payload: %s", ext)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(ext, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	confirmation, ok := decoded["mail_confirmation"].(map[string]any)
+	if !ok || confirmation["mail_draft_confirm_id"] != "draft-retry" || confirmation["mail_draft_confirm_revision"] != float64(3) {
+		t.Fatalf("missing original consent marker: %s", ext)
+	}
+	item := chatHistoryToResponseItem(orm.ChatHistory{Ext: ext})
+	if item["mail_confirmation"] == nil {
+		t.Fatal("history response dropped mail confirmation marker")
+	}
+}
+
+func TestMailConfirmationHistoryDoesNotInventRevisionConsent(t *testing.T) {
+	for _, raw := range []map[string]any{{}, {"mail_draft_confirm_id": "draft-retry"},
+		{"mail_draft_confirm_id": "draft-retry", "mail_draft_confirm_revision": 0}} {
+		ext := buildChatHistoryExt(raw, "Confirm mail")
+		if strings.Contains(string(ext), "mail_confirmation") {
+			t.Fatalf("invented consent: %s", ext)
+		}
+	}
+}
+
+func TestMailConfirmationHistorySurvivesRegenerationWithoutReauthorizing(t *testing.T) {
+	previous := orm.ChatHistory{Ext: buildChatHistoryExt(map[string]any{
+		"mail_draft_confirm_id": "draft-retry", "mail_draft_confirm_revision": 3,
+	}, "Confirm mail")}
+	for _, raw := range []map[string]any{{}, {
+		"mail_draft_confirm_id": "different-draft", "mail_draft_confirm_revision": 4,
+	}} {
+		ext := buildChatHistoryExtWithTrail(raw, "Confirm mail", nil, chatPersistTarget{IsRegeneration: true, Existing: &previous})
+		var decoded map[string]any
+		if err := json.Unmarshal(ext, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		marker, _ := decoded["mail_confirmation"].(map[string]any)
+		if marker["mail_draft_confirm_id"] != "draft-retry" || marker["mail_draft_confirm_revision"] != float64(3) {
+			t.Fatalf("regeneration changed original consent marker: %s", ext)
+		}
+	}
+}
+
 func TestResolveMailDraftConfirmIDFromDraftCard(t *testing.T) {
 	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "确认发送", nil, map[string]any{
 		"mail_draft_confirm_id": "draft_ac38c2afeac34780",
@@ -1285,6 +1339,149 @@ func TestSubmittedAskAnswersPreservesQuestionIndexes(t *testing.T) {
 	}})
 	if len(answers) != 2 || answers["0"] == nil || answers["2"] == nil {
 		t.Fatalf("submitted answers were not preserved by index: %#v", answers)
+	}
+}
+
+func TestSubmittedAskTargetsOlderCompositeAfterMailReceipt(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.ChatHistory{}).DB
+	histories := []orm.ChatHistory{
+		{ID: "ordinary", ConversationID: "owned", Seq: 1, Result: `<tool_result>Question sent to user (ask_id=ordinary).</tool_result>`,
+			Ext: json.RawMessage(`{"ask_pending":{"ask_id":"ordinary","mail_draft_only":false,"questions":[{"text":"Date?","type":"text"}],"mail_drafts":[{"draft_id":"one","status":"draft"}]}}`)},
+		{ID: "receipt", ConversationID: "owned", Seq: 2, Result: "Mail sent",
+			Ext: json.RawMessage(`{"ask_pending":{"ask_id":"receipt","mail_draft_only":true,"questions":[],"mail_drafts":[{"draft_id":"one","status":"sent"}]}}`)},
+	}
+	for _, h := range histories {
+		if err := db.Create(&h).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	submission := map[string]any{"ask_id": "ordinary", "questions": []any{
+		map[string]any{"text": "Date?", "type": "text", "answer": map[string]any{"type": "text", "value": "Friday"}},
+	}}
+	if err := validateWorkspaceAskSubmission(histories, map[string]any{"ask_answers_structured": submission}); err != nil {
+		t.Fatalf("older composite answer rejected: %v", err)
+	}
+	messages := buildHistoryMessages(histories, submission)
+	if !strings.Contains(messages[1]["content"].(string), "Friday") || messages[3]["content"] != "Mail sent" {
+		t.Fatalf("wrong history rewritten: %#v", messages)
+	}
+	markLastAskPendingAnswered(context.Background(), db, histories, submission)
+	var updated orm.ChatHistory
+	if err := db.First(&updated, "id = ?", "ordinary").Error; err != nil {
+		t.Fatal(err)
+	}
+	var ext map[string]any
+	if err := json.Unmarshal(updated.Ext, &ext); err != nil {
+		t.Fatal(err)
+	}
+	if ext["ask_answered"] != true || ext["ask_saved_answers"] == nil || !strings.Contains(string(updated.Ext), "Friday") {
+		t.Fatalf("submitted answers not persisted: %s", updated.Ext)
+	}
+	updated = orm.ChatHistory{}
+	if err := db.First(&updated, "id = ?", "receipt").Error; err != nil {
+		t.Fatal(err)
+	}
+	assertStoredArtifactValue(t, updated.Ext, string(histories[1].Ext))
+	if _, err := submitObjectiveVocabularyAnswers(context.Background(), db, "owner", histories, submission); err != nil {
+		t.Fatalf("ordinary submission incorrectly processed as another card: %v", err)
+	}
+}
+
+func TestSubmittedAskSurvivesAutosaveAfterHistoryLoad(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.ChatHistory{}).DB
+	loaded := orm.ChatHistory{ID: "ordinary", ConversationID: "owned", Seq: 1,
+		Ext: json.RawMessage(`{"ask_pending":{"ask_id":"ordinary","mail_draft_only":false,"questions":[{"text":"Day?","type":"single","choices":["Mon","Wed"]}],"mail_drafts":[{"draft_id":"one","status":"draft"}]}}`)}
+	stored := loaded
+	stored.Ext = json.RawMessage(`{"ask_pending":{"ask_id":"ordinary","mail_draft_only":false,"questions":[{"text":"Day?","type":"single","choices":["Mon","Wed"]}],"mail_drafts":[{"draft_id":"one","status":"draft"}]},"ask_saved_answers":{"0":{"type":"single","value":"Wed"}}}`)
+	if err := db.Create(&stored).Error; err != nil {
+		t.Fatal(err)
+	}
+	submission := map[string]any{"ask_id": "ordinary", "questions": []any{
+		map[string]any{"text": "Day?", "type": "single", "choices": []any{"Mon", "Wed"}, "custom_choices": []any{"Mon", "Wed"},
+			"answer": map[string]any{"type": "single", "value": "Wed"}},
+	}}
+	markLastAskPendingAnswered(context.Background(), db, []orm.ChatHistory{loaded}, submission)
+	var updated orm.ChatHistory
+	if err := db.First(&updated, "id = ?", "ordinary").Error; err != nil {
+		t.Fatal(err)
+	}
+	var ext map[string]any
+	if err := json.Unmarshal(updated.Ext, &ext); err != nil {
+		t.Fatal(err)
+	}
+	if ext["ask_answered"] != true {
+		t.Fatalf("answer lost after a concurrent autosave: %s", updated.Ext)
+	}
+}
+
+func TestObjectiveAskSubmissionRejectsForeignOwnershipBeforeSideEffects(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.Conversation{}).DB
+	conversation := orm.Conversation{ID: "foreign", BaseModel: orm.BaseModel{CreateUserID: "other-user"}}
+	if err := db.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	histories := []orm.ChatHistory{{ID: "review", ConversationID: "foreign", Ext: json.RawMessage(
+		`{"ask_pending":{"ask_id":"review","questions":[],"review_hook":{"kind":"vocabulary_review_objective","session_id":"private"}}}`,
+	)}}
+	_, err := submitObjectiveVocabularyAnswers(context.Background(), db, "owner", histories, map[string]any{"ask_id": "review", "questions": []any{}})
+	if err == nil || !strings.Contains(err.Error(), "does not belong") {
+		t.Fatalf("foreign card was not rejected before review processing: %v", err)
+	}
+	_, err = submitObjectiveVocabularyAnswers(context.Background(), nil, "owner", histories, map[string]any{"ask_id": "wrong", "questions": []any{}})
+	if err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("wrong id reached review processing: %v", err)
+	}
+}
+
+func TestInvalidAskSubmissionHasNoPersistenceOrRewriteSideEffects(t *testing.T) {
+	for _, scenario := range []string{"wrong_id", "missing_id", "forged_question", "mail_only", "env_input", "answered", "foreign_conversation", "stale_snapshot"} {
+		t.Run(scenario, func(t *testing.T) {
+			db := orm.MigrateTestDB(t, &orm.ChatHistory{}).DB
+			pending := map[string]any{"ask_id": "ordinary", "questions": []any{map[string]any{"text": "Date?", "type": "text"}}}
+			ext := map[string]any{"ask_pending": pending}
+			submission := map[string]any{"ask_id": "ordinary", "questions": []any{map[string]any{"text": "Date?", "type": "text", "answer": map[string]any{"type": "text", "value": "Friday"}}}}
+			switch scenario {
+			case "wrong_id":
+				submission["ask_id"] = "wrong"
+			case "missing_id":
+				delete(submission, "ask_id")
+			case "forged_question":
+				submission["questions"].([]any)[0].(map[string]any)["text"] = "Forged"
+			case "mail_only":
+				pending["mail_draft_only"] = true
+			case "env_input":
+				pending["env_input"] = map[string]any{"name": "SECRET"}
+			case "answered":
+				ext["ask_answered"] = true
+			}
+			encoded, _ := json.Marshal(ext)
+			h := orm.ChatHistory{ID: "target", ConversationID: "owned", Ext: encoded, Result: `<tool_result>Question sent to user (ask_id=ordinary).</tool_result>`}
+			stored := h
+			if scenario == "foreign_conversation" {
+				stored.ConversationID = "foreign"
+			}
+			if scenario == "stale_snapshot" {
+				stored.Ext = json.RawMessage(`{"ask_pending":{"ask_id":"replacement"}}`)
+			}
+			if err := db.Create(&stored).Error; err != nil {
+				t.Fatal(err)
+			}
+			markLastAskPendingAnswered(context.Background(), db, []orm.ChatHistory{h}, submission)
+			var actual orm.ChatHistory
+			if err := db.First(&actual, "id = ?", h.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			assertStoredArtifactValue(t, actual.Ext, string(stored.Ext))
+			if scenario != "foreign_conversation" && scenario != "stale_snapshot" {
+				if validateWorkspaceAskSubmission([]orm.ChatHistory{h}, map[string]any{"ask_answers_structured": submission}) == nil {
+					t.Fatal("invalid submission accepted")
+				}
+				messages := buildHistoryMessages([]orm.ChatHistory{h}, submission)
+				if strings.Contains(messages[1]["content"].(string), "Friday") {
+					t.Fatal("invalid answer injected into model history")
+				}
+			}
+		})
 	}
 }
 

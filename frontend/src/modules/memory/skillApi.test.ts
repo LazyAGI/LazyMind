@@ -1,11 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({ apiCoreSkillsGet: vi.fn(), apiCoreSkillsSkillIdGet: vi.fn(), apiCoreSkillOrganizePost: vi.fn() }));
+const http = vi.hoisted(() => ({get: vi.fn(), post: vi.fn()}));
 vi.mock("@/api/generated/core-client", () => ({
   Configuration: class {}, SkillsApiFactory: () => api,
   SkillDraftsApiFactory: () => ({}), SkillFsApiFactory: () => ({}), SkillRevisionsApiFactory: () => ({}), SkillSharesApiFactory: () => ({}), SkillMarketApiFactory: () => ({}), SkillDiffApiFactory: () => ({}),
 }));
-vi.mock("@/components/request", () => ({ axiosInstance: {}, BASE_URL: "", localizeErrorCode: vi.fn() }));
-import { buildSkillUpdatePayload, getSkillAssetDetail, listSkillAssetsPage, normalizeSkillCallMode, organizeSkills } from "./skillApi";
+vi.mock("@/components/request", () => ({ axiosInstance: http, BASE_URL: "", localizeErrorCode: vi.fn() }));
+import { buildSkillUpdatePayload, cancelSkillOrganizeTask, getSkillOrganizeTask, listSkillOrganizeTasks, getSkillAssetDetail, listSkillAssetsPage, normalizeSkillCallMode, organizeSkills } from "./skillApi";
+describe("organize cancellation review marker", () => {
+  it.each([true, false, undefined])("preserves pending_review=%s from cancellation response", async (pendingReview) => {
+    http.post.mockResolvedValue({data: {data: {status: "cancelled", requestid: "r", pending_review: pendingReview}}});
+    expect(await cancelSkillOrganizeTask("r")).toMatchObject({pendingReview: pendingReview === true});
+  });
+  it.each([true, false, undefined])("preserves pending_review=%s in polling and task history", async (pendingReview) => {
+    http.get.mockResolvedValue({data: {data: {items: [{requestid: "r", status: "cancelled", pending_review: pendingReview}]}}});
+    expect(await getSkillOrganizeTask("r")).toMatchObject({pendingReview: pendingReview === true});
+    expect((await listSkillOrganizeTasks())[0]).toMatchObject({pendingReview: pendingReview === true});
+  });
+});
 describe("Skill discovery metadata and calling policy", () => {
   beforeEach(() => vi.clearAllMocks());
   it.each(["manual", "disabled"])("maps %s to manual only", (mode) => {

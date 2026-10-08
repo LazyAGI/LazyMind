@@ -185,6 +185,8 @@ func List(w http.ResponseWriter, r *http.Request) {
 	query := db.WithContext(r.Context()).Where("create_user_id = ?", store.UserID(r))
 	if !strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_inactive")), "true") {
 		query = query.Where("status = ?", StatusActive)
+	} else if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("exclude_revoked")), "true") {
+		query = query.Where("status <> ?", StatusRevoked)
 	}
 	if keyword := strings.TrimSpace(r.URL.Query().Get("query")); keyword != "" {
 		like := "%" + strings.ToLower(keyword) + "%"

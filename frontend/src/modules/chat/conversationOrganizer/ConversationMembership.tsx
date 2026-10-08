@@ -22,7 +22,7 @@ export default function ConversationMembership({ conversationId, groupId, groupK
   return <>
     {modalContextHolder}
     <Dropdown destroyPopupOnHide trigger={["click"]} menu={{ items: [
-      { key: "pin", label: t(pinned ? "chat.unpinConversation" : "chat.pinConversation"), onClick: async () => { await ChatServiceApi().conversationServiceSetPinned(conversationId, !pinned); emitConversationGroupsChanged(); } },
+      ...(!groupId || groupKind === "project" ? [{ key: "pin", label: t(pinned ? "chat.unpinConversation" : "chat.pinConversation"), onClick: async () => { await ChatServiceApi().conversationServiceSetPinned(conversationId, !pinned); emitConversationGroupsChanged(); } }] : []),
       { key: "rename", label: t("conversationOrganizer.renameConversation"), onClick: onRename },
       ...(groupKind === "project" ? [] : [{ key: "move", label: t("conversationOrganizer.adjustMembership"), disabled, children: conversationGroupSubmenu({ conversationId, groupId, title, isTaskConv }, () => setOpen(true)) }]),
       { key: "archive", label: t("settingsPage.recovery.archiveAction"), disabled, onClick: () => setArchiveOpen(true) },

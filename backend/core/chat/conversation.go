@@ -1627,6 +1627,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	sources := retrievalSources(h.RetrievalResult)
 	var input any
 	var mentions any
+	var mailConfirmation map[string]any
 	var askPending any
 	var askAnswered bool
 	var askSavedAnswers any
@@ -1639,6 +1640,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		var ext struct {
 			Input                 any                `json:"input"`
 			Mentions              any                `json:"mentions"`
+			MailConfirmation      map[string]any     `json:"mail_confirmation"`
 			AskPending            any                `json:"ask_pending"`
 			AskAnswered           bool               `json:"ask_answered"`
 			AskSavedAnswers       any                `json:"ask_saved_answers"`
@@ -1651,6 +1653,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		if err := json.Unmarshal(h.Ext, &ext); err == nil {
 			input = ext.Input
 			mentions = ext.Mentions
+			mailConfirmation = mailConfirmationHistoryMetadata(ext.MailConfirmation)
 			askPending = ext.AskPending
 			askAnswered = ext.AskAnswered
 			askSavedAnswers = ext.AskSavedAnswers
@@ -1684,6 +1687,9 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	}
 	_ = json.Unmarshal(h.Ext, &forkFlags)
 	item["fork_read_only"] = forkFlags.ReadOnly
+	if mailConfirmation != nil {
+		item["mail_confirmation"] = mailConfirmation
+	}
 	if exports := chatExportsFromExt(h.Ext); len(exports) > 0 {
 		item["exports"] = exports
 	}

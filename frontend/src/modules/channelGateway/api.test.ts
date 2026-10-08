@@ -23,5 +23,6 @@ describe('channelAccountLabel', () => {
 
   it('preserves a user-defined account name', () => {
     expect(channelAccountLabel(feishu('研究协作助手', 'Alice'))).toBe('研究协作助手');
+    expect(channelAccountLabel(feishu('飞书 · 项目组', 'Alice'))).toBe('飞书 · 项目组');
   });
 });

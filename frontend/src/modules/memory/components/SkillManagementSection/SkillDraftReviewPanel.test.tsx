@@ -13,6 +13,25 @@ beforeEach(() => {
   api.compareSkillFileDiff.mockResolvedValue({path: "SKILL.md", status: "modified", diffEntryLines: [{type: "DELETION", text: "original"}, {type: "ADDITION", text: "draft"}]});
 });
 describe("consolidated skill review", () => {
+  it("accepts one of three packages and retains the other two pending drafts", async () => {
+    const three = [...skills, {...skills[1], skillId: "C", name: "C"}];
+    api.listSkillAssetsPage.mockResolvedValue({records: three, total: 3});
+    const onApplied = vi.fn();
+    const onPendingCountChange = vi.fn();
+    render(<SkillDraftReviewPanel t={t} onClose={vi.fn()} onApplied={onApplied} onPendingCountChange={onPendingCountChange} />);
+    await waitFor(() => expect(screen.getByRole("checkbox", {name: "A"})).toBeEnabled());
+    fireEvent.click(screen.getByRole("checkbox", {name: "A"}));
+    api.commitSkillDraft.mockResolvedValue({revisionId: "accepted-a"});
+    api.listSkillAssetsPage.mockResolvedValue({records: three.slice(1), total: 2});
+    fireEvent.click(screen.getByRole("button", {name: /admin.memorySkillDraftReviewApply/}));
+    await waitFor(() => expect(onApplied).toHaveBeenCalledTimes(1));
+    expect(api.commitSkillDraft).toHaveBeenCalledTimes(1);
+    expect(api.commitSkillDraft).toHaveBeenCalledWith("A", 1);
+    expect(api.discardSkillDraft).not.toHaveBeenCalled();
+    expect(screen.getByRole("checkbox", {name: "B"})).toBeEnabled();
+    expect(screen.getByRole("checkbox", {name: "C"})).toBeEnabled();
+    expect(onPendingCountChange).toHaveBeenLastCalledWith(2);
+  });
   it("previews all packages and preserves failed selection after partial apply", async () => {
     const applied = vi.fn();
     render(<SkillDraftReviewPanel t={t} onClose={vi.fn()} onApplied={applied} />);

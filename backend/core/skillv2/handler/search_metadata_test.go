@@ -7,8 +7,36 @@ import (
 	"strings"
 	"testing"
 
+	"lazymind/core/common/orm"
 	"lazymind/core/skillv2/testutil"
 )
+
+func TestInternalMetadataRejectsCancelledOrganizer(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	withHandlerDB(t, db)
+	setHandlerSkillMetadata(t, db, "skill1", "academic", "external", "Write papers", `["paper"]`)
+	testutil.MustCreate(t, db, &orm.SkillReviewStats{ID: "old", RequestID: "org_old", UserID: "user_001", Status: "cancelled", StartedAt: "2026-09-29", Summary: `{}`})
+	for _, nextStatus := range []string{"cancelled", "organize_plan"} {
+		if nextStatus == "organize_plan" {
+			testutil.MustCreate(t, db, &orm.SkillReviewStats{ID: "new", RequestID: "org_new", UserID: "user_001", Status: nextStatus, StartedAt: "2026-09-30", Summary: `{}`})
+		}
+		req := httptest.NewRequest(http.MethodPost, "/internal/skills:metadata:update", strings.NewReader(`{"task_id":"org_old","updates":[{"skill_key":"external/academic","field":"zombie"}]}`))
+		req.Header.Set("X-User-Id", "user_001")
+		rec := httptest.NewRecorder()
+		InternalMetadataUpdate(rec, req)
+		if rec.Code == http.StatusOK {
+			t.Fatalf("late metadata accepted with next status %s", nextStatus)
+		}
+	}
+	var row testutil.SkillRow
+	if err := db.Where("id = ?", "skill1").Take(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	if row.Field != "" {
+		t.Fatalf("late write persisted: %q", row.Field)
+	}
+}
 
 func TestInternalMetadataBatchUpdatesAreAtomicAndOwnerScoped(t *testing.T) {
 	db := testutil.NewTestDB(t)

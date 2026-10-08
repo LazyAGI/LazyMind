@@ -219,12 +219,15 @@ describe("TaskCenter display modes", () => {
     const artifact = (id: string) => ({ artifact_id: id, revision: 1, producer_display_key: "task:outputs:1", name: id, content_type: "text/plain", size_bytes: 4, state: "ready" as const, preview_kind: null, capabilities: { preview: false, open: false, download: false }, created_at: iso(0) });
     const view = ordinary("outputs", { stage_artifacts: [artifact("draft"), artifact("final")] });
     useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{ ...task("outputs", 1, "succeeded"), ordinary: view }] }, runsByConversation: { "conversation-1": [{ run_id: "run-1", revision: 1, final_output_refs: ["final", "separate"], final_artifacts: [artifact("separate")] }, { run_id: "old-run", revision: 1, final_output_refs: ["old-final"], final_artifacts: [artifact("old-final")] }] } });
-    render(<TaskCenter sessionId="conversation-1" />);
+    const rendered = render(<TaskCenter sessionId="conversation-1" />);
     expect(screen.getAllByText("draft")).toHaveLength(1);
     expect(screen.getAllByText("final")).toHaveLength(2);
     expect(screen.getByText("separate")).toBeInTheDocument();
     expect(screen.queryByText("old-final")).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: /ordinaryFinalArtifacts/ })).toBeInTheDocument();
+    rendered.rerender(<TaskCenter sessionId="conversation-1" hideFinalArtifacts />);
+    expect(screen.queryByRole("region", { name: /ordinaryFinalArtifacts/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("separate")).not.toBeInTheDocument();
   });
 
   it("previews stage artifacts without reload controls and reports metadata pagination failures", async () => {

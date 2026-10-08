@@ -306,6 +306,41 @@ def test_non_mail_structured_failure_keeps_value_preview():
     assert '42' in detail
 
 
+@pytest.mark.parametrize('value', [
+    'ToolExecutionError: {"error": {"message": "Attachment unavailable"}}',
+    {'result': {'error': {'message': 'Attachment unavailable'}}},
+    '[{"message": "Attachment unavailable"}]',
+])
+def test_mail_failure_preview_unwraps_errors(value):
+    text = _tool_result_frame_text({
+        'id': 'mail', 'name': 'MailToolkit_send_draft',
+        'result': {'ok': False, 'value': value},
+    }, 'en')
+    preview = text.split('</trp>', 1)[0]
+    assert 'Attachment unavailable' in preview
+    assert '{' not in preview
+
+
+def test_mail_failure_preview_unwraps_serialized_failure_inside_success_envelope():
+    text = _tool_result_frame_text({
+        'id': 'mail', 'name': 'MailToolkit_send_draft',
+        'result': {'ok': True, 'value': json.dumps({'ok': False, 'error': 'Attachment unavailable'})},
+    }, 'en')
+    preview = text.split('</trp>', 1)[0]
+    assert 'Attachment unavailable' in preview
+    assert 'Email sent' not in preview
+
+
+@pytest.mark.parametrize('status', ['failed', 'partial_sent', 'delivery_unknown'])
+def test_mail_unsuccessful_receipt_never_renders_as_sent(status):
+    text = _tool_result_frame_text({
+        'id': 'mail', 'name': 'MailToolkit_send_draft',
+        'result': {'ok': True, 'value': json.dumps({'status': status, 'last_error': 'Delivery needs attention'})},
+    }, 'en')
+    preview = text.split('</trp>', 1)[0]
+    assert 'Delivery needs attention' in preview
+
+
 def test_mail_search_preview_uses_search_filters_not_mailbox_copy():
     tool_call = {
         'id': 'call-mail-search',
@@ -763,6 +798,16 @@ def test_kb_empty_results_take_precedence_over_success_templates(tool_name, expe
 
     assert expected in result_text
     assert '共找到 **0** 条' not in result_text
+
+
+@pytest.mark.parametrize('tool_name', ['KBToolkit_kb_search', 'KBToolkit_kb_keyword_search', 'KBToolkit_kb_tmp_search'])
+def test_kb_execution_failure_is_not_rendered_as_no_matches(tool_name):
+    text = _tool_result_frame_text(
+        {'id': 'failed-search', 'name': tool_name, 'result': {'ok': False, 'msg': 'search failed'}},
+        'zh', 'sample input',
+    )
+    assert '检索失败' in text
+    assert '未能找到' not in text
 
 
 def test_kb_total_normalizes_json_string_and_nested_result_value():

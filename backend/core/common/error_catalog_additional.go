@@ -939,6 +939,13 @@ func init() {
 	registerAdditionalError("artifact file is outside LazyMind storage", http.StatusBadRequest, 2002921)
 	registerAdditionalError("artifact must be a regular file of at most 20 MiB", http.StatusBadRequest, 2002922)
 	registerAdditionalError("artifact exceeds 20 MiB", http.StatusRequestEntityTooLarge, 2002923)
+	registerAdditionalError("answer does not match an unanswered question card", http.StatusConflict, 2003156)
+	registerAdditionalError("question card does not belong to the requesting user", http.StatusForbidden, 2003157)
+	registerAdditionalError("skill organize cancellation status unavailable", http.StatusInternalServerError, 2003158)
+	registerAdditionalError("skill document has no content", http.StatusBadRequest, 2003159)
+	registerAdditionalError("organize rollback owner mismatch", http.StatusInternalServerError, 2003160)
+	registerAdditionalErrorPattern("unknown organize rollback mutation %q", "unknown organize rollback mutation", http.StatusInternalServerError, 2003161)
+	registerAdditionalError("skill changed during organize rollback", http.StatusConflict, 2003162)
 }
 
 func registerAdditionalError(message string, status, code int) {

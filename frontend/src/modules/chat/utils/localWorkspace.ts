@@ -68,10 +68,11 @@ export async function authorizeWorkspace(runtime: "local" | "desktop", token: st
   }
   return data<LocalWorkspaceView>((await axiosInstance.post("/_local/workspaces:authorize", { selection_token: token })).data);
 }
-export async function listWorkspaces(options: { query?: string; includeInactive?: boolean } = {}): Promise<LocalWorkspaceView[]> {
+export async function listWorkspaces(options: { query?: string; includeInactive?: boolean; excludeRevoked?: boolean } = {}): Promise<LocalWorkspaceView[]> {
   const params = {
     ...(options.query?.trim() ? { query: options.query.trim() } : {}),
     ...(options.includeInactive ? { include_inactive: true } : {}),
+    ...(options.excludeRevoked ? { exclude_revoked: true } : {}),
   };
   const result = data<{ items?: LocalWorkspaceView[] }>((await axiosInstance.get(`${coreBase}/local-workspaces`, { params })).data);
   return result.items ?? [];

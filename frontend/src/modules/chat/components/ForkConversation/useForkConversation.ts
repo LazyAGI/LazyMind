@@ -4,6 +4,7 @@ import { v4 as uuid } from "uuid";
 import { AgentAppsAuth, AUTH_USER_CHANGE_EVENT } from "@/components/auth";
 import type { ForkCreateRequest, ForkPreview } from "@/api/generated/core-client";
 import { CHAT_CONVERSATION_LIST_REFRESH_EVENT, getChatConversationPath } from "@/modules/chat/constants/chat";
+import { emitConversationGroupsChanged } from "../../conversationOrganizer/api";
 import { createFork, previewFork } from "./api";
 
 export type ForkOperation = { id: string; source: string; request: ForkCreateRequest; resultId?: string };
@@ -136,6 +137,7 @@ export function useForkConversation(source: string) {
       if (!resultId) throw new Error("missing result");
       operation.resultId = resultId; removeOperation(operation.id);
       window.dispatchEvent(new Event(CHAT_CONVERSATION_LIST_REFRESH_EVENT));
+      emitConversationGroupsChanged();
       if (mounted.current) {
         setRecoverable(readOperations());
         if (seq === sequence.current) setPhase("idle");

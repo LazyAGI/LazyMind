@@ -1,7 +1,6 @@
-import { useConversationUnreadStore } from "@/modules/chat/store/conversationUnread";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Badge, Button, Form, Input, Layout, Modal, Popover, Spin, message } from "antd";
+import { Button, Dropdown, Form, Input, Layout, Modal, Popover, Spin, Tooltip, message } from "antd";
 import type { InputRef } from "antd";
 import {
   CodeOutlined,
@@ -16,6 +15,7 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   PlusOutlined,
+  FormOutlined,
   RightOutlined,
   FolderOpenOutlined,
   UnorderedListOutlined,
@@ -88,6 +88,7 @@ const PROFILE_EMAIL_MAX_LENGTH = 30;
 const PROFILE_PHONE_MAX_LENGTH = 11;
 const PROFILE_DESCRIPTION_MAX_LENGTH = 200;
 const PROFILE_PASSWORD_MAX_LENGTH = 32;
+const SIDEBAR_HOVER_DELAY = 0.1;
 
 function isAdminRole(role?: string) {
   const normalizedRole = (role || "").trim().toLowerCase();
@@ -130,8 +131,6 @@ export default function MainLayout() {
     matchPath(`${CHAT_HOME_PATH}/:conversationId`, pathname)?.params
       .conversationId || "";
 
-  const unreadCount = useConversationUnreadStore(state => state.counts[routeConversationId] || 0);
-
   const [userInfo, setUserInfo] = useState(() => AgentAppsAuth.getUserInfo());
   const isLoggedIn = Boolean(userInfo?.token);
   useConversationRunningSync(isLoggedIn ? userInfo?.userId || userInfo?.username || "" : "", routeConversationId);
@@ -156,6 +155,7 @@ export default function MainLayout() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSubmitting, setProfileSubmitting] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [terminalConnectionOpen, setTerminalConnectionOpen] = useState(false);
   const [sidebarSearchText, setSidebarSearchText] = useState("");
   const [chatConversationMode, setChatConversationMode] =
@@ -417,7 +417,6 @@ export default function MainLayout() {
         event as CustomEvent<{ conversationId?: string; source?: string }>
       ).detail;
       const conversationId = detail?.conversationId || "";
-      setCurrentSidebarConversationId(conversationId);
 
       if (
         !pathname.startsWith(CHAT_HOME_PATH) ||
@@ -471,6 +470,7 @@ export default function MainLayout() {
   };
 
   const handleNewChat = (runInBackground = false) => {
+    setCreateMenuOpen(false);
     sessionStorage.removeItem(CHAT_PENDING_CONVERSATION_GROUP_KEY);
     selectChatConversationFilter(runInBackground ? "task" : "normal");
     setCurrentSidebarConversationId("");
@@ -875,63 +875,94 @@ export default function MainLayout() {
       >
         <div className="sider-inner">
           <div className="sider-brand-row">
-            <button
-              type="button"
-              className="sider-brand"
-              onClick={() => handleNewChat(false)}
-              aria-label="LazyMind"
-              title="LazyMind"
-            >
-              <Badge count={unreadCount} size="small" overflowCount={99} title={t("chat.unreadAnswers", { count: unreadCount })}>
+            <Tooltip title="LazyMind" placement="right" mouseEnterDelay={SIDEBAR_HOVER_DELAY}>
+              <button
+                type="button"
+                className="sider-brand"
+                onClick={() => handleNewChat(false)}
+                aria-label="LazyMind"
+              >
                 <img src={logoSrc || logoImage} alt="logo" />
-              </Badge>
-              {unreadCount > 0 && <span className="sider-unread-status" role="status">{t("chat.unreadAnswers", { count: unreadCount })}</span>}
-            </button>
-            <button
-              type="button"
-              className="sider-inline-toggle"
-              onClick={toggleMenu}
-              aria-label={isMenuCollapsed ? t("layout.expandMenu") : t("layout.collapseMenu")}
-              title={isMenuCollapsed ? t("layout.expandMenu") : t("layout.collapseMenu")}
-            >
-              {isMenuCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-            </button>
+              </button>
+            </Tooltip>
+            <Tooltip title={isMenuCollapsed ? t("layout.expandMenu") : t("layout.collapseMenu")} placement="right" mouseEnterDelay={SIDEBAR_HOVER_DELAY}>
+              <button
+                type="button"
+                className="sider-inline-toggle"
+                onClick={toggleMenu}
+                aria-label={isMenuCollapsed ? t("layout.expandMenu") : t("layout.collapseMenu")}
+              >
+                {isMenuCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              </button>
+            </Tooltip>
           </div>
           <div className="sider-primary-action">
-            <Button
-              type="text"
-              className={`sider-new-chat-button${!isTaskMode ? " is-active" : ""}`}
-              icon={<PlusOutlined />}
-              onClick={() => handleNewChat(false)}
-              aria-pressed={!isTaskMode}
-              aria-label={t("layout.newChat")}
-              title={t("layout.newChat")}
-            >
-              {!isMenuCollapsed && t("layout.newChat")}
-            </Button>
-            <Button
-              type="text"
-              className={`sider-new-chat-button${isTaskMode ? " is-active" : ""}`}
-              icon={<PlusOutlined />}
-              onClick={() => handleNewChat(true)}
-              aria-pressed={isTaskMode}
-              aria-label={t("layout.newTask")}
-              title={t("layout.newTask")}
-            >
-              {!isMenuCollapsed && t("layout.newTask")}
-            </Button>
+            {isMenuCollapsed ? (
+              <Dropdown
+                trigger={["click"]}
+                placement="bottomLeft"
+                align={{ points: ["tl", "tr"], offset: [8, 0] }}
+                open={createMenuOpen}
+                onOpenChange={setCreateMenuOpen}
+                menu={{
+                  items: [
+                    { key: "normal", label: t("layout.newChat"), icon: <FormOutlined aria-hidden="true" /> },
+                    { key: "task", label: t("layout.newTask"), icon: <UnorderedListOutlined aria-hidden="true" /> },
+                  ],
+                  selectable: true,
+                  selectedKeys: [isTaskMode ? "task" : "normal"],
+                  onClick: ({ key }: { key: string }) => handleNewChat(key === "task"),
+                }}
+              >
+                <Tooltip title={!createMenuOpen && t("common.create")} placement="right" mouseEnterDelay={SIDEBAR_HOVER_DELAY}>
+                  <Button
+                    type="text"
+                    className="sider-new-chat-button"
+                    icon={<PlusOutlined />}
+                    aria-label={t("common.create")}
+                    aria-haspopup="menu"
+                    aria-expanded={createMenuOpen}
+                  />
+                </Tooltip>
+              </Dropdown>
+            ) : (
+              <>
+                <Button
+                  type="text"
+                  className={`sider-new-chat-button${!isTaskMode ? " is-active" : ""}`}
+                  icon={<PlusOutlined />}
+                  onClick={() => handleNewChat(false)}
+                  aria-pressed={!isTaskMode}
+                  aria-label={t("layout.newChat")}
+                >
+                  {t("layout.newChat")}
+                </Button>
+                <Button
+                  type="text"
+                  className={`sider-new-chat-button${isTaskMode ? " is-active" : ""}`}
+                  icon={<PlusOutlined />}
+                  onClick={() => handleNewChat(true)}
+                  aria-pressed={isTaskMode}
+                  aria-label={t("layout.newTask")}
+                >
+                  {t("layout.newTask")}
+                </Button>
+              </>
+            )}
           </div>
           <div className="sider-module-actions">
             <Popover
               content={renderModulePopover(resourceNavItems)}
+              title={isMenuCollapsed ? t("layout.resourceLib") : undefined}
               arrow={false}
               placement="rightTop"
               trigger={["hover", "click"]}
+              mouseEnterDelay={SIDEBAR_HOVER_DELAY}
               mouseLeaveDelay={0.25}
               align={{ offset: [-4, 0] }}
               overlayClassName="sider-module-overlay"
             >
-              <button type="button" className="sider-module-trigger" aria-label={t("layout.resourceLib")} title={t("layout.resourceLib")}>
+              <button type="button" className="sider-module-trigger" aria-label={t("layout.resourceLib")}>
                 <span className="sider-module-icon">
                   <FolderOpenOutlined />
                 </span>
@@ -941,14 +972,16 @@ export default function MainLayout() {
             </Popover>
             <Popover
               content={renderAiEvolutionPopover()}
+              title={isMenuCollapsed ? t("layout.aiEvolution") : undefined}
               arrow={false}
               placement="rightTop"
               trigger={["hover", "click"]}
+              mouseEnterDelay={SIDEBAR_HOVER_DELAY}
               mouseLeaveDelay={0.25}
               align={{ offset: [-4, 0] }}
               overlayClassName="sider-module-overlay"
             >
-              <button type="button" className="sider-module-trigger" aria-label={t("layout.aiEvolution")} title={t("layout.aiEvolution")}>
+              <button type="button" className="sider-module-trigger" aria-label={t("layout.aiEvolution")}>
                 <span className="sider-module-icon">
                   <CodeOutlined />
                 </span>
@@ -956,27 +989,32 @@ export default function MainLayout() {
                 <RightOutlined className="sider-module-arrow" />
               </button>
             </Popover>
-            <button
-              type="button"
-              className={`sider-module-trigger${pathname.startsWith("/task-center") ? " is-active" : ""}`}
-              onClick={() => handleModuleNavigate("/task-center")}
-              aria-label={t("layout.taskCenter")}
-              title={t("layout.taskCenter")}
-            >
-              <span className="sider-module-icon">
-                <UnorderedListOutlined />
-              </span>
-              <span className="sider-module-text">{t("layout.taskCenter")}</span>
-            </button>
+            <Tooltip title={isMenuCollapsed && t("layout.taskCenter")} placement="right" mouseEnterDelay={SIDEBAR_HOVER_DELAY}>
+              <button
+                type="button"
+                className={`sider-module-trigger${pathname.startsWith("/task-center") ? " is-active" : ""}`}
+                onClick={() => handleModuleNavigate("/task-center")}
+                aria-label={t("layout.taskCenter")}
+              >
+                <span className="sider-module-icon">
+                  <UnorderedListOutlined />
+                </span>
+                <span className="sider-module-text">{t("layout.taskCenter")}</span>
+              </button>
+            </Tooltip>
           </div>
           {isMenuCollapsed && (
             <div className="sider-compact-history">
-              <button type="button" className="sider-module-trigger" aria-label={t("layout.searchConversations")} title={t("layout.searchConversations")} onClick={() => openSidebarSection("search")}>
-                <SearchOutlined />
-              </button>
-              <button type="button" className="sider-module-trigger" aria-label={t("layout.conversationHistory")} title={t("layout.conversationHistory")} onClick={() => openSidebarSection("history")}>
-                <HistoryOutlined />
-              </button>
+              <Tooltip title={t("layout.searchConversations")} placement="right" mouseEnterDelay={SIDEBAR_HOVER_DELAY}>
+                <button type="button" className="sider-module-trigger" aria-label={t("layout.searchConversations")} onClick={() => openSidebarSection("search")}>
+                  <SearchOutlined />
+                </button>
+              </Tooltip>
+              <Tooltip title={t("layout.conversationHistory")} placement="right" mouseEnterDelay={SIDEBAR_HOVER_DELAY}>
+                <button type="button" className="sider-module-trigger" aria-label={t("layout.conversationHistory")} onClick={() => openSidebarSection("history")}>
+                  <HistoryOutlined />
+                </button>
+              </Tooltip>
             </div>
           )}
           <div className="sider-history-search" hidden={isMenuCollapsed}>
@@ -1151,7 +1189,7 @@ export default function MainLayout() {
                 }
                 arrow={false}
                 overlayClassName="settings-popover-overlay"
-                placement="topLeft"
+                placement={isMenuCollapsed ? "rightTop" : "topLeft"}
                 trigger="click"
                 open={settingsOpen}
                 onOpenChange={(open) => {
@@ -1159,26 +1197,27 @@ export default function MainLayout() {
                   if (open) setTerminalConnectionOpen(false);
                 }}
               >
-                <button
-                  type="button"
-                  className={`sider-account-trigger${
-                    pathname.startsWith("/settings") ? " is-active" : ""
-                  }`}
-                  aria-label={t("layout.settings")}
-                  aria-haspopup="menu"
-                  aria-expanded={settingsOpen}
-                  title={t("layout.settings")}
-                >
-                  <span className="sider-account-avatar" aria-hidden="true">
-                    {isMenuCollapsed ? <SettingOutlined /> : <UserOutlined />}
-                  </span>
-                  {!isMenuCollapsed && (
-                    <span className="sider-account-copy">
-                      <strong>{accountDisplayName}</strong>
-                      <small>{accountRoleLabel}</small>
+                <Tooltip title={isMenuCollapsed && !settingsOpen && t("layout.settings")} placement="right" mouseEnterDelay={SIDEBAR_HOVER_DELAY}>
+                  <button
+                    type="button"
+                    className={`sider-account-trigger${
+                      pathname.startsWith("/settings") ? " is-active" : ""
+                    }`}
+                    aria-label={t("layout.settings")}
+                    aria-haspopup="menu"
+                    aria-expanded={settingsOpen}
+                  >
+                    <span className="sider-account-avatar" aria-hidden="true">
+                      {isMenuCollapsed ? <SettingOutlined /> : <UserOutlined />}
                     </span>
-                  )}
-                </button>
+                    {!isMenuCollapsed && (
+                      <span className="sider-account-copy">
+                        <strong>{accountDisplayName}</strong>
+                        <small>{accountRoleLabel}</small>
+                      </span>
+                    )}
+                  </button>
+                </Tooltip>
               </Popover>
             )}
             <div className="sider-account-actions">
@@ -1193,7 +1232,7 @@ export default function MainLayout() {
                 )}
                 arrow={false}
                 overlayClassName="terminal-quick-popover-overlay"
-                placement="topLeft"
+                placement={isMenuCollapsed ? "rightTop" : "topLeft"}
                 trigger="click"
                 destroyOnHidden
                 open={terminalConnectionOpen}
@@ -1202,20 +1241,21 @@ export default function MainLayout() {
                   if (open) setSettingsOpen(false);
                 }}
               >
-                <button
-                  type="button"
-                  className={`sider-account-action${
-                    terminalConnectionOpen || pathname.startsWith("/channels")
-                      ? " is-active"
-                      : ""
-                  }`}
-                  aria-label={t("layout.terminalConnection")}
-                  title={t("layout.terminalConnection")}
-                  aria-haspopup="dialog"
-                  aria-expanded={terminalConnectionOpen}
-                >
-                  <LinkOutlined />
-                </button>
+                <Tooltip title={!terminalConnectionOpen && t("layout.terminalConnection")} placement="right" mouseEnterDelay={SIDEBAR_HOVER_DELAY}>
+                  <button
+                    type="button"
+                    className={`sider-account-action${
+                      terminalConnectionOpen || pathname.startsWith("/channels")
+                        ? " is-active"
+                        : ""
+                    }`}
+                    aria-label={t("layout.terminalConnection")}
+                    aria-haspopup="dialog"
+                    aria-expanded={terminalConnectionOpen}
+                  >
+                    <LinkOutlined />
+                  </button>
+                </Tooltip>
               </Popover>
             </div>
           </div>

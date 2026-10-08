@@ -10,6 +10,18 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("MailMailboxCard", () => {
+  it("submits a mailbox choice once and permits retry if the request was not started", async () => {
+    let resolve!: (started: boolean) => void;
+    const onConfirm = vi.fn(() => new Promise<boolean>((done) => { resolve = done; }));
+    render(<MailMailboxCard draft={{ draft_id: "one", mailboxes: [{ email: "sender@example.com" }] }} onConfirm={onConfirm} />);
+    fireEvent.click(screen.getByRole("button", { name: "sender@example.com" }));
+    const confirm = screen.getByRole("button", { name: "chat.mailMailbox.confirm" });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    expect(onConfirm).toHaveBeenCalledOnce();
+    resolve(false);
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "chat.mailMailbox.confirm" })).toBeEnabled());
+  });
   it("only confirms a mailbox from the connected list", () => {
     const onConfirm = vi.fn();
     render(

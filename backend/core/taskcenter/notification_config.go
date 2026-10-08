@@ -30,7 +30,36 @@ type NotificationConfig struct {
 }
 
 func notificationPreferencesView(row orm.UserNotificationPreferences) map[string]any {
+	var defaults NotificationConfig
+	if json.Unmarshal(row.Defaults, &defaults) == nil {
+		clearNotificationDefaultTargets(&defaults)
+		return map[string]any{"enabled": row.Enabled, "revision": row.Revision, "defaults": defaults}
+	}
 	return map[string]any{"enabled": row.Enabled, "revision": row.Revision, "defaults": json.RawMessage(row.Defaults)}
+}
+
+func clearNotificationDefaultTargets(config *NotificationConfig) {
+	for name, channel := range config.Channels {
+		if name == "desktop" {
+			continue
+		}
+		channel.AccountID = ""
+		channel.RecipientID = ""
+		config.Channels[name] = channel
+	}
+}
+
+// Global channel flags never select a recipient for an individual task.
+func taskNotificationDefaults(defaults NotificationConfig) NotificationConfig {
+	channels := make(map[string]NotificationChannelRule, len(defaults.Channels))
+	for provider, channel := range defaults.Channels {
+		if provider != "desktop" {
+			channel = NotificationChannelRule{Enabled: false}
+		}
+		channels[provider] = channel
+	}
+	defaults.Channels = channels
+	return defaults
 }
 
 func DefaultNotificationConfig() NotificationConfig {
@@ -86,21 +115,7 @@ func InitializeScheduleNotifications(ctx context.Context, db *gorm.DB, schedule 
 	if err := json.Unmarshal(prefs.Defaults, &config); err != nil {
 		return err
 	}
-	for provider, channel := range config.Channels {
-		if provider == "desktop" || !channel.Enabled {
-			continue
-		}
-		if strings.TrimSpace(channel.AccountID) == "" {
-			channel.Enabled = false
-			config.Channels[provider] = channel
-			continue
-		}
-		resolved, err := resolveNotificationTarget(ctx, schedule.UserID, provider, channel)
-		if err != nil {
-			return err
-		}
-		config.Channels[provider] = resolved
-	}
+	config = taskNotificationDefaults(config)
 	raw, err := json.Marshal(config)
 	if err != nil {
 		return err
