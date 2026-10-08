@@ -443,6 +443,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	target := resolvePersistTarget(histories, raw, seq)
 	upstreamHistories := historiesForUpstream(histories, target)
 	sessionID := upstreamSessionID(convID)
+	skillSelectionHandled := false
 	if !target.IsRegeneration {
 		resolution, err := submitSkillAmbiguitySelection(r.Context(), db, histories, raw["ask_answers_structured"])
 		if err != nil {
@@ -452,6 +453,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		if resolution != nil {
 			query = resolution.Query
 			displayQuery = resolution.DisplayQuery
+			skillSelectionHandled = true
 		}
 	}
 	resourceContext, err := evolution.BuildChatResourceContext(r.Context(), db, userID, userName, sessionID)
@@ -862,7 +864,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	// Only mark answered when the request carries a full ask_answers_structured payload,
 	// meaning the user actually submitted the AskCard. If the user ignored the card or
 	// only partially filled it, we do NOT mark it answered so the card stays interactive.
-	if !target.IsRegeneration {
+	if !target.IsRegeneration && !skillSelectionHandled {
 		if structured, hasStructured := raw["ask_answers_structured"]; hasStructured {
 			continuation, err := submitObjectiveVocabularyAnswers(r.Context(), db, userID, histories, structured)
 			if err != nil {

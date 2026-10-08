@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -136,10 +137,21 @@ func TestChatAsksUserToResolveAmbiguousBareSkillName(t *testing.T) {
 	}
 
 	upstreamCalled := false
+	var upstreamRequest LazyChatRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/chat/stream" {
 			upstreamCalled = true
+			if err := json.NewDecoder(r.Body).Decode(&upstreamRequest); err != nil {
+				t.Error(err)
+				return
+			}
+			w.Header().Set("Content-Type", "application/x-ndjson")
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"text": "answer"}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{
+				"runtime_event": completedRunEvent(upstreamRequest.Conversation.RunID, true),
+			}})
+			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{}, "tool_groups": []any{}, "data": map[string]any{"items": []any{}}})
 	}))
@@ -181,6 +193,44 @@ func TestChatAsksUserToResolveAmbiguousBareSkillName(t *testing.T) {
 	if ext.AskPending.SkillAmbiguity == nil ||
 		!sameStrings(ext.AskPending.SkillAmbiguity.Candidates, []string{"design/wechat-cover", "external/wechat-cover"}) {
 		t.Fatalf("persisted candidates = %#v", ext.AskPending.SkillAmbiguity)
+	}
+
+	selection := map[string]any{
+		"conversation_id": "ambiguous-skill-chat",
+		"query":           "存在多个 wechat-cover，请选择要使用的 Skill: external/wechat-cover",
+		"stream":          true,
+		"ask_answers_structured": map[string]any{
+			"ask_id": ext.AskPending.AskID,
+			"questions": []any{map[string]any{
+				"text":           ext.AskPending.Questions[0].Text,
+				"type":           "single",
+				"choices":        []any{"design/wechat-cover", "external/wechat-cover"},
+				"custom_choices": []any{"design/wechat-cover", "external/wechat-cover"},
+				"answer":         map[string]any{"type": "single", "value": "external/wechat-cover"},
+			}},
+		},
+	}
+	selectionBody, err := json.Marshal(selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Production submissions are separated by user interaction. Keep the two
+	// requests out of the same millisecond-based upstream session in this test.
+	time.Sleep(2 * time.Millisecond)
+	upstreamCalled = false
+	w = httptest.NewRecorder()
+	ChatConversations(w, sidechatRequest(
+		http.MethodPost, "/api/core/conversations:chat", "user_001", string(selectionBody), nil,
+	))
+
+	if w.Code != http.StatusOK || !upstreamCalled || !strings.Contains(w.Body.String(), "answer") {
+		t.Fatalf("selection continuation status=%d upstreamCalled=%v body=%s", w.Code, upstreamCalled, w.Body.String())
+	}
+	if upstreamRequest.Message.Query != "使用 external/wechat-cover skill，生成打工人职场的微信爆款封面" {
+		t.Fatalf("upstream query = %q", upstreamRequest.Message.Query)
+	}
+	if got := upstreamRequest.ExplicitResources.SkillNames; len(got) != 1 || got[0] != "external/wechat-cover" {
+		t.Fatalf("upstream explicit skill names = %#v", got)
 	}
 }
 
