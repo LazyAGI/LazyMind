@@ -261,6 +261,20 @@ jobs:
             --timeout-ms 300000 \
             --leave-running true
 
+      - name: Upload failed packaged conversion diagnostics
+        if: failure() && steps.packaged_smoke.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-packaged-smoke-diagnostics
+          path: |
+            ~/Library/Logs/LazyMind/chat.log
+            ~/Library/Logs/LazyMind/core.log
+            ~/Library/Logs/LazyMind/frontend.log
+            ~/Library/Logs/lazymind-desktop/installer-warmup.log
+            ~/Library/Logs/lazymind-desktop/desktop-shutdown.log
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Submit app ZIP for notarization
         if: steps.release.outputs.official_release == 'true'
         id: zip_submission
