@@ -6,6 +6,8 @@ import (
 )
 
 func TestMCPOAuthRuntimeEndpoints(t *testing.T) {
+	fixtureCredentialDevicePath(t)
+	t.Setenv(cloudCredentialKeyEnvVar, "")
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)

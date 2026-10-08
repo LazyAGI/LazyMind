@@ -129,6 +129,8 @@ func TestAuthServiceInstallRequirementsUsesUVOnly(t *testing.T) {
 }
 
 func TestAuthServiceGenerateAPIPermissionsUsesRuntimeOutput(t *testing.T) {
+	fixtureCredentialDevicePath(t)
+	t.Setenv(cloudCredentialKeyEnvVar, "")
 	repo := t.TempDir()
 	t.Setenv(runtimeRootEnvVar, filepath.Join(repo, "runtime"))
 	writeComposeFixture(t, repo)

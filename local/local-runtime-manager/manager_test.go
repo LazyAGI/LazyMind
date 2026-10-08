@@ -432,6 +432,13 @@ func TestEnsureRuntimeDirsCreatesDocumentScanDirectory(t *testing.T) {
 }
 
 func TestEnsureAllDirsUsesOnlyApprovedTopLevelDirs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(localHostHomeEnvVar, home)
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	t.Setenv(runtimeRootEnvVar, "")
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("XDG_CACHE_HOME", "")
+	t.Setenv("XDG_STATE_HOME", "")
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	_, paths, err := NewRuntimeConfig("", repo)
