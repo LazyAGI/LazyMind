@@ -22,6 +22,7 @@ export interface AskPending {
   description?: string;
   user_env_delete?: { id: string; name: string; expected_updated_at: string };
   env_input?: import("../EnvInputCard").EnvironmentInput;
+  skill_ambiguity?: { requested_name: string; candidates: string[]; original_query: string };
   mail_draft?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview;
   mail_drafts?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview[];
   mail_draft_only?: boolean;

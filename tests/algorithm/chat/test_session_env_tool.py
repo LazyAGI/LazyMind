@@ -488,6 +488,14 @@ def test_tools_no_longer_accept_value_arguments_and_prompt_never_requests_them()
     for tool in (session, build_user_env_tool()):
         assert 'value' not in inspect.signature(tool).parameters
     assert 'secure input card' in SESSION_ENV_QUERY_APPENDIX
+    assert 'only after the user explicitly asks' in SESSION_ENV_QUERY_APPENDIX
+    assert 'missing_env' in SESSION_ENV_QUERY_APPENDIX
+    assert 'do not use interactive tools' in SESSION_ENV_QUERY_APPENDIX
+    assert 'short user-facing note' in SESSION_ENV_QUERY_APPENDIX
+    assert 'Do not ask how to proceed' in SESSION_ENV_QUERY_APPENDIX
+    assert 'describe internal tool/policy decisions' in SESSION_ENV_QUERY_APPENDIX
+    assert 'Settings > Integrations > Environment Variables' in SESSION_ENV_QUERY_APPENDIX
+    assert 'Do not suggest shell exports or config-file edits' in SESSION_ENV_QUERY_APPENDIX
     assert build_session_env_tool_config(ConversationEnvStore(), 'config').name == 'set_session_env'
     assert USER_ENV_TOOL_CONFIG.tool.__name__ == 'set_user_env'
 

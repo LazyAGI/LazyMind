@@ -26,6 +26,15 @@ type conversationSkillUsage struct {
 	Invocations []evolution.LoadedSkill `json:"invocations,omitempty"`
 }
 
+type skillNameAmbiguousError struct {
+	RequestedName string
+	Candidates    []string
+}
+
+func (e *skillNameAmbiguousError) Error() string {
+	return fmt.Sprintf("skill name %q is ambiguous; choose one of: %s", e.RequestedName, strings.Join(e.Candidates, ", "))
+}
+
 var explicitSkillCue = regexp.MustCompile(`(?i)(?:请使用|请用|使用|调用|启用|不要使用|不要调用|不要用|不用|别用|禁止使用|排除|忽略|跳过|取消(?:使用|调用)?|停止(?:使用|调用)|停用|禁用|\b(?:please\s+use|use|enable|do\s+not\s+use|don't\s+use|without|exclude|ignore|disable|cancel|stop\s+using))\s*[\x60"'@]*$`)
 
 const globalSkillDenyAction = "skill_deny_all"
@@ -62,6 +71,7 @@ func globalSkillDenyMentions(query string) []chatMention {
 func explicitSkillMentions(query string, skills []orm.SkillV2Skill, bound ...chatMention) ([]chatMention, error) {
 	type match struct {
 		mention    chatMention
+		fullName   string
 		start, end int
 	}
 	var matches []match
@@ -91,7 +101,12 @@ func explicitSkillMentions(query string, skills []orm.SkillV2Skill, bound ...cha
 					continue
 				}
 				position := len([]rune(prefix))
-				matches = append(matches, match{chatMention{Type: "skill", ResourceID: skill.ID, DisplayName: label, Start: &position}, start, end})
+				matches = append(matches, match{
+					mention:  chatMention{Type: "skill", ResourceID: skill.ID, DisplayName: label, Start: &position},
+					fullName: skill.Category + "/" + skill.SkillName,
+					start:    start,
+					end:      end,
+				})
 			}
 		}
 	}
@@ -111,12 +126,24 @@ func explicitSkillMentions(query string, skills []orm.SkillV2Skill, bound ...cha
 		}
 	}
 	matches = filtered
-	byPosition := map[int]match{}
+	byPosition := map[int][]match{}
 	for _, item := range matches {
-		if prior, ok := byPosition[item.start]; ok && prior.mention.ResourceID != item.mention.ResourceID {
-			return nil, fmt.Errorf("skill name %q is ambiguous; specify its full category/name", item.mention.DisplayName)
+		byPosition[item.start] = append(byPosition[item.start], item)
+		seenIDs := map[string]bool{}
+		var candidates []string
+		for _, candidate := range byPosition[item.start] {
+			if !seenIDs[candidate.mention.ResourceID] {
+				seenIDs[candidate.mention.ResourceID] = true
+				candidates = append(candidates, candidate.fullName)
+			}
 		}
-		byPosition[item.start] = item
+		if len(candidates) > 1 {
+			sort.Strings(candidates)
+			return nil, &skillNameAmbiguousError{
+				RequestedName: item.mention.DisplayName,
+				Candidates:    candidates,
+			}
+		}
 	}
 	sort.SliceStable(matches, func(i, j int) bool { return matches[i].start < matches[j].start })
 	var out []chatMention

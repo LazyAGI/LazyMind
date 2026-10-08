@@ -443,6 +443,19 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	target := resolvePersistTarget(histories, raw, seq)
 	upstreamHistories := historiesForUpstream(histories, target)
 	sessionID := upstreamSessionID(convID)
+	skillSelectionHandled := false
+	if !target.IsRegeneration {
+		resolution, err := submitSkillAmbiguitySelection(r.Context(), db, histories, raw["ask_answers_structured"])
+		if err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
+		if resolution != nil {
+			query = resolution.Query
+			displayQuery = resolution.DisplayQuery
+			skillSelectionHandled = true
+		}
+	}
 	resourceContext, err := evolution.BuildChatResourceContext(r.Context(), db, userID, userName, sessionID)
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "build chat resource context failed", err), http.StatusInternalServerError)
@@ -450,6 +463,22 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	}
 	query, mentionedResources, err := applyChatMentions(r.Context(), db, raw, userID, convID, sessionID, query, resourceContext)
 	if err != nil {
+		var earlyFlusher http.Flusher
+		if stream {
+			var ok bool
+			earlyFlusher, ok = w.(http.Flusher)
+			if !ok {
+				common.ReplyErr(w, "streaming not supported", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			common.SetLanguageResponseHeaders(w, r.Header.Get("Accept-Language"))
+		}
+		if maybeReplySkillAmbiguity(r.Context(), db, store.State(), w, earlyFlusher, convID, displayQuery, target, raw, histories, err, stream) {
+			return
+		}
 		common.ReplyErr(w, err.Error(), http.StatusForbidden)
 		return
 	}
@@ -835,7 +864,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	// Only mark answered when the request carries a full ask_answers_structured payload,
 	// meaning the user actually submitted the AskCard. If the user ignored the card or
 	// only partially filled it, we do NOT mark it answered so the card stays interactive.
-	if !target.IsRegeneration {
+	if !target.IsRegeneration && !skillSelectionHandled {
 		if structured, hasStructured := raw["ask_answers_structured"]; hasStructured {
 			continuation, err := submitObjectiveVocabularyAnswers(r.Context(), db, userID, histories, structured)
 			if err != nil {
