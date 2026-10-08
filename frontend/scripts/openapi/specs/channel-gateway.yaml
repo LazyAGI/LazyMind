@@ -241,7 +241,7 @@ paths:
         - ChannelAccounts
     patch:
       tags: [ChannelAccounts]
-      summary: Change the remark of an existing Feishu account
+      summary: Change the local remark of an existing Feishu or WeCom account
       operationId: renameChannelAccount
       parameters:
         - $ref: "#/components/parameters/AccountId"
@@ -715,7 +715,11 @@ components:
               type: string
             authorized_id:
               type: string
-          description: Non-secret Feishu application and authorizing user identifiers; unavailable legacy data is empty.
+            bot_id:
+              type: string
+            bot_name:
+              type: string
+          description: Non-secret provider identifiers. Feishu uses application and authorizing user identifiers; WeCom uses bot ID and name. Unavailable legacy data is empty.
 
         id:
           type: string
@@ -723,6 +727,9 @@ components:
           type: string
         label:
           type: string
+        label_custom:
+          type: boolean
+          description: Whether the account label is a user-defined local remark.
         status:
           type: string
           enum:

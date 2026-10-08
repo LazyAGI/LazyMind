@@ -58,7 +58,7 @@ it('ordinary Feishu disconnect pauses the account instead of erasing its credent
 it('reconnect restores the selected paused robot without a QR registration', async () => {
   mount('disconnected'); await expand();
   fireEvent.click(await screen.findByRole('button', { name: 'notifications.reconnect' }));
-  await waitFor(() => expect(mocks.resume).toHaveBeenCalledWith(original.id));
+  await waitFor(() => expect(mocks.resume).toHaveBeenCalledWith(original.id, { silentError: true }));
   expect(mocks.create).not.toHaveBeenCalled();
 });
 

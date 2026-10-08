@@ -59,7 +59,7 @@ export const retryNotice = async (noticeId: string, key: string, confirmed: bool
 export const getAccountDetail = async (accountId: string): Promise<AccountDetail> =>
   (await accountsClient.getChannelAccount({ accountId })).data as AccountDetail;
 export const getTargets = async (accountId: string, cursor = '', recipientId = ''): Promise<Page<Target>> =>
-  (await accountsClient.listNotificationTargets({ accountId, cursor, recipientId: recipientId || undefined, limit: 100 })).data as Page<Target>;
+  (await accountsClient.listNotificationTargets({ accountId, cursor, recipientId: recipientId || undefined, limit: 100 }, { silentError: true } as RawAxiosRequestConfig)).data as Page<Target>;
 export const getReferences = async (accountId: string, cursor = ''): Promise<Page<Reference>> =>
   (await accountsClient.listNotificationReferences({ accountId, cursor, limit: 100 })).data as Page<Reference>;
 export function notificationError(error: unknown): { reason: string; running_task_ids?: string[] } {

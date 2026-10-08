@@ -50,3 +50,27 @@ it('lets the active panel own QR creation errors without a global navigation toa
     headers: { 'Idempotency-Key': 'operation' }, silentError: true,
   });
 });
+
+
+it('identifies WeCom robots by their original Bot ID rather than list order', () => {
+  const a = { id: 'a', provider: 'wecom', label: '日报机器人', identity: { bot_id: 'bot-original-A8C4F2' } } as ChannelAccount;
+  const b = { ...a, id: 'b', identity: { bot_id: 'bot-another-B9D5E3' } };
+  expect(channelAccountLabel(a, [b, a])).toBe('日报机器人 · A8C4F2');
+  expect(channelAccountLabel(b, [a, b])).toBe('日报机器人 · B9D5E3');
+  expect(channelAccountLabel(a, [a])).toBe(channelAccountLabel(a, [b, a]));
+  expect(channelAccountLabel({ ...a, id: 'reauthorized-account' }, [b])).toBe(channelAccountLabel(a, [b]));
+  expect(a.label).toBe('日报机器人');
+});
+
+it('extends robot identity hints when the last six characters collide', () => {
+  const a = { id: 'a', provider: 'wecom', label: '日报机器人', identity: { bot_id: 'bot-AAA8C4F2' } } as ChannelAccount;
+  const b = { ...a, id: 'b', identity: { bot_id: 'bot-BBA8C4F2' } };
+  expect(channelAccountLabel(a, [a, b])).toBe('日报机器人 · AAA8C4F2');
+  expect(channelAccountLabel(b, [b, a])).toBe('日报机器人 · BBA8C4F2');
+});
+
+it('keeps legacy accounts usable before robot identity metadata is available', () => {
+  const a = { id: 'legacy-a', provider: 'wecom', label: '旧机器人' } as ChannelAccount;
+  expect(channelAccountLabel(a)).toBe('旧机器人');
+  expect(channelAccountLabel(a, [a, { ...a, id: 'legacy-b' }])).not.toContain('连接');
+});

@@ -559,19 +559,22 @@ class GatewayStore:
                 WHERE id = %s RETURNING *
             ''', (credentials_ciphertext, account_id)).fetchone()
 
-    def update_account_identity(self, account_id: str, metadata: dict, credential_revision: int):
+    def update_account_identity(self, account_id: str, metadata: dict, credential_revision: int,
+                                provider: str = 'feishu'):
+        if provider not in {'feishu', 'wecom'}:
+            raise ValueError('Unsupported account identity provider')
         with self._connect() as connection:
             return connection.execute('''
                 UPDATE channel_accounts SET identity_metadata = %s
-                WHERE id = %s AND provider = 'feishu' AND credential_revision = %s AND archived_at IS NULL
+                WHERE id = %s AND provider = %s AND credential_revision = %s AND archived_at IS NULL
                 RETURNING *
-            ''', (self._json(metadata), account_id, credential_revision)).fetchone()
+            ''', (self._json(metadata), account_id, provider, credential_revision)).fetchone()
 
     def rename_account(self, owner: str, account_id: str, label: str):
         with self._connect() as connection:
             return connection.execute('''
                 UPDATE channel_accounts SET label = %s, label_custom = TRUE, updated_at = CURRENT_TIMESTAMP
-                WHERE id = %s AND owner_user_id = %s AND provider = 'feishu' AND archived_at IS NULL
+                WHERE id = %s AND owner_user_id = %s AND provider IN ('feishu', 'wecom') AND archived_at IS NULL
                 RETURNING *
             ''', (label, account_id, owner)).fetchone()
 
@@ -1333,6 +1336,18 @@ class GatewayStore:
                 ('连接已取消', session_id, owner_user_id),
             ).fetchone()
 
+    def _wecom_connection_label(self, connection, owner_user_id, external_id_hash, label):
+        # Refreshing a bot's credentials preserves its name. Public views use
+        # the provider's actual name and BotID to distinguish different bots.
+        existing = connection.execute('''
+            SELECT label FROM channel_accounts
+            WHERE owner_user_id = %s AND provider = 'wecom'
+              AND external_id_hash = %s AND archived_at IS NULL
+        ''', (owner_user_id, external_id_hash)).fetchone()
+        if existing:
+            return existing['label']
+        return str(label or '').strip()[:128] or '企业微信机器人'
+
     def save_connected_account(
         self,
         *,
@@ -1352,6 +1367,11 @@ class GatewayStore:
         with self._connect() as connection:
             if runtime_fence is not None:
                 self._lock_runtime_fence(connection, runtime_fence)
+            if provider == 'wecom':
+                connection.execute(
+                    'SELECT pg_advisory_xact_lock(hashtext(%s))',
+                    (f'{owner_user_id}:{provider}',),
+                )
             connection.execute(
                 'SELECT pg_advisory_xact_lock(hashtext(%s))',
                 (f'{provider}:{external_id_hash}',),
@@ -1411,6 +1431,8 @@ class GatewayStore:
                     ),
                 )
                 return None
+            if provider == 'wecom':
+                label = self._wecom_connection_label(connection, owner_user_id, external_id_hash, label)
             account = connection.execute(
                 """
                 INSERT INTO channel_accounts(

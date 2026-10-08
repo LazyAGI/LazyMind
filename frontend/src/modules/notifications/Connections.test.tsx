@@ -33,7 +33,7 @@ describe('channel connection workspace', () => {
     expect(screen.queryByLabelText('BotID')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Secret')).not.toBeInTheDocument();
   });
-  it('blocks disconnect when reference lookup fails and reconnects with the original account ID', async () => {
+  it('blocks disconnect when reference lookup fails and offers original-bot recovery without creating a QR connection', async () => {
     const account = { id: 'original', provider: 'wecom', label: 'Work account', status: 'connected', runtime_status: 'running', updated_at: '2026-09-17' };
     mocks.accounts.mockImplementation((p: string) => Promise.resolve({ items: p === 'wecom' ? [account] : [] }));
     mocks.detail.mockResolvedValue({ ...account, primary_recipient: null, notification_reference_count: 1 });
@@ -54,7 +54,10 @@ describe('channel connection workspace', () => {
     await screen.findByText('Work account');
     const disconnected = document.querySelector('details')!; disconnected.open = true; fireEvent(disconnected, new Event('toggle'));
     fireEvent.click(await screen.findByRole('button', { name: 'notifications.reconnect' }));
-    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith('wecom', expect.objectContaining({ accountId: 'original' })));
+    await screen.findByRole('heading', { name: 'notifications.wecomRestorePermissionTitle' });
+    expect(mocks.resume).toHaveBeenCalledWith('original', { silentError: true });
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'notifications.wecomRefreshAuthorization' })).toBeEnabled();
   });
 
   it('starts WeChat reconnect immediately with the disconnected account ID', async () => {

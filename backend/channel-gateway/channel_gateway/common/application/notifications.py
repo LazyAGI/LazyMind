@@ -18,7 +18,11 @@ class NotificationService:
         if account['provider'] == 'wecom' and not recipient_id:
             try:
                 self._wecom.sync_notification_targets(owner, account)
-            except GatewayError:
+            except GatewayError as exc:
+                # Cached recipients must not hide an authorization that needs
+                # the user's action. Keep the fallback for temporary outages.
+                if exc.code in {'WECOM_CAPABILITY_REAUTH_REQUIRED', 'WECOM_REAUTHORIZATION_REQUIRED'}:
+                    raise
                 cached = self._store.notification_targets(owner, account_id, limit=1)['items']
                 if not cached:
                     raise
@@ -53,9 +57,14 @@ class NotificationService:
         default = self._store.notification_targets(owner, account_id,
                                                    recipient_id=row['default_recipient_id'])['items'] if row.get(
                                                        'default_recipient_id') else []
-        return {**account_view(row), 'primary_recipient': primary,
+        return {**self._account_view(row), 'primary_recipient': primary,
                 'default_recipient': default[0] if default else None,
                 'notification_reference_count': references['total']}
+
+    def _account_view(self, account):
+        if account['provider'] == 'wecom' and self._wecom is not None:
+            return self._wecom.public_account_view(account)
+        return account_view(account)
 
     def notification_groups(self, owner, account_id, cursor='', limit=100):
         return self._feishu.notification_groups(owner, account_id, cursor, limit)
@@ -75,7 +84,7 @@ class NotificationService:
         if recipient_id:
             self._validate_target(owner, account_id, recipient_id, account['provider'])
         row = self._store.set_default_recipient(owner, account_id, recipient_id, account['credential_revision'])
-        return account_view(row)
+        return self._account_view(row)
 
     def retry(self, owner, notice_id, key, confirmed):
         original = self._store.get_notification(owner, notice_id)

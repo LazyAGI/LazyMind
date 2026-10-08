@@ -10,7 +10,7 @@ import uuid
 
 import httpx
 
-from channel_gateway.common.domain.channel import account_view, sanitize_channel_text
+from channel_gateway.common.domain.channel import account_identity, account_view, sanitize_channel_text
 from channel_gateway.common.domain.outbound import OutboundRenderer
 from channel_gateway.common.errors import GatewayError, ProviderRejectedError, RuntimeLeaseLostError
 from channel_gateway.wecom.runtime import verify_credentials
@@ -29,11 +29,15 @@ def _platform_code():
     return {'Darwin': 1, 'Windows': 2, 'Linux': 3}.get(platform.system(), 0)
 
 
-def _bot_label(bot_info=None, ordinal=1):
+def _bot_name(bot_info=None):
     info = bot_info or {}
     name = next((str(info.get(key) or '').strip() for key in
                  ('bot_name', 'botname', 'name', 'display_name') if str(info.get(key) or '').strip()), '')
-    return name[:128] or f'企业微信机器人 {max(1, ordinal)}'
+    return name[:128]
+
+
+def _bot_label(bot_info=None):
+    return _bot_name(bot_info) or '企业微信机器人'
 
 
 class WeComService:
@@ -48,11 +52,43 @@ class WeComService:
         self._qr_workers = {}
         self._reconciler = None
 
-    def _next_bot_label(self, owner_user_id, bot_info=None):
-        return _bot_label(bot_info, len(self._store.list_accounts(owner_user_id, 'wecom')) + 1)
-
     def list_accounts(self, owner_user_id):
-        return {'items': [account_view(row) for row in self._store.list_accounts(owner_user_id, 'wecom')]}
+        return {'items': [self.public_account_view(row) for row in self._store.list_accounts(owner_user_id, 'wecom')]}
+
+    def _with_identity(self, account):
+        if account.get('provider') != 'wecom' or not account.get('credentials_ciphertext'):
+            return account
+        try:
+            credentials = self._cipher.decrypt(account['owner_user_id'], account['credentials_ciphertext'])
+            bot_id = str(credentials.get('bot_id') or '')
+        except Exception:
+            return account
+        if not bot_id or hashlib.sha256(bot_id.encode()).hexdigest() != account['external_id_hash']:
+            return account
+        # Only public identity fields cross the provider boundary. Credentials
+        # remain encrypted and are never included in the account view.
+        metadata = {
+            'bot_id': bot_id[:256],
+            'bot_name': _bot_name(credentials) or account_identity(account)['bot_name'],
+        }
+        if account_identity(account) == metadata:
+            return account
+        updated = self._store.update_account_identity(
+            account['id'], metadata, int(account['credential_revision']), provider='wecom',
+        )
+        return updated or self._store.get_account(account['owner_user_id'], account['id']) or account
+
+    def public_account_view(self, account):
+        return account_view(self._with_identity(account))
+
+    def rename_account(self, owner_user_id, account_id, label):
+        account = self._store.get_account(owner_user_id, account_id)
+        if not account or account.get('provider') != 'wecom':
+            raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '企业微信账号不存在')
+        renamed = self._store.rename_account(owner_user_id, account_id, label)
+        if not renamed:
+            raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '企业微信账号不存在')
+        return self.public_account_view(renamed)
 
     def disconnect_account(self, owner_user_id, account_id):
         if not self._store.disconnect_account(
@@ -68,7 +104,7 @@ class WeComService:
         if not account or account.get('provider') != 'wecom':
             raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '企业微信账号不存在')
         if account.get('status') == 'connected':
-            return account_view(account)
+            return self.public_account_view(account)
         ciphertext = str(account.get('credentials_ciphertext') or '')
         if not ciphertext:
             raise GatewayError(409, 'WECOM_REAUTHORIZATION_REQUIRED', '企业微信凭据不可用，请重新扫码')
@@ -84,10 +120,10 @@ class WeComService:
         if not resumed:
             current = self._store.get_account(owner_user_id, account_id)
             if current and current.get('status') == 'connected':
-                return account_view(current)
+                return self.public_account_view(current)
             raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '企业微信账号状态已经变化，请刷新后重试')
         self._runtime.restart_account(account_id)
-        return account_view(resumed)
+        return self.public_account_view(resumed)
 
     def _token(self, account, *, refresh=False):
         cache_key = (account['id'], account['credential_revision'])
@@ -141,7 +177,7 @@ class WeComService:
         if body.get('errcode'):
             if body.get('errcode') == 853004 and not refresh:
                 return self._cli_call(account, path, payload, refresh=True)
-            if str(body['errcode']) == '850003':
+            if str(body['errcode']) in {'850002', '850003'}:
                 raise ProviderRejectedError('WECOM_CAPABILITY_REAUTH_REQUIRED')
             raise ProviderRejectedError('WECOM_CLI_REQUEST_FAILED')
         inner = json.loads(body.get('results_json') or '{}')
@@ -149,7 +185,7 @@ class WeComService:
         if error:
             if error.get('code') == 853004 and not refresh:
                 return self._cli_call(account, path, payload, refresh=True)
-            if str(error.get('code')) == '850003':
+            if str(error.get('code')) in {'850002', '850003'}:
                 raise ProviderRejectedError('WECOM_CAPABILITY_REAUTH_REQUIRED')
             raise ProviderRejectedError('WECOM_CLI_REQUEST_FAILED')
         result = inner.get('result') or '{}'
@@ -170,6 +206,13 @@ class WeComService:
                 owner_user_id, account['id'], account['credential_revision'], sessions)
         except GatewayError:
             raise
+        except ProviderRejectedError as exc:
+            code = str(exc)
+            if code in {'WECOM_CAPABILITY_REAUTH_REQUIRED', 'WECOM_REAUTHORIZATION_REQUIRED'}:
+                raise GatewayError(409, code, '企业微信会话读取权限不可用，请重新授权机器人',
+                                   retryable=False) from exc
+            raise GatewayError(503, 'WECOM_SESSIONS_UNAVAILABLE',
+                               '企业微信会话暂时无法读取，请稍后刷新', retryable=exc.retryable) from exc
         except Exception as exc:
             _logger.warning('wecom_sessions_sync_failed account_id=%s', account['id'])
             raise GatewayError(503, 'WECOM_SESSIONS_UNAVAILABLE',
@@ -198,7 +241,9 @@ class WeComService:
             if not account:
                 raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '企业微信账号不存在')
             if account['provider'] != 'wecom' or account['external_id_hash'] != identity:
-                raise GatewayError(409, 'ACCOUNT_IDENTITY_MISMATCH', '重连的机器人身份与原账号不一致')
+                raise GatewayError(409, 'ACCOUNT_IDENTITY_MISMATCH',
+                                   '填写的 BotID 与原机器人不同，原机器人和任务通知设置未改动。'
+                                   '请使用原机器人的 BotID 和 Secret；如需使用新机器人，请单独添加连接。')
         row, created = self._store.reserve_session(
             session_id=f'cs_{uuid.uuid4().hex}', owner_user_id=owner_user_id,
             provider='wecom', idempotency_key=idempotency_key,
@@ -218,7 +263,7 @@ class WeComService:
                 account = self._store.save_connected_account(
                     session_id=row['id'], qr_version=row['qr_version'], expected_revision=row['revision'],
                     owner_user_id=owner_user_id, provider='wecom', external_id_hash=identity,
-                    label=self._next_bot_label(owner_user_id),
+                    label=_bot_label(),
                     credentials_ciphertext=self._cipher.encrypt(owner_user_id, credentials),
                     conflict_message='该机器人已绑定其他用户', connected_message='企业微信已连接')
                 if account:
@@ -355,7 +400,8 @@ class WeComService:
                 if lease is not None:
                     lease.keepalive()
                 bot_info = data.get('bot_info') or {}
-                credentials = {'bot_id': str(bot_info.get('botid') or ''), 'secret': str(bot_info.get('secret') or '')}
+                credentials = {'bot_id': str(bot_info.get('botid') or ''), 'secret': str(bot_info.get('secret') or ''),
+                               'bot_name': _bot_name(bot_info)}
                 if not credentials['bot_id'] or not credentials['secret']:
                     raise ValueError('missing bot credentials')
                 identity = hashlib.sha256(credentials['bot_id'].encode()).hexdigest()
@@ -366,7 +412,9 @@ class WeComService:
                     if not account or account['provider'] != 'wecom' or account['external_id_hash'] != identity:
                         self._store.mark_failed(
                             session_id, qr_version, code='ACCOUNT_IDENTITY_MISMATCH',
-                            message='扫码授权的机器人与原账号不一致', retryable=False)
+                            message='扫码授权的是另一个机器人，原机器人和任务通知设置未改动。'
+                                    '请关闭后重新授权并选择原机器人；如需使用新机器人，请单独添加连接。',
+                            retryable=False)
                         return
                 confirming = self._store.update_active_session(
                     session_id=session_id, qr_version=qr_version,
@@ -385,7 +433,7 @@ class WeComService:
                     session_id=session_id, qr_version=qr_version,
                     expected_revision=confirming['revision'], owner_user_id=row['owner_user_id'],
                     provider='wecom', external_id_hash=identity,
-                    label=self._next_bot_label(row['owner_user_id'], bot_info),
+                    label=_bot_label(bot_info),
                     credentials_ciphertext=self._cipher.encrypt(row['owner_user_id'], credentials),
                     conflict_message='该机器人已绑定其他用户', connected_message='企业微信已连接',
                     runtime_fence=lease.fence if lease is not None else None,
@@ -428,7 +476,7 @@ class WeComService:
                 'mode': 'qr_code' if qr or row['status'] != 'connected' else 'credentials', 'status': row['status'],
                 'revision': row['revision'], 'message': row['message'], 'qr': qr, 'challenge': None,
                 'poll_after_ms': 1000, 'allowed_actions': allowed_actions,
-                'account': account_view(account) if account else None, 'error': error}
+                'account': self.public_account_view(account) if account else None, 'error': error}
 
     def cancel_session(self, owner_user_id, session_id):
         self._store.cancel_session(owner_user_id, session_id)

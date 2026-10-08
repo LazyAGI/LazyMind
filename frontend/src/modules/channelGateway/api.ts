@@ -1,4 +1,5 @@
 import type { RawAxiosRequestConfig } from 'axios';
+import i18n from '@/i18n';
 import {
   ChannelAccountsApiFactory,
   Configuration,
@@ -53,8 +54,9 @@ export async function pauseChannelAccount(accountId: string): Promise<void> {
   await channelAccountsApi.pauseChannelAccount({ accountId });
 }
 
-export async function resumeChannelAccount(accountId: string): Promise<ChannelAccount> {
-  const response = await channelAccountsApi.resumeChannelAccount({ accountId });
+export async function resumeChannelAccount(accountId: string, options?: { silentError?: boolean }): Promise<ChannelAccount> {
+  const requestOptions: RawAxiosRequestConfig & { silentError?: boolean } = options || {};
+  const response = await channelAccountsApi.resumeChannelAccount({ accountId }, requestOptions);
   return response.data;
 }
 
@@ -67,7 +69,20 @@ export async function renameChannelAccount(accountId: string, label: string): Pr
   return response.data;
 }
 
-export function channelAccountLabel(account: ChannelAccount): string {
+export function channelAccountLabel(account: ChannelAccount, peers: ChannelAccount[] = []): string {
+  if (account.provider === 'wecom') {
+    const name = account.label.trim() || i18n.t('notifications.wecomDefaultBotName');
+    const botId = account.identity?.bot_id?.trim();
+    const duplicates = [...new Map([...peers, account].filter(peer => peer.provider === 'wecom' && (peer.label.trim() || i18n.t('notifications.wecomDefaultBotName')) === name).map(peer => [peer.id, peer])).values()];
+    if (!botId && duplicates.length < 2) return name;
+    const identity = botId || account.id;
+    let length = Math.min(6, identity.length);
+    while (length < identity.length && duplicates.some(peer => {
+      const otherIdentity = peer.identity?.bot_id?.trim() || peer.id;
+      return otherIdentity !== identity && otherIdentity.slice(-length) === identity.slice(-length);
+    })) length = Math.min(length + 2, identity.length);
+    return i18n.t('notifications.wecomAccountIdentityLabel', { name, identifier: identity.slice(-length) });
+  }
   if (account.provider !== 'feishu') return account.label;
   const storedLabel = account.label.trim();
   const generatedPrefix = '飞书 · ';

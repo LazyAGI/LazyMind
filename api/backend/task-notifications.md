@@ -176,11 +176,13 @@ Electron 常驻且窗口已关闭时，已验证会话遇到 401 会由主进程
 
 ## 飞书账号记录管理
 
-`PATCH /api/channel-gateway/v1/channel-accounts/{account_id}` 接受 `{ "label": "工作号 · 每日简报" }`，去除首尾空白，1–80 字符，拒绝控制字符和未知字段，返回安全 AccountView。仅修改本地备注。
+`PATCH /api/channel-gateway/v1/channel-accounts/{account_id}` 支持飞书和企业微信，接受 `{ "label": "工作号 · 每日简报" }`，去除首尾空白，1–80 字符，拒绝控制字符和未知字段，返回安全 AccountView。仅修改本地备注，重新授权保留备注。
 
-`POST /channel-accounts/{account_id}:archive` 返回 204，从活动列表移除已解绑记录并保留历史。已连接或仍保留凭据的暂停记录返回 409 `ACCOUNT_UNBIND_REQUIRED`；重复删除当前用户自己的记录返回 204；不存在/非当前用户返回 404 `ACCOUNT_NOT_FOUND`。两接口暂仅飞书，其他渠道返回 422 `PROVIDER_NOT_SUPPORTED`，权限 qa.write。归档事务取消该账号仍在进行的授权会话，之后禁止重连、改名和发送；不删除飞书侧应用，不自动改绑通知规则。
+`POST /channel-accounts/{account_id}:archive` 返回 204，从活动列表移除已解绑记录并保留历史。已连接或仍保留凭据的暂停记录返回 409 `ACCOUNT_UNBIND_REQUIRED`；重复删除当前用户自己的记录返回 204；不存在/非当前用户返回 404 `ACCOUNT_NOT_FOUND`。归档接口暂仅飞书，其他渠道返回 422 `PROVIDER_NOT_SUPPORTED`，权限 qa.write。归档事务取消该账号仍在进行的授权会话，之后禁止重连、改名和发送；不删除飞书侧应用，不自动改绑通知规则。
 
 AccountView 追加 `binding_status=connected|paused|unbound` 与 `identity={app_id,authorized_name,authorized_id}`，authorized_id 是当前飞书应用内的用户标识，不能用于推断跨应用身份。密钥不在响应中。信息缺失返回空字符串，前端明确显示缺失，可编辑备注。备注、授权人和应用 ID 用于卡片与选择器，避免同名机器人混淆。
+
+企业微信公开标识为 `identity={bot_id,bot_name}`，仅包含机器人 ID 和可用的真实名称；旧连接从加密凭据补齐 Bot ID，Secret 不会返回。`label_custom` 标识本地自定义备注。界面使用「名称 · Bot ID 尾号」区分机器人，名称缺失时显示「企业微信机器人」，同尾号时延长尾号。标识不依赖连接列表顺序，重新授权和切换通知账号都保留原机器人身份。
 
 Gateway 增量字段 identity_metadata（TEXT，默认空 JSON 对象）和 archived_at（TIMESTAMPTZ，可空）同时支持 SQLite/PostgreSQL；未修改 Core migration。旧记录有可解密凭据时回填标识，解绑保留标识。归档保留所有历史；旧代码回退会重新显示这些已解绑记录，不能自动发送，无需删除新增字段。
 

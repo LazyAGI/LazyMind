@@ -36,6 +36,10 @@ export interface AccountView {
     'id': string;
     'provider': string;
     'label': string;
+    /**
+     * Whether the account label is a user-defined local remark.
+     */
+    'label_custom'?: boolean;
     'status': AccountViewStatusEnum;
     'runtime_status': AccountViewRuntimeStatusEnum;
     'connected_at': string | null;
@@ -70,12 +74,14 @@ export const AccountViewRuntimeStatusEnum = {
 export type AccountViewRuntimeStatusEnum = typeof AccountViewRuntimeStatusEnum[keyof typeof AccountViewRuntimeStatusEnum];
 
 /**
- * Non-secret Feishu application and authorizing user identifiers; unavailable legacy data is empty.
+ * Non-secret provider identifiers. Feishu uses application and authorizing user identifiers; WeCom uses bot ID and name. Unavailable legacy data is empty.
  */
 export interface AccountViewIdentity {
     'app_id'?: string;
     'authorized_name'?: string;
     'authorized_id'?: string;
+    'bot_id'?: string;
+    'bot_name'?: string;
 }
 export interface ChallengeView {
     'type': string;
@@ -519,7 +525,7 @@ export const ChannelAccountsApiAxiosParamCreator = function (configuration?: Con
         },
         /**
          *
-         * @summary Change the remark of an existing Feishu account
+         * @summary Change the local remark of an existing Feishu or WeCom account
          * @param {string} accountId Channel account identifier.
          * @param {RenameChannelAccountRequest} renameChannelAccountRequest
          * @param {*} [options] Override http request option.
@@ -751,7 +757,7 @@ export const ChannelAccountsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Change the remark of an existing Feishu account
+         * @summary Change the local remark of an existing Feishu or WeCom account
          * @param {string} accountId Channel account identifier.
          * @param {RenameChannelAccountRequest} renameChannelAccountRequest
          * @param {*} [options] Override http request option.
@@ -881,7 +887,7 @@ export const ChannelAccountsApiFactory = function (configuration?: Configuration
         },
         /**
          *
-         * @summary Change the remark of an existing Feishu account
+         * @summary Change the local remark of an existing Feishu or WeCom account
          * @param {ChannelAccountsApiRenameChannelAccountRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -1125,7 +1131,7 @@ export class ChannelAccountsApi extends BaseAPI {
 
     /**
      *
-     * @summary Change the remark of an existing Feishu account
+     * @summary Change the local remark of an existing Feishu or WeCom account
      * @param {ChannelAccountsApiRenameChannelAccountRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}

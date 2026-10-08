@@ -43,6 +43,7 @@ import {
   isChannelAccountPendingActivation,
   pauseChannelAccount,
   resumeChannelAccount,
+  renameChannelAccount,
   listChannelAccounts,
 } from '../api';
 import { useChannelConnection } from '../hooks/useChannelConnection';
@@ -143,8 +144,12 @@ interface ChannelConnectionPageProps {
   onConnected?: (account?: ChannelAccount) => void;
 }
 
-function ChannelConnectionPage({ provider, accountId, createNew, autoStart, onConnected }: ChannelConnectionPageProps) {
+export function ChannelConnectionPage({ provider, accountId, createNew, autoStart, onConnected }: ChannelConnectionPageProps) {
   const translationKey = `channelGateway.${provider}`;
+  const restoringWecom = provider === 'wecom' && Boolean(accountId);
+  const [botId, setBotId] = useState('');
+  const [botSecret, setBotSecret] = useState('');
+  const [refreshingAuthorization, setRefreshingAuthorization] = useState(false);
   const copy = (name: string) => {
     if (provider === 'feishu' && accountId) {
       if (['newConnectionTitle', 'guideTitle', 'readyTitle', 'stepConfirmTitle', 'sessionStatusMap.confirming'].includes(name)) return 'notifications.reauthorize';
@@ -169,7 +174,13 @@ function ChannelConnectionPage({ provider, accountId, createNew, autoStart, onCo
     closeSessionPanel,
   } = useChannelConnection(provider);
 
-  useEffect(() => { if (session?.status === 'connected') onConnected?.(session.account || undefined); }, [session?.status, session?.account, onConnected]);
+  useEffect(() => {
+    if (session?.status === 'connected') {
+      setBotSecret('');
+      onConnected?.(session.account || undefined);
+    }
+  }, [session?.status, session?.account, onConnected]);
+  useEffect(() => { setBotId(''); setBotSecret(''); }, [provider, accountId]);
   const step = currentStep(session);
   const hasAccounts = accounts.length > 0;
   const activeScan = isActiveScan(session);
@@ -177,17 +188,60 @@ function ChannelConnectionPage({ provider, accountId, createNew, autoStart, onCo
   const connectTitleId = `${provider}-connect-title`;
   const autoStartedAccountId = useRef<string>();
 
-  const beginScan = useCallback(() => startScan({ accountId, ...(provider === 'feishu' && accountId ? { reauthorize: true } : {}), ...(createNew ? { createNew: true } : {}) }), [accountId, createNew, provider, startScan]);
+  const beginScan = useCallback(() => {
+    // Generic WeCom QR authorization can provision a new bot. Do not start it
+    // implicitly when the user is restoring an existing account.
+    if (restoringWecom) return;
+    return startScan({ accountId, ...(provider === 'feishu' && accountId ? { reauthorize: true } : {}), ...(createNew ? { createNew: true } : {}) });
+  }, [accountId, createNew, provider, restoringWecom, startScan]);
 
   useEffect(() => {
-    if (!autoStart || !accountId) {
+    if (!autoStart || !accountId || restoringWecom) {
       autoStartedAccountId.current = undefined;
       return;
     }
     if (autoStartedAccountId.current === accountId) return;
     autoStartedAccountId.current = accountId;
     void beginScan();
-  }, [accountId, autoStart, beginScan]);
+  }, [accountId, autoStart, beginScan, restoringWecom]);
+
+  if (restoringWecom) {
+    const originalAccount = accounts.find(account => account.id === accountId);
+    return <section className="notification-wecom-connect wecom-original-connection" aria-labelledby="wecom-restore-title">
+      <Title id="wecom-restore-title" level={4}>{t('notifications.wecomRestorePermissionTitle')}</Title>
+      {originalAccount && <Paragraph>{t('notifications.account')}：{channelAccountLabel(originalAccount, accounts)}</Paragraph>}
+      <Alert type="info" showIcon message={t('notifications.wecomReauthorizeStepHint')} />
+      <Button type="primary" loading={refreshingAuthorization} disabled={sessionStarting} onClick={async () => {
+        if (!accountId || refreshingAuthorization) return;
+        setRefreshingAuthorization(true);
+        try {
+          const account = await resumeChannelAccount(accountId, { silentError: true });
+          onConnected?.(account);
+        } catch (error) {
+          message.error(getLocalizedErrorMessage(error) || t('notifications.loadFailed'));
+        } finally { setRefreshingAuthorization(false); }
+      }}>{t('notifications.wecomRefreshAuthorization')}</Button>
+      <details className="wecom-original-credentials">
+        <summary>{t('notifications.wecomUpdateCredentials')}</summary>
+        <Title level={5}>{t('notifications.wecomRestoreCredentialsTitle')}</Title>
+        <Paragraph>{t('notifications.wecomRestoreCredentialsHint')}</Paragraph>
+        <Alert type="warning" showIcon message={t('notifications.wecomUseOriginalCredentials')} />
+        <form onSubmit={event => {
+          event.preventDefault();
+          if (!botId.trim() || !botSecret.trim() || sessionStarting || refreshingAuthorization) return;
+          void startScan({ accountId, credentials: { bot_id: botId.trim(), secret: botSecret.trim() } });
+        }}>
+          <label htmlFor="wecom-original-bot-id">{t('notifications.wecomBotId')}</label>
+          <Input id="wecom-original-bot-id" value={botId} autoComplete="off" onChange={event => setBotId(event.target.value)} />
+          <label htmlFor="wecom-original-bot-secret">{t('notifications.wecomBotSecret')}</label>
+          <Input.Password id="wecom-original-bot-secret" value={botSecret} autoComplete="new-password" onChange={event => setBotSecret(event.target.value)} />
+          <Button type="primary" htmlType="submit" loading={sessionStarting} disabled={refreshingAuthorization || !botId.trim() || !botSecret.trim()}>{t('notifications.wecomRestoreConnection')}</Button>
+        </form>
+      </details>
+      {session?.status === 'connected' && <Alert type="success" message={t('notifications.connected')} />}
+      {session?.error && <Alert type="error" message={session.error.message} />}
+    </section>;
+  }
 
   const connectWorkspace = (
     <section
@@ -361,13 +415,16 @@ function ChannelConnectionPage({ provider, accountId, createNew, autoStart, onCo
   );
 }
 
-function AccountDisclosure({ account, onReconnect, onChanged }: { account: ChannelAccount; onReconnect: () => void; onChanged: () => void }) {
+function AccountDisclosure({ account, accounts, onReconnect, onChanged }: { account: ChannelAccount; accounts: ChannelAccount[]; onReconnect: () => void; onChanged: () => void }) {
   const { t } = useTranslation();
   const [detail, setDetail] = useState<AccountDetail>();
   const [refs, setRefs] = useState<Reference[]>([]);
   const [cursor, setCursor] = useState('');
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [editingRemark, setEditingRemark] = useState(false);
+  const [remark, setRemark] = useState('');
+  const [savingRemark, setSavingRemark] = useState(false);
   const binding = account.binding_status || detail?.binding_status;
   const unbound = binding === 'unbound';
   const provisioning = account.status === 'provisioning';
@@ -395,13 +452,13 @@ function AccountDisclosure({ account, onReconnect, onChanged }: { account: Chann
   const reconnect = async () => {
     setBusy(true);
     try {
-      await resumeChannelAccount(account.id);
+      await resumeChannelAccount(account.id, { silentError: true });
       onChanged();
       message.success(t('notifications.connected'));
     } catch (error) {
       const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
-      if (code?.endsWith('_REAUTHORIZATION_REQUIRED')) {
-        message.info(t('notifications.reauthorizeHint'));
+      if (code?.endsWith('_REAUTHORIZATION_REQUIRED') || code === 'WECOM_CAPABILITY_REAUTH_REQUIRED') {
+        message.info(t(account.provider === 'wecom' ? 'notifications.wecomReauthorizeHint' : 'notifications.reauthorizeHint'));
         onReconnect();
       } else {
         message.error(getLocalizedErrorMessage(error) || t('notifications.loadFailed'));
@@ -409,11 +466,12 @@ function AccountDisclosure({ account, onReconnect, onChanged }: { account: Chann
     } finally { setBusy(false); }
   };
   return <details className="notification-account" onToggle={e => { if (e.currentTarget.open && !busy) void load(); }}>
-    <summary><ChannelBrand channel={account.provider as ChannelProvider} avatar={account.avatar_url} /><div className="notification-grow"><strong>{channelAccountLabel(account)}</strong><small>{t('notifications.taskReferenceCount', { count: detail?.notification_reference_count || 0 })}</small></div><Tag color={provisioning || pendingActivation ? 'warning' : account.status === 'connected' ? 'success' : 'default'}>{t('notifications.' + (provisioning ? 'connecting' : binding === 'unbound' ? 'unbound' : pendingActivation ? 'pendingActivation' : account.status === 'connected' ? 'connected' : 'disconnected'))}</Tag></summary>
+    <summary><ChannelBrand channel={account.provider as ChannelProvider} avatar={account.avatar_url} /><div className="notification-grow"><strong>{channelAccountLabel(account, accounts)}</strong><small>{t('notifications.taskReferenceCount', { count: detail?.notification_reference_count || 0 })}</small></div><Tag color={provisioning || pendingActivation ? 'warning' : account.status === 'connected' ? 'success' : 'default'}>{t('notifications.' + (provisioning ? 'connecting' : binding === 'unbound' ? 'unbound' : pendingActivation ? 'pendingActivation' : account.status === 'connected' ? 'connected' : 'disconnected'))}</Tag></summary>
     {busy && <Spin size="small" />}
     {error && <p role="alert">{t('notifications.loadFailed')} <Button onClick={() => void load()}>{t('notifications.retry')}</Button></p>}
     {detail && <div className="notification-account-details">
-      <div><small>{t('notifications.accountInformation')}</small><strong>{channelAccountLabel(account)}</strong></div>
+      <div><small>{t('notifications.accountInformation')}</small><strong>{channelAccountLabel(account, accounts)}</strong></div>
+      {account.provider === 'wecom' && <div><small>{t('notifications.wecomBotIdentity')}</small><strong>{detail.identity?.bot_id || account.identity?.bot_id || t('notifications.identityMissing')}</strong></div>}
       <div><small>{t('notifications.runtime')}</small><strong>{t(`channelGateway.${account.provider}.runtimeStatusMap.${detail.runtime_status}`)}</strong><p>{t(provisioning ? 'notifications.connectionInProgressHint' : pendingActivation ? 'notifications.pendingActivationHint' : account.status === 'connected' ? 'notifications.connectionAvailableHint' : 'notifications.connectionStoppedHint')}</p></div>
       <div><small>{t('notifications.connectedAt')}</small><strong>{formatTime(detail.connected_at)}</strong><p>{t('notifications.authorizationTimeHint')}</p></div>
       <div><small>{t('notifications.lastMessageAt')}</small><strong>{formatTime(detail.last_message_at)}</strong><p>{t('notifications.lastMessageHint')}</p></div>
@@ -425,7 +483,25 @@ function AccountDisclosure({ account, onReconnect, onChanged }: { account: Chann
       ? <Button disabled={busy} danger onClick={() => void disconnect()}>{t('notifications.disconnect')}</Button>
       : <Button disabled={busy} onClick={() => void reconnect()}>{t('notifications.reconnect')}</Button>}
       {account.provider === 'feishu' && unbound && <Button disabled={busy} onClick={onReconnect}>{t('notifications.reauthorize')}</Button>}
-      {account.provider === 'feishu' && unbound && <Button disabled={busy} danger onClick={() => void disconnect(false, true)}>{t('notifications.removeAccount')}</Button>}</div><small>{t('notifications.accountId')}：{account.id}</small></footer>
+      {account.provider === 'wecom' && !provisioning && <Button disabled={busy || savingRemark} onClick={onReconnect}>{t('notifications.wecomRepairAuthorization')}</Button>}
+      {account.provider === 'wecom' && <Button disabled={busy || savingRemark} onClick={() => { setRemark(account.label); setEditingRemark(true); }}>{t('notifications.editAccountLabel')}</Button>}
+      {account.provider === 'feishu' && unbound && <Button disabled={busy} danger onClick={() => void disconnect(false, true)}>{t('notifications.removeAccount')}</Button>}</div>{account.provider === 'wecom' ? <small>{t('notifications.wecomReauthorizeHint')}</small> : <small>{t('notifications.accountId')}：{account.id}</small>}</footer>
+    {account.provider === 'wecom' && <Modal open={editingRemark} destroyOnHidden zIndex={1600} title={t('notifications.editAccountLabel')} okText={t('notifications.saveChanges')} cancelText={t('notifications.cancel')} confirmLoading={savingRemark} okButtonProps={{ disabled: !remark.trim() }} onCancel={() => { if (!savingRemark) setEditingRemark(false); }} onOk={async () => {
+      if (!remark.trim() || savingRemark) return;
+      setSavingRemark(true);
+      try {
+        await renameChannelAccount(account.id, remark.trim());
+        setEditingRemark(false);
+        message.success(t('notifications.renameAccountSuccess'));
+        onChanged();
+      } catch (error) {
+        message.error(getLocalizedErrorMessage(error) || t('notifications.saveFailed'));
+      } finally { setSavingRemark(false); }
+    }}>
+      <Paragraph>{t('notifications.wecomAccountRemarkHint')}</Paragraph>
+      <label htmlFor={`wecom-remark-${account.id}`}>{t('notifications.accountRemark')}</label>
+      <Input id={`wecom-remark-${account.id}`} value={remark} maxLength={80} autoFocus onChange={event => setRemark(event.target.value)} />
+    </Modal>}
   </details>;
 }
 
@@ -460,7 +536,7 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
   return <div className="notification-connections">
     <header className="notification-heading"><LinkOutlined /><div><h2>{t('notifications.connectTitle')}</h2><p>{t('notifications.connectHint')}</p></div><Tag className="notification-connection-count"><LinkOutlined />{t('notifications.enabledCount', { count: accounts.filter(isChannelAccountAvailable).length })}</Tag></header>
     {error && <p role="alert">{t('notifications.loadFailed')}</p>}
-    {connectedAccount && <Alert type="success" message={`${channelAccountLabel(connectedAccount)} · ${t('notifications.connected')}`} action={onUseAccount && <Button onClick={() => onUseAccount(connectedAccount)}>{t('notifications.returnUseAccount')}</Button>} />}
+    {connectedAccount && <Alert type="success" message={`${channelAccountLabel(connectedAccount, accounts)} · ${t('notifications.connected')}`} action={onUseAccount && <Button onClick={() => onUseAccount(connectedAccount)}>{t('notifications.returnUseAccount')}</Button>} />}
     <nav className="notification-provider-tabs" aria-label={t('notifications.channels')}>{providers.map(p => {
       const providerAccounts = accounts.filter(a => a.provider === p);
       const count = providerAccounts.filter(isChannelAccountAvailable).length;
@@ -471,12 +547,12 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
     <div className="notification-connection-columns"><section className="notification-account-manager"><header><div><small>{t('notifications.accountManagement')}</small><h2>{t('notifications.connectedAccounts')}</h2><p>{t('notifications.accountHint')}</p></div>{accounts.some(a => a.provider === provider && isChannelAccountAvailable(a)) && <Tag color="success">{t('notifications.availableCount', { count: accounts.filter(a => a.provider === provider && isChannelAccountAvailable(a)).length })}</Tag>}</header><div className="notification-account-list">
       {loading && <Spin />}
       {!loading && !error && !accounts.some(a => a.provider === provider) && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('notifications.noAccounts')} />}
-      {accounts.filter(a => a.provider === provider).map(account => <AccountDisclosure key={account.id + account.updated_at} account={account} onChanged={onChanged} onReconnect={() => setReconnectId(account.id)} />)}
+      {accounts.filter(a => a.provider === provider).map(account => <AccountDisclosure key={account.id + account.updated_at} account={account} accounts={accounts} onChanged={onChanged} onReconnect={() => setReconnectId(account.id)} />)}
       </div><p className="notification-account-note">{t('notifications.accountRoleHint')}</p>
-    </section><section className="notification-connect-pane"><header className="notification-connect-pane-heading"><div><small>{t('notifications.scanConnection')}</small><h2>{t(reconnectId ? 'notifications.reconnectPlatform' : 'notifications.connectPlatform', { platform: t('notifications.' + provider) })}</h2><p>{t('notifications.newAccountHint')}</p></div><ChannelBrand channel={provider} /></header>
+    </section><section className="notification-connect-pane"><header className="notification-connect-pane-heading"><div><small>{t(reconnectId && provider === 'wecom' ? 'notifications.accountManagement' : 'notifications.scanConnection')}</small><h2>{t(reconnectId && provider === 'wecom' ? 'notifications.wecomRepairAuthorization' : reconnectId ? 'notifications.reconnectPlatform' : 'notifications.connectPlatform', { platform: t('notifications.' + provider) })}</h2><p>{t(reconnectId && provider === 'wecom' ? 'notifications.wecomReauthorizeHint' : 'notifications.newAccountHint')}</p></div><ChannelBrand channel={provider} /></header>
       {provider !== 'feishu' && reconnectId && <Button onClick={() => setReconnectId(undefined)}>{t('notifications.newAccount')}</Button>}
       {(!loading || accounts.length > 0) && !error && <ChannelConnectionPage
-        key={provider}
+        key={provider === 'wecom' ? `${provider}:${reconnectId || 'new'}` : provider}
         provider={provider}
         accountId={reconnectId}
         autoStart={Boolean(reconnectId)}
