@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { message } from "antd";
 import { createRef } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -11,11 +11,9 @@ vi.mock("react-i18next", () => ({
 vi.mock("@/components/auth", () => ({
   AgentAppsAuth: { getUserInfo: () => ({ role: "system-admin" }) },
 }));
-const datasets = vi.hoisted(() => ({ list: vi.fn(() => new Promise(() => undefined)) }));
-
 vi.mock("@/modules/chat/utils/request", () => ({
   KnowledgeBaseServiceApi: () => ({
-    datasetServiceListDatasets: datasets.list,
+    datasetServiceListDatasets: vi.fn(() => new Promise(() => undefined)),
   }),
 }));
 
@@ -47,15 +45,6 @@ describe("ChatSelector", () => {
 });
 
 describe("ChatSelector model requirements", () => {
-  it("opens with embedding ready without requiring a reranker", async () => {
-    datasets.list.mockResolvedValueOnce({ data: { datasets: [{ dataset_id: "kb", display_name: "Test KB" }] } });
-    const ref = createRef<ChatSelectorImperativeProps>();
-    render(<MemoryRouter><ChatSelector ref={ref} chatConfig={{}} embeddingReady multimodalEmbeddingReady /></MemoryRouter>);
-    act(() => ref.current!.open(document.body));
-    expect(await screen.findByText("Test KB")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByPlaceholderText("chat.searchKnowledge")).toBeEnabled());
-  });
-
   it.each([
     { embeddingReady: false, multimodalEmbeddingReady: true },
     { embeddingReady: true, multimodalEmbeddingReady: false },

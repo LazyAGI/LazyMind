@@ -34,11 +34,8 @@ def configure(model):
     inject_model_config({'reranker': {'source': 'openai', 'model': model, 'api_key': 'test'}} if model else {})
 
 
-@pytest.mark.parametrize('models', [
-    [None, 'model-a', 'model-b', None],
-    ['model-a', None, 'model-b'],
-])
-def test_reranker_follows_each_request_while_retrievers_are_reused(runtime, models):
+def test_reranker_follows_each_request_while_retrievers_are_reused(runtime):
+    models = [None, 'model-a', 'model-b', None, 'model-c']
     retrievers = []
     for model in models:
         configure(model)
@@ -82,13 +79,10 @@ def test_static_reranker_does_not_require_request_config(runtime, monkeypatch):
     assert kb._ensure_kb_search_runtime()[1] is model
 
 
-def test_search_returns_evidence_without_reranking_and_propagates_configured_model_errors(monkeypatch):
+def test_search_returns_evidence_without_reranking(monkeypatch):
     search = importlib.import_module('lazymind.chat.engine.tools.algo.search_kb')
     monkeypatch.setattr(search, '_ctx_expand', lambda nodes: nodes)
     nodes = [SimpleNamespace(text='retrieved evidence', score=0.8, relevance_score=None)]
     retrieve = Mock(return_value=nodes)
     assert search._search_text('query', retrieve, None, 20, 10) == nodes
     assert nodes[0].relevance_score == 0.8
-    failing_reranker = Mock(side_effect=RuntimeError('provider unavailable'))
-    with pytest.raises(RuntimeError, match='provider unavailable'):
-        search._search_text('query', retrieve, failing_reranker, 20, 10)

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render as renderComponent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   NEW_CHAT_MODEL_SELECTION_KEY,
@@ -7,18 +7,25 @@ import {
   type ChatModelSelectionRequest,
 } from "@/modules/chat/store/modelSelection";
 import ChatInput from ".";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useChatInputStore } from "../../store/chatInput";
 import type { ChatMention } from "./MentionEditor";
 import { listSkillLinkedWorkflows } from "@/modules/workflow/workflowDraftApi";
 import { message } from "antd";
+import { MemoryRouter } from "react-router-dom";
+
+const render = (ui: ReactNode) => renderComponent(ui, { wrapper: MemoryRouter });
 
 vi.mock("../SkillRecording", () => ({ default: () => null }));
 
 const promptMocks = vi.hoisted(() => ({ polish: vi.fn() }));
+const datasets = vi.hoisted(() => ({ list: vi.fn(() => new Promise(() => undefined)) }));
 vi.mock("@/modules/chat/utils/request", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/modules/chat/utils/request")>()),
   PromptServiceApi: () => ({ promptServicePolishPrompt: promptMocks.polish }),
+  KnowledgeBaseServiceApi: () => ({
+    datasetServiceListDatasets: datasets.list,
+  }),
 }));
 
 vi.mock("@/modules/workflow/workflowDraftApi", () => ({
@@ -84,16 +91,6 @@ vi.mock("../ImageUpload", async () => {
         removeFile: vi.fn(),
         uploadFiles: vi.fn(),
       }));
-      return null;
-    }),
-  };
-});
-
-vi.mock("../ChatSelector", async () => {
-  const React = await vi.importActual<typeof import("react")>("react");
-  return {
-    default: React.forwardRef(function MockChatSelector(_props, ref) {
-      React.useImperativeHandle(ref, () => ({ open: vi.fn() }));
       return null;
     }),
   };
@@ -487,15 +484,25 @@ describe("ChatInput saved mentions", () => {
 describe("ChatInput optional reranking", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it.each(["selected", "mention"])("sends %s knowledge bases without reranking and only notifies once", async (source) => {
+  it.each(["selected", "mention"])("sends %s knowledge bases without reranking and notifies once per composer", async (source) => {
     const info = vi.spyOn(message, "info").mockImplementation(() => (() => {}) as never);
     const onSend = vi.fn();
     const mention: ChatMention = { mention_id: "kb", type: "knowledge_base", resource_id: "test-kb", display_name: "知识库" };
+    if (source === "selected") {
+      datasets.list.mockResolvedValueOnce({ data: { datasets: [{ dataset_id: "test-kb", display_name: "Test KB" }] } });
+    }
     render(<ChatInput value="请检索知识库" onChange={vi.fn()} onSend={onSend} isChatContent sessionId={`optional-${source}`}
       embeddingReady multimodalEmbeddingReady rerankReady={false}
       chatConfig={source === "selected" ? { knowledgeBaseId: ["test-kb"] } : {}}
       boundMentions={source === "mention" ? [mention] : []}
       showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+
+    if (source === "selected") {
+      fireEvent.click(screen.getByRole("button", { name: "chat.addResource" }));
+      fireEvent.click(await screen.findByRole("button", { name: /chat\.knowledgeBase/ }));
+      expect(await screen.findByText("Test KB")).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("chat.searchKnowledge")).toBeEnabled();
+    }
 
     fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
