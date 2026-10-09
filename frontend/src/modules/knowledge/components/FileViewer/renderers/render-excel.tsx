@@ -5,13 +5,18 @@ import i18n from "@/i18n";
 
 import * as XLSX from "xlsx";
 
-type JsPreviewType = JsExcelPreview;
+// The pinned preview library exposes selection hooks and sheetIndex at runtime.
+type JsPreviewType = JsExcelPreview & { sheetIndex?: number };
+type ExcelSheet = { name: string; rows: Record<number, { cells: Record<number, { text?: string | number | boolean }> }> };
+type ExcelRange = { startRowIndex: number; startColumnIndex: number; endRowIndex: number; endColumnIndex: number };
+export type ExcelSelection = { text: string; context: string; page: number };
 
 interface RenderOfficeProps {
   fileData: ArrayBuffer;
   fileType: "excel";
   content: Segment["content"] | null;
   metadata: Record<string, unknown> | null;
+  onSelection?: (selection: ExcelSelection | null, point: Pick<MouseEvent, "clientX" | "clientY">) => void;
 }
 
 const RenderExcel = (props: RenderOfficeProps) => {
@@ -19,6 +24,33 @@ const RenderExcel = (props: RenderOfficeProps) => {
   const reader = useRef<JsPreviewType | null>(null);
   const showFile = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
+  const sheets = useRef<ExcelSheet[]>([]);
+  const selectedRange = useRef<ExcelRange | null>(null);
+
+  const handleCellSelection = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!(event.target instanceof Element) || !event.target.closest(".vue-office-excel")) return;
+    const range = selectedRange.current;
+    const page = (reader.current?.sheetIndex ?? 0) + 1;
+    const sheet = sheets.current[page - 1];
+    if (!range || !sheet || range.startRowIndex < 0 || range.startColumnIndex < 0) {
+      props.onSelection?.(null, event);
+      return;
+    }
+    const rowIndexes = Object.keys(sheet.rows).map(Number).filter(Number.isInteger).sort((a, b) => a - b);
+    const rows = rowIndexes.filter((row) => row >= range.startRowIndex && row <= range.endRowIndex);
+    const contextRows = [...new Set([rowIndexes[0], ...rows])].filter((row) => row !== undefined);
+    const columnIndexes = [...new Set(contextRows.flatMap((row) => Object.keys(sheet.rows[row].cells).map(Number)))].sort((a, b) => a - b);
+    const columns = columnIndexes.filter((column) => column >= range.startColumnIndex && column <= range.endColumnIndex);
+    const rowText = (row: number, cols: number[]) => cols.map((col) => String(sheet.rows[row]?.cells[col]?.text ?? "")).join("\t");
+    const text = rows.map((row) => rowText(row, columns)).join("\n").trim();
+    const address = XLSX.utils.encode_range({
+      s: { r: range.startRowIndex, c: range.startColumnIndex },
+      e: { r: range.endRowIndex, c: range.endColumnIndex },
+    });
+    props.onSelection?.(text ? {
+      text, page, context: [sheet.name, address, ...contextRows.map((row) => rowText(row, columnIndexes))].join("\n"),
+    } : null, event);
+  };
 
   const contentText = useMemo(() => content || "", [content]);
   const metaTitle = useMemo(
@@ -94,6 +126,8 @@ const RenderExcel = (props: RenderOfficeProps) => {
       }
 
       showFile.current.innerHTML = "";
+      sheets.current = [];
+      selectedRange.current = null;
 
       try {
         const ab = fileData as ArrayBuffer;
@@ -199,7 +233,15 @@ const RenderExcel = (props: RenderOfficeProps) => {
         console.warn("Header check failed:", hdrErr);
       }
 
-      reader.current = readerType.init(showFile.current);
+      const options = {
+        showContextmenu: false,
+        transformData: (data: ExcelSheet[]) => { sheets.current = data; return data; },
+        cellSelected: ({ rowIndex, columnIndex }: { rowIndex: number; columnIndex: number }) => {
+          selectedRange.current = { startRowIndex: rowIndex, endRowIndex: rowIndex, startColumnIndex: columnIndex, endColumnIndex: columnIndex };
+        },
+        cellsSelected: (range: ExcelRange) => { selectedRange.current = range; },
+      };
+      reader.current = readerType.init(showFile.current, options);
       if (reader.current && reader.current.preview) {
         await reader.current.preview(fileData);
       }
@@ -240,7 +282,10 @@ const RenderExcel = (props: RenderOfficeProps) => {
   }, []);
 
   return (
-    <div className="file-viewer-container">
+    <div className="file-viewer-container" onMouseUp={handleCellSelection}
+      onMouseDownCapture={(event) => {
+        if (event.target instanceof Element && event.target.closest(".x-spreadsheet-bottombar")) selectedRange.current = null;
+      }}>
       <div ref={showFile} className="file-viewer-content"></div>
       {loading && (
         <div

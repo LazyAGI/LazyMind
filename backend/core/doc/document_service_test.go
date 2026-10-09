@@ -474,6 +474,55 @@ func TestDocumentServiceGetDocumentReadsParsedContentForAllFormats(t *testing.T)
 	}
 }
 
+func TestDocumentServiceGetDocumentKeepsEmptyTextWithoutParsing(t *testing.T) {
+	for _, fileType := range []struct{ name, mimeType string }{
+		{"empty.txt", "text/plain; charset=utf-8"},
+		{"empty.md", "text/markdown"},
+		{"empty.txt", ""},
+	} {
+		for _, text := range []string{"", " \t\r\n\n"} {
+			t.Run(fmt.Sprintf("%s/%s/%d", fileType.name, fileType.mimeType, len(text)), func(t *testing.T) {
+				db := newDocumentTestDB(t)
+				if err := db.AutoMigrate(&orm.DocumentProcessingState{}); err != nil {
+					t.Fatal(err)
+				}
+				algorithmCalls := 0
+				installDocumentServiceTransport(t, func(r *http.Request) (int, string) {
+					algorithmCalls++
+					return http.StatusServiceUnavailable, `{"message":"unavailable"}`
+				})
+				t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
+				root := t.TempDir()
+				t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+				path := filepath.Join(root, fileType.name)
+				if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				seedDocumentServiceDataset(t, db, "dataset-empty", "user-1", time.Now().UTC())
+				seedDocumentServiceDocument(t, db, "dataset-empty", "document-empty", "user-1", documentExt{
+					StoredPath: path, OriginalFilename: fileType.name, ContentType: fileType.mimeType,
+				})
+				state := newDocumentProcessingState("dataset-empty", "document-empty", time.Now().UTC())
+				if err := db.Create(&state).Error; err != nil {
+					t.Fatal(err)
+				}
+				result, err := mustDocumentService(t, db).GetDocument(context.Background(), DocumentReadRequest{
+					UserID: "user-1", DatasetID: "dataset-empty", DocumentID: "document-empty", IncludeContent: true,
+				})
+				if err != nil {
+					t.Fatalf("GetDocument empty text: %v", err)
+				}
+				if result.Content == nil || result.Content.Text != text || result.Content.Truncated {
+					t.Fatalf("empty text changed: %+v", result.Content)
+				}
+				if algorithmCalls != 0 {
+					t.Fatalf("empty text called parsing service %d times", algorithmCalls)
+				}
+			})
+		}
+	}
+}
+
 func TestDocumentServiceGetDocumentParsedContentChecksPermissionAndDataset(t *testing.T) {
 	db := newDocumentTestDB(t)
 	installDocumentServiceTransport(t, func(r *http.Request) (int, string) {

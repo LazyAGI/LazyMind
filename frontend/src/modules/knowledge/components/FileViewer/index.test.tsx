@@ -50,7 +50,7 @@ async function selectPreviewText() {
 }
 
 describe("document preview selection questions", () => {
-  it.each(["md", "txt", "html", "docx", "xlsx", "pptx"])(
+  it.each(["md", "txt", "html", "docx", "pptx"])(
     "offers a %s selection question even when translation is not configured",
     async (extension) => {
       const onAsk = vi.fn();

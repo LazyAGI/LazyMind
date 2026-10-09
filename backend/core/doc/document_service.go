@@ -145,9 +145,10 @@ type DocumentFileRef struct {
 }
 
 type DocumentContent struct {
-	Text      string
-	MIMEType  string
-	Truncated bool
+	Text         string
+	MIMEType     string
+	Truncated    bool
+	needsParsing bool
 }
 
 type DocumentChunk struct {
@@ -246,7 +247,7 @@ func (s *DocumentService) GetDocument(ctx context.Context, req DocumentReadReque
 		if err != nil {
 			return DocumentReadResult{}, err
 		}
-		if strings.TrimSpace(content.Text) == "" {
+		if content.needsParsing {
 			request, requestErr := http.NewRequestWithContext(ctx, http.MethodPost, "/documents:ensure-parsed", nil)
 			if requestErr != nil {
 				return DocumentReadResult{}, requestErr
@@ -295,7 +296,7 @@ func readDocumentContentFromRecord(rec documentServiceRecord) (DocumentContent, 
 		mimeType = detectDocumentContentType(filename, storedPath, "")
 	}
 	if !isSafeTextDocumentContent(mimeType, filename, storedPath) {
-		return DocumentContent{MIMEType: mimeType}, nil
+		return DocumentContent{MIMEType: mimeType, needsParsing: true}, nil
 	}
 	if strings.TrimSpace(storedPath) == "" {
 		return DocumentContent{}, &DocumentServiceError{Code: DocumentServiceNotFound, Message: "document file not found"}
