@@ -350,6 +350,25 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     height: MENU_MAX_HEIGHT,
   });
 
+  const closeMenu = useCallback(() => {
+    queryRef.current = null;
+    setQuery(null);
+    setActiveIndex(-1);
+  }, []);
+
+  useEffect(() => {
+    if (!allowMentions || !query) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)
+        || editorRef.current?.contains(target)
+        || menuRef.current?.contains(target)) return;
+      closeMenu();
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [allowMentions, query, closeMenu]);
+
   const updateMenuPlacement = useCallback(() => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -550,12 +569,10 @@ const MentionEditor = forwardRef<MentionEditorRef, {
       selection?.removeAllRanges();
       selection?.addRange(caret);
     }
-    queryRef.current = null;
-    setQuery(null);
-    setActiveIndex(-1);
+    closeMenu();
     emit();
     editor.focus();
-  }, [emit, getDisabledReason, t]);
+  }, [closeMenu, emit, getDisabledReason, t]);
 
   const visibleCandidates = candidates.filter((candidate) => {
     if (expandedTypes.has(candidate.type)) return true;
@@ -591,7 +608,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
         data-empty={value === "" ? "true" : "false"}
         onInput={() => { emit(); refreshQuery(); }}
         onClick={refreshQuery}
-        onKeyUp={(event) => { if (!["ArrowUp", "ArrowDown", "Enter"].includes(event.key)) refreshQuery(); }}
+        onKeyUp={(event) => { if (!["ArrowUp", "ArrowDown", "Enter", "Escape"].includes(event.key)) refreshQuery(); }}
         onCompositionStart={() => onCompositionChange(true)}
         onCompositionEnd={() => { onCompositionChange(false); refreshQuery(); }}
         onPaste={onPaste}
@@ -612,8 +629,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
             }
             if (event.key === "Escape") {
               event.preventDefault();
-              queryRef.current = null;
-              setQuery(null);
+              closeMenu();
               return;
             }
           }

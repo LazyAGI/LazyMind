@@ -191,6 +191,77 @@ describe("MentionEditor", () => {
     expect(onMentionsChange).toHaveBeenLastCalledWith([]);
   });
 
+  it.each(["outside click", "Escape"])("dismisses the menu with %s without removing the query and allows reopening", async (action) => {
+    const onChange = vi.fn();
+    const onMentionsChange = vi.fn();
+    mocks.listSkillAssetsPage.mockResolvedValue({ records: [{ id: "dismiss-skill", name: "测试技能" }] });
+    render(<>
+      <button type="button">outside</button>
+      <MentionEditor value="" placeholder="message" onChange={onChange} onMentionsChange={onMentionsChange}
+        onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />
+    </>);
+    const editor = screen.getByRole("textbox");
+    editor.textContent = "请参考 @";
+    const range = document.createRange();
+    range.setStart(editor.firstChild!, editor.textContent.length);
+    range.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    fireEvent.input(editor);
+    expect(await screen.findByRole("option", { name: "测试技能" })).toBeVisible();
+
+    if (action === "outside click") {
+      const outside = screen.getByRole("button", { name: "outside" });
+      fireEvent.pointerDown(outside);
+      fireEvent.mouseDown(outside);
+      fireEvent.click(outside);
+    } else {
+      fireEvent.keyDown(editor, { key: "Escape" });
+      fireEvent.keyUp(editor, { key: "Escape" });
+    }
+
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(editor).toHaveTextContent("请参考 @");
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith("请参考 @");
+    fireEvent.click(editor);
+    const option = await screen.findByRole("option", { name: "测试技能" });
+    fireEvent.pointerDown(option);
+    fireEvent.mouseDown(option);
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(onChange).toHaveBeenLastCalledWith("请参考 测试技能");
+    expect(onMentionsChange).toHaveBeenLastCalledWith([expect.objectContaining({ resource_id: "dismiss-skill" })]);
+  });
+
+  it("keeps the menu open when clicking the editor, menu background, or expand control", async () => {
+    mocks.listSkillAssetsPage.mockResolvedValue({ records: Array.from({ length: 10 }, (_, index) => ({
+      id: `expand-skill-${index}`, name: `技能 ${index + 1}`,
+    })) });
+    render(<MentionEditor value="" placeholder="message" onChange={vi.fn()} onMentionsChange={vi.fn()}
+      onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    const editor = screen.getByRole("textbox");
+    editor.textContent = "@skill:";
+    const range = document.createRange();
+    range.setStart(editor.firstChild!, editor.textContent.length);
+    range.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    fireEvent.input(editor);
+    expect(await screen.findByRole("option", { name: "技能 1" })).toBeVisible();
+    fireEvent.pointerDown(editor);
+    fireEvent.click(editor);
+    const menu = screen.getByRole("listbox");
+    fireEvent.pointerDown(menu);
+    fireEvent.mouseDown(menu);
+    fireEvent.click(menu);
+    expect(menu).toBeVisible();
+    expect(screen.queryByRole("option", { name: "技能 10" })).not.toBeInTheDocument();
+    const expand = screen.getByRole("button", { name: "chat.mentionShowMore" });
+    fireEvent.pointerDown(expand);
+    fireEvent.mouseDown(expand);
+    expect(await screen.findByRole("option", { name: "技能 10" })).toBeVisible();
+  });
+
   it("reloads skills after a previously cached empty list", async () => {
     render(
       <MentionEditor
