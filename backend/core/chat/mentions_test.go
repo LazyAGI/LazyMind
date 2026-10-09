@@ -302,6 +302,113 @@ func TestApplyExplicitResourceBindingsIncludesOnlyCurrentMentions(t *testing.T) 
 	}
 }
 
+func TestRestoreWorkflowClarificationKnowledgeBaseMentions(t *testing.T) {
+	workflowMention := map[string]any{
+		"mention_id": "workflow-1", "type": "workflow",
+		"resource_id": "builtin:ppt-workflow", "display_name": "AI PPT Planner",
+	}
+	knowledgeBaseMention := map[string]any{
+		"mention_id": "kb-1", "type": "knowledge_base",
+		"resource_id": "kb-aaa", "display_name": "aaa", "start": 15, "end": 18,
+	}
+	currentKnowledgeBaseMention := map[string]any{
+		"mention_id": "kb-current", "type": "knowledge_base",
+		"resource_id": "kb-aaa", "display_name": "aaa",
+	}
+	replacementKnowledgeBaseMention := map[string]any{
+		"mention_id": "kb-replacement", "type": "knowledge_base",
+		"resource_id": "kb-replacement", "display_name": "replacement",
+	}
+	toolMention := map[string]any{
+		"mention_id": "tool-1", "type": "tool",
+		"resource_id": "search", "display_name": "Search",
+	}
+	history := func(mentions ...map[string]any) orm.ChatHistory {
+		values := make([]any, 0, len(mentions))
+		for _, mention := range mentions {
+			values = append(values, mention)
+		}
+		ext, err := json.Marshal(map[string]any{
+			"mentions":     values,
+			"ask_pending":  map[string]any{"ask_id": "startup-ask", "questions": []any{}},
+			"ask_answered": false,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return orm.ChatHistory{Ext: ext}
+	}
+
+	tests := []struct {
+		name      string
+		raw       map[string]any
+		histories []orm.ChatHistory
+		wantTypes []string
+		wantIDs   []string
+	}{
+		{
+			name: "restores knowledge base for matching workflow startup ask",
+			raw: map[string]any{"ask_answers_structured": map[string]any{
+				"ask_id": "startup-ask", "questions": []any{},
+			}},
+			histories: []orm.ChatHistory{history(workflowMention, knowledgeBaseMention)},
+			wantTypes: []string{"knowledge_base"}, wantIDs: []string{"kb-aaa"},
+		},
+		{
+			name: "does not restore for a different ask",
+			raw: map[string]any{"ask_answers_structured": map[string]any{
+				"ask_id": "different-ask", "questions": []any{},
+			}},
+			histories: []orm.ChatHistory{history(workflowMention, knowledgeBaseMention)},
+		},
+		{
+			name: "does not restore without an explicit workflow mention",
+			raw: map[string]any{"ask_answers_structured": map[string]any{
+				"ask_id": "startup-ask", "questions": []any{},
+			}},
+			histories: []orm.ChatHistory{history(knowledgeBaseMention)},
+		},
+		{
+			name: "preserves current mentions and deduplicates the knowledge base",
+			raw: map[string]any{
+				"ask_answers_structured": map[string]any{"ask_id": "startup-ask", "questions": []any{}},
+				"mentions":               []any{toolMention, currentKnowledgeBaseMention},
+			},
+			histories: []orm.ChatHistory{history(workflowMention, knowledgeBaseMention)},
+			wantTypes: []string{"tool", "knowledge_base"}, wantIDs: []string{"search", "kb-aaa"},
+		},
+		{
+			name: "current knowledge base replaces the inherited selection",
+			raw: map[string]any{
+				"ask_answers_structured": map[string]any{"ask_id": "startup-ask", "questions": []any{}},
+				"mentions":               []any{replacementKnowledgeBaseMention},
+			},
+			histories: []orm.ChatHistory{history(workflowMention, knowledgeBaseMention)},
+			wantTypes: []string{"knowledge_base"}, wantIDs: []string{"kb-replacement"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			restoreWorkflowClarificationKnowledgeBaseMentions(test.raw, test.histories)
+			// Inherited offsets belong to the original prompt, not the AskCard
+			// submission text, and therefore must not be revalidated against it.
+			mentions, err := parseChatMentions(test.raw, "ok")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(mentions) != len(test.wantIDs) {
+				t.Fatalf("mentions = %#v, want IDs %#v", mentions, test.wantIDs)
+			}
+			for index := range mentions {
+				if mentions[index].Type != test.wantTypes[index] || mentions[index].ResourceID != test.wantIDs[index] {
+					t.Fatalf("mention[%d] = %#v, want type=%q id=%q", index, mentions[index], test.wantTypes[index], test.wantIDs[index])
+				}
+			}
+		})
+	}
+}
+
 func TestResolveExplicitSkillBindingsAcceptsCanonicalUniqueBareAndAliasNames(t *testing.T) {
 	available := []string{
 		"external/requested-skill",

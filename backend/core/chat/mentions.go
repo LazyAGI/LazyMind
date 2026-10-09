@@ -273,6 +273,62 @@ func applyExplicitResourceBindings(body map[string]any, mentions resolvedChatMen
 	}
 }
 
+// restoreWorkflowClarificationKnowledgeBaseMentions carries explicit knowledge
+// bases across the startup AskCard boundary. The matching pending ask and
+// workflow mention must originate from the same history entry, which prevents
+// ordinary follow-up turns from inheriting historical resources.
+func restoreWorkflowClarificationKnowledgeBaseMentions(raw map[string]any, histories []orm.ChatHistory) {
+	submission := askAnswersStructuredFromRaw(raw)
+	matched := submittedAskHistoryIndex(histories, submission)
+	if matched < 0 {
+		return
+	}
+
+	ext := map[string]any{}
+	if json.Unmarshal(histories[matched].Ext, &ext) != nil {
+		return
+	}
+	historical, err := parseChatMentions(ext)
+	if err != nil {
+		return
+	}
+	hasWorkflow := false
+	for _, mention := range historical {
+		if mention.Type == "workflow" {
+			hasWorkflow = true
+			break
+		}
+	}
+	if !hasWorkflow {
+		return
+	}
+
+	current, err := parseChatMentions(raw)
+	if err != nil {
+		return
+	}
+	for _, mention := range current {
+		if mention.Type == "knowledge_base" {
+			// A knowledge base explicitly supplied with the submission overrides
+			// the startup selection instead of broadening it.
+			return
+		}
+	}
+	for _, mention := range historical {
+		if mention.Type != "knowledge_base" {
+			continue
+		}
+		// Text offsets are scoped to the original prompt and are invalid for the
+		// clarification submission's query.
+		mention.Start = nil
+		mention.End = nil
+		current = append(current, mention)
+	}
+	if len(current) > 0 {
+		raw["mentions"] = current
+	}
+}
+
 func resolveExplicitSkillBindings(raw map[string]any, availableSkills []string, skillAliases map[string][]string) ([]string, error) {
 	bindings, ok := raw["explicit_resource_bindings"].(map[string]any)
 	if !ok {

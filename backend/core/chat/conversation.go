@@ -448,6 +448,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "build chat resource context failed", err), http.StatusInternalServerError)
 		return
 	}
+	restoreWorkflowClarificationKnowledgeBaseMentions(raw, histories)
 	query, mentionedResources, err := applyChatMentions(r.Context(), db, raw, userID, convID, sessionID, query, resourceContext)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusForbidden)
