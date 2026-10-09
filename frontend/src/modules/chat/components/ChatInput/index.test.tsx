@@ -11,6 +11,7 @@ import { useState } from "react";
 import { useChatInputStore } from "../../store/chatInput";
 import type { ChatMention } from "./MentionEditor";
 import { listSkillLinkedWorkflows } from "@/modules/workflow/workflowDraftApi";
+import { message } from "antd";
 
 vi.mock("../SkillRecording", () => ({ default: () => null }));
 
@@ -480,5 +481,46 @@ describe("ChatInput saved mentions", () => {
     view.unmount();
     expect(useChatInputStore.getState().getInputContent("mention-draft")).toBe("");
     expect(useChatInputStore.getState().getInputMentions("mention-draft")).toEqual([]);
+  });
+});
+
+describe("ChatInput optional reranking", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each(["selected", "mention"])("sends %s knowledge bases without reranking and only notifies once", async (source) => {
+    const info = vi.spyOn(message, "info").mockImplementation(() => (() => {}) as never);
+    const onSend = vi.fn();
+    const mention: ChatMention = { mention_id: "kb", type: "knowledge_base", resource_id: "test-kb", display_name: "知识库" };
+    render(<ChatInput value="请检索知识库" onChange={vi.fn()} onSend={onSend} isChatContent sessionId={`optional-${source}`}
+      embeddingReady multimodalEmbeddingReady rerankReady={false}
+      chatConfig={source === "selected" ? { knowledgeBaseId: ["test-kb"] } : {}}
+      boundMentions={source === "mention" ? [mention] : []}
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend).toHaveBeenLastCalledWith(expect.objectContaining(source === "selected"
+      ? { chatConfigSnapshot: expect.objectContaining({ knowledgeBaseId: ["test-kb"] }) }
+      : { mentions: [mention] }));
+    expect(info).toHaveBeenCalledWith({ key: "knowledge-rerank-optional", content: "chat.knowledgeSearchWithoutRerank", duration: 5 });
+
+    fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+    expect(info).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { ready: true, kb: true },
+    { ready: null, kb: true },
+    { ready: false, kb: false },
+  ])("does not notify for unrelated or unconfirmed searches: %j", async ({ ready, kb }) => {
+    const info = vi.spyOn(message, "info").mockImplementation(() => (() => {}) as never);
+    const onSend = vi.fn();
+    render(<ChatInput value="hello" onChange={vi.fn()} onSend={onSend} isChatContent sessionId="optional-no-notice"
+      rerankReady={ready} chatConfig={{ knowledgeBaseId: kb ? ["test-kb"] : [] }}
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(info).not.toHaveBeenCalled();
   });
 });

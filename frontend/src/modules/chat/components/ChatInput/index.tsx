@@ -755,6 +755,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const innerRef = useRef<HTMLDivElement>(null);
     const textAreaRef = useRef<MentionEditorRef>(null);
     const isComposingRef = useRef(false);
+    const rerankNoticeShownRef = useRef(false);
     const [isUploading, setIsUploading] = useState(false);
     const [polishingSuggestionKey, setPolishingSuggestionKey] = useState<
       string | null
@@ -1228,6 +1229,17 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         : undefined;
       const effectiveInitialModelSelection =
         storedInitialModelSelection ?? initialModelSelection;
+      if (rerankReady === false && !rerankNoticeShownRef.current && knowledgeBaseEnabled && (
+        (chatConfig?.knowledgeBaseId?.length ?? 0) > 0
+        || resolvedMentions.some((mention) => mention.type === "knowledge_base")
+      )) {
+        rerankNoticeShownRef.current = true;
+        message.info({
+          key: "knowledge-rerank-optional",
+          content: t("chat.knowledgeSearchWithoutRerank"),
+          duration: 5,
+        });
+      }
       setNewMessage(false);
       const sendParams: SendMessageParams = {
         text: normalizedText,
@@ -1655,7 +1667,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                           refreshKey={knowledgeRefreshKey}
                           embeddingReady={embeddingReady}
                           multimodalEmbeddingReady={multimodalEmbeddingReady}
-                          rerankReady={rerankReady}
                           disabled={!knowledgeBaseEnabled}
                           disabledReason={knowledgeBaseDisabledReason}
                           onChange={onKnowledgeBaseChange}

@@ -32,7 +32,6 @@ export interface ChatSelectorProps {
   refreshKey?: number | string;
   embeddingReady?: boolean | null;
   multimodalEmbeddingReady?: boolean | null;
-  rerankReady?: boolean | null;
   disabled?: boolean;
   disabledReason?: ReactNode;
   onChange?: (
@@ -55,14 +54,13 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
     onChange,
     embeddingReady,
     multimodalEmbeddingReady,
-    rerankReady,
     disabled = false,
     disabledReason,
   } = props;
   const { t } = useTranslation();
   const navigate = useNavigate();
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === 'system-admin';
-  const isEmbeddingDisabled = embeddingReady === false || multimodalEmbeddingReady === false || rerankReady === false;
+  const isEmbeddingDisabled = embeddingReady === false || multimodalEmbeddingReady === false;
   const isSelectorDisabled = disabled || isEmbeddingDisabled;
 
   const buildKnowledgeDisabledReason = (): ReactNode => {
@@ -84,9 +82,6 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
       return isAdmin
         ? <span>{t("chat.multimodalEmbeddingNotReadyKnowledgeAdmin")}{goConfig}</span>
         : t("chat.multimodalEmbeddingNotReadyKnowledge");
-    }
-    if (rerankReady === false) {
-      return <span>{t("chat.rerankNotReadyKnowledge")}{goConfig}</span>;
     }
     return undefined;
   };

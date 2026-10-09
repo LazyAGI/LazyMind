@@ -29,7 +29,7 @@ from lazymind.chat.service.utils import (
     static_file_url_from_any,
 )
 from lazymind.config import EMBED_IMAGE, EMBED_MAIN, config as _cfg
-from lazymind.model_config import get_dynamic_role_slot_map
+from lazymind.model_config import is_model_role_available
 
 _MAX_TEXT_LEN = 1200
 _MAX_RESULT_ITEMS = 50
@@ -49,7 +49,6 @@ _KB_IMAGE_RETRIEVER_CONFIG = {
     'embed_keys': [EMBED_IMAGE],
 }
 _kb_retrievers = None
-_kb_reranker = None
 _kb_image_retriever = None
 
 _TMP_WHITELIST_SUFFIXES = frozenset({
@@ -70,36 +69,21 @@ _TMP_HINT = (
 )
 
 
-def _is_reranker_enabled() -> bool:
-    role_slots = get_dynamic_role_slot_map()
-    if 'reranker' not in role_slots:
-        return True
-
-    try:
-        cfg = lazyllm.globals.config['dynamic_model_configs']
-    except Exception:
-        cfg = None
-    role_cfg = cfg.get('reranker') if isinstance(cfg, dict) else None
-    return isinstance(role_cfg, dict) and bool(role_cfg.get(role_slots['reranker']))
-
-
 def _build_reranker() -> Optional[Reranker]:
     return (
         Reranker(_RERANKER_MODULE, model=AutoModel(model=_RERANKER_MODEL))
-        if _is_reranker_enabled()
+        if is_model_role_available(_RERANKER_MODEL)
         else None
     )
 
 
 def _ensure_kb_search_runtime() -> tuple[List[Retriever], Optional[Reranker], Retriever]:
-    global _kb_retrievers, _kb_reranker, _kb_image_retriever
-    if _kb_retrievers is not None and _kb_image_retriever is not None:
-        return _kb_retrievers, _kb_reranker, _kb_image_retriever
-
-    _kb_retrievers = [Retriever(DOCUMENT, **cfg) for cfg in _KB_RETRIEVER_CONFIGS]
-    _kb_reranker = _build_reranker()
-    _kb_image_retriever = Retriever(DOCUMENT, **_KB_IMAGE_RETRIEVER_CONFIG)
-    return _kb_retrievers, _kb_reranker, _kb_image_retriever
+    global _kb_retrievers, _kb_image_retriever
+    if _kb_retrievers is None or _kb_image_retriever is None:
+        _kb_retrievers = [Retriever(DOCUMENT, **cfg) for cfg in _KB_RETRIEVER_CONFIGS]
+        _kb_image_retriever = Retriever(DOCUMENT, **_KB_IMAGE_RETRIEVER_CONFIG)
+    # Model availability belongs to the current request, not the first search.
+    return _kb_retrievers, _build_reranker(), _kb_image_retriever
 
 
 def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
