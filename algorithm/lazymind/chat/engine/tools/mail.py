@@ -2005,8 +2005,8 @@ def _preview(draft: dict[str, Any]) -> dict[str, Any]:
         'requires_reauth': bool(draft.get('requires_reauth')),
         'reauth_path': _REAUTH_PATH if draft.get('requires_reauth') else '',
         'delivery_unknown': status == 'delivery_unknown',
-        'error_code': (draft.get('error_code') or
-                       ('attachment_error' if draft.get('attachment_error') else status))
+        'error_code': (draft.get('error_code')
+                       or ('attachment_error' if draft.get('attachment_error') else status))
         if status in {'failed', 'partial_sent', 'delivery_unknown'} else '',
         'message_id': draft.get('provider_message_id') or '',
         'accepted_recipients': list(draft.get('accepted_recipients') or []),
