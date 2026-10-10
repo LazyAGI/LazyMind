@@ -1149,6 +1149,86 @@ export async function cancelSkillOrganizeTask(requestId: string): Promise<SkillO
   return {pendingReview: toBoolean(payload?.pending_review)};
 }
 
+export interface SkillOrganizeApprovalItem {
+  id: string;
+  type: string;
+  status: string;
+  sourceKeys: string[];
+  targetSourceKey: string;
+  targetName: string;
+  sourceSkillIds: string[];
+  targetSkillId: string;
+  deleteKeys: string[];
+  dependsOn: string[];
+  content: string;
+}
+
+export interface SkillOrganizeApprovalTask {
+  requestId: string;
+  items: SkillOrganizeApprovalItem[];
+  error: string;
+}
+
+export interface SkillOrganizeApprovalResult {
+  id: string;
+  status: string;
+  error: string;
+}
+
+function normalizeOrganizeApprovalItem(value: unknown): SkillOrganizeApprovalItem | null {
+  const raw = toRawObject(value);
+  const id = toStringValue(raw?.id).trim();
+  if (!raw || !id) return null;
+  return {
+    id,
+    type: toStringValue(raw.type).trim(),
+    status: toStringValue(raw.status).trim() || "pending",
+    sourceKeys: toStringArray(raw.source_keys),
+    targetSourceKey: toStringValue(raw.target_source_key).trim(),
+    targetName: toStringValue(raw.target_name).trim(),
+    sourceSkillIds: toStringArray(raw.source_skill_ids),
+    targetSkillId: toStringValue(raw.target_skill_id).trim(),
+    deleteKeys: toStringArray(raw.delete_keys),
+    dependsOn: toStringArray(raw.depends_on),
+    content: toStringValue(raw.content),
+  };
+}
+
+export async function listSkillOrganizeApprovals(): Promise<SkillOrganizeApprovalTask[]> {
+  const response = await axiosInstance.get(`${coreBasePath}/skill_organize/approvals`);
+  const payload = toRawObject(unwrapEnvelope<unknown>(response.data));
+  const tasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
+  return tasks.flatMap((value) => {
+    const raw = toRawObject(value);
+    const requestId = toStringValue(raw?.request_id).trim();
+    if (!raw || !requestId) return [];
+    const items = (Array.isArray(raw.items) ? raw.items : [])
+      .map(normalizeOrganizeApprovalItem)
+      .filter((item): item is SkillOrganizeApprovalItem => Boolean(item));
+    return [{ requestId, items, error: toStringValue(raw.error) }];
+  });
+}
+
+export async function resolveSkillOrganizeApprovals(
+  requestId: string,
+  itemIds: string[],
+  action: "accept" | "reject" | "revoke",
+): Promise<SkillOrganizeApprovalResult[]> {
+  const response = await axiosInstance.post(`${coreBasePath}/skill_organize/approvals:resolve`, {
+    request_id: requestId,
+    item_ids: itemIds,
+    action,
+  });
+  const payload = toRawObject(unwrapEnvelope<unknown>(response.data));
+  const results = Array.isArray(payload?.results) ? payload.results : [];
+  return results.flatMap((value) => {
+    const raw = toRawObject(value);
+    const id = toStringValue(raw?.id).trim();
+    if (!raw || !id) return [];
+    return [{ id, status: toStringValue(raw.status).trim(), error: toStringValue(raw.error) }];
+  });
+}
+
 export async function listSkillTags(): Promise<string[]> {
   const response = await skillsApi.apiCoreSkillsTagsGet();
   const payload = unwrapEnvelope<{ tags?: string[] }>(response.data);

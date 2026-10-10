@@ -1895,5 +1895,15 @@
   "2003159": {"en-US": "The Skill document has no content", "zh-CN": "技能文档没有内容"},
   "2003160": {"en-US": "The skill organize rollback owner does not match", "zh-CN": "技能整理回滚的所有者不匹配"},
   "2003161": {"en-US": "The skill organize rollback contains an unknown mutation", "zh-CN": "技能整理回滚包含未知变更"},
-  "2003162": {"en-US": "The Skill changed during organize rollback", "zh-CN": "技能在整理回滚期间发生了变化"}
+  "2003162": {"en-US": "The Skill changed during organize rollback", "zh-CN": "技能在整理回滚期间发生了变化"},
+  "2003163": {"en-US": "Request ID and item IDs are required", "zh-CN": "请求 ID 和审批项 ID 不能为空"},
+  "2003164": {"en-US": "Action must be accept, reject, or revoke", "zh-CN": "操作必须为接受、拒绝或撤销"},
+  "2003165": {"en-US": "Skill organize approval binding is missing", "zh-CN": "缺少技能整理审批项的技能绑定"},
+  "2003166": {"en-US": "Unsupported organize approval action", "zh-CN": "不支持此技能整理审批操作"},
+  "2003167": {"en-US": "Skill organize item has no target skill", "zh-CN": "技能整理项缺少目标技能"},
+  "2003168": {"en-US": "Skill organize item has no content to approve", "zh-CN": "技能整理项没有待审批正文"},
+  "2003169": {"en-US": "Skill in organize scope was not found", "zh-CN": "找不到整理范围内的技能"},
+  "2003170": {"en-US": "Skill is outside the organize scope", "zh-CN": "技能不在本次整理范围内"},
+  "2003171": {"en-US": "Skill organize target was not found", "zh-CN": "找不到整理目标技能"},
+  "2003172": {"en-US": "Skill to remove was not found", "zh-CN": "找不到要移除的技能"}
 }

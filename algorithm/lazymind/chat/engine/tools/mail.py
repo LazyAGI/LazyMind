@@ -197,8 +197,47 @@ def _is_uncertain_delivery_error(orig: BaseException) -> bool:
     return False
 
 
+def _smtp_response_text(value: Any) -> str:
+    if isinstance(value, bytes):
+        return value.decode('utf-8', errors='replace').strip()
+    return str(value).strip()
+
+
+def _smtp_exception_detail(orig: BaseException) -> str:
+    if isinstance(orig, smtplib.SMTPResponseException):
+        response = _smtp_response_text(orig.smtp_error)
+        return f'{orig.smtp_code} {response}'.strip()
+    return str(orig).strip() or orig.__class__.__name__
+
+
+def _recipient_rejected_error(detail: str) -> ToolExecutionError:
+    error = ToolExecutionError(f'Failed to send the email: recipients were rejected ({detail}).')
+    error.error_code = 'recipient_rejected'
+    return error
+
+
+def _is_recipient_rejection_response(orig: BaseException, detail: str) -> bool:
+    if isinstance(orig, smtplib.SMTPRecipientsRefused):
+        return True
+    if not isinstance(orig, smtplib.SMTPResponseException):
+        return False
+    try:
+        permanent_failure = 500 <= int(orig.smtp_code) < 600
+    except (TypeError, ValueError):
+        permanent_failure = False
+    normalized = detail.lower()
+    recipient_markers = (
+        'non-existent account', 'nonexistent account', 'user unknown', 'unknown user',
+        'no such user', 'recipient rejected', 'recipient address does not exist',
+        'mailbox unavailable',
+    )
+    return permanent_failure and any(marker in normalized for marker in recipient_markers)
+
+
 def _raise_send_error(orig: BaseException, *, data_submitted: bool) -> NoReturn:
-    detail = str(orig).strip() or orig.__class__.__name__
+    detail = _smtp_exception_detail(orig)
+    if _is_recipient_rejection_response(orig, detail):
+        raise _recipient_rejected_error(detail) from orig
     if data_submitted and _is_uncertain_delivery_error(orig):
         err = ToolExecutionError(
             'Mail delivery is unknown: DATA may already have been accepted, but the '
@@ -1849,17 +1888,18 @@ class _IMAPBackend:
             ) from orig
         except smtplib.SMTPRecipientsRefused as orig:
             detail = ', '.join(
-                f'{addr} ({code} {err})'
+                f'{addr} ({code} {_smtp_response_text(err)})'
                 for addr, (code, err) in (orig.recipients or {}).items()
-            ) or str(orig)
-            _fail(f'Failed to send the email: all recipients were rejected ({detail}).')
+            ) or _smtp_exception_detail(orig)
+            raise _recipient_rejected_error(detail) from orig
         except ToolExecutionError:
             raise
         except (smtplib.SMTPException, OSError) as orig:
             _raise_send_error(orig, data_submitted=data_submitted)
         if refused:
             detail = ', '.join(
-                f'{addr} ({code} {err})' for addr, (code, err) in refused.items()
+                f'{addr} ({code} {_smtp_response_text(err)})'
+                for addr, (code, err) in refused.items()
             )
             accepted = [addr for addr in recipients if addr not in refused]
             if accepted:
@@ -1871,11 +1911,11 @@ class _IMAPBackend:
                     'partial_sent': True,
                     'accepted': accepted,
                     'refused': [
-                        {'address': addr, 'code': code, 'error': str(err)}
+                        {'address': addr, 'code': code, 'error': _smtp_response_text(err)}
                         for addr, (code, err) in refused.items()
                     ],
                 }
-            _fail(f'Failed to send the email: recipients were rejected ({detail}).')
+            raise _recipient_rejected_error(detail)
         tzinfo = _user_timezone()
         now = datetime.now(tzinfo) if tzinfo is not None else datetime.now().astimezone()
         return {'id': message.get('Message-ID') or '', 'sent_at': now.isoformat()}
@@ -1965,7 +2005,8 @@ def _preview(draft: dict[str, Any]) -> dict[str, Any]:
         'requires_reauth': bool(draft.get('requires_reauth')),
         'reauth_path': _REAUTH_PATH if draft.get('requires_reauth') else '',
         'delivery_unknown': status == 'delivery_unknown',
-        'error_code': ('attachment_error' if draft.get('attachment_error') else status)
+        'error_code': (draft.get('error_code')
+                       or ('attachment_error' if draft.get('attachment_error') else status))
         if status in {'failed', 'partial_sent', 'delivery_unknown'} else '',
         'message_id': draft.get('provider_message_id') or '',
         'accepted_recipients': list(draft.get('accepted_recipients') or []),
@@ -2541,6 +2582,7 @@ class MailToolkit:
                 f'This preview is stale. The draft is now revision {expected_revision}. '
                 'Confirm the latest preview card; do not send from an older card.'
             )
+        draft.pop('error_code', None)
         try:
             _apply_confirm_patch(draft)
             if draft.get('attachment_error'):
@@ -2587,6 +2629,7 @@ class MailToolkit:
             draft['status'] = 'delivery_unknown' if unknown else 'failed'
             draft['revision'] = expected_revision + 1
             draft['last_error'] = _plain_error_text(orig) or 'Failed to send the email.'
+            draft['error_code'] = str(getattr(orig, 'error_code', '') or '').strip()
             if prior_delivery_unknown:
                 draft['last_error'] = f"{_DELIVERY_UNKNOWN_WARNING} {draft['last_error']}"
             draft['requires_reauth'] = 'Re-authorize' in str(orig)
@@ -2618,6 +2661,7 @@ class MailToolkit:
         draft['status'] = 'sent'
         draft['sent_at'] = sent_at
         draft['last_error'] = ''
+        draft.pop('error_code', None)
         draft['pending_recipients'] = []
         draft['accepted_recipients'] = list(dict.fromkeys([*draft.get('accepted_recipients', []), *recipients]))
         draft['requires_reauth'] = False

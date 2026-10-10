@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+	"gorm.io/gorm"
 
 	"lazymind/core/algo"
 	"lazymind/core/common"
@@ -15,6 +16,7 @@ import (
 	skillfs "lazymind/core/skillv2/fs"
 	skillrevision "lazymind/core/skillv2/revision"
 	skillservice "lazymind/core/skillv2/service"
+	"lazymind/core/skillv2/taskguard"
 )
 
 type generateSkillRequest struct {
@@ -173,31 +175,18 @@ func Confirm(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !ensureUserDraftWriteAllowed(w, r, db, userID, skillID) {
+	value, ok := resolveUserDraft(w, r, db, userID, skillID, func(tx *gorm.DB, decision taskguard.SkillOperationDecision) (any, error) {
+		if _, err := newRevisionService(tx).CommitDraft(r.Context(), skillrevision.CommitDraftRequest{
+			SkillID: skillID, UserID: userID, DraftVersion: decision.DraftVersion,
+		}); err != nil {
+			return nil, err
+		}
+		return newSkillService(tx).GetSkill(r.Context(), skillservice.GetSkillRequest{SkillID: skillID, UserID: userID})
+	})
+	if !ok {
 		return
 	}
-	status, err := newRevisionService(db).DraftStatus(r.Context(), skillrevision.DraftStatusRequest{SkillID: skillID, UserID: userID})
-	if err != nil {
-		replyServiceError(w, err)
-		return
-	}
-	if !status.HasUncommittedDraft {
-		replyError(w, "skill draft not found", http.StatusNotFound)
-		return
-	}
-	if _, err := newRevisionService(db).CommitDraft(r.Context(), skillrevision.CommitDraftRequest{
-		SkillID:      skillID,
-		UserID:       userID,
-		DraftVersion: status.DraftVersion,
-	}); err != nil {
-		replyServiceError(w, err)
-		return
-	}
-	detail, err := newSkillService(db).GetSkill(r.Context(), skillservice.GetSkillRequest{SkillID: skillID, UserID: userID})
-	if err != nil {
-		replyServiceError(w, err)
-		return
-	}
+	detail := value.(skillservice.SkillDetail)
 	common.ReplyOK(w, skillDetailDTO(detail))
 }
 
@@ -206,11 +195,10 @@ func Discard(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !ensureUserDraftWriteAllowed(w, r, db, userID, skillID) {
-		return
-	}
-	if _, err := newSkillService(db).DiscardDraft(r.Context(), skillservice.DiscardDraftRequest{SkillID: skillID, UserID: userID}); err != nil {
-		replyServiceError(w, err)
+	_, ok = resolveUserDraft(w, r, db, userID, skillID, func(tx *gorm.DB, _ taskguard.SkillOperationDecision) (any, error) {
+		return newSkillService(tx).DiscardDraft(r.Context(), skillservice.DiscardDraftRequest{SkillID: skillID, UserID: userID})
+	})
+	if !ok {
 		return
 	}
 	common.ReplyOK(w, map[string]any{"discarded": true})

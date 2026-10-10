@@ -61,19 +61,14 @@ def test_light_materializes_metadata_without_changing_body_or_files(monkeypatch)
     assert 'aliases' not in updated.metadata
     assert draft.upsert_skills[0].search_metadata.field == 'coding'
     assert draft.upsert_skills[0].search_metadata.aliases == ['演示']
-    sent = []
-    monkeypatch.setattr(
-        'lazymind.review.service.skill_organize.update_search_metadata', lambda updates: sent.extend(updates),
-    )
     assert updated.metadata['description'] == 'After.'
     files = {'SKILL.md': CONTENT, 'scripts/do.py': 'print(1)\n', 'assets/image.png': b'\xff\x00\xfe'}
     store = _FakeStore({('internal', 'demo'): files})
-    _apply_fs_draft(draft, store, [SOURCE], mode='light')
-    assert store.packages[('internal', 'demo')]['assets/image.png'] == files['assets/image.png']
-    assert store.packages[('internal', 'demo')]['scripts/do.py'] == files['scripts/do.py']
-    assert sent == [dict(
-        skill_key=SOURCE.key, field='coding', tags=['python'], aliases=['演示'], keywords=['script'],
-    )]
+    result = _apply_fs_draft(draft, store, [SOURCE], mode='light')
+    assert result['staged'] is True
+    assert result['upserted_keys'] == [SOURCE.key]
+    assert store.packages[('internal', 'demo')] == files
+    assert not any(call[0] in {'replace_files', 'rename', 'remove'} for call in store.calls)
 
 
 @pytest.mark.parametrize('change', ['body', 'name', 'license', 'delete'])
@@ -132,14 +127,14 @@ def test_service_passes_mode_through_every_stage(monkeypatch):
 
     def materialize(*args, mode):
         recorded.append(('draft', mode))
-        return SkillFsDraft()
+        return SkillFsDraft(), [SkillFsDraft()]
 
     def apply(*args, mode):
         recorded.append(('apply', mode))
         return {}
 
     monkeypatch.setattr(service, 'build_organize_plan', build)
-    monkeypatch.setattr(service, 'materialize_fs_draft', materialize)
+    monkeypatch.setattr(service, 'materialize_organized_draft', materialize)
     monkeypatch.setattr(service, '_apply_fs_draft', apply)
     result = service._run_skill_organize(request, None, taskid='task-1', remote_store=None)
     assert result.success
@@ -156,7 +151,7 @@ def test_apply_validation_failure_is_not_reported_as_invalid_source_package(monk
     monkeypatch.setattr(service, 'write_stage_file', lambda *_: None)
     monkeypatch.setattr(service, '_record_skill_organize_stage_safely', lambda *_: None)
     monkeypatch.setattr(service, 'build_organize_plan', lambda *_args, **_kwargs: plan)
-    monkeypatch.setattr(service, 'materialize_fs_draft', lambda *_args, **_kwargs: SkillFsDraft())
+    monkeypatch.setattr(service, 'materialize_organized_draft', lambda *_args, **_kwargs: (SkillFsDraft(), [SkillFsDraft()]))
     monkeypatch.setattr(service, '_apply_fs_draft', lambda *_args, **_kwargs: (_ for _ in ()).throw(
         ValueError('generated draft is inconsistent'),
     ))
@@ -356,6 +351,56 @@ def test_cancelled_pending_submission_does_not_start_worker(monkeypatch):
     response = asyncio.run(routes.skill_organize(request))
     assert response.status_code == 409
     assert json.loads(response.body)['data']['status'] == 'cancelled'
+
+
+def test_approval_items_keep_merge_and_independent_changes_on_plan_items():
+    from lazymind.review.skill_organize.approval import build_approval_items
+    reading = SourceSkill(key='internal/paper-reading', category='internal', name='paper-reading', content=CONTENT)
+    summary = SourceSkill(
+        key='internal/paper-summary', category='internal', name='paper-summary',
+        content=CONTENT.replace('name: demo', 'name: paper-summary'),
+    )
+    meeting = SourceSkill(
+        key='internal/meeting-notes', category='internal', name='meeting-notes',
+        content=CONTENT.replace('name: demo', 'name: meeting-notes'),
+    )
+    duplicate = SourceSkill(
+        key='internal/paper-copy', category='internal', name='paper-copy',
+        content=CONTENT.replace('name: demo', 'name: paper-copy'),
+    )
+    plan = SkillOrganizePlan(plans=[
+        dict(type='merge', source_keys=[reading.key, summary.key], target_source_key=reading.key,
+             target_name='paper-study', target_description='Merged.',
+             step_handling_policy='merge_and_deduplicate_existing_steps', reason='Overlap'),
+        dict(type='refactor', source_keys=[meeting.key], target_name='meeting-notes',
+             target_description='Clearer.', step_handling_policy='keep_steps', reason='Clarify'),
+        dict(type='delete_duplicate', source_keys=[duplicate.key], reason='Duplicate'),
+    ])
+    merged = CONTENT.replace('name: demo', 'name: paper-study').replace('Before.', 'Merged.')
+    meeting_content = meeting.content.replace('Before.', 'Clearer.')
+    partials = [
+        SkillFsDraft(
+            delete_keys=[summary.key],
+            upsert_skills=[SkillFsDraftItem(source_key=reading.key, target_key='internal/paper-study', content=merged)],
+        ),
+        SkillFsDraft(upsert_skills=[SkillFsDraftItem(
+            source_key=meeting.key, target_key=meeting.key, content=meeting_content,
+        )]),
+        SkillFsDraft(delete_keys=[duplicate.key]),
+    ]
+    items = build_approval_items(plan, partials)
+    assert [item['id'] for item in items] == ['0', '1', '2']
+    assert items[0]['type'] == 'merge'
+    assert items[0]['source_keys'] == [reading.key, summary.key]
+    assert items[0]['target_source_key'] == reading.key
+    assert items[0]['target_name'] == 'paper-study'
+    assert items[0]['delete_keys'] == [summary.key]
+    assert items[0]['depends_on'] == []
+    assert items[1]['type'] == 'refactor'
+    assert items[1]['source_keys'] == [meeting.key]
+    assert items[2]['type'] == 'delete_duplicate'
+    assert items[2]['delete_keys'] == [duplicate.key]
+    assert 'reason' not in items[0]
 
 
 def test_cancel_events_are_user_scoped():

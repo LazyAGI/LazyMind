@@ -22,18 +22,20 @@ const (
 	TriggerSkillReview   SkillOperation = "trigger_skill_review"
 	TriggerSkillOrganize SkillOperation = "trigger_skill_organize"
 	StartUserEdit        SkillOperation = "start_user_edit"
+	ResolveSkillDraft    SkillOperation = "resolve_skill_draft"
 	WriteSkillDraft      SkillOperation = "write_skill_draft"
 	AutoUpdateSkill      SkillOperation = "auto_update_skill"
 )
 
 const (
-	ReasonMaintenanceTaskRunning = "skill_maintenance_task_running"
-	ReasonOrganizeDraftConflict  = "skill_organize_draft_conflict"
-	ReasonDraftOwnedByOtherTask  = "skill_draft_owned_by_another_task"
-	ReasonDraftStillEditing      = "skill_draft_still_editing"
-	ReasonTaskStatusUnavailable  = "skill_task_status_unavailable"
-	ReasonTaskNotRunning         = "skill_task_not_running"
-	ReasonUserManagedDraft       = "skill_user_managed_draft"
+	ReasonMaintenanceTaskRunning   = "skill_maintenance_task_running"
+	ReasonOrganizeDraftConflict    = "skill_organize_draft_conflict"
+	ReasonDraftOwnedByOtherTask    = "skill_draft_owned_by_another_task"
+	ReasonDraftStillEditing        = "skill_draft_still_editing"
+	ReasonTaskStatusUnavailable    = "skill_task_status_unavailable"
+	ReasonTaskNotRunning           = "skill_task_not_running"
+	ReasonUserManagedDraft         = "skill_user_managed_draft"
+	ReasonOrganizeApprovalDeferred = "skill_organize_approval_deferred"
 
 	DispositionReject = "reject"
 	DispositionDefer  = "defer"
@@ -184,24 +186,25 @@ func EvaluateSkillOperation(ctx context.Context, db *gorm.DB, stateStore state.S
 		if running != nil {
 			return maintenanceBlockedDecision(req, running), nil
 		}
+		return evaluateUserDraftAccess(ctx, db, stateStore, req)
+
+	case ResolveSkillDraft:
 		draft, err := loadSingleDraftState(ctx, db, req.UserID, req.SkillID)
 		if err != nil {
 			return SkillOperationDecision{}, err
 		}
-		if draft == nil || draft.EntryCount == 0 || strings.TrimSpace(draft.TaskID) == "" {
-			return allowedDecision(), nil
+		if running != nil && running.Type == "skill_organize" {
+			ids, recorded, err := organizeScopeSkillIDs(ctx, db, req.UserID, running)
+			if err != nil {
+				return unavailableDecision(req, "无法确认整理任务范围"), err
+			}
+			if !recorded || containsSkillID(ids, req.SkillID) {
+				return blockedDecision(req, ReasonOrganizeApprovalDeferred, "整理任务完成后才能审批本次范围内的 Skill", nil, running), nil
+			}
+		} else if running != nil {
+			return maintenanceBlockedDecision(req, running), nil
 		}
-		if isMaintenanceTaskID(draft.TaskID) {
-			return allowedDecision(), nil
-		}
-		active, err := isConversationActiveByTaskID(ctx, stateStore, draft.TaskID)
-		if err != nil {
-			return unavailableDecision(req, "无法确认 Skill Editor 是否仍在编辑"), err
-		}
-		if active {
-			return blockedDecision(req, ReasonDraftStillEditing, "Skill Editor 正在编辑该草稿", nil, nil), nil
-		}
-		return allowedDecision(), nil
+		return evaluateLoadedUserDraftAccess(ctx, stateStore, req, draft)
 
 	case WriteSkillDraft:
 		if req.SkillID == "" || req.TaskID == "" {
@@ -275,6 +278,77 @@ func EvaluateSkillOperation(ctx context.Context, db *gorm.DB, stateStore state.S
 	default:
 		return SkillOperationDecision{}, fmt.Errorf("unsupported skill operation %q", req.Operation)
 	}
+}
+
+func evaluateUserDraftAccess(ctx context.Context, db *gorm.DB, stateStore state.Store, req SkillOperationRequest) (SkillOperationDecision, error) {
+	draft, err := loadSingleDraftState(ctx, db, req.UserID, req.SkillID)
+	if err != nil {
+		return SkillOperationDecision{}, err
+	}
+	return evaluateLoadedUserDraftAccess(ctx, stateStore, req, draft)
+}
+
+func evaluateLoadedUserDraftAccess(ctx context.Context, stateStore state.Store, req SkillOperationRequest, draft *draftState) (SkillOperationDecision, error) {
+	if draft == nil || draft.EntryCount == 0 || strings.TrimSpace(draft.TaskID) == "" {
+		return allowedDraftDecision(draft), nil
+	}
+	if isMaintenanceTaskID(draft.TaskID) {
+		return allowedDraftDecision(draft), nil
+	}
+	active, err := isConversationActiveByTaskID(ctx, stateStore, draft.TaskID)
+	if err != nil {
+		return unavailableDecision(req, "无法确认 Skill Editor 是否仍在编辑"), err
+	}
+	if active {
+		return blockedDecision(req, ReasonDraftStillEditing, "Skill Editor 正在编辑该草稿", nil, nil), nil
+	}
+	return allowedDraftDecision(draft), nil
+}
+
+func organizeScopeSkillIDs(ctx context.Context, db *gorm.DB, userID string, running *RunningSkillTask) ([]string, bool, error) {
+	if running == nil || db == nil || !db.Migrator().HasTable(&orm.ResourceUpdateTask{}) {
+		return nil, false, nil
+	}
+	requestID := firstNonEmpty(running.RequestID, running.ID)
+	var task orm.ResourceUpdateTask
+	err := db.WithContext(ctx).
+		Where("user_id = ? AND task_type = ? AND status IN ? AND (trigger_id = ? OR result_id = ? OR result_id = ?)",
+			userID,
+			orm.ResourceUpdateTaskTypeOrganizeSkill,
+			[]string{orm.ResourceUpdateTaskStatusPending, orm.ResourceUpdateTaskStatusRunning},
+			"skill_organize:"+userID+":"+requestID,
+			running.ID,
+			requestID,
+		).
+		Take(&task).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	var payload struct {
+		SkillIDs []string `json:"skill_ids"`
+	}
+	if len(task.RequestJSON) > 0 {
+		if err := json.Unmarshal(task.RequestJSON, &payload); err != nil {
+			return nil, false, err
+		}
+	}
+	if payload.SkillIDs == nil {
+		return nil, false, nil
+	}
+	return payload.SkillIDs, true, nil
+}
+
+func containsSkillID(ids []string, skillID string) bool {
+	skillID = strings.TrimSpace(skillID)
+	for _, id := range ids {
+		if strings.TrimSpace(id) == skillID {
+			return true
+		}
+	}
+	return false
 }
 
 func findRunningSkillMaintenanceTask(ctx context.Context, db *gorm.DB, userID string) (*RunningSkillTask, error) {
