@@ -130,11 +130,13 @@ class _Turn:
         config = await self._run_config()
         context, base_observation, projection = await self._observe()
         try:
-            plan = await asyncio.to_thread(
-                planner.plan_next_turn,
-                context,
-                config.get('llm_config') if isinstance(config, Mapping) else {},
-            )
+            plan = planner.plan_resume_turn(context)
+            if plan is None:
+                plan = await asyncio.to_thread(
+                    planner.plan_next_turn,
+                    context,
+                    config.get('llm_config') if isinstance(config, Mapping) else {},
+                )
         except planner.StructuredPlanError as exc:
             return self._finish(
                 'needs_input',

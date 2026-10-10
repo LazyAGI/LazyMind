@@ -52,6 +52,143 @@ GATES = {}
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('mode', ['interactive', 'auto'])
+@pytest.mark.parametrize('text', ['继续', ' 恢复执行！ ', 'RESUME'])
+async def test_paused_message_resumes_without_model_and_replays(tmp_path, monkeypatch, mode, text):
+    from evo.message_intent import planner
+
+    def unavailable(*args):
+        raise AssertionError('an explicit resume must not require the model')
+
+    monkeypatch.setattr(planner, 'plan_next_turn', unavailable)
+    flow_definition = FlowDefinition((blocked,), (FlowStage('dataset', ArtifactKey.scalar('result')),))
+    service = await EvoService.open(tmp_path, flow_definition)
+    release = asyncio.Event()
+    release.set()
+    try:
+        payload = request()
+        payload['mode'] = mode
+        thread_id = (await service.create_thread(payload))['thread_id']
+        entered, cancelled = asyncio.Event(), asyncio.Event()
+        GATES[thread_id] = (entered, cancelled, release)
+        await service.start(thread_id, {})
+        await asyncio.wait_for(entered.wait(), 2)
+        await service.pause(thread_id, {})
+        await service.close()
+        service = await EvoService.open(tmp_path, flow_definition)
+        entered.clear()
+        resumes = []
+        original = service.flow.resume
+
+        async def resume(run_id):
+            resumes.append(run_id)
+            return await original(run_id)
+
+        monkeypatch.setattr(service.flow, 'resume', resume)
+        message = MessageRequest(message_id='resume-once', text=text)
+        result = await service.message(thread_id, message)
+        await asyncio.wait_for(entered.wait(), 2)
+        assert result.turn_decision == 'action_executed'
+        assert result.action_receipt_ref is not None
+        assert (await service.public_thread(thread_id))['runtime_status'] == 'running'
+        assert await service.message(thread_id, message) == result
+        assert resumes == [thread_id]
+        assert len((await service.message_history(thread_id, 10, ''))['items']) == 1
+        if mode == 'auto':
+            assert thread_id in service._auto_tasks
+    finally:
+        release.set()
+        await service.close()
+        GATES.clear()
+
+
+@pytest.mark.parametrize('status', ['created', 'running', 'pausing', 'cancelling', 'cancelled', 'failed', 'completed'])
+def test_resume_shortcut_requires_runtime_pause(status):
+    from evo.message_intent.planner import plan_resume_turn
+
+    assert plan_resume_turn({
+        'origin': 'user', 'user_text': '继续',
+        'flow_snapshot': {'status': 'awaiting_approval', 'runtime': {'status': status}},
+    }) is None
+
+
+@pytest.mark.parametrize('origin,text,pending', [
+    ('auto', '继续', False),
+    ('user', '继续', True),
+    ('user', '继续，先把样本数改成 20', False),
+    ('user', '不要继续', False),
+    ('user', '为什么不能继续？', False),
+])
+def test_resume_shortcut_keeps_confirmation_and_other_intents(origin, text, pending):
+    from evo.message_intent.planner import plan_resume_turn
+
+    assert plan_resume_turn({
+        'origin': origin, 'user_text': text,
+        'projection': {'has_pending_confirmation': pending},
+        'flow_snapshot': {'runtime': {'status': 'paused'}},
+    }) is None
+
+
+def test_resume_shortcut_preserves_agenda_and_does_not_approve_stage():
+    from evo.message_intent.planner import plan_resume_turn
+
+    plan = plan_resume_turn({
+        'origin': 'user', 'user_text': '继续',
+        'projection': {'active_agenda': ['检查评测结果']},
+        'flow_snapshot': {'runtime': {'status': 'paused'}, 'pending_stage_approval': 'dataset'},
+    })
+    assert plan.active_agenda == ['检查评测结果']
+    assert plan.next_action.command == 'resume'
+    assert plan.next_action.stage == ''
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('accept', ['application/json', 'text/event-stream'])
+async def test_paused_resume_message_api_without_model(tmp_path, monkeypatch, accept):
+    from httpx import ASGITransport, AsyncClient
+    from evo.message_intent import planner
+    from evo.service.api import create_app
+
+    def unavailable(*args):
+        raise AssertionError('resume API must not call the model')
+
+    monkeypatch.setattr(planner, 'plan_next_turn', unavailable)
+    flow_definition = FlowDefinition((blocked,), (FlowStage('dataset', ArtifactKey.scalar('result')),))
+    service = await EvoService.open(tmp_path, flow_definition)
+    release = asyncio.Event()
+    release.set()
+    try:
+        thread_id = (await service.create_thread(request()))['thread_id']
+        entered, cancelled = asyncio.Event(), asyncio.Event()
+        GATES[thread_id] = (entered, cancelled, release)
+        await service.start(thread_id, {})
+        await asyncio.wait_for(entered.wait(), 2)
+        app = create_app(tmp_path)
+        app.state.service = service
+        async with AsyncClient(transport=ASGITransport(app=app), base_url='http://evo.test') as client:
+            paused = await client.post(f'/threads/{thread_id}/pause', json={})
+            assert paused.status_code == 200
+            entered.clear()
+            response = await client.post(
+                f'/threads/{thread_id}/messages',
+                json={'message_id': 'api-resume', 'text': '继续'},
+                headers={'Accept': accept},
+            )
+            assert response.status_code == 200
+            assert 'action_submitted' in response.text
+            if accept == 'text/event-stream':
+                assert 'event: action_receipt' in response.text
+                assert '[DONE]' in response.text
+            await asyncio.wait_for(entered.wait(), 2)
+            state = await client.get(f'/threads/{thread_id}')
+            assert state.json()['runtime_status'] == 'running'
+    finally:
+        release.set()
+        await service.close()
+        GATES.clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mode', ['interactive', 'auto'])
 async def test_explicit_pause_survives_auto_driver_and_reopen_until_resume(tmp_path, mode):
     flow_definition = FlowDefinition((blocked,), (FlowStage('dataset', ArtifactKey.scalar('result')),))
     service = await EvoService.open(tmp_path, flow_definition)
