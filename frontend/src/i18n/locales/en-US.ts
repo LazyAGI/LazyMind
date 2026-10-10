@@ -2188,9 +2188,9 @@ const enUS = {
       "concise": "Shorter",
       "fluent": "More fluent",
       "formal": "More formal",
-      "conciseInstruction": "Preserve the original meaning, key information, and structure. Remove repetition, redundant modifiers, and unnecessary lead-ins; tighten wordy sentences to make the writing concise, precise, and direct. Retain necessary qualifications and do not add facts or opinions.",
-      "fluentInstruction": "Preserve the original meaning, details, and tone. Improve sentence flow, word order, transitions, and word choice; resolve awkward or ambiguous phrasing to make the writing coherent, natural, and easy to read. Keep the existing structure and do not add facts or opinions.",
-      "formalInstruction": "Preserve the original meaning, key information, and structure. Replace casual or imprecise phrasing with formal, professional, and objective language. Use consistent terminology, clarify references, and avoid exaggeration or empty phrases. Do not change the original position or add facts or opinions.",
+      "conciseInstruction": "Make the writing concise while preserving its meaning and essential information.",
+      "fluentInstruction": "Make the writing natural and fluent while preserving its meaning.",
+      "formalInstruction": "Use formal, professional written language while preserving the original meaning.",
 
       "math": "formula",
       "mermaid": "diagram",
