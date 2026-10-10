@@ -117,29 +117,103 @@ Research methods, writing processes, and domain standards can be managed as Skil
 
 The PPT Workflow carries a presentation request through research, outline approval, slide generation, review, and export. It can use the user's prompt, uploaded files, LazyMind knowledge bases, web search results, and AI-generated images as source material, and it produces speaker notes for each slide.
 
-After generation, users can reorder or remove slides and select text or elements for natural-language content and style changes. Results can be exported as PDF, image-based PPTX, or editable PPTX containing text, shapes, images, and charts.
+Intermediate results, including collected materials and the outline, remain visible and editable throughout generation. After generation, users can drag the left thumbnails to reorder slides, remove slides and select text or elements for natural-language content and style changes. Results can be exported as PDF, image-based PPTX, or editable PPTX containing text, shapes, images, and charts.
 
-> **Image placeholder: end-to-end PPT Workflow.** Use one 16:9 screenshot showing the execution stages on the left, a real slide preview in the center, and the outline or source-material panel on the right. The stages should visibly cover research, outline, generation, review, and export.
+<table>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/ppt-workflow-overview-en.png"><img src="docs/assets/ppt-workflow-overview-en.png" alt="Gather material from the web, generate slides, and drag the left thumbnails to reorder pages" width="100%" /></a>
+      <br /><sub>Gather material from the web, generate slides, and drag the left thumbnails to reorder pages</sub>
+    </td>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/ppt-workflow-outline-en.png"><img src="docs/assets/ppt-workflow-outline-en.png" alt="Inspect and edit intermediate results, including the outline, throughout generation" width="100%" /></a>
+      <br /><sub>Inspect and edit intermediate results, including the outline, throughout generation</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/ppt-workflow-edit-en.png"><img src="docs/assets/ppt-workflow-edit-en.png" alt="Select slide content and describe changes in natural language" width="100%" /></a>
+      <br /><sub>Select slide content and describe changes in natural language</sub>
+    </td>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/ppt-workflow-export-en.png"><img src="docs/assets/ppt-workflow-export-en.png" alt="Export as PDF, image-based PPTX, or editable PPTX" width="100%" /></a>
+      <br /><sub>Export as PDF, image-based PPTX, or editable PPTX</sub>
+    </td>
+  </tr>
+</table>
 
 ### 5. Discover ready-to-run scenarios in the Capability Center
 
 The Capability Center brings quick chat, complex tasks, and curated examples into one entry point. Users can filter by scenario, capability type, and technical tags; inspect the description, workflow, example input, and interactive result; then launch the capability in Chat or Work. Curated entries are backed by runnable Skills and installed on demand when first used.
 
-> **Image placeholder: Capability Center home and detail view.** Show category filters, at least six curated capability cards, and one detail view with a real result preview and a visible “Try it” action. The image should make clear that these are runnable capabilities rather than static examples.
+<table>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/capability-center-browse-en.png"><img src="docs/assets/capability-center-browse-en.png" alt="Search and filter ready-to-run capabilities by scenario and goal" width="100%" /></a>
+      <br /><sub>Search and filter ready-to-run capabilities by scenario and goal</sub>
+    </td>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/capability-center-example-en.png"><img src="docs/assets/capability-center-example-en.png" alt="Explore an example’s execution steps and output, then select Try it" width="100%" /></a>
+      <br /><sub>Explore an example’s execution steps and output, then select Try it</sub>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center" valign="top">
+      <a href="docs/assets/capability-center-template-en.png"><img src="docs/assets/capability-center-template-en.png" alt="Load the example’s task template, add your own requirements and references, and start" width="100%" /></a>
+      <br /><sub>Load the example’s task template, add your own requirements and references, and start</sub>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center" valign="top">
+      <a href="docs/assets/capability-center-result-en.png"><img src="docs/assets/capability-center-result-en.png" alt="Follow execution and compare the reference image with generated stickers and downloadable outputs" width="100%" /></a>
+      <br /><sub>Follow execution and compare the reference image with generated stickers and downloadable outputs</sub>
+    </td>
+  </tr>
+</table>
 
-### 6. Read, question, and revise directly inside documents
+### 6. Read and ask questions directly inside documents
 
 The document preview supports conversations scoped to the current document and can cite PDF selections, knowledge chunks, or partial chunk content. Temporary document conversations stay out of normal chat history unless the user chooses to promote and save them.
 
-Selections in chat answers and Writer documents can be revised by AI at the smallest relevant scope. Users review the diff, accept or reject the result, and follow citations back to the original document.
-
-> **Image placeholder: document chat and local revision pair.** Use two side-by-side screenshots: a PDF selection entering a document-scoped conversation with citations, and an AI revision diff with visible Accept and Reject actions.
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/document-chat-selection-en.png"><img src="docs/assets/document-chat-selection-en.png" alt="Select text in a PDF and ask a question in the document conversation" width="100%" /></a>
+      <br /><sub>Select text in a PDF and ask a question in the document conversation</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/document-chat-answer-en.png"><img src="docs/assets/document-chat-answer-en.png" alt="Read the answer alongside the PDF and save the conversation to Chat when needed" width="100%" /></a>
+      <br /><sub>Read the answer alongside the PDF and save the conversation to Chat when needed</sub>
+    </td>
+  </tr>
+</table>
 
 ### 7. Give external agents the same knowledge and capabilities
 
 LazyMind can discover local projects and native task histories from Codex, Cursor, WorkBuddy, TRAE Work, DeepSeek Harness, and other agents, then create, continue, and inspect their work in one workspace. Through MCP, external agents can also use LazyMind Workflows, Skills, knowledge bases, and cloud documents without rebuilding the same task context.
 
-> **Image placeholder: external-agent collaboration.** Show a Codex or Cursor task discovered and continued inside LazyMind, including project or session selection, execution status, tool steps, and a final artifact. Avoid using only a Settings connection screen.
+<table>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/external-agent-codex-control-en.png"><img src="docs/assets/external-agent-codex-control-en.png" alt="Codex controls LazyMind to generate images and displays the workflow result" width="100%" /></a>
+      <br /><sub>Codex controls LazyMind to generate images and displays the workflow result</sub>
+    </td>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/external-agent-codex-workflow-en.png"><img src="docs/assets/external-agent-codex-workflow-en.png" alt="Codex follows a LazyMind Workflow to generate and return an image artifact" width="100%" /></a>
+      <br /><sub>Codex follows a LazyMind Workflow to generate and return an image artifact</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/external-agent-codex-embedded-en.png"><img src="docs/assets/external-agent-codex-embedded-en.png" alt="Open an embedded LazyMind Workflow in Codex to inspect and review intermediate results" width="100%" /></a>
+      <br /><sub>Open an embedded LazyMind Workflow in Codex to inspect and review intermediate results</sub>
+    </td>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/external-agent-dsh-embedded-en.png"><img src="docs/assets/external-agent-dsh-embedded-en.png" alt="Display a LazyMind Workflow in DeepSeek Harness to review slides and speaker notes" width="100%" /></a>
+      <br /><sub>Display a LazyMind Workflow in DeepSeek Harness to review slides and speaker notes</sub>
+    </td>
+  </tr>
+</table>
 
 ### 8. Improve only after evidence
 
@@ -161,6 +235,19 @@ Knowledge Ops captures what the user wants—preferences, terminology, experienc
 ### 9. Start local, scale when collaboration requires it
 
 Desktop Mode uses native processes, SQLite, and Milvus Lite with platform-standard data paths. Shared deployments add Kong, JWT/RBAC, Core ACL, external Milvus/OpenSearch, and on-premises OCR. Your workflow stays recognizable across both modes.
+
+<table>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/deployment-local-vscode.png"><img src="docs/assets/deployment-local-vscode.png" alt="Local runtime: SQLite databases and state storage, with services bound to localhost" width="100%" /></a>
+      <br /><sub>Local runtime: SQLite databases and state storage, with services bound to localhost</sub>
+    </td>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/deployment-compose-vscode.png"><img src="docs/assets/deployment-compose-vscode.png" alt="Container deployment: Kong with RBAC, an authentication service, and persistent PostgreSQL storage" width="100%" /></a>
+      <br /><sub>Container deployment: Kong with RBAC, an authentication service, and persistent PostgreSQL storage</sub>
+    </td>
+  </tr>
+</table>
 
 ---
 
@@ -249,7 +336,7 @@ See the [Colima setup guide](docs/quick_start.md#macos-use-colima-instead-of-doc
 |------|----------------------|
 | Knowledge base | Multiple sources, OCR, vectorization, hybrid retrieval, reranking, sync management |
 | Agents | RAG chat, tool calls, subtask timeline, artifacts, task center, long-context compression |
-| Content creation | AI Writer, PPT Workflow, AI Image, local revision, multi-format export |
+| Content creation | AI Writer, PPT Workflow, AI Image, multi-format export |
 | Workflows | State machines, dynamic routing, automatic review, retry/rewind, visual execution, versioned artifacts |
 | Skills | Installation, organization, review, revisions, rollback, Skill → Workflow |
 | Capability Center | Curated Skills, scenario categories, interactive demos, on-demand installation |

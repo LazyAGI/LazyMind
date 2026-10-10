@@ -119,29 +119,103 @@ flowchart LR
 
 PPT Workflow 可以把一个演示需求推进到资料收集、大纲确认、幻灯片生成、审核修改和最终导出。它能够使用用户输入、上传文件、LazyMind 知识库、Web 搜索结果和 AI 配图作为素材，并为每一页生成对应演讲稿。
 
-生成后可以拖拽调整页面顺序、批量移动或删除页面，也可以选中页面中的文字或元素，用自然语言修改内容与局部样式。最终成果支持 PDF、图片版 PPTX，以及包含文字、图形、图片和图表的可编辑 PPTX。
+资料收集、大纲等中间结果在生成过程中可见、可改。生成后可以拖拽左侧缩略图调整页面顺序、批量移动或删除页面，也可以选中页面中的文字或元素，用自然语言修改内容与局部样式。最终成果支持 PDF、图片版 PPTX，以及包含文字、图形、图片和图表的可编辑 PPTX。
 
-> **图片占位：PPT Workflow 全流程截图。** 建议使用一张 16:9 横图，同时展示左侧执行步骤、中间幻灯片预览和右侧大纲/素材区域；画面中应能看到“资料收集 → 大纲 → 生成 → 审核 → 导出”的阶段，以及一个可编辑的实际页面。
+<table>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/ppt-workflow-overview.jpg"><img src="docs/assets/ppt-workflow-overview.jpg" alt="联网搜集素材并生成幻灯片，拖拽左侧缩略图即可调整页序" width="100%" /></a>
+      <br /><sub>联网搜集素材并生成幻灯片，拖拽左侧缩略图即可调整页序</sub>
+    </td>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/ppt-workflow-outline.jpg"><img src="docs/assets/ppt-workflow-outline.jpg" alt="生成过程中的大纲等中间结果可见、可改" width="100%" /></a>
+      <br /><sub>生成过程中的大纲等中间结果可见、可改</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/ppt-workflow-edit.jpg"><img src="docs/assets/ppt-workflow-edit.jpg" alt="选中幻灯片内容，用自然语言直接描述修改要求" width="100%" /></a>
+      <br /><sub>选中幻灯片内容，用自然语言直接描述修改要求</sub>
+    </td>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/ppt-workflow-export.jpg"><img src="docs/assets/ppt-workflow-export.jpg" alt="支持 PDF、图片版 PPTX、可编辑 PPTX 三种格式导出" width="100%" /></a>
+      <br /><sub>支持 PDF、图片版 PPTX、可编辑 PPTX 三种格式导出</sub>
+    </td>
+  </tr>
+</table>
 
 ### 5. 从能力中心发现开箱即用的场景
 
 能力中心把快速问答、复杂任务和精选案例组织在统一入口中。用户可以按场景、能力类型和技术标签筛选，查看能力介绍、工作流程、示例输入与交互式结果，再通过“试一试”进入对应 Chat 或 Work。精选能力与真实可运行的 Skill 绑定，并在首次使用时按需安装。
 
-> **图片占位：能力中心首页截图。** 建议展示分类筛选、至少 6 个精选能力卡片和一个带实际结果预览的能力详情；需要让读者看出这些不是静态案例，而是可以直接“试一试”的可运行能力。
+<table>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/capability-center-browse.png"><img src="docs/assets/capability-center-browse.png" alt="按场景和目标搜索、筛选开箱即用的能力" width="100%" /></a>
+      <br /><sub>按场景和目标搜索、筛选开箱即用的能力</sub>
+    </td>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/capability-center-example.png"><img src="docs/assets/capability-center-example.png" alt="查看案例执行步骤与结果预览，点击“试一试”开始使用" width="100%" /></a>
+      <br /><sub>查看案例执行步骤与结果预览，点击“试一试”开始使用</sub>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center" valign="top">
+      <a href="docs/assets/capability-center-template.png"><img src="docs/assets/capability-center-template.png" alt="一键载入案例任务模板，补充自己的需求与参考素材后即可发起任务" width="100%" /></a>
+      <br /><sub>一键载入案例任务模板，补充自己的需求与参考素材后即可发起任务</sub>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center" valign="top">
+      <a href="docs/assets/capability-center-result.png"><img src="docs/assets/capability-center-result.png" alt="查看任务执行过程，对照参考图预览生成的表情包，并下载产物" width="100%" /></a>
+      <br /><sub>查看任务执行过程，对照参考图预览生成的表情包，并下载产物</sub>
+    </td>
+  </tr>
+</table>
 
-### 6. 在文档中直接阅读、追问和修改
+### 6. 在文档中直接阅读和追问
 
 知识库文档预览页支持围绕当前文档进行对话，并可引用 PDF 选区、知识切片或切片中的部分内容。临时会话不会污染普通聊天历史，也可以在需要时转为正式会话继续保存。
 
-聊天回答和 Writer 文稿中的选区可以交给 AI 做最小范围修改，并通过 Diff 查看变化、接受或拒绝结果。引用保留来源信息，便于从回答回到原始文档。
-
-> **图片占位：文档对话与局部修改组合图。** 建议左右两张：左侧为 PDF 选区进入当前文档对话并显示引用；右侧为选中文字后的 AI 修改 Diff，包含“接受”和“拒绝”操作。
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/document-chat-selection.png"><img src="docs/assets/document-chat-selection.png" alt="选中 PDF 文本，在当前文档对话中发起提问" width="100%" /></a>
+      <br /><sub>选中 PDF 文本，在当前文档对话中发起提问</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/document-chat-answer.png"><img src="docs/assets/document-chat-answer.png" alt="对照 PDF 阅读回答，并按需将临时对话保存到 Chat" width="100%" /></a>
+      <br /><sub>对照 PDF 阅读回答，并按需将临时对话保存到 Chat</sub>
+    </td>
+  </tr>
+</table>
 
 ### 7. 让外部 Agent 使用同一套知识与能力
 
 LazyMind 可以发现 Codex、Cursor、WorkBuddy、TRAE Work、DeepSeek Harness 等外部 Agent 的本地项目和历史任务，并在统一工作台中创建、继续和查看执行过程。外部 Agent 还可以通过 MCP 使用 LazyMind 的 Workflow、Skills、知识库和云文档，而无需重复搭建任务材料。
 
-> **图片占位：外部 Agent 协作截图。** 建议展示一个 Codex 或 Cursor 任务在 LazyMind 中被发现并继续执行，画面同时包含项目/会话选择、执行状态、工具步骤和最终产物；避免只截设置页的连接开关。
+<table>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/external-agent-codex-control.png"><img src="docs/assets/external-agent-codex-control.png" alt="Codex 控制 LazyMind 生成图片，并展示工作流结果" width="100%" /></a>
+      <br /><sub>Codex 控制 LazyMind 生成图片，并展示工作流结果</sub>
+    </td>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/external-agent-codex-workflow.png"><img src="docs/assets/external-agent-codex-workflow.png" alt="Codex 使用 LazyMind Workflow 完成图片生成与产物交付" width="100%" /></a>
+      <br /><sub>Codex 使用 LazyMind Workflow 完成图片生成与产物交付</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/external-agent-codex-embedded.jpg"><img src="docs/assets/external-agent-codex-embedded.jpg" alt="在 Codex 中内嵌 LazyMind Workflow，查看并审阅中间结果" width="100%" /></a>
+      <br /><sub>在 Codex 中内嵌 LazyMind Workflow，查看并审阅中间结果</sub>
+    </td>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/external-agent-dsh-embedded.png"><img src="docs/assets/external-agent-dsh-embedded.png" alt="在 DeepSeek Harness 中展示 LazyMind Workflow，审阅幻灯片与演讲稿" width="100%" /></a>
+      <br /><sub>在 DeepSeek Harness 中展示 LazyMind Workflow，审阅幻灯片与演讲稿</sub>
+    </td>
+  </tr>
+</table>
 
 ### 8. 只在证据支持时改进系统
 
@@ -163,6 +237,19 @@ LazyMind 可以发现 Codex、Cursor、WorkBuddy、TRAE Work、DeepSeek Harness 
 ### 9. 从本地开始，在需要协作时扩展
 
 Desktop Mode 使用原生进程、SQLite 和 Milvus Lite，并遵循平台规范管理数据目录；团队部署可以进一步接入 Kong、JWT/RBAC、Core ACL、外部 Milvus/OpenSearch 与私有化 OCR。两种模式保持一致的工作方式。
+
+<table>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/deployment-local-vscode.png"><img src="docs/assets/deployment-local-vscode.png" alt="本地运行：SQLite 数据库与状态存储，服务监听本机地址" width="100%" /></a>
+      <br /><sub>本地运行：SQLite 数据库与状态存储，服务监听本机地址</sub>
+    </td>
+    <td width="50%" align="center" valign="top">
+      <a href="docs/assets/deployment-compose-vscode.png"><img src="docs/assets/deployment-compose-vscode.png" alt="容器部署：Kong 与 RBAC 访问控制、鉴权服务及 PostgreSQL 持久化存储" width="100%" /></a>
+      <br /><sub>容器部署：Kong 与 RBAC 访问控制、鉴权服务及 PostgreSQL 持久化存储</sub>
+    </td>
+  </tr>
+</table>
 
 ---
 
@@ -253,7 +340,7 @@ Docker/Colima 配置见 [Colima 配置说明](docs/quick_start.CN.md#macos使用
 |------|----------|
 | 知识库 | 多数据源、OCR、向量化、混合检索、重排、同步管理 |
 | Agent | RAG 对话、工具调用、子任务时间轴、Artifact、任务中心、长对话压缩 |
-| 内容创作 | AI Writer、PPT Workflow、AI Image、局部修改与多格式导出 |
+| 内容创作 | AI Writer、PPT Workflow、AI Image 与多格式导出 |
 | Workflow | 状态机、动态路由、自动验收、重试/回退、可视化执行、版本化产物 |
 | Skill | 安装、组织、审核、版本、回滚、Skill → Workflow |
 | 能力中心 | 精选 Skills、场景分类、交互式 Demo、按需安装 |
