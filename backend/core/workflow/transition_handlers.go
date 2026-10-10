@@ -629,7 +629,8 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			}
 			req.Operation = resolved
 		}
-		if req.Operation == "retry" || req.Operation == "rewind" {
+		if req.Operation == "retry" || req.Operation == "rewind" ||
+			(req.Operation == "execute" && projection.Nodes[targets[0].TargetStepID].Validity == "stale") {
 			applyRecoveryIntent(session.IntentContext, &targets[0])
 		}
 		var postStepCheckpoint *executor.PostStepCheckpoint
@@ -844,7 +845,7 @@ func sessionIntentText(value string) string {
 }
 
 // applyRecoveryIntent keeps the workflow launch request authoritative when a
-// user retries or rewinds a step. The recovery command is useful execution
+// user retries, rewinds, or re-executes a stale step. The recovery command is useful execution
 // context, but it must not replace {{user_input}} and silently change the task.
 func applyRecoveryIntent(intentContext string, target *transitionTarget) {
 	if target == nil {

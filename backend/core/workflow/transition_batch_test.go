@@ -237,6 +237,70 @@ func TestTransitionUsesWorkflowModeLockedAtSessionCreation(t *testing.T) {
 	}
 }
 
+func TestExecuteStaleStepPreservesLaunchIntent(t *testing.T) {
+	db, graphHash := setupBatchTransitionSession(t)
+	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").
+		Update("intent_context", `{"text":"写一篇克苏鲁小说"}`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSessionStep{
+		ID: "stale-branch-b", SessionID: "batch-session", StepID: "branch_b", Attempt: 1,
+		TaskID: "stale-task-b", Status: StepStatusSucceeded, Validity: "stale",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	w, data := runBatchTransition(t, db, graphHash, "execute", []map[string]any{
+		{"target_step_id": "branch_b", "task_id": "rerun-task-b", "user_input": "回退到大纲，需要包含二级标题"},
+	})
+	if w.Code != http.StatusOK || data["accepted"] != true {
+		t.Fatalf("stale transition rejected: status=%d body=%s", w.Code, w.Body.String())
+	}
+	var task orm.SubAgentTask
+	if err := db.Where("id = ?", "rerun-task-b").First(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	var params map[string]any
+	if err := json.Unmarshal(task.Params, &params); err != nil {
+		t.Fatal(err)
+	}
+	if params["user_input"] != "写一篇克苏鲁小说" {
+		t.Fatalf("user_input=%v, want launch intent", params["user_input"])
+	}
+	if params["retry_hint"] != "Recovery request for this rerun only: 回退到大纲，需要包含二级标题" {
+		t.Fatalf("retry_hint=%v, want current recovery request", params["retry_hint"])
+	}
+}
+
+func TestExecuteFreshStepKeepsCurrentInput(t *testing.T) {
+	db, graphHash := setupBatchTransitionSession(t)
+	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").
+		Update("intent_context", `{"text":"原始请求"}`).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	w, data := runBatchTransition(t, db, graphHash, "execute", []map[string]any{
+		{"target_step_id": "branch_b", "task_id": "fresh-task-b", "user_input": "当前请求"},
+	})
+	if w.Code != http.StatusOK || data["accepted"] != true {
+		t.Fatalf("fresh transition rejected: status=%d body=%s", w.Code, w.Body.String())
+	}
+	var task orm.SubAgentTask
+	if err := db.Where("id = ?", "fresh-task-b").First(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	var params map[string]any
+	if err := json.Unmarshal(task.Params, &params); err != nil {
+		t.Fatal(err)
+	}
+	if params["user_input"] != "当前请求" {
+		t.Fatalf("user_input=%v, want current input", params["user_input"])
+	}
+	if _, exists := params["retry_hint"]; exists {
+		t.Fatalf("fresh execution unexpectedly received retry_hint=%v", params["retry_hint"])
+	}
+}
+
 func TestExternalControllerTransitionQueuesHostedAttemptForBoundConversation(t *testing.T) {
 	db, graphHash := setupBatchTransitionSession(t)
 	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").
