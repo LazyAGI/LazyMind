@@ -787,6 +787,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/skill-recordings/decision", []string{"qa.write"}, skillv2handler.DecideSkillRecording)
 	handleAPI(r, "POST", "/skill_organize", []string{"qa.write"}, skillv2handler.SubmitSkillOrganize)
 	handleAPI(r, "POST", "/skill_organize:cancel", []string{"qa.write"}, skillv2handler.CancelSkillOrganize)
+	handleAPI(r, "GET", "/skill_organize/approvals", []string{"qa.read"}, skillv2handler.ListSkillOrganizeApprovals)
+	handleAPI(r, "POST", "/skill_organize/approvals:resolve", []string{"qa.write"}, skillv2handler.ResolveSkillOrganizeApprovals)
 	handleAPI(r, "GET", "/skills/maintenance-task", []string{"qa.read"}, skillv2handler.MaintenanceTaskStatus)
 	handleAPI(r, "GET", "/skills/tags", []string{"qa.read"}, skillv2handler.ListTags)
 	handleAPI(r, "GET", "/skills/categories", []string{"qa.read"}, skillv2handler.ListCategories)

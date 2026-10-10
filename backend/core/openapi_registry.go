@@ -1591,6 +1591,46 @@ type skillOrganizeOpenAPIResponse struct {
 	TaskID    string `json:"taskid"`
 }
 
+type skillOrganizeApprovalItemOpenAPIResponse struct {
+	ID              string   `json:"id"`
+	Type            string   `json:"type"`
+	Status          string   `json:"status"`
+	SourceKeys      []string `json:"source_keys"`
+	TargetSourceKey string   `json:"target_source_key"`
+	TargetName      string   `json:"target_name"`
+	SourceSkillIDs  []string `json:"source_skill_ids"`
+	TargetSkillID   string   `json:"target_skill_id"`
+	DeleteKeys      []string `json:"delete_keys"`
+	DependsOn       []string `json:"depends_on"`
+	Content         string   `json:"content,omitempty"`
+}
+
+type skillOrganizeApprovalTaskOpenAPIResponse struct {
+	RequestID string                                     `json:"request_id"`
+	Items     []skillOrganizeApprovalItemOpenAPIResponse `json:"items"`
+	Error     string                                     `json:"error,omitempty"`
+}
+
+type skillOrganizeApprovalListOpenAPIResponse struct {
+	Tasks []skillOrganizeApprovalTaskOpenAPIResponse `json:"tasks"`
+}
+
+type skillOrganizeApprovalResolveOpenAPIRequest struct {
+	RequestID string   `json:"request_id"`
+	ItemIDs   []string `json:"item_ids"`
+	Action    string   `json:"action" enum:"accept,reject,revoke"`
+}
+
+type skillOrganizeApprovalResolveItemOpenAPIResponse struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+}
+
+type skillOrganizeApprovalResolveOpenAPIResponse struct {
+	Results []skillOrganizeApprovalResolveItemOpenAPIResponse `json:"results"`
+}
+
 type skillMaintenanceTaskOpenAPIResponse struct {
 	ID        string `json:"id"`
 	RequestID string `json:"request_id"`
@@ -3518,6 +3558,23 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:        []string{"skills"},
 			RequestBody: jsonBodyOf(skillOrganizeOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Skill organize task accepted", skillOrganizeOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/skill_organize/approvals",
+			Summary:     "List completed skill organize approvals",
+			Description: "Returns pending and accepted plan items after the organize task has finished writing. Items from a running task are omitted.",
+			Tags:        []string{"skills"},
+			Responses:   map[int]openAPIResponse{200: resp("Skill organize approvals", skillOrganizeApprovalListOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/skill_organize/approvals:resolve",
+			Summary:     "Accept, reject, or revoke skill organize items",
+			Description: "Applies one plan item at a time. A merge updates the target skill and removes its source skills together. Reject discards a pending item. Revoke restores an accepted item when no later edit exists.",
+			Tags:        []string{"skills"},
+			RequestBody: jsonBodyOf(skillOrganizeApprovalResolveOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Skill organize approval results", skillOrganizeApprovalResolveOpenAPIResponse{})},
 		},
 		{
 			Method:      "GET",

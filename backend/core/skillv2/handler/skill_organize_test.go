@@ -51,7 +51,7 @@ func TestCancelDeepOrganizeRestoresSourcesBetweenMutations(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := noteSkillOrganizeAccepted(ctx, db.DB, task.ID, "org_deep_run", skillOrganizeSubmitRequest{RequestID: "org_deep_cancel", Mode: "deep", Skills: []string{"skills/internal/a", "skills/internal/b"}}); err != nil {
+			if err := noteSkillOrganizeAccepted(ctx, db.DB, task.ID, "org_deep_run", skillOrganizeSubmitRequest{RequestID: "org_deep_cancel", Mode: "deep", Skills: []string{"skills/internal/a", "skills/internal/b"}}, []string{"a", "b"}); err != nil {
 				t.Fatal(err)
 			}
 			testutil.MustCreate(t, db, &orm.SkillReviewStats{ID: "org_deep_run", RequestID: "org_deep_cancel", UserID: "user_001", Status: "organize_apply", StartedAt: "2026-09-29", Summary: `{}`})
@@ -226,7 +226,7 @@ func TestCancelSkillOrganizeReleasesReservationAndFencesLateWrites(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := noteSkillOrganizeAccepted(context.Background(), db.DB, reservation.ID, "org_cancel_run", skillOrganizeSubmitRequest{RequestID: "org_cancel", Skills: []string{"skills/internal/skill1", "skills/internal/skill2"}}); err != nil {
+	if err := noteSkillOrganizeAccepted(context.Background(), db.DB, reservation.ID, "org_cancel_run", skillOrganizeSubmitRequest{RequestID: "org_cancel", Skills: []string{"skills/internal/skill1", "skills/internal/skill2"}}, []string{"skill1", "skill2"}); err != nil {
 		t.Fatal(err)
 	}
 	testutil.MustCreate(t, db, &orm.SkillReviewStats{ID: "org_cancel_run", RequestID: "org_cancel", UserID: "user_001", Status: "organize_plan", StartedAt: "2026-09-29", Summary: `{}`})
@@ -324,7 +324,7 @@ func TestCancelBeforeOrganizeAcceptanceDominatesLateAcknowledgments(t *testing.T
 	}
 	// A late acknowledgment and then a failed submission must not alter the
 	// cancelled request or point it away from its cancellation tombstone.
-	_ = noteSkillOrganizeAccepted(ctx, db.DB, task.ID, "org_early_late", skillOrganizeSubmitRequest{RequestID: "org_early"})
+	_ = noteSkillOrganizeAccepted(ctx, db.DB, task.ID, "org_early_late", skillOrganizeSubmitRequest{RequestID: "org_early"}, nil)
 	_ = finishSkillOrganizeReservation(ctx, db.DB, task.ID, orm.ResourceUpdateTaskStatusFailed, "", fmt.Errorf("late failure"))
 	var row orm.ResourceUpdateTask
 	if err := db.Where("id = ?", task.ID).Take(&row).Error; err != nil {

@@ -31,7 +31,7 @@ class LocalFS:
 
 
 @pytest.mark.parametrize('category', ['internal', 'external', 'search', 'design'])
-def test_light_organizes_existing_categories_and_persists_only_description_and_sidecar(tmp_path, monkeypatch, category):
+def test_light_stages_existing_categories_without_writing_packages(tmp_path, monkeypatch, category):
     key = f'{category}/demo'
     package = tmp_path / category / 'demo'
     package.mkdir(parents=True)
@@ -57,17 +57,16 @@ def test_light_organizes_existing_categories_and_persists_only_description_and_s
     assert metadata_client.load_search_metadata([key])[key]['aliases'] == ['Before alias']
     draft = materialize_fs_draft(plan, sources, None, mode='light')
     result = _apply_fs_draft(draft, store, sources, mode='light')
+    assert result['staged'] is True
     assert result['upserted_keys'] == [key]
     assert sorted(item.relative_to(tmp_path).as_posix() for item in tmp_path.rglob('*') if item.is_file()) == [
         f'{category}/demo/SKILL.md', f'{category}/demo/image.bin',
     ]
     after = parse_skill_document((package / 'SKILL.md').read_text())
     assert after.body == '\nRun `scripts/do.py`.  \n'
-    assert dict(after.metadata) == {'name': 'demo', 'description': 'After.', 'license': 'MIT'}
+    assert dict(after.metadata) == {'name': 'demo', 'description': 'Before.', 'license': 'MIT'}
     assert (package / 'image.bin').read_bytes() == b'\xff\x00\xfe'
-    assert calls[-1] == ('/internal/skills:metadata:update', {
-        'updates': [dict(skill_key=key, field='coding', aliases=['Demo alias'])],
-    })
+    assert calls == [('/internal/skills:metadata', {'skill_keys': [key]})]
 
 
 @pytest.mark.parametrize('category', ['external', 'search', 'design'])

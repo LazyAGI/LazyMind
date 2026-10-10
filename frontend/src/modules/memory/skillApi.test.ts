@@ -6,7 +6,7 @@ vi.mock("@/api/generated/core-client", () => ({
   SkillDraftsApiFactory: () => ({}), SkillFsApiFactory: () => ({}), SkillRevisionsApiFactory: () => ({}), SkillSharesApiFactory: () => ({}), SkillMarketApiFactory: () => ({}), SkillDiffApiFactory: () => ({}),
 }));
 vi.mock("@/components/request", () => ({ axiosInstance: http, BASE_URL: "", localizeErrorCode: vi.fn() }));
-import { buildSkillUpdatePayload, cancelSkillOrganizeTask, getSkillOrganizeTask, listSkillOrganizeTasks, getSkillAssetDetail, listSkillAssetsPage, normalizeSkillCallMode, organizeSkills } from "./skillApi";
+import { buildSkillUpdatePayload, cancelSkillOrganizeTask, getSkillOrganizeTask, listSkillOrganizeApprovals, listSkillOrganizeTasks, getSkillAssetDetail, listSkillAssetsPage, normalizeSkillCallMode, organizeSkills, resolveSkillOrganizeApprovals } from "./skillApi";
 describe("organize cancellation review marker", () => {
   it.each([true, false, undefined])("preserves pending_review=%s from cancellation response", async (pendingReview) => {
     http.post.mockResolvedValue({data: {data: {status: "cancelled", requestid: "r", pending_review: pendingReview}}});
@@ -39,6 +39,13 @@ describe("Skill discovery metadata and calling policy", () => {
     api.apiCoreSkillOrganizePost.mockResolvedValue({ data: { requestid: "r", taskid: "t", status: "pending" } });
     await organizeSkills(["skills/internal/a", "skills/internal/b"], mode);
     expect(api.apiCoreSkillOrganizePost).toHaveBeenCalledWith({ skillOrganizeOpenAPIRequest: { requestid: expect.any(String), skills: ["skills/internal/a", "skills/internal/b"], mode: mode || "light" } }, { silentError: true });
+  });
+  it("loads and resolves organize approval items without flattening plan fields", async () => {
+    http.get.mockResolvedValue({ data: { data: { tasks: [{ request_id: "org", items: [{ id: "0", type: "merge", status: "pending", source_keys: ["a", "b"], target_source_key: "a", target_name: "merged", delete_keys: ["b"], depends_on: [], content: "body" }] }] } } });
+    expect(await listSkillOrganizeApprovals()).toMatchObject([{ requestId: "org", items: [{ id: "0", type: "merge", targetSourceKey: "a", deleteKeys: ["b"], dependsOn: [] }] }]);
+    http.post.mockResolvedValue({ data: { data: { results: [{ id: "0", status: "accepted" }] } } });
+    expect(await resolveSkillOrganizeApprovals("org", ["0"], "accept")).toMatchObject([{ id: "0", status: "accepted" }]);
+    expect(http.post).toHaveBeenCalledWith(expect.stringContaining("/skill_organize/approvals:resolve"), { request_id: "org", item_ids: ["0"], action: "accept" });
   });
 });
 

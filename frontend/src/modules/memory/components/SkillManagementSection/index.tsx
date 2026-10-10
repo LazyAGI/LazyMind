@@ -28,6 +28,7 @@ import SkillAdminPublishModal from "./SkillAdminPublishModal";
 import SkillInstalledView from "./SkillInstalledView";
 import SkillManagementNavigation from "./SkillManagementNavigation";
 import SkillDraftReviewPanel from "./SkillDraftReviewPanel";
+import SkillOrganizeApprovalPanel from "./SkillOrganizeApprovalPanel";
 import { listPendingSkillDrafts } from "./skillDraftReview";
 import { updateSelectedSkillCallModes } from "./skillBatchCallMode";
 import type { SkillCallMode } from "../../skillApi";
@@ -75,6 +76,8 @@ export default function SkillManagementSection() {
   const [batchCallModeLoading, setBatchCallModeLoading] = useState(false);
   const batchCallModeLock = useRef(false);
   const [draftReviewOpen, setDraftReviewOpen] = useState(false);
+  const [organizeApprovalOpen, setOrganizeApprovalOpen] = useState(false);
+  const [organizeApprovalToken, setOrganizeApprovalToken] = useState(0);
   const [draftApplying, setDraftApplying] = useState(false);
   const [pendingDraftCount, setPendingDraftCount] = useState(0);
   const [organizeMode, setOrganizeMode] = useState(false);
@@ -678,6 +681,8 @@ export default function SkillManagementSection() {
         await refreshSkillAssetsRef.current({ page: skillListPageRef.current });
         if (!isCurrent()) return;
         setOrganizeStatus("success");
+        setOrganizeApprovalOpen(true);
+        setOrganizeApprovalToken((token) => token + 1);
       } catch (error) {
         if (!isCurrent()) {
           return;
@@ -1100,6 +1105,17 @@ export default function SkillManagementSection() {
           action={organizeDraftConflict || hasPendingOrganizeDrafts
             ? <Button onClick={() => { cancelSkillOrganize(); setDraftReviewOpen(true); }}>{t("admin.memorySkillDraftReviewTitle")}</Button>
             : undefined}
+        />
+      ) : null}
+
+      {skillView === "installed" ? (
+        <SkillOrganizeApprovalPanel
+          t={t}
+          hiddenRequestId={organizeRunStatus ? organizeRequestIdRef.current : ""}
+          expanded={organizeApprovalOpen}
+          refreshToken={organizeApprovalToken}
+          onExpandedChange={setOrganizeApprovalOpen}
+          onApplied={() => refreshSkillAssetsRef.current({ preserveChangeProposals: true })}
         />
       ) : null}
 

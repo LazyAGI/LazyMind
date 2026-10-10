@@ -30,31 +30,63 @@ def materialize_fs_draft(
     max_workers: int = DEFAULT_MATERIALIZE_WORKERS,
     mode: str = 'light',
 ) -> SkillFsDraft:
+    draft, _partials = materialize_organized_draft(
+        plan, source_skills, llm, max_retries=max_retries, max_workers=max_workers, mode=mode,
+    )
+    return draft
+
+
+def materialize_organized_draft(
+    plan: SkillOrganizePlan,
+    source_skills: list[SourceSkill],
+    llm,
+    *,
+    max_retries: int = 3,
+    max_workers: int = DEFAULT_MATERIALIZE_WORKERS,
+    mode: str = 'light',
+) -> tuple[SkillFsDraft, list[SkillFsDraft]]:
+    """Return the flattened draft and one partial aligned to each plan item."""
     validate_plan(plan, source_skills, mode=mode)
     if mode == 'light':
-        by_key = {item.key: item for item in source_skills}
-        upserts = []
-        for item in plan.plans:
-            if item.type == 'keep':
-                continue
-            source = by_key[item.source_keys[0]]
-            document = require_valid_skill_document(source.content, expected_name=source.name)
-            content = source.content
-            if item.target_description.strip() and item.target_description.strip() != document.metadata['description']:
-                content = document.with_metadata(description=item.target_description.strip()).render()
-            upserts.append(SkillFsDraftItem(
-                source_key=source.key, target_key=source.key, content=content, search_metadata=item.target_metadata,
-            ))
-        draft = SkillFsDraft(upsert_skills=upserts)
-        validate_fs_draft(draft, source_skills, mode=mode)
-        return draft
+        partials = _light_partials(plan, source_skills)
+    else:
+        partials = _deep_partials(
+            plan, source_skills, llm, max_retries=max_retries, max_workers=max_workers,
+        )
+    draft = _flatten_partials(partials)
+    validate_fs_draft(draft, source_skills, mode=mode)
+    return draft, partials
 
-    all_delete_keys: list[str] = []
-    all_upserts = []
+
+def _light_partials(plan: SkillOrganizePlan, source_skills: list[SourceSkill]) -> list[SkillFsDraft]:
+    by_key = {item.key: item for item in source_skills}
+    partials: list[SkillFsDraft] = []
+    for item in plan.plans:
+        if item.type == 'keep':
+            partials.append(SkillFsDraft())
+            continue
+        source = by_key[item.source_keys[0]]
+        document = require_valid_skill_document(source.content, expected_name=source.name)
+        content = source.content
+        if item.target_description.strip() and item.target_description.strip() != document.metadata['description']:
+            content = document.with_metadata(description=item.target_description.strip()).render()
+        partials.append(SkillFsDraft(upsert_skills=[SkillFsDraftItem(
+            source_key=source.key, target_key=source.key, content=content, search_metadata=item.target_metadata,
+        )]))
+    return partials
+
+
+def _deep_partials(
+    plan: SkillOrganizePlan,
+    source_skills: list[SourceSkill],
+    llm,
+    *,
+    max_retries: int,
+    max_workers: int,
+) -> list[SkillFsDraft]:
     by_key = {item.key: item for item in source_skills}
     partials: list[SkillFsDraft | None] = [None] * len(plan.plans)
     errors: list[Exception] = []
-
     with ThreadPoolExecutor(max_workers=max(1, max_workers)) as executor:
         futures = {
             executor.submit(_materialize_plan_item, item, by_key, llm, max_retries=max_retries): (index, item)
@@ -71,7 +103,6 @@ def materialize_fs_draft(
             except Exception as exc:
                 LOG.warning(f'[SkillOrganize] failed to materialize plan item {index} {item.source_keys}: {exc}')
                 errors.append(exc)
-
     if errors:
         error = next(
             (exc for exc in errors if getattr(exc, 'category', '') in ('model_transport', 'model_timeout')),
@@ -81,15 +112,16 @@ def materialize_fs_draft(
             'failed to materialize fs draft: ' + '; '.join(str(exc) for exc in errors),
             category=getattr(error, 'category', 'model_response'),
         ) from error
+    return [item if item is not None else SkillFsDraft() for item in partials]
 
+
+def _flatten_partials(partials: list[SkillFsDraft]) -> SkillFsDraft:
+    delete_keys: list[str] = []
+    upserts: list[SkillFsDraftItem] = []
     for partial in partials:
-        if partial is None:
-            continue
-        all_delete_keys.extend(partial.delete_keys)
-        all_upserts.extend(partial.upsert_skills)
-    draft = SkillFsDraft(delete_keys=all_delete_keys, upsert_skills=all_upserts)
-    validate_fs_draft(draft, source_skills, mode=mode)
-    return draft
+        delete_keys.extend(partial.delete_keys)
+        upserts.extend(partial.upsert_skills)
+    return SkillFsDraft(delete_keys=delete_keys, upsert_skills=upserts)
 
 
 def _materialize_plan_item(

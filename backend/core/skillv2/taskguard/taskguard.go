@@ -28,14 +28,14 @@ const (
 )
 
 const (
-	ReasonMaintenanceTaskRunning = "skill_maintenance_task_running"
-	ReasonOrganizeDraftConflict  = "skill_organize_draft_conflict"
-	ReasonDraftOwnedByOtherTask  = "skill_draft_owned_by_another_task"
-	ReasonDraftStillEditing      = "skill_draft_still_editing"
-	ReasonTaskStatusUnavailable  = "skill_task_status_unavailable"
-	ReasonTaskNotRunning         = "skill_task_not_running"
-	ReasonUserManagedDraft       = "skill_user_managed_draft"
-	DraftStatusResolved          = "resolved"
+	ReasonMaintenanceTaskRunning   = "skill_maintenance_task_running"
+	ReasonOrganizeDraftConflict    = "skill_organize_draft_conflict"
+	ReasonDraftOwnedByOtherTask    = "skill_draft_owned_by_another_task"
+	ReasonDraftStillEditing        = "skill_draft_still_editing"
+	ReasonTaskStatusUnavailable    = "skill_task_status_unavailable"
+	ReasonTaskNotRunning           = "skill_task_not_running"
+	ReasonUserManagedDraft         = "skill_user_managed_draft"
+	ReasonOrganizeApprovalDeferred = "skill_organize_approval_deferred"
 
 	DispositionReject = "reject"
 	DispositionDefer  = "defer"
@@ -76,14 +76,12 @@ type SkillOperationDecision struct {
 	BlockingSkills []string
 	DraftTaskID    string
 	DraftVersion   int64
-	ResolutionTask *RunningSkillTask
 }
 
 type draftState struct {
 	SkillID      string `gorm:"column:skill_id"`
 	RelativeRoot string `gorm:"column:relative_root"`
 	TaskID       string `gorm:"column:task_id"`
-	DraftStatus  string `gorm:"column:draft_status"`
 	Version      int64  `gorm:"column:version"`
 	EntryCount   int64  `gorm:"column:entry_count"`
 }
@@ -195,12 +193,15 @@ func EvaluateSkillOperation(ctx context.Context, db *gorm.DB, stateStore state.S
 		if err != nil {
 			return SkillOperationDecision{}, err
 		}
-		if running != nil {
-			if running.Type == "skill_organize" && draft != nil && draft.EntryCount > 0 && taskMatchesRunning(draft.TaskID, running) {
-				decision := allowedDraftDecision(draft)
-				decision.ResolutionTask = running
-				return decision, nil
+		if running != nil && running.Type == "skill_organize" {
+			ids, recorded, err := organizeScopeSkillIDs(ctx, db, req.UserID, running)
+			if err != nil {
+				return unavailableDecision(req, "无法确认整理任务范围"), err
 			}
+			if !recorded || containsSkillID(ids, req.SkillID) {
+				return blockedDecision(req, ReasonOrganizeApprovalDeferred, "整理任务完成后才能审批本次范围内的 Skill", nil, running), nil
+			}
+		} else if running != nil {
 			return maintenanceBlockedDecision(req, running), nil
 		}
 		return evaluateLoadedUserDraftAccess(ctx, stateStore, req, draft)
@@ -220,9 +221,6 @@ func EvaluateSkillOperation(ctx context.Context, db *gorm.DB, stateStore state.S
 					return maintenanceBlockedDecision(req, running), nil
 				}
 				return blockedDecision(req, ReasonTaskNotRunning, "当前 Skill 任务已不在运行中", nil, nil), nil
-			}
-			if draft != nil && draft.EntryCount == 0 && draft.DraftStatus == DraftStatusResolved && draft.TaskID == req.TaskID {
-				return blockedDecision(req, ReasonDraftOwnedByOtherTask, "草稿已经由用户处理", nil, running), nil
 			}
 			if taskKind(req.TaskID) == "review" {
 				return allowedDecision(), nil
@@ -305,6 +303,52 @@ func evaluateLoadedUserDraftAccess(ctx context.Context, stateStore state.Store, 
 		return blockedDecision(req, ReasonDraftStillEditing, "Skill Editor 正在编辑该草稿", nil, nil), nil
 	}
 	return allowedDraftDecision(draft), nil
+}
+
+func organizeScopeSkillIDs(ctx context.Context, db *gorm.DB, userID string, running *RunningSkillTask) ([]string, bool, error) {
+	if running == nil || db == nil || !db.Migrator().HasTable(&orm.ResourceUpdateTask{}) {
+		return nil, false, nil
+	}
+	requestID := firstNonEmpty(running.RequestID, running.ID)
+	var task orm.ResourceUpdateTask
+	err := db.WithContext(ctx).
+		Where("user_id = ? AND task_type = ? AND status IN ? AND (trigger_id = ? OR result_id = ? OR result_id = ?)",
+			userID,
+			orm.ResourceUpdateTaskTypeOrganizeSkill,
+			[]string{orm.ResourceUpdateTaskStatusPending, orm.ResourceUpdateTaskStatusRunning},
+			"skill_organize:"+userID+":"+requestID,
+			running.ID,
+			requestID,
+		).
+		Take(&task).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	var payload struct {
+		SkillIDs []string `json:"skill_ids"`
+	}
+	if len(task.RequestJSON) > 0 {
+		if err := json.Unmarshal(task.RequestJSON, &payload); err != nil {
+			return nil, false, err
+		}
+	}
+	if payload.SkillIDs == nil {
+		return nil, false, nil
+	}
+	return payload.SkillIDs, true, nil
+}
+
+func containsSkillID(ids []string, skillID string) bool {
+	skillID = strings.TrimSpace(skillID)
+	for _, id := range ids {
+		if strings.TrimSpace(id) == skillID {
+			return true
+		}
+	}
+	return false
 }
 
 func findRunningSkillMaintenanceTask(ctx context.Context, db *gorm.DB, userID string) (*RunningSkillTask, error) {
@@ -403,11 +447,11 @@ func loadDraftStates(ctx context.Context, db *gorm.DB, userID string, skillIDs [
 	var rows []draftState
 	err := db.WithContext(ctx).
 		Table("skills AS s").
-		Select("s.id AS skill_id, s.relative_root, COALESCE(d.task_id, '') AS task_id, COALESCE(d.draft_status, '') AS draft_status, COALESCE(d.version, 0) AS version, COUNT(e.skill_id) AS entry_count").
+		Select("s.id AS skill_id, s.relative_root, COALESCE(d.task_id, '') AS task_id, COALESCE(d.version, 0) AS version, COUNT(e.skill_id) AS entry_count").
 		Joins("LEFT JOIN skill_drafts AS d ON d.skill_id = s.id").
 		Joins("LEFT JOIN skill_draft_entries AS e ON e.skill_id = s.id").
 		Where("s.owner_user_id = ? AND s.deleted_at IS NULL AND s.id IN ?", userID, skillIDs).
-		Group("s.id, s.relative_root, d.task_id, d.draft_status, d.version").
+		Group("s.id, s.relative_root, d.task_id, d.version").
 		Find(&rows).Error
 	if err != nil {
 		return nil, err
