@@ -381,7 +381,7 @@ exit 1
 	}
 	for _, provider := range []string{"codex", "cursor"} {
 		status := statuses[provider]
-		if status.Enabled || !status.Installed || !status.Ready || status.UnavailableReason != "" {
+		if status.Enabled || status.Installed == nil || !*status.Installed || status.Ready == nil || !*status.Ready || status.UnavailableReason != "" {
 			t.Fatalf("%s status=%#v", provider, status)
 		}
 	}
