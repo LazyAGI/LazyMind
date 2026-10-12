@@ -203,6 +203,10 @@ test("macOS and Windows builds materialize locked catalogs before writing the ru
   assert.match(windows, /skills\\\.runtime/);
   assert.match(darwin, /"\$\{ROOT\}\/" "\$\{RUNTIME_ROOT\}\/app\/"/);
   assert.match(windows, /robocopy\.exe \$repoRoot \$appRoot \/MIR/);
+  assert.match(darwin, /RELEASE_BUILD.*true[\s\S]*remove_generated_path "\$\{app_root\}\/algorithm\/lazyllm"/);
+  assert.match(windows, /\$releaseBuild[\s\S]*algorithm\\lazyllm/);
+  assert.match(darwin, /RELEASE_BUILD.*!=.*true[\s\S]*git -C "\$\{ROOT\}" submodule update --init algorithm\/lazyllm/);
+  assert.match(windows, /LAZYMIND_RELEASE_BUILD -ne 'true'[\s\S]*git\.exe.*submodule.*algorithm\/lazyllm/);
   assert.match(darwin, /--exclude "\/history-injection"/);
   assert.match(darwin, /--exclude "lazymind-history-injection\*\.zip"/);
   assert.match(windows, /\$excludedDirs = @\(\s*'node_modules',/);

@@ -86,21 +86,37 @@ def remove_providers(runtime, site):
     return report
 
 
-def verify_source(source):
-    subprocess.run([sys.executable, '-I', '-B', str(Path(__file__).resolve()), '--verify-source', str(source)],
-                   check=True, timeout=90)
+def verify(source=None):
+    args = [sys.executable, '-I', '-B', str(Path(__file__).resolve())]
+    args.extend(['--verify-source', str(source)] if source is not None else ['--verify-installed'])
+    subprocess.run(args, check=True, timeout=90)
 
 
-def smoke(source):
+def select_source(*candidates):
+    if os.environ.get('LAZYMIND_RELEASE_BUILD') == 'true':
+        return None
+    return next((source for source in candidates if (source / 'lazyllm').is_dir()), None)
+
+
+def smoke(source=None):
     class NoSDK(importlib.abc.MetaPathFinder):
         def find_spec(self, fullname, path=None, target=None):
             if fullname.startswith('volcenginesdk'):
                 raise ImportError('Volcengine SDK must not be required by desktop Doubao')
 
     sys.meta_path.insert(0, NoSDK())
-    if not (source / 'lazyllm/module/llms/onlinemodule/supplier/doubao.py').is_file():
-        raise RuntimeError(f'LazyLLM source not found: {source}')
-    sys.path.insert(0, str(source))
+    if source is not None:
+        expected = source / 'lazyllm/module/llms/onlinemodule/supplier/doubao.py'
+        if not expected.is_file():
+            raise RuntimeError(f'LazyLLM source not found: {source}')
+        sys.path.insert(0, str(source))
+    else:
+        installed = importlib.util.find_spec('lazyllm')
+        if installed is None or installed.origin is None:
+            raise RuntimeError('Pip-installed LazyLLM not found')
+        expected = Path(installed.origin).parent / 'module/llms/onlinemodule/supplier/doubao.py'
+        if not expected.is_file():
+            raise RuntimeError(f'Pip-installed LazyLLM is incomplete: {expected}')
     import requests
     from lazyllm.module.llms.onlinemodule.multimodal import OnlineMultiModalModule
     from lazyllm.module.llms.onlinemodule.supplier import doubao
@@ -143,5 +159,8 @@ def smoke(source):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--verify-source', type=Path, required=True)
-    smoke(parser.parse_args().verify_source.resolve())
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--verify-source', type=Path)
+    mode.add_argument('--verify-installed', action='store_true')
+    args = parser.parse_args()
+    smoke(args.verify_source.resolve() if args.verify_source else None)

@@ -120,10 +120,9 @@ def split(runtime, output, base_url=DEFAULT_BASE_URL, slim_providers=False):
                                                      Path(__file__).with_name('desktop-python-profile.py'))
         profile = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(profile)
-        source = runtime / 'app/algorithm/lazyllm'
-        if not source.is_dir():
-            source = Path(__file__).resolve().parents[2] / 'algorithm/lazyllm'
-        profile.verify_source(source)
+        root = Path(__file__).resolve().parents[2]
+        source = profile.select_source(runtime / 'app/algorithm/lazyllm', root / 'algorithm/lazyllm')
+        profile.verify(source)
         profile.remove_providers(runtime, site)
     distributions = {canonicalize_name(d.metadata['Name']): d
                      for d in metadata.distributions(path=[str(site)]) if d.metadata.get('Name')}
