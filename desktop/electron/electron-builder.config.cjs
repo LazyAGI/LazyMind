@@ -203,7 +203,7 @@ async function splitPythonComponents(runtimeRoot) {
       ];
       if (published) componentArgs.push(
         "--catalog", path.resolve(__dirname, "../python-components/darwin-arm64.json"),
-        "--lock", path.resolve(__dirname, "../python-components/darwin-arm64-requirements.lock"),
+        "--lock", process.env.LAZYMIND_PYTHON_COMPONENT_LOCK || path.resolve(__dirname, "../python-components/darwin-arm64-requirements.lock"),
         "--cache", path.resolve(__dirname, "../cache/published-python/darwin-arm64"),
       );
       if (rebuild) componentArgs.push("--slim-providers");

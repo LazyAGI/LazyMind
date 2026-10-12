@@ -549,10 +549,17 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     Invoke-Native 'uv.exe' @('venv', '--managed-python', '--no-python-downloads', '--relocatable', '--seed', '--link-mode', 'copy', '--python', $python, $algorithmVenv)
     $algorithmPython = Join-Path $algorithmVenv 'Scripts\python.exe'
     $lazyLLMVersion = if ($env:LAZYMIND_LAZYLLM_VERSION) { $env:LAZYMIND_LAZYLLM_VERSION } else { (Get-Content -LiteralPath (Join-Path $repoRoot 'LAZYLLM_VERSION') -Raw).Trim() }
+    $effectiveComponentLock = Join-Path $targetRoot 'windows-amd64-requirements.lock'
+    Invoke-Native $python @(
+        (Join-Path $repoRoot 'desktop\scripts\materialize-python-component-lock.py'),
+        (Join-Path $repoRoot 'desktop\python-components\windows-amd64-requirements.lock'),
+        $effectiveComponentLock,
+        $lazyLLMVersion
+    )
     Write-Host '==> Installing the locked Windows algorithm dependencies for a separate RAG ZIP'
     Invoke-NativeWithRetry 'Locked Windows algorithm dependencies' 'uv.exe' @(
         'pip', 'install', '--python', $algorithmPython, '--link-mode', 'copy', '--strict',
-        '-r', (Join-Path $repoRoot 'desktop\python-components\windows-amd64-requirements.lock'),
+        '-r', $effectiveComponentLock,
         '-r', (Join-Path $repoRoot 'algorithm\requirements.txt'),
         '-r', (Join-Path $repoRoot 'algorithm\requirements-local.txt')
     )

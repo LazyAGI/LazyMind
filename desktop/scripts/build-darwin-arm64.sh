@@ -287,8 +287,13 @@ rm -rf "${RUNTIME_ROOT}/deps/python/algorithm"
 "${UV_BIN}" venv --managed-python --no-python-downloads --relocatable --seed --link-mode copy --python "${PYTHON}" "${RUNTIME_ROOT}/deps/python/algorithm"
 if [[ "${TARGET_ARCH}" == "arm64" && "${LAZYMIND_DESKTOP_DEFER_PYTHON:-true}" != "false" ]]; then
   echo "==> Installing frozen dependencies for the published Mac ARM64 RAG component"
+  EFFECTIVE_COMPONENT_LOCK="${BUILD_ROOT}/darwin-arm64-requirements.lock"
+  "${PYTHON}" "${ROOT}/desktop/scripts/materialize-python-component-lock.py" \
+    "${ROOT}/desktop/python-components/darwin-arm64-requirements.lock" \
+    "${EFFECTIVE_COMPONENT_LOCK}" "${LAZYLLM_VERSION}"
+  export LAZYMIND_PYTHON_COMPONENT_LOCK="${EFFECTIVE_COMPONENT_LOCK}"
   "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict \
-    -r "${ROOT}/desktop/python-components/darwin-arm64-requirements.lock" \
+    -r "${EFFECTIVE_COMPONENT_LOCK}" \
     -r "${ROOT}/algorithm/requirements.txt" -r "${ROOT}/algorithm/requirements-local.txt"
   "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" -c "import importlib.metadata as m; assert m.version('lazyllm') == '${LAZYLLM_VERSION}'"
 else
