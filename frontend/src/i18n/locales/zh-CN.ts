@@ -1423,6 +1423,7 @@ const zhCN = {
     requirements: {
       codex_desktop: { ready: "Codex 桌面端已安装", missing: "Codex 桌面端未安装" },
       codex_desktop_initialized: { ready: "Codex 桌面端已完成首次启动", missing: "Codex 桌面端尚未完成首次启动" },
+      codex_cli: { ready: "已找到 Codex CLI", missing: "未找到 Codex CLI，请定位 CLI 或更新 ChatGPT 桌面端" },
       cursor_desktop: { ready: "Cursor 桌面版已安装", missing: "Cursor 桌面版未安装" },
       cursor_desktop_initialized: { ready: "Cursor 桌面版已完成首次启动", missing: "Cursor 桌面版尚未完成首次启动" },
       workbuddy_desktop: { ready: "WorkBuddy 桌面版已安装", missing: "WorkBuddy 桌面版未安装" },

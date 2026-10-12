@@ -166,25 +166,51 @@ func FindBound(configured, environment string, target BindingTarget, names []str
 	return Find(configured, names)
 }
 
-func FindBoundExecutable(configured, environment string, target BindingTarget, names []string) (string, error) {
+func FindBoundExecutable(configured, environment string, target BindingTarget, names []string, excluded ...string) (string, error) {
 	configured, err := configuredExecutable(configured, environment, target)
 	if err != nil {
 		return "", err
 	}
-	return FindExecutable(configured, names)
+	return FindExecutable(configured, names, excluded...)
 }
 
-func FindExecutable(configured string, names []string) (string, error) {
+func FindExecutable(configured string, names []string, excluded ...string) (string, error) {
 	if strings.TrimSpace(configured) != "" {
 		return ResolveExecutable(configured)
 	}
+	resolveCandidate := func(candidate string) string {
+		resolved, err := ResolveExecutable(candidate)
+		if err != nil {
+			return ""
+		}
+		for _, path := range excluded {
+			if path != "" && SameExecutable(resolved, path) {
+				return ""
+			}
+		}
+		return resolved
+	}
 	for _, name := range names {
-		if resolved, err := exec.LookPath(name); err == nil {
-			return ResolveExecutable(resolved)
+		if candidate, err := exec.LookPath(name); err == nil {
+			if resolved := resolveCandidate(candidate); resolved != "" {
+				return resolved, nil
+			}
+		}
+		if len(excluded) > 0 {
+			for _, directory := range filepath.SplitList(os.Getenv("PATH")) {
+				if !filepath.IsAbs(directory) {
+					continue
+				}
+				if candidate, err := exec.LookPath(filepath.Join(directory, name)); err == nil {
+					if resolved := resolveCandidate(candidate); resolved != "" {
+						return resolved, nil
+					}
+				}
+			}
 		}
 	}
 	for _, candidate := range platformExecutableCandidates(names) {
-		if resolved, err := ResolveExecutable(candidate); err == nil {
+		if resolved := resolveCandidate(candidate); resolved != "" {
 			return resolved, nil
 		}
 	}

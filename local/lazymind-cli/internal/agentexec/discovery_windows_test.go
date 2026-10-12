@@ -191,3 +191,34 @@ func TestWindowsDesktopDiscoveryUsesUninstallRegistration(t *testing.T) {
 		t.Fatalf("state=%#v err=%v", state, err)
 	}
 }
+
+func TestWindowsDesktopDiscoveryUsesUninstallerDirectory(t *testing.T) {
+	root := t.TempDir()
+	desktop := filepath.Join(root, "TestApp.exe")
+	uninstaller := filepath.Join(root, "Uninstall.exe")
+	for _, path := range []string{desktop, uninstaller} {
+		if err := os.WriteFile(path, []byte("test"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	displayName := fmt.Sprintf("LazyMind Test Agent %d", time.Now().UnixNano())
+	keyPath := `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\` + displayName
+	key, _, err := registry.CreateKey(registry.CURRENT_USER, keyPath, registry.SET_VALUE)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.DeleteKey(registry.CURRENT_USER, keyPath) })
+	defer key.Close()
+	if err := key.SetStringValue("DisplayName", displayName); err != nil {
+		t.Fatal(err)
+	}
+	if err := key.SetStringValue("UninstallString", `"`+uninstaller+`" /S`); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := FindDesktopApplication(DesktopApplication{
+		ExecutableNames: []string{"TestApp.exe"}, DisplayNames: []string{displayName},
+	})
+	if err != nil || !SameExecutable(resolved, desktop) {
+		t.Fatalf("resolved=%q err=%v, want desktop %q", resolved, err, desktop)
+	}
+}

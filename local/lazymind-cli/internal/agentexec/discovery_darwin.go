@@ -18,7 +18,7 @@ const (
 	darwinShellOutputLimit = 64 << 10
 )
 
-var darwinBundleExecutableDirectories = []string{"MacOS", "Resources"}
+var darwinBundleExecutableDirectories = []string{"Resources/codex-cli/bin", "Resources", "MacOS"}
 
 var darwinShellPathCache struct {
 	sync.Mutex
@@ -31,8 +31,10 @@ func platformExecutableCandidates(names []string) []string {
 	searchPath := effectiveDarwinPath()
 	candidates := make([]string, 0, len(names))
 	for _, name := range names {
-		if path := lookPathInDarwin(name, searchPath); path != "" {
-			candidates = append(candidates, path)
+		for _, directory := range filepath.SplitList(searchPath) {
+			if path := lookPathInDarwin(name, directory); path != "" {
+				candidates = append(candidates, path)
+			}
 		}
 	}
 	return uniqueDarwinPaths(append(candidates, darwinBundleExecutables(names)...))

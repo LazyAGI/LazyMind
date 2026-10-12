@@ -36,6 +36,105 @@ func TestConfiguredCodexDiscoveryDoesNotExecuteBinary(t *testing.T) {
 	}
 }
 
+func TestCodexDiscoveryFindsCLIInsideWindowsDesktopInstallation(t *testing.T) {
+	for _, desktopName := range []string{"ChatGPT.exe", "Codex.exe"} {
+		t.Run(desktopName, func(t *testing.T) {
+			root := t.TempDir()
+			t.Setenv("LAZYMIND_HOME", filepath.Join(root, "state"))
+			t.Setenv("LAZYMIND_CODEX_BIN", "")
+			t.Setenv("LAZYMIND_DESKTOP_APPLICATION_DIRS", t.TempDir())
+			t.Setenv("PATH", "")
+			t.Setenv("SHELL", "/usr/bin/false")
+			desktop := writeExecutable(t, root, desktopName, "desktop launcher")
+			cli := writeExecutable(t, root, filepath.Join("resources", "codex.exe"), "CLI")
+			if _, err := agentexec.SetExecutableBinding(agentexec.CodexDesktop, desktop); err != nil {
+				t.Fatal(err)
+			}
+			resolved, err := findBinary("")
+			if err != nil || !agentexec.SameExecutable(resolved, cli) {
+				t.Fatalf("resolved=%q err=%v, want bundled CLI %q", resolved, err, cli)
+			}
+		})
+	}
+}
+
+func TestCodexDiscoveryPreservesExplicitCLIOverride(t *testing.T) {
+	for _, source := range []string{"argument", "environment", "binding"} {
+		t.Run(source, func(t *testing.T) {
+			root := t.TempDir()
+			t.Setenv("LAZYMIND_HOME", filepath.Join(root, "state"))
+			t.Setenv("LAZYMIND_CODEX_BIN", "")
+			desktop := writeExecutable(t, root, "ChatGPT.exe", "desktop launcher")
+			writeExecutable(t, root, filepath.Join("resources", "codex.exe"), "bundled CLI")
+			if _, err := agentexec.SetExecutableBinding(agentexec.CodexDesktop, desktop); err != nil {
+				t.Fatal(err)
+			}
+			name, body := "custom-codex", "#!/bin/sh\nprintf 'codex 1.0.0\\n'\n"
+			if runtime.GOOS == "windows" {
+				name, body = "custom-codex.cmd", "@echo off\r\necho codex 1.0.0\r\n"
+			}
+			cli := writeExecutable(t, root, name, body)
+			argument := ""
+			switch source {
+			case "argument":
+				argument = cli
+			case "environment":
+				t.Setenv("LAZYMIND_CODEX_BIN", cli)
+			case "binding":
+				if _, err := agentexec.SetExecutableBinding(agentexec.CodexCLI, cli); err != nil {
+					t.Fatal(err)
+				}
+			}
+			resolved, err := findBinary(argument)
+			if err != nil || !agentexec.SameExecutable(resolved, cli) {
+				t.Fatalf("resolved=%q err=%v, want configured CLI %q", resolved, err, cli)
+			}
+		})
+	}
+}
+
+func TestCodexDiscoveryDoesNotUseDesktopLauncherAsCLI(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_HOME", filepath.Join(root, "state"))
+	t.Setenv("LAZYMIND_CODEX_BIN", "")
+	t.Setenv("LAZYMIND_DESKTOP_APPLICATION_DIRS", t.TempDir())
+	t.Setenv("PATH", root)
+	t.Setenv("SHELL", "/usr/bin/false")
+	name := "codex"
+	if runtime.GOOS == "windows" {
+		name = "codex.exe"
+	}
+	desktop := writeExecutable(t, root, name, "desktop launcher")
+	if _, err := agentexec.SetExecutableBinding(agentexec.CodexDesktop, desktop); err != nil {
+		t.Fatal(err)
+	}
+	if resolved, err := findBinary(""); err == nil && agentexec.SameExecutable(resolved, desktop) {
+		t.Fatalf("desktop launcher was accepted as CLI: %q", resolved)
+	}
+}
+
+func TestCodexDiscoveryContinuesAfterDesktopLauncher(t *testing.T) {
+	root := t.TempDir()
+	desktopDir, cliDir := filepath.Join(root, "desktop"), filepath.Join(root, "cli")
+	t.Setenv("LAZYMIND_HOME", filepath.Join(root, "state"))
+	t.Setenv("LAZYMIND_CODEX_BIN", "")
+	t.Setenv("PATH", desktopDir+string(os.PathListSeparator)+cliDir)
+	t.Setenv("SHELL", "/usr/bin/false")
+	name := "codex"
+	if runtime.GOOS == "windows" {
+		name = "codex.exe"
+	}
+	desktop := writeExecutable(t, desktopDir, name, "desktop launcher")
+	cli := writeExecutable(t, cliDir, name, "CLI")
+	if _, err := agentexec.SetExecutableBinding(agentexec.CodexDesktop, desktop); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := findBinary("")
+	if err != nil || !agentexec.SameExecutable(resolved, cli) {
+		t.Fatalf("resolved=%q err=%v, want CLI after desktop launcher %q", resolved, err, cli)
+	}
+}
+
 func TestCodexDesktopStatusDoesNotRequireCLILogin(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fixture uses a POSIX script")
@@ -84,6 +183,39 @@ func TestCodexStatusRequiresDesktopWhenStandaloneCLIExists(t *testing.T) {
 	}
 }
 
+func TestCodexStatusKeepsDesktopInstalledWhenCLIIsMissing(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_HOME", filepath.Join(root, "state"))
+	t.Setenv("CODEX_HOME", filepath.Join(root, "codex-home"))
+	if err := os.MkdirAll(os.Getenv("CODEX_HOME"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	desktop := writeExecutable(t, root, "ChatGPT.exe", "test")
+	if _, err := agentexec.SetExecutableBinding(agentexec.CodexDesktop, desktop); err != nil {
+		t.Fatal(err)
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter, err := New(filepath.Join(root, "missing-codex"), self, &mcpbridge.Bridge{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := adapter.Status(context.Background())
+	if status.State != agentintegration.RequirementsMissing ||
+		!agentintegration.RequirementSatisfied(status.Requirements, "codex_desktop") ||
+		!agentintegration.RequirementSatisfied(status.Requirements, "codex_desktop_initialized") {
+		t.Fatalf("status=%#v", status)
+	}
+	for _, requirement := range status.Requirements {
+		if requirement.ID == "codex_cli" && !requirement.Satisfied {
+			return
+		}
+	}
+	t.Fatalf("missing CLI requirement not reported: %#v", status.Requirements)
+}
+
 func TestCodexStatusDiscoversDesktopBundleWithoutCLILocationRules(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("macOS application bundle fixture")
@@ -101,7 +233,7 @@ func TestCodexStatusDiscoversDesktopBundleWithoutCLILocationRules(t *testing.T) 
 	}
 	writeExecutable(
 		t,
-		filepath.Join(applications, "ChatGPT.app", "Contents", "Resources"),
+		filepath.Join(applications, "ChatGPT.app", "Contents", "Resources", "codex-cli", "bin"),
 		"codex",
 		"#!/bin/sh\nexit 0\n",
 	)

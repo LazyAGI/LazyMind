@@ -87,10 +87,10 @@ func (a *Adapter) Status(context.Context) agentintegration.Status {
 	if err != nil {
 		return agentintegration.Fail(agentintegration.Status{Agent: "codex", DisplayName: "Codex"}, err.Error())
 	}
-	installed := desktop.Installed && a.discoveryError == nil
 	requirements := []agentintegration.Requirement{
-		{ID: "codex_desktop", Description: "Install the ChatGPT desktop app with Codex.", Satisfied: installed},
-		{ID: "codex_desktop_initialized", Description: "Open Codex in the ChatGPT desktop app at least once.", Satisfied: installed && desktop.Initialized},
+		{ID: "codex_desktop", Description: "Install the ChatGPT desktop app with Codex.", Satisfied: desktop.Installed},
+		{ID: "codex_desktop_initialized", Description: "Open Codex in the ChatGPT desktop app at least once.", Satisfied: desktop.Initialized},
+		{ID: "codex_cli", Description: "Locate the Codex CLI bundled with the ChatGPT desktop app.", Satisfied: a.discoveryError == nil},
 	}
 	status := agentintegration.Status{
 		Agent: "codex", DisplayName: "Codex", Requirements: requirements,
@@ -194,13 +194,18 @@ func codexDesktopState() (agentexec.DesktopApplicationState, error) {
 	if err != nil {
 		return agentexec.DesktopApplicationState{}, err
 	}
-	return agentexec.InspectDesktopApplication(agentexec.DesktopApplication{
+	spec := codexDesktopApplication()
+	spec.StatePaths = []string{home}
+	return agentexec.InspectDesktopApplication(spec)
+}
+
+func codexDesktopApplication() agentexec.DesktopApplication {
+	return agentexec.DesktopApplication{
 		BindingTarget:   agentexec.CodexDesktop,
 		ExecutableNames: []string{"ChatGPT.exe", "Codex.exe"},
-		Protocols:       []string{"chatgpt"},
+		Protocols:       []string{"chatgpt", "codex"},
 		DisplayNames:    []string{"ChatGPT", "Codex"},
-		StatePaths:      []string{home},
-	})
+	}
 }
 
 func (a *Adapter) getConfig() (mcpConfig, bool, error) {
@@ -245,8 +250,22 @@ func (a *Adapter) isOwned(config mcpConfig) bool {
 }
 
 func findBinary(configured string) (string, error) {
+	var desktop string
+	if strings.TrimSpace(configured) == "" && strings.TrimSpace(os.Getenv("LAZYMIND_CODEX_BIN")) == "" {
+		if _, bound, err := agentexec.ExecutableBinding(agentexec.CodexCLI); err == nil && !bound {
+			// The Windows desktop launcher can also be named Codex.exe. Prefer
+			// the bundled CLI before falling back to generic executable discovery.
+			desktop, _ = agentexec.FindDesktopApplication(codexDesktopApplication())
+			if strings.EqualFold(filepath.Ext(desktop), ".exe") {
+				bundled := filepath.Join(filepath.Dir(desktop), "resources", "codex.exe")
+				if resolved, err := agentexec.ResolveExecutable(bundled); err == nil {
+					return resolved, nil
+				}
+			}
+		}
+	}
 	resolved, err := agentexec.FindBoundExecutable(
-		configured, "LAZYMIND_CODEX_BIN", agentexec.CodexCLI, []string{"codex"},
+		configured, "LAZYMIND_CODEX_BIN", agentexec.CodexCLI, []string{"codex"}, desktop,
 	)
 	if err != nil {
 		return "", errors.New("Codex CLI is not installed")

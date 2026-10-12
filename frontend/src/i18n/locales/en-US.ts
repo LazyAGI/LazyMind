@@ -1455,6 +1455,7 @@ const enUS = {
     requirements: {
       codex_desktop: { ready: "Codex Desktop is installed", missing: "Codex Desktop is not installed" },
       codex_desktop_initialized: { ready: "Codex Desktop completed its first launch", missing: "Codex Desktop has not completed its first launch" },
+      codex_cli: { ready: "Codex CLI was found", missing: "Codex CLI was not found; locate the CLI or update the ChatGPT desktop app" },
       cursor_desktop: { ready: "Cursor Desktop is installed", missing: "Cursor Desktop is not installed" },
       cursor_desktop_initialized: { ready: "Cursor Desktop completed its first launch", missing: "Cursor Desktop has not completed its first launch" },
       workbuddy_desktop: { ready: "WorkBuddy Desktop is installed", missing: "WorkBuddy Desktop is not installed" },

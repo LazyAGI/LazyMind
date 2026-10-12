@@ -27,6 +27,23 @@ func TestDarwinFindUsesLoginShellPathAndPreservesItForExecution(t *testing.T) {
 	}
 }
 
+func TestDarwinFindSkipsExcludedExecutableInLoginShellPath(t *testing.T) {
+	root := t.TempDir()
+	firstDir, secondDir := filepath.Join(root, "desktop"), filepath.Join(root, "cli")
+	excluded := writeDarwinExecutable(t, firstDir, "custom-agent", "desktop launcher")
+	wanted := writeDarwinExecutable(t, secondDir, "custom-agent", "CLI")
+	shell := writeDarwinExecutable(t, root, "login-shell", "#!/bin/sh\nprintf '%s\\n' \"$LAZYMIND_TEST_LOGIN_PATH\"\n")
+	t.Setenv("PATH", "/usr/bin:/bin")
+	t.Setenv("SHELL", shell)
+	t.Setenv("LAZYMIND_HOME", filepath.Join(root, "state"))
+	t.Setenv("LAZYMIND_DESKTOP_APPLICATION_DIRS", t.TempDir())
+	t.Setenv("LAZYMIND_TEST_LOGIN_PATH", firstDir+string(os.PathListSeparator)+secondDir)
+	resolved, err := FindExecutable("", []string{"custom-agent"}, excluded)
+	if err != nil || !SameExecutable(resolved, wanted) {
+		t.Fatalf("resolved=%q err=%v, want CLI after excluded executable %q", resolved, err, wanted)
+	}
+}
+
 func TestDarwinFindDiscoversCLIInsideApplicationBundle(t *testing.T) {
 	applications := t.TempDir()
 	binary := writeDarwinExecutable(
@@ -47,9 +64,10 @@ func TestDarwinFindDiscoversCLIInsideApplicationBundle(t *testing.T) {
 
 func TestDarwinFindDiscoversCLIInsideBoundCustomApplication(t *testing.T) {
 	root := t.TempDir()
-	bundle := filepath.Join(root, "Custom Location", "ChatGPT.app")
+	bundle := filepath.Join(root, "Custom Location", "Codex.app")
+	writeDarwinExecutable(t, filepath.Join(bundle, "Contents", "MacOS"), "codex", "#!/bin/sh\nexit 1\n")
 	binary := writeDarwinExecutable(
-		t, filepath.Join(bundle, "Contents", "Resources"), "codex", "#!/bin/sh\nexit 0\n",
+		t, filepath.Join(bundle, "Contents", "Resources", "codex-cli", "bin"), "codex", "#!/bin/sh\nexit 0\n",
 	)
 	t.Setenv("LAZYMIND_HOME", filepath.Join(root, "lazymind"))
 	t.Setenv("LAZYMIND_DESKTOP_APPLICATION_DIRS", filepath.Join(root, "Empty Applications"))
