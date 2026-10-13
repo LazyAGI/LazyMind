@@ -1,0 +1,62 @@
+{
+  "inspected_on": "2026-10-13",
+  "selected_group": "dsh",
+  "historical_build": "unknown",
+  "files": [
+    {
+      "group": "dsh",
+      "kind": "recording",
+      "original_filename": "飞书20261013-171404.mov",
+      "bytes": 107686473,
+      "sha256": "1db4da253957182adb863f989af605e746b02c3f57bd97a6c465eb899d4410f1"
+    },
+    {
+      "group": "dsh",
+      "kind": "pdf",
+      "original_filename": "presentation_2026-09-18T04-06-10.pdf",
+      "bytes": 69124689,
+      "sha256": "948e3679a1099c58ffb36911ca0fac81a1e5e5a3777e0f73bdfcd61cd61c106e"
+    },
+    {
+      "group": "codex",
+      "kind": "recording",
+      "original_filename": "飞书20261013-170718.mov",
+      "bytes": 183086014,
+      "sha256": "8da3f0d94bb3956c96ef025ff465f17a7245d1e788d0516766a2544a055ea715"
+    },
+    {
+      "group": "codex",
+      "kind": "pdf",
+      "original_filename": "presentation_2026-09-24T07-38-27.pdf",
+      "bytes": 69124689,
+      "sha256": "c6067c991af5c76a16a4cfa55de91247667365e8f7de712d77a89e0610f46f7d"
+    },
+    {
+      "group": "codex",
+      "kind": "pptx",
+      "original_filename": "presentation_2026-09-24T07-46-51.pptx",
+      "bytes": 34853119,
+      "sha256": "71e8f194c84c7fb296676ecadc8ae7b2b23f0d3405d7b3a1e553b384c09ba965"
+    },
+    {
+      "group": "codex-duplicate",
+      "kind": "pptx",
+      "original_filename": "presentation_2026-09-24T07-46-51(1).pptx",
+      "bytes": 34853119,
+      "sha256": "71e8f194c84c7fb296676ecadc8ae7b2b23f0d3405d7b3a1e553b384c09ba965"
+    },
+    {
+      "group": "codex-duplicate",
+      "kind": "recording",
+      "original_filename": "飞书20261013-172003.mov",
+      "bytes": 183086014,
+      "sha256": "8da3f0d94bb3956c96ef025ff465f17a7245d1e788d0516766a2544a055ea715"
+    }
+  ],
+  "packaged_reference": {
+    "path": "reference/palace-museum-dsh-reference.zip",
+    "bytes": 22782546,
+    "sha256": "6071c961f1ed2bab8cc341a7c123461607fee658d8f6c72834e2476b2f91bc22",
+    "member": "presentation_2026-09-18T04-06-10.pdf"
+  }
+}

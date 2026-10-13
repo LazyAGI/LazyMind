@@ -2,17 +2,29 @@
 
 [中文](README.CN.md) · [Examples](../README.md)
 
-**Status: preparation, not a verified reproduction.** This case reuses the existing Codex Palace Museum PPT demonstration. The original prompt, input assets and result files have not yet been supplied. Do not infer them from the video title or replace the case with another topic.
+**Status: original prompt and historical output collected; current-version reproduction pending.** This reuses the existing Palace Museum case. The DSH recording and matching PDF are the primary visual reference because the architecture and artifact imagery are clearer; the Codex recording is supplementary. See the [material inventory](sources.md).
+
+![Four-page DSH Palace Museum reference](reference/preview.jpg)
+
+[Download the historical PDF (lossless ZIP)](reference/palace-museum-dsh-reference.zip). This is an existing output, not a new run. Its matching PPTX has not yet been supplied.
 
 ## What this case should demonstrate
 
 Keep using Codex or DSH to start the task. LazyMind provides inspectable intermediate material and a Workflow panel for review and editing, so the user can adjust the work before delivery. The value to verify is the connected process—not simply that an Agent can generate slides.
 
-The references are [Codex + Palace Museum PPT](https://www.bilibili.com/video/BV1TppR6xEj7/) and [DSH + LazyMind plugin](https://www.bilibili.com/video/BV1Xcpt6REjc/). See [source availability](sources.md). Their summaries describe previewing material, images and outlines, followed by slide or element edits. The videos themselves have not been reviewed in this preparation run.
+The public references are [Codex + Palace Museum PPT](https://www.bilibili.com/video/BV1TppR6xEj7/) and [DSH + LazyMind plugin](https://www.bilibili.com/video/BV1Xcpt6REjc/). The owner-supplied recordings have been inspected: they show source/outline/per-slide prompt review, local editing and export inspection. Initial configuration, tool discovery, waiting and panel approval remain part of the user journey; no zero-effort or measured speedup claim is made.
+
+## Original task
+
+Use the owner's [original Chinese prompt](prompt.zh-CN.txt) for reproduction. The following is an English translation for readers, not a second original input:
+
+> Call the LazyMind MCP PPT workflow to create a 16:9 presentation about Beijing's Palace Museum, covering its history, architectural layout, cultural collections, preservation and continuing heritage. Use vermilion, gold and ivory, with a dignified, elegant, classical Chinese style and the feel of a museum catalogue. Collect images, using palace panoramas and artifact close-ups. Keep layouts simple, leave generous space, combine text with images and highlight one core point per slide.
+
+The prompt does not specify a page count. Both historical outputs have four pages, and the Codex recording includes an explicit four-page answer. If asked during reproduction, answer “four pages” and record that clarification separately. Web material and generated images can change; pixel-identical regeneration is not expected.
 
 ## Before running
 
-Complete [Agent setup](../shared/agent-setup.md). Obtain the original material listed in [sources](sources.md), including the exact task and modification requests. Keep source attribution and permitted redistribution information with the material. Use the same source set for the initial deck and its revision.
+Complete [Agent setup](../shared/agent-setup.md) and use the original task above. It asks the workflow to collect material; no fixed original image input bundle is available. Preserve the actual collected files and attribution for the revision and same-input comparison. The exact DSH local-edit instruction is still missing.
 
 ## Reproduction sequence
 
@@ -24,7 +36,7 @@ Complete [Agent setup](../shared/agent-setup.md). Obtain the original material l
 6. Open V2 in a named version of PowerPoint or WPS, edit a text element, save and reopen it. Record which element types were editable; do not call a slide-sized image an editable deck.
 7. Check that the final panel result and exported revision agree. Repeat the full path separately for each advertised host.
 
-The filenames above are output requirements, not included results. The original complete prompt and edit request remain blocked on source material; this page is not yet a copy-and-run tutorial.
+The V1/V2 filenames above are future output requirements. The historical PDF is available for preview, but its matching PPTX, exact local-edit instruction and separate before/after exports remain missing. The first group's PPTX contains native text and image objects; that structural inspection cannot substitute for an edit/save/reopen test of the selected second deck.
 
 ## Evidence and comparison
 
