@@ -1,0 +1,25 @@
+{
+  "repository_revision": "84a1a5b7f1d1e9ef59022f2c57ab7dfe1fd54ac2",
+  "documents": [
+    {
+      "path": "skills/featured/product_solution_delivery/assets/design.html",
+      "sha256": "6d7ebf003e6bf8fd14f06db444cf933a1d1ab2a5ec731b01d4c664c9f21a53f5",
+      "input": "inputs/design.txt"
+    },
+    {
+      "path": "skills/featured/product_solution_delivery/assets/prd.html",
+      "sha256": "bf0d45e9ab9277cadcceefad3b10ac37096e9225249b1ecd3b43c0d43e92ccdd",
+      "input": "inputs/prd.txt"
+    },
+    {
+      "path": "skills/featured/product_solution_delivery/assets/review.html",
+      "sha256": "9b4eed3486b8d32852a3fb0e10db7d9ec6e28615cc0d80ee417164d825e909ab",
+      "input": "inputs/review.txt"
+    },
+    {
+      "path": "skills/featured/product_solution_delivery/assets/handoff.html",
+      "sha256": "e1a74a0cff8947c23d275b000c87651ea644532593de38efcc794c2008283c76",
+      "input": "inputs/handoff.txt"
+    }
+  ]
+}

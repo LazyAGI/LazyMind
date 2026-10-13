@@ -17,7 +17,7 @@ LazyMind 是面向知识密集型工作的 **AI Skill Runtime**：一个把知�
 - **Desktop Mode** 面向具备一定技术基础、但不以编程为主要工作的解决方案、产品、运营、测试和内容从业者，重点降低复杂任务的使用门槛。
 - **团队与企业部署** 面向二次开发、项目交付、投标、FDE 和组织知识协作场景，提供权限、共享部署与评测演进能力。
 
-**[快速开始](#快速开始)** · **[产品架构](docs/architecture.md)** · **[构建工作流](docs/workflow-format.md)** · **[桌面模式](desktop/README.md)**
+**[快速开始](#快速开始)** · **[产品架构](docs/architecture.md)** · **[构建工作流](docs/workflow-format.md)** · **[桌面模式](desktop/README.md)** · **[案例与复现状态](examples/README.CN.md)**
 
 ---
 

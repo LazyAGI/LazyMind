@@ -19,7 +19,7 @@ Instead of repeatedly uploading context, tuning prompts, and supervising every a
 - **Desktop Mode** is designed for technically capable professionals whose primary job is not programming, including solution architects, product managers, operators, testers, and content creators.
 - **Team and enterprise deployments** serve secondary development, project delivery, proposals, FDE work, and organization-wide knowledge collaboration with shared permissions, deployment, and evaluation capabilities.
 
-**[Quick start](#quick-start)** · **[Product architecture](docs/architecture.md)** · **[Build a workflow](docs/workflow-format.md)** · **[Desktop mode](desktop/README.md)**
+**[Quick start](#quick-start)** · **[Product architecture](docs/architecture.md)** · **[Build a workflow](docs/workflow-format.md)** · **[Desktop mode](desktop/README.md)** · **[Examples & reproduction status](examples/README.md)**
 
 ---
 
