@@ -63,3 +63,10 @@ A publishable value claim must name a concrete convenience actually observed, wi
 ## Preparation checks / 准备检查
 
 Run `python3 examples/project-knowledge-reuse/prepare_inputs.py --check` and `git diff --check`. Inspect extracted article text against the HTML, including tables, diagram labels and caveats. These checks validate input packaging only, not parsing in LazyMind, plugin operation, retrieval quality or the claimed advantage. / 生成一致性、差异和原文提取检查仅验证输入整理，不替代产品实跑。
+
+2026-10-13 preparation result / 准备检查结果：
+
+- Regeneration check passed for all four pinned documents. / 四份固定输入的重新生成一致性检查通过。
+- A separate HTML text audit matched all article text after whitespace normalization, and checked preservation of every article link and section ID. / 单独提取 HTML 正文核对，忽略空白后内容一致，全部正文链接及章节 ID 保留。
+- Local Markdown file targets exist; `git diff --check` passed. / 本地 Markdown 文件链接目标存在，差异空白检查通过。
+- Host execution remains pending. Runtime preflight found the Codex Workflow MCP startup and dispatcher default to Bridge port 19091; the existing local Bridge uses credentials for a different instance. Do not replace that connection to claim an isolated run. / 宿主实跑仍待执行；预检发现 Codex Workflow MCP 启动与派发默认使用 19091，现有 Bridge 凭据属于另一实例，不能覆盖该连接来冒充隔离验证。

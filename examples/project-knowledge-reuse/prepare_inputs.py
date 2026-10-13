@@ -97,7 +97,8 @@ def main():
             f"Source: {source['path']}\n"
             f"Repository revision: {manifest['repository_revision']}\n"
             f"Source SHA-256: {source['sha256']}\n"
-            "Extraction: article text, section anchors, links, table cells (tab-separated), and diagram labels; visual layout omitted.\n\n"
+            "Extraction: article text, section anchors, links, table cells (tab-separated), "
+            "and diagram labels; visual layout omitted.\n\n"
         )
         outputs.append((HERE / source["input"], header + article.render()))
     for path, content in outputs:
