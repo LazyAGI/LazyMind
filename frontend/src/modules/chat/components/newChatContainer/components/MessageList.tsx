@@ -8,6 +8,7 @@ import {
   CopyOutlined,
   DatabaseOutlined,
   EditOutlined,
+  FileTextOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
 import { RoleTypes } from "@/modules/chat/constants/common";
@@ -30,6 +31,7 @@ const MENTION_ICONS = {
   skill: <ThunderboltOutlined />,
   workflow: <AppstoreOutlined />,
   tool: <ThunderboltOutlined />,
+  file: <FileTextOutlined />,
   conversation: <CommentOutlined />,
 };
 

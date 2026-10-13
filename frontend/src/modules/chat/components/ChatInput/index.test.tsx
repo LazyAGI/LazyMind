@@ -117,7 +117,8 @@ vi.mock("../BatchChat", async () => {
 });
 
 vi.mock("../ShowChatFileList", () => ({ default: () => null }));
-vi.mock("./ContextUsageButton", () => ({ default: () => null }));
+const contextPreview = vi.hoisted(() => ({ build: null as null | (() => Record<string, any>) }));
+vi.mock("./ContextUsageButton", () => ({ default: (props: { buildRequest: () => Record<string, any> }) => { contextPreview.build = props.buildRequest; return null; } }));
 vi.mock("./LocalWorkspaceControl", () => ({
   default: ({ conversationId, onChange, onSavingChange }: { onSavingChange?: (saving: boolean) => void; conversationId?: string; onChange: (id: string | undefined, mode: "ask_as_needed" | "allow_all") => void }) => (
     <div data-testid="local-workspace-control">
@@ -136,6 +137,29 @@ vi.mock("@/modules/memory/toolApi", () => ({
 }));
 
 describe("ChatInput model switch save lock", () => {
+  it('captures the visible draft before a mode switch request', () => {
+    const rects = vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
+    try {
+      render(<ChatInput value='Keep historical draft' onChange={vi.fn()} isChatContent sessionId='draft-source' runInBackground
+        showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+      window.dispatchEvent(new CustomEvent('lazymind:chat-capture-mode-draft', { detail: { runInBackground: false } }));
+      expect(useChatInputStore.getState().modeDraft).toMatchObject({ text: 'Keep historical draft', mentions: [] });
+    } finally { rects.mockRestore(); useChatInputStore.getState().setModeDraft(); }
+  });
+
+  it('adapts a restored current-conversation file identically for preview and send', async () => {
+    const mention = { mention_id: 'file-chip', type: 'file' as const, resource_id: 'history:h1:0', display_name: 'report.pdf', start: 0, end: 10 };
+    useChatInputStore.getState().saveInputContent('file-conversation', 'report.pdf 总结', [mention]);
+    const input = { input_type: 'file' as const, uri: '/uploads/report.pdf', filename: 'report.pdf' };
+    const onSend = vi.fn();
+    render(<ChatInput value='report.pdf 总结' onChange={vi.fn()} isChatContent sessionId='file-conversation'
+      onSend={onSend} conversationFiles={[{ id: mention.resource_id, name: mention.display_name, input }]}
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+    expect(contextPreview.build?.()).toMatchObject({ mentions: [], input: [expect.objectContaining({ input_type: 'text' }), input] });
+    fireEvent.click(screen.getByRole('button', { name: 'chat.send' }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ mentions: [], referencedFiles: [input] })));
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
     useModelSelectionStore.getState().resetForNewChat();
@@ -170,6 +194,7 @@ describe("ChatInput model switch save lock", () => {
     );
 
     const sendButton = screen.getByRole("button", { name: "chat.send" });
+    fireEvent.click(screen.getByRole("button", { name: "chat.addResource" }));
     const skillDepositButton = screen.getByRole("button", {
       name: /chat\.skillDeposit/,
     });
@@ -214,6 +239,7 @@ describe("ChatInput model switch save lock", () => {
     );
 
     const sendButton = screen.getByRole("button", { name: "chat.send" });
+    fireEvent.click(screen.getByRole("button", { name: "chat.addResource" }));
     const skillDepositButton = screen.getByRole("button", {
       name: /chat\.skillDeposit/,
     });

@@ -42,6 +42,9 @@ import "./index.scss";
 type LoadStatus = "loading" | "ready" | "error";
 
 interface ChatModelSelectorProps {
+  menuHeight?: number;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   conversationId?: string;
   disabled?: boolean;
   disabledReason?: string;
@@ -122,6 +125,8 @@ function modelLabel(
 }
 
 const ChatModelSelector = ({
+  menuHeight,  open: controlledOpen,
+  onOpenChange,
   conversationId,
   disabled = false,
   disabledReason,
@@ -145,7 +150,9 @@ const ChatModelSelector = ({
   const setStoredSelection = useModelSelectionStore((state) => state.setSelection);
   const [catalog, setCatalog] = useState<ChatModelCatalog | null>(null);
   const [loadStatus, setLoadStatus] = useState<LoadStatus>("loading");
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = (next: boolean) => { setInternalOpen(next); onOpenChange?.(next); };
   const [modelsExpanded, setModelsExpanded] = useState(false);
   const [previewDepth, setPreviewDepth] = useState(thinkingDepth ?? "medium");
   const [saving, setSaving] = useState(false);
@@ -907,11 +914,12 @@ const ChatModelSelector = ({
   return (
     <div className="chat-model-selector">
       <Popover
+        styles={{ body: { height: menuHeight } }}
         arrow={false}
         content={content}
         destroyOnHidden
         open={open}
-        overlayClassName={`chat-model-selector-popover${combined && !modelsExpanded ? " is-compact" : ""}`}
+        overlayClassName={`chat-composer-menu chat-model-selector-popover${combined && !modelsExpanded ? " is-compact" : ""}`}
         placement="topLeft"
         trigger="click"
         onOpenChange={(nextOpen: boolean) => {

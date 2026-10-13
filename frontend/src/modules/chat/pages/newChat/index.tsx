@@ -71,6 +71,9 @@ export function resolveChatEntryDefault(
   return defaults[runInBackground ? "new_task" : "quick_question"];
 }
 
+import { useFeaturedSelectionStore } from "@/modules/chat/store/featuredSelection";
+import { useChatInputStore, type ChatModeDraft } from "@/modules/chat/store/chatInput";
+
 const NewChatPage = () => {
   const { i18n, t } = useTranslation();
   const locale = i18n.resolvedLanguage || i18n.language;
@@ -89,12 +92,14 @@ const NewChatPage = () => {
     const currentHour = new Date().getHours();
     return currentHour < 12 ? t("chat.greetingMorning") : t("chat.greetingAfternoon");
   };
+  const incomingModeDraft = useRef(useChatInputStore.getState().modeDraft);
+  useEffect(() => { if (incomingModeDraft.current) { useChatInputStore.getState().setModeDraft(); useFeaturedSelectionStore.getState().setSelection("new", incomingModeDraft.current.featuredSelection); } }, []);
   const [inputValue, setInputValue] = useState(() => {
     const pending = sessionStorage.getItem(CHAT_PENDING_CONVERSATION_PROMPT_KEY) || "";
     sessionStorage.removeItem(CHAT_PENDING_CONVERSATION_PROMPT_KEY);
-    return pending;
+    return incomingModeDraft.current?.text ?? pending;
   });
-  const shouldAutoSendGroupPromptRef = useRef(Boolean(inputValue));
+  const shouldAutoSendGroupPromptRef = useRef(!incomingModeDraft.current && Boolean(inputValue));
   const [isChatContent, setIsChatContent] = useState(
     Boolean(routeConversationId || useChatMessageStore.getState().pendingMessage),
   );
@@ -128,6 +133,10 @@ const NewChatPage = () => {
   >("loading");
   const entryDefaultsRef = useRef(entryDefaults);
   entryDefaultsRef.current = entryDefaults;
+  const preservingModeDraft = useRef(Boolean(incomingModeDraft.current));
+  const [transferredDraft, setTransferredDraft] = useState<Omit<ChatModeDraft, "text"> | undefined>(incomingModeDraft.current);
+  const entryModeRef = useRef(runInBackground);
+  entryModeRef.current = runInBackground;
   const freshEntryRef = useRef(Boolean(showcaseCaseId) || !routeConversationId);
   const [welcomeKnowledgeRefreshKey, setWelcomeKnowledgeRefreshKey] =
     useState(0);
@@ -333,7 +342,7 @@ const NewChatPage = () => {
   }, [showcaseCapabilityStatus, t]);
 
   useEffect(() => {
-    if (!isChatContent) {
+    if (!isChatContent && !preservingModeDraft.current) {
       newChatInputRef.current?.clearFiles();
       setInputValue("");
     }
@@ -359,7 +368,7 @@ const NewChatPage = () => {
 
   useEffect(() => {
     if (!showcaseCaseId) {
-      if (!officialKnowledgeId) setInputValue("");
+      if (!officialKnowledgeId && !preservingModeDraft.current) setInputValue("");
       return;
     }
     if (showcaseCasesLoading) return;
@@ -481,7 +490,32 @@ const NewChatPage = () => {
         }>
       ).detail;
       const conversationId = detail?.conversationId || "";
+      const modeDraft = detail?.runInBackground !== undefined ? useChatInputStore.getState().modeDraft : undefined;
+      if (!conversationId && modeDraft) {
+        preservingModeDraft.current = true;
+        setTransferredDraft({ mentions: modeDraft.mentions, files: modeDraft.files, featuredSelection: modeDraft.featuredSelection });
+        useFeaturedSelectionStore.getState().setSelection("new", modeDraft.featuredSelection);
+        setInputValue(modeDraft.text);
+        setRunInBackground(Boolean(detail.runInBackground));
+        persistRunInBackgroundMode(Boolean(detail.runInBackground));
+        setChatLayoutMounted(false);
+        setIsChatContent(false);
+        setWelcomeKnowledgeRefreshKey(key => key + 1);
+        setSearchParams({}, { replace: true });
+        return;
+      }
+      if (!conversationId && !routeConversationId && detail?.runInBackground !== undefined && detail.runInBackground !== entryModeRef.current) {
+        setRunInBackground(detail.runInBackground);
+        persistRunInBackgroundMode(detail.runInBackground);
+        setWelcomeKnowledgeRefreshKey(key => key + 1);
+        return;
+      }
       if (!conversationId) {
+        preservingModeDraft.current = false;
+        setInputValue("");
+        newChatInputRef.current?.clearFiles();
+        useChatInputStore.getState().setModeDraft();
+        setTransferredDraft(undefined);
         useModelSelectionStore.getState().resetForNewChat();
         freshEntryRef.current = true;
         setChatLayoutMounted(false);
@@ -515,7 +549,7 @@ const NewChatPage = () => {
         handleConversationSelect,
       );
     };
-  }, []);
+  }, [routeConversationId]);
 
   const isFileTypeSupported = (file: File): boolean => {
     const ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
@@ -580,6 +614,7 @@ const NewChatPage = () => {
   };
 
   const showcaseSelection: ShowcaseSelection = {
+    onClear: () => setSearchParams({}, { replace: true }),
     skill: {
       value: showcaseCase?.id,
       selectedLabel: showcaseCase?.title,
@@ -774,6 +809,8 @@ const NewChatPage = () => {
                     </div>
                   ) : null}
                   <ChatInput
+                    transferredDraft={transferredDraft}
+                    conversationFiles={transferredDraft?.files}
                     ref={newChatInputRef}
                     value={inputValue}
                     onChange={handleWelcomeInputChange}
@@ -787,6 +824,9 @@ const NewChatPage = () => {
                     configResetKey={welcomeKnowledgeRefreshKey}
                     setIsChatContent={(value) => {
                       if (value) {
+                        preservingModeDraft.current = false;
+                        useChatInputStore.getState().setModeDraft();
+                        setTransferredDraft(undefined);
                         setInputValue("");
                         setSearchParams({}, { replace: true });
                       }
@@ -806,7 +846,7 @@ const NewChatPage = () => {
                     }}
                     initialConversationSettings={pendingConversationSettings}
                     runInBackground={runInBackground}
-                    showcaseSelection={showcaseSelection}
+                    showcaseSelection={!showcaseCase && transferredDraft?.featuredSelection ? undefined : showcaseSelection}
                     boundMentions={showcaseBoundMentions}
                     showPromptSuggestions={!showcaseCase}
                   />
