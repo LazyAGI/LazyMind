@@ -28,7 +28,7 @@ def validate_storage_id(value: object) -> None:
         raise ToolExecutionError('Storage identifiers must not contain path components.')
 
 
-def managed_path(path: str) -> bool:
+def managed_path(path: str, operation: str = 'read') -> bool:
     request = get_workspace_permission_context()
     resolution = get_tool_resolution_context()
     roots = list(resolution.managed_roots) if resolution else []
@@ -38,6 +38,13 @@ def managed_path(path: str) -> bool:
     canonical = os.path.realpath(path)
     if resolution and canonical in resolution.managed_files:
         return True
+    if resolution and operation == 'read':
+        for root in resolution.acl_read_roots:
+            try:
+                if os.path.commonpath([canonical, root]) == root:
+                    return True
+            except ValueError:
+                continue
     for root in roots:
         try:
             if os.path.commonpath([canonical, root]) == root:
@@ -56,6 +63,11 @@ class FileResolution:
         raw = str(value or '').strip()
         if not raw or '\0' in raw:
             raise ToolExecutionError('A non-empty local file path is required.')
+        if operation == 'read':
+            from lazymind.chat.service.utils.static_file_url import verified_legacy_generated_path
+            legacy = verified_legacy_generated_path(raw)
+            if legacy:
+                return legacy
         if raw.startswith(('/static-files/', '/var/lib/lazymind/uploads/')):
             from lazymind.chat.service.utils.static_file_url import local_path_from_static_file_url
             raw = local_path_from_static_file_url(raw)
@@ -67,7 +79,7 @@ class FileResolution:
                 raise ToolExecutionError(f'Unsupported local file protocol: {parsed.scheme!r}.')
             raw = url2pathname(parsed.path) if os.name == 'nt' else unquote(parsed.path)
         path = canonical_host_path(raw, default_root=self.default_root)
-        if not managed_path(path):
+        if not managed_path(path, operation):
             intent = HostFileIntent(path, operation)
             if intent not in self.files:
                 self.files.append(intent)
@@ -103,6 +115,13 @@ class FileResolution:
         resolution = get_tool_resolution_context()
         citation = resolution.citation_state if resolution else _image_url_registry()
         raw = str((citation.get('_image_url_registry') or {}).get(raw) or raw)
+        # Attachment names are model-facing references, not host-relative paths.
+        # Resolve current and historical turns before declaring host access.
+        if raw and not os.path.isabs(raw) and not urlsplit(raw).scheme and '/' not in raw and '\\' not in raw:
+            from lazymind.chat.engine.tools.file_resources.resolver import resolve_attachment_path
+            attachment, _ = resolve_attachment_path(raw, prefer_newest=True)
+            if attachment:
+                raw = attachment
         # Reject malformed managed locators before the permissive legacy resolver can
         # reinterpret them as ordinary local paths (or HTTP references).
         managed_locator = raw.startswith(('/static-files/', '/var/lib/lazymind/uploads/'))

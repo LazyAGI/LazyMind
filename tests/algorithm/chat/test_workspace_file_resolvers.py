@@ -1,5 +1,6 @@
 """Host file declarations enumerate final inputs before any side effect."""
 import json
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -14,7 +15,7 @@ from lazymind.chat.engine.subagent import tools as artifacts
 def host_root(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, 'canonical_host_path',
                         lambda value, default_root=None: str((__import__('pathlib').Path(default_root or tmp_path) / value).resolve()))
-    monkeypatch.setattr(paths, 'managed_path', lambda path: False)
+    monkeypatch.setattr(paths, 'managed_path', lambda path, operation='read': False)
     monkeypatch.setattr(paths, 'get_workspace_permission_context', lambda: None)
     return tmp_path
 
@@ -86,7 +87,7 @@ def test_artifact_batch_normalizes_all_file_shapes(host_root, monkeypatch):
 
 
 def test_managed_media_produces_no_host_intent(host_root, monkeypatch):
-    monkeypatch.setattr(paths, 'managed_path', lambda path: True)
+    monkeypatch.setattr(paths, 'managed_path', lambda path, operation='read': True)
     result = resolve_media_files({'urls': ['upload.png']})
     assert result.files == ()
     assert result.arguments['urls'] == [str(host_root / 'upload.png')]
@@ -197,6 +198,159 @@ def test_global_upload_and_writer_parents_do_not_exempt_other_users(tmp_path, mo
         assert paths.FileResolution().local(str(foreign)) == str(foreign)
         resolution = resolve_media_files({'url': str(foreign)})
         assert [intent.path for intent in resolution.files] == [str(foreign)]
+
+
+def test_acl_read_roots_exempt_reads_but_not_mutations(tmp_path):
+    from lazymind.chat.engine.tools.workspace_context import ToolResolutionContext, tool_resolution_scope
+
+    owned = tmp_path / 'owned'
+    foreign = tmp_path / 'foreign'
+    owned.mkdir()
+    foreign.mkdir()
+    request = ToolResolutionContext(acl_read_roots=(str(owned.resolve()),))
+    with tool_resolution_scope(request):
+        read = paths.FileResolution().local(str(owned / 'from-other-conversation.png'))
+        write = paths.FileResolution()
+        write.local(str(owned / 'replace.png'), operation='write')
+        outside = paths.FileResolution()
+        outside.local(str(foreign / 'secret.png'))
+    assert read == str(owned / 'from-other-conversation.png')
+    assert write.files[0].operation == 'write'
+    assert outside.files[0].path == str(foreign / 'secret.png')
+
+
+def test_media_short_name_resolves_historical_attachment_before_authorization(
+    host_root, monkeypatch,
+):
+    from lazymind.chat.engine.tools.file_resources import resolver
+
+    attachment = str(host_root / 'uploads' / 'old.png')
+    monkeypatch.setattr(
+        resolver, 'resolve_attachment_path',
+        lambda name, prefer_newest=False: (attachment, None),
+    )
+    result = resolve_media_files({'url': 'old.png'})
+    assert result.arguments['url'] == attachment
+    assert result.files[0].path == attachment
+
+
+@pytest.mark.parametrize('source', ['current', 'history'])
+def test_real_attachment_context_resolves_current_and_historical_short_names(
+    tmp_path, monkeypatch, source,
+):
+    import lazyllm
+    from lazymind.chat.engine.tools.workspace_context import (
+        ToolResolutionContext, normalize_managed_files, tool_resolution_scope,
+    )
+
+    attachment = tmp_path / f'{source}.png'
+    attachment.write_bytes(b'image')
+    config = {
+        'files': [str(attachment)] if source == 'current' else [],
+        'history_files_per_turn': {'2': [str(attachment)]} if source == 'history' else {},
+        'citation_state': {},
+    }
+    previous = lazyllm.globals.get('agentic_config')
+    lazyllm.globals['agentic_config'] = config
+    try:
+        context = ToolResolutionContext(managed_files=normalize_managed_files([str(attachment)]))
+        with tool_resolution_scope(context):
+            result = resolve_media_files({'url': attachment.name})
+    finally:
+        lazyllm.globals['agentic_config'] = previous or {}
+    assert result.arguments['url'] == str(attachment.resolve())
+    assert result.files == ()
+
+
+def test_user_acl_reads_other_conversation_but_not_other_user(tmp_path, monkeypatch):
+    from lazymind.chat.engine.tools import system_resources
+    from lazymind.chat.engine.tools.workspace_context import ToolResolutionContext, tool_resolution_scope
+
+    runtime_config = __import__('lazymind.config', fromlist=['config']).config
+    monkeypatch.setitem(runtime_config._impl, 'agentic_workspace', str(tmp_path / 'agent-workspaces'))
+    own_roots = system_resources.user_managed_read_roots('owner')
+    own = __import__('pathlib').Path(own_roots[1]) / ('f' * 32) / 'result.png'
+    foreign_root = system_resources.user_chat_workspace_roots('other')[0]
+    foreign = __import__('pathlib').Path(foreign_root) / ('e' * 32) / 'secret.png'
+    own.parent.mkdir(parents=True)
+    foreign.parent.mkdir(parents=True)
+    own.write_bytes(b'own')
+    foreign.write_bytes(b'foreign')
+
+    with tool_resolution_scope(ToolResolutionContext(acl_read_roots=own_roots)):
+        own_resolution = paths.FileResolution()
+        own_resolution.local(str(own))
+        foreign_resolution = paths.FileResolution()
+        foreign_resolution.local(str(foreign))
+    assert not own_resolution.files
+    assert foreign_resolution.files[0].path == str(foreign.resolve())
+
+
+def test_generated_files_use_owner_scoped_storage(tmp_path, monkeypatch):
+    from lazymind.chat.engine.tools import system_resources
+
+    monkeypatch.setattr(system_resources, 'current_user_id', lambda: 'user/one')
+    monkeypatch.setattr(
+        system_resources, 'user_upload_root',
+        lambda user_id: str(tmp_path / system_resources.safe_storage_part(user_id)),
+    )
+    directory = system_resources.generated_upload_directory('generated-images')
+    assert directory == tmp_path / 'user_one' / 'generated-images'
+
+
+def test_generated_image_is_relocated_below_authenticated_owner_root(tmp_path, monkeypatch):
+    import lazyllm
+    from lazymind.chat.engine.tools import system_resources
+    from lazymind.chat.engine.tools.infra import image_generation_support
+
+    uploads = tmp_path / 'uploads'
+    source = tmp_path / 'model-output.png'
+    source.write_bytes(b'generated')
+    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(uploads))
+    previous = lazyllm.globals.get('agentic_config')
+    lazyllm.globals['agentic_config'] = {'user_id': 'owner'}
+    try:
+        relocated = image_generation_support._relocate_generated_image_to_upload(str(source))
+    finally:
+        lazyllm.globals['agentic_config'] = previous or {}
+    expected_root = __import__('pathlib').Path(system_resources.user_upload_root('owner'))
+    assert __import__('pathlib').Path(relocated).is_relative_to(expected_root)
+    assert __import__('pathlib').Path(relocated).read_bytes() == b'generated'
+    assert not source.exists()
+
+
+def test_legacy_generated_file_uses_exact_random_id_as_read_capability(tmp_path, monkeypatch):
+    from lazymind.chat.service.utils import static_file_url
+
+    uploads = tmp_path / 'uploads'
+    name = '0123456789abcdef0123456789abcdef.png'
+    legacy = uploads / 'ai_generated' / name
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(b'image')
+    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(uploads))
+    expires = int(time.time()) + 60
+    rel = f'ai_generated/{name}'
+    signed = f'/static-files/{rel}?expires={expires}&sig={static_file_url.sign_static_file(rel, expires)}'
+
+    allowed = paths.FileResolution().local(signed)
+    unsigned = paths.FileResolution().local(f'/static-files/{rel}')
+    expired = paths.FileResolution().local(
+        f'/static-files/{rel}?expires=1&sig=obsolete',
+    )
+    guessed = paths.FileResolution()
+    guessed.local('/static-files/ai_generated/readable-name.png')
+    directory = paths.FileResolution()
+    directory.local(f'/static-files/ai_generated?expires={expires}&sig=' +
+                    static_file_url.sign_static_file('ai_generated', expires))
+    mutation = paths.FileResolution()
+    mutation.local(signed, operation='delete')
+
+    assert allowed == str(legacy.resolve())
+    assert unsigned == str(legacy.resolve())
+    assert expired == str(legacy.resolve())
+    assert guessed.files
+    assert directory.files
+    assert mutation.files[0].operation == 'delete'
 
 
 def test_artifact_open_rejects_source_replaced_after_guard_precheck(tmp_path, monkeypatch):

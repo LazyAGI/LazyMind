@@ -37,7 +37,6 @@ from lazyllm.tools.tools.search import (
 )
 
 from lazymind.chat.service.utils.static_file_url import (
-    _upload_root,
     local_path_from_static_file_url,
     resolve_local_image_path,
     static_file_url_from_any,
@@ -1078,8 +1077,8 @@ def meme_add_caption(
     from PIL import Image
 
     source = _open_caption_source(image_url)
-    output_dir = Path(_upload_root()).resolve() / 'ai_generated'
-    output_dir.mkdir(parents=True, exist_ok=True)
+    from lazymind.chat.engine.tools.system_resources import generated_upload_directory
+    output_dir = generated_upload_directory('generated-images')
     animated = bool(getattr(source, 'is_animated', False) and getattr(source, 'n_frames', 1) > 1)
     suffix = '.gif' if animated else '.png'
     output_path = output_dir / f'{uuid.uuid4().hex}_captioned{suffix}'
