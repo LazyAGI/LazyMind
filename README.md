@@ -2,7 +2,7 @@
 
 **[中文](README.CN.md)** | **English**
 
-<img width="1672" height="941" alt="img_v3_0215b_800b44bc-c72c-4bfa-8e99-7d7c9126310g" src="https://github.com/user-attachments/assets/8d2f370a-f7d9-4665-b616-0e3acd63ef18" />
+<img width="1672" height="600" alt="LazyMind logo" src="docs/assets/lazymind-banner.png" />
 
 > **LazyMind: Keep AI-Agent under your control.**
 
@@ -20,6 +20,17 @@ Instead of repeatedly uploading context, tuning prompts, and supervising every a
 - **Team and enterprise deployments** serve secondary development, project delivery, proposals, FDE work, and organization-wide knowledge collaboration with shared permissions, deployment, and evaluation capabilities.
 
 **[Quick start](#quick-start)** · **[Product architecture](docs/architecture.md)** · **[Build a workflow](docs/workflow-format.md)** · **[Desktop mode](desktop/README.md)**
+
+---
+
+## Ways to use LazyMind
+
+| Mode | Best for | How it works |
+|------|----------|--------------|
+| **Use LazyMind directly** | Local knowledge work or shared team workflows | Run the desktop app for a local-first experience, or deploy the service for your team. Create tasks, use knowledge bases, and run Skills and Workflows in the LazyMind workspace. |
+| **Use LazyMind as an agent plugin** | Extending the agent environment you already use | Connect LazyMind from **Settings → Assistants**. Codex and DeepSeek Harness can then use LazyMind knowledge, Skills, and Workflows in their native sessions, including workflow progress, review checkpoints, and artifacts. |
+
+See the [Codex integration](integrations/codex-workflow/README.md) and [DeepSeek Harness integration](integrations/dsh-workflow/README.md) for implementation details.
 
 ---
 
@@ -253,7 +264,16 @@ Desktop Mode uses native processes, SQLite, and Milvus Lite with platform-standa
 
 ## Quick start
 
-### Run locally
+### Install the desktop app (recommended for local use)
+
+Download the latest installer from [GitHub Releases](https://github.com/LazyAGI/LazyMind/releases/latest):
+
+- **macOS (Apple silicon):** download the `.dmg`, open it, and drag LazyMind into Applications.
+- **Windows x64:** download and run the installer `.exe`.
+
+The installers include the local runtime needed for Desktop Mode. For normal local use, install the `.dmg` or `.exe` instead of building and packaging LazyMind from source.
+
+### Run locally from source
 
 Prerequisites: Go, Python 3, uv, pnpm, and Node.js.
 
@@ -299,7 +319,9 @@ make local-down
 
 Use `make local-win-down` on Windows. See the [Quick Start guide](docs/quick_start.md) for complete configuration.
 
-### Build the desktop application
+### Build the desktop application from source
+
+The commands below are intended for development and release packaging. Local users should normally use the installers above.
 
 | Platform | Command | Output |
 |----------|---------|--------|
