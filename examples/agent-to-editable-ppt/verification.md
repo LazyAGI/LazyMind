@@ -8,11 +8,11 @@ The owner-supplied original prompt, two recordings, two PDFs and one distinct PP
 
 已核对原始提示词、两段录像、两份 PDF 和一份不同内容的 PPTX。主展示选 DSH，另附 Codex 参考；二者不能拼成同一次运行。新下载文件只是第一组的重复件。本轮尚未新生成工作流成果。
 
-Repository baseline inspected: `84a1a5b7f1d1e9ef59022f2c57ab7dfe1fd54ac2`. Integration docs and source were read. An isolated 8091 runtime reported `ready`, but its existing build has not been verified against this baseline; that check is not an example pass. No services were restarted for this preparation.
+Repository baseline inspected: `84a1a5b7f1d1e9ef59022f2c57ab7dfe1fd54ac2`. Integration docs and source were read. An isolated 8091 runtime reported `ready`, but its existing application build has not been verified against this baseline; that check is not an example pass. Later connector preparation rebuilt the connector from this example branch and restarted only the Bridge and test DSH host; neither application frontend was restarted.
 
 | Check | Codex | DSH | Required evidence |
 | --- | --- | --- | --- |
-| Plugin installation and correct instance | Not run | Not run | Host/plugin/build versions; successful capability discovery |
+| Plugin installation and correct instance | Installed; managed MCP preflight passed | Installed and host restarted; Bridge relay passed | Full host UI run and deployed application version still pending |
 | Original material read in current run | Not run | Not run | Historical exports inventoried; collected source-image bundle still missing |
 | Outline/material review | Not run | Not run | Before/after adjustment and user approval |
 | Deck V1 | Not run | Not run | Actual run, artifact revision and opened export |
@@ -23,6 +23,19 @@ Repository baseline inspected: `84a1a5b7f1d1e9ef59022f2c57ab7dfe1fd54ac2`. Integ
 | Independent reproduction | Not run | Not run | Reviewer/date, steps followed, help required and outcome |
 
 ## Record an actual run / 实跑记录要求
+
+### Connector preflight — 2026-10-13 / 接入预检
+
+The owner authorized switching the shared local Agent connection from 8090 to 8091. Existing credentials and connector configuration were backed up privately. Fresh access and refresh credentials were obtained from 8091 through its local session endpoint, then saved with the existing CLI session command. The previous environment's tokens were not reused. This is a single-target connection switch, not simultaneous Agent access to both environments.
+
+用户授权将这套本机 Agent 连接切到 8091。已备份旧配置，从 8091 重新取得并保存完整登录凭据；这次选择单一连接目标，未修改产品代码以支持两个环境同时接入。
+
+- Codex Workflow plugin `0.1.0+codex.c1b5b74cb7b5a351`: installed using the desktop application's bundled CLI after a stale system CLI failed. The installer reports that a new Codex task is needed to load its tools. A subprocess launched from the installed MCP configuration initialized with the 8091 origin and successfully called `knowledge.list` and `workflow.list`. This is a protocol preflight, not a Codex conversation E2E.
+- DSH `0.2.0-rc.2`: MCP and Workflow bundle installed in a separate test profile; web host restarted on port 3081. HTTP 401 confirms its login gate is present, not that a signed-in browser session has passed.
+- Both hosts' scoped pairing credentials successfully made a read-only Bridge relay request (HTTP 200). No workflow execution, review approval or document-generation result is implied by this check.
+- 8090 and 8091 frontend PIDs were unchanged and both returned HTTP 200 after the switch. The application services were not rebuilt by this preflight.
+
+接入阻塞已解除，但上表中的生成、审核、导出、原 Agent 对照及独立复现仍未通过验收；不能把 MCP 工具调用成功写成整篇案例完成。
 
 ### Historical artifact inspection / 历史文件检查
 
