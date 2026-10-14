@@ -462,9 +462,57 @@
         }
       ],
       "errors": []
+    },
+    {
+      "stage": "I",
+      "run": {
+        "stage": "I",
+        "arm": "codex-plugin",
+        "exit_code": 0,
+        "elapsed_seconds": 61.37,
+        "workspace": "<PRIVATE_RUN_ROOT>/zhice-runs/codex-plugin/workspace",
+        "thread_id": "01a13978-d733-72d3-8470-d5b7d8da54e7"
+      },
+      "tools": [
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"pwd\npython3 - <<'PY'\nfrom pathlib import Path\nimport json\nroot=Path('<PRIVATE_RUN_ROOT>/zhice-runs/codex-plugin/workspace/outputs')\nfor name in ['01-summary.md','02-scope-evidence.md']:\n p=root/name\n print(json.dumps({'name':name,'text':p.read_text()},ensure_ascii=False))\nfor name in ['01-summary-reviewed.md','02-scope-evidence-reviewed.md']:\n print(json.dumps({'name':name,'exists':(root/name).exists()}))\nPY\"",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "knowledge.document.list",
+          "arguments": {
+            "knowledge_id": "ds_b4cbf46595d98dd2a0e872c1d96bf03d",
+            "page": {
+              "page_size": 100
+            }
+          },
+          "status": "completed"
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"python3 - <<'PY'\nfrom pathlib import Path\nimport hashlib, json, re\nroot=Path('<PRIVATE_RUN_ROOT>/zhice-runs/codex-plugin/workspace/outputs')\nassert Path.cwd() == root.parent\nknowledge_id='ds_b4cbf46595d98dd2a0e872c1d96bf03d'\ndocuments=json.loads(\\\"{\\\\\\\"review.txt\\\\\\\":\\\\\\\"doc_46a23b2fb47ba47f3b8a9ef0195cc54a\\\\\\\",\\\\\\\"prd.txt\\\\\\\":\\\\\\\"doc_bc9879c116ae6e5b264200dc3f09378b\\\\\\\",\\\\\\\"design.txt\\\\\\\":\\\\\\\"doc_dbd6a8d75dba652c433795dee8d095cc\\\\\\\",\\\\\\\"handoff.txt\\\\\\\":\\\\\\\"doc_fee089df8b540192144ac3cf56ac4cec\\\\\\\"}\\\")\nbase='http://127.0.0.1:8091'\nnotice='> 来源链接审核后恢复（2026-10-14）：初次输出将下载路径错误拼接为网页链接；本版仅修正来源链接及其说明，保留初次文件，正文事实不变。本轮通过 LazyMind knowledge.document.list 核对文档名称与实际 ID。新网页链接由协调者浏览器验收（据本轮用户提供的验收结果）；需要本地服务和登录，不是公开链接，助手本轮未亲自打开。正文保留的检索、全文读取及工具记录属于原始写作轮次，不表示本轮重新执行。\\\\n\\\\n'\nlink_note='以上来源网页链接已按核对的知识库 ID 和文档 ID 修正，由协调者浏览器验收；需要本地服务和登录，不是公开链接，助手本轮未亲自打开。'\nchanges={\n '01-summary.md':[\n  ('工具返回的来源下载链接','来源网页链接（协调者浏览器验收）'),\n  ('以上链接由工具返回的相对 \"'`download_url` 按配置的 LazyMind 基址 `http://127.0.0.1:8091` 补全，保留原路径；本次没有另行点击下载验证。'\"',link_note)\n ],\n '02-scope-evidence.md':[\n  ('工具来源链接','来源网页链接（协调者浏览器验收）'),\n  ('来源链接保留工具返回的下载路径，并以配置的 LazyMind 基址补全；未另行点击下载核验。',link_note)\n ]\n}\nprepared=[]\nfor name, replacements in changes.items():\n source=root/name\n original_bytes=source.read_bytes()\n original=original_bytes.decode('utf-8')\n target=root/(source.stem+'-reviewed.md')\n assert not target.exists(), f'拒绝覆盖已有文件：{target}'\n revised=original\n counts={}\n for document_name,document_id in documents.items():\n  old=f'{base}/datasets/{knowledge_id}/documents/{document_id}:download'\n  new=f'{base}/lib/knowledge/knowledge/{knowledge_id}/{document_id}'\n  counts[document_name]=revised.count(old)\n  revised=revised.replace(old,new)\n assert '/datasets/' not in revised and ':download' not in revised\n for old,new in replacements:\n  assert revised.count(old)==1, (name,old)\n  revised=revised.replace(old,new,1)\n title,remaining=revised.split('\\\\n\\\\n',1)\n revised=title+'\\\\n\\\\n'+notice+remaining\n # Reverse all allowed edits to prove no other text changed.\n restored=revised.replace(notice,'',1)\n for old,new in reversed(replacements):\n  assert restored.count(new)==1\n  restored=restored.replace(new,old,1)\n for document_name,document_id in documents.items():\n  old=f'{base}/datasets/{knowledge_id}/documents/{document_id}:download'\n  new=f'{base}/lib/knowledge/knowledge/{knowledge_id}/{document_id}'\n  restored=restored.replace(new,old)\n assert restored==original, '检测到链接与说明之外的变化'\n prepared.append((source,target,original_bytes,revised,counts))\nfor source,target,original_bytes,revised,counts in prepared:\n with target.open('x',encoding='utf-8',newline='') as output:\n  output.write(revised)\n assert target.read_bytes()==revised.encode('utf-8')\n assert source.read_bytes()==original_bytes, '原文件发生变化'\n print(json.dumps({'file':target.name,'replacements':counts,'total':sum(counts.values()),'original_sha256':hashlib.sha256(original_bytes).hexdigest(),'original_unchanged':True,'only_allowed_edits':True},ensure_ascii=False))\n\nPY\"",
+          "status": "completed",
+          "exit_code": 0
+        }
+      ],
+      "errors": []
     }
   ],
   "outputs": [
+    {
+      "file": "01-summary-reviewed.md",
+      "raw_sha256": "0c6e90dfdad811af528d43e161e164ce114e005b4cb520bc30a7253878b46499",
+      "published_sha256": "0c6e90dfdad811af528d43e161e164ce114e005b4cb520bc30a7253878b46499",
+      "redaction": "private path prefixes only"
+    },
+    {
+      "file": "02-scope-evidence-reviewed.md",
+      "raw_sha256": "cb60fff2bf4d4652c75ad0215dfbf8dd269244309d78421d9bb2c424574f3ec7",
+      "published_sha256": "cb60fff2bf4d4652c75ad0215dfbf8dd269244309d78421d9bb2c424574f3ec7",
+      "redaction": "private path prefixes only"
+    },
     {
       "file": "03-design-revision.md",
       "raw_sha256": "ddac06263fe6bf40a997fec7f3f5cf841f361c0ef9021717479d1856f5bf34c7",

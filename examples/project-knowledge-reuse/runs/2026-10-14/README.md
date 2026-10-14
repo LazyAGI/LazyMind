@@ -53,8 +53,8 @@ The owner confirmed on 2026-10-14 that this case should focus on cross-Agent and
 
 | Deliverable / 成果 | Codex + LazyMind | DSH + LazyMind |
 | --- | --- | --- |
-| Summary / 摘要 | [A](codex-plugin/01-summary.md) | [A](dsh-plugin/01-summary.md) |
-| R-05 evidence / 有据追问 | [B](codex-plugin/02-scope-evidence.md) | [B original](dsh-plugin/02-scope-evidence.md), [F corrected ledger](dsh-plugin/02-scope-evidence-reviewed.md) |
+| Summary / 摘要 | [A original](codex-plugin/01-summary.md), [I corrected links](codex-plugin/01-summary-reviewed.md) | [A](dsh-plugin/01-summary.md) |
+| R-05 evidence / 有据追问 | [B original](codex-plugin/02-scope-evidence.md), [I corrected links](codex-plugin/02-scope-evidence-reviewed.md) | [B original](dsh-plugin/02-scope-evidence.md), [F corrected ledger](dsh-plugin/02-scope-evidence-reviewed.md) |
 | Local proposal / 局部修改建议 | [C](codex-plugin/03-design-revision.md) | [C original](dsh-plugin/03-design-revision.md), [F corrected ledger](dsh-plugin/03-design-revision-reviewed.md) |
 | Fresh-session handoff / 新会话交接 | [D](codex-plugin/04-handoff.md) | [D original](dsh-plugin/04-handoff.md), [H fresh-session rerun](dsh-plugin/04-handoff-post-maintenance.md) |
 
@@ -79,3 +79,9 @@ The run used macOS, a local development instance on 8091, the CLI/plugin version
 - The existing global connector pointed to 8090 after maintenance. H used a private 8091 credential directory with the existing `lazymind mcp proxy` command in a temporary DSH configuration. No global connector or 8090 service was changed. This adds setup and does not validate automatic desktop notification recovery. / 单独恢复 8091 MCP 连接，没有切换全局连接；不算桌面通知无感恢复。
 - All four browser source pages were opened and the relevant original passages checked; [reviewed navigation](source-navigation.md) provides the links. Coordinator MCP reads after H reconfirmed unchanged complete texts: [checks](post-maintenance-checks.json). Original generated API-relative links remain an output defect; this manual index is the disclosed workaround. / 四份原文导航均实测，并再次核对源文未变；初次生成的错误链接保留，导航索引是明确披露的补救。
 - The repository now retains sixteen initial outputs, two provenance-ledger corrections and one fresh-session rerun. No independent human reproduction or graphical DSH-host acceptance is claimed. / 共保留 16 份初次输出、2 份取证修正版和 1 份新会话重跑成果；独立复现与 DSH 图形宿主验收仍未完成。
+
+### Codex citation recovery I / Codex 引用修正 I
+
+Codex resumed its A–C session after migration, listed the four knowledge documents and saved separate reviewed A/B files. It replaced 46 + 23 incorrect links with the four browser-verified document-page routes, preserving the original outputs and body claims. The reviewed copies disclose that the coordinator checked navigation and that the original retrieval ledger belongs to the earlier turns. No new search, full-text read or source write is claimed for I. / 同一 Codex 会话完成两份来源链接修正版，保留初次输出；本轮只列文档核对身份，不冒充重新检索或全文读取。
+
+I used a per-invocation isolated MCP proxy configuration because the installed global connection targets 8090 after maintenance. This recovery is not proof of seamless installed-plugin reconnection. Exit 0; invocation duration 61.37 seconds. The underlying API-relative download-path ambiguity is still an open product issue; generated reports are recovered with a disclosed navigation instruction. / 本轮使用临时隔离连接，未改全局配置；这是已披露的提示词与连接补救，底层链接语义问题仍记录为未修复。

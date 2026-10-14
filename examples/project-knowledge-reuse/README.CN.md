@@ -2,7 +2,7 @@
 
 [English](README.md) · [完整提示词](prompts.CN.md) · [验证记录与判据](verification.md)
 
-**当前状态：已有 Codex CLI / DSH headless 真实输出和工具记录，尚未整体验收。** 来源链接、取证记录准确性和独立复现仍待验收。查看[本轮实跑与问题记录](runs/2026-10-14/README.md)，不把文件生成当作验收通过。
+**当前状态：已有 Codex CLI / DSH headless 真实输出和工具记录，尚未整体验收。** 已补齐检索、取证记录与来源导航修正版；非实现者独立复现仍待完成，初次失败及补救成本保留。查看[本轮实跑与问题记录](runs/2026-10-14/README.md)，不把文件生成当作验收通过。
 
 这个案例复用仓库已有的“知策”产品方案、PRD、评审和交接材料。用户在熟悉的 Codex 或 DeepSeek Harness（DSH）中，通过 LazyMind 插件使用项目知识库；LazyMind 负责检索与原文读取，外部 Agent 负责写作和保存文件。不运行产品方案 Workflow，不新增研究系统。
 

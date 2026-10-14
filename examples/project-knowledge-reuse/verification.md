@@ -10,11 +10,11 @@
 | --- | --- | --- |
 | Plugin connection to intended instance / 插件连接目标实例 | CLI: verified 8091 / 已验证 | Headless: verified 8091 / 已验证 |
 | Four files indexed and readable / 四份文件索引及读取 | Search + four exact full-text reads / 检索及四份完整原文 | Search + four reads; metadata says NONE / 检索读取成功，状态元数据异常 |
-| A: sourced summary / 带来源的摘要 | Generated; source links need correction / 已生成，来源链接待修正 | Generated; content audit recorded / 已生成并记录核查 |
+| A: sourced summary / 带来源的摘要 | Generated; I saved separately reviewed page links / 已生成，I 另存来源链接修正版 | Generated; content audit recorded / 已生成并记录核查 |
 | B: retrieve and explain R-05 / 检索与解释 R-05 | Generated, actual positions identified / 已生成、定位真实章节 | Core explanation supported; ledger corrected in F / 核心解释有据，取证记录已于 F 轮修正 |
 | C: bounded revision proposal / 限定范围修改建议 | Generated; source bytes unchanged / 已生成，原文未变 | Generated; source bytes unchanged; ledger corrected in F / 已生成，原文未变，取证记录已修正 |
 | D: fresh-conversation handoff / 新会话交接 | Generated in fresh session; searched and reread all four / 新会话完成检索与四份读取 | D omitted search; H rerun searched three times and read all four / D 漏检索，H 新会话已完成三次检索与四份读取 |
-| User opens outputs and finds sources / 取得成果与定位原文 | Files saved; source page verified; generated links fail / 文件已保存，原文页面可用，生成链接错误 | Files saved; IDs/sections available; no automatic source-link pass / 文件可用，有 ID/章节，未判自动链接通过 |
+| User opens outputs and finds sources / 取得成果与定位原文 | Files saved; four pages verified; I corrected initial wrong links / 成果与四份原文可用，I 修正初次错误链接 | Files saved; IDs/sections available; no automatic source-link pass / 文件可用，有 ID/章节，未判自动链接通过 |
 | Direct-Agent comparison / 直接使用资料的对照 | A–D outputs recorded / A–D 真实输出已记录 | A–D outputs recorded / A–D 真实输出已记录 |
 | Non-implementer reproduction / 非实现者独立复现 | Pending / 待执行 | Pending / 待执行 |
 
@@ -77,3 +77,5 @@ Run `python3 examples/project-knowledge-reuse/prepare_inputs.py --check` and `gi
 Maintenance hold / 维护暂停：On 2026-10-14 the owner confirmed that 8091 is intentionally stopped and must not be started. Sixteen initial outputs are saved; DSH recovery E failed to connect and was interrupted, not passed. Recovery F corrected only the local provenance ledgers. / 用户确认 8091 正在维护，禁止启动。16 份初次输出已保存；DSH 补验 E 因连接拒绝被中止，不算通过；F 仅修正本地取证记录。
 
 Post-maintenance update / 维护后更新：DSH G could not resume the migrated workspace. H used a fresh session and private 8091 MCP connection, completed explicit search and four reads, and preserved all unresolved states. Browser checks of all four source pages passed; a reviewed navigation index supplements the original incorrect links. See [recovery evidence](runs/2026-10-14/README.md#post-maintenance-recovery--维护后恢复). / G 续跑失败与 H 新会话成功分别记录；四份浏览器原文导航通过，人工补充索引不冒充初次输出正确。
+
+Codex recovery I / Codex 修正：A/B reviewed copies replace 69 wrong links after document-list identity checks, with original outputs retained. This is explicit review/recovery cost; API download semantics remain an open product issue. / A、B 两份修正版共替换 69 处链接，保留初次结果与恢复记录。
