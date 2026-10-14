@@ -93,3 +93,14 @@ When a check fails, retain the failure and narrow the claim. Do not use an old p
 Four page plans were produced, but visual inspection found a watermarked architecture image, a book cover presented as an object close-up, and an exhibition booth described as conservation imagery. Dated collection figures also need correction. See the [review and proposed copy](outputs/codex/review-2026-10-14.md). No rendered deck or review approval is claimed. / 四页方案已产出；逐图检查发现水印、书封面与文物特写混淆、展台与修缮场景混淆，数据时点也待修正，暂不通过。
 
 After maintenance, the chat's existing MCP transport was closed and the global connector targeted 8090. A private 8091-only MCP proxy was initialized using the existing local session mechanism. The global connector and 8090 service were not changed. This recovery is additional setup cost, not seamless plugin continuation. / 维护后原 MCP 连接关闭，全局连接目标回到 8090；本次单独恢复 8091 私有连接，未改全局配置，不宣传无感续跑。
+
+
+### Rework and notification recovery — 2026-10-14 / 重做与通知恢复
+
+Material rework completed after the review instructions were saved to the existing requirements. All four replacement files were visually inspected; the earlier watermarked image, book-cover and exhibition-booth mismatches are absent. The cup photo is somewhat soft, and final-slide layout and attribution still need review. The [new background prompts](outputs/codex/background-prompts-after-review.md) use restrained graphic decoration rather than simulated documentary photography. These intermediate results do not establish completed-deck acceptance.
+
+审核要求已触发素材重做，四张实际图片已检查；金杯照片略软，最终成片和署名仍需验收。底图提示词重做完成，保留真实照片与 AI 装饰背景的边界。
+
+The global Bridge was left targeting 8090 after maintenance. A private Bridge on loopback port 19092 and the existing dispatcher with its supported `--bridge-url` option were started against the isolated 8091 credentials. The existing matching connector pairing was copied privately with mode 0600; its account scope was verified before reuse. A read-only Bridge relay returned HTTP 200. This is additional recovery setup, not a product fix or proof of automatic notification delivery; actual queue receipt is checked separately. Global credentials, the default Bridge and both application runtimes were unchanged.
+
+维护后的全局连接未改动；本次复用已有参数启动独立 19092 Bridge 与通知进程，只连接 8091，配对文件私有保存。只读转发通过，通知实际到达仍需单独核对，不能把启动成功写成自动续跑完成。
