@@ -1,6 +1,6 @@
 # Verification / 验证
 
-**Not accepted yet / 尚未整体验收。** Current-version Codex CLI and DSH headless runs now have real outputs and call traces. Initial source-link defects and independent reproduction remain open; DSH search recovery passed in fresh session H; provenance-ledger corrections are retained separately. See the [2026-10-14 run](runs/2026-10-14/README.md). / 已有真实宿主输出与调用记录；初次来源链接和独立复现仍待处理；DSH 新会话 H 已补齐检索；取证记录修正版单独保留，不宣传效率提升。
+**Not accepted yet / 尚未整体验收。** Current-version Codex CLI and DSH headless runs now have real outputs and call traces. Codex source-link recovery passed in I; the underlying API-link ambiguity and independent reproduction remain open; DSH search recovery passed in fresh session H; provenance-ledger corrections are retained separately. See the [2026-10-14 run](runs/2026-10-14/README.md). / 已有真实宿主输出与调用记录；Codex 初次来源链接已于 I 轮修正，底层 API 链接语义与独立复现仍待处理；DSH 新会话 H 已补齐检索；取证记录修正版单独保留，不宣传效率提升。
 
 输入来源基线 / Source baseline: `84a1a5b7f1d1e9ef59022f2c57ab7dfe1fd54ac2`. Document hashes: [sources.json](sources.json).
 
@@ -38,7 +38,7 @@ These references are for the reviewer, **not knowledge base inputs or extra hint
 | Task | Required source-grounded result / 需要出现的有据结论 |
 | --- | --- |
 | A | Zhice is fictional; proposed public-source research and human review, with role boundaries and immutable confirmed versions. PRD has 12 FR / 18 AC **designs**, not passed tests. Review is returned for revision; handoff remains blocked. / 虚构案例，公开资料与人工复核，角色边界、确认版本保留；12 项 FR / 18 项 AC 不是通过记录；评审退回、交付阻塞。 |
-| B | Review R-05 links design §3 wording to PRD §3. Design's reconfirmation wording is ambiguous out of context; PRD requires a new task after starting. R-05 is P2; clarifying it does not close R-01–R-03 P1 gates. / 对应方案 §3、PRD §3；区分启动前后；澄清 P2 不解除三项 P1 门禁。 |
+| B | Review R-05 refers to §3, but the fixed source files place the relevant wording in design §4 and PRD §4/§5; record this source inconsistency. Design's reconfirmation wording is ambiguous out of context; PRD requires a new task after starting. R-05 is P2; clarifying it does not close R-01–R-03 P1 gates. / 评审原文写 §3，实际相关内容在方案 §4 和 PRD §4/§5，应明确记录章节偏移；区分启动前后；澄清 P2 不解除三项 P1 门禁。 |
 | C | Shows the actual original wording and a localized replacement. Source files remain unchanged. Labels proposal and unconfirmed status, preserving outstanding review items. / 原文与替换片段准确，范围局部，源文件不变，建议待确认，不擅自结案。 |
 | D | Reads sources anew. R-01: unaccepted core rules; R-02: retention/deletion/sensitive-data policy; R-03: technical feasibility/nonfunctional constraints; R-04: prototype coverage; R-05: scope wording. All remain unresolved in these source snapshots. Roles are suggestions, people/dates unspecified; handoff blocked. / 新会话重新读取，找回五项未决问题和关闭条件，角色仅为建议，无已指定个人或日期，交付仍阻塞。 |
 
