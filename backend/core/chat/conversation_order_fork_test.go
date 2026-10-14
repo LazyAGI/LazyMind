@@ -19,7 +19,6 @@ func newForkOrderTestDB(t *testing.T) (*gorm.DB, map[string]orm.Conversation) {
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	base := time.Date(2026, 10, 14, 8, 0, 0, 0, time.UTC)
 	parent := "parent-a"
-	rows := map[string]orm.Conversation{}
 	for i, id := range []string{"parent-a", "parent-b", "root-a", "root-b", "sidechat", "fork-a", "fork-b", "other-fork", "foreign-fork", "archived-fork"} {
 		order := int64((i + 1) * 10)
 		row := orm.Conversation{ID: id, DisplayName: id, HistoryOrder: &order,
@@ -36,7 +35,6 @@ func newForkOrderTestDB(t *testing.T) (*gorm.DB, map[string]orm.Conversation) {
 		if err := db.Create(&row).Error; err != nil {
 			t.Fatal(err)
 		}
-		rows[id] = row
 	}
 	for _, id := range []string{"fork-a", "fork-b", "other-fork", "foreign-fork", "archived-fork"} {
 		source := parent
@@ -49,6 +47,15 @@ func newForkOrderTestDB(t *testing.T) (*gorm.DB, map[string]orm.Conversation) {
 		if err := db.Create(&origin).Error; err != nil {
 			t.Fatal(err)
 		}
+	}
+	// Compare persisted snapshots so driver timestamp representations match.
+	var persisted []orm.Conversation
+	if err := db.Find(&persisted).Error; err != nil {
+		t.Fatal(err)
+	}
+	rows := make(map[string]orm.Conversation, len(persisted))
+	for _, row := range persisted {
+		rows[row.ID] = row
 	}
 	return db, rows
 }
