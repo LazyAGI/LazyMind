@@ -50,16 +50,8 @@ describe("RunStatusCard", () => {
       partial_output: false,
     }} />);
 
-    const isCredentialFailure = code === "authentication_failed"
-      || code === "permission_denied";
+    const isCredentialFailure = code === "authentication_failed";
     const isModelUnavailable = code === "not_found";
-    expect(screen.getByText(
-      isCredentialFailure
-        ? "chat.apiKeyUnavailableTitle"
-        : isModelUnavailable
-          ? "chat.modelUnavailableTitle"
-          : "chat.runStatus.failed",
-    )).toBeInTheDocument();
     expect(screen.getByText(
       isCredentialFailure
         ? /chat\.apiKeyUnavailableDescription/
@@ -81,7 +73,7 @@ describe("RunStatusCard", () => {
     const alert = screen.getByRole("alert");
     expect(alert).not.toHaveClass("chat-run-status-card--cancelled");
     expect(screen.getByText("chat.runStatus.runtimeFailed")).toBeInTheDocument();
-    expect(screen.getByText(/chat\.runStatus\.runtimeError/)).toBeInTheDocument();
+    expect(screen.getByText(/chat\.runStatus\.providerError/)).toBeInTheDocument();
   });
 
   it.each(["user_env_unavailable", "user_env_invalid_name"])("explains %s without suggesting a model change", (code) => {
@@ -93,7 +85,7 @@ describe("RunStatusCard", () => {
     expect(screen.queryByRole("link", { name: "chat.checkModelSettings" })).not.toBeInTheDocument();
   });
 
-  it("shows the normalized failure code and diagnostic id", () => {
+  it("hides the normalized failure code and diagnostic id", () => {
     render(<RunStatusCard terminal={{
       status: "failed",
       reason: "runtime_failure",
@@ -102,8 +94,9 @@ describe("RunStatusCard", () => {
       partial_output: false,
     }} />);
 
-    expect(screen.getByText(/chat\.runStatus\.failureCode/)).toHaveTextContent("transport_error");
-    expect(screen.getByText(/chat\.runStatus\.diagnosticId/)).toHaveTextContent("diag_test");
+    expect(screen.queryByText(/chat\.runStatus\.failureCode/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/chat\.runStatus\.diagnosticId/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/diag_test/)).not.toBeInTheDocument();
   });
 
   it("renders incomplete model output with the interrupted title", () => {
@@ -125,7 +118,7 @@ describe("RunStatusCard", () => {
       partial_output: true,
     }} />);
 
-    expect(screen.getByText("chat.runStatus.failed")).toBeInTheDocument();
+    expect(screen.getByText("chat.runStatus.titles.quota")).toBeInTheDocument();
     expect(screen.getByText(/chat\.runStatus\.codes\.organization_spend_limit_exceeded/)).toBeInTheDocument();
     expect(screen.getByText(/chat\.runStatus\.partialOutput/)).toBeInTheDocument();
     expect(screen.queryByText(/HTTP/)).not.toBeInTheDocument();
@@ -196,12 +189,12 @@ describe("RunStatusCard", () => {
         "/settings?section=models&view=providers&return_to=%2Fagent%2Fchat%2Fhome%2Fconversation-1&provider_id=openai",
       );
     fireEvent.click(
-      screen.getByRole("button", { name: "chat.continueAfterConfiguration" }),
+      screen.getByRole("button", { name: "chat.runStatus.retryAfterSettings" }),
     );
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
-  it("shows a retired model card with settings, model switch, and manual continuation", () => {
+  it("shows an unavailable model card with settings, model switch, and manual retry", () => {
     const onRetry = vi.fn();
     render(<RunStatusCard terminal={{
       status: "failed",
@@ -215,7 +208,7 @@ describe("RunStatusCard", () => {
     expect(screen.getByText(/chat\.modelUnavailableDescription/)).toHaveTextContent("fake");
     expect(screen.getByRole("link", { name: "chat.checkModelSettings" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "chat.changeModel" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "chat.continueAfterConfiguration" }));
+    fireEvent.click(screen.getByRole("button", { name: "chat.runStatus.retryAfterSettings" }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 });

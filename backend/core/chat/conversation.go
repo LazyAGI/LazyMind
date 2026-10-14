@@ -622,17 +622,16 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-			persisted := persistImmediateRunTerminal(r.Context(), db, convID, historyID, displayQuery, runID, target, historyExt, &RunTerminal{
+			terminal := &RunTerminal{
 				Status:        "failed",
 				Reason:        "model_failure",
-				Code:          "not_found",
+				Code:          "model_configuration",
 				PartialOutput: false,
-			})
-			appErr := common.ResolveAppError(err.Error(), http.StatusServiceUnavailable)
-			if persisted {
-				appErr = appErr.WithDetail(map[string]string{"history_id": historyID})
 			}
-			common.ReplyAppErr(w, appErr)
+			if !persistImmediateRunTerminal(r.Context(), db, convID, historyID, displayQuery, runID, target, historyExt, terminal) {
+				historyID = ""
+			}
+			replyChatTerminalError(w, err.Error(), http.StatusServiceUnavailable, terminal, historyID)
 			return
 		}
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load chat runtime config failed", err), http.StatusInternalServerError)

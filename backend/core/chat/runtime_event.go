@@ -3,6 +3,7 @@ package chat
 import (
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 )
 
@@ -86,14 +87,27 @@ var validModelFailureOrigins = map[string]struct{}{
 	"transport": {}, "http": {}, "provider": {}, "protocol": {},
 }
 
-var validModelFailureCodes = map[string]struct{}{
-	"invalid_request": {}, "authentication_failed": {}, "permission_denied": {}, "not_found": {},
-	"rate_limited": {}, "usage_limit_exceeded": {}, "concurrency_limited": {}, "quota_exhausted": {},
-	"balance_exhausted": {}, "organization_spend_limit_exceeded": {}, "project_spend_limit_exceeded": {},
-	"input_filtered": {}, "output_filtered": {}, "token_limit": {}, "request_timeout": {},
-	"provider_overloaded": {}, "service_unavailable": {}, "provider_internal_error": {},
-	"provider_rejected": {}, "conflict": {}, "unprocessable_entity": {}, "protocol_error": {},
-	"transport_error": {},
+// Keys define the public model failure contract. Values retain Auto's existing
+// policy: true marks this model unavailable for the next automatic selection.
+var validModelFailureCodes = map[string]bool{
+	"invalid_request": false, "authentication_failed": true, "permission_denied": true, "not_found": true,
+	"rate_limited": true, "usage_limit_exceeded": true, "concurrency_limited": true, "quota_exhausted": true,
+	"balance_exhausted": true, "organization_spend_limit_exceeded": true, "project_spend_limit_exceeded": true,
+	"input_filtered": false, "output_filtered": false, "token_limit": false, "request_timeout": true,
+	"provider_overloaded": true, "service_unavailable": true, "provider_internal_error": true,
+	"provider_rejected": false, "conflict": false, "unprocessable_entity": false, "protocol_error": false,
+	"transport_error": true, "model_configuration": true,
+}
+
+// ModelFailureCodes supplies OpenAPI and its generated clients from the same
+// directory used to validate persisted and streamed terminals.
+func ModelFailureCodes() []string {
+	codes := make([]string, 0, len(validModelFailureCodes))
+	for code := range validModelFailureCodes {
+		codes = append(codes, code)
+	}
+	sort.Strings(codes)
+	return codes
 }
 
 func (e *ChatRuntimeEvent) Validate(expectedRunID string) error {
