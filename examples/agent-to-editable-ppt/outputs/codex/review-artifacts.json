@@ -1,0 +1,79 @@
+{
+  "date": "2026-10-14",
+  "session_id": "mcp-64c7a99d9707aea53a0102ccb383cb8f",
+  "review_result": "changes_required",
+  "reviewed_artifacts": [
+    {
+      "artifact_id": "4729a4d4-52d3-4595-831f-7fe278636510",
+      "slot": "material_images",
+      "producer_attempt_id": "pss_6052c1df4d454d509ede935cde51d83c",
+      "revision": 2,
+      "list_index": 4,
+      "caption": "故宫中轴线全景航拍（历史篇主图）",
+      "sha256": "sha256:b35a6b6b06b206f39ac8dd1b044ea813c457d67c9b9c1c95c9fcd6b00682b4c0"
+    },
+    {
+      "artifact_id": "2731eec0-b614-41e2-9c99-52daf68a0942",
+      "slot": "material_images",
+      "producer_attempt_id": "pss_6052c1df4d454d509ede935cde51d83c",
+      "revision": 2,
+      "list_index": 5,
+      "caption": "太和殿广场与中轴建筑群全景（建筑篇主图）",
+      "sha256": "sha256:4164aee417ef56d60538a12acd67f9fe0958f998d8084b783abbcbfd5419dfd4"
+    },
+    {
+      "artifact_id": "47be5946-72df-4e78-a834-c490a704eeac",
+      "slot": "material_images",
+      "producer_attempt_id": "pss_6052c1df4d454d509ede935cde51d83c",
+      "revision": 2,
+      "list_index": 6,
+      "caption": "故宫院藏文物高清特写（珍藏篇主图）",
+      "sha256": "sha256:857402c165f3efba273fe2b3c0839eada0432d3b34157d670ae1b709e937f0c7"
+    },
+    {
+      "artifact_id": "3b68c148-c1ff-45f2-9a2c-e97dfa8f1daa",
+      "slot": "material_images",
+      "producer_attempt_id": "pss_6052c1df4d454d509ede935cde51d83c",
+      "revision": 2,
+      "list_index": 7,
+      "caption": "古建修缮与数字故宫（传承篇主图）",
+      "sha256": "sha256:3487f501bf05ddd7402b2b031c594b07c0fff383caa6ff6ab128a4f9d97c285a"
+    },
+    {
+      "artifact_id": "60b87a96-0b2f-4236-8b55-f9ff556ed5bc",
+      "slot": "slide_outline",
+      "producer_attempt_id": "pss_a69cc61142af42ac83b6b832f1b5d925",
+      "revision": 1,
+      "list_index": 0,
+      "caption": "第 1 页｜六百年紫禁城：从明清皇宫到人民的博物馆",
+      "sha256": null
+    },
+    {
+      "artifact_id": "b436ae72-b5c0-4e1c-800e-1d16b3731067",
+      "slot": "slide_outline",
+      "producer_attempt_id": "pss_a69cc61142af42ac83b6b832f1b5d925",
+      "revision": 1,
+      "list_index": 1,
+      "caption": "第 2 页｜中轴对称的营城智慧：一条中轴线撑起整座紫禁城",
+      "sha256": null
+    },
+    {
+      "artifact_id": "dd1177d0-3f3d-4f91-99eb-f58b0a8e68e9",
+      "slot": "slide_outline",
+      "producer_attempt_id": "pss_a69cc61142af42ac83b6b832f1b5d925",
+      "revision": 1,
+      "list_index": 2,
+      "caption": "第 3 页｜百万件文物的宝库：186 万余件院藏如何撑起一座博物馆",
+      "sha256": null
+    },
+    {
+      "artifact_id": "97c47119-2810-4a8d-bb01-fd5ba9a04e39",
+      "slot": "slide_outline",
+      "producer_attempt_id": "pss_a69cc61142af42ac83b6b832f1b5d925",
+      "revision": 1,
+      "list_index": 3,
+      "caption": "第 4 页｜从古建修缮到数字故宫：把六百年遗产交给下一个六百年",
+      "sha256": null
+    }
+  ]
+}

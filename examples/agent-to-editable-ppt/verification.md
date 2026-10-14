@@ -13,8 +13,8 @@ Repository baseline inspected: `84a1a5b7f1d1e9ef59022f2c57ab7dfe1fd54ac2`. Integ
 | Check | Codex | DSH | Required evidence |
 | --- | --- | --- | --- |
 | Plugin installation and correct instance | Installed; managed MCP preflight passed | Installed and host restarted; Bridge relay passed | Full host UI run and deployed application version still pending |
-| Original material read in current run | Original prompt used; four images registered; summary step failed | Not run | Image suitability and source verification remain pending |
-| Outline/material review | Not run | Not run | Before/after adjustment and user approval |
+| Original material read in current run | Original prompt used; material summary succeeded after retries; image review found defects | Not run | Image suitability and source verification remain pending |
+| Outline/material review | Agent reviewed; changes required, no human approval | Not run | Before/after adjustment and user approval |
 | Deck V1 | Not run | Not run | Actual run, artifact revision and opened export |
 | Local edit and preserved pages | Not run | Not run | V1/V2 plus page comparison |
 | Editable export | Not run | Not run | Editor version, edited element, saved/reopened file |
@@ -43,6 +43,10 @@ Attempt 3 successfully saved five artifacts, including the [actual requirement a
 After configuration, attempt 4 reused saved requirements and passed. Material collection then completed three image searches and registered four images, but the following model call ended without a complete answer before saving `material_summary`. Three diagnostic API replays reconstructed from the recorded inputs returned valid `save_artifacts(material_summary)` calls; all three passed the production response parser and argument-schema validation. These replays executed no tools and do not count as Workflow recovery. See [issues and fixes](issues.md).
 
 配置补齐后，第 4 次需求分析复用已保存成果并成功。随后素材收集完成三次图片搜索、注册四张图片，但下一轮模型调用未正常结束，`material_summary` 没有保存。按记录重建请求的三次接口重放均返回有效保存参数，现有解析器和参数校验均通过；诊断未执行工具，不算工作流恢复成功。完整问题记录见 [issues.md](issues.md)。
+
+After a subsequent Kimi HTTP 403 explicitly identified its five-hour quota limit, only the 8091 LLM selection was changed to `deepseek-flash`. Material collection attempt 3 (`pss_6052c1df4d454d509ede935cde51d83c`) succeeded in about 155 seconds and left four selected images plus the [raw material summary](outputs/codex/material-summary.md). This is step-execution evidence only: disputed statistics, image-caption accuracy and image rights remain unreviewed. No completed deck or editable-export acceptance is implied.
+
+Kimi 五小时额度耗尽后，仅切换 8091 对话模型为 DeepSeek。素材收集第 3 次执行约 155 秒成功，保存四张选中图片和素材摘要。统计口径、图片内容与说明是否一致、授权条件仍待复核；尚未生成完整 PPT，也未完成导出编辑验收。
 
 ### Connector preflight — 2026-10-13 / 接入预检
 
@@ -83,3 +87,9 @@ For each host, record: date; LazyMind deployed build and dirty-code status; host
 - Another person can follow the published instructions without undocumented assistance / 非实现者无需隐藏步骤即可复现。
 
 When a check fails, retain the failure and narrow the claim. Do not use an old promotional recording to mark a current check passed.
+
+### Page-plan review after maintenance — 2026-10-14
+
+Four page plans were produced, but visual inspection found a watermarked architecture image, a book cover presented as an object close-up, and an exhibition booth described as conservation imagery. Dated collection figures also need correction. See the [review and proposed copy](outputs/codex/review-2026-10-14.md). No rendered deck or review approval is claimed. / 四页方案已产出；逐图检查发现水印、书封面与文物特写混淆、展台与修缮场景混淆，数据时点也待修正，暂不通过。
+
+After maintenance, the chat's existing MCP transport was closed and the global connector targeted 8090. A private 8091-only MCP proxy was initialized using the existing local session mechanism. The global connector and 8090 service were not changed. This recovery is additional setup cost, not seamless plugin continuation. / 维护后原 MCP 连接关闭，全局连接目标回到 8090；本次单独恢复 8091 私有连接，未改全局配置，不宣传无感续跑。
