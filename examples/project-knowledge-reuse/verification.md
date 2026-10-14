@@ -1,6 +1,6 @@
 # Verification / 验证
 
-**Not accepted yet / 尚未整体验收。** Current-version Codex CLI and DSH headless runs now have real outputs and call traces. Source-link defects, DSH search recovery and independent reproduction remain open; provenance-ledger corrections are retained separately. See the [2026-10-14 run](runs/2026-10-14/README.md). / 已有真实宿主输出与调用记录；来源链接、DSH 检索补验和独立复现仍待处理；取证记录修正版单独保留，不宣传效率提升。
+**Not accepted yet / 尚未整体验收。** Current-version Codex CLI and DSH headless runs now have real outputs and call traces. Initial source-link defects and independent reproduction remain open; DSH search recovery passed in fresh session H; provenance-ledger corrections are retained separately. See the [2026-10-14 run](runs/2026-10-14/README.md). / 已有真实宿主输出与调用记录；初次来源链接和独立复现仍待处理；DSH 新会话 H 已补齐检索；取证记录修正版单独保留，不宣传效率提升。
 
 输入来源基线 / Source baseline: `84a1a5b7f1d1e9ef59022f2c57ab7dfe1fd54ac2`. Document hashes: [sources.json](sources.json).
 
@@ -13,7 +13,7 @@
 | A: sourced summary / 带来源的摘要 | Generated; source links need correction / 已生成，来源链接待修正 | Generated; content audit recorded / 已生成并记录核查 |
 | B: retrieve and explain R-05 / 检索与解释 R-05 | Generated, actual positions identified / 已生成、定位真实章节 | Core explanation supported; ledger corrected in F / 核心解释有据，取证记录已于 F 轮修正 |
 | C: bounded revision proposal / 限定范围修改建议 | Generated; source bytes unchanged / 已生成，原文未变 | Generated; source bytes unchanged; ledger corrected in F / 已生成，原文未变，取证记录已修正 |
-| D: fresh-conversation handoff / 新会话交接 | Generated in fresh session; searched and reread all four / 新会话完成检索与四份读取 | Generated in fresh session; reread all four, omitted separate search / 新会话读取四份，遗漏独立检索调用 |
+| D: fresh-conversation handoff / 新会话交接 | Generated in fresh session; searched and reread all four / 新会话完成检索与四份读取 | D omitted search; H rerun searched three times and read all four / D 漏检索，H 新会话已完成三次检索与四份读取 |
 | User opens outputs and finds sources / 取得成果与定位原文 | Files saved; source page verified; generated links fail / 文件已保存，原文页面可用，生成链接错误 | Files saved; IDs/sections available; no automatic source-link pass / 文件可用，有 ID/章节，未判自动链接通过 |
 | Direct-Agent comparison / 直接使用资料的对照 | A–D outputs recorded / A–D 真实输出已记录 | A–D outputs recorded / A–D 真实输出已记录 |
 | Non-implementer reproduction / 非实现者独立复现 | Pending / 待执行 | Pending / 待执行 |
@@ -75,3 +75,5 @@ Run `python3 examples/project-knowledge-reuse/prepare_inputs.py --check` and `gi
 2026-10-14 update / 更新：The earlier connection blocker above is historical. The user authorized switching the local Agent credentials to 8091. Current runs use that verified instance; no 8090 business service or data was changed. / 上方 10/13 接入阻塞为历史记录；用户已授权切换连接，当前实跑使用 8091。
 
 Maintenance hold / 维护暂停：On 2026-10-14 the owner confirmed that 8091 is intentionally stopped and must not be started. Sixteen initial outputs are saved; DSH recovery E failed to connect and was interrupted, not passed. Recovery F corrected only the local provenance ledgers. / 用户确认 8091 正在维护，禁止启动。16 份初次输出已保存；DSH 补验 E 因连接拒绝被中止，不算通过；F 仅修正本地取证记录。
+
+Post-maintenance update / 维护后更新：DSH G could not resume the migrated workspace. H used a fresh session and private 8091 MCP connection, completed explicit search and four reads, and preserved all unresolved states. Browser checks of all four source pages passed; a reviewed navigation index supplements the original incorrect links. See [recovery evidence](runs/2026-10-14/README.md#post-maintenance-recovery--维护后恢复). / G 续跑失败与 H 新会话成功分别记录；四份浏览器原文导航通过，人工补充索引不冒充初次输出正确。

@@ -39,7 +39,7 @@ A 新会话、B/C 续用同一会话、D 独立新会话；D 未获得 A–C 成
 
 ## Pending / 尚待完成
 
-- Finish source-link correction/recheck and the interrupted DSH search recovery. Both hosts and direct-file arms completed A–D. / 完成来源链接修正复验与中断的 DSH 检索补验；两种宿主和直接文件组均已完成 A–D。
+- Correct initial generated source links at the product/host boundary; a reviewed navigation index is available below. Both hosts and direct-file arms completed A–D; DSH search was rerun in fresh session H. / 初次生成链接仍需产品或宿主层修正，已有审核补充的原文导航；DSH 已在新会话 H 补齐检索。
 - Obtain a non-implementer's reproduction record. / 非实现者独立复现。
 - The owner confirmed cross-Agent/cross-conversation reuse as the showcase focus; no superiority claim over local files is required. / 用户已确认聚焦跨 Agent、跨会话复用，不要求证明优于本地文件。
 - Create the independent PR after the PPT PR, as requested. / 按计划在 PPT PR 之后提交独立 PR。
@@ -56,7 +56,7 @@ The owner confirmed on 2026-10-14 that this case should focus on cross-Agent and
 | Summary / 摘要 | [A](codex-plugin/01-summary.md) | [A](dsh-plugin/01-summary.md) |
 | R-05 evidence / 有据追问 | [B](codex-plugin/02-scope-evidence.md) | [B original](dsh-plugin/02-scope-evidence.md), [F corrected ledger](dsh-plugin/02-scope-evidence-reviewed.md) |
 | Local proposal / 局部修改建议 | [C](codex-plugin/03-design-revision.md) | [C original](dsh-plugin/03-design-revision.md), [F corrected ledger](dsh-plugin/03-design-revision-reviewed.md) |
-| Fresh-session handoff / 新会话交接 | [D](codex-plugin/04-handoff.md) | [D](dsh-plugin/04-handoff.md); search recovery still pending |
+| Fresh-session handoff / 新会话交接 | [D](codex-plugin/04-handoff.md) | [D original](dsh-plugin/04-handoff.md), [H fresh-session rerun](dsh-plugin/04-handoff-post-maintenance.md) |
 
 - All four arms produced A–D, sixteen initial files in total. A/B/C share a session within each arm; D has a different session ID and an empty output workspace. The four arms have distinct session IDs. Plugin calls remain scoped to the same knowledge base and source document IDs.
 - Both plugin handoffs retain R-01–R-05, three P1/two P2, the unapproved state, and `blocked`. Their local C proposals do not become KB facts. A subsequent full read confirmed all four source texts still match the fixed inputs byte for byte: [source integrity](source-integrity.json).
@@ -71,3 +71,11 @@ The owner confirmed on 2026-10-14 that this case should focus on cross-Agent and
 The run used macOS, a local development instance on 8091, the CLI/plugin versions listed above and the existing fixed input revision. The application was a development build with local fixes, not a clean release. A fresh complete build fingerprint was not captured before maintenance; its exact deployed revision is therefore **unverified for this record**, not inferred from branch HEAD. The installation/pairing and KB import were already prepared; this is not a from-zero setup timing. DSH used headless MCP, not its graphical Workflow panel. The JSON event projection can truncate large DSH tool results; full private logs are retained, and truncated projections are not claimed as byte-equality evidence.
 
 服务是带本地修复的开发构建；维护前未补齐完整构建指纹，因此本记录不把仓库 HEAD 当成已验证部署版本。首次安装、配对和入库已预先完成；不宣传从零完成时间。DSH 大结果的事件投影可能截断，只有实际完整返回并核对的内容才算逐字验证。
+
+## Post-maintenance recovery / 维护后恢复
+
+- G could not resume D: DSH rejected the migrated workspace because its recorded working directory no longer existed. Exit 1; no model output or knowledge retrieval. Original session metadata was preserved. / G 因工作目录迁移被 DSH 拒绝续跑，未改历史会话。
+- H started an empty workspace and a new session (`session-b6faa0c1-0eb8-4515-b151-58c635f6d1dd`), with the D task plus explicit search/ledger/link instructions, no previous outputs or summaries. It executed three `knowledge.search` calls followed by four document reads and generated a [new handoff](dsh-plugin/04-handoff-post-maintenance.md), exit 0, 71.22 seconds for this invocation. This is a fresh-session rerun after feedback, not proof that the original D prompt always works. / H 新会话已实做三次检索及四份读取，保留全部五项未决评审和 blocked 状态；补充提示与恢复成本不隐去。
+- The existing global connector pointed to 8090 after maintenance. H used a private 8091 credential directory with the existing `lazymind mcp proxy` command in a temporary DSH configuration. No global connector or 8090 service was changed. This adds setup and does not validate automatic desktop notification recovery. / 单独恢复 8091 MCP 连接，没有切换全局连接；不算桌面通知无感恢复。
+- All four browser source pages were opened and the relevant original passages checked; [reviewed navigation](source-navigation.md) provides the links. Coordinator MCP reads after H reconfirmed unchanged complete texts: [checks](post-maintenance-checks.json). Original generated API-relative links remain an output defect; this manual index is the disclosed workaround. / 四份原文导航均实测，并再次核对源文未变；初次生成的错误链接保留，导航索引是明确披露的补救。
+- The repository now retains sixteen initial outputs, two provenance-ledger corrections and one fresh-session rerun. No independent human reproduction or graphical DSH-host acceptance is claimed. / 共保留 16 份初次输出、2 份取证修正版和 1 份新会话重跑成果；独立复现与 DSH 图形宿主验收仍未完成。

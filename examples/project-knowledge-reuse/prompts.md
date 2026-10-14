@@ -39,3 +39,5 @@ First establish document identities, then search and read the source text. Do no
 List adopted files and versions, current engineering readiness, all unresolved review items and their severity, closure conditions, suggested responsible roles and required evidence. Cite actual document IDs, filenames and sections/item identifiers. Distinguish demonstration readiness, proposed rules, formal acceptance and passed tests. Do not invent named owners or dates.
 Judge only the current knowledge base contents. Do not assume an unrecorded revision proposal has taken effect. State what material or validation is missing, who needs to confirm what next, and which documents you actually read.
 ```
+
+Run notes: distinguish new reads in this turn from source text retained from earlier turns. `original_file.download_url` is an API download path; do not prepend the web origin and present it as a source page. If a verified page URL is unavailable, retain document ID, filename and section. D requires an actual `knowledge.search` call; listing documents or reading full text does not count as search. The run record retains the initial omissions and recovery prompts.

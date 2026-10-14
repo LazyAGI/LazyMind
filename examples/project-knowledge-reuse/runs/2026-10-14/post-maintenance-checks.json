@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-14",
+  "instance": "http://127.0.0.1:8091",
+  "verification": "Coordinator MCP reads after DSH H plus browser checks of all four document pages; not independent reproduction.",
+  "documents": [
+    {
+      "document_id": "doc_dbd6a8d75dba652c433795dee8d095cc",
+      "filename": "design.txt",
+      "text_sha256": "c1c06a794965b06a24de93650c851c910e99a9c23bb365dc0860d55e1b6a9a4f",
+      "matches_fixed_input": true,
+      "truncated": false,
+      "updated_at": "2026-10-14T06:28:19.679028Z",
+      "browser_original_text_verified": true
+    },
+    {
+      "document_id": "doc_bc9879c116ae6e5b264200dc3f09378b",
+      "filename": "prd.txt",
+      "text_sha256": "5ccf7820409600dd5d4b6d40d191b050967e2e623a8af2f1bb9fd0c6f015ef88",
+      "matches_fixed_input": true,
+      "truncated": false,
+      "updated_at": "2026-10-14T06:28:19.679028Z",
+      "browser_original_text_verified": true
+    },
+    {
+      "document_id": "doc_46a23b2fb47ba47f3b8a9ef0195cc54a",
+      "filename": "review.txt",
+      "text_sha256": "12c9839528466c213ec32ecd598e6af366dafcaaf6ef6607dbb4c3f32ee66cd4",
+      "matches_fixed_input": true,
+      "truncated": false,
+      "updated_at": "2026-10-14T06:28:19.679028Z",
+      "browser_original_text_verified": true
+    },
+    {
+      "document_id": "doc_fee089df8b540192144ac3cf56ac4cec",
+      "filename": "handoff.txt",
+      "text_sha256": "39894126968f89f52c68c9cec558f359338e3c1a58dd968485db545b12d05a8c",
+      "matches_fixed_input": true,
+      "truncated": false,
+      "updated_at": "2026-10-14T06:28:19.679028Z",
+      "browser_original_text_verified": true
+    }
+  ]
+}

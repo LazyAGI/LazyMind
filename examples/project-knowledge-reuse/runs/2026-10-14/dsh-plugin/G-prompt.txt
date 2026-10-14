@@ -1,0 +1,2 @@
+验收发现上一轮交接清单实际进行了列库和四份原文读取，但没有执行所要求的 knowledge.search。请在同一知识库 ds_b4cbf46595d98dd2a0e872c1d96bf03d 补做关于未解决评审项及关闭条件的检索，并与已读原文核对。保留原 04-handoff.md，不覆盖它；把核对后的交接清单保存为 <PRIVATE_RUN_ROOT>/zhice-runs/dsh-plugin/fresh-handoff/outputs/04-handoff-reviewed.md。明确说明这是首次输出后的补充检索，不把它写成首次就已执行。仅使用 LazyMind 的知识库工具与本会话已有原文，不访问其他会话或联网，不运行 Workflow。未决状态不得擅自更改。
+上次补验因维护导致连接拒绝而中断。这次连接已单独指向 8091。请通过已加载的 lazymind 知识库工具补验；若连接或鉴权失败，直接报告并停止，不读本地源文件，不探测其他地址。
