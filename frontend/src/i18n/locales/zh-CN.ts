@@ -2891,7 +2891,6 @@ const zhCN = {
         "cancelDialog": "返回",
         "openTarget": "打开目标文档",
         "noTarget": "尚无可打开的目标链接，请在对应云平台核对。",
-        "details": "操作信息",
         "otherDraft": "这次占用来自同一工作流的另一份成稿。",
         "unknownState": "暂时无法识别发布状态，请刷新状态后再处理。",
         "loadFailed": "暂时无法读取发布状态。正文已保留，请重试查询。",

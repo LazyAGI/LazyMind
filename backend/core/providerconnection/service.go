@@ -282,6 +282,15 @@ func (service *Service) ReauthorizeForUser(ctx context.Context, userID, connecti
 		if service.FeishuCLI == nil {
 			return cloudclient.ProviderConnectionSession{}, ErrCLINotInstalled
 		}
+		marker, ok := service.Registry.(interface {
+			MarkAuthorizationPending(context.Context, string, string) error
+		})
+		if !ok {
+			return cloudclient.ProviderConnectionSession{}, ErrCloudUnavailable
+		}
+		if err := marker.MarkAuthorizationPending(ctx, strings.TrimSpace(userID), strings.TrimSpace(connectionID)); err != nil {
+			return cloudclient.ProviderConnectionSession{}, err
+		}
 		return service.FeishuCLI.Start(ctx, strings.TrimSpace(userID), strings.TrimSpace(connectionID))
 	}
 	if metaErr == nil && meta.Provider == "feishu" && meta.ConnectionMethod == "managed_oauth" {
@@ -615,6 +624,14 @@ func (registry HTTPRegistry) UpsertManaged(ctx context.Context, mirror ManagedMi
 			"provider_account_meta":       mirror.ProviderAccountMeta,
 			"capability_contract_version": mirror.CapabilityContractVersion, "capabilities": mirror.Capabilities,
 		}, map[string]string{"X-LazyMind-Internal-Token": registry.InternalToken}, nil, 10*time.Second)
+}
+
+func (registry HTTPRegistry) MarkAuthorizationPending(ctx context.Context, owner, connectionID string) error {
+	return registry.UpsertCLI(ctx, FeishuCLIConnectionMirror{
+		AuthConnectionID: connectionID, OwnerUserID: owner, ProfileReference: owner + "/" + connectionID,
+		CredentialLocation: "local", ProviderAccountMeta: map[string]any{"authorization_pending": true},
+		GrantedScopes: []string{}, Capabilities: []cloudclient.ProviderConnectionCapability{},
+	})
 }
 
 func (registry HTTPRegistry) UpsertCLI(ctx context.Context, mirror FeishuCLIConnectionMirror) error {

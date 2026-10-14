@@ -2959,7 +2959,6 @@ const enUS = {
         "cancelDialog": "Back",
         "openTarget": "Open target document",
         "noTarget": "No target link is available. Check the cloud platform directly.",
-        "details": "Operation details",
         "otherDraft": "This reservation belongs to another draft in the same workflow.",
         "unknownState": "Unrecognized publication state. Refresh status before proceeding.",
         "loadFailed": "Publication status is unavailable. Your draft is preserved; retry the lookup.",

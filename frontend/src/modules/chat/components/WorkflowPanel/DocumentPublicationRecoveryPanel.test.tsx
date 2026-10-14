@@ -151,6 +151,31 @@ it('keeps a previous success in the footer without refreshing a newer local draf
  expect(api.retryPublicationLocal).not.toHaveBeenCalled();
  expect(api.publishDocument).not.toHaveBeenCalled();
 });
+
+it('does not display a cached success as current when a publication status refresh fails',async()=>{
+ const succeeded={...unknown,status:'succeeded',provider_synced:true,artifact_id:'artifact-fixture',target_url:'https://example.test/document',actions:[]};
+ api.getPublicationForArtifact.mockResolvedValueOnce(response(succeeded)).mockRejectedValueOnce(new Error('offline'));
+ const onPublished=vi.fn(),onAvailability=vi.fn();
+ const props={artifactId:'artifact-fixture',slotId:'draft_document',itemIndex:-1,publishing:false,
+  canApplyLocal:()=>true,onResolved:vi.fn(),onPublished,onAvailability};
+ const view=render(<DocumentPublicationRecoveryPanel {...props} refreshKey={0}/>);
+ await waitFor(()=>expect(onPublished).toHaveBeenCalledWith('https://example.test/document','feishu'));
+ view.rerender(<DocumentPublicationRecoveryPanel {...props} refreshKey={1}/>);
+ await expandRecovery();
+ expect(await screen.findByRole('button',{name:'重试查询'})).toBeEnabled();
+ expect(screen.getByRole('alert')).toHaveTextContent('暂时无法读取发布状态');
+ expect(screen.queryByText('已写入云端并完成本地处理。')).not.toBeInTheDocument();
+ expect(screen.queryByText('已写回云文档')).not.toBeInTheDocument();
+ expect(onAvailability).toHaveBeenLastCalledWith(false);
+ expect(onPublished).toHaveBeenCalledTimes(1);
+ api.getPublicationForArtifact.mockResolvedValueOnce(response({...unknown,operation_id:'current-uncertain',target_url:'https://example.test/document'}));
+ fireEvent.click(screen.getByRole('button',{name:'重试查询'}));
+ expect(await screen.findByText('写入结果尚未确认。请先核对云端；原请求可能仍在执行。')).toBeVisible();
+ expect(screen.queryByText('已写入云端并完成本地处理。')).not.toBeInTheDocument();
+ expect(onAvailability).toHaveBeenLastCalledWith(false);
+ expect(onPublished).toHaveBeenCalledTimes(1);
+ expect(api.publishDocument).not.toHaveBeenCalled();
+});
 it.each(['outcome_unknown_released','confirmed_detached','failed_no_write','canceled'])('hides ended publication notices and keeps a known target link: %s',async status=>{
  api.getPublicationForArtifact.mockResolvedValue(response({...unknown,status,target_url:'https://example.test/document',actions:[]}));
  const {onAvailability}=setup();
@@ -175,6 +200,33 @@ it.each(['preparing','write_started','outcome_unknown','provider_confirmed','loc
  expect(await screen.findByRole('button',{name:'刷新状态'})).toBeEnabled();
  fireEvent.click(toggle);
  expect(screen.queryByRole('button',{name:'刷新状态'})).not.toBeInTheDocument();
+ expect(api.publishDocument).not.toHaveBeenCalled();
+});
+
+it.each(['preparing','write_started','outcome_unknown','provider_confirmed','local_conflict','local_persist_failed','unrecognized-state'])('never renders internal publication details after expanding %s',async status=>{
+ api.getPublicationForArtifact.mockResolvedValue(response({...unknown,status,request_id:'request-private',diagnostic_id:'diagnostic-private',error_code:'INTERNAL_PRIVATE',message:'raw-private-error'}));
+ setup();
+ await expandRecovery();
+ expect(await screen.findByRole('button',{name:'刷新状态'})).toBeEnabled();
+ for(const text of ['操作信息','op-fixture','request-private','diagnostic-private','INTERNAL_PRIVATE','raw-private-error',new Date(unknown.updated_at).toLocaleString()]) {
+  expect(screen.queryByText(text,{exact:false})).not.toBeInTheDocument();
+ }
+});
+
+it('keeps diagnostics hidden when refreshing or recovering an existing operation fails',async()=>{
+ setup();await expandRecovery();
+ api.recoverPublication.mockRejectedValue(new Error('raw-recovery-error request-private'));
+ fireEvent.click(screen.getByRole('button',{name:'结束跟踪并解除占用'}));
+ await act(async()=>confirm.mock.calls[0][0].onOk());
+ expect(await screen.findByRole('alert')).toHaveTextContent('恢复操作未完成');
+ expect(api.recoverPublication).toHaveBeenCalledWith('op-fixture',{action:'release_unknown',confirmed:true,reason:'accept_unknown'},expect.anything());
+ api.getPublicationForArtifact.mockRejectedValue(new Error('raw-query-error diagnostic-private'));
+ fireEvent.click(screen.getByRole('button',{name:'刷新状态'}));
+ expect(await screen.findByRole('button',{name:'重试查询'})).toBeEnabled();
+ expect(screen.getByRole('alert')).toHaveTextContent('暂时无法读取发布状态');
+ for(const text of ['操作信息','op-fixture','raw-recovery-error','raw-query-error','request-private','diagnostic-private']) {
+  expect(screen.queryByText(text,{exact:false})).not.toBeInTheDocument();
+ }
  expect(api.publishDocument).not.toHaveBeenCalled();
 });
 

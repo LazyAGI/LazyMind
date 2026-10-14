@@ -112,6 +112,7 @@ type FeishuCLISession struct {
 	OwnerUserID           string                                     `json:"-"`
 	Profile               FeishuCLIProfile                           `json:"-"`
 	GrantedScopes         []string                                   `json:"-"`
+	CompletedOpenID       string                                     `json:"-"`
 	PollStarted           bool                                       `json:"-"`
 	AuthRetryCount        int                                        `json:"-"`
 	ProfileRecoveryCount  int                                        `json:"-"`
@@ -130,6 +131,7 @@ type feishuCLISessionState struct {
 	AuthConnectionID      string                                     `json:"auth_connection_id"`
 	DisplayName           string                                     `json:"display_name,omitempty"`
 	GrantedScopes         []string                                   `json:"granted_scopes,omitempty"`
+	CompletedOpenID       string                                     `json:"completed_open_id,omitempty"`
 	Capabilities          []cloudclient.ProviderConnectionCapability `json:"capabilities,omitempty"`
 	DeviceCode            string                                     `json:"device_code,omitempty"`
 	ErrorCode             string                                     `json:"error_code,omitempty"`
@@ -366,6 +368,7 @@ func (coordinator *FeishuCLIDeviceFlowCoordinator) restoreSession(ctx context.Co
 		DeviceCode:    state.DeviceCode, OwnerUserID: state.OwnerUserID, Profile: profile,
 		AuthRetryCount: state.AuthRetryCount, ProfileRecoveryCount: state.ProfileRecoveryCount,
 		AdminRetryCount: state.AdminRetryCount, RetryAfter: state.RetryAfter,
+		CompletedOpenID: state.CompletedOpenID,
 	}
 	if session.Status == "COMPLETED" && (session.DisplayName == "" || len(session.Capabilities) == 0) {
 		status, statusErr := coordinator.runner.AuthStatus(ctx, profile.ConfigDir)
@@ -409,6 +412,8 @@ func (coordinator *FeishuCLIDeviceFlowCoordinator) resumeAfterAppCreation(sessio
 		current.ExpiresAt = coordinator.now().UTC().Add(time.Duration(start.ExpiresIn) * time.Second)
 		current.PollStarted = false
 		current.ProfileRecoveryCount = 0
+		current.CompletedOpenID = ""
+		current.GrantedScopes = nil
 		current.ErrorCode = ""
 		current.RetryAfter = time.Time{}
 	})
@@ -455,10 +460,22 @@ func (coordinator *FeishuCLIDeviceFlowCoordinator) recoverAuthenticatedProfile(s
 	}
 	ownerUserID := session.OwnerUserID
 	connectionID := session.AuthConnectionID
+	completedOpenID := session.CompletedOpenID
+	completedScopes := session.GrantedScopes
 	coordinator.mu.Unlock()
+	if completedOpenID != "" {
+		if completedOpenID != status.Identities.User.OpenID {
+			return false
+		}
+		for _, scope := range coordinator.scopes {
+			if !slices.Contains(completedScopes, scope) {
+				return false
+			}
+		}
+	}
 	return coordinator.finalizeAuthenticatedProfile(
 		ctx, sessionID, profile, ownerUserID, connectionID,
-		status.Identities.User.UserName, status.Identities.User.OpenID, checked.Granted,
+		status.Identities.User.UserName, status.Identities.User.OpenID, checked.Granted, completedOpenID != "",
 	) == ""
 }
 
@@ -652,6 +669,14 @@ func (coordinator *FeishuCLIDeviceFlowCoordinator) completeAuthorization(session
 		coordinator.failSession(sessionID, classifyFeishuCLIAuthError(err))
 		return
 	}
+	coordinator.updateSession(sessionID, func(current *FeishuCLISession) {
+		current.CompletedOpenID = completed.UserOpenID
+		current.GrantedScopes = append([]string(nil), completed.Granted...)
+	})
+	if err := coordinator.persist(sessionID); err != nil {
+		coordinator.failSession(sessionID, "CLI_UNAVAILABLE")
+		return
+	}
 	status, err := coordinator.runner.AuthStatus(ctx, profile.ConfigDir)
 	if err != nil || status.Identity != "user" || !status.Verified || !status.Identities.User.Available || status.Identities.User.OpenID != completed.UserOpenID {
 		coordinator.failSession(sessionID, "AUTH_TOKEN_EXPIRED")
@@ -659,7 +684,7 @@ func (coordinator *FeishuCLIDeviceFlowCoordinator) completeAuthorization(session
 	}
 	if code := coordinator.finalizeAuthenticatedProfile(
 		ctx, sessionID, profile, ownerUserID, connectionID,
-		completed.UserName, completed.UserOpenID, completed.Granted,
+		completed.UserName, completed.UserOpenID, completed.Granted, true,
 	); code != "" {
 		coordinator.failSession(sessionID, code)
 	}
@@ -674,6 +699,7 @@ func (coordinator *FeishuCLIDeviceFlowCoordinator) finalizeAuthenticatedProfile(
 	displayName string,
 	expectedOpenID string,
 	grantedScopes []string,
+	authorizationCompleted bool,
 ) string {
 	for _, scope := range coordinator.scopes {
 		if !slices.Contains(grantedScopes, scope) {
@@ -684,6 +710,12 @@ func (coordinator *FeishuCLIDeviceFlowCoordinator) finalizeAuthenticatedProfile(
 	if err != nil || identity.OpenID != expectedOpenID {
 		return "PROFILE_TENANT_MISMATCH"
 	}
+	coordinator.mu.Lock()
+	defer coordinator.mu.Unlock()
+	current := coordinator.sessions[sessionID]
+	if current == nil || terminalFeishuCLISessionStatus(current.Status) {
+		return "CLI_UNAVAILABLE"
+	}
 	if err := coordinator.profiles.BindIdentity(ctx, profile, identity.TenantKey, identity.OpenID, coordinator.now()); err != nil {
 		return safeFeishuCLIErrorCode(err)
 	}
@@ -691,16 +723,10 @@ func (coordinator *FeishuCLIDeviceFlowCoordinator) finalizeAuthenticatedProfile(
 	if err := coordinator.registry.UpsertCLI(ctx, FeishuCLIConnectionMirror{
 		AuthConnectionID: connectionID, OwnerUserID: ownerUserID, DisplayName: displayName,
 		ProviderAccountID: identity.OpenID, ProviderTenantKey: identity.TenantKey, ProviderWorkspaceID: identity.TenantKey,
-		ProviderAccountMeta: map[string]any{"open_id": identity.OpenID, "union_id": identity.UnionID, "user_id": identity.UserID},
+		ProviderAccountMeta: map[string]any{"open_id": identity.OpenID, "union_id": identity.UnionID, "user_id": identity.UserID, "authorization_completed": authorizationCompleted},
 		ProfileReference:    profile.Reference, CredentialLocation: coordinator.credentialLocation,
 		GrantedScopes: append([]string(nil), grantedScopes...), Status: "ACTIVE", Capabilities: capabilities,
 	}); err != nil {
-		return "CLI_UNAVAILABLE"
-	}
-	coordinator.mu.Lock()
-	current := coordinator.sessions[sessionID]
-	if current == nil || terminalFeishuCLISessionStatus(current.Status) {
-		coordinator.mu.Unlock()
 		return "CLI_UNAVAILABLE"
 	}
 	completed := *current
@@ -712,11 +738,9 @@ func (coordinator *FeishuCLIDeviceFlowCoordinator) finalizeAuthenticatedProfile(
 	completed.Capabilities = capabilities
 	completed.ErrorCode = ""
 	if err := coordinator.persistSessionLocked(&completed); err != nil {
-		coordinator.mu.Unlock()
 		return "CLI_UNAVAILABLE"
 	}
 	*current = completed
-	coordinator.mu.Unlock()
 	return ""
 }
 
@@ -741,6 +765,7 @@ func (coordinator *FeishuCLIDeviceFlowCoordinator) persistSessionLocked(session 
 		DeviceCode:    session.DeviceCode, ErrorCode: session.ErrorCode,
 		AuthRetryCount: session.AuthRetryCount, ProfileRecoveryCount: session.ProfileRecoveryCount,
 		AdminRetryCount: session.AdminRetryCount, RetryAfter: session.RetryAfter,
+		CompletedOpenID: session.CompletedOpenID,
 	}
 	profile := session.Profile
 	return coordinator.profiles.WriteState(context.Background(), profile, session.SessionID, state)

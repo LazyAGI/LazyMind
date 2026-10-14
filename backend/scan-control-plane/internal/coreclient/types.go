@@ -145,6 +145,7 @@ type SubmitParseTaskRequest struct {
 	ParentDocumentID string    `json:"parent_document_id"`
 	SourceDocumentID string    `json:"source_document_id,omitempty"`
 	UserID           string    `json:"user_id,omitempty"`
+	UserName         string    `json:"-"`
 	DisplayName      string    `json:"display_name"`
 	ContentURI       string    `json:"content_uri,omitempty"`
 	Content          io.Reader `json:"-"`
