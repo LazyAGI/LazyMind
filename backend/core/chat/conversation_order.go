@@ -115,8 +115,20 @@ func lockConversationOrderScope(ctx context.Context, tx *gorm.DB, userID, id, ta
 	if len(anchors) != 2 {
 		return nil, gorm.ErrRecordNotFound
 	}
+	var origins []orm.ConversationForkOrigin
+	if err := tx.Where("conversation_id IN ?", []string{id, targetID}).Find(&origins).Error; err != nil {
+		return nil, err
+	}
+	forkParents := make(map[string]string, len(origins))
+	for _, origin := range origins {
+		forkParents[origin.ConversationID] = origin.SourceConversationID
+	}
 	left, right := anchors[0], anchors[1]
 	parent := func(row orm.Conversation) string {
+		// Fork provenance takes precedence, matching the sidebar relation resolver.
+		if source, ok := forkParents[row.ID]; ok {
+			return source
+		}
 		if row.ParentConversationID != nil {
 			return *row.ParentConversationID
 		}
@@ -129,6 +141,7 @@ func lockConversationOrderScope(ctx context.Context, tx *gorm.DB, userID, id, ta
 		return nil, errConversationOrderConflict
 	}
 	query := active.Session(&gorm.Session{}).Where("is_task_conv=?", left.IsTaskConv)
+	forks := tx.Model(&orm.ConversationForkOrigin{}).Select("conversation_id")
 	parentID := parent(left)
 	if parentID != "" {
 		var ownerParent orm.Conversation
@@ -138,9 +151,11 @@ func lockConversationOrderScope(ctx context.Context, tx *gorm.DB, userID, id, ta
 		if left.PinnedAt != nil {
 			return nil, errConversationOrderConflict
 		}
-		query = query.Where("parent_conversation_id=? AND pinned_at IS NULL", parentID)
+		siblingForks := tx.Model(&orm.ConversationForkOrigin{}).Select("conversation_id").Where("source_conversation_id=?", parentID)
+		query = query.Where("id IN (?) OR (parent_conversation_id=? AND id NOT IN (?))", siblingForks, parentID, forks).
+			Where("pinned_at IS NULL")
 	} else {
-		query = query.Where("parent_conversation_id IS NULL OR parent_conversation_id=''")
+		query = query.Where("(parent_conversation_id IS NULL OR parent_conversation_id='') AND id NOT IN (?)", forks)
 		if left.PinnedAt != nil {
 			query = query.Where("pinned_at IS NOT NULL")
 		} else {

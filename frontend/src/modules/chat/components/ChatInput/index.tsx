@@ -773,16 +773,19 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const [fileList, setFileList] = useState<ChatFileList[]>([]);
     const [removedTransferredFiles, setRemovedTransferredFiles] = useState<string[]>([]);
     useEffect(() => { setRemovedTransferredFiles([]); }, [props.transferredDraft]);
-    const transferredUploads = (props.transferredDraft?.files || EMPTY_COMPOSER_FILES).filter(file => file.id.startsWith('upload:') && file.input?.uri && !removedTransferredFiles.includes(file.id));
+    const localUploadIds = new Set(fileList.map(file => `upload:${file.uid}`));
+    const transferredUploads = [...new Map((props.transferredDraft?.files || EMPTY_COMPOSER_FILES).map(file => [file.id, file])).values()]
+      .filter(file => file.id.startsWith('upload:') && file.input?.uri && !removedTransferredFiles.includes(file.id) && !localUploadIds.has(file.id));
     const displayedFiles = [...fileList, ...transferredUploads.map(file => ({ uid: file.id, name: file.name, base64: file.input?.input_type === 'image' ? file.input.uri : '', suffix: file.name.slice(file.name.lastIndexOf('.')), size: '' }))];
     const conversationFiles = props.conversationFiles ?? EMPTY_COMPOSER_FILES;
     const composerFiles = useMemo(() => {
       const uploaded = fileListRef.current?.getFiles() ?? [];
-      return [...conversationFiles.filter(file => !removedTransferredFiles.includes(file.id)), ...fileList.map(file => {
+      const files = [...conversationFiles.filter(file => !removedTransferredFiles.includes(file.id)), ...fileList.map(file => {
         const stored = uploaded.find(item => item.uid === file.uid);
         return { id: `upload:${file.uid}`, name: file.name, disabled: !stored?.uri,
           input: stored?.uri ? { input_type: allowedImageTypes.includes(file.suffix.toLowerCase()) ? 'image' as const : 'file' as const, uri: stored.uri, filename: file.name } : undefined };
       })];
+      return [...new Map(files.map(file => [file.id, file])).values()];
     }, [conversationFiles, fileList, removedTransferredFiles]);
     const prepareReferences = () => buildComposerReferences(effectiveMentions, composerFiles, [...transferredUploads.map(file => file.input!), ...(fileListRef.current?.getFiles() ?? []).filter(file => file.uri).map(file => ({
       input_type: allowedImageTypes.includes(file.name.substring(file.name.lastIndexOf('.')).toLowerCase()) ? 'image' as const : 'file' as const,
@@ -992,6 +995,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     };
 
     const removeImage = (uid: string) => {
+      setRemovedTransferredFiles(ids => [...ids, `upload:${uid}`]);
       fileListRef.current?.removeFile(uid);
       setFileList((prev) => {
         const target = prev.find((item) => item.uid === uid);
@@ -1674,7 +1678,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     <div className="chat-add-resource-hidden-upload">
                       <ImageUpload
                         updateFiles={updateImageList}
-                        listNum={displayedFiles.length}
+                        listNum={fileList.length}
                         ref={fileListRef}
                         types={uploadTypes}
                         max={Math.max(0, MAX_UPLOAD_FILES - transferredUploads.length)}
