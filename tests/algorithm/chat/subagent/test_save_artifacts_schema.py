@@ -2,9 +2,10 @@ from unittest.mock import MagicMock, patch
 
 import lazyllm
 import pytest
+from jsonschema import Draft202012Validator
 from lazyllm.tools.agent import ToolExecutionError
 from pydantic import ValidationError
-from lazyllm.tools.agent.toolsManager import ToolManager
+from lazyllm.tools.agent.toolsManager import ToolManager, _build_tool_desc
 from lazymind.chat.engine.subagent.tools import (
     _resolve_list_index_from_sort_order,
     _save_artifact,
@@ -26,6 +27,67 @@ def test_save_artifacts_schema_exposes_required_item_fields():
     assert item_schema['properties']['content_type']['enum'] == [
         'text', 'json', 'image', 'file', 'file_list',
     ]
+
+
+def test_save_artifacts_export_omits_only_any_value_title_inside_reference():
+    schema = _build_tool_desc(_save_tool())['function']['parameters']
+    Draft202012Validator.check_schema(schema)
+    item_ref = schema['properties']['artifacts']['items']['$ref']
+    item_schema = schema['$defs'][item_ref.rsplit('/', 1)[-1]]
+    value_schema = item_schema['properties']['value']
+
+    # A title-only Any inside this $ref was rejected by Kimi as infinite recursion.
+    assert value_schema == {}
+    assert item_schema['properties']['key'] == {'title': 'Key', 'type': 'string'}
+    assert item_schema['additionalProperties'] is False
+
+
+@pytest.mark.parametrize('value', [
+    '', '故宫 <html></html>', 0, 2**64, -1.5, True, False, None, {}, [],
+    {'title': '保留字段', 'nested': [None, False, {'value': [1, '文物']}]},
+    [1, 'text', None, {'additional': {'arbitrary': True}}],
+])
+def test_save_artifacts_json_values_survive_export_and_runtime_validation(value):
+    tool = _save_tool()
+    payload = {'artifacts': [{'key': 'report', 'value': value}]}
+    schema = _build_tool_desc(tool)['function']['parameters']
+    Draft202012Validator(schema).validate(payload)
+
+    for validated in (
+        tool._validate_input(payload),
+        tool.params_schema.model_validate(payload, strict=True).model_dump(),
+    ):
+        actual = validated['artifacts'][0]['value']
+        assert actual == value
+        assert type(actual) is type(value)
+
+
+def test_save_artifacts_schema_override_preserves_python_any_validation():
+    value = object()
+    tool = _save_tool()
+    payload = {'artifacts': [{'key': 'report', 'value': value}]}
+
+    assert tool._validate_input(payload)['artifacts'][0]['value'] is value
+    assert tool.params_schema.model_validate(payload, strict=True).artifacts[0]['value'] is value
+
+
+@pytest.mark.parametrize('item', [
+    {'value': 'missing key'},
+    {'key': 'report'},
+    {'key': 'report', 'value': 'text', 'content_type': 'unsupported'},
+    {'key': 'report', 'value': 'text', 'sort_order': []},
+    {'key': 'report', 'value': 'text', 'unknown_field': 'unexpected'},
+])
+def test_save_artifacts_schema_override_preserves_other_field_validation(item):
+    tool = _save_tool()
+    payload = {'artifacts': [item]}
+    assert not Draft202012Validator(
+        _build_tool_desc(tool)['function']['parameters'],
+    ).is_valid(payload)
+    with pytest.raises(ValidationError):
+        tool._validate_input(payload)
+    with pytest.raises(ValidationError):
+        tool.params_schema.model_validate(payload, strict=True)
 
 
 def test_save_artifacts_schema_rejects_content_instead_of_value():

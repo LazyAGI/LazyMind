@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools import fc_register
+from pydantic import ConfigDict, with_config
 from lazymind.chat.engine.tools.host_file_resolution import FileResolution, validate_storage_id, copy_artifact_input
 from typing_extensions import NotRequired, TypedDict
 from lazymind.chat.engine.attachment_reader import (
@@ -35,6 +36,12 @@ UPLOAD_MARKER = '/var/lib/lazymind/uploads/'
 SUBAGENT_MARKER = '/data/subagent/'
 
 
+def _strip_artifact_value_title(schema: Dict[str, Any]) -> None:
+    # Kimi rejects a referenced Any schema containing only a title annotation.
+    schema['properties']['value'].pop('title', None)
+
+
+@with_config(ConfigDict(extra='forbid', json_schema_extra=_strip_artifact_value_title))
 class ArtifactSaveItem(TypedDict):
     """One save_artifacts entry exposed as a structured model-facing schema."""
 
