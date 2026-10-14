@@ -140,6 +140,32 @@ export async function getTask(id: string): Promise<Task> {
   return response.data as unknown as Task;
 }
 
+export async function getTaskGoal(task: Pick<Task, 'conversation_id' | 'title' | 'created_at'>, signal: AbortSignal): Promise<string | undefined> {
+  const prefix = task.title?.replace(/\.\.\.$/, '');
+  if (!prefix || !task.conversation_id) return;
+  // History timestamps are serialized to seconds, while task timestamps retain fractions.
+  const createdAt = Math.floor(Date.parse(task.created_at) / 1000) * 1000;
+  if (!Number.isFinite(createdAt)) return;
+  let pageToken: string | undefined;
+  let candidate: { text: string; time: number } | undefined;
+  do {
+    const { data } = await defaultClient.apiCoreConversationsNameHistoryGet({
+      name: task.conversation_id, pageSize: 50, pageToken,
+    }, { signal, silentError: true } as AxiosRequestConfig & { silentError: boolean });
+    const history = data.history ?? [];
+    for (const item of history) {
+      const time = Date.parse(item.create_time ?? '');
+      if (time >= createdAt && item.query?.startsWith(prefix) && (!candidate || time < candidate.time)) {
+        candidate = { text: item.query, time };
+      }
+    }
+    // Pages run newest first. Stop once we have reached this execution's start.
+    if (history.some(item => Date.parse(item.create_time ?? '') <= createdAt)) break;
+    pageToken = data.next_page_token;
+  } while (pageToken && !signal.aborted);
+  return candidate?.text;
+}
+
 export async function removeTask(id: string): Promise<void> {
   await defaultClient.apiCoreTaskCenterTasksTaskIdRemovePost({ taskId: id });
 }

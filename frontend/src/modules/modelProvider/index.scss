@@ -852,8 +852,17 @@
     border-radius: 10px;
   }
 
-  .ant-select-item-option-active:not(.ant-select-item-option-disabled),
+  // rc-select keeps the last active option after the pointer leaves the menu.
+  .ant-select-item-option-active:not(.ant-select-item-option-disabled):not(.ant-select-item-option-selected) {
+    background: transparent;
+  }
+
+  &:not(.is-keyboard-navigation) .ant-select-item-option:not(.ant-select-item-option-disabled):hover,
   .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
+    background: #f2f7ff;
+  }
+
+  &.is-keyboard-navigation .ant-select-item-option-active:not(.ant-select-item-option-disabled) {
     background: #f2f7ff;
   }
 }
