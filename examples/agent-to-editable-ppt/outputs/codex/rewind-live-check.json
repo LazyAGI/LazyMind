@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-14",
+  "workflow_id": "mcp-64c7a99d9707aea53a0102ccb383cb8f",
+  "ui_commit": "44f785ed18f67f5f20b5a36f122e437b42107493",
+  "browser": "Codex in-app browser",
+  "action": "Clicked existing rewind shortcut for plan_background_prompts while generate_backgrounds review was pending",
+  "before_state_version": 137,
+  "after_state_version": 140,
+  "review_id": "6e6b8b14-14d8-4a25-bee5-16e52d54826c",
+  "review_before": "pending",
+  "review_after": "superseded",
+  "requirements_and_materials": "remain effective",
+  "downstream_backgrounds": "stale",
+  "target_step": "running",
+  "new_execution_ids": [
+    "pss_69ed370b8bb34cec976dce0c4f76d23e"
+  ],
+  "limitation": "Rewind immediately restarts the target using current inputs; it has no rejection-reason field. The reviewer separately edited prompt pages 1 and 3 after this rerun completed. No review was accepted and no approval preferences were changed."
+}
