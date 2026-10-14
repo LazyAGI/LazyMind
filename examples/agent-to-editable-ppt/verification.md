@@ -1,6 +1,6 @@
 # Verification / 验收记录
 
-## Current status — 2026-10-13
+## Current status — 2026-10-14
 
 **Historical materials inspected; current-version E2E remains pending. / 已检查历史材料，当前版本宿主 E2E 仍待验收。**
 
@@ -23,6 +23,22 @@ Repository baseline inspected: `84a1a5b7f1d1e9ef59022f2c57ab7dfe1fd54ac2`. Integ
 | Independent reproduction | Not run | Not run | Reviewer/date, steps followed, help required and outcome |
 
 ## Record an actual run / 实跑记录要求
+
+### Current Codex run — 2026-10-14 / 当前 Codex 实跑
+
+The installed Codex plugin started the original Palace Museum task on the isolated 8091 application, with four slides, a general-public audience and AI backgrounds enabled. Workflow session: `mcp-64c7a99d9707aea53a0102ccb383cb8f`; revision: `17436653-d491-4098-88d9-9b871f2e407d`. Application source: `7c8f9ddef8c3b0021986f4f505d1eb8571694794` plus local changes, including the schema compatibility fix below. This is a development checkout, not a clean released build.
+
+需求分析尚未通过：第一次请求被 Kimi 的工具 schema 校验拒绝；将 `Any` 描述成六类 `anyOf` 后，第二次执行返回 “Model call ended without a complete answer”，未执行工具、未生成成果。第二次失败的具体结束原因没有被保留，不能把它直接归因为第一次的 schema 拒绝。
+
+The first attempt failed Kimi tool-schema validation. A six-type `anyOf` workaround passed request admission, but the second attempt ended without a complete answer and produced no executed tool calls or artifacts. Its exact finish reason was not retained. The two failures must not be reported as the same error.
+
+当前改为仅删除 `ArtifactSaveItem.value` 的 `title` 注释，保留 `Any` 和其他字段校验。完整导出对比确认仅此一处变化；95 项相关回归测试通过。仅重载 8091 Chat，8090 未变更。该结果证明局部兼容修复的测试范围，不代表 PPT 工作流、DSH、导出编辑或独立复现通过。
+
+The replacement removes only the `title` annotation from `ArtifactSaveItem.value`, preserving `Any` and other field validation. The full exported descriptor comparison found exactly that change; 95 related regression tests passed. Only 8091 Chat was reloaded; 8090 was unchanged. Workflow completion, DSH execution, editable export and independent reproduction remain pending.
+
+Attempt 3 successfully saved five artifacts, including the [actual requirement analysis](outputs/codex/requirement-analysis.md), in about 45 seconds. It then failed `MEDIA_CAPABILITY_DEPENDENCY_MISSING`: AI backgrounds were enabled but no image-generation model was selected. This run passed the previously failing schema/tool-call path; it did not complete the step. The existing SiliconFlow `Qwen/Qwen-Image` model was subsequently selected in 8091 settings; actual generation remains unverified.
+
+第三次实跑已成功保存五项成果，需求简报正确包含四页、普通公众、AI 底图和真实检索主体图片。约 45 秒后因未选择文生图模型而失败，属于新的配置阻塞。已在 8091 选择现有 SiliconFlow `Qwen/Qwen-Image`，尚不能把配置成功当作图片生成成功。
 
 ### Connector preflight — 2026-10-13 / 接入预检
 

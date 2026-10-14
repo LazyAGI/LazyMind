@@ -22,6 +22,8 @@ Use the owner's [original Chinese prompt](prompt.zh-CN.txt) for reproduction. Th
 
 The prompt does not specify a page count. Both historical outputs have four pages, and the Codex recording includes an explicit four-page answer. If asked during reproduction, answer “four pages” and record that clarification separately. Web material and generated images can change; pixel-identical regeneration is not expected.
 
+Current-run clarifications: four slides, a general-public audience and AI backgrounds enabled. The owner confirmed the audience and background setting on 2026-10-14. Architecture and artifact subjects still use retrieved photographs. Keep these clarifications separate from the historical prompt.
+
 ## Before running
 
 Complete [Agent setup](../shared/agent-setup.md) and use the original task above. It asks the workflow to collect material; no fixed original image input bundle is available. Preserve the actual collected files and attribution for the revision and same-input comparison. The exact DSH local-edit instruction is still missing.
