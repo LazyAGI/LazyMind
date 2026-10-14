@@ -16,7 +16,7 @@
 | D: fresh-conversation handoff / 新会话交接 | Generated in fresh session; searched and reread all four / 新会话完成检索与四份读取 | D omitted search; H rerun searched three times and read all four / D 漏检索，H 新会话已完成三次检索与四份读取 |
 | User opens outputs and finds sources / 取得成果与定位原文 | Files saved; four pages verified; I corrected initial wrong links / 成果与四份原文可用，I 修正初次错误链接 | Files saved; IDs/sections available; no automatic source-link pass / 文件可用，有 ID/章节，未判自动链接通过 |
 | Direct-Agent comparison / 直接使用资料的对照 | A–D outputs recorded / A–D 真实输出已记录 | A–D outputs recorded / A–D 真实输出已记录 |
-| Non-implementer reproduction / 非实现者独立复现 | Pending / 待执行 | Pending / 待执行 |
+| Non-implementer reproduction / 非实现者独立复现 | Pending; owner arranges a colleague / 用户安排同事，待补结果 | Pending; owner arranges a colleague / 用户安排同事，待补结果 |
 
 ## Run evidence / 实跑证据
 

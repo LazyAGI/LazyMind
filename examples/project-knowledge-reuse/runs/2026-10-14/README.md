@@ -42,7 +42,7 @@ A 新会话、B/C 续用同一会话、D 独立新会话；D 未获得 A–C 成
 - Correct initial generated source links at the product/host boundary; a reviewed navigation index is available below. Both hosts and direct-file arms completed A–D; DSH search was rerun in fresh session H. / 初次生成链接仍需产品或宿主层修正，已有审核补充的原文导航；DSH 已在新会话 H 补齐检索。
 - Obtain a non-implementer's reproduction record. / 非实现者独立复现。
 - The owner confirmed cross-Agent/cross-conversation reuse as the showcase focus; no superiority claim over local files is required. / 用户已确认聚焦跨 Agent、跨会话复用，不要求证明优于本地文件。
-- Create the independent PR after the PPT PR, as requested. / 按计划在 PPT PR 之后提交独立 PR。
+- Submit this case independently as a draft; the owner will arrange a colleague to reproduce it during review. This case does not wait for the PPT PR. / 本例先独立提交草稿 PR，不再等待 PPT；由用户安排同事复现，结果后补，未提前标为通过。
 
 
 ## Recorded outcome / 已记录结果
