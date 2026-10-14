@@ -1,0 +1,17 @@
+# Issues observed during acceptance / 验收过程问题记录
+
+These are observations from the isolated 8091 development run on 2026-10-14, not claims about every provider or installation. Raw requests, credentials and model reasoning are excluded from this example.
+
+以下为隔离 8091 开发环境的实测记录。只记录真实结果；不把 API 重放、单元测试或配置成功等同于 showcase 验收。
+
+| Issue / 问题 | Evidence / 证据 | Resolution and limit / 处理与边界 |
+| --- | --- | --- |
+| Referenced `Any` schema rejected by Kimi / Kimi 拒绝带引用的 `Any` schema | `save_artifacts` exposed `value: {"title":"Value"}` in `$defs`; Kimi returned HTTP 400 with a recursion-validation error / 引用的字段仅含 title 注释，接口误报递归校验失败 | Remove only this field's schema title with Pydantic `json_schema_extra`, preserving `Any` and `extra='forbid' / 仅清理此字段注释，保留运行时语义与未知字段校验。Full descriptor comparison found no other change; 95 related tests passed / 完整描述对比仅该处变化，95 项相关测试通过。 |
+| Six-type `anyOf` workaround did not establish reliability / 六类型替代没有证明稳定性 | Accepted by API, but the second Workflow attempt ended without a complete answer / 接口接收，但完整工作流失败 | Replaced by the smaller title-only removal; no claim that `anyOf` caused the failure / 已改为局部清理，不把相关性写成因果。 |
+| AI backgrounds enabled without a selected image model / 启用底图但未选择模型 | Third analysis attempt saved five outputs, then reported `MEDIA_CAPABILITY_DEPENDENCY_MISSING` / 第三次分析保存五项成果后被能力检查拦截 | Selected existing SiliconFlow `Qwen/Qwen-Image` in 8091; fourth analysis attempt reused outputs and passed / 选择已有模型后，第四次分析复用成果通过。Actual image generation still requires validation / 仍需实际生成验证。 |
+| Material summary generation did not complete / 素材摘要生成未完成 | Three image-search calls and four image registrations succeeded; next Kimi call failed before saving `material_summary` / 图片工具成功，随后模型调用失败，未保存素材摘要 | Three reconstructed-request replays returned HTTP 200, `tool_calls`, valid JSON and valid schema; production parser accepted all three / 三次重放及现有解析器均通过。The original raw finish reason was not persisted, so the cause remains unconfirmed / 原始结束原因丢失，未确定根因。 |
+| SubAgent discarded model failure details / 子任务丢失模型失败详情 | `ModelCallError` carries terminal metadata, but the runner stored only its string / 异常含结束元数据，runner 只保留错误文字 | Append bounded finish metadata and numeric token counts to the existing error summary; exclude model text, reasoning and tool arguments; do not add retries / 在原错误摘要中补充结束原因和数值用量，不追加正文或自动重试。196 runner, executor and subagent tests passed / 196 项相关测试通过，真实失败记录仍待运行验证。 |
+
+The schema fix is commit `f2398b78`. Provider switches, retries, manual reviews and later resolutions must be recorded here when they actually occur. Four registered images are intermediate results: their captions, suitability and usage conditions still require review before presentation publication.
+
+schema 修复提交为 `f2398b78`。后续切换模型、重试、人工审核和问题关闭均按实际发生补记。四张已注册图片只是中间成果，其说明、适用性和使用条件仍待审核，不能直接作为最终宣传材料。

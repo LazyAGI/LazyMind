@@ -4,16 +4,16 @@
 
 **Historical materials inspected; current-version E2E remains pending. / 已检查历史材料，当前版本宿主 E2E 仍待验收。**
 
-The owner-supplied original prompt, two recordings, two PDFs and one distinct PPTX have been inspected. The selected DSH PDF is included as a lossless ZIP with a rendered preview; its corresponding PPTX is missing. The latest PPTX and recording downloads are byte-identical duplicates of the first Codex group. See [sources](sources.md) and [checksums](sources.json). No new workflow output has been produced in this preparation.
+The owner-supplied original prompt, two recordings, two PDFs and one distinct PPTX have been inspected. The selected DSH PDF is included as a lossless ZIP with a rendered preview; its corresponding PPTX is missing. The latest PPTX and recording downloads are byte-identical duplicates of the first Codex group. See [sources](sources.md) and [checksums](sources.json). The current run has produced intermediate requirements and image materials, but no completed deck.
 
-已核对原始提示词、两段录像、两份 PDF 和一份不同内容的 PPTX。主展示选 DSH，另附 Codex 参考；二者不能拼成同一次运行。新下载文件只是第一组的重复件。本轮尚未新生成工作流成果。
+已核对原始提示词、两段录像、两份 PDF 和一份不同内容的 PPTX。主展示选 DSH，另附 Codex 参考；二者不能拼成同一次运行。新下载文件只是第一组的重复件。本轮已有需求与图片中间成果，尚无完成的 PPT。
 
 Repository baseline inspected: `84a1a5b7f1d1e9ef59022f2c57ab7dfe1fd54ac2`. Integration docs and source were read. An isolated 8091 runtime reported `ready`, but its existing application build has not been verified against this baseline; that check is not an example pass. Later connector preparation rebuilt the connector from this example branch and restarted only the Bridge and test DSH host; neither application frontend was restarted.
 
 | Check | Codex | DSH | Required evidence |
 | --- | --- | --- | --- |
 | Plugin installation and correct instance | Installed; managed MCP preflight passed | Installed and host restarted; Bridge relay passed | Full host UI run and deployed application version still pending |
-| Original material read in current run | Not run | Not run | Historical exports inventoried; collected source-image bundle still missing |
+| Original material read in current run | Original prompt used; four images registered; summary step failed | Not run | Image suitability and source verification remain pending |
 | Outline/material review | Not run | Not run | Before/after adjustment and user approval |
 | Deck V1 | Not run | Not run | Actual run, artifact revision and opened export |
 | Local edit and preserved pages | Not run | Not run | V1/V2 plus page comparison |
@@ -28,7 +28,7 @@ Repository baseline inspected: `84a1a5b7f1d1e9ef59022f2c57ab7dfe1fd54ac2`. Integ
 
 The installed Codex plugin started the original Palace Museum task on the isolated 8091 application, with four slides, a general-public audience and AI backgrounds enabled. Workflow session: `mcp-64c7a99d9707aea53a0102ccb383cb8f`; revision: `17436653-d491-4098-88d9-9b871f2e407d`. Application source: `7c8f9ddef8c3b0021986f4f505d1eb8571694794` plus local changes, including the schema compatibility fix below. This is a development checkout, not a clean released build.
 
-需求分析尚未通过：第一次请求被 Kimi 的工具 schema 校验拒绝；将 `Any` 描述成六类 `anyOf` 后，第二次执行返回 “Model call ended without a complete answer”，未执行工具、未生成成果。第二次失败的具体结束原因没有被保留，不能把它直接归因为第一次的 schema 拒绝。
+需求分析的前两次执行未通过：第一次请求被 Kimi 的工具 schema 校验拒绝；将 `Any` 描述成六类 `anyOf` 后，第二次执行返回 “Model call ended without a complete answer”，未执行工具、未生成成果。第二次失败的具体结束原因没有被保留，不能把它直接归因为第一次的 schema 拒绝。
 
 The first attempt failed Kimi tool-schema validation. A six-type `anyOf` workaround passed request admission, but the second attempt ended without a complete answer and produced no executed tool calls or artifacts. Its exact finish reason was not retained. The two failures must not be reported as the same error.
 
@@ -39,6 +39,10 @@ The replacement removes only the `title` annotation from `ArtifactSaveItem.value
 Attempt 3 successfully saved five artifacts, including the [actual requirement analysis](outputs/codex/requirement-analysis.md), in about 45 seconds. It then failed `MEDIA_CAPABILITY_DEPENDENCY_MISSING`: AI backgrounds were enabled but no image-generation model was selected. This run passed the previously failing schema/tool-call path; it did not complete the step. The existing SiliconFlow `Qwen/Qwen-Image` model was subsequently selected in 8091 settings; actual generation remains unverified.
 
 第三次实跑已成功保存五项成果，需求简报正确包含四页、普通公众、AI 底图和真实检索主体图片。约 45 秒后因未选择文生图模型而失败，属于新的配置阻塞。已在 8091 选择现有 SiliconFlow `Qwen/Qwen-Image`，尚不能把配置成功当作图片生成成功。
+
+After configuration, attempt 4 reused saved requirements and passed. Material collection then completed three image searches and registered four images, but the following model call ended without a complete answer before saving `material_summary`. Three diagnostic API replays reconstructed from the recorded inputs returned valid `save_artifacts(material_summary)` calls; all three passed the production response parser and argument-schema validation. These replays executed no tools and do not count as Workflow recovery. See [issues and fixes](issues.md).
+
+配置补齐后，第 4 次需求分析复用已保存成果并成功。随后素材收集完成三次图片搜索、注册四张图片，但下一轮模型调用未正常结束，`material_summary` 没有保存。按记录重建请求的三次接口重放均返回有效保存参数，现有解析器和参数校验均通过；诊断未执行工具，不算工作流恢复成功。完整问题记录见 [issues.md](issues.md)。
 
 ### Connector preflight — 2026-10-13 / 接入预检
 
