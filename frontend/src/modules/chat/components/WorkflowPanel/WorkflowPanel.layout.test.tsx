@@ -384,6 +384,28 @@ describe('shared workflow compact layout', () => {
 
 
 describe('external workflow surface boundary', () => {
+  it.each([true, false])('shows native rollback only when waiting for approval (%s)', async requiresApproval => {
+    fixture.session.status = 'waiting';
+    fixture.session.steps!.find(step => step.step_id === 'write_document')!.created_at = '2026-09-16T00:01:00Z';
+    fixture.session.projection!.nodes = { write_document: {
+      execution: 'succeeded', requires_approval: requiresApproval, validity: 'effective', reachability: '', readiness: '', branch: '',
+    } };
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    await screen.findByText('正文 document');
+    fireEvent.click(screen.getByRole('tab', { name: '成稿' }));
+    await screen.findByRole('button', { name: '发布' });
+    const rollback = screen.queryByRole('group', { name: '回退到步骤：' });
+    if (!requiresApproval) {
+      expect(rollback).not.toBeInTheDocument();
+      return;
+    }
+    fireEvent.click(within(rollback!).getByRole('button', { name: '写作准备' }));
+    await waitFor(() => expect(send).toHaveBeenCalledWith(`${i18n.t('chat.workflowRollbackPrefix')}prepare`));
+    expect(fixture.flush.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]);
+    expect(fixture.setApprovalPreference).not.toHaveBeenCalled();
+  });
+
   it('uses the native running footer and routes stop without saving editors', async () => {
     fixture.session.status = 'active';
     fixture.session.steps![1].status = 'running';
@@ -402,7 +424,7 @@ describe('external workflow surface boundary', () => {
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
   });
 
-  it('renders the same approval bar as native and does not expose rollback while awaiting review', async () => {
+  it.each([true, false])('keeps approval choices and respects rewind permission (%s) while awaiting review', async canRewind => {
     fixture.session.status = 'waiting';
     fixture.session.current_step_id = 'write_document';
     fixture.session.steps!.find(step => step.step_id === 'write_document')!.created_at = '2026-09-16T00:01:00Z';
@@ -415,7 +437,7 @@ describe('external workflow surface boundary', () => {
       protocol: 'workflow.control.v1', session_id: 'layout-test', state_version: 2,
       continuation: 'awaiting_user', reviews: [review], active_executions: 0, active_execution_ids: [],
       admission: { can_begin: false }, binding: { bound: true, generation: 1 }, delivery: null,
-      available_actions: ['confirm', 'confirm_and_continue', 'rewind'],
+      available_actions: ['confirm', 'confirm_and_continue', ...(canRewind ? ['rewind'] : [])],
     } as WorkflowControlView;
     const execute = vi.fn(async () => {});
     render(<WorkflowPanel conversationId='layout-test' controlAdapter={{ control, execute }} />);
@@ -423,7 +445,17 @@ describe('external workflow surface boundary', () => {
     expect(within(approval).getAllByRole('button').map(button => button.textContent)).toEqual([
       '继续执行', '此步骤不需审批', '以后此工作流无需审批',
     ]);
-    expect(screen.queryByRole('group', { name: '回退到步骤：' })).not.toBeInTheDocument();
+    if (canRewind) {
+      const rollback = screen.getByRole('group', { name: '回退到步骤：' });
+      expect(within(rollback).getAllByRole('button').map(button => button.textContent)).toEqual(['写作准备', '成稿']);
+      fireEvent.click(within(rollback).getByRole('button', { name: '写作准备' }));
+      await waitFor(() => expect(execute).toHaveBeenCalledWith({ kind: 'rewind', stepId: 'prepare' }));
+      expect(fixture.flush).toHaveBeenCalledOnce();
+      expect(fixture.flush.mock.invocationCallOrder[0]).toBeLessThan(execute.mock.invocationCallOrder[0]);
+      expect(execute).toHaveBeenCalledTimes(1);
+    } else {
+      expect(screen.queryByRole('group', { name: '回退到步骤：' })).not.toBeInTheDocument();
+    }
     fireEvent.click(within(approval).getByRole('button', { name: '此步骤不需审批' }));
     await waitFor(() => expect(execute).toHaveBeenCalledWith({
       kind: 'confirm_and_continue', review, preferenceScope: 'step',
@@ -461,7 +493,12 @@ describe('external workflow surface boundary', () => {
     expect(onToggleCollapse).toHaveBeenCalledOnce();
   });
 
-  it('blocks external continuation when the shared editor cannot save', async () => {
+  it.each(['completed', 'waiting'] as const)('blocks external rollback when the shared editor cannot save (%s)', async status => {
+    fixture.session.status = status;
+    fixture.session.steps!.find(step => step.step_id === 'write_document')!.created_at = '2026-09-16T00:01:00Z';
+    fixture.session.projection!.nodes = { write_document: {
+      execution: 'succeeded', requires_approval: true, validity: 'effective', reachability: '', readiness: '', branch: '',
+    } };
     fixture.flush.mockResolvedValue(false);
     const execute = vi.fn(async () => {});
     const control = {

@@ -1973,7 +1973,8 @@ export function WorkflowPanel({
     ? Boolean(resolveExternalContinueAction(externalControl, completedContinueStepId))
     : Boolean(continueAction);
   const showStepRollback =
-    (session.status === 'completed' || session.status === 'failed')
+    (session.status === 'completed' || session.status === 'failed'
+      || (displayStatus === 'waiting' && Boolean(approvalStepId)))
     && Boolean(session.steps && session.steps.length > 0)
     && (!externalControl || availableActions.has('rewind'));
 
