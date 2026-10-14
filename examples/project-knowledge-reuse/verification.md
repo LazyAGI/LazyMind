@@ -1,6 +1,6 @@
 # Verification / 验证
 
-**Not accepted yet / 尚未验收。** Source preparation is distinct from an actual host run. No generated outputs or efficiency improvements are claimed here.
+**Not accepted yet / 尚未整体验收。** Current-version Codex CLI and DSH headless runs now have real outputs and call traces. Source-link defects, DSH search recovery and independent reproduction remain open; provenance-ledger corrections are retained separately. See the [2026-10-14 run](runs/2026-10-14/README.md). / 已有真实宿主输出与调用记录；来源链接、DSH 检索补验和独立复现仍待处理；取证记录修正版单独保留，不宣传效率提升。
 
 输入来源基线 / Source baseline: `84a1a5b7f1d1e9ef59022f2c57ab7dfe1fd54ac2`. Document hashes: [sources.json](sources.json).
 
@@ -8,14 +8,14 @@
 
 | Check / 检查 | Codex | DSH |
 | --- | --- | --- |
-| Plugin connection to intended instance / 插件连接目标实例 | Not run / 未实跑 | Not run / 未实跑 |
-| Four files indexed and readable / 四份文件索引及读取 | Not run / 未实跑 | Not run / 未实跑 |
-| A: sourced summary / 带来源的摘要 | Not run / 未实跑 | Not run / 未实跑 |
-| B: retrieve and explain R-05 / 检索与解释 R-05 | Not run / 未实跑 | Not run / 未实跑 |
-| C: bounded revision proposal / 限定范围修改建议 | Not run / 未实跑 | Not run / 未实跑 |
-| D: fresh-conversation handoff / 新会话交接 | Not run / 未实跑 | Not run / 未实跑 |
-| User opens outputs and finds sources / 取得成果与定位原文 | Not run / 未实跑 | Not run / 未实跑 |
-| Direct-Agent comparison / 直接使用资料的对照 | Not run / 未实跑 | Not run / 未实跑 |
+| Plugin connection to intended instance / 插件连接目标实例 | CLI: verified 8091 / 已验证 | Headless: verified 8091 / 已验证 |
+| Four files indexed and readable / 四份文件索引及读取 | Search + four exact full-text reads / 检索及四份完整原文 | Search + four reads; metadata says NONE / 检索读取成功，状态元数据异常 |
+| A: sourced summary / 带来源的摘要 | Generated; source links need correction / 已生成，来源链接待修正 | Generated; content audit recorded / 已生成并记录核查 |
+| B: retrieve and explain R-05 / 检索与解释 R-05 | Generated, actual positions identified / 已生成、定位真实章节 | Core explanation supported; ledger corrected in F / 核心解释有据，取证记录已于 F 轮修正 |
+| C: bounded revision proposal / 限定范围修改建议 | Generated; source bytes unchanged / 已生成，原文未变 | Generated; source bytes unchanged; ledger corrected in F / 已生成，原文未变，取证记录已修正 |
+| D: fresh-conversation handoff / 新会话交接 | Generated in fresh session; searched and reread all four / 新会话完成检索与四份读取 | Generated in fresh session; reread all four, omitted separate search / 新会话读取四份，遗漏独立检索调用 |
+| User opens outputs and finds sources / 取得成果与定位原文 | Files saved; source page verified; generated links fail / 文件已保存，原文页面可用，生成链接错误 | Files saved; IDs/sections available; no automatic source-link pass / 文件可用，有 ID/章节，未判自动链接通过 |
+| Direct-Agent comparison / 直接使用资料的对照 | A–D outputs recorded / A–D 真实输出已记录 | A–D outputs recorded / A–D 真实输出已记录 |
 | Non-implementer reproduction / 非实现者独立复现 | Pending / 待执行 | Pending / 待执行 |
 
 ## Run evidence / 实跑证据
@@ -58,7 +58,7 @@ Record for **each arm and each step** / 两组逐步记录：
 | Recovery / 失败恢复 | Retrieval/read errors, missing documents and what the user had to do. / 检索读取错误、材料缺失和人工处理。 |
 | Timing, if measured / 如计时 | Include setup and user review; record raw intervals and conditions, no invented averages. / 包括首次成本与审核，保存原始区间及条件。 |
 
-A publishable value claim must name a concrete convenience actually observed, with no material loss in source traceability or correctness. If both arms reuse the same four files equally well, record **no added value demonstrated in this fixture**; improve the scope only with the user's evidence and agreement. / 只有观察到明确便利且依据、正确性未明显退步才宣传；若两组同样便利，写明本输入包未证明增量价值，再和用户讨论。
+The owner confirmed the scope on 2026-10-14: demonstrate cross-Agent and cross-conversation reuse, not superiority over local files. Acceptance requires both hosts to retrieve the same original sources, preserve citations and unresolved states in fresh conversations, and disclose setup and recovery. Keep the direct-file results as context; do not invent speed or effort gains. / 用户于 2026-10-14 确认以跨 Agent、跨会话复用为主线。验收关注两种宿主使用同一原文、新会话保留依据与未决状态，并如实披露准备和恢复操作；不以优于本地文件作为通过条件，不虚构效率。
 
 ## Preparation checks / 准备检查
 
@@ -70,3 +70,8 @@ Run `python3 examples/project-knowledge-reuse/prepare_inputs.py --check` and `gi
 - A separate HTML text audit matched all article text after whitespace normalization, and checked preservation of every article link and section ID. / 单独提取 HTML 正文核对，忽略空白后内容一致，全部正文链接及章节 ID 保留。
 - Local Markdown file targets exist; `git diff --check` passed. / 本地 Markdown 文件链接目标存在，差异空白检查通过。
 - Host execution remains pending. Runtime preflight found the Codex Workflow MCP startup and dispatcher default to Bridge port 19091; the existing local Bridge uses credentials for a different instance. Do not replace that connection to claim an isolated run. / 宿主实跑仍待执行；预检发现 Codex Workflow MCP 启动与派发默认使用 19091，现有 Bridge 凭据属于另一实例，不能覆盖该连接来冒充隔离验证。
+
+
+2026-10-14 update / 更新：The earlier connection blocker above is historical. The user authorized switching the local Agent credentials to 8091. Current runs use that verified instance; no 8090 business service or data was changed. / 上方 10/13 接入阻塞为历史记录；用户已授权切换连接，当前实跑使用 8091。
+
+Maintenance hold / 维护暂停：On 2026-10-14 the owner confirmed that 8091 is intentionally stopped and must not be started. Sixteen initial outputs are saved; DSH recovery E failed to connect and was interrupted, not passed. Recovery F corrected only the local provenance ledgers. / 用户确认 8091 正在维护，禁止启动。16 份初次输出已保存；DSH 补验 E 因连接拒绝被中止，不算通过；F 仅修正本地取证记录。

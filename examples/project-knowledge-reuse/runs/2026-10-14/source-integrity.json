@@ -1,0 +1,34 @@
+[
+  {
+    "name": "design.txt",
+    "document_id": "doc_dbd6a8d75dba652c433795dee8d095cc",
+    "same_bytes_after_revision_proposals": true,
+    "sha256": "c1c06a794965b06a24de93650c851c910e99a9c23bb365dc0860d55e1b6a9a4f",
+    "truncated": false,
+    "updated_at": "2026-10-14T06:28:19.679028Z"
+  },
+  {
+    "name": "prd.txt",
+    "document_id": "doc_bc9879c116ae6e5b264200dc3f09378b",
+    "same_bytes_after_revision_proposals": true,
+    "sha256": "5ccf7820409600dd5d4b6d40d191b050967e2e623a8af2f1bb9fd0c6f015ef88",
+    "truncated": false,
+    "updated_at": "2026-10-14T06:28:19.679028Z"
+  },
+  {
+    "name": "review.txt",
+    "document_id": "doc_46a23b2fb47ba47f3b8a9ef0195cc54a",
+    "same_bytes_after_revision_proposals": true,
+    "sha256": "12c9839528466c213ec32ecd598e6af366dafcaaf6ef6607dbb4c3f32ee66cd4",
+    "truncated": false,
+    "updated_at": "2026-10-14T06:28:19.679028Z"
+  },
+  {
+    "name": "handoff.txt",
+    "document_id": "doc_fee089df8b540192144ac3cf56ac4cec",
+    "same_bytes_after_revision_proposals": true,
+    "sha256": "39894126968f89f52c68c9cec558f359338e3c1a58dd968485db545b12d05a8c",
+    "truncated": false,
+    "updated_at": "2026-10-14T06:28:19.679028Z"
+  }
+]

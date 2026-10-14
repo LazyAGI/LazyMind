@@ -1,0 +1,257 @@
+{
+  "date": "2026-10-14",
+  "timezone": "Asia/Shanghai",
+  "arm": "codex-direct",
+  "records": [
+    {
+      "stage": "A",
+      "run": {
+        "stage": "A",
+        "arm": "codex-direct",
+        "exit_code": 0,
+        "elapsed_seconds": 176.36,
+        "workspace": "<PRIVATE_RUN_ROOT>/zhice-runs/codex-direct/workspace",
+        "thread_id": "01a1397b-19ef-71d3-a534-884ac87124c1"
+      },
+      "tools": [
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"rg --files -g '\"'!.*'\"' <INPUT_DIR>\"",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"nl -ba '<INPUT_DIR>/review.txt'\"",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"nl -ba '<INPUT_DIR>/prd.txt'\"",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"nl -ba '<INPUT_DIR>/handoff.txt'\"",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"nl -ba '<INPUT_DIR>/design.txt'\"",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"rg -n '\"'^(#|[一二三四五六七八九十]+[、.]|[0-9]+[、.])|用户|任务|流程|角色|版本|导出|评审|交付|批准|验证|待定'\"' '<INPUT_DIR>'/{design,prd,review,handoff}.txt\"",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc 'nl -ba <INPUT_DIR>/design.txt'",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc 'nl -ba <INPUT_DIR>/prd.txt'",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc 'mkdir -p <PRIVATE_RUN_ROOT>/zhice-runs/codex-direct/workspace/outputs'",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"python3 - <<'PY'\nfrom pathlib import Path\nimport re\np=Path('<PRIVATE_RUN_ROOT>/zhice-runs/codex-direct/workspace/outputs/01-summary.md')\ns=p.read_text()\nused=set(re.findall(r'\\\\]\\\\[([A-Z][A-Z0-9]*)\\\\]', s))\ndefs=set(re.findall(r'\"'^'\"\\\\[([A-Z][A-Z0-9]*)\\\\]:', s, re.M))\nassert not used-defs, used-defs\nassert all(x in s for x in ['用户与任务','主要流程','角色边界','版本、导出','当前评审与交付状态','实际检索、读取记录与未完成项'])\nprint(f'已保存：{p}\\\\n大小：{p.stat().st_size} 字节\\\\n来源引用：{len(used)} 个，均已定义\\\\n必需内容检查通过')\nprint('\\\\n'.join(s.splitlines()[:5]))\nPY\"",
+          "status": "completed",
+          "exit_code": 0
+        }
+      ],
+      "errors": []
+    },
+    {
+      "stage": "B",
+      "run": {
+        "stage": "B",
+        "arm": "codex-direct",
+        "exit_code": 0,
+        "elapsed_seconds": 106.5,
+        "workspace": "<PRIVATE_RUN_ROOT>/zhice-runs/codex-direct/workspace",
+        "thread_id": "01a1397b-19ef-71d3-a534-884ac87124c1"
+      },
+      "tools": [
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"nl -ba '<INPUT_DIR>/review.txt'\"",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"nl -ba '<INPUT_DIR>/prd.txt' | sed -n '63,112p;149,161p'\"",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"nl -ba '<INPUT_DIR>/design.txt' | sed -n '89,160p'\"",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"rg -n 'R-05|改动范围|改范围|变更|确认计划|未确认|退回修改|not-resolved|P1|待确认|尚未确认' '<INPUT_DIR>/design.txt' '<INPUT_DIR>/prd.txt' '<INPUT_DIR>/review.txt'\"",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"python3 - <<'PY'\nfrom pathlib import Path\np=Path('<PRIVATE_RUN_ROOT>/zhice-runs/codex-direct/workspace/outputs/02-scope-evidence.md')\ns=p.read_text()\nassert all(t in s for t in ['design.txt','prd.txt','review.txt','启动前','启动后','尚未接受','not-resolved','未执行产品测试或正式复验'])\nprint(f'文件已保存，{p.stat().st_size} 字节；三份来源、时点规则、决定状态及工作边界均已写入。')\nPY\"",
+          "status": "completed",
+          "exit_code": 0
+        }
+      ],
+      "errors": []
+    },
+    {
+      "stage": "C",
+      "run": {
+        "stage": "C",
+        "arm": "codex-direct",
+        "exit_code": 0,
+        "elapsed_seconds": 88.74,
+        "workspace": "<PRIVATE_RUN_ROOT>/zhice-runs/codex-direct/workspace",
+        "thread_id": "01a1397b-19ef-71d3-a534-884ac87124c1"
+      },
+      "tools": [
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"sed -n '51p;59,61p' '<INPUT_DIR>/review.txt'\"",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"sed -n '120,124p' '<INPUT_DIR>/design.txt'\"",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"sed -n '98,102p' '<INPUT_DIR>/prd.txt'\"",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"python3 - <<'PY'\nfrom pathlib import Path\nimport re\nb=Path('<INPUT_DIR>')\np=Path('<PRIVATE_RUN_ROOT>/zhice-runs/codex-direct/workspace/outputs/03-design-revision.md')\ns=p.read_text()\noriginal,replacement=re.findall(r'\"'```text'\"\\\\n(.*?)\\\\n\"'```'\"',s,re.S)\nassert original == (b/'design.txt').read_text().splitlines()[122]\nassert replacement == original.replace('改动范围后须重新确认','启动前改动范围后须重新确认；启动后改动范围应复制配置创建新任务',1)\nassert '启动前重确认；启动后创建新任务' in (b/'review.txt').read_text()\nassert '应复制配置创建新任务' in (b/'prd.txt').read_text()\nprint('检查通过：原文片段与 design.txt 第 123 行一致；替换仅涉及目标短语；两项时点规则均有来源支持。建议文件已保存。')\nPY\"",
+          "status": "completed",
+          "exit_code": 0
+        }
+      ],
+      "errors": []
+    },
+    {
+      "stage": "D",
+      "run": {
+        "stage": "D",
+        "arm": "codex-direct",
+        "exit_code": 0,
+        "elapsed_seconds": 273.94,
+        "workspace": "<PRIVATE_RUN_ROOT>/zhice-runs/codex-direct/fresh-handoff",
+        "thread_id": "01a13982-7203-7210-a3c1-56c3121141fa"
+      },
+      "tools": [
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc 'ls -la <INPUT_DIR>'",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc 'cat <INPUT_DIR>/design.txt'",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc 'cat <INPUT_DIR>/prd.txt'",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc 'cat <INPUT_DIR>/review.txt'",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc 'cat <INPUT_DIR>/handoff.txt'",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc 'cat <INPUT_DIR>/design.txt'",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"rg -n '\"'^'\"\\\\[section-|v[12]\\\\.0|R-0[1-5]|OPEN-0|DEP-01|RES-01' <INPUT_DIR>\"",
+          "status": "completed",
+          "exit_code": 0
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc 'ls -ld outputs outputs/04-handoff.md'",
+          "status": "failed",
+          "exit_code": 1
+        },
+        {
+          "name": "shell",
+          "command": "/bin/zsh -lc \"python3 - <<'PY'\nfrom pathlib import Path\np = Path('outputs/04-handoff.md')\ns = p.read_text()\nassert all(x in s for x in ('design.txt', 'prd.txt', 'review.txt', 'handoff.txt', 'blocked', 'not-resolved', 'DEP-01', 'RES-01'))\nassert all(f'R-{i:02}' in s for i in range(1,6))\nassert all(f'FR-{i:03}' in s for i in range(1,13))\nassert all(f'AC-{i:03}' in s for i in range(1,19))\nfor n, line in enumerate(s.splitlines(), 1):\n    if line.startswith('|'):\n        assert line.endswith('|'), (n, line)\nprint(f'已核对：{p.resolve()}')\nprint(f'{len(s.splitlines())} 行，{p.stat().st_size} 字节；四份文件、五项评审及全部 FR/AC 编号齐全。')\nPY\"",
+          "status": "completed",
+          "exit_code": 0
+        }
+      ],
+      "errors": []
+    }
+  ],
+  "outputs": [
+    {
+      "file": "03-design-revision.md",
+      "raw_sha256": "e5bf7696fd9c1657f96e9742e4af343e161f1b9af776b78c4d500a5fca169222",
+      "published_sha256": "1414f30a2e471dd53b77131de4eb7c86458feb0045cb96801f048d720e5601e4",
+      "redaction": "private path prefixes only"
+    },
+    {
+      "file": "02-scope-evidence.md",
+      "raw_sha256": "1d154749b5c9bc0b2429fb6c1a9f5b25034ca9900a34605f67163efedce2360a",
+      "published_sha256": "cbf38b2a63a65e843fbaa77d5a290020b7e729f15a30943c4c089ce7a73510c1",
+      "redaction": "private path prefixes only"
+    },
+    {
+      "file": "01-summary.md",
+      "raw_sha256": "2c870d795156ba127b6f5b436e5a8a360bc77c63cc499413699f8232eb989262",
+      "published_sha256": "2940700a61d94872f8f9243b92270074327fc3cddce4127b7ebe176d910259ec",
+      "redaction": "private path prefixes only"
+    },
+    {
+      "file": "04-handoff.md",
+      "raw_sha256": "ec31579d3916057fa2165b82542d5682e0f9255cab6a89defcc8ed586fd5926a",
+      "published_sha256": "17b0a8a9140ed6866b5286df8c96cb39127a9f5aa5b086af5235ebf22884d9c9",
+      "redaction": "private path prefixes only"
+    }
+  ]
+}

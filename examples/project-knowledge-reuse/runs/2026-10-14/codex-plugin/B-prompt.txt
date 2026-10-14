@@ -1,0 +1,3 @@
+继续使用 LazyMind 插件检索、读取知识库 ds_b4cbf46595d98dd2a0e872c1d96bf03d。
+评审中的 R-05 究竟指哪处范围变更表述？请对照产品方案和 PRD 的原文，说明研究启动前与启动后分别应如何处理，为什么当前写法可能被误读，以及它是否改变正式研发交付的阻塞状态。
+把结果保存为 <PRIVATE_RUN_ROOT>/zhice-runs/codex-plugin/workspace/outputs/02-scope-evidence.md。引用三份原文中的位置和实际文档 ID，区分原文规则、你的解释与尚未接受的决定。不要仅凭上轮摘要作答，不宣称已修复或已复验。

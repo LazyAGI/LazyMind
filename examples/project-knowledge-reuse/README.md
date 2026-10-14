@@ -2,11 +2,11 @@
 
 [中文](README.CN.md) · [Full prompts](prompts.md) · [Verification and acceptance](verification.md)
 
-**Status: pinned inputs and reproduction procedure prepared; Codex, DSH, baseline comparison and independent reproduction have not run.** There are no current-run outputs in this directory. This is not an accepted promotional showcase yet.
+**Status: real Codex CLI / DSH headless outputs and tool traces are available; full acceptance is pending.** Source navigation, provenance-ledger accuracy and independent reproduction remain open. See the [current run and findings](runs/2026-10-14/README.md). Generated files alone do not establish acceptance.
 
 Reuse the existing **Zhice (知策)** product design, PRD, review and handoff examples. Users stay in Codex or DeepSeek Harness (DSH), calling LazyMind through its plugin. LazyMind retrieves and reads project documents; the external Agent writes and saves the deliverables. This example does not run the product delivery Workflow or introduce another research system.
 
-The value to test is whether preparing a knowledge base once reduces the manual selection, explanation and transfer of source material across follow-ups, revisions and new conversations. An Agent can also read these four local files directly. Any added convenience must be demonstrated by the [comparison](verification.md#comparison--对照).
+The focus is **reusing the same project sources across Agents and conversations**. Prepare one LazyMind knowledge base; Codex and DSH independently retrieve and read its sources through the plugin, preserving evidence and unresolved decisions across follow-ups, bounded revisions and fresh conversations. No previous conversation summary is copied into the handoff session. Local files are reusable too: keep the [comparison](verification.md#comparison--对照), without claiming fewer actions or faster completion.
 
 ## Inputs and provenance
 
@@ -58,4 +58,4 @@ Use the Agent's normal file-writing tools to save outputs. Open each file, verif
 
 Run and record Codex and DSH separately. One host passing does not validate the other. A person who did not implement the example must then reproduce it using only these instructions. See [verification.md](verification.md) for pending records and criteria. Publish sanitized real outputs and record the demo only after acceptance; do not prefill success or efficiency claims.
 
-Four static Chinese documents do not demonstrate large-scale retrieval, live indexing, edit write-back, version management or production readiness. Include knowledge base creation, indexing, plugin setup and manual checking in the cost. If direct access to the same directory is equally convenient, state that this example has not demonstrated additional LazyMind value.
+Four static Chinese documents do not demonstrate large-scale retrieval, live indexing, edit write-back, version management or production readiness. Include knowledge base creation, indexing, plugin setup and manual checking in the cost. The direct-file runs also reuse the same directory successfully. This showcase demonstrates cross-Agent and cross-conversation access, without claiming fewer operations than local files.
