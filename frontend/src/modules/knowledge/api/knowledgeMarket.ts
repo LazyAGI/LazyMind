@@ -10,6 +10,8 @@ import {
   type KnowledgeMarketListItemOpenAPIResponse,
   type KnowledgeMarketTaskDetailOpenAPIResponse,
   type KnowledgeMarketTaskListOpenAPIResponse,
+  type KnowledgeMarketTaskFilesOpenAPIResponse,
+  type KnowledgeMarketTaskFileOpenAPIResponse,
 } from "@/api/generated/core-client";
 import { axiosInstance, BASE_URL } from "@/components/request";
 
@@ -171,5 +173,21 @@ export async function retryKnowledgeMarketTask(jobId: string): Promise<Knowledge
 
 export async function cancelKnowledgeMarketTask(jobId: string) {
   const response = await knowledgeMarketClient.apiCoreKnowledgeMarketTasksJobIdCancelPost({ jobId });
+  return unwrap(response.data);
+}
+
+export type KnowledgeMarketFileStatus = KnowledgeMarketTaskFileOpenAPIResponse["status"];
+
+export async function listKnowledgeMarketTaskPage(page: number, options?: KnowledgeMarketRequestOptions): Promise<KnowledgeMarketTaskListOpenAPIResponse> {
+  const response = await knowledgeMarketClient.apiCoreKnowledgeMarketTasksGet(
+    { jobType: "all", view: "summary", page, pageSize: 10 }, options,
+  );
+  return unwrap(response.data);
+}
+
+export async function listKnowledgeMarketTaskFiles(jobId: string, status: KnowledgeMarketFileStatus, page: number, options?: KnowledgeMarketRequestOptions): Promise<KnowledgeMarketTaskFilesOpenAPIResponse> {
+  const response = await knowledgeMarketClient.apiCoreKnowledgeMarketTasksJobIdFilesGet(
+    { jobId, status, page, pageSize: 10 }, options,
+  );
   return unwrap(response.data);
 }

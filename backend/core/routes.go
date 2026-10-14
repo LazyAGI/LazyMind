@@ -870,6 +870,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/knowledge-market:update-all", []string{"qa.write"}, systemdeps.RequireRAG(knowledge_market.MarketUpdateAll))
 	handleAPI(r, "GET", "/knowledge-market/tasks", []string{"qa.read"}, knowledge_market.MarketListInstallTasks)
 	handleAPI(r, "GET", "/knowledge-market/tasks/{job_id}", []string{"qa.read"}, knowledge_market.MarketGetInstallTask)
+	handleAPI(r, "GET", "/knowledge-market/tasks/{job_id}/files", []string{"qa.read"}, knowledge_market.MarketTaskFiles)
 	handleAPI(r, "DELETE", "/knowledge-market/tasks/{job_id}", []string{"qa.write"}, knowledge_market.MarketDeleteTask)
 	handleAPI(r, "POST", "/knowledge-market/tasks/{job_id}:retry", []string{"qa.write"}, knowledge_market.MarketRetryTask)
 	handleAPI(r, "POST", "/knowledge-market/tasks/{job_id}:cancel", []string{"qa.write"}, knowledge_market.MarketCancelTask)
