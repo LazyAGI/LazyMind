@@ -1583,6 +1583,67 @@ def test_run_subagent_stream_agent_exception_emits_error(monkeypatch):
     assert 'llm exploded' in error_events[0]['message']
 
 
+@pytest.mark.parametrize('finish_reason', ['length', 'content_filter', 'malformed_function_call'])
+def test_model_failure_persists_safe_diagnostics_without_retry(monkeypatch, finish_reason):
+    from lazyllm.module.llms.onlinemodule.base.model_outcome import ModelCallError, ModelCallTerminal
+    from lazyllm.module.llms.onlinemodule.base.provider_response import OPENAI_COMPATIBLE_PROFILE
+
+    _install_fake_db(monkeypatch)
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_translator(monkeypatch)
+    terminal = ModelCallTerminal(
+        model_call_id='call-1', attempt_count=1, kind='finish', has_semantic_output=True,
+        finish=OPENAI_COMPATIBLE_PROFILE.map_finish(finish_reason),
+    )
+    failure = ModelCallError('Model call ended without a complete answer.', terminal, [{
+        'choices': [{'index': 0, 'finish_reason': finish_reason, 'delta': {
+            'content': 'private-model-text', 'reasoning_content': 'private-reasoning',
+            'tool_calls': [{'function': {'arguments': 'private-tool-input'}}],
+        }}],
+    }])
+    failure.usage = {'prompt_tokens': 100, 'completion_tokens': 200, 'total_tokens': 300,
+                     'provider_usage': {'api_key': 'private-key'}}
+    calls = []
+
+    class ExplodingExecutor:
+        async def stream(self, llm, plan):
+            calls.append(True)
+            raise failure
+            yield  # pragma: no cover
+
+    monkeypatch.setattr(runner_mod, 'AgentExecutor', ExplodingExecutor)
+    raw = asyncio.run(_collect(runner_mod.run_subagent_stream(
+        _DEFAULT_TASK_ID, task_spec={**_DEFAULT_TASK},
+    )))
+    errors = [e for e in _sse_to_events(raw) if e.get('type') == 'error']
+    assert len(errors) == 1
+    assert len(calls) == 1
+    assert errors[0]['status'] == 'failed'
+    assert errors[0]['message'] == errors[0]['summary']
+    detail = json.loads(errors[0]['message'].split('MODEL_CALL_DIAGNOSTICS ')[1].split('\n')[0])
+    assert detail['provider_finish_reason'] == finish_reason
+    assert detail['finish'] == terminal.finish.value
+    assert detail['usage'] == {'prompt_tokens': 100, 'completion_tokens': 200, 'total_tokens': 300}
+    assert 'private-' not in raw
+    assert raw.endswith('data: [DONE]\n\n')
+
+
+def test_model_diagnostics_ignore_non_primary_choices_and_untrusted_fields():
+    from lazyllm.module.llms.onlinemodule.base.model_outcome import ModelCallError, ModelCallTerminal
+
+    failure = ModelCallError('failed', ModelCallTerminal(
+        model_call_id='call-1', attempt_count=1, kind='finish', has_semantic_output=False,
+    ), [{'choices': [
+        {'index': 1, 'finish_reason': 'length'},
+        {'index': 0, 'finish_reason': 'private key: secret'},
+    ]}])
+    failure.usage = {'prompt_tokens': True, 'completion_tokens': -1, 'total_tokens': 'secret'}
+    detail = runner_mod._model_call_diagnostics(failure)
+    assert 'provider_finish_reason' not in detail
+    assert 'usage' not in detail
+    assert 'secret' not in json.dumps(detail)
+
+
 # ---------------------------------------------------------------------------
 # Test: text/think frames from AgentEventFrameTranslator appear in SSE
 # ---------------------------------------------------------------------------

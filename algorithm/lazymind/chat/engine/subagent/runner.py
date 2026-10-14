@@ -20,6 +20,8 @@ from lazymind.chat.engine.tools.workspace_context import (
 )
 from lazymind.chat.engine.tools.conversation_workspace import chat_agent_workspace
 from lazyllm import LOG, AutoModel
+from lazyllm.module.llms.onlinemodule.base.model_outcome import ModelCallError
+from lazyllm.module.llms.onlinemodule.base.provider_response import select_primary_choice
 from lazyllm.tools.fs.client import FS
 from lazyllm.tools.agent.base import (
     TOOL_OBSERVATION_KEY,
@@ -109,6 +111,35 @@ WORKFLOW_TOOL_CALL_LIMITS = {
     'validate_proposal_from_inputs': 2,
     'validate_*': 2,
 }
+
+
+def _model_call_diagnostics(exc: ModelCallError) -> Dict[str, Any]:
+    """Retain terminal metadata without copying model content or provider payloads."""
+    terminal = exc.terminal
+    result = {
+        'model_call_id': terminal.model_call_id,
+        'kind': terminal.kind,
+        'attempt_count': terminal.attempt_count,
+    }
+    if terminal.finish is not None:
+        result['finish'] = terminal.finish.value
+    if terminal.failure is not None:
+        result['failure'] = terminal.failure.public_dict()
+    for frame in reversed(exc.partial_response):
+        choices = frame.get('choices')
+        if not isinstance(choices, list) or not all(isinstance(c, dict) for c in choices):
+            continue
+        choice = select_primary_choice(choices)
+        reason = (choice or {}).get('finish_reason')
+        if isinstance(reason, str) and re.fullmatch(r'[a-z_]{1,64}', reason):
+            result['provider_finish_reason'] = reason
+            break
+    usage = exc.usage or terminal.usage or {}
+    counts = {key: usage[key] for key in ('prompt_tokens', 'completion_tokens', 'total_tokens')
+              if type(usage.get(key)) is int and usage[key] >= 0}
+    if counts:
+        result['usage'] = counts
+    return result
 
 
 def _hard_constraints_from_params(params: Dict[str, Any]) -> str:
@@ -1712,11 +1743,14 @@ async def run_subagent_stream(
         if source_event is not None:
             yield _sse(source_event)
         exc_summary = str(exc)
+        if isinstance(exc, ModelCallError):
+            diagnostics = json.dumps(_model_call_diagnostics(exc), ensure_ascii=False)
+            exc_summary += f'\nMODEL_CALL_DIAGNOSTICS {diagnostics}'
         if db is not None:
             try:
                 steps = db.load_steps(task_id)
                 trace = _steps_to_trace(steps)
-                exc_summary = f'异常：{exc}\n执行路径：\n{trace}'
+                exc_summary = f'异常：{exc_summary}\n执行路径：\n{trace}'
             except Exception:
                 pass
         yield _sse({'type': 'error', 'task_id': task_id, 'status': 'failed',
