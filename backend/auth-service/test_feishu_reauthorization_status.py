@@ -34,7 +34,9 @@ class FeishuReauthorizationStatusTest(unittest.TestCase):
             connection_id=attempt['connection_id'], code='fixture-code', state=attempt['state'],
         )
         self.assertEqual(completed['connection_id'], original)
-        self.assertFalse(self.account_after_reload(original)['provider_account_meta'].get('authorization_pending', False))
+        self.assertFalse(
+            self.account_after_reload(original)['provider_account_meta'].get('authorization_pending', False)
+        )
 
     def test_cli_pending_marker_is_persisted_and_cleared_by_successful_authorization(self):
         mirror = dict(
@@ -45,13 +47,21 @@ class FeishuReauthorizationStatusTest(unittest.TestCase):
             status='ACTIVE', capability_contract_version='feishu-cli/v1', capabilities=[],
         )
         self.service.upsert_feishu_cli_connection(**mirror)
-        self.service.update_connection('fixture-cli', user_id='user-1', provider_account_meta={'authorization_pending': True})
-        self.assertTrue(self.account_after_reload('fixture-cli')['provider_account_meta'].get('authorization_pending', False))
+        self.service.update_connection(
+            'fixture-cli', user_id='user-1', provider_account_meta={'authorization_pending': True}
+        )
+        self.assertTrue(
+            self.account_after_reload('fixture-cli')['provider_account_meta'].get('authorization_pending', False)
+        )
         self.service.upsert_feishu_cli_connection(**mirror)
-        self.assertTrue(self.account_after_reload('fixture-cli')['provider_account_meta'].get('authorization_pending', False))
+        self.assertTrue(
+            self.account_after_reload('fixture-cli')['provider_account_meta'].get('authorization_pending', False)
+        )
         mirror['provider_account_meta']['authorization_completed'] = True
         self.service.upsert_feishu_cli_connection(**mirror)
-        self.assertFalse(self.account_after_reload('fixture-cli')['provider_account_meta'].get('authorization_pending', False))
+        self.assertFalse(
+            self.account_after_reload('fixture-cli')['provider_account_meta'].get('authorization_pending', False)
+        )
 
     def test_internal_cli_marker_preserves_credentials_and_rejects_another_owner(self):
         mirror = dict(
@@ -67,9 +77,13 @@ class FeishuReauthorizationStatusTest(unittest.TestCase):
         result = self.service.upsert_feishu_cli_connection(**FeishuCLIConnectionMirrorBody(**marker).model_dump())
         for field in ('status', 'display_name', 'scope', 'profile_ref', 'provider_account_id'):
             self.assertEqual(result[field], original[field])
-        self.assertTrue(self.account_after_reload('fixture-cli')['provider_account_meta'].get('authorization_pending', False))
+        self.assertTrue(
+            self.account_after_reload('fixture-cli')['provider_account_meta'].get('authorization_pending', False)
+        )
         with self.assertRaises(AppException):
-            self.service.upsert_feishu_cli_connection(**{**marker, 'owner_user_id': 'user-2', 'profile_ref': 'user-2/fixture-cli'})
+            self.service.upsert_feishu_cli_connection(
+                **{**marker, 'owner_user_id': 'user-2', 'profile_ref': 'user-2/fixture-cli'}
+            )
         for overrides in ({'owner_user_id': ''}, {'profile_ref': ''}):
             with self.subTest(overrides=overrides), self.assertRaises(AppException):
                 self.service.upsert_feishu_cli_connection(**{**marker, **overrides})

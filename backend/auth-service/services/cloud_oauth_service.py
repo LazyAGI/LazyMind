@@ -1555,7 +1555,11 @@ class CloudOAuthService:
                 if row is None:
                     raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
                 self._ensure_connection_owner(row, tenant_id='', user_id=normalized_owner)
-                if row.provider != 'feishu' or row.connection_method != 'cli_personal_app' or row.profile_ref != normalized_profile_ref:
+                if (
+                    row.provider != 'feishu'
+                    or row.connection_method != 'cli_personal_app'
+                    or row.profile_ref != normalized_profile_ref
+                ):
                     raise_error(ErrorCodes.CLOUD_REAUTHORIZED_ACCOUNT_MISMATCH)
                 meta = _json_loads(row.provider_account_meta)
                 meta['authorization_pending'] = True
