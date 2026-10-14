@@ -1,0 +1,50 @@
+[
+  {
+    "artifact_id": "32feb854-9857-4463-a81f-52b9d36bf60b",
+    "step_id": "collect_materials",
+    "attempt": 4,
+    "revision": 3,
+    "list_index": 4,
+    "producer_attempt_id": "pss_216af3e5f4b043149dca3b4b3d83d843",
+    "caption": "故宫全景：自景山俯瞰紫禁城建筑群",
+    "filename": "material_01_9e22dd3b-0b28eb69017b3486.jpg",
+    "sha256": "sha256:0b28eb69017b34860140ae07a72331969ae6b821875fb0e21d64615fd56ffc3f",
+    "size": 314828
+  },
+  {
+    "artifact_id": "1cb99d9b-8ea9-4604-8df0-0d882a8fd611",
+    "step_id": "collect_materials",
+    "attempt": 4,
+    "revision": 3,
+    "list_index": 5,
+    "producer_attempt_id": "pss_216af3e5f4b043149dca3b4b3d83d843",
+    "caption": "太和殿：外朝三大殿之首，居紫禁城南北中轴线",
+    "filename": "material_02_f3a5f644-929522de0d2a32c1.jpg",
+    "sha256": "sha256:929522de0d2a32c16360032ec25d2cf1decf920e606a7129247e51c17da1edea",
+    "size": 521652
+  },
+  {
+    "artifact_id": "a3d4aaab-ad57-4be2-83c3-c37fc554b9b7",
+    "step_id": "collect_materials",
+    "attempt": 4,
+    "revision": 3,
+    "list_index": 6,
+    "producer_attempt_id": "pss_216af3e5f4b043149dca3b4b3d83d843",
+    "caption": "金瓯永固杯：故宫博物院珍宝馆藏清代金质酒杯特写",
+    "filename": "material_03_f9235017-8e15383b4ced8204.jpg",
+    "sha256": "sha256:8e15383b4ced82046cdf9aa6ba03813736343b9fedf3ca0895ba8dece7dbf140",
+    "size": 192398
+  },
+  {
+    "artifact_id": "8e4a5d4c-14f9-4653-8191-de6d50d08603",
+    "step_id": "collect_materials",
+    "attempt": 4,
+    "revision": 3,
+    "list_index": 7,
+    "producer_attempt_id": "pss_216af3e5f4b043149dca3b4b3d83d843",
+    "caption": "午门：今日故宫博物院正门",
+    "filename": "material_04_83ad27c6-dfad9f4987f71492.jpg",
+    "sha256": "sha256:dfad9f4987f714923424274df23a99afba0039b04f497e26f85665ba33966e74",
+    "size": 229401
+  }
+]
