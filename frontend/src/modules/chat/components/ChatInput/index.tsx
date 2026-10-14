@@ -39,6 +39,7 @@ import { fileToBase64 } from "@/modules/chat/utils/upload";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
 import { resolveMarkdownImageUrlAsync } from "@/modules/knowledge/utils/imageUrl";
+import { getRuntimeMode, isLocalLikeRuntimeMode } from "@/runtime/mode";
 
 import "./index.scss";
 
@@ -628,6 +629,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       thinkingDepth: controlledThinkingDepth,
       onThinkingDepthChange,
     } = props;
+    const showWorkspaceEnvironment = runInBackground && allowLocalWorkspace && isLocalLikeRuntimeMode(getRuntimeMode());
     const [workspaceId, setWorkspaceId] = useState<string>();
     const [projectName, setProjectName] = useState<string>();
     const [projectValid, setProjectValid] = useState(true);
@@ -1453,7 +1455,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           </div>
         ) : null}
         <div className="input-container">
-          <div className={`chat-input-surface${runInBackground && allowLocalWorkspace ? " has-environment" : ""}`}>
+          <div className={`chat-input-surface${showWorkspaceEnvironment ? " has-environment" : ""}`}>
           <div className="input-top">
             <div className="input-field">
               <ShowChatFileList fileList={displayedFiles} onRemove={uid => uid.startsWith("upload:") ? setRemovedTransferredFiles(ids => [...ids, uid]) : removeImage(uid)} />
@@ -1827,7 +1829,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
               </div>
             </div>
           </div>
-          {runInBackground && allowLocalWorkspace && <div className="chat-input-environment">
+          {showWorkspaceEnvironment && <div className="chat-input-environment">
             <LocalWorkspaceControl
                     approvalContainer={approvalContainer}
                     draftWorkspace={props.draftWorkspace}

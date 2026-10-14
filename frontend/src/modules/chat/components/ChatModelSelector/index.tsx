@@ -606,7 +606,7 @@ const ChatModelSelector = ({
             data-disabled={depthDisabled}
             style={{
               "--depth-progress": `${depthIndex / (THINKING_DEPTH_VALUES.length - 1) * 100}%`,
-              "--depth-thumb-position": `calc(${depthIndex / (THINKING_DEPTH_VALUES.length - 1) * 100}% + ${13 - 26 * depthIndex / (THINKING_DEPTH_VALUES.length - 1)}px)`,
+              "--depth-thumb-position": `calc(${depthIndex / (THINKING_DEPTH_VALUES.length - 1) * 100}% + ${10 - 20 * depthIndex / (THINKING_DEPTH_VALUES.length - 1)}px)`,
             } as CSSProperties}
           >
             <span className="chat-thinking-depth-track" aria-hidden="true" />
@@ -650,7 +650,7 @@ const ChatModelSelector = ({
           </div>
         </div>
       ) : null}
-      <div id={modelListId} hidden={!showModelList}>
+      <div className="chat-model-selector-list" id={modelListId} hidden={!showModelList}>
       {loadStatus === "loading" ? (
         <div className="chat-model-selector-state" role="status">
           <Spin size="small" />
@@ -914,7 +914,7 @@ const ChatModelSelector = ({
   return (
     <div className="chat-model-selector">
       <Popover
-        styles={{ body: { height: menuHeight } }}
+        styles={{ body: { height: combined && !modelsExpanded ? "auto" : menuHeight } }}
         arrow={false}
         content={content}
         destroyOnHidden

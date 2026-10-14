@@ -1,5 +1,6 @@
 import { fireEvent, render as renderComponent, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getRuntimeMode } from "@/runtime/mode";
 import {
   NEW_CHAT_MODEL_SELECTION_KEY,
   useModelSelectionStore,
@@ -15,6 +16,11 @@ import { message } from "antd";
 import { MemoryRouter } from "react-router-dom";
 
 const render = (ui: ReactNode) => renderComponent(ui, { wrapper: MemoryRouter });
+
+vi.mock("@/runtime/mode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/runtime/mode")>()),
+  getRuntimeMode: vi.fn(() => "local"),
+}));
 
 vi.mock("../SkillRecording", () => ({ default: () => null }));
 
@@ -137,6 +143,31 @@ vi.mock("@/modules/memory/toolApi", () => ({
 }));
 
 describe("ChatInput model switch save lock", () => {
+  beforeEach(() => {
+    vi.mocked(getRuntimeMode).mockReturnValue("local");
+  });
+
+  it.each([
+    ["cloud", true, true, false],
+    ["local", true, true, true],
+    ["desktop", true, true, true],
+    ["cloud", false, true, false],
+    ["local", false, true, false],
+    ["desktop", false, true, false],
+    ["cloud", true, false, false],
+    ["local", true, false, false],
+    ["desktop", true, false, false],
+  ] as const)("workspace visibility: %s, task=%s, allowed=%s → %s", (runtime, runInBackground, allowLocalWorkspace, visible) => {
+    vi.mocked(getRuntimeMode).mockReturnValue(runtime);
+    const { container } = render(<ChatInput value="" onChange={vi.fn()} isChatContent
+      runInBackground={runInBackground} allowLocalWorkspace={allowLocalWorkspace}
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+
+    expect(Boolean(screen.queryByTestId("local-workspace-control"))).toBe(visible);
+    expect(Boolean(container.querySelector(".chat-input-environment"))).toBe(visible);
+    expect(container.querySelector(".chat-input-surface")?.classList.contains("has-environment")).toBe(visible);
+  });
+
   it('captures the visible draft before a mode switch request', () => {
     const rects = vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
     try {
