@@ -2359,6 +2359,8 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 		Order(rootUpdated + " DESC").
 		Order("COALESCE(history_parent_id, conversations.id) ASC").
 		Order("CASE WHEN history_parent_id IS NULL THEN 0 ELSE 1 END ASC").
+		Order("CASE WHEN history_parent_id IS NOT NULL AND conversations.history_order IS NULL THEN 0 ELSE 1 END ASC").
+		Order("CASE WHEN history_parent_id IS NOT NULL THEN conversations.history_order END ASC").
 		Order("updated_at DESC").
 		Order("conversations.id ASC").
 		Offset(offset).

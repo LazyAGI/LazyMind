@@ -18452,7 +18452,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/ConversationPinResponse'
                     description: Conversation reordered
-            summary: Move a conversation within its pinned or ordinary history
+            summary: Move a conversation within its pinned, recent, group, project or sibling list without changing relationships
     /api/core/conversations/{conversation_id}:restore:
         post:
             parameters:
