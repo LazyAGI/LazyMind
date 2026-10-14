@@ -15652,7 +15652,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Move a conversation within its pinned or ordinary history
+         * @summary Move a conversation within its pinned, recent, group, project or sibling list without changing relationships
          * @param {string} conversationId
          * @param {ConversationReorderRequest} conversationReorderRequest
          * @param {*} [options] Override http request option.
@@ -26475,7 +26475,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Move a conversation within its pinned or ordinary history
+         * @summary Move a conversation within its pinned, recent, group, project or sibling list without changing relationships
          * @param {string} conversationId
          * @param {ConversationReorderRequest} conversationReorderRequest
          * @param {*} [options] Override http request option.
@@ -30911,7 +30911,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary Move a conversation within its pinned or ordinary history
+         * @summary Move a conversation within its pinned, recent, group, project or sibling list without changing relationships
          * @param {DefaultApiApiCoreConversationsConversationIdReorderPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -36424,7 +36424,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary Move a conversation within its pinned or ordinary history
+     * @summary Move a conversation within its pinned, recent, group, project or sibling list without changing relationships
      * @param {DefaultApiApiCoreConversationsConversationIdReorderPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}

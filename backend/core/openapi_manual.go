@@ -1051,7 +1051,7 @@ func manualPaths() map[string]any {
 			"Unpin a conversation", queryParams(param("path", "conversation_id", true, strSchema())), nil, response(200, "Conversation unpinned", refSchema("ConversationPinResponse")),
 		)},
 		"/conversations/{conversation_id}:reorder": map[string]any{"post": op(
-			"Move a conversation within its pinned or ordinary history", queryParams(param("path", "conversation_id", true, strSchema())), jsonBody(refSchema("ConversationReorderRequest"), true),
+			"Move a conversation within its pinned, recent, group, project or sibling list without changing relationships", queryParams(param("path", "conversation_id", true, strSchema())), jsonBody(refSchema("ConversationReorderRequest"), true),
 			response(200, "Conversation reordered", refSchema("ConversationPinResponse")),
 		)},
 		"/conversations/{conversation_id}:restore": map[string]any{"post": op(
