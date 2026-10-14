@@ -2,7 +2,7 @@
 
 [中文](README.CN.md) · [Full prompts](prompts.md) · [Verification and acceptance](verification.md)
 
-**Status: real Codex CLI / DSH headless outputs and tool traces are available; full acceptance is pending.** Source navigation, provenance-ledger accuracy and independent reproduction remain open. See the [current run and findings](runs/2026-10-14/README.md). Generated files alone do not establish acceptance.
+**Status: real Codex CLI / DSH headless outputs and tool traces are available; full acceptance is pending.** Reviewed source navigation and provenance-ledger corrections are available; independent reproduction remains pending, with initial failures and recovery costs retained. See the [current run and findings](runs/2026-10-14/README.md). Generated files alone do not establish acceptance.
 
 Reuse the existing **Zhice (知策)** product design, PRD, review and handoff examples. Users stay in Codex or DeepSeek Harness (DSH), calling LazyMind through its plugin. LazyMind retrieves and reads project documents; the external Agent writes and saves the deliverables. This example does not run the product delivery Workflow or introduce another research system.
 
