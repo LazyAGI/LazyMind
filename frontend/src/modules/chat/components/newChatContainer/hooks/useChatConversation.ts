@@ -23,7 +23,7 @@ import {
   type ChatAutoAdvanceDetail,
   type ChatWorkflowStepFeedbackDetail,
 } from "@/modules/chat/constants/chat";
-import { streamManager } from "@/modules/chat/utils/StreamManager";
+import { streamManager, type RunTerminal } from "@/modules/chat/utils/StreamManager";
 import { MailConfirmationReplayStore, mailConfirmationMetadata, mailConfirmationTurnSignature } from "@/modules/chat/utils/mailConfirmationReplay";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import type { RealtimeRefusal } from "@/modules/chat/utils/realtimeTransport";
@@ -656,7 +656,7 @@ export function useChatConversation({
 
   function markStructuredChatFailure(
     conversationId: string,
-    semanticCode: string,
+    terminalOrCode: RunTerminal | string,
     reason: "model_failure" | "runtime_failure" = "model_failure",
     historyId?: string,
   ) {
@@ -668,7 +668,7 @@ export function useChatConversation({
     const failedList = applyChatStreamFailure(
       sourceList,
       RoleTypes.ASSISTANT,
-      semanticCode,
+      terminalOrCode,
       reason,
     );
     if (historyId) {
@@ -812,13 +812,13 @@ export function useChatConversation({
         (e as any).data,
         (e as any).status,
       );
-      if (mappedError && !(isResume && mappedError.reason === "runtime_failure")) {
+      if (mappedError && !(isResume && mappedError.terminal.reason === "runtime_failure")) {
         confirmPendingClientConversation(errorConversationId);
         if (!conversationHasAuthoritativeTerminal(errorConversationId)) {
           markStructuredChatFailure(
             errorConversationId,
-            mappedError.semanticCode,
-            mappedError.reason,
+            mappedError.legacy ? mappedError.terminal.code! : mappedError.terminal,
+            mappedError.terminal.reason === "model_failure" ? "model_failure" : "runtime_failure",
             mappedError.historyId,
           );
           return;

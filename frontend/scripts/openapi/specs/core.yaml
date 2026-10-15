@@ -756,6 +756,25 @@ components:
                     format: int64
                     type: integer
             type: object
+        ChatErrorData:
+            properties:
+                detail:
+                    description: Legacy error detail; persisted chat failures include history_id.
+                run_terminal:
+                    $ref: '#/components/schemas/RunTerminal'
+            type: object
+        ChatErrorResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/ChatErrorData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+            type: object
         ChatExport:
             properties:
                 content_type:
@@ -6701,6 +6720,33 @@ components:
                 - reason
                 - settings_url
             type: object
+        ModelFailureCode:
+            enum:
+                - authentication_failed
+                - balance_exhausted
+                - concurrency_limited
+                - conflict
+                - input_filtered
+                - invalid_request
+                - model_configuration
+                - not_found
+                - organization_spend_limit_exceeded
+                - output_filtered
+                - permission_denied
+                - project_spend_limit_exceeded
+                - protocol_error
+                - provider_internal_error
+                - provider_overloaded
+                - provider_rejected
+                - quota_exhausted
+                - rate_limited
+                - request_timeout
+                - service_unavailable
+                - token_limit
+                - transport_error
+                - unprocessable_entity
+                - usage_limit_exceeded
+            type: string
         ModelFeaturesResponse:
             properties:
                 image_embed_enabled:
@@ -8043,6 +8089,16 @@ components:
                         - failed
                         - cancelled
                     type: string
+                transport_diagnostic:
+                    properties:
+                        code:
+                            enum:
+                                - upstream_stream_failed
+                                - upstream_stream_timeout
+                            type: string
+                    required:
+                        - code
+                    type: object
             required:
                 - status
                 - reason
@@ -18902,6 +18958,12 @@ paths:
                             schema:
                                 type: string
                     description: Chat event stream
+                default:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ChatErrorResponse'
+                    description: Chat rejection; run_terminal, when present, is the same authoritative outcome returned by history
             summary: Chat; optional group_id atomically assigns a newly created conversation
     /api/core/conversations:editable-block:
         patch:

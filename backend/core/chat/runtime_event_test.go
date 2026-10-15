@@ -318,6 +318,21 @@ func TestRunTerminalPreservesOptionalModelInvocation(t *testing.T) {
 	}
 }
 
+func TestStoredRunEventPreservesConfigurationAndProviderNotFound(t *testing.T) {
+	for _, code := range []string{"model_configuration", "not_found"} {
+		t.Run(code, func(t *testing.T) {
+			raw := terminalJSON(&RunTerminal{
+				Status: "failed", Reason: "model_failure", Code: code, PartialOutput: false,
+			})
+			event := storedRunEvent("run_configuration", raw)
+			terminal, err := event.Terminal()
+			if err != nil || terminal.Status != "failed" || terminal.Reason != "model_failure" || terminal.Code != code {
+				t.Fatalf("stored failure changed during replay: terminal=%#v err=%v", terminal, err)
+			}
+		})
+	}
+}
+
 func TestRunTerminalPreservesSensitiveContentBlock(t *testing.T) {
 	event := storedRunEvent("run_sensitive", json.RawMessage(`{"status":"failed","reason":"runtime_failure","code":"sensitive_content_blocked","partial_output":true,"model_invoked":false}`))
 	terminal, err := event.Terminal()
