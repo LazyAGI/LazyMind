@@ -33,6 +33,7 @@ import type {
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 import ArchiveFolderPickerModal from "@/components/ui/ArchiveFolderPickerModal";
+import ConversationTrashConfirmContent from "@/modules/chat/components/ConversationTrashConfirmContent";
 import { getChatConversationPath } from "@/modules/chat/constants/chat";
 import { emitConversationGroupsChanged } from "@/modules/chat/conversationOrganizer/api";
 import { emitConversationListRefresh } from "@/modules/chat/utils/conversationActivity";
@@ -99,6 +100,7 @@ function ActionSet({ children, menuItems, busy, moreLabel }: { children: ReactNo
 
 export default function RecoverySettings({ headingRef }: RecoverySettingsProps) {
   const { t, i18n } = useTranslation();
+  const [modal, modalContextHolder] = Modal.useModal();
   const [searchParams, setSearchParams] = useSearchParams();
   const view = recoveryViewFromSearchParams(searchParams);
   const selectView = (nextView: RecoveryView) => {
@@ -467,19 +469,24 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
       message.success(t(action === "unarchive" ? "settingsPage.recovery.unarchived" : "settingsPage.recovery.movedToTrash"));
     } catch (error) {
       message.error(getLocalizedErrorMessage(error));
+      if (action === "trash") throw error;
     } finally {
       setBusyKey("");
     }
   };
 
-  const confirmArchiveTrash = (item: ConversationRecoveryItem) => Modal.confirm({
-    title: t("settingsPage.recovery.moveToTrashTitle"),
-    content: t("settingsPage.recovery.moveToTrashDescription"),
-    okText: t("common.delete"),
-    okButtonProps: { danger: true },
-    cancelText: t("common.cancel"),
-    onOk: () => runArchiveAction(item, "trash"),
-  });
+  const confirmArchiveTrash = async (item: ConversationRecoveryItem) => {
+    await modal.confirm({
+      className: "conversation-trash-confirm",
+      width: 420,
+      title: t("settingsPage.recovery.moveToTrashTitle"),
+      content: <ConversationTrashConfirmContent name={item.display_name} />,
+      okText: t("common.delete"),
+      okButtonProps: { danger: true },
+      cancelText: t("common.cancel"),
+      onOk: () => runArchiveAction(item, "trash"),
+    });
+  };
 
   const groupedArchiveItems = useMemo(() => {
     if (folderFilter !== "all") return [{ id: folderFilter, name: "", items: archiveItems }];
@@ -633,6 +640,7 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
   </>;
 
   return <>
+    {modalContextHolder}
     <header className="settings-detail-header recovery-heading"><div><h1 ref={headingRef} tabIndex={-1}>{t("settingsPage.recovery.title")}</h1><p>{t("settingsPage.recovery.description")}</p></div></header>
     <div className="recovery-view-tabs" role="tablist" aria-label={t("settingsPage.recovery.viewTabs")}>
       <button type="button" role="tab" aria-selected={view === "trash"} className={view === "trash" ? "is-active" : ""} onClick={() => selectView("trash")}><DeleteOutlined /><span><strong>{t("settingsPage.recovery.trash")}</strong><small>{t("settingsPage.recovery.trashSubtitle")}</small></span></button>

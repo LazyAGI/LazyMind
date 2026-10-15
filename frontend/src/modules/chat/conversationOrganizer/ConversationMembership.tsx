@@ -1,6 +1,7 @@
 import { Button, Dropdown, Modal, message } from "antd";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import ArchiveConversationModal from "@/modules/chat/components/ArchiveConversationModal";
+import ConversationTrashConfirmContent from "@/modules/chat/components/ConversationTrashConfirmContent";
 import { conversationGroupSubmenu } from "./ConversationGroupPicker";
 import ConversationMembershipModal from "./ConversationMembershipModal";
 import { useState } from "react";
@@ -27,8 +28,10 @@ export default function ConversationMembership({ conversationId, groupId, groupK
       ...(groupKind === "project" ? [] : [{ key: "move", label: t("conversationOrganizer.adjustMembership"), disabled, children: conversationGroupSubmenu({ conversationId, groupId, title, isTaskConv }, () => setOpen(true)) }]),
       { key: "archive", label: t("settingsPage.recovery.archiveAction"), disabled, onClick: () => setArchiveOpen(true) },
       { key: "trash", label: t("common.delete"), disabled, danger: true, onClick: async () => { await modal.confirm({
+        className: "conversation-trash-confirm",
+        width: 420,
         title: t("settingsPage.recovery.moveToTrashTitle"),
-        content: t("settingsPage.recovery.moveToTrashDescription") + " " + t("chat.fork.deleteNotice"),
+        content: <ConversationTrashConfirmContent name={title} showForkNotice />,
         okText: t("common.delete"),
         cancelText: t("common.cancel"),
         okButtonProps: { danger: true },

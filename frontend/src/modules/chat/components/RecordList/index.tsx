@@ -87,6 +87,7 @@ import {
 import "./index.scss";
 import { downloadStream } from "@/modules/chat/utils/download";
 import ArchiveConversationModal from "../ArchiveConversationModal";
+import ConversationTrashConfirmContent from "../ConversationTrashConfirmContent";
 import { unarchiveConversation } from "@/modules/settings/recoveryApi";
 import {
   CONVERSATION_GROUPS_CHANGED_EVENT,
@@ -741,8 +742,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         hasForks = Boolean((response.data.conversation as { has_fork_descendants?: boolean })?.has_fork_descendants);
       } catch { message.error(t("chat.fork.historyLoadFailed")); return; }
       await modal.confirm({
+        className: "conversation-trash-confirm",
+        width: 420,
         title: t("settingsPage.recovery.moveToTrashTitle"),
-        content: t("settingsPage.recovery.moveToTrashDescription") + (hasForks ? " " + t("chat.fork.deleteNotice") : ""),
+        content: <ConversationTrashConfirmContent name={data.display_name} showForkNotice={hasForks} />,
         okText: t("common.delete"),
         cancelText: t("common.cancel"),
         okButtonProps: { danger: true },

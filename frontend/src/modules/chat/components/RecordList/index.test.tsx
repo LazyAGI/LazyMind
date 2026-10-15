@@ -58,7 +58,7 @@ vi.mock("react-i18next", () => ({
         "chat.reorderConversationFailed": "顺序保存失败，请重试",
         "settingsPage.recovery.moreActions": "更多操作",
         "settingsPage.recovery.archiveAction": "归档",
-        "settingsPage.recovery.moveToTrashTitle": "删除会话",
+        "settingsPage.recovery.moveToTrashTitle": "将对话移入回收站？",
         "settingsPage.recovery.moveToTrash": "移入回收站",
         "chat.batch": "批量",
         "chat.selectAll": "全选",
@@ -285,8 +285,8 @@ describe("RecordList conversation pinning", () => {
     expect(menuItem).toHaveClass("ant-dropdown-menu-item-danger");
     fireEvent.click(menuItem);
     const dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveAccessibleName("删除会话");
-    expect(within(dialog).queryByText(newerConversation.display_name)).not.toBeInTheDocument();
+    expect(dialog).toHaveAccessibleName("将对话移入回收站？");
+    expect(within(dialog).getByText(newerConversation.display_name)).toHaveClass("conversation-trash-confirm-name");
     expect(within(dialog).getByText("settingsPage.recovery.moveToTrashDescription")).toBeInTheDocument();
     expect(mocks.deleteConversation).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "common.cancel" }));
@@ -306,7 +306,7 @@ describe("RecordList conversation pinning", () => {
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "common.delete" }));
     await waitFor(() => expect(mocks.messageError).toHaveBeenCalledWith("settingsPage.recovery.operationFailed"));
-    expect(screen.getByText(newerConversation.display_name)).toBeInTheDocument();
+    expect(within(document.querySelector(".record-list") as HTMLElement).getByText(newerConversation.display_name)).toBeInTheDocument();
     expect(onRemove).not.toHaveBeenCalled();
     mocks.listConversations.mockResolvedValue({ data: { conversations: [olderConversation] } });
     fireEvent.click(await within(dialog).findByRole("button", { name: "common.delete" }));
@@ -314,6 +314,40 @@ describe("RecordList conversation pinning", () => {
     expect(mocks.deleteConversation).toHaveBeenCalledTimes(2);
     expect(mocks.messageSuccess).toHaveBeenCalledWith("chat.deleteConversationSuccess");
     await waitFor(() => expect(screen.queryByText(newerConversation.display_name)).not.toBeInTheDocument());
+  });
+
+  it.each(["recent", "pinned", "search"])("shows the shared confirmation and fork notice from %s", async source => {
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [{ ...newerConversation, is_pinned: source === "pinned" }] } });
+    mocks.getConversationDetail.mockResolvedValue({ data: { conversation: { has_fork_descendants: true } } });
+    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><RecordList compact hideHeader
+      searchText={source === "search" ? "会话" : undefined} onSelected={vi.fn()} onRemove={vi.fn()} /></MemoryRouter></ConfigProvider>);
+    await screen.findByText(newerConversation.display_name);
+    fireEvent.click(moreActionsFor(newerConversation.display_name));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /common.delete/ }));
+    const dialog = await screen.findByRole("dialog", { name: "将对话移入回收站？" });
+    expect(within(dialog).getByText(newerConversation.display_name)).toBeInTheDocument();
+    expect(within(dialog).getByText("chat.fork.deleteNotice")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "common.cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mocks.deleteConversation).not.toHaveBeenCalled();
+  });
+
+  it("shows loading and blocks repeated deletion while the request is pending", async () => {
+    let resolveDelete!: (value: object) => void;
+    mocks.deleteConversation.mockImplementation(() => new Promise(resolve => { resolveDelete = resolve; }));
+    renderRecordList();
+    await screen.findByText(newerConversation.display_name);
+    fireEvent.click(moreActionsFor(newerConversation.display_name));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /common.delete/ }));
+    const dialog = await screen.findByRole("dialog");
+    const submit = within(dialog).getByRole("button", { name: "common.delete" });
+    fireEvent.click(submit);
+    await waitFor(() => expect(submit).toHaveClass("ant-btn-loading"));
+    fireEvent.click(submit);
+    expect(mocks.deleteConversation).toHaveBeenCalledTimes(1);
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [olderConversation] } });
+    await act(async () => resolveDelete({}));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
   it("keeps unsuccessful batch deletions selected and does not close their active conversation", async () => {
