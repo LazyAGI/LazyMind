@@ -7895,12 +7895,22 @@ def _single_selection_edit_ops(
             old_text = tree.node_text(tree.find_repeated_item(target)).strip()
         return [op], old_text, ''
 
-    replacement = re.search(
-        r'(?:修改(?:标题|文字|内容)?(?:成|为)|改成|改为|替换为|变成|rename(?:\s+it)?\s+to)\s*[：:]?\s*(.+)$',
-        command, re.I | re.S,
+    # Only shortcut a complete, literal replacement command. A trailing
+    # instruction must reach the structured planner, never become slide text.
+    replacement = re.fullmatch(
+        r'(?:修改(?:标题|文字|内容)?(?:成|为)|改成|改为|替换为|变成|rename(?:\s+it)?\s+to)\s*[：:]?\s*'
+        r'(?:“(?P<curly>[^”\r\n]*)”|"(?P<double>[^"\r\n]*)"|'
+        r"‘(?P<single_curly>[^’\r\n]*)’|'(?P<single>[^'\r\n]*)'|"
+        r'(?P<plain>[^“”"\'‘’\r\n;,，；。！？!?]+))',
+        command.strip(), re.I,
     )
+    if replacement and replacement.group('plain') and re.search(
+        r'保持|保留|不要|不修改|不改变|不变|\b(?:keep|preserve|without|unchanged|do\s+not)\b',
+        replacement.group('plain'), re.I,
+    ):
+        replacement = None
     if replacement:
-        value = replacement.group(1).strip().strip('“”\"\'')
+        value = next(value for value in replacement.groups() if value is not None).strip()
         if not value:
             raise ValueError('replacement text must not be empty')
         if compound_text_target:
