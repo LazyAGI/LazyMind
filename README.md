@@ -19,7 +19,7 @@ Instead of repeatedly uploading context, tuning prompts, and supervising every a
 - **Desktop Mode** is designed for technically capable professionals whose primary job is not programming, including solution architects, product managers, operators, testers, and content creators.
 - **Team and enterprise deployments** serve secondary development, project delivery, proposals, FDE work, and organization-wide knowledge collaboration with shared permissions, deployment, and evaluation capabilities.
 
-**[Quick start](#quick-start)** · **[Showcase](#showcase)** · **[Examples & reproduction status](examples/README.md)** · **[Product architecture](docs/architecture.md)** · **[Build a workflow](docs/workflow-format.md)** · **[Desktop mode](desktop/README.md)**
+**[Quick start](#quick-start)** · **[Examples & reproduction status](examples/README.md)** · **[Product architecture](docs/architecture.md)** · **[Build a workflow](docs/workflow-format.md)** · **[Desktop mode](desktop/README.md)**
 
 ---
 
@@ -36,27 +36,6 @@ Instead of repeatedly uploading context, tuning prompts, and supervising every a
 | **Quality improvement** | Capture a bad case → evaluate → diagnose → A/B test → deploy | A verified strategy improvement, not an unchecked prompt change |
 
 For an end-to-end product video, see the [Chinese README](README.CN.md#它能交付什么).
-
-## Showcase
-
-See LazyMind in action through published demos. All videos and articles below are in Chinese; links open on their original platforms.
-
-| Demo | What it shows | Length | Case details |
-| --- | --- | --- | --- |
-| [DeepSeek Harness × LazyMind: from a request to a slide deck](https://www.bilibili.com/video/BV1Xcpt6REjc/) | Connect the workflow, clarify requirements, preview backgrounds, review slide content, and export the result | 1:29 | [Case notes](examples/deepseek-harness-ppt/README.md) |
-| [From a product idea to a proposal, PRD, and prototype](https://www.bilibili.com/video/BV1Mypv6zEUN/) | Clarify the product direction through questions, then connect competitor analysis, product planning, requirements, and prototype previews | 0:55 | [Case notes](examples/product-idea-to-prototype/README.md) |
-| [Codex × LazyMind: create and refine a presentation](https://www.bilibili.com/video/BV1TppR6xEj7/) | Start a task in Codex, preview and revise intermediate content, and adjust individual elements in the generated slides | 1:23 | [Case notes](examples/codex-ppt/README.md) |
-
-### More demos
-
-- [Refining AI presentation layouts and content](https://www.bilibili.com/video/BV1cjHS6wEad/) (Bilibili) · [Case notes](examples/refine-ai-ppt/README.md)
-- [Creating your own animated stickers](https://weixin.qq.com/sph/AoG4jZWyfh) (WeChat Channels) · [Case notes](examples/animated-stickers/README.md)
-- [Bringing AI agents into your workflow](https://weixin.qq.com/sph/AMEf3NOyDe) (WeChat Channels) · [Case notes](examples/agents-in-workflow/README.md)
-
-### Articles
-
-- [LazyMind v0.2: from answers to deliverables](https://mp.weixin.qq.com/s/yoU7DZKkq_jw05695e36Qw) (2026-08-04, release introduction)
-- [Why are you still working overtime after AI finishes?](https://mp.weixin.qq.com/s/uj15cKnPNZpdrHWPuua2Tg) (2026-09-01, product introduction)
 
 ## How LazyMind works
 
