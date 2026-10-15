@@ -6,7 +6,7 @@
 
 See [the current review and actual exports](outputs/codex/review-2026-10-15.md). The same run generated four 16:9 slides. The full constrained edit exposed a parser bug; a literal-command workaround succeeded, with pages 2–4 unchanged. Product PDF/PPTX downloads succeeded after installing the existing editable-export dependency. Keynote 14.5 edited a native title, saved/reopened, and exported/reopened PPTX. Fonts differ; footer corrections, deployment verification of the parser fix, DSH's current PPT run, final approval and independent reproduction remain pending.
 
-四页 PDF 已逐页查看；署名已补入讲稿，并确认导出保留。可见页脚修改连续两次遇到模型 HTTP 503。Keynote 首次打开需要负责人协助；后续由协调者完成编辑与重开，不能算非实现者复现。原始提示词和历史宣传材料仍是参考，不替代当前实跑。
+四页 PDF 已逐页查看；署名已补入讲稿，并确认导出保留。可见页脚修改三次尝试遇到模型 HTTP 503。Keynote 首次打开需要负责人协助；后续由协调者完成编辑与重开，不能算非实现者复现。原始提示词和历史宣传材料仍是参考，不替代当前实跑。
 
 | Check | Codex | DSH | Evidence / remaining work |
 | --- | --- | --- | --- |
