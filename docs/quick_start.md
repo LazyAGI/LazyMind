@@ -105,14 +105,14 @@ The frontend defaults to port **8090**. Override if the port is occupied:
 export LAZYMIND_FRONTEND_PORT=8080
 ```
 
-### 5. Auth credentials (production)
+### 5. Auth credentials
 
-Change these before deploying to production:
+Compose requires these values before `make up` or `make up-build`; it does not provide public defaults:
 
 ```bash
-export LAZYMIND_JWT_SECRET=your-strong-secret
+export LAZYMIND_JWT_SECRET="$(openssl rand -base64 32)"
 export LAZYMIND_BOOTSTRAP_ADMIN_USERNAME=admin
-export LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD=your-password
+export LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD="$(openssl rand -base64 24)"
 ```
 
 ### 6. Using a `.env` file
