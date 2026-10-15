@@ -442,6 +442,7 @@ def test_resource_error_code_survives_tool_manager_envelope(code):
 
     @fc_register(host_file='NONE')
     def read_resource(uri: str):
+        """Raise a structured resource failure for envelope testing."""
         raise ToolExecutionError(f'{code}: test resource failure')
 
     middleware = ToolExecutionMiddleware(ToolManager([read_resource]))
