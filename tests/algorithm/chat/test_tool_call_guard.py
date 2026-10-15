@@ -430,6 +430,31 @@ def test_invalid_host_path_is_not_authorization_unavailable(workspace_runtime, m
     assert core.events == []
 
 
+@pytest.mark.parametrize('code', [
+    'RESOURCE_NOT_FOUND',
+    'RESOURCE_VERSION_CHANGED',
+    'RESOURCE_PERMISSION_DENIED',
+    'RESOURCE_AUTH_UNAVAILABLE',
+])
+def test_resource_error_code_survives_tool_manager_envelope(code):
+    from lazyllm.tools import ToolManager
+    from lazyllm.tools.agent import ToolExecutionError
+
+    @fc_register(host_file='NONE')
+    def read_resource(uri: str):
+        raise ToolExecutionError(f'{code}: test resource failure')
+
+    middleware = ToolExecutionMiddleware(ToolManager([read_resource]))
+    result = middleware.execute_with_records({
+        'id': f'resource-{code}',
+        'function': {'name': 'read_resource', 'arguments': {'uri': 'workspace://tool_spills/result.txt'}},
+    }).results[0]
+
+    assert result['ok'] is False
+    assert result['error_code'] == code
+    assert str(result['value']).startswith(code + ':')
+
+
 def _workspace_middleware(monkeypatch, *, cancel_check=None, extra_tools=()):
     from lazyllm.tools.agent import ToolManager
     from lazyllm.tools.agent import FileSystemToolkit

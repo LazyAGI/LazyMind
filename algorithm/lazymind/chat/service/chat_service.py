@@ -632,10 +632,13 @@ def _should_register_subagent_tools(
 def _build_chat_workspace_read_tools() -> list:
     """Read-only file tools that remain safe during bound Workflow turns."""
     from lazyllm import fc_register
-    from lazymind.chat.engine.tools.file_resources.tools import _read_file, _grep
+    from lazymind.chat.engine.tools.file_resources.tools import (
+        _grep, _read_file, read_resource as read_spill_resource,
+    )
 
     @fc_register(host_file='NONE', exclusive=True)
-    def read_file_resource(target: str, offset: int = 1, limit: int = 2000, turn: Optional[int] = None):
+    def read_file_resource(target: str, offset: int = 1, limit: int = 2000,
+                           turn: Optional[int] = None, expected_hash: Optional[str] = None):
         """Read a PDF resource, attachment or workspace file; remote Skills are not available.
 
         Follow next_offset until the footer indicates EOF.
@@ -646,7 +649,17 @@ def _build_chat_workspace_read_tools() -> list:
             limit: Maximum lines to return (default 2000, max 4000).
             turn: Optional conversation turn for attachment disambiguation.
         """
-        return _read_file(target, offset, limit, turn, allow_remote_skill=False)
+        return _read_file(
+            target, offset, limit, turn,
+            allow_remote_skill=False,
+            expected_hash=expected_hash,
+        )
+
+    @fc_register(host_file='NONE', exclusive=True)
+    def read_resource(uri: str, offset: int = 1, limit: int = 2000,
+                      expected_hash: Optional[str] = None):
+        """Read the current Workflow workspace spill with version checking."""
+        return read_spill_resource(uri, offset, limit, expected_hash)
 
     @fc_register(host_file='NONE', exclusive=True)
     def search_file_resource(target: str, pattern: str, max_results: int = 50, turn: Optional[int] = None):
@@ -662,7 +675,7 @@ def _build_chat_workspace_read_tools() -> list:
         """
         return _grep(target, pattern, max_results, turn, allow_remote_skill=False)
 
-    return [search_file_resource, read_file_resource]
+    return [search_file_resource, read_file_resource, read_resource]
 
 
 def _build_chat_artifact_tools(*, host_filesystem_enabled: bool = False) -> list:
@@ -671,9 +684,9 @@ def _build_chat_artifact_tools(*, host_filesystem_enabled: bool = False) -> list
     from lazyllm.tools.agent import FileSystemToolkit
 
     from lazymind.chat.engine.tools.file_resources.tools import (
-        search_file_resource, read_file_resource, list_skill_files,
+        search_file_resource, read_file_resource, read_resource, list_skill_files,
     )
-    tools = [save_chat_artifact, search_file_resource, read_file_resource, list_skill_files]
+    tools = [save_chat_artifact, search_file_resource, read_file_resource, read_resource, list_skill_files]
     if host_filesystem_enabled:
         tools.append(FileSystemToolkit())
         from lazymind.chat.engine.tools.native_search import native_search, native_search_available
@@ -2180,6 +2193,7 @@ async def _handle_chat_impl(
                       for value in (values or ())),
                 ]),
                 citation_state=agentic_config['citation_state'],
+                spill_workspace=workspace,
             ),
             skills=skill_config,
             prompt_skills=prompt_skills,

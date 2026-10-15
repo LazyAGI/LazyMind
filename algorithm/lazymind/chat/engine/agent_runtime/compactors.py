@@ -30,8 +30,10 @@ class ToolCompactionPlan:
     after_tokens: int
     spill_path: str = ''
     spill_bytes: int = 0
+    spill_hash: str = ''
     tool_name: str = ''
     original_content: Any = None
+    original_observation: Any = None
 
 
 def _as_text(content: Any) -> str:
@@ -574,6 +576,7 @@ def spill_tool_result_to_workspace(
         with tempfile.NamedTemporaryFile(
             mode='w',
             encoding='utf-8',
+            newline='',
             dir=spill_dir,
             prefix='.spill-',
             suffix='.tmp',
@@ -590,6 +593,22 @@ def spill_tool_result_to_workspace(
     return os.path.relpath(path, root)
 
 
+def spill_content_hash(
+    workspace: str,
+    tool_name: str,
+    content: Any,
+    observation: Any = None,
+) -> str:
+    """Return the full hash of the exact text written to a spill file."""
+    text, _filename = _spill_text_and_name(
+        os.path.realpath(str(workspace or '')),
+        tool_name,
+        content,
+        observation,
+    )
+    return 'sha256:' + hashlib.sha256(text.encode('utf-8', errors='replace')).hexdigest()
+
+
 def workspace_spill_uri(rel_path: str) -> str:
     """Return the model-facing URI for a result stored in a workspace spill file."""
     normalized = str(rel_path or '').replace(os.sep, '/')
@@ -602,14 +621,20 @@ def format_spilled_tool_notice(
     rel_path: str,
     size_bytes: int,
     workspace: str = '',
+    content_hash: str = '',
 ) -> str:
     size_kb = size_bytes / 1024
+    digest = content_hash or (
+        'sha256:' + hashlib.sha256(_as_text(content).encode('utf-8', errors='replace')).hexdigest()
+    )
+    uri = workspace_spill_uri(rel_path)
     lines = [
         '[Large tool result offloaded to workspace]',
         f'Tool: {tool_name or "tool"}',
-        f'File path: {workspace_spill_uri(rel_path)}',
+        f'File path: {uri}',
         f'Size: {size_kb:.1f} KB',
-        'Use read_file_resource(target="' + workspace_spill_uri(rel_path) + '", offset=1) '
+        f'Hash: {digest}',
+        'Use read_resource(uri="' + uri + '", offset=1, expected_hash="' + digest + '") '
         'to read more. Continue with next_offset until End of file.',
     ]
     lines.extend(_browser_spill_metadata(tool_name, content))
@@ -634,13 +659,23 @@ def compact_or_spill_tool_result(
     limit = spill_threshold_bytes() if threshold is None else max(1, int(threshold))
     if workspace and size_bytes > limit:
         try:
+            spill_text, _filename = _spill_text_and_name(workspace, tool_name, content, observation)
             rel_path = spill_tool_result_to_workspace(
                 workspace, tool_name, content, observation,
             )
         except Exception:
             rel_path = None
         if rel_path:
-            notice = format_spilled_tool_notice(tool_name, content, rel_path, size_bytes, workspace)
+            notice = format_spilled_tool_notice(
+                tool_name,
+                content,
+                rel_path,
+                len(spill_text.encode('utf-8', errors='replace')),
+                workspace,
+                content_hash='sha256:' + hashlib.sha256(
+                    spill_text.encode('utf-8', errors='replace'),
+                ).hexdigest(),
+            )
             return notice, 'spill', before, estimate_tokens(notice), rel_path, size_bytes
     if _file_result_details(tool_name, content, observation):
         compacted, compactor, before_tokens, after_tokens = compact_tool_result(
@@ -675,7 +710,12 @@ def plan_tool_result_compaction(
         )
         rel_path = os.path.join('tool_spills', filename)
         spill_bytes = len(spill_text.encode('utf-8', errors='replace'))
-        notice = format_spilled_tool_notice(tool_name, content, rel_path, spill_bytes, workspace)
+        spill_hash = 'sha256:' + hashlib.sha256(
+            spill_text.encode('utf-8', errors='replace'),
+        ).hexdigest()
+        notice = format_spilled_tool_notice(
+            tool_name, content, rel_path, spill_bytes, workspace, content_hash=spill_hash,
+        )
         after = estimate_tokens(notice)
         if after < before:
             return ToolCompactionPlan(
@@ -685,8 +725,10 @@ def plan_tool_result_compaction(
                 after,
                 spill_path=rel_path,
                 spill_bytes=spill_bytes,
+                spill_hash=spill_hash,
                 tool_name=tool_name,
                 original_content=content,
+                original_observation=observation,
             )
     if _file_result_details(tool_name, content, observation):
         compacted, compactor, before_tokens, after_tokens = compact_tool_result(
@@ -696,7 +738,7 @@ def plan_tool_result_compaction(
         )
         return ToolCompactionPlan(
             compacted, compactor, before_tokens, after_tokens,
-            tool_name=tool_name, original_content=content,
+            tool_name=tool_name, original_content=content, original_observation=observation,
         )
     compacted, compactor, before_tokens, after_tokens = compact_tool_result(
         tool_name,
@@ -705,7 +747,7 @@ def plan_tool_result_compaction(
     )
     return ToolCompactionPlan(
         compacted, compactor, before_tokens, after_tokens,
-        tool_name=tool_name, original_content=content,
+        tool_name=tool_name, original_content=content, original_observation=observation,
     )
 
 
@@ -720,6 +762,7 @@ def commit_tool_result_plan(
         workspace,
         plan.tool_name,
         plan.original_content,
+        plan.original_observation,
     )
     if not rel_path:
         return ToolCompactionPlan(
@@ -732,12 +775,16 @@ def commit_tool_result_plan(
         )
     if rel_path == plan.spill_path:
         return plan
+    spill_hash = plan.spill_hash or spill_content_hash(
+        workspace, plan.tool_name, plan.original_content, plan.original_observation,
+    )
     notice = format_spilled_tool_notice(
         plan.tool_name,
         plan.original_content,
         rel_path,
         plan.spill_bytes,
         workspace,
+        content_hash=spill_hash,
     )
     return ToolCompactionPlan(
         notice,
@@ -746,6 +793,8 @@ def commit_tool_result_plan(
         estimate_tokens(notice),
         spill_path=rel_path,
         spill_bytes=plan.spill_bytes,
+        spill_hash=spill_hash,
         tool_name=plan.tool_name,
         original_content=plan.original_content,
+        original_observation=plan.original_observation,
     )

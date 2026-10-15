@@ -14,6 +14,7 @@ from lazyllm.tools.agent import describe_tool_turns
 from .budget import build_context_budget
 from .compactors import (
     format_spilled_tool_notice,
+    spill_content_hash,
     spill_tool_result_to_workspace,
     tool_result_utf8_size,
 )
@@ -53,6 +54,7 @@ def _spill_old_tool_result(message: dict[str, Any], workspace: Optional[str]) ->
         rel_path,
         tool_result_utf8_size(content),
         workspace=workspace,
+        content_hash=spill_content_hash(workspace, tool_name, content),
     )
     projected = dict(message, content=notice)
     return projected if estimate_history_tokens([projected]) < estimate_history_tokens([message]) else None

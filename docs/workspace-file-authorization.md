@@ -21,7 +21,20 @@
 
 `glob/grep` 要求安装 ripgrep，不提供第二套递归搜索实现。
 
-Main Agent 同时拥有 filesystem、`read_file_resource/search_file_resource` 与 artifact 发布能力。资源读取支持附件、fr_xxx 和会话内部文档，绑定 workspace 不会移除这些工具。SideChat 使用附件与资源限定的只读版本。
+Main Agent 同时拥有 filesystem、`read_file_resource/search_file_resource/read_resource` 与 artifact 发布能力。资源读取支持附件、fr_xxx 和会话内部文档，绑定 workspace 不会移除这些工具。SideChat 使用附件与资源限定的只读版本。
+
+### Spill 资源读取
+
+大工具结果使用 `workspace://tool_spills/<relative-path>` 作为模型可见定位符。URI 只在当前 Chat、SubAgent 或 Workflow execution workspace 内解析，不能被当作普通磁盘路径，也不能回退到父 Agent 的 workspace。
+
+`read_resource(uri, offset, limit, expected_hash)` 是 spill 的统一读取入口。返回值包含 `next_offset`、`eof` 和完整 `content_hash`；后续分页传入上一次的 hash。读取会通过 `HostAccessGuard` 和安全文件句柄校验文件身份，超过旧的整文件读取上限时仍以流式方式完成分页。
+
+spill 读取错误使用以下稳定代码：
+
+- `RESOURCE_NOT_FOUND`：当前 execution workspace 中没有目标文件。
+- `RESOURCE_VERSION_CHANGED`：hash 不匹配，或文件在读取期间发生变化。
+- `RESOURCE_PERMISSION_DENIED`：URI 越界、路径穿越、符号链接逃逸或文件身份校验失败。
+- `RESOURCE_AUTH_UNAVAILABLE`：缺少可信 execution workspace 或授权上下文。
 
 ## 权限
 
@@ -64,9 +77,9 @@ Shell operation 使用 capability=shell、operation=shell、空 path 和绑定�
 
 ## 上下文
 
-`root` 是用户授权边界，未绑定时为空；`cwd` 是 filesystem 相对路径基准，绑定时为用户 workspace，未绑定时为会话内部目录。SubAgent 继承 Main Agent 的 root/cwd，但其 scratch、artifact 和 spill 目录独立。Spill 通知提供绝对路径，避免将任务内部目录误当成 cwd。
+`root` 是用户授权边界，未绑定时为空；`cwd` 是 filesystem 相对路径基准，绑定时为用户 workspace，未绑定时为会话内部目录。SubAgent 继承 Main Agent 的 root/cwd，但其 scratch、artifact 和 spill 目录独立。Spill 通知提供 execution-scoped URI，避免将任务内部目录误当成 cwd。
 
-ToolResolutionContext 只携带 managed_roots、managed_files 和当前请求的 citation_state。前两者归一化，citation_state 保持同一对象，使同轮生成图片后能够解析新短引用。
+ToolResolutionContext 携带 managed_roots、managed_files、当前请求的 citation_state 和固定的 spill_workspace。前三者归一化或保持当前请求对象，spill_workspace 在运行创建时冻结，使 URI 读取不会依赖后续变化的 cwd 或全局配置。
 
 ## 升级与边界
 

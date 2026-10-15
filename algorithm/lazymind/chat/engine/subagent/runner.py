@@ -52,7 +52,7 @@ from lazymind.chat.engine.agent_runtime.compactors import (
     plan_tool_result_compaction,
 )
 from lazymind.chat.engine.tools.file_resources.tools import (
-    search_file_resource as grep, read_file_resource as read_file,
+    read_resource, search_file_resource as grep, read_file_resource as read_file,
     list_skill_files,
 )
 from lazymind.common.token_estimation import estimate_tokens
@@ -450,13 +450,14 @@ def _build_subagent_tools(
     context, so the runtime tool list and its system prompt stay consistent.
     """
     if tools_only:
-        return list(extra_tools or [])
+        return [read_resource, *list(extra_tools or [])]
 
     base = [
         subagent_tools.get_artifact,
         subagent_tools.list_artifacts,
         grep,
         read_file,
+        read_resource,
         list_skill_files,
         subagent_tools.find_artifact,
     ]
@@ -1399,6 +1400,7 @@ async def run_subagent_stream(
                       for value in (values or ())),
                 ]),
                 citation_state=agentic_config['citation_state'],
+                spill_workspace=ctx.workspace_path,
             ),
         )
 

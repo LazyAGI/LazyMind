@@ -4,28 +4,81 @@ import os
 from typing import Any, Dict, Optional
 from lazyllm.tools import fc_register
 from lazyllm.tools.agent import ToolExecutionError
-from .resolver import resolve_text_target, resolve_resource_access
+from .resolver import _agentic_config, resolve_text_target, resolve_resource_access
 from .remote_skill import remote_skill_uri, read_remote, list_remote, grep_remote
+from .spill import ResourceReadError, grep_spill_resource, read_spill_window
 from .text_window import RESULT_BYTE_BUDGET, grep_lines, load_text_lines, read_lines_window, utf8_size
+
+
+def _spill_workspace() -> str:
+    """Return the immutable workspace captured for this tool execution."""
+    from lazymind.chat.engine.tools.workspace_context import get_tool_resolution_context
+
+    resolution = get_tool_resolution_context()
+    configured = str(getattr(resolution, 'spill_workspace', '') or '').strip()
+    if configured:
+        return configured
+    cfg = _agentic_config()
+    if cfg.get('agent_type') == 'workflow_step':
+        return str(cfg.get('workflow_workspace_path') or '').strip()
+    configured = str(cfg.get('_subagent_workspace') or '').strip()
+    if configured:
+        return configured
+    try:
+        from lazymind.chat.engine.tools.conversation_workspace import (
+            _current_artifact_scope, chat_agent_workspace,
+        )
+        user_id, conversation_id = _current_artifact_scope()
+        return chat_agent_workspace(user_id, conversation_id)
+    except (KeyError, RuntimeError, ToolExecutionError, ValueError):
+        return ''
+
+
+def _read_spill(target: str, offset: int, limit: int, expected_hash: Optional[str] = None) -> Dict[str, Any]:
+    try:
+        return read_spill_window(
+            target,
+            _spill_workspace(),
+            offset=offset,
+            limit=limit,
+            expected_hash=expected_hash,
+        )
+    except ResourceReadError as exc:
+        error = ToolExecutionError(str(exc))
+        error.error_code = exc.code
+        raise error from exc
 
 
 def build_resource_read_tools() -> list:
     """Bind readers to attachments, conversation resources, and active execution spills."""
     def scoped_read_file(target: str, offset: int = 1, limit: int = 2000,
-                         turn: Optional[int] = None) -> Dict[str, Any]:
-        return _read_file(target, offset, limit, turn, resources_only=True)
+                         turn: Optional[int] = None,
+                         expected_hash: Optional[str] = None) -> Dict[str, Any]:
+        return _read_file(
+            target, offset, limit, turn,
+            resources_only=True,
+            expected_hash=expected_hash,
+        )
 
     def scoped_grep(target: str, pattern: str, max_results: int = 50,
                     turn: Optional[int] = None) -> Dict[str, Any]:
         return _grep(target, pattern, max_results, turn, resources_only=True)
 
+    def scoped_read_resource(uri: str, offset: int = 1, limit: int = 2000,
+                             expected_hash: Optional[str] = None) -> Dict[str, Any]:
+        return _read_spill(uri, offset, limit, expected_hash)
+
     # These are distinct capabilities: do not unwrap to the host reader's declaration.
-    for scoped, original in ((scoped_grep, search_file_resource), (scoped_read_file, read_file_resource)):
+    for scoped, original in (
+        (scoped_grep, search_file_resource),
+        (scoped_read_file, read_file_resource),
+        (scoped_read_resource, read_resource),
+    ):
         scoped.__name__, scoped.__doc__ = original.__name__, original.__doc__
         scoped.__doc__ = scoped.__doc__.replace(', or authorized local PDF/Office file', '')
         scoped.__doc__ = scoped.__doc__.replace(', or local PDF/Office absolute path', '')
         fc_register(host_file='NONE', exclusive=True)(scoped)
-    return [scoped_grep, scoped_read_file]
+    return [scoped_grep, scoped_read_file, scoped_read_resource]
 
 
 def _resolve_text_target_for_tool(
@@ -52,6 +105,7 @@ def read_file_resource(
     offset: int = 1,
     limit: int = 2000,
     turn: Optional[int] = None,
+    expected_hash: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Read a document resource, attachment, workspace file, remote Skill URI, or authorized local PDF/Office file.
 
@@ -65,8 +119,29 @@ def read_file_resource(
         offset: 1-based first line (default 1).
         limit: Maximum lines to return (default 2000, max 4000).
         turn: Optional 1-based conversation turn used to disambiguate attachments.
+        expected_hash: Optional sha256 hash returned by a previous spill read.
     """
-    return _read_file(target, offset, limit, turn)
+    return _read_file(target, offset, limit, turn, expected_hash=expected_hash)
+
+
+@fc_register(host_file='NONE', exclusive=True)
+def read_resource(
+    uri: str,
+    offset: int = 1,
+    limit: int = 2000,
+    expected_hash: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Read a ``workspace://tool_spills/...`` resource with version checking.
+
+    ``content_hash`` from the first page must be supplied as ``expected_hash``
+    for subsequent pages.  The resource remains bound to the current execution
+    workspace and never becomes a general host filesystem locator.
+    """
+    if not str(uri or '').strip().startswith('workspace://'):
+        error = ToolExecutionError('RESOURCE_PERMISSION_DENIED: expected a workspace spill URI')
+        error.error_code = 'RESOURCE_PERMISSION_DENIED'
+        raise error
+    return _read_spill(uri, offset, limit, expected_hash)
 
 
 def _read_file(
@@ -77,7 +152,10 @@ def _read_file(
     *,
     resources_only: bool = False,
     allow_remote_skill: bool = True,
+    expected_hash: Optional[str] = None,
 ) -> Dict[str, Any]:
+    if str(target or '').strip().startswith('workspace://'):
+        return _read_spill(target, offset, limit, expected_hash)
     if uri := remote_skill_uri(target):
         if not allow_remote_skill:
             raise ToolExecutionError('remote_skill_access_not_allowed: workflow isolation')
@@ -137,6 +215,13 @@ def _grep(
         if resources_only:
             raise ToolExecutionError('remote_skill_access_not_allowed: attachment-only tool')
         return grep_remote(uri, pattern, max_results)
+    if str(target or '').strip().startswith('workspace://'):
+        try:
+            return grep_spill_resource(target, _spill_workspace(), pattern, max_results=max_results)
+        except ResourceReadError as exc:
+            error = ToolExecutionError(str(exc))
+            error.error_code = exc.code
+            raise error from exc
     resolved = _resolve_text_target_for_tool(
         target,
         allow_directory=True,
