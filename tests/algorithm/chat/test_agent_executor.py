@@ -348,7 +348,7 @@ def test_executor_composes_host_context_and_disables_hooks_for_preview(monkeypat
     agent._runtime_notice_buffer.publish('repeat notice')
     kwargs = constructor.call_args.kwargs
     assert kwargs['before_model_request'] is prepare
-    assert kwargs['model_context_provider']() == 'host update\n\nrepeat notice'
+    assert kwargs['model_context_provider']() == 'repeat notice\n\nhost update'
     context.reset_mock()
     AgentExecutor().create_agent('llm', _plan(
         before_model_request=prepare, model_context_provider=context, context_preview=True,
@@ -358,3 +358,120 @@ def test_executor_composes_host_context_and_disables_hooks_for_preview(monkeypat
     assert kwargs['model_context_provider']() is None
     context.assert_not_called()
     prepare.assert_not_called()
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_repeat_convergence_is_opt_in_and_cancel_takes_priority(monkeypatch, enabled):
+    agent = MagicMock()
+    constructor = MagicMock(return_value=agent)
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
+    check = MagicMock(return_value=False)
+    created = AgentExecutor().create_agent('llm', _plan(
+        stop_on_repeated_results=enabled, extra_stop_condition=check))
+    created._exact_repeat_monitor.stop_requested = True
+    stop = constructor.call_args.kwargs['extra_stop_condition']
+    assert bool(stop({})) is enabled
+    check.assert_called_once()
+    check.side_effect = CancelledError('user cancelled')
+    with pytest.raises(CancelledError):
+        stop({})
+
+
+def test_executor_compression_resets_stale_batch_streak(monkeypatch):
+    agent = MagicMock()
+    constructor = MagicMock(return_value=agent)
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
+
+    def compress(history, keep, **kwargs):
+        state = kwargs['runtime_state']
+        state['compression_revision'] = state.get('compression_revision', 0) + 1
+        return history, []
+
+    created = AgentExecutor().create_agent('llm', _plan(history_compactor=compress))
+    created._exact_repeat_monitor.stop_requested = True
+    compact = constructor.call_args.kwargs['history_compactor']
+    compact([], 2, runtime_state={})
+    assert not created._exact_repeat_monitor.stop_requested
+
+
+def test_repeat_notice_survives_actual_function_call_context_bound(monkeypatch):
+    from lazyllm.tools.agent.functionCall import FunctionCall
+    constructor = MagicMock(side_effect=lambda **_: MagicMock())
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
+    directory = MagicMock()
+    directory.model_context.return_value = 'large evidence context ' * 300
+    agent = AgentExecutor().create_agent('llm', _plan(directory_runtime=directory))
+    agent._runtime_notice_buffer.publish('Already seen this window; next_offset=41, EOF=false.')
+    provider = constructor.call_args.kwargs['model_context_provider']
+    fc = object.__new__(FunctionCall)
+    fc._model_context_provider = provider
+    fc._runtime_observer = None
+    delivered = fc._consume_model_context()[0]['content']
+    assert delivered.startswith('Already seen this window; next_offset=41, EOF=false.')
+    assert len(delivered) <= 4096
+    assert agent._runtime_notice_buffer.take() is None
+
+
+def test_repeat_replay_reaches_tool_free_final_answer_with_latest_result(tmp_path):
+    import copy
+    import uuid
+    import lazyllm
+    from lazyllm.tools import ReactAgent
+    from lazyllm.tools.agent import fc_register
+
+    calls = []
+
+    @fc_register(host_file='NONE')
+    def read_evidence(query: str):
+        '''Read stable evidence.
+
+        Args:
+            query: Evidence topic.
+        '''
+        calls.append(query)
+        return 'early critical evidence'
+
+    class Model:
+        def __init__(self):
+            self._module_id = uuid.uuid4().hex
+            self.requests = []
+
+        def share(self, **kwargs):
+            return self
+
+        def used_by(self, _):
+            return self
+
+        def __call__(self, *args, **kwargs):
+            self.requests.append(copy.deepcopy((args, kwargs)))
+            if len(self.requests) == 5:
+                return 'Final answer with the verified evidence and gaps.'
+            return {'content': '', 'tool_calls': [{
+                'id': f'call-{len(self.requests)}', 'type': 'function',
+                'function': {'name': 'read_evidence', 'arguments': '{"query":"topic"}'}}]}
+
+    monitor = executor_mod.ExactRepeatMonitor()
+    buffer = executor_mod.OneShotNoticeBuffer()
+
+    def context():
+        notice = buffer.take()
+        if notice:
+            monitor.notice_delivered()
+        return notice
+
+    with lazyllm.locals._scope():
+        model = Model()
+        agent = ReactAgent(model, [read_evidence], max_retries=20, force_summarize=True,
+                           enable_builtin_tools=False, workspace=str(tmp_path),
+                           model_context_provider=context,
+                           extra_stop_condition=lambda _: monitor.stop_requested)
+        agent._tools_manager = executor_mod.ToolExecutionMiddleware(
+            agent._tools_manager, repeat_monitor=monitor, notice_buffer=buffer,
+            workspace_permission=WorkspaceContext(local_runtime=False))
+        result = agent('Original question')
+        assert result == 'Final answer with the verified evidence and gaps.'
+        assert calls == ['topic'] * 4  # Results were really executed, not cached/replaced.
+        history = model.requests[-1][1]['llm_chat_history']
+        assert sum(m.get('tool_call_id') == 'call-4' for m in history) == 1
+        assert any(m.get('content') == 'early critical evidence' for m in history)
+        assert 'tools' not in model.requests[-1][1]

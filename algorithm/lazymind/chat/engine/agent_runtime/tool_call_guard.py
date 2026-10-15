@@ -47,7 +47,7 @@ _RESULT_LOG_KEYS = (
     'total_lines', 'eof', 'next_offset', 'limit', 'pattern', 'total',
     'truncated', 'status', 'filename', 'corpus', 'skipped', 'channels',
 )
-_REPEATED_CALL_THRESHOLD = 3
+_REPEATED_CALL_THRESHOLD = 2
 
 
 def _requires_expanded_budget(tool_name: str) -> bool:
@@ -282,67 +282,142 @@ class ExactRepeatMonitor:
 
     def __init__(self, threshold: int = _REPEATED_CALL_THRESHOLD):
         self._threshold = max(2, int(threshold))
-        self._previous_batch_digest: str | None = None
+        self._seen = Counter()
+        self._notice_delivered = False
+        self._pending_repeat_notice = False
         self._batch_count = 0
+        self.stop_requested = False
+        self._spill_windows = {}
 
     def reset(self) -> None:
-        self._previous_batch_digest = None
+        self._spill_windows.clear()
+        self._seen.clear()
+        self._notice_delivered = False
+        self._pending_repeat_notice = False
+        self._reset_batch()
+
+    def _reset_batch(self) -> None:
         self._batch_count = 0
+        self.stop_requested = False
 
     @staticmethod
-    def _record_fingerprint(record: ToolExecutionRecord):
+    def _record_fingerprint(record: ToolExecutionRecord, defaults=None):
         arguments = record.validated_arguments
         if arguments is None:
             arguments = record.arguments
+        arguments = thaw(arguments)
+        if defaults and isinstance(arguments, dict):
+            arguments = {**defaults, **arguments}
         arguments_digest = _stable_digest(arguments)
         result_digest = _stable_digest(record.result)
         if arguments_digest is None or result_digest is None:
             return None
         return record.tool_name, arguments_digest, result_digest
 
-    def after_tool_batch(self, records) -> str | None:
-        eligible = [
-            record for record in records
-            if record.disposition in {
-                ToolExecutionDisposition.EXECUTED,
-                ToolExecutionDisposition.PREPARATION_FAILED,
-            } and not record.polling
-        ]
-        if not eligible:
-            self.reset()
-            return None
-        fingerprints = [self._record_fingerprint(record) for record in eligible]
-        if any(item is None for item in fingerprints):
-            self.reset()
-            return None
-        batch_digest = _stable_digest(fingerprints)
-        if batch_digest is None:
-            self.reset()
-            return None
-        previous_count = self._batch_count
-        if batch_digest == self._previous_batch_digest:
+    def after_tool_batch(self, records, parameter_defaults=None) -> str | None:
+        records = list(records)
+        notices = self._spill_notices(records)
+        generic = self._after_generic_batch(records, parameter_defaults or {})
+        if generic:
+            notices.insert(0, generic)
+        return '\n\n'.join(notices) or None
+
+    def _spill_notices(self, records):
+        notices = []
+        for record in records:
+            if record.tool_name != 'read_file_resource' or record.disposition is not ToolExecutionDisposition.EXECUTED:
+                continue
+            args = thaw(record.validated_arguments or record.arguments)
+            result = thaw(record.result)
+            if isinstance(result, str):
+                try:
+                    result = json.loads(result)
+                except (ValueError, TypeError):
+                    continue
+            if not isinstance(args, dict) or not isinstance(result, dict) or result.get('ok') is False:
+                continue
+            result = result.get('value', result)
+            target = args.get('target', '')
+            if not isinstance(target, str) or not target.startswith('workspace://tool_spills/'):
+                continue
+            if (not isinstance(result, dict) or not isinstance(result.get('eof'), bool)
+                    or not isinstance(result.get('offset'), int)):
+                continue
+            key = _stable_digest([target, args.get('offset') or 1, args.get('limit') or 2000,
+                                  args.get('turn'), result])
+            if key is None:
+                continue
+            self._spill_windows[key] = self._spill_windows.get(key, 0) + 1
+            if len(self._spill_windows) > 256:
+                del self._spill_windows[next(iter(self._spill_windows))]
+            if self._spill_windows[key] < 2:
+                continue
+            detail = {'target': target, 'offset': result['offset'], 'end_line': result.get('end_line'),
+                      'eof': result['eof'], 'next_offset': result.get('next_offset')}
+            continuation = ''
+            if not result['eof'] and isinstance(result.get('next_offset'), int):
+                continuation = ' If more evidence is needed, call read_file_resource with ' + json.dumps(
+                    {'target': target, 'offset': result['next_offset'], 'limit': args.get('limit') or 2000,
+                     'turn': args.get('turn')}, ensure_ascii=False) + '.'
+            notices.append('[Internal runtime notice] The same cached window was returned again: '
+                           + json.dumps(detail, ensure_ascii=False) + '.' + continuation
+                           + ' turn selects an attachment conversation turn, not a page. Re-reading may be '
+                           'intentional after compaction; otherwise use the returned evidence or continue. '
+                           'No unread range is implied to have been read.')
+        return notices
+
+    def notice_delivered(self) -> None:
+        if self._pending_repeat_notice:
+            self._notice_delivered = True
+            self._pending_repeat_notice = False
+
+    def context_compacted(self) -> None:
+        self._reset_batch()
+
+    @staticmethod
+    def _eligible(record) -> bool:
+        if record.disposition is not ToolExecutionDisposition.EXECUTED or record.polling:
+            return False
+        result = thaw(record.result)
+        if isinstance(result, dict):
+            if result.get('ok') is False or result.get('needs_approval') or result.get('needs_configuration'):
+                return False
+            result = result.get('value', result)
+        if isinstance(result, dict):
+            return (result.get('success') is not False and not result.get('error') and not result.get('isError')
+                    and result.get('status') not in {'error', 'failed', 'denied', 'pending', 'unavailable'}
+                    and result.get('exit_code', result.get('returncode', 0)) in (0, None))
+        return True
+
+    def _after_generic_batch(self, records, parameter_defaults) -> str | None:
+        eligible = [record for record in records if not record.polling and record.disposition in {
+            ToolExecutionDisposition.EXECUTED, ToolExecutionDisposition.PREPARATION_FAILED}]
+        fingerprints = [self._record_fingerprint(record, parameter_defaults.get(record.tool_name))
+                        for record in eligible]
+        all_seen = (bool(records) and len(eligible) == len(records) and all(self._eligible(r) for r in records)
+                    and all(fp is not None and self._seen[fp] for fp in fingerprints))
+        if all_seen and self._notice_delivered:
             self._batch_count += 1
+            self.stop_requested = self._batch_count >= 2
         else:
-            if previous_count >= self._threshold:
-                append_event('post_notice_strategy_changed', previous_streak=previous_count)
-            self._previous_batch_digest = batch_digest
-            self._batch_count = 1
-        intra_batch_count = max(Counter(fingerprints).values(), default=0)
-        repeat_count = max(self._batch_count, intra_batch_count)
-        if repeat_count < self._threshold:
+            self._reset_batch()
+        repeated = []
+        for record, fingerprint in zip(eligible, fingerprints):
+            if fingerprint is None:
+                continue
+            self._seen[fingerprint] += 1
+            if self._seen[fingerprint] >= self._threshold:
+                repeated.append(record.tool_name)
+        if not repeated:
+            self._pending_repeat_notice = False
             return None
-        batch_ids = [record.call_id for record in records]
-        append_event(
-            'exact_repeat_detected',
-            streak=repeat_count,
-            batch_ids=batch_ids,
-            tool_names=[record.tool_name for record in eligible],
-        )
-        return (
-            '[Internal runtime notice]\n'
-            f'The same tool call batch has returned the same result {repeat_count} consecutive times. '
-            'Review the result and change the approach or arguments instead of repeating it unchanged.'
-        )
+        self._pending_repeat_notice = True
+        append_event('exact_repeat_detected', streak=self._batch_count,
+                     batch_ids=[record.call_id for record in records], tool_names=repeated)
+        return ('[Internal runtime notice] Identical tool arguments returned an already seen result again. '
+                'Use existing hits for targeted reading or obtain specifically missing context. '
+                'If no useful evidence remains available, answer now and state the verification gaps. '
+                'Do not repeat unchanged searches. Reasonable re-reading remains allowed.')
 
 
 class OneShotNoticeBuffer:
@@ -378,8 +453,9 @@ class ToolExecutionMiddleware:
                  call_quota: ToolCallQuota | None = None,
                  authorization_gate: Any = None,
                  workspace_permission=None, tool_context: ToolResolutionContext | None = None,
-                 trusted_opaque_tools=()):
+                 trusted_opaque_tools=(), directory_runtime=None):
         self._manager = manager
+        self._directory_runtime = directory_runtime
         self._failure_policy = failure_policy or FailureRetryPolicy()
         self._call_quota = call_quota or ToolCallQuota()
         self._expanded_round_limit = expanded_round_limit
@@ -579,6 +655,7 @@ class ToolExecutionMiddleware:
             if coordinator is not None:
                 coordinator.close()
         if decision is None:
+            self._capture_documents(executed_batch.records)
             return executed_batch
         elapsed = time.perf_counter() - started_at
         results: list[Any] = [None] * len(prepared_calls)
@@ -632,6 +709,7 @@ class ToolExecutionMiddleware:
             )
             emit_tool_result(prepared_calls[index].tool_call, result)
         completed_records = [record for record in records if record is not None]
+        self._capture_documents(completed_records)
         self._failure_policy.observe(completed_records)
         self._call_quota.observe(completed_records)
         batch = ToolExecutionBatch(
@@ -640,9 +718,25 @@ class ToolExecutionMiddleware:
             duration_ms=round(max(0.0, elapsed * 1000.0)),
         )
         if self._repeat_monitor is not None and self._notice_buffer is not None:
-            notice = self._repeat_monitor.after_tool_batch(completed_records)
+            defaults = {}
+            for record in completed_records:
+                tool = self.tools_info.get(record.tool_name)
+                schema = getattr(tool, '_params_schema', None)
+                if schema is not None:
+                    defaults[record.tool_name] = {
+                        key: field.default for key, field in schema.model_fields.items()
+                        if not field.is_required() and field.default_factory is None}
+            notice = self._repeat_monitor.after_tool_batch(completed_records, defaults)
             self._notice_buffer.publish(notice, [record.call_id for record in completed_records])
         return batch
+
+    def _capture_documents(self, records):
+        if self._directory_runtime is not None:
+            try:
+                self._directory_runtime.observe(records)
+            except Exception as exc:  # Observation must not alter successful tool execution.
+                self._directory_runtime.failed = True
+                lazyllm.LOG.warning('Document collection failed: %s', type(exc).__name__)
 
     def __call__(self, tools: Any, verbose: bool = False,
                  allowed_tool_names: set[str] | None = None) -> Any:

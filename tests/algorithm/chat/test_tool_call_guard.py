@@ -99,7 +99,7 @@ def test_env_tool_logging_redacts_prepared_readonly_arguments(monkeypatch, tool_
     {'ok': True, 'value': {'items': ['same']}},
     {'ok': False, 'msg': 'same failure'},
 ])
-def test_third_identical_observation_emits_soft_notice_without_mutating_result(result):
+def test_second_identical_observation_emits_soft_notice_without_mutating_result(result):
     monitor = ExactRepeatMonitor()
     notices = []
     for index in range(5):
@@ -107,11 +107,10 @@ def test_third_identical_observation_emits_soft_notice_without_mutating_result(r
         assert record.result is result
         notices.append(_notice(monitor.after_tool_batch([record])))
 
-    assert notices[:2] == [[], []]
-    assert all(
-        f'{count} consecutive times' in notices[count - 1][0]
-        for count in (3, 4, 5)
-    )
+    assert notices[0] == []
+    assert all(notices[1:])
+    assert not monitor.stop_requested  # No notice was delivered to a model.
+
 
 
 def test_ordered_multi_tool_batch_repeats_and_order_change_resets_streak():
@@ -122,9 +121,9 @@ def test_ordered_multi_tool_batch_repeats_and_order_change_resets_streak():
     ]
 
     assert not _notice(monitor.after_tool_batch(batch))
-    assert not _notice(monitor.after_tool_batch(batch))
     assert _notice(monitor.after_tool_batch(batch))
-    assert not _notice(monitor.after_tool_batch(list(reversed(batch))))
+    assert _notice(monitor.after_tool_batch(batch))
+    assert _notice(monitor.after_tool_batch(list(reversed(batch))))
 
 
 def test_three_identical_calls_in_one_batch_emit_one_notice():
@@ -134,7 +133,7 @@ def test_three_identical_calls_in_one_batch_emit_one_notice():
     notices = _notice(monitor.after_tool_batch(records))
 
     assert len(notices) == 1
-    assert '3 consecutive times' in notices[0]
+    assert not monitor.stop_requested
 
 
 @pytest.mark.parametrize('change', ['arguments', 'result'])
@@ -150,7 +149,7 @@ def test_arguments_or_result_change_resets_streak(change):
     )
 
     assert not _notice(monitor.after_tool_batch([changed]))
-    assert not _notice(monitor.after_tool_batch([changed]))
+    assert _notice(monitor.after_tool_batch([changed]))
 
 
 @pytest.mark.parametrize('access', [
@@ -161,7 +160,7 @@ def test_write_and_exclusive_failures_are_not_exempt(access):
     monitor = ExactRepeatMonitor()
     failure = {'ok': False, 'msg': 'approval_required'}
 
-    for index in range(2):
+    for index in range(1):
         assert not _notice(monitor.after_tool_batch([
             _record(call_id=f'call-{index}', access=access, result=failure),
         ]))
@@ -209,16 +208,16 @@ def test_middleware_publishes_only_the_current_repeat_notice():
         notice_buffer=buffer,
     )
 
-    for index in range(2):
+    for index in range(1):
         middleware.execute_with_records(_call('same', f'call-{index}'))
         assert buffer.take() is None
 
     middleware.execute_with_records(_call('same', 'call-3'))
-    assert '3 consecutive times' in buffer.take()
+    assert buffer.take()
     assert buffer.take() is None
 
     middleware.execute_with_records(_call('same', 'call-4'))
-    assert '4 consecutive times' in buffer.take()
+    assert buffer.take()
 
 
 def _failing_manager(calls):
@@ -313,7 +312,7 @@ def test_identical_preparation_failures_trigger_repeat_notice(function, allowed_
         assert batch.records[0].disposition is ToolExecutionDisposition.PREPARATION_FAILED
         notices.append(_notice(monitor.after_tool_batch(batch.records)))
 
-    assert notices[:2] == [[], []]
+    assert notices[0] == []
     assert len(notices[2]) == len(notices[3]) == 1
     assert calls == []
 
@@ -422,7 +421,7 @@ def test_invalid_host_path_is_not_authorization_unavailable(workspace_runtime, m
     monkeypatch.setattr(host_access_guard, 'identity', invalid_path)
     batch = middleware.execute_with_records({
         'id': 'invalid-path',
-        'function': {'name': 'read', 'arguments': {'path': 'notes.txt'}},
+        'function': {'name': 'read', 'arguments': {'file_path': 'notes.txt'}},
     })
     assert batch.records[0].reason == 'path_invalid'
     assert batch.results[0]['ok'] is False
@@ -560,3 +559,121 @@ def test_call_quota_and_authorization_compose_without_counting_denied_calls():
         })
     assert effects == ['allowed']
     assert authorization_calls == ['denied', 'allowed']
+
+
+def test_cached_window_repeat_survives_other_batches_and_resets_per_execution():
+    monitor = ExactRepeatMonitor()
+    target = 'workspace://tool_spills/result.txt'
+    payload = {'text': '1: evidence', 'offset': 1, 'end_line': 1, 'eof': False, 'next_offset': 2}
+    first = _record(name='read_file_resource', arguments={'target': target}, result={'ok': True, 'value': payload})
+    assert monitor.after_tool_batch([first]) is None
+    assert monitor.after_tool_batch([_record(name='search')]) is None
+    second = _record(name='read_file_resource', arguments={'target': target, 'offset': 1, 'limit': 2000, 'turn': None}, result={'ok': True, 'value': payload})
+    notice = monitor.after_tool_batch([second])
+    assert '"offset": 2' in notice and '"end_line": 1' in notice
+    assert second.result == first.result
+    continued = _record(name='read_file_resource', arguments={'target': target, 'offset': 2}, result={**payload, 'text': '2: more', 'offset': 2, 'end_line': 2, 'eof': True, 'next_offset': None})
+    assert monitor.after_tool_batch([continued]) is None
+    changed = _record(name='read_file_resource', arguments={'target': target}, result={**payload, 'text': 'new body'})
+    assert monitor.after_tool_batch([changed]) is None
+    monitor.reset()
+    assert monitor.after_tool_batch([second]) is None
+    local = _record(name='read_file_resource', arguments={'target': '/tmp/document.pdf'}, result=payload)
+    monitor.after_tool_batch([local])
+    assert monitor.after_tool_batch([local])  # Generic repeat notice, no cached-window hint.
+
+
+def test_compacted_cached_window_remains_readable_and_retains_cursor():
+    from lazymind.chat.engine.agent_runtime.compactors import compact_file_result
+
+    monitor = ExactRepeatMonitor()
+    target = 'workspace://tool_spills/large.txt'
+    payload = {'target': target, 'text': 'evidence\n' * 1500, 'offset': 21,
+               'end_line': 40, 'total_lines': 100, 'eof': False, 'next_offset': 41}
+    result = {'ok': True, 'value': payload}
+    record = _record(name='read_file_resource', arguments={'target': target, 'offset': 21}, result=result)
+    monitor.after_tool_batch([record])
+    compacted, _ = compact_file_result('read_file_resource', result)
+    assert 'offset=21' in compacted and 'end=40' in compacted
+    assert 'offset=41' in compacted and 'EOF: False' in compacted
+    buffer = OneShotNoticeBuffer()
+    buffer.publish(monitor.after_tool_batch([record]))
+    assert '"next_offset": 41' in buffer.take()
+    # Both notices survive the third identical result; the successful body is unchanged.
+    buffer.publish(monitor.after_tool_batch([record]))
+    notice = buffer.take()
+    assert '"next_offset": 41' in notice and 'already seen' in notice
+    assert record.result == result and buffer.take() is None
+
+
+def test_repeat_convergence_requires_delivery_and_two_stale_batches():
+    monitor = ExactRepeatMonitor()
+    a, b = _record(name='grep'), _record(name='read')
+    assert monitor.after_tool_batch([a]) is None
+    assert monitor.after_tool_batch([b]) is None
+    assert monitor.after_tool_batch([a])
+    assert not monitor.stop_requested
+    monitor.notice_delivered()
+    monitor.after_tool_batch([b])
+    assert not monitor.stop_requested
+    monitor.after_tool_batch([a])
+    assert monitor.stop_requested
+    monitor.context_compacted()
+    monitor.after_tool_batch([a])
+    assert not monitor.stop_requested
+    monitor.after_tool_batch([_record(name='grep', result={'ok': True, 'value': 'new'})])
+    monitor.after_tool_batch([a])
+    assert not monitor.stop_requested
+    monitor.after_tool_batch([a])
+    assert monitor.stop_requested
+    monitor.reset()
+    assert monitor.after_tool_batch([a]) is None and not monitor.stop_requested
+
+
+@pytest.mark.parametrize('record', [
+    _record(polling=True),
+    _record(result={'ok': False, 'msg': 'failure'}),
+    _record(result={'ok': True, 'value': {'status': 'error'}}),
+    _record(result={'ok': True, 'value': {'success': False}}),
+    _record(result={'ok': True, 'value': {'exit_code': 1}}),
+    _record(disposition=ToolExecutionDisposition.SKIPPED, reason='approval_required'),
+])
+def test_failed_pending_polling_batches_never_force_answer(record):
+    monitor = ExactRepeatMonitor()
+    for _ in range(6):
+        monitor.after_tool_batch([record])
+        monitor.notice_delivered()
+        assert not monitor.stop_requested
+
+
+def test_physical_read_compaction_preserves_clipping_and_later_cursor():
+    from lazymind.chat.engine.agent_runtime.compactors import compact_file_result
+    result = {'path': '/tmp/a.jsonl', 'content': 'x' * 2000, 'offset': 35,
+              'end_line': 35, 'line_unit': 'physical', 'truncated_lines': [35],
+              'eof': False, 'next_offset': 36}
+    text, _ = compact_file_result('read', result)
+    assert 'offset=35' in text and 'end=35' in text and 'physical' in text
+    assert '[35]' in text and 'offset=36' in text and 'EOF: False' in text
+    assert 'omitted suffixes' in text
+
+
+def test_actual_schema_defaults_make_omitted_and_explicit_arguments_equivalent():
+    from lazyllm.tools import ToolManager
+
+    @fc_register(host_file='NONE')
+    def sample(query: str, offset: int = 1):
+        '''Return the requested location.
+
+        Args:
+            query: Topic.
+            offset: Starting location.
+        '''
+        return {'query': query, 'offset': offset}
+
+    monitor = ExactRepeatMonitor()
+    buffer = OneShotNoticeBuffer()
+    middleware = ToolExecutionMiddleware(ToolManager([sample]), repeat_monitor=monitor, notice_buffer=buffer)
+    for args in ({'query': 'topic'}, {'offset': 1, 'query': 'topic'}):
+        middleware.execute_with_records({'id': str(args), 'function': {'name': 'sample', 'arguments': args}})
+    assert buffer.take()
+    assert not monitor.stop_requested

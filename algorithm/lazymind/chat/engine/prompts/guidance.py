@@ -45,6 +45,11 @@ FRESH_RESEARCH_GUIDANCE = '''# Current research
 This request depends on current or externally verifiable information. Use the appropriate retrieval
 tool before answering. For open-web research, gather enough independent evidence to support the
 answer, identify the material freshness boundary, and distinguish sourced facts from inference.
+Separate historical reports, current implementation, deployed behavior and executed verification.
+An old pending task does not establish that it is still pending; reading code does not prove deployment
+or passing tests. Reconcile the same issue, version, environment and time scope; neither newer dates
+nor code automatically outrank other evidence. State unresolved conflicts and verification gaps.
+Before calling a historical item still unresolved, check current evidence for that same item within the allowed search budget. If unavailable, say "reported pending on DATE; present status unverified". Missing a test record is a verification gap, not proof of a missing feature or current failure; a past tool loop does not prove the current run still fails.
 An ordinary current-information request may use search directly; it does not require a research skill.'''
 
 DECISION_PLANNING_GUIDANCE = '''# Decision and planning requests

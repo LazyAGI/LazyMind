@@ -38,7 +38,7 @@ jobs:
             # SkillHub package on every CI run.
             if git -C ../.. diff --quiet "${{ github.event.pull_request.base.sha }}" HEAD -- \
               skills/builtin-sources.yaml skills/builtin-skills.lock.json \
-              skills/patches skills/featured \
+              skills/patches skills/featured skills/search \
               backend/core/cmd/builtin-skill-bundle \
               backend/core/skillv2/builtin backend/core/skillv2/metadata \
               backend/core/skillv2/skillpackage backend/core/skillv2/skillpatch \
