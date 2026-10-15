@@ -790,6 +790,56 @@ class PartialEditTests(unittest.TestCase):
         self.assertNotIn('<h1 data-el="title">A < B & C</h1>', edited)
         self.assertIn('Old title', removed)
 
+    def test_literal_replacement_keeps_fast_path_and_quoted_punctuation(self):
+        for instruction, expected in [
+            ('改为北京故宫：历史与建筑', '北京故宫：历史与建筑'),
+            ('修改标题成 New title', 'New title'),
+            ('rename it to "Keep history, preserve culture."', 'Keep history, preserve culture.'),
+            ('改为“故宫：历史，建筑与珍藏”', '故宫：历史，建筑与珍藏'),
+            ("替换为'北京故宫'", '北京故宫'),
+            ('改成‘北京故宫’', '北京故宫'),
+        ]:
+            with self.subTest(instruction=instruction), mock.patch.object(TOOLS, '_agent_llm_call') as llm:
+                ops, _, new_text = TOOLS._selection_edit_ops(
+                    instruction, {'el': 'title'}, TOOLS._HtmlTree(PAGE_HTML),
+                )
+                self.assertEqual(new_text, expected)
+                self.assertEqual(ops, [{'op': 'replace_text', 'el': 'title', 'value': expected}])
+                llm.assert_not_called()
+
+    def test_replacement_with_constraints_uses_planner_without_leaking_instructions(self):
+        expected = '北京故宫：六百年宫城与公共博物馆'
+        for instruction in [
+            f'仅将选中的第一页主标题改为“{expected}”。保持标题原有字体、字号、颜色与位置；'
+            '保持本页其他文字、图片、背景不变，不修改第2至4页。',
+            f'改为“{expected}”，保持其他内容不变',
+            f'改为{expected}；其他内容不变',
+            f'改为{expected}\n保留其他内容',
+            f'改为{expected} 保持原字体',
+            'rename it to "New title" and preserve the layout',
+            'rename it to New title keep the layout',
+        ]:
+            with self.subTest(instruction=instruction), mock.patch.object(
+                TOOLS, '_agent_llm_call',
+                return_value=json.dumps({'op': 'replace_text', 'value': expected}),
+            ) as llm:
+                ops, _, new_text = TOOLS._selection_edit_ops(
+                    instruction, {'el': 'title'}, TOOLS._HtmlTree(PAGE_HTML),
+                )
+                llm.assert_called_once()
+                self.assertEqual(json.loads(llm.call_args.args[1])['instruction'], instruction)
+                self.assertEqual(new_text, expected)
+                edited, *_ = TOOLS._apply_html_ops(PAGE_HTML, ops)
+                self.assertEqual(edited, PAGE_HTML.replace('Old title', expected))
+
+    def test_ambiguous_replacement_does_not_fall_back_to_literal_on_planner_failure(self):
+        with mock.patch.object(TOOLS, '_agent_llm_call', side_effect=RuntimeError('provider unavailable')):
+            with self.assertRaisesRegex(RuntimeError, 'provider unavailable'):
+                TOOLS._selection_edit_ops(
+                    '改为“北京故宫”，保持其他内容不变',
+                    {'el': 'title'}, TOOLS._HtmlTree(PAGE_HTML),
+                )
+
     def test_clicked_nested_text_scopes_replacement_inside_outer_data_el(self):
         selection = {
             'type': 'ppt_html',
