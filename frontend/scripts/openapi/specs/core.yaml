@@ -11286,6 +11286,76 @@ components:
                 - code
                 - message
             type: object
+        knowledgeMarketTaskFileCountsOpenAPIResponse:
+            properties:
+                canceled:
+                    type: integer
+                failed:
+                    type: integer
+                success:
+                    type: integer
+                unfinished:
+                    type: integer
+            required:
+                - canceled
+                - failed
+                - success
+                - unfinished
+            type: object
+        knowledgeMarketTaskFileOpenAPIResponse:
+            properties:
+                file_id:
+                    type: string
+                name:
+                    type: string
+                reason_code:
+                    enum:
+                        - success
+                        - canceled
+                        - waiting
+                        - processing
+                        - unknown
+                        - parse_failed
+                        - import_failed
+                        - missing_task
+                        - rate_limited
+                    type: string
+                status:
+                    enum:
+                        - success
+                        - failed
+                        - canceled
+                        - unfinished
+                    type: string
+            required:
+                - file_id
+                - name
+                - reason_code
+                - status
+            type: object
+        knowledgeMarketTaskFilesOpenAPIResponse:
+            properties:
+                counts:
+                    $ref: '#/components/schemas/knowledgeMarketTaskFileCountsOpenAPIResponse'
+                file_details_available:
+                    type: boolean
+                items:
+                    items:
+                        $ref: '#/components/schemas/knowledgeMarketTaskFileOpenAPIResponse'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    type: integer
+            required:
+                - counts
+                - file_details_available
+                - page
+                - page_size
+                - total
+            type: object
         knowledgeMarketTaskListItemOpenAPIResponse:
             properties:
                 can_cancel:
@@ -11321,6 +11391,8 @@ components:
                 overall_percent:
                     format: int64
                     type: integer
+                parse:
+                    $ref: '#/components/schemas/knowledgeMarketTaskParseOpenAPIResponse'
                 progress:
                     $ref: '#/components/schemas/knowledgeMarketTaskProgressOpenAPIResponse'
                 stage:
@@ -18396,7 +18468,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/ConversationPinResponse'
                     description: Conversation reordered
-            summary: Move a conversation within its pinned or ordinary history
+            summary: Move a conversation within its pinned, recent, group, project or sibling list without changing relationships
     /api/core/conversations/{conversation_id}:restore:
         post:
             parameters:
@@ -22286,11 +22358,19 @@ paths:
                         - failed
                         - canceled
                     type: string
-                - description: Async job type; defaults to knowledge_market_install.
+                - description: Async job type or all; defaults to knowledge_market_install.
                   in: query
                   name: job_type
                   required: false
                   schema:
+                    type: string
+                - description: Summary omits per-file failures; pagination is clamped to available pages.
+                  in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - summary
                     type: string
             responses:
                 "200":
@@ -22300,6 +22380,47 @@ paths:
                                 $ref: '#/components/schemas/knowledgeMarketTaskListOpenAPIResponse'
                     description: Background install task list
             summary: List background knowledge market tasks
+            tags:
+                - knowledge-market
+    /api/core/knowledge-market/tasks/{job_id}/files:
+        get:
+            description: Returns the current user's job-owned file page and all four counts. Historical file snapshots are immutable. Unknown states are unfinished. Aggregate-only history reports file_details_available=false. Page numbers are clamped; page and page_size must be positive integers, page_size at most 100.
+            parameters:
+                - in: path
+                  name: job_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - description: Default 10, maximum 100.
+                  in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - description: Default failed.
+                  in: query
+                  name: status
+                  required: false
+                  schema:
+                    enum:
+                        - success
+                        - failed
+                        - canceled
+                        - unfinished
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskFilesOpenAPIResponse'
+                    description: Task file page
+            summary: List files for one knowledge market task
             tags:
                 - knowledge-market
     /api/core/knowledge-market/tasks/{job_id}:

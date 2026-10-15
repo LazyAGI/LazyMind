@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import { Alert, Button, Select, Skeleton, Switch, Tag, Tooltip } from "antd";
 import {
   CheckCircleOutlined,
@@ -225,6 +225,17 @@ export default function DefaultModelConfigPanel({
   const [cloudServiceSearchKeywords, setCloudServiceSearchKeywords] = useState<
     Partial<Record<CloudServiceSlotKey, string>>
   >({});
+  const [keyboardNavigation, setKeyboardNavigation] = useState(false);
+  const selectInteractionProps = {
+    popupClassName: `model-provider-select-dropdown${keyboardNavigation ? " is-keyboard-navigation" : ""}`,
+    onMouseDown: () => setKeyboardNavigation(false),
+    onInputKeyDown: () => setKeyboardNavigation(true),
+    popupRender: (menu: ReactElement) => (
+      <div onMouseMove={() => setKeyboardNavigation(false)} onMouseLeave={() => setKeyboardNavigation(false)}>
+        {menu}
+      </div>
+    ),
+  };
   const highlightedRowRef = useRef<HTMLDivElement | null>(null);
   const focusedHighlightRef = useRef<string | null>(null);
 
@@ -406,7 +417,7 @@ export default function DefaultModelConfigPanel({
                 ? t("modelProvider.requiredModelPlaceholder")
                 : t("modelProvider.optionalModelPlaceholder"))
           }
-          popupClassName="model-provider-select-dropdown"
+          {...selectInteractionProps}
           showSearch
           suffixIcon={
             <DownOutlined className="model-provider-select-caret" />
@@ -422,6 +433,8 @@ export default function DefaultModelConfigPanel({
           onDropdownVisibleChange={(open) => {
             if (open) {
               void loadModuleModels(module.key, true);
+            } else {
+              setKeyboardNavigation(false);
             }
           }}
           loading={optionLoading || saving}
@@ -603,7 +616,7 @@ export default function DefaultModelConfigPanel({
           id={`model-provider-cloud-${service.key}`}
           optionLabelProp="label"
           placeholder={cloudReady?.group_name || t("modelProvider.cloudServicePlaceholder")}
-          popupClassName="model-provider-select-dropdown"
+          {...selectInteractionProps}
           showSearch
           suffixIcon={
             <DownOutlined className="model-provider-select-caret" />
@@ -621,6 +634,8 @@ export default function DefaultModelConfigPanel({
           onDropdownVisibleChange={(open) => {
             if (open) {
               void loadVerifiedCloudService(service);
+            } else {
+              setKeyboardNavigation(false);
             }
           }}
           loading={optionLoading || saving}

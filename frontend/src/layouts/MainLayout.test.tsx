@@ -129,6 +129,23 @@ describe("MainLayout conversation removal", () => {
     expect(readChatConversationFilters()).toEqual({ filter: "normal", sources: ["codex", "workbuddy"] });
   });
 
+  it('captures the draft before notifying the page about a mode change', () => {
+    const events: string[] = [];
+    const capture = () => events.push('capture');
+    const select = () => events.push('select');
+    window.addEventListener('lazymind:chat-capture-mode-draft', capture);
+    window.addEventListener(CHAT_SELECT_CONVERSATION_EVENT, select);
+    try {
+      sessionStorage.setItem(CHAT_CONVERSATION_FILTER_KEY, '["task"]');
+      render(<MemoryRouter><MainLayout /></MemoryRouter>);
+      fireEvent.click(screen.getByRole('button', { name: /layout.newChat/ }));
+      expect(events).toEqual(['capture', 'select']);
+    } finally {
+      window.removeEventListener('lazymind:chat-capture-mode-draft', capture);
+      window.removeEventListener(CHAT_SELECT_CONVERSATION_EVENT, select);
+    }
+  });
+
   it("uses a detail route for the selected conversation and returns home when it is removed", async () => {
     const selectedConversationId = "conversation-1";
     const selections: string[] = [];

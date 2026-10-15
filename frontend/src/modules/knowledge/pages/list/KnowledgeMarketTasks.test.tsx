@@ -27,6 +27,8 @@ vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
   listKnowledgeMarketDomains: vi.fn(),
   listKnowledgeMarketInstalls: vi.fn(),
   listKnowledgeMarketTasks: vi.fn(),
+  listKnowledgeMarketTaskPage: vi.fn(),
+  listKnowledgeMarketTaskFiles: vi.fn(),
   updateAllKnowledgeMarketItems: vi.fn(),
   updateKnowledgeMarketItem: vi.fn(),
 }));
@@ -157,6 +159,12 @@ beforeEach(() => {
     items: [...jobs.values()].filter((job) => job.job_type === jobType),
     total: jobs.size, page: 1, page_size: 100,
   }));
+  vi.mocked(marketApi.listKnowledgeMarketTaskPage).mockImplementation(async (page) => ({items: [...jobs.values()].sort((a,b) => b.created_at.localeCompare(a.created_at)).slice((page-1)*10,page*10), total: jobs.size, page, page_size: 10}));
+  vi.mocked(marketApi.listKnowledgeMarketTaskFiles).mockImplementation(async (id, status, page) => {
+    const parse = jobs.get(id)?.parse;
+    const items = status === "failed" ? (parse?.failures || []).map((failure) => ({file_id: failure.task_id || failure.name, name: failure.name, status: "failed" as const, reason_code: failure.reason})) : [];
+    return {items, page, page_size: 10, total: items.length, counts: {success: parse?.done || 0, failed: parse?.failed || 0, canceled: parse?.canceled || 0, unfinished: (parse?.pending || 0)+(parse?.parsing || 0)}, file_details_available: true};
+  });
   vi.mocked(marketApi.getKnowledgeMarketTask).mockImplementation(async (jobId) => jobs.get(jobId)!);
   vi.mocked(marketApi.installKnowledgeMarketItem).mockImplementation(async (id) => {
     jobs.set(id, task(id));
@@ -299,6 +307,7 @@ describe("knowledge market background tasks", () => {
     await click(screen.getByRole("button", { name: /OK|确定/ }));
     expect(marketApi.deleteKnowledgeMarketTask).toHaveBeenCalledWith("complete");
     expect(within(dialog).queryByText("知识库 complete")).toBeNull();
+    expect(screen.getByText("删除任务成功")).toBeInTheDocument();
   });
 
   it("shows partial success counts and failed files and can retry", async () => {
@@ -315,10 +324,11 @@ describe("knowledge market background tasks", () => {
     await click(taskEntry(0));
     const dialog = screen.getByRole("dialog", { name: "后台任务" });
     expect(within(dialog).getByText("已完成（部分失败）")).toBeInTheDocument();
-    await click(within(dialog).getByRole("button", { name: /Expand row|展开行/ }));
-    expect(within(dialog).getByText("共 100 个文件：成功 99，失败 1，取消 0，未完成 0。")).toBeInTheDocument();
+    await click(within(dialog).getByRole("button", { name: /展开任务详情/ }));
+    expect(within(dialog).getByRole("tab", {name: "成功 99"})).toBeInTheDocument();
+    expect(within(dialog).getByRole("tab", {name: "失败 1"})).toBeInTheDocument();
     expect(within(dialog).getByText(/broken.pdf/)).toBeInTheDocument();
-    await click(within(dialog).getByRole("button", { name: "重试失败文件" }));
+    await click(within(dialog).getAllByRole("button", { name: "重试" })[0]);
     expect(marketApi.retryKnowledgeMarketTask).toHaveBeenCalledWith("partial");
     expect(taskEntry(1)).toBeInTheDocument();
   });

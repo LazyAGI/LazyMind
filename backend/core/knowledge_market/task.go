@@ -51,14 +51,17 @@ func MarketListInstallTasks(w http.ResponseWriter, r *http.Request) {
 		jobType = defaultInstallJobType
 	}
 
-	if !isMarketJobType(jobType) {
+	if !isMarketJobType(jobType) && jobType != "all" {
 		common.ReplyErr(w, "invalid job type", http.StatusBadRequest)
 		return
 	}
 
 	base := db.WithContext(r.Context()).
 		Model(&orm.AsyncJob{}).
-		Where("job_type = ? AND create_user_id = ?", jobType, userID)
+		Where("job_type IN ? AND create_user_id = ?", marketJobTypes, userID)
+	if jobType != "all" {
+		base = base.Where("job_type = ?", jobType)
+	}
 	if status != "" {
 		base = base.Where("status = ?", status)
 	}
@@ -73,10 +76,18 @@ func MarketListInstallTasks(w http.ResponseWriter, r *http.Request) {
 	if pageSize > 100 {
 		pageSize = 100
 	}
+	if r.URL.Query().Get("view") == "summary" {
+		var valid bool
+		page, pageSize, valid = taskPageQuery(w, r)
+		if !valid {
+			return
+		}
+		page = clampTaskPage(page, pageSize, int(total))
+	}
 
 	var jobs []orm.AsyncJob
 	if err := base.
-		Order("created_at DESC").
+		Order("created_at DESC, id DESC").
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).
 		Find(&jobs).Error; err != nil {
@@ -87,6 +98,14 @@ func MarketListInstallTasks(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		replyServiceError(w, err)
 		return
+	}
+	if r.URL.Query().Get("view") == "summary" {
+		for _, item := range items {
+			parse := item["parse"].(parseProgressInfo)
+			parse.Failures = nil
+			item["parse"] = parse
+			item["error_message"] = ""
+		}
 	}
 	common.ReplyOK(w, map[string]any{"items": items, "page": page, "page_size": pageSize, "total": total})
 }
@@ -336,6 +355,7 @@ func taskProgress(r *http.Request, db *gorm.DB, job orm.AsyncJob, current *orm.K
 		TaskIDs   []string                `json:"task_ids"`
 		Failures  []doc.MarketFileFailure `json:"failures"`
 		Parse     *parseProgressInfo      `json:"parse"`
+		Files     []doc.MarketTaskFile    `json:"file_snapshot"`
 		Reason    string                  `json:"reason"`
 	}
 	_ = json.Unmarshal(job.ResultJSON, &result)
@@ -343,6 +363,9 @@ func taskProgress(r *http.Request, db *gorm.DB, job orm.AsyncJob, current *orm.K
 		return &orm.KnowledgeMarketInstall{DatasetID: result.DatasetID}, parseProgressInfo{State: "canceled"}
 	}
 	if result.Parse != nil {
+		if len(result.Files) == result.Parse.Total {
+			result.Parse.Files = result.Files
+		}
 		return &orm.KnowledgeMarketInstall{DatasetID: result.DatasetID, InstallState: result.Parse.State}, *result.Parse
 	}
 	if (job.Status == "pending" || job.Status == "running") && len(result.TaskIDs) == 0 {
@@ -464,6 +487,7 @@ func marketResultDTO(raw json.RawMessage) map[string]any {
 		return nil
 	}
 	delete(m, "dispatched_task_ids")
+	delete(m, "file_snapshot")
 	return m
 }
 

@@ -3995,6 +3995,49 @@ export interface KnowledgeMarketTaskErrorOpenAPIResponse {
     'data'?: object;
     'message': string;
 }
+export interface KnowledgeMarketTaskFileCountsOpenAPIResponse {
+    'canceled': number;
+    'failed': number;
+    'success': number;
+    'unfinished': number;
+}
+export interface KnowledgeMarketTaskFileOpenAPIResponse {
+    'file_id': string;
+    'name': string;
+    'reason_code': KnowledgeMarketTaskFileOpenAPIResponseReasonCodeEnum;
+    'status': KnowledgeMarketTaskFileOpenAPIResponseStatusEnum;
+}
+
+export const KnowledgeMarketTaskFileOpenAPIResponseReasonCodeEnum = {
+    Success: 'success',
+    Canceled: 'canceled',
+    Waiting: 'waiting',
+    Processing: 'processing',
+    Unknown: 'unknown',
+    ParseFailed: 'parse_failed',
+    ImportFailed: 'import_failed',
+    MissingTask: 'missing_task',
+    RateLimited: 'rate_limited'
+} as const;
+
+export type KnowledgeMarketTaskFileOpenAPIResponseReasonCodeEnum = typeof KnowledgeMarketTaskFileOpenAPIResponseReasonCodeEnum[keyof typeof KnowledgeMarketTaskFileOpenAPIResponseReasonCodeEnum];
+export const KnowledgeMarketTaskFileOpenAPIResponseStatusEnum = {
+    Success: 'success',
+    Failed: 'failed',
+    Canceled: 'canceled',
+    Unfinished: 'unfinished'
+} as const;
+
+export type KnowledgeMarketTaskFileOpenAPIResponseStatusEnum = typeof KnowledgeMarketTaskFileOpenAPIResponseStatusEnum[keyof typeof KnowledgeMarketTaskFileOpenAPIResponseStatusEnum];
+
+export interface KnowledgeMarketTaskFilesOpenAPIResponse {
+    'counts': KnowledgeMarketTaskFileCountsOpenAPIResponse;
+    'file_details_available': boolean;
+    'items'?: Array<KnowledgeMarketTaskFileOpenAPIResponse>;
+    'page': number;
+    'page_size': number;
+    'total': number;
+}
 export interface KnowledgeMarketTaskListItemOpenAPIResponse {
     'can_cancel'?: boolean;
     'can_delete'?: boolean;
@@ -4012,6 +4055,7 @@ export interface KnowledgeMarketTaskListItemOpenAPIResponse {
     'market_item_id': string;
     'name': string;
     'overall_percent'?: number;
+    'parse'?: KnowledgeMarketTaskParseOpenAPIResponse;
     'progress': KnowledgeMarketTaskProgressOpenAPIResponse;
     'stage'?: string;
 }
@@ -15652,7 +15696,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Move a conversation within its pinned or ordinary history
+         * @summary Move a conversation within its pinned, recent, group, project or sibling list without changing relationships
          * @param {string} conversationId
          * @param {ConversationReorderRequest} conversationReorderRequest
          * @param {*} [options] Override http request option.
@@ -26475,7 +26519,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Move a conversation within its pinned or ordinary history
+         * @summary Move a conversation within its pinned, recent, group, project or sibling list without changing relationships
          * @param {string} conversationId
          * @param {ConversationReorderRequest} conversationReorderRequest
          * @param {*} [options] Override http request option.
@@ -30911,7 +30955,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary Move a conversation within its pinned or ordinary history
+         * @summary Move a conversation within its pinned, recent, group, project or sibling list without changing relationships
          * @param {DefaultApiApiCoreConversationsConversationIdReorderPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -36424,7 +36468,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary Move a conversation within its pinned or ordinary history
+     * @summary Move a conversation within its pinned, recent, group, project or sibling list without changing relationships
      * @param {DefaultApiApiCoreConversationsConversationIdReorderPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -43094,11 +43138,12 @@ export const KnowledgeMarketApiAxiosParamCreator = function (configuration?: Con
          * @param {number} [page]
          * @param {number} [pageSize]
          * @param {ApiCoreKnowledgeMarketTasksGetStatusEnum} [status] Filter background tasks by async job status.
-         * @param {string} [jobType] Async job type; defaults to knowledge_market_install.
+         * @param {string} [jobType] Async job type or all; defaults to knowledge_market_install.
+         * @param {ApiCoreKnowledgeMarketTasksGetViewEnum} [view] Summary omits per-file failures; pagination is clamped to available pages.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreKnowledgeMarketTasksGet: async (page?: number, pageSize?: number, status?: ApiCoreKnowledgeMarketTasksGetStatusEnum, jobType?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreKnowledgeMarketTasksGet: async (page?: number, pageSize?: number, status?: ApiCoreKnowledgeMarketTasksGetStatusEnum, jobType?: string, view?: ApiCoreKnowledgeMarketTasksGetViewEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/knowledge-market/tasks`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -43125,6 +43170,10 @@ export const KnowledgeMarketApiAxiosParamCreator = function (configuration?: Con
 
             if (jobType !== undefined) {
                 localVarQueryParameter['job_type'] = jobType;
+            }
+
+            if (view !== undefined) {
+                localVarQueryParameter['view'] = view;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -43194,6 +43243,55 @@ export const KnowledgeMarketApiAxiosParamCreator = function (configuration?: Con
             const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns the current user\'s job-owned file page and all four counts. Historical file snapshots are immutable. Unknown states are unfinished. Aggregate-only history reports file_details_available=false. Page numbers are clamped; page and page_size must be positive integers, page_size at most 100.
+         * @summary List files for one knowledge market task
+         * @param {string} jobId
+         * @param {number} [page]
+         * @param {number} [pageSize] Default 10, maximum 100.
+         * @param {ApiCoreKnowledgeMarketTasksJobIdFilesGetStatusEnum} [status] Default failed.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketTasksJobIdFilesGet: async (jobId: string, page?: number, pageSize?: number, status?: ApiCoreKnowledgeMarketTasksJobIdFilesGetStatusEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'jobId' is not null or undefined
+            assertParamExists('apiCoreKnowledgeMarketTasksJobIdFilesGet', 'jobId', jobId)
+            const localVarPath = `/api/core/knowledge-market/tasks/{job_id}/files`
+                .replace(`{${"job_id"}}`, encodeURIComponent(String(jobId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (page !== undefined) {
+                localVarQueryParameter['page'] = page;
+            }
+
+            if (pageSize !== undefined) {
+                localVarQueryParameter['page_size'] = pageSize;
+            }
+
+            if (status !== undefined) {
+                localVarQueryParameter['status'] = status;
+            }
 
             localVarHeaderParameter['Accept'] = 'application/json';
 
@@ -43399,12 +43497,13 @@ export const KnowledgeMarketApiFp = function(configuration?: Configuration) {
          * @param {number} [page]
          * @param {number} [pageSize]
          * @param {ApiCoreKnowledgeMarketTasksGetStatusEnum} [status] Filter background tasks by async job status.
-         * @param {string} [jobType] Async job type; defaults to knowledge_market_install.
+         * @param {string} [jobType] Async job type or all; defaults to knowledge_market_install.
+         * @param {ApiCoreKnowledgeMarketTasksGetViewEnum} [view] Summary omits per-file failures; pagination is clamped to available pages.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreKnowledgeMarketTasksGet(page?: number, pageSize?: number, status?: ApiCoreKnowledgeMarketTasksGetStatusEnum, jobType?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<KnowledgeMarketTaskListOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketTasksGet(page, pageSize, status, jobType, options);
+        async apiCoreKnowledgeMarketTasksGet(page?: number, pageSize?: number, status?: ApiCoreKnowledgeMarketTasksGetStatusEnum, jobType?: string, view?: ApiCoreKnowledgeMarketTasksGetViewEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<KnowledgeMarketTaskListOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketTasksGet(page, pageSize, status, jobType, view, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['KnowledgeMarketApi.apiCoreKnowledgeMarketTasksGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -43433,6 +43532,22 @@ export const KnowledgeMarketApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketTasksJobIdDelete(jobId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['KnowledgeMarketApi.apiCoreKnowledgeMarketTasksJobIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Returns the current user\'s job-owned file page and all four counts. Historical file snapshots are immutable. Unknown states are unfinished. Aggregate-only history reports file_details_available=false. Page numbers are clamped; page and page_size must be positive integers, page_size at most 100.
+         * @summary List files for one knowledge market task
+         * @param {string} jobId
+         * @param {number} [page]
+         * @param {number} [pageSize] Default 10, maximum 100.
+         * @param {ApiCoreKnowledgeMarketTasksJobIdFilesGetStatusEnum} [status] Default failed.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreKnowledgeMarketTasksJobIdFilesGet(jobId: string, page?: number, pageSize?: number, status?: ApiCoreKnowledgeMarketTasksJobIdFilesGetStatusEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<KnowledgeMarketTaskFilesOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketTasksJobIdFilesGet(jobId, page, pageSize, status, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['KnowledgeMarketApi.apiCoreKnowledgeMarketTasksJobIdFilesGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -43548,7 +43663,7 @@ export const KnowledgeMarketApiFactory = function (configuration?: Configuration
          * @throws {RequiredError}
          */
         apiCoreKnowledgeMarketTasksGet(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<KnowledgeMarketTaskListOpenAPIResponse> {
-            return localVarFp.apiCoreKnowledgeMarketTasksGet(requestParameters.page, requestParameters.pageSize, requestParameters.status, requestParameters.jobType, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreKnowledgeMarketTasksGet(requestParameters.page, requestParameters.pageSize, requestParameters.status, requestParameters.jobType, requestParameters.view, options).then((request) => request(axios, basePath));
         },
         /**
          * Stops the current user\'s latest single-item submission or cancels only WAITING files. Running files and successful content are retained. Counts report confirmed cancellation, running files, and outcomes requiring recheck. No automatic replay after response loss.
@@ -43569,6 +43684,16 @@ export const KnowledgeMarketApiFactory = function (configuration?: Configuration
          */
         apiCoreKnowledgeMarketTasksJobIdDelete(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<KnowledgeMarketTaskDeletedOpenAPIResponse> {
             return localVarFp.apiCoreKnowledgeMarketTasksJobIdDelete(requestParameters.jobId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Returns the current user\'s job-owned file page and all four counts. Historical file snapshots are immutable. Unknown states are unfinished. Aggregate-only history reports file_details_available=false. Page numbers are clamped; page and page_size must be positive integers, page_size at most 100.
+         * @summary List files for one knowledge market task
+         * @param {KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdFilesGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketTasksJobIdFilesGet(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdFilesGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<KnowledgeMarketTaskFilesOpenAPIResponse> {
+            return localVarFp.apiCoreKnowledgeMarketTasksJobIdFilesGet(requestParameters.jobId, requestParameters.page, requestParameters.pageSize, requestParameters.status, options).then((request) => request(axios, basePath));
         },
         /**
          * Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.
@@ -43661,9 +43786,14 @@ export interface KnowledgeMarketApiApiCoreKnowledgeMarketTasksGetRequest {
     readonly status?: ApiCoreKnowledgeMarketTasksGetStatusEnum
 
     /**
-     * Async job type; defaults to knowledge_market_install.
+     * Async job type or all; defaults to knowledge_market_install.
      */
     readonly jobType?: string
+
+    /**
+     * Summary omits per-file failures; pagination is clamped to available pages.
+     */
+    readonly view?: ApiCoreKnowledgeMarketTasksGetViewEnum
 }
 
 /**
@@ -43678,6 +43808,25 @@ export interface KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdCancelPostReq
  */
 export interface KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdDeleteRequest {
     readonly jobId: string
+}
+
+/**
+ * Request parameters for apiCoreKnowledgeMarketTasksJobIdFilesGet operation in KnowledgeMarketApi.
+ */
+export interface KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdFilesGetRequest {
+    readonly jobId: string
+
+    readonly page?: number
+
+    /**
+     * Default 10, maximum 100.
+     */
+    readonly pageSize?: number
+
+    /**
+     * Default failed.
+     */
+    readonly status?: ApiCoreKnowledgeMarketTasksJobIdFilesGetStatusEnum
 }
 
 /**
@@ -43770,7 +43919,7 @@ export class KnowledgeMarketApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreKnowledgeMarketTasksGet(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketTasksGet(requestParameters.page, requestParameters.pageSize, requestParameters.status, requestParameters.jobType, options).then((request) => request(this.axios, this.basePath));
+        return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketTasksGet(requestParameters.page, requestParameters.pageSize, requestParameters.status, requestParameters.jobType, requestParameters.view, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -43793,6 +43942,17 @@ export class KnowledgeMarketApi extends BaseAPI {
      */
     public apiCoreKnowledgeMarketTasksJobIdDelete(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdDeleteRequest, options?: RawAxiosRequestConfig) {
         return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketTasksJobIdDelete(requestParameters.jobId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns the current user\'s job-owned file page and all four counts. Historical file snapshots are immutable. Unknown states are unfinished. Aggregate-only history reports file_details_available=false. Page numbers are clamped; page and page_size must be positive integers, page_size at most 100.
+     * @summary List files for one knowledge market task
+     * @param {KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdFilesGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreKnowledgeMarketTasksJobIdFilesGet(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdFilesGetRequest, options?: RawAxiosRequestConfig) {
+        return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketTasksJobIdFilesGet(requestParameters.jobId, requestParameters.page, requestParameters.pageSize, requestParameters.status, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -43841,6 +44001,17 @@ export const ApiCoreKnowledgeMarketTasksGetStatusEnum = {
     Canceled: 'canceled'
 } as const;
 export type ApiCoreKnowledgeMarketTasksGetStatusEnum = typeof ApiCoreKnowledgeMarketTasksGetStatusEnum[keyof typeof ApiCoreKnowledgeMarketTasksGetStatusEnum];
+export const ApiCoreKnowledgeMarketTasksGetViewEnum = {
+    Summary: 'summary'
+} as const;
+export type ApiCoreKnowledgeMarketTasksGetViewEnum = typeof ApiCoreKnowledgeMarketTasksGetViewEnum[keyof typeof ApiCoreKnowledgeMarketTasksGetViewEnum];
+export const ApiCoreKnowledgeMarketTasksJobIdFilesGetStatusEnum = {
+    Success: 'success',
+    Failed: 'failed',
+    Canceled: 'canceled',
+    Unfinished: 'unfinished'
+} as const;
+export type ApiCoreKnowledgeMarketTasksJobIdFilesGetStatusEnum = typeof ApiCoreKnowledgeMarketTasksJobIdFilesGetStatusEnum[keyof typeof ApiCoreKnowledgeMarketTasksJobIdFilesGetStatusEnum];
 
 
 /**

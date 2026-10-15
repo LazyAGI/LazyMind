@@ -1,8 +1,28 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { batchCreateAutomationGroup, cancelSchedule, cancelTask, createAutomationGroup, createSchedule, deleteAutomationGroup, deleteSchedule, enableSchedule, getTask, listAutomationGroups, listSchedules, listScheduleTasks, listTasks, moveSchedule, removeTask, runScheduleNow, updateSchedule } from './api';
+import { batchCreateAutomationGroup, cancelSchedule, cancelTask, createAutomationGroup, createSchedule, deleteAutomationGroup, deleteSchedule, enableSchedule, getTask, getTaskGoal, listAutomationGroups, listSchedules, listScheduleTasks, listTasks, moveSchedule, removeTask, runScheduleNow, updateSchedule } from './api';
 const http = vi.hoisted(() => ({ request: vi.fn(), defaults: {} }));
 vi.mock('@/components/request', () => ({ BASE_URL: '', axiosInstance: http }));
 beforeEach(() => { vi.clearAllMocks(); http.request.mockResolvedValue({ data: {} }); });
+it('loads the full input for this execution across history pages, preserving second precision', async () => {
+  const task = { conversation_id: 'a/b', title: 'Research...', created_at: '2026-09-30T01:57:11.875Z' };
+  const controller = new AbortController();
+  http.request.mockResolvedValueOnce({ data: { history: [{ query: 'Research later request', create_time: '2026-09-30T02:00:00Z' }], next_page_token: 'older' } });
+  http.request.mockResolvedValueOnce({ data: { history: [
+    { query: 'Research the complete original goal\nwith all requirements', create_time: '2026-09-30T01:57:11Z' },
+    { query: 'Research previous execution', create_time: '2026-09-29T01:57:11Z' },
+  ], next_page_token: 'still-older' } });
+  expect(await getTaskGoal(task, controller.signal)).toBe('Research the complete original goal\nwith all requirements');
+  expect(http.request).toHaveBeenCalledTimes(2);
+  expect(http.request.mock.calls[0][0]).toMatchObject({ url: '/api/core/conversations/a%2Fb:history?page_size=50', signal: controller.signal, silentError: true });
+  expect(http.request.mock.lastCall![0].url).toContain('page_token=older');
+});
+it('does not use an unrelated input or an input from a previous execution as the full goal', async () => {
+  http.request.mockResolvedValue({ data: { history: [
+    { query: 'Different task', create_time: '2026-09-30T01:57:12Z' },
+    { query: 'Research previous execution', create_time: '2026-09-29T01:57:11Z' },
+  ] } });
+  expect(await getTaskGoal({ conversation_id: 'conv', title: 'Research...', created_at: '2026-09-30T01:57:11Z' }, new AbortController().signal)).toBeUndefined();
+});
 it('uses generated request serialization for task filters and opaque IDs', async () => {
   await listTasks({ status: 'running', task_type: 'scheduled', keyword: 'a & b', page: 2, page_size: 10 });
   let request = http.request.mock.calls[0][0];

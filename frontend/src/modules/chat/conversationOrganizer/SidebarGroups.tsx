@@ -1,6 +1,9 @@
+import ScopedConversationList from "../components/RecordList/ScopedConversationList";
+import { moveConversationItems } from "../components/RecordList/conversationReorder";
+import { ChatServiceApi } from "@/modules/chat/utils/request";
 import ConversationPreview from "../components/ConversationPreview";
-import { MessageOutlined, FolderOpenOutlined, PlusOutlined, EllipsisOutlined, PushpinOutlined, LoadingOutlined, HolderOutlined } from "@ant-design/icons";
-import { Button, Checkbox, Dropdown } from "antd";
+import { MessageOutlined, FolderOpenOutlined, PlusOutlined, EllipsisOutlined, PushpinOutlined, LoadingOutlined } from "@ant-design/icons";
+import { Button, Checkbox, Dropdown, message } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -53,6 +56,7 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
   const [dropTarget, setDropTarget] = useState("");
   const [memberDropTarget, setMemberDropTarget] = useState<{ id: string; position: 'before' | 'after' } | null>(null);
   const [busy, setBusy] = useState(false);
+  const memberSaveRef = useRef(false);
   const [selectingGroup, setSelectingGroup] = useState('');
   const selectionVersion = useRef(0);
   const onMembersChange = batchSelection?.onMembersChange;
@@ -75,21 +79,23 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
     }));
     return { matched, details };
   }, [groups, searchText, isTaskConv, includeProjects, projectsOnly, assistants]);
-  useEffect(() => {
-    let disposed = false;
-    const refresh = () => void load().then(({ matched, details }) => {
-      if (disposed) return;
+  const refreshVersion = useRef(0);
+  const refresh = useCallback(async () => {
+    const version = ++refreshVersion.current;
+    try {
+      const { matched, details } = await load();
+      if (version !== refreshVersion.current) return;
       setMatches(new Set(matched.map(g => g.id)));
       setMembers(Object.fromEntries(details.map(([id, detail]) => [id, detail.conversations])));
       setTokens(Object.fromEntries(details.map(([id, detail]) => [id, detail.nextPageToken])));
-    }).catch(() => undefined);
-    refresh();
-    return () => { disposed = true; };
+    } catch { /* Keep the current members available for retry. */ }
   }, [load]);
+  useEffect(() => { void refresh(); return () => { ++refreshVersion.current; }; }, [refresh]);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const batchMode = Boolean(batchSelection);
   useEffect(() => {
     setSelectingGroup('');
+    memberSaveRef.current = false; setBusy(false);
     return () => { selectionVersion.current++; };
   }, [load, batchMode, batchSelection?.checkedIds]);
   const toggle = (setter: typeof setCollapsed, id: string) => setter(old => { const next = new Set(old); if (next.has(id)) next.delete(id); else next.add(id); return next; });
@@ -105,14 +111,26 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
     setMembers(old => ({ ...old, [g.id]: [...(old[g.id] || []), ...detail.conversations] }));
     setTokens(old => ({ ...old, [g.id]: detail.nextPageToken }));
   };
-  const moveMember = async (groupId: string, id: string, target?: { target_conversation_id: string; position: 'before' | 'after' }) => {
-    setBusy(true);
+  const moveMember = async (groupId: string, id: string, target?: { target_conversation_id: string; position: 'before' | 'after' }, sameGroup = false) => {
+    if (memberSaveRef.current) return;
+    const version = selectionVersion.current;
+    memberSaveRef.current = true; setBusy(true);
     try {
-      if (target) await assignConversation(groupId, id, target);
-      else await assignConversation(groupId, id);
-      emitConversationGroupsChanged();
-    } catch { /* The shared request interceptor displays the API error. */ }
-    finally { setBusy(false); }
+      if (sameGroup && target) {
+        const move = { movedId: id, targetId: target.target_conversation_id, position: target.position };
+        setMembers(previous => ({ ...previous, [groupId]: moveConversationItems(previous[groupId] || [], move) }));
+        await ChatServiceApi().conversationServiceReorder(id, target.target_conversation_id, target.position);
+        if (version === selectionVersion.current) await refresh();
+      } else {
+        if (target) await assignConversation(groupId, id, target);
+        else await assignConversation(groupId, id);
+        if (version === selectionVersion.current) emitConversationGroupsChanged();
+      }
+    } catch {
+      if (sameGroup && version === selectionVersion.current) { message.error(t("chat.reorderConversationFailed")); await refresh(); }
+    } finally {
+      if (version === selectionVersion.current) { memberSaveRef.current = false; setBusy(false); }
+    }
   };
   const selectGroup = async (g: ConversationGroup, checked: boolean) => {
     if (!batchSelection || selectingGroup) return;
@@ -143,6 +161,30 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
     const open = Boolean(searchText) || !collapsed.has(g.id);
     const visible = batchSelection || searchText || expanded.has(g.id) ? all : all.slice(0, 5);
     const selected = location.pathname.endsWith(`/groups/${g.id}`);
+    const renderMember = (c: ConversationGroupMember) => <ConversationPreview key={c.conversation_id} conversationId={c.conversation_id} title={c.display_name || c.conversation_id} summary={c.summary} updateTime={c.updated_at} isTask={Boolean(c.is_task_conv)} groupName={g.name} disabled={Boolean(batchSelection) || renamingId === c.conversation_id}><div className={`conversation-group-member ${c.conversation_id === currentConversationId ? "active" : ""} ${memberDropTarget?.id === c.conversation_id ? `member-drop-${memberDropTarget.position}` : ''}`} draggable={g.kind !== "project" && renamingId !== c.conversation_id && !batchSelection && !searchText && !busy}
+          onDragStart={e => startConversationDrag(e, c.conversation_id, g.id, Boolean(c.is_task_conv))}
+          onDragEnd={() => { setDropTarget(''); setMemberDropTarget(null); }}
+          onDragOver={e => {
+            if (g.kind === "project" || batchSelection || searchText || busy || !e.dataTransfer.types.includes(CONVERSATION_DRAG)) return;
+            e.preventDefault(); e.stopPropagation(); setDropTarget('');
+            const row = e.currentTarget.getBoundingClientRect();
+            setMemberDropTarget({ id: c.conversation_id, position: e.clientY > row.top + row.height / 2 ? 'after' : 'before' });
+          }}
+          onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setMemberDropTarget(null); }}
+          onDrop={e => {
+            if (!e.dataTransfer.types.includes(CONVERSATION_DRAG)) return;
+            e.preventDefault(); e.stopPropagation(); setMemberDropTarget(null); setDropTarget('');
+            if (g.kind === "project" || batchSelection || searchText || busy) return;
+            const source = readConversationDrag(e);
+            if (!source || source.id === c.conversation_id || Boolean(source.isTaskConv) !== Boolean(g.is_task_conv)) return;
+            const row = e.currentTarget.getBoundingClientRect();
+            void moveMember(g.id, source.id, { target_conversation_id: c.conversation_id, position: e.clientY > row.top + row.height / 2 ? 'after' : 'before' }, source.groupId === g.id);
+          }}>
+          {batchSelection ? <Checkbox className="conversation-group-batch-checkbox" checked={batchSelection.checkedIds.includes(c.conversation_id)} onChange={event => batchSelection.onToggle(c.conversation_id, event.target.checked)}><span title={c.display_name}>{c.display_name || c.conversation_id}</span></Checkbox> : renamingId === c.conversation_id ? <ConversationTitleEditor key={c.conversation_id} conversationId={c.conversation_id} initialTitle={c.display_name} onClose={() => setRenamingId(null)} /> : <button data-conversation-title onClick={() => navigate(getChatConversationPath(c.conversation_id))}>{c.display_name || c.conversation_id}</button>}
+          {renamingId !== c.conversation_id && c.updated_at && dayjs(c.updated_at).isValid() && <time className="conversation-group-member-time" dateTime={c.updated_at}>{dayjs(c.updated_at).format("MM/DD")}</time>}
+          {!batchSelection && renamingId !== c.conversation_id && <ConversationMembership onRename={() => setRenamingId(c.conversation_id)} pinned={Boolean(c.pinned_at)} isTaskConv={Boolean(c.is_task_conv)} conversationId={c.conversation_id} groupId={g.id} groupKind={g.kind} title={c.display_name} />}
+
+        </div></ConversationPreview>;
     return <ConversationGroupDropZone key={g.id} groupId={g.id} groupName={g.name} isTaskConv={Boolean(g.is_task_conv)} disabled={g.kind === "project" || Boolean(batchSelection || searchText || busy)} className={`conversation-group ${dropTarget === g.id ? "group-drop-target" : ""}`} onDragOver={e => { if (!batchSelection && !searchText && !busy && ((g.kind !== "project" && e.dataTransfer.types.includes(CONVERSATION_DRAG)) || e.dataTransfer.types.includes(GROUP_DRAG))) { e.preventDefault(); setDropTarget(g.id); } }} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTarget(""); }} onDrop={async e => {
       e.preventDefault(); e.stopPropagation(); setDropTarget(""); if (batchSelection || searchText || busy) return;
       const source = e.dataTransfer.getData(GROUP_DRAG), conversation = readConversationDrag(e);
@@ -172,30 +214,12 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
         ] }}><Button type="text" size="small" icon={<EllipsisOutlined />} aria-label={t("conversationOrganizer.groupMore", { name: g.name })} /></Dropdown></>}
       </div>
       {open && <div className="conversation-group-members">
-        {visible.map(c => <ConversationPreview key={c.conversation_id} conversationId={c.conversation_id} title={c.display_name || c.conversation_id} summary={c.summary} updateTime={c.updated_at} isTask={Boolean(c.is_task_conv)} groupName={g.name} disabled={Boolean(batchSelection) || renamingId === c.conversation_id}><div className={`conversation-group-member ${c.conversation_id === currentConversationId ? "active" : ""} ${memberDropTarget?.id === c.conversation_id ? `member-drop-${memberDropTarget.position}` : ''}`} draggable={g.kind !== "project" && renamingId !== c.conversation_id && !batchSelection && !searchText && !busy}
-          onDragStart={e => startConversationDrag(e, c.conversation_id, g.id, Boolean(c.is_task_conv))}
-          onDragEnd={() => { setDropTarget(''); setMemberDropTarget(null); }}
-          onDragOver={e => {
-            if (g.kind === "project" || batchSelection || searchText || busy || !e.dataTransfer.types.includes(CONVERSATION_DRAG)) return;
-            e.preventDefault(); e.stopPropagation(); setDropTarget('');
-            const row = e.currentTarget.getBoundingClientRect();
-            setMemberDropTarget({ id: c.conversation_id, position: e.clientY > row.top + row.height / 2 ? 'after' : 'before' });
-          }}
-          onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setMemberDropTarget(null); }}
-          onDrop={e => {
-            if (!e.dataTransfer.types.includes(CONVERSATION_DRAG)) return;
-            e.preventDefault(); e.stopPropagation(); setMemberDropTarget(null); setDropTarget('');
-            if (g.kind === "project" || batchSelection || searchText || busy) return;
-            const source = readConversationDrag(e);
-            if (!source || source.id === c.conversation_id || Boolean(source.isTaskConv) !== Boolean(g.is_task_conv)) return;
-            const row = e.currentTarget.getBoundingClientRect();
-            void moveMember(g.id, source.id, { target_conversation_id: c.conversation_id, position: e.clientY > row.top + row.height / 2 ? 'after' : 'before' });
-          }}>
-          {batchSelection ? <Checkbox className="conversation-group-batch-checkbox" checked={batchSelection.checkedIds.includes(c.conversation_id)} onChange={event => batchSelection.onToggle(c.conversation_id, event.target.checked)}><span title={c.display_name}>{c.display_name || c.conversation_id}</span></Checkbox> : renamingId === c.conversation_id ? <ConversationTitleEditor key={c.conversation_id} conversationId={c.conversation_id} initialTitle={c.display_name} onClose={() => setRenamingId(null)} /> : <button onClick={() => navigate(getChatConversationPath(c.conversation_id))}>{c.display_name || c.conversation_id}</button>}
-          {renamingId !== c.conversation_id && c.updated_at && dayjs(c.updated_at).isValid() && <time className="conversation-group-member-time" dateTime={c.updated_at}>{dayjs(c.updated_at).format("MM/DD")}</time>}
-          {!batchSelection && renamingId !== c.conversation_id && <ConversationMembership onRename={() => setRenamingId(c.conversation_id)} pinned={Boolean(c.pinned_at)} isTaskConv={Boolean(c.is_task_conv)} conversationId={c.conversation_id} groupId={g.id} groupKind={g.kind} title={c.display_name} />}
-          {g.kind !== "project" && !batchSelection && !searchText && renamingId !== c.conversation_id && <span className="conversation-member-drag-handle" title={t('conversationOrganizer.memberDragHint')}><HolderOutlined /></span>}
-        </div></ConversationPreview>)}
+        {batchSelection ? visible.map(renderMember) : <ScopedConversationList items={visible} scope={`${g.id}:${isTaskConv}:${assistants || ""}:${searchText}`}
+          disabled={Boolean(searchText || busy || renamingId)}
+          onSavingChange={saving => { if (saving) ++refreshVersion.current; setBusy(saving); }}
+          onCommitted={move => setMembers(previous => ({ ...previous, [g.id]: moveConversationItems(previous[g.id] || [], move) }))}
+          onRefresh={refresh}>{renderMember}</ScopedConversationList>}
+
         {(batchSelection ? Boolean(tokens[g.id]) : all.length > 5 || tokens[g.id]) && <Button type="link" size="small" className="conversation-group-more" disabled={Boolean(selectingGroup)} onClick={() => void more(g)}>{t(!batchSelection && expanded.has(g.id) && !tokens[g.id] ? "conversationOrganizer.showLess" : "conversationOrganizer.showMore")}</Button>}
       </div>}
     </ConversationGroupDropZone>;
