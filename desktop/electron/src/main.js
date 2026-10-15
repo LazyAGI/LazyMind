@@ -25,6 +25,7 @@ const { createInputRecorder } = require("./input-recording");
 const { createRecordingHelper } = require("./recording-helper");
 const { resolveWindowsDesktopPaths } = require("./desktop-paths");
 const { resolveRuntimeLocalFile } = require("./runtime-local-file");
+const { revealDirectoryFile } = require("./directory-file");
 const {
   desktopRuntimeReady,
   isRuntimeOwnershipConflict,
@@ -3030,6 +3031,20 @@ async function materializeArtifactFile(payload, destPath) {
 }
 
 ipcMain.handle("lazymind:showItemInFolder", async (_event, payload) => {
+  if (payload?.directoryEntry) {
+    return revealDirectoryFile(payload.directoryEntry, {
+      showItemInFolder: value => shell.showItemInFolder(value),
+      lookup: async ({ directoryId, entryId }) => {
+        const { corePort, userId } = await desktopWorkspaceRuntime();
+        const response = await fetch(`http://127.0.0.1:${corePort}/document-directories/${encodeURIComponent(directoryId)}/entries/${encodeURIComponent(entryId)}/local-file?metadata_only=true`, {
+          headers: { "X-User-Id": userId }, signal: AbortSignal.timeout(30_000),
+        });
+        const result = await response.json();
+        if (!response.ok || result.code !== 0) throw new Error("Directory file is unavailable");
+        return result.data;
+      },
+    });
+  }
   const source = typeof payload === "string" ? payload : String(payload?.source || "");
   const localPath = await resolveExistingArtifactPath(source);
   if (localPath) {

@@ -146,6 +146,7 @@ export type DesktopAgentIntegrationStatusesResult =
 
 export interface DesktopArtifactFilePayload {
   source: string;
+  directoryEntry?: { directoryId: string; entryId: string };
   filename?: string;
   data?: ArrayBuffer;
 }
