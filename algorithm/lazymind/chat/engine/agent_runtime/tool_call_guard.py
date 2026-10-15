@@ -45,9 +45,37 @@ _MAX_TOOL_LOG_CHARS = 800
 _RESULT_LOG_KEYS = (
     'target', 'display_name', 'kind', 'file_id', 'offset', 'end_line',
     'total_lines', 'eof', 'next_offset', 'limit', 'pattern', 'total',
+    'content_hash', 'error_code', 'code',
     'truncated', 'status', 'filename', 'corpus', 'skipped', 'channels',
 )
 _REPEATED_CALL_THRESHOLD = 3
+_RESOURCE_TOOL_NAMES = frozenset({'read_resource', 'read_file_resource', 'search_file_resource'})
+_RESOURCE_ERROR_CODES = frozenset({
+    'RESOURCE_NOT_FOUND',
+    'RESOURCE_VERSION_CHANGED',
+    'RESOURCE_PERMISSION_DENIED',
+    'RESOURCE_AUTH_UNAVAILABLE',
+})
+
+
+def _normalize_resource_failure(tool_name: str, result: Any) -> Any:
+    """Preserve a machine-readable resource code in the ToolManager envelope."""
+    if (
+        tool_name not in _RESOURCE_TOOL_NAMES
+        or not isinstance(result, dict)
+        or result.get('ok') is not False
+        or result.get('error_code')
+    ):
+        return result
+    value = result.get('value')
+    if not isinstance(value, str):
+        return result
+    code = next((item for item in _RESOURCE_ERROR_CODES if value.startswith(item + ':')), None)
+    if not code:
+        return result
+    normalized = dict(result)
+    normalized['error_code'] = code
+    return normalized
 
 
 def _requires_expanded_budget(tool_name: str) -> bool:
@@ -94,7 +122,7 @@ def _summarize_tool_result(result: Any) -> dict[str, Any]:
         return summary
     if 'ok' in result:
         summary['ok'] = result.get('ok')
-    for key in ('error_type', 'dependency', 'exit_code'):
+    for key in ('error_type', 'error_code', 'code', 'dependency', 'exit_code'):
         if key in result:
             summary[key] = str(result[key])[:240]
     msg = result.get('msg')
@@ -587,6 +615,10 @@ class ToolExecutionMiddleware:
         for result, record in executed:
             if record.index in decision.blocked_results or record.index in decision.duplicate_sources:
                 continue
+            normalized_result = _normalize_resource_failure(record.tool_name, result)
+            if normalized_result is not result:
+                record = replace(record, result=normalized_result)
+            result = normalized_result
             if (record.disposition is ToolExecutionDisposition.EXECUTED
                     and record.tool_name in {'run_script', 'run_skill_script'}
                     and self._opaque_tool_is_trusted(record.tool_name)):

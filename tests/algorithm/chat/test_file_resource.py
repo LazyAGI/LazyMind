@@ -40,7 +40,7 @@ def test_scoped_reader_reads_spill_in_active_execution_workspace(monkeypatch, tm
             cfg['workflow_workspace_path'] = str(root)
     (root / 'tool_spills').mkdir(parents=True)
     (root / 'tool_spills' / 'result.txt').write_text('first\nsecond\nthird', encoding='utf-8')
-    _, read = workspace_tools.build_resource_read_tools()
+    _, _, read = workspace_tools.build_resource_read_tools()
     if not scoped:
         read = workspace_tools.read_file_resource
     first = read('workspace://tool_spills/result.txt', limit=1)
@@ -48,6 +48,48 @@ def test_scoped_reader_reads_spill_in_active_execution_workspace(monkeypatch, tm
     rest = read('workspace://tool_spills/result.txt', offset=2)
     assert rest['eof'] is True
     assert 'second' in str(rest) and 'third' in str(rest)
+
+
+def test_read_resource_returns_hash_and_detects_version_change(monkeypatch, tmp_path):
+    _set_scope(monkeypatch, tmp_path)
+    spill = tmp_path / 'tool_spills' / 'versioned.txt'
+    spill.parent.mkdir(parents=True)
+    spill.write_text('first\nsecond\nthird', encoding='utf-8')
+
+    first = workspace_tools.read_resource('workspace://tool_spills/versioned.txt', limit=1)
+    assert first['content_hash'].startswith('sha256:')
+    second = workspace_tools.read_resource(
+        'workspace://tool_spills/versioned.txt',
+        offset=2,
+        expected_hash=first['content_hash'],
+    )
+    assert 'second' in second['text']
+
+    spill.write_text('changed\nsecond\nthird', encoding='utf-8')
+    with pytest.raises(ToolExecutionError, match='RESOURCE_VERSION_CHANGED'):
+        workspace_tools.read_resource(
+            'workspace://tool_spills/versioned.txt',
+            offset=2,
+            expected_hash=first['content_hash'],
+        )
+
+
+def test_read_resource_handles_spills_over_the_legacy_full_read_limit(monkeypatch, tmp_path):
+    _set_scope(monkeypatch, tmp_path)
+    spill = tmp_path / 'tool_spills' / 'large.txt'
+    spill.parent.mkdir(parents=True)
+    spill.write_text(('payload\n' * 3_000_000), encoding='utf-8')
+
+    result = workspace_tools.read_resource('workspace://tool_spills/large.txt', limit=2)
+    assert result['eof'] is False
+    assert result['next_offset'] == 3
+    assert result['content_hash'].startswith('sha256:')
+
+
+def test_read_resource_requires_a_trusted_execution_workspace(monkeypatch):
+    monkeypatch.setattr(resolver.lazyllm, 'globals', {'agentic_config': {}})
+    with pytest.raises(ToolExecutionError, match='RESOURCE_AUTH_UNAVAILABLE'):
+        workspace_tools.read_resource('workspace://tool_spills/result.txt')
 
 
 def test_spill_notice_identifies_registered_reader_and_readable_target(monkeypatch, tmp_path):
@@ -59,9 +101,9 @@ def test_spill_notice_identifies_registered_reader_and_readable_target(monkeypat
     notice, *_ = compact_or_spill_tool_result(
         'KBToolkit_read_document', 'first\nsecond\nthird', workspace=str(tmp_path), threshold=1,
     )
-    tool, target = re.search(r'Use (\w+)\(target="([^"]+)"', notice).groups()
+    tool, target = re.search(r'Use (\w+)\(uri="([^"]+)"', notice).groups()
     manager = ToolManager(workspace_tools.build_resource_read_tools())
-    result = manager._tool_call[tool]({'target': target, 'offset': 2})
+    result = manager._tool_call[tool]({'uri': target, 'offset': 2})
     assert 'second' in str(result) and 'third' in str(result)
 
 
@@ -78,7 +120,7 @@ def test_subagent_spill_does_not_fall_back_to_parent_workspace(monkeypatch, tmp_
 def test_scoped_spill_reader_rejects_escape(monkeypatch, tmp_path, target):
     _set_scope(monkeypatch, tmp_path)
     (tmp_path / 'secret.txt').write_text('secret', encoding='utf-8')
-    _, read = workspace_tools.build_resource_read_tools()
+    _, _, read = workspace_tools.build_resource_read_tools()
     with pytest.raises(ToolExecutionError):
         read(target)
 
@@ -91,7 +133,7 @@ def test_scoped_spill_reader_rejects_symlink_outside_spill_directory(monkeypatch
     secret.write_text('secret', encoding='utf-8')
     (root / 'tool_spills' / 'result.txt').symlink_to(secret)
     _set_scope(monkeypatch, root)
-    _, read = workspace_tools.build_resource_read_tools()
+    _, _, read = workspace_tools.build_resource_read_tools()
     with pytest.raises(ToolExecutionError):
         read('workspace://tool_spills/result.txt')
 
@@ -383,7 +425,7 @@ def test_grep_zero_matches_has_explicit_footer(monkeypatch, tmp_path):
 def test_subagent_always_has_unified_read_tools():
     names = {tool.__name__ for tool in _build_subagent_tools([])}
 
-    assert {'search_file_resource', 'read_file_resource'} <= names
+    assert {'search_file_resource', 'read_file_resource', 'read_resource'} <= names
 
 
 def test_main_agent_always_registers_unified_read_tools():
@@ -393,7 +435,7 @@ def test_main_agent_always_registers_unified_read_tools():
     names = set(__import__('lazyllm').tools.ToolManager(_build_chat_artifact_tools()).tools_info)
     optional = {cfg.name for cfg in DEFAULT_TOOLS}
 
-    assert {'read_file_resource', 'search_file_resource', 'save_chat_artifact'} <= names
+    assert {'read_file_resource', 'read_resource', 'search_file_resource', 'save_chat_artifact'} <= names
     assert {'read', 'write', 'edit', 'ls', 'grep'}.isdisjoint(names)
     assert {'search_file_resource', 'read_file_resource'}.isdisjoint(optional)
 
