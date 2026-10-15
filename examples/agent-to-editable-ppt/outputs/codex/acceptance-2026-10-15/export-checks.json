@@ -1,0 +1,96 @@
+{
+  "date": "2026-10-15",
+  "keynote_version": "14.5",
+  "notes_authors_verified": [
+    "Tojan76",
+    "Gisling",
+    "Baomi",
+    "Legolas1024"
+  ],
+  "keynote_roundtrip": "Opened product PPTX, edited title, saved .key, closed/reopened, exported PPTX, closed/reopened; edited title and four slides persisted. Native UI initially required owner assistance to open the file.",
+  "limits": [
+    "Noto Serif SC missing in Keynote; pixel-identical layout not established",
+    "Visible footer placeholders remain",
+    "Keynote roundtrip uses the earlier title-edited deck, before notes attribution updates",
+    "DSH current-version PPT run and independent reproduction pending"
+  ],
+  "exports": [
+    {
+      "file": "palace-notes-reviewed.pptx",
+      "sha256": "b88af0a6e6a34209d5dd1ffb00b2132179cafc19aa62d6d43ce6951bd504f733",
+      "slides": [
+        {
+          "file": "ppt/slides/slide1.xml",
+          "text_runs": 13,
+          "pictures": 1,
+          "shapes": 33
+        },
+        {
+          "file": "ppt/slides/slide2.xml",
+          "text_runs": 10,
+          "pictures": 1,
+          "shapes": 22
+        },
+        {
+          "file": "ppt/slides/slide3.xml",
+          "text_runs": 14,
+          "pictures": 1,
+          "shapes": 39
+        },
+        {
+          "file": "ppt/slides/slide4.xml",
+          "text_runs": 17,
+          "pictures": 1,
+          "shapes": 52
+        }
+      ]
+    },
+    {
+      "file": "palace-keynote-edit-check.pptx",
+      "sha256": "a91da949406d2db2bd7ff62d3d53058cfc9ac11214577448692991b958b4427a",
+      "slides": [
+        {
+          "file": "ppt/slides/slide1.xml",
+          "text_runs": 13,
+          "pictures": 1,
+          "shapes": 29
+        },
+        {
+          "file": "ppt/slides/slide2.xml",
+          "text_runs": 10,
+          "pictures": 1,
+          "shapes": 19
+        },
+        {
+          "file": "ppt/slides/slide3.xml",
+          "text_runs": 14,
+          "pictures": 1,
+          "shapes": 37
+        },
+        {
+          "file": "ppt/slides/slide4.xml",
+          "text_runs": 17,
+          "pictures": 1,
+          "shapes": 47
+        }
+      ]
+    }
+  ],
+  "packaged_files": [
+    {
+      "file": "keynote-pptx-reopened.png",
+      "sha256": "021635c788a389abd6fe289aa623cf6be2ef9d3c11973e3b1399ea4420611279",
+      "bytes": 115107
+    },
+    {
+      "file": "palace-title-edited-pdf.zip",
+      "sha256": "1316b6763db68b4bd59de81a8c86a71abee3773d11e1082b8e6ed098a88b7c8c",
+      "bytes": 12957312
+    },
+    {
+      "file": "palace-notes-reviewed.pptx",
+      "sha256": "b88af0a6e6a34209d5dd1ffb00b2132179cafc19aa62d6d43ce6951bd504f733",
+      "bytes": 27432730
+    }
+  ]
+}

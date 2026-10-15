@@ -8,7 +8,7 @@ These examples reuse existing LazyMind cases. A reference video demonstrates a p
 
 | Example | What to inspect | Reproduction status |
 | --- | --- | --- |
-| [Agent → editable PPT](agent-to-editable-ppt/README.md) | Review intermediate material, make a local edit, and deliver an editable file | Original prompt and historical DSH PDF available; current-version runs and matching PPTX pending |
+| [Agent → editable PPT](agent-to-editable-ppt/README.md) | Review intermediate material, make a local edit, and deliver an editable file | Codex deck, local edit and Keynote roundtrip checked; final review, DSH run and independent reproduction pending |
 
 Start with [connecting your Agent](shared/agent-setup.md). A running LazyMind instance and its required services are prerequisites; the plugin is not a standalone replacement for LazyMind.
 

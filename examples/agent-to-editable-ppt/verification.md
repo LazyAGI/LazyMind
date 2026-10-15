@@ -1,26 +1,26 @@
 # Verification / 验收记录
 
-## Current status — 2026-10-14
+## Current status — 2026-10-15
 
-**Historical materials inspected; current-version E2E remains pending. / 已检查历史材料，当前版本宿主 E2E 仍待验收。**
+**Codex deck generated, local title edit and Keynote roundtrip verified; full acceptance pending. / Codex 已生成成片并验证局部改名和 Keynote 编辑保存重开，完整验收尚未通过。**
 
-The owner-supplied original prompt, two recordings, two PDFs and one distinct PPTX have been inspected. The selected DSH PDF is included as a lossless ZIP with a rendered preview; its corresponding PPTX is missing. The latest PPTX and recording downloads are byte-identical duplicates of the first Codex group. See [sources](sources.md) and [checksums](sources.json). The current run has produced intermediate requirements and image materials, but no completed deck.
+See [the current review and actual exports](outputs/codex/review-2026-10-15.md). The same run generated four 16:9 slides. The full constrained edit exposed a parser bug; a literal-command workaround succeeded, with pages 2–4 unchanged. Product PDF/PPTX downloads succeeded after installing the existing editable-export dependency. Keynote 14.5 edited a native title, saved/reopened, and exported/reopened PPTX. Fonts differ; footer corrections, deployment verification of the parser fix, DSH's current PPT run, final approval and independent reproduction remain pending.
 
-已核对原始提示词、两段录像、两份 PDF 和一份不同内容的 PPTX。主展示选 DSH，另附 Codex 参考；二者不能拼成同一次运行。新下载文件只是第一组的重复件。本轮已有需求与图片中间成果，尚无完成的 PPT。
+四页 PDF 已逐页查看；署名已补入讲稿，并确认导出保留。可见页脚修改连续两次遇到模型 HTTP 503。Keynote 首次打开需要负责人协助；后续由协调者完成编辑与重开，不能算非实现者复现。原始提示词和历史宣传材料仍是参考，不替代当前实跑。
 
-Repository baseline inspected: `84a1a5b7f1d1e9ef59022f2c57ab7dfe1fd54ac2`. Integration docs and source were read. An isolated 8091 runtime reported `ready`, but its existing application build has not been verified against this baseline; that check is not an example pass. Later connector preparation rebuilt the connector from this example branch and restarted only the Bridge and test DSH host; neither application frontend was restarted.
-
-| Check | Codex | DSH | Required evidence |
+| Check | Codex | DSH | Evidence / remaining work |
 | --- | --- | --- | --- |
-| Plugin installation and correct instance | Installed; managed MCP preflight passed | Installed and host restarted; Bridge relay passed | Full host UI run and deployed application version still pending |
-| Original material read in current run | Original prompt used; material summary succeeded after retries; image review found defects | Not run | Image suitability and source verification remain pending |
-| Outline/material review | Agent reviewed; changes required, no human approval | Not run | Before/after adjustment and user approval |
-| Deck V1 | Not run | Not run | Actual run, artifact revision and opened export |
-| Local edit and preserved pages | Not run | Not run | V1/V2 plus page comparison |
-| Editable export | Not run | Not run | Editor version, edited element, saved/reopened file |
-| Final state agrees with output | Not run | Not run | Completed state and matching artifact revision |
-| Direct-Agent comparison | Not run | Not run | Same-input runs; setup and recurring effort separated |
-| Independent reproduction | Not run | Not run | Reviewer/date, steps followed, help required and outcome |
+| Plugin connection | Workflow initiated; private 8091 connector recovery recorded | Installed/preflight passed | Host setup and recovery are explicit costs |
+| Materials and outline | Reviewed, unsuitable images replaced | Current PPT run pending | [Review and rewind](outputs/codex/review-2026-10-14.md) |
+| Deck | Four pages generated and visually inspected | Pending | [Current review](outputs/codex/review-2026-10-15.md) |
+| Review rewind | Live waiting-review click passed | Pending | [State checks](outputs/codex/rewind-live-check.json) |
+| Local title edit | Literal workaround passed; constrained command bug fixed in source | Pending | 94 Workflow script tests; pinned-run deployment not claimed |
+| PDF/PPTX export | Downloaded and inspected; attribution retained in PPTX notes | Pending | [Exports](outputs/codex/review-2026-10-15.md#export-and-editor-check--导出与编辑器验收) |
+| Editor save/reopen | Keynote 14.5 native text edit and PPTX roundtrip passed | Pending | Missing font; no PowerPoint/WPS pass claimed |
+| Final review and state | Pending: visible footer corrections blocked by 503 | Pending | Current task not approved as final |
+| Independent reproduction | Pending | Pending | Owner arranged colleague; record their result separately |
+
+The records below preserve earlier checkpoints; they describe what was known at that time, not the current status. / 以下保留此前时点的原始记录，当前状态以上表为准。
 
 ## Record an actual run / 实跑记录要求
 

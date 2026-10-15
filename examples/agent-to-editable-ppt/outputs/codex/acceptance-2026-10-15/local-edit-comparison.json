@@ -1,0 +1,52 @@
+[
+  {
+    "file": "preview_html-1.html",
+    "revision": 3,
+    "unchanged": false,
+    "sha256": "d57ceb8bbeef02976256ab626eba409a7d18d4f022dee8e656b41bdfb9855bb3",
+    "only_requested_title_changed": true,
+    "comparison_scope": "HTML title and selected h1 changed; source-provenance comment ignored; all other HTML identical"
+  },
+  {
+    "file": "preview_html-2.html",
+    "revision": 2,
+    "unchanged": true,
+    "sha256": "2303227f5ab90e450806e30c424af0794cea6efa1e89e77f9efa6d4b94443e12"
+  },
+  {
+    "file": "preview_html-3.html",
+    "revision": 2,
+    "unchanged": true,
+    "sha256": "cb3d2b7edba2e7b11f44f29c2567c9fb7bd4108e586eb79da53e1ec5e780655a"
+  },
+  {
+    "file": "preview_html-4.html",
+    "revision": 2,
+    "unchanged": true,
+    "sha256": "faea483efe2c671226b63f78be51ebe8cda58ae752d4446ef26f0c4d0dd03cb8"
+  },
+  {
+    "file": "preview_notes-1.txt",
+    "revision": 1,
+    "unchanged": true,
+    "sha256": "b994999884b912afe86b9a663f0eaf8ece38c96d73182e8ff058f5185d151f1c"
+  },
+  {
+    "file": "preview_notes-2.txt",
+    "revision": 2,
+    "unchanged": true,
+    "sha256": "f47beb143b0bee34a1156dc1d0cddb93ae0f3050dc9ab3f3da2e6abe8f5ffed6"
+  },
+  {
+    "file": "preview_notes-3.txt",
+    "revision": 2,
+    "unchanged": true,
+    "sha256": "5e6b8935c2ad3bf2dfe052769424fb49c86e777fb8e8c82f6b736d8aaaf8c690"
+  },
+  {
+    "file": "preview_notes-4.txt",
+    "revision": 2,
+    "unchanged": true,
+    "sha256": "298040cbf30c354baba1eb21750ce50b1aa597584a43a22d0e7b81e13b4689f4"
+  }
+]

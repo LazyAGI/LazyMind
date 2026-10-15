@@ -8,7 +8,7 @@
 
 | 案例 | 要检查的收益 | 复现状态 |
 | --- | --- | --- |
-| [现有 Agent → 可编辑 PPT](agent-to-editable-ppt/README.CN.md) | 审阅中间材料、局部修改、交付可继续编辑的文件 | 原始提示词及历史 DSH PDF 已提供；对应 PPTX 与当前版本实跑待补 |
+| [现有 Agent → 可编辑 PPT](agent-to-editable-ppt/README.CN.md) | 审阅中间材料、局部修改、交付可继续编辑的文件 | Codex 成片、局部修改及 Keynote 导出编辑通过部分验收；最终审核、DSH 实跑与独立复现待补 |
 
 先阅读[连接现有 Agent](shared/agent-setup.CN.md)。用户仍需运行 LazyMind 并配置所需服务，插件不能脱离 LazyMind 独立执行。
 

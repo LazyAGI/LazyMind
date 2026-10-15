@@ -2,7 +2,7 @@
 
 [中文](README.CN.md) · [Examples](../README.md)
 
-**Status: original prompt and historical output collected; current-version reproduction pending.** This reuses the existing Palace Museum case. The DSH recording and matching PDF are the primary visual reference because the architecture and artifact imagery are clearer; the Codex recording is supplementary. See the [material inventory](sources.md).
+**Status: Codex generated four slides; local title edit, PDF/PPTX export and Keynote edit/save/reopen verified. Full acceptance is pending.** See the [current run and actual outputs](outputs/codex/review-2026-10-15.md). The historical DSH recording/PDF remain visual references and do not pass current DSH acceptance.
 
 ![Four-page DSH Palace Museum reference](reference/preview.jpg)
 
@@ -26,26 +26,26 @@ Current-run clarifications: four slides, a general-public audience and AI backgr
 
 ## Before running
 
-Complete [Agent setup](../shared/agent-setup.md) and use the original task above. It asks the workflow to collect material; no fixed original image input bundle is available. Preserve the actual collected files and attribution for the revision and same-input comparison. The exact DSH local-edit instruction is still missing.
+Complete [Agent setup](../shared/agent-setup.md) and use the original task above. It asks the workflow to collect material; no fixed original image input bundle is available. Preserve the actual collected files and attribution for revision and review. The exact DSH local-edit instruction is still missing.
 
 ## Reproduction sequence
 
 1. Open a new Codex or DSH task. Provide the original task and original assets; ask it to use the LazyMind PPT Workflow. Let the Agent discover the available workflow instead of copying another installation's ID.
 2. Verify the input material is readable. Inspect the collected information, image selections and outline in the Workflow panel. Record a user-requested adjustment and the explicit approval before generation.
 3. Wait for the actual run to complete. Save its run/revision reference and export the initial deck as `deck-v1.pptx`. Open it to inspect content, layout and data.
-4. Apply the original case's local modification request. Record the selected page/element and all user actions. Do not regenerate the entire deck merely to simulate a local edit.
+4. Apply the [current acceptance title-edit instruction](outputs/codex/review-2026-10-15.md#actual-local-edit--局部修改实测); this is a new verification instruction for the same deck, not a recovered historical transcript. Record the selected page/element and all user actions. Do not regenerate the entire deck merely to simulate a local edit.
 5. Export `deck-v2.pptx`. Compare every page with V1: the requested change must be present and the untouched pages must retain their content and layout. File hashes alone cannot establish a visual match.
-6. Open V2 in a named version of PowerPoint or WPS, edit a text element, save and reopen it. Record which element types were editable; do not call a slide-sized image an editable deck.
+6. Open V2 in a named version of PowerPoint, WPS or Keynote, edit a text element, save and reopen it. Record which element types were editable; do not call a slide-sized image an editable deck.
 7. Check that the final panel result and exported revision agree. Repeat the full path separately for each advertised host.
 
 The V1/V2 filenames above are future output requirements. The historical PDF is available for preview, but its matching PPTX, exact local-edit instruction and separate before/after exports remain missing. The first group's PPTX contains native text and image objects; that structural inspection cannot substitute for an edit/save/reopen test of the selected second deck.
 
-## Evidence and comparison
+## Acceptance evidence
 
-Follow the [verification record](verification.md). For the direct-Agent baseline, use the same original prompt and assets with the Agent's normal presentation capabilities. Record setup, review, edits, export, waiting and manual work separately. Do not claim an advantage from different input quality or hide the required LazyMind panel interactions.
+Follow the [verification record](verification.md). Record setup, review, edits, export, waiting and manual work separately. Do not hide required LazyMind panel interactions or claim unmeasured speedups.
 
-Add only actual outputs and sanitized evidence after running. Record partial failures and manual fixes. A 60–90 second video may summarize the run, but accelerated waiting or separate runs must be labeled; video duration is not execution time.
+See the [actual outputs and sanitized evidence](outputs/codex/review-2026-10-15.md). Record partial failures and manual fixes. A 60–90 second video may summarize the run, but accelerated waiting or separate runs must be labeled; video duration is not execution time.
 
 ## Existing implementation
 
-Reuse the [PPT Workflow](../../workflows/ppt-workflow/README.md). The repository also has an [existing League of Legends preview](../../skills/featured/ppt-workflow/featured.yaml); it is a different case and must not be labeled as the Palace Museum output. This example changes no production workflow or public interface.
+Reuse the [PPT Workflow](../../workflows/ppt-workflow/README.md). The repository also has an [existing League of Legends preview](../../skills/featured/ppt-workflow/featured.yaml); it is a different case and must not be labeled as the Palace Museum output. Authorized product fixes found during acceptance are documented in [issues](issues.md).
