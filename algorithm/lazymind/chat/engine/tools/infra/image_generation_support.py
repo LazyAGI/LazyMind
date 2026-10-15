@@ -12,10 +12,10 @@ from lazyllm import AutoModel
 from lazyllm.components.formatter import decode_query_with_filepaths
 from lazyllm.tools.agent import ToolExecutionError
 from lazymind.chat.engine.tools.host_file_resolution import stage_input_file
+from lazymind.chat.engine.tools.system_resources import generated_upload_directory
 
 from lazymind.chat.service.utils import register_image_url, resolve_local_image_path
 from lazymind.chat.service.utils.static_file_url import (
-    _upload_root,
     basename_from_path,
     static_file_url_from_any,
 )
@@ -23,7 +23,6 @@ from lazymind.chat.service.utils.static_file_url import (
 _DEFAULT_IMAGE_SIZE = '1024x1024'
 _DEFAULT_BATCH_SIZE = 1
 _IMAGE_SUFFIXES = ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')
-_UPLOAD_SUBDIR = 'ai_generated'
 _REMOTE_IMAGE_UA = 'Mozilla/5.0 (compatible; LazyMind/1.0; image-download)'
 
 
@@ -62,8 +61,7 @@ def _parse_generated_files(result: Any) -> List[str]:
 
 
 def _relocate_generated_image_to_upload(source_path: str) -> str:
-    dest_dir = Path(_upload_root()).resolve() / _UPLOAD_SUBDIR
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_dir = generated_upload_directory('generated-images')
     src = Path(source_path)
     suffix = src.suffix if src.suffix.lower() in _IMAGE_SUFFIXES else '.png'
     dest = dest_dir / f'{uuid.uuid4().hex}{suffix}'
@@ -117,8 +115,7 @@ def _download_remote_image_to_upload(url: str) -> str:
         raise ToolExecutionError(
             f'Remote URL is not an image: content-type={content_type}.'
         )
-    dest_dir = Path(_upload_root()).resolve() / _UPLOAD_SUBDIR
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_dir = generated_upload_directory('remote-images')
     suffix = '.jpg'
     if 'png' in content_type:
         suffix = '.png'

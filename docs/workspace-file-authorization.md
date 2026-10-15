@@ -23,6 +23,12 @@
 
 Main Agent 同时拥有 filesystem、`read_file_resource/search_file_resource` 与 artifact 发布能力。资源读取支持附件、fr_xxx 和会话内部文档，绑定 workspace 不会移除这些工具。SideChat 使用附件与资源限定的只读版本。
 
+系统托管文件与宿主机文件是两套权限域。由 Core 注入的认证用户身份会生成只读 ACL 根：该用户的上传目录，以及该用户全部会话的内部 workspace 目录。当前轮附件、历史轮附件、其他对话中持有明确引用的附件/产物，以及执行中生成并登记的文件，只要位于这些用户根内，读取就按系统 ACL 放行，不进入 host workspace 授权。写入、删除、移动不会因用户根而豁免，仍按当前执行 workspace 和审批策略处理；其他用户根及旧的无 owner 全局目录也不会自动放行。
+
+历史 `ai_generated` 是无 owner 的共享目录，不作为 ACL root。为兼容旧历史中的签名 URL、过期 URL 和裸引用，只接受精确匹配旧生成规则的 32 位随机文件 ID。Algorithm 只放行该文件的 read；非随机文件名和目录引用均不放行，目录本身也不会获得 `ls/glob/grep` 权限。随机 ID 是旧数据的 bearer capability（持有 ID 即可读），不替代新数据的 owner ACL。
+
+模型传入附件短文件名时，resolver 必须先在当前对话的当前轮和历史轮附件中解析为真实托管路径，再声明文件意图。跨对话引用必须使用系统返回的明确资源引用或路径，不能用全局短文件名猜测，以避免同名文件歧义和越权枚举。
+
 ## 权限
 
 ### 工作区持久身份
@@ -66,7 +72,7 @@ Shell operation 使用 capability=shell、operation=shell、空 path 和绑定�
 
 `root` 是用户授权边界，未绑定时为空；`cwd` 是 filesystem 相对路径基准，绑定时为用户 workspace，未绑定时为会话内部目录。SubAgent 继承 Main Agent 的 root/cwd，但其 scratch、artifact 和 spill 目录独立。Spill 通知提供绝对路径，避免将任务内部目录误当成 cwd。
 
-ToolResolutionContext 只携带 managed_roots、managed_files 和当前请求的 citation_state。前两者归一化，citation_state 保持同一对象，使同轮生成图片后能够解析新短引用。
+ToolResolutionContext 携带 managed_roots、managed_files、acl_read_roots 和当前请求的 citation_state。前三者归一化；acl_read_roots 只参与 read 意图判定。citation_state 保持同一对象，使同轮生成图片后能够解析新短引用。图片、视频和派生媒体写入用户隔离的托管上传目录，不再写入共享的 `ai_generated` 目录。
 
 ## 升级与边界
 
