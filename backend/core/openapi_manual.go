@@ -666,6 +666,9 @@ func manualSchemas() map[string]any {
 			prop("waiting_inputs", int64Schema()), prop("running", int64Schema()), prop("succeeded", int64Schema()),
 			prop("failed", int64Schema()), prop("canceled", int64Schema()),
 		),
+		"TaskRemovalPreview": objReq([]string{"task_id", "task_count", "conversation_count", "active_task_count", "impact_version"}, prop("task_id", strSchema()), prop("task_count", intSchema()), prop("conversation_count", intSchema()), prop("active_task_count", intSchema()), prop("impact_version", strSchema())),
+		"TaskRemovalRequest": obj(prop("impact_version", strSchema())),
+		"TaskRemovalResult":  objReq([]string{"removed_task_ids", "trashed_conversation_ids", "cancellation_pending"}, prop("removed_task_ids", array(strSchema())), prop("trashed_conversation_ids", array(strSchema())), prop("cancellation_pending", boolSchema())),
 		"TaskCenterTaskListResponse": objReq(
 			[]string{"items", "total", "page", "page_size"}, prop("items", array(refSchema("TaskCenterTaskResponse"))),
 			prop("total", int64Schema()), prop("page", intSchema()), prop("page_size", intSchema()), prop("status_counts", refSchema("TaskCenterStatusCounts")),
@@ -1102,6 +1105,8 @@ func manualPaths() map[string]any {
 				param("query", "keyword", false, strSchema()), param("query", "page", false, intSchema()), param("query", "page_size", false, intSchema()),
 			), nil, response(200, "Task-center task page", refSchema("TaskCenterTaskListResponse")),
 		)},
+		"/task-center/tasks/{task_id}/removal-preview": map[string]any{"get": op("Preview removal of a task and related conversations", queryParams(param("path", "task_id", true, strSchema())), nil, response(200, "Removal impact", refSchema("TaskRemovalPreview")))},
+		"/task-center/tasks/{task_id}:remove":          map[string]any{"post": op("Move task and related conversations to Trash", queryParams(param("path", "task_id", true, strSchema())), jsonBody(refSchema("TaskRemovalRequest"), false), response(200, "Removal committed", refSchema("TaskRemovalResult")))},
 		"/task-center/tasks/{task_id}": map[string]any{"get": op(
 			"Get a task-center task", queryParams(param("path", "task_id", true, strSchema())), nil,
 			response(200, "Task-center task", refSchema("TaskCenterTaskResponse")),

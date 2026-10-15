@@ -9439,6 +9439,47 @@ components:
                 task_type:
                     type: string
             type: object
+        TaskRemovalPreview:
+            properties:
+                active_task_count:
+                    type: integer
+                conversation_count:
+                    type: integer
+                impact_version:
+                    type: string
+                task_count:
+                    type: integer
+                task_id:
+                    type: string
+            required:
+                - task_id
+                - task_count
+                - conversation_count
+                - active_task_count
+                - impact_version
+            type: object
+        TaskRemovalRequest:
+            properties:
+                impact_version:
+                    type: string
+            type: object
+        TaskRemovalResult:
+            properties:
+                cancellation_pending:
+                    type: boolean
+                removed_task_ids:
+                    items:
+                        type: string
+                    type: array
+                trashed_conversation_ids:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - removed_task_ids
+                - trashed_conversation_ids
+                - cancellation_pending
+            type: object
         TaskResponse:
             properties:
                 convert_error:
@@ -29028,6 +29069,22 @@ paths:
             summary: Read immutable run configuration and delivery history
             tags:
                 - TaskNotifications
+    /api/core/task-center/tasks/{task_id}/removal-preview:
+        get:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TaskRemovalPreview'
+                    description: Removal impact
+            summary: Preview removal of a task and related conversations
     /api/core/task-center/tasks/{task_id}:cancel:
         post:
             parameters:
@@ -29048,10 +29105,20 @@ paths:
                   required: true
                   schema:
                     type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/TaskRemovalRequest'
+                required: false
             responses:
                 "200":
-                    description: OK
-            summary: POST /task-center/tasks/{task_id}:remove
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TaskRemovalResult'
+                    description: Removal committed
+            summary: Move task and related conversations to Trash
     /api/core/tasks/{task_id}:
         get:
             description: view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.

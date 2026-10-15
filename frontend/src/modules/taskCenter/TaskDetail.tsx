@@ -4,7 +4,7 @@ import '@/modules/notifications/index.scss';
 import ScheduleRunHistory from './ScheduleRunHistory';
 import { describeCron } from './scheduleTime';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Drawer, Dropdown, Empty, Modal, Tag, Tooltip } from 'antd';
+import { Alert, Button, Drawer, Dropdown, Empty, Tag, Tooltip } from 'antd';
 import type { MenuProps } from 'antd';
 import { CheckCircleFilled, CloseCircleFilled, CloseOutlined, DeleteOutlined, EllipsisOutlined, FolderOutlined, SyncOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -124,14 +124,7 @@ export default function TaskDetail({ task: initialTask, onClose, onOpenConversat
       return;
     }
     if (key === 'trash' && onDelete) {
-      Modal.confirm({
-        title: t('taskCenter.trashTaskTitle', { name: taskName }),
-        content: t('taskCenter.trashTaskDescription'),
-        okText: t('settingsPage.recovery.moveToTrash'),
-        cancelText: t('common.cancel'),
-        okButtonProps: { danger: true },
-        onOk: () => onDelete(task),
-      });
+      void onDelete(task);
     }
   };
 

@@ -1,3 +1,4 @@
+import { TASKS_REMOVED_EVENT } from '@/modules/taskCenter/events';
 import { getLocalizedErrorMessage } from "@/components/request";
 import {
   DndContext, PointerSensor, KeyboardSensor, closestCenter, pointerWithin, useSensor, useSensors,
@@ -339,7 +340,8 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     useEffect(() => {
       const refresh = () => getHistory({ isFirst: true, searchText: keyword });
       window.addEventListener(CONVERSATION_GROUPS_CHANGED_EVENT, refresh);
-      return () => window.removeEventListener(CONVERSATION_GROUPS_CHANGED_EVENT, refresh);
+      window.addEventListener(TASKS_REMOVED_EVENT, refresh);
+      return () => { window.removeEventListener(CONVERSATION_GROUPS_CHANGED_EVENT, refresh); window.removeEventListener(TASKS_REMOVED_EVENT, refresh); };
     }, [keyword, conversationFilters]);
 
     useEffect(() => {

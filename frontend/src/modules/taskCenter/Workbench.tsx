@@ -3,7 +3,9 @@ import { Alert, Button, Empty, Input, Progress, Select, Spin, Tooltip } from 'an
 import { CheckCircleFilled, ClockCircleOutlined, CloseCircleOutlined, ReloadOutlined, RightOutlined, SearchOutlined, StopOutlined, SyncOutlined, UserOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { listTasks, removeTask } from './api';
+import TaskRemovalDialog from './TaskRemovalDialog';
+import { TASKS_REMOVED_EVENT, type TasksRemovedDetail } from './events';
+import { listTasks } from './api';
 import type { Task } from './api';
 import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
 import { isTaskFinishedWithinDays } from './recentResults';
@@ -28,6 +30,7 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
   const [keyword, setKeyword] = useState('');
   const [type, setType] = useState('');
   const [statusCounts, setStatusCounts] = useState({ all: 0, pending: 0, waiting: 0, running: 0, succeeded: 0, failed: 0, canceled: 0 });
+  const [removingTask, setRemovingTask] = useState<Task | null>(null);
   const [selected, setSelected] = useState<Task | null>(null);
   const [graphTask, setGraphTask] = useState<Task | null>(null);
   const [attentionExpanded, setAttentionExpanded] = useState(false);
@@ -56,10 +59,19 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
     if (!active) return;
     void load();
     const renamed = () => void load();
+    const removed = (event: Event) => {
+      const detail = (event as CustomEvent<TasksRemovedDetail>).detail;
+      ++request.current;
+      setSelected(current => current && detail.removed_task_ids.includes(current.id) ? null : current);
+      setGraphTask(current => current && detail.removed_task_ids.includes(current.id) ? null : current);
+      void load();
+    };
+    window.addEventListener(TASKS_REMOVED_EVENT, removed);
     window.addEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
     return () => {
       ++request.current;
       window.removeEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
+      window.removeEventListener(TASKS_REMOVED_EVENT, removed);
     };
   }, [active, load]);
 
@@ -100,7 +112,8 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
         {recent.length ? <RecentSection tasks={recent} expanded={recentExpanded} onToggle={() => setRecentExpanded((value) => !value)} onSelect={setSelected} /> : null}
         {!loading && !loadFailed && !hasVisibleTasks ? <WorkbenchEmpty /> : null}
       </Spin>
-      <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={(sessionId) => selected && setGraphTask({ ...selected, workflow_session_id: sessionId })} onDelete={async (task) => { await removeTask(task.id); setSelected(null); await load(); }} />
+      <TaskRemovalDialog task={removingTask} onClose={() => setRemovingTask(null)} />
+      <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={(sessionId) => selected && setGraphTask({ ...selected, workflow_session_id: sessionId })} onDelete={setRemovingTask} />
       {graphTask?.workflow_session_id && <StateGraphModal open onClose={() => setGraphTask(null)} sessionId={graphTask.workflow_session_id} workflowId='' liveRefresh={false} fallbackSteps={graphTask.steps} />}
     </div>
   );

@@ -361,6 +361,7 @@ func RestoreConversation(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	db := store.DB().WithContext(r.Context())
 	userID := recoveryUserID(r)
+	cancellationPending := false
 	err := conversationgroup.UserTransaction(r.Context(), db, userID, func(tx *gorm.DB) error {
 		var conversation orm.Conversation
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(
@@ -390,6 +391,19 @@ func RestoreConversation(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			conversationIDs = append(conversationIDs, childIDs...)
+		}
+		for _, id := range conversationIDs {
+			pending, err := taskcenter.PendingRemovalCancellation(r.Context(), tx, userID, id)
+			if err != nil {
+				return err
+			}
+			if pending {
+				cancellationPending = true
+			}
+		}
+		if cancellationPending {
+			// Commit cancellation retries, but leave the conversation in Trash.
+			return nil
 		}
 		result := tx.Model(&orm.Conversation{}).
 			Where("id IN ? AND create_user_id = ? AND deleted_at IS NOT NULL", conversationIDs, userID).
@@ -423,6 +437,10 @@ func RestoreConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "trashed conversation not found", http.StatusNotFound)
+		return
+	}
+	if cancellationPending {
+		common.ReplyAppErr(w, common.NewAppError(http.StatusConflict, 2004814, "Task execution is stopping. Please retry restoring shortly"))
 		return
 	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{})

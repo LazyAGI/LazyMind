@@ -6786,6 +6786,21 @@ export interface TaskPayload {
     'target_pid'?: string;
     'task_type'?: string;
 }
+export interface TaskRemovalPreview {
+    'active_task_count': number;
+    'conversation_count': number;
+    'impact_version': string;
+    'task_count': number;
+    'task_id': string;
+}
+export interface TaskRemovalRequest {
+    'impact_version'?: string;
+}
+export interface TaskRemovalResult {
+    'cancellation_pending': boolean;
+    'removed_task_ids': Array<string>;
+    'trashed_conversation_ids': Array<string>;
+}
 export interface TaskResponse {
     'convert_error'?: string;
     'convert_required'?: boolean;
@@ -23577,12 +23592,47 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary POST /task-center/tasks/{task_id}:remove
+         * @summary Preview removal of a task and related conversations
          * @param {string} taskId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTaskCenterTasksTaskIdRemovePost: async (taskId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreTaskCenterTasksTaskIdRemovalPreviewGet: async (taskId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'taskId' is not null or undefined
+            assertParamExists('apiCoreTaskCenterTasksTaskIdRemovalPreviewGet', 'taskId', taskId)
+            const localVarPath = `/api/core/task-center/tasks/{task_id}/removal-preview`
+                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Move task and related conversations to Trash
+         * @param {string} taskId
+         * @param {TaskRemovalRequest} [taskRemovalRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterTasksTaskIdRemovePost: async (taskId: string, taskRemovalRequest?: TaskRemovalRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'taskId' is not null or undefined
             assertParamExists('apiCoreTaskCenterTasksTaskIdRemovePost', 'taskId', taskId)
             const localVarPath = `/api/core/task-center/tasks/{task_id}:remove`
@@ -23598,10 +23648,13 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(taskRemovalRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -30004,13 +30057,27 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary POST /task-center/tasks/{task_id}:remove
+         * @summary Preview removal of a task and related conversations
          * @param {string} taskId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreTaskCenterTasksTaskIdRemovePost(taskId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksTaskIdRemovePost(taskId, options);
+        async apiCoreTaskCenterTasksTaskIdRemovalPreviewGet(taskId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskRemovalPreview>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksTaskIdRemovalPreviewGet(taskId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterTasksTaskIdRemovalPreviewGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Move task and related conversations to Trash
+         * @param {string} taskId
+         * @param {TaskRemovalRequest} [taskRemovalRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreTaskCenterTasksTaskIdRemovePost(taskId: string, taskRemovalRequest?: TaskRemovalRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskRemovalResult>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksTaskIdRemovePost(taskId, taskRemovalRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterTasksTaskIdRemovePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -33811,13 +33878,23 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary POST /task-center/tasks/{task_id}:remove
+         * @summary Preview removal of a task and related conversations
+         * @param {DefaultApiApiCoreTaskCenterTasksTaskIdRemovalPreviewGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterTasksTaskIdRemovalPreviewGet(requestParameters: DefaultApiApiCoreTaskCenterTasksTaskIdRemovalPreviewGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<TaskRemovalPreview> {
+            return localVarFp.apiCoreTaskCenterTasksTaskIdRemovalPreviewGet(requestParameters.taskId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Move task and related conversations to Trash
          * @param {DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters: DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters.taskId, options).then((request) => request(axios, basePath));
+        apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters: DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<TaskRemovalResult> {
+            return localVarFp.apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters.taskId, requestParameters.taskRemovalRequest, options).then((request) => request(axios, basePath));
         },
         /**
          * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
@@ -36160,10 +36237,19 @@ export interface DefaultApiApiCoreTaskCenterTasksTaskIdGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreTaskCenterTasksTaskIdRemovalPreviewGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreTaskCenterTasksTaskIdRemovalPreviewGetRequest {
+    readonly taskId: string
+}
+
+/**
  * Request parameters for apiCoreTaskCenterTasksTaskIdRemovePost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest {
     readonly taskId: string
+
+    readonly taskRemovalRequest?: TaskRemovalRequest
 }
 
 /**
@@ -39697,13 +39783,24 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary POST /task-center/tasks/{task_id}:remove
+     * @summary Preview removal of a task and related conversations
+     * @param {DefaultApiApiCoreTaskCenterTasksTaskIdRemovalPreviewGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreTaskCenterTasksTaskIdRemovalPreviewGet(requestParameters: DefaultApiApiCoreTaskCenterTasksTaskIdRemovalPreviewGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreTaskCenterTasksTaskIdRemovalPreviewGet(requestParameters.taskId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Move task and related conversations to Trash
      * @param {DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters: DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters.taskId, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters.taskId, requestParameters.taskRemovalRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
