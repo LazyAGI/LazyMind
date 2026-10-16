@@ -57,6 +57,7 @@ type PythonComponentStatus struct {
 	SizeBytes        int64  `json:"sizeBytes,omitempty"`
 	UnpackedBytes    int64  `json:"unpackedBytes,omitempty"`
 	Message          string `json:"message,omitempty"`
+	InstallMethod    string `json:"installMethod,omitempty"`
 }
 
 var pythonComponentLocks = map[string]*sync.Mutex{"rag": {}}
@@ -131,6 +132,14 @@ func PythonComponentActive(id string) bool {
 func pythonComponentStatus(root string, catalog *pythonCatalog, id string) PythonComponentStatus {
 	status := PythonComponentStatus{ID: id, Installed: true, Active: true}
 	if catalog == nil {
+		status.Active = PythonComponentActive(id)
+		if IsLocalRuntime() && os.Getenv("LAZYMIND_SOURCE_COMPONENT_INSTALLER") != "" {
+			status.InstallSupported = true
+			status.InstallMethod = "source"
+			marker, err := os.ReadFile(filepath.Join(root, "deps", "python-components", "rag", "source.ready"))
+			status.Installed = status.Active || (err == nil && strings.TrimSpace(string(marker)) == os.Getenv("LAZYMIND_ALGORITHM_PYTHON"))
+		}
+		status.RestartRequired = status.Installed && !status.Active
 		return status // Source/cloud and legacy full packages.
 	}
 	entry := catalog.Components[id]
@@ -333,13 +342,44 @@ func InstallPythonComponent(w http.ResponseWriter, r *http.Request) {
 	}
 	defer lock.Unlock()
 	catalog, err := loadPythonCatalog()
-	if err != nil || catalog == nil {
+	if err != nil {
 		common.ReplyErr(w, "dependency catalog is unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	root, err := RuntimeRootFromEnv()
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	if catalog == nil {
+		installer := os.Getenv("LAZYMIND_SOURCE_COMPONENT_INSTALLER")
+		source := os.Getenv("LAZYMIND_ALGORITHM_SOURCE")
+		if installer == "" || source == "" {
+			common.ReplyErr(w, "dependency catalog is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 40*time.Minute)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, installer, "install-rag", "--profile", "local", "--repo-root", filepath.Dir(source), "--runtime-root", root)
+		logDir := filepath.Join(root, "logs")
+		if err := os.MkdirAll(logDir, 0700); err != nil {
+			common.ReplyErr(w, "cannot create component installation log", http.StatusInternalServerError)
+			return
+		}
+		logFile, err := os.OpenFile(filepath.Join(logDir, "rag-install.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			common.ReplyErr(w, "cannot open component installation log", http.StatusInternalServerError)
+			return
+		}
+		defer logFile.Close()
+		cmd.Stdout, cmd.Stderr = logFile, logFile
+		if err := cmd.Run(); err != nil {
+			common.ReplyErr(w, "本地 RAG 依赖安装失败，请检查本地安装日志后重试", http.StatusInternalServerError)
+			return
+		}
+		status := pythonComponentStatus(root, nil, request.ID)
+		status.Installing = false
+		common.ReplyOK(w, status)
 		return
 	}
 	entry := catalog.Components[request.ID]

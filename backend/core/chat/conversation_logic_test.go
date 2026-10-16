@@ -921,6 +921,36 @@ func TestBuildChatRequestBodyLoadsFiltersFromConversationDB(t *testing.T) {
 	}
 }
 
+func TestBuildChatRequestBodyDropsKnowledgeFiltersWhenRAGIsInactive(t *testing.T) {
+	t.Setenv("LAZYMIND_RAG_ENABLED", "0")
+	db := orm.MigrateTestDB(t, &orm.Conversation{})
+	now := time.Now()
+	if err := db.Create(&orm.Conversation{
+		ID:           "conv-with-kb",
+		DisplayName:  "test",
+		ChannelID:    "default",
+		SearchConfig: json.RawMessage(`{"dataset_list":[{"id":"ds-old"}],"creators":["u1"],"tags":["tag"]}`),
+		BaseModel: orm.BaseModel{
+			CreateUserID: "u1",
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	body := buildChatRequestBody(t.Context(), db.DB, "conv-with-kb", "", "hello", nil, map[string]any{
+		"filters":          map[string]any{"kb_id": []string{"ds-request"}},
+		"document_context": map[string]any{"document_id": "doc-old"},
+	}, nil, "u1", 2)
+	if body["filters"] != nil {
+		t.Fatalf("filters = %#v, want nil without RAG", body["filters"])
+	}
+	if _, ok := body["document_context"]; ok {
+		t.Fatalf("document_context = %#v, want it omitted without RAG", body["document_context"])
+	}
+}
+
 func TestBuildChatRequestBodyKeepsExistingFilters(t *testing.T) {
 	existing := map[string]any{"kb_id": []string{"manual"}}
 	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{

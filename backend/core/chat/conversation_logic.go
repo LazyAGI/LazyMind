@@ -26,6 +26,7 @@ import (
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/systemdeps"
 	"lazymind/core/taskcenter"
 	"lazymind/core/vocabulary"
 	"lazymind/core/workflow"
@@ -1606,6 +1607,11 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		body["searchable_skills"] = resourceContext.SearchableSkills
 		body["excluded_skills"] = resourceContext.ExcludedSkills
 		body["loaded_skills"] = resourceContext.LoadedSkills
+	}
+	if !systemdeps.PythonComponentActive("rag") {
+		body["filters"] = nil
+		delete(body, "document_context")
+		return body
 	}
 	if body["filters"] == nil {
 		conv, _ := raw["conversation"].(map[string]any)

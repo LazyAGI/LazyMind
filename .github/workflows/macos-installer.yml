@@ -7,6 +7,20 @@ on:
         description: "Branch, tag, or commit SHA to build"
         required: false
         type: string
+    secrets:
+      HF_TOKEN:
+        description: "Hugging Face write token used to publish optional Python components"
+        required: false
+      MAC_CSC_LINK:
+        required: false
+      MAC_CSC_KEY_PASSWORD:
+        required: false
+      APPLE_ID:
+        required: false
+      APPLE_APP_SPECIFIC_PASSWORD:
+        required: false
+      APPLE_TEAM_ID:
+        required: false
     outputs:
       installer_artifact_name:
         value: ${{ jobs.build-macos-installer.outputs.installer_artifact_name }}
@@ -36,7 +50,9 @@ env:
   UV_DEFAULT_INDEX: https://pypi.org/simple
   LAZYMIND_DESKTOP_DEFER_HISTORY: "true"
   LAZYMIND_DESKTOP_DEFER_PYTHON: "true"
-  LAZYMIND_PYTHON_COMPONENT_BASE_URL: ${{ vars.LAZYMIND_PYTHON_COMPONENT_BASE_URL }}
+  LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS: "true"
+  LAZYMIND_PYTHON_COMPONENT_BASE_URL: ${{ vars.LAZYMIND_PYTHON_COMPONENT_BASE_URL || 'https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/RAG/' }}
+  LAZYMIND_HF_COMPONENT_REPO: LazyAGI/LazyMind
   LAZYMIND_DESKTOP_SHARE_PYTHON: "false"
   LAZYMIND_DESKTOP_PRUNE_PYTHON: "true"
 
@@ -620,10 +636,36 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v7
         with:
-          name: macos-python-components
+          name: macos-rag-components-${{ github.run_id }}
           path: desktop/dist/python-components/
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Publish macOS RAG component to Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HF_TOKEN:-}" ]]; then
+            echo "::notice::HF_TOKEN is not configured; the macOS RAG component was packaged but not published."
+            exit 0
+          fi
+          component_dir="desktop/dist/python-components/darwin-arm64"
+          read -r filename expected_sha < <(python3 - "${component_dir}/python-components.json" <<'PY'
+          import json
+          import sys
+          rag = json.load(open(sys.argv[1], encoding='utf-8'))['components']['rag']
+          print(rag['filename'], rag['sha256'])
+          PY
+          )
+          component_path="${component_dir}/${filename}"
+          actual_sha="$(shasum -a 256 "${component_path}" | awk '{print $1}')"
+          test "${actual_sha}" = "${expected_sha}"
+          uvx --from huggingface-hub hf upload \
+            "${LAZYMIND_HF_COMPONENT_REPO}" "${component_path}" "RAG/${filename}" \
+            --repo-type dataset --revision main \
+            --commit-message "Publish macOS RAG component ${filename}" --quiet
+          echo "Published ${filename} to Hugging Face dataset ${LAZYMIND_HF_COMPONENT_REPO}." >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload PDF font and final runtime reports
         if: always()

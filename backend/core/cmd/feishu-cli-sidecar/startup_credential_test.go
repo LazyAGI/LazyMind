@@ -106,7 +106,10 @@ func TestSidecarProductionStartupWiresHelperAndPreservesCLI(t *testing.T) {
 			done := make(chan struct{})
 			go func() { _ = process.Wait(); close(done) }()
 			t.Cleanup(func() { _ = process.Process.Kill(); <-done })
-			client := &http.Client{Timeout: 3 * time.Second}
+			// The first signed execute request starts the fixture CLI process. Under a
+			// full-package test run the Go scheduler and process startup can exceed
+			// three seconds even though the sidecar is already healthy.
+			client := &http.Client{Timeout: 10 * time.Second}
 			origin := "http://" + address
 			ready := false
 			ticker := time.NewTicker(10 * time.Millisecond)

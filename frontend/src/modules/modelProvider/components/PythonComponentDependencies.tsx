@@ -52,12 +52,14 @@ export default function PythonComponentDependencies() {
       </Tag></h3>
       <p>{descriptions[item.id]}</p>
       <Space wrap>
-        <span>下载约 {((item.sizeBytes || 0) / 1048576).toFixed(1)} MiB</span>
+        <span>{item.installMethod === "source" ? "按本地源码依赖配置下载并安装" : `下载约 ${((item.sizeBytes || 0) / 1048576).toFixed(1)} MiB`}</span>
         {busy ? <Button type="primary" loading disabled>{progressLabel}</Button> : <>
           {!item.installed && <Button type="primary" disabled={item.installing} onClick={() => setSelected(item)}>
             {item.installing ? "安装中" : "安装组件"}
           </Button>}
-          {item.restartRequired && <Button onClick={() => void runPythonComponentTask(item.id, true)}>重试启用组件</Button>}
+          {item.restartRequired && (item.installMethod === "source"
+            ? <span>依赖已安装，请执行 make local-down，再执行 make local-up LAZYMIND_RAG_ENABLED=false 启用。</span>
+            : <Button onClick={() => void runPythonComponentTask(item.id, true)}>重试启用组件</Button>)}
         </>}
         {task.phase === "installing" && <Button onClick={cancelPythonComponentDownload}>取消下载</Button>}
         <Button disabled={busy} onClick={() => void refresh()}>刷新状态</Button>
@@ -67,12 +69,12 @@ export default function PythonComponentDependencies() {
     </section>)}
     <Modal title={selected ? `安装${names[selected.id]}` : "安装组件"} open={!!selected}
       okText="下载并安装"
-      okButtonProps={{ disabled: busy || selected?.installing || !selected?.url?.startsWith("https://") }}
+      okButtonProps={{ disabled: busy || selected?.installing || (selected?.installMethod !== "source" && !selected?.url?.startsWith("https://")) }}
       cancelText="取消" onOk={beginInstall} onCancel={() => setSelected(null)}>
-      <p>将从以下来源下载此版本所需组件，并自动校验文件完整性。</p>
-      <p>下载在后台进行，可以继续浏览。完成后会自动重启本地服务，重启期间正在运行的任务会中断。</p>
+      <p>{selected?.installMethod === "source" ? "将使用本地运行环境的依赖安装器，按当前源码配置下载 RAG 依赖。" : "将从以下来源下载此版本所需组件，并自动校验文件完整性。"}</p>
+      <p>{selected?.installMethod === "source" ? "下载在后台进行，可以继续浏览。完成后需重新运行 make local-up 启用组件。" : "下载在后台进行，可以继续浏览。完成后会自动重启本地服务，重启期间正在运行的任务会中断。"}</p>
       <p style={{ overflowWrap: "anywhere" }}>{selected?.filename}</p>
-      <p aria-label="组件下载来源" style={{ overflowWrap: "anywhere" }}>{selected?.url || "下载来源暂不可用，请刷新后重试。"}</p>
+      <p aria-label="组件下载来源" style={{ overflowWrap: "anywhere" }}>{selected?.installMethod === "source" ? "当前本地 Python 包源（LazyLLM RAG 与 requirements-local.txt）" : selected?.url || "下载来源暂不可用，请刷新后重试。"}</p>
     </Modal>
   </>;
 }
@@ -80,10 +82,10 @@ export default function PythonComponentDependencies() {
 export function RAGComponentNotice() {
   const { availability, refresh } = useRAGComponent();
   if (availability === "error") return <Alert type="warning" showIcon style={{ margin: 16 }}
-    message="无法确认本地知识库组件状态" description="请重试，确认组件已启用后再创建资料库。"
+    message="无法确认本地知识库组件状态" description="请重试确认组件状态。已有知识库及文件会保留。"
     action={<Button onClick={refresh}>重试</Button>} />;
   if (availability !== "missing") return null;
   return <Alert type="info" showIcon style={{ margin: 16 }} message="本地知识库组件尚未启用"
-    description="安装并重启本地服务后，即可解析文档和检索知识库。已有知识库数据会保留。"
+    description="文件仍保留在知识库内，也可以继续上传保存；未安装组件时不解析、不切分、不生成向量。解析与检索需要安装并启用组件。"
     action={<Link to="/settings?section=system_tools#python-rag-dependency">安装组件</Link>} />;
 }

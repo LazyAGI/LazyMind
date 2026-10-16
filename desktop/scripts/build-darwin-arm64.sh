@@ -305,6 +305,7 @@ else
   "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements.txt"
   "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements-local.txt"
 fi
+"${RUNTIME_ROOT}/deps/python/algorithm/bin/python" "${ROOT}/desktop/scripts/patch-reader-imports.py"
 make_python_venv_relocatable "${RUNTIME_ROOT}/deps/python/auth-service" "${PYTHON}"
 make_python_venv_relocatable "${RUNTIME_ROOT}/deps/python/channel-gateway" "${PYTHON}"
 make_python_venv_relocatable "${RUNTIME_ROOT}/deps/python/algorithm" "${PYTHON}"

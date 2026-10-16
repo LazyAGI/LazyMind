@@ -26,6 +26,7 @@ interface IData {
   names?: string[];
   title: string;
   processingLevel?: "stored" | "parsed" | "chunked" | "indexed";
+  ingest?: boolean;
 }
 
 export interface IRestartKnowledgeProps {
@@ -131,8 +132,9 @@ const RestartKnowledgeModal = (
       setRuntimeWaiting(false);
 
       const docNames = (modalInfo.names || []).filter(Boolean);
-      const displayName =
-        docNames.length === 1
+      const displayName = modalInfo.ingest
+        ? t("knowledge.ingestRetained")
+        : docNames.length === 1
           ? t("knowledge.reparseTaskNameSingle", { name: docNames[0] })
           : docNames.length > 1
             ? t("knowledge.reparseTaskNameMulti", { name: docNames[0], count: ids.length })
@@ -144,11 +146,11 @@ const RestartKnowledgeModal = (
           {
             upload_file_id: "",
             task: {
-              task_type: "TASK_TYPE_REPARSE",
+              task_type: modalInfo.ingest ? "TASK_TYPE_PARSE_UPLOADED" : "TASK_TYPE_REPARSE",
               document_ids: ids.filter((i: string) => !!i),
               display_name: displayName,
-              reparse_groups: reparseGroups,
-              reparse_mode: scope,
+              reparse_groups: modalInfo.ingest ? undefined : reparseGroups,
+              reparse_mode: modalInfo.ingest ? undefined : scope,
             },
           },
         ],
@@ -204,7 +206,7 @@ const RestartKnowledgeModal = (
     supportsVectorReparse(modalInfo?.processingLevel) ||
     option.value !== REPARSE_SCOPE_SLICE_AND_EMBED,
   );
-  const supportsSegments = supportsSegmentReparse(modalInfo?.processingLevel);
+  const supportsSegments = !modalInfo?.ingest && supportsSegmentReparse(modalInfo?.processingLevel);
 
   const reparseStrategyLabel = (
     <span className="reparse-strategy-label">
@@ -253,6 +255,7 @@ const RestartKnowledgeModal = (
         />
       )}
       <Form form={form} layout="vertical">
+        {modalInfo?.ingest && <Alert type="info" showIcon message={t("knowledge.ingestRetainedHint")} />}
         {supportsSegments && (
           <>
             <Form.Item

@@ -213,7 +213,7 @@ func TestProjectNamesAreIndependentOfGroups(t *testing.T) {
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	const uid = "names-owner"
-	grant, err := localworkspace.Register(t.Context(), db.DB, uid, localworkspace.RegisterInput{DisplayName: "local", CanonicalPath: t.TempDir(), Source: "local"})
+	grant, err := localworkspace.Register(t.Context(), db.DB, uid, localworkspace.RegisterInput{DisplayName: "local", CanonicalPath: projectTestWorkspacePath(t), Source: "local"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +284,7 @@ func TestDeletedProjectRecreationPreservesHistoryAndRestoreIsAtomic(t *testing.T
 	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
 	db := orm.MigrateAllModelsForTest(t)
 	const uid = "recreate-owner"
-	grant, err := localworkspace.Register(t.Context(), db.DB, uid, localworkspace.RegisterInput{DisplayName: "folder", CanonicalPath: t.TempDir(), Source: "local"})
+	grant, err := localworkspace.Register(t.Context(), db.DB, uid, localworkspace.RegisterInput{DisplayName: "folder", CanonicalPath: projectTestWorkspacePath(t), Source: "local"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +381,7 @@ func TestConcurrentExplicitProjectCreation(t *testing.T) {
 	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
 	db := orm.MigrateAllModelsForTest(t)
 	const uid = "concurrent-project"
-	grant, err := localworkspace.Register(t.Context(), db.DB, uid, localworkspace.RegisterInput{DisplayName: "folder", CanonicalPath: t.TempDir(), Source: "local"})
+	grant, err := localworkspace.Register(t.Context(), db.DB, uid, localworkspace.RegisterInput{DisplayName: "folder", CanonicalPath: projectTestWorkspacePath(t), Source: "local"})
 	if err != nil {
 		t.Fatal(err)
 	}

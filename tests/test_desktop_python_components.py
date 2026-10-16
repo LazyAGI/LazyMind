@@ -87,6 +87,11 @@ class DependencyGroupsTests(unittest.TestCase):
             self.assertTrue((site / 'dashscope/__init__.py').is_file())
             self.assertEqual(set(catalog['components']), {'rag'})
             for ident, item in catalog['components'].items():
+                self.assertRegex(
+                    item['filename'],
+                    r'^lazymind-(?:mac|win|linux)-[a-z0-9]+-rag-cp\d+-'
+                    r'\d{8}T\d{6}Z-[0-9a-f]{16}\.zip$',
+                )
                 archive = Path(temp) / 'output' / item['filename']
                 self.assertEqual(components.digest(archive.read_bytes()), item['sha256'])
                 with zipfile.ZipFile(archive) as bundle:

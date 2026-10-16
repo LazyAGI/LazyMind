@@ -1,5 +1,20 @@
 # Mac 本地构建、上传依赖与安装验证
 
+## Actions 自动发布 RAG（2026-10-16）
+
+macOS / Windows Actions 都生成与当前安装包配套的 RAG ZIP。设置 GitHub 仓库
+`Settings → Secrets and variables → Actions → New repository secret`，名称为 `HF_TOKEN`，
+值为拥有 Hugging Face dataset `LazyAGI/LazyMind` 写权限的 token。主发布 workflow 已继承 secrets。
+本地代理仅用于本地命令，无需配置到 Actions。
+
+有 token 时，构建校验 SHA-256 后自动上传 `RAG/<filename>.zip`，首次上传自动创建目录；
+缺少 token 时保留 GitHub artifact 并提示跳过上传。上传失败会使工作流失败。
+新文件名形如 `lazymind-win-amd64-rag-cp311-20261016T021500Z-<revision>.zip` 或
+`lazymind-mac-arm64-rag-cp311-20261016T021500Z-<revision>.zip`，时间为 UTC。
+安装器清单记录精确文件名、URL 和 SHA-256。旧包保留，以服务旧安装器。
+
+以下固定包/手动上传说明为历史流程；本地 Mac 默认仍可复用固定组件，Actions 已启用重新打包。
+
 适用于 **Apple Silicon Mac（M 系列，ARM64）**。2026-09-23 起，ARM64 默认使用已发布的固定 RAG 包，按“构建 → 自动校验固定组件 → 安装试用”执行，**不再每次构建生成或上传 RAG ZIP**。Workflow 演示案例仍在首次启动 warmup 时下载。
 
 ## Mac ARM64 固定云端版本（2026-09-24 更新）

@@ -48,6 +48,10 @@ def base_imports(without_grpc=False):
     for name in ('dashscope', 'numpy', 'pandas', 'sklearn', 'umap', 'fitz', 'docx', 'pptx', 'openpyxl'):
         importlib.import_module(name)
         print(f'BASE_IMPORT_OK {name}', flush=True)
+    importlib.import_module('lazyllm.tools.rag.readers.ocrReader')
+    require('lazyllm.tools.rag.document' not in sys.modules, 'OCR imported knowledge-base document management')
+    require('lazyllm.tools.rag.store' not in sys.modules, 'OCR imported knowledge-base storage')
+    print('BASE_OCR_IMPORT_OK', flush=True)
 
 
 def overlay_imports(overlay):

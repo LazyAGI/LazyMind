@@ -9,6 +9,7 @@ from typing import Any, Callable, Literal
 
 import docstring_parser
 import lazyllm
+from lazymind.common.optional_components import component_enabled
 from lazyllm.tools.fs.supplier.feishu import FeishuFS
 from lazyllm.tools.fs.supplier.googledrive import GoogleDriveFS
 from lazyllm.tools.fs.supplier.notion import NotionFS
@@ -191,7 +192,8 @@ ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'Supported uploads: images, pdf/doc/docx/pptx, and common plain-text/code/config files.\n'
         '- Default to the current turn (marked 当前轮次) when the user says '
         '"this image / 这张图 / 这个文件" without naming a turn.\n'
-        '- For uploaded whitelist documents, prefer `kb_tmp_search` then `read_file_resource`. '
+        '- For uploaded whitelist documents, use `read_file_resource` or `search_file_resource`. '
+        'Use `kb_tmp_search` only when it is present in the available tools. '
         'For knowledge-base questions about indexed documents, use `kb_*` tools.',
     ),
 }
@@ -508,6 +510,8 @@ _CLOUD_FILE_TOOLKIT = {
 
 
 def _temp_kb_key_source() -> Any:
+    if not component_enabled('rag'):
+        return None
     agentic_config = lazyllm.globals.get('agentic_config') or {}
     return agentic_config.get('files')
 
@@ -971,6 +975,8 @@ def _registration_key_source(tool: Any) -> Callable[[], Any] | None:
 
 
 def tool_is_active(cfg: ToolConfig) -> bool:
+    if cfg.name in {'kb', 'temp_kb'} and not component_enabled('rag'):
+        return False
     if cfg.name == 'kb':
         context = lazyllm.globals.get('agentic_config') or {}
         if not (context.get('filters') or {}).get('kb_id'):

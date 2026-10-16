@@ -28,6 +28,7 @@ import (
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/systemdeps"
 	"lazymind/core/taskcenter"
 	"lazymind/core/workflow"
 )
@@ -104,6 +105,9 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	if len(items) > 0 {
 		uid := strings.TrimSpace(r.Header.Get("X-User-Id"))
 		for _, it := range items {
+			if it.ResourceType == acl.ResourceTypeDB && !systemdeps.PythonComponentActive("rag") {
+				continue
+			}
 			if it.NeedPerm == "" || !acl.Can(uid, it.ResourceType, it.ResourceID, it.NeedPerm) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusForbidden)
@@ -254,7 +258,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if err := authorizeConversationSearchConfig(r.Context(), db, userID, convID, requestSearchConfig); err != nil {
+	if err := authorizeConversationSearchConfigWhenAvailable(r.Context(), db, userID, convID, requestSearchConfig); err != nil {
 		if errors.Is(err, errKnowledgeBaseNotReadable) {
 			common.ReplyErr(w, errKnowledgeBaseNotReadable.Error(), http.StatusForbidden)
 		} else {
@@ -881,6 +885,18 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handleStreamChat(w, r, db, stateStore, baseURL, reqBody, convID, displayQuery, target, dualReply, historyExt)
+}
+
+func authorizeConversationSearchConfigWhenAvailable(
+	ctx context.Context,
+	db *gorm.DB,
+	userID, conversationID string,
+	requestSearchConfig any,
+) error {
+	if !systemdeps.PythonComponentActive("rag") {
+		return nil
+	}
+	return authorizeConversationSearchConfig(ctx, db, userID, conversationID, requestSearchConfig)
 }
 
 // workflowSessionAvailableForRequest decides whether a workflow session should

@@ -18,6 +18,38 @@ from lazymind.chat.engine.tools.infra import vocab_db  # noqa: E402
 vocab_tool = importlib.import_module('lazymind.chat.engine.tools.vocab_learn')
 
 
+def test_sqlite_vocab_reads_core_table_and_filters_users_and_deleted_rows(monkeypatch):
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine('sqlite://')
+    errors = []
+    monkeypatch.setattr(vocab_db, '_has_vocab_conn_target', lambda db_url=None: True)
+    monkeypatch.setattr(vocab_db, '_get_vocab_conn', lambda db_url=None: engine)
+    monkeypatch.setattr(vocab_db, '_table_ensured', False)
+    monkeypatch.setattr(vocab_db.LOG, 'error', errors.append)
+    with engine.begin() as conn:
+        conn.execute(text('CREATE TABLE words (id TEXT, word TEXT, group_id TEXT, '
+                          'create_user_id TEXT, deleted_at TEXT, description TEXT, reference_info TEXT)'))
+        conn.execute(text("INSERT INTO words VALUES "
+                          "('1','ICOCO','g1','u1',NULL,'conference','source'),"
+                          "('2','deleted','g1','u1','2026-01-01','',''),"
+                          "('3','private','g2','u2',NULL,'','')"))
+    try:
+        assert vocab_db.fetch_vocab_for_user_id('u1') == [{'word': 'ICOCO', 'cluster_id': 'g1'}]
+        groups = vocab_db.fetch_vocab_groups_for_user_id('u1')
+        assert groups == {'g1': {'group_id': 'g1', 'description': 'conference',
+                                 'words': ['ICOCO'], 'references': ['source']}}
+        assert not errors
+    finally:
+        engine.dispose()
+
+
+def test_vocab_postgres_keeps_schema_qualification():
+    from types import SimpleNamespace
+    engine = SimpleNamespace(dialect=SimpleNamespace(name='postgresql'))
+    assert vocab_db._vocab_table_name(engine) == 'public.words'
+
+
 def test_fetch_chat_histories_for_timestamped_session(monkeypatch):
     seen_conversation_ids = []
 

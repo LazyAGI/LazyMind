@@ -26,6 +26,11 @@ type pythonComponentCatalog struct {
 
 var componentDigestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
+func sourceRAGInstalled(paths RuntimePaths) bool {
+	data, err := os.ReadFile(filepath.Join(paths.RuntimeRoot, "deps", "python-components", "rag", "source.ready"))
+	return err == nil && strings.TrimSpace(string(data)) == paths.AlgorithmPython
+}
+
 func loadPythonComponentCatalog(paths RuntimePaths) (*pythonComponentCatalog, error) {
 	data, err := os.ReadFile(filepath.Join(paths.ResourcesRoot, "config", "python-components.json"))
 	if os.IsNotExist(err) {
@@ -70,7 +75,7 @@ func installedPythonComponentPath(paths RuntimePaths, entry pythonComponent) str
 	return site
 }
 
-func pythonComponentEnvironment(paths RuntimePaths) []string {
+func pythonComponentEnvironment(paths RuntimePaths, ragDisabled bool) []string {
 	values := []string{
 		"LAZYMIND_PYTHON_COMPONENT_CATALOG=" + filepath.Join(paths.ResourcesRoot, "config", "python-components.json"),
 		"LAZYMIND_ALGORITHM_PYTHON=" + paths.AlgorithmPython,
@@ -78,12 +83,20 @@ func pythonComponentEnvironment(paths RuntimePaths) []string {
 	}
 	catalog, err := loadPythonComponentCatalog(paths)
 	if err != nil || catalog == nil {
+		if ragDisabled {
+			values = append(values, ragEnabledEnvVar+"=0")
+		} else {
+			values = append(values, ragEnabledEnvVar+"=1")
+		}
+		if paths.RepoRoot != "" {
+			values = append(values, "LAZYMIND_SOURCE_COMPONENT_INSTALLER="+filepath.Join(paths.BuildRoot, "bin", executableName("local-runtime-manager")))
+		}
 		return values
 	}
 	var sites []string
 	for _, id := range []string{"rag"} {
 		enabled := "0"
-		if site := installedPythonComponentPath(paths, catalog.Components[id]); site != "" {
+		if site := installedPythonComponentPath(paths, catalog.Components[id]); site != "" && !ragDisabled {
 			sites = append(sites, site)
 			enabled = "1"
 		}

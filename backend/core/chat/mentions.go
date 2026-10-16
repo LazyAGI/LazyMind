@@ -17,6 +17,7 @@ import (
 	"lazymind/core/evolution"
 	"lazymind/core/settings"
 	skillruntimeidentity "lazymind/core/skillv2/runtimeidentity"
+	"lazymind/core/systemdeps"
 	"lazymind/core/workflow"
 )
 
@@ -153,6 +154,9 @@ func applyChatMentions(ctx context.Context, db *gorm.DB, raw map[string]any, use
 		denied := (mention.Type == "tool" || mention.Type == "workflow") && mentionIsDenied(query, mention)
 		switch mention.Type {
 		case "knowledge_base":
+			if !systemdeps.PythonComponentActive("rag") {
+				continue
+			}
 			if !acl.Can(userID, acl.ResourceTypeDB, mention.ResourceID, acl.PermRead) {
 				return query, resolved, fmt.Errorf("knowledge base mention is not readable: %s", mention.ResourceID)
 			}
@@ -586,6 +590,9 @@ func buildMentionResourceContext(ctx context.Context, db *gorm.DB, userID string
 	isReadable := func(mention chatMention) bool {
 		switch mention.Type {
 		case "knowledge_base":
+			if !systemdeps.PythonComponentActive("rag") {
+				return false
+			}
 			if !acl.Can(userID, acl.ResourceTypeDB, mention.ResourceID, acl.PermRead) {
 				return false
 			}

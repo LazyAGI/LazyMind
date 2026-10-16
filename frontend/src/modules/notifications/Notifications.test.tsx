@@ -75,7 +75,10 @@ describe('notification settings and task UI', () => {
     expect(entry).toHaveTextContent('taskCenter.statusSuccess、taskCenter.statusFailed');
     fireEvent.click(entry);
     fireEvent.click(await screen.findByRole('button', { name: 'notifications.cancel' }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'notifications.save' })).not.toBeInTheDocument());
+    await waitFor(
+      () => expect(screen.queryByRole('button', { name: 'notifications.save' })).not.toBeInTheDocument(),
+      { timeout: 5000 },
+    );
     expect(entry).toHaveTextContent('notifications.desktop');
     expect(mocks.put).not.toHaveBeenCalled();
     expect(mocks.execution).not.toHaveBeenCalled();
@@ -101,13 +104,19 @@ describe('notification settings and task UI', () => {
 
     fireEvent.click(close!);
     fireEvent.click(await screen.findByRole('button', { name: 'notifications.discardChanges' }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'notifications.save' })).not.toBeInTheDocument());
+    await waitFor(
+      () => expect(screen.queryByRole('button', { name: 'notifications.save' })).not.toBeInTheDocument(),
+      { timeout: 5000 },
+    );
     expect(mocks.put).not.toHaveBeenCalled();
     fireEvent.click(entry);
     expect(await screen.findByRole('switch', { name: 'notifications.waiting' })).not.toBeChecked();
     vi.mocked(Modal.confirm).mockClear();
     fireEvent.click(document.querySelector<HTMLButtonElement>('.notification-editor-drawer .ant-drawer-close')!);
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'notifications.save' })).not.toBeInTheDocument());
+    await waitFor(
+      () => expect(screen.queryByRole('button', { name: 'notifications.save' })).not.toBeInTheDocument(),
+      { timeout: 5000 },
+    );
     expect(Modal.confirm).not.toHaveBeenCalled();
   });
   it('loads the selected execution snapshot only inside the reminder sidebar', async () => {

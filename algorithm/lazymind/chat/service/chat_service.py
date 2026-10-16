@@ -10,7 +10,6 @@ import threading
 import time
 from html import escape as escape_xml
 from pathlib import Path
-import sys
 from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
 import lazyllm
@@ -315,12 +314,7 @@ def _select_recent_progress_memory_reference(
 
 
 def _inject_reader_config(ocr_config: Dict[str, Any]) -> None:
-    from lazymind.common.optional_components import component_enabled
-    if not component_enabled('rag'):
-        return
-    if not ocr_config and 'lazyllm.tools.rag' not in sys.modules:
-        return
-    from lazyllm.tools.rag import inject_reader_config
+    from lazyllm.tools.rag.readers.reader_config_inject import inject_reader_config
     inject_reader_config(ocr_config=ocr_config)
 
 

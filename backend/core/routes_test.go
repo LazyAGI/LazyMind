@@ -8,6 +8,19 @@ import (
 	"github.com/gorilla/mux"
 )
 
+func TestStoredDocumentSearchRouteDoesNotRequireRAG(t *testing.T) {
+	t.Setenv("LAZYMIND_RAG_ENABLED", "false")
+	router := mux.NewRouter()
+	registerAllRoutes(router)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/datasets/storage-test/documents:search", nil))
+	// Without an identity, the catalog handler must reject access, rather than
+	// the optional-component gate masking the file listing with a 503.
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected missing-user validation, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestWriterDocumentSyncRouteParsesSingleSlotIndex(t *testing.T) {
 	r := mux.NewRouter()
 	r.UseEncodedPath()

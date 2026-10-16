@@ -2,6 +2,7 @@
 """Split optional distributions from the resolved algorithm environment into ZIPs."""
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import importlib.metadata as metadata
 import importlib.util
@@ -102,7 +103,7 @@ def distribution_files(dist, site):
 
 
 DEFAULT_BASE_URL = 'https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/'
-DEFAULT_FALLBACK_BASE_URL = 'https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/'
+DEFAULT_FALLBACK_BASE_URL = 'https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/RAG/'
 
 
 def split(runtime, output, base_url=DEFAULT_BASE_URL, slim_providers=False):
@@ -145,6 +146,8 @@ def split(runtime, output, base_url=DEFAULT_BASE_URL, slim_providers=False):
     catalog = {**identity, 'components': {}}
     if slim_providers:
         catalog['desktopProfile'] = 'slim-providers-v1'
+    build_time = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    platform_label = {'darwin': 'mac', 'windows': 'win'}.get(identity['platform'], identity['platform'])
     planned = {}
     owners = {}
     for name, dist in distributions.items():
@@ -157,8 +160,10 @@ def split(runtime, output, base_url=DEFAULT_BASE_URL, slim_providers=False):
         manifest = {**identity, 'id': component, 'packages': {name: full_versions[name] for name in sorted(names)}}
         contents = {str(p.relative_to(site)).replace('\\', '/'): digest(p.read_bytes()) for p in paths}
         manifest['revision'] = digest(encoded({'manifest': manifest, 'files': contents}))
-        filename = (f'lazymind-python-{component}-{identity["platform"]}-{identity["arch"]}-'
-                    f'{identity["pythonAbi"]}-{manifest["revision"][:16]}.zip')
+        filename = (
+            f'lazymind-{platform_label}-{identity["arch"]}-{component}-'
+            f'{identity["pythonAbi"]}-{build_time}-{manifest["revision"][:16]}.zip'
+        )
         archive = output / filename
         with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as bundle:
             for path in paths:

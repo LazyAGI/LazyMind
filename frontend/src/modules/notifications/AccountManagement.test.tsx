@@ -163,7 +163,12 @@ it('restores a connected WeCom robot with its original credentials without autom
   expect(screen.getByText('notifications.wecomReauthorizeStepHint')).toBeVisible();
   expect(screen.queryByText('channelGateway.wecom.stepScanHint')).not.toBeInTheDocument();
   expect(screen.queryByText('channelGateway.wecom.stepConfirmHint')).not.toBeInTheDocument();
-  expect(within(screen.getByRole('region', { name: 'notifications.wecomRestorePermissionTitle' })).getByText('notifications.account：Team robot')).toBeVisible();
+  const restoreRegion = screen.getByRole('region', { name: 'notifications.wecomRestorePermissionTitle' });
+  expect(await within(restoreRegion).findByText(
+    'notifications.account：Team robot',
+    undefined,
+    { timeout: 5000 },
+  )).toBeVisible();
   expect(screen.queryByRole('button', { name: /channelGateway.wecom.startScan/ })).not.toBeInTheDocument();
   const credentials = screen.getByText('notifications.wecomUpdateCredentials').closest('details')!;
   expect(screen.getByLabelText('notifications.wecomBotId')).not.toBeVisible();

@@ -1,5 +1,5 @@
 import { fireEvent, render as renderComponent, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   NEW_CHAT_MODEL_SELECTION_KEY,
   useModelSelectionStore,
@@ -19,6 +19,11 @@ const render = (ui: ReactNode) => renderComponent(ui, { wrapper: MemoryRouter })
 vi.mock("../SkillRecording", () => ({ default: () => null }));
 
 const promptMocks = vi.hoisted(() => ({ polish: vi.fn() }));
+const rag = vi.hoisted(() => ({ availability: "ready" }));
+vi.mock("@/modules/modelProvider/contexts/RAGComponentContext", () => ({
+  useRAGComponent: () => ({ availability: rag.availability }),
+}));
+afterEach(() => { rag.availability = "ready"; });
 const datasets = vi.hoisted(() => ({ list: vi.fn(() => new Promise(() => undefined)) }));
 vi.mock("@/modules/chat/utils/request", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/modules/chat/utils/request")>()),
@@ -82,16 +87,22 @@ vi.mock("../ImageUpload", async () => {
     allowedFileTypes: [".pdf"],
     allowedTextTypes: [".txt"],
     allowedUploadTypes: [".png", ".pdf", ".txt"],
-    default: React.forwardRef(function MockImageUpload(_props, ref) {
+    default: React.forwardRef(function MockImageUpload(props: { types: string[]; updateFiles: (files: any[]) => void }, ref) {
+      const files = React.useRef<File[]>([]);
       React.useImperativeHandle(ref, () => ({
         clear: vi.fn(),
-        getFiles: () => [],
+        getFiles: () => files.current,
         getUploadingCount: () => 0,
         openFileDialog: vi.fn(),
         removeFile: vi.fn(),
         uploadFiles: vi.fn(),
       }));
-      return null;
+      return <button type="button" data-testid="attach-test-pdf" data-accept={props.types.join(",")}
+        onClick={() => {
+          const file = Object.assign(new File(["PDF"], "paper.pdf", { type: "application/pdf" }), { uid: "pdf-1" });
+          files.current = [file];
+          props.updateFiles([file]);
+        }}>attach PDF</button>;
     }),
   };
 });
@@ -139,6 +150,29 @@ describe("ChatInput model switch save lock", () => {
   afterEach(() => {
     vi.clearAllMocks();
     useModelSelectionStore.getState().resetForNewChat();
+  });
+
+  it("accepts and sends PDF attachments without RAG while leaving knowledge search disabled", async () => {
+    const createObjectURL = URL.createObjectURL;
+    const revokeObjectURL = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => "blob:test-pdf");
+    URL.revokeObjectURL = vi.fn();
+    onTestFinished(() => {
+      URL.createObjectURL = createObjectURL;
+      URL.revokeObjectURL = revokeObjectURL;
+    });
+    rag.availability = "missing";
+    const onSend = vi.fn();
+    render(<ChatInput value="Read this PDF" onChange={vi.fn()} onSend={onSend} isChatContent />);
+    const upload = screen.getByTestId("attach-test-pdf");
+    expect(upload).toHaveAttribute("data-accept", expect.stringContaining(".pdf"));
+    fireEvent.click(upload);
+    fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({
+      fileList: [expect.objectContaining({ name: "paper.pdf" })],
+      files: [expect.objectContaining({ name: "paper.pdf" })],
+      chatConfigSnapshot: expect.objectContaining({ knowledgeBaseId: [] }),
+    })));
   });
 
   it("does not mount workspace polling for document previews", () => {

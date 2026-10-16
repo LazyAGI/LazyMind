@@ -46,6 +46,8 @@ interface KnowledgeSquareProps {
   onOpen: (item: OfficialKnowledgeBase) => void;
   onQuery: (item: OfficialKnowledgeBase) => void;
   onLoadDetail: (item: OfficialKnowledgeBase) => Promise<OfficialKnowledgeBase>;
+  actionDisabled?: boolean;
+  actionDisabledReason?: ReactNode;
 }
 
 const iconByType: Record<string, ReactNode> = {
@@ -81,6 +83,8 @@ export default function KnowledgeSquare({
   onOpen,
   onQuery,
   onLoadDetail,
+  actionDisabled = false,
+  actionDisabledReason,
 }: KnowledgeSquareProps) {
   const { t } = useTranslation();
   const [type, setType] = useState<KnowledgeSquareType>("industry");
@@ -325,7 +329,8 @@ export default function KnowledgeSquare({
                       size="small"
                       type="primary"
                       loading={active}
-                      disabled={active}
+                      disabled={active || actionDisabled}
+                      title={actionDisabled ? String(actionDisabledReason || "") : undefined}
                       onClick={(event: MouseEvent<HTMLElement>) => {
                         event.stopPropagation();
                         if (item.installed) onUpdate(item);
@@ -371,7 +376,8 @@ export default function KnowledgeSquare({
               {detailItem.catalogSource !== "cloud" ? <Button
                 type="primary"
                 loading={detailActive}
-                disabled={detailActive}
+                disabled={detailActive || actionDisabled}
+                title={actionDisabled ? String(actionDisabledReason || "") : undefined}
                 onClick={() => {
                   if (detailItem.installed) onUpdate(detailItem);
                   else onInstall(detailItem);

@@ -155,8 +155,13 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
     }), [isSelectorDisabled, selectorDisabledReason, t]);
 
     useEffect(() => {
+      if (isSelectorDisabled) {
+        setKnowledgeBaseList([]);
+        setFilteredList([]);
+        return;
+      }
       getKnowledgeBaseList();
-    }, []);
+    }, [isSelectorDisabled]);
 
     useEffect(() => {
       if (
@@ -167,8 +172,9 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
       }
 
       previousRefreshKeyRef.current = refreshKey;
+      if (isSelectorDisabled) return;
       getKnowledgeBaseList();
-    }, [refreshKey]);
+    }, [isSelectorDisabled, refreshKey]);
 
     function getKnowledgeBaseList() {
       setKnowledgeLoading(true);

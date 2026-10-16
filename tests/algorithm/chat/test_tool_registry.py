@@ -83,7 +83,8 @@ def test_wikipedia_remains_available_without_web_provider():
     assert 'wikipedia' in _active_tool_names()
 
 
-def test_temp_kb_activates_when_files_are_present():
+def test_temp_kb_activates_when_files_are_present(monkeypatch):
+    monkeypatch.setenv('LAZYMIND_RAG_ENABLED', 'true')
     from lazyllm.tools.agent.toolsManager import ToolManager
 
     assert 'temp_kb' not in _active_tool_names()
@@ -107,6 +108,22 @@ def test_temp_kb_activates_when_files_are_present():
             'summary': 'Locate passages in this conversation\'s uploaded documents.',
         }
     ]
+
+
+@pytest.mark.parametrize('enabled', ['0', 'false'])
+def test_missing_rag_hides_temporary_search_but_keeps_attachment_readers(monkeypatch, enabled):
+    from lazyllm.tools.agent.toolsManager import ToolManager
+    from lazymind.chat.service.component.tool_registry import USER_ATTACHMENT_TOOL_CONFIGS
+
+    monkeypatch.setenv('LAZYMIND_RAG_ENABLED', enabled)
+    lazyllm.globals['agentic_config'] = {'files': ['paper.pdf'], 'filters': {'kb_id': ['kb-1']}}
+    configs = filter_tools([*DEFAULT_TOOLS, *USER_ATTACHMENT_TOOL_CONFIGS], include_unready=True)
+    names = {cfg.name for cfg in configs}
+    assert not names.intersection({'kb', 'temp_kb'})
+    assert {'read_user_attachment', 'find_user_attachment'} <= names
+    assert _tool_group('temp_kb')['active'] is False
+    cfg = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'temp_kb')
+    assert ToolManager([cfg.tool]).tools_description == []
 
 
 def test_registry_key_source_activates_function_tool():
