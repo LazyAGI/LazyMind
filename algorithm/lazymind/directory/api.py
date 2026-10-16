@@ -18,7 +18,9 @@ unsupported, and reading is not proof that a classification is correct.
 Use the user's language for names and explanations. Return only the requested JSON object.
 '''
 ROUTE = '''Decide which directories to maintain from the supplied task observations.
-Each observation retains its user question. Separate different tasks, merge follow-up questions
+Each observation retains its id, question and resource_keys. Resources hold metadata and evidence windows;
+match each window by observation_ids and its version, never assume the latest window supports every question.
+Separate different tasks, merge follow-up questions
 with the same purpose. Only resources relevant to those tasks may participate. Incidental unrelated
 hits must not create directories. Existing directory Intent and organization define its scope.
 Prefer existing object directories and their natural subgroups when they fit. A comparison of
@@ -44,7 +46,7 @@ and user adjustments. Only propose new groups that are needed, using temporary I
 Use existing groups whenever appropriate. New groups may reference existing or new parents.
 Do not reclassify, move or remove pinned entries. Core filters and reports excluded entries.
 Only keys in resources may appear in assignments; entries are context, never additional inputs.
-Do not re-add excluded entries. Do not treat source providers as document types.
+Do not treat source providers as document types.
 When organizing by document type, derive reusable content-type groups from the materials.
 Documents of the same type share a group across providers, systems and subjects; do not split
 or name type groups by provider, system or subject. This does not override an explicit other
@@ -71,11 +73,10 @@ titled "alice invited you to alice/ProjectX" supports a repository-invitation gr
 whose scope includes ProjectX repository invitations. This does not prove development progress.
 Generic titles, keyword overlap, storage location or a recognizable source alone are insufficient.
 If relying on an actual read excerpt, use evidence_basis="read"; never relabel body evidence as metadata.
-Do not require a body read merely because read_state is unread. Do not infer topic from adjacent items.
 Ambiguous objects or unsupported placement remain unconfirmed. Give the specific title/source or
 body evidence supporting BOTH membership and placement, or the concrete missing evidence, in reason.
 Never use "unread" or "not fully read" alone as a reason. Existing confirmed entries without new evidence
-or changed placement/version retain their confirmation and evidence. Existing pinned positions stay fixed.
+or changed placement/version retain their confirmation and evidence.
 Return {"groups":[{"id":"new_1","name":"...","parent_id":"existing/new ID or empty",
 "position":0}],"assignments":[{"resource_key":"exact resources key", "group_id":"ID or empty",
 "confirmed":false,"evidence_basis":"metadata or read","reason":"brief evidence-grounded reason"}]}.

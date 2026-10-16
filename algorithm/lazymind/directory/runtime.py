@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from lazyllm import LOG
 from lazyllm.tools import fc_register
 from lazyllm.tools.agent import ToolExecutionDisposition
+from lazyllm.tools.fs.supplier.googledrive import GoogleDriveFS
 from lazymind.chat.engine.tools.infra.core_api_client import post_core_api
 
 
@@ -28,6 +29,8 @@ def _decoded(value):
 def _tool_value(value):
     """Decode the existing MCP adaptor envelope, never arbitrary prose fragments."""
     value = _decoded(value)
+    if isinstance(value, dict):
+        value = _decoded(value.get('value', value))
     if isinstance(value, str):
         prefix = 'Tool call result:\nReceived text message:\n'
         if value.startswith(prefix):
@@ -231,11 +234,16 @@ class DirectoryRuntime:
                 self.manage_document_directory, self.folders.inspect_document_folder,
                 self.folders.submit_document_directory_organization]
 
-    def observe(self, records):
+    def observe(self, records, observed_at=None):
         with self._lock:
             for record in records:
                 try:
                     observation = self.normalize(record)
+                    if observation and observed_at:
+                        for candidate in observation.get('candidates', []):
+                            candidate['observed_at'] = observed_at
+                            candidate['observation_id'] = record.call_id
+                            candidate['check_status'] = observation['status']
                 except Exception:
                     self.failed = True
                     self._capture_gap = True
@@ -280,11 +288,9 @@ class DirectoryRuntime:
             read = any(c.get('read_state') in {'read', 'partial'} for c in observation['candidates'])
             facts['reads'] += int(read)
             if source == 'agent_conversations':
-                raw = _decoded(record.result)
-                body = raw.get('value', raw) if isinstance(raw, dict) else raw
                 located = any(c.get('locator', {}).get('range_kind') == 'physical_lines'
                               or c.get('locator', {}).get('start_message_id') for c in observation['candidates'])
-                messages = read and located and _history_messages(body)
+                messages = read and located and _history_messages(record.result)
                 facts['message_windows'] += int(messages)
                 facts['non_message_reads'] += int(not messages)
         facts['incomplete'] += int(observation['incomplete'])
@@ -485,9 +491,12 @@ class DirectoryRuntime:
                 'id', 'page_id', 'document_id', 'file_id', 'resource_id', 'node_token', 'obj_token', 'token',
             ) if row.get(k)), None)
             if source == 'google_drive':
-                rid = rid or row.get('name')
-                if not rid and isinstance(row.get('path'), str):
-                    rid = row['path'].removeprefix('googledrive:/').lstrip('/')
+                try:
+                    rid = GoogleDriveFS.file_id_from_path(
+                        rid or row.get('name') or row.get('path') or row.get('google_drive_path'))
+                except ValueError:
+                    gaps = True
+                    continue
             if source == 'feishu':
                 rid = row.get('node_token') or rid
             if source == 'feishu' and not rid:
@@ -555,14 +564,16 @@ class DirectoryRuntime:
             snippet = row.get('content') or row.get('text') or row.get('body') or row.get('snippet') or ''
             if not isinstance(snippet, str):
                 snippet = json.dumps(snippet, ensure_ascii=False)
-            read = operation == 'read' and not failed and bool(snippet)
+            read = operation == 'read' and not failed and bool(snippet) and row.get('version_stable', True)
             if operation == 'read' and not read:
                 gaps = True
             # Compare like-for-like provider versions only. A rendered excerpt or
             # reader response is not a stable fingerprint of the source document.
-            version = next((f'{field}:{row[field]}' for field in
-                            ('version', 'page_last_edited_at', 'modified_time', 'mtime')
-                            if row.get(field) is not None), '')
+            version = row.get('content_version') or next(
+                (f'{field}:{row[field]}' for field in ('version', 'page_last_edited_at', 'modified_time', 'mtime')
+                 if row.get(field) is not None), '')
+            if source == 'google_drive' and version and not row.get('content_version'):
+                version = 'source_revision:' + version
             items.append({'source': item_source, 'namespace': namespace, 'resource_id': str(rid),
                           'title': str(row.get('title') or row.get('name') or row.get('subject') or '')[:1000],
                           'locator': locator,
@@ -571,7 +582,8 @@ class DirectoryRuntime:
                           'read_at': now if read else None,
                           'access_state': ('denied' if status == 'denied' else 'unavailable' if failed
                                            else 'accessible' if read else 'unknown'),
-                          'content_version': version})
+                          'content_version': version, 'version_stable': row.get('version_stable'),
+                          'trashed': row.get('trashed')})
         incomplete = (gaps or partial or failed or len(rows) > 1000
                       or not items and operation == 'read' or name == 'shell')
         # Retain metadata without turning observations into a document body store.

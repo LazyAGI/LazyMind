@@ -28,6 +28,7 @@ export default function DirectoryPage() {
   const [page, setPage] = useState(1);
   const [directories, setDirectories] = useState<DocumentDirectory[]>([]);
   const [detail, setDetail] = useState<DocumentDirectoryDetail>();
+  const [detailQuery, setDetailQuery] = useState('');
   const [batches, setBatches] = useState<DocumentDirectoryBatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -36,12 +37,13 @@ export default function DirectoryPage() {
   const requestSequence = useRef(0);
   const pageContainer = useRef<HTMLDivElement>(null);
   const editingGroup = useRef<string>();
+  const queryKey = JSON.stringify([directoryId, page, viewMode, selectedGroup, query, stateFilter]);
   const refresh = useCallback(async () => {
     const sequence = ++requestSequence.current;
     const [dirs, runs, view] = await Promise.all([listDirectories(), listBatches(), directoryId ? getDirectory(directoryId, { offset: (page - 1) * PAGE_SIZE, limit: PAGE_SIZE, groupId: viewMode === 'groups' && selectedGroup !== null ? selectedGroup : undefined, query, state: stateFilter }) : undefined]);
     if (sequence !== requestSequence.current) return;
-    setDirectories(dirs); setBatches(runs); setDetail(view); setLoading(false);
-  }, [directoryId, page, viewMode, selectedGroup, query, stateFilter]);
+    setDirectories(dirs); setBatches(runs); setDetail(view); setDetailQuery(queryKey); setLoading(false);
+  }, [directoryId, page, viewMode, selectedGroup, query, stateFilter, queryKey]);
   useEffect(() => {
     if (pageContainer.current) pageContainer.current.scrollTop = 0;
     void refresh().catch(() => setLoading(false));
@@ -87,7 +89,7 @@ export default function DirectoryPage() {
       {result.grouped !== undefined && <div>{t('directories.folderClassificationCounts', { grouped: result.grouped, unclassified: result.unclassified })}</div>}</div>;
   };
   const d = detail?.directory;
-  const entries = (detail?.entries || []).filter(e => !e.excluded);
+  const entries = detail?.entries || [];
   const groupName = (id: string): string => {
     const group = detail?.groups.find(g => g.id === id);
     return group ? `${group.parent_id ? groupName(group.parent_id) + ' / ' : ''}${group.name}` : t('directories.unclassified');
@@ -121,13 +123,11 @@ export default function DirectoryPage() {
     .filter(c => ['denied', 'failed', 'error', 'unavailable'].includes(c.status))
     .map(c => t(`directories.sourceIssue_${c.operation}_${c.status === 'denied' ? 'denied' : 'failed'}`, { source: sourceLabel(c.source) })))];
   const inaccessibleCount = entries.filter(inaccessible).length;
-  const filteredEntries = entries.filter(e =>
-    (viewMode === 'all' || e.group_id === activeGroup) &&
-    (stateFilter === 'all' || (stateFilter === 'unconfirmed' && !e.confirmed) ||
-      (stateFilter === 'unread' && e.read_state === 'unread') || (stateFilter === 'inaccessible' && inaccessible(e))) &&
-    `${e.title} ${e.resource_id} ${sourceLabel(e.source)}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
-  const entryTotal = detail?.total ?? filteredEntries.length;
-  const currentPage = Math.min(page, Math.max(1, Math.ceil(entryTotal / PAGE_SIZE)));
+  const entryTotal = detail?.total ?? 0;
+  const matchesQuery = detailQuery === queryKey;
+  const currentPage = matchesQuery ? Math.min(page, Math.max(1, Math.ceil(entryTotal / PAGE_SIZE))) : page;
+  const pageReady = matchesQuery && page === currentPage &&
+    (viewMode !== 'groups' || selectedGroup !== null && selectedGroup === activeGroup);
   useEffect(() => { if (page !== currentPage) setPage(currentPage); }, [page, currentPage]);
   const selected = detail?.entries.find(e => e.id === selectedEntry);
   const readState = (e: DocumentDirectoryEntry) => t(`directories.read_${e.read_state}`, { defaultValue: e.read_state });
@@ -206,7 +206,7 @@ export default function DirectoryPage() {
           </nav>}
           <section className="directory-documents">
             <div className="directory-document-toolbar"><Input allowClear prefix={<SearchOutlined />} aria-label={t('directories.search')} placeholder={t('directories.search')} value={query} onChange={(e: ChangeEvent<HTMLInputElement>) => { setQuery(e.target.value); setPage(1); }} /><Select aria-label={t('directories.filterState')} value={stateFilter} onChange={(value: string) => { setStateFilter(value); setPage(1); }} options={['all', 'unconfirmed', 'unread', 'inaccessible'].map(value => ({ value, label: t(`directories.filter_${value}`) }))} /></div>
-            <Table tableLayout="fixed" rowKey="id" dataSource={detail?.total !== undefined ? filteredEntries : filteredEntries.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)} columns={columns} pagination={false} scroll={{ x: 580, y: 400 }} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('directories.noMatchingDocuments')} /> }} />
+            <Table tableLayout="fixed" rowKey="id" loading={!pageReady} dataSource={pageReady ? entries : []} columns={columns} pagination={false} scroll={{ x: 580, y: 400 }} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('directories.noMatchingDocuments')} /> }} />
             <Pagination className="directory-pagination" current={currentPage} onChange={setPage} total={entryTotal} pageSize={PAGE_SIZE} showSizeChanger={false} hideOnSinglePage={false} showTotal={(total: number) => t('directories.documentCount', { count: total })} />
           </section>
         </div>}

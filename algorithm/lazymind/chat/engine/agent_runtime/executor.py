@@ -173,6 +173,7 @@ class AgentExecutor:
                 result = compact_history(history, keep_full_turns, **kwargs)
                 if state.get('compression_revision', 0) != previous:
                     repeat_monitor.context_compacted()
+                    notice_buffer.clear()
                 return result
 
         def stop_condition(value):

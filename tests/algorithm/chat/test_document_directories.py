@@ -404,3 +404,37 @@ def test_empty_read_past_eof_does_not_invent_a_history_window():
         'content': '', 'line_unit': 'physical', 'offset': 100, 'end_line': 99, 'eof': True,
     }, {'path': '/home/u/.codex/sessions/a.jsonl'}))
     assert result['candidates'] == [] and result['incomplete']
+
+
+def test_google_drive_enumeration_read_capture_matches_core_fixture(monkeypatch):
+    from pathlib import Path
+    from lazyllm.tools.fs.supplier.googledrive import GoogleDriveFS
+    from lazymind.directory.folders import cloud_page
+
+    fixture = json.loads((Path(__file__).parents[2] / 'fixtures/document_directory_drive.json').read_text())
+    fs = GoogleDriveFS(dynamic_auth=True, skip_instance_cache=True)
+    monkeypatch.setattr(fs, '_get', lambda *a, **kw: {'files': [fixture['metadata']]})
+    nodes, children, cursor, _ = cloud_page(
+        fixture['source'], {'id': 'FOLDER_789', 'key': 'root', 'path': ''}, fs)
+    assert nodes == [fixture['node']]
+    assert not children and cursor is None
+    monkeypatch.setattr(fs, '_get', lambda *a, **kw: fixture['metadata'])
+    monkeypatch.setattr(fs, '_export_document', lambda *a: fixture['body'].encode())
+    for case in fixture['cases']:
+        body = fs.read(case['path'])
+        assert body == fixture['body']
+        item = record('fs_google_read', body, {'path': case['path']})
+        item.call_id = case['observation']['call_id']
+        observation = runtime().normalize(item)
+        assert observation['candidates'][0]['read_at']
+        observation['candidates'][0]['read_at'] = case['observation']['candidates'][0]['read_at']
+        assert observation == case['observation']
+
+
+
+def test_google_drive_invalid_paths_keep_other_candidates_and_report_gap():
+    observation = runtime().normalize(record('fs_google_search', [
+        {'path': '/folder/file'}, {'path': '/drive/drive-1/file-1'}, {'name': 'file-2', 'google_drive_path': 'googledrive:/file-2'},
+    ]))
+    assert observation['incomplete']
+    assert [c['resource_id'] for c in observation['candidates']] == ['file-1', 'file-2']

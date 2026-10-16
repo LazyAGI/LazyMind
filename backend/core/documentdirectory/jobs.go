@@ -214,9 +214,7 @@ func enqueueManual(ctx context.Context, tx *gorm.DB, uid string, d orm.DocumentD
 				}
 			}
 			for i := range entries {
-				entries[i].ID = common.GenerateID()
-				entries[i].DirectoryID = d.ID
-				entries[i].GroupID = ""
+				copyEntryIdentity(&entries[i], d.ID)
 				entries[i].Pinned = false
 				entries[i].Confirmed = false
 			}
@@ -231,9 +229,7 @@ func enqueueManual(ctx context.Context, tx *gorm.DB, uid string, d orm.DocumentD
 				return err
 			}
 			for i := range excluded {
-				excluded[i].ID = common.GenerateID()
-				excluded[i].DirectoryID = d.ID
-				excluded[i].GroupID = ""
+				copyEntryIdentity(&excluded[i], d.ID)
 			}
 			if len(excluded) > 0 {
 				if err := tx.CreateInBatches(excluded, 100).Error; err != nil {
@@ -359,7 +355,7 @@ func handleJob(ctx context.Context, j asyncjob.Job, reporter asyncjob.Reporter) 
 		var dirs []orm.DocumentDirectory
 		err = db.WithContext(ctx).Where("user_id=? AND deleted_at IS NULL", b.UserID).Find(&dirs).Error
 		if err == nil {
-			proposal, err = generate("route", map[string]any{"input": input, "directories": dirs, "resources": candidates(input)})
+			proposal, err = generate("route", routeInput(input, dirs))
 		}
 		if err == nil {
 			err = applyTargets(ctx, db, j, &b, input, proposal)
@@ -410,6 +406,63 @@ func handleJob(ctx context.Context, j asyncjob.Job, reporter asyncjob.Reporter) 
 		return asyncjob.Result{ErrorCode: "directory_organize_failed", Permanent: errors.Is(err, ErrInput)}, err
 	}
 	return asyncjob.Result{ResultJSON: b.ResultJSON}, nil
+}
+
+// Project model context without changing the durable snapshot used for retries.
+func routeInput(input Input, directories []orm.DocumentDirectory) map[string]any {
+	type resource struct {
+		Candidate
+		Evidence []map[string]any `json:"evidence,omitempty"`
+	}
+	resources := map[string]*resource{}
+	for k, c := range candidates(input) {
+		c.Excerpt = "" // Bodies live only in evidence, including older distinct windows.
+		resources[k] = &resource{Candidate: c}
+	}
+	observations := make([]map[string]any, 0, len(input.Observations))
+	evidenceIndex := map[string]int{}
+	for _, row := range input.Observations {
+		var o Observation
+		if json.Unmarshal(row.PayloadJSON, &o) != nil {
+			continue
+		}
+		keys, seen := []string{}, map[string]bool{}
+		for _, c := range o.Candidates {
+			k := resourceKey(c)
+			if !seen[k] {
+				keys = append(keys, k)
+				seen[k] = true
+			}
+			if c.Excerpt == "" {
+				continue
+			}
+			r := resources[k]
+			evidenceKey := key([]any{k, c.Excerpt, c.Locator, c.ReadState, c.ReadAt, c.ContentVersion})
+			index, found := evidenceIndex[evidenceKey]
+			if !found {
+				index = len(r.Evidence)
+				evidenceIndex[evidenceKey] = index
+				r.Evidence = append(r.Evidence, map[string]any{
+					"excerpt": c.Excerpt, "locator": c.Locator, "read_state": c.ReadState,
+					"read_at": c.ReadAt, "content_version": c.ContentVersion, "observation_ids": []string{},
+				})
+			}
+			ids := r.Evidence[index]["observation_ids"].([]string)
+			if len(ids) == 0 || ids[len(ids)-1] != row.ID {
+				r.Evidence[index]["observation_ids"] = append(ids, row.ID)
+			}
+		}
+		observations = append(observations, map[string]any{
+			"id": row.ID, "query": row.Query, "source": o.Source, "operation": o.Operation, "scope": o.Scope,
+			"status": o.Status, "incomplete": o.Incomplete, "resource_keys": keys,
+		})
+	}
+	return map[string]any{"input": map[string]any{"observations": observations, "instruction": input.Instruction},
+		"directories": directories, "resources": resources}
+}
+
+func copyEntryIdentity(e *orm.DocumentDirectoryEntry, directoryID string) {
+	e.ID, e.DirectoryID, e.GroupID = common.GenerateID(), directoryID, ""
 }
 
 func candidates(input Input) map[string]Candidate {
@@ -823,11 +876,8 @@ func applyOrganization(ctx context.Context, db *gorm.DB, j asyncjob.Job, b *orm.
 		b.UpdatedAt = now
 		if input.FolderBatch {
 			b.Status = "running"
-			var grouped, unclassified int64
-			if err := tx.Model(&orm.DocumentDirectoryEntry{}).Where("directory_id=? AND excluded=? AND group_id<>?", d.ID, false, "").Count(&grouped).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&orm.DocumentDirectoryEntry{}).Where("directory_id=? AND excluded=? AND group_id=?", d.ID, false, "").Count(&unclassified).Error; err != nil {
+			grouped, unclassified, err := classificationCounts(tx, d.ID)
+			if err != nil {
 				return err
 			}
 			b.ResultJSON = folderResult(b.ResultJSON, map[string]any{"processed": input.FolderOffset, "grouped": grouped, "unclassified": unclassified, "classification_state": "running", "directory_name": d.Name, "usage": p.Usage})
@@ -949,17 +999,9 @@ func SaveObservations(ctx context.Context, db *gorm.DB, uid, conversation, histo
 					}
 					continue
 				}
-				scoped, unscoped := []Candidate{}, []Candidate{}
-				for _, c := range o.Candidates {
-					var n int64
-					if err := tx.Model(&orm.DocumentFolderNode{}).Where("inventory_id=? AND resource_key=?", v.ID, resourceKey(c)).Count(&n).Error; err != nil {
-						return err
-					}
-					if n > 0 {
-						scoped = append(scoped, c)
-					} else {
-						unscoped = append(unscoped, c)
-					}
+				scoped, unscoped, err := partitionFolderCandidates(tx, v.ID, o.Candidates)
+				if err != nil {
+					return err
 				}
 				if len(unscoped) > 0 {
 					other := row

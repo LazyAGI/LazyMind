@@ -536,3 +536,82 @@ func TestReadWindowMergeKeepsPhysicalMetadataTogether(t *testing.T) {
 		t.Fatal("new read retained old clipping or cursor")
 	}
 }
+
+func TestRestoreChecksOriginalGroupAndPreservesReading(t *testing.T) {
+	for _, scenario := range []string{"existing", "deleted", "different_directory", "query_error"} {
+		t.Run(scenario, func(t *testing.T) {
+			db := testDB(t)
+			d := create(t, db, "restore")
+			g := command(t, db, Command{Operation: "group", DirectoryID: d.ID, Name: "G"})["group"].(orm.DocumentDirectoryGroup)
+			c := sample("/read-document")
+			c.ReadState, c.ContentVersion = "read", "version-1"
+			now := time.Now().UTC()
+			c.ReadAt, c.Excerpt = &now, "Verified document body"
+			e := command(t, db, Command{Operation: "entry", DirectoryID: d.ID, GroupID: g.ID, Candidate: &c})["entry"].(orm.DocumentDirectoryEntry)
+			if e.ReadState != "read" || !e.Pinned || !e.Confirmed {
+				t.Fatal("restore fixture lacks reading evidence and manual placement")
+			}
+			command(t, db, Command{Operation: "exclude", DirectoryID: d.ID, EntryID: e.ID})
+			if scenario == "deleted" {
+				command(t, db, Command{Operation: "delete_group", DirectoryID: d.ID, GroupID: g.ID})
+			} else if scenario == "different_directory" {
+				other := create(t, db, "other")
+				must(t, db.Model(&g).Update("directory_id", other.ID).Error)
+			}
+			before, err := requireDirectory(db, "u", d.ID)
+			must(t, err)
+			injected := errors.New("group lookup failed")
+			if scenario == "query_error" {
+				must(t, db.Callback().Query().Before("gorm:query").Register("fail_group_lookup", func(tx *gorm.DB) {
+					if tx.Statement.Table == "document_directory_groups" {
+						tx.AddError(injected)
+					}
+				}))
+			}
+			_, err = Execute(context.Background(), db, "u", Command{Operation: "restore", DirectoryID: d.ID, EntryID: e.ID})
+			if scenario == "query_error" {
+				must(t, db.Callback().Query().Remove("fail_group_lookup"))
+				if !errors.Is(err, injected) {
+					t.Fatalf("wanted lookup failure, got %v", err)
+				}
+			} else {
+				must(t, err)
+			}
+			var restored orm.DocumentDirectoryEntry
+			must(t, db.Where("id=?", e.ID).Take(&restored).Error)
+			if restored.ResourceKey != e.ResourceKey || restored.ReadState != e.ReadState || restored.Pinned != e.Pinned {
+				t.Fatalf("restore changed identity, read evidence or pin: %+v", restored)
+			}
+			if scenario == "query_error" {
+				after, err := requireDirectory(db, "u", d.ID)
+				must(t, err)
+				if !restored.Excluded || restored.GroupID != g.ID || after.Version != before.Version {
+					t.Fatal("failed restore was not rolled back")
+				}
+				return
+			}
+			if restored.Excluded {
+				t.Fatal("entry not restored")
+			}
+			group := g.ID
+			if scenario != "existing" {
+				group = ""
+				var evidence map[string]any
+				must(t, json.Unmarshal(restored.EvidenceJSON, &evidence))
+				if restored.Confirmed || len(evidence) != 0 {
+					t.Fatal("orphan grouping evidence survived restore")
+				}
+			} else if restored.Confirmed != e.Confirmed || string(restored.EvidenceJSON) != string(e.EvidenceJSON) {
+				t.Fatal("valid grouping evidence changed")
+			}
+			if restored.GroupID != group {
+				t.Fatalf("group=%q, want %q", restored.GroupID, group)
+			}
+			page, err := Get(context.Background(), db, "u", d.ID, EntryPageQuery{Limit: 5, Group: &group})
+			must(t, err)
+			if page.Total != 1 || len(page.Entries) != 1 || page.Entries[0].ID != e.ID {
+				t.Fatal("restored entry is not visible in its group")
+			}
+		})
+	}
+}

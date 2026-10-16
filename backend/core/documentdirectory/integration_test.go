@@ -15,6 +15,7 @@ import (
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
+	"strings"
 )
 
 func TestHTTPObservationIdleWorkerAndNextConversation(t *testing.T) {
@@ -38,6 +39,7 @@ func TestHTTPObservationIdleWorkerAndNextConversation(t *testing.T) {
 		return r
 	}
 	c := sample("/a")
+	c.Excerpt = "unique-observed-body"
 	obs := InternalRequest{Command: Command{Operation: "observations"}, HistoryID: "h1", RunID: "r1", Observations: []Observation{{CallID: "read", Source: "local", Status: "success", Operation: "read", Candidates: []Candidate{c}}}}
 	if got := send("c1", "u", "wrong", obs); got.Code != 401 {
 		t.Fatal(got.Code)
@@ -45,6 +47,20 @@ func TestHTTPObservationIdleWorkerAndNextConversation(t *testing.T) {
 	if got := send("c1", "other", "test-internal", obs); got.Code != 404 {
 		t.Fatal(got.Code)
 	}
+	if got := send("c1", "u", "test-internal", obs); got.Code != 200 {
+		t.Fatal(got.Code, got.Body.String())
+	}
+	second := c
+	second.Excerpt = "another-window-for-followup"
+	readAt := time.Now().UTC()
+	second.ReadAt, second.ReadState = &readAt, "partial"
+	second.Locator = encoded(map[string]any{"path": "/a", "offset": 100, "end_line": 150})
+	must(t, db.Model(&orm.ChatHistory{}).Where("id=?", "h1").Update("raw_content", "A followup").Error)
+	obs.Observations = []Observation{{CallID: "read-second", Source: "local", Status: "success", Operation: "read", Candidates: []Candidate{second}}}
+	if got := send("c1", "u", "test-internal", obs); got.Code != 200 {
+		t.Fatal(got.Code, got.Body.String())
+	}
+	obs.Observations[0].CallID = "same-window-again"
 	if got := send("c1", "u", "test-internal", obs); got.Code != 200 {
 		t.Fatal(got.Code, got.Body.String())
 	}
@@ -63,6 +79,35 @@ func TestHTTPObservationIdleWorkerAndNextConversation(t *testing.T) {
 		}
 		p := Proposal{}
 		if req.Mode == "route" {
+			body := string(encoded(req.Input))
+			if strings.Count(body, c.Excerpt) != 1 || strings.Count(body, second.Excerpt) != 1 || !strings.Contains(body, "resource_keys") || !strings.Contains(body, "A contracts") || !strings.Contains(body, "A followup") {
+				t.Error("route duplicated body evidence or lost question/resource association")
+			}
+			var payload struct {
+				Input     struct{ Observations []struct{ ID, Query string } } `json:"input"`
+				Resources map[string]struct {
+					Evidence []struct {
+						Excerpt string
+						IDs     []string `json:"observation_ids"`
+					}
+				} `json:"resources"`
+			}
+			must(t, json.Unmarshal(encoded(req.Input), &payload))
+			queries := map[string]string{}
+			for _, o := range payload.Input.Observations {
+				queries[o.ID] = o.Query
+			}
+			for _, e := range payload.Resources[resourceKey(c)].Evidence {
+				want := "A contracts"
+				if e.Excerpt == second.Excerpt {
+					want = "A followup"
+				}
+				for _, id := range e.IDs {
+					if queries[id] != want {
+						t.Error("evidence attached to the wrong question")
+					}
+				}
+			}
 			p.Targets = []Target{{Name: "A", Intent: "A contracts", ResourceKeys: []string{resourceKey(c)}}}
 		} else {
 			p.Assignments = []Assignment{{ResourceKey: resourceKey(c), Reason: "contract candidate"}}

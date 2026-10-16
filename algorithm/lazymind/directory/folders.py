@@ -24,7 +24,15 @@ def resolve_folder_access(arguments):
         permission = get_workspace_permission_context()
         if not permission or not permission.local_runtime or not (permission.active or permission.trusted_local):
             raise ToolExecutionError('An authorized local workspace is required.')
-        arguments['root'] = resolution.local(arguments.get('root', ''))
+        root = arguments.get('root', '')
+        arguments['root'] = resolution.local(root)
+        if os.name == 'nt':
+            # Keep the authorized spelling so a junction cannot disappear into
+            # canonicalization before the handle-based component checks.
+            root = os.path.abspath(root)
+            if os.path.normcase(root) != os.path.normcase(arguments['root']):
+                raise ToolExecutionError('path_invalid')
+            arguments['root'] = root
     return resolution.finish(arguments)
 
 
@@ -49,8 +57,13 @@ def local_directory(root, relative=''):
     guard = get_host_access_guard()
     if guard:
         guard.validate()
-    if os.path.realpath(root) != root:
+    if os.path.normcase(os.path.realpath(root)) != os.path.normcase(root):
         raise ToolExecutionError('path_invalid')
+    if os.name == 'nt':
+        from .windows_directory import pinned_directory
+        with pinned_directory(root, relative) as directory:
+            yield directory
+        return
     flags = os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0) | getattr(os, 'O_NOFOLLOW', 0)
     descriptor = os.open(root, flags)
     try:
@@ -65,10 +78,14 @@ def local_directory(root, relative=''):
         os.close(descriptor)
 
 
+def directory_stat(directory):
+    return os.fstat(directory) if isinstance(directory, int) else os.stat(directory, follow_symlinks=False)
+
+
 def local_page(source, current):
     root, relative = source['root'], current['path']
     with local_directory(root, relative) as fd:
-        info = os.fstat(fd)
+        info = directory_stat(fd)
         identity = [info.st_dev, info.st_ino, info.st_mtime_ns]
         if current.get('identity') and current['identity'] != identity:
             raise ToolExecutionError('Directory changed during inventory; restart inventory.')
@@ -77,10 +94,12 @@ def local_page(source, current):
         start = current.get('cursor', 0)
         nodes, children = [], []
         for name in names[start:start + 100]:
-            info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            info = (os.stat(name, dir_fd=fd, follow_symlinks=False) if isinstance(fd, int)
+                    else os.stat(os.path.join(fd, name), follow_symlinks=False))
             path = '/'.join(filter(None, [relative, name]))
             absolute = os.path.join(root, *path.split('/'))
-            kind = ('link' if stat.S_ISLNK(info.st_mode) else 'directory' if stat.S_ISDIR(info.st_mode)
+            kind = ('link' if stat.S_ISLNK(info.st_mode) or getattr(info, 'st_file_attributes', 0) & 0x400
+                    else 'directory' if stat.S_ISDIR(info.st_mode)
                     else 'file' if stat.S_ISREG(info.st_mode) else 'special')
             item = None if kind == 'directory' else candidate(source, absolute, name, {'path': absolute, 'kind': kind})
             if item:
@@ -89,7 +108,7 @@ def local_page(source, current):
             nodes.append(entry)
             if kind == 'directory':
                 children.append({'key': entry['node_key'], 'path': path, 'id': path})
-        after = os.fstat(fd)
+        after = directory_stat(fd)
         if [after.st_dev, after.st_ino, after.st_mtime_ns] != identity:
             raise ToolExecutionError('Directory changed during inventory; restart inventory.')
         next_cursor = start + len(nodes) if start + len(nodes) < len(names) else None
@@ -127,20 +146,13 @@ def cloud_root(provider, root, client):
         if not re.fullmatch(r'[A-Za-z0-9_-]+', identifier):
             raise ValueError('Use a stable folder ID or supported folder URL.')
     if provider == 'google_drive':
-        info = client._get(f'{client._base_url}/files/{identifier}', params={
-            'fields': 'id,name,mimeType,driveId,webViewLink', 'supportsAllDrives': 'true'})
-        if info.get('mimeType') != 'application/vnd.google-apps.folder':
+        info = client.info('/' + identifier)
+        if info.get('type') != 'directory':
             raise ValueError('The selected resource is not a folder.')
-        return identifier, info['name'], {'drive_id': info.get('driveId', '')}, None
+        return identifier, info['title'], {'drive_id': info.get('drive_id', '')}, None
+    info = client.folder_info(identifier)
     if provider == 'feishu_wiki':
-        info = client._get_node(identifier)
-        if not info.get('space_id'):
-            raise ValueError('Wiki space identity unavailable.')
         return identifier, info.get('title') or identifier, {'space_id': info['space_id']}, info
-    payload = client._get(f'{client._base_url}/drive/explorer/v2/folder/{identifier}/meta')
-    if payload.get('code', 0) != 0 or not isinstance(payload.get('data'), dict):
-        raise ValueError('Folder metadata is inaccessible.')
-    info = payload['data'].get('folder', payload['data'])
     return identifier, info.get('name') or identifier, {}, None
 
 
@@ -148,62 +160,47 @@ def cloud_page(source, current, client):
     provider = source['provider']
     cursor = current.get('cursor')
     if provider == 'google_drive':
-        params = {'q': f"'{current['id']}' in parents and trashed = false", 'pageSize': 100,
-                  'supportsAllDrives': 'true', 'includeItemsFromAllDrives': 'true',
-                  'fields': 'nextPageToken,incompleteSearch,files(id,name,mimeType,modifiedTime,webViewLink)'}
-        if source.get('drive_id'):
-            params.update(driveId=source['drive_id'], corpora='drive')
-        if cursor:
-            params['pageToken'] = cursor
-        response = client._get(f'{client._base_url}/files', params=params)
-        if response.get('incompleteSearch'):
-            raise ValueError('Provider returned incompleteSearch.')
-        items, next_cursor = response.get('files', []), response.get('nextPageToken')
+        response = client.list_page(folder_id=current['id'], drive_id=source.get('drive_id', ''),
+                                    page_size=100, page_token=cursor or '')
     else:
-        params = {'page_size': 50 if provider == 'feishu_wiki' else 100}
-        if provider == 'feishu_wiki':
-            url = f"{client._base_url}/wiki/v2/spaces/{source['space_id']}/nodes"
-            params['parent_node_token'] = current['id']
-        else:
-            url = f'{client._base_url}/drive/v1/files'
-            params['folder_token'] = current['id']
-        if cursor:
-            params['page_token'] = cursor
-        payload = client._get(url, params=params)
-        if payload.get('code', 0) != 0 or not isinstance(payload.get('data'), dict):
-            raise ValueError(f"Provider rejected enumeration (code={payload.get('code', 'missing')}).")
-        response = payload['data']
-        items = (response.get('items', response.get('nodes', []))
-                 if provider == 'feishu_wiki' else response.get('files', []))
-        next_cursor = ((response.get('page_token') or response.get('next_page_token'))
-                       if response.get('has_more') else None)
-        if response.get('has_more') and not next_cursor:
-            raise ValueError('Provider omitted continuation token.')
-    if cursor and next_cursor == cursor:
+        kwargs = {'space_id': source['space_id']} if provider == 'feishu_wiki' else {}
+        response = client.list_page(current['id'], page_size=50 if provider == 'feishu_wiki' else 100,
+                                    page_token=cursor or '', **kwargs)
+    if response.get('incomplete_search'):
+        raise ValueError('Provider returned incompleteSearch.')
+    items, next_cursor = response['items'], response.get('next_page_token') or None
+    if next_cursor and (next_cursor == cursor or next_cursor in current.get('page_tokens', [])):
         raise ValueError('Provider repeated continuation token.')
     if not isinstance(items, list):
         raise ValueError('Provider returned invalid folder contents.')
     nodes, children = [], []
     for item in items:
-        identifier = item.get('node_token') if provider == 'feishu_wiki' else item.get('id') or item.get('token')
+        if provider == 'google_drive':
+            identifier, name = item.get('name'), item.get('title')
+            mime, url, modified = item.get('mime_type'), item.get('web_url'), item.get('modified_time_raw')
+        else:
+            identifier = item.get('node_token') if provider == 'feishu_wiki' else item.get('id') or item.get('token')
+            name = item.get('name') or item.get('title')
+            mime, url = item.get('mimeType'), item.get('webViewLink') or item.get('url')
+            modified = item.get('modifiedTime') or item.get('modified_time')
         if not identifier:
             raise ValueError('Provider omitted resource identity.')
-        name = item.get('name') or item.get('title') or identifier
+        name = name or identifier
         path = '/'.join(filter(None, [current['path'], name]))
-        kind = ('link' if item.get('mimeType') == 'application/vnd.google-apps.shortcut'
+        kind = ('link' if mime == 'application/vnd.google-apps.shortcut'
                 or item.get('node_type') == 'shortcut' or item.get('type') == 'shortcut'
                 else 'directory' if provider == 'feishu_wiki' or item.get('type') == 'folder'
-                or item.get('mimeType') == 'application/vnd.google-apps.folder' else 'file')
+                or mime == 'application/vnd.google-apps.folder' else 'file')
         locator = {'id': identifier, 'path': ('/~node/' if provider == 'feishu_wiki' else '/') + identifier}
         if source.get('drive_id'):
             locator['path'] = f"/drive/{source['drive_id']}/{identifier}"
-        locator['url'] = item.get('webViewLink') or item.get('url') or ''
+        locator['url'] = url or ''
         if provider == 'feishu_wiki':
             locator['url'] = f'https://feishu.cn/wiki/{identifier}'
         resource = (None if kind == 'directory' and provider != 'feishu_wiki'
                     else candidate(source, identifier, name, locator))
         if resource:
-            resource['content_version'] = str(item.get('modifiedTime') or item.get('modified_time') or '')
+            resource['content_version'] = str(modified or '')
         entry = node(current['key'] + '/' + identifier, current['key'], path, name, kind, resource)
         nodes.append(entry)
         if kind == 'directory':
@@ -272,7 +269,7 @@ class FolderTools:
         client = cloud_client(provider)
         token = tokens[identities.index(selected)]
         # Bind this client only; never change the request-wide credentials of other tools.
-        client._resolve_dynamic_token = lambda: token
+        client.bind_access_token(token)
         return selected, client
 
     @fc_register(host_file=resolve_folder_access, exclusive=True)
@@ -317,16 +314,16 @@ class FolderTools:
             root_item = None
             if provider == 'local':
                 with local_directory(root) as fd:
-                    info = os.fstat(fd)
+                    info = directory_stat(fd)
                     source['identity'] = [info.st_dev, info.st_ino]
                 identifier, name = '', os.path.basename(root) or root
             else:
                 identifier, name, extra, root_item = cloud_root(provider, root, client)
                 source.update(extra)
             source['name'] = name
-            root_candidate = (candidate(source, identifier, name, {'path': '/~node/' + identifier, 'url': root})
-                              if root_item else None)
-            root_node = node('root', '', '', name, 'directory', root_candidate)
+            root_node = node('root', '', '', name, 'directory',
+                             candidate(source, identifier, name, {'path': '/~node/' + identifier, 'url': root})
+                             if root_item else None)
             state = {'queue': [{'key': root_node['node_key'], 'path': '', 'id': identifier}],
                      'errors': [], 'file_types': {root_item.get('obj_type', 'document'): 1} if root_item else {},
                      'started_at': datetime.now(timezone.utc).isoformat()}
@@ -344,7 +341,7 @@ class FolderTools:
                 try:
                     if provider == 'local':
                         with local_directory(root) as fd:
-                            info = os.fstat(fd)
+                            info = directory_stat(fd)
                             if [info.st_dev, info.st_ino] != source['identity']:
                                 raise ToolExecutionError('Root identity changed; start a new inventory.')
                         nodes, children, cursor, identity = local_page(source, current)
@@ -358,6 +355,8 @@ class FolderTools:
                         state['queue'].pop(0)
                     else:
                         current['cursor'] = cursor
+                        if provider != 'local':
+                            current.setdefault('page_tokens', []).append(cursor)
                         if identity:
                             current['identity'] = identity
                     state['queue'].extend(children)
@@ -392,8 +391,8 @@ class FolderTools:
         Args:
             inventory_id: Exact complete inventory returned by inspect_document_folder.
             name: User-facing logical directory name.
-            organization: Default 按资料类型组织. Change only for an explicit user rule;
-                retaining source structure does not change this default. Do not enumerate file assignments.
+            organization: Default 按资料类型组织. Change only for an explicit user rule; retaining source structure
+                does not change this default. Do not enumerate file assignments.
             summary: Brief understanding from actual metadata and sampled reads, including reading limitations.
 
         All references are retained, even unread or unclassified. The new directory is pinned for retention,

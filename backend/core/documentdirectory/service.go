@@ -402,6 +402,17 @@ func Execute(ctx context.Context, db *gorm.DB, uid string, c Command) (map[strin
 			} else if c.Operation == "exclude" {
 				e.Excluded = true
 			} else if c.Operation == "restore" {
+				if e.GroupID != "" {
+					var group orm.DocumentDirectoryGroup
+					err := tx.Where("id=? AND directory_id=?", e.GroupID, d.ID).Take(&group).Error
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						e.GroupID = ""
+						e.Confirmed = false
+						e.EvidenceJSON = encoded(map[string]any{})
+					} else if err != nil {
+						return err
+					}
+				}
 				e.Excluded = false
 			} else {
 				if e.Excluded {

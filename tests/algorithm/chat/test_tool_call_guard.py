@@ -604,6 +604,10 @@ def test_compacted_cached_window_remains_readable_and_retains_cursor():
     notice = buffer.take()
     assert '"next_offset": 41' in notice and 'already seen' in notice
     assert record.result == result and buffer.take() is None
+    monitor.context_compacted()
+    assert monitor.after_tool_batch([record]) is None
+    assert not monitor.stop_requested
+
 
 
 def test_repeat_convergence_requires_delivery_and_two_stale_batches():
@@ -619,15 +623,19 @@ def test_repeat_convergence_requires_delivery_and_two_stale_batches():
     monitor.after_tool_batch([a])
     assert monitor.stop_requested
     monitor.context_compacted()
+    assert monitor.after_tool_batch([a]) is None
+    assert monitor.after_tool_batch([b]) is None
+    assert not monitor.stop_requested
+    assert monitor.after_tool_batch([a])
     monitor.after_tool_batch([a])
     assert not monitor.stop_requested
-    monitor.after_tool_batch([_record(name='grep', result={'ok': True, 'value': 'new'})])
-    monitor.after_tool_batch([a])
-    assert not monitor.stop_requested
+    monitor.notice_delivered()
+    monitor.after_tool_batch([b])
     monitor.after_tool_batch([a])
     assert monitor.stop_requested
     monitor.reset()
     assert monitor.after_tool_batch([a]) is None and not monitor.stop_requested
+
 
 
 @pytest.mark.parametrize('record', [

@@ -475,3 +475,82 @@ def test_repeat_replay_reaches_tool_free_final_answer_with_latest_result(tmp_pat
         assert sum(m.get('tool_call_id') == 'call-4' for m in history) == 1
         assert any(m.get('content') == 'early critical evidence' for m in history)
         assert 'tools' not in model.requests[-1][1]
+
+
+@pytest.mark.parametrize('compressed', [False, True])
+def test_executor_compression_resets_stale_batch_streak_and_notice(monkeypatch, compressed):
+    agent = MagicMock()
+    constructor = MagicMock(return_value=agent)
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
+
+    def compress(history, keep, **kwargs):
+        state = kwargs['runtime_state']
+        if compressed:
+            state['compression_revision'] = state.get('compression_revision', 0) + 1
+        return history, []
+
+    created = AgentExecutor().create_agent('llm', _plan(history_compactor=compress))
+    created._exact_repeat_monitor.stop_requested = True
+    created._runtime_notice_buffer.publish('Old repeat warning')
+    compact = constructor.call_args.kwargs['history_compactor']
+    compact([], 2, runtime_state={})
+    assert created._exact_repeat_monitor.stop_requested is not compressed
+    assert created._runtime_notice_buffer.take() == (None if compressed else 'Old repeat warning')
+
+
+
+def test_actual_agent_recovers_evidence_after_compaction_and_reaches_new_document(tmp_path):
+    import uuid
+    import lazyllm
+    from lazyllm.tools.agent import fc_register
+    from lazyllm.tools.agent.reactAgent import _FORCE_SUMMARIZE_MSG
+
+    calls, compressions = [], []
+    sequence = ['A', 'B', 'A', 'C', 'A', 'B', 'D']
+
+    @fc_register(host_file='NONE')
+    def read_evidence(topic: str):
+        '''Read an evidence document.
+
+        Args:
+            topic: Document identity.
+        '''
+        calls.append(topic)
+        return 'Stable body for ' + topic
+
+    class Model:
+        def __init__(self):
+            self._module_id = uuid.uuid4().hex
+
+        def share(self, **kwargs):
+            return self
+
+        def used_by(self, _):
+            return self
+
+        def __call__(self, *args, **kwargs):
+            if args and isinstance(args[0], str) and _FORCE_SUMMARIZE_MSG in args[0]:
+                return 'Forced summary before finishing the evidence'
+            if len(calls) == len(sequence):
+                return {'content': 'Final answer including D'}
+            return {'content': '', 'tool_calls': [{
+                'id': f'call-{len(calls)}', 'type': 'function',
+                'function': {'name': 'read_evidence', 'arguments': json.dumps({'topic': sequence[len(calls)]})}}]}
+
+    def compact(history, keep, **kwargs):
+        current = kwargs.get('current_round_messages', [])
+        if len(calls) == 4 and not compressions:
+            state = kwargs['runtime_state']
+            state['compression_revision'] = state.get('compression_revision', 0) + 1
+            compressions.append(state['compression_revision'])
+            return [{'role': 'user', 'content': 'Summary: re-read A and B, then read D.'}], current
+        return history, current
+
+    plan = _plan(enable_builtin_tools=False, history_compactor=compact, stop_on_repeated_results=True,
+                 workspace=str(tmp_path), max_retries=20)
+    plan.tools = [read_evidence]
+    with lazyllm.locals._scope():
+        result = AgentExecutor().create_agent(Model(), plan)('Read the evidence including D.')
+    assert calls == sequence
+    assert compressions == [1]
+    assert result == 'Final answer including D'

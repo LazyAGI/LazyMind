@@ -240,6 +240,54 @@ func folderOperation(ctx context.Context, db *gorm.DB, uid, conv string, c Comma
 	return result, err
 }
 
+// Query only distinct resource keys, preserving the candidate order and payloads.
+func partitionFolderCandidates(tx *gorm.DB, inventoryID string, candidates []Candidate) ([]Candidate, []Candidate, error) {
+	keys, seen := []string{}, map[string]bool{}
+	for _, c := range candidates {
+		k := resourceKey(c)
+		if !seen[k] {
+			keys = append(keys, k)
+			seen[k] = true
+		}
+	}
+	members := map[string]bool{}
+	for start := 0; start < len(keys); start += 100 {
+		var found []string
+		if err := tx.Model(&orm.DocumentFolderNode{}).Where("inventory_id=? AND resource_key IN ?", inventoryID, keys[start:min(start+100, len(keys))]).Pluck("resource_key", &found).Error; err != nil {
+			return nil, nil, err
+		}
+		for _, k := range found {
+			members[k] = true
+		}
+	}
+	inside, outside := []Candidate{}, []Candidate{}
+	for _, c := range candidates {
+		if members[resourceKey(c)] {
+			inside = append(inside, c)
+		} else {
+			outside = append(outside, c)
+		}
+	}
+	return inside, outside, nil
+}
+
+func classificationCounts(tx *gorm.DB, directoryID string) (int64, int64, error) {
+	var counts []struct {
+		GroupID string
+		Count   int64
+	}
+	err := tx.Model(&orm.DocumentDirectoryEntry{}).Select("group_id, count(*) AS count").Where("directory_id=? AND excluded=?", directoryID, false).Group("group_id").Scan(&counts).Error
+	var grouped, unclassified int64
+	for _, row := range counts {
+		if row.GroupID != "" {
+			grouped += row.Count
+		} else {
+			unclassified = row.Count
+		}
+	}
+	return grouped, unclassified, err
+}
+
 func reconcileFolderObservations(tx *gorm.DB, v orm.DocumentFolderInventory) error {
 	var rows []orm.DocumentObservation
 	marker := "inv:" + v.ID
@@ -251,17 +299,9 @@ func reconcileFolderObservations(tx *gorm.DB, v orm.DocumentFolderInventory) err
 		if err := json.Unmarshal(row.PayloadJSON, &observation); err != nil {
 			return err
 		}
-		inside, outside := []Candidate{}, []Candidate{}
-		for _, candidate := range observation.Candidates {
-			var count int64
-			if err := tx.Model(&orm.DocumentFolderNode{}).Where("inventory_id=? AND resource_key=?", v.ID, resourceKey(candidate)).Count(&count).Error; err != nil {
-				return err
-			}
-			if count > 0 {
-				inside = append(inside, candidate)
-			} else {
-				outside = append(outside, candidate)
-			}
+		inside, outside, err := partitionFolderCandidates(tx, v.ID, observation.Candidates)
+		if err != nil {
+			return err
 		}
 		if len(outside) > 0 {
 			other := row
@@ -396,11 +436,8 @@ func organizeFolder(ctx context.Context, db *gorm.DB, j asyncjob.Job, b *orm.Doc
 				if err := ownsJob(tx, j); err != nil {
 					return err
 				}
-				var grouped, unclassified int64
-				if err := tx.Model(&orm.DocumentDirectoryEntry{}).Where("directory_id=? AND excluded=? AND group_id<>?", d.ID, false, "").Count(&grouped).Error; err != nil {
-					return err
-				}
-				if err := tx.Model(&orm.DocumentDirectoryEntry{}).Where("directory_id=? AND excluded=? AND group_id=?", d.ID, false, "").Count(&unclassified).Error; err != nil {
+				grouped, unclassified, err := classificationCounts(tx, d.ID)
+				if err != nil {
 					return err
 				}
 				b.Status = "succeeded"
@@ -510,9 +547,9 @@ func entryPage(db *gorm.DB, dir string, page EntryPageQuery, detail *Detail) err
 	if page.Group != nil {
 		q = q.Where("group_id=?", *page.Group)
 	}
-	if page.Query != "" {
-		value := "%" + strings.ToLower(page.Query) + "%"
-		q = q.Where("LOWER(title) LIKE ? OR LOWER(resource_id) LIKE ?", value, value)
+	if query := strings.TrimSpace(page.Query); query != "" {
+		value := "%" + strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(strings.ToLower(query)) + "%"
+		q = q.Where("(LOWER(title) LIKE ? ESCAPE '!' OR LOWER(resource_id) LIKE ? ESCAPE '!')", value, value)
 	}
 	switch page.State {
 	case "unconfirmed":

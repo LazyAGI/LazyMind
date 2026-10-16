@@ -10,39 +10,55 @@ vi.mock('./api', () => ({ listDirectories: vi.fn(), getDirectory: vi.fn(), listB
 vi.mock('./LocalFileReader', () => ({ default: ({ entry }: { entry?: { id: string } }) => entry ? <div data-testid="local-file-preview">{entry.id}</div> : null }));
 const directory = { id: 'd', name: 'Contracts', intent: 'Customer A contracts', organization: 'Type', pinned: false, auto_add: true, version: 2, last_used_at: '2026-10-10T00:00:00Z', coverage: [] };
 const entry = { id: 'e', resource_key: 'key', source: 'local', namespace: 'host', resource_id: '/a.txt', title: 'Contract A', group_id: '', pinned: false, excluded: false, read_state: 'unread', confirmed: false, access_state: 'unknown' };
+function mockDirectory(detail: api.DocumentDirectoryDetail) {
+  vi.mocked(api.getDirectory).mockImplementation(async (_id, page = {}) => {
+    const active = detail.entries.filter(e => e.excluded === (page.state === 'excluded'));
+    const group_counts: Record<string, number> = {};
+    active.forEach(e => { group_counts[e.group_id] = (group_counts[e.group_id] || 0) + 1; });
+    const query = (page.query || '').trim().toLowerCase();
+    const matches = active.filter(e =>
+      (page.groupId === undefined || e.group_id === page.groupId) &&
+      (e.title.toLowerCase().includes(query) || e.resource_id.toLowerCase().includes(query)) &&
+      (page.state === 'unconfirmed' ? !e.confirmed : page.state === 'unread' ? e.read_state === 'unread' :
+        page.state === 'inaccessible' ? ['denied', 'deleted', 'unavailable'].includes(e.access_state) : true));
+    const offset = page.offset || 0;
+    return { ...detail, group_counts, total: matches.length, entries: matches.slice(offset, offset + (page.limit || 5)) };
+  });
+}
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(api.listDirectories).mockResolvedValue([directory]);
   vi.mocked(api.listBatches).mockResolvedValue([]);
-  vi.mocked(api.getDirectory).mockResolvedValue({ directory, entries: [entry], groups: [], organizing: false });
+  mockDirectory({ directory, entries: [entry], groups: [], organizing: false });
   vi.mocked(api.directoryAction).mockResolvedValue({});
 });
 function view() { return render(<MemoryRouter initialEntries={['/document-directories/d']}><Routes><Route path="/document-directories/:directoryId" element={<DirectoryPage />} /></Routes></MemoryRouter>); }
 it('paginates five documents, resets on filtering, and keeps controls for empty results', async () => {
-  vi.mocked(api.getDirectory).mockResolvedValue({ directory, groups: [], organizing: false,
+  mockDirectory({ directory, groups: [], organizing: false,
     entries: Array.from({ length: 11 }, (_, i) => ({ ...entry, id: `e${i}`, title: `Document ${i + 1}`, confirmed: i > 0 })),
   });
   view(); await screen.findByText('Document 1');
   expect(screen.getAllByRole('button', { name: 'directories.details' })).toHaveLength(5);
   expect(screen.queryByText('Document 6')).not.toBeInTheDocument();
   fireEvent.click(screen.getByTitle('2'));
-  expect(screen.getByText('Document 6')).toBeInTheDocument();
+  expect(await screen.findByText('Document 6')).toBeInTheDocument();
   expect(screen.queryByText('Document 1')).not.toBeInTheDocument();
   fireEvent.click(screen.getByTitle('3'));
+  await screen.findByText('Document 11');
   expect(screen.getAllByRole('button', { name: 'directories.details' })).toHaveLength(1);
   expect(screen.getByText('Document 11')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('tab', { name: 'directories.allDocuments' }));
-  expect(screen.getByText('Document 1')).toBeInTheDocument();
+  expect(await screen.findByText('Document 1')).toBeInTheDocument();
   fireEvent.click(screen.getByTitle('2'));
   fireEvent.mouseDown(screen.getByRole('combobox', { name: 'directories.filterState' }));
   fireEvent.click(await screen.findByText('directories.filter_unconfirmed'));
-  expect(screen.getByText('Document 1')).toBeInTheDocument();
+  expect(await screen.findByText('Document 1')).toBeInTheDocument();
   expect(screen.getAllByRole('button', { name: 'directories.details' })).toHaveLength(1);
-  expect(screen.getByTitle('Next Page')).toHaveAttribute('aria-disabled', 'true');
+  await waitFor(() => expect(screen.getByTitle('Next Page')).toHaveAttribute('aria-disabled', 'true'));
   fireEvent.change(screen.getByRole('textbox', { name: 'directories.search' }), { target: { value: 'missing' } });
   expect(screen.getByText('directories.noMatchingDocuments')).toBeInTheDocument();
   expect(screen.getByTitle('1')).toBeInTheDocument();
-  expect(screen.getByTitle('Next Page')).toHaveAttribute('aria-disabled', 'true');
+  await waitFor(() => expect(screen.getByTitle('Next Page')).toHaveAttribute('aria-disabled', 'true'));
 });
 
 it('opens and records use, pins position without changing group, and excludes a reference', async () => {
@@ -55,7 +71,6 @@ it('opens and records use, pins position without changing group, and excludes a 
   fireEvent.click(screen.getByRole('button', { name: 'directories.exclude' }));
   await waitFor(() => expect(api.directoryAction).toHaveBeenCalledWith({ operation: 'exclude', directory_id: 'd', version: 2, entry_id: 'e' }));
 });
-
 it('loads excluded references separately and restores an item beyond the first page', async () => {
   let restored = false;
   vi.mocked(api.getDirectory).mockImplementation(async (_, options) => ({
@@ -84,7 +99,7 @@ it('loads excluded references separately and restores an item beyond the first p
   await waitFor(() => expect(screen.queryByText('Excluded last')).not.toBeInTheDocument());
 });
 it('shows committed documents but blocks manual edits during organization', async () => {
-  vi.mocked(api.getDirectory).mockResolvedValue({ directory, entries: [entry], groups: [], organizing: true });
+  mockDirectory({ directory, entries: [entry], groups: [], organizing: true });
   view(); await screen.findByText('Contract A');
   fireEvent.click(screen.getByRole('button', { name: 'directories.details' }));
   expect(screen.getByText('directories.organizing')).toBeInTheDocument();
@@ -133,13 +148,13 @@ it('pins and unpins a directory from its card without opening it', async () => {
 
 it('opens legacy Notion URLs and preserves the source link after refresh', async () => {
   const url = 'https://app.notion.com/p/3f4b8b30a5b08119bd8bcf0b4999c02f';
-  vi.mocked(api.getDirectory).mockResolvedValue({ directory, entries: [{ ...entry, source: 'notion', locator: { id: url } }], groups: [], organizing: false });
+  mockDirectory({ directory, entries: [{ ...entry, source: 'notion', locator: { id: url } }], groups: [], organizing: false });
   view();
   expect(await screen.findByRole('link', { name: 'Contract A' })).toHaveAttribute('href', url);
 });
 
 it('filters groups and searches without changing references, and explains evidence in details', async () => {
-  vi.mocked(api.getDirectory).mockResolvedValue({ directory, organizing: false,
+  mockDirectory({ directory, organizing: false,
     groups: [{ id: 'g', name: 'Plans', parent_id: '', position: 0 }],
     entries: [{ ...entry, group_id: 'g', evidence: { reason: 'Read the project scope' } },
       { ...entry, id: 'e2', title: 'Meeting notes', resource_id: '/meeting.txt' }],
@@ -150,20 +165,20 @@ it('filters groups and searches without changing references, and explains eviden
   fireEvent.change(screen.getByRole('textbox', { name: 'directories.search' }), { target: { value: 'missing' } });
   expect(screen.queryByText('Contract A')).not.toBeInTheDocument();
   fireEvent.change(screen.getByRole('textbox', { name: 'directories.search' }), { target: { value: 'Contract' } });
-  fireEvent.click(screen.getByRole('button', { name: 'directories.details' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'directories.details' }));
   expect(await screen.findByText('Read the project scope')).toBeInTheDocument();
   expect(screen.getByText('directories.confirmationHelp')).toBeInTheDocument();
   expect(api.directoryAction).toHaveBeenCalledTimes(1);
 });
 
 it('filters denied or unavailable references without treating unknown access as a failure', async () => {
-  vi.mocked(api.getDirectory).mockResolvedValue({ directory, organizing: false, groups: [], entries: [
+  mockDirectory({ directory, organizing: false, groups: [], entries: [
     { ...entry, access_state: 'denied' }, { ...entry, id: 'e2', title: 'Unknown access' },
   ] });
   view(); await screen.findByText('Contract A');
   fireEvent.mouseDown(screen.getByRole('combobox', { name: 'directories.filterState' }));
   fireEvent.click(await screen.findByText('directories.filter_inaccessible'));
-  expect(screen.getByText('Contract A')).toBeInTheDocument();
+  expect(await screen.findByText('Contract A')).toBeInTheDocument();
   expect(screen.queryByText('Unknown access')).not.toBeInTheDocument();
   expect(screen.getByText('directories.access_denied')).toBeInTheDocument();
 });
@@ -197,14 +212,14 @@ it('shows explicit source failures, hides recovered requests and ignores incompl
 });
 
 it('separates all documents from groups and preserves filters when switching views', async () => {
-  vi.mocked(api.getDirectory).mockResolvedValue({ directory, organizing: false,
+  mockDirectory({ directory, organizing: false,
     groups: [{ id: 'g', name: 'Plans', parent_id: '', position: 0 }],
     entries: [{ ...entry, group_id: 'g' }, { ...entry, id: 'e2', title: 'Meeting notes' }],
   });
   view(); await screen.findByText('Contract A');
   expect(screen.queryByText('Meeting notes')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('tab', { name: 'directories.allDocuments' }));
-  expect(screen.getByText('Meeting notes')).toBeInTheDocument();
+  expect(await screen.findByText('Meeting notes')).toBeInTheDocument();
   expect(screen.queryByRole('navigation', { name: 'directories.group' })).not.toBeInTheDocument();
   fireEvent.change(screen.getByRole('textbox', { name: 'directories.search' }), { target: { value: 'Contract' } });
   fireEvent.click(screen.getByRole('tab', { name: 'directories.groupedView' }));
@@ -213,7 +228,7 @@ it('separates all documents from groups and preserves filters when switching vie
 });
 
 it('hides empty ungrouped navigation and reads mail from both title and details', async () => {
-  vi.mocked(api.getDirectory).mockResolvedValue({ directory, organizing: true,
+  mockDirectory({ directory, organizing: true,
     groups: [{ id: 'g', name: 'Mail', parent_id: '', position: 0 }],
     entries: [{ ...entry, source: 'mail', group_id: 'g' }],
   });
@@ -239,19 +254,19 @@ it('falls back to the next nonempty group after a background refresh removes the
     if (delay === 5000) tick = callback;
     return original(callback, delay);
   }) as typeof window.setInterval);
-  vi.mocked(api.getDirectory).mockResolvedValue({ directory, organizing: false,
+  mockDirectory({ directory, organizing: false,
     groups: [{ id: 'g', name: 'Original group', parent_id: '', position: 0 }],
     entries: [{ ...entry, group_id: 'g' }],
   });
   view(); interval.mockRestore();
   await screen.findByText('Contract A');
-  vi.mocked(api.getDirectory).mockResolvedValue({ directory, organizing: false,
+  mockDirectory({ directory, organizing: false,
     groups: [{ id: 'h', name: 'Remaining group', parent_id: '', position: 0 }],
     entries: [{ ...entry, group_id: 'h' }],
   });
   await act(async () => tick());
   await waitFor(() => expect(screen.getByRole('button', { name: /Remaining group/ })).toHaveAttribute('aria-pressed', 'true'));
-  expect(screen.getByText('Contract A')).toBeInTheDocument();
+  expect(await screen.findByText('Contract A')).toBeInTheDocument();
 });
 
 it('opens local preview from the title while keeping reference details separate', async () => {
@@ -259,4 +274,76 @@ it('opens local preview from the title while keeping reference details separate'
   fireEvent.click(screen.getByRole('button', { name: 'Contract A' }));
   expect(screen.getByTestId('local-file-preview')).toHaveTextContent('e');
   expect(api.readDirectoryMail).not.toHaveBeenCalled();
+});
+
+it('keeps the server page intact and never renders unresolved groups or stale search responses', async () => {
+  const groups = [{ id: 'g', name: 'Plans', parent_id: '', position: 0 }];
+  const pending = new Map<string, (value: api.DocumentDirectoryDetail) => void>();
+  const result = (title: string): api.DocumentDirectoryDetail => ({ directory, groups, organizing: false,
+    group_counts: { g: 1 }, total: 1, entries: [{ ...entry, group_id: 'g', title }] });
+  vi.mocked(api.getDirectory).mockImplementation((_id, page = {}) => {
+    if (page.groupId === undefined) return Promise.resolve(result('Unscoped initial page'));
+    return new Promise(resolve => { pending.set(page.query || '', resolve); });
+  });
+  view();
+  await waitFor(() => expect(pending.has('')).toBe(true));
+  expect(screen.queryByText('Unscoped initial page')).not.toBeInTheDocument();
+  await act(async () => pending.get('')!(result('Initial document')));
+  const search = screen.getByRole('textbox', { name: 'directories.search' });
+  fireEvent.change(search, { target: { value: 'old' } });
+  expect(screen.queryByText('Initial document')).not.toBeInTheDocument();
+  await waitFor(() => expect(pending.has('old')).toBe(true));
+  fireEvent.change(search, { target: { value: 'new' } });
+  await waitFor(() => expect(pending.has('new')).toBe(true));
+  // The API owns matching; the component must display its current page unchanged.
+  await act(async () => pending.get('new')!(result('Server-selected result')));
+  expect(screen.getByText('Server-selected result')).toBeInTheDocument();
+  await act(async () => pending.get('old')!(result('Stale result')));
+  expect(screen.queryByText('Stale result')).not.toBeInTheDocument();
+  expect(screen.getByText('Server-selected result')).toBeInTheDocument();
+});
+
+it('resets page on group and state changes, ignoring pending results from the old group', async () => {
+  const groups = [{ id: 'g', name: 'Plans', parent_id: '', position: 0 }, { id: 'h', name: 'Notes', parent_id: '', position: 1 }];
+  mockDirectory({ directory, groups, organizing: false, entries: [
+    ...Array.from({ length: 6 }, (_, i) => ({ ...entry, id: `p${i}`, group_id: 'g', title: `Plan ${i + 1}` })),
+    { ...entry, id: 'note', group_id: 'h', title: 'Note', read_state: 'read' },
+  ] });
+  const paged = vi.mocked(api.getDirectory).getMockImplementation()!;
+  let oldPage!: (value: api.DocumentDirectoryDetail) => void;
+  vi.mocked(api.getDirectory).mockImplementation((id, page = {}) => page.groupId === 'g' && page.offset === 5
+    ? new Promise(resolve => { oldPage = resolve; }) : paged(id, page));
+  view(); await screen.findByText('Plan 1');
+  fireEvent.click(screen.getByTitle('2'));
+  await waitFor(() => expect(oldPage).toBeDefined());
+  fireEvent.click(screen.getByRole('button', { name: /Notes/ }));
+  await screen.findByText('Note');
+  expect(api.getDirectory).toHaveBeenLastCalledWith('d', expect.objectContaining({ groupId: 'h', offset: 0 }));
+  await act(async () => oldPage({ directory, groups, organizing: false, group_counts: { g: 6, h: 1 }, total: 6,
+    entries: [{ ...entry, group_id: 'g', title: 'Late Plan 6' }] }));
+  expect(screen.queryByText('Late Plan 6')).not.toBeInTheDocument();
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: 'directories.filterState' }));
+  fireEvent.click(await screen.findByText('directories.filter_unread'));
+  await waitFor(() => expect(api.getDirectory).toHaveBeenLastCalledWith('d', expect.objectContaining({ groupId: 'h', offset: 0, state: 'unread' })));
+  await waitFor(() => expect(screen.queryByText('Note')).not.toBeInTheDocument());
+});
+
+it('loads the preceding server page after excluding the last item on the last page', async () => {
+  const data = { directory, groups: [], organizing: false,
+    entries: Array.from({ length: 6 }, (_, i) => ({ ...entry, id: `e${i}`, title: `Document ${i + 1}` })) };
+  mockDirectory(data);
+  vi.mocked(api.directoryAction).mockImplementation(async command => {
+    if (command.operation === 'exclude') data.entries = data.entries.filter(e => e.id !== command.entry_id);
+    return {};
+  });
+  view(); await screen.findByText('Document 1');
+  fireEvent.click(screen.getByTitle('2'));
+  await screen.findByText('Document 6');
+  fireEvent.click(screen.getByRole('button', { name: 'directories.details' }));
+  fireEvent.click(screen.getByRole('button', { name: 'directories.exclude' }));
+  await screen.findByText('Document 1');
+  expect(screen.queryByText('Document 6')).not.toBeInTheDocument();
+  expect(screen.getAllByRole('button', { name: 'directories.details' })).toHaveLength(5);
+  expect(api.getDirectory).toHaveBeenLastCalledWith('d', expect.objectContaining({ offset: 0 }));
+  expect(screen.getByTitle('Next Page')).toHaveAttribute('aria-disabled', 'true');
 });

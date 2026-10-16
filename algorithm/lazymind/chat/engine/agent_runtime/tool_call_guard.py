@@ -372,7 +372,7 @@ class ExactRepeatMonitor:
             self._pending_repeat_notice = False
 
     def context_compacted(self) -> None:
-        self._reset_batch()
+        self.reset()
 
     @staticmethod
     def _eligible(record) -> bool:

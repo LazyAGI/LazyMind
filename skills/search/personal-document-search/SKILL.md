@@ -96,16 +96,9 @@ body → answer**. Once a useful path and line are visible, read that location; 
 finish paging the entire search result first. Search snippets and grep spill pages
 do not become original message reads merely by reading more of them.
 
-Before running an ad hoc JSONL extraction, check its code: selected file(s), explicit
-physical line range, `readline(16 * 1024 * 1024 + 1)` with oversized-record draining,
-recognized user/assistant message envelope, and a total 16 KiB UTF-8 output budget.
-`for line in f`, arbitrary recursive string walking, and per-message `[:N]` alone
-do not meet these bounds or establish message identity. Inspect the format first
-and adapt the extraction; emit original path, physical line and actual timestamp.
-In Codex JSONL, `event_msg` / `task_complete` / `last_agent_message` are runtime
-records, even if their text resembles an assistant answer. They are clues, not an
-original-message read. Locate and parse the corresponding `response_item` whose
-payload has `type=message` and `role=user/assistant` before claiming message verification.
+For clipped JSONL, follow the bounded extraction and message-envelope rules in
+[source-routing.md](references/source-routing.md). Runtime summaries/events are
+location clues, not original user/assistant message evidence.
 
 Search hits are candidates. For content questions, read relevant bodies or bounded
 conversation windows before making substantive claims. A location question may use
@@ -113,14 +106,9 @@ metadata alone. Prioritize relevance, authority and completeness; do not mass-re
 every hit or impose a fixed top-K reading quota. Use returned pagination/window
 controls only as needed; do not invent them or treat capped output as complete.
 
-After relevant history hits, switch to targeted body reading instead of repeating
-topic searches. `grep` and `read` use the same physical file lines. Read normal
-records with `read`; for clipped JSONL lines inspect the format and use existing
-Shell with Python's standard library to extract only selected records and message
-fields. Follow the bounded extraction rules in source-routing.md. Never use a
-later `offset` to recover an omitted line suffix or require EOF without an evidence need.
-For a weak Source, make at most one purposeful query refinement; if it still cannot
-support the answer, explain the gap and finish with the available evidence.
+After relevant hits, switch to body reading. `grep` and `read` share physical
+line coordinates; a later offset cannot recover a clipped line suffix. Do not
+require EOF without an evidence need. Refine weak Sources only as described below.
 
 Respect actual filesystem, user, mailbox and cloud access permissions. Direct
 history-file access does not require catalog visibility or a dedicated reader.
