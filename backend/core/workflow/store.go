@@ -19,6 +19,7 @@ import (
 	"lazymind/core/algo"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/tasktiming"
 	"lazymind/core/workflow/artifactgraph"
 	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/document"
@@ -101,6 +102,9 @@ func CreateSession(ctx context.Context, db *gorm.DB, in CreateSessionInput) (*or
 		UpdatedAt:        now,
 	}
 	if err := db.WithContext(ctx).Create(s).Error; err != nil {
+		return nil, err
+	}
+	if err := tasktiming.BindWorkflow(ctx, db, *s, now); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -395,7 +399,7 @@ func UpdateStepStatus(ctx context.Context, db *gorm.DB, taskID, status string) e
 				return err
 			}
 			payload, _ := json.Marshal(map[string]any{"attempt_id": row.ID, "status": status})
-			if err := tx.Create(&orm.WorkflowEvent{SessionID: row.SessionID, OwnerUserID: session.CreateUserID, ContractVersion: "workflow.v1", EventType: "attempt.patch", EntityID: row.ID, StateVersion: session.StateVersion, PayloadJSON: payload, CreatedAt: now}).Error; err != nil {
+			if err := tasktiming.PersistWorkflowEvent(tx, &orm.WorkflowEvent{SessionID: row.SessionID, OwnerUserID: session.CreateUserID, ContractVersion: "workflow.v1", EventType: "attempt.patch", EntityID: row.ID, StateVersion: session.StateVersion, PayloadJSON: payload, CreatedAt: now}); err != nil {
 				return err
 			}
 		}
@@ -1740,7 +1744,7 @@ func SaveDocumentArtifactValue(ctx context.Context, db *gorm.DB, owner, id strin
 // State and its notification commit together. The stream polls this durable
 // log as well as accepting in-process wakeups.
 func appendSessionStateEvent(tx *gorm.DB, session orm.WorkflowSession, eventType string, payload json.RawMessage) error {
-	return tx.Create(&orm.WorkflowEvent{SessionID: session.ID, OwnerUserID: session.CreateUserID,
+	return tasktiming.PersistWorkflowEvent(tx, &orm.WorkflowEvent{SessionID: session.ID, OwnerUserID: session.CreateUserID,
 		ContractVersion: "workflow.v1", EventType: eventType, EntityID: session.ID,
-		StateVersion: session.StateVersion, PayloadJSON: payload, CreatedAt: time.Now().UTC()}).Error
+		StateVersion: session.StateVersion, PayloadJSON: payload, CreatedAt: time.Now().UTC()})
 }

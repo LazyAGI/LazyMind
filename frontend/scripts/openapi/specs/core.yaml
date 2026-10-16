@@ -7463,6 +7463,8 @@ components:
             type: object
         OrdinaryRunView:
             properties:
+                execution_id:
+                    type: string
                 final_artifacts:
                     items:
                         $ref: '#/components/schemas/PublicArtifact'
@@ -7476,6 +7478,10 @@ components:
                     type: integer
                 run_id:
                     type: string
+                status:
+                    type: string
+                timing:
+                    $ref: '#/components/schemas/RunTiming'
             required:
                 - revision
                 - run_id
@@ -8553,6 +8559,36 @@ components:
                 - status
                 - reason
                 - partial_output
+            type: object
+        RunTiming:
+            properties:
+                cumulative_execution_ms:
+                    format: int64
+                    nullable: true
+                    type: integer
+                elapsed_ms:
+                    format: int64
+                    nullable: true
+                    type: integer
+                finished_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                measured_at:
+                    format: date-time
+                    type: string
+                requested_at:
+                    format: date-time
+                    type: string
+                running_attempt_count:
+                    type: integer
+            required:
+                - cumulative_execution_ms
+                - elapsed_ms
+                - finished_at
+                - measured_at
+                - requested_at
+                - running_attempt_count
             type: object
         ScheduleMoveRequest:
             properties:

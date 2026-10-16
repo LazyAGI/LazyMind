@@ -23,6 +23,7 @@ import (
 	"lazymind/core/conversationgroup"
 	"lazymind/core/store"
 	"lazymind/core/taskcenter"
+	"lazymind/core/tasktiming"
 )
 
 const (
@@ -544,6 +545,9 @@ func purgeConversation(ctxDB *gorm.DB, conversationID, userID string) error {
 			if err := tx.Where(deletion.where, deletion.args...).Delete(deletion.model).Error; err != nil {
 				return err
 			}
+		}
+		if err := tasktiming.PurgeConversations(ctx, tx, userID, conversationIDs); err != nil {
+			return err
 		}
 		if err := artifact.PurgeConversationOwned(tx, userID, conversationIDs); err != nil {
 			return err

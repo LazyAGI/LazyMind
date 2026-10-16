@@ -13,6 +13,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/taskdisplay"
+	"lazymind/core/tasktiming"
 )
 
 var ErrStaleExecution = errors.New("stale task execution")
@@ -27,6 +28,23 @@ type publicStepRecord struct {
 // beginDisplayExecution runs under the same row lock as launch/resume. Historical
 // records stay intact; their execution IDs cannot contaminate the new attempt.
 func beginDisplayExecution(ctx context.Context, db *gorm.DB, taskID, executionID string) error {
+	previous, err := GetTask(ctx, db, taskID)
+	if err != nil {
+		return err
+	}
+	if previous.Status != StatusPending && previous.Status != StatusRunning {
+		return ErrTaskTerminal
+	}
+	if previous.ExecutionID == executionID {
+		return nil
+	}
+	if previous.StartedAt != nil && previous.FinishedAt == nil {
+		now := time.Now().UTC()
+		previous.FinishedAt = &now
+	}
+	if err := tasktiming.RecordSubagent(ctx, db, *previous); err != nil {
+		return err
+	}
 	result := db.WithContext(ctx).Model(&orm.SubAgentTask{}).Where("id = ? AND status IN ?", taskID, []string{StatusPending, StatusRunning}).Updates(map[string]any{
 		"execution_id": executionID, "display_revision": gorm.Expr("display_revision + 1"), "started_at": nil, "finished_at": nil, "sources": orm.RawJSON(`[]`),
 		"progress_pct": 0,

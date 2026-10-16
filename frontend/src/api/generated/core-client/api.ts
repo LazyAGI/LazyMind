@@ -4972,10 +4972,13 @@ export interface OrdinaryDisplayErrorData {
     'request_id': string;
 }
 export interface OrdinaryRunView {
+    'execution_id'?: string;
     'final_artifacts'?: Array<PublicArtifact>;
     'final_output_refs'?: Array<string>;
     'revision': number;
     'run_id': string;
+    'status'?: string;
+    'timing'?: RunTiming;
 }
 export interface OrdinaryTaskDetailData {
     'task': OrdinaryTaskView;
@@ -5607,6 +5610,14 @@ export const RunTerminalTransportDiagnosticCodeEnum = {
 
 export type RunTerminalTransportDiagnosticCodeEnum = typeof RunTerminalTransportDiagnosticCodeEnum[keyof typeof RunTerminalTransportDiagnosticCodeEnum];
 
+export interface RunTiming {
+    'cumulative_execution_ms': number | null;
+    'elapsed_ms': number | null;
+    'finished_at': string | null;
+    'measured_at': string;
+    'requested_at': string;
+    'running_attempt_count': number;
+}
 export interface ScheduleMoveRequest {
     'group_id'?: string | null;
     'position'?: number;

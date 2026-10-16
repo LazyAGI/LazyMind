@@ -29,6 +29,7 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
+	"lazymind/core/tasktiming"
 	"lazymind/core/workflow"
 )
 
@@ -79,6 +80,7 @@ func writeSSEChunk(w http.ResponseWriter, flusher http.Flusher, v any) {
 }
 
 func Chat(w http.ResponseWriter, r *http.Request) {
+	r = r.WithContext(tasktiming.WithRequestTime(r.Context(), time.Now().UTC()))
 	ChatConversations(w, r)
 }
 

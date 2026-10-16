@@ -129,7 +129,7 @@ describe("buildOrdinaryTaskTimeline", () => {
     expect(timeline.groups[1].mode).toBe("serial");
   });
 
-  it("reports wall-clock elapsed time separately from visible task execution time", () => {
+  it("keeps child intervals while leaving root totals to the server", () => {
     const serialTimeline = buildOrdinaryTaskTimeline([
       task("first", 1, "succeeded", 0, 10),
       task("second", 2, "succeeded", 20, 30),
@@ -140,10 +140,12 @@ describe("buildOrdinaryTaskTimeline", () => {
       task("parallel-b", 2, "succeeded", 2, 18),
     ]);
 
-    expect(serialTimeline.elapsedSeconds).toBe(30);
-    expect(serialTimeline.cumulativeExecutionSeconds).toBe(20);
-    expect(parallelTimeline.elapsedSeconds).toBe(20);
-    expect(parallelTimeline.cumulativeExecutionSeconds).toBe(36);
+    expect(serialTimeline.items.map(ordinaryTaskDurationSeconds)).toEqual([10, 10, undefined]);
+    expect(parallelTimeline.items.map(ordinaryTaskDurationSeconds)).toEqual([20, 16]);
+    expect(serialTimeline.elapsedSeconds).toBeUndefined();
+    expect(serialTimeline.cumulativeExecutionSeconds).toBeUndefined();
+    expect(parallelTimeline.elapsedSeconds).toBeUndefined();
+    expect(parallelTimeline.cumulativeExecutionSeconds).toBeUndefined();
   });
 
   it("ignores tasks without a complete timing interval", () => {
@@ -157,8 +159,9 @@ describe("buildOrdinaryTaskTimeline", () => {
       task("missing-end", 2, "succeeded", 10, 20, { ordinary: undefined, updated_at: undefined }),
     ]);
 
-    expect(partialTimeline.elapsedSeconds).toBe(10);
-    expect(partialTimeline.cumulativeExecutionSeconds).toBe(10);
+    expect(partialTimeline.items.map(ordinaryTaskDurationSeconds)).toEqual([undefined, 10, undefined]);
+    expect(partialTimeline.elapsedSeconds).toBeUndefined();
+    expect(partialTimeline.cumulativeExecutionSeconds).toBeUndefined();
     expect(untimedTimeline.elapsedSeconds).toBeUndefined();
     expect(untimedTimeline.cumulativeExecutionSeconds).toBeUndefined();
   });
@@ -323,4 +326,14 @@ describe("buildOrdinaryTaskTimeline", () => {
       "current-b",
     ]);
   });
+});
+
+it('excludes pruned and bypassed branches from completion progress', () => {
+  const timeline = buildOrdinaryTaskTimeline([
+    task('done', 1, 'succeeded', 0, 10),
+    task('pruned', 2, 'pending', 0, 10, { ordinary: ordinary('pruned', { status: 'pruned', run_id: 'history-1' }) }),
+    task('bypassed', 3, 'pending', 0, 10, { ordinary: ordinary('bypassed', { status: 'bypassed', run_id: 'history-1' }) }),
+  ]);
+  expect(timeline.totalCount).toBe(1);
+  expect(timeline.completedCount).toBe(1);
 });

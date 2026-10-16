@@ -19,6 +19,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/conversationgroup"
 	"lazymind/core/store"
+	"lazymind/core/tasktiming"
 )
 
 const removalCancellationJob = "task_center.removal_cancel"
@@ -196,6 +197,9 @@ func removeTaskWithImpact(ctx context.Context, db *gorm.DB, owner, id, version s
 			}
 		}
 		for _, c := range s.conversations {
+			if err := tasktiming.CancelConversation(ctx, tx, owner, c.ID, now); err != nil {
+				return err
+			}
 			result.TrashedConversationIDs = append(result.TrashedConversationIDs, c.ID)
 			if c.DeletedAt == nil {
 				if err := tx.Model(&orm.Conversation{}).Where("id=? AND create_user_id=?", c.ID, owner).Updates(map[string]any{"deleted_at": now, "trash_expires_at": now.Add(30 * 24 * time.Hour), "archived_at": nil, "archive_folder_id": nil, "updated_at": now}).Error; err != nil {

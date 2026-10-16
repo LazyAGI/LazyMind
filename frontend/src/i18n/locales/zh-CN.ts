@@ -3759,6 +3759,7 @@ const zhCN = {
   },
 
   taskCenter: {
+    ordinaryInitializing: "正在初始化，等待子任务开始",
     title: "任务中心",
     description: "查看需要处理的事项、任务进展和自动化计划",
     newTask: "新建任务",
