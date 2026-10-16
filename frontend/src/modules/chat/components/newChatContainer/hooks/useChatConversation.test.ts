@@ -222,6 +222,7 @@ describe("useChatConversation regeneration recovery", () => {
     useTaskCenterStore.setState({
       activeConversationId: "",
       tasksByConversation: {},
+      artifactsByConversation: {},
     });
   });
 
@@ -419,6 +420,32 @@ describe("useChatConversation regeneration recovery", () => {
     } }) }));
     expect(emitConversationActivity).not.toHaveBeenCalledWith(expect.objectContaining({ displayName: expect.any(String) }));
     expect(emitConversationListRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("shows a persisted file from the main chat stream before the answer finishes", async () => {
+    const { listeners, onOpenSSE } = createPreparedStream("artifact-conversation");
+    const { result } = renderConversation({ onOpenSSE });
+    await act(async () => { await result.current.sendMessage({ text: "画出差审批流程" }); });
+    const artifact = {
+      artifact_id: "artifact-1",
+      conversation_id: "artifact-conversation",
+      history_id: "history-1",
+      producer_type: "main_agent",
+      filename: "出差申请审批流程图.html",
+      content_type: "file",
+      slot: "出差申请审批流程图.html",
+      seq: 1,
+      value: { url: "/files/diagram.html" },
+    };
+    act(() => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "artifact-conversation",
+      history_id: "history-1",
+      seq: 1,
+      artifact_created: artifact,
+    } }) }));
+    expect(useTaskCenterStore.getState().artifactsByConversation["artifact-conversation"])
+      .toEqual([artifact]);
+    expect(result.current.isStreaming).toBe(true);
   });
 
   it("keeps unretained sidechat activity out of the main history", async () => {

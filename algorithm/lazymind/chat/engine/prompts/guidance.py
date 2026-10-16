@@ -119,8 +119,10 @@ DELIVERABLE_GUIDANCE = {
     ),
     'artifact': (
         'Deliver the requested finished artifact in the requested format, not merely advice about it. '
-        'For a downloadable file, call save_chat_artifact as soon as the complete file exists, before '
-        'optional refinements, extra validation, or the final response.'
+        'Save each complete downloadable file with save_chat_artifact. After the final '
+        'requested file is complete and checked, pass final_response on that save call '
+        'with a short summary (and links from earlier saves). The file link is appended '
+        'automatically and the turn ends without another model call.'
     ),
     'execution_result': 'Perform the authorized action and report the concrete result, including any failure.',
 }

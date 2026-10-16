@@ -809,6 +809,24 @@ def test_ordinary_skill_concept_does_not_select_runtime_skill() -> None:
     assert profile.explicit_resources.skill_names == ()
 
 
+def test_diagram_skill_request_routes_to_downloadable_artifact() -> None:
+    profile = resolve_task_profile(
+        '请使用「图示设计助手」的完整能力，根据我接下来提供的需求完成任务。'
+        '可综合使用的功能包括：设计系统架构图、梳理业务流程图、设计 OAuth 时序图。'
+        '信息不足时，请先询问完成任务所需的关键资料。'
+        '写一个出差申请的流程，需要经过wbs经理，直系领导，三级部门长，二级部门长的审批通过',
+        enable_llm_fallback=False,
+    )
+    assert profile.primary_outcome == 'create'
+    assert profile.deliverable_kind == 'artifact'
+    assert 'artifact' in selected_prompt_modules(profile)
+
+
+def test_explaining_an_approval_flow_does_not_request_an_artifact() -> None:
+    profile = resolve_task_profile('解释一下出差申请的审批流程', enable_llm_fallback=False)
+    assert profile.deliverable_kind == 'direct_answer'
+
+
 def test_attachment_and_url_are_mixed_inputs() -> None:
     profile = resolve_task_profile(
         '分析附件并参考 https://example.com',

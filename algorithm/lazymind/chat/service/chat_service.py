@@ -1917,7 +1917,8 @@ async def _handle_chat_impl(
             'Relative paths use the selected workspace, or the internal working directory when unbound. '
             'Reads are allowed; writes and deletions follow the workspace permission mode. '
             'Wait for any required approval and report only actual tool results. '
-            'Use save_chat_artifact to publish a downloadable result.'
+            'Use save_chat_artifact to publish a downloadable result. On the last '
+            'requested file, pass final_response to finish this turn.'
         )
     elif _cfg['trusted_local_mode']:
         workspace_policy = (
@@ -1925,14 +1926,16 @@ async def _handle_chat_impl(
             'Trusted local mode is active: when the user requests it, you may read and write absolute local '
             'paths outside this workspace and use `shell` to run local commands. Keep relative paths '
             'inside the default workspace. Use `read`, `grep`, `write`, and `ls` for file operations, '
-            'then publish completed downloadable files with `save_chat_artifact`.'
+            'then publish completed downloadable files with `save_chat_artifact`. '
+            'Pass final_response on the last file to finish this turn.'
         )
     else:
         workspace_policy = (
             f'Use `{workspace}` as the single working directory for all generated and intermediate files. '
             'This unbound chat does not provide `write` or other host filesystem tools. Use '
             '`search_file_resource` and `read_file_resource` for available conversation files. '
-            'Create text or JSON downloads with `save_chat_artifact`. When another tool such as '
+            'Create text or JSON downloads with `save_chat_artifact`. Pass final_response '
+            'on the last file to finish this turn. When another tool such as '
             'MailToolkit_compose_draft needs the generated file, pass the returned `workspace_path`. '
             'Do not invent paths or call tools that are not registered.'
         )

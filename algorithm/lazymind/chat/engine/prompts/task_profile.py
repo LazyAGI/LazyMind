@@ -169,6 +169,7 @@ _SIGNALS: tuple[tuple[Outcome, re.Pattern[str]], ...] = (
     )),
     ('create', re.compile(
         r'创建|生成|编写|撰写|写一份|写一篇|写篇|写个|帮我写|制作一份|做一个|设计一个|画一个|'
+        r'写一个.{0,16}(?:流程|图)|(?:设计|绘制|画|梳理).{0,16}(?:架构图|流程图|时序图|图示)|'
         r'起草|拟一份|想几个|给.{0,4}个点子|搭一个原型|实现一个|补一个测试|'
         r'产出|create|generate|draft|design|compose|implement|brainstorm|mock\s+up|\bwrite\b', re.I,
     )),

@@ -882,6 +882,14 @@ export function useChatConversation({
       );
       return;
     }
+    if (result.artifact_created?.artifact_id && messageConversationId) {
+      // Core persists the file before this chunk. Show it while the model is
+      // still running, without waiting for a separate conversation event.
+      useTaskCenterStore.getState().upsertConversationArtifact(
+        messageConversationId,
+        result.artifact_created,
+      );
+    }
     const isUsingTempId = currentConversationIdAtStart.startsWith("temp_");
     const isActiveConversation =
       !messageConversationId ||

@@ -41,6 +41,7 @@ def test_save_chat_artifact_file_copies_to_persistent_workspace(tmp_path, monkey
 
     result = chat_artifact.save_chat_artifact(
         'report.docx', 'report.docx', content_type='file', caption='技术方案',
+        final_response='技术方案已完成。',
     )
 
     artifact_id = result['artifact_id']
@@ -51,6 +52,10 @@ def test_save_chat_artifact_file_copies_to_persistent_workspace(tmp_path, monkey
     assert os.path.commonpath((str(shared_workspace), published)) == str(shared_workspace)
     assert Path(published).read_bytes() == b'fake-docx'
     assert emitted[0]['value']['size'] == len(b'fake-docx')
+    assert result['_agent_control'] == {
+        'stop': True,
+        'final_text': f'技术方案已完成。\n\n[report.docx](file_id:{artifact_id})',
+    }
 
 
 def test_save_chat_artifact_emits_logical_key_and_hash(monkeypatch):
@@ -64,8 +69,9 @@ def test_save_chat_artifact_emits_logical_key_and_hash(monkeypatch):
         lambda tag, **payload: emitted.append({'tag': tag, **payload}),
     )
 
-    chat_artifact.save_chat_artifact(
+    result = chat_artifact.save_chat_artifact(
         'report.md', 'hello', change_summary='first draft', logical_key='report',
+        final_response='报告已完成。',
     )
 
     event = emitted[0]
@@ -76,6 +82,17 @@ def test_save_chat_artifact_emits_logical_key_and_hash(monkeypatch):
     assert event['content_hash'].startswith('sha256:')
     assert event['size'] > 0
     assert event['idempotency_key']
+    assert result['_agent_control']['stop'] is True
+    assert '[report.md](file_id:' in result['_agent_control']['final_text']
+
+
+def test_save_chat_artifact_rejects_empty_final_response_before_publishing(monkeypatch):
+    emitted = []
+    monkeypatch.setattr(chat_artifact, '_write_agent_data',
+                        lambda tag, **payload: emitted.append({'tag': tag, **payload}))
+    with pytest.raises(ToolExecutionError, match='final_response'):
+        chat_artifact.save_chat_artifact('report.txt', 'hello', final_response=' ')
+    assert emitted == []
 
 
 @pytest.mark.parametrize(

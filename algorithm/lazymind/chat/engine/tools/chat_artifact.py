@@ -77,6 +77,15 @@ def _file_markdown(filename: str, artifact_id: str) -> str:
     return f'[{filename}](file_id:{artifact_id})'
 
 
+def _finish_after_save(result: Dict[str, Any], final_response: Optional[str]) -> Dict[str, Any]:
+    if final_response is not None:
+        result['_agent_control'] = {
+            'stop': True,
+            'final_text': f"{final_response.strip()}\n\n{result['file_markdown']}",
+        }
+    return result
+
+
 def _artifact_metadata(
     encoded_value: bytes,
     change_summary: Optional[str],
@@ -115,6 +124,7 @@ def save_chat_artifact(
     caption: Optional[str] = None,
     change_summary: Optional[str] = None,
     logical_key: Optional[str] = None,
+    final_response: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Save a downloadable artifact produced in the current main-chat turn.
 
@@ -129,6 +139,11 @@ def save_chat_artifact(
     link, for example ``[notes.txt](file_id:...)``. Do not paste workspace paths,
     unsigned URLs, or a bare filename without that link.
 
+    When this is the last requested artifact and no further work is needed,
+    pass a short ``final_response`` in the user's language. The saved file link
+    is appended automatically and the turn ends without another model call.
+    For multiple files, include earlier saved file links in ``final_response``.
+
     Args:
         filename: Download filename, for example ``notes.txt``. Directory paths are rejected.
         content: Text, a JSON-compatible value, or a workspace path for a file artifact.
@@ -136,17 +151,23 @@ def save_chat_artifact(
             other binary attachments use ``file`` with a local path inside the
             current main-Agent workspace. ``image`` is not a valid value here.
         caption: Optional short human-readable description.
+        final_response: Optional final message to end this turn after saving.
     """
+    if final_response is not None and (
+        not isinstance(final_response, str) or not final_response.strip()
+        or len(final_response) > 4000
+    ):
+        raise ToolExecutionError('final_response must be non-empty text of at most 4000 characters')
     normalized_type = str(content_type or 'text').strip().lower()
     if normalized_type not in {'text', 'json', 'file'}:
         raise ToolExecutionError("content_type must be 'text', 'json', or 'file'")
     safe_name = _safe_filename(filename, normalized_type)
     normalized_caption = _normalize_caption(caption)
     if normalized_type == 'file':
-        return save_chat_file(
+        return _finish_after_save(save_chat_file(
             safe_name, str(content or ''), normalized_caption,
             change_summary=change_summary, logical_key=logical_key,
-        )
+        ), final_response)
     if normalized_type == 'json':
         value = {'data': content}
     else:
@@ -191,7 +212,7 @@ def save_chat_artifact(
     except Exception:
         shutil.rmtree(mirrored_dir, ignore_errors=True)
         raise
-    return {
+    return _finish_after_save({
         'artifact_id': artifact_id,
         'filename': safe_name,
         'content_type': normalized_type,
@@ -201,7 +222,7 @@ def save_chat_artifact(
             f"Saved downloadable artifact '{safe_name}'. Pass workspace_path to another "
             'tool when it needs the generated file, including MailToolkit_compose_draft.'
         ),
-    }
+    }, final_response)
 
 
 def save_chat_file(
