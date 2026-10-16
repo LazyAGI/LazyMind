@@ -2639,7 +2639,7 @@ const zhCN = {
     docImageExclusive: "不支持同时传入文档与图片",
     maxFilesWarning: "最多只能上传 3 个文件",
     unsupportedFileType: "仅支持上传{{types}}格式的文件",
-    supportedUploadTypeSummary: "图片、PDF/Office 文档及常见纯文本/代码/配置",
+    supportedUploadTypeSummary: "图片、PDF/Office 文档、CSV/TSV/Excel 表格及常见纯文本/代码/配置",
     thinking: "思考中...",
     modelRetrying:
       "模型服务调用失败，正在重试（第 {{attempt}}/{{max}} 次）……",
@@ -3342,7 +3342,7 @@ const zhCN = {
     greetingSuffix: "，有什么我能帮你的吗？",
     taskGreetingSuffix: "，你想执行什么任务呢？",
     dragToUpload: "文件拖动到此处即可上传",
-    dragSupportedFormats: "支持的文件格式：PDF、Word文档（DOC、DOCX）、PPTX、图片（PNG、JPG）",
+    dragSupportedFormats: "支持的文件格式：PDF、Word、PPTX、CSV、TSV、Excel（XLS、XLSX）、图片及常见文本文件",
     unsupportedFileTypeDrag: "不支持上传该类型文件",
     disclaimerAI: "AI 生成内容不代表开发者立场",
     disclaimerSecurity: "为了保障您的信息安全，请勿上传",

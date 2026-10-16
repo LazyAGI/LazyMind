@@ -12,6 +12,7 @@ import lazyllm
 from lazymind.chat.engine.attachment_reader import (
     is_chat_document_file,
     is_chat_image_file,
+    is_chat_spreadsheet_file,
     is_chat_text_file,
     parse_attachment_content,
 )
@@ -206,6 +207,15 @@ def _resolved_from_local_file(
         return resolve_text_target(str(manifest.get('file_id')))
     if is_chat_image_file(source):
         raise ValueError('images are not text targets; use an image or vision tool')
+    if is_chat_spreadsheet_file(source):
+        parsed_path = _materialize_document_text(source, workspace)
+        return ResolvedTextResource(
+            target=target,
+            path=parsed_path,
+            display_name=display_name,
+            kind='attachment_document',
+            workspace=workspace,
+        )
     if is_chat_text_file(source):
         from .attachment_edit import effective_attachment_path
         source = effective_attachment_path(source)
