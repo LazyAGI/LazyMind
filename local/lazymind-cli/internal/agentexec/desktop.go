@@ -13,6 +13,7 @@ type DesktopApplication struct {
 	ExecutableNames []string
 	Protocols       []string
 	DisplayNames    []string
+	PackageNames    []string // Exact Windows MSIX identities, independent of version.
 	StatePaths      []string
 }
 

@@ -467,6 +467,7 @@ export async function agentIntegrationAction(agent: DesktopAgent, action: Deskto
       `/agents/${encodeURIComponent(agent)}/${action}`,
       { method: "POST" },
       action === "login" ? LOGIN_TIMEOUT_MS
+        : agent === "codex" && ["connect", "disconnect"].includes(action) ? INSTALL_TIMEOUT_MS * 2
         : agent === "deepseek-harness" && action === "connect" ? INSTALL_TIMEOUT_MS
         : agent === "deepseek-harness" && action === "disconnect" ? DSH_DISCONNECT_TIMEOUT_MS : ACTION_TIMEOUT_MS,
     );

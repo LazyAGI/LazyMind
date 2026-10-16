@@ -389,6 +389,19 @@ func TestMarketControlPendingJobStopsWithoutCallingAlgorithm(t *testing.T) {
 	}
 }
 
+func TestMarketControlCancelRechecksCachedHealth(t *testing.T) {
+	f := newMarketControlFixture(t, "WAITING")
+	data := marketControlData(t, f.request("GET", "/control-job", "control-owner"))
+	if data["can_cancel"] != true {
+		t.Fatal("healthy service did not allow cancellation")
+	}
+	f.cancelStatus.Store(503)
+	w := f.request("POST", "/control-job:cancel", "control-owner")
+	if w.Code != http.StatusServiceUnavailable || len(f.calls) != 0 {
+		t.Fatalf("stale health allowed cancellation: status=%d calls=%v", w.Code, f.calls)
+	}
+}
+
 func TestMarketControlCancelCannotUseStaleDatasetPermission(t *testing.T) {
 	f := newMarketControlFixture(t, "WAITING")
 	if err := f.db.Model(&orm.Dataset{}).Where("id = ?", "control-dataset").Update("create_user_id", "other-owner").Error; err != nil {
@@ -526,6 +539,7 @@ func TestMarketControlUnsafeRetryAndDeleteAreRejectedByRoutes(t *testing.T) {
 		{"unknown-retry", "POST", "/control-job:retry", true},
 		{"unknown-delete", "DELETE", "/control-job", true},
 		{"unavailable-retry", "POST", "/control-job:retry", false},
+		{"cached-available-retry", "POST", "/control-job:retry", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newMarketControlFixture(t, "FAILED")
@@ -538,6 +552,17 @@ func TestMarketControlUnsafeRetryAndDeleteAreRejectedByRoutes(t *testing.T) {
 					t.Fatal(err)
 				}
 			} else {
+				if tc.name == "cached-available-retry" {
+					data := marketControlData(t, f.request("GET", "/control-job", "control-owner"))
+					if data["can_retry"] != true {
+						t.Fatal("healthy worker did not allow retry")
+					}
+					// Reading the task caches worker health. Retrying must still
+					// check whether the worker is available now.
+					if err := f.db.Take(&before, "id = ?", "control-job").Error; err != nil {
+						t.Fatal(err)
+					}
+				}
 				f.workerStatus.Store(503)
 			}
 			w := f.request(tc.method, tc.suffix, "control-owner")

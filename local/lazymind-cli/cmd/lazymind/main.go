@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -21,6 +22,7 @@ import (
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/assistantbridge"
 	"lazymind/agentconnector/internal/chatagent"
+	"lazymind/agentconnector/internal/codexruntime"
 	"lazymind/agentconnector/internal/coreapi"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/executorpolicy"
@@ -36,7 +38,17 @@ const maxInternalSessionBytes = 1 << 20
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr); err != nil {
+	action := func() error {
+		if codexruntime.IsLauncher() && !(len(os.Args) > 2 && os.Args[1] == "internal" && os.Args[2] == "codex-runtime") {
+			return codexruntime.RunLauncher(ctx, os.Args[1:])
+		}
+		return run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	}
+	if err := action(); err != nil {
+		var exit *exec.ExitError
+		if codexruntime.IsLauncher() && errors.As(err, &exit) {
+			os.Exit(exit.ExitCode())
+		}
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
@@ -65,6 +77,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 }
 
 func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "codex-runtime" {
+		return codexruntime.RunNative(ctx, args[1:], os.Stdin, stdout)
+	}
 	if len(args) > 0 && args[0] == "codex-workflow-pair" {
 		return runCodexWorkflowPair(args[1:], stdout, stderr)
 	}

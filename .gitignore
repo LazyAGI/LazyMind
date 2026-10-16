@@ -90,6 +90,7 @@ lazyllm_cpp.egg-info/
 !build*.sh
 !build*.ps1
 !desktop/scripts/build-python-components.py
+!integrations/codex-workflow/scripts/build-desktop.mjs
 !build_document.py
 !builder.py
 

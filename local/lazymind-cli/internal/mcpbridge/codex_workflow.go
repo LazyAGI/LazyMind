@@ -10,16 +10,17 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"lazymind/agentconnector/internal/codexruntime"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
 // Binding occurs within workflow.start, using the same paired connector as
-// the queue dispatcher. Revalidate the account and pairing on every bind.
+// the dispatcher. Revalidate the account, profile and transport on every bind.
 func (b *Bridge) bindCodexController(ctx context.Context, runID, threadID string) error {
 	path := os.Getenv("LAZYMIND_WORKFLOW_PAIRING_FILE")
 	if path == "" {
-		return errors.New("set LAZYMIND_WORKFLOW_PAIRING_FILE to the queue dispatcher's pairing file")
+		return errors.New("set LAZYMIND_WORKFLOW_PAIRING_FILE to the dispatcher's pairing file")
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -62,12 +63,16 @@ func (b *Bridge) bindCodexController(ctx context.Context, runID, threadID string
 	if err != nil {
 		return err
 	}
-	if pair.Provider != "codex" || pair.Profile != profile {
+	if pair.Provider != "codex" || !codexruntime.SameProfile(pair.Profile, profile) {
 		return errors.New("pairing does not match this Codex profile")
+	}
+	cancellation, err := codexruntime.Cancellation(profile)
+	if err != nil {
+		return err
 	}
 	var result map[string]any
 	return b.api.DoJSON(ctx, http.MethodPost, "/workflow-sessions/"+url.PathEscape(runID)+"/host-binding", map[string]any{
 		"connector_id": pair.ConnectorID, "credential": pair.Token, "provider": pair.Provider,
-		"driver_session_id": threadID, "cancellation": "none",
+		"driver_session_id": threadID, "cancellation": cancellation,
 	}, &result)
 }

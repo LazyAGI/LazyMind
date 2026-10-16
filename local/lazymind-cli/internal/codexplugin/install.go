@@ -18,6 +18,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 	"lazymind/agentconnector/internal/agentexec"
+	"lazymind/agentconnector/internal/codexruntime"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/localfile"
 	"lazymind/agentconnector/internal/workflowhost"
@@ -283,6 +284,7 @@ func writeAtomic(path string, data []byte) error {
 // cached plugin content when only instructions change.
 func BuildID() string {
 	hash := sha256.New()
+	hash.Write([]byte(codexruntime.BuildID()))
 	_ = fs.WalkDir(assets, "assets", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err

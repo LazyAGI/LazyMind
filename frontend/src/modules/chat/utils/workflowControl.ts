@@ -31,14 +31,13 @@ export const REVIEW_CHANGED_NOTICE = 'chat.workflowControlReviewChanged';
 
 export type OverlayInfoBanner = { key: string; tone: 'info' | 'warning' };
 
-/** Only delivery problems need a banner; routine delivery stays silent. */
+/** Show uncertain delivery and Codex stop guidance without a generic host-rejection banner. */
 export function deliveryBanner(delivery: WorkflowControlView['delivery'] | null | undefined, binding?: WorkflowControlView['binding']): OverlayInfoBanner | undefined {
   if (!delivery || delivery.consumed_at) return undefined;
   if (delivery.status === 'unknown') return { key: 'chat.workflowControlDeliveryUnknown', tone: 'warning' };
   if (delivery.status === 'failed' && delivery.kind === 'cancel' && binding?.provider === 'codex') {
     return { key: 'chat.workflowControlCodexStopped', tone: 'info' };
   }
-  if (delivery.status === 'failed') return { key: 'chat.workflowControlDeliveryFailed', tone: 'warning' };
   return undefined;
 }
 

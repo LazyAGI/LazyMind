@@ -8,7 +8,8 @@ import { createDispatcher } from '../../workflow-agent-core/src/dispatcher'
 import { HostBridge } from '../../workflow-agent-core/src/transport'
 import { setTimeout as delay } from 'node:timers/promises'
 import { dispatcherLock, DispatcherBusy } from './runtime-lock'
-import { CodexAdapter } from './adapter'
+import { openRuntime, sharedEndpoint } from './runtime'
+import { sameProfile } from './profile'
 
 const runFile = promisify(execFile)
 async function main() {
@@ -17,6 +18,7 @@ async function main() {
     'codex-bin': { type: 'string' }, 'codex-home': { type: 'string' },
     'pairing-file': { type: 'string' }, 'lazymind-cli': { type: 'string', default: 'lazymind' },
     'bridge-url': { type: 'string', default: 'http://127.0.0.1:19091' },
+    'app-server-url': { type: 'string' },
   } })
   const binary = values['codex-bin']
   if (!binary || !isAbsolute(binary)) throw new Error('--codex-bin must be the absolute path to the desktop bundled Codex executable')
@@ -31,7 +33,7 @@ async function main() {
   // Windows uses profile ACLs, not the synthetic POSIX mode returned by stat.
   if (!info.isFile() || process.platform !== 'win32' && (info.mode & 0o077) !== 0) throw new Error('Pairing must be a private file (0600)')
   const pairing = JSON.parse(await readFile(path, 'utf8'))
-  if (pairing.provider !== 'codex' || pairing.enabled !== true || pairing.profile !== profile
+  if (pairing.provider !== 'codex' || pairing.enabled !== true || !await sameProfile(pairing.profile, profile)
     || !/^host-[a-f0-9]{32}$/.test(pairing.connector_id) || !/^[a-f0-9]{64}$/.test(pairing.token)) {
     throw new Error('Pairing does not match this Codex profile')
   }
@@ -49,6 +51,8 @@ async function main() {
   parentWatch?.unref()
   const instanceId = randomUUID()
   let unlock: (() => Promise<void>) | undefined
+  let closeRuntime: (() => void) | undefined
+  let modeWatch: ReturnType<typeof setInterval> | undefined
   try {
     while (!lifetime.signal.aborted) {
       try { unlock = await dispatcherLock(path, instanceId); break }
@@ -59,11 +63,29 @@ async function main() {
     }
     lifetime.signal.throwIfAborted()
     const bridge = new HostBridge(values['bridge-url']!, pairing)
-    const adapter = new CodexAdapter(binary, profile)
-    console.log(`Codex Workflow queue dispatcher ready. MCP pairing file: ${path}. Native turn interruption is unavailable.`)
-    await createDispatcher(adapter, undefined, bridge, instanceId, lifetime.signal).poll()
+    const selectedEndpoint = values['app-server-url'] ?? await sharedEndpoint(profile)
+    const runtime = await openRuntime({ binary, profile, pairingFile: path, connectorId: pairing.connector_id,
+      bridge, lifetime, endpoint: selectedEndpoint ?? null })
+    closeRuntime = runtime.close
+    // Reconfiguration takes effect at a connection boundary, never mid-delivery
+    // by switching transports and resending the same action.
+    if (!values['app-server-url']) {
+      let checking = false
+      modeWatch = setInterval(async () => {
+        if (checking) return
+        checking = true
+        try { if (await sharedEndpoint(profile) !== selectedEndpoint) lifetime.abort(new Error('Shared server configuration changed; restart dispatcher')) }
+        catch { lifetime.abort(new Error('Shared server configuration became invalid')) }
+        finally { checking = false }
+      }, 1000)
+      modeWatch.unref()
+    }
+    console.log(`Codex Workflow ${runtime.mode} dispatcher ready. Cancellation: ${runtime.adapter.cancellation}.`)
+    await createDispatcher(runtime.adapter, runtime.host, bridge, instanceId, lifetime.signal).poll()
   } finally {
     lifetime.abort()
+    if (modeWatch) clearInterval(modeWatch)
+    closeRuntime?.()
     if (parentWatch) clearInterval(parentWatch)
     if (unlock) await unlock()
     process.removeListener('SIGINT', stop)

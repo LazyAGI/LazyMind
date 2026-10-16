@@ -720,10 +720,12 @@ function runAgentConnector(agent, action) {
   if (action === "login") {
     return startAgentLogin(agent);
   }
-  const installWorkflow = agent === "deepseek-harness" && action === "connect";
+  const installWorkflow = ["deepseek-harness", "codex"].includes(agent) && action === "connect";
+  const configureCodex = agent === "codex" && ["connect", "disconnect"].includes(action);
   const run = () => runConnectorJSON(
     ["internal", "agent", agent, action],
-    installWorkflow ? agentConnectorInstallTimeoutMs
+    configureCodex ? agentConnectorInstallTimeoutMs * 2
+      : installWorkflow ? agentConnectorInstallTimeoutMs
       : agent === "deepseek-harness" && action === "disconnect" ? agentConnectorDisconnectTimeoutMs
       : action === "status" ? agentConnectorStatusTimeoutMs : agentConnectorActionTimeoutMs,
   );

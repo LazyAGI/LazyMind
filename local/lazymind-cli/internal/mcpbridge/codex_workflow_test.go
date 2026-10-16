@@ -1,8 +1,10 @@
 package mcpbridge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"runtime"
 	"testing"
 
+	"lazymind/agentconnector/internal/codexruntime"
 	"lazymind/agentconnector/internal/coreapi"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/workflowhost"
@@ -17,6 +20,15 @@ import (
 
 func TestCodexBindingUsesCurrentAccountAndProfilePairing(t *testing.T) {
 	home, profile := t.TempDir(), t.TempDir()
+	// POSIX modes alone do not restrict Windows ACLs or set individual ownership.
+	makePrivate := func(path string) {
+		t.Helper()
+		privatePath, _ := json.Marshal(map[string]string{"path": path})
+		if err := codexruntime.RunNative(context.Background(), []string{"make-private"}, bytes.NewReader(privatePath), io.Discard); err != nil {
+			t.Fatal(err)
+		}
+	}
+	makePrivate(profile)
 	calls := 0
 	var received map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +62,39 @@ func TestCodexBindingUsesCurrentAccountAndProfilePairing(t *testing.T) {
 	if received["provider"] != "codex" || received["driver_session_id"] != "thread-1" || received["connector_id"] != pair.ConnectorID || received["credential"] != pair.Token {
 		t.Fatal("binding did not use paired identity")
 	}
+	if received["cancellation"] != "none" {
+		t.Fatal("legacy binding advertised native cancellation")
+	}
+	registration := filepath.Join(profile, codexruntime.RegistrationName)
+	config := codexruntime.Registration{Version: 1, Profile: profile, Endpoint: "ws+unix://localhost/private/tmp/native.sock:/rpc"}
+	if runtime.GOOS == "windows" {
+		config.Endpoint = "ws://127.0.0.1:49152"
+		config.TokenFile = filepath.Join(profile, "token")
+		if err := os.WriteFile(config.TokenFile, []byte("fixture"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		makePrivate(config.TokenFile)
+	}
+	shared, _ := json.Marshal(config)
+	if err := os.WriteFile(registration, shared, 0600); err != nil {
+		t.Fatal(err)
+	}
+	makePrivate(registration)
+	if err := bridge.bindCodexController(context.Background(), "run-1", "thread-1"); err != nil {
+		t.Fatal(err)
+	}
+	if received["cancellation"] != "session" {
+		t.Fatal("shared binding did not advertise native cancellation")
+	}
+	if err := os.WriteFile(registration, []byte(`{"version":0}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := bridge.bindCodexController(context.Background(), "run-1", "thread-1"); err == nil {
+		t.Fatal("invalid shared configuration fell back to queue")
+	}
+	if err := os.Remove(registration); err != nil {
+		t.Fatal(err)
+	}
 	if runtime.GOOS != "windows" {
 		path := filepath.Join(home, "workflow-hosts", pair.ConnectorID+".json")
 		if err := os.Chmod(path, 0644); err != nil {
@@ -78,7 +123,7 @@ func TestCodexBindingUsesCurrentAccountAndProfilePairing(t *testing.T) {
 	if err := bridge.bindCodexController(context.Background(), "run-1", "thread-1"); err == nil {
 		t.Fatal("accepted disabled pairing")
 	}
-	if calls != 1 {
+	if calls != 2 {
 		t.Fatalf("unexpected bind calls: %d", calls)
 	}
 }
