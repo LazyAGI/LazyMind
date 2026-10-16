@@ -169,7 +169,6 @@ export default function DirectoryPage() {
           {detail?.folder && <Tag>{t('directories.folderMembership')}</Tag>}
         </div>
         <Space wrap className="directory-primary-actions">{d ? <>
-          <Button disabled={blocked} onClick={() => run({ operation: 'organize' })}>{t('directories.organize')}</Button>
           <Dropdown trigger={['click']} menu={{ items: [
             { key: 'edit', label: t('directories.edit'), disabled: blocked, onClick: () => edit('update') },
             { key: 'reorganize', label: t('directories.reorganize'), disabled: blocked, onClick: () => edit('reorganize') },
@@ -263,8 +262,8 @@ export default function DirectoryPage() {
     </Drawer>
     <LocalFileReader directoryId={directoryId} entry={localEntry} onClose={() => setLocalEntry(undefined)} />
     <MailReader directoryId={directoryId} entry={mailEntry} onClose={() => setMailEntry(undefined)} />
-    <Modal open={!!editor} title={editor === 'group' ? t(editingGroup.current ? 'directories.editGroup' : 'directories.addGroup') : t(`directories.${editor || 'create'}`)} onCancel={() => setEditor(undefined)} confirmLoading={saving} onOk={() => { void form.validateFields().then(values => act({ operation: editor!, group_id: editor === 'group' ? editingGroup.current : undefined, ...values })).then(() => setEditor(undefined)).catch(() => {}); }}>
-      <Form form={form} layout="vertical">{editor !== 'reorganize' && <Form.Item name="name" label={t('directories.name')} rules={[{ required: true, whitespace: true, max: 255 }]}><Input /></Form.Item>}{(editor === 'create' || editor === 'update') && <Form.Item name="intent" label={t('directories.intent')} rules={[{ required: true, whitespace: true, max: 4000 }]}><Input.TextArea /></Form.Item>}{editor === 'reorganize' && <><Alert message={t('directories.newView')} /><Form.Item name="organization" label={t('directories.organization')} rules={[{ required: true, whitespace: true }]}><Input /></Form.Item></>}{editor === 'group' && <Form.Item name="parent_id" label={t('directories.parent')}><Select allowClear options={groupOptions} /></Form.Item>}</Form>
+    <Modal open={!!editor} title={editor === 'group' ? t(editingGroup.current ? 'directories.editGroup' : 'directories.addGroup') : t(`directories.${editor || 'create'}`)} onCancel={() => setEditor(undefined)} confirmLoading={saving} onOk={() => { void form.validateFields().then(values => act({ operation: editor!, group_id: editor === 'group' ? editingGroup.current : undefined, parent_id: editor === 'group' ? detail?.groups.find(g => g.id === editingGroup.current)?.parent_id || '' : undefined, ...values })).then(() => setEditor(undefined)).catch(() => {}); }}>
+      <Form form={form} layout="vertical">{editor !== 'reorganize' && <Form.Item name="name" label={t('directories.name')} rules={[{ required: true, whitespace: true, max: 255 }]}><Input /></Form.Item>}{(editor === 'create' || editor === 'update') && <Form.Item name="intent" label={t('directories.intent')} rules={[{ required: true, whitespace: true, max: 4000 }]}><Input.TextArea /></Form.Item>}{editor === 'reorganize' && <><Alert message={t('directories.newView')} /><Form.Item name="organization" label={t('directories.organization')} rules={[{ required: true, whitespace: true }]}><Input /></Form.Item></>}</Form>
     </Modal>
   </div>;
 }

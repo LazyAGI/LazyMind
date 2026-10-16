@@ -65,6 +65,7 @@ it('opens and records use, pins position without changing group, and excludes a 
   view(); await screen.findByText('Contract A');
   fireEvent.click(screen.getByRole('button', { name: 'directories.details' }));
   expect(api.directoryAction).toHaveBeenCalledWith({ operation: 'touch', directory_id: 'd' });
+  expect(screen.queryByRole('button', { name: 'directories.refreshSources' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'directories.entryPin' }));
   await waitFor(() => expect(api.directoryAction).toHaveBeenCalledWith({ operation: 'entry_pin', directory_id: 'd', version: 2, entry_id: 'e', pinned: true }));
   await waitFor(() => expect(screen.getByRole('button', { name: 'directories.exclude' })).not.toBeDisabled());
@@ -105,7 +106,7 @@ it('shows committed documents but blocks manual edits during organization', asyn
   fireEvent.click(screen.getByRole('button', { name: 'directories.details' }));
   expect(screen.getByText('directories.organizing')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'directories.entryPin' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'directories.organize' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'directories.organize' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'directories.exclude' })).toBeDisabled();
   expect(screen.queryByRole('button', { name: 'directories.ask' })).not.toBeInTheDocument();
 });
@@ -383,18 +384,19 @@ it('restores excluded documents from the header menu and offers directory deleti
 
 it('edits groups beside their names and only allows deleting empty leaf groups', async () => {
   mockDirectory({ directory, organizing: false,
-    groups: [{ id: 'g', name: 'Plans', parent_id: '', position: 0 },
+    groups: [{ id: 'g', name: 'Plans', parent_id: 'parent', position: 0 },
       { id: 'parent', name: 'Parent', parent_id: '', position: 1 },
       { id: 'empty', name: 'Empty', parent_id: 'parent', position: 2 }],
     entries: [{ ...entry, group_id: 'g' }] });
   const mounted = view(); await screen.findByText('Contract A');
-  fireEvent.click(screen.getByRole('button', { name: 'Plans directories.more' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Parent / Plans directories.more' }));
   expect(await screen.findByRole('menuitem', { name: 'directories.removeGroup' })).toHaveAttribute('aria-disabled', 'true');
   fireEvent.click(screen.getByRole('menuitem', { name: 'directories.editGroup' }));
   const dialog = await screen.findByRole('dialog');
+  expect(within(dialog).queryByLabelText('directories.parent')).not.toBeInTheDocument();
   fireEvent.change(within(dialog).getByLabelText('directories.name'), { target: { value: 'Updated plans' } });
   fireEvent.click(within(dialog).getByRole('button', { name: 'OK' }));
-  await waitFor(() => expect(api.directoryAction).toHaveBeenCalledWith(expect.objectContaining({ operation: 'group', group_id: 'g', name: 'Updated plans' })));
+  await waitFor(() => expect(api.directoryAction).toHaveBeenCalledWith(expect.objectContaining({ operation: 'group', group_id: 'g', name: 'Updated plans', parent_id: 'parent' })));
   mounted.unmount();
   const parentView = view(); await screen.findByText('Contract A');
   fireEvent.click(screen.getByRole('button', { name: 'Parent directories.more' }));
