@@ -465,12 +465,20 @@ jobs:
           python -c "from lazyllm import fc_register; print('fc_register OK')"
 
       - name: Test with coverage
+        # Git Bash enables Windows backup privileges, bypassing directory ACL tests.
+        shell: python
         env:
           LAZYLLM_INIT_DOC: "1"
         run: |
-          coverage run --source=algorithm -m pytest tests/algorithm/ -v
-          coverage html -d htmlcov-algorithm
-          coverage xml -o coverage-algorithm.xml
+          import subprocess
+          import sys
+
+          for arguments in [
+              ['run', '--source=algorithm', '-m', 'pytest', 'tests/algorithm/', '-v'],
+              ['html', '-d', 'htmlcov-algorithm'],
+              ['xml', '-o', 'coverage-algorithm.xml'],
+          ]:
+              subprocess.run([sys.executable, '-m', 'coverage', *arguments], check=True)
 
       - name: Upload HTML report
         uses: actions/upload-artifact@v4

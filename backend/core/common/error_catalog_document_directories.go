@@ -1,6 +1,7 @@
 package common
 
 func init() {
+	registerAdditionalErrorAlias("local file unavailable", "document directory operation failed", 502, 2003206)
 	registerAdditionalErrorAlias("directory model failed", "document directory operation failed", 500, 2003206)
 	registerAdditionalErrorAlias("document directory execution lease lost", "document directory is organizing", 409, 2003201)
 	registerAdditionalError("document directory is organizing", 409, 2003201)

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -39,14 +40,14 @@ def test_retired_directory_reference_is_not_bound_to_model_resources():
 
 @pytest.mark.parametrize('tool,args,result,source,rid,read', [
     ('native_search', {'query': 'contract'}, {'status': 'ok', 'results': [{'path': '/tmp/contract.txt'}]},
-     'local', '/tmp/contract.txt', 'unread'),
+     'local', os.path.realpath('/tmp/contract.txt'), 'unread'),
     ('read', {'path': '/tmp/contract.txt'},
      {'path': '/tmp/contract.txt', 'content': 'terms', 'offset': 1, 'end_line': 1, 'eof': True},
-     'local', '/tmp/contract.txt', 'read'),
+     'local', os.path.realpath('/tmp/contract.txt'), 'read'),
     ('read', {'path': '/home/u/.codex/sessions/a.jsonl'},
      {'content': '{"type":"response_item","payload":{"content":"terms"}}',
       'line_unit': 'physical', 'offset': 10, 'end_line': 20, 'eof': False},
-     'agent_conversations', '/home/u/.codex/sessions/a.jsonl:physical:10:20', 'partial'),
+     'agent_conversations', os.path.realpath('/home/u/.codex/sessions/a.jsonl') + ':physical:10:20', 'partial'),
     ('fs_google_search', {'keywords': 'contract'},
      [{'name': 'file-1', 'title': 'Contract', 'google_drive_path': 'googledrive:/file-1'}],
      'google_drive', 'file-1', 'unread'),
@@ -74,6 +75,16 @@ def test_actual_source_envelopes(tool, args, result, source, rid, read):
     if source == 'mail':
         assert item['locator']['thread_id'] == '<abc@example.com>'
         assert item['locator']['id'] == 'INBOX::42'
+
+
+@pytest.mark.parametrize('path', [
+    r'C:\Users\u\.codex\sessions\a.jsonl',
+    r'C:\Users\u\.claude\projects\project\a.jsonl',
+])
+def test_windows_history_search_is_not_a_local_file_observation(path):
+    observation = runtime().normalize(record('grep', {'matches': []}, {'path': path, 'pattern': 'terms'}))
+    assert observation['source'] == 'agent_conversations'
+    assert observation['operation'] == 'search'
 
 
 def test_scope_and_failure_are_not_reported_as_zero_or_complete():

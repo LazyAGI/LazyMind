@@ -64,7 +64,7 @@ def _notion_id(value):
 
 
 def _is_agent_history(path):
-    return isinstance(path, str) and any(token in path.rstrip('/') + '/' for token in (
+    return isinstance(path, str) and any(token in path.replace('\\', '/').rstrip('/') + '/' for token in (
         '/.codex/sessions/', '/.codex/archived_sessions/', '/.claude/projects/', '/opencode/', '/.hermes/',
     ))
 
