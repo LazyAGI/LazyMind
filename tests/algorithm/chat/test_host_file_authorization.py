@@ -62,7 +62,7 @@ def test_unbound_workspace_mutations_are_outside(tmp_path):
     from lazymind.chat.engine.agent_runtime.workspace_policy import WorkspaceAuthorizationPolicy
     permission = WorkspaceContext.from_snapshot({'permission_mode': 'ask_as_needed'}, cwd=str(tmp_path))
     manager = ToolManager([FileSystemToolkit()])
-    batch = manager.prepare_tool_calls(call('write', path='new.txt', content='test'),
+    batch = manager.prepare_tool_calls(call('write', file_path='new.txt', content='test'),
                                       working_directory=str(tmp_path),
                                       authorization_policy=WorkspaceAuthorizationPolicy(permission, set(), lambda _: False))
     assert batch[0].authorization is AuthorizationDecision.ASK

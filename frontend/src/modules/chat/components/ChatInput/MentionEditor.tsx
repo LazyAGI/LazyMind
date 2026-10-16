@@ -28,6 +28,8 @@ import {
 } from "@/modules/chat/utils/request";
 
 export type MentionType =
+  // Retained only for rendering previously saved conversation references.
+  | "document_directory"
   | "knowledge_base"
   | "skill"
   | "workflow"

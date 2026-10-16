@@ -38,7 +38,7 @@ jobs:
             # SkillHub package on every CI run.
             if git -C ../.. diff --quiet "${{ github.event.pull_request.base.sha }}" HEAD -- \
               skills/builtin-sources.yaml skills/builtin-skills.lock.json \
-              skills/patches skills/featured \
+              skills/patches skills/featured skills/search \
               backend/core/cmd/builtin-skill-bundle \
               backend/core/skillv2/builtin backend/core/skillv2/metadata \
               backend/core/skillv2/skillpackage backend/core/skillv2/skillpatch \
@@ -465,12 +465,20 @@ jobs:
           python -c "from lazyllm import fc_register; print('fc_register OK')"
 
       - name: Test with coverage
+        # Git Bash enables Windows backup privileges, bypassing directory ACL tests.
+        shell: python
         env:
           LAZYLLM_INIT_DOC: "1"
         run: |
-          coverage run --source=algorithm -m pytest tests/algorithm/ -v
-          coverage html -d htmlcov-algorithm
-          coverage xml -o coverage-algorithm.xml
+          import subprocess
+          import sys
+
+          for arguments in [
+              ['run', '--source=algorithm', '-m', 'pytest', 'tests/algorithm/', '-v'],
+              ['html', '-d', 'htmlcov-algorithm'],
+              ['xml', '-o', 'coverage-algorithm.xml'],
+          ]:
+              subprocess.run([sys.executable, '-m', 'coverage', *arguments], check=True)
 
       - name: Upload HTML report
         uses: actions/upload-artifact@v4

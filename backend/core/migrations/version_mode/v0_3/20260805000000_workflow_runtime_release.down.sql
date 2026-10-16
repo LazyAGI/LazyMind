@@ -1,3 +1,6 @@
+DROP TABLE IF EXISTS document_folder_nodes;
+DROP TABLE IF EXISTS document_folder_inventories;
+
 -- +migrate Dialect postgres,sqlite
 DROP INDEX IF EXISTS idx_user_environment_variables_deleted_at;
 DROP INDEX IF EXISTS idx_user_env_user_enabled;
@@ -761,3 +764,17 @@ ALTER TABLE sub_agent_tasks DROP COLUMN finished_at;
 ALTER TABLE sub_agent_tasks DROP COLUMN started_at;
 ALTER TABLE sub_agent_tasks DROP COLUMN display_revision;
 ALTER TABLE sub_agent_tasks DROP COLUMN execution_id;
+
+-- +migrate Dialect postgres
+DROP TABLE IF EXISTS document_directory_batches;
+DROP TABLE IF EXISTS document_observations;
+DROP TABLE IF EXISTS document_directory_entries;
+DROP TABLE IF EXISTS document_directory_groups;
+DROP TABLE IF EXISTS document_directories;
+
+-- +migrate Dialect sqlite
+DROP TABLE IF EXISTS document_directory_batches;
+DROP TABLE IF EXISTS document_observations;
+DROP TABLE IF EXISTS document_directory_entries;
+DROP TABLE IF EXISTS document_directory_groups;
+DROP TABLE IF EXISTS document_directories;

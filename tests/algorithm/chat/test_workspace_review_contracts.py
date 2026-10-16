@@ -16,7 +16,7 @@ def test_permission_matrix(workspace_runtime, tmp_path, mode, outside, operation
     root = tmp_path if outside else tmp_path / 'workspace'
     target = root / 'notes.txt'
     target.write_text('before')
-    arguments = {'path': str(target)}
+    arguments = {'path' if operation == 'remove' else 'file_path': str(target)}
     if operation == 'write':
         arguments['content'] = 'after'
     result = middleware.execute_with_records(call(operation, **arguments))
@@ -35,7 +35,7 @@ def test_rejected_or_expired_call_has_no_effect(workspace_runtime, tmp_path, dec
     middleware, core, _ = workspace_runtime()
     core.on_poll = lambda value: value.update(status=decision, decision='denied')
     target = tmp_path / 'outside.txt'
-    result = middleware.execute_with_records(call('write', path=str(target), content='x'))
+    result = middleware.execute_with_records(call('write', file_path=str(target), content='x'))
     assert not result.results[0]['ok']
     assert not target.exists()
     assert not any(action == 'claim' for action, _ in core.events)
@@ -46,7 +46,7 @@ def test_unbound_context_uses_internal_cwd_and_permission(workspace_runtime, tmp
     middleware, core, _ = workspace_runtime(permission_mode=mode)
     middleware._workspace_permission = replace(middleware._workspace_permission,
         workspace_id='', root='', workspace_version=0, cwd=str(tmp_path))
-    result = middleware.execute_with_records(call('write', path='result.txt', content='x'))
+    result = middleware.execute_with_records(call('write', file_path='result.txt', content='x'))
     assert result.results[0]['ok'], result.results
     assert (tmp_path / 'result.txt').read_text() == 'x'
     assert any(action == 'approve' for action, _ in core.events) == (mode != 'allow_all')
@@ -66,7 +66,7 @@ def test_cancellation_before_execution_has_no_effect(workspace_runtime, tmp_path
         value.update(status='allowed', decision='allowed')
     core.on_poll = approve
     with pytest.raises(UserCancelledError):
-        middleware.execute_with_records(call('write', path=str(tmp_path / 'out'), content='x'))
+        middleware.execute_with_records(call('write', file_path=str(tmp_path / 'out'), content='x'))
     assert not (tmp_path / 'out').exists()
 
 
@@ -95,7 +95,7 @@ def test_path_replaced_during_approval_is_not_written(workspace_runtime, tmp_pat
         target.symlink_to(other)
         value.update(status='allowed', decision='allowed')
     core.on_poll = approve
-    result = middleware.execute_with_records(call('write', path=str(target), content='changed'))
+    result = middleware.execute_with_records(call('write', file_path=str(target), content='changed'))
     assert not result.results[0]['ok']
     assert other.read_text() == 'protected'
 
@@ -106,18 +106,18 @@ def test_context_and_prepared_arguments_are_immutable(workspace_runtime, tmp_pat
         config['workspace_context']['root'] = str(tmp_path)
         value.update(status='allowed', decision='allowed')
     core.on_poll = approve
-    request = call('write', path='out.txt', content='x')
+    request = call('write', file_path='out.txt', content='x')
     result = middleware.execute_with_records(request)
     assert result.results[0]['ok'], result.results
     assert (tmp_path / 'workspace' / 'out.txt').read_text() == 'x'
     assert not (tmp_path / 'out.txt').exists()
-    assert request['function']['arguments']['path'] == 'out.txt'
+    assert request['function']['arguments']['file_path'] == 'out.txt'
 
 
 @pytest.mark.parametrize('path', ['.git/config', '.env', '.ssh/key'])
 def test_named_paths_follow_the_same_permission_mode(workspace_runtime, tmp_path, path):
     middleware, core, _ = workspace_runtime(permission_mode='allow_all')
-    result = middleware.execute_with_records(call('write', path=path, content='x'))
+    result = middleware.execute_with_records(call('write', file_path=path, content='x'))
     assert result.results[0]['ok'] and not core.events
     assert (tmp_path / 'workspace' / path).read_text() == 'x'
 
@@ -126,9 +126,9 @@ def test_same_file_batch_keeps_order_and_all_updates(workspace_runtime, tmp_path
     middleware, core, _ = workspace_runtime()
     target = tmp_path / 'notes.txt'
     result = middleware.execute_with_records([
-        call('write', path=str(target), content='a', mode='create'),
-        call('write', path=str(target), content='b', mode='append'),
-        call('read', path=str(target)),
+        call('write', file_path=str(target), content='a'),
+        call('edit', file_path=str(target), old_string='a', new_string='ab'),
+        call('read', file_path=str(target)),
     ])
     assert all(item['ok'] for item in result.results), result.results
     assert target.read_text() == 'ab'
@@ -197,8 +197,8 @@ def test_mixed_batch_preserves_ordinary_record_reason(workspace_runtime, tmp_pat
     source.write_text('source')
     batch = middleware.execute_with_records([
         call('calculator', expression='2+3'),
-        call('read', path=str(source)),
-        call('write', path=str(tmp_path / 'result'), content='result'),
+        call('read', file_path=str(source)),
+        call('write', file_path=str(tmp_path / 'result'), content='result'),
     ])
     assert all(result['ok'] for result in batch.results), batch.results
     assert batch.records[0].reason not in {'workspace_operation', 'host_file_operation', 'approval_operation'}

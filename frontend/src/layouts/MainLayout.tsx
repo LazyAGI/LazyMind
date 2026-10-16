@@ -39,6 +39,7 @@ import {
 import { validatePassword } from "@/modules/signin/utils/formRules";
 import logoImage from "@/public/Lazy.png";
 import { useTranslation } from "react-i18next";
+import { listBatches as listDirectoryBatches } from "@/modules/documentDirectories/api";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { isVocabularyEnabled } from "@/runtime/mode";
 import {
@@ -133,6 +134,23 @@ export default function MainLayout() {
 
   const [userInfo, setUserInfo] = useState(() => AgentAppsAuth.getUserInfo());
   const isLoggedIn = Boolean(userInfo?.token);
+  const [directoryUnread, setDirectoryUnread] = useState(false);
+  useEffect(() => {
+    let disposed = false;
+    setDirectoryUnread(false);
+    if (!isLoggedIn) return;
+    const refresh = async () => {
+      try {
+        const batches = await listDirectoryBatches();
+        if (!disposed) setDirectoryUnread(batches.some(root => !root.parent_id && !root.acknowledged &&
+          ['succeeded', 'failed', 'canceled'].includes(root.status) &&
+          !batches.some(child => child.parent_id === root.id && ['pending', 'running'].includes(child.status))));
+      } catch { /* Existing request layer handles connectivity; keep saved results unread. */ }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 30000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [isLoggedIn, userInfo?.userId, pathname]);
   useConversationRunningSync(isLoggedIn ? userInfo?.userId || userInfo?.username || "" : "", routeConversationId);
   const userName = userInfo?.username || "";
   const isAdminUser = isAdminRole(userInfo?.role);
@@ -229,6 +247,7 @@ export default function MainLayout() {
   const showSettingsTrigger =
     settingsMenuItems.length > 0 || !hideLocalUserControls;
   const resourceNavItems = [
+    { key: "/document-directories", label: t("directories.title") + (directoryUnread ? " •" : ""), icon: <BookOutlined /> },
     {
       key: "/lib/knowledge",
       label: t("layout.knowledgeBase"),

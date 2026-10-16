@@ -76,6 +76,21 @@ func TestCLIAuthenticationPreservesAllExistingToolConfigConsumers(t *testing.T) 
 			}
 		})
 	}
+	chatConfig, err := LoadCloudToolConfig(t.Context(), "fixture-owner", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedScopes, ok := chatConfig["document_directory_scopes"].(string)
+	if !ok {
+		t.Fatal("directory identities must survive the string-only chat configuration transport")
+	}
+	var scopes map[string][]string
+	if err := json.Unmarshal([]byte(encodedScopes), &scopes); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(scopes["feishu"], []string{"connection:fixture-connection"}) || chatConfig["feishu"] != "fixture-cli-user-access" {
+		t.Fatal("directory identity metadata changed provider authentication or account scope")
+	}
 	if registry.legacyCalls != 0 || backend.calls.Load() != 0 {
 		t.Fatal("CLI credential loading called legacy auth or CLI document execution")
 	}

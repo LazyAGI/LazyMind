@@ -1231,6 +1231,26 @@ func persistSuccessfulChatModel(ctx context.Context, db *gorm.DB, userID, conver
 	}
 }
 
+// LoadOrganizerChatLLMConfig reuses Main Chat selection, including a conversation override.
+// Resolve credentials at execution time instead of persisting them in batch inputs.
+func LoadOrganizerChatLLMConfig(ctx context.Context, db *gorm.DB, userID, conversationID string) (map[string]any, error) {
+	if db == nil {
+		return nil, errChatModelUnavailable
+	}
+	body := map[string]any{"conversation_id": conversationID}
+	if err := applyConversationChatModelConfig(ctx, db, userID, body); err != nil {
+		return nil, err
+	}
+	if config, ok := body["llm_config"].(map[string]any); ok {
+		return config, nil
+	}
+	role, err := LoadDefaultChatLLMConfig(ctx, db, userID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"llm": role}, nil
+}
+
 // LoadDefaultChatLLMConfig returns the same llm role that chat would use when
 // no conversation overlay is available: the user's current default chat model.
 func LoadDefaultChatLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {
