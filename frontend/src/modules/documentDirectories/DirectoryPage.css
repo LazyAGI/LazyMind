@@ -10,7 +10,9 @@
 .directory-workspace { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 20px; align-items: start; }
 .directory-groups { background: var(--directory-panel); border: 1px solid var(--directory-border); border-radius: 12px; padding: 14px 10px; }
 .directory-section-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 12px; }
-.directory-group-button { width: 100%; border: 0; background: transparent; color: inherit; cursor: pointer; display: flex; align-items: center; gap: 9px; padding: 11px 12px; border-radius: 8px; text-align: left; font: inherit; margin: 3px 0; }
+.directory-group-row { display: flex; align-items: center; min-width: 0; }
+.directory-group-row > .ant-btn { flex-shrink: 0; }
+.directory-group-button { flex: 1; min-width: 0; width: 100%; border: 0; background: transparent; color: inherit; cursor: pointer; display: flex; align-items: center; gap: 9px; padding: 11px 12px; border-radius: 8px; text-align: left; font: inherit; margin: 3px 0; }
 .directory-group-button > span:nth-child(2) { min-width: 0; overflow-wrap: anywhere; flex: 1; }
 .directory-group-button:hover { background: var(--directory-hover); }
 .directory-group-button.is-selected { background: var(--directory-selected); font-weight: 600; }
@@ -40,7 +42,6 @@
 .directory-title-button { border: 0; padding: 0; background: none; cursor: pointer; text-align: left; font-family: inherit; font-size: inherit; }
 .directory-document-title > a:hover, .directory-title-button:hover { color: #3370ff; }
 .directory-document-meta { display: block; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.directory-managed-group { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; overflow-wrap: anywhere; }
 .directory-entry-detail { display: flex; flex-direction: column; gap: 14px; overflow-wrap: anywhere; }
 .directory-entry-detail .ant-typography { margin-bottom: 0; }
 .directory-entry-detail > .ant-btn { align-self: flex-start; }
@@ -48,7 +49,7 @@
 .directory-overview-card { min-width: 0; }
 .directory-card-organization.ant-tag { max-width: 100%; margin-inline-end: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: top; }
 .directory-card-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
-.directory-card-heading > .ant-btn:not(.directory-pin-button) { padding: 0; text-align: left; height: auto; white-space: normal; flex: 1; font-weight: 600; color: inherit; }
+.directory-card-heading > .ant-btn-link { padding: 0; text-align: left; height: auto; white-space: normal; flex: 1; font-weight: 600; color: inherit; }
 .directory-card-footer { color: var(--directory-muted); font-size: 12px; margin-top: 16px; }
 .directory-loading { text-align: center; padding: 80px; }
 @media (max-width: 1100px) {
@@ -61,7 +62,7 @@
   .directory-workspace { grid-template-columns: minmax(0, 1fr); }
   .directory-groups { display: flex; flex-wrap: wrap; gap: 4px; }
   .directory-section-heading { width: 100%; }
-  .directory-group-button { width: auto; max-width: 100%; }
+  .directory-group-row { max-width: 100%; }
   .directory-document-toolbar { flex-wrap: wrap; }
   .directory-document-toolbar > .ant-select { margin-left: 0; }
   .directory-card-grid { grid-template-columns: minmax(0, 1fr); }

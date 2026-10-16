@@ -61,6 +61,7 @@ const enUS = {
     noMatchingDocuments: "No matching documents",
     manageGroups: "Manage groups",
     settings: "Directory settings",
+    editGroup: "Edit group",
     more: "More actions",
     confirmationHelp: "Existing evidence does not sufficiently establish relevance to this directory. Retained for reference.",
     openOriginal: "Open original",

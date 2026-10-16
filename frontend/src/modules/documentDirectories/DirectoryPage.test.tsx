@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, expect, it, vi } from 'vitest';
 import DirectoryPage from './DirectoryPage';
@@ -87,7 +87,8 @@ it('loads excluded references separately and restores an item beyond the first p
   });
   view();
   await screen.findByText('Contract A');
-  fireEvent.click(screen.getByText('directories.excluded'));
+  fireEvent.click(screen.getByRole('button', { name: 'directories.more' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'directories.excluded' }));
   await screen.findByText('Excluded first');
   fireEvent.click(screen.getByTitle('2'));
   await screen.findByText('Excluded last');
@@ -160,7 +161,7 @@ it('filters groups and searches without changing references, and explains eviden
       { ...entry, id: 'e2', title: 'Meeting notes', resource_id: '/meeting.txt' }],
   });
   view(); await screen.findByText('Contract A');
-  fireEvent.click(screen.getByRole('button', { name: /Plans/ }));
+  fireEvent.click(screen.getByRole('button', { name: /Plans/, pressed: true }));
   expect(screen.queryByText('Meeting notes')).not.toBeInTheDocument();
   fireEvent.change(screen.getByRole('textbox', { name: 'directories.search' }), { target: { value: 'missing' } });
   expect(screen.queryByText('Contract A')).not.toBeInTheDocument();
@@ -224,7 +225,7 @@ it('separates all documents from groups and preserves filters when switching vie
   fireEvent.change(screen.getByRole('textbox', { name: 'directories.search' }), { target: { value: 'Contract' } });
   fireEvent.click(screen.getByRole('tab', { name: 'directories.groupedView' }));
   expect(screen.getByRole('textbox', { name: 'directories.search' })).toHaveValue('Contract');
-  expect(screen.getByRole('button', { name: /Plans/ })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: /Plans/, pressed: true })).toHaveAttribute('aria-pressed', 'true');
 });
 
 it('hides empty ungrouped navigation and reads mail from both title and details', async () => {
@@ -265,7 +266,7 @@ it('falls back to the next nonempty group after a background refresh removes the
     entries: [{ ...entry, group_id: 'h' }],
   });
   await act(async () => tick());
-  await waitFor(() => expect(screen.getByRole('button', { name: /Remaining group/ })).toHaveAttribute('aria-pressed', 'true'));
+  await waitFor(() => expect(screen.getByRole('button', { name: /Remaining group/, pressed: true })).toHaveAttribute('aria-pressed', 'true'));
   expect(await screen.findByText('Contract A')).toBeInTheDocument();
 });
 
@@ -316,7 +317,7 @@ it('resets page on group and state changes, ignoring pending results from the ol
   view(); await screen.findByText('Plan 1');
   fireEvent.click(screen.getByTitle('2'));
   await waitFor(() => expect(oldPage).toBeDefined());
-  fireEvent.click(screen.getByRole('button', { name: /Notes/ }));
+  fireEvent.click(screen.getByRole('button', { name: /Notes/, pressed: false }));
   await screen.findByText('Note');
   expect(api.getDirectory).toHaveBeenLastCalledWith('d', expect.objectContaining({ groupId: 'h', offset: 0 }));
   await act(async () => oldPage({ directory, groups, organizing: false, group_counts: { g: 6, h: 1 }, total: 6,
@@ -346,4 +347,61 @@ it('loads the preceding server page after excluding the last item on the last pa
   expect(screen.getAllByRole('button', { name: 'directories.details' })).toHaveLength(5);
   expect(api.getDirectory).toHaveBeenLastCalledWith('d', expect.objectContaining({ offset: 0 }));
   expect(screen.getByTitle('Next Page')).toHaveAttribute('aria-disabled', 'true');
+});
+
+it('deletes from a directory card only after confirmation and refreshes the overview', async () => {
+  vi.mocked(api.directoryAction).mockImplementation(async () => {
+    vi.mocked(api.listDirectories).mockResolvedValue([]);
+    return {};
+  });
+  render(<MemoryRouter><DirectoryPage /></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Contracts directories.more' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'directories.delete' }));
+  const dialog = await screen.findByRole('dialog');
+  expect(within(dialog).getByText('Contracts')).toBeInTheDocument();
+  expect(api.directoryAction).not.toHaveBeenCalled();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'directories.cancel' }));
+  expect(api.directoryAction).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Contracts directories.more' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'directories.delete' }));
+  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'directories.delete' }));
+  await waitFor(() => expect(api.directoryAction).toHaveBeenCalledWith({ operation: 'delete', directory_id: 'd', version: 2 }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Contracts directories.more' })).not.toBeInTheDocument());
+});
+
+it('restores excluded documents from the header menu and offers directory deletion there', async () => {
+  mockDirectory({ directory, groups: [], organizing: false,
+    entries: [entry, { ...entry, id: 'removed', title: 'Removed document', excluded: true }] });
+  view(); await screen.findByText('Contract A');
+  fireEvent.click(screen.getByRole('button', { name: 'directories.more' }));
+  expect(await screen.findByRole('menuitem', { name: 'directories.delete' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('menuitem', { name: 'directories.excluded' }));
+  expect(await screen.findByText('Removed document')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'directories.restore' }));
+  await waitFor(() => expect(api.directoryAction).toHaveBeenCalledWith({ operation: 'restore', directory_id: 'd', version: 2, entry_id: 'removed' }));
+});
+
+it('edits groups beside their names and only allows deleting empty leaf groups', async () => {
+  mockDirectory({ directory, organizing: false,
+    groups: [{ id: 'g', name: 'Plans', parent_id: '', position: 0 },
+      { id: 'parent', name: 'Parent', parent_id: '', position: 1 },
+      { id: 'empty', name: 'Empty', parent_id: 'parent', position: 2 }],
+    entries: [{ ...entry, group_id: 'g' }] });
+  const mounted = view(); await screen.findByText('Contract A');
+  fireEvent.click(screen.getByRole('button', { name: 'Plans directories.more' }));
+  expect(await screen.findByRole('menuitem', { name: 'directories.removeGroup' })).toHaveAttribute('aria-disabled', 'true');
+  fireEvent.click(screen.getByRole('menuitem', { name: 'directories.editGroup' }));
+  const dialog = await screen.findByRole('dialog');
+  fireEvent.change(within(dialog).getByLabelText('directories.name'), { target: { value: 'Updated plans' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'OK' }));
+  await waitFor(() => expect(api.directoryAction).toHaveBeenCalledWith(expect.objectContaining({ operation: 'group', group_id: 'g', name: 'Updated plans' })));
+  mounted.unmount();
+  const parentView = view(); await screen.findByText('Contract A');
+  fireEvent.click(screen.getByRole('button', { name: 'Parent directories.more' }));
+  expect(await screen.findByRole('menuitem', { name: 'directories.removeGroup' })).toHaveAttribute('aria-disabled', 'true');
+  parentView.unmount();
+  view(); await screen.findByText('Contract A');
+  fireEvent.click(screen.getByRole('button', { name: 'Parent / Empty directories.more' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'directories.removeGroup' }));
+  await waitFor(() => expect(api.directoryAction).toHaveBeenCalledWith(expect.objectContaining({ operation: 'delete_group', group_id: 'empty' })));
 });

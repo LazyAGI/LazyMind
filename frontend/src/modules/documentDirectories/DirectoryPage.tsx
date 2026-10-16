@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ChangeEvent } from 'react';
 import { ArrowLeftOutlined, FileTextOutlined, FolderOutlined, MoreOutlined, PushpinFilled, PushpinOutlined, SearchOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Collapse, Drawer, Dropdown, Empty, Form, Input, Modal, message, Pagination, Popconfirm, Select, Space, Spin, Switch, Table, Tabs, Tag, Tooltip, Typography, theme } from 'antd';
+import { Alert, Button, Card, Drawer, Dropdown, Empty, Form, Input, Modal, message, Pagination, Select, Space, Spin, Switch, Table, Tabs, Tag, Tooltip, Typography, theme } from 'antd';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { DocumentDirectoryCommand } from '@/api/generated/core-client';
@@ -32,6 +32,8 @@ export default function DirectoryPage() {
   const [batches, setBatches] = useState<DocumentDirectoryBatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [excludedOpen, setExcludedOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<DocumentDirectory>();
   const [editor, setEditor] = useState<'create' | 'update' | 'group' | 'reorganize'>();
   const [form] = Form.useForm();
   const requestSequence = useRef(0);
@@ -50,7 +52,7 @@ export default function DirectoryPage() {
     const timer = window.setInterval(() => { void refresh().catch(() => {}); }, 5000);
     return () => { ++requestSequence.current; window.clearInterval(timer); };
   }, [refresh]);
-  useEffect(() => { setSelectedGroup(null); setPage(1); setQuery(''); setStateFilter('all'); setViewMode('groups'); setSelectedEntry(undefined); }, [directoryId]);
+  useEffect(() => { setSelectedGroup(null); setPage(1); setQuery(''); setStateFilter('all'); setViewMode('groups'); setSelectedEntry(undefined); setExcludedOpen(false); setDeleteTarget(undefined); }, [directoryId]);
   useEffect(() => {
     if (!directoryId) return;
     const touch = () => {
@@ -69,7 +71,7 @@ export default function DirectoryPage() {
     try {
       const result = await directoryAction({ directory_id: directoryId, version: detail?.directory.version, ...command });
       if (result.evicted) message.info(`${t('directories.evicted')}: ${result.evicted}`);
-      if (command.operation === 'delete') navigate('/document-directories');
+      if (command.operation === 'delete' && directoryId) navigate('/document-directories');
       else if (command.operation === 'create' && result.directory) navigate(`/document-directories/${result.directory.id}`);
       else await refresh();
       return result;
@@ -171,6 +173,9 @@ export default function DirectoryPage() {
           <Dropdown trigger={['click']} menu={{ items: [
             { key: 'edit', label: t('directories.edit'), disabled: blocked, onClick: () => edit('update') },
             { key: 'reorganize', label: t('directories.reorganize'), disabled: blocked, onClick: () => edit('reorganize') },
+            { key: 'excluded', label: t('directories.excluded'), onClick: () => setExcludedOpen(true) },
+            { type: 'divider' },
+            { key: 'delete', label: t('directories.delete'), danger: true, disabled: blocked, onClick: () => setDeleteTarget(d) },
           ] }}><Button aria-label={t('directories.more')} icon={<MoreOutlined />} /></Dropdown>
         </> : !directoryId && <Button onClick={() => edit('create')}>{t('directories.create')}</Button>}</Space>
       </header>
@@ -183,7 +188,11 @@ export default function DirectoryPage() {
         {[true, false].map(pinned => <section className="directory-list-section" key={String(pinned)}>
           <Typography.Title level={4}>{pinned ? t('directories.pinned') : t('directories.recent')} <Typography.Text type="secondary">{directories.filter(x => x.pinned === pinned).length}</Typography.Text></Typography.Title>
           {directories.filter(x => x.pinned === pinned).length === 0 ? <Typography.Paragraph type="secondary" className="directory-empty-section">{t(pinned ? 'directories.noPinned' : 'directories.noDirectories')}</Typography.Paragraph> : <div className="directory-card-grid">{directories.filter(x => x.pinned === pinned).map(x => <Card key={x.id} className="directory-overview-card">
-            <div className="directory-card-heading"><FolderOutlined /><Button type="link" onClick={() => navigate(`/document-directories/${x.id}`)}>{x.name}</Button><Tooltip title={t(x.pinned ? 'directories.directoryUnpin' : 'directories.directoryPin')}><Button type="text" className="directory-pin-button" aria-label={t(x.pinned ? 'directories.directoryUnpin' : 'directories.directoryPin')} aria-pressed={x.pinned} icon={x.pinned ? <PushpinFilled /> : <PushpinOutlined />} disabled={saving} onClick={() => run({ operation: 'update', directory_id: x.id, version: x.version, pinned: !x.pinned })} /></Tooltip></div>
+            <div className="directory-card-heading"><FolderOutlined /><Button type="link" onClick={() => navigate(`/document-directories/${x.id}`)}>{x.name}</Button><Tooltip title={t(x.pinned ? 'directories.directoryUnpin' : 'directories.directoryPin')}><Button type="text" className="directory-pin-button" aria-label={t(x.pinned ? 'directories.directoryUnpin' : 'directories.directoryPin')} aria-pressed={x.pinned} icon={x.pinned ? <PushpinFilled /> : <PushpinOutlined />} disabled={saving} onClick={() => run({ operation: 'update', directory_id: x.id, version: x.version, pinned: !x.pinned })} /></Tooltip>
+              <Dropdown trigger={['click']} menu={{ items: [{ key: 'delete', label: t('directories.delete'), danger: true,
+                disabled: saving || batches.some(b => b.directory_id === x.id && ['pending', 'running'].includes(b.status)),
+                onClick: () => setDeleteTarget(x) }] }}><Button type="text" aria-label={`${x.name} ${t('directories.more')}`} icon={<MoreOutlined />} /></Dropdown>
+            </div>
             <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }}>{x.intent}</Typography.Paragraph>
             <Tooltip title={x.organization}><Tag bordered={false} className="directory-card-organization">{x.organization}</Tag></Tooltip><div className="directory-card-footer">{t('directories.lastUsed')}: {new Date(x.last_used_at).toLocaleString()}</div>
           </Card>)}</div>}
@@ -201,7 +210,17 @@ export default function DirectoryPage() {
             <div className="directory-section-heading"><Typography.Text strong>{t('directories.group')}</Typography.Text><Button type="text" size="small" disabled={blocked} onClick={() => edit('group')}>{t('directories.addGroup')}</Button></div>
             {groupOptions.filter(g => g.value !== '' || ungroupedCount > 0).map(g => {
               const count = detail?.group_counts?.[g.value] ?? entries.filter(e => e.group_id === g.value).length;
-              return <button key={g.value} className={`directory-group-button ${activeGroup === g.value ? 'is-selected' : ''}`} aria-pressed={activeGroup === g.value} onClick={() => { setSelectedGroup(g.value); setPage(1); }}><FolderOutlined /><span>{g.label}</span><span className="directory-group-count">{count}</span></button>;
+              const group = detail.groups.find(item => item.id === g.value);
+              return <div key={g.value} className="directory-group-row">
+                <button className={`directory-group-button ${activeGroup === g.value ? 'is-selected' : ''}`} aria-pressed={activeGroup === g.value} onClick={() => { setSelectedGroup(g.value); setPage(1); }}><FolderOutlined /><span>{g.label}</span><span className="directory-group-count">{count}</span></button>
+                {group && <Dropdown trigger={['click']} menu={{ items: [
+                  { key: 'edit', label: t('directories.editGroup'), disabled: blocked,
+                    onClick: () => { edit('group'); editingGroup.current = group.id; form.setFieldsValue(group); } },
+                  { key: 'delete', label: t('directories.removeGroup'), danger: true,
+                    disabled: blocked || count > 0 || detail.groups.some(item => item.parent_id === group.id),
+                    onClick: () => run({ operation: 'delete_group', group_id: group.id }) },
+                ] }}><Button type="text" size="small" aria-label={`${g.label} ${t('directories.more')}`} icon={<MoreOutlined />} /></Dropdown>}
+              </div>;
             })}
           </nav>}
           <section className="directory-documents">
@@ -210,13 +229,17 @@ export default function DirectoryPage() {
             <Pagination className="directory-pagination" current={currentPage} onChange={setPage} total={entryTotal} pageSize={PAGE_SIZE} showSizeChanger={false} hideOnSinglePage={false} showTotal={(total: number) => t('directories.documentCount', { count: total })} />
           </section>
         </div>}
-        <Collapse className="directory-secondary-panels" items={[
-          { key: 'groups', label: t('directories.manageGroups'), children: detail.groups.map(group => <div className="directory-managed-group" key={group.id}><span>{groupName(group.id)}</span><Space><Button size="small" disabled={blocked} onClick={() => {edit('group'); editingGroup.current = group.id; form.setFieldsValue(group);}}>{t('directories.edit')}</Button><Button size="small" disabled={blocked || detail.groups.some(g => g.parent_id === group.id) || entries.some(e => e.group_id === group.id)} onClick={() => run({operation:'delete_group',group_id:group.id})}>{t('directories.removeGroup')}</Button></Space></div>) },
-          { key: 'excluded', label: t('directories.excluded'), children: <ExcludedEntries key={d.id} directoryId={d.id} version={d.version} blocked={blocked} restore={id => run({ operation: 'restore', entry_id: id })} /> },
-          { key: 'settings', label: t('directories.settings'), children: <><Typography.Paragraph type="secondary">{t('directories.entryPinHelp')}</Typography.Paragraph><Typography.Paragraph type="secondary">{t('directories.retention')}</Typography.Paragraph><Popconfirm title={t('directories.deleteConfirm')} onConfirm={() => act({ operation: 'delete' })}><Button danger disabled={blocked}>{t('directories.delete')}</Button></Popconfirm></> },
-        ]} />
+
       </> : <Empty />}
     </div>
+    <Modal open={!!deleteTarget} title={t('directories.deleteConfirm')} okText={t('directories.delete')} cancelText={t('directories.cancel')}
+      okButtonProps={{ danger: true }} confirmLoading={saving} onCancel={() => setDeleteTarget(undefined)}
+      onOk={() => { if (deleteTarget) void act({ operation: 'delete', directory_id: deleteTarget.id, version: deleteTarget.version }).then(() => setDeleteTarget(undefined)).catch(() => {}); }}>
+      <Typography.Text>{deleteTarget?.name}</Typography.Text>
+    </Modal>
+    <Drawer open={excludedOpen} title={t('directories.excluded')} width={460} onClose={() => setExcludedOpen(false)}>
+      {excludedOpen && d && <ExcludedEntries key={d.id} directoryId={d.id} version={d.version} blocked={blocked} restore={id => run({ operation: 'restore', entry_id: id })} />}
+    </Drawer>
     <Drawer open={!!selected} title={t('directories.details')} width={460} onClose={() => setSelectedEntry(undefined)}>
       {selected && <div className="directory-entry-detail">
         <Typography.Title level={4}>{entryTitle(selected)}</Typography.Title>
@@ -240,7 +263,7 @@ export default function DirectoryPage() {
     </Drawer>
     <LocalFileReader directoryId={directoryId} entry={localEntry} onClose={() => setLocalEntry(undefined)} />
     <MailReader directoryId={directoryId} entry={mailEntry} onClose={() => setMailEntry(undefined)} />
-    <Modal open={!!editor} title={t(`directories.${editor || 'create'}`)} onCancel={() => setEditor(undefined)} confirmLoading={saving} onOk={() => { void form.validateFields().then(values => act({ operation: editor!, group_id: editor === 'group' ? editingGroup.current : undefined, ...values })).then(() => setEditor(undefined)).catch(() => {}); }}>
+    <Modal open={!!editor} title={editor === 'group' ? t(editingGroup.current ? 'directories.editGroup' : 'directories.addGroup') : t(`directories.${editor || 'create'}`)} onCancel={() => setEditor(undefined)} confirmLoading={saving} onOk={() => { void form.validateFields().then(values => act({ operation: editor!, group_id: editor === 'group' ? editingGroup.current : undefined, ...values })).then(() => setEditor(undefined)).catch(() => {}); }}>
       <Form form={form} layout="vertical">{editor !== 'reorganize' && <Form.Item name="name" label={t('directories.name')} rules={[{ required: true, whitespace: true, max: 255 }]}><Input /></Form.Item>}{(editor === 'create' || editor === 'update') && <Form.Item name="intent" label={t('directories.intent')} rules={[{ required: true, whitespace: true, max: 4000 }]}><Input.TextArea /></Form.Item>}{editor === 'reorganize' && <><Alert message={t('directories.newView')} /><Form.Item name="organization" label={t('directories.organization')} rules={[{ required: true, whitespace: true }]}><Input /></Form.Item></>}{editor === 'group' && <Form.Item name="parent_id" label={t('directories.parent')}><Select allowClear options={groupOptions} /></Form.Item>}</Form>
     </Modal>
   </div>;

@@ -61,6 +61,7 @@ const zhCN = {
     noMatchingDocuments: "没有符合条件的资料",
     manageGroups: "管理分组",
     settings: "目录设置",
+    editGroup: "编辑分组",
     more: "更多操作",
     confirmationHelp: "现有依据尚不足以确认这份资料符合本目录主题，暂时保留供参考。",
     openOriginal: "打开原文",
