@@ -3,8 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 from urllib.parse import urlparse
 
 from lazyllm.tools.agent import ToolExecutionError
@@ -19,6 +20,12 @@ from lazymind.chat.engine.attachment_reader import (
 )
 from lazymind.chat.engine.tools.file_resources.attachment_edit import (
     AttachmentEditDraft,
+)
+from lazymind.chat.engine.tools.file_resources.presentation_edit import (
+    available_font_families,
+    inspect_pptx,
+    normalize_color_map,
+    rewrite_pptx,
 )
 
 from lazymind.chat.service.utils.static_file_url import (
@@ -1548,7 +1555,11 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
     }
 
 
-def _publish_attachment_edit(draft: AttachmentEditDraft) -> Dict[str, Any]:
+def _publish_attachment_edit(
+    draft: AttachmentEditDraft,
+    *,
+    source_tool: str = 'string_replace',
+) -> Dict[str, Any]:
     """Publish through the owning Agent's artifact channel."""
     ctx = get_context()
     if ctx is None:
@@ -1558,7 +1569,7 @@ def _publish_attachment_edit(draft: AttachmentEditDraft) -> Dict[str, Any]:
         artifact_key,
         draft.draft_path,
         content_type='file',
-        source_tool='string_replace',
+        source_tool=source_tool,
         caption=f'Edited copy of {draft.filename}',
     )
     return {
@@ -1683,6 +1694,97 @@ def string_replace(
             'message': 'Reverted the most recent applied edit and updated the download artifact.',
         }
     raise ToolExecutionError("action must be 'preview', 'apply', or 'undo'")
+
+
+@fc_register(host_file='NONE')
+def edit_presentation(
+    filename: str,
+    action: Literal['inspect', 'replace_fonts', 'replace_palette'],
+    source_font: Optional[str] = None,
+    target_font: Optional[str] = None,
+    color_map: Optional[Union[Dict[str, str], str]] = None,
+    pages: Optional[Union[List[int], str, int]] = None,
+    text_scope: Literal['all', 'titles', 'body'] = 'all',
+    turn: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Inspect or directly edit an uploaded PPTX without starting a Workflow.
+
+    `inspect` reports fonts, missing fonts, and colors. `replace_fonts` replaces
+    one source family, or all explicit/theme font references when source_font is
+    omitted. `pages` can select one or more 1-based slides and `text_scope` can
+    limit replacement to `titles` or `body`. `replace_palette` applies exact
+    #RRGGBB mappings to the whole deck. Edits preserve the original upload and
+    publish one editable PPTX revision.
+    """
+    matched, err = _resolve_attachment(filename, turn)
+    if err:
+        raise ToolExecutionError(f'Attachment not found: {err}')
+    matched = _materialize_local_path(matched)
+    if not os.path.isfile(matched) or not matched.lower().endswith('.pptx'):
+        raise ToolExecutionError('edit_presentation requires one available .pptx attachment')
+    draft = AttachmentEditDraft.for_current_conversation(matched)
+    effective = draft.effective_path
+    normalized_action = str(action or '').strip().lower()
+    if normalized_action == 'inspect':
+        try:
+            return {'status': 'ok', 'action': 'inspect', **inspect_pptx(effective)}
+        except ValueError as exc:
+            raise ToolExecutionError(str(exc)) from exc
+
+    installed = available_font_families()
+    if normalized_action == 'replace_fonts':
+        requested = str(target_font or '').strip()
+        if not requested:
+            raise ToolExecutionError('target_font is required for replace_fonts')
+        installed_by_name = {family.casefold(): family for family in installed}
+        if requested.casefold() not in installed_by_name:
+            suggestions = sorted(
+                family for family in installed
+                if requested.casefold() in family.casefold() or family.casefold() in requested.casefold()
+            )[:8]
+            suffix = f' Available close matches: {", ".join(suggestions)}.' if suggestions else ''
+            raise ToolExecutionError(
+                f'Target font {requested!r} is not available on this system; choose or upload another font.' + suffix
+            )
+        requested = installed_by_name[requested.casefold()]
+        colors = None
+    elif normalized_action == 'replace_palette':
+        if pages not in (None, '') or str(text_scope or 'all').strip().lower() != 'all':
+            raise ToolExecutionError('pages/text_scope are supported for replace_fonts only')
+        try:
+            colors = normalize_color_map(color_map)
+        except ValueError as exc:
+            raise ToolExecutionError(str(exc)) from exc
+        requested = None
+    else:
+        raise ToolExecutionError("action must be 'inspect', 'replace_fonts', or 'replace_palette'")
+
+    os.makedirs(draft.root, exist_ok=True)
+    handle, candidate = tempfile.mkstemp(prefix='presentation-', suffix='.pptx', dir=draft.root)
+    os.close(handle)
+    try:
+        stats = rewrite_pptx(
+            effective, candidate,
+            source_font=source_font if normalized_action == 'replace_fonts' else None,
+            target_font=requested,
+            color_map=colors,
+            pages=pages if normalized_action == 'replace_fonts' else None,
+            text_scope=text_scope if normalized_action == 'replace_fonts' else 'all',
+        )
+        os.replace(candidate, draft.draft_path)
+    except (OSError, ValueError) as exc:
+        try:
+            os.unlink(candidate)
+        except FileNotFoundError:
+            pass
+        raise ToolExecutionError(str(exc)) from exc
+    artifact = _publish_attachment_edit(draft, source_tool='edit_presentation')
+    return {
+        'status': 'ok', 'action': normalized_action,
+        'source_filename': os.path.basename(matched),
+        'original_unchanged': True,
+        **stats, **artifact,
+    }
 
 
 @fc_register(host_file='NONE')

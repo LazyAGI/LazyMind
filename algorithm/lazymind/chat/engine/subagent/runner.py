@@ -61,6 +61,7 @@ from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 from lazymind.chat.service.component.tool_registry import (
     ATTACHMENT_EDIT_TOOL_CONFIG,
+    PRESENTATION_EDIT_TOOL_CONFIG,
     DEFAULT_TOOLS,
     USER_ATTACHMENT_TOOL_CONFIGS,
     collect_system_prompt_appendices,
@@ -478,7 +479,11 @@ def _build_subagent_tools(
 def _resolve_attachment_configs(
     agentic_config: Dict[str, Any], agent_type: str, params: Dict[str, Any],
 ) -> List[Any]:
-    configs = [*USER_ATTACHMENT_TOOL_CONFIGS, ATTACHMENT_EDIT_TOOL_CONFIG]
+    configs = [
+        *USER_ATTACHMENT_TOOL_CONFIGS,
+        ATTACHMENT_EDIT_TOOL_CONFIG,
+        PRESENTATION_EDIT_TOOL_CONFIG,
+    ]
     if agent_type == 'workflow_step':
         declared = params.get('legacy_tools') or params.get('tools') or []
         declared_names = {str(name).strip() for name in declared}

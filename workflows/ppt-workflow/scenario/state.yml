@@ -24,16 +24,28 @@ transitions:
         ppt_capability_requirements is exactly AI_BACKGROUND_IMAGES: disabled.
 
   collect_materials:
+    - to: analyze_academic_sources
+      when: presentation_scenario is research_report, paper_review, thesis_defense, or reading_notes.
+    - to: choose_style
+      when: presentation_scenario is general or absent, and style_flow is exactly preview_choice.
+    - to: plan_background_prompts
+      when: >
+        presentation_scenario is general or absent, and style_flow is exactly auto and ppt_capability_requirements is exactly
+        AI_BACKGROUND_IMAGES: enabled.
+    - to: build_outline
+      when: >
+        presentation_scenario is general or absent, and style_flow is exactly auto and ppt_capability_requirements is exactly
+        AI_BACKGROUND_IMAGES: disabled.
+
+  analyze_academic_sources:
     - to: choose_style
       when: style_flow is exactly preview_choice.
     - to: plan_background_prompts
       when: >
-        style_flow is exactly auto and ppt_capability_requirements is exactly
-        AI_BACKGROUND_IMAGES: enabled.
+        style_flow is exactly auto and ppt_capability_requirements is exactly AI_BACKGROUND_IMAGES: enabled.
     - to: build_outline
       when: >
-        style_flow is exactly auto and ppt_capability_requirements is exactly
-        AI_BACKGROUND_IMAGES: disabled.
+        style_flow is exactly auto and ppt_capability_requirements is exactly AI_BACKGROUND_IMAGES: disabled.
 
   choose_style:
     - to: plan_background_prompts
@@ -92,10 +104,18 @@ steps:
         this workflow supports optional uploaded materials.
 
       Startup clarification contract:
+      - Uploaded PPTX templates take precedence over visual-style and AI
+        background answers. When template_mode=upload, use style_flow=auto,
+        generate_background_images=disabled, and capability marker
+        AI_BACKGROUND_IMAGES: disabled. Save both skip_style_choices and
+        skip_background_images. This also applies to full generation: keep
+        generation_mode=full for content collection, but skip style candidates,
+        background prompts and background generation. The template is analyzed
+        in generate_ppt as before. Do not require an image model for this path.
       - The Chat host collects presentation topic, exact slide count, target
-        customer/audience, visual style, whether to generate one style directly
-        or preview three choices, and whether per-slide AI background generation
-        is enabled before creating this workflow session. Extract all six
+        customer/audience, visual style, whether per-slide AI background generation
+        is enabled, whether a PPTX template is used, and generation mode before
+        creating this workflow session. Extract all seven
         faithfully from {{user_input}}; clarification
         answers may have been merged into the original request.
       - Do not replace an explicitly supplied value with a generic default.
@@ -104,6 +124,9 @@ steps:
         count.
 
       Uploaded source reading:
+      - For academic tasks, record source filenames and user-provided notes here;
+        defer paper parsing to collect_materials and its cached reader tool.
+        Do not parse the same papers during requirement analysis.
       - You CAN read user-uploaded PPT/PPTX files with the attachment reader.
         When the request asks you to base the new deck on an uploaded PPT/PPTX,
         call read_user_attachment(filename=<uploaded filename>) before writing
@@ -115,8 +138,14 @@ steps:
       - If the reader returns a parsing error, record the filename and exact
         error under missing information / assumptions; do not invent the deck's
         contents.
+      - A file bound as template_pptx is a visual template, not source content.
+        Do not read or summarize it here; generate_ppt owns template analysis.
 
       Include:
+      - Save presentation_scenario as exactly general, research_report,
+        paper_review, thesis_defense, or reading_notes according to the user's
+        intent. Academic scenarios MUST enter collect_materials even in quick
+        mode; never save skip_material_collection for these scenarios.
       - presentation goal
       - presentation topic
       - target customer / audience
@@ -136,35 +165,46 @@ steps:
         (default: no — do not invent this need)
       - AI background generation: record exactly enabled or disabled from the
         startup answer. This is independent from foreground material images.
-      - Style flow: record exactly auto when the user chose direct generation,
-        or preview_choice when the user chose three previews. This decision is
-        independent from AI background generation.
+      - Style flow is an internal route, not a user confirmation mode: record
+        auto for uploaded templates or 快速生成, otherwise preview_choice for 完整生成 so the full path creates
+        three candidates and automatically continues with the recommended one.
+      - Generation mode: record exactly quick for 快速生成, or full for
+        完整生成，耗时较长.
+      - Template mode: record exactly none when no template is used, or upload
+        when the user selected and attached a PPTX template.
 
       If the user already attached a PDF/PPTX/report or pasted key facts, fold the
       usable numbers and claims into the brief. collect_materials will reuse
       these facts and may complete without any network search.
 
       Save the result:
+        save_artifact(key='presentation_scenario', content_type='text', value=<scenario>)
         save_artifact(key='requirement_analysis', content_type='text', value=<analysis>)
         save_artifact(
           key='ppt_capability_requirements',
           content_type='text',
-          value='AI_BACKGROUND_IMAGES: enabled' if the startup answer enabled
+          value='AI_BACKGROUND_IMAGES: enabled' only if no template is used and the startup answer enabled
                 per-slide AI backgrounds, otherwise
                 'AI_BACKGROUND_IMAGES: disabled',
         )
         save_artifact(
           key='style_flow', content_type='text',
-          value='auto' for direct generation, otherwise 'preview_choice',
+          value='auto' for 快速生成 or an uploaded template, otherwise 'preview_choice',
+        )
+        save_artifact(
+          key='generation_mode', content_type='text',
+          value='quick' for 快速生成, otherwise 'full',
+        )
+        save_artifact(
+          key='template_mode', content_type='text',
+          value='upload' only when a PPTX template is attached, otherwise 'none',
         )
         save_artifact(
           key='generate_background_images', content_type='text',
-          value='enabled' if AI backgrounds are enabled, otherwise 'disabled',
+          value='enabled' only if no template is used and AI backgrounds are enabled, otherwise 'disabled',
         )
-        When and only when style_flow is auto, also save:
-          save_artifact(
-            key='skip_style_choices', content_type='text', value='skip',
-          )
+        For 快速生成 or an uploaded template, save:
+          save_artifact(key='skip_style_choices', content_type='text', value='skip')
         When and only when AI background generation is disabled, also save:
           save_artifact(
             key='skip_background_images', content_type='text', value='skip',
@@ -175,6 +215,7 @@ steps:
             key='skip_material_collection', content_type='text', value='skip',
           )
         when ALL of these are true:
+        - generation_mode is quick; full mode intentionally runs material collection;
         - the request is self-contained and uses common, stable knowledge;
         - there is no uploaded source, selected/mentioned knowledge base, or
           pasted source material that needs processing;
@@ -191,9 +232,12 @@ steps:
       After both artifacts are saved, Executor runs the deterministic model
       capability check. Stop after saving. Do not call advance tools yourself.
     outputs:
+      - material: presentation_scenario
       - material: requirement_analysis
       - material: ppt_capability_requirements
       - material: style_flow
+      - material: generation_mode
+      - material: template_mode
       - material: generate_background_images
       - material: skip_style_choices
         required: false
@@ -206,8 +250,12 @@ steps:
       topic, exact slide count, target customer/audience, communication tone,
       explicit visual constraints, structure, constraints, and assumptions.
       ppt_capability_requirements must be exactly AI_BACKGROUND_IMAGES: enabled
-      or AI_BACKGROUND_IMAGES: disabled. style_flow must be exactly auto or
-      preview_choice and must not be inferred from the background setting.
+      or AI_BACKGROUND_IMAGES: disabled. style_flow must be auto for quick mode
+      or preview_choice for full mode without a template. Uploaded templates always use auto.
+      generation_mode must be exactly quick or full, and template_mode must be
+      exactly none or upload.
+      Uploaded templates require style_flow=auto, disabled backgrounds and both
+      skip markers, regardless of generation_mode or earlier background answers.
       Executor must run the configured
       deterministic check exactly once before this Attempt can pass.
 
@@ -242,6 +290,14 @@ steps:
       retrieval subject to the KB-first gate below.
 
       Uploaded file parsing:
+      - For academic scenarios, call ppt_cache_academic_sources with ALL relevant
+        exact attachment filenames from the original request, conversation and
+        uploaded_materials. This tool parses each file to EOF and persists reader
+        chunks by content hash. Use ppt_read_academic_source for needed chunks.
+        Do not separately call read_user_attachment for those papers. Preserve
+        each filename/source_id in material_summary, list every failure, and
+        do not claim failed papers were analyzed. Repeating the cache call reuses
+        successes and retries failures. User-provided reading notes need no file.
       - You CAN read PPT/PPTX with the attachment reader. If the user uploaded a
         PDF/DOC/DOCX/PPT/PPTX or refers to an uploaded source file, call
         read_user_attachment(filename=<uploaded filename>) to extract text.
@@ -250,6 +306,8 @@ steps:
         file tools to open conversation uploads.
       - If a file cannot be parsed, mention the filename and the parsing error
         in gaps/assumptions.
+      - Never treat template_pptx as research/source material. Its slide text is
+        not evidence and its OOXML is analyzed only in generate_ppt.
 
       Retrieval policy (do this before writing the summary):
       1. KB-first gate (mandatory): if the user supplied, selected, or mentioned
@@ -369,6 +427,8 @@ steps:
 
       Stop after saving.
     tools:
+      - ppt_cache_academic_sources
+      - ppt_read_academic_source
       - kb
       - web_search
       - wikipedia
@@ -395,13 +455,66 @@ steps:
       as individual image-list artifacts so the Materials tab can preview them
       and later steps can embed them in HTML.
 
+  analyze_academic_sources:
+    label: 科研内容分析
+    mode: auto
+    route: choice
+    prompt: |
+      Analyze the supplied academic sources for this presentation.
+      Scenario: {{presentation_scenario}}
+      Requirements: {{requirement_analysis}}
+      Collected evidence: {{material_summary}}
+      User request: {{user_input}}
+      {{runtime_instruction}}
+
+      Reuse collected source_ids via ppt_read_academic_source; continue reading
+      chunks needed for each claim. Never infer a full paper from its excerpt.
+      If a source is absent from material_summary, use ppt_cache_academic_sources
+      with its exact attachment filename first. Distinguish the user's own paper, one paper, multiple
+      papers, and reading notes. Reading notes alone are valid input: never
+      invent a paper or force an upload. Keep each paper's title, authors,
+      filename/URL, and available page/figure/table references with its claims.
+      For each source extract research question, method, experimental setup,
+      evidence, conclusions, contributions, and limitations. Mark unavailable
+      evidence explicitly. Separate author claims from the user's reflections.
+      For multiple papers compare methods and results only where metrics and
+      experimental conditions are comparable; preserve attribution per claim.
+      Inventory formulas with variable meanings and original notation, and
+      figures with captions, source locations and available image references.
+      Never invent experimental values, citations, formulas or visual assets.
+      Suggest a narrative for research_report, paper_review, thesis_defense,
+      or reading_notes and identify content that needs a dedicated slide.
+      Templates use the existing optional template_pptx upload and final-step
+      template analysis. Do not create a second template-selection process.
+      Save the full analysis as academic_brief using save_artifact and stop.
+      Continue automatically without requesting step confirmation.
+    tools:
+      - ppt_cache_academic_sources
+      - ppt_read_academic_source
+    inputs:
+      - material: presentation_scenario
+        required: true
+      - material: requirement_analysis
+        required: true
+      - material: material_summary
+        required: true
+      - material: uploaded_materials
+        required: false
+    outputs:
+      - material: academic_brief
+    acceptance_criteria: |
+      academic_brief identifies source attribution, findings, uncertainties,
+      formulas/figures when present, and an appropriate academic narrative.
+      Missing evidence is explicit; no fabricated claims or forced uploads.
+
   choose_style:
     label: Choose Style
-    mode: human
+    mode: auto
     skip_if: {material: skip_style_choices}
     prompt: |
       Generate exactly three deck-wide visual style previews, publish them for
-      comparison, and stop for the user's choice. Do not build the outline,
+      comparison, keep the tool's recommended candidate in style_selection, and
+      continue automatically. Do not build the outline,
       generate AI backgrounds, or render final slides in this step.
 
       Requirement analysis:
@@ -435,9 +548,9 @@ steps:
       and pass its deck_dir so the tool reuses the same three previews. Never
       create another deck merely because the step was resumed.
 
-      The user confirms by leaving A unchanged or editing style_selection to B
-      or C, then clicking Save and Continue. Do not ask the user to edit JSON.
-      Stop immediately after ppt_prepare_style_choices succeeds.
+      Do not wait for a user confirmation and do not ask the user to edit JSON.
+      Stop immediately after ppt_prepare_style_choices succeeds; Runtime advances
+      with the recommended style_selection.
     tools:
       - ppt_find_deck
       - ppt_prepare_style_choices
@@ -457,7 +570,8 @@ steps:
         required: true
     acceptance_criteria: |
       Exactly three preview choices A, B, and C are visible. style_selection is
-      one editable, non-empty A/B/C value and the step waits for human approval.
+      one editable, non-empty recommended A/B/C value and the step does not wait
+      for human approval.
 
   build_outline:
     label: Build Outline
@@ -476,6 +590,13 @@ steps:
 
       Material summary (may be empty if collect_materials was skipped):
       {{material_summary}}
+
+      Academic analysis (optional):
+      {{academic_brief}}
+      When present, carry its source attribution, formulas, figure references,
+      evidence and limitations into outline_markdown. Use the requested academic
+      narrative. Keep long formulas on dedicated slides or split at meaningful
+      mathematical boundaries, preserving notation and explaining variables.
 
       Original user request:
       {{user_input}}
@@ -572,6 +693,8 @@ steps:
         required: true
       - material: material_summary
         required: false
+      - material: academic_brief
+        required: false
       - material: material_images
         required: false
       - material: ppt_capability_requirements
@@ -588,7 +711,7 @@ steps:
 
   plan_page_prompts:
     label: Plan Page Prompts
-    mode: human
+    mode: auto
     prompt: |
       You are a PPT per-page prompt planner. The readable content outline exists.
       Publish exactly one editable generation prompt per page for human review.
@@ -749,7 +872,7 @@ steps:
 
   generate_backgrounds:
     label: Generate Backgrounds
-    mode: human
+    mode: auto
     skip_if: {material: skip_background_images}
     rerun_when: >
       用户要求重新生成全部底图、重新生成/替换第 1、2 等指定位置的底图，
@@ -798,7 +921,7 @@ steps:
         republish, or revise any existing background image.
 
       If generation fails or returns no file, report the exact model/tool reason
-      and fail the step. After success, stop for human image approval.
+      and fail the step. After success, continue automatically.
     tools:
       - ppt_find_deck
       - ppt_generate_background_images
@@ -816,7 +939,7 @@ steps:
 
   generate_ppt:
     label: Generate PPT
-    mode: human
+    mode: auto
     prompt: |
       You are a PPT HTML generator. You do NOT rewrite the outline. You MUST
       drive generation through ppt_* tools and publish preview_html.
@@ -840,6 +963,28 @@ steps:
       execution context and bound prior artifacts to retain the existing requirements.
 
       {{runtime_instruction}}
+
+      Generation mode:
+      {{generation_mode}}
+
+      Template mode:
+      {{template_mode}}
+
+      Optional PPTX template:
+      {{template_pptx}}
+
+      ## Template analysis (must be first)
+
+      For a full generation request when template_mode is upload, the FIRST tool call in this step must be
+      ppt_analyze_template(template_file=<the exact attached .pptx filename>,
+      deck_dir=<existing deck_dir when already known>). Do not call
+      ppt_find_deck, ppt_generate_pages, or any editing tool before it. Reuse
+      the returned cached template profile on retries. If template analysis
+      fails, surface that exact error and stop; never silently fall back to a
+      non-template design. The analyzer updates the saved deck-wide palette and
+      typography contract from the template before page rendering. When
+      template_mode is none, do not call the analyzer. Incremental edits to an
+      existing deck, including font-only edits, do not re-analyze the template.
 
       ## Mode selection
 
@@ -928,7 +1073,15 @@ steps:
       explain that this changes the deck-wide background capability instead of
       pretending a one-page replacement succeeded.
 
-      ### E) Full deck HTML generation (default)
+      ### E) Font-only edit on an existing HTML deck
+      For requests such as “全部改成宋体”, “第 1 页改成宋体”, or “第 2 页标题
+      改成宋体”, call ppt_find_deck and then ppt_replace_deck_fonts exactly once.
+      Omit pages for the whole deck; otherwise pass the requested 1-based pages.
+      Use text_scope=all, titles, or body. The tool refreshes only the changed
+      previews and updates the deck-wide style contract only for whole-deck edits.
+      Stop afterward; do not rerun style, outline, page HTML generation, or export.
+
+      ### F) Full deck HTML generation (default)
       Page prompts already exist from plan_page_prompts. Do NOT call ppt_init_deck,
       stage=style, or stage=outline again.
 
@@ -964,16 +1117,22 @@ steps:
       - Never stage=outline / style / ppt_init_deck on a full generate after
         build_outline already ran (unless ppt_find_deck finds nothing).
       - Never export PPTX from tools — UI Export only.
+      - Font-only request on an existing HTML deck → ppt_find_deck, then
+        ppt_replace_deck_fonts. Omit pages for the whole deck, or pass the
+        requested 1-based pages; use text_scope=all/titles/body. Do not rerun
+        outline, style, or page generation. Stop after the preview refreshes.
       - All visible slide text must match the user's language.
       - After tools finish, stop.
 
       Stop after preview_html pages are published.
     tools:
+      - ppt_analyze_template
       - ppt_generate_pages
       - ppt_find_deck
       - ppt_run_stage
       - ppt_list_pages
       - ppt_publish_outline
+      - ppt_replace_deck_fonts
       - ppt_read_page_html
       - ppt_read_page_outline
       - ppt_patch_page_outline
@@ -999,9 +1158,17 @@ steps:
         required: false
       - material: slide_outline
         required: true
+      - material: generation_mode
+        required: true
+      - material: template_mode
+        required: true
+      - material: template_pptx
+        required: false
     outputs:
       - material: preview_html
       - material: preview_notes
+      - material: template_profile
+        required: false
     acceptance_criteria: |
       For a full run: the exact requested number of preview_html HTML pages must
       be saved (DOCTYPE/html documents), with matching preview_notes sort_order.

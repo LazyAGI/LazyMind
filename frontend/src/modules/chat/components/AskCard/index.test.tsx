@@ -4,9 +4,14 @@ import { describe, expect, it, vi } from "vitest";
 import AskCard, { type AskPending } from "./index";
 
 vi.mock("react-i18next", () => ({
+  initReactI18next: { type: "3rdParty", init: vi.fn() },
   useTranslation: () => ({
     t: (key: string) => key,
   }),
+}));
+
+vi.mock("@/modules/chat/utils/chunkUpload", () => ({
+  uploadFileInChunks: vi.fn(async () => "/uploads/template.pptx"),
 }));
 
 describe("AskCard read-only history", () => {
@@ -71,6 +76,59 @@ describe("AskCard read-only history", () => {
     fireEvent.click(screen.getByRole("button", { name: "chat.askCardSubmit" }));
     expect(onSubmit.mock.calls[0][0].structured.questions[0].answer).toBeNull();
     await waitFor(() => expect(screen.queryByRole("button", { name: "chat.askCardSubmit" })).toBeNull());
+  });
+
+  it("requires and submits a conditional attachment with the answer", async () => {
+    const onSubmit = vi.fn();
+    const { container } = render(<AskCard askPending={{
+      ask_id: "ppt-template",
+      questions: [{
+        text: "Use a template?",
+        type: "single",
+        choices: ["No template", "Upload template"],
+        attachment: {
+          when_choice: "Upload template",
+          material_id: "template_pptx",
+          accept: [".pptx"],
+          max_files: 1,
+          required: true,
+        },
+      }],
+    }} onSubmit={onSubmit} />);
+
+    fireEvent.click(screen.getByRole("radio", { name: "Upload template" }));
+    expect(screen.getByRole("button", { name: /chat\.askCardUploadFile/ })).toBeInTheDocument();
+    const submit = screen.getByRole("button", { name: "chat.askCardSubmit" });
+    expect(submit).toBeDisabled();
+    fireEvent.change(container.querySelector('input[type="file"]')!, {
+      target: { files: [new File(["pptx"], "brand.pptx", { type: "application/vnd.openxmlformats-officedocument.presentationml.presentation" })] },
+    });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0][0].files).toEqual([
+      expect.objectContaining({ name: "brand.pptx", uri: "/uploads/template.pptx" }),
+    ]);
+  });
+
+  it("submits more than three academic papers without a count limit", async () => {
+    const onSubmit = vi.fn();
+    const { container } = render(<AskCard askPending={{
+      ask_id: "papers",
+      questions: [{ text: "Research materials", type: "single", choices: ["Upload papers"],
+        attachment: { when_choice: "Upload papers", material_id: "uploaded_materials",
+          accept: [".pdf"], max_files: -1, required: true } }],
+    }} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByRole("radio", { name: "Upload papers" }));
+    const submit = screen.getByRole("button", { name: "chat.askCardSubmit" });
+    expect(submit).toBeDisabled();
+    fireEvent.change(container.querySelector('input[type="file"]')!, {
+      target: { files: [1, 2, 3, 4, 5].map((i) => new File([String(i)], `${i}.pdf`, { type: "application/pdf" })) },
+    });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0][0].files.map((file: File) => file.name)).toEqual(["1.pdf", "2.pdf", "3.pdf", "4.pdf", "5.pdf"]);
   });
 
   it.each(["yes", "no"])("localizes boolean %s in the message but preserves its structured token", async (choice) => {

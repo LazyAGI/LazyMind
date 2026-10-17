@@ -180,6 +180,33 @@
     cursor: default;
   }
 
+  &__attachment {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 12px;
+    border: 1px dashed #b5c0ef;
+    border-radius: 8px;
+    background: #f8f9ff;
+  }
+
+  &__attachment-file {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    color: #2d3a56;
+    font-size: 13px;
+  }
+
+  &__attachment-hint {
+    color: #8c5d00;
+    font-size: 12px;
+  }
+
   &__other-input {
     margin-top: 8px;
     border-radius: 8px !important;

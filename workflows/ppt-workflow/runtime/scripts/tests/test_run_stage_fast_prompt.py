@@ -95,16 +95,17 @@ class StyleRenderingRecipeTest(unittest.TestCase):
         self.assertTrue(field['choices'][1].startswith('不启用'))
         self.assertIn('background_images', workflow['runtime']['publisher_owned_slots'])
 
-    def test_only_page_prompts_and_generation_checkpoints_require_approval(self) -> None:
+    def test_generation_steps_continue_without_confirmation(self) -> None:
         state_path = Path(__file__).resolve().parents[3] / 'scenario' / 'state.yml'
         state = yaml.safe_load(state_path.read_text(encoding='utf-8'))
 
         self.assertEqual(state['steps']['plan_background_prompts']['mode'], 'auto')
         self.assertEqual(state['steps']['build_outline']['mode'], 'auto')
-        self.assertEqual(state['steps']['choose_style']['mode'], 'human')
-        self.assertEqual(state['steps']['plan_page_prompts']['mode'], 'human')
-        self.assertEqual(state['steps']['generate_backgrounds']['mode'], 'human')
-        self.assertEqual(state['steps']['generate_ppt']['mode'], 'human')
+        self.assertEqual(state['steps']['choose_style']['mode'], 'auto')
+        self.assertEqual(state['steps']['plan_page_prompts']['mode'], 'auto')
+        self.assertEqual(state['steps']['generate_backgrounds']['mode'], 'auto')
+        self.assertEqual(state['steps']['generate_ppt']['mode'], 'auto')
+        self.assertEqual(state['steps']['analyze_academic_sources']['mode'], 'auto')
 
     def test_background_prompt_and_generation_steps_support_skip_and_targeted_rerun(self) -> None:
         workflow_path = Path(__file__).resolve().parents[3] / 'workflow.yaml'
@@ -127,7 +128,7 @@ class StyleRenderingRecipeTest(unittest.TestCase):
         self.assertIn('background_prompts', workflow['runtime']['publisher_owned_slots'])
         self.assertEqual(
             [edge['to'] for edge in state['transitions']['collect_materials']],
-            ['choose_style', 'plan_background_prompts', 'build_outline'],
+            ['analyze_academic_sources', 'choose_style', 'plan_background_prompts', 'build_outline'],
         )
         self.assertEqual(
             [edge['to'] for edge in state['transitions']['choose_style']],
@@ -202,6 +203,7 @@ class StyleRenderingRecipeTest(unittest.TestCase):
                 'capability_requirements': 'ppt_capability_requirements',
                 'style_flow': 'style_flow',
                 'generate_background_images': 'generate_background_images',
+                'template_mode': 'template_mode',
             },
         }])
         self.assertFalse(slots['ppt_capability_requirements']['exposed'])

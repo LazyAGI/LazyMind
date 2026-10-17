@@ -95,13 +95,26 @@ and provider reason instead of silently falling back.
 ## Outline → HTML split
 
 - `plan_background_prompts`: N editable, connected prompts (automatic)
-- `generate_backgrounds`: N generated images from approved prompts (human approval)
+- `generate_backgrounds`: N generated images from approved prompts (automatic)
 - `build_outline`: **one call** `ppt_build_outline` → one Markdown `deck_outline` (automatic)
-- `plan_page_prompts`: `ppt_publish_outline` → editable per-page `slide_outline` prompts (human approval)
+- `plan_page_prompts`: `ppt_publish_outline` → editable per-page `slide_outline` prompts (automatic)
 - `generate_ppt`: **one call** `ppt_generate_pages` — **no** re-outline
 - Low-level `ppt_init_deck` / `ppt_run_stage` / `ppt_publish_*` remain for
   debug, recovery, and single-page edits
 - User can edit each page prompt in the Page Prompts tab; generate reads human revisions via `_resolve_artifact_text`
+
+## Optional PPTX template
+
+The startup Ask card exposes a conditional `.pptx` upload. The file remains a
+normal conversation attachment and is bound to the external `template_pptx`
+material. It is never treated as source evidence.
+
+When a template is present, `generate_ppt` calls `ppt_analyze_template` first.
+The analyzer caches the original template plus a deterministic OOXML profile
+(slide size, masters, layouts/placeholders, theme fonts and theme colors) and
+applies its palette, typography and layout hints to the existing deck-wide HTML
+style contract before page rendering. Template analysis stays inside the final
+step rather than adding another Workflow checkpoint.
 
 ## Deck storage (conversation-scoped)
 

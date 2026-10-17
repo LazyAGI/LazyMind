@@ -39,8 +39,12 @@ Workflow:
 
 Steps 3 and 4 are skipped together when AI backgrounds are disabled.
 
-After `analyze_requirements` succeeds, always advance to `collect_materials`.
-This removes the ambiguous two-ready-step choice. The collection step must use
+Academic scenarios always collect materials, then run the automatic
+`analyze_academic_sources` branch before rejoining style/background/outline
+planning. Its `academic_brief` preserves per-paper attribution, formulas,
+figures, findings and limitations. General self-contained quick decks may
+skip material collection according to the declared state transitions.
+The collection step must use
 a supplied/selected KB before any web tool and must skip web retrieval when the
 request, uploads, and KB already provide enough material.
 

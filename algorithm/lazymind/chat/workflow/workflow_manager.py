@@ -707,7 +707,32 @@ def _runtime_clarification_fields(runtime_policy: Any) -> List[Dict[str, Any]]:
             'type': question_type,
             'choices': choices,
             'choice_policy': choice_policy,
+            'ask_when': _clean_workflow_text(raw.get('ask_when')),
         }
+        # A conditional attachment augments an existing choice question. It uses
+        # the normal conversation attachment transport instead of introducing a
+        # workflow-specific file question or upload API.
+        raw_attachment = raw.get('attachment')
+        if question_type == 'single' and isinstance(raw_attachment, dict):
+            when_choice = _clean_workflow_text(raw_attachment.get('when_choice'))
+            material_id = _clean_workflow_text(raw_attachment.get('material_id'))
+            accept = [
+                value if value.startswith('.') else f'.{value}'
+                for item in (raw_attachment.get('accept') or [])
+                if (value := _clean_workflow_text(item).lower())
+            ]
+            max_files = raw_attachment.get('max_files', 1)
+            if (
+                when_choice in choices and material_id and accept
+                and type(max_files) is int and (max_files == -1 or max_files >= 1)
+            ):
+                field['attachment'] = {
+                    'when_choice': when_choice,
+                    'material_id': material_id,
+                    'accept': list(dict.fromkeys(accept)),
+                    'max_files': max_files,
+                    'required': raw_attachment.get('required') is True,
+                }
         if question_type in {'single', 'multiple'}:
             # Fixed package choices are closed by definition. This default also
             # covers installed package revisions created before ``allow_other``
@@ -774,13 +799,15 @@ def enforce_startup_clarification_policy(
     """
     if not isinstance(questions, list):
         return questions
-    fixed_fields = [
+    governed_fields = [
         field for field in _runtime_clarification_fields(runtime_policy)
-        if field.get('choice_policy') == 'fixed'
-        and field.get('type') in {'single', 'multiple'}
-        and field.get('choices')
+        if (
+            field.get('choice_policy') == 'fixed'
+            and field.get('type') in {'single', 'multiple'}
+            and field.get('choices')
+        ) or field.get('attachment')
     ]
-    if not fixed_fields:
+    if not governed_fields:
         return questions
 
     governed: List[Any] = []
@@ -797,7 +824,7 @@ def enforce_startup_clarification_policy(
             if _clean_workflow_text(value) and _clean_workflow_text(value) != '其他'
         }
         matched = None
-        for field in fixed_fields:
+        for field in governed_fields:
             field_text = _question_fingerprint(field.get('question'))
             field_choices = set(field.get('choices') or [])
             if question_id and question_id == field.get('id'):
@@ -812,9 +839,12 @@ def enforce_startup_clarification_policy(
                 matched = field
                 break
         if matched is not None:
-            question['type'] = matched['type']
-            question['choices'] = list(matched['choices'])
-            question['allow_other'] = matched.get('allow_other', True)
+            if matched.get('choice_policy') == 'fixed':
+                question['type'] = matched['type']
+                question['choices'] = list(matched['choices'])
+                question['allow_other'] = matched.get('allow_other', True)
+            if matched.get('attachment'):
+                question['attachment'] = dict(matched['attachment'])
         governed.append(question)
     return governed
 
@@ -969,6 +999,10 @@ def _startup_clarification_guidance(runtime_policy: Any) -> str:
         'inspect the current request, relevant attachment names/content already available, '
         'and prior conversation turns. Treat a field as present only when it is explicit or '
         'unambiguously inferable. Do not ask for fields that are already present. If one or '
+        'more fields declare ask_when, evaluate that condition against the request, attachments '
+        'and conversation first. Exclude fields whose condition is false. Existing source '
+        'attachments or supplied substantive source text satisfy material questions; never '
+        'ask for those uploads again. A visual template alone is not source material. If one or '
         'more fields are missing, call ask_user exactly once TOTAL with only those missing fields, '
         'putting all of them in that single card, then stop without triggering the Workflow in '
         'that turn. Include each '
@@ -987,12 +1021,21 @@ def _startup_clarification_guidance(runtime_policy: Any) -> str:
         'when responsible suggestions cannot be inferred. When a declared choice field has '
         'allow_other=false, pass allow_other=false in that ask_user question so the card does not '
         'append an Other option. Keep allow_other=true or omit it for other choice fields. '
+        'When a declared field includes attachment metadata, copy that metadata verbatim into '
+        'the matching ask_user question. The Chat card owns the upload button and sends the file '
+        'as a normal conversation attachment; never ask the user to paste a filesystem path. '
+        'On the answer turn, bind its declared attachment.material_id to the exact uploaded '
+        'filename in trigger input_bindings for a single file. For multiple files, preserve '
+        'EVERY exact attachment filename in request_context so the Workflow can resolve each '
+        'through the conversation attachment reader. Do not stringify a filename list into '
+        'a single file binding; omit that binding when multiple attachments are supplied. '
         'On the answer turn, NEVER call ask_user '
         'again or reassess fields as missing. Combine the original request, all already-known '
         'fields, and the new answers into one concise request_context and pass that value to '
         'the trigger; an answer-only current_query must never replace the original request. '
         'If no field is missing, trigger immediately. Never ask for an upload unless the '
-        'Workflow separately declares it as a required input. Declared fields: '
+        'Workflow declares it as a required input or as the selected conditional attachment '
+        'on a clarification field. Declared fields: '
         + json.dumps(fields, ensure_ascii=False, default=str)
     )
 

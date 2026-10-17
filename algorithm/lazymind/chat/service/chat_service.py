@@ -55,6 +55,7 @@ from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
     ASK_USER_TOOL_CONFIG,
     ATTACHMENT_EDIT_TOOL_CONFIG,
+    PRESENTATION_EDIT_TOOL_CONFIG,
     DEFAULT_TOOLS,
     USER_ATTACHMENT_TOOL_CONFIGS,
     collect_query_appendices,
@@ -689,6 +690,7 @@ def _build_user_attachment_tools(has_files: bool) -> list:
     return [
         *(config.tool for config in USER_ATTACHMENT_TOOL_CONFIGS),
         ATTACHMENT_EDIT_TOOL_CONFIG.tool,
+        PRESENTATION_EDIT_TOOL_CONFIG.tool,
     ]
 
 
@@ -1626,7 +1628,11 @@ async def _handle_chat_impl(
             [] if workflow_turn_is_bound else _build_user_attachment_tools(bool(files_map))
         )
         attachment_configs = (
-            [*USER_ATTACHMENT_TOOL_CONFIGS, ATTACHMENT_EDIT_TOOL_CONFIG]
+            [
+                *USER_ATTACHMENT_TOOL_CONFIGS,
+                ATTACHMENT_EDIT_TOOL_CONFIG,
+                PRESENTATION_EDIT_TOOL_CONFIG,
+            ]
             if attachment_tools else []
         )
         # ask_user is a ChatAgent-only stop-tool. It is NOT in DEFAULT_TOOLS so SubAgents
