@@ -570,10 +570,13 @@ def test_stage_one_fit_skips_optional_summary_and_required_invalid_summary_exclu
         proxy_tokens = _request_tokens(view, 'continue', [], None, call_kwargs) + sum(
             estimate_message_tokens(message) for message in stage_one
         )
-        assert budget.trigger_tokens < complete_tokens <= budget.effective_input_budget
+        assert budget.trigger_tokens < complete_tokens
         if conservative_image_estimate:
+            # The complete request now uses the same image allowance as history.
+            assert complete_tokens > budget.effective_input_budget
             assert proxy_tokens > budget.effective_input_budget
         else:
+            assert complete_tokens <= budget.effective_input_budget
             assert proxy_tokens <= budget.effective_input_budget
         before = copy.deepcopy(projection)
         events = []

@@ -76,6 +76,7 @@ type TaskEvent struct {
 	V2ArtifactID string                         `json:"v2_artifact_id,omitempty"`
 	V2RevisionID string                         `json:"v2_revision_id,omitempty"`
 	ExecutionID  string                         `json:"execution_id,omitempty"`
+	Snapshot     bool                           `json:"snapshot,omitempty"`
 	EventID      string                         `json:"event_id,omitempty"`
 	ProcessStep  *taskdisplay.PublicProcessStep `json:"process_step,omitempty"`
 	Steps        []string                       `json:"steps,omitempty"`

@@ -38,8 +38,12 @@ async def run_subagent(
     ] = None,
     workspace_execution: Annotated[Optional[Dict[str, Any]], Body(description='Core private execution identity')] = None,
     model_fallback_current_id: Annotated[str, Body(description='Core private current model candidate')] = '',
-    model_fallback_candidates: Annotated[Optional[List[Dict[str, Any]]], Body(description='Core private execution candidates')] = None,
-    model_fallback_initial_switch: Annotated[Optional[Dict[str, Any]], Body(description='Core private initial model replacement')] = None,
+    model_fallback_candidates: Annotated[
+        Optional[List[Dict[str, Any]]], Body(description='Core private execution candidates'),
+    ] = None,
+    model_fallback_initial_switch: Annotated[
+        Optional[Dict[str, Any]], Body(description='Core private initial model replacement'),
+    ] = None,
 ):
     from lazymind.chat.engine.subagent.runner import run_subagent_stream
 

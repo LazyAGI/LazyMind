@@ -91,12 +91,73 @@ function emitConversationEvent(
 }
 
 describe("task center workflow events", () => {
+  it.each(["task", "conversation"])("keeps same-execution live task_start idempotent on the %s stream", (source) => {
+    const store = useTaskCenterStore.getState();
+    store.subscribeConvEvents("conversation-1");
+    store.upsertTask("conversation-1", { task_id: "model-task", status: "running" });
+    store.subscribeTask("conversation-1", "model-task");
+    const emit = (event: object) => sseHarness.callbacks.get("/tasks/model-task/stream")!.message({
+      data: JSON.stringify({ execution_id: "execution", ...event }),
+    } as any);
+    const output = (call_index: number, phase?: string) => ({ run_id: "execution", call_index, ...(phase ? { phase } : {}) });
+    emit({ type: "task_start", snapshot: true });
+    emit({ type: "text", text: "COMMITTED", model_output: output(1) });
+    emit({ type: "model_output", model_output: output(1, "commit") });
+    emit({ type: "tool_results", tool_results: [{ id: "receipt", name: "save", result: "SAVED-ONCE" }] });
+    emit({ type: "artifact", slot: "saved", content_type: "text", seq: 1, value: { text: "SAVED-ONCE" } });
+    if (source === "task") emit({ type: "task_start" });
+    else emitConversationEvent({ type: "task_updated", payload: { task_id: "model-task", event: { type: "task_start", execution_id: "execution" } } });
+    emit({ type: "model_output", model_output: output(2, "begin") });
+    emit({ type: "text", text: "FAILED PREVIEW", model_output: output(2) });
+    emit({ type: "model_output", model_output: output(2, "rollback") });
+    emit({ type: "model_output", model_output: output(3, "begin") });
+    emit({ type: "text", text: "GOOD ANSWER", model_output: output(3) });
+    emit({ type: "model_output", model_output: output(3, "commit") });
+    const task = store.getTasks("conversation-1")[0];
+    expect(task.execution_log.filter(item => item.type === "text").map(item => item.content)).toEqual(["COMMITTED", "GOOD ANSWER"]);
+    expect(task.execution_log.filter(item => item.type === "tool_results")).toHaveLength(1);
+    expect(task.artifacts).toHaveLength(1);
+    expect(task.model_output).toEqual(output(3, "commit"));
+    expect(task.model_output_hydrating).toBe(false);
+    expect(requestHarness.listConversationTasks).not.toHaveBeenCalled();
+  });
+
+  it("rebuilds the same execution on reconnect and rejects late live starts from an older execution", () => {
+    const store = useTaskCenterStore.getState();
+    store.subscribeConvEvents("conversation-1");
+    store.upsertTask("conversation-1", { task_id: "model-task", status: "running" });
+    store.subscribeTask("conversation-1", "model-task");
+    const emit = (event: object) => sseHarness.callbacks.get("/tasks/model-task/stream")!.message({ data: JSON.stringify(event) } as any);
+    const snapshot = (run_id: string) => {
+      emit({ type: "task_start", execution_id: run_id, snapshot: true });
+      emit({ type: "text", execution_id: run_id, text: "COMMITTED", model_output: { run_id, call_index: 1 } });
+      emit({ type: "model_output", execution_id: run_id, model_output: { run_id, call_index: 1, phase: "commit" } });
+    };
+    snapshot("current");
+    store.unsubscribeTask("model-task");
+    store.subscribeTask("conversation-1", "model-task");
+    snapshot("current");
+    expect(store.getTasks("conversation-1")[0].execution_log.map(item => item.content)).toEqual(["COMMITTED"]);
+    snapshot("new");
+    emit({ type: "task_start", execution_id: "current" });
+    emitConversationEvent({ type: "task_updated", payload: { task_id: "model-task", event: { type: "task_start", execution_id: "current" } } });
+    emit({ type: "text", execution_id: "current", text: "STALE" });
+    emit({ type: "model_output", execution_id: "new", model_output: { run_id: "new", call_index: 2, phase: "begin" } });
+    emit({ type: "text", execution_id: "new", text: "NEW PREVIEW", model_output: { run_id: "new", call_index: 2 } });
+    emit({ type: "model_output", execution_id: "new", model_output: { run_id: "new", call_index: 2, phase: "rollback" } });
+    const task = store.getTasks("conversation-1")[0];
+    expect(task.execution_id).toBe("new");
+    expect(task.execution_log.map(item => item.content)).toEqual(["COMMITTED"]);
+    expect(task.model_output).toEqual({ run_id: "new", call_index: 2, phase: "rollback" });
+    expect(task.model_output_hydrating).toBe(false);
+  });
+
   it("rolls back only the current model call while retaining committed calls and real effects", () => {
     const store = useTaskCenterStore.getState();
     store.upsertTask("conversation-1", { task_id: "model-task", status: "running" });
     const output = (call_index: number, phase?: string) => ({ run_id: "execution", call_index, ...(phase ? { phase } : {}) });
     const emit = (event: object) => store.applyTaskEvent("conversation-1", "model-task", { execution_id: "execution", ...event });
-    emit({ type: "task_start" });
+    emit({ type: "task_start", snapshot: true });
     emit({ type: "text", text: "COMMITTED", model_output: output(1) });
     emit({ type: "text", text: "SECOND", model_output: output(2) });
     emit({ type: "model_output", model_output: output(2, "commit") });
@@ -139,7 +200,7 @@ describe("task center workflow events", () => {
     await store.loadConversationTasks("conversation-1");
     expect(store.getTasks("conversation-1")[0]).toMatchObject({ execution_id: "new-execution", model_output: cursor });
     expect(store.getTasks("conversation-1")[0].execution_log.map(item => item.content)).toEqual(["one", "two"]);
-    store.applyTaskEvent("conversation-1", "model-task", { type: "task_start", execution_id: "new-execution" });
+    store.applyTaskEvent("conversation-1", "model-task", { type: "task_start", execution_id: "new-execution", snapshot: true });
     expect(store.getTasks("conversation-1")[0].execution_log).toEqual([]);
   });
 
@@ -168,7 +229,7 @@ describe("task center workflow events", () => {
     store.upsertTask("conversation-1", { task_id: "model-task", status: "running" });
     const output = (call_index: number, phase?: string) => ({ run_id: "execution", call_index, ...(phase ? { phase } : {}) });
     const emit = (event: object) => store.applyTaskEvent("conversation-1", "model-task", { execution_id: "execution", ...event });
-    emit({ type: "task_start" });
+    emit({ type: "task_start", snapshot: true });
     emit({ type: "text", text: "one", model_output: output(1) });
     requestHarness.listConversationTasks.mockResolvedValue({ data: { tasks: [{ task_id: "model-task", status: "running", execution_id: "execution", steps: [
       { role: "text", execution_id: "execution", content: { content: "one", model_output: output(1) } },
@@ -205,7 +266,7 @@ describe("task center workflow events", () => {
     const loading = store.loadConversationTasks("conversation-1");
     const output = (call_index: number, phase?: string) => ({ run_id: "new", call_index, ...(phase ? { phase } : {}) });
     const emit = (event: object) => store.applyTaskEvent("conversation-1", "model-task", { execution_id: "new", ...event });
-    emit({ type: "task_start" });
+    emit({ type: "task_start", snapshot: true });
     emit({ type: "model_output", model_output: output(0, "commit") });
     emit({ type: "model_output", model_output: output(1, "begin") });
     emit({ type: "text", text: "NEW-PREVIEW", model_output: output(1) });
@@ -314,7 +375,7 @@ describe("task center workflow events", () => {
     store.subscribeTask("conversation-1", "model-task");
     const emit = (event: object) => sseHarness.callbacks.get("/tasks/model-task/stream")!.message({ data: JSON.stringify(event) } as any);
     const metadata = { run_id: "execution", call_index: 1 };
-    emit({ type: "task_start", execution_id: "execution" });
+    emit({ type: "task_start", execution_id: "execution", snapshot: true });
     emit({ type: "model_output", execution_id: "execution", model_output: { ...metadata, call_index: 0, phase: "commit" } });
     emit({ type: "model_output", execution_id: "execution", model_output: { ...metadata, phase: "begin" } });
     store.upsertTask("conversation-1", { task_id: "model-task", execution_id: "execution", model_output: { ...metadata, phase: "commit" },

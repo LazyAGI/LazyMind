@@ -546,12 +546,15 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
       task.updated_at = new Date().toISOString();
       switch (event.type) {
         case "task_start":
+          // DB snapshots rebuild the log on reconnect. Live starts also arrive
+          // through the conversation stream and cannot replace an established run.
+          if (event.snapshot !== true && task.execution_id) return state;
           task.status = "running";
           if (event.execution_id) {
             task.execution_id = event.execution_id;
             task.execution_log = [];
             task.model_output = undefined;
-            task.model_output_hydrating = true;
+            task.model_output_hydrating = event.snapshot === true;
           }
           break;
         case "model_output":
@@ -798,7 +801,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           if (event.model_output && before?.execution_id && event.model_output.run_id !== before.execution_id) return;
           get().applyTaskEvent(conversationId, taskId, event);
           const current = get().getTasks(conversationId).find(item => item.task_id === taskId);
-          if (event.type === "task_start" && event.execution_id && snapshotExecution !== event.execution_id) {
+          if (event.type === "task_start" && event.execution_id && event.execution_id === current?.execution_id && snapshotExecution !== event.execution_id) {
             snapshotExecution = event.execution_id;
             lastSwitchIndex = 0;
           }

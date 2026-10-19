@@ -16,10 +16,11 @@ from lazyllm.module.llms.onlinemodule.base.model_outcome import (
 )
 from lazymind.chat.engine.attachment_reader import is_chat_image_file
 
-from .budget import build_context_budget, parse_token_limit
+from .budget import build_context_budget, output_budget_kwargs, parse_token_limit
 from .context_estimator import estimate_tokens
 from .cancellation import UserCancelledError
 from .models import FallbackRunState, ModelCandidate
+from .message_fields import estimate_message_tokens
 from lazymind.config import config
 from lazymind.chat.runtime_events import runtime_event
 
@@ -169,8 +170,9 @@ def _failure_from_error(error: Exception):
 
 def _request_tokens(view, input, history, files, kwargs) -> int:
     normalized, attached = view._get_files(copy.deepcopy(input), copy.deepcopy(files))
-    data = view._prompt.generate_prompt(input=normalized, history=copy.deepcopy(history),
-                                       format=view._message_format, tools=kwargs.get('tools'))
+    data = view._prompt.generate_prompt(
+        input=normalized, history=copy.deepcopy(history), format=view._message_format, tools=kwargs.get('tools'),
+    )
     if view.type == 'VLM' and (attached or view._vlm_force_format_input_with_files):
         data['messages'][-1]['content'] = view._format_input_with_files(data['messages'][-1]['content'], attached)
         for message in data['messages'][:-1]:
@@ -179,7 +181,10 @@ def _request_tokens(view, input, history, files, kwargs) -> int:
     data.update(view._static_params)
     data.update({key: value for key, value in kwargs.items() if key not in {'max_retries', 'tools'}})
     data = view._prepare_request_data(data)
-    return estimate_tokens(json.dumps(data, ensure_ascii=False, default=str))
+    messages = data.pop('messages', [])
+    return estimate_tokens(json.dumps({**data, 'messages': []}, ensure_ascii=False, default=str)) + sum(
+        estimate_message_tokens(message) + 4 for message in messages
+    )
 
 
 def _prepare_context(raw, supplier, input, history, files, kwargs, *, state, budget, projection, summary_runtime):
@@ -284,13 +289,15 @@ class FallbackLLM(ModuleBase, LLMBase):
             call_open = False
             output_metadata = {'call_index': 0}
 
-            def rollback():
+            def rollback(output_metadata=output_metadata):
                 nonlocal call_open
                 if call_open:
                     call_open = False
-                    emit({'tag': 'model_output', 'model_output': {'call_index': call_index, 'phase': 'rollback'}})
+                    emit({'tag': 'model_output', 'model_output': {
+                        'call_index': output_metadata['call_index'], 'phase': 'rollback',
+                    }})
 
-            def sink(event, output_metadata=output_metadata):
+            def sink(event, output_metadata=output_metadata, local_failure=local_failure):
                 try:
                     if event.get('tag') in {'text', 'think'} or (
                         event.get('tag') == 'runtime_event' and (event.get('runtime_event') or {}).get('type')
@@ -307,16 +314,13 @@ class FallbackLLM(ModuleBase, LLMBase):
                              stream=selected_stream, copy_static_params=True)
             usage_module_id = self._used_by_moduleid or self._module_id
             view.used_by(usage_module_id)
+            budget = build_context_budget(current.max_input_tokens) if current.max_input_tokens else state.budget
             with lazyllm.globals.stack_enter(view.identities):
                 supplier_factory = getattr(view, '_get_supplier', None)
                 supplier = supplier_factory() if supplier_factory is not None else view
                 supplier.used_by(usage_module_id)
-            budget = build_context_budget(current.max_input_tokens) if current.max_input_tokens else state.budget
-            call_kwargs = copy.deepcopy(kwargs)
+                call_kwargs = output_budget_kwargs(view, supplier, budget.reserved_output_tokens, copy.deepcopy(kwargs))
             call_kwargs['max_retries'] = 1
-            configured_max = call_kwargs.get('max_tokens', view._static_params.get('max_tokens'))
-            call_kwargs['max_tokens'] = min(int(configured_max), budget.reserved_output_tokens) \
-                if configured_max is not None else budget.reserved_output_tokens
             history, files = copy.deepcopy(llm_chat_history), copy.deepcopy(lazyllm_files)
             prepared = None
             preparing_context = False
@@ -370,9 +374,10 @@ class FallbackLLM(ModuleBase, LLMBase):
                     failure.provider_error_code or '',
                 ).lower() in _UNSUPPORTED_CALL_CODES
                 terminal = getattr(exc, 'terminal', None)
-                unsupported_call = unsupported_call or (failure is not None and terminal is not None
-                                                         and terminal.attempt_count == 0
-                                                         and failure.code == ModelFailureCode.PROVIDER_REJECTED)
+                unsupported_call = unsupported_call or (
+                    failure is not None and terminal is not None
+                    and terminal.attempt_count == 0 and failure.code == ModelFailureCode.PROVIDER_REJECTED
+                )
                 if (failure is None
                         or (failure.code.value not in _RECOVERABLE and not unsupported_call and not preparing_context)):
                     raise

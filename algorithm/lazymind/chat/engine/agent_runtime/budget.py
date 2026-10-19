@@ -111,6 +111,28 @@ def needs_compression(estimated_tokens: int, budget: ContextBudget) -> bool:
     return int(estimated_tokens) >= budget.trigger_tokens
 
 
+def output_budget_kwargs(view: Any, supplier: Any, output_limit: int, kwargs=None) -> dict[str, Any]:
+    """Bound output on per-call views using the provider's supported parameter."""
+    params = dict(kwargs or {})
+    static = view._static_params
+    runtime = view._merge_dynamic_forward_kwargs(params) if hasattr(view, '_merge_dynamic_forward_kwargs') else params
+    model = str(runtime.get('model') or getattr(supplier, '_model_name', '')).lower()
+    modern = getattr(supplier, 'series', None) == 'openai' and re.match(r'^(o\d+|gpt-[5-9])(?:[.-]|$)', model)
+    completion_limit = modern or any(
+        source.get('max_completion_tokens') is not None for source in (params, static)
+    )
+    key = 'max_completion_tokens' if completion_limit and supplier._message_format != 'anthropic' else 'max_tokens'
+    limits = [int(source[name]) for source in (params, static) for name in ('max_tokens', 'max_completion_tokens')
+              if source.get(name) is not None]
+    # Both SDK views are isolated by share(copy_static_params=True). Remove the
+    # incompatible alias from static data as well as call kwargs before sending.
+    for source in (params, static, supplier._static_params):
+        source.pop('max_tokens', None)
+        source.pop('max_completion_tokens', None)
+    params[key] = min([output_limit, *limits])
+    return params
+
+
 def usage_ratio(estimated_tokens: int, budget: ContextBudget) -> float:
     if budget.effective_input_budget <= 0:
         return 0.0

@@ -181,6 +181,49 @@ def test_old_raw_sink_keeps_its_identity_and_late_sdk_observation_is_only_accoun
     assert translator.run.semantic_output is False
 
 
+def test_late_failed_sink_does_not_poison_the_replacement_call(provider, monkeypatch):
+    import requests
+
+    provider.script['model-a'] = [broken_output()]
+    provider.script['model-b'] = [{'message': {'role': 'assistant', 'content': 'B CLEAN ANSWER'}}]
+    translator = AgentEventFrameTranslator(query='test', run_id='late-failure-run', enable_exports=True)
+    frames, events, old_sinks, late_errors = [], [], [], []
+    with config.temp('context_compression_enabled', False):
+        executor, agent, plan = make_agent(provider, translator)
+        agent.build_agent()
+        raw = agent._model_fallback_state.raw_llm
+        original_share = raw.share
+
+        def share(**kwargs):
+            old_sinks.append(kwargs['stream']['_stream_sink'])
+            return original_share(**kwargs)
+
+        monkeypatch.setattr(raw, 'share', share)
+
+        def deliver(event):
+            if event.get('delta') == 'LATE-A-TEXT':
+                raise RuntimeError('old call sink failed')
+            lazyllm.FileSystemQueue().enqueue(json.dumps(event))
+
+        executor.runtime_llm(agent)._stream = {'_stream_sink': deliver}
+        original_post = requests.post
+
+        def post(url, **kwargs):
+            if kwargs['json']['model'] == 'model-b':
+                with pytest.raises(RuntimeError, match='old call sink failed') as error:
+                    old_sinks[0]({'tag': 'text', 'delta': 'LATE-A-TEXT'})
+                late_errors.append(error.value)
+            return original_post(url, **kwargs)
+
+        monkeypatch.setattr(requests, 'post', post)
+        assert asyncio.run(drive(executor, agent, plan, translator, frames, events)) == 'B CLEAN ANSWER'
+    assert len(late_errors) == 1
+    assert [request['model'] for request in provider.requests] == ['model-a', 'model-b']
+    assert agent._model_fallback_state.current.model_id == 'model-b'
+    assert EFFECT_RECEIPTS == []
+    assert not any('LATE-A-' in str(frame.get('text') or '') for frame in frames)
+
+
 def boundary(index, phase=None, *, run_id='run'):
     result = {'run_id': run_id, 'call_index': index}
     if phase is not None:

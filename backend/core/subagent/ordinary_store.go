@@ -132,7 +132,7 @@ func routeExecutionEvent(ctx context.Context, db *gorm.DB, taskID, executionID s
 		if role, content := remoteStepContent(ev); role != "" && ev.ModelOutput == nil {
 			var err error
 			if task.AgentType != "workflow_step" && role != "plan" {
-				err = appendExecutionStep(ctx, tx, taskID, executionID, role, content)
+				ev.Seq, err = appendExecutionStep(ctx, tx, taskID, executionID, role, content)
 			} else {
 				err = AppendRemoteStep(ctx, tx, taskID, role, content)
 			}

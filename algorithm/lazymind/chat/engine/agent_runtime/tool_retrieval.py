@@ -152,6 +152,7 @@ def configure_tool_retrieval(agent, plan):
     skill_manager = agent._skill_manager
     budget = build_context_budget(options.max_input_tokens, llm_config=options.llm_config)
     fallback_state = getattr(agent, '_model_fallback_state', None)
+    initializing = False
 
     def validate_load(definitions):
         # Use candidate schemas directly: reading manager.tools_description here would
@@ -163,6 +164,15 @@ def configure_tool_retrieval(agent, plan):
             'skill_prompt_parts': skill_manager.describe_prompt() if skill_manager else [],
         }
         active_budget = fallback_state.budget if fallback_state is not None else budget
+        if initializing and fallback_state is not None:
+            from .model_fallback import _ordered_candidates
+            candidates = _ordered_candidates(fallback_state)
+            if any(item.max_input_tokens is None for item in candidates):
+                return
+            active_budget = max(
+                [active_budget, *(build_context_budget(item.max_input_tokens) for item in candidates)],
+                key=lambda item: item.effective_input_budget,
+            )
         if estimate_non_history_tokens(prefix, plan.prompt.current_input) > active_budget.effective_input_budget:
             raise ToolExecutionError('加载失败，原因是新增工具定义导致固定上下文超过有效输入上限；'
                                      '请释放可选工具，或只加载所需成员。')
@@ -225,7 +235,11 @@ def configure_tool_retrieval(agent, plan):
     if fallback_state is not None:
         fallback_state.tool_retrieval = controller
     if not options.context_preview:
-        controller.initialize()
+        initializing = True
+        try:
+            controller.initialize()
+        finally:
+            initializing = False
     if skill_manager:
         skill_manager.on_skill_loaded = controller.load_skill
         skill_tool = manager.tools_info.get('get_skill')

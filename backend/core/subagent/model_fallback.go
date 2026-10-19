@@ -232,7 +232,7 @@ func persistTaskModelEvent(ctx context.Context, tx *gorm.DB, req *RunRequest, ca
 		}
 		for _, pending := range call.pending {
 			role, content := remoteStepContent(pending)
-			if err := appendExecutionStep(ctx, tx, ev.TaskID, ev.ExecutionID, role, content); err != nil {
+			if _, err := appendExecutionStep(ctx, tx, ev.TaskID, ev.ExecutionID, role, content); err != nil {
 				return false, err
 			}
 		}
@@ -252,7 +252,7 @@ func persistTaskModelEvent(ctx context.Context, tx *gorm.DB, req *RunRequest, ca
 	}
 	record := taskModelRecord{ModelOutput: *m, CurrentModel: identity, MaxInputTokens: window, ModelSwitch: switched}
 	raw, _ := json.Marshal(record)
-	if err := appendExecutionStep(ctx, tx, ev.TaskID, ev.ExecutionID, "model_runtime", raw); err != nil {
+	if _, err := appendExecutionStep(ctx, tx, ev.TaskID, ev.ExecutionID, "model_runtime", raw); err != nil {
 		return false, err
 	}
 	if switched != nil {
@@ -265,10 +265,11 @@ func persistTaskModelEvent(ctx context.Context, tx *gorm.DB, req *RunRequest, ca
 	return true, nil
 }
 
-func appendExecutionStep(ctx context.Context, tx *gorm.DB, taskID, executionID, role string, content json.RawMessage) error {
+func appendExecutionStep(ctx context.Context, tx *gorm.DB, taskID, executionID, role string, content json.RawMessage) (int, error) {
 	var seq int
 	if err := tx.Model(&orm.SubAgentStep{}).Where("task_id = ?", taskID).Select("COALESCE(MAX(seq), -1)").Scan(&seq).Error; err != nil {
-		return err
+		return 0, err
 	}
-	return tx.WithContext(ctx).Create(&orm.SubAgentStep{ID: "sas_" + common.GenerateID(), TaskID: taskID, ExecutionID: executionID, Seq: seq + 1, Role: role, Content: content, CreatedAt: time.Now().UTC()}).Error
+	err := tx.WithContext(ctx).Create(&orm.SubAgentStep{ID: "sas_" + common.GenerateID(), TaskID: taskID, ExecutionID: executionID, Seq: seq + 1, Role: role, Content: content, CreatedAt: time.Now().UTC()}).Error
+	return seq + 1, err
 }

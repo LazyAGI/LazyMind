@@ -6503,7 +6503,7 @@ export interface TaskDocumentInfo {
     'document_state'?: string;
 }
 /**
- * Ordinary task model_output uses execution_id as run_id. type=model_output carries pure begin/commit/rollback controls; only commit may include the Host model_switched fact. Model text/think carry run/call identity without phase. SDK observations and Chat run_finished are not Task events. Developer reconnect begins with task_start and committed DB entries retaining call identity, followed by one closed cursor (0 when none), current open cache preview and ordered live events. The DB section is authoritative hydration. Terminal restores any open preview before done/error.
+ * Ordinary task model_output uses execution_id as run_id. type=model_output carries pure begin/commit/rollback controls; only commit may include the Host model_switched fact. Model text/think carry run/call identity without phase. SDK observations and Chat run_finished are not Task events. Developer reconnect or execution changes begin with a Core-generated task_start with snapshot=true and committed DB entries retaining call identity, followed by one closed cursor (0 when none), current open cache preview and ordered live events. Only this DB section initializes authoritative hydration; live task_start is idempotent for an established execution. On ordinary tool_calls/tool_results, seq is the zero-based durable step sequence used to merge snapshot and live delivery once. Terminal restores any open preview before done/error.
  */
 export interface TaskEvent {
     'chunk_index'?: number;
@@ -6522,6 +6522,7 @@ export interface TaskEvent {
     'scope_version'?: number;
     'seq'?: number;
     'slot'?: string;
+    'snapshot'?: boolean;
     'sources'?: Array<object>;
     'status'?: string;
     'steps'?: Array<string>;

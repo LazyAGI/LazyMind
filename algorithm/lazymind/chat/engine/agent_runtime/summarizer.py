@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import json
 from dataclasses import asdict
 from typing import Any, Callable, Optional
 
@@ -9,9 +8,9 @@ import lazyllm
 
 from lazymind.config import config
 
-from .budget import usage_ratio
+from .budget import output_budget_kwargs, usage_ratio
 from .context_estimator import estimate_tokens
-from .message_fields import model_facing_history, model_facing_message
+from .message_fields import model_facing_history, estimate_message_tokens
 from .models import ContextBudget, CompressionTrigger, SummaryEvent
 from .summary_prompt import (
     build_summary_user_prompt,
@@ -42,10 +41,7 @@ except Exception:  # pragma: no cover - optional at import time in unit tests
 
 
 def _estimate_history_tokens(history: list[dict[str, Any]]) -> int:
-    return sum(
-        estimate_tokens(json.dumps(model_facing_message(message), ensure_ascii=False, default=str))
-        for message in history
-    )
+    return sum(estimate_message_tokens(message) for message in history)
 
 
 def _llm_response_text(resp: Any) -> str:
@@ -75,12 +71,12 @@ def _call_summarizer_llm(llm: Any, system_prompt: str, user_prompt: str, *,
         view._static_params.pop('tools', None)
         with lazyllm.globals.stack_enter(view.identities):
             supplier = view._get_supplier() if hasattr(view, '_get_supplier') else view
-        output_limit = max(1, candidate_budget.reserved_output_tokens)
-        if _request_tokens(supplier, user_prompt, None, None, {'max_tokens': output_limit}) \
+            output_params = output_budget_kwargs(view, supplier, max(1, candidate_budget.reserved_output_tokens))
+        if _request_tokens(supplier, user_prompt, None, None, output_params) \
                 > candidate_budget.effective_input_budget:
             raise _preparation_error(ModelFailureCode.TOKEN_LIMIT, 'The summary request does not fit this candidate.')
         try:
-            return _llm_response_text(view(user_prompt, max_tokens=output_limit, max_retries=1, tools=[]))
+            return _llm_response_text(view(user_prompt, **output_params, max_retries=1, tools=[]))
         except ModelCallError as exc:
             if exc.terminal.kind == 'finish' and exc.terminal.finish == ModelFinish.LENGTH:
                 raise _preparation_error(ModelFailureCode.TOKEN_LIMIT,

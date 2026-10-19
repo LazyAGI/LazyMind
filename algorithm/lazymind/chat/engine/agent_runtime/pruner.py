@@ -393,8 +393,9 @@ def _record_candidate(
     prepared=None,
 ) -> None:
     if prepared is not None:
-        prepared.candidate_events.append(dict(stage=stage, decision=decision, reason=reason,
-                                             changed_entries=changed_entries, **metrics))
+        prepared.candidate_events.append(dict(
+            stage=stage, decision=decision, reason=reason, changed_entries=changed_entries, **metrics,
+        ))
         return
     append_event(
         'compression_candidate',

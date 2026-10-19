@@ -957,16 +957,9 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 			}
 			unavailable := unavailableAutoChatModels(&conversation, histories)
 			usable := make([]availableChatModel, 0, len(models))
-			hasLocalCandidates := false
-			for index := range models {
-				if models[index].Source != "cloud" && chatModelUsable(&models[index]) {
-					hasLocalCandidates = true
-					break
-				}
-			}
 			for _, candidate := range models {
 				key := chatModelIdentityKey(candidate.Source, candidate.ID)
-				if chatModelUsable(&candidate) && !unavailable[key] && (!hasLocalCandidates || candidate.Source != "cloud") {
+				if chatModelUsable(&candidate) && !unavailable[key] {
 					usable = append(usable, candidate)
 				}
 			}
@@ -1011,6 +1004,25 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 				}
 			}
 			if model == nil {
+				// Restore a successful Cloud binding before applying the existing
+				// local-first policy to a new selection. Catalog visibility alone
+				// must not enable Cloud when local models have failed this session.
+				hasLocalCandidates := false
+				for index := range models {
+					if models[index].Source != "cloud" && chatModelUsable(&models[index]) {
+						hasLocalCandidates = true
+						break
+					}
+				}
+				if hasLocalCandidates {
+					local := usable[:0]
+					for _, candidate := range usable {
+						if candidate.Source != "cloud" {
+							local = append(local, candidate)
+						}
+					}
+					usable = local
+				}
 				defaultModel, defaultErr := resolveDefaultChatModel(ctx, db, userID, usable)
 				if defaultErr != nil {
 					return defaultErr
