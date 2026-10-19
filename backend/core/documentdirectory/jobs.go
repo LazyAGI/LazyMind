@@ -184,7 +184,7 @@ func enqueueManual(ctx context.Context, tx *gorm.DB, uid string, d orm.DocumentD
 	} else if c.Organization != "" && c.Organization != d.Organization {
 		return ErrInput
 	}
-	b := orm.DocumentDirectoryBatch{ID: common.GenerateID(), UserID: uid, OwnerKey: uid, DirectoryID: d.ID, TriggerID: common.GenerateID(), InputJSON: encoded(Input{ConversationID: c.ConversationID, Entries: entries, Instruction: c.Instruction, Manual: true}), Status: "pending", CreatedAt: now, UpdatedAt: now}
+	b := orm.DocumentDirectoryBatch{ID: common.GenerateID(), UserID: uid, OwnerKey: uid, DirectoryID: d.ID, TriggerID: common.GenerateID(), InputJSON: encoded(Input{ConversationID: c.ConversationID, Entries: entries, Instruction: c.Instruction, Manual: true, Reorganize: c.Operation == "reorganize", SourceDirectoryID: c.DirectoryID}), Status: "pending", CreatedAt: now, UpdatedAt: now}
 	var folder orm.DocumentFolderInventory
 	folderErr := tx.Where("directory_id=? AND user_id=?", c.DirectoryID, uid).Take(&folder).Error
 	if folderErr != nil && !errors.Is(folderErr, gorm.ErrRecordNotFound) {
@@ -206,6 +206,15 @@ func enqueueManual(ctx context.Context, tx *gorm.DB, uid string, d orm.DocumentD
 			folder.ID = common.GenerateID()
 			folder.DirectoryID = d.ID
 			folder.BatchID = b.ID
+			var state map[string]any
+			if err := json.Unmarshal(folder.StateJSON, &state); err != nil {
+				return err
+			}
+			if state == nil {
+				state = map[string]any{}
+			}
+			state["reorganization"] = true
+			folder.StateJSON = encoded(state)
 			folder.CreatedAt = now
 			folder.UpdatedAt = now
 			if err := tx.Create(&folder).Error; err != nil {
@@ -248,8 +257,20 @@ func enqueueManual(ctx context.Context, tx *gorm.DB, uid string, d orm.DocumentD
 				}
 			}
 		}
-		b.InputJSON = encoded(Input{ConversationID: c.ConversationID, FolderInventoryID: folder.ID, Manual: true, Instruction: c.Instruction})
+		b.InputJSON = encoded(Input{ConversationID: c.ConversationID, FolderInventoryID: folder.ID, Manual: true, Instruction: c.Instruction, Reorganize: c.Operation == "reorganize", SourceDirectoryID: c.DirectoryID})
 		b.ResultJSON = encoded(map[string]any{"collection_state": "pending", "classification_state": "pending", "processed": 0})
+	}
+
+	if c.Operation == "reorganize" && errors.Is(folderErr, gorm.ErrRecordNotFound) {
+		for i := range entries {
+			copyEntryIdentity(&entries[i], d.ID)
+			entries[i].Confirmed = false
+		}
+		if len(entries) > 0 {
+			if err := tx.CreateInBatches(entries, 100).Error; err != nil {
+				return err
+			}
+		}
 	}
 
 	if err := enqueue(ctx, tx, &b, OrganizeJob, d.ID); err != nil {
@@ -347,7 +368,6 @@ func handleJob(ctx context.Context, j asyncjob.Job, reporter asyncjob.Reporter) 
 	if input.ConversationID == "" && len(input.Observations) > 0 {
 		input.ConversationID = input.Observations[0].ConversationID
 	}
-	var proposal Proposal
 	var err error
 	generate := func(mode string, data any) (Proposal, error) {
 		p, modelErr := callModel(ctx, db, b.UserID, input.ConversationID, mode, data)
@@ -361,7 +381,9 @@ func handleJob(ctx context.Context, j asyncjob.Job, reporter asyncjob.Reporter) 
 				result = map[string]any{}
 			}
 			attempts, _ := result["model_attempts"].([]any)
-			result["model_attempts"] = append(attempts, map[string]any{"job_id": j.ID, "attempt": j.AttemptCount, "mode": mode, "succeeded": modelErr == nil, "usage": p.Usage})
+			attempts = append(attempts, map[string]any{"job_id": j.ID, "attempt": j.AttemptCount, "mode": mode, "succeeded": modelErr == nil, "usage": p.Usage})
+			result["model_attempts"] = attempts
+			result["usage"] = modelUsage(attempts)
 			b.ResultJSON = encoded(result)
 			return tx.Model(&b).Update("result_json", b.ResultJSON).Error
 		})
@@ -373,55 +395,9 @@ func handleJob(ctx context.Context, j asyncjob.Job, reporter asyncjob.Reporter) 
 	if input.FolderInventoryID != "" {
 		err = organizeFolder(ctx, db, j, &b, input, generate)
 	} else if j.JobType == PlanJob {
-		var dirs []orm.DocumentDirectory
-		err = db.WithContext(ctx).Where("user_id=? AND deleted_at IS NULL", b.UserID).Find(&dirs).Error
-		if err == nil {
-			proposal, err = generate("route", routeInput(input, dirs))
-		}
-		if err == nil {
-			err = applyTargets(ctx, db, j, &b, input, proposal)
-		}
+		err = routeChunks(ctx, db, j, &b, input, generate)
 	} else {
-		var d orm.DocumentDirectory
-		var groups []orm.DocumentDirectoryGroup
-		var entries []orm.DocumentDirectoryEntry
-		err = mutate(ctx, db, b.UserID, func(tx *gorm.DB) error {
-			if e := ownsJob(tx, j); e != nil {
-				return e
-			}
-			var e error
-			d, e = requireDirectory(tx, b.UserID, b.DirectoryID)
-			if e != nil {
-				return e
-			}
-			if !input.Manual && !d.AutoAdd {
-				return ErrInput
-			}
-			if e = tx.Where("directory_id=?", d.ID).Find(&groups).Error; e != nil {
-				return e
-			}
-			return tx.Where("directory_id=?", d.ID).Find(&entries).Error
-		})
-		if errors.Is(err, gorm.ErrRecordNotFound) || (!input.Manual && errors.Is(err, ErrInput)) {
-			err = mutate(ctx, db, b.UserID, func(tx *gorm.DB) error {
-				if e := ownsJob(tx, j); e != nil {
-					return e
-				}
-				return tx.Model(&b).Updates(map[string]any{"status": "canceled", "updated_at": time.Now().UTC()}).Error
-			})
-			return asyncjob.Result{}, err
-		}
-		if err == nil {
-			resources := organizerResources(input, entries)
-			if len(resources) == 0 {
-				proposal = Proposal{Groups: []orm.DocumentDirectoryGroup{}, Assignments: []Assignment{}, Usage: map[string]any{"model_calls": 0}}
-			} else {
-				proposal, err = generate("organize", map[string]any{"directory": d, "groups": groups, "entries": entries, "resources": resources, "instruction": input.Instruction})
-			}
-		}
-		if err == nil {
-			err = applyOrganization(ctx, db, j, &b, d.Version, input, proposal)
-		}
+		err = organizeChunks(ctx, db, j, &b, input, generate)
 	}
 	if err != nil {
 		return asyncjob.Result{ErrorCode: "directory_organize_failed", Permanent: errors.Is(err, ErrInput)}, err
@@ -478,8 +454,12 @@ func routeInput(input Input, directories []orm.DocumentDirectory) map[string]any
 			"status": o.Status, "incomplete": o.Incomplete, "resource_keys": keys,
 		})
 	}
+	catalog := make([]map[string]any, 0, len(directories))
+	for _, d := range directories {
+		catalog = append(catalog, map[string]any{"id": d.ID, "name": d.Name, "intent": d.Intent, "organization": d.Organization, "auto_add": d.AutoAdd, "ready": d.Ready})
+	}
 	return map[string]any{"input": map[string]any{"observations": observations, "instruction": input.Instruction},
-		"directories": directories, "resources": resources}
+		"directories": catalog, "resources": resources}
 }
 
 func copyEntryIdentity(e *orm.DocumentDirectoryEntry, directoryID string) {
@@ -670,6 +650,7 @@ func applyTargets(ctx context.Context, db *gorm.DB, j asyncjob.Job, b *orm.Docum
 		}
 		b.Status = "succeeded"
 		b.UpdatedAt = now
+		b.Acknowledged = len(seen) == 0
 		b.ResultJSON = batchResult(b.ResultJSON, map[string]any{"targets": len(seen), "usage": p.Usage})
 		return tx.Save(b).Error
 	})
@@ -737,7 +718,7 @@ func applyOrganization(ctx context.Context, db *gorm.DB, j asyncjob.Job, b *orm.
 				return ErrInput
 			}
 		}
-		if len(p.Assignments) == 0 && !d.Ready {
+		if len(p.Assignments) == 0 && !d.Ready && !input.Chunked && !input.Reorganize {
 			b.Status = "succeeded"
 			b.ResultJSON = batchResult(b.ResultJSON, map[string]any{"added": 0, "usage": p.Usage})
 			if err := tx.Save(b).Error; err != nil {
@@ -753,7 +734,13 @@ func applyOrganization(ctx context.Context, db *gorm.DB, j asyncjob.Job, b *orm.
 		needed := map[string]bool{}
 		for _, a := range p.Assignments {
 			var fixed int64
-			if err := tx.Model(&orm.DocumentDirectoryEntry{}).Where("directory_id=? AND resource_key=? AND (pinned=? OR excluded=?)", d.ID, a.ResourceKey, true, true).Count(&fixed).Error; err != nil {
+			fixedQuery := tx.Model(&orm.DocumentDirectoryEntry{}).Where("directory_id=? AND resource_key=?", d.ID, a.ResourceKey)
+			if readAt := resources[a.ResourceKey].ReadAt; readAt != nil {
+				fixedQuery = fixedQuery.Where("pinned=? OR excluded=? OR read_at>?", true, true, readAt.Truncate(time.Microsecond))
+			} else {
+				fixedQuery = fixedQuery.Where("pinned=? OR excluded=?", true, true)
+			}
+			if err := fixedQuery.Count(&fixed).Error; err != nil {
 				return err
 			}
 			if fixed > 0 {
@@ -809,6 +796,10 @@ func applyOrganization(ctx context.Context, db *gorm.DB, j asyncjob.Job, b *orm.
 			if err != nil && !fresh {
 				return err
 			}
+			// An older read cannot revise an already accepted classification either.
+			if !fresh && c.ReadAt != nil && e.ReadAt != nil && c.ReadAt.Truncate(time.Microsecond).Before(e.ReadAt.Truncate(time.Microsecond)) {
+				continue
+			}
 			hasReadEvidence := c.ReadAt != nil && (c.ReadState == "read" || c.ReadState == "partial") && strings.TrimSpace(c.Excerpt) != "" && c.AccessState != "denied" && c.AccessState != "unavailable" && c.AccessState != "deleted"
 			// PostgreSQL stores microseconds; JSON observations may retain nanoseconds.
 			newRead := hasReadEvidence && (e.ReadAt == nil || c.ReadAt.Truncate(time.Microsecond).After(e.ReadAt.Truncate(time.Microsecond)))
@@ -860,7 +851,7 @@ func applyOrganization(ctx context.Context, db *gorm.DB, j asyncjob.Job, b *orm.
 			}
 		}
 		evicted := ""
-		if !d.Ready {
+		if !d.Ready && !input.Chunked && !input.Reorganize {
 			evicted, err = makeRoom(tx, b.UserID, d.ID)
 			if err != nil {
 				return err
@@ -890,13 +881,23 @@ func applyOrganization(ctx context.Context, db *gorm.DB, j asyncjob.Job, b *orm.
 		b.Status = "succeeded"
 
 		b.UpdatedAt = now
-		if input.FolderBatch {
+		if input.FolderBatch || input.Chunked {
 			b.Status = "running"
 			grouped, unclassified, err := classificationCounts(tx, d.ID)
 			if err != nil {
 				return err
 			}
-			b.ResultJSON = folderResult(b.ResultJSON, map[string]any{"processed": input.FolderOffset, "grouped": grouped, "unclassified": unclassified, "classification_state": "running", "directory_name": d.Name, "usage": p.Usage})
+			offset := input.FolderOffset
+			if input.Chunked {
+				offset = input.ChunkOffset
+			}
+			var prior struct {
+				Added    int `json:"added"`
+				Pending  int `json:"pending"`
+				Excluded int `json:"excluded"`
+			}
+			_ = json.Unmarshal(b.ResultJSON, &prior)
+			b.ResultJSON = folderResult(b.ResultJSON, map[string]any{"added": prior.Added + added, "pending": prior.Pending + pending, "excluded": prior.Excluded + excluded, "processed": offset, "grouped": grouped, "unclassified": unclassified, "classification_state": "running", "directory_name": d.Name})
 		} else {
 			b.ResultJSON = batchResult(b.ResultJSON, map[string]any{"added": added, "pending": pending, "excluded": excluded, "evicted": evicted, "directory_name": d.Name, "usage": p.Usage})
 		}
@@ -1022,6 +1023,7 @@ func batchResult(previous json.RawMessage, result map[string]any) json.RawMessag
 	_ = json.Unmarshal(previous, &old)
 	if attempts, ok := old["model_attempts"]; ok {
 		result["model_attempts"] = attempts
+		result["usage"] = old["usage"]
 	}
 	return encoded(result)
 }

@@ -97,19 +97,21 @@ func TestReviewLateObservationPreservesVersion(t *testing.T) {
 	current.AccessState = "accessible"
 	e := entryFromCandidate(d.ID, current, late)
 	e.Confirmed = true
+	e.ContentState = "changed"
 	must(t, db.Create(&e).Error)
 	old := current
 	old.ReadAt = &early
 	old.ContentVersion = "version:1"
 	old.Excerpt = "old reading"
+	old.Title = "Outdated title"
 	merged := mergeCandidate(current, old)
 	input := Input{Observations: []orm.DocumentObservation{{PayloadJSON: encoded(Observation{Candidates: []Candidate{old}})}}}
 	b, j := batch(t, db, d, input)
-	must(t, applyOrganization(ctx, db, j, &b, d.Version, input, Proposal{Assignments: []Assignment{{ResourceKey: resourceKey(old), Confirmed: true, EvidenceBasis: "read", Reason: "old read"}}}))
+	must(t, applyOrganization(ctx, db, j, &b, d.Version, input, Proposal{Groups: []orm.DocumentDirectoryGroup{{ID: "old-group", Name: "Outdated group"}}, Assignments: []Assignment{{ResourceKey: resourceKey(old), GroupID: "old-group", Confirmed: true, EvidenceBasis: "read", Reason: "old read"}}}))
 	var got orm.DocumentDirectoryEntry
 	must(t, db.Where("id=?", e.ID).Take(&got).Error)
 	t.Logf("merge_version=%s persisted_version=%s read_at=%s confirmed=%v content_state=%s", merged.ContentVersion, got.ContentVersion, got.ReadAt.Format(time.RFC3339), got.Confirmed, got.ContentState)
-	if got.ContentVersion != "version:2" || !got.Confirmed {
+	if got.ContentVersion != "version:2" || !got.Confirmed || got.Title != "Same" || got.GroupID != "" || got.ContentState != "changed" {
 		t.Errorf("late evidence regressed accepted facts")
 	}
 }

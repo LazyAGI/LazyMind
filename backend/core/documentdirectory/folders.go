@@ -406,11 +406,13 @@ func collectFolder(ctx context.Context, db *gorm.DB, j asyncjob.Job, b *orm.Docu
 			}
 			state := "running"
 			if len(nodes) == 0 {
-				if _, err = makeRoom(tx, b.UserID, d.ID); err != nil {
-					return err
-				}
-				if err = tx.Model(&d).Updates(map[string]any{"ready": true, "updated_at": time.Now().UTC()}).Error; err != nil {
-					return err
+				if !input.Reorganize {
+					if _, err = makeRoom(tx, b.UserID, d.ID); err != nil {
+						return err
+					}
+					if err = tx.Model(&d).Updates(map[string]any{"ready": true, "updated_at": time.Now().UTC()}).Error; err != nil {
+						return err
+					}
 				}
 				finished = true
 				state = "complete"
@@ -432,92 +434,7 @@ func organizeFolder(ctx context.Context, db *gorm.DB, j asyncjob.Job, b *orm.Doc
 	if err := collectFolder(ctx, db, j, b, input); err != nil {
 		return err
 	}
-	for {
-		var result struct {
-			Processed int `json:"processed"`
-		}
-		if err := json.Unmarshal(b.ResultJSON, &result); err != nil {
-			return err
-		}
-		var d orm.DocumentDirectory
-		var groups []orm.DocumentDirectoryGroup
-		var entries []orm.DocumentDirectoryEntry
-		err := mutate(ctx, db, b.UserID, func(tx *gorm.DB) error {
-			if err := ownsJob(tx, j); err != nil {
-				return err
-			}
-			var err error
-			d, err = requireDirectory(tx, b.UserID, b.DirectoryID)
-			if err != nil {
-				return err
-			}
-			if err = tx.Where("directory_id=?", d.ID).Order("position,id").Find(&groups).Error; err != nil {
-				return err
-			}
-			if err = tx.Where("directory_id=?", d.ID).Order("id").Offset(result.Processed).Limit(30).Find(&entries).Error; err != nil {
-				return err
-			}
-			b.ResultJSON = folderResult(b.ResultJSON, map[string]any{"classification_state": "running"})
-			return tx.Model(b).Update("result_json", b.ResultJSON).Error
-		})
-		if err != nil {
-			return err
-		}
-		if len(entries) == 0 {
-			return mutate(ctx, db, b.UserID, func(tx *gorm.DB) error {
-				if err := ownsJob(tx, j); err != nil {
-					return err
-				}
-				grouped, unclassified, err := classificationCounts(tx, d.ID)
-				if err != nil {
-					return err
-				}
-				b.Status = "succeeded"
-				b.ResultJSON = folderResult(b.ResultJSON, map[string]any{"classification_state": "complete", "grouped": grouped, "unclassified": unclassified})
-				return tx.Model(b).Updates(map[string]any{"status": b.Status, "result_json": b.ResultJSON, "updated_at": time.Now().UTC()}).Error
-			})
-		}
-		chunk := Input{Manual: true, Entries: entries, FolderBatch: true, FolderOffset: result.Processed + len(entries)}
-		// Only the evidence for this inventory is eligible for enrichment.
-		var observations []orm.DocumentObservation
-		v, loadErr := inventory(db, b.UserID, input.FolderInventoryID)
-		if loadErr != nil {
-			return loadErr
-		}
-		if err = db.Where("user_id=? AND batch_id IN ?", b.UserID, []string{b.ID, v.BatchID}).Find(&observations).Error; err != nil {
-			return err
-		}
-		selected := map[string]bool{}
-		for _, e := range entries {
-			selected[e.ResourceKey] = true
-		}
-		for _, o := range observations {
-			var obs Observation
-			if json.Unmarshal(o.PayloadJSON, &obs) != nil {
-				continue
-			}
-			filtered := []Candidate{}
-			for _, c := range obs.Candidates {
-				if selected[resourceKey(c)] {
-					filtered = append(filtered, c)
-				}
-			}
-			obs.Candidates = filtered
-			o.PayloadJSON = encoded(obs)
-			chunk.Observations = append(chunk.Observations, o)
-		}
-		resources := organizerResources(chunk, entries)
-		p := Proposal{Groups: []orm.DocumentDirectoryGroup{}, Assignments: []Assignment{}}
-		if len(resources) > 0 {
-			p, err = generate("organize", map[string]any{"directory": d, "groups": groups, "entries": entries, "resources": resources, "instruction": input.Instruction + "\nAll supplied resources already belong to the selected folder. Classify only; reuse existing groups. Keep reasons brief. Uncertain items remain unclassified."})
-			if err != nil {
-				return err
-			}
-		}
-		if err = applyOrganization(ctx, db, j, b, d.Version, chunk, p); err != nil {
-			return err
-		}
-	}
+	return organizeChunks(ctx, db, j, b, input, generate)
 }
 
 func folderResult(previous json.RawMessage, next map[string]any) json.RawMessage {

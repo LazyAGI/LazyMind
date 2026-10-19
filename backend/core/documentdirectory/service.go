@@ -52,6 +52,11 @@ type Observation struct {
 }
 
 type Input struct {
+	ResourceKeys      []string                     `json:"resource_keys,omitempty"`
+	Reorganize        bool                         `json:"reorganize,omitempty"`
+	SourceDirectoryID string                       `json:"source_directory_id,omitempty"`
+	Chunked           bool                         `json:"chunked,omitempty"`
+	ChunkOffset       int                          `json:"chunk_offset,omitempty"`
 	ConversationID    string                       `json:"conversation_id,omitempty"`
 	Observations      []orm.DocumentObservation    `json:"observations"`
 	Entries           []orm.DocumentDirectoryEntry `json:"entries,omitempty"`
@@ -167,6 +172,9 @@ func getSnapshot(ctx context.Context, db *gorm.DB, uid, id string, page ...Entry
 	}
 	var folder orm.DocumentFolderInventory
 	if err := db.Where("directory_id=? AND user_id=?", id, uid).Take(&folder).Error; err == nil {
+		if !d.Directory.Ready && hiddenReorganization(folder) {
+			return d, gorm.ErrRecordNotFound
+		}
 		d.Folder = &folder
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return d, err
@@ -179,7 +187,34 @@ func getSnapshot(ctx context.Context, db *gorm.DB, uid, id string, page ...Entry
 func List(ctx context.Context, db *gorm.DB, uid string) ([]orm.DocumentDirectory, error) {
 	rows := []orm.DocumentDirectory{}
 	err := db.WithContext(ctx).Where("user_id=? AND deleted_at IS NULL AND (ready=? OR id IN (SELECT directory_id FROM document_folder_inventories WHERE user_id=?))", uid, true, uid).Order("pinned DESC, COALESCE(organized_at,created_at) DESC,id").Find(&rows).Error
-	return rows, err
+	if err != nil {
+		return nil, err
+	}
+	var folders []orm.DocumentFolderInventory
+	if err = db.WithContext(ctx).Where("user_id=?", uid).Find(&folders).Error; err != nil {
+		return nil, err
+	}
+	hidden := map[string]bool{}
+	for _, folder := range folders {
+		if hiddenReorganization(folder) {
+			hidden[folder.DirectoryID] = true
+		}
+	}
+	visible := rows[:0]
+	for _, d := range rows {
+		if d.Ready || !hidden[d.ID] {
+			visible = append(visible, d)
+		}
+	}
+	return visible, nil
+}
+
+func hiddenReorganization(folder orm.DocumentFolderInventory) bool {
+	var state struct {
+		Reorganize bool `json:"reorganization"`
+	}
+	_ = json.Unmarshal(folder.StateJSON, &state)
+	return state.Reorganize
 }
 
 // All user mutations serialize only their short transactions, never model calls.
@@ -208,7 +243,7 @@ func removeTx(tx *gorm.DB, uid, id string) error {
 
 // Called immediately before committing a new visible directory. A failed model
 // call can never evict an existing view.
-func makeRoom(tx *gorm.DB, uid, exclude string) (string, error) {
+func makeRoom(tx *gorm.DB, uid, exclude string, protected ...string) (string, error) {
 	var n int64
 	if err := tx.Model(&orm.DocumentDirectory{}).Where("user_id=? AND ready=? AND id<>?", uid, true, exclude).Count(&n).Error; err != nil {
 		return "", err
@@ -221,6 +256,16 @@ func makeRoom(tx *gorm.DB, uid, exclude string) (string, error) {
 		return "", err
 	}
 	for _, d := range candidates {
+		skip := false
+		for _, id := range protected {
+			if id == d.ID {
+				skip = true
+				break
+			}
+		}
+		if skip {
+			continue
+		}
 		b, err := busy(tx, uid, d.ID)
 		if err != nil {
 			return "", err

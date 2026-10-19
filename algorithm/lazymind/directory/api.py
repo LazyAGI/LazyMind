@@ -45,7 +45,8 @@ Do not change Intent or organization. Preserve all existing group IDs, names, pa
 and user adjustments. Only propose new groups that are needed, using temporary IDs (new_1 etc.).
 Use existing groups whenever appropriate. New groups may reference existing or new parents.
 Do not reclassify, move or remove pinned entries. Core filters and reports excluded entries.
-Only keys in resources may appear in assignments; entries are context, never additional inputs.
+Only keys in resources may appear in assignments; entries are a bounded selection of related
+entries and representative confirmed examples, never a complete inventory or additional inputs.
 Do not treat source providers as document types.
 When organizing by document type, derive reusable content-type groups from the materials.
 Documents of the same type share a group across providers, systems and subjects; do not split
