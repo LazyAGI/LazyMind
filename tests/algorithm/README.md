@@ -79,3 +79,19 @@ select that mode explicitly. This prevents an existing service's environment fro
 silently changing unrelated test assumptions. Retain the command, source SHAs,
 import paths and output with the acceptance record; remove only this snapshot when
 its evidence has been saved.
+
+### Startup failure diagnostics
+
+The chat startup test keeps its 3-second wall-clock limit around
+`ensure_chat_runtime()`. If the timing or unloaded-RAG/docs assertions fail, the
+assertion includes a structured report with runtime-loader import time, chat
+runtime import time, chat runtime CPU time, Python/OS/architecture information,
+installed dependency versions and the actual imported module paths. Installed
+package metadata can differ from a checked-out source override; use the module
+paths to identify which code ran.
+
+Metadata collection occurs after timing and after capturing the RAG/docs state.
+Successful tests emit no diagnostic output. The probe does not dump environment
+variables, credentials, business data or raw child-process logs, and it does not
+use per-module `importtime` instrumentation. This is permanent test-only
+observability, with no changes to production startup or automatic retries.
