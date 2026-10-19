@@ -9,7 +9,25 @@ class WeChatError(RuntimeError):
 
 
 class WeChatRejectedError(WeChatError, ProviderRejectedError):
-    pass
+    """Provider rejection with bounded diagnostics, never a raw response."""
+
+    def __init__(self, message='Provider rejected request', retryable=False,
+                 operation='unknown', http_status=None, ret=None, errcode=None):
+        super().__init__(message, retryable)
+        self.operation = operation if type(operation) is str and operation in {
+            'getupdates', 'notifystart', 'getconfig', 'sendtyping',
+            'getuploadurl', 'sendmessage',
+        } else 'unknown'
+        self.http_status = http_status if type(http_status) is int and 100 <= http_status <= 599 else None
+        self.ret = self._numeric_code(ret)
+        self.errcode = self._numeric_code(errcode)
+        # Keep the existing exception copy/pickle contract, without retaining
+        # provider text, credentials, URLs or request/response payloads.
+        self.args = (message, retryable, self.operation, self.http_status, self.ret, self.errcode)
+
+    @staticmethod
+    def _numeric_code(value):
+        return value if type(value) is int and -(2 ** 31) <= value < 2 ** 31 else None
 
 
 @dataclass(frozen=True, slots=True)

@@ -268,6 +268,7 @@ def test_resume_does_not_rotate_or_erase_credentials_from_a_later_pause(gateway,
 @pytest.mark.parametrize('create_new,app_id', [(False, 'cli_existing'), (True, None)])
 def test_registration_adapter_distinguishes_reauthorization_from_creation(monkeypatch, create_new, app_id):
     import threading
+    import lark_oapi
     from channel_gateway.feishu import registration
     calls = []
 
@@ -276,7 +277,7 @@ def test_registration_adapter_distinguishes_reauthorization_from_creation(monkey
         return {'client_id': app_id or 'cli_new', 'client_secret': 'synthetic-only',
                 'user_info': {'open_id': 'owner-open', 'name': 'Alice'}}
 
-    monkeypatch.setattr(registration.lark_oapi, 'register_app', register)
+    monkeypatch.setattr(lark_oapi, 'register_app', register)
     monkeypatch.setattr(registration, 'get_bot_name', lambda *_: '我的飞书机器人')
     result = registration.LarkAppRegistrar().register(
         on_qr_code=lambda *_: None, on_status_change=lambda *_: None,
@@ -325,6 +326,7 @@ def test_custom_feishu_name_with_legacy_prefix_survives_account_list(gateway, ac
 
 def test_bot_name_probe_reads_bot_info_response(monkeypatch):
     from types import SimpleNamespace
+    import lark_oapi
     from channel_gateway.feishu import registration
 
     class Client:
@@ -352,5 +354,5 @@ def test_bot_name_probe_reads_bot_info_response(monkeypatch):
         def build(self):
             return Client()
 
-    monkeypatch.setattr(registration.lark_oapi, 'Client', Client)
+    monkeypatch.setattr(lark_oapi, 'Client', Client)
     assert registration.get_bot_name('cli_example', 'secret') == 'My Feishu Bot'

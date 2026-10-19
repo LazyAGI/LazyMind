@@ -312,6 +312,27 @@ class LazyMindClient:
         except Exception:
             raise GatewayError(503, 'NOTIFICATION_CORE_UNAVAILABLE', '暂时无法查询账号引用', retryable=True) from None
 
+    def wechat_notification_targets(self, owner):
+        try:
+            preferences = self._request_json(
+                'GET', f'{self._base_url}/user/notification-preferences', owner_user_id=owner,
+                request_id='wechat-probe-gate', error_label='notification preferences', timeout_seconds=2,
+            )
+            preferences = preferences.get('data', preferences)
+            if (preferences.get('enabled') is not True or preferences.get('defaults', {}).get(
+                    'channels', {}).get('wechat', {}).get('enabled') is not True):
+                return []
+            result = self._request_json(
+                'GET', f'{self._base_url}/user/wechat-notification-targets', owner_user_id=owner,
+                request_id='wechat-probe-targets', error_label='confirmed notification targets', timeout_seconds=2,
+            )
+            result = result.get('data', result)
+            return [item for item in result.get('items', []) if isinstance(item, dict)
+                    and isinstance(item.get('account_id'), str) and item['account_id']
+                    and isinstance(item.get('recipient_id'), str) and item['recipient_id']]
+        except Exception:
+            raise GatewayError(503, 'NOTIFICATION_CORE_UNAVAILABLE', '暂时无法查询通知接收对象', retryable=True) from None
+
     def chat(
         self,
         *,

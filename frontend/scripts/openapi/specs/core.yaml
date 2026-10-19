@@ -9332,6 +9332,23 @@ components:
                 name:
                     type: string
             type: object
+        WeChatNotificationTargets:
+            properties:
+                items:
+                    items:
+                        properties:
+                            account_id:
+                                type: string
+                            recipient_id:
+                                type: string
+                        required:
+                            - account_id
+                            - recipient_id
+                        type: object
+                    type: array
+            required:
+                - items
+            type: object
         WordGroupConflictResponse:
             properties:
                 created_at:
@@ -28727,6 +28744,72 @@ paths:
                                 $ref: '#/components/schemas/NotificationError'
                     description: Notification request failed
             summary: Compare revision; closing requires the exact current affected run IDs
+            tags:
+                - TaskNotifications
+    /api/core/user/wechat-notification-targets:
+        get:
+            description: List unique confirmed WeChat recipients from owned saved schedule notification rules; does not check connectivity. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    code:
+                                        type: integer
+                                    data:
+                                        $ref: '#/components/schemas/WeChatNotificationTargets'
+                                type: object
+                    description: Success
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "413":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotificationError'
+                    description: Notification request failed
+            summary: List unique confirmed WeChat recipients from owned saved schedule notification rules; does not check connectivity
             tags:
                 - TaskNotifications
     /api/core/user/ui-preferences:

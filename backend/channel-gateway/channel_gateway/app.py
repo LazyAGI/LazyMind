@@ -304,9 +304,10 @@ def notification_targets(
     cursor: Annotated[str, Query(max_length=256)] = '',
     recipient_id: Annotated[str, Query(max_length=256)] = '',
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    check_connection: bool = False,
 ):
     return components(request).notifications.notification_targets(
-        owner, account_id, cursor=cursor, recipient_id=recipient_id, limit=limit)
+        owner, account_id, cursor=cursor, recipient_id=recipient_id, limit=limit, check_connection=check_connection)
 
 
 @app.get('/api/channel-gateway/v1/channel-accounts/{account_id}/notification-groups')
@@ -386,8 +387,9 @@ def list_channel_accounts(
     provider: Annotated[str, Query(min_length=1, max_length=32)],
     owner_user_id: Annotated[str, Depends(current_owner)],
     gateway: Annotated[AccountApplicationService, Depends(account_service)],
+    check_connection: bool = False,
 ):
-    return gateway.list_accounts(owner_user_id, provider)
+    return gateway.list_accounts(owner_user_id, provider, check_connection=check_connection)
 
 
 @app.delete(

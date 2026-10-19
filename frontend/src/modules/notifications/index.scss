@@ -28,6 +28,7 @@
   color: #3370ff; background: #edf4ff; font-size: 19px;
 }
 .notification-warning { color: #bd7b18; }
+.notification-channel-block > .notification-activation-warning { margin: 0 18px 16px; }
 .notification-target-picker {
   display: grid; gap: 16px; padding: 14px 0;
   > .ant-alert {
@@ -69,7 +70,21 @@
 }
 
 .notification-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; h3 { margin-bottom: 4px; } }
-.notification-rules.is-settings .notification-channels > .notification-surface {
+.notification-channel-scopes {
+  margin-top: 16px; border: 1px solid var(--border-color, #d8e3f0); border-radius: 12px; overflow: hidden; background: var(--bg-primary, #fff);
+}
+.notification-channel-scope {
+  min-width: 0;
+  + .notification-channel-scope { border-top: 1px solid var(--border-color, #d8e3f0); }
+  > header { padding: 18px 20px; border-bottom: 1px solid var(--border-color, #e7e8ec); background: var(--bg-secondary, #f8fafc);
+    h4 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text-primary, #202a3b); }
+    p { margin: 6px 0 0; }
+  }
+  > .notification-surface { margin: 0; border: 0; border-radius: 0; }
+  > .ant-alert { margin: 12px; }
+  > footer { display: flex; justify-content: flex-end; padding: 8px 16px; border-top: 1px solid var(--border-color, #e7e8ec); }
+}
+.notification-rules.is-settings .notification-channel-scope > .notification-surface {
   border-color: #d8e3f0; border-radius: 12px;
   .notification-row { min-height: 78px; padding: 18px 20px; }
   .notification-brand { flex-basis: 32px; width: 32px; height: 32px; border: 1px solid #dbe3ed; border-radius: 9px; background: #f2f5f8; font-size: 18px; color: #72839c; }
@@ -83,7 +98,7 @@
   font-size: 12px; font-weight: 600; line-height: 22px;
   &.is-connected { color: #159765; background: #e9f8f1; }
   &.is-pending, &.is-expired { color: #ad6800; background: #fff6df; }
-  &.is-disconnected { color: #7d8899; background: #f0f2f5; }
+  &.is-disconnected, &.is-off { color: #7d8899; background: #f0f2f5; }
   &.is-connected::before, &.is-pending::before, &.is-expired::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-inline-end: 7px; border-radius: 50%; background: currentColor; vertical-align: 1px; }
 }
 .notification-browser-permission {

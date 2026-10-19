@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { BellOutlined, FileTextOutlined, SafetyCertificateOutlined, WarningOutlined } from '@ant-design/icons';
 import { listTasks, type Task } from '@/modules/taskCenter/api';
 import RuleEditor from './RuleEditor';
+import { NOTIFICATION_PREFERENCES_CHANGED_EVENT, subscribeNotificationChange } from './notificationEvents';
+import { AgentAppsAuth } from '@/components/auth';
 import { channelGateEnabled, channelSwitchDefaults, channels, events, getExecutionNotifications, getPreferences, notificationError, patchPreferences, ruleError, type ChannelName, type NotificationConfig, type Preferences } from './api';
 
 const activeTaskStatuses = new Set(['pending', 'running', 'waiting', 'waiting_inputs']);
@@ -23,14 +25,24 @@ export default function NotificationSettings({ requestedChannel, onChannelEnable
   const pendingPatch = useRef<Partial<Preferences>>();
   const saving = useRef(false);
   const mounted = useRef(true);
+  const loadGeneration = useRef(0);
+  const pendingReload = useRef(false);
   const load = useCallback(async () => {
+    if (saving.current) { pendingReload.current = true; return; }
+    const generation = ++loadGeneration.current, session = AgentAppsAuth.getSessionIdentity();
+    const current = () => mounted.current && generation === loadGeneration.current && session === AgentAppsAuth.getSessionIdentity();
     setBusy(true); setError('');
-    try { const p = await getPreferences(); if (mounted.current) { setPrefs(p); setDraft(channelSwitchDefaults(p.defaults)); setConflict(false); } }
-    catch { if (mounted.current) setError('loadFailed'); } finally { if (mounted.current) setBusy(false); }
+    try { const p = await getPreferences(); if (current()) { setPrefs(p); setDraft(channelSwitchDefaults(p.defaults)); setConflict(false); } }
+    catch { if (current()) setError('loadFailed'); } finally { if (current()) setBusy(false); }
   }, []);
-  useEffect(() => { mounted.current = true; void load(); return () => { mounted.current = false; }; }, [load]);
+  useEffect(() => {
+    mounted.current = true; void load();
+    const unsubscribe = subscribeNotificationChange(NOTIFICATION_PREFERENCES_CHANGED_EVENT, () => { void load(); }, true);
+    return () => { mounted.current = false; loadGeneration.current += 1; unsubscribe(); };
+  }, [load]);
   const save = async (patch: Partial<Preferences>, confirmed?: string[], revision = prefs?.revision, enabledChannel?: ChannelName) => {
     if (revision === undefined || saving.current) return;
+    loadGeneration.current += 1;
     saving.current = true; pendingPatch.current = patch; setBusy(true); setError('');
     try {
       const result = await patchPreferences({ ...patch, revision, ...(confirmed ? { confirm_running_task_ids: confirmed } : {}) });
@@ -54,7 +66,13 @@ export default function NotificationSettings({ requestedChannel, onChannelEnable
         Modal.confirm({ zIndex: 1600, title: t('notifications.confirmGlobal'), content: <><p>{t('notifications.confirmGlobalHint')}</p>{detail.running_task_ids.map(id => <p key={id}>{id}</p>)}</>, okText: t('notifications.off'), cancelText: t('notifications.cancel'), onOk: () => save(patch, detail.running_task_ids, revision) });
       } else if (detail.reason === 'NOTIFICATION_CONFIG_CONFLICT') { setConflict(true); setError('conflict'); }
       else setError(detail.reason);
-    } finally { saving.current = false; if (mounted.current) setBusy(false); }
+    } finally {
+      saving.current = false;
+      if (mounted.current) {
+        setBusy(false);
+        if (pendingReload.current) { pendingReload.current = false; void load(); }
+      }
+    }
   };
   const confirmEnable = (patch: Partial<Preferences>, channel: ChannelName) => {
     if (!prefs) return;
@@ -153,7 +171,7 @@ export default function NotificationSettings({ requestedChannel, onChannelEnable
       <section className="notification-surface notification-global-control"><div className="notification-row"><span className="notification-global-icon"><BellOutlined /></span><div className="notification-grow"><strong>{t('notifications.global')}</strong><p>{t('notifications.globalHint')}</p></div><Switch aria-label={t('notifications.global')} checked={prefs.enabled} loading={busy} disabled={busy || conflict} onChange={changeMaster} /></div></section>
       {!prefs.enabled && <Alert type="warning" showIcon message={t('notifications.paused')} />}
       <p className="notification-note">{t('notifications.defaultsHint')}</p>
-      {draft && <RuleEditor value={draft} onChange={changeRule} disabled={busy || conflict} highlightedChannel={requestedChannel} connectionInPlace={connectionInPlace} />}
+      {draft && <RuleEditor value={draft} onChange={changeRule} disabled={busy || conflict} preferences={prefs} highlightedChannel={requestedChannel} connectionInPlace={connectionInPlace} />}
     </>}
   </div>;
 }

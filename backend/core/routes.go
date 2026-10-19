@@ -586,6 +586,7 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- Task Center -----
 	handleAPI(r, "GET", "/task-center/tasks", []string{"qa.read"}, taskcenter.ListTasks)
 	handleAPI(r, "GET", "/user/notification-preferences", []string{"qa.read"}, taskcenter.NotificationPreferences)
+	handleAPI(r, "GET", "/user/wechat-notification-targets", []string{"qa.read"}, taskcenter.WeChatNotificationTargets)
 	handleAPI(r, "GET", "/notification-account-references/{account_id}", []string{"qa.read"}, taskcenter.NotificationAccountReferences)
 	handleAPI(r, "POST", "/task-center/notification-events/{notification_id}:claim", []string{"qa.write"}, taskcenter.ClaimNotification)
 	handleAPI(r, "PATCH", "/user/notification-preferences", []string{"qa.write"}, taskcenter.NotificationPreferences)

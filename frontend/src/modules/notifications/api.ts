@@ -3,6 +3,9 @@ import { Configuration as GatewayConfiguration, TaskNotificationsApi as GatewayN
 import type { RawAxiosRequestConfig } from 'axios';
 import { axiosInstance, BASE_URL } from '@/components/request';
 import { listNotificationGroups, type ChannelAccount, type ChannelProvider } from '@/modules/channelGateway/api';
+import { NOTIFICATION_PREFERENCES_CHANGED_EVENT, WECHAT_NOTIFICATION_CONFIG_CHANGED_EVENT, notificationEventScope, publishNotificationChange } from './notificationEvents';
+
+export { NOTIFICATION_PREFERENCES_CHANGED_EVENT, WECHAT_NOTIFICATION_CONFIG_CHANGED_EVENT } from './notificationEvents';
 
 export const providers: ChannelProvider[] = ['feishu', 'wecom', 'wechat'];
 export const channels = ['desktop', ...providers] as const;
@@ -20,7 +23,12 @@ export interface ScheduleNotifications {
   configured: boolean; revision: number; config: NotificationConfig | null;
   availability: Partial<Record<ChannelName, { state: string; reason: string }>>;
 }
-export interface Target { recipient_id: string; label: string; available: boolean; kind?: string }
+export interface Target {
+  recipient_id: string; label: string; available: boolean; kind?: string;
+  connection_check_status?: 'unknown' | 'checking' | 'connected' | 'activation_required' | 'unavailable';
+  connection_checked_at?: string | null; connection_error_code?: string;
+}
+export interface ConfiguredWechatTarget { account_id: string; recipient_id: string }
 export interface Reference { id: string; kind: string; name: string; enabled: boolean }
 export interface Page<T> { items: T[]; next_cursor: string; total?: number }
 export interface AccountDetail extends ChannelAccount {
@@ -39,17 +47,29 @@ const gatewayClient = new GatewayNotificationsApi(new GatewayConfiguration({ bas
 const accountsClient = new ChannelAccountsApi(new GatewayConfiguration({ basePath: BASE_URL }), BASE_URL, axiosInstance);
 // Core notification endpoints retain their business envelope; gateway returns the view directly.
 const unwrap = <T,>(data: T | { data: T }): T => 'data' in (data as object) ? (data as { data: T }).data : data as T;
-export const getPreferences = async () =>
-  unwrap<Preferences>((await coreClient.apiCoreUserNotificationPreferencesGet()).data as Preferences | { data: Preferences });
-export const patchPreferences = async (patch: Partial<Preferences> & { revision: number; confirm_running_task_ids?: string[] }) =>
-  unwrap<Preferences>((await coreClient.apiCoreUserNotificationPreferencesPatch({ notificationPreferencesPatch: patch })).data as Preferences | { data: Preferences });
+export const getPreferences = async (options?: { silentError?: boolean }) =>
+  unwrap<Preferences>((await coreClient.apiCoreUserNotificationPreferencesGet(options as RawAxiosRequestConfig)).data as Preferences | { data: Preferences });
+export const getConfiguredWechatTargets = async (options?: { silentError?: boolean }): Promise<{ items: ConfiguredWechatTarget[] }> =>
+  unwrap<{ items: ConfiguredWechatTarget[] }>((await coreClient.apiCoreUserWechatNotificationTargetsGet(options as RawAxiosRequestConfig)).data as { items: ConfiguredWechatTarget[] } | { data: { items: ConfiguredWechatTarget[] } });
+export const patchPreferences = async (patch: Partial<Preferences> & { revision: number; confirm_running_task_ids?: string[] }) => {
+  const scope = notificationEventScope();
+  const preferences = unwrap<Preferences>((await coreClient.apiCoreUserNotificationPreferencesPatch({ notificationPreferencesPatch: patch })).data as Preferences | { data: Preferences });
+  // Consumers reload their current user's preferences instead of trusting an
+  // asynchronous save response that may belong to an earlier login session.
+  publishNotificationChange(NOTIFICATION_PREFERENCES_CHANGED_EVENT, scope);
+  return preferences;
+};
 export const getScheduleNotifications = async (scheduleId: string) =>
   unwrap<ScheduleNotifications>((await coreClient.apiCoreSchedulesScheduleIdNotificationsGet({ scheduleId })).data as ScheduleNotifications | { data: ScheduleNotifications });
-export const putScheduleNotifications = async (scheduleId: string, revision: number, config: NotificationConfig | null, silentError = false) =>
-  unwrap<ScheduleNotifications>((await coreClient.apiCoreSchedulesScheduleIdNotificationsPut(
+export const putScheduleNotifications = async (scheduleId: string, revision: number, config: NotificationConfig | null, silentError = false) => {
+  const scope = notificationEventScope();
+  const result = unwrap<ScheduleNotifications>((await coreClient.apiCoreSchedulesScheduleIdNotificationsPut(
     { scheduleId, scheduleNotificationUpdate: { revision, ...(config === null ? { clear: true } : { config }) } },
     silentError ? ({ silentError: true } as RawAxiosRequestConfig) : undefined,
   )).data as ScheduleNotifications | { data: ScheduleNotifications });
+  publishNotificationChange(WECHAT_NOTIFICATION_CONFIG_CHANGED_EVENT, scope);
+  return result;
+};
 export const getExecutionNotifications = async (taskId: string) =>
   unwrap<ExecutionNotifications>((await coreClient.apiCoreTaskCenterTasksTaskIdNotificationsGet({ taskId })).data as ExecutionNotifications | { data: ExecutionNotifications });
 export const getAttempts = async (taskId: string, cursor = ''): Promise<Page<Attempt>> =>
@@ -58,8 +78,11 @@ export const retryNotice = async (noticeId: string, key: string, confirmed: bool
   (await gatewayClient.retryTaskNotification({ notificationId: noticeId, notificationRetry: { idempotency_key: key, confirm_duplicate_risk: confirmed } })).data as Attempt;
 export const getAccountDetail = async (accountId: string): Promise<AccountDetail> =>
   (await accountsClient.getChannelAccount({ accountId })).data as AccountDetail;
-export const getTargets = async (accountId: string, cursor = '', recipientId = ''): Promise<Page<Target>> =>
-  (await accountsClient.listNotificationTargets({ accountId, cursor, recipientId: recipientId || undefined, limit: 100 }, { silentError: true } as RawAxiosRequestConfig)).data as Page<Target>;
+export const getTargets = async (accountId: string, cursor = '', recipientId = '', options?: { checkConnection?: boolean }): Promise<Page<Target>> =>
+  (await accountsClient.listNotificationTargets({
+    accountId, cursor, recipientId: recipientId || undefined, limit: 100,
+    checkConnection: options?.checkConnection && recipientId.trim() ? true : undefined,
+  }, { silentError: true } as RawAxiosRequestConfig)).data as Page<Target>;
 export const getReferences = async (accountId: string, cursor = ''): Promise<Page<Reference>> =>
   (await accountsClient.listNotificationReferences({ accountId, cursor, limit: 100 })).data as Page<Reference>;
 export function notificationError(error: unknown): { reason: string; running_task_ids?: string[] } {
@@ -91,9 +114,9 @@ export function ruleError(config: NotificationConfig, defaults = false, task?: {
     return !unchangedPaused;
   })) return 'NOTIFICATION_TARGET_REQUIRED';
 }
-export function availabilityError(value: ScheduleNotifications | undefined): { reason: string; provider: ChannelProvider; account_id: string } | undefined {
+export function availabilityError(value: ScheduleNotifications | undefined, preferences?: Preferences): { reason: string; provider: ChannelProvider; account_id: string } | undefined {
   if (!value?.config) return undefined;
-  const provider = providers.find(name => value.config?.channels[name]?.enabled && value.availability[name]?.state === 'unavailable');
+  const provider = providers.find(name => value.config?.channels[name]?.enabled && (!preferences || channelGateEnabled(preferences, name)) && value.availability[name]?.state === 'unavailable');
   if (!provider) return undefined;
   return {
     reason: value.availability[provider]?.reason || 'NOTIFICATION_TARGET_UNAVAILABLE',
