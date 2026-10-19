@@ -23,6 +23,15 @@ func scopedBackgroundTestTask(t *testing.T, db *gorm.DB, id, historyID, runID st
 	return task
 }
 
+func backgroundStoredCompletionTime(db *gorm.DB, at time.Time) time.Time {
+	// JSON retains nanoseconds, but pgx stores PostgreSQL timestamps in
+	// microseconds. SQLite preserves the original precision in both fields.
+	if db.Dialector.Name() == "postgres" {
+		return at.Truncate(time.Microsecond)
+	}
+	return at
+}
+
 func rejectBackgroundExecutionNotices(t *testing.T, db *gorm.DB) func() {
 	t.Helper()
 	trigger := `CREATE TRIGGER reject_execution_notice BEFORE INSERT ON task_notifications BEGIN SELECT RAISE(ABORT, 'synthetic notification storage failure'); END`
@@ -71,7 +80,7 @@ func TestBackgroundExecutionRetainsFailureAcrossLaterRuns(t *testing.T) {
 				}
 				scope := progress["_background_execution"].(map[string]any)
 				part := scope["parts"].([]any)[0].(map[string]any)
-				if part["status"] != "failed" || part["completed_at"] == nil {
+				if part["status"] != "failed" || part["completed_at"] != originalAt.UTC().Format(time.RFC3339Nano) {
 					t.Errorf("terminal evidence lost on notice rejection: %s", first.ProgressJSON)
 				}
 				if progress["keep"] != "preserved" {
@@ -96,7 +105,7 @@ func TestBackgroundExecutionRetainsFailureAcrossLaterRuns(t *testing.T) {
 				if err := db.First(&first, "id = ?", first.ID).Error; err != nil {
 					t.Fatal(err)
 				}
-				if first.Status != "failed" || first.FinishedAt == nil || !first.FinishedAt.Equal(originalAt) {
+				if first.Status != "failed" || first.FinishedAt == nil || !first.FinishedAt.Equal(backgroundStoredCompletionTime(db, originalAt)) {
 					t.Fatalf("later generating run changed original failure/time: %#v (want %v)", first, originalAt)
 				}
 				if !persistImmediateRunTerminal(t.Context(), db, first.ConversationID, nextID, "next", "next-run", target, nil, &RunTerminal{Status: "completed", Reason: "normal"}) {
@@ -225,7 +234,7 @@ func TestBackgroundExecutionExternalReplayAdmission(t *testing.T) {
 			if err := db.Where("id = ?", historyID).Take(&history).Error; err != nil {
 				t.Fatal(err)
 			}
-			if !tasks[0].FinishedAt.Equal(taskcenter.NotificationHistoryCompletedAt(history.CreateTime, history.UpdateTime, history.Ext)) {
+			if !tasks[0].FinishedAt.Equal(backgroundStoredCompletionTime(db, taskcenter.NotificationHistoryCompletedAt(history.CreateTime, history.UpdateTime, history.Ext))) {
 				t.Fatal("replay changed original terminal time")
 			}
 		})
@@ -466,7 +475,7 @@ func TestBackgroundExecutionGateUsesOriginalCompletion(t *testing.T) {
 	if err := db.Where("task_id = ?", task.ID).Take(&notice).Error; err != nil {
 		t.Fatal(err)
 	}
-	if task.Status != "failed" || task.FinishedAt == nil || !task.FinishedAt.Equal(originalAt) || notice.Status != "skipped" || notice.Reason != "NOTIFICATIONS_DISABLED" {
+	if task.Status != "failed" || task.FinishedAt == nil || !task.FinishedAt.Equal(backgroundStoredCompletionTime(db, originalAt)) || notice.Status != "skipped" || notice.Reason != "NOTIFICATIONS_DISABLED" {
 		t.Fatalf("old completion crossed reopened gate: task=%#v notice=%#v", task, notice)
 	}
 }
