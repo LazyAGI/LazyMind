@@ -1,3 +1,10 @@
+import io
+import json
+import unittest
+from unittest.mock import patch
+from urllib.error import HTTPError, URLError
+
+from services.cloud_oauth_provider import CloudProviderError
 from urllib.parse import parse_qs, urlparse
 
 from services.providers import google_drive_oauth_provider as provider_module
@@ -145,3 +152,61 @@ def test_get_json_reports_invalid_json(monkeypatch):
         assert 'invalid json' in str(exc)
     else:
         raise AssertionError('expected invalid JSON to raise RuntimeError')
+
+
+class GoogleDriveRefreshErrorsTest(unittest.TestCase):
+    def setUp(self):
+        self.provider = GoogleDriveOAuthProvider()
+
+    def test_refresh_classifies_http_errors(self) -> None:
+        for status, code, retryable, reauth in (
+            (400, 'invalid_grant', False, True),
+            (400, 'invalid_client', False, False),
+            (401, 'invalid_client', False, False),
+            (408, '', True, False),
+            (429, 'rate_limit_exceeded', True, False),
+            (500, 'server_error', True, False),
+            (502, '', True, False),
+        ):
+            with self.subTest(status=status, code=code):
+                body = (json.dumps({'error': code, 'error_description': 'fixture failure'}).encode()
+                        if code else b'<html>unavailable</html>')
+                error = HTTPError('https://oauth2.googleapis.com/token', status, 'failure', {}, io.BytesIO(body))
+                with patch('services.providers.google_drive_oauth_provider.request.urlopen', side_effect=error):
+                    with self.assertRaises(CloudProviderError) as raised:
+                        self.provider.refresh_access_token(
+                            client_id='client', client_secret='secret', refresh_token='old',
+                        )
+                self.assertEqual(raised.exception.provider_code, code or str(status))
+                self.assertEqual(raised.exception.retryable, retryable)
+                self.assertEqual(raised.exception.requires_reauth, reauth)
+
+    def test_refresh_network_failures_are_retryable(self) -> None:
+        for error in (URLError('connection reset'), TimeoutError('timed out')):
+            with self.subTest(error=error):
+                with patch('services.providers.google_drive_oauth_provider.request.urlopen', side_effect=error):
+                    with self.assertRaises(CloudProviderError) as raised:
+                        self.provider.refresh_access_token(
+                            client_id='client', client_secret='secret', refresh_token='old',
+                        )
+                self.assertTrue(raised.exception.retryable)
+                self.assertFalse(raised.exception.requires_reauth)
+
+    def test_json_refresh_error_retains_reauthorization_requirement(self) -> None:
+        with patch('services.providers.google_drive_oauth_provider._post_form', return_value={'error': 'invalid_grant'}):
+            with self.assertRaises(CloudProviderError) as raised:
+                self.provider.refresh_access_token(client_id='client', client_secret='secret', refresh_token='old')
+        self.assertEqual(raised.exception.provider_code, 'invalid_grant')
+        self.assertTrue(raised.exception.requires_reauth)
+
+    def test_invalid_authorization_code_is_not_an_expired_refresh_token(self) -> None:
+        error = HTTPError(
+            'https://oauth2.googleapis.com/token', 400, 'failure', {}, io.BytesIO(b'{"error":"invalid_grant"}'),
+        )
+        with patch('services.providers.google_drive_oauth_provider.request.urlopen', side_effect=error):
+            with self.assertRaises(CloudProviderError) as raised:
+                self.provider.exchange_code(
+                    client_id='client', client_secret='secret', code='bad', redirect_uri='https://example.test',
+                )
+        self.assertEqual(raised.exception.provider_code, 'invalid_grant')
+        self.assertFalse(raised.exception.requires_reauth)

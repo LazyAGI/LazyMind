@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from urllib import parse, request
 from urllib.error import HTTPError, URLError
 
-from services.cloud_oauth_provider import CloudAccountProfile, CloudOAuthProvider, CloudTokenPayload
+from services.cloud_oauth_provider import CloudAccountProfile, CloudOAuthProvider, CloudProviderError, CloudTokenPayload
 
 
 _GOOGLE_AUTHORIZE_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
@@ -33,9 +33,21 @@ def _post_form(payload: dict, timeout_seconds: int = 30) -> dict:
             return json.loads(response_body) if response_body else {}
     except HTTPError as exc:
         detail = exc.read().decode('utf-8', errors='ignore')
-        raise RuntimeError(f'provider http error {exc.code}: {detail}') from exc
-    except URLError as exc:
-        raise RuntimeError(f'provider network error: {exc}') from exc
+        try:
+            data = json.loads(detail)
+        except json.JSONDecodeError:
+            data = {}
+        code = data.get('error') if isinstance(data, dict) else None
+        code = code if isinstance(code, str) else ''
+        retryable = exc.code in {408, 429} or exc.code >= 500
+        raise CloudProviderError(
+            f'provider http error {exc.code}: {detail}',
+            provider_code=code or str(exc.code),
+            retryable=retryable,
+            requires_reauth=not retryable and payload.get('grant_type') == 'refresh_token' and code == 'invalid_grant',
+        ) from exc
+    except (URLError, TimeoutError) as exc:
+        raise CloudProviderError(f'provider network error: {exc}', retryable=True) from exc
     except json.JSONDecodeError as exc:
         raise RuntimeError(f'provider returned invalid json: {exc}') from exc
 
@@ -52,9 +64,13 @@ def _get_json(url: str, access_token: str, timeout_seconds: int = 30) -> dict:
             return json.loads(response_body) if response_body else {}
     except HTTPError as exc:
         detail = exc.read().decode('utf-8', errors='ignore')
-        raise RuntimeError(f'provider http error {exc.code}: {detail}') from exc
-    except URLError as exc:
-        raise RuntimeError(f'provider network error: {exc}') from exc
+        raise CloudProviderError(
+            f'provider http error {exc.code}: {detail}',
+            provider_code=str(exc.code),
+            retryable=exc.code in {408, 429} or exc.code >= 500,
+        ) from exc
+    except (URLError, TimeoutError) as exc:
+        raise CloudProviderError(f'provider network error: {exc}', retryable=True) from exc
     except json.JSONDecodeError as exc:
         raise RuntimeError(f'provider returned invalid json: {exc}') from exc
 
@@ -102,8 +118,9 @@ class GoogleDriveOAuthProvider(CloudOAuthProvider):
             'grant_type': 'authorization_code',
         })
         if data.get('error'):
-            raise RuntimeError(
-                f"google drive code exchange failed: {data.get('error_description') or data.get('error')}"
+            raise CloudProviderError(
+                f"google drive code exchange failed: {data.get('error_description') or data.get('error')}",
+                provider_code=data['error'],
             )
         return CloudTokenPayload(
             access_token=(data.get('access_token') or '').strip(),
@@ -126,8 +143,10 @@ class GoogleDriveOAuthProvider(CloudOAuthProvider):
             'grant_type': 'refresh_token',
         })
         if data.get('error'):
-            raise RuntimeError(
-                f"google drive token refresh failed: {data.get('error_description') or data.get('error')}"
+            raise CloudProviderError(
+                f"google drive token refresh failed: {data.get('error_description') or data.get('error')}",
+                provider_code=data['error'],
+                requires_reauth=data['error'] == 'invalid_grant',
             )
         return CloudTokenPayload(
             access_token=(data.get('access_token') or '').strip(),
