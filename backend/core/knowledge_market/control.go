@@ -31,14 +31,14 @@ type healthEntry struct {
 
 var marketHealthClient = &http.Client{Timeout: time.Second, Transport: http.DefaultTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
-func marketHealth(ctx context.Context, endpoint, path string) string {
+func marketHealth(ctx context.Context, endpoint, path string, refresh bool) string {
 	if strings.TrimSpace(endpoint) == "" {
 		return "unknown"
 	}
 	url := strings.TrimRight(endpoint, "/") + path
 	marketHealthCache.Lock()
 	defer marketHealthCache.Unlock()
-	if entry, ok := marketHealthCache.entries[url]; ok && time.Now().Before(entry.expires) {
+	if entry, ok := marketHealthCache.entries[url]; !refresh && ok && time.Now().Before(entry.expires) {
 		return entry.state
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -62,11 +62,11 @@ func marketHealth(ctx context.Context, endpoint, path string) string {
 	return state
 }
 
-func marketWorkerHealth(ctx context.Context) string {
-	return marketHealth(ctx, os.Getenv("LAZYMIND_DOCUMENT_WORKER_URL"), "/ready")
+func marketWorkerHealth(ctx context.Context, refresh bool) string {
+	return marketHealth(ctx, os.Getenv("LAZYMIND_DOCUMENT_WORKER_URL"), "/ready", refresh)
 }
-func marketCancelHealth(ctx context.Context) string {
-	return marketHealth(ctx, os.Getenv("LAZYMIND_DOCUMENT_SERVICE_URL"), "/v1/ready")
+func marketCancelHealth(ctx context.Context, refresh bool) string {
+	return marketHealth(ctx, os.Getenv("LAZYMIND_DOCUMENT_SERVICE_URL"), "/v1/ready", refresh)
 }
 func marketDraining(job orm.AsyncJob) bool {
 	return job.Status == "canceled" && job.LockedBy != "" && job.LockUntil != nil && job.LockUntil.After(time.Now())
@@ -120,7 +120,7 @@ func addMarketControl(r *http.Request, db *gorm.DB, data map[string]any, job orm
 	terminal := state != "unknown" && state != "pending" && state != "processing"
 	worker := "unknown"
 	if !terminal || parse.Failed > 0 || job.Status == "failed" {
-		worker = marketWorkerHealth(r.Context())
+		worker = marketWorkerHealth(r.Context(), false)
 	}
 	// A worker outage does not stop a Go download, nor alter historical results.
 	if !terminal && state != "unknown" && job.Status != "pending" && job.Status != "running" && !marketDraining(job) {
@@ -135,7 +135,7 @@ func addMarketControl(r *http.Request, db *gorm.DB, data map[string]any, job orm
 	if latest && job.JobType != updateAllJobType {
 		canCancel = job.Status == "pending" || job.Status == "running"
 		if !canCancel && state != "unknown" && !marketDraining(job) && parse.Pending > 0 {
-			canCancel = marketCancelHealth(r.Context()) == "available"
+			canCancel = marketCancelHealth(r.Context(), false) == "available"
 		}
 	}
 	data["display_state"], data["can_cancel"], data["can_delete"] = state, canCancel, terminal
@@ -245,7 +245,7 @@ func MarketCancelTask(w http.ResponseWriter, r *http.Request) {
 			needsCancel = true
 		}
 	}
-	if needsCancel && marketCancelHealth(r.Context()) != "available" {
+	if needsCancel && marketCancelHealth(r.Context(), true) != "available" {
 		marketUnavailable(w)
 		return
 	}

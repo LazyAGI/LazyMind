@@ -7,13 +7,22 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "build": "tsdown src/main.ts --format esm --platform node --out-dir dist --no-dts && node scripts/embed.mjs",
+    "build": "tsdown src/main.ts --format esm --platform node --out-dir dist --no-dts && node scripts/embed.mjs && pnpm build:desktop",
+    "build:desktop": "node scripts/build-desktop.mjs",
+    "test:desktop": "node --test tests/desktop-runtime.check.mjs",
+    "test:control": "node --test tests/native-dispatcher.check.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "start": "node dist/main.mjs"
+    "start": "node dist/main.mjs",
+    "test:platform": "node --test tests/platform.check.mjs tests/plugin-manifest.check.mjs",
+    "test:install": "node --test tests/desktop-install.check.mjs"
+  },
+  "dependencies": {
+    "ws": "8.21.3"
   },
   "devDependencies": {
     "@types/node": "24.3.0",
+    "@types/ws": "8.18.1",
     "tsdown": "0.19.0",
     "typescript": "5.9.3",
     "vitest": "2.1.9"

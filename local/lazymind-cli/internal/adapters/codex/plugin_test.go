@@ -2,6 +2,8 @@ package codex
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -56,6 +58,25 @@ exit 1
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Replace only the OS deployment boundary; keep real plugin migration and pairing.
+	sharedCalls := []string{}
+	adapter.sharedRuntime = func(ctx context.Context, enable bool, install func() error) error {
+		if !enable {
+			sharedCalls = append(sharedCalls, "disable")
+			os.Remove(filepath.Join(profile, "lazymind-shared-server.json"))
+			return nil
+		}
+		sharedCalls = append(sharedCalls, "prepare")
+		if err := install(); err != nil {
+			return err
+		}
+		sharedCalls = append(sharedCalls, "activate")
+		registration, _ := json.Marshal(map[string]any{"version": 1, "profile": profile, "app_server_url": "ws+unix://localhost/tmp/fixture.sock:/rpc"})
+		if err := os.WriteFile(filepath.Join(profile, "lazymind-shared-server.json"), registration, 0600); err != nil {
+			return err
+		}
+		return nil
+	}
 	original := "[mcp_servers.lazymind]\ncommand = \"" + self + "\"\nargs = [\"mcp\", \"proxy\"]\n[mcp_servers.other]\ncommand = \"other-server\"\n"
 	path := filepath.Join(profile, "config.toml")
 	_ = os.WriteFile(path, []byte(original), 0600)
@@ -68,14 +89,14 @@ exit 1
 		t.Fatal("failed install changed original MCP")
 	}
 	_ = os.Remove(fail)
-	if status := adapter.Connect(context.Background()); status.State != agentintegration.Enabled {
+	if status := adapter.Connect(context.Background()); status.State != agentintegration.ActionRequired || !status.CanDisconnect || !status.CanConnect {
 		t.Fatalf("offline install failed: %+v", status)
 	}
 	events, _ := os.ReadFile(filepath.Join(profile, "events"))
 	if string(events) != "installed\nmigrated\n" {
 		t.Fatalf("migration ordering: %s", events)
 	}
-	if status := adapter.Connect(context.Background()); status.State != agentintegration.Enabled {
+	if status := adapter.Connect(context.Background()); status.State != agentintegration.ActionRequired || !status.CanDisconnect || !status.CanConnect {
 		t.Fatalf("idempotent connect failed: %+v", status)
 	}
 	after, _ := os.ReadFile(filepath.Join(profile, "events"))
@@ -86,8 +107,20 @@ exit 1
 	if err != nil {
 		t.Fatal(err)
 	}
+	shared := adapter.sharedRuntime
+	adapter.sharedRuntime = func(context.Context, bool, func() error) error { return errors.New("quit Desktop first") }
+	if status := adapter.Disconnect(context.Background()); status.State != agentintegration.Failed {
+		t.Fatalf("expected blocked disconnect: %+v", status)
+	}
+	if stillEnabled, err := codexplugin.Enabled(profile, record.Marketplace); err != nil || !stillEnabled {
+		t.Fatal("blocked disconnect removed plugin")
+	}
+	adapter.sharedRuntime = shared
 	if status := adapter.Disconnect(context.Background()); status.State != agentintegration.Ready {
 		t.Fatalf("disconnect failed: %+v", status)
+	}
+	if got := strings.Join(sharedCalls, ","); got != "prepare,prepare,activate,prepare,activate,disable" {
+		t.Fatalf("shared setup ordering: %s", got)
 	}
 	account, _ := store.AccountScope()
 	if workflowhost.Configured(home, record.ConnectorID, account) {

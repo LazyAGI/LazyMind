@@ -73,9 +73,7 @@ it('keeps routine host delivery silent while preserving actionable notices', () 
   expect(overlayInfoBanner(REVIEW_CHANGED_NOTICE, pending)).toEqual({
     key: REVIEW_CHANGED_NOTICE, tone: 'info',
   });
-  expect(overlayInfoBanner('', { ...pending, status: 'failed', last_error: 'timeout' })).toEqual({
-    key: 'chat.workflowControlDeliveryFailed', tone: 'warning',
-  });
+  expect(overlayInfoBanner('', { ...pending, status: 'failed', last_error: 'timeout' })).toBeUndefined();
   expect(overlayInfoBanner('', { ...pending, consumed_at: '2026-09-14T00:00:00Z' })).toBeUndefined();
 });
 
@@ -83,8 +81,8 @@ it('explains Codex cancellation limits without reporting that Workflow stop fail
   const delivery = { id: 'cancel', kind: 'cancel' as const, status: 'failed' };
   const binding = { bound: true, generation: 2, provider: 'codex' };
   expect(overlayInfoBanner('', delivery, binding)).toEqual({ key: 'chat.workflowControlCodexStopped', tone: 'info' });
-  expect(deliveryBanner({ ...delivery, kind: 'continue' }, binding)?.tone).toBe('warning');
-  expect(deliveryBanner(delivery, { ...binding, provider: 'deepseek-harness' })?.tone).toBe('warning');
+  expect(deliveryBanner({ ...delivery, kind: 'continue' }, binding)).toBeUndefined();
+  expect(deliveryBanner(delivery, { ...binding, provider: 'deepseek-harness' })).toBeUndefined();
 });
 
 it('resolves completed Continue after saved edits invalidate the old execution', async () => {

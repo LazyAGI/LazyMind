@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"lazymind/agentconnector/internal/executorpolicy"
 )
 
 // StartWorker keeps all worker output off MCP stdout and ties its lifetime to
@@ -41,10 +43,31 @@ func StartWorker(ctx context.Context, home string) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
+	policy, err := executorpolicy.New(home)
+	if err != nil {
+		log.Close()
+		return nil, err
+	}
+	enabled, err := policy.Enabled("codex")
+	if err != nil {
+		log.Close()
+		return nil, err
+	}
 	lifetime, cancel := context.WithCancel(ctx)
 	args := []string{script, "--managed", "--parent-pid", strconv.Itoa(os.Getpid()), "--codex-bin", binary, "--codex-home", profile, "--pairing-file", pairing}
-	launch := func() (*exec.Cmd, error) {
-		cmd := exec.CommandContext(lifetime, node, args...)
+	type worker struct {
+		cancel context.CancelFunc
+		exited chan error
+	}
+	launch := func() (*worker, error) {
+		workerContext, stopWorker := context.WithCancel(lifetime)
+		cmd := exec.CommandContext(workerContext, node, args...)
+		self, selfErr := os.Executable()
+		if selfErr != nil {
+			stopWorker()
+			return nil, selfErr
+		}
+		cmd.Env = append(os.Environ(), "LAZYMIND_RUNTIME_HELPER="+self)
 		cmd.Stdout, cmd.Stderr = log, log
 		cmd.WaitDelay = 5 * time.Second
 		cmd.Cancel = func() error {
@@ -54,42 +77,72 @@ func StartWorker(ctx context.Context, home string) (func(), error) {
 			return nil
 		}
 		if err := cmd.Start(); err != nil {
+			stopWorker()
 			return nil, err
 		}
-		return cmd, nil
+		current := &worker{cancel: stopWorker, exited: make(chan error, 1)}
+		go func() { current.exited <- cmd.Wait() }()
+		return current, nil
 	}
-	first, err := launch()
-	if err != nil {
-		cancel()
-		log.Close()
-		return nil, err
+	var current *worker
+	if enabled {
+		current, err = launch()
+		if err != nil {
+			cancel()
+			log.Close()
+			return nil, err
+		}
 	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		defer log.Close()
-		current := first
-		for {
-			err := current.Wait()
-			if lifetime.Err() != nil {
-				return
+		defer func() {
+			if current != nil {
+				current.cancel()
+				<-current.exited
 			}
-			fmt.Fprintf(log, "Workflow dispatcher exited (%v); restarting in 3s\n", err)
+		}()
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		var retryAt time.Time
+		for {
+			var exited <-chan error
+			if current != nil {
+				exited = current.exited
+			}
 			select {
 			case <-lifetime.Done():
 				return
-			case <-time.After(3 * time.Second):
-			}
-			for {
-				current, err = launch()
-				if err == nil {
-					break
-				}
-				fmt.Fprintf(log, "Workflow dispatcher restart failed: %v\n", err)
-				select {
-				case <-lifetime.Done():
+			case err := <-exited:
+				current.cancel()
+				current = nil
+				if lifetime.Err() != nil {
 					return
-				case <-time.After(3 * time.Second):
+				}
+				fmt.Fprintf(log, "Workflow dispatcher exited (%v); retrying in 3s if enabled\n", err)
+				retryAt = time.Now().Add(3 * time.Second)
+			case <-ticker.C:
+				enabled, err := policy.Enabled("codex")
+				if err != nil {
+					fmt.Fprintf(log, "Workflow policy unavailable; stopping dispatcher: %v\n", err)
+					enabled = false
+				}
+				if !enabled {
+					if current != nil {
+						current.cancel()
+						<-current.exited
+						current = nil
+					}
+					retryAt = time.Time{}
+					continue
+				}
+				if current == nil && !time.Now().Before(retryAt) {
+					current, err = launch()
+					if err != nil {
+						fmt.Fprintf(log, "Workflow dispatcher restart failed: %v\n", err)
+						retryAt = time.Now().Add(3 * time.Second)
+					}
 				}
 			}
 		}

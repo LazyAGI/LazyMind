@@ -3207,7 +3207,6 @@ const enUS = {
     workflowControlReviewChanged: "Content was saved or changed. Review the updated content before confirming this step.",
     workflowControlDeliveryUnknown: "Host receipt is unknown. Reconciling the original session; do not resend continue.",
     workflowControlCodexStopped: "Workflow stopped. Codex cannot interrupt the current response, which may continue running.",
-    workflowControlDeliveryFailed: "The host did not accept the operation. Check the original session and connection.",
     workflowControlLegacy: "This run uses the legacy protocol. Control it from its original conversation; new runs use the controlled workflow protocol.",
     workflowRunRefresh: "Refresh",
     workflowHostBindingRequiredHint: "This workflow is not bound to a DSH execution session. If you switched Desktop / local-up or accounts, reconnect DeepSeek Harness in LazyMind, restart DSH, then continue in the original conversation.",

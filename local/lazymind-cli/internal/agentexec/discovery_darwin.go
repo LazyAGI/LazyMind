@@ -168,6 +168,12 @@ func darwinBundleExecutablePaths(bundle string, names []string) []string {
 	contents := filepath.Join(bundle, "Contents")
 	var candidates []string
 	for _, name := range names {
+		if name == "codex" {
+			nested := filepath.Join(contents, "Resources", "codex-cli", "CodexCLI.app", "Contents", "MacOS", name)
+			if resolved := executableFile(nested); resolved != "" {
+				candidates = append(candidates, resolved)
+			}
+		}
 		for _, directory := range darwinBundleExecutableDirectories {
 			if resolved := executableFile(filepath.Join(contents, directory, name)); resolved != "" {
 				candidates = append(candidates, resolved)

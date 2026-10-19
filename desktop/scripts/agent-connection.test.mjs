@@ -46,3 +46,20 @@ for (const platform of ['darwin', 'win32']) {
     ]);
   });
 }
+
+// Codex now prepares its shared runtime through the same connect action.
+test('Codex connect uses the installation budget and starts the bridge', async () => {
+  const commands = [];
+  const run = vm.runInNewContext(`(${source.slice(start, end)})`, {
+    URL, process: { platform: 'darwin', env: {} },
+    agentConnectorActionTimeoutMs: 15000, agentConnectorInstallTimeoutMs: 120000,
+    runConnectorJSON: async (args, timeout) => { commands.push([Array.from(args), timeout]); return { state: 'enabled' }; },
+  });
+  await run('codex', 'connect');
+  assert.deepEqual(commands, [
+    [['assistant', 'start', '--listen', '127.0.0.1:19091'], 15000],
+    [['internal', 'agent', 'codex', 'connect'], 240000],
+  ]);
+  await run('codex', 'disconnect');
+  assert.deepEqual(commands[2], [['internal', 'agent', 'codex', 'disconnect'], 240000]);
+});

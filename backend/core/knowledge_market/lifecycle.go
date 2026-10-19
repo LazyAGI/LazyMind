@@ -231,7 +231,8 @@ func MarketRetryTask(w http.ResponseWriter, r *http.Request) {
 	if install != nil && install.DatasetID != "" && !doc.RequireMarketDatasetPermission(w, r, install.DatasetID) {
 		return
 	}
-	if marketWorkerHealth(r.Context()) != "available" {
+	// Mutations must probe current health rather than trust the polling cache.
+	if marketWorkerHealth(r.Context(), true) != "available" {
 		marketUnavailable(w)
 		return
 	}

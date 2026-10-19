@@ -2,6 +2,7 @@ package codexplugin
 
 import (
 	"context"
+	"lazymind/agentconnector/internal/executorpolicy"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,13 @@ import (
 
 func TestWorkerKeepsOutputInLogAndStopsWithMCP(t *testing.T) {
 	home, profile, _, binary := fixture(t)
+	policy, err := executorpolicy.New(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := policy.SetEnabled("codex", true); err != nil {
+		t.Fatal(err)
+	}
 	node := executable(t, t.TempDir(), "worker", "#!/bin/sh\necho 'worker stdout'\necho 'worker stderr' >&2\nexec sleep 60\n")
 	t.Setenv("LAZYMIND_NODE_BIN", node)
 	t.Setenv("LAZYMIND_CODEX_BIN", binary)

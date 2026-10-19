@@ -94,3 +94,16 @@ func writeDarwinExecutable(t *testing.T, root, name, body string) string {
 	}
 	return path
 }
+
+func TestDarwinFindDiscoversNestedCodexCLI(t *testing.T) {
+	apps := t.TempDir()
+	binary := writeDarwinExecutable(t, filepath.Join(apps, "ChatGPT.app", "Contents", "Resources", "codex-cli", "CodexCLI.app", "Contents", "MacOS"), "codex", "#!/bin/sh\nexit 0\n")
+	t.Setenv("LAZYMIND_DESKTOP_APPLICATION_DIRS", apps)
+	t.Setenv("LAZYMIND_HOME", t.TempDir())
+	t.Setenv("PATH", "/usr/bin:/bin")
+	t.Setenv("SHELL", "/usr/bin/false")
+	resolved, err := Find("", []string{"codex"})
+	if err != nil || !SameExecutable(resolved, binary) {
+		t.Fatalf("%s %v", resolved, err)
+	}
+}
