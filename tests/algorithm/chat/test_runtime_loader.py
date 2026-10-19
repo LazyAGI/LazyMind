@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -30,15 +31,18 @@ def _subprocess_env():
 
 
 def _run_probe(script: str, timeout: float = 35) -> dict:
-    completed = subprocess.run(
-        [sys.executable, '-c', script],
-        cwd=_REPO_ROOT,
-        env=_subprocess_env(),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=True,
-    )
+    with tempfile.TemporaryDirectory(prefix='runtime-probe-traces-') as trace_dir:
+        env = _subprocess_env()
+        env['LAZYLLM_TRACE_LOCAL_STORAGE_DIR'] = trace_dir
+        completed = subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=_REPO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=True,
+        )
     return json.loads(completed.stdout.strip().splitlines()[-1])
 
 
