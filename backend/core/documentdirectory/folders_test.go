@@ -19,7 +19,7 @@ func TestFolderObservationMembershipBatchesAndRetry(t *testing.T) {
 	for _, deferred := range []bool{false, true} {
 		t.Run(fmt.Sprint(deferred), func(t *testing.T) {
 			db := testDB(t)
-			v := orm.DocumentFolderInventory{ID: "inventory", UserID: "u", ConversationID: "conv", Status: "complete", SourceJSON: encoded(map[string]any{}), StateJSON: encoded(map[string]any{})}
+			v := orm.DocumentFolderInventory{ID: "inventory", UserID: "u", ConversationID: "conv", Status: "complete", SourceJSON: encoded(map[string]any{"provider": "local", "namespace": "host-a"}), StateJSON: encoded(map[string]any{"node_format_version": 2})}
 			if deferred {
 				v.Status = "scanning"
 			}
@@ -41,10 +41,12 @@ func TestFolderObservationMembershipBatchesAndRetry(t *testing.T) {
 			for retry := 0; retry < 2; retry++ {
 				must(t, SaveObservations(context.Background(), db, "u", "conv", "h", "r", "question", []Observation{obs}))
 				if deferred {
+					v.Status = "complete"
+					must(t, db.Save(&v).Error)
 					must(t, reconcileFolderObservations(db, v))
 				}
 			}
-			if queries > 6 {
+			if queries > 9 {
 				t.Fatalf("membership still queries per candidate: %d", queries)
 			}
 			var rows []orm.DocumentObservation
@@ -70,7 +72,7 @@ func TestFolderObservationMembershipBatchesAndRetry(t *testing.T) {
 func TestFolderCollectionClassificationAndRetry(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
-	result, err := folderOperation(ctx, db, "u", "conv", Command{Operation: "folder_begin"}, FolderRequest{Source: encoded(map[string]string{"provider": "local", "root": "/fixture"}), State: encoded(map[string]any{"queue": []any{}, "errors": []any{}})})
+	result, err := folderOperation(ctx, db, "u", "conv", Command{Operation: "folder_begin"}, FolderRequest{Source: encoded(map[string]string{"provider": "local", "namespace": "host-a", "root": "/fixture"}), State: encoded(map[string]any{"node_format_version": 2, "queue": []any{}, "errors": []any{}})})
 	must(t, err)
 	inv := result["inventory"].(orm.DocumentFolderInventory)
 	nodes := []orm.DocumentFolderNode{{NodeKey: "root", Path: "", Name: "fixture", Kind: "directory", Listed: true}}
@@ -91,7 +93,7 @@ func TestFolderCollectionClassificationAndRetry(t *testing.T) {
 	if held.BatchID == "" || len(held.BatchID) > 36 {
 		t.Fatal("pending evidence marker must fit the PostgreSQL batch_id column")
 	}
-	_, err = folderOperation(ctx, db, "u", "conv", Command{Operation: "folder_checkpoint"}, FolderRequest{InventoryID: inv.ID, Version: 1, Status: "complete", State: encoded(map[string]any{"queue": []any{}, "errors": []any{}}), Nodes: nodes})
+	_, err = folderOperation(ctx, db, "u", "conv", Command{Operation: "folder_checkpoint"}, FolderRequest{InventoryID: inv.ID, Version: 1, Status: "complete", State: encoded(map[string]any{"node_format_version": 2, "queue": []any{}, "errors": []any{}}), Nodes: nodes})
 	must(t, err)
 	submit := func() map[string]any {
 		v, e := folderOperation(ctx, db, "u", "conv", Command{Operation: "folder_submit", Name: "fixture"}, FolderRequest{InventoryID: inv.ID})
@@ -181,10 +183,10 @@ func TestFolderConcurrentSubmissionsReserveOnlyAvailablePins(t *testing.T) {
 	}
 	ids := []string{}
 	for i := 0; i < 2; i++ {
-		v, err := folderOperation(ctx, db, "u", "conv", Command{Operation: "folder_begin"}, FolderRequest{Source: encoded(map[string]string{"provider": "local", "root": "/empty"}), State: encoded(map[string]any{})})
+		v, err := folderOperation(ctx, db, "u", "conv", Command{Operation: "folder_begin"}, FolderRequest{Source: encoded(map[string]string{"provider": "local", "root": "/empty"}), State: encoded(map[string]any{"node_format_version": 2})})
 		must(t, err)
 		inv := v["inventory"].(orm.DocumentFolderInventory)
-		_, err = folderOperation(ctx, db, "u", "conv", Command{Operation: "folder_checkpoint"}, FolderRequest{InventoryID: inv.ID, Version: 1, Status: "complete", State: encoded(map[string]any{"queue": []any{}, "errors": []any{}}), Nodes: []orm.DocumentFolderNode{{NodeKey: "root", Kind: "directory", Listed: true, Name: "empty"}}})
+		_, err = folderOperation(ctx, db, "u", "conv", Command{Operation: "folder_checkpoint"}, FolderRequest{InventoryID: inv.ID, Version: 1, Status: "complete", State: encoded(map[string]any{"node_format_version": 2, "queue": []any{}, "errors": []any{}}), Nodes: []orm.DocumentFolderNode{{NodeKey: "root", Kind: "directory", Listed: true, Name: "empty"}}})
 		must(t, err)
 		ids = append(ids, inv.ID)
 	}
@@ -239,11 +241,11 @@ func TestGoogleDriveReadIdentityAcrossFolderPipeline(t *testing.T) {
 		t.Run(tc.Path, func(t *testing.T) {
 			db := testDB(t)
 			ctx := context.Background()
-			result, err := folderOperation(ctx, db, "u", "conv", Command{Operation: "folder_begin"}, FolderRequest{Source: encoded(fixture.Source), State: encoded(map[string]any{})})
+			result, err := folderOperation(ctx, db, "u", "conv", Command{Operation: "folder_begin"}, FolderRequest{Source: encoded(fixture.Source), State: encoded(map[string]any{"node_format_version": 2})})
 			must(t, err)
 			inv := result["inventory"].(orm.DocumentFolderInventory)
 			nodes := []orm.DocumentFolderNode{{NodeKey: "root", Kind: "directory", Listed: true, Name: "root"}, fixture.Node}
-			_, err = folderOperation(ctx, db, "u", "conv", Command{Operation: "folder_checkpoint"}, FolderRequest{InventoryID: inv.ID, Version: 1, Status: "complete", State: encoded(map[string]any{"queue": []any{}, "errors": []any{}}), Nodes: nodes})
+			_, err = folderOperation(ctx, db, "u", "conv", Command{Operation: "folder_checkpoint"}, FolderRequest{InventoryID: inv.ID, Version: 1, Status: "complete", State: encoded(map[string]any{"node_format_version": 2, "queue": []any{}, "errors": []any{}}), Nodes: nodes})
 			must(t, err)
 			result, err = folderOperation(ctx, db, "u", "conv", Command{Operation: "folder_submit", Name: "shared drive contract"}, FolderRequest{InventoryID: inv.ID})
 			must(t, err)

@@ -40,14 +40,15 @@ type Candidate struct {
 }
 
 type Observation struct {
-	InventoryID string          `json:"inventory_id,omitempty"`
-	CallID      string          `json:"call_id"`
-	Source      string          `json:"source"`
-	Operation   string          `json:"operation"`
-	Status      string          `json:"status"`
-	Scope       json.RawMessage `json:"scope"`
-	Candidates  []Candidate     `json:"candidates"`
-	Incomplete  bool            `json:"incomplete"`
+	InventoryIDs []string        `json:"inventory_ids,omitempty"`
+	InventoryID  string          `json:"inventory_id,omitempty"`
+	CallID       string          `json:"call_id"`
+	Source       string          `json:"source"`
+	Operation    string          `json:"operation"`
+	Status       string          `json:"status"`
+	Scope        json.RawMessage `json:"scope"`
+	Candidates   []Candidate     `json:"candidates"`
+	Incomplete   bool            `json:"incomplete"`
 }
 
 type Input struct {
@@ -260,7 +261,7 @@ func Execute(ctx context.Context, db *gorm.DB, uid string, c Command) (map[strin
 	err := mutate(ctx, db, uid, func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		if c.Operation == "acknowledge" {
-			return tx.Model(&orm.DocumentDirectoryBatch{}).Where("id=? AND user_id=?", c.BatchID, uid).Update("acknowledged", true).Error
+			return acknowledgeBatch(tx, uid, c.BatchID)
 		}
 		if c.Operation == "retry" || c.Operation == "cancel" {
 			return batchAction(ctx, tx, uid, c, result)

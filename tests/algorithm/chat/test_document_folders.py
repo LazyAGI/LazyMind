@@ -333,8 +333,37 @@ def test_wiki_root_resolution_retains_root_document(monkeypatch, space_id):
             'https://example.feishu.cn/wiki/root', provider='feishu_wiki')
     assert result['inventory']['status'] == 'complete'
     assert result['inventory']['source']['space_id'] == 'space'
-    root = store.nodes[node_key('root')]
+    root = next(n for n in store.nodes.values() if n['path'] == '')
     assert root['name'] == 'Root document'
     assert root['candidate']['resource_id'] == 'root'
     assert root['candidate']['locator']['path'] == '/~node/root'
     assert len(requests) == 2
+
+
+@pytest.mark.parametrize('kind', ['file', 'directory'])
+def test_root_named_child_has_distinct_manifest_identity(tmp_path, kind):
+    child = tmp_path / 'root'
+    if kind == 'file':
+        child.write_text('root file')
+    else:
+        child.mkdir()
+        (child / 'child.txt').write_text('child')
+    store = InventoryStore()
+    with trusted():
+        FolderTools(store).inspect_document_folder(str(tmp_path))
+    by_path = {n['path']: n for n in store.nodes.values()}
+    assert '' in by_path and 'root' in by_path
+    assert by_path['root']['parent_key'] == by_path['']['node_key']
+    assert by_path['root']['node_key'] != by_path['']['node_key']
+    if kind == 'directory':
+        assert by_path['root/child.txt']['parent_key'] == by_path['root']['node_key']
+
+
+def test_legacy_manifest_cannot_resume(tmp_path):
+    store = InventoryStore()
+    with trusted():
+        tools = FolderTools(store)
+        tools.inspect_document_folder(str(tmp_path))
+        store.inventory['state'].pop('node_format_version', None)
+        with pytest.raises(ValueError, match='restart|new inventory'):
+            tools.inspect_document_folder(str(tmp_path), inventory_id='inventory')

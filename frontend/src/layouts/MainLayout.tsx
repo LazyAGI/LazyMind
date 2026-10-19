@@ -39,6 +39,7 @@ import {
 import { validatePassword } from "@/modules/signin/utils/formRules";
 import logoImage from "@/public/Lazy.png";
 import { useTranslation } from "react-i18next";
+import { hasUnreadDirectoryResults } from "@/modules/documentDirectories/batches";
 import { listBatches as listDirectoryBatches } from "@/modules/documentDirectories/api";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { isVocabularyEnabled } from "@/runtime/mode";
@@ -142,9 +143,7 @@ export default function MainLayout() {
     const refresh = async () => {
       try {
         const batches = await listDirectoryBatches();
-        if (!disposed) setDirectoryUnread(batches.some(root => !root.parent_id && !root.acknowledged &&
-          ['succeeded', 'failed', 'canceled'].includes(root.status) &&
-          !batches.some(child => child.parent_id === root.id && ['pending', 'running'].includes(child.status))));
+        if (!disposed) setDirectoryUnread(hasUnreadDirectoryResults(batches));
       } catch { /* Existing request layer handles connectivity; keep saved results unread. */ }
     };
     void refresh();

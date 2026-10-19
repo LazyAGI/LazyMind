@@ -251,17 +251,18 @@ it('hides empty ungrouped navigation and reads mail from both title and details'
 
 it('falls back to the next nonempty group after a background refresh removes the selection', async () => {
   let tick: () => void = () => {};
-  const original = window.setInterval;
-  const interval = vi.spyOn(window, 'setInterval').mockImplementation(((callback: () => void, delay: number) => {
+  const original = window.setTimeout;
+  const interval = vi.spyOn(window, 'setTimeout').mockImplementation(((callback: () => void, delay: number) => {
     if (delay === 5000) tick = callback;
     return original(callback, delay);
-  }) as typeof window.setInterval);
+  }) as typeof window.setTimeout);
   mockDirectory({ directory, organizing: false,
     groups: [{ id: 'g', name: 'Original group', parent_id: '', position: 0 }],
     entries: [{ ...entry, group_id: 'g' }],
   });
-  view(); interval.mockRestore();
+  view();
   await screen.findByText('Contract A');
+  interval.mockRestore();
   mockDirectory({ directory, organizing: false,
     groups: [{ id: 'h', name: 'Remaining group', parent_id: '', position: 0 }],
     entries: [{ ...entry, group_id: 'h' }],

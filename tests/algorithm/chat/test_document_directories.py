@@ -449,3 +449,31 @@ def test_google_drive_invalid_paths_keep_other_candidates_and_report_gap():
     ]))
     assert observation['incomplete']
     assert [c['resource_id'] for c in observation['candidates']] == ['file-1', 'file-2']
+
+
+@pytest.mark.parametrize('count,complete', [(1, True), (101, False)])
+def test_capture_completion_distinguishes_recovered_delivery_from_lost_calls(count, complete):
+    rt = runtime()
+    rt.started = True
+    rt.pending = [{'call_id': str(i), 'candidates': []} for i in range(count)]
+    rt.request = Mock(side_effect=ConnectionError('offline'))
+    rt.flush()
+    delivered = []
+    rt.request = lambda operation, **payload: delivered.extend(payload['observations'])
+    rt.finish()
+    assert (delivered[-1]['status'] == 'complete') is complete
+    assert len([o for o in delivered if o['call_id'] != '__capture__']) == min(count, 100)
+
+
+def test_cloud_read_reports_all_matching_active_scopes():
+    rt = runtime()
+    rt.folders.active = {
+        'A': {'provider': 'google_drive', 'namespace': 'account-1'},
+        'B': {'provider': 'google_drive', 'namespace': 'account-1'},
+        'foreign': {'provider': 'google_drive', 'namespace': 'other'},
+    }
+    obs = rt.normalize(record('fs_google_read', 'body', {'path': '/file-1'}))
+    scoped = rt.folders.scope_observation(obs)
+    assert len(scoped) == 1
+    assert scoped[0]['inventory_ids'] == ['A', 'B']
+    assert scoped[0]['candidates'][0]['resource_id'] == 'file-1'

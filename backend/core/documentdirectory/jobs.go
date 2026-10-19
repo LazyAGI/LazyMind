@@ -98,6 +98,11 @@ func enqueue(ctx context.Context, tx *gorm.DB, b *orm.DocumentDirectoryBatch, jo
 	b.JobID = j.ID
 	b.Status = "pending"
 	b.Acknowledged = false
+	if b.ParentID != "" {
+		if err := tx.Model(&orm.DocumentDirectoryBatch{}).Where("id=? AND user_id=?", b.ParentID, b.UserID).Update("acknowledged", false).Error; err != nil {
+			return err
+		}
+	}
 	b.UpdatedAt = time.Now().UTC()
 	return tx.Save(b).Error
 }
@@ -993,48 +998,11 @@ func SaveObservations(ctx context.Context, db *gorm.DB, uid, conversation, histo
 				}
 			}
 			row := orm.DocumentObservation{ID: key([]string{uid, conversation, history, run, o.CallID}), UserID: uid, ConversationID: conversation, HistoryID: history, RunID: run, CallID: o.CallID, Query: query, PayloadJSON: encoded(o), CreatedAt: time.Now().UTC()}
-			if o.InventoryID != "" {
-				v, err := inventory(tx, uid, o.InventoryID)
-				if err != nil {
+			if o.InventoryID != "" || len(o.InventoryIDs) > 0 {
+				if err := saveScopedObservation(tx, row, o); err != nil {
 					return err
 				}
-				if v.ConversationID != conversation {
-					return ErrInput
-				}
-				// A suspended traversal may not have reached a sampled node yet. Hold
-				// these observations until the complete manifest can decide membership.
-				if v.Status != "complete" {
-					row.BatchID = "inv:" + v.ID
-					if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
-						return err
-					}
-					continue
-				}
-				scoped, unscoped, err := partitionFolderCandidates(tx, v.ID, o.Candidates)
-				if err != nil {
-					return err
-				}
-				if len(unscoped) > 0 {
-					other := row
-					other.ID = key([]string{row.ID, "unscoped"})
-					other.CallID = strings.TrimSuffix(row.CallID, ":"+v.ID) + ":outside"
-					plain := o
-					plain.InventoryID = ""
-					plain.Candidates = unscoped
-					other.PayloadJSON = encoded(plain)
-					if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&other).Error; err != nil {
-						return err
-					}
-				}
-				if len(scoped) == 0 {
-					continue
-				}
-				o.Candidates = scoped
-				row.PayloadJSON = encoded(o)
-				row.BatchID = v.BatchID
-				if row.BatchID == "" {
-					row.BatchID = "inv:" + v.ID
-				}
+				continue
 			}
 			conflict := clause.OnConflict{DoNothing: true}
 			if o.CallID == "__capture__" {

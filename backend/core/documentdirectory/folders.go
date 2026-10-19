@@ -37,6 +37,9 @@ func folderOperation(ctx context.Context, db *gorm.DB, uid, conv string, c Comma
 	err := mutate(ctx, db, uid, func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		if c.Operation == "folder_begin" {
+			if !currentNodeFormat(req.State) {
+				return fmt.Errorf("%w: inventory_format_restart", ErrInput)
+			}
 			var source map[string]any
 			if json.Unmarshal(req.Source, &source) != nil || source["root"] == nil {
 				return ErrInput
@@ -64,6 +67,9 @@ func folderOperation(ctx context.Context, db *gorm.DB, uid, conv string, c Comma
 		if v.ConversationID != conv {
 			return ErrInput
 		}
+		if v.BatchID == "" && c.Operation != "folder_page" && !currentNodeFormat(v.StateJSON) {
+			return fmt.Errorf("%w: inventory_format_restart", ErrInput)
+		}
 		switch c.Operation {
 		case "folder_page":
 			if req.Offset < 0 {
@@ -87,7 +93,7 @@ func folderOperation(ctx context.Context, db *gorm.DB, uid, conv string, c Comma
 			if v.BatchID != "" || req.Version != v.Version {
 				return ErrBusy
 			}
-			if len(req.Nodes) > 200 || !json.Valid(req.State) {
+			if len(req.Nodes) > 200 || !currentNodeFormat(req.State) {
 				return ErrInput
 			}
 			switch req.Status {
@@ -145,9 +151,6 @@ func folderOperation(ctx context.Context, db *gorm.DB, uid, conv string, c Comma
 				if json.Unmarshal(req.State, &state) != nil || remaining > 0 || roots != 1 || len(state.Queue) > 0 || len(state.Errors) > 0 {
 					return ErrInput
 				}
-				if err = reconcileFolderObservations(tx, v); err != nil {
-					return err
-				}
 			}
 			var counts struct {
 				Files            int64 `json:"files"`
@@ -170,6 +173,9 @@ func folderOperation(ctx context.Context, db *gorm.DB, uid, conv string, c Comma
 			state["counts"] = counts
 			v.Status, v.StateJSON, v.UpdatedAt, v.Version = req.Status, encoded(state), now, v.Version+1
 			if err = tx.Save(&v).Error; err != nil {
+				return err
+			}
+			if err = reconcileFolderObservations(tx, v); err != nil {
 				return err
 			}
 			result["inventory"] = v
@@ -289,6 +295,29 @@ func classificationCounts(tx *gorm.DB, directoryID string) (int64, int64, error)
 }
 
 func reconcileFolderObservations(tx *gorm.DB, v orm.DocumentFolderInventory) error {
+	var pending []orm.DocumentObservation
+	if err := tx.Where("user_id=? AND conversation_id=? AND batch_id LIKE ?", v.UserID, v.ConversationID, "sc:%").Find(&pending).Error; err != nil {
+		return err
+	}
+	for _, row := range pending {
+		var o Observation
+		if err := json.Unmarshal(row.PayloadJSON, &o); err != nil {
+			return err
+		}
+		for _, id := range o.InventoryIDs {
+			if id == v.ID {
+				if err := saveScopedObservation(tx, row, o); err != nil {
+					return err
+				}
+				break
+			}
+		}
+	}
+	// Reconcile pre-upgrade single-inventory observations as well.
+	return reconcileLegacyFolderObservations(tx, v)
+}
+
+func reconcileLegacyFolderObservations(tx *gorm.DB, v orm.DocumentFolderInventory) error {
 	var rows []orm.DocumentObservation
 	marker := "inv:" + v.ID
 	if err := tx.Where("user_id=? AND conversation_id=? AND (batch_id=? OR (batch_id=? AND call_id LIKE ?))", v.UserID, v.ConversationID, marker, "", "%:"+v.ID).Find(&rows).Error; err != nil {
@@ -298,6 +327,9 @@ func reconcileFolderObservations(tx *gorm.DB, v orm.DocumentFolderInventory) err
 		var observation Observation
 		if err := json.Unmarshal(row.PayloadJSON, &observation); err != nil {
 			return err
+		}
+		if len(observation.InventoryIDs) > 0 || v.Status != "complete" {
+			continue
 		}
 		inside, outside, err := partitionFolderCandidates(tx, v.ID, observation.Candidates)
 		if err != nil {

@@ -11,6 +11,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+from .sources import source_identity
+
 from lazyllm.tools import fc_register
 from lazyllm.tools.agent import ToolExecutionError
 from lazymind.chat.engine.tools.host_file_resolution import FileResolution
@@ -36,18 +38,17 @@ def resolve_folder_access(arguments):
     return resolution.finish(arguments)
 
 
-def node_key(identity):
-    return hashlib.sha256(identity.encode()).hexdigest()
+def node_key(identity, *, root=False):
+    return hashlib.sha256(('root:' if root else 'path:').encode() + identity.encode()).hexdigest()
 
 
 def candidate(source, resource_id, title, locator):
-    return {'source': 'feishu' if source['provider'] == 'feishu_wiki' else source['provider'],
-            'namespace': source['namespace'], 'resource_id': resource_id, 'title': title,
+    return {**source_identity(source['provider'], source['namespace'], resource_id), 'title': title,
             'locator': locator, 'read_state': 'unread', 'access_state': 'accessible'}
 
 
 def node(identity, parent, path, name, kind, item=None, listed=False):
-    return {'node_key': node_key(identity), 'parent_key': parent, 'path': path,
+    return {'node_key': node_key('' if path == '' else identity, root=path == ''), 'parent_key': parent, 'path': path,
             'name': name, 'kind': kind, 'listed': listed, 'candidate': item}
 
 
@@ -225,27 +226,23 @@ class FolderTools:
         # Split mixed-source results; never suppress unrelated discovery observations.
         groups = {}
         for item in observation.get('candidates', []):
-            owner = ''
-            for inventory_id, source in reversed(list(self.active.items())):
-                if item.get('namespace') != source['namespace']:
+            owners = []
+            for inventory_id, source in sorted(self.active.items()):
+                provider = 'feishu' if source['provider'] == 'feishu_wiki' else source['provider']
+                if item.get('namespace') != source['namespace'] or item.get('source') != provider:
                     continue
-                if source['provider'] == 'local':
-                    path = item.get('resource_id', '')
+                if provider == 'local':
                     try:
-                        matches = os.path.commonpath([source['root'], path]) == source['root']
+                        if os.path.commonpath([source['root'], item.get('resource_id', '')]) != source['root']:
+                            continue
                     except ValueError:
-                        matches = False
-                else:
-                    # Membership is checked by Core against the durable node table.
-                    matches = item.get('source') in {'feishu', 'google_drive'}
-                if matches:
-                    owner = inventory_id
-                    break
-            groups.setdefault(owner, []).append(item)
+                        continue
+                owners.append(inventory_id)
+            groups.setdefault(tuple(owners), []).append(item)
         if not groups:
             return [observation]
-        return [{**observation, 'call_id': observation['call_id'] + (':' + owner if owner else ''),
-                 'inventory_id': owner, 'candidates': items} for owner, items in groups.items()]
+        return [{**observation, 'call_id': observation['call_id'] + ':' + node_key(json.dumps(owners))[:16],
+                 'inventory_ids': list(owners), 'candidates': items} for owners, items in groups.items()]
 
     def _cloud(self, provider, account):
         configuration = self.runtime.configuration
@@ -272,7 +269,7 @@ class FolderTools:
         client = cloud_client(provider)
         token = tokens[identities.index(selected)]
         # Bind this client only; never change the request-wide credentials of other tools.
-        client.bind_access_token(token)
+        client.bind_access_token(token, user_token=True)
         return selected, client
 
     @fc_register(host_file=resolve_folder_access, exclusive=True)
@@ -305,6 +302,8 @@ class FolderTools:
         if inventory_id:
             saved = self.runtime.request('folder_page', inventory_id=inventory_id, offset=0)
             inv = saved['inventory']
+            if not inv.get('batch_id') and inv['state'].get('node_format_version') != 2:
+                raise ValueError('Legacy inventory format; start a new inventory.')
             source = inv['source']
             if source['provider'] != provider or source['root'] != root or source['namespace'] != namespace:
                 raise ValueError('Inventory source or account changed; start a new inventory.')
@@ -327,7 +326,7 @@ class FolderTools:
             root_node = node('root', '', '', name, 'directory',
                              candidate(source, identifier, name, {'path': '/~node/' + identifier, 'url': root})
                              if root_item else None)
-            state = {'queue': [{'key': root_node['node_key'], 'path': '', 'id': identifier}],
+            state = {'node_format_version': 2, 'queue': [{'key': root_node['node_key'], 'path': '', 'id': identifier}],
                      'errors': [], 'file_types': {root_item.get('obj_type', 'document'): 1} if root_item else {},
                      'started_at': datetime.now(timezone.utc).isoformat()}
             inv = self.runtime.request('folder_begin', source=source, state=state)['inventory']

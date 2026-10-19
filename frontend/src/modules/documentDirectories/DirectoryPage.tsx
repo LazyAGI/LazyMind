@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent } from 'react';
 import { ArrowLeftOutlined, FileTextOutlined, FolderOutlined, MoreOutlined, PushpinFilled, PushpinOutlined, SearchOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Drawer, Dropdown, Empty, Form, Input, Modal, message, Pagination, Select, Space, Spin, Switch, Table, Tabs, Tag, Tooltip, Typography, theme } from 'antd';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -10,6 +10,7 @@ import LocalFileReader from './LocalFileReader';
 import SourceTree from './SourceTree';
 import ExcludedEntries from './ExcludedEntries';
 import './DirectoryPage.css';
+import { latestDirectoryBatches } from './batches';
 
 const PAGE_SIZE = 5;
 
@@ -27,7 +28,7 @@ export default function DirectoryPage() {
   const [selectedEntry, setSelectedEntry] = useState<string>();
   const [page, setPage] = useState(1);
   const [directories, setDirectories] = useState<DocumentDirectory[]>([]);
-  const [detail, setDetail] = useState<DocumentDirectoryDetail>();
+  const [loadedDetail, setDetail] = useState<DocumentDirectoryDetail>();
   const [detailQuery, setDetailQuery] = useState('');
   const [batches, setBatches] = useState<DocumentDirectoryBatch[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,23 +37,40 @@ export default function DirectoryPage() {
   const [deleteTarget, setDeleteTarget] = useState<DocumentDirectory>();
   const [editor, setEditor] = useState<'create' | 'update' | 'group' | 'reorganize'>();
   const [form] = Form.useForm();
-  const requestSequence = useRef(0);
   const pageContainer = useRef<HTMLDivElement>(null);
   const editingGroup = useRef<string>();
   const queryKey = JSON.stringify([directoryId, page, viewMode, selectedGroup, query, stateFilter]);
-  const refresh = useCallback(async () => {
-    const sequence = ++requestSequence.current;
-    const [dirs, runs, view] = await Promise.all([listDirectories(), listBatches(), directoryId ? getDirectory(directoryId, { offset: (page - 1) * PAGE_SIZE, limit: PAGE_SIZE, groupId: viewMode === 'groups' && selectedGroup !== null ? selectedGroup : undefined, query, state: stateFilter }) : undefined]);
-    if (sequence !== requestSequence.current) return;
-    setDirectories(dirs); setBatches(runs); setDetail(view); setDetailQuery(queryKey); setLoading(false);
-  }, [directoryId, page, viewMode, selectedGroup, query, stateFilter, queryKey]);
+  const owner = useMemo(() => ({ key: queryKey }), [queryKey]);
+  const activeOwner = useRef(owner);
+  activeOwner.current = owner;
+  const inFlight = useRef<{ owner: typeof owner; promise: Promise<void> }>();
+  const detail = loadedDetail?.directory.id === directoryId ? loadedDetail : undefined;
+  const refresh = useCallback(() => {
+    if (activeOwner.current !== owner) return Promise.resolve();
+    if (inFlight.current?.owner === owner) return inFlight.current.promise;
+    const promise = (async () => {
+      const [dirs, runs, view] = await Promise.all([listDirectories(), listBatches(), directoryId ? getDirectory(directoryId, { offset: (page - 1) * PAGE_SIZE, limit: PAGE_SIZE, groupId: viewMode === 'groups' && selectedGroup !== null ? selectedGroup : undefined, query, state: stateFilter }) : undefined]);
+      if (activeOwner.current !== owner) return;
+      setDirectories(dirs); setBatches(runs); setDetail(view); setDetailQuery(queryKey); setLoading(false);
+    })().finally(() => { if (inFlight.current?.owner === owner) inFlight.current = undefined; });
+    inFlight.current = { owner, promise };
+    return promise;
+  }, [directoryId, page, viewMode, selectedGroup, query, stateFilter, queryKey, owner]);
   useEffect(() => {
     if (pageContainer.current) pageContainer.current.scrollTop = 0;
-    void refresh().catch(() => setLoading(false));
-    const timer = window.setInterval(() => { void refresh().catch(() => {}); }, 5000);
-    return () => { ++requestSequence.current; window.clearInterval(timer); };
-  }, [refresh]);
-  useEffect(() => { setSelectedGroup(null); setPage(1); setQuery(''); setStateFilter('all'); setViewMode('groups'); setSelectedEntry(undefined); setExcludedOpen(false); setDeleteTarget(undefined); }, [directoryId]);
+    let disposed = false;
+    let timer: number | undefined;
+    if (!loadedDetail || loadedDetail.directory.id !== directoryId) setLoading(true);
+    setSaving(false);
+    const poll = async () => {
+      try { await refresh(); }
+      catch { if (!disposed && activeOwner.current === owner) setLoading(false); }
+      finally { if (!disposed) timer = window.setTimeout(() => void poll(), 5000); }
+    };
+    void poll();
+    return () => { disposed = true; window.clearTimeout(timer); };
+  }, [refresh, owner]);
+  useEffect(() => { setSelectedGroup(null); setPage(1); setQuery(''); setStateFilter('all'); setViewMode('groups'); setSelectedEntry(undefined); setExcludedOpen(false); setDeleteTarget(undefined); setEditor(undefined); setMailEntry(undefined); setLocalEntry(undefined); }, [directoryId]);
   useEffect(() => {
     if (!directoryId) return;
     const touch = () => {
@@ -67,15 +85,17 @@ export default function DirectoryPage() {
     };
   }, [directoryId]);
   const act = async (command: DocumentDirectoryCommand) => {
+    const operationOwner = owner;
     setSaving(true);
     try {
       const result = await directoryAction({ directory_id: directoryId, version: detail?.directory.version, ...command });
+      if (activeOwner.current !== operationOwner) throw new Error('Directory view changed');
       if (result.evicted) message.info(`${t('directories.evicted')}: ${result.evicted}`);
       if (command.operation === 'delete' && directoryId) navigate('/document-directories');
       else if (command.operation === 'create' && result.directory) navigate(`/document-directories/${result.directory.id}`);
       else await refresh();
       return result;
-    } finally { setSaving(false); }
+    } finally { if (activeOwner.current === operationOwner) setSaving(false); }
   };
   const run = (command: DocumentDirectoryCommand) => { void act(command).catch(() => {}); };
   const edit = (kind: typeof editor) => { editingGroup.current = undefined; form.resetFields(); if (kind === 'update') form.setFieldsValue(detail?.directory); setEditor(kind); };
@@ -150,15 +170,19 @@ export default function DirectoryPage() {
     </div> },
     { title: t('directories.actions'), key: 'actions', width: 80, render: (_: unknown, e: DocumentDirectoryEntry) => <Button type="text" onClick={() => setSelectedEntry(e.id)}>{t('directories.details')}</Button> },
   ];
-  // Keep only each directory's latest status; completed history needs no acknowledgement.
-  const latestBatches = new Map<string, DocumentDirectoryBatch>();
-  [...batches].sort((a, b) => b.created_at.localeCompare(a.created_at)).forEach(batch => {
-    if (batches.some(child => child.parent_id === batch.id)) return;
-    if (directoryId && batch.directory_id !== directoryId) return;
-    const key = batch.directory_id || batch.id;
-    if (!latestBatches.has(key)) latestBatches.set(key, batch);
-  });
-  const statusBatches = [...latestBatches.values()].filter(b => !b.acknowledged && !batches.find(parent => parent.id === b.parent_id)?.acknowledged && ['pending', 'running', 'failed', 'canceled'].includes(b.status));
+  const visibleBatches = latestDirectoryBatches(batches, directoryId);
+  const statusBatches = visibleBatches.filter(b => ['pending', 'running', 'failed', 'canceled'].includes(b.status));
+  const acknowledging = useRef(new Set<string>());
+  useEffect(() => {
+    if (loading || document.hidden || directoryId && !detail) return;
+    for (const batch of latestDirectoryBatches(batches, directoryId)) {
+      if (batch.status !== 'succeeded' || !directoryId && batch.directory_id || acknowledging.current.has(batch.id)) continue;
+      acknowledging.current.add(batch.id);
+      void directoryAction({ operation: 'acknowledge', batch_id: batch.id }).then(() => {
+        if (activeOwner.current === owner) setBatches(previous => previous.map(b => b.id === batch.id ? { ...b, acknowledged: true } : b));
+      }).catch(() => {}).finally(() => acknowledging.current.delete(batch.id));
+    }
+  }, [batches, directoryId, detail, loading, owner]);
   return <div ref={pageContainer} className="directory-page" style={{ '--directory-bg': token.colorBgLayout, '--directory-panel': token.colorBgContainer, '--directory-border': token.colorBorderSecondary, '--directory-muted': token.colorTextSecondary, '--directory-hover': token.controlItemBgHover, '--directory-selected': token.controlItemBgActive } as CSSProperties}>
     <div className="directory-page-inner">
       <header className="directory-header">
@@ -180,7 +204,7 @@ export default function DirectoryPage() {
       </header>
       {statusBatches.map(batch => <Alert key={batch.id} showIcon type={batch.status === 'failed' ? 'error' : 'info'}
         message={<Space>{!directoryId && <span>{directories.find(x => x.id === batch.directory_id)?.name || String(batch.result?.directory_name || '')}</span>}{t(batch.status === 'canceled' ? 'directories.folderState_canceled' : batch.status === 'failed' ? 'directories.organizeFailed' : batch.status === 'pending' ? 'directories.organizePending' : 'directories.organizing')}{folderProgress(batch)}</Space>}
-        action={<Button size="small" disabled={saving} onClick={() => run({ operation: ['failed', 'canceled'].includes(batch.status) ? 'retry' : 'cancel', batch_id: batch.id })}>{t(['failed', 'canceled'].includes(batch.status) ? 'directories.retry' : 'directories.cancel')}</Button>} />)}
+        action={<Space><Button size="small" disabled={saving} onClick={() => run({ operation: ['failed', 'canceled'].includes(batch.status) ? 'retry' : 'cancel', batch_id: batch.id })}>{t(['failed', 'canceled'].includes(batch.status) ? 'directories.retry' : 'directories.cancel')}</Button>{['failed', 'canceled'].includes(batch.status) && <Button size="small" disabled={saving} onClick={() => run({ operation: 'acknowledge', batch_id: batch.id })}>{t('directories.dismissResult')}</Button>}</Space>} />)}
       {folderBatch?.status === 'succeeded' && <Alert type="success" message={folderProgress(folderBatch)} />}
       {loading ? <div className="directory-loading"><Spin /></div> : !directoryId ? <>
         <Typography.Paragraph type="secondary">{t('directories.retention')}</Typography.Paragraph>
