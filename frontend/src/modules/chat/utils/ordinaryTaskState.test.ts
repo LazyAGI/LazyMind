@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { OrdinaryTaskView, PublicProcessStep, PublicArtifact } from "../types/ordinaryTask";
 import { mergeOrdinarySnapshot, readOrdinaryTask } from "./ordinaryTaskState";
+import type { ChatModelSwitchRecord } from "@/api/generated/core-client";
 
 function step(id: string): PublicProcessStep {
   return { step_id: id, title: id, order: Number(id), revision: 1, status: "succeeded", started_at: null, finished_at: null, elapsed_ms: null };
@@ -22,6 +23,17 @@ function snapshot(revision = 1): OrdinaryTaskView {
 }
 
 describe("ordinary task snapshots", () => {
+  it("keeps bounded model facts across partial pages and replaces them with a new execution", () => {
+    const record: ChatModelSwitchRecord = { event_id: "switch", switch_index: 1, reason_code: "rate_limited", context_compacted: false,
+      from_max_input_tokens: null, to_max_input_tokens: 65536,
+      from: { candidate_id: "own:a", source: "own", model_id: "a", provider_group_id: "a" },
+      to: { candidate_id: "own:b", source: "own", model_id: "b", provider_group_id: "b" } };
+    const incoming = { ...snapshot(2), model_switch: record, failure_code: "model_fallback_exhausted" as const };
+    expect(mergeOrdinarySnapshot(snapshot(), incoming)).toMatchObject({ model_switch: record, failure_code: "model_fallback_exhausted" });
+    const next = { ...snapshot(3), display_key: "task:one:new", execution_id: "new" };
+    expect(mergeOrdinarySnapshot(incoming, next).model_switch).toBeUndefined();
+    expect(mergeOrdinarySnapshot(incoming, next).failure_code).toBeUndefined();
+  });
   it("does not accept a legacy raw task response as a public snapshot", () => {
     expect(readOrdinaryTask({ task_id: "one", objective: "internal", steps: [] })).toBeUndefined();
     expect(readOrdinaryTask(snapshot())?.display_key).toBe("task:one:run");

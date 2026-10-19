@@ -65,6 +65,9 @@ class AgentExecutionOptions:
     tool_failure_limits: Optional[dict[str, int]] = None
     tool_call_limits: Optional[dict[str, int]] = None
     llm_config: Optional[dict[str, Any]] = None
+    current_model_candidate_id: str = ''
+    model_candidates: tuple[ModelCandidate, ...] = field(default_factory=tuple, repr=False)
+    initial_model_switch: Optional[dict[str, Any]] = field(default=None, repr=False)
     max_input_tokens: Optional[Any] = None
     history_compactor: Optional[Callable[..., tuple[list[dict[str, Any]], list[dict[str, Any]]]]] = None
     authorization_gate: Optional[Callable[..., Any]] = None
@@ -86,6 +89,52 @@ class ContextBudget:
     trigger_ratio: float
     target_ratio: float
     source: str = 'fallback'
+
+
+@dataclass(frozen=True)
+class ModelCandidate:
+    candidate_id: str
+    source: str
+    model_id: str
+    provider_group_id: str = ''
+    credential_revision: int = 0
+    credential_count: int = 1
+    max_input_tokens: Optional[int] = None
+    llm_config: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass
+class FallbackRunState:
+    current: ModelCandidate
+    raw_llm: Any = field(repr=False)
+    budget: ContextBudget
+    candidates: tuple[ModelCandidate, ...] = ()
+    failed_candidates: set[str] = field(default_factory=set)
+    failed_credentials: set[tuple[str, int]] = field(default_factory=set)
+    switch_index: int = 0
+    initial_model_switch: Optional[dict[str, Any]] = field(default=None, repr=False)
+    usage_snapshot: dict[str, Any] = field(default_factory=dict, repr=False)
+    workspace: Optional[str] = field(default=None, repr=False)
+    keep_recent: Optional[int] = None
+    tool_retrieval: Any = field(default=None, repr=False)
+    model_output_index: int = 0
+
+
+@dataclass
+class PreparedContext:
+    budget: ContextBudget
+    input: Any = field(default=None, repr=False)
+    history: list[dict[str, Any]] = field(default_factory=list, repr=False)
+    current_messages: list[dict[str, Any]] = field(default_factory=list, repr=False)
+    projection: dict[str, Any] = field(default_factory=dict, repr=False)
+    spill_plans: list[Any] = field(default_factory=list, repr=False)
+    prune_events: list[Any] = field(default_factory=list, repr=False)
+    candidate_events: list[dict[str, Any]] = field(default_factory=list, repr=False)
+    summary_event: Any = field(default=None, repr=False)
+    summary_text: str = field(default='', repr=False)
+    summary_covered: int = 0
+    summary_runtime: dict[str, Any] = field(default_factory=dict, repr=False)
+    context_compacted: bool = False
 
 
 @dataclass(frozen=True)

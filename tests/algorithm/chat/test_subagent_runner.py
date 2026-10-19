@@ -277,8 +277,9 @@ def _install_fake_build(monkeypatch):
 def _install_fake_translator(monkeypatch):
     """AgentEventFrameTranslator that turns text events into {text:...} frames."""
     class FakeTranslator:
-        def __init__(self, query=''):
+        def __init__(self, query='', run_id=''):
             self.citation_state: Dict[str, Any] = {}
+            self.run = MagicMock(fallback_code='')
 
         def feed(self, item):
             tag = item.get('tag', '')

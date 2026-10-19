@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 	"sync"
@@ -18,6 +20,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/common/taskdisplay"
 	"lazymind/core/localworkspace"
+	"lazymind/core/modelconfig"
 	"lazymind/core/state"
 	"lazymind/core/userenv"
 )
@@ -46,23 +49,30 @@ func CancelRuns(taskIDs []string) {
 // snapshot and never receives a database DSN. Runtime events are streamed back
 // to Core, which is the only component that persists steps and artifacts.
 type RunRequest struct {
-	TaskID             string            `json:"task_id"`
-	AgentType          string            `json:"agent_type"`
-	Params             map[string]any    `json:"params,omitempty"`
-	WorkspacePath      string            `json:"workspace_path"`
-	Tools              []string          `json:"tools,omitempty"`
-	Resume             bool              `json:"resume"`
-	LLMConfig          map[string]any    `json:"llm_config,omitempty"`
-	ToolConfig         map[string]any    `json:"tool_config,omitempty"`
-	UserEnvVars        map[string]string `json:"user_env_vars,omitempty"`
-	TaskSpec           map[string]any    `json:"task_spec,omitempty"`
-	InitialSteps       []stepDTO         `json:"initial_steps,omitempty"`
-	WorkspaceExecution map[string]string `json:"workspace_execution,omitempty"`
+	TaskID                     string                             `json:"task_id"`
+	AgentType                  string                             `json:"agent_type"`
+	Params                     map[string]any                     `json:"params,omitempty"`
+	WorkspacePath              string                             `json:"workspace_path"`
+	Tools                      []string                           `json:"tools,omitempty"`
+	Resume                     bool                               `json:"resume"`
+	LLMConfig                  map[string]any                     `json:"llm_config,omitempty"`
+	ToolConfig                 map[string]any                     `json:"tool_config,omitempty"`
+	UserEnvVars                map[string]string                  `json:"user_env_vars,omitempty"`
+	TaskSpec                   map[string]any                     `json:"task_spec,omitempty"`
+	InitialSteps               []stepDTO                          `json:"initial_steps,omitempty"`
+	WorkspaceExecution         map[string]string                  `json:"workspace_execution,omitempty"`
+	ModelFallbackCurrentID     string                             `json:"model_fallback_current_id,omitempty"`
+	ModelFallbackCandidates    []modelconfig.ChatModelCandidate   `json:"model_fallback_candidates,omitempty"`
+	ModelFallbackInitialSwitch *common.ModelFallbackInitialSwitch `json:"model_fallback_initial_switch,omitempty"`
+	InheritedModelOrigin       *InheritedModelOrigin              `json:"-"`
+	modelModels                []modelconfig.AvailableChatModel
 }
 
 // TaskEvent is one event emitted by the SubAgent SSE stream.
 type TaskEvent struct {
 	Type         string                         `json:"type"`
+	ModelOutput  *common.ModelOutput            `json:"model_output,omitempty"`
+	RuntimeEvent *common.ModelRuntimeEvent      `json:"runtime_event,omitempty"`
 	V2ArtifactID string                         `json:"v2_artifact_id,omitempty"`
 	V2RevisionID string                         `json:"v2_revision_id,omitempty"`
 	ExecutionID  string                         `json:"execution_id,omitempty"`
@@ -121,18 +131,46 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 	defer cancel()
 	if err := hydrateRunRequest(runCtx, db, &req); err != nil {
 		wrapped := fmt.Errorf("prepare subagent run task=%s: %w", req.TaskID, err)
-		routeError(runCtx, db, stateStore, req.TaskID, wrapped.Error())
+		if errors.Is(err, errTaskModelsExhausted) {
+			ev := TaskEvent{Type: "error", TaskID: req.TaskID, Status: StatusFailed, CurrentPhase: "model_fallback_exhausted", Message: "task model configuration unavailable"}
+			_ = routeEventWithWorkflowHooks(runCtx, db, stateStore, ev, true, true)
+		} else {
+			routeError(runCtx, db, stateStore, req.TaskID, wrapped.Error())
+		}
 		return wrapped
 	}
 	params, _ := req.TaskSpec["params"].(map[string]any)
 	workspaceBound := localworkspace.SnapshotFromParams(params) != nil
 	generation := uuid.NewString()
+	call := taskModelCall{cursor: common.ModelOutput{RunID: generation, Phase: "commit"}, currentID: req.ModelFallbackCurrentID, seen: map[string]string{}}
+	ordinary := req.AgentType != "workflow_step"
+	terminalAccepted := false
 	routeAccepted := func(ev TaskEvent) error {
+		if ordinary && terminalAccepted {
+			return nil
+		}
+		var next taskModelCall
 		accepted, err := routeExecutionEvent(runCtx, db, req.TaskID, generation, ev, func(tx *gorm.DB, event TaskEvent) (bool, error) {
+			next = call
+			next.seen = maps.Clone(call.seen)
 			ev = event
+			if ev.RuntimeEvent != nil {
+				runtimeEvent := *ev.RuntimeEvent
+				ev.RuntimeEvent = &runtimeEvent
+			}
+			if ordinary {
+				return persistTaskModelEvent(runCtx, tx, &req, &next, &ev)
+			}
 			return persistTaskEventWithRecord(runCtx, tx, &ev)
 		})
 		if err == nil && accepted {
+			call = next
+			if ev.Type == "done" || ev.Type == "error" {
+				terminalAccepted = true
+			}
+			if ordinary && ev.RuntimeEvent != nil {
+				req.LLMConfig["llm"] = cloneTaskConfig(taskModelCandidate(&req, call.currentID).LLMConfig)["llm"]
+			}
 			ev.DurableToolResults = nil
 			publishTaskEvent(runCtx, db, stateStore, ev, true, true)
 		}
@@ -182,7 +220,34 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 		return err
 	}
 	req.TaskSpec["execution_id"] = generation
+	rollbackOpen := func() {
+		if ordinary && call.cursor.Phase == "begin" {
+			boundary := call.cursor
+			boundary.Phase = "rollback"
+			_ = routeAccepted(TaskEvent{Type: "model_output", TaskID: req.TaskID, ModelOutput: &boundary})
+		}
+	}
+	defer func() {
+		if ordinary && (call.cursor.Phase == "begin" || call.cursor.CallIndex > 0 && runCtx.Err() != nil) {
+			stopped := runCtx.Err()
+			// Cancellation must close previews even after the HTTP context has expired.
+			cleanup, stop := context.WithTimeout(context.WithoutCancel(runCtx), 5*time.Second)
+			defer stop()
+			runCtx = cleanup
+			rollbackOpen()
+			if stopped != nil {
+				if task, err := GetTask(cleanup, db, req.TaskID); err == nil && !isTerminal(task.Status) {
+					status := StatusCanceled
+					if errors.Is(stopped, context.DeadlineExceeded) {
+						status = StatusInterrupted
+					}
+					_ = routeAccepted(TaskEvent{Type: "error", TaskID: req.TaskID, Status: status, Message: "task execution interrupted"})
+				}
+			}
+		}
+	}()
 	runError := func(message string) {
+		rollbackOpen()
 		_ = routeAccepted(TaskEvent{Type: "error", TaskID: req.TaskID, Status: StatusFailed, Message: message})
 	}
 
@@ -229,6 +294,19 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 			continue
 		}
 		ev.TaskID = req.TaskID
+		if ordinary && terminalAccepted {
+			continue
+		}
+		if ev.ExecutionID != "" && ev.ExecutionID != generation || ev.ModelOutput != nil && ev.ModelOutput.RunID != generation {
+			continue
+		}
+		if ordinary && (ev.Type == "done" || ev.Type == "error") {
+			open := call.cursor.Phase == "begin"
+			rollbackOpen()
+			if open && ev.Type == "done" {
+				ev = TaskEvent{Type: "error", TaskID: req.TaskID, ExecutionID: generation, Status: StatusFailed, Message: "task ended before model commit"}
+			}
+		}
 		if observe != nil {
 			if err := observe(ev); err != nil {
 				return fmt.Errorf("%w", err)
@@ -236,13 +314,20 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 		}
 		if err := routeAccepted(ev); err != nil {
 			message := fmt.Sprintf("persist subagent %s event failed: %v", ev.Type, err)
-			runError(message)
+			if ordinary {
+				runError("subagent runtime event rejected")
+			} else {
+				runError(message)
+			}
 			return fmt.Errorf("%s", message)
 		}
 	}
 	if err := scanner.Err(); err != nil && runCtx.Err() == nil {
 		runError(fmt.Sprintf("subagent stream read error: %v", err))
 		return err
+	}
+	if ordinary && call.cursor.CallIndex > 0 && !terminalAccepted && runCtx.Err() == nil {
+		runError("subagent stream ended before task completion")
 	}
 	return nil
 }
@@ -274,6 +359,12 @@ func hydrateRunRequest(ctx context.Context, db *gorm.DB, req *RunRequest) error 
 	req.UserEnvVars, err = userenv.LoadEnabled(ctx, db, task.CreateUserID)
 	if err != nil {
 		return fmt.Errorf("user environment configuration unavailable")
+	}
+	req.AgentType = task.AgentType
+	if task.AgentType != "workflow_step" {
+		if err := prepareTaskModelInput(ctx, db, task, req); err != nil {
+			return err
+		}
 	}
 	if req.TaskSpec != nil {
 		return nil
@@ -365,7 +456,7 @@ func persistTaskEventWithRecord(ctx context.Context, db *gorm.DB, ev *TaskEvent)
 	var err error
 	switch ev.Type {
 	case "process_step":
-		if ev.ProcessStep == nil {
+		if ev.ProcessStep == nil || ev.ProcessStep.ModelSwitch != nil {
 			return false, taskdisplay.ErrInvalidProcessStep
 		}
 		return PersistPublicProcessStep(ctx, db, ev.TaskID, ev.ExecutionID, ev.EventID, *ev.ProcessStep)

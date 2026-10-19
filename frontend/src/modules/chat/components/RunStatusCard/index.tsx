@@ -10,8 +10,11 @@ import { MODEL_FAILURE_CODES } from "@/modules/chat/utils/chatStreamError";
 
 import "./index.scss";
 
+const MODEL_FALLBACK_CODES = new Set(["model_fallback_exhausted", "model_context_not_fit"]);
+
 const KNOWN_CODES = new Set([
   ...MODEL_FAILURE_CODES,
+  ...MODEL_FALLBACK_CODES,
   "request_rejected",
   "length",
   "content_filter",
@@ -154,8 +157,9 @@ export default function RunStatusCard({
   const className = isCancelled
     ? "chat-run-status-card chat-run-status-card--cancelled"
     : "chat-run-status-card";
-  const isModelFailure = terminal.reason === "model_failure";
-  const shouldCheckSettings = MODEL_SETTINGS_CODES.has(terminal.code || "");
+  const isFallbackFailure = MODEL_FALLBACK_CODES.has(terminal.code || "");
+  const isModelFailure = terminal.reason === "model_failure" || isFallbackFailure;
+  const shouldCheckSettings = MODEL_SETTINGS_CODES.has(terminal.code || "") || isFallbackFailure;
   const modelSettingsUrl = (() => {
     const params = new URLSearchParams({ section: "models", view: "providers" });
     if (conversationId) {

@@ -558,6 +558,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
         className="chat-chat-container"
         onWheelCapture={handleConversationWheel}
       >
+        {conversation.modelFallbackNotificationHolder}
         <div className="chat-box">
           <div className="chat-main-column">
             <MessageList

@@ -2509,7 +2509,17 @@ const zhCN = {
       "自动选择可用模型，后续沿用上次成功使用的模型；仅在模型不可用或主动切换时更换",
     modelRouteAutoLabel: "Auto · {{model}}",
     modelRouteFixedLabel: "{{model}}",
+    modelFallbackSucceeded: "模型切换成功",
+    modelFallbackDescription: "{{from}} → {{to}}。原因：{{reason}}",
+    modelFallbackHistory: "模型切换记录",
+    modelFallbackWindowUnknown: "窗口未知",
+    modelFallbackContextAdapted: "上下文已适配。",
+    modelFallbackReason: {
+      model_config_unavailable: "原模型配置不可用。",
+      unknown: "模型服务暂时不可用。",
+    },
     modelRouteReason: {
+      model_fallback: "本次任务自动切换至已成功响应的替代模型",
       fork_selection: "沿用分支来源回复的模型",
       initial_selection: "首次为此会话选择可用模型",
       model_unavailable: "之前的模型不可用，已切换至另一可用模型",
@@ -2715,6 +2725,8 @@ const zhCN = {
       failureCode: "错误码：{{code}}",
       diagnosticId: "诊断 ID：{{id}}",
       codes: {
+        model_fallback_exhausted: "本次任务没有其他可用的替代模型。请选择模型或检查模型设置后重试。",
+        model_context_not_fit: "没有可容纳当前任务上下文的可用模型。请选择上下文更长的模型或检查模型设置。",
         invalid_request: "模型请求格式错误或缺少必要参数。",
         authentication_failed: "模型服务身份验证失败，请检查 API Key、组织或项目成员关系及 IP 白名单设置。",
         permission_denied: "当前请求无权访问模型服务，请检查访问权限或区域限制。",

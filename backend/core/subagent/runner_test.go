@@ -20,7 +20,8 @@ func TestAlgoServiceURL(t *testing.T) {
 }
 
 func TestHydrateRunRequestUsesCoreOwnedSnapshotWithoutDSN(t *testing.T) {
-	db := newTestDB(t)
+	db := orm.MigrateAllModelsForTest(t)
+	seedTaskModel(t, db.DB, "user-1", "snapshot-model", false)
 	now := time.Now().UTC()
 	task := &orm.SubAgentTask{
 		ID: "task-snapshot", ConversationID: "conv-1", TriggerHistoryID: "history-1",
@@ -149,10 +150,11 @@ func TestRouteArtifactRollsBackDeliveryWhenV2SnapshotFails(t *testing.T) {
 }
 
 func TestHydrationFailureMarksExistingTaskFailed(t *testing.T) {
-	db := newTestDB(t)
+	db := orm.MigrateAllModelsForTest(t)
+	seedTaskModel(t, db.DB, "user-1", "hydration-model", false)
 	now := time.Now().UTC()
 	task := &orm.SubAgentTask{ID: "task-hydration-error", ConversationID: "conv-1",
-		AgentType: "research", Title: "Research", Objective: "Investigate", Mode: "auto",
+		CreateUserID: "user-1", AgentType: "research", Title: "Research", Objective: "Investigate", Mode: "auto",
 		Status: StatusRunning, Params: json.RawMessage(`{}`), InputSlots: json.RawMessage(`[]`),
 		OutputSlots: json.RawMessage(`[]`), LastHeartbeat: now, CreatedAt: now, UpdatedAt: now}
 	if err := db.Create(task).Error; err != nil {

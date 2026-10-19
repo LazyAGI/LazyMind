@@ -24,6 +24,7 @@ from .summary_range import (
     is_runtime_summary_message,
     select_summary_range,
     validate_tool_pairing,
+    extract_summary_markdown,
 )
 from .telemetry import append_event
 
@@ -60,10 +61,31 @@ def _llm_response_text(resp: Any) -> str:
     return str(resp).strip()
 
 
-def _call_summarizer_llm(llm: Any, system_prompt: str, user_prompt: str) -> str:
+def _call_summarizer_llm(llm: Any, system_prompt: str, user_prompt: str, *,
+                         candidate_budget: Optional[ContextBudget] = None) -> str:
     """Invoke the shared chat LLM once without streaming."""
+    llm = getattr(llm, 'raw_llm', llm)
     if llm is None:
         raise ValueError('summarizer llm is required')
+    if candidate_budget is not None:
+        from .model_fallback import _request_tokens, _preparation_error
+        from lazyllm.module.llms.onlinemodule.base.model_outcome import ModelFailureCode, ModelCallError, ModelFinish
+
+        view = llm.share(prompt=system_prompt, format=_llm_response_text, stream=False, copy_static_params=True)
+        view._static_params.pop('tools', None)
+        with lazyllm.globals.stack_enter(view.identities):
+            supplier = view._get_supplier() if hasattr(view, '_get_supplier') else view
+        output_limit = max(1, candidate_budget.reserved_output_tokens)
+        if _request_tokens(supplier, user_prompt, None, None, {'max_tokens': output_limit}) \
+                > candidate_budget.effective_input_budget:
+            raise _preparation_error(ModelFailureCode.TOKEN_LIMIT, 'The summary request does not fit this candidate.')
+        try:
+            return _llm_response_text(view(user_prompt, max_tokens=output_limit, max_retries=1, tools=[]))
+        except ModelCallError as exc:
+            if exc.terminal.kind == 'finish' and exc.terminal.finish == ModelFinish.LENGTH:
+                raise _preparation_error(ModelFailureCode.TOKEN_LIMIT,
+                                         'The candidate summary exceeded its output limit.') from exc
+            raise
     prompt = f'{system_prompt}\n\n{user_prompt}'
     if hasattr(llm, 'share'):
         summarize_llm = llm.share(stream=False)
@@ -151,7 +173,7 @@ def _validate_summary(
     return True, 'ok', summary_tokens, replaced_tokens
 
 
-def apply_summary_compression(
+def prepare_summary_compression(
     history: list[dict[str, Any]],
     *,
     budget: ContextBudget,
@@ -160,12 +182,11 @@ def apply_summary_compression(
     summarizer: Optional[Callable[[str, str], str]] = None,
     force: bool = False,
     estimated_total_tokens: Optional[int] = None,
+    runtime_state: Optional[dict[str, Any]] = None,
+    raise_llm_errors: bool = True,
+    candidate_budget: Optional[ContextBudget] = None,
 ) -> tuple[list[dict[str, Any]], SummaryEvent]:
-    """Replace older turns with a rolling runtime summary when over target.
-
-    The input history is never mutated. On any failure the original list copy
-    is returned (Stage-1 projection remains authoritative for this attempt).
-    """
+    """Plan a validated summary without publishing events or model context."""
     original = list(history)
     before_history = _estimate_history_tokens(original)
     before_total = (
@@ -195,7 +216,7 @@ def apply_summary_compression(
     if selected is None:
         return _abandon(original, budget, trigger, before_total, ratio_before, 'no_summary_range')
 
-    runtime_state = collect_summary_runtime_state()
+    runtime_state = collect_summary_runtime_state() if runtime_state is None else runtime_state
     profile = resolve_summary_profile(runtime_state)
     if (
         profile == 'workflow'
@@ -217,8 +238,12 @@ def apply_summary_compression(
         if summarizer is not None:
             summary_markdown = (summarizer(system_prompt, user_prompt) or '').strip()
         else:
-            summary_markdown = _call_summarizer_llm(llm, system_prompt, user_prompt)
+            summary_markdown = _call_summarizer_llm(
+                llm, system_prompt, user_prompt, candidate_budget=candidate_budget,
+            )
     except Exception as exc:  # noqa: BLE001 - never fail the agent path
+        if raise_llm_errors:
+            raise
         lazyllm.LOG.warning(f'[ContextSummary] summary_llm_failed err={exc}')
         return _abandon(
             original, budget, trigger, before_total, ratio_before, 'llm_failed',
@@ -280,11 +305,40 @@ def apply_summary_compression(
         usage_ratio_before=ratio_before,
         usage_ratio_after=ratio_after,
     )
-    _log_summary_event(event)
-    covered = _max_history_seq(replaced_span)
-    if covered > 0:
-        _emit_model_context_updated(summary_markdown, covered)
     return projected, event
+
+
+def apply_summary_compression(
+    history: list[dict[str, Any]],
+    *,
+    budget: ContextBudget,
+    trigger: CompressionTrigger,
+    llm: Any = None,
+    summarizer: Optional[Callable[[str, str], str]] = None,
+    force: bool = False,
+    estimated_total_tokens: Optional[int] = None,
+) -> tuple[list[dict[str, Any]], SummaryEvent]:
+    projected, event = prepare_summary_compression(
+        history, budget=budget, trigger=trigger, llm=llm, summarizer=summarizer,
+        force=force, estimated_total_tokens=estimated_total_tokens, raise_llm_errors=False,
+    )
+    _log_summary_event(event)
+    if event.decision == 'summarized':
+        selected = select_summary_range(
+            history, effective_input_budget=budget.effective_input_budget,
+            keep_recent_ratio=float(config['context_summary_keep_recent_ratio']),
+            min_recent_user_turns=int(config['context_summary_min_recent_user_turns']),
+        )
+        _emit_model_context_updated(
+            extract_summary_markdown(projected[selected.replace_start]),
+            _max_history_seq(history[selected.replace_start:selected.replace_end]),
+        )
+    return projected, event
+
+
+def commit_summary_compression(summary_text, covered, event, runtime_state):
+    _log_summary_event(event)
+    _emit_model_context_updated(summary_text, covered, runtime_state=runtime_state, strict=True)
 
 
 def strip_lazymind_meta(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -307,10 +361,13 @@ def _max_history_seq(messages: list[dict[str, Any]]) -> int:
     return max_seq
 
 
-def _emit_model_context_updated(summary_markdown: str, covered_through_seq: int) -> None:
+def _emit_model_context_updated(summary_markdown: str, covered_through_seq: int, *,
+                                runtime_state: Optional[dict[str, Any]] = None, strict: bool = False) -> None:
     if covered_through_seq <= 0 or not summary_markdown.strip():
         return
     if _write_agent_data is None:
+        if strict:
+            raise RuntimeError('model context sink is unavailable')
         return
     cfg = lazyllm.globals.get('agentic_config') or {}
     prior = cfg.get('model_context') if isinstance(cfg, dict) else None
@@ -323,12 +380,13 @@ def _emit_model_context_updated(summary_markdown: str, covered_through_seq: int)
     if covered_through_seq <= prior_covered:
         return
     try:
+        fields = sidecar_fields(runtime_state)
         _write_agent_data(
             'model_context_updated',
             summary_text=summary_markdown.strip(),
             covered_through_seq=int(covered_through_seq),
             version=1,
-            **sidecar_fields(),
+            **fields,
         )
         if isinstance(cfg, dict):
             cfg['model_context'] = merge_model_context_sidecar(
@@ -337,9 +395,11 @@ def _emit_model_context_updated(summary_markdown: str, covered_through_seq: int)
                     'covered_through_seq': int(covered_through_seq),
                     'version': 1,
                 },
-                sidecar_fields(),
+                fields,
             )
     except Exception as exc:  # noqa: BLE001
+        if strict:
+            raise
         lazyllm.LOG.warning(f'[ContextSummary] model_context_emit_failed err={exc}')
 
 
@@ -362,7 +422,6 @@ def _skip(
         usage_ratio_before=ratio_before,
         usage_ratio_after=ratio_before,
     )
-    _log_summary_event(event)
     return history, event
 
 
@@ -392,7 +451,6 @@ def _abandon(
         usage_ratio_before=ratio_before,
         usage_ratio_after=ratio_before,
     )
-    _log_summary_event(event)
     return history, event
 
 

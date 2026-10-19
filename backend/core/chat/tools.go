@@ -173,16 +173,18 @@ func fetchChatTools(ctx context.Context, db *gorm.DB, userID, acceptLanguage str
 }
 
 func applyChatRuntimeConfigs(ctx context.Context, db *gorm.DB, userID string, body map[string]any) error {
+	clearChatFallbackInput(body)
+	delete(body, chatModelPreparedBodyKey)
 	if db == nil {
 		return nil
 	}
-	llmConfig, err := modelconfig.LoadLLMConfig(ctx, db, userID)
+	prepared, err := modelconfig.LoadChatRuntimeConfig(ctx, db, userID)
 	if err != nil {
 		return err
 	}
-	if len(llmConfig) > 0 {
-		body["llm_config"] = llmConfig
-	}
+	body[chatModelPreparedBodyKey] = prepared
+	body["llm_config"] = prepared.Config
+	defer delete(body, chatModelPreparedBodyKey)
 	if err := applyConversationChatModelConfig(ctx, db, userID, body); err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package chat
 import (
 	"encoding/json"
 	"errors"
+	"lazymind/core/common"
 	"strings"
 )
 
@@ -12,13 +13,7 @@ const (
 	RuntimeEventRunFinished         = "run_finished"
 )
 
-type ChatRuntimeEvent struct {
-	SchemaVersion int             `json:"schema_version"`
-	EventID       string          `json:"event_id"`
-	RunID         string          `json:"run_id"`
-	Type          string          `json:"type"`
-	Data          json.RawMessage `json:"data"`
-}
+type ChatRuntimeEvent common.ModelRuntimeEvent
 
 type RunTerminal struct {
 	Status              string                  `json:"status"`
@@ -86,15 +81,7 @@ var validModelFailureOrigins = map[string]struct{}{
 	"transport": {}, "http": {}, "provider": {}, "protocol": {},
 }
 
-var validModelFailureCodes = map[string]struct{}{
-	"invalid_request": {}, "authentication_failed": {}, "permission_denied": {}, "not_found": {},
-	"rate_limited": {}, "usage_limit_exceeded": {}, "concurrency_limited": {}, "quota_exhausted": {},
-	"balance_exhausted": {}, "organization_spend_limit_exceeded": {}, "project_spend_limit_exceeded": {},
-	"input_filtered": {}, "output_filtered": {}, "token_limit": {}, "request_timeout": {},
-	"provider_overloaded": {}, "service_unavailable": {}, "provider_internal_error": {},
-	"provider_rejected": {}, "conflict": {}, "unprocessable_entity": {}, "protocol_error": {},
-	"transport_error": {},
-}
+var validModelFailureCodes = common.ValidModelFailureCodes
 
 func (e *ChatRuntimeEvent) Validate(expectedRunID string) error {
 	if e == nil {
@@ -107,6 +94,8 @@ func (e *ChatRuntimeEvent) Validate(expectedRunID string) error {
 		return errors.New("runtime event run_id mismatch")
 	}
 	switch e.Type {
+	case RuntimeEventModelSwitched:
+		return validateModelSwitched(e.Data)
 	case RuntimeEventModelRetryScheduled:
 		return validateModelRetryScheduled(e.Data)
 	case RuntimeEventModelCallFinished:
@@ -221,6 +210,7 @@ func parseRunTerminal(raw json.RawMessage) (*RunTerminal, error) {
 		switch terminal.Reason {
 		case "model_failure":
 			_, valid = validModelFailureCodes[terminal.Code]
+			valid = valid || terminal.Code == "model_fallback_exhausted" || terminal.Code == "model_context_not_fit"
 		case "runtime_failure":
 			valid = strings.TrimSpace(terminal.Code) != ""
 		}

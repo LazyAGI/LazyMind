@@ -149,6 +149,7 @@ vi.mock("./hooks/useChatConversation", () => ({
     regenerate: mocks.regenerate,
     mediaCapabilityDependency: null,
     mediaCapabilityChecking: false,
+    modelFallbackNotificationHolder: <span data-testid="model-fallback-notifications" />,
     continueAfterMediaCapabilityConfiguration: vi.fn(),
     replaceMessageList: vi.fn(),
     mergeHistoryPage: mocks.mergeHistoryPage,
@@ -237,6 +238,7 @@ describe("ChatContainerComponent wheel forwarding", () => {
 
   it("disables workspace controls for document previews but enables them for ordinary chats", () => {
     const view = render(<ChatContainerComponent sessionId="pdf-preview" allowLocalWorkspace={false} />);
+    expect(screen.getByTestId("model-fallback-notifications")).toBeInTheDocument();
     expect(mocks.latestChatInputProps.allowLocalWorkspace).toBe(false);
     view.rerender(<ChatContainerComponent sessionId="conversation-1" />);
     expect(mocks.latestChatInputProps.allowLocalWorkspace).toBe(true);

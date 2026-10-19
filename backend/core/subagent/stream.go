@@ -216,7 +216,7 @@ func StreamTask(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	// 1. DB snapshot: task_start + history progress + history artifacts + history steps.
-	writeTaskSSE(w, flusher, TaskEvent{Type: "task_start", TaskID: taskID})
+	writeTaskSSE(w, flusher, TaskEvent{Type: "task_start", TaskID: taskID, ExecutionID: t.ExecutionID})
 	writeTaskSSE(w, flusher, TaskEvent{
 		Type: "progress", TaskID: taskID,
 		Progress: t.ProgressPct, CurrentPhase: t.CurrentPhase, EstimatedSec: t.EstimatedSec,
@@ -226,16 +226,7 @@ func StreamTask(w http.ResponseWriter, r *http.Request) {
 		Sources: normalizeJSON(json.RawMessage(t.Sources), "[]"),
 	})
 	steps, _ := LoadSteps(ctx, db, taskID)
-	lastStepSeq := -1
-	for i := range steps {
-		if steps[i].Seq > lastStepSeq {
-			lastStepSeq = steps[i].Seq
-		}
-		ev := stepToTaskEvent(taskID, &steps[i])
-		if ev != nil {
-			writeTaskSSE(w, flusher, *ev)
-		}
-	}
+	lastStepSeq, cursor := writeTaskStepsSnapshot(w, flusher, t, steps)
 	arts, _ := LoadArtifacts(ctx, db, taskID)
 	for i := range arts {
 		if arts[i].Hidden {
@@ -255,9 +246,9 @@ func StreamTask(w http.ResponseWriter, r *http.Request) {
 	// then emit the authoritative DB terminal state.
 	if isTerminal(t.Status) {
 		if stateStore != nil {
-			_, _, _ = replayArtifactStreamEvents(ctx, stateStore, w, flusher, taskID, nil)
+			_, _, _ = replayArtifactStreamEvents(ctx, stateStore, w, flusher, taskID, nil, cursor, true)
 		}
-		emitTerminal(w, flusher, taskID, t.Status, t.Summary)
+		emitTaskTerminal(w, flusher, t)
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		flusher.Flush()
 		return
@@ -266,10 +257,10 @@ func StreamTask(w http.ResponseWriter, r *http.Request) {
 	// 3. Still running: start at offset zero even when the LIST does not exist yet.
 	// The first Draft stream event may be created after the browser connects.
 	if stateStore == nil {
-		pollDBUntilTerminal(ctx, db, w, flusher, taskID, t.WorkspacePath, lastStepSeq)
+		pollDBUntilTerminal(ctx, db, w, flusher, taskID, t.WorkspacePath, lastStepSeq, cursor)
 		return
 	}
-	tailRedisStream(ctx, db, stateStore, w, flusher, taskID, t.WorkspacePath, lastStepSeq)
+	tailRedisStream(ctx, db, stateStore, w, flusher, taskID, t.WorkspacePath, lastStepSeq, cursor)
 }
 
 func replayArtifactStreamEvents(
@@ -279,25 +270,82 @@ func replayArtifactStreamEvents(
 	flusher http.Flusher,
 	taskID string,
 	sent map[string]struct{},
+	cursor *common.ModelOutput, terminalStatus bool,
 ) (int64, *TaskEvent, error) {
 	existing, err := StreamEventsFrom(ctx, stateStore, taskID, 0)
 	if err != nil {
 		return 0, nil, err
 	}
 	var terminal *TaskEvent
+	var pending []TaskEvent
+	nextIndex := 0
+	if cursor != nil {
+		nextIndex = cursor.CallIndex + 1
+	}
 	for _, raw := range existing {
 		var ev TaskEvent
 		if json.Unmarshal([]byte(raw), &ev) != nil {
 			continue
 		}
+		if cursor != nil && ev.ExecutionID != "" && ev.ExecutionID != cursor.RunID {
+			continue
+		}
 		if isArtifactStreamEvent(ev.Type) {
 			writeArtifactStreamEventOnce(w, flusher, ev, sent)
 		}
+		if m := ev.ModelOutput; m != nil && cursor != nil {
+			if m.RunID != cursor.RunID || m.CallIndex < nextIndex {
+				continue
+			}
+			switch m.Phase {
+			case "begin":
+				if m.CallIndex == nextIndex && len(pending) == 0 {
+					pending = []TaskEvent{ev}
+				}
+			case "":
+				if len(pending) > 0 && m.CallIndex == nextIndex && (ev.Type == "text" || ev.Type == "think") {
+					pending = append(pending, ev)
+				}
+			case "commit", "rollback":
+				if len(pending) == 0 || m.CallIndex != nextIndex {
+					continue
+				}
+				if m.Phase == "commit" {
+					for _, frame := range pending {
+						writeTaskSSE(w, flusher, frame)
+					}
+				} else {
+					writeTaskSSE(w, flusher, pending[0])
+				}
+				writeTaskSSE(w, flusher, ev)
+				*cursor = *m
+				pending = nil
+				nextIndex++
+			}
+		}
 		if ev.Type == "done" || ev.Type == "error" {
+			if cursor != nil && ev.ExecutionID != cursor.RunID {
+				continue
+			}
 			copy := ev
 			terminal = &copy
 		}
 	}
+	if len(pending) > 0 {
+		if terminalStatus || terminal != nil {
+			writeTaskSSE(w, flusher, pending[0])
+			boundary := *pending[0].ModelOutput
+			boundary.Phase = "rollback"
+			*cursor = boundary
+			writeTaskSSE(w, flusher, TaskEvent{Type: "model_output", TaskID: taskID, ExecutionID: boundary.RunID, ModelOutput: &boundary})
+		} else {
+			*cursor = *pending[0].ModelOutput
+			for _, ev := range pending {
+				writeTaskSSE(w, flusher, ev)
+			}
+		}
+	}
+
 	return int64(len(existing)), terminal, nil
 }
 
@@ -307,6 +355,66 @@ func emitTerminal(w http.ResponseWriter, flusher http.Flusher, taskID, status, s
 		return
 	}
 	writeTaskSSE(w, flusher, TaskEvent{Type: "error", TaskID: taskID, Status: status, Message: summary})
+}
+
+func emitTaskTerminal(w http.ResponseWriter, flusher http.Flusher, task *orm.SubAgentTask) {
+	ev := TaskEvent{Type: "error", TaskID: task.ID, ExecutionID: task.ExecutionID, Status: task.Status, Message: task.Summary, CurrentPhase: task.CurrentPhase}
+	if task.Status == StatusSucceeded {
+		ev.Type = "done"
+		ev.Message = ""
+		ev.Summary = task.Summary
+	}
+	writeTaskSSE(w, flusher, ev)
+}
+
+func writeTaskStepsSnapshot(w http.ResponseWriter, flusher http.Flusher, task *orm.SubAgentTask, steps []orm.SubAgentStep) (int, *common.ModelOutput) {
+	seq := -1
+	var cursor *common.ModelOutput
+	if task.AgentType != "workflow_step" && task.ExecutionID != "" {
+		cursor = &common.ModelOutput{RunID: task.ExecutionID, Phase: "commit"}
+	}
+	for i := range steps {
+		row := &steps[i]
+		seq = max(seq, row.Seq)
+		if row.ExecutionID != "" && row.ExecutionID != task.ExecutionID {
+			continue
+		}
+		if row.Role == "model_runtime" && cursor != nil {
+			var record taskModelRecord
+			if json.Unmarshal(row.Content, &record) == nil && record.ModelOutput.RunID == task.ExecutionID && (record.ModelOutput.Phase == "commit" || record.ModelOutput.Phase == "rollback") {
+				value := record.ModelOutput
+				cursor = &value
+			}
+			continue
+		}
+		if ev := stepToTaskEvent(task.ID, row); ev != nil {
+			writeTaskSSE(w, flusher, *ev)
+		}
+	}
+	if cursor != nil {
+		writeTaskSSE(w, flusher, TaskEvent{Type: "model_output", TaskID: task.ID, ExecutionID: task.ExecutionID, ModelOutput: cursor})
+	}
+	return seq, cursor
+}
+
+func refreshTaskStepsSnapshot(ctx context.Context, db *gorm.DB, w http.ResponseWriter, flusher http.Flusher, taskID string, seq int, cursor *common.ModelOutput) (int, *common.ModelOutput) {
+	task, err := GetTask(ctx, db, taskID)
+	if err != nil {
+		return seq, cursor
+	}
+	steps, err := LoadSteps(ctx, db, taskID)
+	if err != nil {
+		return seq, cursor
+	}
+	writeTaskSSE(w, flusher, TaskEvent{Type: "task_start", TaskID: taskID, ExecutionID: task.ExecutionID})
+	return writeTaskStepsSnapshot(w, flusher, task, steps)
+}
+
+func closeTaskPreview(w http.ResponseWriter, flusher http.Flusher, taskID string, cursor *common.ModelOutput) {
+	if cursor != nil && cursor.Phase == "begin" {
+		cursor.Phase = "rollback"
+		writeTaskSSE(w, flusher, TaskEvent{Type: "model_output", TaskID: taskID, ExecutionID: cursor.RunID, ModelOutput: cursor})
+	}
 }
 
 // stepToTaskEvent converts a persisted step back to a TaskEvent for the DB snapshot replay.
@@ -325,22 +433,24 @@ func stepToTaskEvent(taskID string, s *orm.SubAgentStep) *TaskEvent {
 
 	case "text":
 		var c struct {
-			Content string `json:"content"`
+			Content     string              `json:"content"`
+			ModelOutput *common.ModelOutput `json:"model_output,omitempty"`
 		}
 		_ = json.Unmarshal(s.Content, &c)
 		if c.Content == "" {
 			return nil
 		}
-		return &TaskEvent{Type: "text", TaskID: taskID, Text: c.Content}
+		return &TaskEvent{Type: "text", TaskID: taskID, Text: c.Content, ExecutionID: s.ExecutionID, ModelOutput: c.ModelOutput}
 	case "think":
 		var c struct {
-			Content string `json:"content"`
+			Content     string              `json:"content"`
+			ModelOutput *common.ModelOutput `json:"model_output,omitempty"`
 		}
 		_ = json.Unmarshal(s.Content, &c)
 		if c.Content == "" {
 			return nil
 		}
-		return &TaskEvent{Type: "think", TaskID: taskID, Think: c.Content}
+		return &TaskEvent{Type: "think", TaskID: taskID, Think: c.Content, ExecutionID: s.ExecutionID, ModelOutput: c.ModelOutput}
 	case "assistant", "tool":
 		// assistant step content: {"tool_calls": [...], "text": ""}
 		// tool step content: {"tool_results": [...]}
@@ -353,7 +463,7 @@ func stepToTaskEvent(taskID string, s *orm.SubAgentStep) *TaskEvent {
 			if len(c.ToolCalls) == 0 {
 				return nil
 			}
-			return &TaskEvent{Type: "tool_calls", TaskID: taskID, ToolCalls: c.ToolCalls}
+			return &TaskEvent{Type: "tool_calls", TaskID: taskID, ToolCalls: c.ToolCalls, ExecutionID: s.ExecutionID}
 		}
 		var c struct {
 			ToolResults json.RawMessage `json:"tool_results"`
@@ -362,7 +472,7 @@ func stepToTaskEvent(taskID string, s *orm.SubAgentStep) *TaskEvent {
 		if len(c.ToolResults) == 0 {
 			return nil
 		}
-		return &TaskEvent{Type: "tool_results", TaskID: taskID, ToolResults: c.ToolResults}
+		return &TaskEvent{Type: "tool_results", TaskID: taskID, ToolResults: c.ToolResults, ExecutionID: s.ExecutionID}
 	}
 	return nil
 }
@@ -377,6 +487,7 @@ func tailRedisStream(
 	taskID string,
 	workspacePath string,
 	lastStepSeq int,
+	cursor *common.ModelOutput,
 ) {
 	liveEvents, unsubscribe := taskLiveEvents.subscribe(taskID)
 	defer unsubscribe()
@@ -385,10 +496,13 @@ func tailRedisStream(
 	// DB-backed events were already sent by the snapshot. Draft preview events are
 	// Redis-only, so replay all of those still available within the LIST TTL.
 	from, terminal, err := replayArtifactStreamEvents(
-		ctx, stateStore, w, flusher, taskID, sentArtifactStreamEvents,
+		ctx, stateStore, w, flusher, taskID, sentArtifactStreamEvents, cursor, false,
 	)
 	if err != nil {
-		pollDBUntilTerminal(ctx, db, w, flusher, taskID, workspacePath, lastStepSeq)
+		if cursor != nil {
+			lastStepSeq, cursor = refreshTaskStepsSnapshot(ctx, db, w, flusher, taskID, lastStepSeq, cursor)
+		}
+		pollDBUntilTerminal(ctx, db, w, flusher, taskID, workspacePath, lastStepSeq, cursor)
 		return
 	}
 	if terminal != nil {
@@ -412,11 +526,17 @@ func tailRedisStream(
 		case <-ctx.Done():
 			return
 		case ev := <-liveEvents:
+			if cursor != nil && ev.ExecutionID != "" && ev.ExecutionID != cursor.RunID {
+				continue
+			}
 			if ev.Type == "progress" {
 				writeTaskSSE(w, flusher, ev)
 				continue
 			}
 			if ev.Type == "done" || ev.Type == "error" {
+				if cursor != nil {
+					continue
+				}
 				writeTaskSSE(w, flusher, ev)
 				_, _ = w.Write([]byte("data: [DONE]\n\n"))
 				flusher.Flush()
@@ -437,13 +557,18 @@ func tailRedisStream(
 		case <-pollTicker.C:
 			events, err := StreamEventsFrom(ctx, stateStore, taskID, from)
 			if err != nil {
+				if cursor != nil {
+					lastStepSeq, cursor = refreshTaskStepsSnapshot(ctx, db, w, flusher, taskID, lastStepSeq, cursor)
+					pollDBUntilTerminal(ctx, db, w, flusher, taskID, workspacePath, lastStepSeq, cursor)
+					return
+				}
 				steps, _ := LoadSteps(ctx, db, taskID)
 				for i := range steps {
 					if steps[i].Seq > lastStepSeq {
 						lastStepSeq = steps[i].Seq
 					}
 				}
-				pollDBUntilTerminal(ctx, db, w, flusher, taskID, workspacePath, lastStepSeq)
+				pollDBUntilTerminal(ctx, db, w, flusher, taskID, workspacePath, lastStepSeq, cursor)
 				return
 			}
 			wroteEvent := false
@@ -452,6 +577,16 @@ func tailRedisStream(
 				if json.Unmarshal([]byte(raw), &ev) != nil {
 					from++
 					continue
+				}
+				if cursor != nil && (ev.ExecutionID != "" && ev.ExecutionID != cursor.RunID || ev.ModelOutput != nil && ev.ModelOutput.RunID != cursor.RunID) {
+					from++
+					continue
+				}
+				if m := ev.ModelOutput; m != nil && cursor != nil && m.Phase != "" && m.CallIndex >= cursor.CallIndex {
+					*cursor = *m
+				}
+				if ev.Type == "done" || ev.Type == "error" {
+					closeTaskPreview(w, flusher, taskID, cursor)
 				}
 				ev = prepareTaskEventForSSE(ev, workspacePath)
 				if isArtifactStreamEvent(ev.Type) {
@@ -479,7 +614,8 @@ func tailRedisStream(
 			// started tailing (race: done event already in LIST but skipped by from=len(existing)).
 			// In both cases, emit terminal and stop regardless of whether the Redis key still exists.
 			if t, err := GetTask(ctx, db, taskID); err == nil && isTerminal(t.Status) {
-				emitTerminal(w, flusher, taskID, t.Status, t.Summary)
+				closeTaskPreview(w, flusher, taskID, cursor)
+				emitTaskTerminal(w, flusher, t)
 				_, _ = w.Write([]byte("data: [DONE]\n\n"))
 				flusher.Flush()
 				return
@@ -500,6 +636,7 @@ func pollDBUntilTerminal(
 	taskID string,
 	workspacePath string,
 	lastStepSeq int,
+	cursor *common.ModelOutput,
 ) {
 	lastProgress := -1
 	lastPhase := ""
@@ -539,13 +676,40 @@ func pollDBUntilTerminal(
 		}
 		steps, _ := LoadSteps(ctx, db, taskID)
 		for i := range steps {
-			if steps[i].Seq <= lastStepSeq {
+			row := &steps[i]
+			if row.Seq <= lastStepSeq {
 				continue
 			}
-			if ev := stepToTaskEvent(taskID, &steps[i]); ev != nil {
-				writeTaskSSE(w, flusher, *ev)
+			lastStepSeq = row.Seq
+			if row.ExecutionID != "" && row.ExecutionID != t.ExecutionID {
+				continue
 			}
-			lastStepSeq = steps[i].Seq
+			ev := stepToTaskEvent(taskID, row)
+			if row.Role == "model_runtime" {
+				var record taskModelRecord
+				if json.Unmarshal(row.Content, &record) == nil && record.ModelOutput.RunID == t.ExecutionID {
+					ev = &TaskEvent{Type: "model_output", TaskID: taskID, ExecutionID: t.ExecutionID, ModelOutput: &record.ModelOutput}
+				}
+			}
+			if ev == nil {
+				continue
+			}
+			if m := ev.ModelOutput; m != nil && cursor != nil {
+				if m.CallIndex < cursor.CallIndex || m.CallIndex == cursor.CallIndex && cursor.Phase != "begin" {
+					continue
+				}
+				if m.CallIndex > cursor.CallIndex && cursor.Phase != "begin" {
+					begin := *m
+					begin.Phase = "begin"
+					writeTaskSSE(w, flusher, TaskEvent{Type: "model_output", TaskID: taskID, ExecutionID: t.ExecutionID, ModelOutput: &begin})
+					cursor = &begin
+				}
+				if m.Phase != "" {
+					value := *m
+					cursor = &value
+				}
+			}
+			writeTaskSSE(w, flusher, *ev)
 		}
 		arts, _ := LoadArtifacts(ctx, db, taskID)
 		for i := range arts {
@@ -564,7 +728,7 @@ func pollDBUntilTerminal(
 			})
 		}
 		if isTerminal(t.Status) {
-			emitTerminal(w, flusher, taskID, t.Status, t.Summary)
+			emitTaskTerminal(w, flusher, t)
 			_, _ = w.Write([]byte("data: [DONE]\n\n"))
 			flusher.Flush()
 			return

@@ -201,6 +201,8 @@ func LoadCloudProviderTokens(ctx context.Context, provider, userID string) ([]st
 }
 
 type SelectedRuntimeModel struct {
+	ProviderGroupID    string
+	CredentialRevision int64
 	ModelType          string
 	TechnicalModelType string
 	Vision             bool
@@ -272,9 +274,16 @@ func LoadLLMConfigWithEvolution(ctx context.Context, db *gorm.DB, userID string,
 }
 
 func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolution bool) (map[string]any, error) {
+	return loadLLMConfigWithOptions(ctx, db, userID, omitEvolution, false, runtimeCredentials{})
+}
+
+func loadLLMConfigWithOptions(ctx context.Context, db *gorm.DB, userID string, omitEvolution, omitChat bool, credentials runtimeCredentials) (map[string]any, error) {
 	selectionScope := func(query *gorm.DB) *gorm.DB {
 		if omitEvolution {
-			return query.Where("usm.model_type <> ?", "evo_llm")
+			query = query.Where("usm.model_type <> ?", "evo_llm")
+		}
+		if omitChat {
+			query = query.Where("LOWER(TRIM(usm.model_type)) <> ?", "llm")
 		}
 		return query
 	}
@@ -290,7 +299,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 				"m.provider_name, "+
 				"m.name AS model_name, "+
 				"g.base_url, "+
-				"g.api_key, g.api_key_ciphertext, "+
+				"g.api_key, g.api_key_ciphertext, g.id AS provider_group_id, g.credential_revision, "+
 				"m.max_input_tokens",
 		).
 		Joins(
@@ -312,7 +321,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		return nil, err
 	}
 	ownRows = eligibleRuntimeModels(ownRows)
-	if err := decryptRuntimeModels(ownRows); err != nil {
+	if err := decryptRuntimeModelsWithCache(ownRows, credentials); err != nil {
 		return nil, err
 	}
 
@@ -329,6 +338,9 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 	unresolvedCloudTypes := make(map[string]struct{}, len(cloudSelections))
 	resolvedCloudRows := make([]SelectedRuntimeModel, 0, len(cloudSelections))
 	for _, selection := range cloudSelections {
+		if omitChat && strings.EqualFold(strings.TrimSpace(selection.ModelType), "llm") {
+			continue
+		}
 		resolved, available, err := ResolveCloudRuntimeModel(ctx, selection.ModelType, selection.PublicModelKey)
 		if err != nil || !available {
 			// Keep the user's stored Cloud preference, but let the dormant local
@@ -369,7 +381,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 				"m.provider_name, "+
 				"m.name AS model_name, "+
 				"g.base_url, "+
-				"g.api_key, g.api_key_ciphertext, "+
+				"g.api_key, g.api_key_ciphertext, g.id AS provider_group_id, g.credential_revision, "+
 				"m.max_input_tokens",
 		).
 		Joins(
@@ -389,7 +401,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		return nil, err
 	}
 	sharedRows = eligibleRuntimeModels(sharedRows)
-	if err := decryptRuntimeModels(sharedRows); err != nil {
+	if err := decryptRuntimeModelsWithCache(sharedRows, credentials); err != nil {
 		return nil, err
 	}
 
@@ -413,6 +425,15 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		rows = filtered
 	}
 
+	if omitChat {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if !strings.EqualFold(strings.TrimSpace(row.ModelType), "llm") {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
+	}
 	return BuildLLMConfig(rows), nil
 }
 
@@ -779,8 +800,12 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 }
 
 func decryptRuntimeModels(rows []SelectedRuntimeModel) error {
+	return decryptRuntimeModelsWithCache(rows, runtimeCredentials{})
+}
+
+func decryptRuntimeModelsWithCache(rows []SelectedRuntimeModel, credentials runtimeCredentials) error {
 	for i := range rows {
-		apiKey, err := modelprovider.ResolveAPIKey(rows[i].APIKey, rows[i].APIKeyCiphertext)
+		apiKey, err := credentials.resolve(rows[i].ProviderGroupID, rows[i].CredentialRevision, rows[i].APIKey, rows[i].APIKeyCiphertext)
 		if err != nil {
 			return err
 		}
