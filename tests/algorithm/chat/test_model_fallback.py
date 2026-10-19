@@ -11,6 +11,7 @@ import base64
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+from pathlib import Path
 import threading
 import tempfile
 import unittest
@@ -310,13 +311,13 @@ class ModelFallbackHTTPTests(unittest.TestCase):
                                       api_key='fake-fallback-key', stream=False)
         wrapper = FallbackLLM(create_fallback_state(raw, options))
         history = [{'role': 'user', 'content': 'prior text'}]
-        with tempfile.NamedTemporaryFile(suffix='.png') as picture:
-            picture.write(base64.b64decode(
+        with tempfile.TemporaryDirectory() as directory:
+            picture = Path(directory) / 'picture.png'
+            picture.write_bytes(base64.b64decode(
                 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jY9kAAAAASUVORK5CYII=',
             ))
-            picture.flush()
             lazyllm.locals['chat_history'][wrapper._module_id] = history
-            lazyllm.locals['lazyllm_files'][wrapper._module_id] = [picture.name]
+            lazyllm.locals['lazyllm_files'][wrapper._module_id] = [str(picture)]
             try:
                 self.assertEqual(wrapper('inspect picture'), 'done')
             finally:

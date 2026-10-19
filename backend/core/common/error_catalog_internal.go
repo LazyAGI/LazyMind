@@ -173,6 +173,8 @@ func init() {
 	registerAdditionalErrorAlias("conversation order changed", "Conflict", http.StatusConflict, 2000107)
 	registerAdditionalErrorAlias("conversation is busy", "Conflict", http.StatusConflict, 2000107)
 	registerAdditionalErrorAlias("save conversation model failed", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorAlias("save model output failed", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorAlias("task model configuration unavailable", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("%w; fallback parser chunks failed", "Primary and fallback document parsing failed", http.StatusInternalServerError, 2001601)
 	registerAdditionalError("acl_db_dsn is empty", http.StatusInternalServerError, 2001602)
 	registerAdditionalError("active plugin session already exists for conversation", http.StatusConflict, 2001603)
@@ -805,6 +807,23 @@ func init() {
 		"run_finished model_invoked must be boolean",
 		"run_finished code must be a string",
 		"invalid run status/reason combination",
+		"model switch has no authorized candidates",
+		"model switch candidate mismatch",
+		"conflicting runtime event",
+		"model switch initial reason mismatch",
+		"model switch sequence mismatch",
+		"model output content contains an independent event",
+		"model output boundary contains semantic content",
+		"model output boundary contains an unrelated runtime event",
+		"model switch has no output commit",
+		"model output sequence mismatch",
+		"model switch must change candidate",
+		"task switch requires a model commit",
+		"unconfirmed task model switch",
+		"task model boundary contains content",
+		"task initial switch reason mismatch",
+		"task switch candidate mismatch",
+		"task initial model requires successful switch",
 	} {
 		registerAdditionalErrorAlias(source, "algorithm chat stream failed", http.StatusBadGateway, 2002077)
 	}

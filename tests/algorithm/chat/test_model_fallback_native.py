@@ -3,6 +3,7 @@ import asyncio
 import copy
 import json
 import socket
+import threading
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -174,9 +175,22 @@ def test_native_exposed_network_failure_recovers_without_parsing_error_text(prov
     succeed(provider, 'model-b')
     with socket.socket() as unavailable:
         unavailable.bind(('127.0.0.1', 0))
+        unavailable.listen(1)
+        unavailable.settimeout(2)
+
+        def disconnect():
+            with unavailable.accept()[0]:
+                pass
+
+        # Accept and close a real connection so every OS reports a transport failure.
+        thread = threading.Thread(target=disconnect, daemon=True)
+        thread.start()
         a.llm_config['llm']['base_url'] = f'http://127.0.0.1:{unavailable.getsockname()[1]}/v1/'
         events = []
-        assert wrapper(a, [b])('start', stream={'_stream_sink': events.append}) == 'done:model-b'
+        try:
+            assert wrapper(a, [b])('start', stream={'_stream_sink': events.append}) == 'done:model-b'
+        finally:
+            thread.join(timeout=2)
     assert [item['model'] for item in provider.requests] == ['model-b']
     assert switches(events)[0]['reason_code'] == 'transport_error'
 
