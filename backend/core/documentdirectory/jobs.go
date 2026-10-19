@@ -86,12 +86,18 @@ func RegisterJobs() {
 }
 
 func enqueue(ctx context.Context, tx *gorm.DB, b *orm.DocumentDirectoryBatch, jobType, resource string) error {
-	j, err := asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{JobType: jobType, ResourceType: jobType, ResourceID: resource, IdempotencyKey: b.ID, Payload: map[string]string{"batch_id": b.ID}, MaxAttempts: 3, CreateUserID: b.UserID})
+	idempotencyKey := b.ID
+	if b.JobID != "" {
+		// Manual retries must never resurrect the identity of a canceled worker.
+		idempotencyKey = key([]string{b.ID, b.JobID})
+	}
+	j, err := asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{JobType: jobType, ResourceType: jobType, ResourceID: resource, IdempotencyKey: idempotencyKey, Payload: map[string]string{"batch_id": b.ID}, MaxAttempts: 3, CreateUserID: b.UserID})
 	if err != nil {
 		return err
 	}
 	b.JobID = j.ID
 	b.Status = "pending"
+	b.Acknowledged = false
 	b.UpdatedAt = time.Now().UTC()
 	return tx.Save(b).Error
 }
@@ -298,7 +304,17 @@ func ownsJob(tx *gorm.DB, j asyncjob.Job) error {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return maintenanceLeaseLost
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	var count int64
+	if err = tx.Model(&orm.DocumentDirectoryBatch{}).Where("job_id=? AND user_id=? AND status<>?", j.ID, j.CreateUserID, "canceled").Count(&count).Error; err != nil {
+		return err
+	}
+	if count != 1 {
+		return maintenanceLeaseLost
+	}
+	return nil
 }
 
 var maintenanceLeaseLost = errors.New("document directory execution lease lost")
@@ -340,7 +356,7 @@ func handleJob(ctx context.Context, j asyncjob.Job, reporter asyncjob.Reporter) 
 				result = map[string]any{}
 			}
 			attempts, _ := result["model_attempts"].([]any)
-			result["model_attempts"] = append(attempts, map[string]any{"attempt": j.AttemptCount, "mode": mode, "succeeded": modelErr == nil, "usage": p.Usage})
+			result["model_attempts"] = append(attempts, map[string]any{"job_id": j.ID, "attempt": j.AttemptCount, "mode": mode, "succeeded": modelErr == nil, "usage": p.Usage})
 			b.ResultJSON = encoded(result)
 			return tx.Model(&b).Update("result_json", b.ResultJSON).Error
 		})
@@ -508,7 +524,7 @@ func mergeCandidate(old, next Candidate) Candidate {
 		return next
 	}
 	merged := old
-	if next.Title != "" && next.Title != next.ResourceID {
+	if next.Title != "" && next.Title != next.ResourceID && (next.ReadAt == nil || old.ReadAt == nil || !next.ReadAt.Before(*old.ReadAt)) {
 		merged.Title = next.Title
 	}
 	var locator, incoming map[string]any
@@ -792,8 +808,9 @@ func applyOrganization(ctx context.Context, db *gorm.DB, j asyncjob.Job, b *orm.
 			// PostgreSQL stores microseconds; JSON observations may retain nanoseconds.
 			newRead := hasReadEvidence && (e.ReadAt == nil || c.ReadAt.Truncate(time.Microsecond).After(e.ReadAt.Truncate(time.Microsecond)))
 			readNotOlder := c.ReadAt != nil && (e.ReadAt == nil || !c.ReadAt.Truncate(time.Microsecond).Before(e.ReadAt.Truncate(time.Microsecond)))
-			versionChanged := c.ContentVersion != "" && e.ContentVersion != "" && strings.SplitN(c.ContentVersion, ":", 2)[0] == strings.SplitN(e.ContentVersion, ":", 2)[0] && c.ContentVersion != e.ContentVersion
-			titleChanged := c.Title != "" && c.Title != e.Title
+			merged := mergeCandidate(Candidate{Source: e.Source, Namespace: e.Namespace, ResourceID: e.ResourceID, Title: e.Title, Locator: e.LocatorJSON, ReadState: e.ReadState, ReadAt: e.ReadAt, AccessState: e.AccessState, ContentVersion: e.ContentVersion}, c)
+			versionChanged := merged.ContentVersion != "" && e.ContentVersion != "" && strings.SplitN(merged.ContentVersion, ":", 2)[0] == strings.SplitN(e.ContentVersion, ":", 2)[0] && merged.ContentVersion != e.ContentVersion
+			titleChanged := merged.Title != "" && merged.Title != e.Title
 			preserveConfirmation := !fresh && e.Confirmed && !newRead && !versionChanged && !titleChanged && e.GroupID == groups[a.GroupID]
 			// Metadata can independently support classification without claiming a read.
 			// Body-based decisions still require a current, accessible read excerpt.
@@ -807,26 +824,20 @@ func applyOrganization(ctx context.Context, db *gorm.DB, j asyncjob.Job, b *orm.
 			} else if e.Excluded {
 				continue
 			} else {
-				merged := mergeCandidate(Candidate{Source: e.Source, Namespace: e.Namespace, ResourceID: e.ResourceID, Title: e.Title, Locator: e.LocatorJSON, ReadState: e.ReadState, ReadAt: e.ReadAt, AccessState: e.AccessState, ContentVersion: e.ContentVersion}, c)
 				e.Title = merged.Title
 				e.LocatorJSON = merged.Locator
 				e.AccessState = merged.AccessState
-				if c.ContentVersion != "" && e.ContentVersion != "" && strings.SplitN(c.ContentVersion, ":", 2)[0] == strings.SplitN(e.ContentVersion, ":", 2)[0] {
+				if merged.ContentVersion != "" && e.ContentVersion != "" && strings.SplitN(merged.ContentVersion, ":", 2)[0] == strings.SplitN(e.ContentVersion, ":", 2)[0] {
 					e.ContentState = "unchanged"
-					if c.ContentVersion != e.ContentVersion {
+					if versionChanged {
 						e.ContentState = "changed"
 						e.Confirmed = false
 					}
-				} else if c.ContentVersion != "" {
+				} else if merged.ContentVersion != "" {
 					e.ContentState = "unknown"
 				}
-				if c.ContentVersion != "" {
-					e.ContentVersion = c.ContentVersion
-				}
-				if c.ReadAt != nil && (e.ReadAt == nil || !c.ReadAt.Truncate(time.Microsecond).Before(e.ReadAt.Truncate(time.Microsecond))) {
-					e.ReadAt = c.ReadAt
-					e.ReadState = c.ReadState
-				}
+				e.ContentVersion = merged.ContentVersion
+				e.ReadAt, e.ReadState = merged.ReadAt, merged.ReadState
 			}
 			if !e.Pinned {
 				e.GroupID = groups[a.GroupID]
