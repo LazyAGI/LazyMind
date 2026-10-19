@@ -5,6 +5,21 @@ package common
 import "net/http"
 
 func init() {
+	for _, source := range []string{
+		"failed to resolve background task",
+		"failed to create background task",
+		"failed to bind background execution",
+	} {
+		registerAdditionalErrorAlias(source, "Internal server error", http.StatusServiceUnavailable, 2000000)
+	}
+	registerAdditionalErrorAlias("duplicate background execution part", "Invalid request", http.StatusBadRequest, 2000103)
+	for _, source := range []string{
+		"background task is not scoped",
+		"background execution rebinding rejected",
+		"background task is terminal",
+	} {
+		registerAdditionalErrorAlias(source, "Conflict", http.StatusConflict, 2000107)
+	}
 	registerAdditionalErrorPattern("SKILL.md frontmatter field %q conflicts with compatibility normalization", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("verified source name has an unsupported runtime path character", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorPattern("%w in subdirectory %q", "Invalid request", http.StatusBadRequest, 2000103)

@@ -296,13 +296,19 @@ func TestBackgroundExecutionTrustedNativeAdmission(t *testing.T) {
 
 func TestBackgroundExecutionDualRegeneratedPrimary(t *testing.T) {
 	_, db := newExternalChatTestApplication(t)
-	old := orm.ChatHistory{ID: "history", ConversationID: "conversation-1", Seq: 1, RunID: "old", RunStatus: "completed", TimeMixin: orm.TimeMixin{CreateTime: time.Now().UTC(), UpdateTime: time.Now().UTC()}}
+	completedAt := time.Date(2026, time.October, 19, 8, 0, 0, 123456789, time.UTC)
+	old := orm.ChatHistory{ID: "history", ConversationID: "conversation-1", Seq: 1, RunID: "old", RunStatus: "completed", TimeMixin: orm.TimeMixin{CreateTime: completedAt, UpdateTime: completedAt}}
 	oldProgress, _ := json.Marshal(map[string]any{"_background_execution": map[string]any{"version": 1, "parts": []any{map[string]any{"history_id": old.ID, "run_id": old.RunID}}}})
 	previousTask := orm.TaskCenterTask{ID: "previous", UserID: "user-1", ConversationID: old.ConversationID, TaskType: "background_chat", Status: "running", CreatedAt: old.CreateTime.Add(-time.Minute), ProgressJSON: oldProgress}
 	if err := db.Create(&previousTask).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Create(&old).Error; err != nil {
+		t.Fatal(err)
+	}
+	// Compare against the stored timestamp: SQLite preserves nanoseconds,
+	// while PostgreSQL stores timestamps at microsecond precision.
+	if err := db.First(&old, "id = ?", old.ID).Error; err != nil {
 		t.Fatal(err)
 	}
 	task := orm.TaskCenterTask{ID: "dual", UserID: "user-1", ConversationID: "conversation-1", TaskType: "background_chat", Status: "running", ProgressJSON: taskcenter.NewBackgroundExecutionProgress(nil)}
@@ -341,7 +347,7 @@ func TestBackgroundExecutionDualRegeneratedPrimary(t *testing.T) {
 	if err := db.First(&previousTask, "id = ?", previousTask.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if previousTask.Status != "succeeded" || previousTask.FinishedAt == nil || !previousTask.FinishedAt.Equal(old.UpdateTime.Truncate(time.Microsecond)) {
+	if previousTask.Status != "succeeded" || previousTask.FinishedAt == nil || !previousTask.FinishedAt.Equal(old.UpdateTime) {
 		t.Fatalf("dual takeover erased previous execution evidence: %#v", previousTask)
 	}
 }
