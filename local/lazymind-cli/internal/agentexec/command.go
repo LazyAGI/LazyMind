@@ -178,43 +178,54 @@ func FindExecutable(configured string, names []string, excluded ...string) (stri
 	if strings.TrimSpace(configured) != "" {
 		return ResolveExecutable(configured)
 	}
-	resolveCandidate := func(candidate string) string {
+	candidates := FindExecutables(names, excluded...)
+	if len(candidates) == 0 {
+		return "", errors.New("executable is not installed")
+	}
+	return candidates[0], nil
+}
+
+// FindExecutables discovers candidates without executing them. Runtime callers
+// can validate each candidate without a broken PATH entry hiding later installs.
+func FindExecutables(names []string, excluded ...string) []string {
+	var candidates []string
+	seen := map[string]bool{}
+	add := func(candidate string) {
 		resolved, err := ResolveExecutable(candidate)
 		if err != nil {
-			return ""
+			return
 		}
 		for _, path := range excluded {
 			if path != "" && SameExecutable(resolved, path) {
-				return ""
+				return
 			}
 		}
-		return resolved
+		key := resolved
+		if runtime.GOOS == "windows" {
+			key = strings.ToLower(key)
+		}
+		if !seen[key] {
+			seen[key] = true
+			candidates = append(candidates, resolved)
+		}
 	}
 	for _, name := range names {
 		if candidate, err := exec.LookPath(name); err == nil {
-			if resolved := resolveCandidate(candidate); resolved != "" {
-				return resolved, nil
-			}
+			add(candidate)
 		}
-		if len(excluded) > 0 {
-			for _, directory := range filepath.SplitList(os.Getenv("PATH")) {
-				if !filepath.IsAbs(directory) {
-					continue
-				}
-				if candidate, err := exec.LookPath(filepath.Join(directory, name)); err == nil {
-					if resolved := resolveCandidate(candidate); resolved != "" {
-						return resolved, nil
-					}
-				}
+		for _, directory := range filepath.SplitList(os.Getenv("PATH")) {
+			if !filepath.IsAbs(directory) {
+				continue
+			}
+			if candidate, err := exec.LookPath(filepath.Join(directory, name)); err == nil {
+				add(candidate)
 			}
 		}
 	}
 	for _, candidate := range platformExecutableCandidates(names) {
-		if resolved := resolveCandidate(candidate); resolved != "" {
-			return resolved, nil
-		}
+		add(candidate)
 	}
-	return "", errors.New("executable is not installed")
+	return candidates
 }
 
 func ResolveRunnable(candidate string) (string, error) {
@@ -264,6 +275,16 @@ func ResolveExecutable(value string) (string, error) {
 	return filepath.Clean(abs), nil
 }
 
+// Keep the diagnostic shown to callers while preserving exit/startup/cancellation
+// causes for classification. An exit error is not necessarily an auth failure.
+type commandError struct {
+	message string
+	cause   error
+}
+
+func (e *commandError) Error() string { return e.message }
+func (e *commandError) Unwrap() error { return e.cause }
+
 func Run(ctx context.Context, binary string, arguments ...string) (string, error) {
 	command, invocationEnvironment, err := commandContext(ctx, binary, arguments...)
 	if err != nil {
@@ -281,7 +302,11 @@ func Run(ctx context.Context, binary string, arguments ...string) (string, error
 		if message == "" {
 			message = err.Error()
 		}
-		return "", errors.New(message)
+		cause := err
+		if ctx.Err() != nil {
+			cause = ctx.Err()
+		}
+		return "", &commandError{message: message, cause: cause}
 	}
 	return stdout.String(), nil
 }

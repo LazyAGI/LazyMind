@@ -24,6 +24,8 @@ type Status struct {
 	Installed         *bool       `json:"installed,omitempty"`
 	Ready             *bool       `json:"ready,omitempty"`
 	UnavailableReason string      `json:"unavailable_reason,omitempty"`
+	CLIPath           string      `json:"cli_path,omitempty"`
+	CLISource         string      `json:"cli_source,omitempty"`
 	BridgeState       BridgeState `json:"bridge_state,omitempty"`
 }
 

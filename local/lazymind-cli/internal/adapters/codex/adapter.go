@@ -27,6 +27,7 @@ const (
 
 type Adapter struct {
 	binary         string
+	configured     string
 	discoveryError error
 	self           string
 	bridge         *mcpbridge.Bridge
@@ -77,7 +78,7 @@ func New(binary, self string, bridge *mcpbridge.Bridge) (*Adapter, error) {
 		return nil, fmt.Errorf("resolve LazyMind Agent Host identity: %w", err)
 	}
 	return &Adapter{
-		binary: resolvedBinary, discoveryError: discoveryError,
+		binary: resolvedBinary, configured: binary, discoveryError: discoveryError,
 		self: resolvedSelf, bridge: bridge, home: home, hostID: hostID,
 	}, nil
 }
@@ -133,6 +134,9 @@ func (a *Adapter) Connect(ctx context.Context) agentintegration.Status {
 	if err != nil {
 		return agentintegration.Fail(status, err.Error())
 	}
+	if err := a.prepareRuntime(ctx); err != nil {
+		return agentintegration.Fail(status, err.Error())
+	}
 	record, err := codexplugin.Install(ctx, a.home, a.self, a.binary, profile, a.hostID)
 	if err != nil {
 		return agentintegration.Fail(status, "install LazyMind Workflow plugin: "+err.Error())
@@ -178,13 +182,16 @@ func (a *Adapter) Disconnect(ctx context.Context) agentintegration.Status {
 
 func (a *Adapter) Login(ctx context.Context) agentintegration.Status {
 	status := a.Status(ctx)
-	if a.discoveryError != nil {
-		return status
+	if err := a.prepareRuntime(ctx); err != nil {
+		return agentintegration.Fail(status, err.Error())
 	}
 	loginCtx, cancel := context.WithTimeout(ctx, interactiveTimeout)
 	defer cancel()
 	if _, err := agentexec.Run(loginCtx, a.binary, "login"); err != nil {
 		return agentintegration.Fail(status, "Codex login failed: "+err.Error())
+	}
+	if ready, reason := availability(a.binary); !ready {
+		return agentintegration.Fail(status, reason)
 	}
 	return a.Status(ctx)
 }
@@ -238,6 +245,9 @@ func (a *Adapter) getConfig() (mcpConfig, bool, error) {
 }
 
 func (a *Adapter) run(ctx context.Context, arguments ...string) (string, error) {
+	if err := a.prepareRuntime(ctx); err != nil {
+		return "", err
+	}
 	runCtx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 	return agentexec.Run(runCtx, a.binary, arguments...)
@@ -247,30 +257,6 @@ func (a *Adapter) isOwned(config mcpConfig) bool {
 	return agentexec.SameExecutable(config.Transport.Command, a.self) &&
 		len(config.Transport.Args) == 2 &&
 		config.Transport.Args[0] == "mcp" && config.Transport.Args[1] == "proxy"
-}
-
-func findBinary(configured string) (string, error) {
-	var desktop string
-	if strings.TrimSpace(configured) == "" && strings.TrimSpace(os.Getenv("LAZYMIND_CODEX_BIN")) == "" {
-		if _, bound, err := agentexec.ExecutableBinding(agentexec.CodexCLI); err == nil && !bound {
-			// The Windows desktop launcher can also be named Codex.exe. Prefer
-			// the bundled CLI before falling back to generic executable discovery.
-			desktop, _ = agentexec.FindDesktopApplication(codexDesktopApplication())
-			if strings.EqualFold(filepath.Ext(desktop), ".exe") {
-				bundled := filepath.Join(filepath.Dir(desktop), "resources", "codex.exe")
-				if resolved, err := agentexec.ResolveExecutable(bundled); err == nil {
-					return resolved, nil
-				}
-			}
-		}
-	}
-	resolved, err := agentexec.FindBoundExecutable(
-		configured, "LAZYMIND_CODEX_BIN", agentexec.CodexCLI, []string{"codex"}, desktop,
-	)
-	if err != nil {
-		return "", errors.New("Codex CLI is not installed")
-	}
-	return resolved, nil
 }
 
 func codexHome() (string, error) {
@@ -283,8 +269,6 @@ func codexHome() (string, error) {
 	}
 	return filepath.Join(home, ".codex"), nil
 }
-
-func FindBinary(configured string) (string, error) { return findBinary(configured) }
 
 func (a *Adapter) pluginEnabled() bool {
 	record, err := codexplugin.Read()

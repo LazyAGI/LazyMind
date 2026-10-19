@@ -99,6 +99,7 @@ export interface DesktopAgentAction {
 }
 
 export interface DesktopAgentIntegrationStatus {
+  login?: { state: "running" | "succeeded" | "failed" | "cancelled"; message?: string };
   issue?: { code: "unsupported_version" | "dependency_environment" | "operation_failed"; path?: string };
 	can_connect?: boolean;
 	can_disconnect?: boolean;
@@ -135,6 +136,8 @@ export interface DesktopExecutorPolicy {
   ready?: boolean;
   unavailable_reason?: string;
   bridge_state?: "ready" | "authentication_required" | "unavailable";
+  cli_path?: string;
+  cli_source?: "explicit" | "desktop" | "path";
 }
 
 export type DesktopRuntimeStatusResult =

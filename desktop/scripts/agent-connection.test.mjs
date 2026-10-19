@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 const source = readFileSync(new URL('../electron/src/main.js', import.meta.url), 'utf8');
 const start = source.indexOf('function runAgentConnector(');
-const end = source.indexOf('\nfunction startAgentLogin(', start);
+const end = source.indexOf('\nasync function runExecutorConnector(', start);
 // Execute the production timeout declarations with the extracted function so
 // the harness cannot hide a changed budget behind its own stale constants.
 const timeoutDeclarations = [
@@ -22,7 +22,8 @@ const timeoutDeclarations = [
 for (const platform of ['darwin', 'win32']) {
   test(`desktop ${platform} uses production budgets for installation, status and disconnection`, async () => {
     const commands = [];
-    const run = vm.runInNewContext(`${timeoutDeclarations}\n(${source.slice(start, end)})`, {
+    const run = vm.runInNewContext(`${timeoutDeclarations}\n${source.slice(start, end)}\nrunAgentConnector`, {
+      agentLogins: new Map(),
       URL, process: { platform, env: {} },
       runConnectorJSON: async (args, timeout) => {
         commands.push([Array.from(args), timeout]);

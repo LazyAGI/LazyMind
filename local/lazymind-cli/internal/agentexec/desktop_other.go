@@ -7,3 +7,5 @@ func platformDesktopInstalled(_ DesktopApplication, initialized bool) bool {
 }
 
 func platformDesktopApplication(DesktopApplication) string { return "" }
+
+func platformDesktopApplications(DesktopApplication) []string { return nil }

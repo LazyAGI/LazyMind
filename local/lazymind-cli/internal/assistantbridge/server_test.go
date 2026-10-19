@@ -153,6 +153,7 @@ func TestInteractiveLoginActionsReturnBeforeExternalLoginCompletes(t *testing.T)
 			changes := server.policy.Changes()
 			started := make(chan struct{})
 			release := make(chan struct{})
+			defer close(release)
 			server.loginOverride = func(context.Context, string) error {
 				close(started)
 				<-release
@@ -167,19 +168,249 @@ func TestInteractiveLoginActionsReturnBeforeExternalLoginCompletes(t *testing.T)
 			if elapsed := time.Since(start); elapsed > time.Second {
 				t.Fatalf("login action blocked for %s", elapsed)
 			}
-			if !strings.Contains(status.Message, "return to LazyMind and check again") {
-				t.Fatalf("status=%#v", status)
+			body, err := json.Marshal(status)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(body, []byte(`"login":{"state":"running"`)) {
+				t.Fatalf("status=%s", body)
 			}
 			select {
 			case <-started:
 			case <-time.After(time.Second):
 				t.Fatal("background login did not start")
 			}
-			close(release)
+			release <- struct{}{}
 			select {
 			case <-changes:
 			case <-time.After(time.Second):
 				t.Fatal("completed login did not trigger an executor recheck")
+			}
+		})
+	}
+}
+
+func TestCodexLoginActionReportsRealAdapterCompletion(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses a POSIX script")
+	}
+	server := newLoginTestServer(t)
+	t.Setenv("SHELL", "")
+	t.Setenv("LAZYMIND_DESKTOP_APPLICATION_DIRS", t.TempDir())
+	binary := filepath.Join(t.TempDir(), "codex")
+	authenticated := filepath.Join(t.TempDir(), "authenticated")
+	script := fmt.Sprintf(`#!/bin/sh
+case "$1 $2" in
+  "--version ") echo 'codex-cli 0.100.0' ;;
+  "login ") printf authenticated > %q ;;
+  "login status") test -f %q ;;
+  *) exit 2 ;;
+esac
+`, authenticated, authenticated)
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAZYMIND_CODEX_BIN", binary)
+	before := readAgentLoginResponse(t, server, "codex", false)
+	changes := server.policy.Changes()
+	status, err := server.agentAction(context.Background(), "codex", "login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Login == nil || status.State != before.State || status.Message != before.Message {
+		t.Fatalf("login changed MCP status: before=%#v after=%#v", before, status)
+	}
+	// Version, login, and login-status each start a subprocess; allow scheduling time during the full suite.
+	select {
+	case <-changes:
+	case <-time.After(10 * time.Second):
+		t.Fatal("real adapter login did not complete and recheck executor status")
+	}
+	completed := readAgentLoginResponse(t, server, "codex", false)
+	if completed.Login == nil || completed.Login.State != "succeeded" {
+		t.Fatalf("real adapter login outcome=%+v", completed.Login)
+	}
+}
+
+type agentLoginResponse struct {
+	State   agentintegration.State `json:"state"`
+	Message string                 `json:"message"`
+	Login   *struct {
+		State   string `json:"state"`
+		Message string `json:"message"`
+	} `json:"login"`
+}
+
+func readAgentLoginResponse(t *testing.T, server *Server, agent string, all bool) agentLoginResponse {
+	t.Helper()
+	path := "/v1/agents/" + agent
+	if all {
+		path = "/v1/agents"
+	}
+	response := httptest.NewRecorder()
+	server.routes().ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var status agentLoginResponse
+	if all {
+		var result struct {
+			Agents map[string]agentLoginResponse `json:"agents"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		status = result.Agents[agent]
+	} else if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	return status
+}
+
+func newLoginTestServer(t *testing.T) *Server {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+	t.Setenv("PATH", "")
+	t.Setenv("LAZYMIND_CODEX_BIN", "")
+	return newTestServer(t, filepath.Join(home, ".lazymind"))
+}
+
+func waitLoginRecheck(t *testing.T, changes <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-changes:
+	case <-time.After(time.Second):
+		t.Fatal("login did not complete and recheck executor status")
+	}
+}
+
+func TestBackgroundLoginOutcomesAppearInStatusWithoutChangingMCPState(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		err     error
+		state   string
+		message string
+	}{
+		{name: "success", state: "succeeded"},
+		{name: "failure", err: errors.New("browser login could not start"), state: "failed", message: "browser login could not start"},
+		{name: "long failure", err: errors.New(strings.Repeat("登录失败", 1024)), state: "failed", message: "登录失败"},
+		{name: "timeout", err: context.DeadlineExceeded, state: "failed", message: "timed out"},
+		{name: "cancelled", err: context.Canceled, state: "cancelled", message: "cancelled"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := newLoginTestServer(t)
+			before := readAgentLoginResponse(t, server, "codex", false)
+			changes := server.policy.Changes()
+			release := make(chan struct{})
+			server.startAgentLogin("codex", func(context.Context) error {
+				<-release
+				return test.err
+			})
+			for _, all := range []bool{false, true} {
+				status := readAgentLoginResponse(t, server, "codex", all)
+				if status.Login == nil || status.Login.State != "running" {
+					close(release)
+					waitLoginRecheck(t, changes)
+					t.Fatalf("all=%v running status=%#v", all, status)
+				}
+			}
+			close(release)
+			waitLoginRecheck(t, changes)
+			for _, all := range []bool{false, true} {
+				status := readAgentLoginResponse(t, server, "codex", all)
+				if status.Login == nil || status.Login.State != test.state || !strings.Contains(status.Login.Message, test.message) {
+					t.Fatalf("all=%v terminal status=%#v, login=%+v", all, status, status.Login)
+				}
+				if len([]rune(status.Login.Message)) > 2048 {
+					t.Fatal("login failure message was not bounded")
+				}
+				if status.State != before.State || status.Message != before.Message {
+					t.Fatalf("login changed MCP status: before=%#v after=%#v", before, status)
+				}
+			}
+		})
+	}
+}
+
+func TestSupersededLoginCannotReplaceLatestOutcome(t *testing.T) {
+	server := newLoginTestServer(t)
+	oldCancelled := make(chan struct{})
+	oldRelease := make(chan struct{})
+	defer close(oldRelease)
+	server.startAgentLogin("codex", func(ctx context.Context) error {
+		<-ctx.Done()
+		close(oldCancelled)
+		<-oldRelease
+		return errors.New("stale failure")
+	})
+	changes := server.policy.Changes()
+	server.startAgentLogin("codex", func(context.Context) error { return nil })
+	waitLoginRecheck(t, changes)
+	select {
+	case <-oldCancelled:
+	case <-time.After(time.Second):
+		t.Fatal("superseded login was not cancelled")
+	}
+	status := readAgentLoginResponse(t, server, "codex", false)
+	if status.Login == nil || status.Login.State != "succeeded" {
+		t.Fatalf("latest status=%#v login=%+v", status, status.Login)
+	}
+	changes = server.policy.Changes()
+	oldRelease <- struct{}{}
+	waitLoginRecheck(t, changes)
+	status = readAgentLoginResponse(t, server, "codex", false)
+	if status.Login == nil || status.Login.State != "succeeded" {
+		t.Fatalf("stale login replaced latest outcome: %#v login=%+v", status, status.Login)
+	}
+}
+
+func TestExecutableBindingChangesCancelAndClearOnlyRelatedLogin(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses a POSIX script")
+	}
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		t.Run(method, func(t *testing.T) {
+			server := newLoginTestServer(t)
+			binary := filepath.Join(t.TempDir(), "codex")
+			if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			changes := server.policy.Changes()
+			server.startAgentLogin("cursor", func(context.Context) error { return nil })
+			waitLoginRecheck(t, changes)
+			cancelled := make(chan struct{})
+			release := make(chan struct{})
+			defer close(release)
+			server.startAgentLogin("codex", func(ctx context.Context) error {
+				<-ctx.Done()
+				close(cancelled)
+				<-release
+				return ctx.Err()
+			})
+			defer server.cancelAgentLogins()
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(method, "/v1/bindings/codex-cli", strings.NewReader(`{"path":`+strconv.Quote(binary)+`}`))
+			server.routes().ServeHTTP(response, request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("binding status=%d body=%s", response.Code, response.Body.String())
+			}
+			select {
+			case <-cancelled:
+			case <-time.After(time.Second):
+				t.Fatal("binding change did not cancel the previous login")
+			}
+			changes = server.policy.Changes()
+			release <- struct{}{}
+			waitLoginRecheck(t, changes)
+			if status := readAgentLoginResponse(t, server, "codex", false); status.Login != nil {
+				t.Fatalf("binding change retained old login: %+v", status.Login)
+			}
+			if status := readAgentLoginResponse(t, server, "cursor", false); status.Login == nil || status.Login.State != "succeeded" {
+				t.Fatalf("binding change cleared unrelated login: %+v", status.Login)
 			}
 		})
 	}
@@ -384,6 +615,27 @@ exit 1
 		if status.Enabled || status.Installed == nil || !*status.Installed || status.Ready == nil || !*status.Ready || status.UnavailableReason != "" {
 			t.Fatalf("%s status=%#v", provider, status)
 		}
+	}
+	body, err := json.Marshal(statuses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var details map[string]struct {
+		CLIPath   string `json:"cli_path"`
+		CLISource string `json:"cli_source"`
+	}
+	if err := json.Unmarshal(body, &details); err != nil {
+		t.Fatal(err)
+	}
+	resolvedBinary, err := filepath.EvalSymlinks(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if details["codex"].CLIPath != resolvedBinary || details["codex"].CLISource != "explicit" {
+		t.Fatalf("Codex runtime details=%+v", details["codex"])
+	}
+	if details["cursor"].CLIPath != "" || details["cursor"].CLISource != "" {
+		t.Fatalf("unexpected Cursor runtime details=%+v", details["cursor"])
 	}
 }
 
