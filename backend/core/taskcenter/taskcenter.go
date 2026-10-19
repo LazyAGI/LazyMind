@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -74,17 +75,23 @@ func UpdateTaskStatus(ctx context.Context, db *gorm.DB, id, status string) error
 }
 
 func updateTaskStatus(ctx context.Context, db *gorm.DB, id, status string, nonTerminalOnly bool) error {
+	return updateTaskStatusAt(ctx, db, id, status, nonTerminalOnly, time.Now().UTC())
+}
+
+func updateTaskStatusAt(ctx context.Context, db *gorm.DB, id, status string, nonTerminalOnly bool, finishedAt time.Time) error {
+	if finishedAt.IsZero() {
+		finishedAt = time.Now().UTC()
+	}
 	updates := map[string]any{
 		"status":     status,
 		"updated_at": time.Now().UTC(),
 	}
 	if isTerminal(status) {
-		now := time.Now().UTC()
-		updates["finished_at"] = now
+		updates["finished_at"] = finishedAt
 	}
 	return notificationTx(ctx, db, func(tx *gorm.DB) error {
 		query := tx.Model(&orm.TaskCenterTask{}).Where("id = ? AND archived_at IS NULL AND status NOT IN ('canceled')", id)
-		if nonTerminalOnly {
+		if nonTerminalOnly || isTerminal(status) {
 			query = query.Where("status NOT IN ?", terminalTaskStatuses)
 		}
 		result := query.Updates(updates)
@@ -97,18 +104,25 @@ func updateTaskStatus(ctx context.Context, db *gorm.DB, id, status string, nonTe
 
 // UpdateTaskFailure persists a terminal task failure together with a user-facing reason.
 func UpdateTaskFailure(ctx context.Context, db *gorm.DB, id, reason string) error {
+	return updateTaskFailureAt(ctx, db, id, reason, time.Now().UTC())
+}
+
+func updateTaskFailureAt(ctx context.Context, db *gorm.DB, id, reason string, finishedAt time.Time) error {
 	var task orm.TaskCenterTask
 	if err := db.WithContext(ctx).Select("id", "status", "progress_json").Where("id = ?", id).First(&task).Error; err != nil {
 		return err
 	}
-	if isTerminal(task.Status) && task.Status != "failed" {
+	if isTerminal(task.Status) {
 		return nil
 	}
 	now := time.Now().UTC()
+	if finishedAt.IsZero() {
+		finishedAt = now
+	}
 	return notificationTx(ctx, db, func(tx *gorm.DB) error {
 		result := tx.Model(&orm.TaskCenterTask{}).
-			Where("id = ? AND archived_at IS NULL AND status NOT IN ('succeeded','skipped','canceled')", id).
-			Updates(map[string]any{"status": "failed", "progress_json": progressWithFailureReason(task.ProgressJSON, reason), "finished_at": now, "updated_at": now})
+			Where("id = ? AND archived_at IS NULL AND status NOT IN ?", id, terminalTaskStatuses).
+			Updates(map[string]any{"status": "failed", "progress_json": progressWithFailureReason(task.ProgressJSON, reason), "finished_at": finishedAt, "updated_at": now})
 		if result.Error != nil || result.RowsAffected == 0 {
 			return result.Error
 		}
@@ -138,6 +152,31 @@ func progressWithFailureReason(progress orm.RawJSON, reason string) orm.RawJSON 
 // Used by the plugin EventLoop to sync task status when a session completes or fails.
 func UpdateTaskStatusBySession(ctx context.Context, db *gorm.DB, sessionID, status string) error {
 	return notificationTx(ctx, db, func(tx *gorm.DB) error {
+		finishedAt := time.Now().UTC()
+		if status == "succeeded" || status == "failed" {
+			var session orm.WorkflowSession
+			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", sessionID).First(&session).Error
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			if err == nil {
+				if status == "succeeded" && session.Status != "completed" || status == "failed" && session.Status != "failed" {
+					return nil
+				}
+				finishedAt, err = WorkflowNotificationCompletedAt(ctx, tx, session)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		return UpdateTaskStatusBySessionAt(ctx, tx, sessionID, status, finishedAt)
+	})
+}
+
+// UpdateTaskStatusBySessionAt retains the authoritative session's completion
+// time when a task projection is retried after a notification storage outage.
+func UpdateTaskStatusBySessionAt(ctx context.Context, db *gorm.DB, sessionID, status string, finishedAt time.Time) error {
+	return notificationTx(ctx, db, func(tx *gorm.DB) error {
 		var tasks []orm.TaskCenterTask
 		if err := tx.Where("plugin_session_id = ? AND archived_at IS NULL", sessionID).Where("status NOT IN ?", terminalTaskStatuses).Find(&tasks).Error; err != nil {
 			return err
@@ -147,12 +186,25 @@ func UpdateTaskStatusBySession(ctx context.Context, db *gorm.DB, sessionID, stat
 			if task.TaskType == "scheduled" && status == "succeeded" {
 				continue
 			}
-			if err := updateTaskStatus(ctx, tx, task.ID, status, true); err != nil {
+			if err := updateTaskStatusAt(ctx, tx, task.ID, status, true, finishedAt); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// FinalizeBackgroundTasks commits a plain chat's task status and desktop notice
+// together. Linked workflows own their lifecycle; terminal and archived tasks
+// cannot be completed again by a late chat response.
+func FinalizeBackgroundTasks(ctx context.Context, db *gorm.DB, conversationID, status string, finishedAt time.Time) error {
+	return finalizeBackgroundTasks(ctx, db, conversationID, "", status, finishedAt)
+}
+
+func finalizeBackgroundTasks(ctx context.Context, db *gorm.DB, conversationID, taskID, status string, finishedAt time.Time) error {
+	// Compatibility callers may request reconciliation, but cannot supply evidence
+	// for any conversation-wide completion.
+	return reconcileBackgroundTasks(ctx, db, conversationID, taskID, "", "")
 }
 
 // CancelTask marks a task as canceled if it is still pending or running.

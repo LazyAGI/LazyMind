@@ -75,13 +75,21 @@ export function channelSwitchDefaults(config: NotificationConfig): NotificationC
   return { ...config, channels };
 }
 export function taskRuleFromDefaults(config: NotificationConfig): NotificationConfig {
-  const channels = { ...config.channels };
-  providers.forEach(provider => { if (channels[provider]) channels[provider] = { enabled: false }; });
-  return { ...config, channels };
+  return channelSwitchDefaults(config);
 }
-export function ruleError(config: NotificationConfig, defaults = false): string | undefined {
+export function channelGateEnabled(preferences: Preferences, channel: ChannelName): boolean {
+  return preferences.enabled && Boolean(preferences.defaults.channels[channel]?.enabled);
+}
+export function ruleError(config: NotificationConfig, defaults = false, task?: { preferences: Preferences; original?: NotificationConfig | null }): string | undefined {
   if ((defaults || Object.values(config.channels).some(c => c?.enabled)) && !events.some(e => config.events[e].enabled)) return 'NOTIFICATION_EVENT_REQUIRED';
-  if (!defaults && providers.some(p => config.channels[p]?.enabled && (!config.channels[p]?.account_id || !config.channels[p]?.recipient_id))) return 'NOTIFICATION_TARGET_REQUIRED';
+  if (!defaults && providers.some(provider => {
+    const rule = config.channels[provider];
+    if (!rule?.enabled || (rule.account_id && rule.recipient_id)) return false;
+    const original = task?.original?.channels[provider];
+    const unchangedPaused = task && !channelGateEnabled(task.preferences, provider) && original?.enabled === rule.enabled
+      && original.account_id === rule.account_id && original.recipient_id === rule.recipient_id;
+    return !unchangedPaused;
+  })) return 'NOTIFICATION_TARGET_REQUIRED';
 }
 export function availabilityError(value: ScheduleNotifications | undefined): { reason: string; provider: ChannelProvider; account_id: string } | undefined {
   if (!value?.config) return undefined;

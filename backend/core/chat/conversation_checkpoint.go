@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm/clause"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/taskcenter"
 )
 
 func registerForkableHistoryRun(ctx context.Context, db *gorm.DB, convID, historyID, runID, query string, target chatPersistTarget, ext json.RawMessage) error {
@@ -26,6 +27,9 @@ func registerForkableHistoryRun(ctx context.Context, db *gorm.DB, convID, histor
 			}
 			if !target.IsRegeneration {
 				return forkFail("SOURCE_NOT_SETTLED")
+			}
+			if err := taskcenter.CaptureBackgroundExecution(ctx, tx, convID, history.ID, history.RunID); err != nil {
+				return err
 			}
 			return tx.Model(&history).Updates(map[string]any{"run_id": runID, "run_status": "generating", "run_terminal": nil, "ext": ext, "update_time": time.Now().UTC()}).Error
 		}

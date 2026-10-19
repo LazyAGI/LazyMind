@@ -122,6 +122,16 @@
   &::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-inline-end: 8px; border-radius: 50%; background: currentColor; vertical-align: 1px; }
 }
 .notification-channel-block + .notification-channel-block { border-top: 1px solid var(--border-color, #eeeff2); }
+.notification-channel-block.is-globally-disabled {
+  background: var(--bg-secondary, #f7f9fc);
+  .notification-channel > .notification-brand, .notification-channel > .notification-grow, > .notification-target-picker { opacity: .6; }
+}
+.notification-channel-block.is-requested { outline: 2px solid #91b8ff; outline-offset: -2px; background: #f6f9ff; }
+.notification-channel-gate {
+  padding: 0 16px 14px 66px;
+  p { margin: 0 0 8px; color: var(--text-secondary, #7a7e87); font-size: 12px; }
+  > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+}
 .notification-channel-block > .notification-target-picker { margin: 0 20px 18px 76px; padding: 16px; border-radius: 8px; background: var(--bg-secondary, #f7f9fc); grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .notification-summary { margin: 10px 0; p { font-size: 12px; line-height: 1.7; } }
 .notification-account summary small { display: block; overflow-wrap: anywhere; color: var(--text-secondary, #7a7e87); margin-top: 5px; }

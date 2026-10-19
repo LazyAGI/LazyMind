@@ -49,8 +49,18 @@ describe('notification API contracts', () => {
     const config = emptyRule();
     config.channels.wecom = { enabled: true, account_id: 'old-account', recipient_id: 'old-group' };
     expect(channelSwitchDefaults(config).channels.wecom).toEqual({ enabled: true });
-    expect(taskRuleFromDefaults(config).channels.wecom).toEqual({ enabled: false });
+    expect(taskRuleFromDefaults(config).channels.wecom).toEqual({ enabled: true });
     expect(config.channels.wecom).toEqual({ enabled: true, account_id: 'old-account', recipient_id: 'old-group' });
+  });
+  it('only exempts unchanged paused channels from target validation', () => {
+    const original = emptyRule();
+    original.channels.feishu = { enabled: true };
+    const preferences = { revision: 1, enabled: true, defaults: emptyRule() };
+    const changed = { ...original, channels: { ...original.channels, feishu: { enabled: true, account_id: 'new-account' } } };
+    expect(ruleError(original, false, { preferences, original })).toBeUndefined();
+    expect(ruleError(changed, false, { preferences, original })).toBe('NOTIFICATION_TARGET_REQUIRED');
+    preferences.defaults.channels.feishu = { enabled: true };
+    expect(ruleError(original, false, { preferences, original })).toBe('NOTIFICATION_TARGET_REQUIRED');
   });
   it('extracts safe reasons without displaying raw errors', () => {
     expect(notificationError({ response: { data: { data: { detail: { reason: 'NOTIFICATION_CONFIRMATION_REQUIRED', running_task_ids: ['r'] } } } } })).toEqual({ reason: 'NOTIFICATION_CONFIRMATION_REQUIRED', running_task_ids: ['r'] });

@@ -2194,9 +2194,12 @@ func TestShouldEmitStreamFrame(t *testing.T) {
 }
 
 func TestFeedBackChatHistoryCancelsFeedback(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.ChatHistory{})
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	if err := db.Create(&orm.Conversation{ID: "conv-1"}).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	now := time.Now()
 	if err := db.Create(&orm.ChatHistory{
@@ -2243,11 +2246,14 @@ func TestFeedBackChatHistoryReplacesOnlyTargetFeedback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect db: %v", err)
 	}
-	if err := db.AutoMigrate(&orm.ChatHistory{}); err != nil {
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	if err := db.Create(&orm.Conversation{ID: "conv-1"}).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	now := time.Now()
 	for _, history := range []orm.ChatHistory{

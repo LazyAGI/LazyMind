@@ -52,6 +52,7 @@ describe('notification settings and task UI', () => {
   it('replaces the generic request error with recipient guidance for WeCom', async () => {
     const config = emptyRule();
     config.channels.wecom = { enabled: true, account_id: 'wecom-account' };
+    mocks.prefs.mockResolvedValue({ revision: 3, enabled: true, defaults: { ...defaults, channels: { ...defaults.channels, wecom: { enabled: true } } } });
     mocks.schedule.mockResolvedValue({ revision: 1, configured: true, config, availability: {} });
     mocks.accounts.mockImplementation((provider: string) => Promise.resolve({
       items: provider === 'wecom' ? [{ id: 'wecom-account', provider, label: '企业微信机器人', status: 'connected' }] : [],
@@ -148,7 +149,7 @@ describe('notification settings and task UI', () => {
     mocks.patch.mockResolvedValue({ revision: 4, enabled: true, defaults: { ...defaults, channels: { ...defaults.channels, desktop: { enabled: false } } } });
     mount(<NotificationSettings />);
     fireEvent.click(await screen.findByRole('switch', { name: 'notifications.desktop' }));
-    expect(mocks.tasks).toHaveBeenCalledWith({ task_type: 'scheduled', page: 1, page_size: 100 });
+    expect(mocks.tasks).toHaveBeenCalledWith({ page: 1, page_size: 100 });
     expect((await screen.findAllByText('notifications.closeNamedTitle')).length).toBeGreaterThan(0);
     expect(screen.getByText('每日 AI 行业动态')).toBeInTheDocument();
     expect(screen.getByText('notifications.runningTaskCount')).toBeInTheDocument();

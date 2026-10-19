@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -843,8 +844,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// run_in_background: create a background_chat task record so it appears in the
-	// task center. Status is derived on read via resolveTaskStatus (chat_histories
-	// presence), so no status callback is needed after the SSE drains.
+	// task center and bind completion to the accepted server execution.
 	if runInBackground, _ := raw["run_in_background"].(bool); runInBackground {
 		taskTitle := displayQuery
 		if len([]rune(taskTitle)) > 40 {
@@ -856,9 +856,47 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			TaskType:       "background_chat",
 			Title:          &taskTitle,
 			Status:         "running",
+			ProgressJSON:   taskcenter.NewBackgroundExecutionProgress(nil),
 		}
-		// Conversation type was fixed atomically at creation.
-		_ = taskcenter.CreateTask(reqCtx, db, bgTask)
+		// A keyed external replay reuses the server-derived task identity.
+		externalRunID, _ := reqBody["_external_run_id"].(string)
+		externalReplay := externalRunID != ""
+		if externalRunID == "" {
+			if key, _ := reqBody["_external_request_key"].(string); key != "" {
+				externalRunID, _ = externalChatIdentity(key)
+			}
+		}
+		if externalRunID != "" {
+			digest := sha256.Sum256([]byte("background/" + externalRunID))
+			bgTask.ID = fmt.Sprintf("tc_%x", digest[:16])
+		}
+		if bgTask.ID != "" {
+			existing, lookupErr := taskcenter.GetTask(reqCtx, db, bgTask.ID)
+			if lookupErr == nil {
+				if existing.UserID != userID || existing.ConversationID != convID || existing.TaskType != "background_chat" {
+					common.ReplyErr(w, "failed to resolve background task", http.StatusServiceUnavailable)
+					return
+				}
+				target.BackgroundTaskID = existing.ID
+			} else if !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+				common.ReplyErr(w, "failed to resolve background task", http.StatusServiceUnavailable)
+				return
+			}
+		}
+		// Replaying a foreground execution does not admit new background work.
+		// In particular its old completion must not strand a newly-created task.
+		if target.BackgroundTaskID == "" && !externalReplay {
+			if err := taskcenter.CreateTask(reqCtx, db, bgTask); err != nil {
+				// Concurrent keyed requests can race admission. A committed
+				// matching deterministic row is the same accepted execution.
+				existing, lookupErr := taskcenter.GetTask(reqCtx, db, bgTask.ID)
+				if externalRunID == "" || lookupErr != nil || existing.UserID != userID || existing.ConversationID != convID || existing.TaskType != "background_chat" {
+					common.ReplyErr(w, "failed to create background task", http.StatusServiceUnavailable)
+					return
+				}
+			}
+			target.BackgroundTaskID = bgTask.ID
+		}
 	}
 
 	// Mark the last assistant turn that had an ask_pending as answered.
@@ -2556,12 +2594,21 @@ func SetChatHistory(w http.ResponseWriter, r *http.Request) {
 			RawContent: selected.RawContent, Content: selected.Content, Result: selected.Result, RetrievalResult: selected.RetrievalResult,
 			ToolCallTurns: selected.ToolCallTurns, ThinkingDurationS: selected.ThinkingDurationS, RunID: selected.RunID,
 			RunStatus: selected.RunStatus, RunTerminal: selected.RunTerminal, FeedBack: selected.FeedBack,
-			Reason: selected.Reason, Ext: selected.Ext, Version: "2.3", TimeMixin: orm.TimeMixin{CreateTime: time.Now(), UpdateTime: time.Now()}}
+			Reason: selected.Reason, Ext: taskcenter.WithNotificationCompletionTimeForRun(selected.Ext,
+				taskcenter.NotificationHistoryCompletedAt(selected.CreateTime, selected.UpdateTime, selected.Ext), selected.RunID),
+			Version: "2.3", TimeMixin: orm.TimeMixin{CreateTime: time.Now(), UpdateTime: time.Now()}}
 		if err := validateForkPrefix([]orm.ChatHistory{target}); err != nil {
 			return err
 		}
 		if discarded.RunStatus == "generating" {
 			return forkFail("SOURCE_NOT_SETTLED")
+		}
+		// Selection removes both durable parts. Preserve their own terminal
+		// evidence before changing the selected representation.
+		for _, part := range []orm.MultiAnswersChatHistory{selected, discarded} {
+			if err := taskcenter.CaptureBackgroundExecution(r.Context(), tx, conv.ID, part.ID, part.RunID); err != nil {
+				return err
+			}
 		}
 		if err := tx.Where("conversation_id = ? AND seq = ?", conv.ID, selected.Seq).Delete(&orm.ChatHistory{}).Error; err != nil {
 			return err
@@ -2654,7 +2701,18 @@ func FeedBackChatHistory(w http.ResponseWriter, r *http.Request) {
 		updates["reason"] = body.Reason
 		updates["expected_answer"] = body.ExpectedAnswer
 	}
-	if err := db.Model(&orm.ChatHistory{}).Where("id = ?", body.HistoryID).Updates(updates).Error; err != nil {
+	if err := conversationCheckpoint(r.Context(), db, target.ConversationID, func(tx *gorm.DB) error {
+		// Read after taking the same checkpoint as regeneration. Never merge an
+		// old terminal's Ext into a newer generating run.
+		if err := tx.Where("id = ?", body.HistoryID).Take(&target).Error; err != nil {
+			return err
+		}
+		if target.RunStatus != "generating" {
+			updates["ext"] = taskcenter.WithNotificationCompletionTimeForRun(target.Ext,
+				taskcenter.NotificationHistoryCompletedAt(target.CreateTime, target.UpdateTime, target.Ext), target.RunID)
+		}
+		return tx.Model(&orm.ChatHistory{}).Where("id = ?", body.HistoryID).Updates(updates).Error
+	}); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "update feedback failed", err), http.StatusInternalServerError)
 		return
 	}

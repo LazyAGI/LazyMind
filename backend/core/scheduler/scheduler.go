@@ -729,7 +729,7 @@ func CreateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Notification != nil {
-		prepared, err := taskcenter.PrepareScheduleNotificationUpdate(r.Context(), userID, *body.Notification)
+		prepared, err := taskcenter.PrepareScheduleNotificationUpdateForSchedule(r.Context(), db, userID, "", *body.Notification)
 		if err != nil {
 			taskcenter.ReplyScheduleNotificationError(w, r, err)
 			return
@@ -916,7 +916,7 @@ func UpdateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Notification != nil {
-		prepared, err := taskcenter.PrepareScheduleNotificationUpdate(r.Context(), userID, *body.Notification)
+		prepared, err := taskcenter.PrepareScheduleNotificationUpdateForSchedule(r.Context(), db, userID, id, *body.Notification)
 		if err != nil {
 			taskcenter.ReplyScheduleNotificationError(w, r, err)
 			return

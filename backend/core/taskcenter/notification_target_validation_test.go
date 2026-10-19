@@ -27,10 +27,12 @@ func TestResolveNotificationTargetReturnsProviderSpecificGuidance(t *testing.T) 
 	}
 }
 
-func TestInitializeScheduleNotificationsDisablesUntargetedExternalDefaults(t *testing.T) {
+func TestInitializeScheduleNotificationsPreservesEnabledExternalDefaultsWithoutTargets(t *testing.T) {
 	db := orm.MigrateAllModelsForTest(t).DB
 	defaults := DefaultNotificationConfig()
-	defaults.Channels["wechat"] = NotificationChannelRule{Enabled: true}
+	for _, provider := range []string{"feishu", "wecom", "wechat"} {
+		defaults.Channels[provider] = NotificationChannelRule{Enabled: true}
+	}
 	raw, err := json.Marshal(defaults)
 	if err != nil {
 		t.Fatal(err)
@@ -52,8 +54,10 @@ func TestInitializeScheduleNotificationsDisablesUntargetedExternalDefaults(t *te
 	if err := json.Unmarshal([]byte(*schedule.NotificationConfig), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Channels["wechat"].Enabled {
-		t.Fatalf("accountless wechat default remained enabled: %#v", got.Channels["wechat"])
+	for _, provider := range []string{"feishu", "wecom", "wechat"} {
+		if channel := got.Channels[provider]; !channel.Enabled || channel.AccountID != "" || channel.RecipientID != "" {
+			t.Fatalf("%s default lost its selection or invented a target: %#v", provider, channel)
+		}
 	}
 	if !got.Channels["desktop"].Enabled {
 		t.Fatal("valid desktop default was unexpectedly disabled")
@@ -125,7 +129,7 @@ func TestDispatchNotificationsSkipsExternalRowsWithoutTargets(t *testing.T) {
 	if err := db.First(&notice, "id = ?", notice.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if notice.Status != "skipped" || notice.Reason != "NOTIFICATION_TARGET_UNAVAILABLE" {
+	if notice.Status != "skipped" || notice.Reason != "NOTIFICATION_TARGET_REQUIRED" {
 		t.Fatalf("invalid target remained dispatchable: status=%q reason=%q", notice.Status, notice.Reason)
 	}
 }
@@ -156,8 +160,8 @@ func TestInitializeScheduleNotificationsIgnoresLegacyGlobalTarget(t *testing.T) 
 	if err := json.Unmarshal([]byte(*schedule.NotificationConfig), &saved); err != nil {
 		t.Fatal(err)
 	}
-	if channel := saved.Channels["wechat"]; channel.Enabled || channel.AccountID != "" || channel.RecipientID != "" {
-		t.Fatalf("new task inherited a global target: %#v", channel)
+	if channel := saved.Channels["wechat"]; !channel.Enabled || channel.AccountID != "" || channel.RecipientID != "" {
+		t.Fatalf("new task lost the global switch or inherited a target: %#v", channel)
 	}
 }
 

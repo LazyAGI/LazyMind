@@ -205,7 +205,7 @@ func TestStreamSingleAnswerPersistsFinalAlgorithmID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect db: %v", err)
 	}
-	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}); err != nil {
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}, &orm.TaskCenterTask{}); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
 	now := time.Now().UTC()
@@ -299,7 +299,7 @@ func TestStreamSingleAnswerPersistsAndForwardsPerformanceMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect db: %v", err)
 	}
-	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}, &orm.ChatRunPerformance{}); err != nil {
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}, &orm.ChatRunPerformance{}, &orm.TaskCenterTask{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	now := time.Now().UTC()
@@ -354,7 +354,7 @@ func TestStreamSingleAnswerPersistsFailureForInvalidTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect db: %v", err)
 	}
-	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}); err != nil {
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}, &orm.TaskCenterTask{}); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
 	now := time.Now().UTC()
@@ -538,7 +538,7 @@ func TestHandleStreamChatHSetFailureReturnsHTTP503BeforeUpstream(t *testing.T) {
 			if err != nil {
 				t.Fatalf("connect db: %v", err)
 			}
-			if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}, &orm.MultiAnswersChatHistory{}); err != nil {
+			if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}, &orm.MultiAnswersChatHistory{}, &orm.TaskCenterTask{}); err != nil {
 				t.Fatalf("auto migrate: %v", err)
 			}
 			now := time.Now().UTC()
@@ -617,7 +617,7 @@ func TestHandleStreamChatHistoryClaimFailureRemainsSSE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect db: %v", err)
 	}
-	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}); err != nil {
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}, &orm.TaskCenterTask{}); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
 

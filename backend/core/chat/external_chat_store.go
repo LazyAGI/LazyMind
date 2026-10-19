@@ -23,10 +23,12 @@ import (
 	"gorm.io/gorm/clause"
 
 	"lazymind/core/agentinvocation"
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
 	"lazymind/core/externalcontext"
 	"lazymind/core/log"
+	"lazymind/core/taskcenter"
 	"lazymind/core/workflow/artifactfile"
 )
 
@@ -298,7 +300,7 @@ func (a *externalChatApplication) appendEvent(
 	event externalChatEvent,
 ) (int64, error) {
 	var sequence int64
-	err := a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := common.TransactionWithSQLiteBusyRetry(ctx, a.db, func(tx *gorm.DB) error {
 		now := a.now()
 		var run orm.ExternalChatRun
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -588,7 +590,7 @@ func finalizeExternalChatHistory(tx *gorm.DB, run *orm.ExternalChatRun, now time
 		ID: run.HistoryID, Seq: run.Sequence, ConversationID: run.ConversationID,
 		AlgorithmID: "external:" + run.Provider, RawContent: run.Query, Content: run.Query,
 		Result: result.String(), RunID: run.ID, RunStatus: terminal.Status,
-		RunTerminal: terminalJSON(terminal), Ext: run.HistoryExt,
+		RunTerminal: terminalJSON(terminal), Ext: taskcenter.WithNotificationCompletionTimeForRun(run.HistoryExt, now, run.ID),
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
 	var existing orm.ChatHistory
@@ -630,17 +632,35 @@ func finalizeExternalChatHistory(tx *gorm.DB, run *orm.ExternalChatRun, now time
 			return false, err
 		}
 	}
-	taskStatus := "succeeded"
-	if run.Status == "failed" {
-		taskStatus = "failed"
-	} else if run.Status == "stopped" {
-		taskStatus = "canceled"
+	if err := taskcenter.CaptureBackgroundExecution(tx.Statement.Context, tx, run.ConversationID, run.HistoryID, run.ID); err != nil {
+		return false, err
 	}
-	err = tx.Model(&orm.TaskCenterTask{}).
-		Where("conversation_id = ? AND task_type = ? AND archived_at IS NULL AND status NOT IN ('succeeded','failed','canceled')", run.ConversationID, "background_chat").
-		Where("plugin_session_id IS NULL OR plugin_session_id = ''"). // workflow-naming: persistence
-		Updates(map[string]any{"status": taskStatus, "finished_at": now, "updated_at": now}).Error
-	return err == nil, err
+	// The run and final history are authoritative. A notification projection
+	// failure must not make a completed provider execution claimable again.
+	const projectionSavepoint = "external_notification_projection"
+	if err := tx.SavePoint(projectionSavepoint).Error; err != nil {
+		return false, err
+	}
+	err = taskcenter.FinalizeBackgroundExecution(tx.Statement.Context, tx, run.ConversationID, run.HistoryID, run.ID)
+	if err != nil {
+		if rollbackErr := tx.RollbackTo(projectionSavepoint).Error; rollbackErr != nil {
+			return false, errors.Join(err, rollbackErr)
+		}
+	}
+	if releaseErr := tx.Exec("RELEASE SAVEPOINT " + projectionSavepoint).Error; releaseErr != nil {
+		return false, errors.Join(err, releaseErr)
+	}
+	if err != nil {
+		if common.IsSQLiteBusy(err) {
+			return false, err
+		}
+		if contextErr := tx.Statement.Context.Err(); contextErr != nil {
+			return false, contextErr
+		}
+		log.Logger.Warn().Err(err).Str("conversation_id", run.ConversationID).
+			Msg("external chat notification projection deferred to recovery")
+	}
+	return true, nil
 }
 
 var markdownLinkDestination = regexp.MustCompile(`\]\(([^)\n]+)\)`)
