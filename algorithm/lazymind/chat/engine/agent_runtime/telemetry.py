@@ -61,7 +61,10 @@ def classify_tool(name: str) -> str:
         return 'harness'
     if lower in _EXTERNAL_TOOLS or lower.endswith('_search') or 'search' in lower:
         return 'external'
-    if lower in {'run_script', 'run_skill_script', 'shell', 'terminal', 'bash', 'execute_command', 'cmd'}:
+    if lower in {
+        'run_script', 'run_skill_script', 'run_skill_command',
+        'shell', 'terminal', 'bash', 'execute_command', 'cmd',
+    }:
         return 'shell'
     return 'tool'
 
@@ -197,7 +200,7 @@ def emit_tool_result(tool_call: dict[str, Any], result: Any) -> None:
     if isinstance(result, dict):
         diagnostics = {
             key: result[key]
-            for key in ('error_type', 'dependency', 'exit_code')
+            for key in ('error_type', 'reason_code', 'dependency', 'blocked_resource', 'exit_code')
             if isinstance(result.get(key), (str, int, float))
             and not isinstance(result.get(key), bool)
         }

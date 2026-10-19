@@ -464,13 +464,17 @@ def test_workspace_skill_capabilities_are_owned_by_skill_implementations(tmp_pat
     skills = SkillManager(dir=str(root), fs=skill_fs)
     manager = ToolManager(skills.get_skill_tools())
     metadata = {name: tool.runtime_metadata for name, tool in manager.tools_info.items()}
-    assert set(metadata) == {'search_skill', 'get_skill', 'read_skill_resource', 'run_skill_script'}
+    assert set(metadata) == {
+        'search_skill', 'get_skill', 'read_skill_resource',
+        'run_skill_script', 'run_skill_command',
+    }
     assert 'visible' in skills.build_prompt()
     assert skills.read_reference('visible', 'guide.md')['content'] == 'normal reference'
     from lazyllm.tools.agent.tool_runtime import HostFileAccess
     assert metadata['get_skill'].host_file_access is HostFileAccess.NONE
     assert metadata['read_skill_resource'].host_file_access is HostFileAccess.NONE
     assert metadata['run_skill_script'].host_file_access is HostFileAccess.OPAQUE
+    assert metadata['run_skill_command'].host_file_access is HostFileAccess.OPAQUE
     unguarded = SkillManager(dir=str(root), fs=skill_fs)
     assert all(tool.runtime_metadata.host_file_access is not HostFileAccess.UNDECLARED
                for tool in ToolManager(unguarded.get_skill_tools()).tools_info.values())

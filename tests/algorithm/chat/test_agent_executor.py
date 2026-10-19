@@ -128,6 +128,7 @@ def test_executor_trusts_only_the_framework_skill_run_script_identity(monkeypatc
     created = AgentExecutor().create_agent('llm', _plan())
 
     assert created._tools_manager._opaque_tool_is_trusted('run_skill_script')
+    assert created._tools_manager._opaque_tool_is_trusted('run_skill_command')
     assert not created._tools_manager._opaque_tool_is_trusted('arbitrary_executable')
 
 
@@ -140,6 +141,32 @@ def test_executor_passes_cancel_condition_to_chat_agent(monkeypatch) -> None:
     AgentExecutor().create_agent('llm', _plan(extra_stop_condition=stop_condition))
 
     assert constructor.call_args.kwargs['extra_stop_condition'] is stop_condition
+
+
+def test_executor_releases_skill_sandbox_session_after_sync_run(monkeypatch) -> None:
+    sandbox = MagicMock()
+    sandbox.release_session.return_value = {'status': 'ok'}
+    agent = MagicMock(return_value='done')
+    agent._skill_manager._sandbox = sandbox
+    monkeypatch.setattr(AgentExecutor, 'create_agent', lambda *_args, **_kwargs: agent)
+
+    with executor_mod.lazyllm.globals._bind_sid('run-session'):
+        assert AgentExecutor().run('llm', _plan()) == 'done'
+    sandbox.release_session.assert_called_once_with('run-session')
+
+
+def test_cancel_agent_run_signals_agent_and_releases_active_sandbox(monkeypatch) -> None:
+    sandbox = MagicMock()
+    sandbox.release_session.return_value = {'status': 'ok'}
+    agent = MagicMock()
+    agent._skill_manager._sandbox = sandbox
+    request_cancel = MagicMock()
+    monkeypatch.setattr(executor_mod, 'request_cancel', request_cancel)
+
+    executor_mod._cancel_agent_run(agent, 'run-session')
+
+    request_cancel.assert_called_once_with('run-session')
+    sandbox.release_session.assert_called_once_with('run-session')
 
 
 def test_tool_guard_checks_cancellation_before_dispatch(monkeypatch) -> None:
@@ -334,6 +361,7 @@ def test_executor_keeps_the_configured_fs_for_skill_indexing(monkeypatch, tmp_pa
         'get_skill': 'NONE',
         'read_skill_resource': 'NONE',
         'run_skill_script': 'OPAQUE',
+        'run_skill_command': 'OPAQUE',
     }
 
 

@@ -297,6 +297,32 @@ config.add('agentic_workspace', str, './workspace', 'AGENTIC_WORKSPACE',
            ))
 config.add('trusted_local_mode', bool, False, 'TRUSTED_LOCAL_MODE',
            description='Allow agents to access host paths outside their workspace and use local command tools.')
+config.add(
+    'skill_sandbox_backend',
+    str,
+    'runner',
+    'SKILL_SANDBOX_BACKEND',
+    description='Skill execution backend: runner for isolated execution or local for explicit development use.',
+)
+config.add(
+    'skill_sandbox_socket',
+    str,
+    '/run/lazymind-sandbox/runner.sock',
+    'SKILL_SANDBOX_SOCKET',
+    description='Unix socket used by the isolated Skill sandbox runner.',
+)
+config.add('skill_sandbox_timeout', int, 180, 'SKILL_SANDBOX_TIMEOUT',
+           description='Wall-clock timeout in seconds for one Skill script or CLI command.')
+config.add('skill_sandbox_memory_mb', int, 1024, 'SKILL_SANDBOX_MEMORY_MB',
+           description='Memory limit in MiB for one isolated Skill execution.')
+config.add('skill_sandbox_cpu_seconds', int, 60, 'SKILL_SANDBOX_CPU_SECONDS',
+           description='CPU time limit in seconds for one isolated Skill execution.')
+config.add('skill_sandbox_pids', int, 64, 'SKILL_SANDBOX_PIDS',
+           description='Maximum process count for one isolated Skill execution.')
+config.add('skill_sandbox_output_bytes', int, 1024 * 1024, 'SKILL_SANDBOX_OUTPUT_BYTES',
+           description='Maximum captured stdout or stderr bytes for one Skill execution.')
+config.add('skill_sandbox_bundle_bytes', int, 32 * 1024 * 1024, 'SKILL_SANDBOX_BUNDLE_BYTES',
+           description='Maximum compressed Skill package size accepted by the sandbox runner.')
 config.add('agentic_keep_full_turns', int, 2, 'AGENTIC_KEEP_FULL_TURNS',
            description='Number of recent tool results kept intact during context compression.')
 # Context compression knobs (process-level via LAZYMIND_*). Master switch gates all

@@ -617,6 +617,92 @@ def _tool_result_count(value: Any) -> int | None:
     )
 
 
+def _skill_sandbox_failure_text(result: Any, language: str) -> str:
+    if not isinstance(result, dict):
+        return ''
+    error_type = str(result.get('error_type') or result.get('reason_code') or '').upper()
+    dependency = str(result.get('dependency') or '').strip()
+    blocked = str(result.get('blocked_resource') or '').strip()
+    missing_env = result.get('missing_env') or []
+    if error_type == 'SKILL_NOT_LOADED':
+        return (
+            '无法运行此 Skill：执行前必须先通过 `get_skill` 加载该 Skill。'
+            if language == 'zh' else
+            'Cannot run this Skill: load it with `get_skill` before execution.'
+        )
+    if error_type == 'COMMAND_NOT_FOUND':
+        available = [str(item) for item in (result.get('available_commands') or []) if item]
+        available_text = '、'.join(available[:12]) if language == 'zh' else ', '.join(available[:12])
+        suffix = (
+            f' 当前可用 CLI：{available_text}。' if language == 'zh' and available_text else
+            f' Available CLIs: {available_text}.' if available_text else ''
+        )
+        return (
+            f'无法运行此 Skill：沙箱中未安装 `{dependency or "所需 CLI"}`。'
+            f'{suffix}请更换实现或申请加入 runtime profile。'
+            if language == 'zh' else
+            f'Cannot run this Skill: `{dependency or "the required CLI"}` is not installed in the sandbox. '
+            f'{suffix} Use another implementation or request a runtime profile update.'
+        )
+    if error_type in {'RUNTIME_NOT_SUPPORTED', 'RUNTIME_NOT_FOUND'}:
+        runtime = dependency or blocked or 'unknown'
+        return (
+            f'无法运行此 Skill：当前沙箱不支持或未安装运行时 `{runtime}`。'
+            '请调整脚本类型或申请对应 runtime profile。'
+            if language == 'zh' else
+            f'Cannot run this Skill: runtime `{runtime}` is unsupported or unavailable. '
+            'Use another script type or request the matching runtime profile.'
+        )
+    if error_type == 'COMMAND_DENIED':
+        return (
+            '无法运行此 Skill：命令或资源 '
+            f'`{blocked or dependency or "unknown"}` 不在沙箱授权范围内。'
+            if language == 'zh' else
+            f'Cannot run this Skill: `{blocked or dependency or "unknown"}` is outside the sandbox policy.'
+        )
+    if error_type == 'MISSING_ENV':
+        names = '、'.join(str(item) for item in missing_env) or dependency or 'unknown'
+        return (
+            f'无法运行此 Skill：缺少已声明的环境变量 `{names}`。请先完成配置。'
+            if language == 'zh' else
+            f'Cannot run this Skill: required environment variable `{names}` is not configured.'
+        )
+    if error_type == 'NETWORK_DENIED':
+        return (
+            f'无法运行此 Skill：网络访问 `{blocked or "目标地址"}` 被沙箱策略拒绝。'
+            if language == 'zh' else
+            f'Cannot run this Skill: network access to `{blocked or "the destination"}` was denied.'
+        )
+    if error_type == 'FILESYSTEM_DENIED':
+        return (
+            f'无法运行此 Skill：文件访问 `{blocked or "目标路径"}` 超出沙箱边界。'
+            if language == 'zh' else
+            f'Cannot run this Skill: file access to `{blocked or "the target path"}` left the sandbox boundary.'
+        )
+    if error_type in {'TIMEOUT', 'RESOURCE_LIMIT', 'OUTPUT_LIMIT', 'CANCELLED'}:
+        labels = {
+            'TIMEOUT': ('执行超时', 'execution timed out'),
+            'RESOURCE_LIMIT': ('超过 CPU、内存或进程限制', 'a CPU, memory, or process limit was exceeded'),
+            'OUTPUT_LIMIT': ('输出超过大小限制', 'the output size limit was exceeded'),
+            'CANCELLED': ('执行已取消', 'execution was cancelled'),
+        }
+        zh_label, en_label = labels[error_type]
+        return f'无法运行此 Skill：{zh_label}。' if language == 'zh' else f'Cannot run this Skill: {en_label}.'
+    if error_type == 'SANDBOX_UNAVAILABLE':
+        return ('无法运行此 Skill：沙箱服务当前不可用。' if language == 'zh'
+                else 'Cannot run this Skill: the sandbox service is unavailable.')
+    if error_type == 'EXIT_NON_ZERO':
+        exit_code = result.get('exit_code')
+        suffix = f'（退出码 {exit_code}）' if exit_code is not None else ''
+        en_suffix = f' with exit code {exit_code}' if exit_code is not None else ''
+        return (
+            f'Skill 命令执行失败{suffix}，请检查脚本输出。'
+            if language == 'zh' else
+            f'The Skill command failed{en_suffix}; check the command output.'
+        )
+    return ''
+
+
 def _tool_result_preview(tool_name: str, result: Any, value: str = '', language: str = 'en') -> str:
     status = _tool_result_status(result)
     if _tool_name_starts(tool_name, 'MailToolkit_'):
@@ -660,6 +746,10 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
             result,
         )
     if status == 'failed':
+        if _tool_name_is(tool_name, 'run_skill_script') or _tool_name_is(tool_name, 'run_skill_command'):
+            detail = _skill_sandbox_failure_text(result, language)
+            if detail:
+                return _ensure_trailing_newline(detail)
         return _render_preview_template(
             tool_name,
             value or _tool_result_failure_detail(result),

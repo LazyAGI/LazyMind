@@ -108,7 +108,7 @@ def test_executor_wires_the_interpreter_only_to_skill_manager(monkeypatch):
     )
     AgentExecutor().create_agent('llm', plan)
     assert 'sandbox' not in constructor.call_args.kwargs
-    assert isinstance(manager._sandbox, mod.SkillScriptSandbox)
+    assert isinstance(manager._sandbox, mod.SandboxRunnerClient)
 
 
 def test_skill_manager_materializes_and_runs_real_javascript(tmp_path):
@@ -131,3 +131,92 @@ def test_skill_manager_materializes_and_runs_real_javascript(tmp_path):
     result = manager.run_script('sample', 'scripts/check.js', args=['real-node-result'])
     assert result['status'] == 'ok'
     assert result['stdout'].strip() == 'real-node-result'
+
+
+def test_local_cli_uses_literal_argv_and_rejects_inline_shell(tmp_path):
+    (tmp_path / 'SKILL.md').write_text('demo', encoding='utf-8')
+    sandbox = mod.SkillScriptSandbox()
+    result = sandbox.execute_command(str(tmp_path), ['printf', '%s', '; touch nope'])
+    denied = sandbox.execute_command(str(tmp_path), ['bash', '-c', 'touch nope'])
+
+    assert result['status'] == 'ok'
+    assert result['stdout'] == '; touch nope'
+    assert denied['error_type'] == 'COMMAND_DENIED'
+
+
+def test_skill_manager_passes_normalized_metadata_policy_and_declared_env(tmp_path, monkeypatch):
+    from lazyllm.tools.agent.skill_manager import SkillManager
+
+    (tmp_path / 'SKILL.md').write_text(
+        '---\n'
+        'name: demo\n'
+        'description: demo\n'
+        'required_env: [ROOT_TOKEN]\n'
+        'input_files: [references/input.json]\n'
+        'declared_outputs: [output/*.pdf]\n'
+        'runtime_profile: base\n'
+        'metadata:\n'
+        '  openclaw:\n'
+        '    requires:\n'
+        '      bins: [jq]\n'
+        '      env: [SERVICE_TOKEN]\n'
+        '  security:\n'
+        '    allowed_domains: [api.example.com]\n'
+        '---\n',
+        encoding='utf-8',
+    )
+    calls = []
+
+    class Sandbox:
+        def execute_command(self, **kwargs):
+            calls.append(kwargs)
+            return {'status': 'ok', 'stdout': 'ok', 'stderr': '', 'exit_code': 0}
+
+    monkeypatch.setattr(
+        'lazyllm.tools.tool_config_inject.get_dynamic_env_vars',
+        lambda: {'ROOT_TOKEN': 'root', 'SERVICE_TOKEN': 'service', 'UNDECLARED': 'secret'},
+    )
+    manager = SkillManager(dir=str(tmp_path), sandbox=Sandbox())
+    result = manager.run_command('demo', ['jq', '--version'])
+
+    assert result['status'] == 'ok'
+    assert calls[0]['argv'] == ['jq', '--version']
+    assert calls[0]['env'] == {
+        'ROOT_TOKEN': 'root', 'SERVICE_TOKEN': 'service', 'UNDECLARED': 'secret',
+    }
+    assert calls[0]['policy']['required_bins'] == ['jq']
+    assert calls[0]['policy']['required_env'] == ['ROOT_TOKEN', 'SERVICE_TOKEN']
+    assert calls[0]['policy']['allowed_domains'] == ['api.example.com']
+    assert calls[0]['input_files'] == ['references/input.json']
+    assert calls[0]['declared_outputs'] == ['output/*.pdf']
+    assert calls[0]['skill_id'] == tmp_path.name
+    assert calls[0]['revision'] == 'latest'
+
+
+def test_skill_manager_preserves_structured_runner_failure(tmp_path):
+    from lazyllm.tools.agent import ToolExecutionError
+    from lazyllm.tools.agent.skill_manager import SkillManager
+
+    (tmp_path / 'SKILL.md').write_text(
+        '---\nname: demo\ndescription: demo\n---\n', encoding='utf-8',
+    )
+
+    class Sandbox:
+        def execute_command(self, **kwargs):
+            del kwargs
+            return {
+                'status': 'failed',
+                'error_type': 'COMMAND_DENIED',
+                'error': 'command blocked',
+                'stderr': 'command blocked',
+                'stdout': '',
+                'exit_code': None,
+                'dependency': 'sudo',
+            }
+
+    manager = SkillManager(dir=str(tmp_path), sandbox=Sandbox())
+    with pytest.raises(ToolExecutionError) as exc_info:
+        manager.run_command('demo', ['sudo'])
+
+    assert exc_info.value.error_type == 'COMMAND_DENIED'
+    assert exc_info.value.dependency == 'sudo'

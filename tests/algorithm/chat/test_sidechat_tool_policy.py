@@ -101,7 +101,7 @@ def test_sidechat_final_tools_remain_readonly_after_lazy_activation(monkeypatch,
     } <= names
 
     forbidden_names = {
-        'run_script', 'run_skill_script', 'read_skill_resource', 'shell', 'write_file',
+        'run_script', 'run_skill_script', 'run_skill_command', 'read_skill_resource', 'shell', 'write_file',
         'save_chat_artifact', 'intentwrite',
         'string_replace', 'create_subagent', 'ask_user', 'set_session_env', 'future_writer',
         'get_ScheduleToolkit_methods', 'get_CloudFileToolkit_methods', 'get_SkillManagementToolkit_methods',

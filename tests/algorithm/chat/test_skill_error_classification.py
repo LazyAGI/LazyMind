@@ -7,6 +7,7 @@ from lazymind.chat.engine.agent_runtime import telemetry
 from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolExecutionMiddleware
 from lazymind.chat.engine.agent_runtime.tool_call_guard import _summarize_tool_result
 from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
+from lazymind.chat.service.component.tool_rendering import _tool_result_preview
 
 
 @pytest.mark.parametrize('message,expected', [
@@ -50,6 +51,63 @@ def test_do_not_override_existing_contract(result):
 def test_missing_env_takes_priority():
     result = {'ok': False, 'value': 'Required runtime not found: node', 'missing_env': ['SERVICE_KEY']}
     assert classify_skill_failure(result) == {**result, 'error_type': 'missing_env'}
+
+
+def test_structured_tool_execution_error_survives_tool_boundary():
+    def run_skill_command(name: str) -> str:
+        """Run a command.
+
+        Args:
+            name (str): Command name.
+        """
+        raise ToolExecutionError.with_diagnostics(
+            'CLI command is not installed: jq',
+            error_type='COMMAND_NOT_FOUND',
+            dependency='jq',
+            exit_code=127,
+            duration_ms=180123,
+        )
+
+    result = ToolManager([run_skill_command])({
+        'function': {'name': 'run_skill_command', 'arguments': {'name': 'jq'}},
+    })[0]
+
+    assert result == {
+        'ok': False,
+        'value': 'CLI command is not installed: jq',
+        'error_type': 'COMMAND_NOT_FOUND',
+        'dependency': 'jq',
+        'exit_code': 127,
+        'duration_ms': 180123,
+    }
+
+
+def test_skill_sandbox_failure_renders_actionable_message():
+    result = {
+        'ok': False,
+        'value': 'Required CLI is not installed.',
+        'error_type': 'COMMAND_NOT_FOUND',
+        'dependency': 'jq',
+    }
+
+    preview = _tool_result_preview('run_skill_command', result, language='zh')
+
+    assert 'jq' in preview
+    assert '未安装' in preview
+    assert 'runtime profile' in preview
+
+
+def test_skill_not_loaded_renders_get_skill_guidance():
+    result = {
+        'ok': False,
+        'value': 'Skill must be loaded before execution.',
+        'error_type': 'SKILL_NOT_LOADED',
+    }
+
+    preview = _tool_result_preview('run_skill_script', result, language='zh')
+
+    assert 'get_skill' in preview
+    assert '加载' in preview
 
 
 def test_long_script_error_keeps_diagnostics_in_backend_log_summary():

@@ -94,7 +94,7 @@ def _summarize_tool_result(result: Any) -> dict[str, Any]:
         return summary
     if 'ok' in result:
         summary['ok'] = result.get('ok')
-    for key in ('error_type', 'dependency', 'exit_code'):
+    for key in ('error_type', 'reason_code', 'dependency', 'blocked_resource', 'exit_code', 'duration_ms'):
         if key in result:
             summary[key] = str(result[key])[:240]
     msg = result.get('msg')
@@ -588,7 +588,7 @@ class ToolExecutionMiddleware:
             if record.index in decision.blocked_results or record.index in decision.duplicate_sources:
                 continue
             if (record.disposition is ToolExecutionDisposition.EXECUTED
-                    and record.tool_name in {'run_script', 'run_skill_script'}
+                    and record.tool_name in {'run_script', 'run_skill_script', 'run_skill_command'}
                     and self._opaque_tool_is_trusted(record.tool_name)):
                 result = classify_skill_failure(result)
                 record = replace(record, result=result)

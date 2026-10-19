@@ -939,6 +939,7 @@ _SKILL_METHODS = [
     {'name': 'get_skill', 'summary': 'Load SKILL.md and the declared resource manifest.'},
     {'name': 'read_skill_resource', 'summary': 'Read a resource declared by a loaded skill.'},
     {'name': 'run_skill_script', 'summary': 'Run a script declared by a loaded skill.'},
+    {'name': 'run_skill_command', 'summary': 'Run an argv-based CLI command for a loaded skill.'},
 ]
 
 

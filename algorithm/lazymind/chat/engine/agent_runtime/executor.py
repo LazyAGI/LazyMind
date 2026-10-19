@@ -111,6 +111,28 @@ def _skill_filesystem(fs: Any, skills_dir: Optional[str]) -> Any:
     return fs
 
 
+def _release_skill_sandbox(agent: Any, session_id: str) -> None:
+    manager = getattr(agent, '_skill_manager', None)
+    sandbox = getattr(manager, '_sandbox', None)
+    release = getattr(sandbox, 'release_session', None)
+    if not callable(release) or not session_id:
+        return
+    try:
+        result = release(session_id)
+        if isinstance(result, dict) and result.get('status') not in {'ok', 'not_found'}:
+            lazyllm.LOG.warning(f'[AgentExecutor] sandbox session cleanup failed: {result}')
+    except Exception as exc:
+        lazyllm.LOG.warning(
+            f'[AgentExecutor] sandbox session cleanup failed: {type(exc).__name__}: {exc}'
+        )
+
+
+def _cancel_agent_run(agent: Any, session_id: str) -> None:
+    """Propagate a stopped stream to both the Agent and its active sandbox."""
+    request_cancel(session_id)
+    _release_skill_sandbox(agent, session_id)
+
+
 class AgentInvocation:
     """LazyLLM-traceable boundary for one in-process agent invocation."""
 
@@ -242,7 +264,10 @@ class AgentExecutor:
         configure_tool_retrieval(agent, plan)
         restore_loaded_skill_runtime(getattr(agent, '_skill_manager', None), plan.history)
         trusted_opaque_tools = tuple(
-            tool for name in (getattr(agent, '_skill_tool_names', set()) & {'run_script', 'run_skill_script'})
+            tool for name in (
+                getattr(agent, '_skill_tool_names', set())
+                & {'run_script', 'run_skill_script', 'run_skill_command'}
+            )
             if (tool := agent._tools_manager.tools_info.get(name)) is not None
         )
         permission = options.workspace_permission
@@ -332,7 +357,11 @@ class AgentExecutor:
                 sid=sid(),
             )
         run_sid = lazyllm.globals._sid
-        helper = _sh.StreamCallHelper(agent, init_sid=False, on_cancel=lambda: request_cancel(run_sid))
+        helper = _sh.StreamCallHelper(
+            agent,
+            init_sid=False,
+            on_cancel=lambda: _cancel_agent_run(agent, run_sid),
+        )
         kwargs = {'llm_chat_history': history} if history is not None else {}
         execution_options = getattr(plan, 'execution_options', None)
         llm_config = getattr(execution_options, 'llm_config', None)
@@ -384,6 +413,7 @@ class AgentExecutor:
                     repeat_monitor.reset()
                 if notice_buffer is not None:
                     notice_buffer.clear()
+                await asyncio.to_thread(_release_skill_sandbox, agent, run_sid)
                 if telemetry_enabled():
                     append_event(
                         'run_end',
@@ -417,4 +447,8 @@ class AgentExecutor:
     def run(self, llm: Any, plan: AgentRunPlan) -> Any:
         """Run a one-shot agent while preserving ReactAgent's synchronous API."""
         agent = self.create_agent(llm, plan)
-        return agent(plan.prompt.current_input)
+        run_sid = lazyllm.globals._sid
+        try:
+            return agent(plan.prompt.current_input)
+        finally:
+            _release_skill_sandbox(agent, run_sid)
