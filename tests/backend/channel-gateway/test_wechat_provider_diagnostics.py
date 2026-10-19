@@ -73,25 +73,35 @@ def test_worker_correlates_safe_provider_codes_without_changing_delivery_contrac
         assert secret not in caplog.text
 
 
-def test_rejection_diagnostics_survive_copy_and_pickle():
-    error = WeChatRejectedError(operation='sendmessage', http_status=200, ret=-2, errcode=40001)
-    for restored in (WeChatRejectedError(*error.args), copy.copy(error), pickle.loads(pickle.dumps(error))):
+@pytest.mark.parametrize('retryable', [False, True])
+def test_rejection_diagnostics_survive_copy_and_pickle(retryable):
+    error = WeChatRejectedError(retryable=retryable, operation='sendmessage', http_status=200, ret=-2, errcode=40001)
+    for restored in (
+        WeChatRejectedError(*error.args), copy.copy(error), copy.deepcopy(error), pickle.loads(pickle.dumps(error)),
+    ):
+        assert restored.args == error.args
+        assert str(restored) == 'Provider rejected request'
         assert restored.operation == 'sendmessage'
         assert restored.http_status == 200
         assert restored.ret == -2
         assert restored.errcode == 40001
-        assert restored.retryable is False
+        assert restored.retryable is retryable
 
 
 @pytest.mark.parametrize('operation', ['private-token', {'token': 'private-token'}, ['private-token']])
 def test_diagnostic_fields_retain_only_allowlisted_operations_and_bounded_numbers(operation):
-    error = WeChatRejectedError(operation=operation, http_status='private-token',
-                               ret='private-token', errcode=2 ** 100)
-    assert error.operation == 'unknown'
-    assert error.http_status is None
-    assert error.ret is None
-    assert error.errcode is None
-    assert 'private-token' not in repr(error)
+    error = WeChatRejectedError(
+        operation=operation, http_status='private-token', ret='private-token', errcode=2 ** 100,
+    )
+    for restored in (
+        error, WeChatRejectedError(*error.args), copy.copy(error),
+        copy.deepcopy(error), pickle.loads(pickle.dumps(error)),
+    ):
+        assert restored.operation == 'unknown'
+        assert restored.http_status is None
+        assert restored.ret is None
+        assert restored.errcode is None
+        assert 'private-token' not in repr(restored)
 
 
 def test_getupdates_keeps_safe_operation_and_http_diagnostics(monkeypatch):

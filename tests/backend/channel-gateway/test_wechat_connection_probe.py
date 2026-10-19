@@ -640,7 +640,16 @@ def test_runtime_supervisor_probes_on_startup_and_later_timer_without_receiver_t
     monkeypatch.setattr(runtime, 'start_account', lambda *args, **kwargs: None)
     supervisor._interval_seconds = 0.02
     observed = queue.Queue()
-    platform.on_request = lambda payload: observed.put(True)
+    finish_check = gateway.store.finish_wechat_connection_check
+
+    def observe_finished_check(*args):
+        result = finish_check(*args)
+        observed.put(True)
+        return result
+
+    # A provider request starting does not mean its result has been persisted.
+    # Observe completion so the assertion cannot race the background writer.
+    monkeypatch.setattr(gateway.store, 'finish_wechat_connection_check', observe_finished_check)
     # A previous process's persisted probe must not delay this process's first
     # check until the new 20-minute background interval has elapsed.
     with gateway.store._connect() as connection:

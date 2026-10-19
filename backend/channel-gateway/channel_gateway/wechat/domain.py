@@ -11,8 +11,10 @@ class WeChatError(RuntimeError):
 class WeChatRejectedError(WeChatError, ProviderRejectedError):
     """Provider rejection with bounded diagnostics, never a raw response."""
 
-    def __init__(self, message='Provider rejected request', retryable=False,
-                 operation='unknown', http_status=None, ret=None, errcode=None):
+    def __init__(  # noqa: B042 - sanitized reconstruction args are explicitly stored below.
+        self, message='Provider rejected request', retryable=False,
+        operation='unknown', http_status=None, ret=None, errcode=None,
+    ):
         super().__init__(message, retryable)
         self.operation = operation if type(operation) is str and operation in {
             'getupdates', 'notifystart', 'getconfig', 'sendtyping',

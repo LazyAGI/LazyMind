@@ -2216,7 +2216,8 @@ class GatewayStore:
         ''', (envelope.account_id, envelope.recipient_id, ciphertext))
         if envelope.provider == 'wechat':
             connection.execute('''
-                UPDATE channel_notification_targets SET connection_check_status = 'connected', connection_error_code = '',
+                UPDATE channel_notification_targets
+                SET connection_check_status = 'connected', connection_error_code = '',
                     connection_check_id = '', connection_checked_at = CURRENT_TIMESTAMP
                 WHERE account_id = %s AND recipient_id = %s
             ''', (envelope.account_id, envelope.recipient_id))
