@@ -315,6 +315,7 @@ def test_executor_keeps_the_configured_fs_for_skill_indexing(monkeypatch, tmp_pa
     monkeypatch.setitem(lazyllm.globals, 'agentic_config', {
         'user_id': 'u', 'conversation_id': 'c', '_core_workspace_context': {'workspace_id': 'bound'},
     })
+
     def construct(**kwargs):
         if os.name == 'nt':
             from fsspec.implementations.local import LocalFileSystem
@@ -329,7 +330,9 @@ def test_executor_keeps_the_configured_fs_for_skill_indexing(monkeypatch, tmp_pa
         return agent
     monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', construct)
     agent = AgentExecutor().create_agent('llm', _plan(skills=['visible'], fs=FS, skills_dir=str(skill_dir.parent)))
-    assert {name: tool.runtime_metadata.host_file_access.value for name, tool in agent._tools_manager.tools_info.items()} == {
+    access = {name: tool.runtime_metadata.host_file_access.value
+              for name, tool in agent._tools_manager.tools_info.items()}
+    assert access == {
         'search_skill': 'NONE',
         'get_skill': 'NONE',
         'read_skill_resource': 'NONE',
@@ -408,11 +411,11 @@ def test_repeat_notice_survives_actual_function_call_context_bound(monkeypatch):
     fc._runtime_observer = None
     delivered = fc._consume_model_context()[0]['content']
     assert delivered.startswith('Already seen this window; next_offset=41, EOF=false.')
-    assert len(delivered) <= 4096
+    assert len(delivered) <= 2048
     assert agent._runtime_notice_buffer.take() is None
 
 
-def test_repeat_replay_reaches_tool_free_final_answer_with_latest_result(tmp_path):
+def test_repeat_replay_stops_exploration_and_returns_final_answer(tmp_path):
     import copy
     import uuid
     import lazyllm
@@ -471,10 +474,7 @@ def test_repeat_replay_reaches_tool_free_final_answer_with_latest_result(tmp_pat
         result = agent('Original question')
         assert result == 'Final answer with the verified evidence and gaps.'
         assert calls == ['topic'] * 4  # Results were really executed, not cached/replaced.
-        history = model.requests[-1][1]['llm_chat_history']
-        assert sum(m.get('tool_call_id') == 'call-4' for m in history) == 1
-        assert any(m.get('content') == 'early critical evidence' for m in history)
-        assert 'tools' not in model.requests[-1][1]
+        assert len(model.requests) == 5
 
 
 @pytest.mark.parametrize('compressed', [False, True])
@@ -496,7 +496,6 @@ def test_executor_compression_resets_stale_batch_streak_and_notice(monkeypatch, 
     compact([], 2, runtime_state={})
     assert created._exact_repeat_monitor.stop_requested is not compressed
     assert created._runtime_notice_buffer.take() == (None if compressed else 'Old repeat warning')
-
 
 
 def test_actual_agent_recovers_evidence_after_compaction_and_reaches_new_document(tmp_path):

@@ -1,11 +1,10 @@
 import copy
 import os
 import subprocess
-from types import SimpleNamespace
 
 import pytest
 
-from lazymind.directory.folders import FolderTools, cloud_page, node_key, resolve_folder_access
+from lazymind.directory.folders import FolderTools, cloud_page, cloud_root, node_key, resolve_folder_access
 from lazymind.chat.engine.tools.workspace_context import WorkspaceContext, workspace_permission_scope
 
 
@@ -83,6 +82,7 @@ def test_inventory_denial_then_resume(monkeypatch, tmp_path):
     (tmp_path / 'restricted').mkdir()
     (tmp_path / 'restricted' / 'file.txt').write_text('keep')
     original = module.local_page
+
     def denied(source, current):
         if current['path'] == 'restricted':
             raise PermissionError('permission denied')
@@ -216,6 +216,7 @@ def test_cloud_pages_keep_stable_ids_and_wiki_documents(provider):
                    {'node_token': 'f1', 'token': 'f1', 'title': 'same', 'name': 'same', 'type': 'folder'},
                    {'node_token': 'f2', 'token': 'f2', 'title': 'same', 'name': 'same', 'type': 'docx'}],
                    'has_more': True, 'page_token': 'next'}})
+
     def get_page(*args, **kwargs):
         if provider == 'feishu_wiki':
             assert kwargs['params']['page_size'] <= 50
@@ -288,7 +289,8 @@ def test_google_supplier_pagination_traversal_and_resume(monkeypatch, failure):
             assert store.inventory['state']['queue']
             assert any(not n['listed'] for n in store.nodes.values() if n['kind'] == 'directory')
             failure = ''
-            result = FolderTools(store).inspect_document_folder('root', provider='google_drive', inventory_id='inventory')
+            result = FolderTools(store).inspect_document_folder(
+                'root', provider='google_drive', inventory_id='inventory')
         assert result['inventory']['status'] == 'complete'
     resources = [n for n in store.nodes.values() if n.get('candidate')]
     assert {n['candidate']['resource_id'] for n in resources} == {'shortcut', 'nested', 'last'}
@@ -298,3 +300,41 @@ def test_google_supplier_pagination_traversal_and_resume(monkeypatch, failure):
         if item['name'] != 'Shortcut':
             assert item['candidate']['content_version'] == timestamp
         assert item['candidate']['locator']['path'].startswith('/drive/drive/')
+
+
+@pytest.mark.parametrize('space_id', ['space', ''])
+def test_wiki_root_resolution_retains_root_document(monkeypatch, space_id):
+    from lazyllm.tools.fs.supplier.feishu import FeishuWikiFS
+
+    client = FeishuWikiFS(dynamic_auth=True, skip_instance_cache=True)
+    requests = []
+
+    def get(url, params):
+        requests.append((url, params))
+        if url.endswith('/wiki/v2/spaces/get_node'):
+            assert params == {'token': 'root'}
+            return {'code': 0, 'data': {'node': {
+                'node_token': 'root', 'space_id': space_id, 'title': 'Root document',
+                'obj_type': 'docx', 'obj_token': 'doc-root', 'has_child': False,
+            }}}
+        assert url.endswith('/wiki/v2/spaces/space/nodes')
+        assert params['parent_node_token'] == 'root'
+        return {'code': 0, 'data': {'items': [], 'has_more': False}}
+
+    monkeypatch.setattr(client, '_get', get)
+    monkeypatch.setattr(FolderTools, '_cloud', lambda *a, **kw: ('account', client))
+    if not space_id:
+        with pytest.raises(ValueError, match='Wiki space identity unavailable'):
+            cloud_root('feishu_wiki', 'root', client)
+        return
+    store = InventoryStore()
+    with trusted():
+        result = FolderTools(store).inspect_document_folder(
+            'https://example.feishu.cn/wiki/root', provider='feishu_wiki')
+    assert result['inventory']['status'] == 'complete'
+    assert result['inventory']['source']['space_id'] == 'space'
+    root = store.nodes[node_key('root')]
+    assert root['name'] == 'Root document'
+    assert root['candidate']['resource_id'] == 'root'
+    assert root['candidate']['locator']['path'] == '/~node/root'
+    assert len(requests) == 2

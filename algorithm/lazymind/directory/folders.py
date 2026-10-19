@@ -150,9 +150,12 @@ def cloud_root(provider, root, client):
         if info.get('type') != 'directory':
             raise ValueError('The selected resource is not a folder.')
         return identifier, info['title'], {'drive_id': info.get('drive_id', '')}, None
-    info = client.folder_info(identifier)
     if provider == 'feishu_wiki':
+        info = client.resolve_wiki_ref('/~node/' + identifier)
+        if not info.get('space_id'):
+            raise ValueError('Wiki space identity unavailable.')
         return identifier, info.get('title') or identifier, {'space_id': info['space_id']}, info
+    info = client.folder_info(identifier)
     return identifier, info.get('name') or identifier, {}, None
 
 
