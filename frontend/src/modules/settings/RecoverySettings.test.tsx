@@ -197,6 +197,16 @@ describe("RecoverySettings", () => {
     fireEvent.click(screen.getByRole("tab", { name: /已归档/ }));
   }
 
+  it("refreshes archived items and folder counts after undo from a batch notice", async () => {
+    renderRecoverySettings(RECOVERY_ARCHIVE_PATH, false);
+    await screen.findByText("设置页信息架构整理");
+    const folderCalls = mocks.listArchiveFolders.mock.calls.length;
+    mocks.listArchivedConversations.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
+    act(() => window.dispatchEvent(new Event(CHAT_CONVERSATION_LIST_REFRESH_EVENT)));
+    await waitFor(() => expect(screen.queryByText("设置页信息架构整理")).not.toBeInTheDocument());
+    expect(mocks.listArchiveFolders.mock.calls.length).toBeGreaterThan(folderCalls);
+  });
+
   it("opens on Trash with the skill category selected", async () => {
     renderRecoverySettings();
 

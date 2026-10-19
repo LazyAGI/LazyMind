@@ -40,7 +40,8 @@ var (
 )
 
 type conversationArchiveRequest struct {
-	FolderID *string `json:"folder_id"`
+	FolderID     *string `json:"folder_id"`
+	OnlyIfActive bool    `json:"only_if_active"`
 }
 
 type archiveFolderRequest struct {
@@ -236,6 +237,7 @@ func ArchiveConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body conversationArchiveRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	if err := decodeOptionalJSON(r, &body); err != nil {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
@@ -253,6 +255,7 @@ func ArchiveConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	var conversation orm.Conversation
+	newlyArchived := false
 	archivedConversationIDs := []string{}
 	err = conversationgroup.UserTransaction(r.Context(), db, userID, func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", conversationID, userID).First(&conversation).Error; err != nil {
@@ -261,6 +264,10 @@ func ArchiveConversation(w http.ResponseWriter, r *http.Request) {
 		if conversation.ParentConversationID != nil {
 			return errChildGroupOperation
 		}
+		if body.OnlyIfActive && conversation.ArchivedAt != nil {
+			return nil
+		}
+		newlyArchived = conversation.ArchivedAt == nil
 		conversationIDs, err := ownedConversationFamilyIDs(r.Context(), tx, userID, conversationID)
 		if err != nil {
 			return err
@@ -273,9 +280,13 @@ func ArchiveConversation(w http.ResponseWriter, r *http.Request) {
 		if err := taskcenter.ArchiveTasksForConversations(r.Context(), tx, userID, conversationIDs, taskcenter.ArchivedReasonConversationArchive, now); err != nil {
 			return err
 		}
-		return tx.Model(&orm.Conversation{}).
+		if err := tx.Model(&orm.Conversation{}).
 			Where("id IN ? AND create_user_id = ? AND deleted_at IS NULL", conversationIDs, userID).
-			Updates(updates).Error
+			Updates(updates).Error; err != nil {
+			return err
+		}
+		// Return the database's timestamp precision for conditional undo.
+		return tx.Select("archived_at").First(&conversation, "id = ?", conversationID).Error
 	})
 	if errors.Is(err, errChildGroupOperation) {
 		common.ReplyErr(w, err.Error(), http.StatusConflict)
@@ -293,13 +304,25 @@ func ArchiveConversation(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
 		return
 	}
-	notifySessionEnvClear(archivedConversationIDs...)
-	writeConversationJSON(w, http.StatusOK, map[string]any{})
+	if len(archivedConversationIDs) > 0 {
+		notifySessionEnvClear(archivedConversationIDs...)
+	}
+	writeConversationJSON(w, http.StatusOK, map[string]any{
+		"conversation_id": conversationID, "newly_archived": newlyArchived, "archived_at": conversation.ArchivedAt,
+	})
 }
 
 func UnarchiveConversation(w http.ResponseWriter, r *http.Request) {
 	conversationID, ok := recoveryConversationID(w, r)
 	if !ok {
+		return
+	}
+	var body struct {
+		ExpectedArchivedAt *time.Time `json:"expected_archived_at"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	if err := decodeOptionalJSON(r, &body); err != nil || (body.ExpectedArchivedAt != nil && body.ExpectedArchivedAt.IsZero()) {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
 	}
 	now := time.Now().UTC()
@@ -308,13 +331,22 @@ func UnarchiveConversation(w http.ResponseWriter, r *http.Request) {
 	err := conversationgroup.UserTransaction(r.Context(), db, userID, func(tx *gorm.DB) error {
 		var conversation orm.Conversation
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(
-			"id = ? AND create_user_id = ? AND deleted_at IS NULL AND archived_at IS NOT NULL",
+			"id = ? AND create_user_id = ? AND deleted_at IS NULL",
 			conversationID, userID,
 		).Take(&conversation).Error; err != nil {
 			return err
 		}
 		if conversation.ParentConversationID != nil {
 			return errChildGroupOperation
+		}
+		if conversation.ArchivedAt == nil {
+			if body.ExpectedArchivedAt != nil {
+				return nil // A retry after a lost response is already satisfied.
+			}
+			return gorm.ErrRecordNotFound
+		}
+		if body.ExpectedArchivedAt != nil && !conversation.ArchivedAt.Equal(*body.ExpectedArchivedAt) {
+			return common.ResolveAppError("conversation archive changed", http.StatusConflict)
 		}
 		conversationIDs, err := ownedConversationFamilyIDs(r.Context(), tx, userID, conversationID)
 		if err != nil {
@@ -770,7 +802,7 @@ func DeleteConversationArchiveFolder(w http.ResponseWriter, r *http.Request) {
 	moveTarget := strings.TrimSpace(r.URL.Query().Get("move_to_folder_id"))
 	userID := recoveryUserID(r)
 	var movedCount int64
-	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+	err := conversationgroup.UserTransaction(r.Context(), store.DB(), userID, func(tx *gorm.DB) error {
 		var folder orm.ConversationArchiveFolder
 		if err := tx.Where("id = ? AND user_id = ?", folderID, userID).First(&folder).Error; err != nil {
 			return err
@@ -792,9 +824,10 @@ func DeleteConversationArchiveFolder(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
+			now := time.Now().UTC()
 			if err := tx.Model(&orm.Conversation{}).
 				Where("create_user_id = ? AND archive_folder_id = ?", userID, folderID).
-				Updates(map[string]any{"archive_folder_id": targetID, "updated_at": time.Now().UTC()}).Error; err != nil {
+				Updates(map[string]any{"archive_folder_id": targetID, "archived_at": now, "updated_at": now}).Error; err != nil {
 				return err
 			}
 		}

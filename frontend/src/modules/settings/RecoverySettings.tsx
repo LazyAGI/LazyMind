@@ -34,7 +34,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 import ArchiveFolderPickerModal from "@/components/ui/ArchiveFolderPickerModal";
 import ConversationTrashConfirmContent from "@/modules/chat/components/ConversationTrashConfirmContent";
-import { getChatConversationPath } from "@/modules/chat/constants/chat";
+import { CHAT_CONVERSATION_LIST_REFRESH_EVENT, getChatConversationPath } from "@/modules/chat/constants/chat";
 import { emitConversationGroupsChanged } from "@/modules/chat/conversationOrganizer/api";
 import { emitConversationListRefresh } from "@/modules/chat/utils/conversationActivity";
 import {
@@ -164,6 +164,15 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
   const [trashRevision, setTrashRevision] = useState(0);
   const [retentionNow, setRetentionNow] = useState(() => Date.now());
   const latestTrashRequest = useRef(0);
+
+  useEffect(() => {
+    const refresh = () => {
+      setArchiveRevision((value) => value + 1);
+      setFolderRevision((value) => value + 1);
+    };
+    window.addEventListener(CHAT_CONVERSATION_LIST_REFRESH_EVENT, refresh);
+    return () => window.removeEventListener(CHAT_CONVERSATION_LIST_REFRESH_EVENT, refresh);
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => setRetentionNow(Date.now()), RETENTION_REFRESH_INTERVAL_MS);

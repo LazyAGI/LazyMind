@@ -63,6 +63,7 @@ var errorCatalog = map[string]*AppError{
 	"task removal unavailable":          NewAppError(http.StatusConflict, 2004812, "This task cannot be removed while its related conversation is locked"),
 	"task removal failed":               NewAppError(http.StatusInternalServerError, 2004813, "Unable to move the task to Trash. Please retry"),
 	"task removal stopping":             NewAppError(http.StatusConflict, 2004814, "Task execution is stopping. Please retry restoring shortly"),
+	"conversation archive changed":      NewAppError(http.StatusConflict, 2004815, "Conversation archive state has changed. Please review the archived list."),
 	"task not found":                    NewAppError(http.StatusNotFound, 2000405, "Task not found"),
 	"prompt not found":                  NewAppError(http.StatusNotFound, 2000406, "Prompt not found"),
 	"conversation not found":            NewAppError(http.StatusNotFound, 2000407, "Conversation not found"),

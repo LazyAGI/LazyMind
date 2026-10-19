@@ -1463,6 +1463,12 @@ export interface ConversationArchiveFolderRequest {
 }
 export interface ConversationArchiveRequest {
     'folder_id'?: string | null;
+    'only_if_active'?: boolean;
+}
+export interface ConversationArchiveResponse {
+    'archived_at': string;
+    'conversation_id': string;
+    'newly_archived': boolean;
 }
 export interface ConversationBatchDeleteRequest {
     'conversation_ids': Array<string>;
@@ -2122,6 +2128,9 @@ export interface ConversationTrailListResponse {
     'name'?: string;
     'next_page_token'?: string;
     'total_size'?: number;
+}
+export interface ConversationUnarchiveRequest {
+    'expected_archived_at'?: string;
 }
 export interface CoreEmptyResponse {
     'code': number;
@@ -4256,6 +4265,10 @@ export interface KnowledgeMarketTaskListOpenAPIResponse {
     'page': number;
     'page_size': number;
     'total': number;
+    /**
+     * Current user\'s unfinished knowledge market tasks across all pages and filters, including ongoing file parsing.
+     */
+    'unfinished_count': number;
 }
 export interface KnowledgeMarketTaskParseOpenAPIResponse {
     'canceled'?: number;
@@ -16211,12 +16224,13 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Unarchive a conversation
+         * @summary Unarchive a conversation. A stale expected_archived_at returns business code 2004815; an already active conversation satisfies a conditional retry.
          * @param {string} conversationId
+         * @param {ConversationUnarchiveRequest} [conversationUnarchiveRequest]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsConversationIdUnarchivePost: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreConversationsConversationIdUnarchivePost: async (conversationId: string, conversationUnarchiveRequest?: ConversationUnarchiveRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdUnarchivePost', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}:unarchive`
@@ -16232,11 +16246,13 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Content-Type'] = 'application/json';
             localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationUnarchiveRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -27035,7 +27051,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationsConversationIdArchivePost(conversationId: string, conversationArchiveRequest: ConversationArchiveRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
+        async apiCoreConversationsConversationIdArchivePost(conversationId: string, conversationArchiveRequest: ConversationArchiveRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationArchiveResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdArchivePost(conversationId, conversationArchiveRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdArchivePost']?.[localVarOperationServerIndex]?.url;
@@ -27257,13 +27273,14 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Unarchive a conversation
+         * @summary Unarchive a conversation. A stale expected_archived_at returns business code 2004815; an already active conversation satisfies a conditional retry.
          * @param {string} conversationId
+         * @param {ConversationUnarchiveRequest} [conversationUnarchiveRequest]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationsConversationIdUnarchivePost(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdUnarchivePost(conversationId, options);
+        async apiCoreConversationsConversationIdUnarchivePost(conversationId: string, conversationUnarchiveRequest?: ConversationUnarchiveRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdUnarchivePost(conversationId, conversationUnarchiveRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdUnarchivePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -31651,7 +31668,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsConversationIdArchivePost(requestParameters: DefaultApiApiCoreConversationsConversationIdArchivePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
+        apiCoreConversationsConversationIdArchivePost(requestParameters: DefaultApiApiCoreConversationsConversationIdArchivePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationArchiveResponse> {
             return localVarFp.apiCoreConversationsConversationIdArchivePost(requestParameters.conversationId, requestParameters.conversationArchiveRequest, options).then((request) => request(axios, basePath));
         },
         /**
@@ -31816,13 +31833,13 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary Unarchive a conversation
+         * @summary Unarchive a conversation. A stale expected_archived_at returns business code 2004815; an already active conversation satisfies a conditional retry.
          * @param {DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreConversationsConversationIdUnarchivePost(requestParameters: DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
-            return localVarFp.apiCoreConversationsConversationIdUnarchivePost(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreConversationsConversationIdUnarchivePost(requestParameters.conversationId, requestParameters.conversationUnarchiveRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -35031,6 +35048,8 @@ export interface DefaultApiApiCoreConversationsConversationIdToolLimitDecisionPo
  */
 export interface DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest {
     readonly conversationId: string
+
+    readonly conversationUnarchiveRequest?: ConversationUnarchiveRequest
 }
 
 /**
@@ -37507,13 +37526,13 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary Unarchive a conversation
+     * @summary Unarchive a conversation. A stale expected_archived_at returns business code 2004815; an already active conversation satisfies a conditional retry.
      * @param {DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreConversationsConversationIdUnarchivePost(requestParameters: DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdUnarchivePost(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdUnarchivePost(requestParameters.conversationId, requestParameters.conversationUnarchiveRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

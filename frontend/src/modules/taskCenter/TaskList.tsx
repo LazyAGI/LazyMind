@@ -10,7 +10,7 @@ import { TASKS_REMOVED_EVENT, type TasksRemovedDetail } from './events';
 import { listTasks } from './api';
 import type { Task } from './api';
 import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
-import { CONVERSATION_TITLE_CHANGED_EVENT, getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
+import { CHAT_CONVERSATION_LIST_REFRESH_EVENT, CONVERSATION_TITLE_CHANGED_EVENT, getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
 import ArchiveConversationModal from '@/modules/chat/components/ArchiveConversationModal';
 import { unarchiveConversation } from '@/modules/settings/recoveryApi';
@@ -76,9 +76,11 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
     };
     window.addEventListener(TASKS_REMOVED_EVENT, removed);
     window.addEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
+    window.addEventListener(CHAT_CONVERSATION_LIST_REFRESH_EVENT, renamed);
     return () => {
       ++request.current;
       window.removeEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
+      window.removeEventListener(CHAT_CONVERSATION_LIST_REFRESH_EVENT, renamed);
       window.removeEventListener(TASKS_REMOVED_EVENT, removed);
     };
   }, [active, load]);

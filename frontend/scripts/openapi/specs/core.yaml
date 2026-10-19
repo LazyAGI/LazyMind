@@ -1732,6 +1732,22 @@ components:
                 folder_id:
                     nullable: true
                     type: string
+                only_if_active:
+                    type: boolean
+            type: object
+        ConversationArchiveResponse:
+            properties:
+                archived_at:
+                    format: date-time
+                    type: string
+                conversation_id:
+                    type: string
+                newly_archived:
+                    type: boolean
+            required:
+                - conversation_id
+                - newly_archived
+                - archived_at
             type: object
         ConversationBatchDeleteRequest:
             properties:
@@ -2870,6 +2886,12 @@ components:
                 total_size:
                     format: int64
                     type: integer
+            type: object
+        ConversationUnarchiveRequest:
+            properties:
+                expected_archived_at:
+                    format: date-time
+                    type: string
             type: object
         CoreEmptyResponse:
             properties:
@@ -12005,10 +12027,14 @@ components:
                     type: integer
                 total:
                     type: integer
+                unfinished_count:
+                    description: Current user's unfinished knowledge market tasks across all pages and filters, including ongoing file parsing.
+                    type: integer
             required:
                 - page
                 - page_size
                 - total
+                - unfinished_count
             type: object
         knowledgeMarketTaskParseOpenAPIResponse:
             properties:
@@ -18949,7 +18975,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/EmptyObject'
+                                $ref: '#/components/schemas/ConversationArchiveResponse'
                     description: Conversation archived
             summary: Archive or move a conversation
     /api/core/conversations/{conversation_id}:pin:
@@ -19128,6 +19154,12 @@ paths:
                   required: true
                   schema:
                     type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConversationUnarchiveRequest'
+                required: false
             responses:
                 "200":
                     content:
@@ -19135,7 +19167,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/EmptyObject'
                     description: Conversation unarchived
-            summary: Unarchive a conversation
+            summary: Unarchive a conversation. A stale expected_archived_at returns business code 2004815; an already active conversation satisfies a conditional retry.
     /api/core/conversations/{conversation_id}:unpin:
         post:
             parameters:

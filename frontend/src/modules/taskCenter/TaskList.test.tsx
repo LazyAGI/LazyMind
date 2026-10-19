@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import TaskList from './TaskList';
 import type { Task } from './api';
 import { TASKS_REMOVED_EVENT } from './events';
+import { CHAT_CONVERSATION_LIST_REFRESH_EVENT } from '@/modules/chat/constants/chat';
 
 const mocks = vi.hoisted(() => ({ listTasks: vi.fn(), getTaskRemovalPreview: vi.fn(), removeTask: vi.fn() }));
 vi.mock('./api', () => mocks);
@@ -19,6 +20,15 @@ const task: Task = {
   id: 't', user_id: 'u', conversation_id: 'c', conversation_state: 'active', task_type: 'background_chat',
   title: 'Temporary task', status: 'failed', steps: [], created_at: '', updated_at: '',
 };
+
+it('reloads related task records when a batch archive is undone', async () => {
+  mocks.listTasks.mockResolvedValue({ items: [], total: 0 });
+  render(<TaskList active status='' page={1} onStatusChange={vi.fn()} onPageChange={vi.fn()} />);
+  await waitFor(() => expect(mocks.listTasks).toHaveBeenCalledOnce());
+  mocks.listTasks.mockResolvedValue({ items: [task], total: 1 });
+  act(() => window.dispatchEvent(new Event(CHAT_CONVERSATION_LIST_REFRESH_EVENT)));
+  await screen.findByText(task.title!, { selector: 'strong' });
+});
 
 it('requires confirmation from the list and preserves rows on cancel or failure, then refreshes after success', async () => {
   mocks.listTasks.mockResolvedValue({ items: [task], total: 1 });

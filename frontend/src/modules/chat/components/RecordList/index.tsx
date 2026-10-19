@@ -87,6 +87,7 @@ import {
 import "./index.scss";
 import { downloadStream } from "@/modules/chat/utils/download";
 import ArchiveConversationModal from "../ArchiveConversationModal";
+import { showBatchArchiveFeedback } from "../BatchArchiveFeedback";
 import ConversationTrashConfirmContent from "../ConversationTrashConfirmContent";
 import { unarchiveConversation } from "@/modules/settings/recoveryApi";
 import {
@@ -1201,19 +1202,18 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           open={batchArchiveIds !== null}
           conversationIds={batchArchiveIds || []}
           onCancel={() => setBatchArchiveIds(null)}
-          onArchived={(archivedIds, failedIds) => {
+          onArchived={(archivedIds, failedIds, batch) => {
             setBatchArchiveIds(null);
-            removeHistoryItems(archivedIds);
+            removeHistoryItems([...archivedIds, ...(batch?.skippedIds || [])]);
             setCheckedList(failedIds);
             if (!failedIds.length) setShowBatchExport(false);
-            message.open({
-              type: "success",
-              duration: 8,
-              content: <span className="archive-feedback">
-                {t("chat.batchArchiveSuccess", { count: archivedIds.length })}
-                <Button type="link" size="small" onClick={() => navigate(getRecoveryArchivePath(conversationFilters.filter === "task" ? "task" : "dialog"))}>{t("settingsPage.recovery.viewArchived")}</Button>
-              </span>,
-            });
+            if (archivedIds.length) {
+              showBatchArchiveFeedback({
+                count: archivedIds.length,
+                receipts: batch?.receipts || [],
+                onViewArchived: () => navigate(getRecoveryArchivePath(conversationFilters.filter === "task" ? "task" : "dialog")),
+              });
+            } else message.info(t("chat.batchArchiveStateChanged"));
           }}
         />
         <ConversationMembershipModal conversation={movingConversation?.conversation_id ? { conversationId: movingConversation.conversation_id, groupId: movingConversation.group_id, title: movingConversation.display_name, isTaskConv: Boolean(movingConversation.is_task_conv) } : null} onClose={() => setMovingConversation(null)} />

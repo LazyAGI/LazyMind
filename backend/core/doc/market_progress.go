@@ -121,6 +121,23 @@ func MarketParseProgress(ctx context.Context, db *gorm.DB, datasetID string, tas
 	if err != nil {
 		return MarketParseProgressInfo{State: "unknown", Total: len(taskIDs) + len(failures), Unknown: len(taskIDs) + len(failures)}
 	}
+	return MarketParseProgressFromStates(taskIDs, failures, files)
+}
+
+// MarketParseProgressFromStates aggregates an already loaded file scope. Callers
+// can batch the database read for jobs that belong to the same dataset.
+func MarketParseProgressFromStates(taskIDs []string, failures []MarketFileFailure, files []MarketTaskState) MarketParseProgressInfo {
+	wanted := make(map[string]bool, len(taskIDs))
+	for _, id := range taskIDs {
+		wanted[id] = true
+	}
+	scoped := make([]MarketTaskState, 0, len(taskIDs))
+	for _, file := range files {
+		if wanted[file.Task.ID] {
+			scoped = append(scoped, file)
+		}
+	}
+	files = scoped
 	p := MarketParseProgressInfo{Failed: len(failures), Failures: append([]MarketFileFailure{}, failures...)}
 	seen := make(map[string]bool, len(files))
 	for _, file := range files {

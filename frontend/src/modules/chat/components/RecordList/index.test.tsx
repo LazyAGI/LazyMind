@@ -14,6 +14,8 @@ import { useConversationRunningStore } from "@/modules/chat/store/conversationRu
 import { CONVERSATION_DRAG } from "../../conversationOrganizer/drag";
 vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getUserInfo: () => ({ userId: "record-owner" }) }, AUTH_USER_CHANGE_EVENT: "record-user-change" }));
 
+vi.mock("../BatchArchiveFeedback", () => ({ showBatchArchiveFeedback: (...args: unknown[]) => mocks.showBatchArchiveFeedback(...args) }));
+
 vi.mock("../ConversationTitleEditor", () => ({ default: ({ initialTitle, onClose }: { initialTitle: string; onClose: () => void }) => <input aria-label="会话名称" defaultValue={initialTitle} onKeyDown={event => { if (event.key === "Escape") onClose(); }} /> }));
 
 const drag = vi.hoisted(() => ({ end: (_event: DragEndEvent): Promise<void> | void => {} }));
@@ -40,6 +42,7 @@ const mocks = vi.hoisted(() => ({
   localizedError: vi.fn(() => "请求失败"),
   batchDelete: vi.fn(),
   archiveConversation: vi.fn(),
+  showBatchArchiveFeedback: vi.fn(),
   listArchiveFolders: vi.fn(),
 }));
 
@@ -388,8 +391,9 @@ describe("RecordList conversation pinning", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(screen.queryByText(newerConversation.display_name)).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: new RegExp(olderConversation.display_name) })).toBeChecked();
-    expect(mocks.archiveConversation.mock.calls).toEqual([["newer", null], ["older", null]]);
+    expect(mocks.archiveConversation.mock.calls).toEqual([["newer", null, true], ["older", null, true]]);
     expect(mocks.batchDelete).not.toHaveBeenCalled();
+    expect(mocks.showBatchArchiveFeedback).toHaveBeenCalledWith({ count: 1, receipts: [], onViewArchived: expect.any(Function) });
     mocks.archiveConversation.mockResolvedValue(undefined);
     mocks.listConversations.mockResolvedValue({ data: { conversations: [] } });
     fireEvent.click(screen.getByRole("button", { name: /common.actions/ }));
@@ -398,7 +402,7 @@ describe("RecordList conversation pinning", () => {
     await within(retry).findByRole("radio");
     fireEvent.click(within(retry).getByRole("button", { name: "归档" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "批量" })).toBeInTheDocument());
-    expect(mocks.archiveConversation.mock.calls).toEqual([["newer", null], ["older", null], ["older", null]]);
+    expect(mocks.archiveConversation.mock.calls).toEqual([["newer", null, true], ["older", null, true], ["older", null, true]]);
     expect(screen.queryByText(olderConversation.display_name)).not.toBeInTheDocument();
   });
 

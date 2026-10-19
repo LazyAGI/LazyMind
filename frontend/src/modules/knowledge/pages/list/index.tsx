@@ -143,6 +143,8 @@ import {
   type SourceCategory,
 } from "./knowledgeListState";
 
+import { useKnowledgeMarketTasks } from "./useKnowledgeMarketTasks";
+
 import "./index.scss";
 import "@/modules/dataSource/index.scss";
 
@@ -266,9 +268,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const officialSortRequestSeqRef = useRef(0);
   const marketRequestSeqRef = useRef(0);
   const finishedMarketJobIds = useRef(new Set<string>());
-  const activeMarketTaskCount = Object.keys(trackedMarketJobs).length;
   const availableUpdateCount = officialItems.filter((item) => item.updateAvailable).length;
   const marketTaskRefreshKey = `${Object.keys(trackedMarketJobs).sort().join(",")}:${marketTaskRevision}`;
+  const marketTasks = useKnowledgeMarketTasks(marketTaskModalOpen, marketTaskRefreshKey);
+  const activeMarketTaskCount = marketTasks.data?.unfinished_count;
   const activeMarketJobTypes = useMemo(() => {
     const types: Record<string, "install" | "update"> = {};
     Object.values(trackedMarketJobs).forEach((job) => {
@@ -904,7 +907,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         });
         taskNotification.open({
           ...marketTaskNoticeOptions,
-          message: t("knowledge.marketUpdateStarted"),
+          message: t("knowledge.marketTaskAdded"),
           description: t("knowledge.marketUpdateStartedDescription", { name: item.name }),
         });
         void loadKnowledgeMarket();
@@ -1106,7 +1109,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       });
       taskNotification.open({
         ...marketTaskNoticeOptions,
-        message: t("knowledge.marketUpdateAllStarted"),
+        message: t("knowledge.marketTaskAdded"),
         description: t("knowledge.marketUpdateAllStartedDescription", { count: availableUpdateCount }),
       });
     } catch {
@@ -1693,7 +1696,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     <Button
       className="knowledge-background-tasks-button"
       icon={<HistoryOutlined />}
-      aria-label={t("knowledge.backgroundTasksCount", {
+      aria-label={activeMarketTaskCount === undefined ? t("knowledge.backgroundTasks") : t("knowledge.backgroundTasksCount", {
         count: activeMarketTaskCount,
       })}
       aria-haspopup="dialog"
@@ -1701,7 +1704,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       onClick={() => setMarketTaskModalOpen(true)}
     >
       {t("knowledge.backgroundTasks")}
-      {activeMarketTaskCount > 0 ? (
+      {activeMarketTaskCount !== undefined && activeMarketTaskCount > 0 ? (
         <Badge
           className="knowledge-task-count"
           count={activeMarketTaskCount}
@@ -2024,9 +2027,20 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       <SyncKnowledgeBaseCreationFlow vm={syncCreateVm} hideProviderModal />
       <KnowledgeMarketTaskModal
         open={marketTaskModalOpen}
-        refreshKey={marketTaskRefreshKey}
+        query={marketTasks}
         onClose={() => setMarketTaskModalOpen(false)}
-        onTasksChanged={() => { finishedMarketJobIds.current.clear(); setMarketTaskRevision((value) => value + 1); void loadKnowledgeMarket(); }}
+        onTasksChanged={(retriedTask) => {
+          if (retriedTask) {
+            taskNotification.open({
+              ...marketTaskNoticeOptions,
+              message: t("knowledge.marketTaskAdded"),
+              description: t("knowledge.marketRetryStartedDescription", { name: retriedTask.name }),
+            });
+          }
+          finishedMarketJobIds.current.clear();
+          setMarketTaskRevision((value) => value + 1);
+          void loadKnowledgeMarket();
+        }}
       />
     </div>
   );

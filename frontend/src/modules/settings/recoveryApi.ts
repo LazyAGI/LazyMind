@@ -2,6 +2,7 @@ import {
   Configuration as CoreConfiguration,
   DefaultApiFactory,
   type ConversationArchiveFolder,
+  type ConversationArchiveResponse,
   type ConversationRecoveryItem,
   type ConversationRecoveryListResponse,
   type WorkflowTrashItem,
@@ -119,15 +120,21 @@ export async function listTrashedConversations(options: {
   return toPage(response.data);
 }
 
-export async function archiveConversation(conversationId: string, folderId?: string | null): Promise<void> {
-  await coreApi.apiCoreConversationsConversationIdArchivePost({
+export type ConversationArchiveReceipt = Pick<ConversationArchiveResponse, "conversation_id" | "archived_at">;
+
+export async function archiveConversation(conversationId: string, folderId?: string | null, onlyIfActive = false): Promise<ConversationArchiveResponse> {
+  const response = await coreApi.apiCoreConversationsConversationIdArchivePost({
     conversationId,
-    conversationArchiveRequest: { folder_id: folderId || null },
+    conversationArchiveRequest: { folder_id: folderId || null, ...(onlyIfActive ? { only_if_active: true } : {}) },
   }, { silentError: true } as never);
+  return response.data;
 }
 
-export async function unarchiveConversation(conversationId: string): Promise<void> {
-  await coreApi.apiCoreConversationsConversationIdUnarchivePost({ conversationId });
+export async function unarchiveConversation(conversationId: string, expectedArchivedAt?: string): Promise<void> {
+  await coreApi.apiCoreConversationsConversationIdUnarchivePost({
+    conversationId,
+    ...(expectedArchivedAt ? { conversationUnarchiveRequest: { expected_archived_at: expectedArchivedAt } } : {}),
+  }, expectedArchivedAt ? { silentError: true } as never : undefined);
 }
 
 export async function restoreConversation(conversationId: string): Promise<void> {

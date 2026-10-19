@@ -597,7 +597,10 @@ func manualSchemas() map[string]any {
 		"ConversationBatchDeleteRequest":   objReq([]string{"conversation_ids"}, prop("conversation_ids", array(strSchema()))),
 		"ConversationBatchDeleteResponse":  obj(prop("deleted_count", intSchema()), prop("deleted_ids", array(strSchema()))),
 		"ConversationArchiveFolderRequest": objReq([]string{"name"}, prop("name", strSchema())),
-		"ConversationArchiveRequest":       obj(prop("folder_id", nullableSchema(strSchema()))),
+		"ConversationArchiveRequest":       obj(prop("folder_id", nullableSchema(strSchema())), prop("only_if_active", boolSchema())),
+		"ConversationArchiveResponse": objReq([]string{"conversation_id", "newly_archived", "archived_at"},
+			prop("conversation_id", strSchema()), prop("newly_archived", boolSchema()), prop("archived_at", dateTimeSchema())),
+		"ConversationUnarchiveRequest": obj(prop("expected_archived_at", dateTimeSchema())),
 		"ConversationArchiveFolder": objReq(
 			[]string{"id", "name", "dialog_count", "task_count", "total_count", "created_at", "updated_at"},
 			prop("id", strSchema()), prop("name", strSchema()),
@@ -1057,10 +1060,10 @@ func manualPaths() map[string]any {
 		},
 		"/conversations/{conversation_id}:archive": map[string]any{"post": op(
 			"Archive or move a conversation", queryParams(param("path", "conversation_id", true, strSchema())), jsonBody(refSchema("ConversationArchiveRequest"), true),
-			response(200, "Conversation archived", refSchema("EmptyObject")),
+			response(200, "Conversation archived", refSchema("ConversationArchiveResponse")),
 		)},
 		"/conversations/{conversation_id}:unarchive": map[string]any{"post": op(
-			"Unarchive a conversation", queryParams(param("path", "conversation_id", true, strSchema())), nil, response(200, "Conversation unarchived", refSchema("EmptyObject")),
+			"Unarchive a conversation. A stale expected_archived_at returns business code 2004815; an already active conversation satisfies a conditional retry.", queryParams(param("path", "conversation_id", true, strSchema())), jsonBody(refSchema("ConversationUnarchiveRequest"), false), response(200, "Conversation unarchived", refSchema("EmptyObject")),
 		)},
 		"/conversations/{conversation_id}:pin": map[string]any{"post": op(
 			"Pin a conversation", queryParams(param("path", "conversation_id", true, strSchema())), nil, response(200, "Conversation pinned", refSchema("ConversationPinResponse")),

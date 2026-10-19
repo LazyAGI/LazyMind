@@ -1,0 +1,14 @@
+.batch-archive-feedback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  max-width: min(600px, calc(100vw - 64px));
+  text-align: start;
+  overflow-wrap: anywhere;
+
+  .batch-archive-feedback-success { color: var(--ant-color-success, #52c41a); }
+  .batch-archive-feedback-warning { color: var(--ant-color-warning, #faad14); }
+  .batch-archive-feedback-detail { display: block; }
+}
