@@ -26,3 +26,18 @@ func TestAcknowledgeOnlyAfterEachChildResult(t *testing.T) {
 		t.Fatal("completed parent remains unread")
 	}
 }
+
+func TestChildAcknowledgementDoesNotWaitForParentLeaseFinalization(t *testing.T) {
+	db := testDB(t)
+	d := create(t, db, "parent-lease")
+	parent, _ := batch(t, db, d, Input{})
+	must(t, db.Model(&parent).Update("status", "succeeded").Error)
+	child := orm.DocumentDirectoryBatch{ID: "visible-child", UserID: "u", OwnerKey: "u", TriggerID: "visible-child", ParentID: parent.ID, Status: "succeeded", InputJSON: encoded(Input{})}
+	must(t, db.Create(&child).Error)
+	command(t, db, Command{Operation: "acknowledge", BatchID: child.ID})
+	must(t, db.Where("id=?", parent.ID).Take(&parent).Error)
+	must(t, db.Where("id=?", child.ID).Take(&child).Error)
+	if !child.Acknowledged || !parent.Acknowledged {
+		t.Fatal("parent lease finalization prevented result acknowledgement")
+	}
+}

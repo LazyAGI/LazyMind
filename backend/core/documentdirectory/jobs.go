@@ -720,11 +720,15 @@ func applyOrganization(ctx context.Context, db *gorm.DB, j asyncjob.Job, b *orm.
 		}
 		if len(p.Assignments) == 0 && !d.Ready && !input.Chunked && !input.Reorganize {
 			b.Status = "succeeded"
+			b.Acknowledged = true
 			b.ResultJSON = batchResult(b.ResultJSON, map[string]any{"added": 0, "usage": p.Usage})
 			if err := tx.Save(b).Error; err != nil {
 				return err
 			}
-			return tx.Delete(&d).Error
+			if err := tx.Delete(&d).Error; err != nil {
+				return err
+			}
+			return acknowledgeParents(tx, b.UserID, b.ParentID)
 		}
 		// Only create groups actually used, including their ancestors.
 		proposed := map[string]orm.DocumentDirectoryGroup{}

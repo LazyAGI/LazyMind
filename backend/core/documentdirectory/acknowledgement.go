@@ -31,13 +31,31 @@ func acknowledgeBatch(tx *gorm.DB, uid, id string) error {
 	if err := tx.Model(&b).Update("acknowledged", true).Error; err != nil {
 		return err
 	}
-	if b.ParentID != "" {
-		if err := tx.Model(&orm.DocumentDirectoryBatch{}).Where("parent_id=? AND user_id=? AND acknowledged=?", b.ParentID, uid, false).Count(&unread).Error; err != nil {
-			return err
-		}
-		if unread == 0 {
-			return acknowledgeBatch(tx, uid, b.ParentID)
-		}
+	return acknowledgeParents(tx, uid, b.ParentID)
+}
+
+// Aggregating a completed result must not fail because the parent's runner
+// has not yet finalized its lease. The batch status is committed with routing.
+func acknowledgeParents(tx *gorm.DB, uid, id string) error {
+	if id == "" {
+		return nil
 	}
-	return nil
+	var b orm.DocumentDirectoryBatch
+	if err := tx.Where("id=? AND user_id=?", id, uid).Take(&b).Error; err != nil {
+		return err
+	}
+	if b.Status != "succeeded" && b.Status != "failed" && b.Status != "canceled" {
+		return nil
+	}
+	var unread int64
+	if err := tx.Model(&orm.DocumentDirectoryBatch{}).Where("parent_id=? AND user_id=? AND acknowledged=?", id, uid, false).Count(&unread).Error; err != nil {
+		return err
+	}
+	if unread != 0 {
+		return nil
+	}
+	if err := tx.Model(&b).Update("acknowledged", true).Error; err != nil {
+		return err
+	}
+	return acknowledgeParents(tx, uid, b.ParentID)
 }

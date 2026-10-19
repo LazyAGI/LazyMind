@@ -93,7 +93,10 @@ export default function DirectoryPage() {
       if (result.evicted) message.info(`${t('directories.evicted')}: ${result.evicted}`);
       if (command.operation === 'delete' && directoryId) navigate('/document-directories');
       else if (command.operation === 'create' && result.directory) navigate(`/document-directories/${result.directory.id}`);
-      else await refresh();
+      else {
+        await refresh();
+        if (activeOwner.current !== operationOwner) throw new Error('Directory view changed');
+      }
       return result;
     } finally { if (activeOwner.current === operationOwner) setSaving(false); }
   };

@@ -1,6 +1,7 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { ConfigProvider } from 'antd';
 import DirectoryPage from './DirectoryPage';
 import * as api from './api';
 const t = (key: string) => key;
@@ -11,7 +12,7 @@ vi.mock('./LocalFileReader', () => ({ default: () => null }));
 const directory = { id: 'A', name: 'Directory A', intent: 'Intent A', organization: 'Type', pinned: false, auto_add: true, version: 2, last_used_at: '2026-10-19T00:00:00Z', coverage: [] };
 const viewData = (id = 'A') => ({ directory: id === 'A' ? directory : { ...directory, id: 'B', name: 'Directory B', intent: 'Intent B', version: 99 }, entries: [], groups: [], organizing: false, group_counts: {}, total: 0 });
 function Nav() { const navigate = useNavigate(); const location = useLocation(); return <><button onClick={() => navigate('/document-directories/B')}>Go B</button><output data-testid="route">{location.pathname}</output></>; }
-function view() { return render(<MemoryRouter initialEntries={['/document-directories/A']}><Nav /><Routes><Route path="/document-directories/:directoryId" element={<DirectoryPage />} /></Routes></MemoryRouter>); }
+function view() { return render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter initialEntries={['/document-directories/A']}><Nav /><Routes><Route path="/document-directories/:directoryId" element={<DirectoryPage />} /></Routes></MemoryRouter></ConfigProvider>); }
 beforeEach(() => {
  vi.clearAllMocks();
  vi.mocked(api.listDirectories).mockResolvedValue([directory]);
@@ -52,3 +53,33 @@ it('acknowledges a successful result after opening its directory', async () => {
  const commands=vi.mocked(api.directoryAction).mock.calls.map(([c])=>c.operation);
  expect(commands).toContain('acknowledge');
 });
+
+
+it('does not close B editor after A mutation refresh completes', async () => {
+ let release!: (value: ReturnType<typeof viewData>) => void;
+ const pending = new Promise<ReturnType<typeof viewData>>(resolve => { release = resolve; });
+ view();
+ await screen.findByRole('heading', { name: 'Directory A' });
+ fireEvent.click(screen.getByRole('button', { name: 'directories.more' }));
+ fireEvent.click(await screen.findByRole('menuitem', { name: 'directories.edit' }));
+ const dialog = await screen.findByRole('dialog');
+ let updating = false;
+ let refreshStarted = false;
+ vi.mocked(api.directoryAction).mockImplementation(async command => { if (command.operation === 'update') updating = true; return {}; });
+ vi.mocked(api.getDirectory).mockImplementation(id => {
+   if (id === 'A' && updating) { refreshStarted = true; return pending; }
+   return Promise.resolve(viewData(id));
+ });
+ fireEvent.click(within(dialog).getByRole('button', { name: 'OK' }));
+ await waitFor(() => expect(refreshStarted).toBe(true), { timeout: 10000 });
+ fireEvent.click(screen.getByRole('button', { name: 'Go B' }));
+ await screen.findByRole('heading', { name: 'Directory B' });
+ fireEvent.click(screen.getByRole('button', { name: 'directories.more' }));
+ fireEvent.click(await screen.findByRole('menuitem', { name: 'directories.edit' }));
+ await screen.findByDisplayValue('Directory B');
+ await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible(), { timeout: 10000 });
+ await act(async () => { release(viewData('A')); await pending; });
+ await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+ expect(screen.getByRole('dialog')).toBeVisible();
+ expect(screen.getByDisplayValue('Directory B')).toBeVisible();
+}, 20000);

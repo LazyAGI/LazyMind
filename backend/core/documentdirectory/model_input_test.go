@@ -269,3 +269,46 @@ func TestRoutingAlsoBoundsInputAndCoalescesChunkTargets(t *testing.T) {
 		t.Fatal("routing dropped resources")
 	}
 }
+
+func TestLegacyFolderRetryKeepsEntryOffsetOrder(t *testing.T) {
+	db := testDB(t)
+	d := create(t, db, "legacy resume")
+	input := Input{Manual: true, FolderInventoryID: "legacy-order"}
+	b, j := batch(t, db, d, input)
+	must(t, db.Create(&orm.DocumentFolderInventory{ID: input.FolderInventoryID, UserID: "u", ConversationID: "conv", Status: "complete", DirectoryID: d.ID, BatchID: b.ID, SourceJSON: encoded(map[string]string{"provider": "local", "namespace": "host-a"}), StateJSON: encoded(map[string]any{})}).Error)
+	for i := 0; i < 61; i++ {
+		e := entryFromCandidate(d.ID, sample(fmt.Sprintf("/ordered/%03d", i)), time.Now().UTC())
+		e.ID = fmt.Sprintf("entry-%03d", i)
+		e.Excluded = i == 35
+		must(t, db.Create(&e).Error)
+	}
+	b.ResultJSON = encoded(map[string]any{"processed": 30, "collection_state": "complete"})
+	must(t, db.Save(&b).Error)
+	seen := map[string]bool{}
+	must(t, organizeFolder(context.Background(), db, j, &b, input, func(_ string, data any) (Proposal, error) {
+		for _, c := range data.(map[string]any)["resources"].(map[string]Candidate) {
+			seen[c.ResourceID] = true
+		}
+		return Proposal{Assignments: []Assignment{}}, nil
+	}))
+	for i := 0; i < 61; i++ {
+		want := i >= 30 && i != 35
+		if seen[fmt.Sprintf("/ordered/%03d", i)] != want {
+			t.Fatalf("legacy offset skipped or replayed %d", i)
+		}
+	}
+}
+
+func TestEmptyReservedDirectoryHasNoUnreadResult(t *testing.T) {
+	db := testDB(t)
+	d := create(t, db, "empty reservation")
+	must(t, db.Model(&d).Update("ready", false).Error)
+	c := sample("/irrelevant")
+	input := Input{Observations: []orm.DocumentObservation{{PayloadJSON: encoded(Observation{Candidates: []Candidate{c}})}}}
+	b, j := batch(t, db, d, input)
+	must(t, organizeChunks(context.Background(), db, j, &b, input, func(string, any) (Proposal, error) { return Proposal{Assignments: []Assignment{}}, nil }))
+	must(t, db.Where("id=?", b.ID).Take(&b).Error)
+	if !b.Acknowledged {
+		t.Fatal("deleted empty result remains unread")
+	}
+}

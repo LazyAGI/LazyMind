@@ -107,7 +107,7 @@ func organizeChunks(ctx context.Context, db *gorm.DB, j asyncjob.Job, b *orm.Doc
 		if err != nil {
 			return err
 		}
-		if err = db.Where("directory_id=? AND excluded=?", b.DirectoryID, false).Order("group_id,id").Find(&source.Entries).Error; err != nil {
+		if err = db.Where("directory_id=?", b.DirectoryID).Order("id").Find(&source.Entries).Error; err != nil {
 			return err
 		}
 		if err = db.Where("user_id=? AND batch_id IN ?", b.UserID, []string{b.ID, v.BatchID}).Order("created_at,id").Find(&source.Observations).Error; err != nil {
@@ -141,12 +141,19 @@ func organizeChunks(ctx context.Context, db *gorm.DB, j asyncjob.Job, b *orm.Doc
 		entryIndex[e.ResourceKey] = e
 	}
 	if input.ResourceKeys == nil {
-		resources := candidates(source)
-		input.ResourceKeys = make([]string, 0, len(resources))
-		for k := range resources {
-			input.ResourceKeys = append(input.ResourceKeys, k)
+		input.ResourceKeys = []string{}
+		if input.FolderInventoryID != "" {
+			// Legacy checkpoints count entry slots in ID order, including excluded
+			// entries. Preserve that order when freezing a pre-upgrade retry.
+			for _, e := range source.Entries {
+				input.ResourceKeys = append(input.ResourceKeys, e.ResourceKey)
+			}
+		} else {
+			for k := range candidates(source) {
+				input.ResourceKeys = append(input.ResourceKeys, k)
+			}
+			sort.Strings(input.ResourceKeys)
 		}
-		sort.Strings(input.ResourceKeys)
 		if err := mutate(ctx, db, b.UserID, func(tx *gorm.DB) error {
 			if err := ownsJob(tx, j); err != nil {
 				return err
@@ -242,6 +249,7 @@ func finishOrganization(ctx context.Context, db *gorm.DB, j asyncjob.Job, b *orm
 				if err = tx.Delete(&d).Error; err != nil {
 					return err
 				}
+				b.Acknowledged = true
 			} else {
 				evicted, err = makeRoom(tx, b.UserID, d.ID, input.SourceDirectoryID)
 				if err != nil {
@@ -255,7 +263,13 @@ func finishOrganization(ctx context.Context, db *gorm.DB, j asyncjob.Job, b *orm
 		b.Status = "succeeded"
 		b.UpdatedAt = time.Now().UTC()
 		b.ResultJSON = folderResult(b.ResultJSON, map[string]any{"classification_state": "complete", "grouped": grouped, "unclassified": unclassified, "directory_name": d.Name, "evicted": evicted})
-		return tx.Save(b).Error
+		if err = tx.Save(b).Error; err != nil {
+			return err
+		}
+		if b.Acknowledged {
+			return acknowledgeParents(tx, b.UserID, b.ParentID)
+		}
+		return nil
 	})
 }
 
