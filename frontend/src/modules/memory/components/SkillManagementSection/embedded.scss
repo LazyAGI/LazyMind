@@ -52,7 +52,7 @@
     flex-direction: column;
     min-width: 0;
     min-height: 0;
-    overflow: auto;
+    overflow: hidden;
   }
 
   .memory-skill-toolbar {
@@ -131,7 +131,7 @@
       background: transparent;
       color: #667085;
       font: inherit;
-      font-size: 12px;
+      font-size: 13px;
       white-space: nowrap;
       cursor: pointer;
       &:hover { color: #1768db; }
@@ -179,25 +179,45 @@
     font-size: 12px;
     &.is-priority { background: #edf3ff; color: #2563c7; }
     &.is-on_demand,
-    &.is-auto { background: #eff7f4; color: #287864; }
+    &.is-auto { background: #c6ebd8; color: #0d6b4c; }
     &.is-manual,
     &.is-disabled { background: #f3f4f7; color: #606b7c; }
     &:hover:not(:disabled) { border-color: currentColor; }
     &:disabled { opacity: .55; }
     .anticon { font-size: 10px; opacity: .7; }
   }
-  .memory-list-content { min-height: 0; overflow: auto; }
+  .memory-list-content { min-height: 0; overflow: hidden; }
   .memory-skill-installed-table {
     .ant-table { border: 0; border-radius: 0; }
-    .ant-table-thead > tr > th { background: #fbfcfe; color: #667085; font-size: 11px; font-weight: 500; }
+    .ant-table-thead > tr > th { background: #fbfcfe; color: #667085; font-size: 12px; font-weight: 500; }
     .ant-table-tbody > tr > td { padding-top: 10px; padding-bottom: 10px; border-bottom-color: #eff2f6; font-size: 12px; }
     .ant-table-thead > tr > th:first-child,
     .ant-table-tbody > tr > td:first-child { padding-left: 24px; }
-    .ant-pagination { padding: 0 24px; }
+    .ant-pagination {
+      padding: 0 24px;
+      font-size: 11px;
+
+      .ant-pagination-total-text,
+      .ant-pagination-item,
+      .ant-pagination-item-link,
+      .ant-pagination-options,
+      .ant-select-selection-item,
+      .ant-pagination-options-quick-jumper {
+        font-size: 11px;
+      }
+    }
   }
   .memory-skill-market-pagination {
     justify-content: flex-end;
     padding: 8px 20px 8px;
+    font-size: 11px;
+
+    .ant-pagination,
+    .ant-pagination-total-text,
+    .ant-pagination-item,
+    .ant-select-selection-item {
+      font-size: 11px;
+    }
   }
   .memory-table-main-with-icon { align-items: center; gap: 10px; }
   .memory-table-main-icon {
@@ -215,6 +235,7 @@
   .memory-skill-source {
     display: flex;
     flex-direction: column;
+    align-items: flex-start;
     gap: 4px;
     color: #59657a;
     font-size: 12px;

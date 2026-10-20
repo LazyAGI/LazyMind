@@ -9,6 +9,10 @@ import {
   message,
 } from "antd";
 import SkillCallModeControl from "./components/SkillManagementSection/SkillCallModeControl";
+import {
+  OriginMark,
+  resolveSkillOriginKind,
+} from "./components/SkillManagementSection/OriginMark";
 import type { ColumnsType } from "antd/es/table";
 import {
   AppstoreOutlined,
@@ -4506,7 +4510,19 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       width: 110,
       render: (value: string, record) => (
         <div className="memory-skill-source">
-          <span>{record.originBuiltinSkillUid ? t("admin.memorySkillOriginBuiltin") : record.category === "external" || record.sourceRefType === "url" || record.sourceRefType === "upload" ? t("admin.memorySkillOriginExternal") : record.category === "internal" ? t("admin.memorySkillOriginInternal") : t("admin.memorySkillOriginUnknown")}</span>
+          <OriginMark kind={resolveSkillOriginKind(record)}>
+            {record.originBuiltinSkillUid
+              ? t("admin.memorySkillOriginBuiltin")
+              : record.cloudResourceId
+                ? t("admin.memoryResourceCloud")
+                : record.category === "external" ||
+                    record.sourceRefType === "url" ||
+                    record.sourceRefType === "upload"
+                  ? t("admin.memorySkillOriginExternal")
+                  : record.category === "internal"
+                    ? t("admin.memorySkillOriginInternal")
+                    : t("admin.memorySkillOriginUnknown")}
+          </OriginMark>
           {record.field || (value && !["internal", "external"].includes(value)) ? <small>{record.field || value}</small> : null}
         </div>
       ),

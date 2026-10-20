@@ -6259,6 +6259,8 @@ const zhCN = {
     memoryWorkflowFilterAll: "全部",
     memoryWorkflowFilterBuiltin: "内置",
     memoryWorkflowFilterCustom: "技能转换",
+    memoryWorkflowFilterAi: "AI生成",
+    memoryWorkflowFilterBlank: "自定义",
     memoryWorkflowEmptyDesc: "还没有工作流，点击「新建工作流」开始创建",
     memoryWorkflowEmptyNoResult: "暂无工作流",
     memorySkillMessageCenterButton: "技能消息中心（{{count}}）",

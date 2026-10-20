@@ -33,7 +33,7 @@ describe("Desktop 我的工作流 combined catalog", () => {
     mocks.session.mockResolvedValue({ configured: true, reachability: "reachable", state, account_id: "cloud-a" });
     mount();
     expect(await screen.findByText("local-workflow-1", { exact: true })).toBeVisible();
-    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    expect(screen.getAllByRole("tab")).toHaveLength(5);
     expect(screen.getByRole("button", { name: t("admin.memoryWorkflowSearchPlaceholder") })).toBeVisible();
     expect(screen.getByRole("tab", { name: t("admin.memoryWorkflowFilterBuiltin") })).toBeEnabled();
     expect(screen.getByText(t("admin.memoryWorkflowFilterBuiltin"), { exact: true })).toBeVisible();

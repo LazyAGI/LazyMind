@@ -2,6 +2,7 @@ import { getLocalizedErrorMessage } from "@/components/request";
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Alert, Button, Empty, Popconfirm, Select, Spin, Table, Tag, Tooltip, message } from 'antd';
 import ExpandableTitleSearch from './ExpandableTitleSearch';
+import { OriginMark } from './OriginMark';
 import { ApartmentOutlined, CloudDownloadOutlined, CopyOutlined, DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { SelectProps } from 'antd';
@@ -50,7 +51,26 @@ type WorkflowRow =
   | ({ _type: 'published'; id: string } & UserWorkflowSetting)
   | ({ _type: 'cloud'; id: string; name: string } & CloudResourceItem);
 
-type TypeFilter = 'all' | 'builtin' | 'draft';
+type TypeFilter = 'all' | 'builtin' | 'skill' | 'ai' | 'custom';
+
+function matchesWorkflowTypeFilter(row: WorkflowRow, filter: TypeFilter): boolean {
+  if (filter === 'all') {
+    return true;
+  }
+  if (filter === 'builtin') {
+    return row._type === 'builtin';
+  }
+  if (row._type === 'builtin' || row._type === 'cloud') {
+    return false;
+  }
+  if (filter === 'skill') {
+    return row.source_type === 'skill';
+  }
+  if (filter === 'ai') {
+    return row.source_type === 'ai';
+  }
+  return row.source_type !== 'skill' && row.source_type !== 'ai';
+}
 type CallModeOption = { value: WorkflowCallMode; label: string; title: string };
 
 const defaultPageSizeOptions = [20, 50, 100];
@@ -222,8 +242,7 @@ export default function WorkflowInstalledView({
 
   const q = query.trim().toLowerCase();
   const filteredRows = allRows.filter((row) => {
-    if (typeFilter === 'builtin' && row._type !== 'builtin') return false;
-    if (typeFilter === 'draft' && row._type === 'builtin') return false;
+    if (!matchesWorkflowTypeFilter(row, typeFilter)) return false;
     if (q) {
       const name = row._type === 'builtin' ? row.name : row.name;
       const id = rowWorkflowId(row);
@@ -270,9 +289,9 @@ export default function WorkflowInstalledView({
       key: 'type',
       width: 110,
       render: (_: unknown, row: WorkflowRow) => {
-        if (row._type === 'builtin') return <Tag color="blue">{t('admin.memoryWorkflowTypeBuiltin')}</Tag>;
-        if (row._type === 'cloud') return <Tag color="blue">{t('admin.memoryResourceCloud')}</Tag>;
-        if (row._type === 'published') return <Tag>{t('admin.memoryResourceLocal')}</Tag>;
+        if (row._type === 'builtin') return <OriginMark kind="builtin">{t('admin.memoryWorkflowTypeBuiltin')}</OriginMark>;
+        if (row._type === 'cloud') return <OriginMark kind="cloud">{t('admin.memoryResourceCloud')}</OriginMark>;
+        if (row._type === 'published') return <OriginMark kind="local">{t('admin.memoryResourceLocal')}</OriginMark>;
         if (row.source_type === 'skill') {
           const skillLabel = row.source_skill_name || row.source_skill_id || t('admin.memoryWorkflowTypeSkillUnknown');
           const skillId = row.source_skill_id;
@@ -292,12 +311,12 @@ export default function WorkflowInstalledView({
           ) : t('admin.memoryWorkflowTypeSkillTooltipNoId', { name: skillLabel });
           return (
             <Tooltip title={tooltipContent}>
-              <Tag color="purple" style={{ cursor: 'default' }}>{t('admin.memoryWorkflowTypeSkill')}</Tag>
+              <OriginMark kind="skill">{t('admin.memoryWorkflowTypeSkill')}</OriginMark>
             </Tooltip>
           );
         }
-        if (row.source_type === 'ai') return <Tag color="blue">{t('admin.memoryWorkflowTypeAi')}</Tag>;
-        return <Tag>{t('admin.memoryWorkflowTypeCustom')}</Tag>;
+        if (row.source_type === 'ai') return <OriginMark kind="ai">{t('admin.memoryWorkflowTypeAi')}</OriginMark>;
+        return <OriginMark kind="custom">{t('admin.memoryWorkflowTypeCustom')}</OriginMark>;
       },
     },
     {
@@ -472,7 +491,9 @@ export default function WorkflowInstalledView({
           {([
             ['all', 'admin.memoryWorkflowFilterAll'],
             ['builtin', 'admin.memoryWorkflowFilterBuiltin'],
-            ['draft', 'admin.memoryWorkflowFilterCustom'],
+            ['skill', 'admin.memoryWorkflowFilterCustom'],
+            ['ai', 'admin.memoryWorkflowFilterAi'],
+            ['custom', 'admin.memoryWorkflowFilterBlank'],
           ] as const).map(([value, labelKey]) => (
             <button
               type="button"

@@ -6466,6 +6466,8 @@ const enUS = {
     memoryWorkflowFilterAll: "All",
     memoryWorkflowFilterBuiltin: "Built-in",
     memoryWorkflowFilterCustom: "Skill conversion",
+    memoryWorkflowFilterAi: "AI generated",
+    memoryWorkflowFilterBlank: "Custom",
     memoryWorkflowEmptyDesc: "No workflows yet. Click \"New Workflow\" to get started.",
     memoryWorkflowEmptyNoResult: "No workflows",
     memorySkillMessageCenterButton: "Skill Message Center ({{count}})",

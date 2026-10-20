@@ -596,10 +596,10 @@
 
   &.is-auto,
   &.is-on_demand {
-    color: #287864;
+    color: #0d6b4c;
 
     .ant-select-selector {
-      background: #eff7f4;
+      background: #c6ebd8;
     }
   }
 
@@ -887,33 +887,58 @@
   -webkit-line-clamp: 2;
 }
 
+.memory-origin-mark,
 .memory-skill-badge {
   display: inline-flex;
   align-items: center;
   height: 22px;
   padding: 0 8px;
+  border: 0;
   border-radius: 6px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;
 }
 
-.memory-skill-badge-source {
-  &.is-builtin {
-    background: #eef4ff;
-    color: #175cd3;
-  }
+.memory-origin-mark.is-builtin,
+.memory-skill-badge-source.is-builtin {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
 
-  &.is-admin {
-    background: #fff7ed;
-    color: #c2410c;
-  }
+.memory-origin-mark.is-internal,
+.memory-skill-badge-source.is-personal {
+  background: #c8f5e4;
+  color: #0b7a5a;
+}
 
-  &.is-personal {
-    background: #f2f4f7;
-    color: #344054;
-  }
+.memory-origin-mark.is-external,
+.memory-skill-badge-source.is-admin {
+  background: #e8eaef;
+  color: #5d6776;
+}
+
+.memory-origin-mark.is-skill {
+  background: #ead4ff;
+  color: #7c1fbf;
+}
+
+.memory-origin-mark.is-cloud {
+  background: #c7efff;
+  color: #0369a1;
+}
+
+.memory-origin-mark.is-ai {
+  background: #cfe0ff;
+  color: #1d4ed8;
+}
+
+.memory-origin-mark.is-local,
+.memory-origin-mark.is-custom,
+.memory-origin-mark.is-unknown {
+  background: #e2e6ee;
+  color: #3f4b5b;
 }
 
 .memory-skill-tile-desc {
@@ -946,20 +971,20 @@
 }
 
 .memory-skill-badge-installed {
-  background: #e8f0ea;
-  color: #5f7a66;
+  background: #f3f4f7;
+  color: #667085;
 }
 
 .memory-skill-installed-action.ant-btn {
-  color: #5f7a66;
-  background: #e8f0ea;
-  border-color: #c9d6cc;
+  color: #667085;
+  background: #f3f4f7;
+  border-color: #e5e7eb;
 
   &:disabled,
   &.ant-btn-disabled {
-    color: #5f7a66;
-    background: #e8f0ea;
-    border-color: #c9d6cc;
+    color: #667085;
+    background: #f3f4f7;
+    border-color: #e5e7eb;
     opacity: 1;
   }
 }

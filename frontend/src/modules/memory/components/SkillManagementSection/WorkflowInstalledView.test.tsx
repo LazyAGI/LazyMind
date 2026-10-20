@@ -47,6 +47,8 @@ const labels: Record<string, string> = {
   'admin.memoryWorkflowFilterAll': '全部',
   'admin.memoryWorkflowFilterBuiltin': '内置',
   'admin.memoryWorkflowFilterCustom': '技能转换',
+  'admin.memoryWorkflowFilterAi': 'AI生成',
+  'admin.memoryWorkflowFilterBlank': '自定义',
   'admin.memoryWorkflowEmptyNoResult': '没有工作流',
 };
 
@@ -117,12 +119,37 @@ describe('WorkflowInstalledView call mode', () => {
   it('keeps only type filters and the deployment workflow list', async () => {
     renderView();
     expect(await screen.findByText('AI 图片生成', { exact: true })).toBeVisible();
-    expect(screen.getAllByRole('tab')).toHaveLength(3);
+    expect(screen.getAllByRole('tab')).toHaveLength(5);
+    expect(screen.getByRole('tab', { name: 'AI生成' })).toBeVisible();
+    expect(screen.getByRole('tab', { name: '自定义' })).toBeVisible();
     expect(screen.getByRole('button', { name: '搜索工作流名称...' })).toBeVisible();
     fireEvent.click(screen.getByRole('tab', { name: '技能转换' }));
     expect(screen.queryByText('AI 图片生成', { exact: true })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '内置' }));
     expect(screen.getByText('AI 图片生成', { exact: true })).toBeVisible();
+  });
+
+  it('filters drafts by skill conversion, AI generation, and custom sources', async () => {
+    workflowApiMocks.listWorkflowDrafts.mockResolvedValue({
+      records: [
+        { id: 'skill-draft', name: 'from-skill', source_type: 'skill', generate_status: 'done', updated_at: '2026-09-07T00:00:00Z' },
+        { id: 'ai-draft', name: 'from-ai', source_type: 'ai', generate_status: 'done', updated_at: '2026-09-07T00:00:00Z' },
+        { id: 'blank-draft', name: 'from-blank', source_type: 'blank', generate_status: 'done', updated_at: '2026-09-07T00:00:00Z' },
+      ],
+      total: 3,
+    });
+    renderView();
+    expect(await screen.findByText('from-skill', { exact: true })).toBeVisible();
+    fireEvent.click(screen.getByRole('tab', { name: '技能转换' }));
+    expect(screen.getByText('from-skill', { exact: true })).toBeVisible();
+    expect(screen.queryByText('from-ai', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText('from-blank', { exact: true })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'AI生成' }));
+    expect(screen.getByText('from-ai', { exact: true })).toBeVisible();
+    expect(screen.queryByText('from-skill', { exact: true })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '自定义' }));
+    expect(screen.getByText('from-blank', { exact: true })).toBeVisible();
+    expect(screen.queryByText('from-ai', { exact: true })).not.toBeInTheDocument();
   });
 
   it('shows the three call methods and prevents another change while saving', async () => {
