@@ -10,6 +10,18 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("AskCard read-only history", () => {
+  it.each([
+    { type: "single", value: "old-option", otherText: "" },
+    { type: "multiple", value: ["new-option"], otherText: "" },
+  ])("discards saved answers incompatible with the current question: $type", async (saved) => {
+    const submit = vi.fn().mockResolvedValue(false);
+    render(<AskCard askPending={{ ask_id: "new", questions: [{ text: "New?", type: "single", choices: ["new-option"] }] }}
+      savedAnswers={{ 0: saved } as any} onSubmit={submit} />);
+    fireEvent.click(screen.getByRole("button", { name: "chat.askCardSubmit" }));
+    await waitFor(() => expect(submit).toHaveBeenCalled());
+    expect(submit.mock.calls[0][0].structured.questions[0].answer).toBeNull();
+  });
+
   const deletion: AskPending = {
     ask_id: "env-delete",
     user_env_delete: { id: "env-test", name: "test_api_key", expected_updated_at: "2026-09-23T00:00:00Z" },
@@ -168,7 +180,8 @@ describe("Knowledge management confirmation", () => {
   it.each(["yes", "no"])("submits explicit %s to the bound decision endpoint without a chat message", async (choice) => {
     vi.mocked(axiosInstance.post).mockResolvedValueOnce({ data: { data: { status: "allowed" } } });
     const onSubmit = vi.fn();
-    render(<AskCard askPending={pending} onSubmit={onSubmit} />);
+    const onDecisionSubmitted = vi.fn();
+    render(<AskCard askPending={pending} onSubmit={onSubmit} onDecisionSubmitted={onDecisionSubmitted} />);
     const submit = screen.getByRole("button", { name: "chat.askCardSubmit" });
     expect(submit).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: `common.${choice}` }));
@@ -178,6 +191,7 @@ describe("Knowledge management confirmation", () => {
       { decision: choice === "yes" ? "approved" : "rejected", arguments_digest: "args-digest", snapshot: "version-1" },
     ));
     expect(onSubmit).not.toHaveBeenCalled();
+    expect(onDecisionSubmitted).toHaveBeenCalledWith(expect.objectContaining({ structured: expect.objectContaining({ ask_id: "kb-confirm" }) }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "chat.askCardSubmit" })).toBeNull());
   });
 

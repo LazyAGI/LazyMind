@@ -55,6 +55,8 @@ interface AskCardProps {
   askPending: AskPending;
   /** Called with a payload containing the formatted text and full structured answers. */
   onSubmit: (payload: AskSubmitPayload) => void | boolean | Promise<void | boolean>;
+  /** A business decision has already been persisted; update the parent without a chat turn. */
+  onDecisionSubmitted?: (payload: AskSubmitPayload) => void;
   disabled?: boolean;
   /** Cached answers to pre-populate (index → serialized answer) */
   savedAnswers?: Record<number, AnswerState>;
@@ -81,6 +83,24 @@ function initAnswer(q: AskQuestion): AnswerState {
       return { type: "multiple", value: [], otherText: "" };
     default:
       return { type: "text", value: "" };
+  }
+}
+
+function restoreAnswer(q: AskQuestion, saved?: AnswerState): AnswerState {
+  if (!saved || saved.type !== q.type) return initAnswer(q);
+  const choices = q.choices?.length ? q.choices :
+    q.type === "boolean" ? ["__ask_user_yes__", "__ask_user_no__"] : [];
+  switch (saved.type) {
+    case "text":
+      return typeof saved.value === "string" ? saved : initAnswer(q);
+    case "boolean":
+      return saved.value === null || choices.includes(saved.value) ? saved : initAnswer(q);
+    case "single":
+      return saved.value === null || choices.includes(saved.value)
+        ? { ...saved, otherText: saved.otherText ?? "" } : initAnswer(q);
+    case "multiple":
+      return Array.isArray(saved.value) && saved.value.every(value => choices.includes(value))
+        ? { ...saved, otherText: saved.otherText ?? "" } : initAnswer(q);
   }
 }
 
@@ -172,6 +192,7 @@ export default function AskCard({
   disabled = false,
   savedAnswers,
   onAnswerChange,
+  onDecisionSubmitted,
 }: AskCardProps) {
   const { t } = useTranslation();
   const otherOption = OTHER_OPTION;
@@ -200,7 +221,7 @@ export default function AskCard({
   const total = questions.length;
 
   const [answers, setAnswers] = useState<AnswerState[]>(() =>
-    questions.map((q, i) => savedAnswers?.[i] ?? initAnswer(q)),
+    questions.map((q, i) => restoreAnswer(q, savedAnswers?.[i])),
   );
   const [currentIndex, setCurrentIndex] = useState(0);
   const [submitted, setSubmitted] = useState(false);
@@ -220,7 +241,7 @@ export default function AskCard({
 
   useEffect(() => {
     setAnswers((prev) =>
-      questions.map((q, i) => savedAnswers?.[i] ?? prev[i] ?? initAnswer(q)),
+      questions.map((q, i) => restoreAnswer(q, savedAnswers?.[i] ?? prev[i])),
     );
   }, [askPending.ask_id, savedAnswers]);
 
@@ -285,6 +306,7 @@ export default function AskCard({
           { decision, arguments_digest: confirmation.arguments_digest, snapshot: confirmation.snapshot },
         );
         setSubmitted(true);
+        onDecisionSubmitted?.({ text: lines.join("\n"), structured });
         return;
       }
       const accepted = await onSubmit({ text: lines.join("\n"), structured });

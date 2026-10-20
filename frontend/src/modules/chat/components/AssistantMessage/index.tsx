@@ -540,12 +540,17 @@ const AssistantMessage = (props: any) => {
   // Debounced backend persistence for ask-card answers. Created once per component
   // instance with useRef so it is stable across re-renders.
   const persistAskAnswersRef = useRef(
-    debounce((sid: string, hid: string, answers: Record<number, any>) => {
+    debounce((sid: string, hid: string, askId: string, answers: Record<number, any>) => {
       ChatServiceApi()
-        .conversationServiceSaveAskAnswers(sid, hid, answers)
+        .conversationServiceSaveAskAnswers(sid, hid, askId, answers)
         .catch(() => {});
     }, 600),
   );
+  useEffect(() => () => {
+    // Preserve the last edit when navigating away. The bound ask ID prevents
+    // this pending save from writing into a replacement card.
+    persistAskAnswersRef.current.flush();
+  }, [sessionId, item.history_id, item.ask_pending?.ask_id]);
   const [feedbackState, dispatch] = useReducer(feedbackReducer, {
     showModal: false,
     isSubmitting: false,
@@ -1535,9 +1540,22 @@ const AssistantMessage = (props: any) => {
               persistAskAnswersRef.current(
                 sessionId,
                 item.history_id,
+                askPending.ask_id,
                 currentAnswers,
               );
             }
+          }}
+          onDecisionSubmitted={(payload) => {
+            const current = currentItemRef.current;
+            if (current.ask_pending?.ask_id !== payload.structured.ask_id) return;
+            persistAskAnswersRef.current.cancel();
+            updateMessage({
+              ...current,
+              ask_answered: true,
+              ask_saved_answers: Object.fromEntries(
+                payload.structured.questions.map((question, idx) => [idx, question.answer]),
+              ),
+            });
           }}
           onSubmit={async (payload) => {
             persistAskAnswersRef.current.cancel();

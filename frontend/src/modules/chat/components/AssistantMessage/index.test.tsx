@@ -879,3 +879,73 @@ describe("configuration continuation", () => {
     } finally { request.mockRestore(); }
   });
 });
+
+
+describe("knowledge confirmation parent state", () => {
+  it("persists the answered state in the parent without sending a chat turn", async () => {
+    const post = vi.spyOn(axiosInstance, "post").mockResolvedValue({ data: {} });
+    const updateMessage = vi.fn();
+    const sendMessage = vi.fn();
+    const item = { role: "assistant", history_id: "knowledge-history", ask_pending: {
+      ask_id: "knowledge-card", knowledge_management: { confirmation_id: "knowledge-card", arguments_digest: "digest", snapshot: "snapshot" },
+      questions: [{ text: "Delete?", type: "boolean", choices: ["__ask_user_yes__", "__ask_user_no__"] }],
+    } };
+    const props = { index: 0, length: 1, renderText: () => null, regenerate: vi.fn(), stopGeneration: vi.fn(), updateMessage, sendMessage };
+    const view = render(<AssistantMessage {...props} item={item} />);
+    fireEvent.click(screen.getByRole("button", { name: "common.no" }));
+    fireEvent.click(screen.getByRole("button", { name: "chat.askCardSubmit" }));
+    await waitFor(() => expect(updateMessage).toHaveBeenCalledWith(expect.objectContaining({ ask_answered: true })));
+    const saved = updateMessage.mock.calls[updateMessage.mock.calls.length - 1][0];
+    expect(saved.ask_saved_answers[0].value).toBe("__ask_user_no__");
+    expect(sendMessage).not.toHaveBeenCalled();
+    view.unmount();
+    render(<AssistantMessage {...props} item={saved} />);
+    expect(screen.queryByRole("button", { name: "chat.askCardSubmit" })).toBeNull();
+    post.mockRestore();
+  });
+});
+
+
+describe("ask answer autosave lifecycle", () => {
+  it("keeps pending and new autosaves bound to their respective card IDs", async () => {
+    const patch = vi.spyOn(axiosInstance, "patch").mockResolvedValue({ data: {} });
+    const item = (ask_id: string) => ({ role: "assistant", history_id: "autosave-history", ask_pending: {
+      ask_id, questions: [{ text: `Question ${ask_id}`, type: "single", choices: ["Monday"] }],
+    } });
+    const props = { sessionId: "autosave-conversation", index: 0, length: 1, renderText: () => null,
+      regenerate: vi.fn(), stopGeneration: vi.fn(), updateMessage: vi.fn(), sendMessage: vi.fn() };
+    const view = render(<AssistantMessage {...props} item={item("old")} />);
+    fireEvent.click(screen.getByRole("radio", { name: "Monday" }));
+    view.rerender(<AssistantMessage {...props} item={item("new")} />);
+    expect(patch).toHaveBeenCalledWith(
+      expect.stringContaining("autosave-conversation:ask-answers"),
+      expect.objectContaining({ history_id: "autosave-history", ask_id: "old" }),
+      expect.objectContaining({ silentError: true }),
+    );
+    fireEvent.click(screen.getByRole("radio", { name: "Monday" }));
+    await waitFor(() => expect(patch).toHaveBeenLastCalledWith(
+      expect.stringContaining("autosave-conversation:ask-answers"),
+      { history_id: "autosave-history", ask_id: "new", answers: { 0: { type: "single", value: "Monday", otherText: "" } } },
+      { silentError: true, headers: { "Content-Type": "application/json" } },
+    ));
+    patch.mockRestore();
+  });
+});
+
+
+describe("ask draft navigation", () => {
+  it("saves the last edit when leaving the chat before debounce expires", async () => {
+    const patch = vi.spyOn(axiosInstance, "patch").mockResolvedValue({ data: {} });
+    const view = render(<AssistantMessage sessionId="leaving" index={0} length={1} renderText={() => null}
+      regenerate={vi.fn()} stopGeneration={vi.fn()} updateMessage={vi.fn()} sendMessage={vi.fn()}
+      item={{ role: "assistant", history_id: "history", ask_pending: { ask_id: "still-valid", questions: [
+        { text: "When?", type: "text" },
+      ] } }} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Friday" } });
+    view.unmount();
+    await waitFor(() => expect(patch).toHaveBeenCalledWith(expect.stringContaining("leaving:ask-answers"),
+      { history_id: "history", ask_id: "still-valid", answers: { 0: { type: "text", value: "Friday" } } },
+      expect.any(Object)));
+    patch.mockRestore();
+  });
+});

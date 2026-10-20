@@ -1127,9 +1127,16 @@ export function useChatConversation({
         assistantMessage.reasoning_content || "",
       );
 
+      const questionChanged = result.ask_pending?.ask_id &&
+        result.ask_pending.ask_id !== assistantMessage.ask_pending?.ask_id;
       assistantMessage = {
         ...assistantMessage,
         ...result,
+        ...(questionChanged ? {
+          ask_answered: false,
+          ask_saved_answers: undefined,
+          env_input_result: undefined,
+        } : {}),
         seq: result.seq ?? assistantMessage.seq,
         // Raw upstream/provider diagnostics must remain server-side only.
         errMessage: undefined,

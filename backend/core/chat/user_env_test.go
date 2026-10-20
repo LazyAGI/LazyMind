@@ -106,7 +106,7 @@ func TestEnvironmentInputRejectsCrossUserStaleAndOrdinaryAnswerPaths(t *testing.
 				db.Model(&orm.Conversation{}).Where("id = ?", h.ConversationID).Update("archived_at", time.Now())
 			case "autosave":
 				rec := httptest.NewRecorder()
-				SaveAskAnswers(rec, newUserEnvRequest(http.MethodPatch, "/unused", `{"history_id":"input-history","answers":{"0":{"value":"synthetic-secret"}}}`, owner, nil))
+				SaveAskAnswers(rec, newUserEnvRequest(http.MethodPatch, "/unused", `{"history_id":"input-history","ask_id":"input-card","answers":{"0":{"value":"synthetic-secret"}}}`, owner, nil))
 				if rec.Code != http.StatusConflict {
 					t.Fatalf("autosave status=%d", rec.Code)
 				}
@@ -274,7 +274,7 @@ func TestUserEnvDeletionLateAutosaveCannotRestoreConfirmation(t *testing.T) {
 			}
 			defer db.Callback().Update().Remove("test:late-autosave")
 			rec := httptest.NewRecorder()
-			SaveAskAnswers(rec, newUserEnvRequest(http.MethodPost, "/unused", `{"history_id":"autosave-history","answers":{"0":{"type":"boolean","value":"__ask_user_yes__"}}}`, row.UserID, nil))
+			SaveAskAnswers(rec, newUserEnvRequest(http.MethodPost, "/unused", `{"history_id":"autosave-history","ask_id":"autosave-card","answers":{"0":{"type":"boolean","value":"__ask_user_yes__"}}}`, row.UserID, nil))
 			if rec.Code != http.StatusNoContent || !injected {
 				t.Fatalf("autosave status=%d injected=%v", rec.Code, injected)
 			}

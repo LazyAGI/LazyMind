@@ -133,6 +133,30 @@ function createPreparedStream(clientConversationId: string) {
 }
 
 describe("useChatConversation regeneration recovery", () => {
+  it("resets answer and environment receipt state only when a stream replaces the question", async () => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList("ask-switch", []));
+    await act(async () => { await result.current.sendMessage({ text: "Manage resources" }); });
+    const emit = (ask_pending?: unknown) => act(() => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "ask-switch", history_id: "ask-history", seq: 1, ask_pending,
+      finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
+    } }) }));
+    emit({ ask_id: "old", questions: [{ text: "Old?", type: "boolean" }] });
+    const saved = { 0: { type: "boolean", value: "__ask_user_yes__" } };
+    act(() => result.current.updateAssistantMessage({ ask_answered: true, ask_saved_answers: saved,
+      env_input_result: { name: "OLD", status: "configured" } }, undefined, result.current.messageList.length - 1));
+    emit({ ask_id: "old", description: "same card" });
+    expect(result.current.messageList[result.current.messageList.length - 1]?.ask_saved_answers).toEqual(saved);
+    emit({ ask_id: "new", questions: [{ text: "New?", type: "boolean" }] });
+    const next = result.current.messageList[result.current.messageList.length - 1]!;
+    expect(next.ask_pending.ask_id).toBe("new");
+    expect(next.ask_answered).toBeFalsy();
+    expect(next.ask_saved_answers).toBeUndefined();
+    expect(next.env_input_result).toBeUndefined();
+    expect(result.current.conversationMessagesCache.current.get("ask-switch")).toEqual(result.current.messageList);
+  });
+
   it("replays the exact mail confirmation only on explicit failed-run retry", async () => {
     const { stream, listeners } = createMockStream();
     const onOpenSSE = vi.fn(() => stream);
