@@ -63,6 +63,7 @@ export function mapCloudConnectionToFeishuAccount(
     chatEnabled: rawChatEnabled,
     canUseChat: connection.can_use_chat,
     status,
+    authorizationPending: providerMeta.authorization_pending === true,
     connection: {
       provider: "feishu",
       connectionId: connection.connection_id,

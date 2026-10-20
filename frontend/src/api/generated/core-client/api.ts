@@ -842,6 +842,18 @@ export const ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum = {
 
 export type ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum = typeof ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum[keyof typeof ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum];
 
+export interface ChatErrorData {
+    /**
+     * Legacy error detail; persisted chat failures include history_id.
+     */
+    'detail'?: any;
+    'run_terminal'?: RunTerminal;
+}
+export interface ChatErrorResponse {
+    'code': number;
+    'data'?: ChatErrorData;
+    'message': string;
+}
 export interface ChatExport {
     'content_type': ChatExportContentTypeEnum;
     'end': number;
@@ -4585,6 +4597,37 @@ export const MissingCapabilityIdEnum = {
 
 export type MissingCapabilityIdEnum = typeof MissingCapabilityIdEnum[keyof typeof MissingCapabilityIdEnum];
 
+
+export const ModelFailureCode = {
+    AuthenticationFailed: 'authentication_failed',
+    BalanceExhausted: 'balance_exhausted',
+    ConcurrencyLimited: 'concurrency_limited',
+    Conflict: 'conflict',
+    InputFiltered: 'input_filtered',
+    InvalidRequest: 'invalid_request',
+    ModelConfiguration: 'model_configuration',
+    NotFound: 'not_found',
+    OrganizationSpendLimitExceeded: 'organization_spend_limit_exceeded',
+    OutputFiltered: 'output_filtered',
+    PermissionDenied: 'permission_denied',
+    ProjectSpendLimitExceeded: 'project_spend_limit_exceeded',
+    ProtocolError: 'protocol_error',
+    ProviderInternalError: 'provider_internal_error',
+    ProviderOverloaded: 'provider_overloaded',
+    ProviderRejected: 'provider_rejected',
+    QuotaExhausted: 'quota_exhausted',
+    RateLimited: 'rate_limited',
+    RequestTimeout: 'request_timeout',
+    ServiceUnavailable: 'service_unavailable',
+    TokenLimit: 'token_limit',
+    TransportError: 'transport_error',
+    UnprocessableEntity: 'unprocessable_entity',
+    UsageLimitExceeded: 'usage_limit_exceeded'
+} as const;
+
+export type ModelFailureCode = typeof ModelFailureCode[keyof typeof ModelFailureCode];
+
+
 export interface ModelFeaturesResponse {
     'image_embed_enabled': boolean;
     'image_embed_required': boolean;
@@ -5311,6 +5354,7 @@ export interface RunTerminal {
     'partial_output': boolean;
     'reason': RunTerminalReasonEnum;
     'status': RunTerminalStatusEnum;
+    'transport_diagnostic'?: RunTerminalTransportDiagnostic;
 }
 
 export const RunTerminalReasonEnum = {
@@ -5331,6 +5375,17 @@ export const RunTerminalStatusEnum = {
 } as const;
 
 export type RunTerminalStatusEnum = typeof RunTerminalStatusEnum[keyof typeof RunTerminalStatusEnum];
+
+export interface RunTerminalTransportDiagnostic {
+    'code': RunTerminalTransportDiagnosticCodeEnum;
+}
+
+export const RunTerminalTransportDiagnosticCodeEnum = {
+    UpstreamStreamFailed: 'upstream_stream_failed',
+    UpstreamStreamTimeout: 'upstream_stream_timeout'
+} as const;
+
+export type RunTerminalTransportDiagnosticCodeEnum = typeof RunTerminalTransportDiagnosticCodeEnum[keyof typeof RunTerminalTransportDiagnosticCodeEnum];
 
 export interface ScheduleMoveRequest {
     'group_id'?: string | null;
@@ -15293,7 +15348,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarQueryParameter = {} as any;
 
             localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'text/event-stream';
+            localVarHeaderParameter['Accept'] = 'text/event-stream,application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};

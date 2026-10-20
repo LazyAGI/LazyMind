@@ -7,13 +7,17 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gorilla/mux"
+
 	"lazymind/core/common/orm"
 	"lazymind/core/state"
+	corestore "lazymind/core/store"
 )
 
 type failNthHSetStore struct {
@@ -528,10 +532,12 @@ func TestHandleStreamChatHSetFailureReturnsHTTP503BeforeUpstream(t *testing.T) {
 		name       string
 		dualReply  bool
 		failOnCall int
+		regenerate bool
 	}{
 		{name: "primary run status", failOnCall: 1},
 		{name: "primary dual run status", dualReply: true, failOnCall: 1},
 		{name: "secondary run status", dualReply: true, failOnCall: 2},
+		{name: "regenerated primary run", failOnCall: 1, regenerate: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat.db")
@@ -553,7 +559,21 @@ func TestHandleStreamChatHSetFailureReturnsHTTP503BeforeUpstream(t *testing.T) {
 				t.Fatalf("create state store: %v", err)
 			}
 			defer store.Close()
+			corestore.Init(db.DB, nil, store)
+			t.Cleanup(func() { corestore.Init(nil, nil, nil) })
 			failingStore := &failNthHSetStore{Store: store, failOnCall: tt.failOnCall}
+			target := chatPersistTarget{HistoryID: "history-hset", Seq: 1}
+			if tt.regenerate {
+				previous := orm.ChatHistory{ID: target.HistoryID, ConversationID: "conv-hset", Seq: 1,
+					RawContent: "question", Content: "question", RunID: "previous-run", RunStatus: "failed",
+					RunTerminal: terminalJSON(&RunTerminal{Status: "failed", Reason: "model_failure", Code: "not_found"}),
+					TimeMixin:   orm.TimeMixin{CreateTime: now, UpdateTime: now},
+				}
+				if err := db.Create(&previous).Error; err != nil {
+					t.Fatal(err)
+				}
+				target.IsRegeneration, target.Existing = true, &previous
+			}
 
 			var upstreamCalls atomic.Int32
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -567,9 +587,17 @@ func TestHandleStreamChatHSetFailureReturnsHTTP503BeforeUpstream(t *testing.T) {
 			handleStreamChat(
 				recorder, request, db.DB, failingStore, upstream.URL,
 				map[string]any{"query": "question", "user_id": "u1"},
-				"conv-hset", "question", chatPersistTarget{HistoryID: "history-hset", Seq: 1}, tt.dualReply, json.RawMessage(`{}`),
+				"conv-hset", "question", target, tt.dualReply, json.RawMessage(`{}`),
 			)
 			assertStoreUnavailableJSON(t, recorder)
+			var httpFailure struct {
+				Data struct {
+					RunTerminal *RunTerminal `json:"run_terminal"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &httpFailure); err != nil {
+				t.Fatal(err)
+			}
 			if failingStore.calls < tt.failOnCall {
 				t.Fatalf("HSet calls = %d, failure was not reached", failingStore.calls)
 			}
@@ -581,6 +609,9 @@ func TestHandleStreamChatHSetFailureReturnsHTTP503BeforeUpstream(t *testing.T) {
 				terminal, err := parseRunTerminal(raw)
 				if err != nil || status != "failed" || terminal.Status != "failed" || terminal.Code != "state_store_unavailable" {
 					t.Fatalf("history %s did not finish: status=%q terminal=%s err=%v", id, status, raw, err)
+				}
+				if !tt.dualReply && !reflect.DeepEqual(httpFailure.Data.RunTerminal, terminal) {
+					t.Fatalf("HTTP/history %s mismatch: HTTP=%+v stored=%+v", id, httpFailure.Data.RunTerminal, terminal)
 				}
 				cached, err := getChatStatus(request.Context(), store, "conv-hset", id)
 				if err != nil || cached.Status != "failed" || cached.RunTerminal == nil || cached.RunTerminal.Code != terminal.Code {
@@ -607,6 +638,28 @@ func TestHandleStreamChatHSetFailureReturnsHTTP503BeforeUpstream(t *testing.T) {
 				for _, history := range histories {
 					assertFailedHistory(history.ID, history.RunStatus, history.RunTerminal)
 				}
+				return
+			}
+			historyRequest := httptest.NewRequest(http.MethodGet, "/api/core/conversations/conv-hset:history", nil)
+			historyRequest.Header.Set("X-User-Id", "u1")
+			historyRequest = mux.SetURLVars(historyRequest, map[string]string{"name": "conv-hset:history"})
+			historyResponse := httptest.NewRecorder()
+			GetConversationHistory(historyResponse, historyRequest)
+			var refreshed struct {
+				History []struct {
+					ID          string             `json:"id"`
+					RunTerminal *RunTerminal       `json:"run_terminal"`
+					Attempts    []failedRunAttempt `json:"failed_attempts"`
+				} `json:"history"`
+			}
+			if err := json.Unmarshal(historyResponse.Body.Bytes(), &refreshed); err != nil {
+				t.Fatal(err)
+			}
+			if historyResponse.Code != http.StatusOK || len(refreshed.History) != 1 || refreshed.History[0].ID != target.HistoryID || !reflect.DeepEqual(refreshed.History[0].RunTerminal, httpFailure.Data.RunTerminal) {
+				t.Fatalf("HTTP/public history mismatch: HTTP=%+v history=%s", httpFailure.Data.RunTerminal, historyResponse.Body.String())
+			}
+			if tt.regenerate && (len(refreshed.History[0].Attempts) != 1 || refreshed.History[0].Attempts[0].RunID != "previous-run" || refreshed.History[0].Attempts[0].RunTerminal.Code != "not_found") {
+				t.Fatalf("regeneration lost previous failure: %+v", refreshed.History[0].Attempts)
 			}
 		})
 	}

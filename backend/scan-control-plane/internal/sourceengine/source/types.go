@@ -57,6 +57,8 @@ type Engine interface {
 type CreateSourceRequest struct {
 	CallerID          string         `json:"-"`
 	CallerName        string         `json:"-"`
+	CreatorID         string         `json:"-"`
+	CreatorName       string         `json:"-"`
 	TenantID          string         `json:"-"`
 	RequestID         string         `json:"request_id"`
 	Name              string         `json:"name"`
@@ -65,6 +67,16 @@ type CreateSourceRequest struct {
 	ExcludeExtensions []string       `json:"exclude_extensions,omitempty"`
 	ChatEnabled            *bool                      `json:"chat_enabled,omitempty"`
 	SourceOptions     map[string]any `json:"source_options,omitempty"`
+}
+
+type CreatorIdentity struct {
+	UserID   string
+	UserName string
+	TenantID string
+}
+
+type CreatorResolver interface {
+	ResolveAdmin(ctx context.Context, tenantID string) (CreatorIdentity, error)
 }
 
 type UpdateSourceRequest struct {

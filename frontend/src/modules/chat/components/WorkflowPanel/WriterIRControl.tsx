@@ -16,6 +16,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
+import { getLocalizedErrorMessage } from '@/components/request';
 import {
   collectWriterOutline,
   getWriterInternalReference,
@@ -740,7 +741,7 @@ export function WriterIRControl({
     } catch (error) {
       lastSavedDocumentRef.current = previousSavedDocument;
       if (mountedRef.current) {
-        setSaveError(error instanceof Error ? error.message : t('chat.writerIR.saveFailed'));
+        setSaveError(getLocalizedErrorMessage(error));
       }
       return 'error';
     } finally {

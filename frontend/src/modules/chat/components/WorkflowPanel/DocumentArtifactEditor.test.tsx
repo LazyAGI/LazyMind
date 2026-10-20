@@ -403,6 +403,39 @@ it.each(['outcome_unknown_released', 'confirmed_detached', 'outcome_unknown'])('
   expect(api.publishDocument).not.toHaveBeenCalled();
 });
 
+it('keeps an uncertain current publication separate from a cached successful publication',async()=>{
+ await i18n.changeLanguage('zh-CN');
+ const succeeded={operation_id:'previous-success',status:'succeeded',provider:'notion',provider_synced:true,
+  artifact_id:'published-draft',source_slot_id:'draft_document',item_index:-1,updated_at:'2026-09-15T00:00:00Z',
+  target_url:'https://example.test/notion',actions:[]};
+ api.listDocumentProviders.mockResolvedValue({data:{data:{providers:[{id:'notion'},{id:'feishu'}]}}});
+ api.getPublicationForArtifact.mockResolvedValueOnce({data:{data:{operation:succeeded}}})
+  .mockRejectedValueOnce(new Error('offline'));
+ api.publishDocument.mockRejectedValueOnce(new Error('offline'));
+ let action:SlotFooterAction|undefined;
+ const slot={artifact_id:'published-draft',slot_id:'draft_document',revision:1,
+  artifact_value:{text:'# Retained draft'},document:{representation:'markdown',editable:true,capabilities:['save','publish_document']}} as SlotRevision;
+ render(<SlotEditingContext.Provider value={{setEditing:vi.fn(),registerFlush:()=>()=>{},
+  registerFooterAction:(_key,next)=>{if(next?.icon==='write-back')action=next;return ()=>{};}}}>
+  <DocumentArtifactEditor slot={slot} sessionId='fixture'/>
+ </SlotEditingContext.Provider>);
+ await waitFor(()=>expect(action?.statusText).toBe('已写回云文档'));
+ await act(async()=>action!.menu!.find(item=>item.key==='notion')!.onClick());
+ fireEvent.click(await screen.findByRole('button',{name:'发布状态'}));
+ expect(await screen.findByRole('button',{name:'重试查询'})).toBeEnabled();
+ expect(action?.statusText).toContain('写入结果待确认');
+ expect(action?.disabled).toBe(true);
+ expect(screen.queryByText('已写入云端并完成本地处理。')).not.toBeInTheDocument();
+ expect(screen.queryByText('已写回云文档')).not.toBeInTheDocument();
+ expect(screen.getByRole('article')).toHaveTextContent('# Retained draft');
+ api.getPublicationForArtifact.mockResolvedValueOnce({data:{data:{operation:succeeded}}});
+ fireEvent.click(screen.getByRole('button',{name:'重试查询'}));
+ await waitFor(()=>expect(action?.disabled).toBe(false));
+ expect(action?.statusText).toContain('写入结果待确认');
+ expect(action?.statusLink?.href).toBe('https://example.test/notion');
+ expect(api.publishDocument).toHaveBeenCalledTimes(1);
+});
+
 it('blocks stale publication buttons and menus until the refreshed draft is loaded', async () => {
  await i18n.changeLanguage('zh-CN');
  api.listDocumentProviders.mockResolvedValue({data:{data:{providers:[{id:'feishu'},{id:'obsidian'}]}}});

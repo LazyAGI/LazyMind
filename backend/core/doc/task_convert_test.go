@@ -54,8 +54,8 @@ func TestNeedsOfficeConvertBeforeParse(t *testing.T) {
 		{"pptm with paddle converts", pptmExt, paddleCfg, true},
 		{"pptm without ocr config converts", pptmExt, nil, true},
 		{"docx with official mineru still converts", docExt, officialMineruCfg, true},
-		{"xlsx always converts", xlsxExt, paddleCfg, true},
-		{"xlsx with official mineru still converts", xlsxExt, officialMineruCfg, true},
+		{"xlsx with paddle parses directly", xlsxExt, paddleCfg, false},
+		{"xlsx with official mineru parses directly", xlsxExt, officialMineruCfg, false},
 		{"non-office never converts", documentExt{StoredPath: "/data/demo.pdf", ConvertRequired: false}, officialMineruCfg, false},
 	}
 
@@ -94,13 +94,13 @@ func TestParsePathForIngestionMacroPresentationMineru(t *testing.T) {
 	}
 }
 
-func TestNewDocumentExtSpreadsheetRequiresConvert(t *testing.T) {
+func TestNewDocumentExtSpreadsheetParsesDirectly(t *testing.T) {
 	d := newDocumentExt("/data/demo.xlsx", "demo.xlsx", "demo.xlsx", 100, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "", nil)
-	if !d.ConvertRequired {
-		t.Fatal("xlsx upload should require office conversion")
+	if d.ConvertRequired {
+		t.Fatal("xlsx upload should not require office conversion")
 	}
-	if d.ConvertStatus != ConvertStatusPending {
-		t.Fatalf("xlsx ConvertStatus = %q, want %q", d.ConvertStatus, ConvertStatusPending)
+	if d.ConvertStatus != ConvertStatusNone {
+		t.Fatalf("xlsx ConvertStatus = %q, want %q", d.ConvertStatus, ConvertStatusNone)
 	}
 }
 
@@ -111,8 +111,8 @@ func TestParsePathForIngestionSpreadsheet(t *testing.T) {
 		OriginalFilename: "demo.xlsx",
 		ConvertRequired:  true,
 	}
-	if got := parsePathForIngestion(d, nil, documentParseProfileCloud); got != "/data/demo.pdf" {
-		t.Fatalf("parsePathForIngestion() = %q, want converted pdf path", got)
+	if got := parsePathForIngestion(d, nil, documentParseProfileCloud); got != "/data/demo.xlsx" {
+		t.Fatalf("parsePathForIngestion() = %q, want original spreadsheet path", got)
 	}
 }
 
@@ -193,18 +193,45 @@ func TestLocalParseProfileOfficialMinerUPresentationSkipsConvert(t *testing.T) {
 	}
 }
 
-func TestLocalParseProfileOfficeWithoutOCRUsesFallbackConvert(t *testing.T) {
+func TestLocalParseProfileSpreadsheetWithoutOCRParsesDirectly(t *testing.T) {
 	d := documentExt{
 		StoredPath:       "/data/demo.xlsx",
 		ParseStoredPath:  "/data/demo.pdf",
 		OriginalFilename: "demo.xlsx",
 		ConvertRequired:  true,
 	}
-	if got := needsOfficeConvertBeforeParse(d, nil, documentParseProfileLocal); !got {
-		t.Fatal("needsOfficeConvertBeforeParse() = false, want local fallback convert")
+	if got := needsOfficeConvertBeforeParse(d, nil, documentParseProfileLocal); got {
+		t.Fatal("needsOfficeConvertBeforeParse() = true, want direct spreadsheet parse")
 	}
-	if got := parsePathForIngestion(d, nil, documentParseProfileLocal); got != "/data/demo.pdf" {
-		t.Fatalf("parsePathForIngestion() = %q, want converted pdf path", got)
+	if got := parsePathForIngestion(d, nil, documentParseProfileLocal); got != "/data/demo.xlsx" {
+		t.Fatalf("parsePathForIngestion() = %q, want original spreadsheet path", got)
+	}
+}
+
+func TestOfficeConversionGuardResetsLegacySpreadsheetState(t *testing.T) {
+	d := documentExt{
+		StoredPath:       "/data/demo.xlsx",
+		OriginalFilename: "demo.xlsx",
+		ParseStoredPath:  "/data/demo.pdf",
+		ParseStoredName:  "demo.pdf",
+		ParseContentType: "application/pdf",
+		ParseFileSize:    123,
+		ConvertRequired:  true,
+		ConvertStatus:    ConvertStatusPending,
+		ConvertError:     "stale error",
+		ConvertProvider:  convertProviderHTTP,
+	}
+
+	callOfficeConvertWithRetry(context.Background(), &d, documentParseProfileCloud)
+
+	if d.ConvertRequired || d.ConvertStatus != ConvertStatusNone {
+		t.Fatalf("spreadsheet conversion state was not reset: %#v", d)
+	}
+	if d.ConvertError != "" || d.ConvertProvider != "" {
+		t.Fatalf("spreadsheet conversion diagnostics were not cleared: %#v", d)
+	}
+	if d.ParseStoredPath != "" || d.ParseStoredName != "" || d.ParseContentType != "" || d.ParseFileSize != 0 {
+		t.Fatalf("legacy spreadsheet PDF fields were not cleared: %#v", d)
 	}
 }
 
