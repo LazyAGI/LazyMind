@@ -33,6 +33,159 @@ _REGEX_TOOL_NAMES = {
 }
 
 
+def _preview_and_payload(frame, preview_tag, payload_tag):
+    preview = re.search(rf'<{preview_tag} id="retrieval-call">(.*?)</{preview_tag}>', frame, re.S).group(1)
+    payload = json.loads(re.search(rf'<{payload_tag}>(.*?)</{payload_tag}>', frame, re.S).group(1))
+    assert re.search(r'\{[^{}]+\}', preview) is None
+    return preview.strip(), payload
+
+
+@pytest.mark.parametrize('prefix', ['', 'Agent_'])
+@pytest.mark.parametrize('language', ['zh', 'en'])
+@pytest.mark.parametrize('wrapped', [False, True])
+@pytest.mark.parametrize('empty', [False, True])
+def test_search_tools_preview_counts_candidates(prefix, language, wrapped, empty):
+    name = prefix + 'search_tools'
+    args = {'query': 'document search'}
+    candidates = [] if empty else [
+        {'name': 'Docs', 'type': 'group', 'matched_members': [{'name': 'read'}, {'name': 'search'}]},
+        {'name': 'lookup', 'type': 'tool'},
+    ]
+    result = {'ok': True, 'value': json.dumps(candidates)} if wrapped else candidates
+    call, value = _tool_call_frame_text({
+        'id': 'retrieval-call', 'function': {'name': name, 'arguments': json.dumps(args)},
+    }, language)
+    rendered = _tool_result_frame_text({
+        'id': 'retrieval-call', 'name': name, 'result': result,
+    }, language, value)
+    call_preview, call_payload = _preview_and_payload(call, 'tp', 'tool_call')
+    result_preview, result_payload = _preview_and_payload(rendered, 'trp', 'tool_result')
+    assert call_preview == (
+        '正在检索与 **document search** 相关的工具…' if language == 'zh'
+        else 'Searching for tools related to **document search**…'
+    )
+    expected = {
+        ('zh', False): '检索到 **2** 个相关工具。',
+        ('zh', True): '未检索到相关工具。',
+        ('en', False): 'Found **2** relevant tools.',
+        ('en', True): 'No relevant tools found.',
+    }
+    assert result_preview == expected[language, empty]
+    assert call_payload == {'id': 'retrieval-call', 'name': name, 'arguments': args}
+    assert result_payload == {'id': 'retrieval-call', 'name': name, 'result': result}
+
+
+@pytest.mark.parametrize('prefix', ['', 'Agent_'])
+@pytest.mark.parametrize('language', ['zh', 'en'])
+@pytest.mark.parametrize('wrapped', [False, True])
+@pytest.mark.parametrize(
+    ('args', 'loaded', 'unloaded', 'call_zh', 'result_zh', 'call_en', 'result_en'),
+    [
+        ({'tool_names': ['Docs']}, ['Docs_read', 'Docs_search'], [],
+         '正在加载工具：**Docs**…', '工具 **Docs_read, Docs_search** 加载完成。',
+         'Loading tools: **Docs**…', 'Tools **Docs_read, Docs_search** loaded.'),
+        ({'tool_names': ['A', 'B']}, ['A', 'B'], [],
+         '正在加载工具：**A, B**…', '工具 **A, B** 加载完成。',
+         'Loading tools: **A, B**…', 'Tools **A, B** loaded.'),
+        ({'unload_tool_names': ['B']}, [], ['B'],
+         '正在卸载工具：**B**…', '工具 **B** 已卸载。',
+         'Unloading tools: **B**…', 'Tools **B** unloaded.'),
+        ({'tool_names': ['A'], 'unload_tool_names': ['B']}, ['A'], ['B'],
+         '正在加载工具：**A**；卸载工具：**B**…', '工具 **A** 加载完成；工具 **B** 已卸载。',
+         'Loading tools: **A**; unloading tools: **B**…', 'Tools **A** loaded; tools **B** unloaded.'),
+        ({}, [], [],
+         '正在更新工具加载状态…', '工具加载状态未变更。',
+         'Updating tool loading state…', 'Tool loading state unchanged.'),
+        ({'tool_names': [], 'unload_tool_names': None}, [], [],
+         '正在更新工具加载状态…', '工具加载状态未变更。',
+         'Updating tool loading state…', 'Tool loading state unchanged.'),
+    ],
+)
+def test_load_tools_preview_uses_requested_and_actual_operations(
+    prefix, language, wrapped, args, loaded, unloaded, call_zh, result_zh, call_en, result_en,
+):
+    name = prefix + 'load_tools'
+    result = {'status': 'ok', 'loaded': loaded, 'unloaded': unloaded}
+    if wrapped:
+        result = {'ok': True, 'value': json.dumps(result)}
+    call, value = _tool_call_frame_text({
+        'id': 'retrieval-call', 'function': {'name': name, 'arguments': json.dumps(args) if wrapped else args},
+    }, language)
+    rendered = _tool_result_frame_text({
+        'id': 'retrieval-call', 'name': name, 'result': result,
+    }, language, value)
+    call_preview, call_payload = _preview_and_payload(call, 'tp', 'tool_call')
+    result_preview, result_payload = _preview_and_payload(rendered, 'trp', 'tool_result')
+    assert call_preview == (call_zh if language == 'zh' else call_en)
+    assert result_preview == (result_zh if language == 'zh' else result_en)
+    assert call_payload == {'id': 'retrieval-call', 'name': name, 'arguments': args}
+    assert result_payload == {'id': 'retrieval-call', 'name': name, 'result': result}
+
+
+@pytest.mark.parametrize('name', ['search_tools', 'load_tools'])
+@pytest.mark.parametrize('language', ['zh', 'en'])
+@pytest.mark.parametrize('wrapped', [False, True])
+def test_retrieval_tool_failure_keeps_error_instead_of_success(name, language, wrapped):
+    result = {'ok': False, 'value': 'loading threshold exceeded', 'loaded': ['A'], 'unloaded': ['B']}
+    if wrapped:
+        result = json.dumps(result)
+    rendered = _tool_result_frame_text({
+        'id': 'retrieval-call', 'name': name, 'result': result,
+    }, language, 'document search')
+    preview, payload = _preview_and_payload(rendered, 'trp', 'tool_result')
+    expected = {
+        ('search_tools', 'zh'): '工具检索失败：**loading threshold exceeded**。',
+        ('load_tools', 'zh'): '工具加载状态更新失败：**loading threshold exceeded**。',
+        ('search_tools', 'en'): 'Tool search failed: **loading threshold exceeded**.',
+        ('load_tools', 'en'): 'Tool loading state update failed: **loading threshold exceeded**.',
+    }
+    assert preview == expected[name, language]
+    assert payload['result'] == result
+
+
+def test_load_tools_preview_summarizes_long_lists_without_changing_payload():
+    names = ['A', 'B', 'C', 'D']
+    call, _ = _tool_call_frame_text({
+        'id': 'retrieval-call', 'function': {'name': 'load_tools', 'arguments': {'tool_names': names}},
+    }, 'zh')
+    preview, payload = _preview_and_payload(call, 'tp', 'tool_call')
+    assert preview == '正在加载工具：**A, B and 2 more**…'
+    assert payload['arguments']['tool_names'] == names
+    names = ['X' * 250]
+    rendered = _tool_result_frame_text({
+        'id': 'retrieval-call', 'name': 'load_tools', 'result': {'loaded': names, 'unloaded': []},
+    }, 'zh')
+    preview, payload = _preview_and_payload(rendered, 'trp', 'tool_result')
+    assert preview == '工具 **' + 'X' * 200 + '...** 加载完成。'
+    assert payload['result']['loaded'] == names
+
+
+@pytest.mark.parametrize('name', ['GoogleDriveFS_read', 'GoogleDriveFS_read_file', 'Cloud_GoogleDriveFS_read_file'])
+@pytest.mark.parametrize('language', ['zh', 'en'])
+def test_google_drive_read_file_uses_path_for_call_success_and_failure(name, language):
+    call, value = _tool_call_frame_text({
+        'id': 'retrieval-call', 'function': {'name': name, 'arguments': {'path': '/report.txt'}},
+    }, language)
+    preview, _ = _preview_and_payload(call, 'tp', 'tool_call')
+    assert preview == (
+        '正在读取 Google Drive 文件 **/report.txt**。' if language == 'zh'
+        else 'Reading Google Drive content from **/report.txt**.'
+    )
+    for ok in (True, False):
+        rendered = _tool_result_frame_text({
+            'id': 'retrieval-call', 'name': name,
+            'result': {'ok': ok, 'value': 'file content' if ok else 'read failed'},
+        }, language, value)
+        preview, _ = _preview_and_payload(rendered, 'trp', 'tool_result')
+        expected = {
+            ('zh', True): '已成功读取 Google Drive 文件 **/report.txt**。',
+            ('zh', False): '未能读取 Google Drive 文件 **/report.txt**。',
+            ('en', True): 'Google Drive content from **/report.txt** was loaded.',
+            ('en', False): 'Google Drive content from **/report.txt** could not be read.',
+        }
+        assert preview == expected[language, ok]
+
+
 def _concrete_template_tool_name(template_key):
     return (
         _SEARCH_PROVIDER_TOOL_NAMES.get(template_key)
