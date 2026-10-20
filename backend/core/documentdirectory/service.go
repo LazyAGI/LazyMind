@@ -16,6 +16,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/maintenance"
+	"lazymind/core/settings"
 )
 
 const PlanJob = "document_directory_plan"
@@ -24,6 +25,7 @@ const OrganizeJob = "document_directory_organize"
 var ErrBusy = errors.New("document directory is organizing")
 var ErrCapacity = errors.New("document directory capacity is busy")
 var ErrPinLimit = errors.New("document directory pin limit reached")
+var ErrDisabled = errors.New("document directories disabled")
 var ErrInput = errors.New("invalid document directory input")
 
 type Candidate struct {
@@ -222,7 +224,12 @@ func mutate(ctx context.Context, db *gorm.DB, uid string, fn func(*gorm.DB) erro
 	if strings.TrimSpace(uid) == "" {
 		return ErrInput
 	}
-	return maintenance.UserTransaction(ctx, db, uid, fn)
+	return maintenance.UserTransaction(ctx, db, uid, func(tx *gorm.DB) error {
+		if err := requireEnabled(ctx, tx, uid); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
 }
 
 func removeTx(tx *gorm.DB, uid, id string) error {
@@ -511,4 +518,38 @@ func validateParent(tx *gorm.DB, dir, id, parent string) error {
 
 func entryFromCandidate(dir string, c Candidate, now time.Time) orm.DocumentDirectoryEntry {
 	return orm.DocumentDirectoryEntry{ID: common.GenerateID(), DirectoryID: dir, ResourceKey: resourceKey(c), Source: c.Source, Namespace: c.Namespace, ResourceID: c.ResourceID, LocatorJSON: c.Locator, Title: c.Title, ReadState: c.ReadState, AccessState: c.AccessState, ContentVersion: c.ContentVersion, ReadAt: c.ReadAt, CreatedAt: now, UpdatedAt: now}
+}
+
+type controlGenerationKey struct{}
+
+func requireEnabled(ctx context.Context, db *gorm.DB, uid string) error {
+	controls, err := settings.LoadFeatureControls(ctx, db, uid)
+	if err != nil {
+		return err
+	}
+	generation, scoped := ctx.Value(controlGenerationKey{}).(int64)
+	if !controls.DocumentDirectoriesEnabled || scoped && generation != controls.DocumentDirectoriesGeneration {
+		return ErrDisabled
+	}
+	return nil
+}
+
+// Pause is called under the user maintenance lock in the preference transaction.
+// Revoking job leases prevents in-flight model results from being committed, even
+// if the user enables the feature again before the model call returns.
+func Pause(tx *gorm.DB, uid string) error {
+	// Revoke in-flight chat callbacks as well as async jobs. Re-enabling must not
+	// permit an old runtime to flush evidence captured while collection was off.
+	if err := tx.Model(&orm.UserUIPreferences{}).Where("user_id=?", uid).UpdateColumn("document_directories_generation", gorm.Expr("document_directories_generation + 1")).Error; err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	if err := tx.Model(&orm.AsyncJob{}).Where("create_user_id=? AND job_type IN ? AND status IN ?", uid, []string{PlanJob, OrganizeJob}, []string{"pending", "running"}).Updates(map[string]any{"status": "canceled", "lock_until": nil, "locked_by": "", "finished_at": now, "updated_at": now}).Error; err != nil {
+		return err
+	}
+	if err := tx.Model(&orm.DocumentDirectoryBatch{}).Where("user_id=? AND status IN ?", uid, []string{"pending", "running"}).Updates(map[string]any{"status": "canceled", "updated_at": now}).Error; err != nil {
+		return err
+	}
+	// Retain captured evidence but exclude it from future idle-event ingestion.
+	return tx.Model(&orm.DocumentObservation{}).Where("user_id=? AND batch_id=?", uid, "").Update("batch_id", "disabled").Error
 }

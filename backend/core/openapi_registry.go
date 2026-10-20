@@ -2679,6 +2679,7 @@ type userUIPreferencesPatchOpenAPIRequest struct {
 	WorkflowsEnabled              *bool   `json:"workflows_enabled,omitempty"`
 	MCPEnabled                    *bool   `json:"mcp_enabled,omitempty"`
 	DocumentParsingEnabled        *bool   `json:"document_parsing_enabled,omitempty"`
+	DocumentDirectoriesEnabled    *bool   `json:"document_directories_enabled,omitempty"`
 	PerformanceStatsEnabled       *bool   `json:"performance_stats_enabled,omitempty"`
 }
 
@@ -2693,18 +2694,20 @@ type userUIPreferencesOpenAPIResponse struct {
 	WorkflowsEnabled              bool   `json:"workflows_enabled"`
 	MCPEnabled                    bool   `json:"mcp_enabled"`
 	DocumentParsingEnabled        bool   `json:"document_parsing_enabled"`
+	DocumentDirectoriesEnabled    bool   `json:"document_directories_enabled"`
 	PerformanceStatsEnabled       bool   `json:"performance_stats_enabled"`
 	UserPreferenceConfigured      bool   `json:"user_preference_configured"`
 	UpdatedAt                     string `json:"updated_at"`
 }
 
 type settingsFeatureControlsOpenAPIResponse struct {
-	TaskCenterEnabled      bool `json:"task_center_enabled"`
-	SchedulesEnabled       bool `json:"schedules_enabled"`
-	SkillsEnabled          bool `json:"skills_enabled"`
-	WorkflowsEnabled       bool `json:"workflows_enabled"`
-	MCPEnabled             bool `json:"mcp_enabled"`
-	DocumentParsingEnabled bool `json:"document_parsing_enabled"`
+	TaskCenterEnabled          bool `json:"task_center_enabled"`
+	SchedulesEnabled           bool `json:"schedules_enabled"`
+	SkillsEnabled              bool `json:"skills_enabled"`
+	WorkflowsEnabled           bool `json:"workflows_enabled"`
+	MCPEnabled                 bool `json:"mcp_enabled"`
+	DocumentParsingEnabled     bool `json:"document_parsing_enabled"`
+	DocumentDirectoriesEnabled bool `json:"document_directories_enabled"`
 }
 
 type settingsOverviewCountsOpenAPIResponse struct {

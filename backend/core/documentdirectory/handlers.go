@@ -1,6 +1,7 @@
 package documentdirectory
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -25,6 +26,8 @@ func reply(w http.ResponseWriter, value any, err error) {
 	switch {
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		status, message = 404, "document directory not found"
+	case errors.Is(err, ErrDisabled):
+		status, message = 409, err.Error()
 	case errors.Is(err, ErrInput):
 		status, message = 400, ErrInput.Error()
 	case errors.Is(err, ErrBusy), errors.Is(err, ErrCapacity), errors.Is(err, ErrPinLimit):
@@ -78,6 +81,7 @@ func BatchesHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 type InternalRequest struct {
+	ControlGeneration int64 `json:"document_directories_generation"`
 	Command
 	FolderRequest
 	HistoryID    string        `json:"history_id"`
@@ -113,6 +117,11 @@ func InternalHandler(w http.ResponseWriter, r *http.Request) {
 	var h orm.ChatHistory
 	if err := db.WithContext(r.Context()).Where("id=? AND conversation_id=? AND run_id=? AND run_status=?", req.HistoryID, conv, req.RunID, "generating").Take(&h).Error; err != nil {
 		reply(w, nil, gorm.ErrRecordNotFound)
+		return
+	}
+	r = r.WithContext(context.WithValue(r.Context(), controlGenerationKey{}, req.ControlGeneration))
+	if err := requireEnabled(r.Context(), db, uid); err != nil {
+		reply(w, nil, err)
 		return
 	}
 	if strings.HasPrefix(req.Operation, "folder_") {

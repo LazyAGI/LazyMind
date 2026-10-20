@@ -166,6 +166,8 @@ ALTER TABLE user_ui_preferences
     DROP COLUMN IF EXISTS performance_stats_enabled,
     DROP COLUMN IF EXISTS sensitive_word_filter_enabled,
     DROP COLUMN IF EXISTS document_parsing_enabled,
+    DROP COLUMN IF EXISTS document_directories_enabled,
+    DROP COLUMN IF EXISTS document_directories_generation,
     DROP COLUMN IF EXISTS workflows_enabled,
     DROP COLUMN IF EXISTS mcp_enabled,
     DROP COLUMN IF EXISTS skills_enabled,
@@ -352,6 +354,8 @@ ALTER TABLE conversations DROP COLUMN chat_executor;
 ALTER TABLE user_ui_preferences DROP COLUMN performance_stats_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN sensitive_word_filter_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN document_parsing_enabled;
+ALTER TABLE user_ui_preferences DROP COLUMN document_directories_enabled;
+ALTER TABLE user_ui_preferences DROP COLUMN document_directories_generation;
 ALTER TABLE user_ui_preferences DROP COLUMN workflows_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN mcp_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN skills_enabled;

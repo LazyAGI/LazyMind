@@ -110,7 +110,7 @@ func enqueue(ctx context.Context, tx *gorm.DB, b *orm.DocumentDirectoryBatch, jo
 // QueueIdle runs after the existing idle-event validity check, before memory
 // history is inspected. Observation ownership is durable and independent of Redis.
 func QueueIdle(ctx context.Context, db *gorm.DB, event orm.ConversationIdleEvent) error {
-	return mutate(ctx, db, event.UserID, func(tx *gorm.DB) error {
+	err := mutate(ctx, db, event.UserID, func(tx *gorm.DB) error {
 		var valid int64
 		if err := tx.Model(&orm.ConversationIdleEvent{}).Where("event_id=? AND status=? AND due_at<=?", event.EventID, "waiting", time.Now().UTC()).Count(&valid).Error; err != nil {
 			return err
@@ -139,6 +139,10 @@ func QueueIdle(ctx context.Context, db *gorm.DB, event orm.ConversationIdleEvent
 		}
 		return enqueue(ctx, tx, &b, PlanJob, event.UserID)
 	})
+	if errors.Is(err, ErrDisabled) {
+		return nil
+	}
+	return err
 }
 
 func enqueueManual(ctx context.Context, tx *gorm.DB, uid string, d orm.DocumentDirectory, c Command, result map[string]any) error {
@@ -370,6 +374,9 @@ func handleJob(ctx context.Context, j asyncjob.Job, reporter asyncjob.Reporter) 
 	}
 	var err error
 	generate := func(mode string, data any) (Proposal, error) {
+		if err := mutate(ctx, db, b.UserID, func(tx *gorm.DB) error { return ownsJob(tx, j) }); err != nil {
+			return Proposal{}, err
+		}
 		p, modelErr := callModel(ctx, db, b.UserID, input.ConversationID, mode, data)
 		saveErr := mutate(ctx, db, b.UserID, func(tx *gorm.DB) error {
 			if e := ownsJob(tx, j); e != nil {
@@ -400,7 +407,7 @@ func handleJob(ctx context.Context, j asyncjob.Job, reporter asyncjob.Reporter) 
 		err = organizeChunks(ctx, db, j, &b, input, generate)
 	}
 	if err != nil {
-		return asyncjob.Result{ErrorCode: "directory_organize_failed", Permanent: errors.Is(err, ErrInput)}, err
+		return asyncjob.Result{ErrorCode: "directory_organize_failed", Permanent: errors.Is(err, ErrInput) || errors.Is(err, ErrDisabled)}, err
 	}
 	return asyncjob.Result{ResultJSON: b.ResultJSON}, nil
 }
@@ -963,7 +970,7 @@ func Cleanup(ctx context.Context, db *gorm.DB) error {
 				return nil
 			}
 			return removeTx(tx, row.UserID, row.ID)
-		}); err != nil {
+		}); err != nil && !errors.Is(err, ErrDisabled) {
 			return err
 		}
 	}

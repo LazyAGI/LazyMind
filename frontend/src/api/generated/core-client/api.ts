@@ -5795,6 +5795,7 @@ export interface SettingsChecksOpenAPIResponse {
     'started_at': string;
 }
 export interface SettingsFeatureControlsOpenAPIResponse {
+    'document_directories_enabled': boolean;
     'document_parsing_enabled': boolean;
     'mcp_enabled': boolean;
     'schedules_enabled': boolean;
@@ -7066,6 +7067,7 @@ export interface UserUIPreferencesOpenAPIResponse {
     'accepted_user_agreement_version': string;
     'chat_preference_notice_dismissed': boolean;
     'developer_mode_active': boolean;
+    'document_directories_enabled': boolean;
     'document_parsing_enabled': boolean;
     'mcp_enabled': boolean;
     'performance_stats_enabled': boolean;
@@ -7081,6 +7083,7 @@ export interface UserUIPreferencesPatchOpenAPIRequest {
     'accepted_user_agreement_version'?: string;
     'chat_preference_notice_dismissed'?: boolean;
     'developer_mode_active'?: boolean;
+    'document_directories_enabled'?: boolean;
     'document_parsing_enabled'?: boolean;
     'mcp_enabled'?: boolean;
     'performance_stats_enabled'?: boolean;

@@ -56,6 +56,11 @@ func TestDirectoryAggregateMatchesDevAndRollsBack(t *testing.T) {
 					applySQL(t, db, migrationPath(t, "version_mode/"+version+"/*.up.sql"), dialect)
 				}
 			}
+			for _, db := range []*sql.DB{aggregate, dev} {
+				if _, err := db.Exec("INSERT INTO user_ui_preferences (user_id, created_at, updated_at) VALUES ('existing', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"); err != nil {
+					t.Fatal(err)
+				}
+			}
 			path := migrationPath(t, "version_mode/v0_3/*.up.sql")
 			applySQL(t, aggregate, path, dialect)
 			paths, err := filepath.Glob("dev_mode/v0_3/*.up.sql")
@@ -66,6 +71,21 @@ func TestDirectoryAggregateMatchesDevAndRollsBack(t *testing.T) {
 			for _, p := range paths {
 				applySQL(t, dev, p, dialect)
 			}
+			for _, db := range []*sql.DB{aggregate, dev} {
+				var enabled bool
+				if err := db.QueryRow("SELECT document_directories_enabled FROM user_ui_preferences WHERE user_id='existing'").Scan(&enabled); err != nil || !enabled {
+					t.Fatalf("existing user default: %v %v", enabled, err)
+				}
+				if _, err := db.Exec("UPDATE user_ui_preferences SET document_directories_enabled=FALSE WHERE user_id='existing'; INSERT INTO user_ui_preferences (user_id, created_at, updated_at) VALUES ('new', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"); err != nil {
+					t.Fatal(err)
+				}
+				if err := db.QueryRow("SELECT document_directories_enabled FROM user_ui_preferences WHERE user_id='new'").Scan(&enabled); err != nil || !enabled {
+					t.Fatalf("new user default: %v %v", enabled, err)
+				}
+				if err := db.QueryRow("SELECT document_directories_enabled FROM user_ui_preferences WHERE user_id='existing'").Scan(&enabled); err != nil || enabled {
+					t.Fatalf("explicit false not preserved: %v %v", enabled, err)
+				}
+			}
 			a, b := directoryColumns(t, aggregate, dialect), directoryColumns(t, dev, dialect)
 			if len(a) == 0 || strings.Join(a, "\n") != strings.Join(b, "\n") {
 				t.Fatalf("directory schema mismatch: aggregate=%v dev=%v", a, b)
@@ -74,13 +94,20 @@ func TestDirectoryAggregateMatchesDevAndRollsBack(t *testing.T) {
 			if len(directoryColumns(t, aggregate, dialect)) != 0 {
 				t.Fatal("directory tables survived aggregate rollback")
 			}
-			for _, name := range []string{"document_folders", "document_directories"} {
+			for _, name := range []string{"add_document_directories_control", "document_folders", "document_directories"} {
 				applySQL(t, dev, migrationPath(t, "dev_mode/v0_3/*_"+name+".down.sql"), dialect)
 			}
 			if len(directoryColumns(t, dev, dialect)) != 0 {
 				t.Fatal("directory tables survived dev rollback")
 			}
 			for _, db := range []*sql.DB{aggregate, dev} {
+				var users int
+				if err := db.QueryRow("SELECT count(*) FROM user_ui_preferences WHERE user_id IN ('existing', 'new')").Scan(&users); err != nil || users != 2 {
+					t.Fatalf("rollback lost preferences: %d %v", users, err)
+				}
+				if _, err := db.Query("SELECT document_directories_enabled FROM user_ui_preferences"); err == nil {
+					t.Fatal("control survived rollback")
+				}
 				var title string
 				if err := db.QueryRow("SELECT title FROM directory_migration_existing WHERE id=1").Scan(&title); err != nil || title != "keep" {
 					t.Fatalf("existing data changed after upgrade and rollback: title=%q err=%v", title, err)

@@ -12942,6 +12942,8 @@ components:
             type: object
         settingsFeatureControlsOpenAPIResponse:
             properties:
+                document_directories_enabled:
+                    type: boolean
                 document_parsing_enabled:
                     type: boolean
                 mcp_enabled:
@@ -12955,6 +12957,7 @@ components:
                 workflows_enabled:
                     type: boolean
             required:
+                - document_directories_enabled
                 - document_parsing_enabled
                 - mcp_enabled
                 - schedules_enabled
@@ -14580,6 +14583,8 @@ components:
                     type: boolean
                 developer_mode_active:
                     type: boolean
+                document_directories_enabled:
+                    type: boolean
                 document_parsing_enabled:
                     type: boolean
                 mcp_enabled:
@@ -14604,6 +14609,7 @@ components:
                 - accepted_user_agreement_version
                 - chat_preference_notice_dismissed
                 - developer_mode_active
+                - document_directories_enabled
                 - document_parsing_enabled
                 - mcp_enabled
                 - performance_stats_enabled
@@ -14622,6 +14628,8 @@ components:
                 chat_preference_notice_dismissed:
                     type: boolean
                 developer_mode_active:
+                    type: boolean
+                document_directories_enabled:
                     type: boolean
                 document_parsing_enabled:
                     type: boolean

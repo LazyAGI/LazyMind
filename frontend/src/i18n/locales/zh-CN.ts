@@ -9073,6 +9073,7 @@ const zhCN = {
       skills: { title: "我的技能", summary: "统一启用或停用全部个人技能" },
       workflows: { title: "我的工作流", summary: "统一启用或停用全部可用工作流" },
       mcp: { title: "MCP 工具", summary: "统一启停当前账号创建的 MCP 服务；重新开启时，只会启用已经通过验证的服务。" },
+      documentDirectories: { title: "逻辑目录整理", summary: "开启后可收录和整理资料。关闭后停止收录与整理、取消未完成的目录任务并隐藏入口，保留已有目录和内容；重新开启不会自动重跑已取消的任务" },
       documentParsing: { title: "文档解析", summary: "暂停新的文档解析与重新解析" },
     },
 

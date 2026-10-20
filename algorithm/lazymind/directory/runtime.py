@@ -12,7 +12,8 @@ from .sources import normalize_observation, _history_messages
 
 
 class DirectoryRuntime:
-    def __init__(self, user_id, conversation_id, history_id, run_id, configuration=None):
+    def __init__(self, user_id, conversation_id, history_id, run_id, configuration=None, *, control_generation=0):
+        self.control_generation = control_generation
         self.user_id = user_id
         self.history_id = history_id
         self.run_id = run_id
@@ -32,6 +33,7 @@ class DirectoryRuntime:
     def request(self, operation, **payload):
         response = post_core_api(self.path, {
             'operation': operation, 'history_id': self.history_id, 'run_id': self.run_id, **payload,
+            'document_directories_generation': self.control_generation,
         }, user_id=self.user_id)
         return response.get('response', {}).get('data', {})
 

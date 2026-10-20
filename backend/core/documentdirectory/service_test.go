@@ -615,3 +615,56 @@ func TestRestoreChecksOriginalGroupAndPreservesReading(t *testing.T) {
 		})
 	}
 }
+
+func TestFeaturePauseStopsWritesAndPreservesDirectories(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+	must(t, db.AutoMigrate(&orm.UserUIPreferences{}))
+	d := create(t, db, "keep")
+	b, j := batch(t, db, d, Input{})
+	must(t, SaveObservations(ctx, db, "u", "c", "h", "r", "query", []Observation{{CallID: "capture", Candidates: []Candidate{sample("/a")}}}))
+	must(t, db.Model(&orm.DocumentDirectory{}).Where("id=?", d.ID).Update("last_used_at", time.Now().Add(-8*24*time.Hour)).Error)
+	must(t, db.Model(&orm.UserUIPreferences{}).Create(map[string]any{"user_id": "u", "document_directories_enabled": false, "created_at": time.Now().UTC(), "updated_at": time.Now().UTC()}).Error)
+	must(t, db.Transaction(func(tx *gorm.DB) error { return Pause(tx, "u") }))
+	if _, err := Execute(ctx, db, "u", Command{Operation: "organize", DirectoryID: d.ID}); !errors.Is(err, ErrDisabled) {
+		t.Fatalf("manual: %v", err)
+	}
+	if err := SaveObservations(ctx, db, "u", "c", "h", "r", "", []Observation{{CallID: "later"}}); !errors.Is(err, ErrDisabled) {
+		t.Fatalf("capture: %v", err)
+	}
+	must(t, QueueIdle(ctx, db, orm.ConversationIdleEvent{UserID: "u"}))
+	must(t, Cleanup(ctx, db))
+	if _, err := requireDirectory(db, "u", d.ID); err != nil {
+		t.Fatalf("disabled cleanup removed data: %v", err)
+	}
+	var job orm.AsyncJob
+	must(t, db.Where("id=?", j.ID).Take(&job).Error)
+	must(t, db.Where("id=?", b.ID).Take(&b).Error)
+	if job.Status != "canceled" || job.LockUntil != nil || b.Status != "canceled" {
+		t.Fatalf("work survived pause: job=%+v batch=%+v", job, b)
+	}
+	var pending int64
+	must(t, db.Model(&orm.DocumentObservation{}).Where("user_id=? AND batch_id=?", "u", "").Count(&pending).Error)
+	if pending != 0 {
+		t.Fatalf("%d observations would be replayed", pending)
+	}
+	if _, err := Execute(ctx, db, "other", Command{Operation: "create", Name: "other", Intent: "other"}); err != nil {
+		t.Fatal(err)
+	}
+	must(t, db.Model(&orm.UserUIPreferences{}).Where("user_id=?", "u").Update("document_directories_enabled", true).Error)
+	if err := mutate(ctx, db, "u", func(tx *gorm.DB) error { return ownsJob(tx, j) }); !errors.Is(err, maintenanceLeaseLost) {
+		t.Fatalf("old result can commit after reenable: %v", err)
+	}
+	oldRun := context.WithValue(ctx, controlGenerationKey{}, int64(0))
+	if err := SaveObservations(oldRun, db, "u", "c", "h", "r", "", []Observation{{CallID: "late"}}); !errors.Is(err, ErrDisabled) {
+		t.Fatalf("old chat flushed after reenable: %v", err)
+	}
+	if _, err := folderOperation(oldRun, db, "u", "c", Command{Operation: "folder_checkpoint"}, FolderRequest{}); !errors.Is(err, ErrDisabled) {
+		t.Fatalf("old folder callback accepted: %v", err)
+	}
+	newRun := context.WithValue(ctx, controlGenerationKey{}, int64(1))
+	must(t, SaveObservations(newRun, db, "u", "c", "h2", "r2", "", []Observation{{CallID: "new"}}))
+	if _, err := Get(ctx, db, "u", d.ID); err != nil {
+		t.Fatalf("retained directory unavailable: %v", err)
+	}
+}

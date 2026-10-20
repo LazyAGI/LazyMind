@@ -9328,6 +9328,7 @@ const enUS = {
       skills: { title: "My skills", summary: "Enable or disable all personal skills together" },
       workflows: { title: "My workflows", summary: "Enable or disable all available workflows together" },
       mcp: { title: "MCP tools", summary: "Enable or disable MCP services created by the current account together. When re-enabled, only verified services are turned on." },
+      documentDirectories: { title: "Document directory organization", summary: "Collect and organize resources. Turning this off stops collection and organization, cancels unfinished directory tasks, and hides directories while keeping existing content. Canceled tasks do not restart automatically when enabled again" },
       documentParsing: { title: "Document parsing", summary: "Pause new document parsing and re-parsing" },
     },
 

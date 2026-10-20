@@ -2113,12 +2113,14 @@ async def _handle_chat_impl(
             'browser.runtime', priority=90, authoritative=True, content_kind='instruction',
         )
     directory_runtime = None
-    if (not sidechat_readonly and not workflow_turn_is_bound and not is_driver_turn
+    if (agent.document_directories_enabled and not sidechat_readonly
+            and not workflow_turn_is_bound and not is_driver_turn
             and not configuration_preview and user_id and conversation_id
             and conversation.history_id and conversation.run_id):
         from lazymind.directory.runtime import DirectoryRuntime
         directory_runtime = DirectoryRuntime(
             user_id, conversation_id, conversation.history_id, conversation.run_id, configuration_runtime,
+            control_generation=agent.document_directories_generation,
         )
         all_tools.extend(directory_runtime.tools())
         prompt_builder.runtime(

@@ -83,7 +83,7 @@ export function useSettingsChange(onSaved: (result: SettingsChangeResult) => voi
     </>}
   >
     {failure ? <Alert type="error" showIcon message={t(failure === "check" ? "settingsPage.change.taskCheckFailed" : "settingsPage.change.saveFailed")} /> :
-      <p>{t(enablingDeveloper ? "settingsPage.confirm.developerEnableContent" : pending?.key === "developer_mode_active" ? "settingsPage.change.developerConsequence" : "settingsPage.change.consequence")}</p>
+      <p>{t(enablingDeveloper ? "settingsPage.confirm.developerEnableContent" : pending?.key === "developer_mode_active" ? "settingsPage.change.developerConsequence" : pending?.key === "document_directories_enabled" ? "settingsPage.controls.documentDirectories.summary" : "settingsPage.change.consequence")}</p>
     }
   </Modal>;
   return { requestChange, saving, dialog };

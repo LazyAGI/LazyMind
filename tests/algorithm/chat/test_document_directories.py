@@ -477,3 +477,14 @@ def test_cloud_read_reports_all_matching_active_scopes():
     assert len(scoped) == 1
     assert scoped[0]['inventory_ids'] == ['A', 'B']
     assert scoped[0]['candidates'][0]['resource_id'] == 'file-1'
+
+
+def test_callbacks_keep_the_chat_control_generation(monkeypatch):
+    from lazymind.directory import runtime as module
+    send = Mock(return_value={'response': {'data': {}}})
+    monkeypatch.setattr(module, 'post_core_api', send)
+    current = DirectoryRuntime('user', 'conversation', 'history', 'run', control_generation=7)
+    current.request('observations', observations=[])
+    assert send.call_args.args[1]['document_directories_generation'] == 7
+    current.request('folder_checkpoint')
+    assert send.call_args.args[1]['document_directories_generation'] == 7
