@@ -10,12 +10,18 @@ import (
 	"gorm.io/gorm/clause"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/store"
+	"lazymind/core/subagent"
+	"lazymind/core/tasktiming"
 )
 
 func registerForkableHistoryRun(ctx context.Context, db *gorm.DB, convID, historyID, runID, query string, target chatPersistTarget, ext json.RawMessage) error {
-	return conversationCheckpoint(ctx, db, convID, func(tx *gorm.DB) error {
+	err := conversationCheckpoint(ctx, db, convID, func(tx *gorm.DB) error {
 		var conversation orm.Conversation
 		if err := tx.Where("id = ? AND deleted_at IS NULL", convID).Take(&conversation).Error; err != nil {
+			return err
+		}
+		if err := tasktiming.BeginChat(ctx, tx, runID, historyID, convID, conversation.CreateUserID, tasktiming.RequestedAt(ctx)); err != nil {
 			return err
 		}
 		var history orm.ChatHistory
@@ -35,6 +41,10 @@ func registerForkableHistoryRun(ctx context.Context, db *gorm.DB, convID, histor
 		now := time.Now().UTC()
 		return tx.Create(&orm.ChatHistory{ID: historyID, ConversationID: convID, Seq: target.Seq, RawContent: query, Content: query, RunID: runID, RunStatus: "generating", Ext: ext, TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now}}).Error
 	})
+	if err == nil {
+		subagent.EventHooks.CallConversationEvent(ctx, store.State(), convID, historyID, "task_run_updated", map[string]any{})
+	}
+	return err
 }
 
 // A short database checkpoint shared by snapshot readers and history writers.

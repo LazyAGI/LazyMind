@@ -5,6 +5,16 @@ package common
 import "net/http"
 
 func init() {
+	for _, source := range []string{
+		"cancellation store unavailable",
+		"chat execution store unavailable",
+		"task cancellation is not configured",
+		"removal cancellation has no execution snapshot",
+		"workflow stop pending",
+		"chat stop unavailable",
+	} {
+		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
+	}
 	registerAdditionalErrorPattern("SKILL.md frontmatter field %q conflicts with compatibility normalization", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("verified source name has an unsupported runtime path character", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorPattern("%w in subdirectory %q", "Invalid request", http.StatusBadRequest, 2000103)

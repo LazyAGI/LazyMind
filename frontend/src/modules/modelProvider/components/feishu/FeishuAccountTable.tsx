@@ -78,14 +78,14 @@ export default function FeishuAccountTable({
         if (record.connection_method === "managed_oauth") {
           return <Tag color="warning">{t("modelProvider.cloudDocuments.feishuReconnectRequired")}</Tag>;
         }
-        if (status === "connected") {
+        if (status === "connected" && !record.authorizationPending) {
           return (
             <Tag className="model-provider-service-status" color="success">
               {t("modelProvider.cloudDocuments.authValid")}
             </Tag>
           );
         }
-        if (status === "waiting") {
+        if (record.authorizationPending || status === "waiting" || (status === "pending" && record.connection?.connectionId)) {
           return (
             <Tag className="model-provider-service-status" color="processing">
               {t("modelProvider.cloudDocuments.authPending")}
@@ -195,7 +195,7 @@ export default function FeishuAccountTable({
             icon={<SafetyCertificateOutlined />}
             onClick={() => onAuthorize(record)}
           >
-            {record.status === "connected"
+            {record.status === "connected" && !record.authorizationPending
               ? t("admin.dataSourceFeishuReconnectAction")
               : t("admin.dataSourceFeishuAuthorizeAction")}
           </Button>

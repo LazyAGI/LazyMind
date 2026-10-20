@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -70,6 +72,9 @@ func SnapshotMarketTaskHistory(ctx context.Context, db *gorm.DB, install *orm.Kn
 			result = map[string]any{}
 		}
 		result["parse"], result["dataset_id"] = parse, own.DatasetID
+		if parse.Files != nil {
+			result["file_snapshot"] = parse.Files
+		}
 		data, err := json.Marshal(result)
 		if err != nil {
 			return err
@@ -82,6 +87,8 @@ func SnapshotMarketTaskHistory(ctx context.Context, db *gorm.DB, install *orm.Kn
 }
 
 type MarketParseProgressInfo struct {
+	// Files is internal; only the paginated endpoint exposes file rows.
+	Files    []MarketTaskFile    `json:"-"`
 	State    string              `json:"state"` // pending | parsing | done | partial_failed | failed
 	Total    int                 `json:"total"`
 	Pending  int                 `json:"pending"`
@@ -90,7 +97,14 @@ type MarketParseProgressInfo struct {
 	Failed   int                 `json:"failed"`
 	Canceled int                 `json:"canceled"`
 	Unknown  int                 `json:"unknown"`
-	Failures []MarketFileFailure `json:"failures"`
+	Failures []MarketFileFailure `json:"failures,omitempty"`
+}
+
+type MarketTaskFile struct {
+	FileID     string `json:"file_id"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	ReasonCode string `json:"reason_code"`
 }
 
 // MarketParseProgress aggregates the parse tasks recorded in the install config
@@ -107,6 +121,23 @@ func MarketParseProgress(ctx context.Context, db *gorm.DB, datasetID string, tas
 	if err != nil {
 		return MarketParseProgressInfo{State: "unknown", Total: len(taskIDs) + len(failures), Unknown: len(taskIDs) + len(failures)}
 	}
+	return MarketParseProgressFromStates(taskIDs, failures, files)
+}
+
+// MarketParseProgressFromStates aggregates an already loaded file scope. Callers
+// can batch the database read for jobs that belong to the same dataset.
+func MarketParseProgressFromStates(taskIDs []string, failures []MarketFileFailure, files []MarketTaskState) MarketParseProgressInfo {
+	wanted := make(map[string]bool, len(taskIDs))
+	for _, id := range taskIDs {
+		wanted[id] = true
+	}
+	scoped := make([]MarketTaskState, 0, len(taskIDs))
+	for _, file := range files {
+		if wanted[file.Task.ID] {
+			scoped = append(scoped, file)
+		}
+	}
+	files = scoped
 	p := MarketParseProgressInfo{Failed: len(failures), Failures: append([]MarketFileFailure{}, failures...)}
 	seen := make(map[string]bool, len(files))
 	for _, file := range files {
@@ -135,6 +166,35 @@ func MarketParseProgress(ctx context.Context, db *gorm.DB, datasetID string, tas
 		}
 	}
 	p.Total = len(taskIDs) + len(failures)
+	p.Files = make([]MarketTaskFile, 0, p.Total)
+	for _, file := range files {
+		status, reason := "unfinished", "waiting"
+		switch parseGroup(file.State) {
+		case "done":
+			status, reason = "success", "success"
+		case "failed":
+			status, reason = "failed", file.Reason
+		case "canceled":
+			status, reason = "canceled", "canceled"
+		case "parsing":
+			reason = "processing"
+		case "unknown":
+			reason = "unknown"
+		}
+		p.Files = append(p.Files, MarketTaskFile{FileID: file.Task.ID, Name: file.Task.DisplayName, Status: status, ReasonCode: reason})
+	}
+	for _, id := range taskIDs {
+		if !seen[id] {
+			p.Files = append(p.Files, MarketTaskFile{FileID: id, Name: id, Status: "failed", ReasonCode: "missing_task"})
+		}
+	}
+	for i, failure := range failures {
+		if failure.Reason != "import_failed" && failure.Reason != "missing_task" && failure.Reason != "parse_failed" && failure.Reason != "rate_limited" {
+			failure.Reason = "import_failed"
+		}
+		p.Files = append(p.Files, MarketTaskFile{FileID: fmt.Sprintf("import:%d", i), Name: failure.Name, Status: "failed", ReasonCode: failure.Reason})
+	}
+	sort.Slice(p.Files, func(i, j int) bool { return p.Files[i].FileID < p.Files[j].FileID })
 	switch {
 	case p.Unknown > 0:
 		p.State = "unknown"

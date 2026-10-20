@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import { Alert, Button, Select, Skeleton, Switch, Tag, Tooltip } from "antd";
 import {
   CheckCircleOutlined,
@@ -225,6 +225,17 @@ export default function DefaultModelConfigPanel({
   const [cloudServiceSearchKeywords, setCloudServiceSearchKeywords] = useState<
     Partial<Record<CloudServiceSlotKey, string>>
   >({});
+  const [keyboardNavigation, setKeyboardNavigation] = useState(false);
+  const selectInteractionProps = {
+    popupClassName: `model-provider-select-dropdown${keyboardNavigation ? " is-keyboard-navigation" : ""}`,
+    onMouseDown: () => setKeyboardNavigation(false),
+    onInputKeyDown: () => setKeyboardNavigation(true),
+    popupRender: (menu: ReactElement) => (
+      <div onMouseMove={() => setKeyboardNavigation(false)} onMouseLeave={() => setKeyboardNavigation(false)}>
+        {menu}
+      </div>
+    ),
+  };
   const highlightedRowRef = useRef<HTMLDivElement | null>(null);
   const focusedHighlightRef = useRef<string | null>(null);
 
@@ -285,11 +296,12 @@ export default function DefaultModelConfigPanel({
           <label
             className="model-provider-default-title"
             htmlFor={`model-provider-${module.key.toLowerCase()}`}
+            title={moduleTitle}
           >
             {module.required ? (
               <span className="is-required">*</span>
             ) : null}
-            <span>{moduleTitle}</span>
+            <span className="model-provider-default-title-text">{moduleTitle}</span>
           </label>
           {configured && shouldShowMaxInputTokens ? (
             <span className="model-provider-max-input-tokens">
@@ -298,7 +310,7 @@ export default function DefaultModelConfigPanel({
               })}
             </span>
           ) : null}
-          <Tooltip placement="top" title={moduleSubtitle}>
+          <Tooltip placement="top" title={moduleSubtitle} trigger={["hover", "focus"]}>
             <button
               aria-label={t("modelProvider.moduleHelpAria", {
                 title: moduleTitle,
@@ -406,7 +418,7 @@ export default function DefaultModelConfigPanel({
                 ? t("modelProvider.requiredModelPlaceholder")
                 : t("modelProvider.optionalModelPlaceholder"))
           }
-          popupClassName="model-provider-select-dropdown"
+          {...selectInteractionProps}
           showSearch
           suffixIcon={
             <DownOutlined className="model-provider-select-caret" />
@@ -422,6 +434,8 @@ export default function DefaultModelConfigPanel({
           onDropdownVisibleChange={(open) => {
             if (open) {
               void loadModuleModels(module.key, true);
+            } else {
+              setKeyboardNavigation(false);
             }
           }}
           loading={optionLoading || saving}
@@ -518,10 +532,11 @@ export default function DefaultModelConfigPanel({
           <label
             className="model-provider-default-title"
             htmlFor={`model-provider-cloud-${service.key}`}
+            title={serviceTitle}
           >
-            <span>{serviceTitle}</span>
+            <span className="model-provider-default-title-text">{serviceTitle}</span>
           </label>
-          <Tooltip placement="top" title={serviceSubtitle}>
+          <Tooltip placement="top" title={serviceSubtitle} trigger={["hover", "focus"]}>
             <button
               aria-label={t("modelProvider.moduleHelpAria", {
                 title: serviceTitle,
@@ -603,7 +618,7 @@ export default function DefaultModelConfigPanel({
           id={`model-provider-cloud-${service.key}`}
           optionLabelProp="label"
           placeholder={cloudReady?.group_name || t("modelProvider.cloudServicePlaceholder")}
-          popupClassName="model-provider-select-dropdown"
+          {...selectInteractionProps}
           showSearch
           suffixIcon={
             <DownOutlined className="model-provider-select-caret" />
@@ -621,6 +636,8 @@ export default function DefaultModelConfigPanel({
           onDropdownVisibleChange={(open) => {
             if (open) {
               void loadVerifiedCloudService(service);
+            } else {
+              setKeyboardNavigation(false);
             }
           }}
           loading={optionLoading || saving}
@@ -723,7 +740,7 @@ export default function DefaultModelConfigPanel({
               <div className="model-provider-default-list">{configuredCards.map((card) => card.node)}</div>
             ) : <p className="model-provider-capability-empty">{t("modelProvider.configuredCapabilitiesEmpty")}</p>}
           </section>
-          <section className="model-provider-capability-section" aria-label={t("modelProvider.pendingCapabilities")}>
+          <section className="model-provider-capability-section model-provider-pending-section" aria-label={t("modelProvider.pendingCapabilities")}>
             <div className="model-provider-capability-heading">
               <h3>{t("modelProvider.pendingCapabilities")} <span>{pendingCards.length}</span></h3>
 

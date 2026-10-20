@@ -35,7 +35,7 @@ def test_postponed_tool_annotations_are_resolved_before_registration():
     assert not isinstance(tool.__annotations__['value'], str)
 
 
-def test_googledrive_docs_are_loaded_on_demand_without_loading_all_docs():
+def test_googledrive_docs_are_loaded_on_demand_without_loading_all_docs(tmp_path):
     script = r'''
 import sys
 from lazyllm import init_session, locals as lazyllm_locals
@@ -60,6 +60,7 @@ assert description.startswith('Search the live source Google Drive')
 '''
     env = os.environ.copy()
     env['LAZYLLM_INIT_DOC'] = 'False'
+    env['LAZYLLM_TRACE_LOCAL_STORAGE_DIR'] = str(tmp_path / 'traces')
     env['PYTHONPATH'] = os.pathsep.join((
         str(REPO_ROOT / 'algorithm' / 'lazyllm'),
         str(REPO_ROOT / 'algorithm'),

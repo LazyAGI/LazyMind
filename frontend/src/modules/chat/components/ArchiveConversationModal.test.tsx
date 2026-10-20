@@ -168,8 +168,8 @@ describe("ArchiveConversationModal", () => {
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(await within(dialog).findByRole("radio", { name: /产品设计/ }));
     fireEvent.click(within(dialog).getByRole("button", { name: "归档" }));
-    await waitFor(() => expect(onArchived).toHaveBeenCalledWith(["first", "last"], ["failed"]));
-    expect(mocks.archiveConversation.mock.calls).toEqual([["first", "folder-1"], ["failed", "folder-1"], ["last", "folder-1"]]);
+    await waitFor(() => expect(onArchived).toHaveBeenCalledWith(["first", "last"], ["failed"], { receipts: [], skippedIds: [] }));
+    expect(mocks.archiveConversation.mock.calls).toEqual([["first", "folder-1", true], ["failed", "folder-1", true], ["last", "folder-1", true]]);
   });
 
   it("retains a failed batch and retries without duplicate in-flight submissions", async () => {
@@ -186,6 +186,30 @@ describe("ArchiveConversationModal", () => {
     await waitFor(() => expect(submit).not.toHaveClass("ant-btn-loading"));
     expect(onArchived).not.toHaveBeenCalled();
     fireEvent.click(submit);
-    await waitFor(() => expect(onArchived).toHaveBeenCalledWith(["first"], []));
+    await waitFor(() => expect(onArchived).toHaveBeenCalledWith(["first"], [], { receipts: [], skippedIds: [] }));
+  });
+
+  it("returns versions only for this batch and excludes already archived conversations from its count", async () => {
+    const archivedAt = "2026-10-19T08:00:00.123456Z";
+    mocks.archiveConversation.mockImplementation(async (id: string) => ({
+      conversation_id: id, archived_at: archivedAt, newly_archived: id !== "already-archived",
+    }));
+    const { onArchived } = renderModal({ conversationIds: ["new", "already-archived", "new"] });
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByRole("radio", { name: /未分类/ });
+    fireEvent.click(within(dialog).getByRole("button", { name: "归档" }));
+    await waitFor(() => expect(onArchived).toHaveBeenCalledWith(["new"], [], {
+      receipts: [{ conversation_id: "new", archived_at: archivedAt }], skippedIds: ["already-archived"],
+    }));
+    expect(mocks.archiveConversation).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports an entirely skipped batch so the stale active list can refresh", async () => {
+    mocks.archiveConversation.mockResolvedValue({ conversation_id: "old", newly_archived: false, archived_at: "2026-10-19T08:00:00Z" });
+    const { onArchived } = renderModal({ conversationIds: ["old"] });
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByRole("radio", { name: /未分类/ });
+    fireEvent.click(within(dialog).getByRole("button", { name: "归档" }));
+    await waitFor(() => expect(onArchived).toHaveBeenCalledWith([], [], { receipts: [], skippedIds: ["old"] }));
   });
 });

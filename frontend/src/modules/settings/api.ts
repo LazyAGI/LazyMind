@@ -16,6 +16,7 @@ export interface SettingsControls {
   workflows_enabled: boolean;
   mcp_enabled: boolean;
   document_parsing_enabled: boolean;
+  document_directories_enabled: boolean;
 }
 
 export interface SettingsOverviewCounts {

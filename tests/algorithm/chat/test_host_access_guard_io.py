@@ -48,7 +48,7 @@ def test_replaced_path_is_rejected_before_write(workspace_runtime, tmp_path, pha
         operation.update(status='allowed', decision='allowed')
     setattr(core, phase, replace)
     result = middleware.execute_with_records({'function': {
-        'name': 'write', 'arguments': {'path': str(target), 'content': 'must not write'},
+        'name': 'write', 'arguments': {'file_path': str(target), 'content': 'must not write'},
     }}).results[0]
     assert result['ok'] is False
     assert list(outside.iterdir()) == []

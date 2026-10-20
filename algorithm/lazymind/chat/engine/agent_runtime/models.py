@@ -51,6 +51,7 @@ class AgentExecutionOptions:
     model_context_provider: Optional[Callable[[], Optional[str]]] = None
     configuration_runtime: Any = None
     knowledge_management: Any = None
+    directory_runtime: Any = None
     skills: Any = None
     prompt_skills: Optional[list[str]] = None
     excluded_skills: Optional[list[str]] = None
@@ -61,6 +62,7 @@ class AgentExecutionOptions:
     fs: Any = None
     skills_dir: Optional[str] = None
     extra_stop_condition: Optional[Callable[..., Any]] = None
+    stop_on_repeated_results: bool = False
     max_retries: Optional[int] = None
     expanded_round_limit: Optional[int] = None
     tool_failure_limits: Optional[dict[str, int]] = None

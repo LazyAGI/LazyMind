@@ -1598,6 +1598,9 @@ func startParseTasksAtLevel(ctx context.Context, userID, datasetID string, taskI
 		submittedExt.ProcessingLevel = processingLevel
 		submittedExt.ProcessingRevision = dataset.ProcessingRevision
 		taskRow.Ext = mustJSON(submittedExt)
+		if normalizeSpreadsheetDirectParse(&dExt) {
+			persistDocumentConvertState(ctx, datasetID, docRow.ID, dExt)
+		}
 		candidate := startCandidate{task: taskRow, doc: docRow, docExt: dExt}
 		candidates = append(candidates, candidate)
 		if needsOfficeConvertBeforeParse(dExt, ocrConfig, parseProfile) {

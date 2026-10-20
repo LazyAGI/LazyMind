@@ -580,7 +580,7 @@ function IdentityDocumentCard({
             {fields.map((field, fieldIndex) => {
               const editing = editingField?.path === field.path;
               return (
-                <div key={field.path}>
+                <div className="memory-identity-field-item" key={field.path}>
                   {fieldIndex === 0 ||
                   fields[fieldIndex - 1].sectionPath !== field.sectionPath ? (
                     <h5 className="memory-identity-section-title">
@@ -624,42 +624,46 @@ function IdentityDocumentCard({
                         )
                       )}
                     </span>
-                    <Button
-                      aria-label={t("admin.memoryCurrentEditField", {
-                        field: field.label,
-                      })}
-                      disabled={saving}
-                      icon={
-                        field.valueType === "string-list" ? (
-                          <PlusOutlined />
-                        ) : (
-                          <EditOutlined />
-                        )
-                      }
-                      size="small"
-                      type="text"
-                      onClick={() => beginEdit(field)}
-                    />
-                    {(Array.isArray(field.value)
-                      ? field.value.length > 0
-                      : Boolean(field.value?.trim())) ? (
+                    <div className="memory-identity-field-controls">
                       <Button
+                        aria-label={t("admin.memoryCurrentEditField", {
+                          field: field.label,
+                        })}
                         disabled={saving}
+                        icon={
+                          field.valueType === "string-list" ? (
+                            <PlusOutlined />
+                          ) : (
+                            <EditOutlined />
+                          )
+                        }
                         size="small"
                         type="text"
-                        onClick={() =>
-                          void savePatch(field.buildClearPatch(), false)
-                        }
-                      >
-                        {t("admin.memoryCurrentClearField")}
-                      </Button>
-                    ) : null}
+                        onClick={() => beginEdit(field)}
+                      />
+                      {(Array.isArray(field.value)
+                        ? field.value.length > 0
+                        : Boolean(field.value?.trim())) ? (
+                        <Button
+                          aria-label={`${t("admin.memoryCurrentClearField")} ${field.label}`}
+                          disabled={saving}
+                          size="small"
+                          type="text"
+                          onClick={() =>
+                            void savePatch(field.buildClearPatch(), false)
+                          }
+                        >
+                          {t("admin.memoryCurrentClearField")}
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
 
                   {editing ? (
                     <div className="memory-identity-field-editor">
                       {field.valueType === "string-list" ? (
                         <Input
+                          aria-label={t("admin.memoryCurrentEditField", { field: field.label })}
                           autoFocus
                           disabled={saving}
                           value={
@@ -677,6 +681,7 @@ function IdentityDocumentCard({
                         />
                       ) : (
                         <Input.TextArea
+                          aria-label={t("admin.memoryCurrentEditField", { field: field.label })}
                           autoFocus
                           autoSize={{ minRows: 2, maxRows: 6 }}
                           disabled={saving}

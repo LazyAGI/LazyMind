@@ -850,6 +850,18 @@ export const ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum = {
 
 export type ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum = typeof ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum[keyof typeof ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum];
 
+export interface ChatErrorData {
+    /**
+     * Legacy error detail; persisted chat failures include history_id.
+     */
+    'detail'?: any;
+    'run_terminal'?: RunTerminal;
+}
+export interface ChatErrorResponse {
+    'code': number;
+    'data'?: ChatErrorData;
+    'message': string;
+}
 export interface ChatExport {
     'content_type': ChatExportContentTypeEnum;
     'end': number;
@@ -1463,6 +1475,12 @@ export interface ConversationArchiveFolderRequest {
 }
 export interface ConversationArchiveRequest {
     'folder_id'?: string | null;
+    'only_if_active'?: boolean;
+}
+export interface ConversationArchiveResponse {
+    'archived_at': string;
+    'conversation_id': string;
+    'newly_archived': boolean;
 }
 export interface ConversationBatchDeleteRequest {
     'conversation_ids': Array<string>;
@@ -2123,6 +2141,9 @@ export interface ConversationTrailListResponse {
     'next_page_token'?: string;
     'total_size'?: number;
 }
+export interface ConversationUnarchiveRequest {
+    'expected_archived_at'?: string;
+}
 export interface CoreEmptyResponse {
     'code': number;
     'message': string;
@@ -2721,6 +2742,39 @@ export interface DiffTreeOpenAPIResponse {
     'files'?: Array<DiffFileOpenAPIResponse>;
     'user_id'?: string;
 }
+export interface DirectoryLocalFile {
+    'content_base64': string;
+    'error_code'?: string;
+    'filename': string;
+    'mime_type': string;
+    'namespace': string;
+    'path': string;
+    'size': number;
+}
+export interface DirectoryLocalFileResponse {
+    'code': number;
+    'data': DirectoryLocalFile;
+}
+export interface DirectoryMail {
+    'attachments': Array<DirectoryMailAttachmentsInner>;
+    'body': string;
+    'cc': string;
+    'date': string;
+    'from': string;
+    'mailbox': string;
+    'subject': string;
+    'to': string;
+    'truncated': boolean;
+}
+export interface DirectoryMailAttachmentsInner {
+    'filename': string;
+    'mime_type': string;
+    'size': number;
+}
+export interface DirectoryMailResponse {
+    'code': number;
+    'data': DirectoryMail;
+}
 export interface DiscoverResponse {
     'success': boolean;
     'tools'?: Array<ToolResponse>;
@@ -3064,6 +3118,153 @@ export const DocumentCrossReferenceTargetsResultRepresentationEnum = {
 
 export type DocumentCrossReferenceTargetsResultRepresentationEnum = typeof DocumentCrossReferenceTargetsResultRepresentationEnum[keyof typeof DocumentCrossReferenceTargetsResultRepresentationEnum];
 
+export interface DocumentDirectory {
+    'auto_add': boolean;
+    'coverage'?: Array<{ [key: string]: any; }>;
+    'id': string;
+    'intent': string;
+    'last_used_at': string;
+    'name': string;
+    'organization': string;
+    'organized_at'?: string;
+    'pinned': boolean;
+    'version': number;
+}
+export interface DocumentDirectoryActionResult {
+    'batch'?: DocumentDirectoryBatch;
+    'directory'?: DocumentDirectory;
+    'entry'?: DocumentDirectoryEntry;
+    'evicted'?: string;
+    'group'?: DocumentDirectoryGroup;
+}
+export interface DocumentDirectoryActionResultResponse {
+    'code': number;
+    'data': DocumentDirectoryActionResult;
+}
+export interface DocumentDirectoryBatch {
+    'acknowledged': boolean;
+    'created_at': string;
+    'directory_id': string;
+    'id': string;
+    'parent_id': string;
+    'result'?: { [key: string]: any; };
+    'status': string;
+}
+export interface DocumentDirectoryBatches {
+    'batches': Array<DocumentDirectoryBatch>;
+}
+export interface DocumentDirectoryBatchesResponse {
+    'code': number;
+    'data': DocumentDirectoryBatches;
+}
+export interface DocumentDirectoryCommand {
+    'auto_add'?: boolean;
+    'batch_id'?: string;
+    'candidate'?: { [key: string]: any; };
+    'directory_id'?: string;
+    'entry_id'?: string;
+    'group_id'?: string;
+    'instruction'?: string;
+    'intent'?: string;
+    'name'?: string;
+    'operation': DocumentDirectoryCommandOperationEnum;
+    'organization'?: string;
+    'parent_id'?: string;
+    'pinned'?: boolean;
+    'version'?: number;
+}
+
+export const DocumentDirectoryCommandOperationEnum = {
+    Create: 'create',
+    Update: 'update',
+    Delete: 'delete',
+    Touch: 'touch',
+    Group: 'group',
+    DeleteGroup: 'delete_group',
+    Entry: 'entry',
+    EntryPin: 'entry_pin',
+    Exclude: 'exclude',
+    Restore: 'restore',
+    Organize: 'organize',
+    Reorganize: 'reorganize',
+    Retry: 'retry',
+    Cancel: 'cancel',
+    Acknowledge: 'acknowledge'
+} as const;
+
+export type DocumentDirectoryCommandOperationEnum = typeof DocumentDirectoryCommandOperationEnum[keyof typeof DocumentDirectoryCommandOperationEnum];
+
+export interface DocumentDirectoryDetail {
+    'directory': DocumentDirectory;
+    'entries': Array<DocumentDirectoryEntry>;
+    'folder'?: DocumentFolderInventory;
+    'group_counts'?: { [key: string]: number; };
+    'groups': Array<DocumentDirectoryGroup>;
+    'organizing': boolean;
+    'total'?: number;
+}
+export interface DocumentDirectoryDetailResponse {
+    'code': number;
+    'data': DocumentDirectoryDetail;
+}
+export interface DocumentDirectoryEntry {
+    'access_state': string;
+    'confirmed': boolean;
+    'content_state'?: string;
+    'content_version'?: string;
+    'evidence'?: { [key: string]: any; };
+    'excluded': boolean;
+    'group_id': string;
+    'id': string;
+    'locator'?: { [key: string]: any; };
+    'namespace': string;
+    'pinned': boolean;
+    'read_at'?: string;
+    'read_state': string;
+    'resource_id': string;
+    'resource_key': string;
+    'source': string;
+    'title': string;
+}
+export interface DocumentDirectoryGroup {
+    'id': string;
+    'name': string;
+    'parent_id': string;
+    'position': number;
+}
+export interface DocumentDirectoryList {
+    'directories': Array<DocumentDirectory>;
+}
+export interface DocumentDirectoryListResponse {
+    'code': number;
+    'data': DocumentDirectoryList;
+}
+export interface DocumentFolderInventory {
+    'batch_id': string;
+    'directory_id': string;
+    'id': string;
+    'source': { [key: string]: any; };
+    'state': { [key: string]: any; };
+    'status': string;
+}
+export interface DocumentFolderNode {
+    'candidate'?: { [key: string]: any; };
+    'kind': string;
+    'listed': boolean;
+    'name': string;
+    'node_key': string;
+    'parent_key': string;
+    'path': string;
+}
+export interface DocumentFolderNodes {
+    'next_offset': number;
+    'nodes': Array<DocumentFolderNode>;
+    'total': number;
+}
+export interface DocumentFolderNodesResponse {
+    'code': number;
+    'data': DocumentFolderNodes;
+}
 export interface DocumentImageDisplay {
     'end': number;
     'height'?: number;
@@ -4014,6 +4215,49 @@ export interface KnowledgeMarketTaskErrorOpenAPIResponse {
     'data'?: object;
     'message': string;
 }
+export interface KnowledgeMarketTaskFileCountsOpenAPIResponse {
+    'canceled': number;
+    'failed': number;
+    'success': number;
+    'unfinished': number;
+}
+export interface KnowledgeMarketTaskFileOpenAPIResponse {
+    'file_id': string;
+    'name': string;
+    'reason_code': KnowledgeMarketTaskFileOpenAPIResponseReasonCodeEnum;
+    'status': KnowledgeMarketTaskFileOpenAPIResponseStatusEnum;
+}
+
+export const KnowledgeMarketTaskFileOpenAPIResponseReasonCodeEnum = {
+    Success: 'success',
+    Canceled: 'canceled',
+    Waiting: 'waiting',
+    Processing: 'processing',
+    Unknown: 'unknown',
+    ParseFailed: 'parse_failed',
+    ImportFailed: 'import_failed',
+    MissingTask: 'missing_task',
+    RateLimited: 'rate_limited'
+} as const;
+
+export type KnowledgeMarketTaskFileOpenAPIResponseReasonCodeEnum = typeof KnowledgeMarketTaskFileOpenAPIResponseReasonCodeEnum[keyof typeof KnowledgeMarketTaskFileOpenAPIResponseReasonCodeEnum];
+export const KnowledgeMarketTaskFileOpenAPIResponseStatusEnum = {
+    Success: 'success',
+    Failed: 'failed',
+    Canceled: 'canceled',
+    Unfinished: 'unfinished'
+} as const;
+
+export type KnowledgeMarketTaskFileOpenAPIResponseStatusEnum = typeof KnowledgeMarketTaskFileOpenAPIResponseStatusEnum[keyof typeof KnowledgeMarketTaskFileOpenAPIResponseStatusEnum];
+
+export interface KnowledgeMarketTaskFilesOpenAPIResponse {
+    'counts': KnowledgeMarketTaskFileCountsOpenAPIResponse;
+    'file_details_available': boolean;
+    'items'?: Array<KnowledgeMarketTaskFileOpenAPIResponse>;
+    'page': number;
+    'page_size': number;
+    'total': number;
+}
 export interface KnowledgeMarketTaskListItemOpenAPIResponse {
     'can_cancel'?: boolean;
     'can_delete'?: boolean;
@@ -4031,6 +4275,7 @@ export interface KnowledgeMarketTaskListItemOpenAPIResponse {
     'market_item_id': string;
     'name': string;
     'overall_percent'?: number;
+    'parse'?: KnowledgeMarketTaskParseOpenAPIResponse;
     'progress': KnowledgeMarketTaskProgressOpenAPIResponse;
     'stage'?: string;
 }
@@ -4039,6 +4284,10 @@ export interface KnowledgeMarketTaskListOpenAPIResponse {
     'page': number;
     'page_size': number;
     'total': number;
+    /**
+     * Current user\'s unfinished knowledge market tasks across all pages and filters, including ongoing file parsing.
+     */
+    'unfinished_count': number;
 }
 export interface KnowledgeMarketTaskParseOpenAPIResponse {
     'canceled'?: number;
@@ -4600,6 +4849,37 @@ export const MissingCapabilityIdEnum = {
 
 export type MissingCapabilityIdEnum = typeof MissingCapabilityIdEnum[keyof typeof MissingCapabilityIdEnum];
 
+
+export const ModelFailureCode = {
+    AuthenticationFailed: 'authentication_failed',
+    BalanceExhausted: 'balance_exhausted',
+    ConcurrencyLimited: 'concurrency_limited',
+    Conflict: 'conflict',
+    InputFiltered: 'input_filtered',
+    InvalidRequest: 'invalid_request',
+    ModelConfiguration: 'model_configuration',
+    NotFound: 'not_found',
+    OrganizationSpendLimitExceeded: 'organization_spend_limit_exceeded',
+    OutputFiltered: 'output_filtered',
+    PermissionDenied: 'permission_denied',
+    ProjectSpendLimitExceeded: 'project_spend_limit_exceeded',
+    ProtocolError: 'protocol_error',
+    ProviderInternalError: 'provider_internal_error',
+    ProviderOverloaded: 'provider_overloaded',
+    ProviderRejected: 'provider_rejected',
+    QuotaExhausted: 'quota_exhausted',
+    RateLimited: 'rate_limited',
+    RequestTimeout: 'request_timeout',
+    ServiceUnavailable: 'service_unavailable',
+    TokenLimit: 'token_limit',
+    TransportError: 'transport_error',
+    UnprocessableEntity: 'unprocessable_entity',
+    UsageLimitExceeded: 'usage_limit_exceeded'
+} as const;
+
+export type ModelFailureCode = typeof ModelFailureCode[keyof typeof ModelFailureCode];
+
+
 export interface ModelFeaturesResponse {
     'image_embed_enabled': boolean;
     'image_embed_required': boolean;
@@ -4724,10 +5004,13 @@ export interface OrdinaryDisplayErrorData {
     'request_id': string;
 }
 export interface OrdinaryRunView {
+    'execution_id'?: string;
     'final_artifacts'?: Array<PublicArtifact>;
     'final_output_refs'?: Array<string>;
     'revision': number;
     'run_id': string;
+    'status'?: string;
+    'timing'?: RunTiming;
 }
 export interface OrdinaryTaskDetailData {
     'task': OrdinaryTaskView;
@@ -5365,6 +5648,7 @@ export interface RunTerminal {
     'partial_output': boolean;
     'reason': RunTerminalReasonEnum;
     'status': RunTerminalStatusEnum;
+    'transport_diagnostic'?: RunTerminalTransportDiagnostic;
 }
 
 export const RunTerminalReasonEnum = {
@@ -5386,6 +5670,25 @@ export const RunTerminalStatusEnum = {
 
 export type RunTerminalStatusEnum = typeof RunTerminalStatusEnum[keyof typeof RunTerminalStatusEnum];
 
+export interface RunTerminalTransportDiagnostic {
+    'code': RunTerminalTransportDiagnosticCodeEnum;
+}
+
+export const RunTerminalTransportDiagnosticCodeEnum = {
+    UpstreamStreamFailed: 'upstream_stream_failed',
+    UpstreamStreamTimeout: 'upstream_stream_timeout'
+} as const;
+
+export type RunTerminalTransportDiagnosticCodeEnum = typeof RunTerminalTransportDiagnosticCodeEnum[keyof typeof RunTerminalTransportDiagnosticCodeEnum];
+
+export interface RunTiming {
+    'cumulative_execution_ms': number | null;
+    'elapsed_ms': number | null;
+    'finished_at': string | null;
+    'measured_at': string;
+    'requested_at': string;
+    'running_attempt_count': number;
+}
 export interface ScheduleMoveRequest {
     'group_id'?: string | null;
     'position'?: number;
@@ -5574,6 +5877,7 @@ export interface SettingsChecksOpenAPIResponse {
     'started_at': string;
 }
 export interface SettingsFeatureControlsOpenAPIResponse {
+    'document_directories_enabled': boolean;
     'document_parsing_enabled': boolean;
     'mcp_enabled': boolean;
     'schedules_enabled': boolean;
@@ -6607,6 +6911,21 @@ export interface TaskPayload {
     'target_pid'?: string;
     'task_type'?: string;
 }
+export interface TaskRemovalPreview {
+    'active_task_count': number;
+    'conversation_count': number;
+    'impact_version': string;
+    'task_count': number;
+    'task_id': string;
+}
+export interface TaskRemovalRequest {
+    'impact_version'?: string;
+}
+export interface TaskRemovalResult {
+    'cancellation_pending': boolean;
+    'removed_task_ids': Array<string>;
+    'trashed_conversation_ids': Array<string>;
+}
 export interface TaskResponse {
     'convert_error'?: string;
     'convert_required'?: boolean;
@@ -6888,6 +7207,7 @@ export interface UserUIPreferencesOpenAPIResponse {
     'accepted_user_agreement_version': string;
     'chat_preference_notice_dismissed': boolean;
     'developer_mode_active': boolean;
+    'document_directories_enabled': boolean;
     'document_parsing_enabled': boolean;
     'mcp_enabled': boolean;
     'performance_stats_enabled': boolean;
@@ -6903,6 +7223,7 @@ export interface UserUIPreferencesPatchOpenAPIRequest {
     'accepted_user_agreement_version'?: string;
     'chat_preference_notice_dismissed'?: boolean;
     'developer_mode_active'?: boolean;
+    'document_directories_enabled'?: boolean;
     'document_parsing_enabled'?: boolean;
     'mcp_enabled'?: boolean;
     'performance_stats_enabled'?: boolean;
@@ -15444,7 +15765,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarQueryParameter = {} as any;
 
             localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'text/event-stream';
+            localVarHeaderParameter['Accept'] = 'text/event-stream,application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -15814,7 +16135,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Move a conversation within its pinned or ordinary history
+         * @summary Move a conversation within its pinned, recent, group, project or sibling list without changing relationships
          * @param {string} conversationId
          * @param {ConversationReorderRequest} conversationReorderRequest
          * @param {*} [options] Override http request option.
@@ -16065,12 +16386,13 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Unarchive a conversation
+         * @summary Unarchive a conversation. A stale expected_archived_at returns business code 2004815; an already active conversation satisfies a conditional retry.
          * @param {string} conversationId
+         * @param {ConversationUnarchiveRequest} [conversationUnarchiveRequest]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsConversationIdUnarchivePost: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreConversationsConversationIdUnarchivePost: async (conversationId: string, conversationUnarchiveRequest?: ConversationUnarchiveRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdUnarchivePost', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}:unarchive`
@@ -16086,11 +16408,13 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Content-Type'] = 'application/json';
             localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationUnarchiveRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -23457,12 +23781,47 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary POST /task-center/tasks/{task_id}:remove
+         * @summary Preview removal of a task and related conversations
          * @param {string} taskId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTaskCenterTasksTaskIdRemovePost: async (taskId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreTaskCenterTasksTaskIdRemovalPreviewGet: async (taskId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'taskId' is not null or undefined
+            assertParamExists('apiCoreTaskCenterTasksTaskIdRemovalPreviewGet', 'taskId', taskId)
+            const localVarPath = `/api/core/task-center/tasks/{task_id}/removal-preview`
+                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Move task and related conversations to Trash
+         * @param {string} taskId
+         * @param {TaskRemovalRequest} [taskRemovalRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterTasksTaskIdRemovePost: async (taskId: string, taskRemovalRequest?: TaskRemovalRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'taskId' is not null or undefined
             assertParamExists('apiCoreTaskCenterTasksTaskIdRemovePost', 'taskId', taskId)
             const localVarPath = `/api/core/task-center/tasks/{task_id}:remove`
@@ -23478,10 +23837,13 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(taskRemovalRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -26991,7 +27353,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationsConversationIdArchivePost(conversationId: string, conversationArchiveRequest: ConversationArchiveRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
+        async apiCoreConversationsConversationIdArchivePost(conversationId: string, conversationArchiveRequest: ConversationArchiveRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationArchiveResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdArchivePost(conversationId, conversationArchiveRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdArchivePost']?.[localVarOperationServerIndex]?.url;
@@ -27119,7 +27481,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Move a conversation within its pinned or ordinary history
+         * @summary Move a conversation within its pinned, recent, group, project or sibling list without changing relationships
          * @param {string} conversationId
          * @param {ConversationReorderRequest} conversationReorderRequest
          * @param {*} [options] Override http request option.
@@ -27213,13 +27575,14 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Unarchive a conversation
+         * @summary Unarchive a conversation. A stale expected_archived_at returns business code 2004815; an already active conversation satisfies a conditional retry.
          * @param {string} conversationId
+         * @param {ConversationUnarchiveRequest} [conversationUnarchiveRequest]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationsConversationIdUnarchivePost(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdUnarchivePost(conversationId, options);
+        async apiCoreConversationsConversationIdUnarchivePost(conversationId: string, conversationUnarchiveRequest?: ConversationUnarchiveRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdUnarchivePost(conversationId, conversationUnarchiveRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdUnarchivePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -30024,13 +30387,27 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary POST /task-center/tasks/{task_id}:remove
+         * @summary Preview removal of a task and related conversations
          * @param {string} taskId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreTaskCenterTasksTaskIdRemovePost(taskId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksTaskIdRemovePost(taskId, options);
+        async apiCoreTaskCenterTasksTaskIdRemovalPreviewGet(taskId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskRemovalPreview>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksTaskIdRemovalPreviewGet(taskId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterTasksTaskIdRemovalPreviewGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Move task and related conversations to Trash
+         * @param {string} taskId
+         * @param {TaskRemovalRequest} [taskRemovalRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreTaskCenterTasksTaskIdRemovePost(taskId: string, taskRemovalRequest?: TaskRemovalRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskRemovalResult>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksTaskIdRemovePost(taskId, taskRemovalRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterTasksTaskIdRemovePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -31647,7 +32024,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsConversationIdArchivePost(requestParameters: DefaultApiApiCoreConversationsConversationIdArchivePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
+        apiCoreConversationsConversationIdArchivePost(requestParameters: DefaultApiApiCoreConversationsConversationIdArchivePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationArchiveResponse> {
             return localVarFp.apiCoreConversationsConversationIdArchivePost(requestParameters.conversationId, requestParameters.conversationArchiveRequest, options).then((request) => request(axios, basePath));
         },
         /**
@@ -31742,7 +32119,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary Move a conversation within its pinned or ordinary history
+         * @summary Move a conversation within its pinned, recent, group, project or sibling list without changing relationships
          * @param {DefaultApiApiCoreConversationsConversationIdReorderPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -31812,13 +32189,13 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary Unarchive a conversation
+         * @summary Unarchive a conversation. A stale expected_archived_at returns business code 2004815; an already active conversation satisfies a conditional retry.
          * @param {DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreConversationsConversationIdUnarchivePost(requestParameters: DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
-            return localVarFp.apiCoreConversationsConversationIdUnarchivePost(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreConversationsConversationIdUnarchivePost(requestParameters.conversationId, requestParameters.conversationUnarchiveRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -33885,13 +34262,23 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary POST /task-center/tasks/{task_id}:remove
+         * @summary Preview removal of a task and related conversations
+         * @param {DefaultApiApiCoreTaskCenterTasksTaskIdRemovalPreviewGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterTasksTaskIdRemovalPreviewGet(requestParameters: DefaultApiApiCoreTaskCenterTasksTaskIdRemovalPreviewGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<TaskRemovalPreview> {
+            return localVarFp.apiCoreTaskCenterTasksTaskIdRemovalPreviewGet(requestParameters.taskId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Move task and related conversations to Trash
          * @param {DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters: DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters.taskId, options).then((request) => request(axios, basePath));
+        apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters: DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<TaskRemovalResult> {
+            return localVarFp.apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters.taskId, requestParameters.taskRemovalRequest, options).then((request) => request(axios, basePath));
         },
         /**
          * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
@@ -35057,6 +35444,8 @@ export interface DefaultApiApiCoreConversationsConversationIdToolLimitDecisionPo
  */
 export interface DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest {
     readonly conversationId: string
+
+    readonly conversationUnarchiveRequest?: ConversationUnarchiveRequest
 }
 
 /**
@@ -36274,10 +36663,19 @@ export interface DefaultApiApiCoreTaskCenterTasksTaskIdGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreTaskCenterTasksTaskIdRemovalPreviewGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreTaskCenterTasksTaskIdRemovalPreviewGetRequest {
+    readonly taskId: string
+}
+
+/**
  * Request parameters for apiCoreTaskCenterTasksTaskIdRemovePost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest {
     readonly taskId: string
+
+    readonly taskRemovalRequest?: TaskRemovalRequest
 }
 
 /**
@@ -37479,7 +37877,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary Move a conversation within its pinned or ordinary history
+     * @summary Move a conversation within its pinned, recent, group, project or sibling list without changing relationships
      * @param {DefaultApiApiCoreConversationsConversationIdReorderPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -37556,13 +37954,13 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary Unarchive a conversation
+     * @summary Unarchive a conversation. A stale expected_archived_at returns business code 2004815; an already active conversation satisfies a conditional retry.
      * @param {DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreConversationsConversationIdUnarchivePost(requestParameters: DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdUnarchivePost(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdUnarchivePost(requestParameters.conversationId, requestParameters.conversationUnarchiveRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -39843,13 +40241,24 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary POST /task-center/tasks/{task_id}:remove
+     * @summary Preview removal of a task and related conversations
+     * @param {DefaultApiApiCoreTaskCenterTasksTaskIdRemovalPreviewGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreTaskCenterTasksTaskIdRemovalPreviewGet(requestParameters: DefaultApiApiCoreTaskCenterTasksTaskIdRemovalPreviewGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreTaskCenterTasksTaskIdRemovalPreviewGet(requestParameters.taskId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Move task and related conversations to Trash
      * @param {DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters: DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters.taskId, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters.taskId, requestParameters.taskRemovalRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -41521,6 +41930,615 @@ export const ApiCoreCloudKnowledgeMarketGetCategoryEnum = {
     Evaluation: 'evaluation'
 } as const;
 export type ApiCoreCloudKnowledgeMarketGetCategoryEnum = typeof ApiCoreCloudKnowledgeMarketGetCategoryEnum[keyof typeof ApiCoreCloudKnowledgeMarketGetCategoryEnum];
+
+
+/**
+ * DocumentDirectoriesApi - axios parameter creator
+ */
+export const DocumentDirectoriesApiAxiosParamCreator = function (configuration?: Configuration) {
+    return {
+        /**
+         *
+         * @summary Apply an owned directory action; organizing directories reject edits
+         * @param {DocumentDirectoryCommand} documentDirectoryCommand
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        executeDocumentDirectoryAction: async (documentDirectoryCommand: DocumentDirectoryCommand, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'documentDirectoryCommand' is not null or undefined
+            assertParamExists('executeDocumentDirectoryAction', 'documentDirectoryCommand', documentDirectoryCommand)
+            const localVarPath = `/api/core/document-directories/actions`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(documentDirectoryCommand, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read last committed directory version
+         * @param {string} directoryId
+         * @param {number} [offset]
+         * @param {number} [limit]
+         * @param {string} [groupId]
+         * @param {string} [query]
+         * @param {string} [state]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getDocumentDirectory: async (directoryId: string, offset?: number, limit?: number, groupId?: string, query?: string, state?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'directoryId' is not null or undefined
+            assertParamExists('getDocumentDirectory', 'directoryId', directoryId)
+            const localVarPath = `/api/core/document-directories/{directory_id}`
+                .replace(`{${"directory_id"}}`, encodeURIComponent(String(directoryId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (offset !== undefined) {
+                localVarQueryParameter['offset'] = offset;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            if (groupId !== undefined) {
+                localVarQueryParameter['group_id'] = groupId;
+            }
+
+            if (query !== undefined) {
+                localVarQueryParameter['query'] = query;
+            }
+
+            if (state !== undefined) {
+                localVarQueryParameter['state'] = state;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Page original source tree children
+         * @param {string} directoryId
+         * @param {string} [parentKey]
+         * @param {number} [offset]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getDocumentFolderNodes: async (directoryId: string, parentKey?: string, offset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'directoryId' is not null or undefined
+            assertParamExists('getDocumentFolderNodes', 'directoryId', directoryId)
+            const localVarPath = `/api/core/document-directories/{directory_id}/source-nodes`
+                .replace(`{${"directory_id"}}`, encodeURIComponent(String(directoryId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (parentKey !== undefined) {
+                localVarQueryParameter['parent_key'] = parentKey;
+            }
+
+            if (offset !== undefined) {
+                localVarQueryParameter['offset'] = offset;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List up to 20 directories without refreshing use
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listDocumentDirectories: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/document-directories`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List durable organization results
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listDocumentDirectoryBatches: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/document-directories/batches`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Preview an owned local file without changing Agent evidence
+         * @param {string} directoryId
+         * @param {string} entryId
+         * @param {boolean} [metadataOnly]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        readDocumentDirectoryLocalFile: async (directoryId: string, entryId: string, metadataOnly?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'directoryId' is not null or undefined
+            assertParamExists('readDocumentDirectoryLocalFile', 'directoryId', directoryId)
+            // verify required parameter 'entryId' is not null or undefined
+            assertParamExists('readDocumentDirectoryLocalFile', 'entryId', entryId)
+            const localVarPath = `/api/core/document-directories/{directory_id}/entries/{entry_id}/local-file`
+                .replace(`{${"directory_id"}}`, encodeURIComponent(String(directoryId)))
+                .replace(`{${"entry_id"}}`, encodeURIComponent(String(entryId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (metadataOnly !== undefined) {
+                localVarQueryParameter['metadata_only'] = metadataOnly;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read an owned email without changing directory evidence
+         * @param {string} directoryId
+         * @param {string} entryId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        readDocumentDirectoryMail: async (directoryId: string, entryId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'directoryId' is not null or undefined
+            assertParamExists('readDocumentDirectoryMail', 'directoryId', directoryId)
+            // verify required parameter 'entryId' is not null or undefined
+            assertParamExists('readDocumentDirectoryMail', 'entryId', entryId)
+            const localVarPath = `/api/core/document-directories/{directory_id}/entries/{entry_id}/mail`
+                .replace(`{${"directory_id"}}`, encodeURIComponent(String(directoryId)))
+                .replace(`{${"entry_id"}}`, encodeURIComponent(String(entryId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+    }
+};
+
+/**
+ * DocumentDirectoriesApi - functional programming interface
+ */
+export const DocumentDirectoriesApiFp = function(configuration?: Configuration) {
+    const localVarAxiosParamCreator = DocumentDirectoriesApiAxiosParamCreator(configuration)
+    return {
+        /**
+         *
+         * @summary Apply an owned directory action; organizing directories reject edits
+         * @param {DocumentDirectoryCommand} documentDirectoryCommand
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async executeDocumentDirectoryAction(documentDirectoryCommand: DocumentDirectoryCommand, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentDirectoryActionResultResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.executeDocumentDirectoryAction(documentDirectoryCommand, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DocumentDirectoriesApi.executeDocumentDirectoryAction']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read last committed directory version
+         * @param {string} directoryId
+         * @param {number} [offset]
+         * @param {number} [limit]
+         * @param {string} [groupId]
+         * @param {string} [query]
+         * @param {string} [state]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getDocumentDirectory(directoryId: string, offset?: number, limit?: number, groupId?: string, query?: string, state?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentDirectoryDetailResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getDocumentDirectory(directoryId, offset, limit, groupId, query, state, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DocumentDirectoriesApi.getDocumentDirectory']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Page original source tree children
+         * @param {string} directoryId
+         * @param {string} [parentKey]
+         * @param {number} [offset]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getDocumentFolderNodes(directoryId: string, parentKey?: string, offset?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentFolderNodesResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getDocumentFolderNodes(directoryId, parentKey, offset, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DocumentDirectoriesApi.getDocumentFolderNodes']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List up to 20 directories without refreshing use
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listDocumentDirectories(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentDirectoryListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listDocumentDirectories(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DocumentDirectoriesApi.listDocumentDirectories']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List durable organization results
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listDocumentDirectoryBatches(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentDirectoryBatchesResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listDocumentDirectoryBatches(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DocumentDirectoriesApi.listDocumentDirectoryBatches']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Preview an owned local file without changing Agent evidence
+         * @param {string} directoryId
+         * @param {string} entryId
+         * @param {boolean} [metadataOnly]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async readDocumentDirectoryLocalFile(directoryId: string, entryId: string, metadataOnly?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DirectoryLocalFileResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.readDocumentDirectoryLocalFile(directoryId, entryId, metadataOnly, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DocumentDirectoriesApi.readDocumentDirectoryLocalFile']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read an owned email without changing directory evidence
+         * @param {string} directoryId
+         * @param {string} entryId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async readDocumentDirectoryMail(directoryId: string, entryId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DirectoryMailResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.readDocumentDirectoryMail(directoryId, entryId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DocumentDirectoriesApi.readDocumentDirectoryMail']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+    }
+};
+
+/**
+ * DocumentDirectoriesApi - factory interface
+ */
+export const DocumentDirectoriesApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
+    const localVarFp = DocumentDirectoriesApiFp(configuration)
+    return {
+        /**
+         *
+         * @summary Apply an owned directory action; organizing directories reject edits
+         * @param {DocumentDirectoriesApiExecuteDocumentDirectoryActionRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        executeDocumentDirectoryAction(requestParameters: DocumentDirectoriesApiExecuteDocumentDirectoryActionRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentDirectoryActionResultResponse> {
+            return localVarFp.executeDocumentDirectoryAction(requestParameters.documentDirectoryCommand, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read last committed directory version
+         * @param {DocumentDirectoriesApiGetDocumentDirectoryRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getDocumentDirectory(requestParameters: DocumentDirectoriesApiGetDocumentDirectoryRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentDirectoryDetailResponse> {
+            return localVarFp.getDocumentDirectory(requestParameters.directoryId, requestParameters.offset, requestParameters.limit, requestParameters.groupId, requestParameters.query, requestParameters.state, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Page original source tree children
+         * @param {DocumentDirectoriesApiGetDocumentFolderNodesRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getDocumentFolderNodes(requestParameters: DocumentDirectoriesApiGetDocumentFolderNodesRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentFolderNodesResponse> {
+            return localVarFp.getDocumentFolderNodes(requestParameters.directoryId, requestParameters.parentKey, requestParameters.offset, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List up to 20 directories without refreshing use
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listDocumentDirectories(options?: RawAxiosRequestConfig): AxiosPromise<DocumentDirectoryListResponse> {
+            return localVarFp.listDocumentDirectories(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List durable organization results
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listDocumentDirectoryBatches(options?: RawAxiosRequestConfig): AxiosPromise<DocumentDirectoryBatchesResponse> {
+            return localVarFp.listDocumentDirectoryBatches(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Preview an owned local file without changing Agent evidence
+         * @param {DocumentDirectoriesApiReadDocumentDirectoryLocalFileRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        readDocumentDirectoryLocalFile(requestParameters: DocumentDirectoriesApiReadDocumentDirectoryLocalFileRequest, options?: RawAxiosRequestConfig): AxiosPromise<DirectoryLocalFileResponse> {
+            return localVarFp.readDocumentDirectoryLocalFile(requestParameters.directoryId, requestParameters.entryId, requestParameters.metadataOnly, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read an owned email without changing directory evidence
+         * @param {DocumentDirectoriesApiReadDocumentDirectoryMailRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        readDocumentDirectoryMail(requestParameters: DocumentDirectoriesApiReadDocumentDirectoryMailRequest, options?: RawAxiosRequestConfig): AxiosPromise<DirectoryMailResponse> {
+            return localVarFp.readDocumentDirectoryMail(requestParameters.directoryId, requestParameters.entryId, options).then((request) => request(axios, basePath));
+        },
+    };
+};
+
+/**
+ * Request parameters for executeDocumentDirectoryAction operation in DocumentDirectoriesApi.
+ */
+export interface DocumentDirectoriesApiExecuteDocumentDirectoryActionRequest {
+    readonly documentDirectoryCommand: DocumentDirectoryCommand
+}
+
+/**
+ * Request parameters for getDocumentDirectory operation in DocumentDirectoriesApi.
+ */
+export interface DocumentDirectoriesApiGetDocumentDirectoryRequest {
+    readonly directoryId: string
+
+    readonly offset?: number
+
+    readonly limit?: number
+
+    readonly groupId?: string
+
+    readonly query?: string
+
+    readonly state?: string
+}
+
+/**
+ * Request parameters for getDocumentFolderNodes operation in DocumentDirectoriesApi.
+ */
+export interface DocumentDirectoriesApiGetDocumentFolderNodesRequest {
+    readonly directoryId: string
+
+    readonly parentKey?: string
+
+    readonly offset?: number
+}
+
+/**
+ * Request parameters for readDocumentDirectoryLocalFile operation in DocumentDirectoriesApi.
+ */
+export interface DocumentDirectoriesApiReadDocumentDirectoryLocalFileRequest {
+    readonly directoryId: string
+
+    readonly entryId: string
+
+    readonly metadataOnly?: boolean
+}
+
+/**
+ * Request parameters for readDocumentDirectoryMail operation in DocumentDirectoriesApi.
+ */
+export interface DocumentDirectoriesApiReadDocumentDirectoryMailRequest {
+    readonly directoryId: string
+
+    readonly entryId: string
+}
+
+/**
+ * DocumentDirectoriesApi - object-oriented interface
+ */
+export class DocumentDirectoriesApi extends BaseAPI {
+    /**
+     *
+     * @summary Apply an owned directory action; organizing directories reject edits
+     * @param {DocumentDirectoriesApiExecuteDocumentDirectoryActionRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public executeDocumentDirectoryAction(requestParameters: DocumentDirectoriesApiExecuteDocumentDirectoryActionRequest, options?: RawAxiosRequestConfig) {
+        return DocumentDirectoriesApiFp(this.configuration).executeDocumentDirectoryAction(requestParameters.documentDirectoryCommand, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read last committed directory version
+     * @param {DocumentDirectoriesApiGetDocumentDirectoryRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getDocumentDirectory(requestParameters: DocumentDirectoriesApiGetDocumentDirectoryRequest, options?: RawAxiosRequestConfig) {
+        return DocumentDirectoriesApiFp(this.configuration).getDocumentDirectory(requestParameters.directoryId, requestParameters.offset, requestParameters.limit, requestParameters.groupId, requestParameters.query, requestParameters.state, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Page original source tree children
+     * @param {DocumentDirectoriesApiGetDocumentFolderNodesRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getDocumentFolderNodes(requestParameters: DocumentDirectoriesApiGetDocumentFolderNodesRequest, options?: RawAxiosRequestConfig) {
+        return DocumentDirectoriesApiFp(this.configuration).getDocumentFolderNodes(requestParameters.directoryId, requestParameters.parentKey, requestParameters.offset, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List up to 20 directories without refreshing use
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listDocumentDirectories(options?: RawAxiosRequestConfig) {
+        return DocumentDirectoriesApiFp(this.configuration).listDocumentDirectories(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List durable organization results
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listDocumentDirectoryBatches(options?: RawAxiosRequestConfig) {
+        return DocumentDirectoriesApiFp(this.configuration).listDocumentDirectoryBatches(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Preview an owned local file without changing Agent evidence
+     * @param {DocumentDirectoriesApiReadDocumentDirectoryLocalFileRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public readDocumentDirectoryLocalFile(requestParameters: DocumentDirectoriesApiReadDocumentDirectoryLocalFileRequest, options?: RawAxiosRequestConfig) {
+        return DocumentDirectoriesApiFp(this.configuration).readDocumentDirectoryLocalFile(requestParameters.directoryId, requestParameters.entryId, requestParameters.metadataOnly, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read an owned email without changing directory evidence
+     * @param {DocumentDirectoriesApiReadDocumentDirectoryMailRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public readDocumentDirectoryMail(requestParameters: DocumentDirectoriesApiReadDocumentDirectoryMailRequest, options?: RawAxiosRequestConfig) {
+        return DocumentDirectoriesApiFp(this.configuration).readDocumentDirectoryMail(requestParameters.directoryId, requestParameters.entryId, options).then((request) => request(this.axios, this.basePath));
+    }
+}
+
 
 
 /**
@@ -44299,11 +45317,12 @@ export const KnowledgeMarketApiAxiosParamCreator = function (configuration?: Con
          * @param {number} [page]
          * @param {number} [pageSize]
          * @param {ApiCoreKnowledgeMarketTasksGetStatusEnum} [status] Filter background tasks by async job status.
-         * @param {string} [jobType] Async job type; defaults to knowledge_market_install.
+         * @param {string} [jobType] Async job type or all; defaults to knowledge_market_install.
+         * @param {ApiCoreKnowledgeMarketTasksGetViewEnum} [view] Summary omits per-file failures; pagination is clamped to available pages.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreKnowledgeMarketTasksGet: async (page?: number, pageSize?: number, status?: ApiCoreKnowledgeMarketTasksGetStatusEnum, jobType?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreKnowledgeMarketTasksGet: async (page?: number, pageSize?: number, status?: ApiCoreKnowledgeMarketTasksGetStatusEnum, jobType?: string, view?: ApiCoreKnowledgeMarketTasksGetViewEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/knowledge-market/tasks`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -44330,6 +45349,10 @@ export const KnowledgeMarketApiAxiosParamCreator = function (configuration?: Con
 
             if (jobType !== undefined) {
                 localVarQueryParameter['job_type'] = jobType;
+            }
+
+            if (view !== undefined) {
+                localVarQueryParameter['view'] = view;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -44399,6 +45422,55 @@ export const KnowledgeMarketApiAxiosParamCreator = function (configuration?: Con
             const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns the current user\'s job-owned file page and all four counts. Historical file snapshots are immutable. Unknown states are unfinished. Aggregate-only history reports file_details_available=false. Page numbers are clamped; page and page_size must be positive integers, page_size at most 100.
+         * @summary List files for one knowledge market task
+         * @param {string} jobId
+         * @param {number} [page]
+         * @param {number} [pageSize] Default 10, maximum 100.
+         * @param {ApiCoreKnowledgeMarketTasksJobIdFilesGetStatusEnum} [status] Default failed.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketTasksJobIdFilesGet: async (jobId: string, page?: number, pageSize?: number, status?: ApiCoreKnowledgeMarketTasksJobIdFilesGetStatusEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'jobId' is not null or undefined
+            assertParamExists('apiCoreKnowledgeMarketTasksJobIdFilesGet', 'jobId', jobId)
+            const localVarPath = `/api/core/knowledge-market/tasks/{job_id}/files`
+                .replace(`{${"job_id"}}`, encodeURIComponent(String(jobId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (page !== undefined) {
+                localVarQueryParameter['page'] = page;
+            }
+
+            if (pageSize !== undefined) {
+                localVarQueryParameter['page_size'] = pageSize;
+            }
+
+            if (status !== undefined) {
+                localVarQueryParameter['status'] = status;
+            }
 
             localVarHeaderParameter['Accept'] = 'application/json';
 
@@ -44604,12 +45676,13 @@ export const KnowledgeMarketApiFp = function(configuration?: Configuration) {
          * @param {number} [page]
          * @param {number} [pageSize]
          * @param {ApiCoreKnowledgeMarketTasksGetStatusEnum} [status] Filter background tasks by async job status.
-         * @param {string} [jobType] Async job type; defaults to knowledge_market_install.
+         * @param {string} [jobType] Async job type or all; defaults to knowledge_market_install.
+         * @param {ApiCoreKnowledgeMarketTasksGetViewEnum} [view] Summary omits per-file failures; pagination is clamped to available pages.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreKnowledgeMarketTasksGet(page?: number, pageSize?: number, status?: ApiCoreKnowledgeMarketTasksGetStatusEnum, jobType?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<KnowledgeMarketTaskListOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketTasksGet(page, pageSize, status, jobType, options);
+        async apiCoreKnowledgeMarketTasksGet(page?: number, pageSize?: number, status?: ApiCoreKnowledgeMarketTasksGetStatusEnum, jobType?: string, view?: ApiCoreKnowledgeMarketTasksGetViewEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<KnowledgeMarketTaskListOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketTasksGet(page, pageSize, status, jobType, view, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['KnowledgeMarketApi.apiCoreKnowledgeMarketTasksGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -44638,6 +45711,22 @@ export const KnowledgeMarketApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketTasksJobIdDelete(jobId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['KnowledgeMarketApi.apiCoreKnowledgeMarketTasksJobIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Returns the current user\'s job-owned file page and all four counts. Historical file snapshots are immutable. Unknown states are unfinished. Aggregate-only history reports file_details_available=false. Page numbers are clamped; page and page_size must be positive integers, page_size at most 100.
+         * @summary List files for one knowledge market task
+         * @param {string} jobId
+         * @param {number} [page]
+         * @param {number} [pageSize] Default 10, maximum 100.
+         * @param {ApiCoreKnowledgeMarketTasksJobIdFilesGetStatusEnum} [status] Default failed.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreKnowledgeMarketTasksJobIdFilesGet(jobId: string, page?: number, pageSize?: number, status?: ApiCoreKnowledgeMarketTasksJobIdFilesGetStatusEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<KnowledgeMarketTaskFilesOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketTasksJobIdFilesGet(jobId, page, pageSize, status, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['KnowledgeMarketApi.apiCoreKnowledgeMarketTasksJobIdFilesGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -44753,7 +45842,7 @@ export const KnowledgeMarketApiFactory = function (configuration?: Configuration
          * @throws {RequiredError}
          */
         apiCoreKnowledgeMarketTasksGet(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<KnowledgeMarketTaskListOpenAPIResponse> {
-            return localVarFp.apiCoreKnowledgeMarketTasksGet(requestParameters.page, requestParameters.pageSize, requestParameters.status, requestParameters.jobType, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreKnowledgeMarketTasksGet(requestParameters.page, requestParameters.pageSize, requestParameters.status, requestParameters.jobType, requestParameters.view, options).then((request) => request(axios, basePath));
         },
         /**
          * Stops the current user\'s latest single-item submission or cancels only WAITING files. Running files and successful content are retained. Counts report confirmed cancellation, running files, and outcomes requiring recheck. No automatic replay after response loss.
@@ -44774,6 +45863,16 @@ export const KnowledgeMarketApiFactory = function (configuration?: Configuration
          */
         apiCoreKnowledgeMarketTasksJobIdDelete(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<KnowledgeMarketTaskDeletedOpenAPIResponse> {
             return localVarFp.apiCoreKnowledgeMarketTasksJobIdDelete(requestParameters.jobId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Returns the current user\'s job-owned file page and all four counts. Historical file snapshots are immutable. Unknown states are unfinished. Aggregate-only history reports file_details_available=false. Page numbers are clamped; page and page_size must be positive integers, page_size at most 100.
+         * @summary List files for one knowledge market task
+         * @param {KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdFilesGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketTasksJobIdFilesGet(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdFilesGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<KnowledgeMarketTaskFilesOpenAPIResponse> {
+            return localVarFp.apiCoreKnowledgeMarketTasksJobIdFilesGet(requestParameters.jobId, requestParameters.page, requestParameters.pageSize, requestParameters.status, options).then((request) => request(axios, basePath));
         },
         /**
          * Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.
@@ -44866,9 +45965,14 @@ export interface KnowledgeMarketApiApiCoreKnowledgeMarketTasksGetRequest {
     readonly status?: ApiCoreKnowledgeMarketTasksGetStatusEnum
 
     /**
-     * Async job type; defaults to knowledge_market_install.
+     * Async job type or all; defaults to knowledge_market_install.
      */
     readonly jobType?: string
+
+    /**
+     * Summary omits per-file failures; pagination is clamped to available pages.
+     */
+    readonly view?: ApiCoreKnowledgeMarketTasksGetViewEnum
 }
 
 /**
@@ -44883,6 +45987,25 @@ export interface KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdCancelPostReq
  */
 export interface KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdDeleteRequest {
     readonly jobId: string
+}
+
+/**
+ * Request parameters for apiCoreKnowledgeMarketTasksJobIdFilesGet operation in KnowledgeMarketApi.
+ */
+export interface KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdFilesGetRequest {
+    readonly jobId: string
+
+    readonly page?: number
+
+    /**
+     * Default 10, maximum 100.
+     */
+    readonly pageSize?: number
+
+    /**
+     * Default failed.
+     */
+    readonly status?: ApiCoreKnowledgeMarketTasksJobIdFilesGetStatusEnum
 }
 
 /**
@@ -44975,7 +46098,7 @@ export class KnowledgeMarketApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreKnowledgeMarketTasksGet(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketTasksGet(requestParameters.page, requestParameters.pageSize, requestParameters.status, requestParameters.jobType, options).then((request) => request(this.axios, this.basePath));
+        return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketTasksGet(requestParameters.page, requestParameters.pageSize, requestParameters.status, requestParameters.jobType, requestParameters.view, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -44998,6 +46121,17 @@ export class KnowledgeMarketApi extends BaseAPI {
      */
     public apiCoreKnowledgeMarketTasksJobIdDelete(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdDeleteRequest, options?: RawAxiosRequestConfig) {
         return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketTasksJobIdDelete(requestParameters.jobId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns the current user\'s job-owned file page and all four counts. Historical file snapshots are immutable. Unknown states are unfinished. Aggregate-only history reports file_details_available=false. Page numbers are clamped; page and page_size must be positive integers, page_size at most 100.
+     * @summary List files for one knowledge market task
+     * @param {KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdFilesGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreKnowledgeMarketTasksJobIdFilesGet(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdFilesGetRequest, options?: RawAxiosRequestConfig) {
+        return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketTasksJobIdFilesGet(requestParameters.jobId, requestParameters.page, requestParameters.pageSize, requestParameters.status, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -45046,6 +46180,17 @@ export const ApiCoreKnowledgeMarketTasksGetStatusEnum = {
     Canceled: 'canceled'
 } as const;
 export type ApiCoreKnowledgeMarketTasksGetStatusEnum = typeof ApiCoreKnowledgeMarketTasksGetStatusEnum[keyof typeof ApiCoreKnowledgeMarketTasksGetStatusEnum];
+export const ApiCoreKnowledgeMarketTasksGetViewEnum = {
+    Summary: 'summary'
+} as const;
+export type ApiCoreKnowledgeMarketTasksGetViewEnum = typeof ApiCoreKnowledgeMarketTasksGetViewEnum[keyof typeof ApiCoreKnowledgeMarketTasksGetViewEnum];
+export const ApiCoreKnowledgeMarketTasksJobIdFilesGetStatusEnum = {
+    Success: 'success',
+    Failed: 'failed',
+    Canceled: 'canceled',
+    Unfinished: 'unfinished'
+} as const;
+export type ApiCoreKnowledgeMarketTasksJobIdFilesGetStatusEnum = typeof ApiCoreKnowledgeMarketTasksJobIdFilesGetStatusEnum[keyof typeof ApiCoreKnowledgeMarketTasksJobIdFilesGetStatusEnum];
 
 
 /**

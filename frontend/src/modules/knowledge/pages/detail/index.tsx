@@ -26,7 +26,8 @@ import {
   CopyOutlined,
   DownOutlined,
 } from "@ant-design/icons";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useKnowledgeListReturn } from "../../hooks/useKnowledgeListNavigation";
 import { useTranslation } from "react-i18next";
 import {
   Dataset,
@@ -150,7 +151,7 @@ const Detail = () => {
   const { id = "" } = useParams();
 
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const { returnToList, listUrl } = useKnowledgeListReturn();
 
   const { setCurrentDataset, clearDataset } = useDatasetPermissionStore();
 
@@ -426,9 +427,7 @@ const Detail = () => {
       .datasetServiceDeleteDataset({ dataset: knowledgeBaseId })
       .then(() => {
         message.success(t("knowledge.deleteSuccess"));
-        navigate({
-          pathname: "/lib/knowledge/list",
-        });
+        returnToList(true);
       });
   }
 
@@ -554,19 +553,14 @@ const Detail = () => {
           )
         }
         breadcrumbs={[
-          { title: t("layout.knowledgeBase"), href: "/lib/knowledge/list" },
+          { title: <Link to={listUrl} onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            returnToList();
+          }}>{t("layout.knowledgeBase")}</Link> },
           { title: detail?.display_name },
         ]}
-        onBack={() => {
-          const bool = ["aiwrite", "aireview", "chat"].includes(
-            searchParams.get("from") ?? "",
-          );
-          if (bool) {
-            navigate("/lib/knowledge/list");
-          } else {
-            navigate(-1);
-          }
-        }}
+        onBack={() => returnToList()}
       />
       {uploadingNoticeVisible && (
         <Alert

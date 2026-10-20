@@ -25,7 +25,7 @@ func authServiceInternalHeaders() map[string]string {
 // connections owned by the current user. It intentionally uses auth-service as
 // the source of truth, so providers can share the same dynamic-token flow.
 func fetchCloudToolConfig(ctx context.Context, userID string) (map[string]any, error) {
-	return modelconfig.LoadCloudToolConfig(ctx, userID)
+	return modelconfig.LoadCloudToolConfig(ctx, userID, true)
 }
 
 func fetchCloudProviderTokens(ctx context.Context, provider, userID string) ([]string, error) {

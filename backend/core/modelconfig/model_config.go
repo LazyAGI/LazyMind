@@ -56,10 +56,11 @@ type cloudTokenResponse struct {
 }
 
 // LoadCloudToolConfig loads current user-scoped cloud credentials at execution time.
-func LoadCloudToolConfig(ctx context.Context, userID string) (map[string]any, error) {
+func LoadCloudToolConfig(ctx context.Context, userID string, includeDirectoryScopes ...bool) (map[string]any, error) {
 	toolConfig := map[string]any{}
+	scopes := map[string][]string{}
 	for _, provider := range cloudToolProviders {
-		tokens, err := LoadCloudProviderTokens(ctx, provider, userID)
+		tokens, err := LoadCloudProviderTokens(ctx, provider, userID, scopes)
 		if err != nil {
 			return nil, err
 		}
@@ -68,6 +69,14 @@ func LoadCloudToolConfig(ctx context.Context, userID string) (map[string]any, er
 		} else if len(tokens) > 1 {
 			toolConfig[provider] = tokens
 		}
+	}
+	if len(scopes) > 0 && len(includeDirectoryScopes) > 0 && includeDirectoryScopes[0] {
+		// Tool configuration transports strings or string lists, not nested maps.
+		encoded, err := json.Marshal(scopes)
+		if err != nil {
+			return nil, err
+		}
+		toolConfig["document_directory_scopes"] = string(encoded)
 	}
 	mailCredentials, err := LoadMailToolConfig(ctx, userID)
 	if err != nil {
@@ -145,7 +154,7 @@ func loadMailProviderCredentials(ctx context.Context, provider, userID string) (
 	return out, nil
 }
 
-func LoadCloudProviderTokens(ctx context.Context, provider, userID string) ([]string, error) {
+func LoadCloudProviderTokens(ctx context.Context, provider, userID string, scopeOutput ...map[string][]string) ([]string, error) {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	userID = strings.TrimSpace(userID)
 	if provider == "" || userID == "" {
@@ -166,6 +175,13 @@ func LoadCloudProviderTokens(ctx context.Context, provider, userID string) ([]st
 		connectionID := strings.TrimSpace(item.ConnectionID)
 		if connectionID == "" {
 			continue
+		}
+		if len(scopeOutput) > 0 {
+			identity := strings.TrimSpace(item.ProviderAccountID)
+			if identity == "" {
+				identity = "connection:" + connectionID
+			}
+			scopeOutput[0][provider] = append(scopeOutput[0][provider], identity)
 		}
 		var bridge *coreproviderconnection.ProviderConnectionBridge = coreproviderconnection.DefaultService()
 		if bridge != nil {

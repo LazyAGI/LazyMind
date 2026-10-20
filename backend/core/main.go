@@ -34,6 +34,7 @@ import (
 	"lazymind/core/credentialvault"
 	"lazymind/core/currentmemory"
 	"lazymind/core/doc"
+	"lazymind/core/documentdirectory"
 	"lazymind/core/episode"
 	"lazymind/core/evalset"
 	"lazymind/core/externallease"
@@ -866,6 +867,9 @@ func run(ctx context.Context) error {
 	chat.RegisterConversationTitleJobs(store.DB())
 	conversationgroup.RegisterTitlePreparer(chat.OrganizerTitlePreparer{})
 	conversationgroup.RegisterAsyncJobs()
+	documentdirectory.RegisterJobs()
+	documentdirectory.LoadChatModel = chat.LoadOrganizerChatLLMConfig
+	resourceupdate.DirectoryIdleHandler = documentdirectory.QueueIdle
 	knowledge_market.RegisterAsyncJobs()
 	doc.RegisterPDFTranslationJobs()
 	workflow.RegisterWorkflowDraftGenerateJob()
@@ -892,6 +896,7 @@ func run(ctx context.Context) error {
 	// returns. asyncjob.Runner exposes Done() directly; the other Start funcs
 	// now return a done channel too.
 	var backgroundDone []<-chan struct{}
+	chat.RegisterTaskCenterEnvCleanup()
 	startBackgroundJobs := backgroundJobsEnabled()
 	var runner *asyncjob.Runner
 	if !startBackgroundJobs {
@@ -900,7 +905,7 @@ func run(ctx context.Context) error {
 		// History samples have already been downloaded and imported above.
 		backgroundDone = append(backgroundDone, showcase.StartAssetPrefetch(runtimeCtx))
 		asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
-		excludedJobs := append([]string(nil), chat.ConversationTitleJobTypes...)
+		excludedJobs := append([]string{documentdirectory.PlanJob, documentdirectory.OrganizeJob}, chat.ConversationTitleJobTypes...)
 		if !systemdeps.PythonComponentActive("rag") {
 			excludedJobs = append(excludedJobs, doc.MarketInstallJobType, doc.MarketUpdateJobType,
 				doc.MarketUpdateAllJobType, "document_pdf_translation")
@@ -912,6 +917,9 @@ func run(ctx context.Context) error {
 			LockTTL:         asyncConfig.LockTTL,
 		})
 		backgroundDone = append(backgroundDone, runner.Done())
+		directoryRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{documentdirectory.PlanJob, documentdirectory.OrganizeJob}, SerializeResources: true, Concurrency: 2, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
+		backgroundDone = append(backgroundDone, directoryRunner.Done(), documentdirectory.StartCleanup(runtimeCtx, store.DB()))
+		backgroundDone = append(backgroundDone, resourceupdate.StartIdle(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig(), resourceupdate.EnabledFromEnv()))
 		backgroundDone = append(backgroundDone, workflow.StartExternalWorkflowTaskRecovery(runtimeCtx, store.DB()))
 		backgroundDone = append(backgroundDone, conversationgroup.StartTerminalJobReconciler(runtimeCtx, store.DB(), 2*time.Second))
 		backgroundDone = append(backgroundDone, chat.StartConversationTitle(runtimeCtx, store.DB())...)
@@ -939,7 +947,6 @@ func run(ctx context.Context) error {
 
 	// Register plugin lifecycle hooks into the subagent EventHooks.
 	workflow.RegisterSubAgentHooks()
-	chat.RegisterTaskCenterEnvCleanup()
 	// Wire the conversation SSE hook so plugin events reach the frontend via the
 	// conversation-level events channel (history-independent real-time push).
 	subagent.EventHooks.RegisterConversationEventHook(

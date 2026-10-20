@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { WriterIRControl } from './WriterIRControl';
 vi.mock('./WriterIRDocumentEditor',()=>({WriterIRDocumentEditor:()=>null}));
 vi.mock('@/modules/knowledge/utils/imageUrl',()=>({resolveMarkdownImageUrlAsync:async(value:string)=>value}));
-vi.mock('react-i18next',()=>({useTranslation:()=>({t:(key:string)=>key})}));
+vi.mock('react-i18next',async(original)=>({...await original<typeof import('react-i18next')>(),useTranslation:()=>({t:(key:string)=>key})}));
 
 it('renders structured tables, formulas and existing task state in the read view',()=>{
  const {container}=render(<WriterIRControl readOnly document={{document_id:'read-doc',stage:'final',title:'Read',blocks:[

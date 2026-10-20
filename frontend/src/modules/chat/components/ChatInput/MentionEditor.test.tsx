@@ -49,6 +49,89 @@ vi.mock("@/modules/chat/utils/request", () => ({
 }));
 
 describe("MentionEditor", () => {
+  const enterQuery = (text: string) => {
+    const editor = screen.getByRole('textbox');
+    editor.textContent = text;
+    const range = document.createRange();
+    range.setStart(editor.firstChild!, text.length);
+    range.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    fireEvent.input(editor);
+  };
+
+  it('separates reference candidates from slash invocations and offers current files', async () => {
+    mocks.listDatasets.mockResolvedValue({ data: { datasets: [{ dataset_id: 'split-kb', display_name: 'Reference knowledge' }] } });
+    mocks.listSkillAssetsPage.mockResolvedValue({ records: [{ id: 'split-skill', name: 'Execute skill' }] });
+    const view = render(<MentionEditor value='' placeholder='message' fileCandidates={[{ id: 'upload:file1', name: 'Reference.pdf' }]}
+      onChange={vi.fn()} onMentionsChange={vi.fn()} onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    enterQuery('@');
+    await screen.findByRole('option', { name: 'Reference knowledge' });
+    expect(screen.getByRole('option', { name: 'Reference.pdf' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Execute skill' })).toBeNull();
+    enterQuery('/');
+    await screen.findByRole('option', { name: 'Execute skill' });
+    expect(view.container.querySelector('.chat-mention-group.is-conversation')).toBeNull();
+    expect(screen.queryByRole('option', { name: 'Reference.pdf' })).toBeNull();
+  });
+
+  it('keeps keyboard selection on the same file when another group loads late', async () => {
+    let resolveKnowledge!: (value: unknown) => void;
+    mocks.listDatasets.mockReturnValue(new Promise(resolve => { resolveKnowledge = resolve; }));
+    const onMentionsChange = vi.fn();
+    render(<MentionEditor value='' placeholder='message' fileCandidates={[{ id: 'file-stable', name: 'Stable.pdf' }]}
+      onChange={vi.fn()} onMentionsChange={onMentionsChange} onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    enterQuery('@');
+    await screen.findByRole('option', { name: 'Stable.pdf' });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'ArrowDown' });
+    resolveKnowledge({ data: { datasets: [{ dataset_id: 'late-kb', display_name: 'Late knowledge' }] } });
+    await screen.findByRole('option', { name: 'Late knowledge' });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+    expect(onMentionsChange).toHaveBeenLastCalledWith([expect.objectContaining({ type: 'file', resource_id: 'file-stable' })]);
+  });
+
+  it('closes on mode change, preserves the draft, and ignores the previous mode response', async () => {
+    let resolveOld!: (value: unknown) => void;
+    mocks.listConversations.mockImplementation((_params, options) => options?.params?.is_task_conv
+      ? Promise.resolve({ data: { conversations: [{ conversation_id: 'task', display_name: 'Task history' }] } })
+      : new Promise(resolve => { resolveOld = resolve; }));
+    const props = { value: 'draft @', placeholder: 'message', onChange: vi.fn(), onMentionsChange: vi.fn(), onPaste: vi.fn(), onSend: vi.fn(), onCompositionChange: vi.fn() };
+    const view = render(<MentionEditor {...props} runInBackground={false} />);
+    enterQuery('draft @');
+    await waitFor(() => expect(resolveOld).toBeDefined());
+    view.rerender(<MentionEditor {...props} runInBackground />);
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(screen.getByRole('textbox')).toHaveTextContent('draft @');
+    resolveOld({ data: { conversations: [{ conversation_id: 'normal', display_name: 'Old history' }] } });
+    enterQuery('draft @');
+    await screen.findByRole('option', { name: 'Task history' });
+    expect(screen.queryByRole('option', { name: 'Old history' })).toBeNull();
+  });
+
+  it('deletes one chip without deleting surrounding text or the remaining identity', () => {
+    const mentions = [
+      { mention_id: 'one', type: 'skill' as const, resource_id: 's1', display_name: 'First', start: 0, end: 5 },
+      { mention_id: 'two', type: 'workflow' as const, resource_id: 'w1', display_name: 'Second', start: 6, end: 12 },
+    ];
+    const onMentionsChange = vi.fn();
+    const onChange = vi.fn();
+    render(<MentionEditor value='First Second text' initialMentions={mentions} placeholder='message'
+      onChange={onChange} onMentionsChange={onMentionsChange} onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'chat.removeMention First' }));
+    expect(onChange).toHaveBeenLastCalledWith(' Second text');
+    expect(onMentionsChange.mock.lastCall?.[0]).toEqual([expect.objectContaining({ resource_id: 'w1', start: 1, end: 7 })]);
+  });
+
+  it('activates chip deletion with the keyboard without submitting the message', () => {
+    const onSend = vi.fn();
+    const onChange = vi.fn();
+    render(<MentionEditor value='First text' initialMentions={[{ mention_id: 'one', type: 'skill', resource_id: 's1', display_name: 'First', start: 0, end: 5 }]} placeholder='message'
+      onChange={onChange} onMentionsChange={vi.fn()} onPaste={vi.fn()} onSend={onSend} onCompositionChange={vi.fn()} />);
+    fireEvent.keyDown(screen.getByRole('button', { name: 'chat.removeMention First' }), { key: 'Enter' });
+    expect(onChange).toHaveBeenLastCalledWith(' text');
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it('restores a saved mention chip with its resource identity', () => {
     const onMentionsChange = vi.fn();
     const mention = { mention_id: 'm1', type: 'skill' as const, resource_id: 'test-skill', display_name: '测试技能', start: 0, end: 4 };
@@ -155,7 +238,7 @@ describe("MentionEditor", () => {
     expect(mocks.listDatasets).not.toHaveBeenCalled();
   });
 
-  it.each(['@', '@skill:', '@workflow:', '@tool:', '@kb:', '@chat:', '@prompt:'])(
+  it.each(['@', '/skill:', '/workflow:', '@tool:', '@kb:', '@chat:', '@prompt:'])(
     'keeps %s as plain text without loading resources when mentions are unavailable',
     (text) => {
       const onSend = vi.fn();
@@ -201,7 +284,7 @@ describe("MentionEditor", () => {
         onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />
     </>);
     const editor = screen.getByRole("textbox");
-    editor.textContent = "请参考 @";
+    editor.textContent = "请参考 /";
     const range = document.createRange();
     range.setStart(editor.firstChild!, editor.textContent.length);
     range.collapse(true);
@@ -221,9 +304,9 @@ describe("MentionEditor", () => {
     }
 
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    expect(editor).toHaveTextContent("请参考 @");
+    expect(editor).toHaveTextContent("请参考 /");
     expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenLastCalledWith("请参考 @");
+    expect(onChange).toHaveBeenLastCalledWith("请参考 /");
     fireEvent.click(editor);
     const option = await screen.findByRole("option", { name: "测试技能" });
     fireEvent.pointerDown(option);
@@ -240,7 +323,7 @@ describe("MentionEditor", () => {
     render(<MentionEditor value="" placeholder="message" onChange={vi.fn()} onMentionsChange={vi.fn()}
       onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
     const editor = screen.getByRole("textbox");
-    editor.textContent = "@skill:";
+    editor.textContent = "/skill:";
     const range = document.createRange();
     range.setStart(editor.firstChild!, editor.textContent.length);
     range.collapse(true);
@@ -290,7 +373,7 @@ describe("MentionEditor", () => {
     });
 
     const editor = screen.getByRole("textbox");
-    editor.textContent = "@skill:";
+    editor.textContent = "/skill:";
     const range = document.createRange();
     const textNode = editor.firstChild;
     if (!textNode) {
@@ -332,7 +415,7 @@ describe("MentionEditor", () => {
     });
 
     const editor = screen.getByRole("textbox");
-    editor.textContent = "@workflow:";
+    editor.textContent = "/workflow:";
     const textNode = editor.firstChild;
     if (!textNode) throw new Error("Mention editor did not create a text node");
     const range = document.createRange();
@@ -383,7 +466,7 @@ describe("MentionEditor", () => {
     );
 
     const editor = screen.getByRole("textbox");
-    editor.textContent = "@workflow:";
+    editor.textContent = "/workflow:";
     const range = document.createRange();
     range.setStart(editor.firstChild!, editor.textContent.length);
     range.collapse(true);
@@ -404,7 +487,7 @@ describe("MentionEditor", () => {
     render(<MentionEditor value="" placeholder="message" onChange={vi.fn()} onMentionsChange={onMentionsChange}
       onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
     const editor = screen.getByRole("textbox");
-    editor.textContent = "@workflow:";
+    editor.textContent = "/workflow:";
     const range = document.createRange(); range.setStart(editor.firstChild!, editor.textContent.length); range.collapse(true);
     window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(range); fireEvent.input(editor);
     expect(await screen.findByRole("option", { name: "Research（research-a）" })).toBeInTheDocument();
@@ -430,7 +513,7 @@ describe("MentionEditor", () => {
     );
 
     const editor = screen.getByRole("textbox");
-    editor.textContent = "@find";
+    editor.textContent = "/find";
     let textNode = editor.firstChild;
     if (!textNode) throw new Error("Mention editor did not create a text node");
     let range = document.createRange();
@@ -444,7 +527,7 @@ describe("MentionEditor", () => {
     await waitFor(() => expect(scrollablePrototype.scrollTo).toHaveBeenCalledWith({ top: 0 }));
     vi.mocked(scrollablePrototype.scrollTo).mockClear();
 
-    editor.textContent = "@find-skill";
+    editor.textContent = "/find-skill";
     textNode = editor.firstChild;
     if (!textNode) throw new Error("Mention editor did not create a text node");
     range = document.createRange();
@@ -461,7 +544,7 @@ describe("MentionEditor", () => {
     mocks.listSkillAssetsPage.mockResolvedValue({
       records: [{ id: "skill-find", name: "find-skill-skillhub" }],
     });
-    mocks.listConversations.mockReturnValue(new Promise(() => undefined));
+    mocks.axiosGet.mockReturnValue(new Promise(() => undefined));
 
     render(
       <MentionEditor
@@ -476,7 +559,7 @@ describe("MentionEditor", () => {
     );
 
     const editor = screen.getByRole("textbox");
-    editor.textContent = "@find";
+    editor.textContent = "/find";
     const textNode = editor.firstChild;
     if (!textNode) throw new Error("Mention editor did not create a text node");
     const range = document.createRange();

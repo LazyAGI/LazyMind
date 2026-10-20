@@ -1689,6 +1689,7 @@ func newTestSourceEngineWithScheduleAndAuthStatus(t *testing.T, repo *sourceEngi
 		WithIDGenerator(sourceTestIDGenerator()),
 		WithDefaultDatasetAlgo(coreclient.DatasetAlgo{AlgoID: "general_algo", DisplayName: "General"}),
 		WithAuthConnectionStatusClient(authStatus),
+		WithCreatorResolver(fixtureCreatorResolver{}),
 	)
 }
 

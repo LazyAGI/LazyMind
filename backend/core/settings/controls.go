@@ -15,22 +15,25 @@ import (
 // FeatureControls are non-destructive per-user pause layers. A missing
 // preference row is intentionally treated as fully enabled for upgrade safety.
 type FeatureControls struct {
-	TaskCenterEnabled      bool `json:"task_center_enabled"`
-	SchedulesEnabled       bool `json:"schedules_enabled"`
-	SkillsEnabled          bool `json:"skills_enabled"`
-	WorkflowsEnabled       bool `json:"workflows_enabled"`
-	MCPEnabled             bool `json:"mcp_enabled"`
-	DocumentParsingEnabled bool `json:"document_parsing_enabled"`
+	DocumentDirectoriesGeneration int64 `json:"-"`
+	TaskCenterEnabled             bool  `json:"task_center_enabled"`
+	SchedulesEnabled              bool  `json:"schedules_enabled"`
+	SkillsEnabled                 bool  `json:"skills_enabled"`
+	WorkflowsEnabled              bool  `json:"workflows_enabled"`
+	MCPEnabled                    bool  `json:"mcp_enabled"`
+	DocumentParsingEnabled        bool  `json:"document_parsing_enabled"`
+	DocumentDirectoriesEnabled    bool  `json:"document_directories_enabled"`
 }
 
 func DefaultFeatureControls() FeatureControls {
 	return FeatureControls{
-		TaskCenterEnabled:      true,
-		SchedulesEnabled:       true,
-		SkillsEnabled:          true,
-		WorkflowsEnabled:       true,
-		MCPEnabled:             true,
-		DocumentParsingEnabled: true,
+		TaskCenterEnabled:          true,
+		SchedulesEnabled:           true,
+		SkillsEnabled:              true,
+		WorkflowsEnabled:           true,
+		MCPEnabled:                 true,
+		DocumentParsingEnabled:     true,
+		DocumentDirectoriesEnabled: true,
 	}
 }
 
@@ -55,12 +58,14 @@ func LoadFeatureControls(ctx context.Context, db *gorm.DB, userID string) (Featu
 		return FeatureControls{}, err
 	}
 	return FeatureControls{
-		TaskCenterEnabled:      preferences.TaskCenterEnabled,
-		SchedulesEnabled:       preferences.SchedulesEnabled,
-		SkillsEnabled:          preferences.SkillsEnabled,
-		WorkflowsEnabled:       preferences.WorkflowsEnabled,
-		MCPEnabled:             preferences.MCPEnabled,
-		DocumentParsingEnabled: preferences.DocumentParsingEnabled,
+		TaskCenterEnabled:             preferences.TaskCenterEnabled,
+		SchedulesEnabled:              preferences.SchedulesEnabled,
+		SkillsEnabled:                 preferences.SkillsEnabled,
+		WorkflowsEnabled:              preferences.WorkflowsEnabled,
+		MCPEnabled:                    preferences.MCPEnabled,
+		DocumentParsingEnabled:        preferences.DocumentParsingEnabled,
+		DocumentDirectoriesEnabled:    preferences.DocumentDirectoriesEnabled,
+		DocumentDirectoriesGeneration: preferences.DocumentDirectoriesGeneration,
 	}, nil
 }
 

@@ -50,7 +50,7 @@ INSERT INTO sub_agent_artifacts VALUES ('artifact','history','Preserved output')
 func ordinaryTableSchema(t *testing.T, db *sql.DB, dialect string) string {
 	t.Helper()
 	lines := []string{}
-	for _, table := range []string{"sub_agent_tasks", "sub_agent_steps", "sub_agent_artifacts"} {
+	for _, table := range []string{"sub_agent_tasks", "sub_agent_steps", "sub_agent_artifacts", "task_execution_timings", "task_attempt_timings"} {
 		if dialect == "sqlite" {
 			rows, err := db.Query("PRAGMA table_info(" + table + ")")
 			if err != nil {

@@ -1,3 +1,4 @@
+import { TASKS_REMOVED_EVENT } from '@/modules/taskCenter/events';
 import { getLocalizedErrorMessage } from "@/components/request";
 import {
   CheckCircleOutlined,
@@ -118,6 +119,7 @@ export default function ConversationGroups({ assistants, onChanged, onNewChatInG
     }
   }, [isTaskConv, includeProjects, projectsOnly, assistants]);
 
+  useEffect(() => { const refresh = () => void refreshGroups(); window.addEventListener(TASKS_REMOVED_EVENT, refresh); return () => window.removeEventListener(TASKS_REMOVED_EVENT, refresh); }, [refreshGroups]);
   useEffect(() => () => { ++pollGenerationRef.current; window.clearTimeout(pollRef.current); }, []);
 
   const refreshActiveRun = useCallback(async (runId: string, generation: number) => {

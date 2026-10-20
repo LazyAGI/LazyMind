@@ -10,12 +10,17 @@ import lazyllm
 from lazyllm import AutoModel, LOG
 from lazyllm.components.formatter import encode_query_with_filepaths
 
-from lazymind.chat.config import CHAT_DOCUMENT_EXTENSIONS, CHAT_TEXT_EXTENSIONS, IMAGE_EXTENSIONS
+from lazymind.chat.config import (
+    CHAT_DOCUMENT_EXTENSIONS,
+    CHAT_SPREADSHEET_EXTENSIONS,
+    CHAT_TEXT_EXTENSIONS,
+    IMAGE_EXTENSIONS,
+)
 from lazymind.chat.engine.prompts import VISION_EXTRACT_DEFAULT_INSTRUCTION
 from lazymind.config import config as _cfg
 from lazymind.vision_model import select_vision_model_role, VisionModelUnavailable
 
-_SUPPORTED_ATTACHMENT_LABEL = 'images, Office/PDF documents, and common plain-text files'
+_SUPPORTED_ATTACHMENT_LABEL = 'images, Office/PDF documents, spreadsheets, and common plain-text files'
 _PROMPT_TEMPLATE_PLACEHOLDER_RE = re.compile(r'\{(\w+)\}')
 _MAX_TEXT_ATTACHMENT_CHARS = 200_000
 _MAX_DOCUMENT_ATTACHMENT_CHARS = 200_000
@@ -58,8 +63,17 @@ def is_chat_text_file(path: str) -> bool:
     return _suffix(path) in CHAT_TEXT_EXTENSIONS
 
 
+def is_chat_spreadsheet_file(path: str) -> bool:
+    return _suffix(path) in CHAT_SPREADSHEET_EXTENSIONS
+
+
 def is_chat_attachment_file(path: str) -> bool:
-    return is_chat_image_file(path) or is_chat_document_file(path) or is_chat_text_file(path)
+    return (
+        is_chat_image_file(path)
+        or is_chat_document_file(path)
+        or is_chat_spreadsheet_file(path)
+        or is_chat_text_file(path)
+    )
 
 
 def filter_chat_image_files(files: List[str]) -> List[str]:
@@ -217,6 +231,13 @@ def parse_attachment_content(file_path: str, *, priority: int = 0) -> str:
         )
     if is_chat_image_file(path):
         return extract_image_description(path, priority=priority)
+    if is_chat_spreadsheet_file(path):
+        from lazymind.chat.engine.chat_excel_extractor import extract_spreadsheet
+
+        started_at = _log_parse_start(path, kind='spreadsheet')
+        body = extract_spreadsheet(path).text
+        _log_parse_done(path, kind='spreadsheet', started_at=started_at, body=body)
+        return body
     if is_chat_text_file(path):
         return read_chat_text_file(path)
     return read_chat_document_text(path)
@@ -224,7 +245,7 @@ def parse_attachment_content(file_path: str, *, priority: int = 0) -> str:
 
 def _build_reference_section(file_path: str, body: str, *, kind: str) -> str:
     name = Path(file_path).name
-    label = 'Image' if kind == 'image' else 'Document'
+    label = {'image': 'Image', 'spreadsheet': 'Spreadsheet'}.get(kind, 'Document')
     safe_body = _sanitize_for_prompt_template(body.strip())
     return (
         f'## Attached {label} Reference: {name}\n'
@@ -244,7 +265,11 @@ def build_attachment_reference_prompt(files: List[str], *, priority: int = 0) ->
                 continue
             body = parse_attachment_content(path, priority=priority)
             if body:
-                kind = 'image' if is_chat_image_file(path) else 'document'
+                kind = (
+                    'image' if is_chat_image_file(path)
+                    else 'spreadsheet' if is_chat_spreadsheet_file(path)
+                    else 'document'
+                )
                 sections.append(_build_reference_section(path, body, kind=kind))
         except VisionModelUnavailable as exc:
             sections.append(_build_reference_section(

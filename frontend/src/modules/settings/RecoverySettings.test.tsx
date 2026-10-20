@@ -1,6 +1,6 @@
 import { getLocalizedErrorMessage } from "@/components/request";
 import { createRef } from "react";
-import { Modal } from "antd";
+import { ConfigProvider, Modal } from "antd";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   listWorkflowTrash: vi.fn(),
   restoreConversation: vi.fn(),
   unarchiveConversation: vi.fn(),
+  trashConversation: vi.fn(),
 }));
 
 vi.mock("react-i18next", async (importOriginal) => ({
@@ -77,6 +78,9 @@ vi.mock("react-i18next", async (importOriginal) => ({
         "settingsPage.recovery.moveTo": "移动到",
         "settingsPage.recovery.unarchive": "取消归档",
         "settingsPage.recovery.moveToTrash": "移入回收站",
+        "settingsPage.recovery.moveToTrashTitle": "将对话移入回收站？",
+        "settingsPage.recovery.moveToTrashDescription": "该对话将在回收站保留 30 天，期间可以恢复，到期后自动删除。",
+        "common.delete": "删除",
         "settingsPage.recovery.moreActions": "更多操作",
         "settingsPage.recovery.restore": "恢复",
         "settingsPage.recovery.restoreNamed": `恢复“${values?.name}”？`,
@@ -120,7 +124,7 @@ vi.mock("./recoveryApi", () => ({
   restoreConversation: mocks.restoreConversation,
   restoreSkillAsset: vi.fn(),
   restoreWorkflow: vi.fn(),
-  trashConversation: vi.fn(),
+  trashConversation: mocks.trashConversation,
   unarchiveConversation: mocks.unarchiveConversation,
 }));
 
@@ -128,12 +132,12 @@ function RecoveryLocation() {
   return <output data-testid="recovery-location">{useLocation().search}</output>;
 }
 
-function renderRecoverySettings(initialEntry = "/settings?section=recovery") {
+function renderRecoverySettings(initialEntry = "/settings?section=recovery", motion = true) {
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
+    <ConfigProvider theme={{ token: { motion } }}><MemoryRouter initialEntries={[initialEntry]}>
       <RecoveryLocation />
       <RecoverySettings headingRef={createRef<HTMLHeadingElement>()} />
-    </MemoryRouter>,
+    </MemoryRouter></ConfigProvider>,
   );
 }
 
@@ -184,6 +188,7 @@ describe("RecoverySettings", () => {
     mocks.archiveConversation.mockResolvedValue(undefined);
     mocks.restoreConversation.mockResolvedValue(undefined);
     mocks.unarchiveConversation.mockResolvedValue(undefined);
+    mocks.trashConversation.mockResolvedValue(undefined);
     mocks.updateArchiveFolder.mockResolvedValue(undefined);
     mocks.deleteArchiveFolder.mockResolvedValue(1);
   });
@@ -191,6 +196,16 @@ describe("RecoverySettings", () => {
   function openArchiveView() {
     fireEvent.click(screen.getByRole("tab", { name: /已归档/ }));
   }
+
+  it("refreshes archived items and folder counts after undo from a batch notice", async () => {
+    renderRecoverySettings(RECOVERY_ARCHIVE_PATH, false);
+    await screen.findByText("设置页信息架构整理");
+    const folderCalls = mocks.listArchiveFolders.mock.calls.length;
+    mocks.listArchivedConversations.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
+    act(() => window.dispatchEvent(new Event(CHAT_CONVERSATION_LIST_REFRESH_EVENT)));
+    await waitFor(() => expect(screen.queryByText("设置页信息架构整理")).not.toBeInTheDocument());
+    expect(mocks.listArchiveFolders.mock.calls.length).toBeGreaterThan(folderCalls);
+  });
 
   it("opens on Trash with the skill category selected", async () => {
     renderRecoverySettings();
@@ -275,6 +290,46 @@ describe("RecoverySettings", () => {
     } finally {
       window.removeEventListener(CHAT_CONVERSATION_LIST_REFRESH_EVENT, refresh);
     }
+  });
+
+  it("shows the archived conversation name and cancels without moving it to Trash", async () => {
+    renderRecoverySettings(RECOVERY_ARCHIVE_PATH, false);
+    const name = await screen.findByText("设置页信息架构整理");
+    fireEvent.click(within(name.closest(".recovery-row") as HTMLElement).getByRole("button", { name: "settingsPage.recovery.moveToTrashNamed" }));
+    const dialog = await screen.findByRole("dialog", { name: "将对话移入回收站？" });
+    expect(within(dialog).getByText("设置页信息架构整理")).toHaveClass("conversation-trash-confirm-name");
+    expect(within(dialog).getByText("该对话将在回收站保留 30 天，期间可以恢复，到期后自动删除。")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: /取\s*消/ }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mocks.trashConversation).not.toHaveBeenCalled();
+    expect(name).toBeInTheDocument();
+  });
+
+  it("keeps a failed archive deletion open, blocks duplicate requests, and refreshes only on success", async () => {
+    mocks.trashConversation.mockRejectedValueOnce(new Error("offline"));
+    renderRecoverySettings(RECOVERY_ARCHIVE_PATH, false);
+    const name = await screen.findByText("设置页信息架构整理");
+    fireEvent.click(within(name.closest(".recovery-row") as HTMLElement).getByRole("button", { name: "settingsPage.recovery.moveToTrashNamed" }));
+    const dialog = await screen.findByRole("dialog");
+    const submit = within(dialog).getByRole("button", { name: /删\s*除/ });
+    fireEvent.click(submit);
+    await screen.findByText(getLocalizedErrorMessage(new Error("offline")));
+    await waitFor(() => expect(submit).not.toHaveClass("ant-btn-loading"));
+    expect(dialog).toBeInTheDocument();
+    expect(name).toBeInTheDocument();
+    expect(mocks.listArchivedConversations).toHaveBeenCalledTimes(1);
+
+    let resolveDelete!: () => void;
+    mocks.trashConversation.mockImplementationOnce(() => new Promise<void>(resolve => { resolveDelete = resolve; }));
+    fireEvent.click(submit);
+    await waitFor(() => expect(submit).toHaveClass("ant-btn-loading"));
+    fireEvent.click(submit);
+    expect(mocks.trashConversation.mock.calls).toEqual([["conversation-1"], ["conversation-1"]]);
+    mocks.listArchivedConversations.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
+    await act(async () => resolveDelete());
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(name).not.toBeInTheDocument();
+    expect(mocks.listArchivedConversations).toHaveBeenCalledTimes(2);
   });
 
   it("restores a deleted child conversation and refreshes the conversation sidebar", async () => {

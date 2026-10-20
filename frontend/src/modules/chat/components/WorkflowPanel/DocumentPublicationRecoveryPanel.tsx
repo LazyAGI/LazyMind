@@ -38,7 +38,7 @@ export function DocumentPublicationRecoveryPanel({ artifactId, slotId, itemIndex
 
   const load=useCallback(async()=>{
     const current=++generation.current;
-    setBusy(true);setError('');
+    setBusy(true);setLoaded(false);setError('');
     try {
       const response=await WorkflowSessionApi().getPublicationForArtifact(artifactId,{silentError:true});
       const next=response.data.data.operation;
@@ -126,11 +126,10 @@ export function DocumentPublicationRecoveryPanel({ artifactId, slotId, itemIndex
       <span aria-hidden>{expanded?'▾':'▸'}</span>{label('status')}
     </button>
     {expanded && <div id={detailsId} className='document-publication-recovery__details'><Space direction='vertical' style={{width:'100%'}}>
-      {operation && <>
+      {loaded && operation && <>
         <span>{label(known?`states.${operation.status}`:'unknownState')}</span>
         {(operation.source_slot_id!==slotId || operation.item_index!==itemIndex) && <span>{label('otherDraft')}</span>}
         {target?<a href={target} target='_blank' rel='noreferrer'>{label('openTarget')}</a>:<span>{label('noTarget')}</span>}
-        <details><summary>{label('details')}</summary><div style={{overflowWrap:'anywhere'}}>{operation.operation_id}</div><time dateTime={operation.updated_at}>{new Date(operation.updated_at).toLocaleString()}</time></details>
       </>}
       {error && <span role='alert'>{label(error)}</span>}
       <Space wrap size={6}>

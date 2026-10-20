@@ -787,6 +787,25 @@ components:
                     format: int64
                     type: integer
             type: object
+        ChatErrorData:
+            properties:
+                detail:
+                    description: Legacy error detail; persisted chat failures include history_id.
+                run_terminal:
+                    $ref: '#/components/schemas/RunTerminal'
+            type: object
+        ChatErrorResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/ChatErrorData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+            type: object
         ChatExport:
             properties:
                 content_type:
@@ -1744,6 +1763,22 @@ components:
                 folder_id:
                     nullable: true
                     type: string
+                only_if_active:
+                    type: boolean
+            type: object
+        ConversationArchiveResponse:
+            properties:
+                archived_at:
+                    format: date-time
+                    type: string
+                conversation_id:
+                    type: string
+                newly_archived:
+                    type: boolean
+            required:
+                - conversation_id
+                - newly_archived
+                - archived_at
             type: object
         ConversationBatchDeleteRequest:
             properties:
@@ -2882,6 +2917,12 @@ components:
                 total_size:
                     format: int64
                     type: integer
+            type: object
+        ConversationUnarchiveRequest:
+            properties:
+                expected_archived_at:
+                    format: date-time
+                    type: string
             type: object
         CoreEmptyResponse:
             properties:
@@ -4064,6 +4105,96 @@ components:
                 next_cursor:
                     type: string
             type: object
+        DirectoryLocalFile:
+            properties:
+                content_base64:
+                    type: string
+                error_code:
+                    type: string
+                filename:
+                    type: string
+                mime_type:
+                    type: string
+                namespace:
+                    type: string
+                path:
+                    type: string
+                size:
+                    format: int64
+                    type: integer
+            required:
+                - path
+                - namespace
+                - filename
+                - size
+                - mime_type
+                - content_base64
+            type: object
+        DirectoryLocalFileResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DirectoryLocalFile'
+            required:
+                - code
+                - data
+            type: object
+        DirectoryMail:
+            properties:
+                attachments:
+                    items:
+                        properties:
+                            filename:
+                                type: string
+                            mime_type:
+                                type: string
+                            size:
+                                format: int64
+                                type: integer
+                        required:
+                            - filename
+                            - mime_type
+                            - size
+                        type: object
+                    type: array
+                body:
+                    type: string
+                cc:
+                    type: string
+                date:
+                    type: string
+                from:
+                    type: string
+                mailbox:
+                    type: string
+                subject:
+                    type: string
+                to:
+                    type: string
+                truncated:
+                    type: boolean
+            required:
+                - subject
+                - from
+                - to
+                - cc
+                - date
+                - mailbox
+                - body
+                - attachments
+                - truncated
+            type: object
+        DirectoryMailResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DirectoryMail'
+            required:
+                - code
+                - data
+            type: object
         DiscoverResponse:
             properties:
                 success:
@@ -4549,6 +4680,366 @@ components:
                 - invalid_references
                 - representation
                 - targets
+            type: object
+        DocumentDirectory:
+            properties:
+                auto_add:
+                    type: boolean
+                coverage:
+                    items:
+                        additionalProperties: true
+                        type: object
+                    type: array
+                id:
+                    type: string
+                intent:
+                    type: string
+                last_used_at:
+                    format: date-time
+                    type: string
+                name:
+                    type: string
+                organization:
+                    type: string
+                organized_at:
+                    format: date-time
+                    type: string
+                pinned:
+                    type: boolean
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - id
+                - name
+                - intent
+                - organization
+                - auto_add
+                - pinned
+                - version
+                - last_used_at
+            type: object
+        DocumentDirectoryActionResult:
+            properties:
+                batch:
+                    $ref: '#/components/schemas/DocumentDirectoryBatch'
+                directory:
+                    $ref: '#/components/schemas/DocumentDirectory'
+                entry:
+                    $ref: '#/components/schemas/DocumentDirectoryEntry'
+                evicted:
+                    type: string
+                group:
+                    $ref: '#/components/schemas/DocumentDirectoryGroup'
+            type: object
+        DocumentDirectoryActionResultResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DocumentDirectoryActionResult'
+            required:
+                - code
+                - data
+            type: object
+        DocumentDirectoryBatch:
+            properties:
+                acknowledged:
+                    type: boolean
+                created_at:
+                    format: date-time
+                    type: string
+                directory_id:
+                    type: string
+                id:
+                    type: string
+                parent_id:
+                    type: string
+                result:
+                    additionalProperties: true
+                    type: object
+                status:
+                    type: string
+            required:
+                - id
+                - directory_id
+                - parent_id
+                - status
+                - acknowledged
+                - created_at
+            type: object
+        DocumentDirectoryBatches:
+            properties:
+                batches:
+                    items:
+                        $ref: '#/components/schemas/DocumentDirectoryBatch'
+                    type: array
+            required:
+                - batches
+            type: object
+        DocumentDirectoryBatchesResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DocumentDirectoryBatches'
+            required:
+                - code
+                - data
+            type: object
+        DocumentDirectoryCommand:
+            properties:
+                auto_add:
+                    type: boolean
+                batch_id:
+                    type: string
+                candidate:
+                    additionalProperties: true
+                    type: object
+                directory_id:
+                    type: string
+                entry_id:
+                    type: string
+                group_id:
+                    type: string
+                instruction:
+                    type: string
+                intent:
+                    type: string
+                name:
+                    type: string
+                operation:
+                    enum:
+                        - create
+                        - update
+                        - delete
+                        - touch
+                        - group
+                        - delete_group
+                        - entry
+                        - entry_pin
+                        - exclude
+                        - restore
+                        - organize
+                        - reorganize
+                        - retry
+                        - cancel
+                        - acknowledge
+                    type: string
+                organization:
+                    type: string
+                parent_id:
+                    type: string
+                pinned:
+                    type: boolean
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - operation
+            type: object
+        DocumentDirectoryDetail:
+            properties:
+                directory:
+                    $ref: '#/components/schemas/DocumentDirectory'
+                entries:
+                    items:
+                        $ref: '#/components/schemas/DocumentDirectoryEntry'
+                    type: array
+                folder:
+                    $ref: '#/components/schemas/DocumentFolderInventory'
+                group_counts:
+                    additionalProperties:
+                        format: int64
+                        type: integer
+                    type: object
+                groups:
+                    items:
+                        $ref: '#/components/schemas/DocumentDirectoryGroup'
+                    type: array
+                organizing:
+                    type: boolean
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - directory
+                - groups
+                - entries
+                - organizing
+            type: object
+        DocumentDirectoryDetailResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DocumentDirectoryDetail'
+            required:
+                - code
+                - data
+            type: object
+        DocumentDirectoryEntry:
+            properties:
+                access_state:
+                    type: string
+                confirmed:
+                    type: boolean
+                content_state:
+                    type: string
+                content_version:
+                    type: string
+                evidence:
+                    additionalProperties: true
+                    type: object
+                excluded:
+                    type: boolean
+                group_id:
+                    type: string
+                id:
+                    type: string
+                locator:
+                    additionalProperties: true
+                    type: object
+                namespace:
+                    type: string
+                pinned:
+                    type: boolean
+                read_at:
+                    format: date-time
+                    type: string
+                read_state:
+                    type: string
+                resource_id:
+                    type: string
+                resource_key:
+                    type: string
+                source:
+                    type: string
+                title:
+                    type: string
+            required:
+                - id
+                - resource_key
+                - source
+                - namespace
+                - resource_id
+                - title
+                - group_id
+                - pinned
+                - excluded
+                - read_state
+                - confirmed
+                - access_state
+            type: object
+        DocumentDirectoryGroup:
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                parent_id:
+                    type: string
+                position:
+                    type: integer
+            required:
+                - id
+                - name
+                - parent_id
+                - position
+            type: object
+        DocumentDirectoryList:
+            properties:
+                directories:
+                    items:
+                        $ref: '#/components/schemas/DocumentDirectory'
+                    type: array
+            required:
+                - directories
+            type: object
+        DocumentDirectoryListResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DocumentDirectoryList'
+            required:
+                - code
+                - data
+            type: object
+        DocumentFolderInventory:
+            properties:
+                batch_id:
+                    type: string
+                directory_id:
+                    type: string
+                id:
+                    type: string
+                source:
+                    additionalProperties: true
+                    type: object
+                state:
+                    additionalProperties: true
+                    type: object
+                status:
+                    type: string
+            required:
+                - id
+                - status
+                - source
+                - state
+                - directory_id
+                - batch_id
+            type: object
+        DocumentFolderNode:
+            properties:
+                candidate:
+                    additionalProperties: true
+                    type: object
+                kind:
+                    type: string
+                listed:
+                    type: boolean
+                name:
+                    type: string
+                node_key:
+                    type: string
+                parent_key:
+                    type: string
+                path:
+                    type: string
+            required:
+                - node_key
+                - parent_key
+                - path
+                - name
+                - kind
+                - listed
+            type: object
+        DocumentFolderNodes:
+            properties:
+                next_offset:
+                    type: integer
+                nodes:
+                    items:
+                        $ref: '#/components/schemas/DocumentFolderNode'
+                    type: array
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - nodes
+                - total
+                - next_offset
+            type: object
+        DocumentFolderNodesResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DocumentFolderNodes'
+            required:
+                - code
+                - data
             type: object
         DocumentImageDisplay:
             properties:
@@ -6751,6 +7242,33 @@ components:
                 - reason
                 - settings_url
             type: object
+        ModelFailureCode:
+            enum:
+                - authentication_failed
+                - balance_exhausted
+                - concurrency_limited
+                - conflict
+                - input_filtered
+                - invalid_request
+                - model_configuration
+                - not_found
+                - organization_spend_limit_exceeded
+                - output_filtered
+                - permission_denied
+                - project_spend_limit_exceeded
+                - protocol_error
+                - provider_internal_error
+                - provider_overloaded
+                - provider_rejected
+                - quota_exhausted
+                - rate_limited
+                - request_timeout
+                - service_unavailable
+                - token_limit
+                - transport_error
+                - unprocessable_entity
+                - usage_limit_exceeded
+            type: string
         ModelFeaturesResponse:
             properties:
                 image_embed_enabled:
@@ -7017,6 +7535,8 @@ components:
             type: object
         OrdinaryRunView:
             properties:
+                execution_id:
+                    type: string
                 final_artifacts:
                     items:
                         $ref: '#/components/schemas/PublicArtifact'
@@ -7030,6 +7550,10 @@ components:
                     type: integer
                 run_id:
                     type: string
+                status:
+                    type: string
+                timing:
+                    $ref: '#/components/schemas/RunTiming'
             required:
                 - revision
                 - run_id
@@ -8200,10 +8724,50 @@ components:
                         - failed
                         - cancelled
                     type: string
+                transport_diagnostic:
+                    properties:
+                        code:
+                            enum:
+                                - upstream_stream_failed
+                                - upstream_stream_timeout
+                            type: string
+                    required:
+                        - code
+                    type: object
             required:
                 - status
                 - reason
                 - partial_output
+            type: object
+        RunTiming:
+            properties:
+                cumulative_execution_ms:
+                    format: int64
+                    nullable: true
+                    type: integer
+                elapsed_ms:
+                    format: int64
+                    nullable: true
+                    type: integer
+                finished_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                measured_at:
+                    format: date-time
+                    type: string
+                requested_at:
+                    format: date-time
+                    type: string
+                running_attempt_count:
+                    type: integer
+            required:
+                - cumulative_execution_ms
+                - elapsed_ms
+                - finished_at
+                - measured_at
+                - requested_at
+                - running_attempt_count
             type: object
         ScheduleMoveRequest:
             properties:
@@ -9089,6 +9653,47 @@ components:
                     type: string
                 task_type:
                     type: string
+            type: object
+        TaskRemovalPreview:
+            properties:
+                active_task_count:
+                    type: integer
+                conversation_count:
+                    type: integer
+                impact_version:
+                    type: string
+                task_count:
+                    type: integer
+                task_id:
+                    type: string
+            required:
+                - task_id
+                - task_count
+                - conversation_count
+                - active_task_count
+                - impact_version
+            type: object
+        TaskRemovalRequest:
+            properties:
+                impact_version:
+                    type: string
+            type: object
+        TaskRemovalResult:
+            properties:
+                cancellation_pending:
+                    type: boolean
+                removed_task_ids:
+                    items:
+                        type: string
+                    type: array
+                trashed_conversation_ids:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - removed_task_ids
+                - trashed_conversation_ids
+                - cancellation_pending
             type: object
         TaskResponse:
             properties:
@@ -11441,6 +12046,76 @@ components:
                 - code
                 - message
             type: object
+        knowledgeMarketTaskFileCountsOpenAPIResponse:
+            properties:
+                canceled:
+                    type: integer
+                failed:
+                    type: integer
+                success:
+                    type: integer
+                unfinished:
+                    type: integer
+            required:
+                - canceled
+                - failed
+                - success
+                - unfinished
+            type: object
+        knowledgeMarketTaskFileOpenAPIResponse:
+            properties:
+                file_id:
+                    type: string
+                name:
+                    type: string
+                reason_code:
+                    enum:
+                        - success
+                        - canceled
+                        - waiting
+                        - processing
+                        - unknown
+                        - parse_failed
+                        - import_failed
+                        - missing_task
+                        - rate_limited
+                    type: string
+                status:
+                    enum:
+                        - success
+                        - failed
+                        - canceled
+                        - unfinished
+                    type: string
+            required:
+                - file_id
+                - name
+                - reason_code
+                - status
+            type: object
+        knowledgeMarketTaskFilesOpenAPIResponse:
+            properties:
+                counts:
+                    $ref: '#/components/schemas/knowledgeMarketTaskFileCountsOpenAPIResponse'
+                file_details_available:
+                    type: boolean
+                items:
+                    items:
+                        $ref: '#/components/schemas/knowledgeMarketTaskFileOpenAPIResponse'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    type: integer
+            required:
+                - counts
+                - file_details_available
+                - page
+                - page_size
+                - total
+            type: object
         knowledgeMarketTaskListItemOpenAPIResponse:
             properties:
                 can_cancel:
@@ -11476,6 +12151,8 @@ components:
                 overall_percent:
                     format: int64
                     type: integer
+                parse:
+                    $ref: '#/components/schemas/knowledgeMarketTaskParseOpenAPIResponse'
                 progress:
                     $ref: '#/components/schemas/knowledgeMarketTaskProgressOpenAPIResponse'
                 stage:
@@ -11505,10 +12182,14 @@ components:
                     type: integer
                 total:
                     type: integer
+                unfinished_count:
+                    description: Current user's unfinished knowledge market tasks across all pages and filters, including ongoing file parsing.
+                    type: integer
             required:
                 - page
                 - page_size
                 - total
+                - unfinished_count
             type: object
         knowledgeMarketTaskParseOpenAPIResponse:
             properties:
@@ -12519,6 +13200,8 @@ components:
             type: object
         settingsFeatureControlsOpenAPIResponse:
             properties:
+                document_directories_enabled:
+                    type: boolean
                 document_parsing_enabled:
                     type: boolean
                 mcp_enabled:
@@ -12532,6 +13215,7 @@ components:
                 workflows_enabled:
                     type: boolean
             required:
+                - document_directories_enabled
                 - document_parsing_enabled
                 - mcp_enabled
                 - schedules_enabled
@@ -14254,6 +14938,8 @@ components:
                     type: boolean
                 developer_mode_active:
                     type: boolean
+                document_directories_enabled:
+                    type: boolean
                 document_parsing_enabled:
                     type: boolean
                 mcp_enabled:
@@ -14278,6 +14964,7 @@ components:
                 - accepted_user_agreement_version
                 - chat_preference_notice_dismissed
                 - developer_mode_active
+                - document_directories_enabled
                 - document_parsing_enabled
                 - mcp_enabled
                 - performance_stats_enabled
@@ -14296,6 +14983,8 @@ components:
                 chat_preference_notice_dismissed:
                     type: boolean
                 developer_mode_active:
+                    type: boolean
+                document_directories_enabled:
                     type: boolean
                 document_parsing_enabled:
                     type: boolean
@@ -18538,7 +19227,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/EmptyObject'
+                                $ref: '#/components/schemas/ConversationArchiveResponse'
                     description: Conversation archived
             summary: Archive or move a conversation
     /api/core/conversations/{conversation_id}:pin:
@@ -18648,7 +19337,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/ConversationPinResponse'
                     description: Conversation reordered
-            summary: Move a conversation within its pinned or ordinary history
+            summary: Move a conversation within its pinned, recent, group, project or sibling list without changing relationships
     /api/core/conversations/{conversation_id}:restore:
         post:
             parameters:
@@ -18717,6 +19406,12 @@ paths:
                   required: true
                   schema:
                     type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConversationUnarchiveRequest'
+                required: false
             responses:
                 "200":
                     content:
@@ -18724,7 +19419,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/EmptyObject'
                     description: Conversation unarchived
-            summary: Unarchive a conversation
+            summary: Unarchive a conversation. A stale expected_archived_at returns business code 2004815; an already active conversation satisfies a conditional retry.
     /api/core/conversations/{conversation_id}:unpin:
         post:
             parameters:
@@ -19154,6 +19849,12 @@ paths:
                             schema:
                                 type: string
                     description: Chat event stream
+                default:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ChatErrorResponse'
+                    description: Chat rejection; run_terminal, when present, is the same authoritative outcome returned by history
             summary: Chat; optional group_id atomically assigns a newly created conversation
     /api/core/conversations:editable-block:
         patch:
@@ -21277,6 +21978,177 @@ paths:
                 "200":
                     description: OK
             summary: POST /datasets/processing/preflight
+    /api/core/document-directories:
+        get:
+            operationId: listDocumentDirectories
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DocumentDirectoryListResponse'
+                    description: List up to 20 directories without refreshing use
+            summary: List up to 20 directories without refreshing use
+            tags:
+                - DocumentDirectories
+    /api/core/document-directories/{directory_id}:
+        get:
+            operationId: getDocumentDirectory
+            parameters:
+                - in: path
+                  name: directory_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: offset
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: limit
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: group_id
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: query
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: state
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DocumentDirectoryDetailResponse'
+                    description: Read last committed directory version
+            summary: Read last committed directory version
+            tags:
+                - DocumentDirectories
+    /api/core/document-directories/{directory_id}/entries/{entry_id}/local-file:
+        get:
+            operationId: readDocumentDirectoryLocalFile
+            parameters:
+                - in: path
+                  name: directory_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: entry_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: metadata_only
+                  required: false
+                  schema:
+                    type: boolean
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DirectoryLocalFileResponse'
+                    description: Preview an owned local file without changing Agent evidence
+            summary: Preview an owned local file without changing Agent evidence
+            tags:
+                - DocumentDirectories
+    /api/core/document-directories/{directory_id}/entries/{entry_id}/mail:
+        get:
+            operationId: readDocumentDirectoryMail
+            parameters:
+                - in: path
+                  name: directory_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: entry_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DirectoryMailResponse'
+                    description: Read an owned email without changing directory evidence
+            summary: Read an owned email without changing directory evidence
+            tags:
+                - DocumentDirectories
+    /api/core/document-directories/{directory_id}/source-nodes:
+        get:
+            operationId: getDocumentFolderNodes
+            parameters:
+                - in: path
+                  name: directory_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: parent_key
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: offset
+                  required: false
+                  schema:
+                    type: integer
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DocumentFolderNodesResponse'
+                    description: Page original source tree children
+            summary: Page original source tree children
+            tags:
+                - DocumentDirectories
+    /api/core/document-directories/actions:
+        post:
+            operationId: executeDocumentDirectoryAction
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/DocumentDirectoryCommand'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DocumentDirectoryActionResultResponse'
+                    description: Apply an owned directory action; organizing directories reject edits
+            summary: Apply an owned directory action; organizing directories reject edits
+            tags:
+                - DocumentDirectories
+    /api/core/document-directories/batches:
+        get:
+            operationId: listDocumentDirectoryBatches
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DocumentDirectoryBatchesResponse'
+                    description: List durable organization results
+            summary: List durable organization results
+            tags:
+                - DocumentDirectories
     /api/core/document-providers:
         get:
             responses:
@@ -22621,11 +23493,19 @@ paths:
                         - failed
                         - canceled
                     type: string
-                - description: Async job type; defaults to knowledge_market_install.
+                - description: Async job type or all; defaults to knowledge_market_install.
                   in: query
                   name: job_type
                   required: false
                   schema:
+                    type: string
+                - description: Summary omits per-file failures; pagination is clamped to available pages.
+                  in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - summary
                     type: string
             responses:
                 "200":
@@ -22672,6 +23552,47 @@ paths:
                                 $ref: '#/components/schemas/knowledgeMarketTaskDetailOpenAPIResponse'
                     description: Background install task detail
             summary: Get background knowledge market task detail
+            tags:
+                - knowledge-market
+    /api/core/knowledge-market/tasks/{job_id}/files:
+        get:
+            description: Returns the current user's job-owned file page and all four counts. Historical file snapshots are immutable. Unknown states are unfinished. Aggregate-only history reports file_details_available=false. Page numbers are clamped; page and page_size must be positive integers, page_size at most 100.
+            parameters:
+                - in: path
+                  name: job_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - description: Default 10, maximum 100.
+                  in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - description: Default failed.
+                  in: query
+                  name: status
+                  required: false
+                  schema:
+                    enum:
+                        - success
+                        - failed
+                        - canceled
+                        - unfinished
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskFilesOpenAPIResponse'
+                    description: Task file page
+            summary: List files for one knowledge market task
             tags:
                 - knowledge-market
     /api/core/knowledge-market/tasks/{job_id}:cancel:
@@ -28513,6 +29434,22 @@ paths:
             summary: Read immutable run configuration and delivery history
             tags:
                 - TaskNotifications
+    /api/core/task-center/tasks/{task_id}/removal-preview:
+        get:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TaskRemovalPreview'
+                    description: Removal impact
+            summary: Preview removal of a task and related conversations
     /api/core/task-center/tasks/{task_id}:cancel:
         post:
             parameters:
@@ -28533,10 +29470,20 @@ paths:
                   required: true
                   schema:
                     type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/TaskRemovalRequest'
+                required: false
             responses:
                 "200":
-                    description: OK
-            summary: POST /task-center/tasks/{task_id}:remove
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TaskRemovalResult'
+                    description: Removal committed
+            summary: Move task and related conversations to Trash
     /api/core/tasks/{task_id}:
         get:
             description: view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.

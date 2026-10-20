@@ -88,7 +88,7 @@ def test_filesystem_append_preserves_content(tmp_path):
     from lazyllm.tools.agent.file_tool import read
     target = str(tmp_path / 'document.md')
     write(target, 'first')
-    write(target, ' second', mode='append')
+    write(target, read(target)['content'] + ' second')
     assert read(target)['content'] == 'first second'
 
 
@@ -106,8 +106,8 @@ def test_filesystem_prepared_relative_and_absolute_paths_share_resources(tmp_pat
     from lazyllm.tools.agent import FileSystemToolkit
     manager = ToolManager([FileSystemToolkit()])
     batch = manager.prepare_tool_calls([
-        {'function': {'name': 'write', 'arguments': {'path': 'document.md', 'content': 'relative'}}},
-        {'function': {'name': 'write', 'arguments': {'path': str(tmp_path / 'document.md'), 'content': 'absolute'}}},
+        {'function': {'name': 'write', 'arguments': {'file_path': 'document.md', 'content': 'relative'}}},
+        {'function': {'name': 'write', 'arguments': {'file_path': str(tmp_path / 'document.md'), 'content': 'absolute'}}},
         {'function': {'name': 'ls', 'arguments': {'path': '.'}}},
     ], working_directory=str(tmp_path))
     assert batch[0].access.write_keys == batch[1].access.write_keys

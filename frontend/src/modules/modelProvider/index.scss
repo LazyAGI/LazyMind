@@ -529,16 +529,39 @@
   gap: 4px;
 }
 
+.model-provider-pending-section {
+  container: pending-capabilities / inline-size;
+}
+
 .model-provider-pending-list {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 
   .model-provider-default-row {
-    flex: 1 1 240px;
-    max-width: 100%;
     padding: 12px;
     border-radius: 12px;
+  }
+
+  .model-provider-default-meta {
+    min-height: 38px;
+  }
+
+  .model-provider-default-title {
+    flex: 1;
+    overflow: hidden;
+
+    .is-required {
+      flex-shrink: 0;
+    }
+  }
+
+  .model-provider-default-title-text {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow-wrap: anywhere;
   }
 
   .model-provider-pending-description {
@@ -547,20 +570,42 @@
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     min-height: 38px;
-    margin: 0;
+    margin: 0 0 auto;
     color: #64748b;
     font-size: 12px;
     line-height: 19px;
     overflow-wrap: anywhere;
   }
 
-  .model-provider-configure-capability {
-    align-self: flex-start;
-    margin-top: auto;
+  .model-provider-default-row > [role="status"] {
+    min-height: 42px;
   }
 
-  .model-provider-model-select {
-    margin-top: auto;
+  .model-provider-configure-capability {
+    align-self: flex-start;
+    min-height: 42px;
+    max-width: 100%;
+    height: auto;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+@container pending-capabilities (min-width: 492px) {
+  .model-provider-pending-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container pending-capabilities (min-width: 744px) {
+  .model-provider-pending-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container pending-capabilities (min-width: 996px) {
+  .model-provider-pending-list {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
@@ -852,8 +897,17 @@
     border-radius: 10px;
   }
 
-  .ant-select-item-option-active:not(.ant-select-item-option-disabled),
+  // rc-select keeps the last active option after the pointer leaves the menu.
+  .ant-select-item-option-active:not(.ant-select-item-option-disabled):not(.ant-select-item-option-selected) {
+    background: transparent;
+  }
+
+  &:not(.is-keyboard-navigation) .ant-select-item-option:not(.ant-select-item-option-disabled):hover,
   .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
+    background: #f2f7ff;
+  }
+
+  &.is-keyboard-navigation .ant-select-item-option-active:not(.ant-select-item-option-disabled) {
     background: #f2f7ff;
   }
 }
