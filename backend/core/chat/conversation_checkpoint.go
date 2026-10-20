@@ -48,7 +48,8 @@ func registerForkableHistoryRun(ctx context.Context, db *gorm.DB, convID, histor
 }
 
 // A short database checkpoint shared by snapshot readers and history writers.
-// SQLite pins BEGIN IMMEDIATE to one connection; no model execution runs here.
+// Direct SQLite pins BEGIN IMMEDIATE; the proxy uses managed transactions.
+// No model execution runs here.
 func conversationCheckpoint(ctx context.Context, db *gorm.DB, conversationID string, fn func(*gorm.DB) error) error {
 	locked := func(tx *gorm.DB) error {
 		if conversationID == "" {
@@ -71,6 +72,9 @@ func conversationCheckpoint(ctx context.Context, db *gorm.DB, conversationID str
 			}
 			return locked(tx)
 		})
+	}
+	if common.IsSQLiteProxy(db) {
+		return common.ImmediateTransactionWithSQLiteBusyRetry(ctx, db, locked)
 	}
 	for attempt := 0; attempt < 6; attempt++ {
 		err := db.WithContext(ctx).Connection(func(conn *gorm.DB) error {
