@@ -59,7 +59,7 @@ func TestRunIncludesInitializationWaitRetriesAndFinalCutoff(t *testing.T) {
 func TestParallelAttemptsAndNewRoundRemainIndependent(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.TaskExecutionTiming{}, &orm.TaskAttemptTiming{})
 	ctx := context.Background()
-	start := time.Now().UTC()
+	start := time.Date(2026, 10, 16, 0, 0, 0, 123456000, time.UTC)
 	must := func(err error) {
 		t.Helper()
 		if err != nil {
