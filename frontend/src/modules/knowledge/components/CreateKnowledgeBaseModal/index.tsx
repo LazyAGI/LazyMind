@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Modal, Form, Input, Select, Tabs, Typography, Button, Collapse, Tooltip, message } from "antd";
+import { Modal, Form, Input, Radio, Select, Tabs, Typography, Button, Collapse, Tooltip, message } from "antd";
 import { QuestionCircleOutlined, SettingOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { Dataset, Algo } from "@/api/generated/knowledge-client";
@@ -28,6 +28,7 @@ import {
 import "@/modules/dataSource/index.scss";
 import "./index.scss";
 import { createCapabilityProfile, getLearningCatalog, listCapabilityProfiles, saveKnowledgeBaseCapabilities, type CustomCapabilityProfile, type LearningCatalog } from "@/modules/learning/api";
+import { markPaperLibrary } from "@/modules/knowledge/paper/store";
 import CapabilitySettings, { capabilityRefsFromForm } from "@/modules/learning/CapabilitySettings";
 
 const { TextArea } = Input;
@@ -122,7 +123,7 @@ const CreateKnowledgeBaseModal = forwardRef<
   function loadFormData() {
     const catalogRequest = getLearningCatalog().then((catalog) => {
       setLearningCatalog(catalog);
-      form.setFieldsValue({ learning_profile_key: "general", learning_capability_keys: catalog.profiles.find((item) => item.key === "general")?.capabilities || ["general_translation"] });
+      form.setFieldsValue({ library_kind: "document", learning_profile_key: "general", learning_capability_keys: catalog.profiles.find((item) => item.key === "general")?.capabilities || ["general_translation"] });
     });
     void listCapabilityProfiles().then(result=>setCustomProfiles(result.custom));
     KnowledgeBaseServiceApi()
@@ -222,6 +223,13 @@ const CreateKnowledgeBaseModal = forwardRef<
 
       setLoading(true);
       try {
+        const libraryKind = params.library_kind === "paper" ? "paper" : "document";
+        delete params.library_kind;
+        if (libraryKind === "paper") {
+          params.learning_profile_key = "academic_papers";
+          const paperProfile = learningCatalog?.profiles.find((item) => item.key === "academic_papers");
+          if (paperProfile) params.learning_capability_keys = paperProfile.capabilities;
+        }
         const capabilityKeys = params.learning_capability_keys || [];
         if (!capabilityKeys.length) {
           message.error(t("learning.selectCapabilities"));
@@ -238,6 +246,7 @@ const CreateKnowledgeBaseModal = forwardRef<
         const created = await onCreate(params);
         const datasetId = created?.dataset_id;
         if (datasetId) await saveKnowledgeBaseCapabilities(datasetId, capabilityRefsFromForm(capabilityKeys,capabilitySettings,learningCatalog?.capabilities));
+        if (datasetId && libraryKind === "paper") markPaperLibrary(datasetId);
         message.success(t("knowledge.createSuccess"));
         onCancel();
       } catch (error) {
@@ -358,6 +367,17 @@ const CreateKnowledgeBaseModal = forwardRef<
                     maxTagLengthMessage={t("knowledge.knowledgeTagMaxLength")}
                     showOverLengthInputError
                     onLengthErrorChange={handleTagLengthErrorChange}
+                  />
+                </Form.Item>
+                <Form.Item name="library_kind" label="资料库类型">
+                  <Radio.Group
+                    optionType="button"
+                    options={[{ label: "常规知识库", value: "document" }, { label: "论文集", value: "paper" }]}
+                    onChange={(event) => {
+                      if (event.target.value !== "paper") return;
+                      const profile = learningCatalog?.profiles.find((item) => item.key === "academic_papers");
+                      form.setFieldsValue({ learning_profile_key: "academic_papers", learning_capability_keys: profile?.capabilities || [] });
+                    }}
                   />
                 </Form.Item>
                 <Form.Item name="learning_profile_key" label={t("learning.capabilityProfile")}>

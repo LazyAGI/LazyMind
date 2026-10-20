@@ -66,6 +66,7 @@ import {
   effectiveProcessingLevel,
   type ProcessingLevel,
 } from "@/modules/knowledge/utils/processingLevel";
+import { isPaperLibrary } from "@/modules/knowledge/paper/store";
 
 import { ListPageTable } from "@/components/ui";
 import { useTranslation } from "react-i18next";
@@ -1252,7 +1253,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                   navigate({ pathname: `/lib/knowledge/detail/${data.dataset_id}` });
                 }}
               >
-                <Tooltip title={name}><span>{name}</span></Tooltip>
+                <Tooltip title={name}><span>{name}{isPaperLibrary(data.dataset_id) ? " · 论文集" : ""}</span></Tooltip>
               </Button>
               <Tooltip title={data.desc} placement="topLeft">
                 <span className="knowledge-list-description">{data.desc || "-"}</span>

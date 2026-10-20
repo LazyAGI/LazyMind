@@ -78,6 +78,8 @@ import {
 } from "@/modules/knowledge/utils/processingLevel";
 
 import "./index.scss";
+import PaperLibrary from "@/modules/knowledge/paper/PaperLibrary";
+import { isPaperLibrary, markPaperLibrary, unmarkPaperLibrary } from "@/modules/knowledge/paper/store";
 
 type DatasetWithDataSourceFlag = Dataset & {
   created_by_data_source?: boolean;
@@ -149,6 +151,7 @@ const Detail = () => {
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
 
   const { id = "" } = useParams();
+  const [paperLibrary, setPaperLibrary] = useState(() => isPaperLibrary(id));
 
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -539,6 +542,19 @@ const Detail = () => {
                 </Button>
               )}
               <Button
+                onClick={() => {
+                  if (paperLibrary) {
+                    unmarkPaperLibrary(id);
+                    setPaperLibrary(false);
+                  } else {
+                    markPaperLibrary(id);
+                    setPaperLibrary(true);
+                  }
+                }}
+              >
+                {paperLibrary ? "恢复为常规知识库" : "作为论文集查看"}
+              </Button>
+              <Button
                 danger
                 icon={<DeleteOutlined />}
                 onClick={() => {
@@ -583,7 +599,12 @@ const Detail = () => {
           showIcon
         />
       )}
-      <div className="toolbar my-4 mt-6 w-full">
+      {paperLibrary && detail ? (
+        <div className="my-4 mt-6">
+          <PaperLibrary datasetId={id} onUploadPdf={() => openImportModal({ importMode: "file" })} />
+        </div>
+      ) : null}
+      {!paperLibrary && <div className="toolbar my-4 mt-6 w-full">
         <Search
           className="search-input"
           placeholder={t("knowledge.searchDocPlaceholder")}
@@ -819,8 +840,8 @@ const Detail = () => {
             )}
           </div>
         )}
-      </div>
-      {detail && (
+      </div>}
+      {detail && !paperLibrary && (
         <KnowledgeTable
           ref={knowledgeListRef}
           detail={detail}

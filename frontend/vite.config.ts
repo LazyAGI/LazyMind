@@ -69,6 +69,16 @@ export default defineConfig(({ mode }) => {
           target: devProxyTarget,
           changeOrigin: true,
         },
+        "/scholar": {
+          target: "https://api.semanticscholar.org",
+          changeOrigin: true,
+          rewrite: (requestPath) => requestPath.replace(/^\/scholar/, ""),
+        },
+        "/arxiv": {
+          target: "https://export.arxiv.org",
+          changeOrigin: true,
+          rewrite: (requestPath) => requestPath.replace(/^\/arxiv/, ""),
+        },
       },
     },
     build: {
