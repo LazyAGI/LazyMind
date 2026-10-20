@@ -58,6 +58,42 @@ func beginDisplayExecution(ctx context.Context, db *gorm.DB, taskID, executionID
 	return nil
 }
 
+// PrepareTaskResume moves the new execution to its triggering turn while keeping
+// the previous attempt's timing bound to the previous round.
+func PrepareTaskResume(ctx context.Context, db *gorm.DB, task *orm.SubAgentTask, historyID string, params json.RawMessage) (*orm.SubAgentTask, error) {
+	var resumed *orm.SubAgentTask
+	err := taskTransaction(ctx, db, func(tx *gorm.DB) error {
+		locked := tx.Model(&orm.SubAgentTask{}).Where("id=? AND create_user_id=? AND conversation_id=?", task.ID, task.CreateUserID, task.ConversationID).UpdateColumn("display_revision", gorm.Expr("display_revision"))
+		if locked.Error != nil {
+			return locked.Error
+		}
+		if locked.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		previous, err := GetTask(ctx, tx, task.ID)
+		if err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		if previous.StartedAt != nil && previous.FinishedAt == nil {
+			previous.FinishedAt = &now
+		}
+		if err := tx.Model(&orm.SubAgentTask{}).Where("id=?", task.ID).Updates(map[string]any{
+			"trigger_history_id": historyID, "params": params, "status": StatusRunning,
+			"execution_id": uuid.NewString(), "display_revision": gorm.Expr("display_revision + 1"),
+			"started_at": nil, "finished_at": nil, "last_heartbeat": now, "updated_at": now,
+		}).Error; err != nil {
+			return err
+		}
+		if err := tasktiming.RecordSubagent(ctx, tx, *previous); err != nil {
+			return err
+		}
+		resumed, err = GetTask(ctx, tx, task.ID)
+		return err
+	})
+	return resumed, err
+}
+
 func PersistPublicProcessStep(ctx context.Context, db *gorm.DB, taskID, executionID, eventID string, step taskdisplay.PublicProcessStep) (bool, error) {
 	if executionID == "" || eventID == "" || len(eventID) > 128 || taskdisplay.ValidateProcessStep(step) != nil {
 		return false, taskdisplay.ErrInvalidProcessStep

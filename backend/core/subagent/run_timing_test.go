@@ -3,16 +3,72 @@ package subagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/gorilla/mux"
+	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
 	"lazymind/core/common/taskdisplay"
 	"lazymind/core/tasktiming"
 )
+
+func TestResumeRebindsCurrentExecutionAndFencesPreviousEvents(t *testing.T) {
+	db, task := ordinaryFixture(t)
+	if err := db.AutoMigrate(&orm.TaskExecutionTiming{}, &orm.TaskAttemptTiming{}); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+	if err := tasktiming.Begin(t.Context(), db.DB, "old-root", "turn", task.ConversationID, task.CreateUserID, start); err != nil {
+		t.Fatal(err)
+	}
+	oldStart, oldEnd := start.Add(time.Second), start.Add(10*time.Second)
+	if err := db.Model(task).Updates(map[string]any{"status": StatusFailed, "started_at": oldStart, "finished_at": oldEnd}).Error; err != nil {
+		t.Fatal(err)
+	}
+	task, err := GetTask(t.Context(), db.DB, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tasktiming.RecordSubagent(t.Context(), db.DB, *task); err != nil {
+		t.Fatal(err)
+	}
+	if err := tasktiming.FinishChat(t.Context(), db.DB, "old-root", "completed", oldEnd); err != nil {
+		t.Fatal(err)
+	}
+	if err := tasktiming.Begin(t.Context(), db.DB, "new-root", "new-turn", task.ConversationID, task.CreateUserID, start.Add(20*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	foreign := *task
+	foreign.CreateUserID = "other"
+	if _, err := PrepareTaskResume(t.Context(), db.DB, &foreign, "new-turn", task.Params); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("foreign resume accepted: %v", err)
+	}
+	resumed, err := PrepareTaskResume(t.Context(), db.DB, task, "new-turn", task.Params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.TriggerHistoryID != "new-turn" || resumed.StartedAt != nil || resumed.FinishedAt != nil || resumed.ExecutionID == task.ExecutionID {
+		t.Fatalf("invalid new execution: %+v", resumed)
+	}
+	if _, err := PersistPublicProcessStep(t.Context(), db.DB, task.ID, task.ExecutionID, "late-old-event", publicStep(1, "running")); !errors.Is(err, ErrStaleExecution) {
+		t.Fatalf("old attempt was not fenced: %v", err)
+	}
+	if accepted, err := AcceptTaskStart(t.Context(), db.DB, task.ID); err != nil || !accepted {
+		t.Fatalf("new attempt did not start: %v %v", accepted, err)
+	}
+	var attempt orm.TaskAttemptTiming
+	if err := db.First(&attempt, "id=?", "task:"+task.ID+":"+resumed.ExecutionID).Error; err != nil || attempt.ExecutionID != "new-root" {
+		t.Fatalf("new attempt recorded in old round: %+v %v", attempt, err)
+	}
+	old, err := tasktiming.Snapshot(t.Context(), db.DB, task.CreateUserID, task.ConversationID, "turn", start.Add(120*time.Second))
+	if err != nil || *old.Timing.CumulativeExecutionMS != 9000 {
+		t.Fatalf("old round changed: %+v %v", old, err)
+	}
+}
 
 func TestAttemptTimingSurvivesResumeAndInterrupt(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.SubAgentTask{}, &orm.TaskExecutionTiming{}, &orm.TaskAttemptTiming{})

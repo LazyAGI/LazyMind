@@ -185,18 +185,31 @@ func removeTaskWithImpact(ctx context.Context, db *gorm.DB, owner, id, version s
 			return errRemovalScopeChanged
 		}
 		now := time.Now().UTC()
-		schedules := map[string]bool{}
+		schedules := []string{}
 		cancelConversations := map[string]bool{}
+		executions := map[string][]string{}
 		for _, task := range s.tasks {
 			result.RemovedTaskIDs = append(result.RemovedTaskIDs, task.ID)
 			if task.ScheduleID != nil {
-				schedules[*task.ScheduleID] = true
+				schedules = append(schedules, *task.ScheduleID)
 			}
 			if task.ArchivedAt == nil && !isTerminal(task.Status) && len(s.conversations) > 0 {
 				cancelConversations[task.ConversationID] = true
 			}
 		}
 		for _, c := range s.conversations {
+			ids, err := removalChatExecutionIDs(ctx, c.ID, now)
+			if err != nil {
+				return err
+			}
+			executions[c.ID] = ids
+			active, err := removalHasActiveRun(ctx, tx, owner, c.ID, now)
+			if err != nil {
+				return err
+			}
+			if len(ids) > 0 || active {
+				cancelConversations[c.ID] = true
+			}
 			if err := tasktiming.CancelConversation(ctx, tx, owner, c.ID, now); err != nil {
 				return err
 			}
@@ -225,21 +238,11 @@ func removeTaskWithImpact(ctx context.Context, db *gorm.DB, owner, id, version s
 				return err
 			}
 		}
-		for schedule := range schedules {
-			var count int64
-			if err := tx.Model(&orm.TaskCenterTask{}).Where("user_id=? AND schedule_id=? AND archived_at IS NULL", owner, schedule).Count(&count).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&orm.UserSchedule{}).Where("id=? AND user_id=?", schedule, owner).Update("run_count", count).Error; err != nil {
-				return err
-			}
+		if err := recountScheduleRuns(ctx, tx, owner, schedules); err != nil {
+			return err
 		}
 		for conv := range cancelConversations {
-			executionIDs, err := removalChatExecutionIDs(ctx, conv, now)
-			if err != nil {
-				return err
-			}
-			_, err = asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{JobType: removalCancellationJob, ResourceType: "conversation", ResourceID: conv, CreateUserID: owner, IdempotencyKey: id + ":" + conv + ":" + now.Format(time.RFC3339Nano), Payload: map[string]any{"conversation_id": conv, "before": now, "chat_execution_ids": executionIDs}, MaxAttempts: 8})
+			_, err = asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{JobType: removalCancellationJob, ResourceType: "conversation", ResourceID: conv, CreateUserID: owner, IdempotencyKey: id + ":" + conv + ":" + now.Format(time.RFC3339Nano), Payload: map[string]any{"conversation_id": conv, "before": now, "chat_execution_ids": executions[conv]}, MaxAttempts: 8})
 			if err != nil {
 				return err
 			}
@@ -250,6 +253,21 @@ func removeTaskWithImpact(ctx context.Context, db *gorm.DB, owner, id, version s
 	sort.Strings(result.RemovedTaskIDs)
 	sort.Strings(result.TrashedConversationIDs)
 	return result, err
+}
+
+func removalHasActiveRun(ctx context.Context, db *gorm.DB, owner, conversation string, before time.Time) (bool, error) {
+	var count int64
+	if db.Migrator().HasTable(&orm.WorkflowSession{}) {
+		if err := db.WithContext(ctx).Model(&orm.WorkflowSession{}).Where("create_user_id=? AND conversation_id=? AND created_at<=? AND status=?", owner, conversation, before, "active").Count(&count).Error; err != nil || count > 0 {
+			return count > 0, err
+		}
+	}
+	if db.Migrator().HasTable(&orm.ExternalChatRun{}) {
+		if err := db.WithContext(ctx).Model(&orm.ExternalChatRun{}).Where("actor_user_id=? AND conversation_id=? AND created_at<=? AND status IN ?", owner, conversation, before, []string{"pending", "running"}).Count(&count).Error; err != nil {
+			return false, err
+		}
+	}
+	return count > 0, nil
 }
 
 // PendingRemovalCancellation prevents restoring a conversation while an old

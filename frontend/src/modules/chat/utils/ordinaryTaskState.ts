@@ -48,6 +48,7 @@ export function mergeOrdinarySnapshot(
 }
 
 export function mergeRun(current: OrdinaryRunView | undefined, incoming: OrdinaryRunView): OrdinaryRunView {
+  if (!current?.timing && !incoming.timing) return current && incoming.revision < current.revision ? current : incoming;
   if (!current?.timing || !incoming.timing) return incoming.timing ? incoming : current ?? incoming;
   if (current.execution_id !== incoming.execution_id) {
     return Date.parse(incoming.timing.requested_at) < Date.parse(current.timing.requested_at) ? current : incoming;

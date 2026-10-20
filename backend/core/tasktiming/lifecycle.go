@@ -67,20 +67,48 @@ func FinishChat(ctx context.Context, db *gorm.DB, id, status string, now time.Ti
 	if !Available(db) {
 		return nil
 	}
-	var root orm.TaskExecutionTiming
-	err := db.WithContext(ctx).Where("id = ? AND workflow_session_id = ''", id).First(&root).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return SetStatus(ctx, db, id, status, now)
+	return transaction(ctx, db, func(tx *gorm.DB) error {
+		// Serialize reply completion with child starts and terminal transitions.
+		if err := tx.WithContext(ctx).Model(&orm.TaskExecutionTiming{}).Where("id=?", id).UpdateColumn("revision", gorm.Expr("revision")).Error; err != nil {
+			return err
+		}
+		var root orm.TaskExecutionTiming
+		err := tx.WithContext(ctx).Where("id = ? AND workflow_session_id = ''", id).First(&root).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return finishChatRound(ctx, tx, root, status, now)
+	})
 }
-func RecordSubagent(ctx context.Context, db *gorm.DB, task orm.SubAgentTask) error {
-	if !Available(db) || task.ExecutionID == "" || task.StartedAt == nil {
+
+func finishChatRound(ctx context.Context, db *gorm.DB, root orm.TaskExecutionTiming, status string, now time.Time) error {
+	if root.FinishedAt != nil {
 		return nil
 	}
+	if (status == "completed" || status == "succeeded") && db.Migrator().HasTable(&orm.SubAgentTask{}) {
+		var count int64
+		if err := db.WithContext(ctx).Model(&orm.SubAgentTask{}).Where("create_user_id=? AND conversation_id=? AND trigger_history_id=? AND agent_type<>? AND status IN ?", root.OwnerUserID, root.ConversationID, root.HistoryID, "workflow_step", []string{"pending", "running"}).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			// The reply is complete; pending/running background children own the cutoff.
+			return SetStatus(ctx, db, root.ID, "waiting", now)
+		}
+	}
+	return SetStatus(ctx, db, root.ID, status, now)
+}
+
+func RecordSubagent(ctx context.Context, db *gorm.DB, task orm.SubAgentTask) error {
+	if !Available(db) || task.ExecutionID == "" || (task.StartedAt == nil && task.FinishedAt == nil) {
+		return nil
+	}
+	return transaction(ctx, db, func(tx *gorm.DB) error { return recordSubagent(ctx, tx, task) })
+}
+
+func recordSubagent(ctx context.Context, db *gorm.DB, task orm.SubAgentTask) error {
 	// A Workflow adapter and its hosted Attempt identify one execution. Only the
 	// adapter records its duration; the hosted event path skips such rows.
 	var sessionID string
@@ -116,7 +144,24 @@ func RecordSubagent(ctx context.Context, db *gorm.DB, task orm.SubAgentTask) err
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-	return RecordAttempt(ctx, db, root.ID, id, *task.StartedAt, task.FinishedAt)
+	// Even a pending child canceled before it starts must settle its waiting round.
+	if err := db.WithContext(ctx).Model(&orm.TaskExecutionTiming{}).Where("id=?", root.ID).UpdateColumn("revision", gorm.Expr("revision")).Error; err != nil {
+		return err
+	}
+	if task.StartedAt != nil {
+		if err := RecordAttempt(ctx, db, root.ID, id, *task.StartedAt, task.FinishedAt); err != nil {
+			return err
+		}
+	}
+	if task.FinishedAt != nil {
+		if err := db.WithContext(ctx).Where("id=?", root.ID).First(&root).Error; err != nil {
+			return err
+		}
+		if root.WorkflowSessionID == "" && root.Status == "waiting" {
+			return finishChatRound(ctx, db, root, "completed", *task.FinishedAt)
+		}
+	}
+	return nil
 }
 func SyncSubagent(ctx context.Context, db *gorm.DB, taskID string) error {
 	if !Available(db) {

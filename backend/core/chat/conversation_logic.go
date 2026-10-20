@@ -3727,12 +3727,10 @@ func handleTaskCreated(
 				return nil, err
 			}
 			paramsJSON, _ = json.Marshal(params)
-			if err := db.WithContext(chatCtx).Model(&orm.SubAgentTask{}).Where("id = ? AND create_user_id = ? AND conversation_id = ?",
-				existing.ID, userID, convID).Updates(map[string]any{"params": paramsJSON, "updated_at": time.Now().UTC()}).Error; err != nil {
+			existing, err = subagent.PrepareTaskResume(chatCtx, db, existing, historyID, paramsJSON)
+			if err != nil {
 				return nil, err
 			}
-			existing.Params = paramsJSON
-			_ = subagent.UpdateStatus(chatCtx, db, existing.ID, subagent.StatusRunning)
 			_ = subagent.WriteStatus(chatCtx, stateStore, existing.ID, map[string]any{
 				"status": subagent.StatusRunning, "progress": existing.ProgressPct,
 			})

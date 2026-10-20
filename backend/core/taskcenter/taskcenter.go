@@ -237,9 +237,44 @@ func RestoreTasksForConversations(ctx context.Context, db *gorm.DB, userID strin
 	if len(conversationIDs) == 0 {
 		return nil
 	}
-	return db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-		Where("user_id = ? AND conversation_id IN ? AND archived_reason = ?", userID, conversationIDs, reason).
-		Updates(map[string]any{"archived_at": nil, "archived_reason": "", "updated_at": now}).Error
+	restore := func(tx *gorm.DB) error {
+		var schedules []string
+		if err := tx.WithContext(ctx).Model(&orm.TaskCenterTask{}).
+			Where("user_id = ? AND conversation_id IN ? AND archived_reason = ? AND schedule_id IS NOT NULL", userID, conversationIDs, reason).
+			Pluck("schedule_id", &schedules).Error; err != nil {
+			return err
+		}
+		if err := tx.WithContext(ctx).Model(&orm.TaskCenterTask{}).
+			Where("user_id = ? AND conversation_id IN ? AND archived_reason = ?", userID, conversationIDs, reason).
+			Updates(map[string]any{"archived_at": nil, "archived_reason": "", "updated_at": now}).Error; err != nil {
+			return err
+		}
+		return recountScheduleRuns(ctx, tx, userID, schedules)
+	}
+	if _, nested := db.Statement.ConnPool.(gorm.TxCommitter); nested || db.SkipDefaultTransaction {
+		return restore(db)
+	}
+	return common.ImmediateTransactionWithSQLiteBusyRetry(ctx, db, restore)
+}
+
+func recountScheduleRuns(ctx context.Context, db *gorm.DB, userID string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	var schedules []orm.UserSchedule
+	if err := db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id=? AND id IN ?", userID, ids).Order("id").Find(&schedules).Error; err != nil {
+		return err
+	}
+	for _, schedule := range schedules {
+		var count int64
+		if err := db.WithContext(ctx).Model(&orm.TaskCenterTask{}).Where("user_id=? AND schedule_id=? AND archived_at IS NULL", userID, schedule.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if err := db.WithContext(ctx).Model(&orm.UserSchedule{}).Where("user_id=? AND id=?", userID, schedule.ID).Update("run_count", count).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func MarkConversationPurged(ctx context.Context, db *gorm.DB, userID, conversationID string, now time.Time) error {
@@ -785,15 +820,7 @@ func archiveTaskRun(ctx context.Context, db *gorm.DB, userID, id string) (orm.Ta
 			return err
 		}
 		if existing.ScheduleID != nil && *existing.ScheduleID != "" {
-			var visibleRuns int64
-			if err := tx.Model(&orm.TaskCenterTask{}).
-				Where("schedule_id = ? AND user_id = ? AND archived_at IS NULL", *existing.ScheduleID, userID).
-				Count(&visibleRuns).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&orm.UserSchedule{}).
-				Where("id = ? AND user_id = ?", *existing.ScheduleID, userID).
-				Update("run_count", visibleRuns).Error; err != nil {
+			if err := recountScheduleRuns(ctx, tx, userID, []string{*existing.ScheduleID}); err != nil {
 				return err
 			}
 		}
