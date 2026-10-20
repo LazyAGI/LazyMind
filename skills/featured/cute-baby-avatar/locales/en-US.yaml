@@ -1,0 +1,42 @@
+locale: en-US
+
+classification:
+  category: Creative design
+  tags: [baby avatar, image generation, photo editing, style selection]
+
+presentation:
+  card:
+    title: Cute baby avatar
+    description: Upload a photo or describe a character, then choose a style to generate one avatar
+    output_type: images
+    output_label: Avatar and prompt
+    cover_asset: cover
+    result_summary: Compare a child photo with its head-only teddy-bear hat avatar and reusable prompt
+  detail:
+    title: Cute baby avatar
+    description: Use a photo or character description and choose a style before generating an avatar with a reusable prompt. This entry requests one image by default; ask for more or a set of nine separate avatars. Source https://skillhub.cn/skills/org-ni2p9rei/cute-baby-avatar.
+    attachment_hint: Upload a portrait or describe hair, facial features, expression, and preferred style
+
+tasks:
+  - id: create-avatar
+    selector:
+      title: Create an avatar from a photo or description
+      description: Choose a style, then receive one separate avatar and its reusable prompt
+      output_label: Avatar and prompt
+    launch:
+      prompt_short: Help me create one cute baby avatar. First ask for my photo or character description and let me choose a style.
+      prompt: Use the cute baby avatar Skill to create one avatar with a reusable prompt. I can upload a photo or describe a character. First ask for my photo or character description and show the available styles; wait for my choice before generating. If I have already provided this information, use it without asking again. Unless I specify a different count, generate only one separate square head-only avatar on a white background. Without a photo, use a fictional character; with a photo, use the original image as the identity reference. If image generation or reference-image editing is unavailable, clearly state the limitation; do not present a prompt or example image as a newly generated result.
+    replay:
+      steps:
+        - title: Confirm character and style
+          description: Receive a photo or description, show styles, and wait for the user's choice
+        - title: Generate one avatar
+          description: Create one square head-only avatar on a white background in the chosen style
+        - title: Deliver the image and prompt
+          description: Show the avatar image for saving and provide its reusable prompt
+    result:
+      template: html_preview_v1
+      eyebrow: Photo-to-avatar example
+      title: Teddy-bear hat · Input and output
+      summary: A child photo with its original background and upper body, alongside a head-only teddy-bear hat avatar on white and a reusable prompt.
+      html_asset: avatar_preview

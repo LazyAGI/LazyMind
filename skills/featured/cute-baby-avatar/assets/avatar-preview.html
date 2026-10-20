@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>萌宠帽 · 输入与输出对照</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #fff8f3; color: #352e2b; font: 15px/1.75 system-ui, -apple-system, "PingFang SC", sans-serif; }
+    main { max-width: 1040px; margin: auto; padding: 28px 24px; }
+    .label { color: #9c563f; font-size: 12px; letter-spacing: .12em; }
+    h1 { margin: 8px 0; font-size: 28px; line-height: 1.3; }
+    .intro { color: #746962; margin: 0 0 22px; }
+    .comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+    figure, section { margin: 0; padding: 18px; background: white; border: 1px solid #ecdfd5; border-radius: 20px; }
+    .step { display: inline-block; margin-bottom: 12px; padding: 3px 10px; border-radius: 99px; color: #746962; background: #f6f3ef; font-size: 12px; }
+    .output .step { color: #90543a; background: #fff1e6; }
+    img { display: block; width: 100%; max-width: 340px; height: auto; aspect-ratio: 1; object-fit: contain; margin: auto; border-radius: 12px; }
+    figcaption { margin-top: 12px; }
+    figcaption strong { display: block; font-size: 16px; }
+    figcaption span { color: #746962; font-size: 13px; }
+    h2 { font-size: 17px; margin: 0 0 10px; }
+    .prompt { margin-top: 20px; }
+    .prompt p { margin: 0; }
+    .note { color: #746962; font-size: 12px; margin: 16px 0 0; }
+    @media (max-width: 420px) { main { padding: 20px 12px; } .comparison { gap: 10px; } figure { padding: 10px; border-radius: 14px; } h1 { font-size: 23px; } figcaption strong { font-size: 14px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <span class="label">萌娃头像 / CUTE BABY AVATAR</span>
+    <h1>儿童照片 → 萌宠帽头像</h1>
+    <p class="intro">从带背景和上半身的儿童照片中提取头部，保留人物五官与表情，生成戴棕色小熊耳朵毛绒帽的白底头像。</p>
+    <div class="comparison" aria-label="输入和输出图像对照">
+      <figure>
+        <span class="step">01 · 输入 / INPUT</span>
+        <img src="{{asset_url:input_photo}}" alt="输入图像：黑色短发儿童的普通半身照片，身穿黄色上衣，灰色背景">
+        <figcaption><strong>输入儿童照片</strong><span>保留原背景、衣服与上半身</span></figcaption>
+      </figure>
+      <figure class="output">
+        <span class="step">02 · 输出 / OUTPUT</span>
+        <img src="{{asset_url:avatar}}" alt="输出图像：输入照片中的同一儿童戴棕色小熊耳朵毛绒帽，保留五官与表情，白底纯头部头像">
+        <figcaption><strong>萌宠帽款</strong><span>白底纯头部 · 棕色小熊耳朵毛绒帽</span></figcaption>
+      </figure>
+    </div>
+    <section class="prompt">
+      <h2>本例提示词</h2>
+      <p>请参考输入儿童照片，生成一张“萌宠帽”风格头像。保留原人物的年龄感、脸型、五官比例、肤色、露出的黑色头发、微笑和正面视线，添加棕色小熊耳朵毛绒帽。帽子只包覆头顶和两侧，完整露出面部与下巴，不添加围巾、帽带或其他配饰。移除照片原有的灰色背景、黄色上衣、脖子和上半身。保持自然写实摄影与柔软绒毛质感，输出一张独立的 1:1 白底纯头部头像；完整保留头顶和小熊耳朵，四周均衡留白。不要出现脖子、肩膀、身体、手、文字、水印、边框或拼图。</p>
+    </section>
+    <p class="note">本例展示“普通儿童照片 → 萌宠帽头像”的转换效果。实际使用时上传照片并选择款式；默认生成一张，需要多张时直接说明。</p>
+  </main>
+</body>
+</html>

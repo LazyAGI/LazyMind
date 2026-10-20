@@ -1,0 +1,72 @@
+schema_version: 2
+id: cute-baby-avatar
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: SkillHub
+
+skill:
+  source_url: https://skillhub.cn/skills/org-ni2p9rei/cute-baby-avatar
+  category: design
+  required_version: 1.0.1
+
+placement:
+  home: true
+  gallery: false
+  order: 31
+
+classification:
+  category: 设计创意
+  tags: [萌娃头像, 图片生成, 照片编辑, 风格选择]
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  input_photo:
+    file: assets/input-photo.png
+    role: result
+  avatar:
+    file: assets/avatar.png
+    role: result
+  avatar_preview:
+    file: assets/avatar-preview.html
+    role: result
+
+presentation:
+  card:
+    title: 萌娃头像生成
+    description: 上传照片或描述人物，选好款式后生成一张萌娃头像
+    output_type: images
+    output_label: 头像与提示词
+    cover_asset: cover
+    result_summary: 对照儿童照片与萌宠帽头像，查看照片转头像的效果及提示词
+  detail:
+    title: 萌娃头像生成
+    description: 支持照片或文字描述，先选择自然俏皮、苹果头、甜系配饰等款式，再生成萌娃头像及逐张提示词。此入口默认一张，可按需指定多张或九张独立头像套装。来源：https://skillhub.cn/skills/org-ni2p9rei/cute-baby-avatar。
+    attachment_hint: 上传人物照片，或描述发型、五官、表情及希望的款式
+
+tasks:
+  - id: create-avatar
+    selector:
+      title: 照片或文字生成头像
+      description: 先选款式，生成一张独立头像及可复用提示词
+      output_label: 头像与提示词
+    launch:
+      prompt_short: 帮我生成一张萌娃头像，先让我提供照片或人物描述并选择款式。
+      prompt: 请使用萌娃头像生成 Skill，帮我生成一张萌娃头像，并附上可复用的提示词。我可以上传照片或用文字描述人物；请先引导我提供照片或人物描述，并展示可选款式，等我选好后再生图。如果我已经明确提供了这些信息，请直接使用，不要重复询问。除非我另行指定数量，本次只生成一张独立的 1:1 白底纯头部头像。没有照片时使用虚构人物；有照片时使用原始照片作为身份参照。若当前没有可用的生图或参考图编辑能力，请明确说明限制，不要把提示词或示例图当作本次生成结果。
+    replay:
+      steps:
+        - title: 确认人物与款式
+          description: 接收照片或人物描述，展示款式并等待用户选择
+        - title: 生成独立头像
+          description: 按已选款式生成一张 1:1 白底纯头部头像
+        - title: 交付图片与提示词
+          description: 展示可保存的头像成图，并附可复用提示词
+    result:
+      template: html_preview_v1
+      eyebrow: 照片转头像示例
+      title: 萌宠帽 · 输入与输出对照
+      summary: 以带背景和上半身的儿童照片为输入，生成白底纯头部的小熊帽头像，展示前后对照与可复用提示词。
+      html_asset: avatar_preview
