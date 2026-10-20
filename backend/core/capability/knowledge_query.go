@@ -2,6 +2,7 @@ package capability
 
 import (
 	"context"
+	"lazymind/core/learning"
 	"slices"
 	"strings"
 )
@@ -80,8 +81,11 @@ func (s *Service) ListKnowledge(ctx context.Context, call InvocationContext, inp
 	if err != nil {
 		return ListKnowledgeResult{}, err
 	}
-	if input.Scene != "" && input.Scene != "general" && input.Scene != "paper_collection" {
-		return ListKnowledgeResult{}, NewError(InvalidArgument, op, "invalid scene", false, nil)
+	if input.Scene != "" {
+		input.Scene, err = learning.NormalizeScene(input.Scene)
+		if err != nil {
+			return ListKnowledgeResult{}, NewError(InvalidArgument, op, err.Error(), false, nil)
+		}
 	}
 	if input.RequiredAction == "" {
 		input.RequiredAction = "read"
@@ -106,7 +110,7 @@ func (s *Service) ListKnowledge(ctx context.Context, call InvocationContext, inp
 	if err != nil {
 		return ListKnowledgeResult{}, err
 	}
-	page, err := s.knowledge.ListKnowledge(ctx, call, KnowledgeListQuery{Keyword: input.Keyword, Tags: input.Tags, KnowledgeBaseIDs: input.KnowledgeBaseIDs, Match: input.Match, Scene: input.Scene, RequiredAction: input.RequiredAction, Offset: offset, Limit: input.Page.PageSize})
+	page, err := s.knowledge.ListKnowledge(ctx, call, KnowledgeListQuery{Source: input.Source, OrderBy: input.OrderBy, IncludeConfiguration: input.IncludeConfiguration, Keyword: input.Keyword, Tags: input.Tags, KnowledgeBaseIDs: input.KnowledgeBaseIDs, Match: input.Match, Scene: input.Scene, RequiredAction: input.RequiredAction, Offset: offset, Limit: input.Page.PageSize})
 	if err != nil {
 		return ListKnowledgeResult{}, err
 	}
@@ -202,7 +206,7 @@ func (s *Service) ListKnowledgeDocuments(ctx context.Context, call InvocationCon
 	if input.Recursive != nil {
 		recursive = *input.Recursive
 	}
-	page, err := s.documents.ListKnowledgeDocuments(ctx, call, KnowledgeDocumentListQuery{KnowledgeID: input.KnowledgeID, KnowledgeIDs: ids, ResourceIDs: input.ResourceIDs, ParentID: input.ParentID, Recursive: recursive, ResourceType: input.ResourceType, Match: input.Match, Name: input.Name, Path: input.Path, Offset: offset, Limit: input.Page.PageSize})
+	page, err := s.documents.ListKnowledgeDocuments(ctx, call, KnowledgeDocumentListQuery{OrderBy: input.OrderBy, KnowledgeID: input.KnowledgeID, KnowledgeIDs: ids, ResourceIDs: input.ResourceIDs, ParentID: input.ParentID, Recursive: recursive, ResourceType: input.ResourceType, Match: input.Match, Name: input.Name, Path: input.Path, Offset: offset, Limit: input.Page.PageSize})
 	if err != nil {
 		return ListKnowledgeDocumentsResult{}, err
 	}

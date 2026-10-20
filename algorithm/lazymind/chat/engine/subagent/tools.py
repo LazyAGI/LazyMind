@@ -1698,8 +1698,8 @@ def string_replace(
 def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str, Any]:
     """Return path/url of a user-uploaded attachment without parsing it.
 
-    Prefer this over read_user_attachment when you only need the file location: image
-    editing, workflows, vision_extractor, or passing an image path to other tools.
+    Prefer this over read_user_attachment when you only need the file location: knowledge
+    upload, image editing, workflows, vision_extractor, or passing a path to other tools.
     Does not run OCR or vision description (fast).
 
     Args:
@@ -1711,7 +1711,9 @@ def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
 
     Returns:
         A dict with 'url' (signed HTTP URL from Go, preferred) and 'path' (local absolute path,
-        fallback). Pass 'url' to other tools when available.
+        fallback). For knowledge.document.upload, pass the local 'path' as files[].path;
+        neither 'url' nor the reading-only 'file_id' is an upload source. Other tools may
+        accept 'url' according to their own schema.
     """
     matched, err = _resolve_attachment(filename, turn)
     if err:

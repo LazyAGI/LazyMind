@@ -11,9 +11,13 @@ func init() {
 		"download filename or supported mime required", "folders have no original", "original must be a regular file",
 		"original is not a pdf", "pdf is incomplete", "original is not a valid zip container",
 		"office container does not match filename", "original mime mismatch", "encoded response cannot preserve original bytes",
+		"device paths are not supported", "regular file required", "image format does not match filename",
+		"empty file or upload size limit exceeded", "upload batch exceeds 1 gib",
+		"upload size limit exceeded", "zip upload size limit exceeded",
 	} {
 		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
 	}
+	registerAdditionalErrorPattern("file %d", "Invalid request", http.StatusBadRequest, 2000103)
 	for _, source := range []string{
 		"original url uses a non-public address", "original host resolves to a non-public address",
 		"artifact does not belong to current tenant or identity",

@@ -111,14 +111,14 @@ func newServer(service *capability.Service) *mcp.Server {
 	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "knowledge.list", Title: "List LazyMind knowledge bases",
-		Description: "List knowledge bases visible to the authenticated LazyMind user.", Annotations: annotations,
+		Description: "List accessible library metadata and allowed actions; filters combine with AND. Returned IDs are Core IDs.", Annotations: annotations,
 	}, func(ctx context.Context, request *mcp.CallToolRequest, input capability.ListKnowledgeInput) (*mcp.CallToolResult, capability.ListKnowledgeResult, error) {
 		result, err := service.ListKnowledge(ctx, invocation(ctx, request), input)
 		return nil, result, err
 	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "knowledge.document.list", Title: "List LazyMind knowledge documents",
-		Description: "List documents and logical folders across selected knowledge bases visible to the authenticated LazyMind user, with global pagination. Optional name and path filters are combined; path matches the upload relative directory, not a host filesystem path. Use knowledge.search for parsed content search.", Annotations: annotations,
+		Description: "List document/folder metadata across libraries with global pagination; filters combine with AND. logical_path is current folder placement. Use knowledge.search for parsed content.", Annotations: annotations,
 	}, func(ctx context.Context, request *mcp.CallToolRequest, input capability.ListKnowledgeDocumentsInput) (*mcp.CallToolResult, capability.ListKnowledgeDocumentsResult, error) {
 		result, err := service.ListKnowledgeDocuments(ctx, invocation(ctx, request), input)
 		return nil, result, err

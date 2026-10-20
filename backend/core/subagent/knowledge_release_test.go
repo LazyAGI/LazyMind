@@ -1,6 +1,9 @@
 package subagent
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestKnowledgeDefaultReleaseRespectsSelectionAndRollback(t *testing.T) {
 	t.Setenv("LAZYMIND_KNOWLEDGE_MANAGEMENT_ENABLED", "")
@@ -11,6 +14,13 @@ func TestKnowledgeDefaultReleaseRespectsSelectionAndRollback(t *testing.T) {
 	cfg := configs[0].(map[string]any)
 	if len(cfg["allowed_tools"].([]string)) != 9 {
 		t.Fatalf("management tools=%v", cfg["allowed_tools"])
+	}
+	if slices.Contains(cfg["allowed_tools"].([]string), "knowledge.options") ||
+		len(KnowledgeToolsForSelection([]string{"knowledge.options"})) != 0 {
+		t.Fatal("removed options tool remains selectable")
+	}
+	if !slices.Equal(KnowledgeToolsForSelection([]string{"kb"}), []string{"knowledge.list", "knowledge.document.list", "knowledge.document.aggregate"}) {
+		t.Fatal("read-only knowledge selection changed")
 	}
 	empty := KnowledgeSystemConfig([]string{})[0].(map[string]any)
 	if len(empty["allowed_tools"].([]string)) != 0 {

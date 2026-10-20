@@ -78,7 +78,7 @@ func mapOperation(op string, r doc.ResourceOperationResult, e error) (capability
 	return out, e
 }
 func (m *KnowledgeManagement) CreateKnowledge(ctx context.Context, c capability.InvocationContext, r capability.CreateKnowledgeRequest) (capability.ResourceOperationResult, error) {
-	v, e := m.resources.CreateKnowledge(ctx, m.operation(c), doc.CreateKnowledgeRequest{Name: r.Name, Description: r.Description, Scene: r.Scene, ProcessingLevel: r.ProcessingLevel})
+	v, e := m.resources.CreateKnowledge(ctx, m.operation(c), doc.CreateKnowledgeRequest{Name: r.Name, Description: r.Description, Scene: r.Scene, ProcessingLevel: r.ProcessingLevel, Tags: r.Tags, ProfileID: r.ProfileID, AlgoID: r.AlgoID, Capabilities: r.Capabilities})
 	return mapOperation("knowledge.create", v, e)
 }
 func (m *KnowledgeManagement) CreateFolders(ctx context.Context, c capability.InvocationContext, r capability.CreateFoldersRequest) (capability.ResourceOperationResult, error) {
@@ -88,7 +88,7 @@ func (m *KnowledgeManagement) CreateFolders(ctx context.Context, c capability.In
 func (m *KnowledgeManagement) UpdateMetadata(ctx context.Context, c capability.InvocationContext, r capability.UpdateMetadataRequest) (capability.ResourceOperationResult, error) {
 	items := make([]doc.ResourceMetadataItem, len(r.Items))
 	for i, v := range r.Items {
-		items[i] = doc.ResourceMetadataItem{Target: toCoreRef(v.Target), Changes: doc.ResourceMetadataChanges{Name: v.Changes.Name, Description: v.Changes.Description, Scene: v.Changes.Scene, Tags: v.Changes.Tags}}
+		items[i] = doc.ResourceMetadataItem{Target: toCoreRef(v.Target), Changes: doc.ResourceMetadataChanges{Name: v.Changes.Name, Description: v.Changes.Description, Scene: v.Changes.Scene, Tags: v.Changes.Tags, ProfileID: v.Changes.ProfileID, AlgoID: v.Changes.AlgoID, ProcessingLevel: v.Changes.ProcessingLevel, Capabilities: v.Changes.Capabilities, TagMode: v.Changes.TagMode, Recursive: v.Changes.Recursive}}
 	}
 	v, e := m.resources.UpdateMetadata(ctx, m.operation(c), doc.UpdateMetadataRequest{Items: items})
 	return mapOperation("knowledge.resource.update_metadata", v, e)
@@ -102,7 +102,7 @@ func (m *KnowledgeManagement) Delete(ctx context.Context, c capability.Invocatio
 	return mapOperation("knowledge.resource.delete", v, e)
 }
 func (m *KnowledgeManagement) Aggregate(ctx context.Context, c capability.InvocationContext, r capability.AggregateKnowledgeDocumentsInput) (capability.AggregateKnowledgeDocumentsResult, error) {
-	v, e := doc.AggregateMetadata(ctx, m.db, m.lazyDB, managementCaller(c), doc.AggregateDocumentsRequest{DatasetIDs: r.KnowledgeIDs, FileTypes: r.FileTypes, DocumentStages: r.DocumentStages, DataSourceTypes: r.DataSourceTypes, Creators: r.Creators, Tags: r.Tags, GroupBy: r.GroupBy}, doc.AggregateBudget{})
+	v, e := doc.AggregateMetadata(ctx, m.db, m.lazyDB, managementCaller(c), doc.AggregateDocumentsRequest{ResourceIDs: r.ResourceIDs, ParentID: r.ParentID, Recursive: r.Recursive, Match: r.Match, Name: r.Name, Path: r.Path, DatasetIDs: r.KnowledgeIDs, FileTypes: r.FileTypes, DocumentStages: r.DocumentStages, DataSourceTypes: r.DataSourceTypes, Creators: r.Creators, Tags: r.Tags, GroupBy: r.GroupBy}, doc.AggregateBudget{})
 	if e != nil {
 		return capability.AggregateKnowledgeDocumentsResult{}, mapResourceError("knowledge.document.aggregate", e)
 	}
@@ -123,52 +123,29 @@ func (m *KnowledgeManagement) Upload(ctx context.Context, c capability.Invocatio
 		return mapOperation(op, saved, e)
 	}
 	caller := managementCaller(c)
+	if c.AllowedDatasetIDs != nil {
+		allowed := false
+		for _, id := range c.AllowedDatasetIDs {
+			if id == r.KnowledgeBaseID {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return capability.ResourceOperationResult{}, capability.NewError(capability.PermissionDenied, op, "knowledge base is outside the allowed scope", false, nil)
+		}
+	}
 	if _, e := doc.ResolveResourceDataset(ctx, m.db, caller, r.KnowledgeBaseID, "UPLOAD"); e != nil {
 		return capability.ResourceOperationResult{}, mapResourceError(op, e)
 	}
 	requests := make([]doc.ImportOriginalRequest, 0, len(r.Files))
+	var total int64
 	for i, f := range r.Files {
-		var ref doc.OriginalRef
-		var err error
-		// A source is a discriminated union. Reject extra locators instead of silently
-		// preferring one and importing different bytes than the caller selected.
-		source := f.Source
-		n := 0
-		for _, v := range []string{source.FileRef, source.Path, source.URL, source.ArtifactID} {
-			if v != "" {
-				n++
-			}
-		}
-		if n != 1 {
-			return capability.ResourceOperationResult{}, capability.NewError(capability.InvalidArgument, op, fmt.Sprintf("file %d must have exactly one source locator", i), false, nil)
-		}
-		switch source.Kind {
-		case "uploaded_file":
-			if source.FileRef == "" {
-				err = fmt.Errorf("file_ref required")
-			} else {
-				ref, err = m.originals.AcquireUploadedOriginal(ctx, caller, source.FileRef)
-			}
-		case "remote_file":
-			if source.URL == "" {
-				err = fmt.Errorf("url required")
-			} else {
-				ref, err = m.originals.AcquireRemoteOriginal(ctx, caller, doc.AcquireRemoteOriginalRequest{URL: source.URL, DisplayName: f.DisplayName})
-			}
-		case "work_artifact":
-			if source.ArtifactID == "" || source.RevisionID == "" {
-				err = fmt.Errorf("artifact_id and fixed revision_id required")
-			} else {
-				ref, err = m.originals.AcquireWorkOriginal(ctx, caller, source.ArtifactID, source.RevisionID)
-			}
-		case "local_file":
-			return capability.ResourceOperationResult{}, capability.NewError(capability.Unsupported, op, "local_file requires host byte transfer; upload bytes then pass uploaded_file.file_ref", false, nil)
-		default:
-			err = fmt.Errorf("invalid source kind")
-		}
+		ref, err := m.originals.AcquireLocalOriginal(ctx, caller, f.Path, doc.OriginalBatchMaxBytes-total)
 		if err != nil {
-			return capability.ResourceOperationResult{}, mapResourceError(op, err)
+			return capability.ResourceOperationResult{}, mapResourceError(op, fmt.Errorf("file %d: %w", i, err))
 		}
+		total += ref.Size
 		requests = append(requests, doc.ImportOriginalRequest{FileRef: ref.FileRef, DatasetID: r.KnowledgeBaseID, ParentID: r.ParentID, DisplayName: f.DisplayName, Tags: f.Tags})
 	}
 	v, e := m.resources.Upload(ctx, operation, requests)

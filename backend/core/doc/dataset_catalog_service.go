@@ -2,7 +2,9 @@ package doc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"lazymind/core/learning"
 	"strings"
 
 	"gorm.io/gorm"
@@ -88,9 +90,10 @@ type DatasetListResult struct {
 }
 
 type DatasetGetRequest struct {
-	UserID    string
-	DatasetID string
-	Caller    DatasetCatalogCaller
+	IncludeConfiguration bool
+	UserID               string
+	DatasetID            string
+	Caller               DatasetCatalogCaller
 }
 
 func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetListRequest) (DatasetListResult, error) {
@@ -136,7 +139,11 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 		base = base.Where("datasets.display_name = ?", keyword)
 	}
 	if req.Scene != "" {
-		base = base.Where("datasets.scene = ?", req.Scene)
+		if req.Scene == "academic_papers" || req.Scene == "paper_collection" {
+			base = base.Where("datasets.scene IN ?", []string{"academic_papers", "paper_collection"})
+		} else {
+			base = base.Where("datasets.scene = ?", req.Scene)
+		}
 	}
 	if order.usageJoin {
 		base = base.Joins("LEFT JOIN dataset_user_states dus ON dus.dataset_id = datasets.id AND dus.create_user_id = ?", userID)
@@ -266,6 +273,18 @@ func (s *DatasetCatalogService) GetDataset(ctx context.Context, req DatasetGetRe
 	cloudMap := map[string]bool{ds.ID: createdByDataSource}
 	sourceTypeMap := buildDatasetSourceTypeMap([]string{ds.ID}, cloudMap, installedMap)
 	out := []Dataset{s.datasetFromRow(ctx, ds, userID, datasetACL, calcDatasetStatsWithDB(ctx, s.db, ds.ID), createdByDataSource, sourceTypeMap[ds.ID], nil)}
+	if req.IncludeConfiguration {
+		var refs []learning.KnowledgeBaseCapability
+		if err := s.db.WithContext(ctx).Where("dataset_id = ? AND enabled = ?", ds.ID, true).Order("display_order ASC").Find(&refs).Error; err != nil {
+			return Dataset{}, err
+		}
+		out[0].ProfileID, _ = knowledgeExt(ds.Ext)["profile_id"].(string)
+		for _, row := range refs {
+			var config map[string]any
+			_ = json.Unmarshal([]byte(row.SettingsJSON), &config)
+			out[0].ReadingCapabilities = append(out[0].ReadingCapabilities, learning.CapabilityRef{Key: row.CapabilityKey, Version: row.CapabilityVersion, Enabled: row.Enabled, DisplayOrder: row.DisplayOrder, Settings: config})
+		}
+	}
 	s.addAllowedActions(ctx, caller, out)
 	return out[0], nil
 }
@@ -299,7 +318,7 @@ func (s *DatasetCatalogService) datasetFromRow(ctx context.Context, ds orm.Datas
 	parsers := mergeParserConfigs(parseDatasetParsers(ds.Ext), liveParsers)
 	return Dataset{
 		Name:  "datasets/" + ds.ID,
-		Scene: firstNonEmpty(ds.Scene, "general"), ResourceVersion: ds.ResourceVersion,
+		Scene: canonicalKnowledgeScene(ds.Scene), ResourceVersion: ds.ResourceVersion,
 		DatasetID:              ds.ID,
 		DisplayName:            ds.DisplayName,
 		Desc:                   ds.Desc,
@@ -363,4 +382,12 @@ func catalogAllowsAction(permissions []string, action string) bool {
 		}
 	}
 	return false
+}
+
+func canonicalKnowledgeScene(value string) string {
+	scene, err := resourceScene(value)
+	if err != nil {
+		return value
+	}
+	return scene
 }

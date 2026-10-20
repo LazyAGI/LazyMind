@@ -169,15 +169,21 @@ func UpdateProcessingLevel(w http.ResponseWriter, r *http.Request) {
 	if level == ProcessingLevelIndexed && replyEmbedNotReady(w, r, userID) {
 		return
 	}
-	updates := map[string]any{"processing_level": level, "processing_revision": ds.ProcessingRevision + 1, "transition_status": TransitionIdle, "updated_at": time.Now().UTC()}
-	if req.ReaderFallbackAccepted != nil {
-		updates["reader_fallback_accepted"] = *req.ReaderFallbackAccepted
-	}
-	if err := store.DB().WithContext(r.Context()).Model(&orm.Dataset{}).Where("id = ?", datasetID).Updates(updates).Error; err != nil {
-		common.ReplyErr(w, "update processing level failed", http.StatusInternalServerError)
+	service, op, err := resourcePageService(r)
+	if err != nil {
+		replyResourceError(w, err)
 		return
 	}
-	common.ReplyJSON(w, map[string]any{"dataset_id": datasetID, "processing_level": level, "processing_revision": ds.ProcessingRevision + 1, "transition_status": TransitionIdle, "capabilities": capabilitiesForProcessingLevel(level)})
+	_, err = service.UpdateMetadata(r.Context(), op, UpdateMetadataRequest{Items: []ResourceMetadataItem{{Target: ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: datasetID}, Changes: ResourceMetadataChanges{ProcessingLevel: &level, ReaderFallbackAccepted: req.ReaderFallbackAccepted}}}})
+	if err != nil {
+		replyResourceError(w, err)
+		return
+	}
+	if err = store.DB().WithContext(r.Context()).Where("id = ?", datasetID).First(ds).Error; err != nil {
+		replyResourceError(w, err)
+		return
+	}
+	common.ReplyJSON(w, map[string]any{"dataset_id": datasetID, "processing_level": ds.ProcessingLevel, "processing_revision": ds.ProcessingRevision, "transition_status": ds.TransitionStatus, "capabilities": capabilitiesForProcessingLevel(ds.ProcessingLevel)})
 }
 
 func GetProcessingStatus(w http.ResponseWriter, r *http.Request) {

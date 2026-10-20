@@ -323,13 +323,17 @@ func (s *ResourceService) ReplayOperation(ctx context.Context, op ResourceOperat
 	return s.replay(ctx, op, action, input)
 }
 
-func (s *ResourceService) syncKnowledgeMetadata(ctx context.Context, c DatasetCatalogCaller, id string) error {
+func (s *ResourceService) syncKnowledgeMetadata(ctx context.Context, c DatasetCatalogCaller, id string, algorithmChanged bool) error {
 	var ds orm.Dataset
 	if err := s.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", id).Take(&ds).Error; err != nil {
 		return err
 	}
 	display := algoDatasetDisplayName(ds.CreateUserID, ds.DisplayName)
+	algoID := parseDatasetAlgo(ds.Ext).AlgoID
 	request := kbUpdateRequest{DisplayName: &display, Description: &ds.Desc, Meta: map[string]any{"tags": parseDatasetTags(ds.Ext)}}
+	if algorithmChanged {
+		request.AlgoID = &algoID
+	}
 	return common.ApiPost(ctx, common.JoinURL(common.AlgoServiceEndpoint(), "/v1/kbs/"+firstNonEmpty(ds.KbID, ds.ID)), request, nil, nil, 10*time.Second)
 }
 

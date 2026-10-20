@@ -429,6 +429,7 @@ export function buildChatMessageListFromHistory(
       performance_metrics: (record as any).performance_metrics,
       model_route: record.model_route,
       fork_read_only: (record as any).fork_read_only,
+      knowledge_operations: (record as any).knowledge_operations,
     };
 
     // Restore ask_pending from persisted ext so the AskCard is visible after page reload.

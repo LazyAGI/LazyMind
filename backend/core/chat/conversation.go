@@ -1644,6 +1644,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 			Input                 any                `json:"input"`
 			Mentions              any                `json:"mentions"`
 			MailConfirmation      map[string]any     `json:"mail_confirmation"`
+			KnowledgeOperations   []map[string]any   `json:"knowledge_operations"`
 			AskPending            any                `json:"ask_pending"`
 			AskAnswered           bool               `json:"ask_answered"`
 			AskSavedAnswers       any                `json:"ask_saved_answers"`
@@ -1724,6 +1725,13 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	}
 	if len(failedAttempts) > 0 {
 		item["failed_attempts"] = failedAttempts
+	}
+	var operationExt struct {
+		KnowledgeOperations []map[string]any `json:"knowledge_operations"`
+	}
+	_ = json.Unmarshal(h.Ext, &operationExt)
+	if len(operationExt.KnowledgeOperations) > 0 {
+		item["knowledge_operations"] = operationExt.KnowledgeOperations
 	}
 	return item
 }

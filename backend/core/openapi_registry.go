@@ -2975,6 +2975,9 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:   map[int]openAPIResponse{200: evoJSONResp("WriterDocument write-back result")},
 		},
 		{
+			Method: "GET", Path: "/knowledge/options", Summary: "Available knowledge configuration and upload limits", Tags: []string{"datasets"}, Responses: map[int]openAPIResponse{200: evoJSONResp("Knowledge options")},
+		},
+		{
 			Method:      "GET",
 			Path:        "/datasets",
 			Summary:     "Dataset list",

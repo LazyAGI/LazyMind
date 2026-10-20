@@ -271,6 +271,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/workflow-control/capabilities", []string{"qa.read"}, workflowControl.Capabilities)
 
 	// ----- Datasettext -----
+	handleAPI(r, "GET", "/knowledge/options", []string{"document.read"}, doc.GetKnowledgeOptions)
 	handleAPI(r, "GET", "/dataset/algos", []string{"document.read"}, doc.ListAlgos)
 	handleAPI(r, "GET", "/dataset/tags", []string{"document.read"}, doc.AllDatasetTags)
 	handleAPI(r, "GET", "/datasets", []string{"document.read"}, doc.ListDatasets)
@@ -994,7 +995,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/learning/review/sessions", []string{"document.write"}, learning.CreateReviewSession)
 	handleAPI(r, "GET", "/learning/review/sessions/{session_id}", []string{"document.read"}, learning.GetReviewSession)
 	handleAPI(r, "POST", "/learning/review/sessions/{session_id}/answers", []string{"document.write"}, learning.AnswerReviewQuestion)
-	handleAPI(r, "POST", "/learning/preanalysis/tasks", []string{"document.write"}, learning.CreatePreanalysisTask)
+	handleAPI(r, "POST", "/learning/preanalysis/tasks", []string{"document.write"}, doc.CreatePreanalysisTask)
 	handleAPI(r, "GET", "/learning/preanalysis/tasks/latest", []string{"document.read"}, learning.GetLatestPreanalysisTask)
 	handleAPI(r, "GET", "/learning/preanalysis/tasks/{task_id}", []string{"document.read"}, learning.GetPreanalysisTask)
 	handleAPI(r, "POST", "/learning/preanalysis/tasks/{task_id}:run", []string{"document.write"}, learning.RunPreanalysisTask)

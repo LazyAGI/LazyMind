@@ -1,3 +1,4 @@
+import KnowledgeOperationCards from "../KnowledgeOperationCards";
 import { Button, Divider, Flex, message, Modal, Popover, Spin, Tooltip } from "antd";
 import { trim, debounce } from "lodash";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
@@ -1667,6 +1668,7 @@ const AssistantMessage = (props: any) => {
         <div className="chat-bot-box-multi">
         <div className="chat-bot">
             <ModelRouteSummary route={item.model_route} />
+          <KnowledgeOperationCards operations={item.knowledge_operations} />
             <ExternalExecutionSummary execution={item.execution} />
             <RunStatusCard
               terminal={item.run_terminal}
@@ -1771,6 +1773,7 @@ const AssistantMessage = (props: any) => {
       <div className="chat-bot-box-single">
         <div className="chat-bot">
           <ModelRouteSummary route={item.model_route} />
+          <KnowledgeOperationCards operations={item.knowledge_operations} />
           <ExternalExecutionSummary execution={item.execution} />
           <RunStatusCard
             terminal={item.run_terminal}

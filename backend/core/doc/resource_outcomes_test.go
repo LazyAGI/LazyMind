@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -193,7 +194,7 @@ func TestResourceCreateKnowledgeCommitsOwnerMembership(t *testing.T) {
 	}
 	s.provision = func(context.Context, DatasetCatalogCaller, *orm.Dataset) error { return nil }
 	op.OperationKey = "create-owner"
-	result, err := s.CreateKnowledge(context.Background(), op, CreateKnowledgeRequest{Name: "New-library"})
+	result, err := s.CreateKnowledge(context.Background(), op, CreateKnowledgeRequest{Name: "New-library", Tags: []string{"test"}, ProcessingLevel: "stored"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,6 +418,15 @@ func TestResourceCreateKnowledgeResolvesDefaultAlgorithm(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, db, op := resourceFixture(t)
+			previous := http.DefaultTransport
+			http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path == "/v1/algo/list" {
+					return testJSONResponse(200, `{"code":200,"data":{"items":[{"algo_id":"custom_algo","display_name":"Custom"}]}}`), nil
+				}
+				return previous.RoundTrip(r)
+			})
+			t.Cleanup(func() { http.DefaultTransport = previous })
+
 			if err := db.AutoMigrate(&orm.KBModel{}, &orm.ACLModel{}); err != nil {
 				t.Fatal(err)
 			}
@@ -426,7 +436,7 @@ func TestResourceCreateKnowledgeResolvesDefaultAlgorithm(t *testing.T) {
 				}
 				return nil
 			}
-			result, err := s.CreateKnowledge(context.Background(), op, CreateKnowledgeRequest{Name: "Default-algo", PageOptions: tc.options})
+			result, err := s.CreateKnowledge(context.Background(), op, CreateKnowledgeRequest{Name: "Default-algo", Tags: []string{"test"}, ProcessingLevel: "stored", PageOptions: tc.options})
 			if err != nil {
 				t.Fatal(err)
 			}

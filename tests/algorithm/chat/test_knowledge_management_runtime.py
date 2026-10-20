@@ -65,6 +65,9 @@ def test_server_factory_intersects_positive_whitelist_and_keeps_empty(monkeypatc
     assert host.server_config({'allowed_tools': []})['allowed_tools'] == []
     assert set(host.server_config({})['allowed_tools']) == set(MANAGEMENT_TOOLS)
     assert 'knowledge.document.get' not in MANAGEMENT_TOOLS
+    assert 'knowledge.options' not in MANAGEMENT_TOOLS
+    assert len(MANAGEMENT_TOOLS) == 9
+    assert host.server_config({'allowed_tools': ['knowledge.options']})['allowed_tools'] == []
 
 
 def test_missing_active_identity_fails_closed():
@@ -295,7 +298,7 @@ def test_real_manager_dispatch_attaches_claimed_metadata_and_keeps_structured_er
         assert len(dispatched) == 1
 
 
-def test_local_upload_is_declared_authorized_then_transferred_before_claim(monkeypatch, tmp_path):
+def test_local_upload_is_authorized_and_forwarded_without_transfer(monkeypatch, tmp_path):
     from contextlib import asynccontextmanager
     from mcp.types import CallToolResult
     from lazyllm.tools.mcp.client import MCPClient
@@ -305,8 +308,8 @@ def test_local_upload_is_declared_authorized_then_transferred_before_claim(monke
     from lazymind.chat.engine.agent_runtime.workspace_authorization import digest
     file = tmp_path / 'paper.pdf'
     file.write_bytes(b'original bytes')
-    args = {'knowledge_base_id': 'kb', 'files': [{'source': {'kind': 'local_file', 'path': str(file)}}]}
-    final_args = {'knowledge_base_id': 'kb', 'files': [{'source': {'kind': 'uploaded_file', 'file_ref': 'original-1'}}]}
+    args = {'knowledge_base_id': 'kb', 'files': [{'path': str(file)}]}
+    final_args = args
     host, requests = runtime(monkeypatch, {'prepare': {
         'operation_key': 'upload', 'arguments_digest': digest(final_args), 'snapshot': 'v',
         'requires_confirmation': False, 'status': 'allowed'},
@@ -333,12 +336,6 @@ def test_local_upload_is_declared_authorized_then_transferred_before_claim(monke
     prepared_call = manager.prepare_tool_calls(call)[0]
     assert len(prepared_call.host_files) == 1
     assert prepared_call.host_files[0].path == str(file.resolve())
-    def upload(path):
-        assert get_workspace_permission_context().workflow_full_trust
-        assert requests == []
-        uploaded.append(path)
-        return 'original-1'
-    monkeypatch.setattr(host, '_upload_original', upload)
     denied = ToolExecutionMiddleware(manager, knowledge_management=host,
         workspace_permission=WorkspaceContext(local_runtime=True))
     denied.execute_with_records(call)
@@ -346,39 +343,10 @@ def test_local_upload_is_declared_authorized_then_transferred_before_claim(monke
     middleware = ToolExecutionMiddleware(manager, knowledge_management=host,
         workspace_permission=WorkspaceContext(local_runtime=True, workflow_full_trust=True))
     result = middleware.execute_with_records(call)
-    assert uploaded == [str(file.resolve())]
+    assert uploaded == []
     assert dispatched == [final_args]
     assert result.results[0]['ok'] is True
     assert requests[0][1]['arguments'] == final_args
-
-
-def test_original_transfer_streams_approved_fd_with_captured_identity(monkeypatch, tmp_path):
-    import importlib
-    import httpx
-    file = tmp_path / 'original.txt'
-    file.write_bytes(b'approved original')
-    host = KnowledgeManagementRuntime(EXECUTION, 'http://core/api/core')
-    captured = []
-    def handle(request):
-        captured.append(request)
-        assert b'approved original' in request.read()
-        assert b'filename="original.txt"' in request.content
-        return httpx.Response(200, json={'file_ref': 'uploaded-1'})
-    original_client = httpx.Client
-    monkeypatch.setattr(httpx, 'Client', lambda **kwargs: original_client(
-        **kwargs, transport=httpx.MockTransport(handle)))
-    monkeypatch.setattr(importlib.import_module('lazymind.config'), 'config', {
-        'core_internal_token': 'private-token', 'core_api_timeout': 5})
-    assert host._upload_original(str(file)) == 'uploaded-1'
-    assert captured[0].url.path == '/api/core/internal/knowledge-management:upload-original'
-    assert json.loads(captured[0].headers['X-LazyMind-Execution']) == EXECUTION
-    assert captured[0].headers['X-LazyMind-Internal-Token'] == 'private-token'
-    assert 'X-User-Id' not in captured[0].headers
-    link = tmp_path / 'link.txt'
-    link.symlink_to(file)
-    with pytest.raises(OSError):
-        host._upload_original(str(link))
-    assert len(captured) == 1
 
 
 @pytest.mark.parametrize('stop', ['deadline', 'cancel'])
@@ -482,19 +450,19 @@ def test_agent_receives_private_errors_through_real_manager_and_mcp_adapter(monk
     assert 'must-not-leak' not in str(result.results)
 
 
-def test_original_transfer_retains_structured_http_error(monkeypatch, tmp_path):
-    import importlib
-    import httpx
-    file = tmp_path / 'original.txt'
-    file.write_bytes(b'original')
-    error = {'code': 'ORIGINAL_TOO_LARGE', 'message': 'Reduce the file size',
-             'details': {'limit_bytes': 128 * 1024 * 1024, 'suggestion': 'Split the original'}}
-    original_client = httpx.Client
-    monkeypatch.setattr(httpx, 'Client', lambda **kwargs: original_client(
-        **kwargs, transport=httpx.MockTransport(lambda _: httpx.Response(413, json={'error': error}))))
-    monkeypatch.setattr(importlib.import_module('lazymind.config'), 'config', {
-        'core_internal_token': 'private-token', 'core_api_timeout': 5})
-    host = KnowledgeManagementRuntime(EXECUTION, 'http://core')
-    with pytest.raises(ToolExecutionError) as raised:
-        host._upload_original(str(file))
-    assert json.loads(str(raised.value))['structuredContent'] == error
+
+
+def test_success_emits_trusted_resource_card_without_navigation_url(monkeypatch):
+    events = []
+    host, _ = runtime(monkeypatch, {}, events)
+    host._tools['identity'] = 'knowledge.document.upload'
+    call = prepared('knowledge.document.upload', {'knowledge_base_id': 'kb', 'files': [{'path': '/tmp/paper.pdf'}]})
+    payload = {'action': 'knowledge.document.upload', 'status': 'succeeded', 'items': [
+        {'name': 'paper.pdf', 'resource_ref': {'kind': 'document', 'knowledge_base_id': 'kb', 'document_id': 'doc'},
+         'resource_status': 'uploaded', 'processing_status': 'submitted', 'entry_url': 'http://old-host/detail'}]}
+    result = {'ok': True, 'value': json.dumps({'structuredContent': payload})}
+    assert host.record_result(call, result) == result
+    assert events[0][0] == 'knowledge_operation_result'
+    assert events[0][1]['call_id'] == 'call-1'
+    assert 'entry_url' not in events[0][1]['items'][0]
+    assert events[0][1]['items'][0]['processing_status'] == 'submitted'

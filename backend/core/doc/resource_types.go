@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
+	"lazymind/core/learning"
 	"time"
 )
 
@@ -39,12 +40,16 @@ type ResourceOperationContext struct {
 	AllowedDatasetIDs []string
 }
 type CreateKnowledgeRequest struct {
-	PageOptions     *Dataset `json:"-"`
-	PreferredID     string   `json:"-"`
-	Name            string   `json:"name"`
-	Description     string   `json:"description,omitempty"`
-	Scene           string   `json:"scene,omitempty"`
-	ProcessingLevel string   `json:"processing_level,omitempty"`
+	PageOptions     *Dataset                 `json:"-"`
+	PreferredID     string                   `json:"-"`
+	Name            string                   `json:"name"`
+	Description     string                   `json:"description,omitempty"`
+	Scene           string                   `json:"scene,omitempty"`
+	ProcessingLevel string                   `json:"processing_level,omitempty"`
+	Tags            []string                 `json:"tags"`
+	ProfileID       string                   `json:"profile_id,omitempty"`
+	AlgoID          string                   `json:"algo_id,omitempty"`
+	Capabilities    []learning.CapabilityRef `json:"capabilities,omitempty"`
 }
 type CreateFoldersRequest struct {
 	PreferredRootID string   `json:"-"` // Existing page API may choose a single new folder ID.
@@ -53,10 +58,19 @@ type CreateFoldersRequest struct {
 	ParentID        string   `json:"parent_id,omitempty"`
 }
 type ResourceMetadataChanges struct {
-	Name        *string   `json:"name,omitempty"`
-	Description *string   `json:"description,omitempty"`
-	Scene       *string   `json:"scene,omitempty"`
-	Tags        *[]string `json:"tags,omitempty"`
+	ReaderFallbackAccepted *bool `json:"reader_fallback_accepted,omitempty"`
+	algorithm              *Algo
+	parsers                []ParserConfig
+	Name                   *string                   `json:"name,omitempty"`
+	Description            *string                   `json:"description,omitempty"`
+	Scene                  *string                   `json:"scene,omitempty"`
+	Tags                   *[]string                 `json:"tags,omitempty"`
+	ProfileID              *string                   `json:"profile_id,omitempty"`
+	AlgoID                 *string                   `json:"algo_id,omitempty"`
+	ProcessingLevel        *string                   `json:"processing_level,omitempty"`
+	Capabilities           *[]learning.CapabilityRef `json:"capabilities,omitempty"`
+	TagMode                string                    `json:"tag_mode,omitempty"`
+	Recursive              bool                      `json:"recursive,omitempty"`
 }
 type ResourceMetadataItem struct {
 	Target  ResourceRef             `json:"target"`
@@ -93,7 +107,7 @@ type ResourceOperationItem struct {
 	IDMapping        map[string]string `json:"id_mapping,omitempty"`
 	Before           map[string]any    `json:"before,omitempty"`
 	After            map[string]any    `json:"after,omitempty"`
-	EntryURL         string            `json:"entry_url"`
+	EntryURL         string            `json:"-"`
 	Error            *ResourceError    `json:"error,omitempty"`
 }
 type ResourceOperationResult struct {

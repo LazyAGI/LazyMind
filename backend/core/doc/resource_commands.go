@@ -6,19 +6,11 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/acl"
 	"lazymind/core/common/orm"
+	"lazymind/core/learning"
 	"strings"
 	"time"
 )
 
-func resourceScene(s string) (string, error) {
-	if s == "" {
-		return "general", nil
-	}
-	if s != "general" && s != "paper_collection" {
-		return "", resourceErr("INVALID_ARGUMENT", "invalid scene")
-	}
-	return s, nil
-}
 func (s *ResourceService) CreateKnowledge(ctx context.Context, op ResourceOperationContext, req CreateKnowledgeRequest) (ResourceOperationResult, error) {
 	if err := resourceAccount(op.Caller); err != nil {
 		return ResourceOperationResult{}, err
@@ -29,17 +21,17 @@ func (s *ResourceService) CreateKnowledge(ctx context.Context, op ResourceOperat
 	if hasReservedDatasetDisplayNamePrefix(req.Name) {
 		return ResourceOperationResult{}, resourceErr("INVALID_ARGUMENT", "reserved name")
 	}
+	// Resolve replay before external provisioning. The transaction checks again below.
+	if out, found, err := s.replay(ctx, op, "knowledge.create", req); found || err != nil {
+		return out, err
+	}
 	scene, err := resourceScene(req.Scene)
 	if err != nil {
 		return ResourceOperationResult{}, err
 	}
-	level, err := normalizeProcessingLevel(req.ProcessingLevel)
+	level, err := knowledgeProcessingLevel(ctx, s.db, op.Caller.UserID, req.ProcessingLevel)
 	if err != nil {
 		return ResourceOperationResult{}, err
-	}
-	// Resolve replay before external provisioning. The transaction checks again below.
-	if out, found, err := s.replay(ctx, op, "knowledge.create", req); found || err != nil {
-		return out, err
 	}
 	now := time.Now().UTC()
 	id := newDatasetID()
@@ -54,10 +46,28 @@ func (s *ResourceService) CreateKnowledge(ctx context.Context, op ResourceOperat
 	if req.PageOptions != nil {
 		options = *req.PageOptions
 	}
-	if strings.TrimSpace(options.Algo.AlgoID) == "" {
-		options.Algo = Algo{AlgoID: defaultMarketAlgoID, DisplayName: defaultMarketAlgoName}
+	if req.Tags != nil {
+		options.Tags = req.Tags
 	}
 	tags, err := normalizeAndValidateDatasetTags(options.Tags)
+	if err != nil {
+		return ResourceOperationResult{}, err
+	}
+	if len(tags) == 0 {
+		return ResourceOperationResult{}, resourceErr("INVALID_ARGUMENT", "at least one knowledge base tag is required")
+	}
+	if err := validateKnowledgeDescription(req.Description); err != nil {
+		return ResourceOperationResult{}, err
+	}
+	algoID := req.AlgoID
+	if algoID == "" {
+		algoID = options.Algo.AlgoID
+	}
+	options.Algo, err = knowledgeAlgorithm(ctx, algoID)
+	if err != nil {
+		return ResourceOperationResult{}, err
+	}
+	refs, err := knowledgeCapabilities(ctx, s.db, op.Caller.UserID, scene, req.ProfileID, req.Capabilities)
 	if err != nil {
 		return ResourceOperationResult{}, err
 	}
@@ -67,7 +77,7 @@ func (s *ResourceService) CreateKnowledge(ctx context.Context, op ResourceOperat
 	parsers := fetchParsersByAlgoID(ctx, options.Algo.AlgoID)
 	ds.CoverImage = strings.TrimSpace(options.CoverImage)
 	ds.ReaderFallbackAccepted = options.ReaderFallbackAccepted
-	ds.Ext, _ = json.Marshal(map[string]any{"tags": tags, "algo_id": options.Algo.AlgoID, "algo_name": options.Algo.DisplayName, "parsers": parsers})
+	ds.Ext, _ = json.Marshal(map[string]any{"tags": tags, "algo_id": options.Algo.AlgoID, "algo_name": options.Algo.DisplayName, "parsers": parsers, "profile_id": req.ProfileID})
 
 	if err := s.provision(ctx, op.Caller, &ds); err != nil {
 		return ResourceOperationResult{}, err
@@ -82,13 +92,16 @@ func (s *ResourceService) CreateKnowledge(ctx context.Context, op ResourceOperat
 		if err := tx.Create(&orm.KBModel{ID: ds.KbID, Name: ds.DisplayName, OwnerID: op.Caller.UserID, Visibility: acl.VisibilityPrivate}).Error; err != nil {
 			return ResourceOperationResult{}, err
 		}
+		if err := learning.SaveKnowledgeBaseCapabilities(tx, op.Caller.UserID, ds.ID, refs); err != nil {
+			return ResourceOperationResult{}, err
+		}
 		for _, permission := range roleToPermissions("dataset_maintainer") {
 			grant := orm.ACLModel{ResourceType: acl.ResourceTypeDB, ResourceID: ds.ID, GranteeType: acl.GranteeUser, TargetID: op.Caller.UserID, Permission: permission, CreatedBy: op.Caller.UserID, CreatedAt: now}
 			if err := tx.Create(&grant).Error; err != nil {
 				return ResourceOperationResult{}, err
 			}
 		}
-		return ResourceOperationResult{Items: []ResourceOperationItem{{ResourceRef: ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: ds.ID}, Name: ds.DisplayName, ResourceStatus: "created", EntryURL: "/lib/knowledge/detail/" + ds.ID, After: map[string]any{"description": ds.Desc, "scene": ds.Scene, "processing_level": ds.ProcessingLevel}}}}, nil
+		return ResourceOperationResult{Items: []ResourceOperationItem{{ResourceRef: ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: ds.ID}, Name: ds.DisplayName, ResourceStatus: "created", EntryURL: "/lib/knowledge/detail/" + ds.ID, After: map[string]any{"description": ds.Desc, "scene": ds.Scene, "processing_level": ds.ProcessingLevel, "tags": tags, "algo_id": options.Algo.AlgoID, "profile_id": req.ProfileID, "capabilities": refs}}}}, nil
 	})
 }
 func (s *ResourceService) knowledgeNameConflict(ctx context.Context, tx *gorm.DB, op ResourceOperationContext, name, exclude string) error {
@@ -193,12 +206,51 @@ func (s *ResourceService) UpdateMetadata(ctx context.Context, op ResourceOperati
 	if len(req.Items) > s.budget.MaxResources {
 		return ResourceOperationResult{}, resourceErr("OPERATION_TOO_LARGE", "too many metadata items")
 	}
+	if err := resourceAccount(op.Caller); err != nil {
+		return ResourceOperationResult{}, err
+	}
+	if saved, found, err := s.replay(ctx, op, "knowledge.resource.update_metadata", req); found || err != nil {
+		return saved, err
+	}
+	// Preflight external readiness before opening a database transaction.
+	prepared := make([]ResourceMetadataChanges, len(req.Items))
+	for i, item := range req.Items {
+		c := item.Changes
+		if _, err := s.dataset(ctx, s.db, op, item.Target.KnowledgeBaseID, acl.PermissionDatasetWrite); err != nil {
+			return ResourceOperationResult{}, err
+		}
+		if c.ProcessingLevel != nil {
+			if *c.ProcessingLevel == "" {
+				return ResourceOperationResult{}, resourceErr("INVALID_ARGUMENT", "processing_level cannot be empty")
+			}
+			level, err := knowledgeProcessingLevel(ctx, s.db, op.Caller.UserID, *c.ProcessingLevel)
+			if err != nil {
+				return ResourceOperationResult{}, err
+			}
+			c.ProcessingLevel = &level
+		}
+		if c.AlgoID != nil {
+			algo, err := knowledgeAlgorithm(ctx, *c.AlgoID)
+			if err != nil {
+				return ResourceOperationResult{}, err
+			}
+			c.AlgoID = &algo.AlgoID
+			c.algorithm = &algo
+			c.parsers = fetchParsersByAlgoID(ctx, algo.AlgoID)
+		}
+		if c.Description != nil {
+			if err := validateKnowledgeDescription(*c.Description); err != nil {
+				return ResourceOperationResult{}, err
+			}
+		}
+		prepared[i] = c
+	}
 	committed := false
 	result, err := s.mutate(ctx, op, "knowledge.resource.update_metadata", req, func(tx *gorm.DB) (ResourceOperationResult, error) {
 		var out ResourceOperationResult
-		for _, item := range req.Items {
-			c := item.Changes
-			if c.Name == nil && c.Description == nil && c.Scene == nil && c.Tags == nil {
+		for index, item := range req.Items {
+			c := prepared[index]
+			if c.Name == nil && c.Description == nil && c.Scene == nil && c.Tags == nil && c.ProfileID == nil && c.AlgoID == nil && c.ProcessingLevel == nil && c.Capabilities == nil && c.ReaderFallbackAccepted == nil {
 				return out, resourceErr("INVALID_ARGUMENT", "changes cannot be empty")
 			}
 			if c.Name != nil && strings.TrimSpace(*c.Name) == "" {
@@ -216,8 +268,8 @@ func (s *ResourceService) UpdateMetadata(ctx context.Context, op ResourceOperati
 			after := map[string]any{}
 			var result ResourceOperationItem
 			if item.Target.Kind == "knowledge_base" {
-				if c.Tags != nil {
-					return out, resourceErr("INVALID_ARGUMENT", "knowledge base tags cannot be changed here")
+				if err := updateKnowledgeConfiguration(ctx, tx, op.Caller.UserID, &ds, c, updates, before, after); err != nil {
+					return out, err
 				}
 				if c.Name != nil {
 					n := strings.TrimSpace(*c.Name)
@@ -258,6 +310,44 @@ func (s *ResourceService) UpdateMetadata(ctx context.Context, op ResourceOperati
 				if e != nil {
 					return out, e
 				}
+				if isFolderLikeDocument(row) && c.Tags != nil {
+					if !c.Recursive || c.Name != nil || c.Scene != nil || c.Description != nil || c.Capabilities != nil || c.ProfileID != nil || c.AlgoID != nil || c.ProcessingLevel != nil {
+						return out, resourceErr("INVALID_ARGUMENT", "folder tags require recursive=true and only tag changes")
+					}
+					tree, e := s.tree(ctx, tx, op, item.Target)
+					if e != nil {
+						return out, e
+					}
+					for _, child := range tree.rows {
+						if isFolderLikeDocument(child) {
+							continue
+						}
+						changes, prior, next, e := resourceDocumentChanges(tx, child, ResourceMetadataChanges{Tags: c.Tags, TagMode: c.TagMode}, child.PID)
+						if e != nil {
+							return out, e
+						}
+						changes["resource_version"] = gorm.Expr("resource_version + 1")
+						changes["updated_at"] = time.Now().UTC()
+						changed := tx.Model(&orm.Document{}).Where("id = ? AND resource_version = ? AND deleted_at IS NULL", child.ID, child.ResourceVersion).Updates(changes)
+						if changed.Error != nil {
+							return out, changed.Error
+						}
+						if changed.RowsAffected != 1 {
+							return out, resourceErr("CONFLICT", "resource changed")
+						}
+						if len(out.Items) >= s.budget.MaxResources {
+							return out, resourceErr("OPERATION_TOO_LARGE", "too many metadata resources")
+						}
+						value := resourceItem(child, "updated")
+						value.Before = prior
+						value.After = next
+						out.Items = append(out.Items, value)
+					}
+					continue
+				}
+				if c.Recursive {
+					return out, resourceErr("INVALID_ARGUMENT", "recursive applies to folder tags only")
+				}
 				changes, prior, next, e := resourceDocumentChanges(tx, row, c, row.PID)
 				if e != nil {
 					return out, e
@@ -291,7 +381,14 @@ func (s *ResourceService) UpdateMetadata(ctx context.Context, op ResourceOperati
 	}
 	for i, item := range result.Items {
 		if item.ResourceRef.Kind == "knowledge_base" {
-			if syncErr := s.syncKnowledgeMetadata(ctx, op.Caller, item.ResourceRef.KnowledgeBaseID); syncErr != nil {
+			_, algoChanged := item.After["algo_id"]
+			_, nameChanged := item.After["name"]
+			_, descChanged := item.After["description"]
+			_, tagsChanged := item.After["tags"]
+			if !algoChanged && !nameChanged && !descChanged && !tagsChanged {
+				continue
+			}
+			if syncErr := s.syncKnowledgeMetadata(ctx, op.Caller, item.ResourceRef.KnowledgeBaseID, algoChanged); syncErr != nil {
 				result.Items[i].Error = resourceErr("METADATA_SYNC_FAILED", syncErr.Error())
 			}
 		}
@@ -303,7 +400,7 @@ func (s *ResourceService) UpdateMetadata(ctx context.Context, op ResourceOperati
 // resourceDocumentChanges is shared by metadata edits and combined legacy moves.
 func resourceDocumentChanges(tx *gorm.DB, row orm.Document, c ResourceMetadataChanges, parent string) (map[string]any, map[string]any, map[string]any, error) {
 	updates, before, after := map[string]any{}, map[string]any{}, map[string]any{}
-	if c.Description != nil || c.Scene != nil || (isFolderLikeDocument(row) && c.Tags != nil) {
+	if c.Description != nil || c.Scene != nil || c.ProfileID != nil || c.AlgoID != nil || c.ProcessingLevel != nil || c.Capabilities != nil || c.ReaderFallbackAccepted != nil || (isFolderLikeDocument(row) && c.Tags != nil) {
 		return nil, nil, nil, resourceErr("INVALID_ARGUMENT", "field is not allowed for resource kind")
 	}
 	if c.Name != nil {
@@ -318,6 +415,16 @@ func resourceDocumentChanges(tx *gorm.DB, row orm.Document, c ResourceMetadataCh
 	}
 	if c.Tags != nil {
 		tags := normalizeBatchDocumentTags(*c.Tags)
+		if c.TagMode == "append" {
+			var existing []string
+			_ = json.Unmarshal(row.Tags, &existing)
+			tags = mergeAppendDocumentTags(existing, tags, 10)
+		} else if c.TagMode != "" && c.TagMode != "replace" {
+			return nil, nil, nil, resourceErr("INVALID_ARGUMENT", "tag_mode must be append or replace")
+		}
+		if len(tags) > 10 {
+			tags = tags[:10]
+		}
 		raw, _ := json.Marshal(tags)
 		updates["tags"], before["tags"], after["tags"] = raw, row.Tags, tags
 	}

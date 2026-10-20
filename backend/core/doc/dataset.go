@@ -18,6 +18,7 @@ import (
 	"lazymind/core/acl"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/learning"
 	"lazymind/core/log"
 	corestore "lazymind/core/store"
 
@@ -41,38 +42,42 @@ type ParserConfig struct {
 }
 
 type Dataset struct {
-	AllowedActions         []string            `json:"allowed_actions,omitempty"`
-	Scene                  string              `json:"scene,omitempty"`
-	ResourceVersion        int64               `json:"resource_version,omitempty"`
-	Name                   string              `json:"name"`
-	DatasetID              string              `json:"dataset_id"`
-	DisplayName            string              `json:"display_name"`
-	Desc                   string              `json:"desc"`
-	CoverImage             string              `json:"cover_image"`
-	State                  string              `json:"state"`
-	IsEmpty                bool                `json:"is_empty"`
-	DocumentCount          int64               `json:"document_count"`
-	DocumentSize           int64               `json:"document_size"`
-	SegmentCount           int64               `json:"segment_count"`
-	TokenCount             int64               `json:"token_count"`
-	Parsers                []ParserConfig      `json:"parsers"`
-	Algo                   Algo                `json:"algo"`
-	Creator                string              `json:"creator"`
-	IsOwner                bool                `json:"is_owner"`
-	CreateTime             time.Time           `json:"create_time"`
-	UpdateTime             time.Time           `json:"update_time"`
-	Acl                    []string            `json:"acl"`
-	ShareType              string              `json:"share_type"`
-	Type                   string              `json:"type"`
-	Tags                   []string            `json:"tags"`
-	DefaultDataset         bool                `json:"default_dataset"`
-	CreatedByDataSource    *bool               `json:"created_by_data_source,omitempty"`
-	SourceType             string              `json:"source_type,omitempty"`
-	ProcessingLevel        string              `json:"processing_level,omitempty"`
-	ProcessingRevision     int64               `json:"processing_revision,omitempty"`
-	TransitionStatus       string              `json:"transition_status,omitempty"`
-	ReaderFallbackAccepted bool                `json:"reader_fallback_accepted"`
-	Capabilities           DatasetCapabilities `json:"capabilities"`
+	OperationResult        *ResourceOperationResult `json:"operation_result,omitempty"`
+	ProfileID              string                   `json:"profile_id,omitempty"`
+	AlgoID                 string                   `json:"algo_id,omitempty"`
+	ReadingCapabilities    []learning.CapabilityRef `json:"reading_capabilities,omitempty"`
+	AllowedActions         []string                 `json:"allowed_actions,omitempty"`
+	Scene                  string                   `json:"scene,omitempty"`
+	ResourceVersion        int64                    `json:"resource_version,omitempty"`
+	Name                   string                   `json:"name"`
+	DatasetID              string                   `json:"dataset_id"`
+	DisplayName            string                   `json:"display_name"`
+	Desc                   string                   `json:"desc"`
+	CoverImage             string                   `json:"cover_image"`
+	State                  string                   `json:"state"`
+	IsEmpty                bool                     `json:"is_empty"`
+	DocumentCount          int64                    `json:"document_count"`
+	DocumentSize           int64                    `json:"document_size"`
+	SegmentCount           int64                    `json:"segment_count"`
+	TokenCount             int64                    `json:"token_count"`
+	Parsers                []ParserConfig           `json:"parsers"`
+	Algo                   Algo                     `json:"algo"`
+	Creator                string                   `json:"creator"`
+	IsOwner                bool                     `json:"is_owner"`
+	CreateTime             time.Time                `json:"create_time"`
+	UpdateTime             time.Time                `json:"update_time"`
+	Acl                    []string                 `json:"acl"`
+	ShareType              string                   `json:"share_type"`
+	Type                   string                   `json:"type"`
+	Tags                   []string                 `json:"tags"`
+	DefaultDataset         bool                     `json:"default_dataset"`
+	CreatedByDataSource    *bool                    `json:"created_by_data_source,omitempty"`
+	SourceType             string                   `json:"source_type,omitempty"`
+	ProcessingLevel        string                   `json:"processing_level,omitempty"`
+	ProcessingRevision     int64                    `json:"processing_revision,omitempty"`
+	TransitionStatus       string                   `json:"transition_status,omitempty"`
+	ReaderFallbackAccepted bool                     `json:"reader_fallback_accepted"`
+	Capabilities           DatasetCapabilities      `json:"capabilities"`
 }
 
 // Dataset source types. They are derived per dataset and deliberately use the
@@ -912,7 +917,7 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 		replyResourceError(w, err)
 		return
 	}
-	result, err := service.CreateKnowledge(r.Context(), op, CreateKnowledgeRequest{Name: body.DisplayName, Description: body.Desc, Scene: body.Scene, ProcessingLevel: body.ProcessingLevel, PreferredID: strings.TrimSpace(r.URL.Query().Get("dataset_id")), PageOptions: &body})
+	result, err := service.CreateKnowledge(r.Context(), op, CreateKnowledgeRequest{Name: body.DisplayName, Description: body.Desc, Scene: body.Scene, ProcessingLevel: body.ProcessingLevel, PreferredID: strings.TrimSpace(r.URL.Query().Get("dataset_id")), PageOptions: &body, Tags: body.Tags, AlgoID: body.AlgoID, ProfileID: body.ProfileID, Capabilities: body.ReadingCapabilities})
 	if err != nil {
 		replyResourceError(w, err)
 		return
@@ -926,6 +931,10 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetDataset(w http.ResponseWriter, r *http.Request) {
+	replyDataset(w, r, nil)
+}
+
+func replyDataset(w http.ResponseWriter, r *http.Request, operation *ResourceOperationResult) {
 	userID := corestore.UserID(r)
 	if userID == "" {
 		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
@@ -948,7 +957,7 @@ func GetDataset(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusForbidden)
 		return
 	}
-	result, err := service.GetDataset(r.Context(), DatasetGetRequest{
+	result, err := service.GetDataset(r.Context(), DatasetGetRequest{IncludeConfiguration: true,
 		UserID:    userID,
 		DatasetID: datasetID,
 		Caller:    caller,
@@ -958,6 +967,7 @@ func GetDataset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	result.OperationResult = operation
 	common.ReplyJSON(w, result)
 }
 
@@ -1266,7 +1276,7 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(raw, &fields)
 	metadataOnly := len(fields) > 0
 	for key := range fields {
-		if key != "display_name" && key != "desc" && key != "scene" {
+		if key != "display_name" && key != "desc" && key != "scene" && key != "tags" && key != "algo_id" && key != "algo" && key != "profile_id" && key != "reading_capabilities" && key != "processing_level" && key != "dataset_id" {
 			metadataOnly = false
 		}
 	}
@@ -1281,16 +1291,34 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 		if _, ok := fields["scene"]; ok {
 			changes.Scene = &body.Scene
 		}
+		if _, ok := fields["tags"]; ok {
+			changes.Tags = &body.Tags
+		}
+		if _, ok := fields["profile_id"]; ok {
+			changes.ProfileID = &body.ProfileID
+		}
+		if _, ok := fields["reading_capabilities"]; ok {
+			changes.Capabilities = &body.ReadingCapabilities
+		}
+		if _, ok := fields["processing_level"]; ok {
+			changes.ProcessingLevel = &body.ProcessingLevel
+		}
+		if _, ok := fields["algo_id"]; ok {
+			changes.AlgoID = &body.AlgoID
+		} else if _, ok := fields["algo"]; ok {
+			changes.AlgoID = &body.Algo.AlgoID
+		}
 		service, op, err := resourcePageService(r)
 		if err != nil {
 			replyResourceError(w, err)
 			return
 		}
-		if _, err = service.UpdateMetadata(r.Context(), op, UpdateMetadataRequest{Items: []ResourceMetadataItem{{Target: ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: datasetID}, Changes: changes}}}); err != nil {
+		result, err := service.UpdateMetadata(r.Context(), op, UpdateMetadataRequest{Items: []ResourceMetadataItem{{Target: ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: datasetID}, Changes: changes}}})
+		if err != nil {
 			replyResourceError(w, err)
 			return
 		}
-		GetDataset(w, r)
+		replyDataset(w, r, &result)
 		return
 	}
 

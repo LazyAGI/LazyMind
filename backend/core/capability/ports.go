@@ -27,6 +27,8 @@ type SkillReader interface {
 }
 
 type KnowledgeListQuery struct {
+	Source, OrderBy              string
+	IncludeConfiguration         bool
 	KnowledgeBaseIDs             []string
 	Match, Scene, RequiredAction string
 	Keyword                      string
@@ -47,6 +49,7 @@ type KnowledgeCatalog interface {
 }
 
 type KnowledgeDocumentListQuery struct {
+	OrderBy      string
 	KnowledgeIDs []string
 	ResourceIDs  []string
 	ResourceType string

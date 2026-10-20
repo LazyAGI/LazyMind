@@ -47,9 +47,7 @@ def _resolve_upload_files(arguments):
     resolution = FileResolution()
     arguments = copy.deepcopy(arguments)
     for item in arguments.get('files') or []:
-        source = item.get('source') or {}
-        if source.get('kind') == 'local_file':
-            source['path'] = resolution.local(source.get('path'))
+        item['path'] = resolution.local(item.get('path'))
     return resolution.finish(arguments)
 
 
@@ -144,33 +142,6 @@ class KnowledgeManagementRuntime:
             return json.dumps(error, ensure_ascii=False) if error is not None else result
         return dispatch
 
-    def _upload_original(self, path):
-        import httpx
-        import stat
-        from lazymind.config import config
-        from lazymind.chat.engine.tools.host_file_resolution import open_input_file
-        headers = {'X-LazyMind-Internal-Token': str(config['core_internal_token'] or ''),
-                   'X-LazyMind-Execution': json.dumps(dict(self.execution), separators=(',', ':'))}
-        with open_input_file(path) as source:
-            info = os.fstat(source.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_size > 128 * 1024 * 1024:
-                raise ToolExecutionError('Knowledge upload requires a regular file of at most 128 MiB')
-            with httpx.Client(trust_env=False, timeout=int(config['core_api_timeout'])) as client:
-                response = client.post(self.core_api_url + '/internal/knowledge-management:upload-original', headers=headers,
-                                       files={'file': (os.path.basename(path), source, 'application/octet-stream')})
-            if response.is_error:
-                try:
-                    body = response.json()
-                except ValueError:
-                    body = None
-                raise _CoreManagementError(body, response.status_code)
-            body = response.json()
-            reference = body.get('data', body).get('file_ref')
-            if not isinstance(reference, str) or not reference:
-                raise ToolExecutionError('Knowledge original reference unavailable')
-            return reference
-
-
     async def request_metadata(self, wire_name, arguments):
         current = _REQUEST.get()
         if not current or current[0] is not self or current[1] != wire_name or current[2] != digest(arguments):
@@ -189,12 +160,6 @@ class KnowledgeManagementRuntime:
         original_digest = digest(arguments)
         if (wire_name, original_digest) in self._uncertain_calls:
             raise ToolExecutionError('Previous knowledge mutation outcome is uncertain; reconcile its receipt before retrying')
-        if wire_name == 'knowledge.document.upload':
-            for item in arguments.get('files') or []:
-                source = item.get('source') or {}
-                if source.get('kind') == 'local_file':
-                    self._check_cancel()
-                    item['source'] = {'kind': 'uploaded_file', 'file_ref': self._upload_original(source['path'])}
         arguments_digest = digest(arguments)
         payload = {'execution': dict(self.execution), 'wire_name': wire_name,
                    'arguments': arguments, 'call_id': prepared.call_id}
@@ -258,7 +223,16 @@ class KnowledgeManagementRuntime:
             envelope = json.loads(value) if isinstance(value, str) else value
         except (TypeError, ValueError):
             return result
-        if not isinstance(envelope, dict) or envelope.get('isError') is not True:
+        if not isinstance(envelope, dict):
+            return result
+        if envelope.get('isError') is not True:
+            operation = envelope.get('structuredContent', envelope)
+            if isinstance(operation, dict) and operation.get('action') == wire_name and isinstance(operation.get('items'), list):
+                items = [{key: copy.deepcopy(item[key]) for key in (
+                    'resource_ref', 'name', 'resource_status', 'processing_status', 'cleanup_status', 'error'
+                ) if key in item} for item in operation['items'] if isinstance(item, dict)]
+                _write_agent_data('knowledge_operation_result', call_id=prepared.call_id,
+                                  action=wire_name, status=operation.get('status'), items=items)
             return result
         details = envelope.get('structuredContent') or {}
         if (isinstance(details, dict) and details.get('code') == 'MCP_CALL_FAILED'

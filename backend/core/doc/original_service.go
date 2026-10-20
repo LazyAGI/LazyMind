@@ -9,6 +9,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	_ "golang.org/x/image/bmp"
+	_ "golang.org/x/image/tiff"
+	_ "golang.org/x/image/webp"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"net/http"
 	"os"
@@ -23,7 +30,7 @@ import (
 	"lazymind/core/common/orm"
 )
 
-const originalMaxBytes int64 = 128 << 20
+const originalMaxBytes int64 = OriginalFileMaxBytes
 const originalRetention = 24 * time.Hour
 
 // OriginalRef identifies immutable bytes; it is never a filesystem capability.
@@ -65,6 +72,7 @@ type originalMetadata struct {
 	RevisionID string    `json:"original_revision_id,omitempty"`
 }
 type ImportOriginalRequest struct {
+	DocumentID, TaskID, RelativePath                          string // Internal page request identity; not part of MCP upload schema.
 	FileRef, DatasetID, ParentID, DisplayName, DataSourceType string
 	Tags                                                      []string
 	ConflictPolicy                                            string
@@ -272,6 +280,13 @@ func (s *OriginalService) prepare(ctx context.Context, caller DatasetCatalogCall
 		return nil, err
 	}
 	req.DisplayName = name
+	req.Tags = normalizeBatchDocumentTags(req.Tags)
+	if len(req.Tags) > 10 {
+		req.Tags = req.Tags[:10]
+	}
+	if req.RelativePath != "" {
+		meta.RelativePath = req.RelativePath
+	}
 	input, err := openControlledOriginal(meta.StoredPath)
 	if err != nil {
 		return nil, err
@@ -359,7 +374,7 @@ func (s *OriginalService) BindOriginalTx(ctx context.Context, tx *gorm.DB, calle
 		return OriginalImportResult{}, originalError("CONFLICT", "target already contains this name")
 	}
 	now := s.now()
-	docID, taskID := newDocID(), newTaskID()
+	docID, taskID := firstNonEmpty(req.DocumentID, newDocID()), firstNonEmpty(req.TaskID, newTaskID())
 	meta := p.metadata
 	base := orm.BaseModel{CreateUserID: caller.UserID, CreateUserName: firstNonEmpty(caller.UserName, caller.UserID), CreatedAt: now, UpdatedAt: now}
 	dExt := newDocumentExt(meta.StoredPath, meta.StoredName, meta.OriginalFilename, meta.FileSize, meta.ContentType, meta.RelativePath, req.Tags)
@@ -517,13 +532,13 @@ func validateOriginalBytes(f *os.File, size int64, name, expectedMIME string) (s
 			return "", errors.New("PDF is incomplete")
 		}
 		mime = "application/pdf"
-	case ".docx", ".xlsx", ".pptx", ".zip":
+	case ".docx", ".xlsx", ".pptx", ".pptm", ".epub", ".zip":
 		zr, err := zip.NewReader(f, size)
 		if err != nil {
 			return "", errors.New("original is not a valid ZIP container")
 		}
-		if ext != ".zip" {
-			prefix := map[string]string{".docx": "word/", ".xlsx": "xl/", ".pptx": "ppt/"}[ext]
+		if ext != ".zip" && ext != ".epub" {
+			prefix := map[string]string{".docx": "word/", ".xlsx": "xl/", ".pptx": "ppt/", ".pptm": "ppt/"}[ext]
 			types, content := false, false
 			for _, entry := range zr.File {
 				types = types || entry.Name == "[Content_Types].xml"
@@ -533,14 +548,14 @@ func validateOriginalBytes(f *os.File, size int64, name, expectedMIME string) (s
 				return "", errors.New("Office container does not match filename")
 			}
 		}
-		mime = map[string]string{".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", ".zip": "application/zip"}[ext]
-	case ".txt", ".md", ".csv", ".tsv", ".html", ".htm", ".json", ".xml":
+		mime = map[string]string{".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", ".zip": "application/zip", ".pptm": "application/vnd.ms-powerpoint.presentation.macroEnabled.12", ".epub": "application/epub+zip"}[ext]
+	case ".txt", ".md", ".csv", ".tsv", ".html", ".htm", ".json", ".xml", ".ipynb", ".jsonl", ".yaml", ".yml", ".py", ".mbox":
 		// Validate the full stream, not only a plausible prefix.
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
 			return "", err
 		}
 		decoder := json.NewDecoder(f)
-		if ext == ".json" {
+		if ext == ".json" || ext == ".ipynb" {
 			var v any
 			if err := decoder.Decode(&v); err != nil {
 				return "", errors.New("invalid JSON original")
@@ -581,6 +596,35 @@ func validateOriginalBytes(f *os.File, size int64, name, expectedMIME string) (s
 			}
 		}
 		mime = map[string]string{".md": "text/markdown", ".html": "text/html", ".htm": "text/html", ".json": "application/json", ".xml": "application/xml", ".csv": "text/csv", ".tsv": "text/tab-separated-values", ".txt": "text/plain"}[ext]
+	case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".tif":
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return "", err
+		}
+		_, format, err := image.DecodeConfig(f)
+		if err != nil {
+			return "", errors.New("invalid image original")
+		}
+		expected := strings.TrimPrefix(ext, ".")
+		if expected == "jpg" {
+			expected = "jpeg"
+		}
+		if expected == "tif" {
+			expected = "tiff"
+		}
+		if format != expected {
+			return "", errors.New("image format does not match filename")
+		}
+		mime = "image/" + format
+	case ".mp3":
+		if !bytes.HasPrefix(header, []byte("ID3")) && !(len(header) > 1 && header[0] == 0xff && header[1]&0xe0 == 0xe0) {
+			return "", errors.New("invalid MP3 original")
+		}
+		mime = "audio/mpeg"
+	case ".mp4":
+		if len(header) < 12 || !bytes.Equal(header[4:8], []byte("ftyp")) {
+			return "", errors.New("invalid MP4 original")
+		}
+		mime = "video/mp4"
 	case ".doc", ".xls", ".ppt":
 		mime = map[string]string{".doc": "application/msword", ".xls": "application/vnd.ms-excel", ".ppt": "application/vnd.ms-powerpoint"}[ext]
 		if !bytes.HasPrefix(header, []byte{0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1}) {
@@ -588,6 +632,9 @@ func validateOriginalBytes(f *os.File, size int64, name, expectedMIME string) (s
 		}
 	default:
 		return "", originalError("UNSUPPORTED_FORMAT", "unsupported original file format")
+	}
+	if mime == "" {
+		mime = "text/plain"
 	}
 	expectedMIME = strings.TrimSpace(strings.Split(expectedMIME, ";")[0])
 	if expectedMIME != "" && expectedMIME != "application/octet-stream" && expectedMIME != mime && !(strings.HasPrefix(expectedMIME, "text/") && strings.HasPrefix(mime, "text/")) {

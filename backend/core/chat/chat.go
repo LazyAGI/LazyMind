@@ -161,6 +161,7 @@ type LazyChatData struct {
 	ReasoningText            string                         `json:"think"`
 	TaskCreated              *TaskCreatedEvent              `json:"task_created,omitempty"`
 	ExportSnapshot           *ChatExportSnapshot            `json:"export_snapshot,omitempty"`
+	KnowledgeOperationResult map[string]any                 `json:"knowledge_operation_result,omitempty"`
 	ArtifactCreated          *ArtifactCreatedEvent          `json:"artifact_created,omitempty"`
 	AskPending               *AskPendingEvent               `json:"ask_pending,omitempty"`
 	ToolLimitPending         *ToolLimitPendingEvent         `json:"tool_limit_pending,omitempty"`
@@ -447,6 +448,7 @@ type UpstreamStreamChunk struct {
 	ReasoningText            string                         `json:"reasoning_text"` // text think
 	TaskCreated              *TaskCreatedEvent              `json:"task_created,omitempty"`
 	ExportSnapshot           *ChatExportSnapshot            `json:"export_snapshot,omitempty"`
+	KnowledgeOperationResult map[string]any                 `json:"knowledge_operation_result,omitempty"`
 	ArtifactCreated          *ArtifactCreatedEvent          `json:"artifact_created,omitempty"`
 	AskPending               *AskPendingEvent               `json:"ask_pending,omitempty"`
 	ToolLimitPending         *ToolLimitPendingEvent         `json:"tool_limit_pending,omitempty"`
@@ -1110,6 +1112,7 @@ func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {
 		ReasoningText:            data.ReasoningText,
 		TaskCreated:              data.TaskCreated,
 		ArtifactCreated:          data.ArtifactCreated,
+		KnowledgeOperationResult: data.KnowledgeOperationResult,
 		ExportSnapshot:           data.ExportSnapshot,
 		AskPending:               data.AskPending,
 		ToolLimitPending:         data.ToolLimitPending,

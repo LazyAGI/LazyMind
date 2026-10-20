@@ -40,7 +40,8 @@ func NewKnowledgeCatalogForDB(db *gorm.DB) (*KnowledgeCatalog, error) {
 func (c *KnowledgeCatalog) ListKnowledge(ctx context.Context, call capability.InvocationContext, query capability.KnowledgeListQuery) (capability.KnowledgeListPage, error) {
 	userID := strings.TrimSpace(call.Principal.UserID)
 	resp, err := c.service.ListDatasets(ctx, doc.DatasetListRequest{
-		UserID:     userID,
+		UserID:       userID,
+		SourceFilter: query.Source, OrderBy: query.OrderBy,
 		DatasetIDs: query.KnowledgeBaseIDs, Match: query.Match, Scene: query.Scene, RequiredAction: query.RequiredAction,
 		Keyword: query.Keyword,
 		Tags:    append([]string(nil), query.Tags...),
@@ -53,8 +54,16 @@ func (c *KnowledgeCatalog) ListKnowledge(ctx context.Context, call capability.In
 	}
 	items := make([]capability.KnowledgeSummary, 0, len(resp.Datasets))
 	for _, item := range resp.Datasets {
+		var configuration map[string]any
+		if query.IncludeConfiguration {
+			full, e := c.service.GetDataset(ctx, doc.DatasetGetRequest{IncludeConfiguration: true, UserID: userID, DatasetID: item.DatasetID, Caller: managementCaller(call)})
+			if e != nil {
+				return capability.KnowledgeListPage{}, mapDatasetError("knowledge.list", e)
+			}
+			configuration = map[string]any{"scene": full.Scene, "tags": full.Tags, "profile_id": full.ProfileID, "algo_id": full.Algo.AlgoID, "processing_level": full.ProcessingLevel, "capabilities": full.ReadingCapabilities}
+		}
 		items = append(items, capability.KnowledgeSummary{
-			ID: item.DatasetID, Name: item.DisplayName, Description: item.Desc,
+			Configuration: configuration, ID: item.DatasetID, Name: item.DisplayName, Description: item.Desc,
 			AllowedActions: item.AllowedActions, EntryURL: "/lib/knowledge/detail/" + item.DatasetID, Scene: item.Scene, ResourceRef: capability.ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: item.DatasetID},
 			Tags: append([]string(nil), item.Tags...), UpdatedAt: item.UpdateTime,
 			DocumentSizeBytes: item.DocumentSize, DocumentCount: item.DocumentCount,

@@ -63,30 +63,31 @@ const (
 )
 
 type ChatChunkResponse struct {
-	Exports               *[]ChatExport                `json:"exports,omitempty"`
-	ConversationID        string                       `json:"conversation_id"`
-	Seq                   int32                        `json:"seq"`
-	Message               string                       `json:"message"`
-	Delta                 string                       `json:"delta"`
-	DeltaMode             ChatDeltaMode                `json:"delta_mode,omitempty"`
-	HistoryID             string                       `json:"history_id"`
-	Sources               []any                        `json:"sources,omitempty"`
-	PromptQuestions       []string                     `json:"prompt_questions,omitempty"`
-	ReasoningContent      string                       `json:"reasoning_content,omitempty"`
-	ThinkingDurationS     int64                        `json:"thinking_duration_s,omitempty"`
-	ToolCallTurns         int                          `json:"tool_call_turns,omitempty"`
-	ExternalEventSequence int64                        `json:"external_event_sequence,omitempty"`
-	Execution             *externalExecutionProjection `json:"execution,omitempty"`
-	ModelRoute            *chatModelRoute              `json:"model_route,omitempty"`
-	TaskCreated           *TaskCreatedNotice           `json:"task_created,omitempty"`
-	ArtifactCreated       *ConversationArtifactDTO     `json:"artifact_created,omitempty"`
-	AskPending            *AskPendingEvent             `json:"ask_pending,omitempty"`
-	ToolLimitPending      *ToolLimitPendingEvent       `json:"tool_limit_pending,omitempty"`
-	IntentUpdated         *IntentUpdatedEvent          `json:"intent_updated,omitempty"`
-	CapabilityDependency  map[string]any               `json:"capability_dependency,omitempty"`
-	ToolConfiguration     map[string]any               `json:"tool_configuration,omitempty"`
-	RuntimeEvent          *ChatRuntimeEvent            `json:"runtime_event,omitempty"`
-	PerformanceMetrics    *RunPerformanceMetrics       `json:"performance_metrics,omitempty"`
+	KnowledgeOperationResult map[string]any               `json:"knowledge_operation_result,omitempty"`
+	Exports                  *[]ChatExport                `json:"exports,omitempty"`
+	ConversationID           string                       `json:"conversation_id"`
+	Seq                      int32                        `json:"seq"`
+	Message                  string                       `json:"message"`
+	Delta                    string                       `json:"delta"`
+	DeltaMode                ChatDeltaMode                `json:"delta_mode,omitempty"`
+	HistoryID                string                       `json:"history_id"`
+	Sources                  []any                        `json:"sources,omitempty"`
+	PromptQuestions          []string                     `json:"prompt_questions,omitempty"`
+	ReasoningContent         string                       `json:"reasoning_content,omitempty"`
+	ThinkingDurationS        int64                        `json:"thinking_duration_s,omitempty"`
+	ToolCallTurns            int                          `json:"tool_call_turns,omitempty"`
+	ExternalEventSequence    int64                        `json:"external_event_sequence,omitempty"`
+	Execution                *externalExecutionProjection `json:"execution,omitempty"`
+	ModelRoute               *chatModelRoute              `json:"model_route,omitempty"`
+	TaskCreated              *TaskCreatedNotice           `json:"task_created,omitempty"`
+	ArtifactCreated          *ConversationArtifactDTO     `json:"artifact_created,omitempty"`
+	AskPending               *AskPendingEvent             `json:"ask_pending,omitempty"`
+	ToolLimitPending         *ToolLimitPendingEvent       `json:"tool_limit_pending,omitempty"`
+	IntentUpdated            *IntentUpdatedEvent          `json:"intent_updated,omitempty"`
+	CapabilityDependency     map[string]any               `json:"capability_dependency,omitempty"`
+	ToolConfiguration        map[string]any               `json:"tool_configuration,omitempty"`
+	RuntimeEvent             *ChatRuntimeEvent            `json:"runtime_event,omitempty"`
+	PerformanceMetrics       *RunPerformanceMetrics       `json:"performance_metrics,omitempty"`
 }
 
 // TaskCreatedNotice notifies the frontend that an independent SubAgent task exists.

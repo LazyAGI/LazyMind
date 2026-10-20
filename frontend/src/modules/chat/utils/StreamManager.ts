@@ -232,6 +232,7 @@ export class StreamManager {
               result.reasoning_content ||
               result.task_created ||
               result.artifact_created ||
+              (result as any).knowledge_operation_result ||
               result.ask_pending ||
               result.tool_limit_pending,
           );

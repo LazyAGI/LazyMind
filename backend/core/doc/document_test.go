@@ -14,6 +14,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
+	"lazymind/core/learning"
 	"lazymind/core/store"
 
 	"github.com/gorilla/mux"
@@ -161,6 +162,7 @@ func newDocumentTestDB(t *testing.T) *orm.DB {
 	db := orm.OpenTestDB(t)
 	if err := db.AutoMigrate(
 		&orm.Dataset{},
+		&learning.KnowledgeBaseCapability{}, &learning.CapabilityProfile{},
 		&orm.Document{},
 		&orm.Task{},
 		&orm.UploadedFile{},

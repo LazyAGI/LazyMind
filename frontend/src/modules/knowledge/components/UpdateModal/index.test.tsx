@@ -23,9 +23,9 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-async function open() {
+async function open(reject = false) {
   const ref = createRef<UpdateImperativeProps>();
-  const onUpdate = vi.fn().mockResolvedValue(undefined);
+  const onUpdate = reject ? vi.fn().mockRejectedValue(new Error("at least one capability is required")) : vi.fn().mockResolvedValue(undefined);
   render(<ConfigProvider theme={{ token: { motion: false } }}><UpdateModal ref={ref} onUpdate={onUpdate} /></ConfigProvider>);
   await act(async () => ref.current!.onOpen({ dataset_id: "mcp-library", display_name: "MCP-library", desc: "before", tags: ["test"], algo: { algo_id: "general_algo" } }));
   await screen.findByRole("dialog");
@@ -53,11 +53,11 @@ describe("metadata-only library editing", () => {
     vi.mocked(getKnowledgeBaseCapabilities).mockResolvedValue([{ id: "cap-1", dataset_id: "mcp-library", capability_key: "existing", capability_version: 1, enabled: true, display_order: 1, settings_json: "{}" }]);
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      await open();
+      const onUpdate = await open(true);
       const control = screen.getByRole("combobox", { name: "learning.knowledgeBaseCapabilities" });
       fireEvent.click(control.closest(".ant-select")!.querySelector(".ant-select-selection-item-remove")!);
       fireEvent.click(screen.getByRole("button", { name: "OK" }));
-      await waitFor(() => expect(saveKnowledgeBaseCapabilities).toHaveBeenCalledWith("mcp-library", []));
+      await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({reading_capabilities: []})));
       expect(screen.getByRole("dialog")).toBeInTheDocument();
     } finally { consoleError.mockRestore(); }
   });

@@ -2498,6 +2498,20 @@ func streamSingleAnswer(
 			}
 			continue
 		}
+		if d.KnowledgeOperationResult != nil {
+			historyExt = mergeKnowledgeOperation(historyExt, d.KnowledgeOperationResult)
+			if err := persistKnowledgeOperation(chatCtx, db, convID, historyID, d.KnowledgeOperationResult); err != nil {
+				log.Logger.Error().Err(err).Msg("persist knowledge operation")
+			}
+			chunk := &ChatChunkResponse{ConversationID: convID, HistoryID: historyID, Seq: int32(seq), KnowledgeOperationResult: d.KnowledgeOperationResult}
+			if reqCtx.Err() == nil {
+				writeSSEChunk(w, flusher, chunk)
+			}
+			if stateStore != nil {
+				_ = appendChatChunk(chatCtx, stateStore, convID, historyID, chunk)
+			}
+			continue
+		}
 		if d.ArtifactCreated != nil {
 			persistAndPublishConversationArtifact(
 				chatCtx, reqCtx, w, flusher, db, stateStore, reqBody,

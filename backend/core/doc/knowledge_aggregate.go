@@ -3,7 +3,6 @@ package doc
 import (
 	"context"
 	"gorm.io/gorm"
-	"lazymind/core/common/orm"
 	"sort"
 )
 
@@ -43,7 +42,14 @@ func AggregateMetadata(ctx context.Context, db, lazyDB *gorm.DB, caller DatasetC
 		}
 	}
 	var ids []string
-	query := db.WithContext(ctx).Model(&orm.Document{}).Where("dataset_id IN ? AND deleted_at IS NULL AND UPPER(COALESCE(document_type,'')) <> 'FOLDER'", req.DatasetIDs)
+	if req.ParentID != nil && len(req.DatasetIDs) != 1 {
+		return AggregateDocumentsResponse{}, resourceErr("INVALID_ARGUMENT", "parent_id requires a single library")
+	}
+	recursive := req.Recursive == nil || *req.Recursive
+	query, err := NewDocumentCatalog(db, catalog).filteredQuery(ctx, DocumentCatalogQuery{DatasetIDs: req.DatasetIDs, ResourceIDs: req.ResourceIDs, ResourceType: "document", ParentID: req.ParentID, Recursive: recursive, Match: req.Match, Name: req.Name, Path: req.Path})
+	if err != nil {
+		return AggregateDocumentsResponse{}, err
+	}
 	if err = query.Order("id").Limit(budget.MaxDocuments+1).Pluck("id", &ids).Error; err != nil {
 		return AggregateDocumentsResponse{}, err
 	}

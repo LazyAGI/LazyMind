@@ -1,3 +1,4 @@
+import { mergeKnowledgeOperations } from "../../../utils/knowledgeOperations";
 import { emitConversationGroupsChanged } from "../../../conversationOrganizer/api";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useEffect, useRef, useState, type RefObject } from "react";
@@ -1162,6 +1163,7 @@ export function useChatConversation({
           result.sources && result.sources.length > 0
             ? result.sources
             : assistantMessage.sources,
+        knowledge_operations: mergeKnowledgeOperations(assistantMessage.knowledge_operations, (result as any).knowledge_operation_result),
         ask_pending: mergeAskPending(
           assistantMessage.ask_pending,
           result.ask_pending,

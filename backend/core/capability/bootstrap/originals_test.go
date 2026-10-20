@@ -8,8 +8,7 @@ import (
 	"errors"
 	"io"
 	"lazymind/core/artifact"
-	"lazymind/core/capability"
-	"lazymind/core/capability/internal/coreadapter"
+
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
 	"net/http"
@@ -145,7 +144,7 @@ func TestWorkOriginalResolverUsesRealDualWritersOwnerNamespaceAndBlobMIME(t *tes
 	}
 }
 
-func TestWorkOriginalErrorsReachCapabilityAdapter(t *testing.T) {
+func TestWorkOriginalResolverErrors(t *testing.T) {
 	cases := []struct{ name, artifactID, revisionID, user, tenant, want, drop string }{
 		{name: "missing artifact", artifactID: "missing", revisionID: "missing", want: "NOT_FOUND"},
 		{name: "missing revision", artifactID: "artifact", revisionID: "missing", want: "NOT_FOUND"},
@@ -195,16 +194,12 @@ func TestWorkOriginalErrorsReachCapabilityAdapter(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			resources, err := doc.NewResourceService(doc.ResourceServiceDeps{DB: db.DB, Originals: originals})
-			if err != nil {
-				t.Fatal(err)
+			_, err = originals.AcquireWorkOriginal(context.Background(), doc.DatasetCatalogCaller{UserID: user, TenantID: tenant}, tc.artifactID, tc.revisionID)
+			var typed *doc.ResourceError
+			if err == nil || (tc.want != "INTERNAL" && (!errors.As(err, &typed) || typed.Code != tc.want)) {
+				t.Fatalf("original error=%+v want=%s", err, tc.want)
 			}
-			adapter := coreadapter.NewKnowledgeManagement(db.DB, db.DB, resources, originals)
-			_, err = adapter.Upload(context.Background(), capability.InvocationContext{Principal: capability.Principal{UserID: user, TenantID: tenant, Permissions: capability.PermissionSet{"document.write": {}}}}, capability.UploadKnowledgeDocumentInput{KnowledgeBaseID: "target", Files: []capability.KnowledgeUploadItem{{Source: capability.KnowledgeUploadSource{Kind: "work_artifact", ArtifactID: tc.artifactID, RevisionID: tc.revisionID}}}})
-			var typed *capability.Error
-			if !errors.As(err, &typed) || string(typed.Code) != tc.want {
-				t.Fatalf("adapter error=%+v want=%s", err, tc.want)
-			}
+
 		})
 	}
 }

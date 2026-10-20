@@ -62,7 +62,7 @@ func (r *KnowledgeDocumentReader) ListKnowledgeDocuments(ctx context.Context, ca
 		ids = []string{query.KnowledgeID}
 	}
 	catalog := doc.NewDocumentCatalog(r.db, r.datasets)
-	page, err := catalog.List(ctx, caller, doc.DocumentCatalogQuery{DatasetIDs: ids, ResourceIDs: query.ResourceIDs, ResourceType: query.ResourceType, ParentID: query.ParentID, Recursive: query.Recursive, Match: query.Match, Name: query.Name, Path: query.Path, Offset: query.Offset, Limit: query.Limit})
+	page, err := catalog.List(ctx, caller, doc.DocumentCatalogQuery{OrderBy: query.OrderBy, DatasetIDs: ids, ResourceIDs: query.ResourceIDs, ResourceType: query.ResourceType, ParentID: query.ParentID, Recursive: query.Recursive, Match: query.Match, Name: query.Name, Path: query.Path, Offset: query.Offset, Limit: query.Limit})
 	if err != nil {
 		return capability.KnowledgeDocumentListPage{}, mapResourceError(operation, err)
 	}

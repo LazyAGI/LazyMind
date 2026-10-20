@@ -136,7 +136,7 @@ func runHistoryInjections(ctx context.Context, db *gorm.DB) error {
 }
 
 func buildCapabilityRuntime() (*capabilitybootstrap.Runtime, error) {
-	moveBudget, err := knowledgeMoveBudget()
+	moveBudget, err := doc.KnowledgeMoveBudget()
 	if err != nil {
 		return nil, err
 	}

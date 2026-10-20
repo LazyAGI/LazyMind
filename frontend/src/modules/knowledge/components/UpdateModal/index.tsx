@@ -23,7 +23,7 @@ import {
   PROCESSING_LEVEL_ORDER,
   type ProcessingLevel,
 } from "@/modules/knowledge/utils/processingLevel";
-import { getKnowledgeBaseCapabilities, getLearningCatalog, saveKnowledgeBaseCapabilities, type LearningCapability, type CapabilityRef } from "@/modules/learning/api";
+import { getKnowledgeBaseCapabilities, getLearningCatalog,  type LearningCapability, type CapabilityRef } from "@/modules/learning/api";
 import CapabilitySettings, { capabilityRefsFromForm, parseCapabilitySettings } from "@/modules/learning/CapabilitySettings";
 
 const { TextArea } = Input;
@@ -179,11 +179,9 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
         }
         setLoading(true);
         try {
-          await onUpdate({ ...params, dataset_id: data?.dataset_id });
           const capabilityRefs = capabilityRefsFromForm(learningCapabilityKeys, learningCapabilitySettings, learningCapabilities);
-          if (data?.dataset_id && !isEqual(capabilityRefs, initialCapabilityRefs.current)) {
-            await saveKnowledgeBaseCapabilities(data.dataset_id, capabilityRefs);
-          }
+          if (!isEqual(capabilityRefs, initialCapabilityRefs.current)) params.reading_capabilities = capabilityRefs;
+          await onUpdate({ ...params, dataset_id: data?.dataset_id });
           setLoading(false);
           onCancel();
         } catch (error) {

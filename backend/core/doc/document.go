@@ -1173,86 +1173,44 @@ func BatchUpdateDocumentTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	targetIDs := map[string]struct{}{}
+	service, op, err := resourcePageService(r)
+	if err != nil {
+		replyResourceError(w, err)
+		return
+	}
+	tagMode := "append"
+	if mode == "OVERWRITE" {
+		tagMode = "replace"
+	}
+	items := []ResourceMetadataItem{}
 	for _, id := range req.DocumentIDs {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			targetIDs[id] = struct{}{}
+		if strings.TrimSpace(id) != "" {
+			items = append(items, ResourceMetadataItem{Target: ResourceRef{Kind: "document", KnowledgeBaseID: datasetID, DocumentID: id}, Changes: ResourceMetadataChanges{Tags: &req.Tags, TagMode: tagMode}})
 		}
 	}
-	for _, folderID := range req.FolderIDs {
-		folderID = strings.TrimSpace(folderID)
-		if folderID == "" {
-			continue
-		}
-		subtree, err := loadDocumentSubtree(r.Context(), datasetID, folderID)
-		if err != nil {
-			common.ReplyErr(w, fmt.Sprintf("%s: %v", "folder not found", err), http.StatusBadRequest)
-			return
-		}
-		for _, row := range subtree {
-			if isFolderLikeDocument(row) {
-				continue
-			}
-			targetIDs[strings.TrimSpace(row.ID)] = struct{}{}
+	for _, id := range req.FolderIDs {
+		if strings.TrimSpace(id) != "" {
+			items = append(items, ResourceMetadataItem{Target: ResourceRef{Kind: "folder", KnowledgeBaseID: datasetID, FolderID: id}, Changes: ResourceMetadataChanges{Tags: &req.Tags, TagMode: tagMode, Recursive: true}})
 		}
 	}
-
-	if len(targetIDs) == 0 {
-		common.ReplyJSON(w, BatchUpdateDocumentTagsResponse{AffectedFiles: 0, TruncatedDocs: 0})
+	if len(items) == 0 {
+		common.ReplyJSON(w, BatchUpdateDocumentTagsResponse{})
 		return
 	}
-
-	ids := make([]string, 0, len(targetIDs))
-	for id := range targetIDs {
-		ids = append(ids, id)
-	}
-
-	var docs []orm.Document
-	if err := store.DB().WithContext(r.Context()).
-		Where("dataset_id = ? AND id IN ? AND deleted_at IS NULL", datasetID, ids).
-		Find(&docs).Error; err != nil {
-		common.ReplyErr(w, "query documents failed", http.StatusInternalServerError)
+	out, err := service.UpdateMetadata(r.Context(), op, UpdateMetadataRequest{Items: items})
+	if err != nil {
+		replyResourceError(w, err)
 		return
 	}
-
-	requestTags := normalizeBatchDocumentTags(req.Tags)
-	now := time.Now().UTC()
-	affected := int32(0)
+	seen := map[string]bool{}
+	for _, item := range out.Items {
+		seen[item.ResourceRef.DocumentID] = true
+	}
 	truncated := int32(0)
-
-	for _, docRow := range docs {
-		if isFolderLikeDocument(docRow) {
-			continue
-		}
-		affected++
-		finalTags := append([]string(nil), requestTags...)
-		if mode == "APPEND" || mode == "UPDATE_MODE_UNSPECIFIED" {
-			var existing []string
-			_ = json.Unmarshal(docRow.Tags, &existing)
-			finalTags = mergeAppendDocumentTags(existing, requestTags, 10)
-		} else if len(finalTags) > 10 {
-			finalTags = finalTags[:10]
-			truncated++
-		}
-		if len(finalTags) > 10 {
-			finalTags = finalTags[:10]
-			truncated++
-		}
-		tagsBytes, _ := json.Marshal(finalTags)
-		if err := store.DB().WithContext(r.Context()).
-			Model(&orm.Document{}).
-			Where("dataset_id = ? AND id = ? AND deleted_at IS NULL", datasetID, docRow.ID).
-			Updates(map[string]any{"tags": tagsBytes, "updated_at": now}).Error; err != nil {
-			common.ReplyErr(w, "update document tags failed", http.StatusInternalServerError)
-			return
-		}
+	if tagMode == "replace" && len(normalizeBatchDocumentTags(req.Tags)) > 10 {
+		truncated = int32(len(seen))
 	}
-
-	common.ReplyJSON(w, BatchUpdateDocumentTagsResponse{
-		AffectedFiles: affected,
-		TruncatedDocs: truncated,
-	})
+	common.ReplyJSON(w, BatchUpdateDocumentTagsResponse{AffectedFiles: int32(len(seen)), TruncatedDocs: truncated})
 }
 
 func normalizeBatchDocumentTags(tags []string) []string {

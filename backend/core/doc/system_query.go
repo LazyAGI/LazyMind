@@ -11,6 +11,12 @@ import (
 )
 
 type AggregateDocumentsRequest struct {
+	ResourceIDs     []string `json:"resource_ids,omitempty"`
+	ParentID        *string  `json:"parent_id,omitempty"`
+	Recursive       *bool    `json:"recursive,omitempty"`
+	Match           string   `json:"match,omitempty"`
+	Name            string   `json:"name,omitempty"`
+	Path            string   `json:"path,omitempty"`
 	DatasetIDs      []string `json:"dataset_ids,omitempty"`
 	FileTypes       []string `json:"file_types,omitempty"`
 	DocumentStages  []string `json:"document_stages,omitempty"`
@@ -163,7 +169,7 @@ func containsAllNormalized(values []string, want map[string]struct{}) bool {
 func documentRowTags(row mergedDocRow) []string {
 	var tags []string
 	_ = json.Unmarshal(row.Tags, &tags)
-	return tags
+	return normalizeBatchDocumentTags(tags)
 }
 
 func normalizeGroupBy(values []string) []string {

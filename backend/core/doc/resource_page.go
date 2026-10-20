@@ -13,7 +13,15 @@ func resourcePageService(r *http.Request) (*ResourceService, ResourceOperationCo
 	caller := datasetCatalogCallerFromRequest(r)
 	caller.UserName = store.UserName(r)
 	caller.Permissions = []string{"document.write"}
-	service, err := NewResourceService(ResourceServiceDeps{DB: store.DB()})
+	budget, err := KnowledgeMoveBudget()
+	if err != nil {
+		return nil, ResourceOperationContext{}, err
+	}
+	originals, err := NewOriginalService(OriginalServiceDeps{DB: store.DB()})
+	if err != nil {
+		return nil, ResourceOperationContext{}, err
+	}
+	service, err := NewResourceService(ResourceServiceDeps{DB: store.DB(), Originals: originals, Budget: budget})
 	return service, ResourceOperationContext{Caller: caller}, err
 }
 func replyResourceError(w http.ResponseWriter, err error) {
