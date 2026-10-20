@@ -129,14 +129,18 @@ runs exit 1. Do not use fault injection against business work.
 ```bash
 .venv/bin/python cli.py --config "$TRIAL/private/config.json" restore-brief \
   --task "$TRIAL/csv-a/task.json" --repo "$TRIAL/csv-a/worktree" --state "$TRIAL/csv-a/run"
+# Open the failed Workflow session in LazyMind and click Retry now.
 .venv/bin/python cli.py --config "$TRIAL/private/config.json" run --resume \
   --task "$TRIAL/csv-a/task.json" --repo "$TRIAL/csv-a/worktree" --state "$TRIAL/csv-a/run"
 ```
 
 Apply these commands to the *failed missing-brief run*, not the completed Quick Start
-run. Restore re-extracts the same committed task. Explicit `--resume` invokes the
-public control Retry operation, retaining the failed Attempt and creating a new
-one in the same session. An already queued UI Retry can also be claimed. Preparation
+run. Restore re-extracts the same committed task. After restoring the brief, open the failed session in the authenticated LazyMind
+Workflow page and click **Retry**. Then run `--resume` to claim that queued Attempt.
+The public API deliberately denies external executors permission to issue user
+recovery controls (403); the CLI reports UI_RETRY_REQUIRED instead of impersonating
+the browser. Core retains the failed Attempt and creates a new one in the same
+session. Preparation
 must have succeeded and dispatch must never have started. Previous result snapshots
 remain in `previous-results.jsonl` and Core retains Attempt history.
 

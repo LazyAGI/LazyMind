@@ -97,12 +97,15 @@ Checklist。用自己的 task/repo 参数运行即可；变更 Manifest 不可�
 ```bash
 .venv/bin/python cli.py --config "$TRIAL/private/config.json" restore-brief \
   --task "$TRIAL/csv-a/task.json" --repo "$TRIAL/csv-a/worktree" --state "$TRIAL/csv-a/run"
+# 在已登录的 LazyMind 页面打开失败 Session，点击“重试”。
 .venv/bin/python cli.py --config "$TRIAL/private/config.json" run --resume \
   --task "$TRIAL/csv-a/task.json" --repo "$TRIAL/csv-a/worktree" --state "$TRIAL/csv-a/run"
 ```
 
-restore 从同一个已提交任务重新生成 Brief。显式 --resume 调用公共 control Retry，
-在同 Session 中保留失败 Attempt 并产生新 Attempt；也可认领 UI 已排队的 Retry。
+restore 从同一个已提交任务重新生成 Brief。随后在已登录的 Workflow 页面点击“重试”，
+再用 --resume 认领 UI 创建的新 Attempt。Core 保留同 Session 的失败 Attempt。
+外部凭证调用用户 control Retry 实际返回 403，CLI 会明确提示 UI_RETRY_REQUIRED，
+不会冒充浏览器权限。
 仅支持 Prepare 已成功且从未派发的校验失败。旧结果保存在 previous-results.jsonl。
 
 错误 Base、Plan/测试被修改或 Manifest 无效时，检查错误并重新准备经过审阅的输入、

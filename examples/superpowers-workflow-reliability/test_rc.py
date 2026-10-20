@@ -162,5 +162,28 @@ class RCProcessAndInputTests(unittest.TestCase):
                 execute(runtime,task,{'model':'model','reasoning':'medium'},state,workflow,resume=True)
             runtime.call.assert_not_called()
 
+class RCRecoveryTests(unittest.TestCase):
+    def test_external_executor_does_not_issue_ui_control(self):
+        from project import execute
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as t:
+            root=Path(t);repo=root/'repo';repo.mkdir();state=root/'state';state.mkdir();raw=b'{}'
+            workflow={'workflow_ref':'r','revision_id':'v','revision_no':1,'created':False}
+            binding={'task':digest(raw),'repo':str(repo),'config_model':'model','reasoning':'medium','workflow':{k:v for k,v in workflow.items() if k!='created'}}
+            (state/'session.json').write_text(json.dumps({'session_id':'session','binding':binding}))
+            runtime=Mock();runtime.trace=Trace(state/'trace.jsonl');runtime.trace.emit('prepared')
+            runtime.control.return_value={'control':{'active_execution_ids':[]},'session':{'slots':[{'slot_id':'preparation','selected':True,'artifact_value':{'brief_sha256':'abc'}}]},'projection':{'nodes':{k:{'execution':v} for k,v in [('prepare','succeeded'),('validate_dispatch','failed'),('dispatch','none'),('collect','none'),('validate_completion','none'),('record','none')]}}}
+            task=SimpleNamespace(repo=repo,raw=raw,data={'expected_base':'a'*40,'task_id':'task'},validate_binding=lambda: {})
+            with self.assertRaisesRegex(GateError,'UI_RETRY_REQUIRED'):
+                execute(runtime,task,{'model':'model','reasoning':'medium'},state,workflow,resume=True)
+            runtime.call.assert_not_called()
+    def test_unicode_changed_file_matches_exact_scope(self):
+        with tempfile.TemporaryDirectory() as t:
+            root=Path(t)/'demo';create(root);repo=root/'worktree'
+            data=json.loads((root/'task.json').read_text());data['allowed_files']=['标签.py'];(root/'task.json').write_text(json.dumps(data))
+            task=Task(root/'task.json',repo);(repo/'标签.py').write_text('pass\n')
+            self.assertEqual(task.validate_scope(),['标签.py'])
+
 
 if __name__=='__main__':unittest.main()

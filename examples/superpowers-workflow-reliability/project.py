@@ -29,13 +29,10 @@ def execute(runtime, task, config, state, workflow, resume=False, fault=None):
         prep = next(x["artifact_value"] for x in control["session"].get("slots", [])
                     if x.get("selected") and x["slot_id"] == "preparation")
         guard.expected_brief_hash = prep["brief_sha256"]
-        # Explicit CLI --resume is a user recovery operation, via the same public control API as UI Retry.
+        # Only the authenticated Workflow UI may issue user recovery controls.
+        # This executor claims a UI-created attempt; it never impersonates that UI.
         if not control["control"].get("active_execution_ids"):
-            if nodes["validate_dispatch"]["execution"] not in ("failed", "interrupted"):
-                raise GateError("VALIDATION_RETRY_REQUIRED")
-            runtime.call("POST", f"/workflow-sessions/{session}/control", {
-                "command_id": str(uuid.uuid4()), "kind": "retry", "step_id": "validate_dispatch",
-                "expected_state_version": control["control"]["state_version"]})
+            raise GateError("UI_RETRY_REQUIRED")
         if (state / "result.json").exists():
             with (state / "previous-results.jsonl").open("a") as f:
                 f.write(json.dumps(json.loads((state / "result.json").read_text())) + "\n")

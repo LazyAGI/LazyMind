@@ -140,8 +140,11 @@ class Task:
         self.validate_binding()
         if subprocess.run(["git", "-C", str(self.repo), "merge-base", "--is-ancestor", self.data["expected_base"], "HEAD"], capture_output=True).returncode:
             raise GateError("BASE_ANCESTRY_CHANGED")
-        changed = git(self.repo, "diff", "--name-only", self.data["expected_base"]).splitlines()
-        changed += git(self.repo, "ls-files", "--others", "--exclude-standard").splitlines()
+        def names(*args):
+            raw = subprocess.check_output(["git", "-C", str(self.repo), *args, "-z"], stderr=subprocess.PIPE)
+            return [x.decode() for x in raw.split(b"\0") if x]
+        changed = names("diff", "--name-only", self.data["expected_base"])
+        changed += names("ls-files", "--others", "--exclude-standard")
         if not changed:
             raise GateError("NO_IMPLEMENTATION_CHANGE")
         if set(changed) - set(self.data["allowed_files"]):

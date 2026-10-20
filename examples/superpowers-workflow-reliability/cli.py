@@ -25,6 +25,7 @@ from task import Task
 
 UPSTREAM_SHA = "bb92a77741419a4ab5f06e711a283343f1ada0c3"
 HINTS = {
+    "UI_RETRY_REQUIRED": "Open this session in the authenticated LazyMind Workflow page and click Retry, then rerun with --resume. External API credentials cannot issue user control actions.",
     "WORKFLOW_NOT_INSTALLED": "Run install with this configuration first.",
     "WORKFLOW_DISABLED": "Run install to enable this exact compatible Workflow in manual mode.",
     "WORKFLOW_INCOMPATIBLE": "Use a new workflow name in a new config, or review and publish compatible files through LazyMind authoring. Existing drafts are never overwritten.",
@@ -189,7 +190,7 @@ def main():
                 'completed': control['projection']['completed'],
                 'steps': {k: v['execution'] for k, v in control['projection']['nodes'].items()}}
     checks = preflight(config, runtime)
-    trace.emit('preflight', **checks)
+    trace.emit('preflight', executor_sources={n: __import__('hashlib').sha256(Path(__file__).with_name(n).read_bytes()).hexdigest() for n in ['cli.py', 'project.py', 'task.py', 'gates.py', 'runtime.py', 'lifecycle.py']}, **checks)
     workflow = ensure(runtime, config['workflow_name'], install=args.command == 'install')
     save(state / 'workflow.json', workflow)
     if args.command in ('install', 'preflight'):
