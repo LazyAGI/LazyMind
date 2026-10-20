@@ -25,7 +25,6 @@ from lazymind.chat.engine.tools.mail import (
     _extract_transfer_links,
     _find_account,
     _imap_date,
-    _imap_search_args,
     _incoming_attachment_path,
     _load_draft,
     _lookup_accounts,
@@ -777,28 +776,96 @@ def test_mail_internal_drafts_require_full_identity(mail_auth, missing):
         _draft_dir()
 
 
-def test_imap_search_args_quote_and_charset():
-    assert _imap_search_args({'keyword': '合同'}) == [
-        'CHARSET', 'UTF-8', 'ALL', 'TEXT', '"合同"',
-    ]
-    assert _imap_search_args({'keyword': 'hello world'}) == [
-        'ALL', 'TEXT', '"hello world"',
-    ]
-    assert _imap_search_args({'subject': 'a "quoted" subject'}) == [
-        'ALL', 'SUBJECT', '"a \\"quoted\\" subject"',
-    ]
+@pytest.fixture
+def search_wire_imap():
+    """A real imaplib client against a server that enforces literal framing."""
+    import imaplib
+    import re
+    import socket
+
+    client_socket, server_socket = socket.socketpair()
+    client_socket.settimeout(5)
+    server_socket.settimeout(5)
+    searches, errors = [], []
+
+    def serve():
+        try:
+            with server_socket, server_socket.makefile('rwb', buffering=0) as stream:
+                stream.write(b'* OK test IMAP\r\n')
+                while line := stream.readline():
+                    tag = line.split()[0]
+                    command, literals = line.rstrip(b'\r\n'), []
+                    while match := re.search(rb'\{(\d+)\}$', line.rstrip(b'\r\n')):
+                        stream.write(b'+ send literal\r\n')
+                        value = stream.read(int(match[1]))
+                        literals.append(value.decode('utf-8'))
+                        line = stream.readline()
+                        command += line.rstrip(b'\r\n')
+                    assert command.isascii(), 'Non-ASCII quoted strings require UTF8 negotiation'
+                    if b' CAPABILITY' in command:
+                        stream.write(b'* CAPABILITY IMAP4rev1\r\n')
+                    elif b' LIST ' in command:
+                        stream.write(b'* LIST () "/" INBOX\r\n')
+                    elif b' EXAMINE ' in command:
+                        stream.write(b'* 2 EXISTS\r\n')
+                    elif b' UID SEARCH ' in command:
+                        searches.append((command, literals))
+                        if literals:
+                            assert b'CHARSET UTF-8' in command
+                        empty = b'UID 1:10' in command or '不存在' in literals
+                        stream.write(b'* SEARCH' + (b'' if empty else b' 11 12') + b'\r\n')
+                    elif b' UID FETCH ' in command:
+                        for uid in [11, 12]:
+                            header = b'From: a@b.com\r\nSubject: matched\r\n\r\n'
+                            stream.write(f'* 1 FETCH (UID {uid} BODY[HEADER.FIELDS] {{{len(header)}}}\r\n'.encode())
+                            stream.write(header + b')\r\n')
+                    elif b' LOGOUT' in command:
+                        stream.write(b'* BYE done\r\n' + tag + b' OK logout\r\n')
+                        break
+                    stream.write(tag + b' OK done\r\n')
+        except Exception as exc:
+            errors.append(exc)
+
+    class Client(imaplib.IMAP4):
+        def open(self, host='', port=143, timeout=None):
+            self.sock = client_socket
+            self.file = self.sock.makefile('rb')
+
+    worker = threading.Thread(target=serve, daemon=True)
+    worker.start()
+    client = Client()
+    client.login('user', 'test')
+    yield client, searches
+    if client.state != 'LOGOUT':
+        client.logout()
+    worker.join(timeout=5)
+    assert not worker.is_alive()
+    assert not errors
 
 
-def test_imap_search_encodes_unicode_and_quoted_values(mail_auth):
-    imap = _RecordingIMAP()
-    with patch.object(_IMAPBackend, '_connect', return_value=imap):
-        MailToolkit().search(keyword='合同', mailbox='user@qq.com')
-        MailToolkit().search(keyword='hello world', mailbox='user@qq.com')
-        MailToolkit().search(subject='a "quoted" subject', mailbox='user@qq.com')
-    searches = [args for command, args in imap.calls if command == 'SEARCH']
-    assert any('CHARSET' in args and '"合同"' in args for args in searches)
-    assert any('"hello world"' in args for args in searches)
-    assert any('"a \\"quoted\\" subject"' in args for args in searches)
+@pytest.mark.parametrize('filters,literals,returned', [
+    ({'keyword': 'hello world', 'subject': 'a "quoted" subject'}, [], 2),
+    ({'keyword': '合同'}, ['合同'], 2),
+    ({'sender': '张三', 'recipient': '李四', 'subject': '合同 "签署"\\附件',
+      'keyword': '安全提醒', 'after': '2026-01-01', 'before': '2026-10-13'},
+     ['张三', '李四', '合同 "签署"\\附件', '安全提醒'], 2),
+    ({'keyword': '不存在'}, ['不存在'], 0),
+])
+def test_imap_search_unicode_over_wire(mail_auth, search_wire_imap, filters, literals, returned):
+    client, searches = search_wire_imap
+    with patch.object(_IMAPBackend, '_connect', return_value=client):
+        result = MailToolkit().search(mailbox='user@qq.com', folder='inbox', limit=2, **filters)
+    assert result['returned'] == returned
+    if returned == 0:
+        assert result['reason'] == 'no_matches'
+    assert all(values == literals for _, values in searches)
+    assert client.literal is None
+    if returned:
+        assert {item['id'] for item in result['items']} == {'INBOX::11', 'INBOX::12'}
+        assert any(b'UID 1:10' in command for command, _ in searches)
+    if 'after' in filters:
+        assert all(b'SINCE 01-Jan-2026' in command and b'BEFORE 14-Oct-2026' in command
+                   for command, _ in searches)
 
 
 def _two_qq_accounts():
@@ -1136,14 +1203,14 @@ def test_imap_search_returns_requested_page_when_more_exist(mail_auth):
     assert result['items'][0]['id'].endswith('::80')
 
 
-def test_imap_search_reports_window_exhausted(mail_auth):
+def test_imap_search_short_result_does_not_claim_hidden_mail(mail_auth):
     imap = _WindowIMAP(list(range(398, 430)))
     with patch.object(_IMAPBackend, '_connect', return_value=imap):
         result = MailToolkit().search(mailbox='user@qq.com', folder='inbox', limit=40)
     assert result['requested'] == 40
     assert result['returned'] == 32
     assert result['has_more'] is False
-    assert result['reason'] == 'imap_window_exhausted'
+    assert 'reason' not in result
     assert result['oldest_date']
     assert 'next_before' not in result
 
@@ -1705,3 +1772,29 @@ def test_build_message_excludes_accepted_recipients_after_to_edit():
         'attachment_paths': [],
     }, 'user@qq.com')
     assert (message['To'] or '') == 'new@b.com'
+
+
+def test_imap_search_reports_non_progressing_pagination(mail_auth):
+    imap = _RecordingIMAP()  # Returns the same UIDs even with an older UID ceiling.
+    with patch.object(_IMAPBackend, '_connect', return_value=imap):
+        result = MailToolkit().search(mailbox='user@qq.com', folder='inbox')
+    assert result['reason'] == 'search_incomplete'
+    assert result['status'] == 'partial'
+
+
+def test_imap_search_failure_is_not_zero_matches(mail_auth):
+    imap = _RecordingIMAP()
+    with patch.object(_IMAPBackend, '_connect', return_value=imap), patch.object(imap, 'uid', return_value=('NO', [b'failed'])):
+        with pytest.raises(ToolExecutionError, match='IMAP SEARCH failed'):
+            MailToolkit().search(mailbox='user@qq.com', folder='inbox')
+
+
+def test_imap_search_missing_headers_is_not_zero_matches(mail_auth):
+    imap = _RecordingIMAP()
+    with patch.object(_IMAPBackend, '_connect', return_value=imap), \
+         patch('lazymind.chat.engine.tools.mail._collect_matching_uids', return_value=(['1'], False, False)), \
+         patch('lazymind.chat.engine.tools.mail._fetch_header_messages', return_value={}):
+        result = MailToolkit().search(mailbox='user@qq.com', folder='inbox')
+    assert result['returned'] == 0
+    assert result['reason'] == 'search_incomplete'
+    assert result['status'] == 'partial'

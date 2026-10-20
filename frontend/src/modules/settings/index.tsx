@@ -106,7 +106,7 @@ type SectionID =
   | "organization"
   | "recovery"
   | "developer";
-type MasterSetting = "task_center_enabled" | "schedules_enabled" | "skills_enabled" | "workflows_enabled" | "mcp_enabled" | "document_parsing_enabled";
+type MasterSetting = "task_center_enabled" | "schedules_enabled" | "skills_enabled" | "workflows_enabled" | "mcp_enabled" | "document_parsing_enabled" | "document_directories_enabled";
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 interface NavigationItem {
@@ -136,6 +136,7 @@ function controlCopy(t: Translate): Record<MasterSetting, { title: string; summa
     skills_enabled: { title: t("settingsPage.controls.skills.title"), summary: t("settingsPage.controls.skills.summary"), section: "skills" },
     workflows_enabled: { title: t("settingsPage.controls.workflows.title"), summary: t("settingsPage.controls.workflows.summary"), section: "skills" },
     mcp_enabled: { title: t("settingsPage.controls.mcp.title"), summary: t("settingsPage.controls.mcp.summary"), section: "mcp" },
+    document_directories_enabled: { title: t("settingsPage.controls.documentDirectories.title"), summary: t("settingsPage.controls.documentDirectories.summary"), section: "knowledge" },
     document_parsing_enabled: { title: t("settingsPage.controls.documentParsing.title"), summary: t("settingsPage.controls.documentParsing.summary"), section: "knowledge" },
   };
 }
@@ -797,6 +798,9 @@ function SettingsPageContent() {
         <KnowledgeDataSettings
         routeParams={searchParams}
           controlsDisabled={saving !== null}
+          documentDirectoriesEnabled={overview?.controls.document_directories_enabled ?? true}
+          documentDirectoriesSaving={saving === "document_directories_enabled"}
+          onDocumentDirectoriesChange={(enabled) => requestMasterChange("document_directories_enabled", enabled)}
           documentParsingEnabled={Boolean(overview?.controls.document_parsing_enabled)}
           documentParsingSaving={saving === "document_parsing_enabled"}
           headingRef={headingRef}

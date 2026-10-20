@@ -137,6 +137,10 @@ func TestAvailableChatModelsUseUserSelectionAsDefault(t *testing.T) {
 	if cfg["model"] != "gpt-5" || cfg["source"] != "openai" {
 		t.Fatalf("default chat llm = %#v", cfg)
 	}
+	organizer, err := LoadOrganizerChatLLMConfig(context.Background(), db, "user-1", "")
+	if err != nil || organizer["llm"].(map[string]any)["model"] != "gpt-5" {
+		t.Fatal("standalone organizer did not inherit the default chat model", err)
+	}
 }
 
 func TestConversationFixedModelOverridesOnlyLLMAndNeverFallsBack(t *testing.T) {
@@ -175,6 +179,16 @@ func TestConversationFixedModelOverridesOnlyLLMAndNeverFallsBack(t *testing.T) {
 	if config["embed_main"].(map[string]any)["model"] != "embedding-model" {
 		t.Fatalf("non-chat role changed: %#v", config)
 	}
+	organizer, err := LoadOrganizerChatLLMConfig(context.Background(), db, "user-1", conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inherited := organizer["llm"].(map[string]any); inherited["model"] != llm["model"] || inherited["api_key"] != llm["api_key"] || inherited["base_url"] != llm["base_url"] {
+		t.Fatal("organizer must inherit the conversation model instead of the default")
+	}
+	if _, err := LoadOrganizerChatLLMConfig(context.Background(), db, "other-user", conversation.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatal("organizer accepted another user's conversation", err)
+	}
 
 	if err := db.Model(&orm.UserModelProviderGroupModel{}).Where("id = ?", "model-b").Update("deleted_at", time.Now().UTC()).Error; err != nil {
 		t.Fatalf("delete bound model: %v", err)
@@ -182,6 +196,9 @@ func TestConversationFixedModelOverridesOnlyLLMAndNeverFallsBack(t *testing.T) {
 	body["llm_config"] = map[string]any{"llm": map[string]any{"model": "gpt-default"}}
 	if err := applyConversationChatModelConfig(context.Background(), db, "user-1", body); !errors.Is(err, errChatModelUnavailable) {
 		t.Fatalf("deleted fixed model error=%v, want unavailable without fallback", err)
+	}
+	if _, err := LoadOrganizerChatLLMConfig(context.Background(), db, "user-1", conversation.ID); !errors.Is(err, errChatModelUnavailable) {
+		t.Fatal("organizer silently replaced an unavailable conversation model", err)
 	}
 
 	legacy := orm.Conversation{ID: "conversation-legacy", BaseModel: orm.BaseModel{

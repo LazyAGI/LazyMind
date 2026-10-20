@@ -14,6 +14,8 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/currentmemory"
+	"lazymind/core/documentdirectory"
+	"lazymind/core/maintenance"
 	"lazymind/core/scheduler"
 	"lazymind/core/settings"
 	"lazymind/core/store"
@@ -31,6 +33,7 @@ type uiPreferencesResponse struct {
 	WorkflowsEnabled              bool   `json:"workflows_enabled"`
 	MCPEnabled                    bool   `json:"mcp_enabled"`
 	DocumentParsingEnabled        bool   `json:"document_parsing_enabled"`
+	DocumentDirectoriesEnabled    bool   `json:"document_directories_enabled"`
 	PerformanceStatsEnabled       bool   `json:"performance_stats_enabled"`
 	UserPreferenceConfigured      bool   `json:"user_preference_configured"`
 	UpdatedAt                     string `json:"updated_at"`
@@ -47,6 +50,7 @@ type uiPreferencesPatchRequest struct {
 	WorkflowsEnabled              *bool   `json:"workflows_enabled"`
 	MCPEnabled                    *bool   `json:"mcp_enabled"`
 	DocumentParsingEnabled        *bool   `json:"document_parsing_enabled"`
+	DocumentDirectoriesEnabled    *bool   `json:"document_directories_enabled"`
 	PerformanceStatsEnabled       *bool   `json:"performance_stats_enabled"`
 }
 
@@ -102,6 +106,7 @@ func PatchUIPreferences(w http.ResponseWriter, r *http.Request) {
 		req.WorkflowsEnabled == nil &&
 		req.MCPEnabled == nil &&
 		req.DocumentParsingEnabled == nil &&
+		req.DocumentDirectoriesEnabled == nil &&
 		req.PerformanceStatsEnabled == nil {
 		common.ReplyErr(w, "no valid fields to update", http.StatusBadRequest)
 		return
@@ -113,11 +118,16 @@ func PatchUIPreferences(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var row orm.UserUIPreferences
-	err = db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+	update := func(tx *gorm.DB) error {
 		var upsertErr error
 		row, upsertErr = UpsertUserUIPreferences(r.Context(), tx, userID, req)
 		if upsertErr != nil {
 			return upsertErr
+		}
+		if req.DocumentDirectoriesEnabled != nil && !*req.DocumentDirectoriesEnabled {
+			if err := documentdirectory.Pause(tx, userID); err != nil {
+				return err
+			}
 		}
 		if req.SkillsEnabled != nil {
 			if err := setAllSkillsEnabled(r.Context(), tx, userID, *req.SkillsEnabled); err != nil {
@@ -133,7 +143,12 @@ func PatchUIPreferences(w http.ResponseWriter, r *http.Request) {
 			return scheduler.RecomputeEnabledSchedules(r.Context(), tx, userID, time.Now().UTC())
 		}
 		return nil
-	})
+	}
+	if req.DocumentDirectoriesEnabled != nil {
+		err = maintenance.UserTransaction(r.Context(), db, userID, update)
+	} else {
+		err = db.WithContext(r.Context()).Transaction(update)
+	}
 	if err != nil {
 		common.ReplyErr(w, "update user ui preferences failed", http.StatusInternalServerError)
 		return
@@ -209,14 +224,15 @@ func LoadUserUIPreferences(ctx context.Context, db *gorm.DB, userID string) (orm
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return orm.UserUIPreferences{
-			UserID:                  strings.TrimSpace(userID),
-			TaskCenterEnabled:       true,
-			SchedulesEnabled:        true,
-			SkillsEnabled:           true,
-			WorkflowsEnabled:        true,
-			MCPEnabled:              true,
-			DocumentParsingEnabled:  true,
-			PerformanceStatsEnabled: false,
+			UserID:                     strings.TrimSpace(userID),
+			TaskCenterEnabled:          true,
+			SchedulesEnabled:           true,
+			SkillsEnabled:              true,
+			WorkflowsEnabled:           true,
+			MCPEnabled:                 true,
+			DocumentParsingEnabled:     true,
+			DocumentDirectoriesEnabled: true,
+			PerformanceStatsEnabled:    false,
 		}, nil
 	}
 	return row, err
@@ -230,16 +246,17 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 	err := db.WithContext(ctx).Where("user_id = ?", userID).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		row = orm.UserUIPreferences{
-			UserID:                  userID,
-			TaskCenterEnabled:       true,
-			SchedulesEnabled:        true,
-			SkillsEnabled:           true,
-			WorkflowsEnabled:        true,
-			MCPEnabled:              true,
-			DocumentParsingEnabled:  true,
-			PerformanceStatsEnabled: false,
-			CreatedAt:               now,
-			UpdatedAt:               now,
+			UserID:                     userID,
+			TaskCenterEnabled:          true,
+			SchedulesEnabled:           true,
+			SkillsEnabled:              true,
+			WorkflowsEnabled:           true,
+			MCPEnabled:                 true,
+			DocumentParsingEnabled:     true,
+			DocumentDirectoriesEnabled: true,
+			PerformanceStatsEnabled:    false,
+			CreatedAt:                  now,
+			UpdatedAt:                  now,
 		}
 		if req.ChatPreferenceNoticeDismissed != nil {
 			row.ChatPreferenceNoticeDismissed = *req.ChatPreferenceNoticeDismissed
@@ -271,6 +288,9 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 		if req.DocumentParsingEnabled != nil {
 			row.DocumentParsingEnabled = *req.DocumentParsingEnabled
 		}
+		if req.DocumentDirectoriesEnabled != nil {
+			row.DocumentDirectoriesEnabled = *req.DocumentDirectoriesEnabled
+		}
 		if req.PerformanceStatsEnabled != nil {
 			row.PerformanceStatsEnabled = *req.PerformanceStatsEnabled
 		}
@@ -288,6 +308,7 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 			"workflows_enabled":                row.WorkflowsEnabled,
 			"mcp_enabled":                      row.MCPEnabled,
 			"document_parsing_enabled":         row.DocumentParsingEnabled,
+			"document_directories_enabled":     row.DocumentDirectoriesEnabled,
 			"performance_stats_enabled":        row.PerformanceStatsEnabled,
 			"created_at":                       row.CreatedAt,
 			"updated_at":                       row.UpdatedAt,
@@ -342,6 +363,10 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 		updates["document_parsing_enabled"] = *req.DocumentParsingEnabled
 		row.DocumentParsingEnabled = *req.DocumentParsingEnabled
 	}
+	if req.DocumentDirectoriesEnabled != nil {
+		updates["document_directories_enabled"] = *req.DocumentDirectoriesEnabled
+		row.DocumentDirectoriesEnabled = *req.DocumentDirectoriesEnabled
+	}
 	if req.PerformanceStatsEnabled != nil {
 		updates["performance_stats_enabled"] = *req.PerformanceStatsEnabled
 		row.PerformanceStatsEnabled = *req.PerformanceStatsEnabled
@@ -390,6 +415,7 @@ func buildUIPreferencesResponse(row orm.UserUIPreferences, userPreferenceConfigu
 		WorkflowsEnabled:              row.WorkflowsEnabled,
 		MCPEnabled:                    row.MCPEnabled,
 		DocumentParsingEnabled:        row.DocumentParsingEnabled,
+		DocumentDirectoriesEnabled:    row.DocumentDirectoriesEnabled,
 		PerformanceStatsEnabled:       row.PerformanceStatsEnabled,
 		UserPreferenceConfigured:      userPreferenceConfigured,
 		UpdatedAt:                     updatedAt,

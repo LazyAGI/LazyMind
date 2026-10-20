@@ -56,6 +56,22 @@ class _JSONModel:
         return json.dumps(self.payload)
 
 
+@pytest.mark.parametrize('configured', [{}, {'temperature': None}, {'temperature': 0}, {'temperature': 1}])
+def test_temperature_is_only_sent_when_explicitly_configured(monkeypatch, configured):
+    calls = []
+
+    def model(prompt, **options):
+        calls.append(options)
+        return '{"targets":[]}'
+
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
+    llm_task._call_model(LLMTaskRequest(options=configured), 'organize references')
+    if configured.get('temperature') is None:
+        assert 'temperature' not in calls[0]
+    else:
+        assert calls[0]['temperature'] == configured['temperature']
+
+
 def test_workflow_task_loads_builtin_skill_and_returns_json(monkeypatch):
     model = _JSONModel({'design_brief': 'Slots: input_text. Steps: summarize.'})
     monkeypatch.setattr(llm_task, 'inject_model_config', lambda _config: None)

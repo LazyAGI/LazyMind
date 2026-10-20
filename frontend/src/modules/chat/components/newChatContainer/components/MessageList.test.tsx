@@ -57,6 +57,7 @@ function selectMessageText(text: string) {
 
 describe("MessageList resource references", () => {
   it.each([
+    ["document_directory", "近期进展", "项目资料", "/document-directories/resource-1", "book"],
     ["skill", "last30days-cn", "last30days-cn", "/memory-management/skills/resource-1", "thunderbolt"],
     ["workflow", "last30days-cn", "Last 30 Days Workflow", "/memory-management/workflows/resource-1", "appstore"],
     ["skill", "请汇总近期信息", "last30days-cn", "/memory-management/skills/resource-1", "thunderbolt"],
