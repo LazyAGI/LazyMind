@@ -61,12 +61,12 @@ describe("settings disable confirmation", () => {
 
   it.each<SettingsChangeKey>([
     "task_center_enabled", "schedules_enabled", "skills_enabled",
-    "workflows_enabled", "mcp_enabled", "document_parsing_enabled",
+    "workflows_enabled", "mcp_enabled", "document_parsing_enabled", "document_directories_enabled",
   ])("confirms %s once before saving, without fetching running tasks", async (setting) => {
     const saved = vi.fn();
     render(<Fixture saved={saved} setting={setting} />);
     fireEvent.click(screen.getByText("disable"));
-    expect(await screen.findByText("settingsPage.change.consequence")).toBeInTheDocument();
+    expect(await screen.findByText(setting === "document_directories_enabled" ? "settingsPage.controls.documentDirectories.summary" : "settingsPage.change.consequence")).toBeInTheDocument();
     expect(api.applySettingsChange).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText("settingsPage.confirmDisable"));
     await waitFor(() => expect(saved).toHaveBeenCalledWith({ key: setting, enabled: false }));

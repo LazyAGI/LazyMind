@@ -1905,5 +1905,18 @@
   "2003169": {"en-US": "Skill in organize scope was not found", "zh-CN": "找不到整理范围内的技能"},
   "2003170": {"en-US": "Skill is outside the organize scope", "zh-CN": "技能不在本次整理范围内"},
   "2003171": {"en-US": "Skill organize target was not found", "zh-CN": "找不到整理目标技能"},
-  "2003172": {"en-US": "Skill to remove was not found", "zh-CN": "找不到要移除的技能"}
+  "2003172": {"en-US": "Skill to remove was not found", "zh-CN": "找不到要移除的技能"},
+  "2003201": {"zh-CN": "目录正在整理或版本已更新，请稍后刷新重试", "en-US": "The directory is organizing or has changed. Refresh and retry."},
+  "2003202": {"zh-CN": "目录已满，临时目录正在使用或整理，请稍后重试", "en-US": "All temporary directories are in use. Retry when capacity is available."},
+  "2003203": {"zh-CN": "最多长期保留 10 个目录，请先取消其他目录的 Pin", "en-US": "Up to 10 directories can be pinned. Unpin another directory first."},
+  "2003204": {"zh-CN": "目录操作参数无效，请检查后重试", "en-US": "Invalid directory input. Check the request and retry."},
+  "2003205": {"zh-CN": "目录或资料已不可用，请刷新", "en-US": "The directory or reference is unavailable. Refresh the page."},
+  "2003206": {"zh-CN": "目录操作失败，请稍后重试", "en-US": "The directory operation failed. Please retry."},
+  "2003207": { "en-US": "Document directory organization is disabled. Enable it in Settings → Knowledge & Data.", "zh-CN": "逻辑目录整理已关闭，请在设置 → 知识与数据中开启。" },
+  "2003210": {"zh-CN": "邮箱未连接或授权不可用，请检查邮箱连接", "en-US": "Mailbox disconnected or authorization unavailable. Check the mailbox connection."},
+  "2003211": {"zh-CN": "邮箱授权失效，请重新连接邮箱", "en-US": "Mailbox authorization failed. Reconnect the mailbox."},
+  "2003212": {"zh-CN": "这封邮件缺少定位信息，暂时无法读取", "en-US": "This email lacks location information and cannot be read yet."},
+  "2003213": {"zh-CN": "邮件位置已变化或邮件已删除，暂时无法读取", "en-US": "The email has moved or been deleted and cannot be read."},
+  "2003214": {"zh-CN": "邮件读取超时，请重试", "en-US": "Reading the email timed out. Retry."},
+  "2003215": {"zh-CN": "邮件读取失败，请稍后重试", "en-US": "Unable to read the email. Retry later."}
 }

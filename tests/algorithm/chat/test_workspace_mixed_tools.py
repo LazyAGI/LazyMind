@@ -67,7 +67,7 @@ def test_artifact_context_change_during_batch_approval_fails_before_copy(workspa
     core.on_poll = approve
     result = middleware.execute_with_records([
         artifact_call(source),
-        {'function': {'name': 'write', 'arguments': {'path': str(tmp_path / 'out'), 'content': 'x'}}},
+        {'function': {'name': 'write', 'arguments': {'file_path': str(tmp_path / 'out'), 'content': 'x'}}},
     ])
     assert not result.results[0]['ok'] and not emitted
     assert not (other / source.name).exists()
@@ -84,8 +84,8 @@ def test_read_path_change_during_batch_approval_never_executes(workspace_runtime
         operation.update(status='allowed', decision='allowed')
     core.on_poll = approve
     result = middleware.execute_with_records([
-        {'function': {'name': 'read', 'arguments': {'path': str(original)}}},
-        {'function': {'name': 'write', 'arguments': {'path': str(tmp_path / 'out'), 'content': 'x'}}},
+        {'function': {'name': 'read', 'arguments': {'file_path': str(original)}}},
+        {'function': {'name': 'write', 'arguments': {'file_path': str(tmp_path / 'out'), 'content': 'x'}}},
     ])
     assert not result.results[0]['ok']
     assert other.read_bytes() == b'other'
@@ -110,7 +110,7 @@ def test_external_unbound_snapshot_allows_task_artifacts_not_host_writes(workspa
     assert emitted and not core.events
     outside = tmp_path / 'external-write.txt'
     denied = middleware.execute_with_records({'function': {'name': 'write', 'arguments': {
-        'path': str(outside), 'content': 'must not write',
+        'file_path': str(outside), 'content': 'must not write',
     }}})
     assert not denied.results[0]['ok']
     assert not outside.exists() and not core.events

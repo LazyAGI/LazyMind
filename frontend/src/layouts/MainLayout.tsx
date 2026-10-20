@@ -40,6 +40,9 @@ import {
 import { validatePassword } from "@/modules/signin/utils/formRules";
 import logoImage from "@/public/Lazy.png";
 import { useTranslation } from "react-i18next";
+import { hasUnreadDirectoryResults } from "@/modules/documentDirectories/batches";
+import { listBatches as listDirectoryBatches } from "@/modules/documentDirectories/api";
+import { fetchUserUiPreferences, USER_UI_PREFERENCES_CHANGED_EVENT } from "@/modules/user/uiPreferencesApi";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { isVocabularyEnabled } from "@/runtime/mode";
 import {
@@ -135,6 +138,46 @@ export default function MainLayout() {
 
   const [userInfo, setUserInfo] = useState(() => AgentAppsAuth.getUserInfo());
   const isLoggedIn = Boolean(userInfo?.token);
+  const [directoryPreference, setDirectoryPreference] = useState<{ user: string; enabled: boolean } | null>(null);
+  const directoryUser = userInfo?.userId || userInfo?.username || "";
+  const directoriesEnabled = isLoggedIn && directoryPreference?.user === directoryUser ? directoryPreference.enabled : null;
+  useEffect(() => {
+    if (!isLoggedIn) { setDirectoryPreference(null); return; }
+    let disposed = false;
+    let sequence = 0;
+    const load = async () => {
+      const request = ++sequence;
+      try {
+        const prefs = await fetchUserUiPreferences({ silentError: true } as never);
+        if (!disposed && request === sequence) setDirectoryPreference({ user: directoryUser, enabled: prefs.document_directories_enabled ?? true });
+      } catch { /* Keep the feature unavailable until preferences can be read. */ }
+    };
+    const changed = (event: Event) => {
+      const prefs = (event as CustomEvent).detail;
+      if (typeof prefs?.document_directories_enabled === "boolean") {
+        sequence++;
+        setDirectoryPreference({ user: directoryUser, enabled: prefs.document_directories_enabled });
+      } else { void load(); }
+    };
+    void load();
+    window.addEventListener(USER_UI_PREFERENCES_CHANGED_EVENT, changed);
+    return () => { disposed = true; window.removeEventListener(USER_UI_PREFERENCES_CHANGED_EVENT, changed); };
+  }, [isLoggedIn, directoryUser]);
+  const [directoryUnread, setDirectoryUnread] = useState(false);
+  useEffect(() => {
+    let disposed = false;
+    setDirectoryUnread(false);
+    if (!directoriesEnabled) return;
+    const refresh = async () => {
+      try {
+        const batches = await listDirectoryBatches();
+        if (!disposed) setDirectoryUnread(hasUnreadDirectoryResults(batches));
+      } catch { /* Existing request layer handles connectivity; keep saved results unread. */ }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 30000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [directoriesEnabled, directoryUser, pathname]);
   useConversationRunningSync(isLoggedIn ? userInfo?.userId || userInfo?.username || "" : "", routeConversationId);
   const userName = userInfo?.username || "";
   const isAdminUser = isAdminRole(userInfo?.role);
@@ -231,6 +274,7 @@ export default function MainLayout() {
   const showSettingsTrigger =
     settingsMenuItems.length > 0 || !hideLocalUserControls;
   const resourceNavItems = [
+    ...(directoriesEnabled ? [{ key: "/document-directories", label: t("directories.title") + (directoryUnread ? " •" : ""), icon: <BookOutlined /> }] : []),
     {
       key: "/lib/knowledge",
       label: t("layout.knowledgeBase"),
@@ -1270,12 +1314,14 @@ export default function MainLayout() {
         <Content className="main-layout-body">
           <div className="sub-app-container">
             <Suspense fallback={<div className="main-layout-page-loading"><Spin /></div>}>
-              <Outlet
+              {pathname.startsWith("/document-directories") && !directoriesEnabled ? (
+                directoriesEnabled === false ? <Navigate to="/settings?section=knowledge" replace /> : <Spin />
+              ) : <Outlet
                 context={{
                   isMenuCollapsed,
                   toggleMenu,
                 }}
-              />
+              />}
             </Suspense>
           </div>
         </Content>

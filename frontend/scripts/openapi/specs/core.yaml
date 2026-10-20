@@ -4033,6 +4033,96 @@ components:
                 next_cursor:
                     type: string
             type: object
+        DirectoryLocalFile:
+            properties:
+                content_base64:
+                    type: string
+                error_code:
+                    type: string
+                filename:
+                    type: string
+                mime_type:
+                    type: string
+                namespace:
+                    type: string
+                path:
+                    type: string
+                size:
+                    format: int64
+                    type: integer
+            required:
+                - path
+                - namespace
+                - filename
+                - size
+                - mime_type
+                - content_base64
+            type: object
+        DirectoryLocalFileResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DirectoryLocalFile'
+            required:
+                - code
+                - data
+            type: object
+        DirectoryMail:
+            properties:
+                attachments:
+                    items:
+                        properties:
+                            filename:
+                                type: string
+                            mime_type:
+                                type: string
+                            size:
+                                format: int64
+                                type: integer
+                        required:
+                            - filename
+                            - mime_type
+                            - size
+                        type: object
+                    type: array
+                body:
+                    type: string
+                cc:
+                    type: string
+                date:
+                    type: string
+                from:
+                    type: string
+                mailbox:
+                    type: string
+                subject:
+                    type: string
+                to:
+                    type: string
+                truncated:
+                    type: boolean
+            required:
+                - subject
+                - from
+                - to
+                - cc
+                - date
+                - mailbox
+                - body
+                - attachments
+                - truncated
+            type: object
+        DirectoryMailResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DirectoryMail'
+            required:
+                - code
+                - data
+            type: object
         DiscoverResponse:
             properties:
                 success:
@@ -4518,6 +4608,366 @@ components:
                 - invalid_references
                 - representation
                 - targets
+            type: object
+        DocumentDirectory:
+            properties:
+                auto_add:
+                    type: boolean
+                coverage:
+                    items:
+                        additionalProperties: true
+                        type: object
+                    type: array
+                id:
+                    type: string
+                intent:
+                    type: string
+                last_used_at:
+                    format: date-time
+                    type: string
+                name:
+                    type: string
+                organization:
+                    type: string
+                organized_at:
+                    format: date-time
+                    type: string
+                pinned:
+                    type: boolean
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - id
+                - name
+                - intent
+                - organization
+                - auto_add
+                - pinned
+                - version
+                - last_used_at
+            type: object
+        DocumentDirectoryActionResult:
+            properties:
+                batch:
+                    $ref: '#/components/schemas/DocumentDirectoryBatch'
+                directory:
+                    $ref: '#/components/schemas/DocumentDirectory'
+                entry:
+                    $ref: '#/components/schemas/DocumentDirectoryEntry'
+                evicted:
+                    type: string
+                group:
+                    $ref: '#/components/schemas/DocumentDirectoryGroup'
+            type: object
+        DocumentDirectoryActionResultResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DocumentDirectoryActionResult'
+            required:
+                - code
+                - data
+            type: object
+        DocumentDirectoryBatch:
+            properties:
+                acknowledged:
+                    type: boolean
+                created_at:
+                    format: date-time
+                    type: string
+                directory_id:
+                    type: string
+                id:
+                    type: string
+                parent_id:
+                    type: string
+                result:
+                    additionalProperties: true
+                    type: object
+                status:
+                    type: string
+            required:
+                - id
+                - directory_id
+                - parent_id
+                - status
+                - acknowledged
+                - created_at
+            type: object
+        DocumentDirectoryBatches:
+            properties:
+                batches:
+                    items:
+                        $ref: '#/components/schemas/DocumentDirectoryBatch'
+                    type: array
+            required:
+                - batches
+            type: object
+        DocumentDirectoryBatchesResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DocumentDirectoryBatches'
+            required:
+                - code
+                - data
+            type: object
+        DocumentDirectoryCommand:
+            properties:
+                auto_add:
+                    type: boolean
+                batch_id:
+                    type: string
+                candidate:
+                    additionalProperties: true
+                    type: object
+                directory_id:
+                    type: string
+                entry_id:
+                    type: string
+                group_id:
+                    type: string
+                instruction:
+                    type: string
+                intent:
+                    type: string
+                name:
+                    type: string
+                operation:
+                    enum:
+                        - create
+                        - update
+                        - delete
+                        - touch
+                        - group
+                        - delete_group
+                        - entry
+                        - entry_pin
+                        - exclude
+                        - restore
+                        - organize
+                        - reorganize
+                        - retry
+                        - cancel
+                        - acknowledge
+                    type: string
+                organization:
+                    type: string
+                parent_id:
+                    type: string
+                pinned:
+                    type: boolean
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - operation
+            type: object
+        DocumentDirectoryDetail:
+            properties:
+                directory:
+                    $ref: '#/components/schemas/DocumentDirectory'
+                entries:
+                    items:
+                        $ref: '#/components/schemas/DocumentDirectoryEntry'
+                    type: array
+                folder:
+                    $ref: '#/components/schemas/DocumentFolderInventory'
+                group_counts:
+                    additionalProperties:
+                        format: int64
+                        type: integer
+                    type: object
+                groups:
+                    items:
+                        $ref: '#/components/schemas/DocumentDirectoryGroup'
+                    type: array
+                organizing:
+                    type: boolean
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - directory
+                - groups
+                - entries
+                - organizing
+            type: object
+        DocumentDirectoryDetailResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DocumentDirectoryDetail'
+            required:
+                - code
+                - data
+            type: object
+        DocumentDirectoryEntry:
+            properties:
+                access_state:
+                    type: string
+                confirmed:
+                    type: boolean
+                content_state:
+                    type: string
+                content_version:
+                    type: string
+                evidence:
+                    additionalProperties: true
+                    type: object
+                excluded:
+                    type: boolean
+                group_id:
+                    type: string
+                id:
+                    type: string
+                locator:
+                    additionalProperties: true
+                    type: object
+                namespace:
+                    type: string
+                pinned:
+                    type: boolean
+                read_at:
+                    format: date-time
+                    type: string
+                read_state:
+                    type: string
+                resource_id:
+                    type: string
+                resource_key:
+                    type: string
+                source:
+                    type: string
+                title:
+                    type: string
+            required:
+                - id
+                - resource_key
+                - source
+                - namespace
+                - resource_id
+                - title
+                - group_id
+                - pinned
+                - excluded
+                - read_state
+                - confirmed
+                - access_state
+            type: object
+        DocumentDirectoryGroup:
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                parent_id:
+                    type: string
+                position:
+                    type: integer
+            required:
+                - id
+                - name
+                - parent_id
+                - position
+            type: object
+        DocumentDirectoryList:
+            properties:
+                directories:
+                    items:
+                        $ref: '#/components/schemas/DocumentDirectory'
+                    type: array
+            required:
+                - directories
+            type: object
+        DocumentDirectoryListResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DocumentDirectoryList'
+            required:
+                - code
+                - data
+            type: object
+        DocumentFolderInventory:
+            properties:
+                batch_id:
+                    type: string
+                directory_id:
+                    type: string
+                id:
+                    type: string
+                source:
+                    additionalProperties: true
+                    type: object
+                state:
+                    additionalProperties: true
+                    type: object
+                status:
+                    type: string
+            required:
+                - id
+                - status
+                - source
+                - state
+                - directory_id
+                - batch_id
+            type: object
+        DocumentFolderNode:
+            properties:
+                candidate:
+                    additionalProperties: true
+                    type: object
+                kind:
+                    type: string
+                listed:
+                    type: boolean
+                name:
+                    type: string
+                node_key:
+                    type: string
+                parent_key:
+                    type: string
+                path:
+                    type: string
+            required:
+                - node_key
+                - parent_key
+                - path
+                - name
+                - kind
+                - listed
+            type: object
+        DocumentFolderNodes:
+            properties:
+                next_offset:
+                    type: integer
+                nodes:
+                    items:
+                        $ref: '#/components/schemas/DocumentFolderNode'
+                    type: array
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - nodes
+                - total
+                - next_offset
+            type: object
+        DocumentFolderNodesResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DocumentFolderNodes'
+            required:
+                - code
+                - data
             type: object
         DocumentImageDisplay:
             properties:
@@ -12492,6 +12942,8 @@ components:
             type: object
         settingsFeatureControlsOpenAPIResponse:
             properties:
+                document_directories_enabled:
+                    type: boolean
                 document_parsing_enabled:
                     type: boolean
                 mcp_enabled:
@@ -12505,6 +12957,7 @@ components:
                 workflows_enabled:
                     type: boolean
             required:
+                - document_directories_enabled
                 - document_parsing_enabled
                 - mcp_enabled
                 - schedules_enabled
@@ -14130,6 +14583,8 @@ components:
                     type: boolean
                 developer_mode_active:
                     type: boolean
+                document_directories_enabled:
+                    type: boolean
                 document_parsing_enabled:
                     type: boolean
                 mcp_enabled:
@@ -14154,6 +14609,7 @@ components:
                 - accepted_user_agreement_version
                 - chat_preference_notice_dismissed
                 - developer_mode_active
+                - document_directories_enabled
                 - document_parsing_enabled
                 - mcp_enabled
                 - performance_stats_enabled
@@ -14172,6 +14628,8 @@ components:
                 chat_preference_notice_dismissed:
                     type: boolean
                 developer_mode_active:
+                    type: boolean
+                document_directories_enabled:
                     type: boolean
                 document_parsing_enabled:
                     type: boolean
@@ -20034,6 +20492,28 @@ paths:
                 "200":
                     description: OK
             summary: GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content
+    /api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:draft:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: artifact
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:draft
     /api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:layout:
         get:
             parameters:
@@ -20056,6 +20536,50 @@ paths:
                 "200":
                     description: OK
             summary: GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:layout
+    /api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:retranslate:
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: artifact
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:retranslate
+    /api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:revise:
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: artifact
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:revise
     /api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/searchable:
         post:
             parameters:
@@ -20284,6 +20808,23 @@ paths:
                 "200":
                     description: OK
             summary: POST /datasets/{dataset}/documents/{document}:ensure-parsed
+    /api/core/datasets/{dataset}/documents/{document}:read:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /datasets/{dataset}/documents/{document}:read
     /api/core/datasets/{dataset}/documents:batchUpdateTags:
         post:
             parameters:
@@ -21076,6 +21617,177 @@ paths:
                 "200":
                     description: OK
             summary: POST /datasets/processing/preflight
+    /api/core/document-directories:
+        get:
+            operationId: listDocumentDirectories
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DocumentDirectoryListResponse'
+                    description: List up to 20 directories without refreshing use
+            summary: List up to 20 directories without refreshing use
+            tags:
+                - DocumentDirectories
+    /api/core/document-directories/{directory_id}:
+        get:
+            operationId: getDocumentDirectory
+            parameters:
+                - in: path
+                  name: directory_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: offset
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: limit
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: group_id
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: query
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: state
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DocumentDirectoryDetailResponse'
+                    description: Read last committed directory version
+            summary: Read last committed directory version
+            tags:
+                - DocumentDirectories
+    /api/core/document-directories/{directory_id}/entries/{entry_id}/local-file:
+        get:
+            operationId: readDocumentDirectoryLocalFile
+            parameters:
+                - in: path
+                  name: directory_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: entry_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: metadata_only
+                  required: false
+                  schema:
+                    type: boolean
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DirectoryLocalFileResponse'
+                    description: Preview an owned local file without changing Agent evidence
+            summary: Preview an owned local file without changing Agent evidence
+            tags:
+                - DocumentDirectories
+    /api/core/document-directories/{directory_id}/entries/{entry_id}/mail:
+        get:
+            operationId: readDocumentDirectoryMail
+            parameters:
+                - in: path
+                  name: directory_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: entry_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DirectoryMailResponse'
+                    description: Read an owned email without changing directory evidence
+            summary: Read an owned email without changing directory evidence
+            tags:
+                - DocumentDirectories
+    /api/core/document-directories/{directory_id}/source-nodes:
+        get:
+            operationId: getDocumentFolderNodes
+            parameters:
+                - in: path
+                  name: directory_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: parent_key
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: offset
+                  required: false
+                  schema:
+                    type: integer
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DocumentFolderNodesResponse'
+                    description: Page original source tree children
+            summary: Page original source tree children
+            tags:
+                - DocumentDirectories
+    /api/core/document-directories/actions:
+        post:
+            operationId: executeDocumentDirectoryAction
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/DocumentDirectoryCommand'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DocumentDirectoryActionResultResponse'
+                    description: Apply an owned directory action; organizing directories reject edits
+            summary: Apply an owned directory action; organizing directories reject edits
+            tags:
+                - DocumentDirectories
+    /api/core/document-directories/batches:
+        get:
+            operationId: listDocumentDirectoryBatches
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DocumentDirectoryBatchesResponse'
+                    description: List durable organization results
+            summary: List durable organization results
+            tags:
+                - DocumentDirectories
     /api/core/document-providers:
         get:
             responses:
@@ -26235,6 +26947,29 @@ paths:
             summary: Get current user's settings overview
             tags:
                 - settings
+    /api/core/showcase-assets/{asset:.*}:
+        get:
+            parameters:
+                - in: path
+                  name: asset:.*
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /showcase-assets/{asset:.*}
+        head:
+            parameters:
+                - in: path
+                  name: asset:.*
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: HEAD /showcase-assets/{asset:.*}
     /api/core/showcase/cases:
         get:
             parameters:
@@ -26754,6 +27489,12 @@ paths:
             summary: Submit skill organize task
             tags:
                 - skills
+    /api/core/skill_organize:cancel:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /skill_organize:cancel
     /api/core/skills:
         get:
             parameters:
@@ -27852,6 +28593,24 @@ paths:
                 "200":
                     description: OK
             summary: POST /system-dependencies/ffmpeg:install
+    /api/core/system-dependencies/pdf-font:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /system-dependencies/pdf-font
+    /api/core/system-dependencies/python:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /system-dependencies/python
+    /api/core/system-dependencies/python:install:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /system-dependencies/python:install
     /api/core/system-query/documents:aggregate:
         post:
             requestBody:
