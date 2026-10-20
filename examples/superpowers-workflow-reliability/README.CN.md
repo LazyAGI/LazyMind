@@ -1,6 +1,6 @@
 # Superpowers 派发可靠性 Workflow 集成
 
-[English](README.md) · [RC 验收](../../RELEASE_CANDIDATE.md) · [对照](comparison.md)
+[English](README.md) · [RC 验收](../../RELEASE_CANDIDATE.md) · [PR 验证](PR_VALIDATION.md) · [对照](comparison.md)
 
 本例在隔离 Git worktree 中执行**一项明确声明的开发任务**。六步骤 Workflow 与外部
 Python 执行器在启动 Codex 前检查非空 Brief、可观察的 in_progress 状态和真实 Base SHA；
@@ -17,16 +17,19 @@ Python 3.9.6、Git 2.50.1、Codex CLI 0.155.0-alpha.9；CLI 必须支持
 `exec --ignore-user-config --ephemeral --json`。CLI 不在 PATH 时，配置命令可加
 `--codex /path/to/codex`。MODEL 必须替换为自己账号实际可用的模型。
 
-若收到未公开发布的 Git bundle，可先获取候选代码（已在本轮验证 bundle checkout）：
+从贡献者的公开 Fork 获取待审分支（PR 目标为 `LazyAGI/LazyMind:main`）：
 
 ```bash
-git clone https://github.com/LazyAGI/LazyMind.git LazyMind-rc
-git -C LazyMind-rc fetch /path/to/lazymind-superpowers-reliability-rc.bundle feat/superpowers-workflow-eval
-git -C LazyMind-rc switch -c reliability-rc FETCH_HEAD
+git clone --branch feat/superpowers-workflow-eval --single-branch \
+  https://github.com/NicoYang1984/LazyMind.git LazyMind-rc
 cd LazyMind-rc
 ```
 
-已有候选分支 checkout 可直接继续；当前没有声称已发布公开下载链接。
+已有 PR 分支 checkout 可直接继续。原始离线 RC bundle 仍可作为历史/可选交付方式：
+克隆上游仓库后执行
+`git fetch /path/to/lazymind-superpowers-reliability-rc.bundle feat/superpowers-workflow-eval`，
+再执行 `git switch -c reliability-rc FETCH_HEAD`。其中 bundle 路径是另行提供文件的占位符，
+上面的公开 Fork 方式不需要本地 bundle。
 
 在包含本例的 checkout 中，选择一个不存在的新目录：
 

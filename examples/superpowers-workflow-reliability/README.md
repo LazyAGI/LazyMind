@@ -1,6 +1,8 @@
 # Superpowers Dispatch Reliability Workflow Integration
 
-[中文](README.CN.md) · [RC acceptance](../../RELEASE_CANDIDATE.md) · [Comparison](comparison.md)
+[中文](README.CN.md) · [RC acceptance](../../RELEASE_CANDIDATE.md) · [PR validation](PR_VALIDATION.md) · [Comparison](comparison.md)
+
+A reusable Superpowers Dispatch Reliability Workflow integration built with LazyMind.
 
 Run **one declared development task** in an isolated Git worktree. A six-step
 LazyMind Workflow and its Python executor require a nonempty task brief, observable
@@ -21,16 +23,20 @@ The RC was tested with Python 3.9.6, Git 2.50.1 and Codex CLI 0.155.0-alpha.9.
 Codex must accept `exec --ignore-user-config --ephemeral --json` and the selected
 model. If the CLI is not on PATH, use `--codex /path/to/codex` when configuring.
 
-If you received the unpublished candidate as a Git bundle, first obtain its checkout:
+Get the review branch from the public contributor fork (the PR targets
+`LazyAGI/LazyMind:main`):
 
 ```bash
-git clone https://github.com/LazyAGI/LazyMind.git LazyMind-rc
-git -C LazyMind-rc fetch /path/to/lazymind-superpowers-reliability-rc.bundle feat/superpowers-workflow-eval
-git -C LazyMind-rc switch -c reliability-rc FETCH_HEAD
+git clone --branch feat/superpowers-workflow-eval --single-branch \
+  https://github.com/NicoYang1984/LazyMind.git LazyMind-rc
 cd LazyMind-rc
 ```
 
-A reviewed branch checkout can be used directly. No public RC download is claimed before publication.
+If you already checked out the PR branch, continue below. The original offline RC
+bundle remains an optional historical handoff method: clone the upstream repository,
+then `git fetch /path/to/lazymind-superpowers-reliability-rc.bundle feat/superpowers-workflow-eval`
+and `git switch -c reliability-rc FETCH_HEAD`. The bundle path is a placeholder for a
+file supplied separately; the public fork checkout above does not require it.
 
 Start from a checkout containing this example. Select a **new** writable directory,
 your local gateway URL and a model available to your Codex account:

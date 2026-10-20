@@ -1,0 +1,41 @@
+{
+  "files": 254,
+  "raw_bytes": 4545724,
+  "gzip_payload_bytes": 569661,
+  "largest_files": [
+    [
+      294731,
+      "examples/superpowers-workflow-reliability/evidence/rc/missing-brief/trace.jsonl"
+    ],
+    [
+      183805,
+      "examples/superpowers-workflow-reliability/evidence/rc/csv-a/trace.jsonl"
+    ],
+    [
+      183095,
+      "examples/superpowers-workflow-reliability/evidence/rc/csv-b/trace.jsonl"
+    ]
+  ],
+  "secret_or_path_findings": [],
+  "broken_relative_links": [],
+  "manifests": [
+    {
+      "path": "examples/superpowers-workflow-reliability/evidence/manifest.json",
+      "files": 89
+    },
+    {
+      "path": "examples/superpowers-workflow-reliability/evidence/pr-validation/manifest.json",
+      "files": 19
+    },
+    {
+      "path": "examples/superpowers-workflow-reliability/evidence/release-audit/manifest.json",
+      "files": 38
+    },
+    {
+      "path": "examples/superpowers-workflow-reliability/evidence/rc/manifest.json",
+      "files": 59
+    }
+  ],
+  "license_matches_pinned_upstream": true,
+  "production_and_submodule_diff": false
+}

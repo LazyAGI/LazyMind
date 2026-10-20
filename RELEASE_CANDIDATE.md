@@ -1,5 +1,7 @@
 # Release Candidate — Superpowers Dispatch Reliability Workflow Integration
 
+> Historical RC acceptance snapshot. For the later merge to main, public checkout and fresh validation, see [PR validation](examples/superpowers-workflow-reliability/PR_VALIDATION.md). Statements below about publication refer to the RC acceptance time.
+
 验收日期：2026-10-20。**CODE_REVIEW_READY: PASS。EXTERNAL_TRIAL_READY: PASS，限下述支持范围。**
 建议提交独立 Example PR 并邀请有 LazyMind/Codex 环境的开发者试用；没有 push、PR、合并或 Issue 评论。
 这不是完整 SDD 转换器，也不是生产级任意 Agent 拦截器。

@@ -1,0 +1,155 @@
+{
+  "checked_at": "2026-10-20T09:50:48.466602+00:00",
+  "source_commit": "113585a430e5b5f8f2d97b8963d7d1431329a1a0",
+  "main_commit": "87ee4145166d94f18230e55060b009596aed5e59",
+  "kind": "independent-verification-of-real-local-Runtime-and-Codex",
+  "runtime_environment": "Existing authorized local service; server binary was not rebuilt from merged main in this pass.",
+  "cases": {
+    "normal": {
+      "session_id": "ea0bf0c839dc47ebaff1b442c92209da",
+      "status": "completed",
+      "completed": true,
+      "failure": null,
+      "selected_slots": [
+        "admission",
+        "completion",
+        "evidence",
+        "execution",
+        "preparation",
+        "result"
+      ],
+      "launch_receipt_count": 1,
+      "child_pids": [
+        83231
+      ],
+      "changed_files": [
+        "csv_records.py"
+      ],
+      "parent_unchanged": true,
+      "protected_inputs_unchanged": true,
+      "stages": [
+        {
+          "at": "2026-10-20T09:47:37.498410+00:00",
+          "event": "step_started",
+          "step": "prepare"
+        },
+        {
+          "at": "2026-10-20T09:47:37.690334+00:00",
+          "event": "step_completed",
+          "step": "prepare"
+        },
+        {
+          "at": "2026-10-20T09:47:37.724758+00:00",
+          "event": "step_started",
+          "step": "validate_dispatch"
+        },
+        {
+          "at": "2026-10-20T09:47:37.847118+00:00",
+          "event": "step_completed",
+          "step": "validate_dispatch"
+        },
+        {
+          "at": "2026-10-20T09:47:37.876489+00:00",
+          "event": "step_started",
+          "step": "dispatch"
+        },
+        {
+          "at": "2026-10-20T09:48:28.203924+00:00",
+          "event": "step_completed",
+          "step": "dispatch"
+        },
+        {
+          "at": "2026-10-20T09:48:28.245528+00:00",
+          "event": "step_started",
+          "step": "collect"
+        },
+        {
+          "at": "2026-10-20T09:48:28.397564+00:00",
+          "event": "step_completed",
+          "step": "collect"
+        },
+        {
+          "at": "2026-10-20T09:48:28.443243+00:00",
+          "event": "step_started",
+          "step": "validate_completion"
+        },
+        {
+          "at": "2026-10-20T09:48:28.774885+00:00",
+          "event": "step_completed",
+          "step": "validate_completion"
+        },
+        {
+          "at": "2026-10-20T09:48:28.811428+00:00",
+          "event": "step_started",
+          "step": "record"
+        },
+        {
+          "at": "2026-10-20T09:48:28.833439+00:00",
+          "event": "step_completed",
+          "step": "record"
+        }
+      ],
+      "child_receipt": {
+        "started_at": "2026-10-20T09:47:38.037752+00:00",
+        "completed_at": "2026-10-20T09:48:28.153414+00:00",
+        "duration_seconds": 50.116,
+        "returncode": 0,
+        "turn_completed": true,
+        "requested_model": "gpt-6-astra",
+        "actual_backend_model": "N/A",
+        "usage": {
+          "input_tokens": 139712,
+          "cached_input_tokens": 113920,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 1362,
+          "reasoning_output_tokens": 9
+        },
+        "trace_sha256": "07ac416a7315b9bbc5aa5654cc5d93b2c0b893841cea6f9dcc5989adfaf99bf5"
+      },
+      "implementation_commit": "1598cc710f9c98a5e2436e93251afa781fd6c1f9"
+    },
+    "missing-brief": {
+      "session_id": "e8d6a9425f67429b9b44c57d934de720",
+      "status": "failed",
+      "completed": false,
+      "failure": "BRIEF_MISSING",
+      "selected_slots": [
+        "preparation"
+      ],
+      "launch_receipt_count": 0,
+      "child_pids": [],
+      "changed_files": [],
+      "parent_unchanged": true,
+      "protected_inputs_unchanged": true,
+      "stages": [
+        {
+          "at": "2026-10-20T09:49:02.895515+00:00",
+          "event": "step_started",
+          "step": "prepare"
+        },
+        {
+          "at": "2026-10-20T09:49:03.112872+00:00",
+          "event": "step_completed",
+          "step": "prepare"
+        },
+        {
+          "at": "2026-10-20T09:49:03.144059+00:00",
+          "event": "step_started",
+          "step": "validate_dispatch"
+        },
+        {
+          "at": "2026-10-20T09:49:03.152884+00:00",
+          "event": "step_failed",
+          "step": "validate_dispatch"
+        }
+      ],
+      "classification": "deliberate brief deletion + real Runtime; no child invocation"
+    }
+  },
+  "installation": {
+    "first_created": true,
+    "repeat_created": false,
+    "same_revision": true,
+    "revision_id": "80cebe93-5bc3-4f46-b311-2868e77834c1"
+  }
+}

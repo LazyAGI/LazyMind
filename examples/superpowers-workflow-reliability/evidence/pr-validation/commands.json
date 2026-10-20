@@ -1,0 +1,220 @@
+[
+  {
+    "label": "configure",
+    "argv": [
+      "$VENV/bin/python",
+      "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability/cli.py",
+      "--config",
+      "$PR_TRIAL/private/config.json",
+      "configure",
+      "--url",
+      "http://127.0.0.1:5024",
+      "--local-login",
+      "--superpowers",
+      "$SUPERPOWERS_ROOT",
+      "--codex",
+      "/Applications/ChatGPT.app/Contents/Resources/codex",
+      "--model",
+      "gpt-6-astra",
+      "--workflow-name",
+      "superpowers-reliability-pr-20261020"
+    ],
+    "cwd": "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability",
+    "started_at": "2026-10-20T09:47:36.509928+00:00",
+    "ended_at": "2026-10-20T09:47:36.610451+00:00",
+    "returncode": 0,
+    "expected_returncode": 0,
+    "log": "configure.log"
+  },
+  {
+    "label": "install-first",
+    "argv": [
+      "$VENV/bin/python",
+      "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability/cli.py",
+      "--config",
+      "$PR_TRIAL/private/config.json",
+      "install"
+    ],
+    "cwd": "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability",
+    "started_at": "2026-10-20T09:47:36.610737+00:00",
+    "ended_at": "2026-10-20T09:47:36.828698+00:00",
+    "returncode": 0,
+    "expected_returncode": 0,
+    "log": "install-first.log"
+  },
+  {
+    "label": "install-reuse",
+    "argv": [
+      "$VENV/bin/python",
+      "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability/cli.py",
+      "--config",
+      "$PR_TRIAL/private/config.json",
+      "install"
+    ],
+    "cwd": "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability",
+    "started_at": "2026-10-20T09:47:36.828922+00:00",
+    "ended_at": "2026-10-20T09:47:36.959041+00:00",
+    "returncode": 0,
+    "expected_returncode": 0,
+    "log": "install-reuse.log"
+  },
+  {
+    "label": "preflight",
+    "argv": [
+      "$VENV/bin/python",
+      "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability/cli.py",
+      "--config",
+      "$PR_TRIAL/private/config.json",
+      "preflight"
+    ],
+    "cwd": "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability",
+    "started_at": "2026-10-20T09:47:36.959244+00:00",
+    "ended_at": "2026-10-20T09:47:37.086176+00:00",
+    "returncode": 0,
+    "expected_returncode": 0,
+    "log": "preflight.log"
+  },
+  {
+    "label": "prepare-normal",
+    "argv": [
+      "$VENV/bin/python",
+      "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability/demo.py",
+      "$PR_TRIAL/normal"
+    ],
+    "cwd": "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability",
+    "started_at": "2026-10-20T09:47:37.086388+00:00",
+    "ended_at": "2026-10-20T09:47:37.209829+00:00",
+    "returncode": 0,
+    "expected_returncode": 0,
+    "log": "prepare-normal.log"
+  },
+  {
+    "label": "run-normal",
+    "argv": [
+      "$VENV/bin/python",
+      "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability/cli.py",
+      "--config",
+      "$PR_TRIAL/private/config.json",
+      "run",
+      "--task",
+      "$PR_TRIAL/normal/task.json",
+      "--repo",
+      "$PR_TRIAL/normal/worktree",
+      "--state",
+      "$PR_TRIAL/normal/run"
+    ],
+    "cwd": "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability",
+    "started_at": "2026-10-20T09:47:37.210045+00:00",
+    "ended_at": "2026-10-20T09:48:28.864106+00:00",
+    "returncode": 0,
+    "expected_returncode": 0,
+    "log": "run-normal.log"
+  },
+  {
+    "label": "status-normal",
+    "argv": [
+      "$VENV/bin/python",
+      "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability/cli.py",
+      "--config",
+      "$PR_TRIAL/private/config.json",
+      "status",
+      "--state",
+      "$PR_TRIAL/normal/run"
+    ],
+    "cwd": "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability",
+    "started_at": "2026-10-20T09:48:28.864429+00:00",
+    "ended_at": "2026-10-20T09:48:28.976580+00:00",
+    "returncode": 0,
+    "expected_returncode": 0,
+    "log": "status-normal.log"
+  },
+  {
+    "label": "independent-tests",
+    "argv": [
+      "$VENV/bin/python",
+      "-m",
+      "unittest",
+      "-v",
+      "test_csv_preview"
+    ],
+    "cwd": "$PR_TRIAL/normal/worktree",
+    "started_at": "2026-10-20T09:48:28.980204+00:00",
+    "ended_at": "2026-10-20T09:48:29.010764+00:00",
+    "returncode": 1,
+    "expected_returncode": 0,
+    "log": "independent-tests-wrong-module.log",
+    "note": "Validation harness used the nonexistent test_csv_preview module; corrected to the declared test_csv_records. Product E2E and protected checks already passed."
+  },
+  {
+    "label": "independent-tests",
+    "argv": [
+      "$VENV/bin/python",
+      "-m",
+      "unittest",
+      "-v",
+      "test_csv_records"
+    ],
+    "cwd": "$PR_TRIAL/normal/worktree",
+    "started_at": "2026-10-20T09:49:02.353191+00:00",
+    "ended_at": "2026-10-20T09:49:02.391822+00:00",
+    "returncode": 0,
+    "expected_returncode": 0,
+    "log": "independent-tests.log"
+  },
+  {
+    "label": "prepare-missing-brief",
+    "argv": [
+      "$VENV/bin/python",
+      "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability/demo.py",
+      "$PR_TRIAL/missing-brief"
+    ],
+    "cwd": "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability",
+    "started_at": "2026-10-20T09:49:02.392187+00:00",
+    "ended_at": "2026-10-20T09:49:02.551404+00:00",
+    "returncode": 0,
+    "expected_returncode": 0,
+    "log": "prepare-missing-brief.log"
+  },
+  {
+    "label": "run-missing-brief",
+    "argv": [
+      "$VENV/bin/python",
+      "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability/cli.py",
+      "--config",
+      "$PR_TRIAL/private/config.json",
+      "run",
+      "--task",
+      "$PR_TRIAL/missing-brief/task.json",
+      "--repo",
+      "$PR_TRIAL/missing-brief/worktree",
+      "--state",
+      "$PR_TRIAL/missing-brief/run",
+      "--fault",
+      "missing-brief"
+    ],
+    "cwd": "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability",
+    "started_at": "2026-10-20T09:49:02.551687+00:00",
+    "ended_at": "2026-10-20T09:49:03.170929+00:00",
+    "returncode": 1,
+    "expected_returncode": 1,
+    "log": "run-missing-brief.log"
+  },
+  {
+    "label": "status-missing-brief",
+    "argv": [
+      "$VENV/bin/python",
+      "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability/cli.py",
+      "--config",
+      "$PR_TRIAL/private/config.json",
+      "status",
+      "--state",
+      "$PR_TRIAL/missing-brief/run"
+    ],
+    "cwd": "$LAZYMIND_ROOT/examples/superpowers-workflow-reliability",
+    "started_at": "2026-10-20T09:49:03.171327+00:00",
+    "ended_at": "2026-10-20T09:49:03.239937+00:00",
+    "returncode": 0,
+    "expected_returncode": 0,
+    "log": "status-missing-brief.log"
+  }
+]
