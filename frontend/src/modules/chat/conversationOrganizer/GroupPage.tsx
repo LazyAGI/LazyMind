@@ -41,6 +41,7 @@ export default function ConversationGroupPage() {
   const [loadError, setLoadError] = useState(false);
   const [editing, setEditing] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [chatConfig, setChatConfig] = useState<ChatConfig>({});
   const [saveError, setSaveError] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -144,15 +145,18 @@ export default function ConversationGroupPage() {
         onSavingChange={saving => { if (saving) ++loadGeneration.current; setSorting(saving); }}
         onCommitted={move => setConversations(previous => moveConversationItems(previous, move))}
         onRefresh={() => load(false, "", true)}>
-        {conversation => <div className="conversation-group-page-item" key={conversation.conversation_id} draggable={group.kind !== "project" && renamingId !== conversation.conversation_id} onDragStart={e => startConversationDrag(e, conversation.conversation_id, group.id, Boolean(conversation.is_task_conv))}>
-        {renamingId === conversation.conversation_id ? <ConversationTitleEditor key={conversation.conversation_id} conversationId={conversation.conversation_id} initialTitle={conversation.display_name} onClose={() => setRenamingId(null)} /> : <>
+        {conversation => <div className="conversation-group-page-item" key={conversation.conversation_id} draggable={group.kind !== "project" && renamingId !== conversation.conversation_id} onDragStart={e => startConversationDrag(e, conversation.conversation_id, group.id, Boolean(conversation.is_task_conv))}
+          onContextMenu={event => { if (renamingId) return; event.preventDefault(); event.stopPropagation(); setOpenMenuId(conversation.conversation_id); }}>
         <button data-conversation-title onClick={() => navigate(getChatConversationPath(conversation.conversation_id))}><MessageOutlined /><span>{conversation.display_name || conversation.conversation_id}<small>{conversation.summary}</small></span></button>
         <time>{conversation.updated_at ? new Date(conversation.updated_at).toLocaleDateString() : ""}</time>
-        <ConversationMembership onRename={() => setRenamingId(conversation.conversation_id)} pinned={Boolean(conversation.pinned_at)} isTaskConv={Boolean(conversation.is_task_conv)} conversationId={conversation.conversation_id} groupId={group.id} groupKind={group.kind} title={conversation.display_name} />
-        </>}
+        <ConversationMembership onRename={() => setRenamingId(conversation.conversation_id)} pinned={Boolean(conversation.pinned_at)} isTaskConv={Boolean(conversation.is_task_conv)} conversationId={conversation.conversation_id} groupId={group.id} groupKind={group.kind} title={conversation.display_name}
+          menuOpen={!renamingId && openMenuId === conversation.conversation_id} onMenuOpenChange={open => setOpenMenuId(current => open && !renamingId ? conversation.conversation_id : current === conversation.conversation_id ? null : current)} />
       </div>}</ScopedConversationList>}
       {nextPageToken && <Button block loading={loading} disabled={sorting} onClick={() => void load(true, nextPageToken)}>{t("conversationOrganizer.loadMore")}</Button>}
     </section>
+    {renamingId && <ConversationTitleEditor key={renamingId} conversationId={renamingId}
+      initialTitle={conversations.find(item => item.conversation_id === renamingId)?.display_name}
+      onClose={() => { setOpenMenuId(null); setRenamingId(null); }} />}
     <Modal open={editing} title={t(group.kind === "project" ? "conversationProject.edit" : "conversationOrganizer.editGroup")} okText={t("conversationOrganizer.save")} cancelText={t("common.cancel")} onOk={() => void save()} onCancel={() => setEditing(false)}>
       {saveError && <Alert type="error" showIcon message={saveError} />}
       <Form form={form} layout="vertical"><GroupFields project={group.kind === "project"} nameDisabled={namesLocked && group.kind !== "project"} scopeHint={t(namesLocked ? "conversationOrganizer.namesLocked" : "conversationOrganizer.scopeEditHint")} /></Form>

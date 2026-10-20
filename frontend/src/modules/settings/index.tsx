@@ -1,7 +1,7 @@
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
-import { Alert, Button, Empty, Input, Skeleton, Switch, Tabs, Tag, message } from "antd";
+import { Alert, Button, Empty, Input, Skeleton, Space, Switch, Tabs, Tag, message } from "antd";
 import {
   ApiOutlined,
   ApartmentOutlined,
@@ -500,12 +500,20 @@ function SettingsPageContent() {
           <QuickModelSettings canConfigureEmbedding={isAdmin} key="quick-models" onSaved={syncOverview} />,
         ])}
         {dashboardCard("knowledge", <DatabaseOutlined />, t("settingsPage.sections.knowledge"), t("settingsPage.overview.knowledgeDesc"), [
-          dashboardRow(t("settingsPage.sections.knowledge"), t("settingsPage.controls.documentParsing.title"), t("settingsPage.overview.documentParsingDesc"), switchControl("document_parsing_enabled")),
-          dashboardRow(t("settingsPage.sections.knowledge"), t("settingsPage.overview.knowledgeRetrieval"), t("settingsPage.overview.knowledgeRetrievalDesc"), <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("knowledge")}>{t("settingsPage.quickConfig")}</Button>),
+          dashboardRow(t("settingsPage.sections.knowledge"), t("settingsPage.controls.documentParsing.title"), t("settingsPage.overview.documentParsingDesc"), <Space size={8}>
+            <Button className="settings-dashboard-quick-action" size="small" aria-label={t("settingsPage.goToDetailAria", { title: t("settingsPage.controls.documentParsing.title") })} onClick={() => setSearchParams(settingsRouteParams(searchParams, { section: "knowledge", tool: "document-parsing" }))}>{t("settingsPage.quickConfig")}</Button>
+            {switchControl("document_parsing_enabled")}
+          </Space>),
+          dashboardRow(t("settingsPage.sections.knowledge"), t("settingsPage.overview.knowledgeRetrieval"), t("settingsPage.overview.knowledgeRetrievalDesc"), <Button className="settings-dashboard-quick-action" size="small" aria-label={t("settingsPage.goToDetailAria", { title: t("settingsPage.overview.knowledgeRetrieval") })} onClick={() => selectSection("knowledge")}>{t("settingsPage.quickConfig")}</Button>),
         ])}
-        {dashboardCard("memory", <ExperimentOutlined />, t("settingsPage.sections.memory"), t("settingsPage.overview.memoryDesc"), [
-          dashboardRow(t("settingsPage.sections.memory"), t("settingsPage.overview.memoryEdit"), t("settingsPage.overview.memoryEditDesc"), <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("memory")}>{t("settingsPage.quickConfig")}</Button>),
-        ])}
+        {dashboardCard("memory", <ExperimentOutlined />, t("settingsPage.sections.memory"), t("settingsPage.overview.memoryDesc"),
+          ["vocabulary", "read", "edit"].map((capability) => dashboardRow(
+            t("settingsPage.sections.memory"),
+            t(`settingsPage.memory.${capability}.title`),
+            t(`settingsPage.memory.${capability}.description`),
+            <Button className="settings-dashboard-quick-action" size="small" aria-label={t("settingsPage.goToDetailAria", { title: t(`settingsPage.memory.${capability}.title`) })} onClick={() => selectSection("memory")}>{t("settingsPage.quickConfig")}</Button>,
+          )),
+        )}
         {dashboardCard("system_tools", <ToolOutlined />, t("settingsPage.sections.systemTools"), t("settingsPage.overview.systemToolsDesc"), [
           dashboardRow(t("settingsPage.sections.systemTools"), t("settingsPage.overview.builtinTools"), t("settingsPage.overview.builtinToolsDesc"), <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("system_tools")}>{t("settingsPage.manageTools")}</Button>),
           dashboardRow(t("settingsPage.sections.systemTools"), t("settingsPage.overview.localDeps"), t("settingsPage.overview.localDepsDesc"), <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("system_tools")}>{hasLocalDependencies ? t("settingsPage.checkDeps") : t("settingsPage.cloudHosted")}</Button>),

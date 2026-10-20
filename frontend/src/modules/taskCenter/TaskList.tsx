@@ -15,6 +15,7 @@ import StateGraphModal from '@/components/StateGraphModal';
 import ArchiveConversationModal from '@/modules/chat/components/ArchiveConversationModal';
 import { unarchiveConversation } from '@/modules/settings/recoveryApi';
 import { RECOVERY_ARCHIVE_PATH } from '@/modules/settings/recoveryRoute';
+import { emitConversationListRefresh } from '@/modules/chat/utils/conversationActivity';
 
 const PAGE_SIZE = 20;
 const POLL_INTERVAL_MS = 5_000;
@@ -166,7 +167,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
             .then(() => {
               message.destroy(messageKey);
               message.success(t('settingsPage.recovery.unarchived'));
-              void load();
+              emitConversationListRefresh();
             })
             .catch((error) => message.error(getLocalizedErrorMessage(error)));
         }}>{t('settingsPage.recovery.undo')}</Button>

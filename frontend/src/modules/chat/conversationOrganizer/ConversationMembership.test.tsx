@@ -34,6 +34,16 @@ describe("ConversationMembership Trash confirmation", () => {
     mocks.deleteConversation.mockResolvedValue({});
   });
 
+  it.each(["hover", "contextMenu"])("opens member actions using %s", async trigger => {
+    const rename = vi.fn();
+    render(<MemoryRouter><ConversationMembership conversationId="member" groupId="group-1" title="组内对话" onRename={rename} /></MemoryRouter>);
+    const more = screen.getByRole("button", { name: "conversationOrganizer.conversationMore" });
+    if (trigger === "hover") fireEvent.mouseEnter(more);
+    else fireEvent.contextMenu(more);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "conversationOrganizer.renameConversation" }));
+    expect(rename).toHaveBeenCalledOnce();
+  });
+
   it.each(["group", "project"])("shows the shared content and cancels without deleting a %s member", async kind => {
     const dialog = await openConfirmation(kind);
     expect(within(dialog).getByText("组内对话")).toHaveClass("conversation-trash-confirm-name");

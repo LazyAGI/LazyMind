@@ -4,16 +4,29 @@ import TaskList from './TaskList';
 import type { Task } from './api';
 import { TASKS_REMOVED_EVENT } from './events';
 import { CHAT_CONVERSATION_LIST_REFRESH_EVENT } from '@/modules/chat/constants/chat';
+import { RECOVERY_ARCHIVE_PATH } from '@/modules/settings/recoveryRoute';
 
-const mocks = vi.hoisted(() => ({ listTasks: vi.fn(), getTaskRemovalPreview: vi.fn(), removeTask: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  listTasks: vi.fn(), getTaskRemovalPreview: vi.fn(), removeTask: vi.fn(),
+  navigate: vi.fn(), unarchiveConversation: vi.fn(), messageOpen: vi.fn(), messageSuccess: vi.fn(), messageError: vi.fn(),
+}));
 vi.mock('./api', () => mocks);
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
-vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
+vi.mock('react-router-dom', () => ({ useNavigate: () => mocks.navigate }));
 vi.mock('@/components/request', () => ({ getLocalizedErrorMessage: () => 'failure' }));
-vi.mock('./TaskDetail', () => ({ default: () => null, StatusTag: () => null, formatDate: () => '' }));
+vi.mock('./TaskDetail', () => ({
+  default: ({ task, onArchive }: { task: Task | null; onArchive: (task: Task) => void }) => task && <button onClick={() => onArchive(task)}>Archive task</button>,
+  StatusTag: () => null, formatDate: () => '',
+}));
 vi.mock('@/components/StateGraphModal', () => ({ default: () => null }));
-vi.mock('@/modules/chat/components/ArchiveConversationModal', () => ({ default: () => null }));
-vi.mock('@/modules/settings/recoveryApi', () => ({ unarchiveConversation: vi.fn() }));
+vi.mock('@/modules/chat/components/ArchiveConversationModal', () => ({
+  default: ({ open, onArchived }: { open: boolean; onArchived: () => void }) => open && <button onClick={onArchived}>Confirm archive</button>,
+}));
+vi.mock('@/modules/settings/recoveryApi', () => ({ unarchiveConversation: mocks.unarchiveConversation }));
+vi.mock('antd', async () => {
+  const actual = await vi.importActual<typeof import('antd')>('antd');
+  return { ...actual, message: { ...actual.message, open: mocks.messageOpen, success: mocks.messageSuccess, error: mocks.messageError, destroy: vi.fn() } };
+});
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 const task: Task = {
@@ -28,6 +41,38 @@ it('reloads related task records when a batch archive is undone', async () => {
   mocks.listTasks.mockResolvedValue({ items: [task], total: 1 });
   act(() => window.dispatchEvent(new Event(CHAT_CONVERSATION_LIST_REFRESH_EVENT)));
   await screen.findByText(task.title!, { selector: 'strong' });
+});
+
+it.each([true, false])('only refreshes archives after a successful task undo following navigation (success=%s)', async success => {
+  mocks.listTasks.mockResolvedValue({ items: [task], total: 1 });
+  const source = render(<TaskList active status='' page={1} onStatusChange={vi.fn()} onPageChange={vi.fn()} />);
+  fireEvent.click(await screen.findByText(task.title!, { selector: 'strong' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Archive task' }));
+  mocks.listTasks.mockResolvedValue({ items: [], total: 0 });
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm archive' }));
+  await waitFor(() => expect(mocks.messageOpen).toHaveBeenCalledOnce());
+  const notice = render(mocks.messageOpen.mock.calls[0][0].content);
+  fireEvent.click(within(notice.container).getByRole('button', { name: 'settingsPage.recovery.viewArchived' }));
+  expect(mocks.navigate).toHaveBeenCalledWith(RECOVERY_ARCHIVE_PATH);
+  source.unmount();
+
+  const refresh = vi.fn();
+  window.addEventListener(CHAT_CONVERSATION_LIST_REFRESH_EVENT, refresh);
+  try {
+    if (success) mocks.unarchiveConversation.mockResolvedValueOnce(undefined);
+    else mocks.unarchiveConversation.mockRejectedValueOnce(new Error('offline'));
+    fireEvent.click(within(notice.container).getByRole('button', { name: 'settingsPage.recovery.undo' }));
+    expect(mocks.unarchiveConversation).toHaveBeenCalledWith(task.conversation_id);
+    if (success) {
+      await waitFor(() => expect(mocks.messageSuccess).toHaveBeenCalledWith('settingsPage.recovery.unarchived'));
+      expect(refresh).toHaveBeenCalledOnce();
+    } else {
+      await waitFor(() => expect(mocks.messageError).toHaveBeenCalledWith('failure'));
+      expect(refresh).not.toHaveBeenCalled();
+    }
+  } finally {
+    window.removeEventListener(CHAT_CONVERSATION_LIST_REFRESH_EVENT, refresh);
+  }
 });
 
 it('requires confirmation from the list and preserves rows on cancel or failure, then refreshes after success', async () => {
