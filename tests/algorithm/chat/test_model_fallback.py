@@ -5,14 +5,11 @@ or replays an agent, so provider request counts expose missing recovery.
 """
 from __future__ import annotations
 
-import copy
 import asyncio
 import base64
 from dataclasses import replace
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
-import threading
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -20,7 +17,8 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import lazyllm
-from lazyllm.tools.agent import fc_register
+import pytest
+from fallback_test_support import EFFECT_RECEIPTS, record_fallback_effect
 
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions, AgentExecutor, AgentRole, AgentRunPlan, PromptBuilder,
@@ -33,139 +31,8 @@ from lazymind.chat.engine.agent_runtime.model_fallback import FallbackLLM, creat
 from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 
 
-EFFECT_RECEIPTS = []
-
-
-@fc_register(host_file='NONE')
-def record_fallback_effect(value: str) -> str:
-    """Record one isolated effect.
-
-    Args:
-        value: Value to record.
-    """
-    EFFECT_RECEIPTS.append(value)
-    return 'effect-receipt: ' + value
-
-
-class ScriptedProvider:
-    def __init__(self):
-        self.requests = []
-        self.script = {}
-        self.on_request = None
-        provider = self
-
-        class Handler(BaseHTTPRequestHandler):
-            def log_message(self, *_args):
-                pass
-
-            def do_POST(self):
-                request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-                provider.requests.append(copy.deepcopy(request))
-                override = (provider.on_request(copy.deepcopy(request))
-                            if provider.on_request is not None else None)
-                model = request['model']
-                count = sum(item['model'] == model for item in provider.requests)
-                script = provider.script.get(model)
-                step = override if override is not None else (
-                    script[min(count - 1, len(script) - 1)] if script else None)
-                if (step and 'error' in step) or (not step and model == 'model-a' and count > 1):
-                    body = json.dumps({'error': {
-                        'message': 'controlled model unavailable',
-                        'code': (step or {}).get('error', 'model_not_found'),
-                        'type': (step or {}).get('type', 'invalid_request_error'),
-                    }}).encode()
-                    status, content_type = (step or {}).get('status', 404), 'application/json'
-                else:
-                    if step:
-                        message, finish = step['message'], step.get('finish', 'stop')
-                    elif model == 'model-a':
-                        message, finish = {'role': 'assistant', 'content': '', 'tool_calls': [{
-                            'id': 'effect-call', 'index': 0, 'type': 'function',
-                            'function': {'name': 'record_fallback_effect',
-                                         'arguments': '{"value": "once"}'},
-                        }]}, 'tool_calls'
-                    else:
-                        has_receipt = any(item.get('role') == 'tool'
-                                          and 'effect-receipt: once' in item.get('content', '')
-                                          for item in request['messages'])
-                        content = 'completed via B' if has_receipt else 'missing tool receipt'
-                        message, finish = {'role': 'assistant', 'content': content}, 'stop'
-                    if self.path.rstrip('/').endswith('/messages'):
-                        content = [{'type': 'text', 'text': message.get('content', '')}]
-                        if request.get('stream'):
-                            frames = [
-                                {'type': 'message_start', 'message': {'usage': {'input_tokens': 11}}},
-                                {'type': 'content_block_delta', 'index': 0,
-                                 'delta': {'type': 'text_delta', 'text': message.get('content', '')}},
-                                {'type': 'message_delta', 'delta': {'stop_reason': 'end_turn'},
-                                 'usage': {'output_tokens': 7},
-                                 'padding': 'x' * 1024 if step and step.get('disconnect') else ''},
-                                {'type': 'message_stop'},
-                            ]
-                            body = ''.join('event: ' + item['type'] + '\ndata: ' + json.dumps(item) + '\n\n'
-                                           for item in frames).encode()
-                            content_type = 'text/event-stream'
-                        else:
-                            body = json.dumps({'type': 'message', 'content': content, 'stop_reason': 'end_turn',
-                                               'usage': {'input_tokens': 11, 'output_tokens': 7}}).encode()
-                            content_type = 'application/json'
-                    elif request.get('stream'):
-                        chunk = {'id': 'controlled', 'model': model, 'choices': [{
-                            'index': 0, 'delta': message, 'finish_reason': finish,
-                        }]}
-                        if step and step.get('usage'):
-                            chunk['usage'] = step['usage']
-                        frames = step.get('frames') if step else None
-                        body = ''.join('data: ' + json.dumps(frame) + '\n\n'
-                                       for frame in (frames or [chunk]))
-                        if not (step and step.get('disconnect')):
-                            body += 'data: [DONE]\n\n'
-                        body = body.encode()
-                        content_type = 'text/event-stream'
-                    else:
-                        body = json.dumps({'id': 'controlled', 'model': model, 'choices': [{
-                            'index': 0, 'message': message, 'finish_reason': finish,
-                        }]}).encode()
-                        content_type = 'application/json'
-                    status = 200
-                self.send_response(status)
-                self.send_header('Content-Type', content_type)
-                self.send_header('Content-Length', str(len(body) + (100 if step and step.get('disconnect') else 0)))
-                self.end_headers()
-                self.wfile.write(body)
-
-        self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
-        self.url = f'http://127.0.0.1:{self.server.server_port}/v1/'
-
-    def close(self):
-        self.server.shutdown()
-        self.server.server_close()
-        self.thread.join(timeout=2)
-
-    def config(self, model):
-        return {'llm': {'source': 'openai', 'model': model, 'base_url': self.url,
-                        'api_key': 'fake-fallback-key', 'max_input_tokens': 32768}}
-
-
+@pytest.mark.usefixtures('fallback_provider')
 class ModelFallbackHTTPTests(unittest.TestCase):
-    def setUp(self):
-        self.provider = ScriptedProvider()
-        self.old_config = lazyllm.globals.get('agentic_config')
-        self.old_agent = lazyllm.locals.get('_lazyllm_agent')
-        self.old_history = lazyllm.locals['chat_history'].copy()
-        lazyllm.globals['agentic_config'] = {}
-        lazyllm.locals['_lazyllm_agent'] = {}
-        EFFECT_RECEIPTS.clear()
-
-    def tearDown(self):
-        self.provider.close()
-        lazyllm.globals['agentic_config'] = self.old_config
-        lazyllm.locals['_lazyllm_agent'] = self.old_agent
-        lazyllm.locals['chat_history'].clear()
-        lazyllm.locals['chat_history'].update(self.old_history)
-
     def candidate(self, model, window=32768, *, group=None):
         return ModelCandidate(
             candidate_id='own:' + model, source='own', model_id=model,
@@ -206,7 +73,9 @@ class ModelFallbackHTTPTests(unittest.TestCase):
                       self.candidate('long-1', 65536), self.candidate('unknown-2', None)]
         for candidate in [self.candidate('model-a'), *candidates]:
             self.fail(candidate.model_id)
-        with patch.object(fallback_module.random, 'shuffle', side_effect=lambda values: values.reverse()) as shuffle:
+        from lazymind.config import config
+        with config.temp('model_fallback_max_candidates', 7), \
+                patch.object(fallback_module.random, 'shuffle', side_effect=lambda values: values.reverse()) as shuffle:
             wrapper = self.wrapper(candidates)
             with self.assertRaises(Exception) as failure:
                 wrapper('start', stream=True)
@@ -484,15 +353,13 @@ class ModelFallbackHTTPTests(unittest.TestCase):
         self.assertEqual(terminal['data']['code'], 'runtime_failure')
 
     def test_raw_helper_uses_committed_model_without_consuming_candidates(self):
-        from lazymind.chat.engine.agent_runtime.summarizer import _call_summarizer_llm
-
         self.fail('model-a')
         self.succeed('model-b')
         wrapper = self.wrapper([self.candidate('model-b'), self.candidate('model-c')])
         self.assertEqual(wrapper('start'), 'done')
         self.fail('model-b')
         with self.assertRaises(Exception):
-            _call_summarizer_llm(wrapper, 'summary system', 'summary input')
+            wrapper.auxiliary_call('summary system', 'summary input')
         self.assertEqual([item['model'] for item in self.provider.requests], ['model-a', 'model-b', 'model-b'])
         self.assertEqual(wrapper.state.current.model_id, 'model-b')
 

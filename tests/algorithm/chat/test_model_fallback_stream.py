@@ -7,8 +7,8 @@ from unittest.mock import patch
 import lazyllm
 import pytest
 
-from test_model_fallback import ScriptedProvider, EFFECT_RECEIPTS, record_fallback_effect
-from test_model_fallback_native import candidate
+from fallback_test_support import EFFECT_RECEIPTS, record_fallback_effect
+from fallback_test_support import candidate, sse_frame, broken_output
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions, AgentExecutor, AgentRole, AgentRunPlan, PromptBuilder,
 )
@@ -16,37 +16,6 @@ from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 from lazymind.chat.runtime_events import RunOutcome
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 from lazymind.config import config
-
-
-@pytest.fixture
-def provider():
-    server = ScriptedProvider()
-    old_agent = lazyllm.locals.get('_lazyllm_agent')
-    old_config = lazyllm.globals.get('agentic_config')
-    lazyllm.locals['_lazyllm_agent'] = {}
-    EFFECT_RECEIPTS.clear()
-    yield server
-    lazyllm.locals['_lazyllm_agent'] = old_agent
-    lazyllm.globals['agentic_config'] = old_config
-    server.close()
-
-
-def sse_frame(delta, *, finish=None, usage=None, padding=''):
-    result = {'id': 'controlled', 'choices': [{'index': 0, 'delta': delta, 'finish_reason': finish}]}
-    if usage is not None:
-        result['usage'] = usage
-    if padding:
-        result['padding'] = padding
-    return result
-
-
-def broken_output():
-    return {'message': {'role': 'assistant', 'content': ''}, 'disconnect': True, 'frames': [
-        sse_frame({'reasoning_content': 'BAD-THOUGHT ' * 60},
-                  usage={'prompt_tokens': 10, 'completion_tokens': 3}),
-        sse_frame({'content': 'BAD-BODY [[1.1]]\n:::export{title="bad draft" filename="bad.md"}\nBAD-DRAFT\n<thi'}),
-        sse_frame({}, padding='x' * 4096),
-    ]}
 
 
 def make_agent(provider, translator, *, alternatives=None):
@@ -135,7 +104,7 @@ def test_real_agent_rolls_back_only_failed_call_then_continues_after_one_tool(pr
 
 
 def test_old_raw_sink_keeps_its_identity_and_late_sdk_observation_is_only_accounted(provider, monkeypatch):
-    import requests
+    from lazyllm.module.llms.onlinemodule.base import PreparedModelRequest
 
     provider.script['model-a'] = [broken_output()]
     provider.script['model-b'] = [{'message': {'role': 'assistant', 'content': ''}}]
@@ -161,16 +130,16 @@ def test_old_raw_sink_keeps_its_identity_and_late_sdk_observation_is_only_accoun
             lazyllm.FileSystemQueue().enqueue(json.dumps(event))
 
         executor.runtime_llm(agent)._stream = {'_stream_sink': deliver}
-        original_post = requests.post
+        original_execute = PreparedModelRequest.execute
 
-        def post(url, **kwargs):
-            if kwargs['json']['model'] == 'model-b':
+        def execute(request, **kwargs):
+            if request.payload['model'] == 'model-b':
                 old_sinks[0]({'tag': 'text', 'delta': 'LATE-A-TEXT'})
                 old_sinks[0]({'tag': 'think', 'delta': 'LATE-A-THINK'})
                 old_sinks[0](delayed[0])
-            return original_post(url, **kwargs)
+            return original_execute(request, **kwargs)
 
-        monkeypatch.setattr(requests, 'post', post)
+        monkeypatch.setattr(PreparedModelRequest, 'execute', execute)
         assert asyncio.run(drive(executor, agent, plan, translator, frames, events)) == ''
     assert [request['model'] for request in provider.requests] == ['model-a', 'model-b']
     late = [event for event in events if str(event.get('delta') or '').startswith('LATE-A-')]
@@ -182,7 +151,7 @@ def test_old_raw_sink_keeps_its_identity_and_late_sdk_observation_is_only_accoun
 
 
 def test_late_failed_sink_does_not_poison_the_replacement_call(provider, monkeypatch):
-    import requests
+    from lazyllm.module.llms.onlinemodule.base import PreparedModelRequest
 
     provider.script['model-a'] = [broken_output()]
     provider.script['model-b'] = [{'message': {'role': 'assistant', 'content': 'B CLEAN ANSWER'}}]
@@ -206,16 +175,16 @@ def test_late_failed_sink_does_not_poison_the_replacement_call(provider, monkeyp
             lazyllm.FileSystemQueue().enqueue(json.dumps(event))
 
         executor.runtime_llm(agent)._stream = {'_stream_sink': deliver}
-        original_post = requests.post
+        original_execute = PreparedModelRequest.execute
 
-        def post(url, **kwargs):
-            if kwargs['json']['model'] == 'model-b':
+        def execute(request, **kwargs):
+            if request.payload['model'] == 'model-b':
                 with pytest.raises(RuntimeError, match='old call sink failed') as error:
                     old_sinks[0]({'tag': 'text', 'delta': 'LATE-A-TEXT'})
                 late_errors.append(error.value)
-            return original_post(url, **kwargs)
+            return original_execute(request, **kwargs)
 
-        monkeypatch.setattr(requests, 'post', post)
+        monkeypatch.setattr(PreparedModelRequest, 'execute', execute)
         assert asyncio.run(drive(executor, agent, plan, translator, frames, events)) == 'B CLEAN ANSWER'
     assert len(late_errors) == 1
     assert [request['model'] for request in provider.requests] == ['model-a', 'model-b']

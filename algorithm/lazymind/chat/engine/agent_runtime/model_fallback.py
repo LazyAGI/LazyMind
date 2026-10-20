@@ -5,22 +5,25 @@ import copy
 import json
 import random
 import socket
+import time
+from asyncio import CancelledError
 from typing import Any
 
 import lazyllm
 import requests
 from lazyllm.module import ModuleBase
+from lazyllm.module.module import ModuleExecutionError
 from lazyllm.module.servermodule import LLMBase
 from lazyllm.module.llms.onlinemodule.base.model_outcome import (
-    ModelCallError, ModelCallTerminal, ModelFailure, ModelFailureCode, ModelFailureOrigin,
+    ModelCallError, ModelFailure, ModelFailureCode, ModelFailureOrigin,
 )
-from lazymind.chat.engine.attachment_reader import is_chat_image_file
 
-from .budget import build_context_budget, output_budget_kwargs, parse_token_limit
-from .context_estimator import estimate_tokens
+from .budget import build_context_budget, parse_token_limit
+from .model_calls import ContextCapacityError, UnsupportedModelInput, prepare_model_call, request_tokens
+from .message_fields import model_facing_history
+from lazyllm.module.llms.onlinemodule.base import ModelCallControl
 from .cancellation import UserCancelledError
 from .models import FallbackRunState, ModelCandidate
-from .message_fields import estimate_message_tokens
 from lazymind.config import config
 from lazymind.chat.runtime_events import runtime_event
 
@@ -72,10 +75,9 @@ def create_fallback_state(llm: Any, options: Any) -> FallbackRunState:
     random.shuffle(unknown)
     state = FallbackRunState(
         current=current, raw_llm=llm,
-        budget=build_context_budget(current.max_input_tokens, llm_config=options.llm_config),
+        budget=build_context_budget(current.max_input_tokens),
         candidates=tuple([*known, *unknown]),
         initial_model_switch=copy.deepcopy(getattr(options, 'initial_model_switch', None)),
-        workspace=getattr(options, 'workspace', None), keep_recent=getattr(options, 'keep_full_turns', None),
     )
     if state.initial_model_switch is not None:
         state.failed_candidates.add(state.initial_model_switch['from']['candidate_id'])
@@ -122,13 +124,6 @@ def _copy_prompt(prompt):
     return cloned
 
 
-def _contains_image(value) -> bool:
-    if isinstance(value, dict):
-        return value.get('type') == 'image_url' or value.get('type') == 'input_image' or any(
-            _contains_image(item) for item in value.values())
-    return isinstance(value, (list, tuple)) and any(_contains_image(item) for item in value)
-
-
 def _make_llm(candidate: ModelCandidate):
     config = candidate.llm_config.get('llm') or {}
     if not config.get('source') or not config.get('model') or not (config.get('skip_auth') or config.get('api_key')):
@@ -143,17 +138,15 @@ def _make_llm(candidate: ModelCandidate):
     )
 
 
-def _preparation_error(code: ModelFailureCode, message: str) -> ModelCallError:
-    return ModelCallError(message,
-                          ModelCallTerminal('', 0, 'failure', False, failure=ModelFailure(
-                              ModelFailureOrigin.PROTOCOL, code)))
-
-
 def _failure_from_error(error: Exception):
     seen = set()
     network_failure = None
     while error is not None and id(error) not in seen:
         seen.add(id(error))
+        if isinstance(error, ContextCapacityError):
+            return ModelFailure(ModelFailureOrigin.PROTOCOL, ModelFailureCode.TOKEN_LIMIT)
+        if isinstance(error, UnsupportedModelInput):
+            return ModelFailure(ModelFailureOrigin.PROTOCOL, ModelFailureCode.PROVIDER_REJECTED)
         if isinstance(error, ModelCallError):
             return error.terminal.failure
         failure = getattr(error, 'failure', None)
@@ -168,63 +161,34 @@ def _failure_from_error(error: Exception):
     return network_failure
 
 
-def _request_tokens(view, input, history, files, kwargs) -> int:
-    normalized, attached = view._get_files(copy.deepcopy(input), copy.deepcopy(files))
-    data = view._prompt.generate_prompt(
-        input=normalized, history=copy.deepcopy(history), format=view._message_format, tools=kwargs.get('tools'),
-    )
-    if view.type == 'VLM' and (attached or view._vlm_force_format_input_with_files):
-        data['messages'][-1]['content'] = view._format_input_with_files(data['messages'][-1]['content'], attached)
-        for message in data['messages'][:-1]:
-            if message.get('role') == 'user' and isinstance(message.get('content'), str):
-                message['content'] = view._format_vl_chat_query(message['content'])
-    data.update(view._static_params)
-    data.update({key: value for key, value in kwargs.items() if key not in {'max_retries', 'tools'}})
-    data = view._prepare_request_data(data)
-    messages = data.pop('messages', [])
-    return estimate_tokens(json.dumps({**data, 'messages': []}, ensure_ascii=False, default=str)) + sum(
-        estimate_message_tokens(message) + 4 for message in messages
-    )
-
-
-def _prepare_context(raw, supplier, input, history, files, kwargs, *, state, budget, projection, summary_runtime):
-    from .pruner import prepare_history_compaction, _pressure_rearm_tokens
-    from .projection_state import split_projection
-    from .message_fields import model_facing_history
+def _summarize_context(raw, view, input, files, kwargs, *, budget, state, control, estimated_total_tokens):
+    from .summarizer import _call_summarizer_llm, summarize_model_history
 
     wrapped_input = isinstance(input, dict) and set(input) == {'input'}
     current_input = input['input'] if wrapped_input else input
-    current_count = int((projection or {}).get('_projected_current_count') or 0)
-    if current_count:
-        _, expected_current = split_projection(projection['entries'], projection['_source_prior_len'])
-        if not isinstance(current_input, list) \
-                or model_facing_history(current_input[:current_count]) != expected_current:
-            raise _preparation_error(ModelFailureCode.TOKEN_LIMIT, 'The prepared source boundary no longer matches.')
-    current = copy.deepcopy(current_input[:current_count]) if isinstance(current_input, list) else []
+    current_count = state.current_message_count
+    current = state.model_history[-current_count:] if current_count else []
+    prior = state.model_history[:-current_count] if current_count else state.model_history
+    if current_count and (not isinstance(current_input, list)
+                          or current_input[:current_count] != model_facing_history(current)):
+        raise ContextCapacityError('The model history boundary no longer matches.')
     fixed_current = current_input[current_count:] if isinstance(current_input, list) else current_input
     fixed_input = {'input': fixed_current or ''} if wrapped_input else fixed_current
-    fixed_tokens = _request_tokens(supplier, fixed_input or '', [], files, kwargs)
+    fixed_tokens = request_tokens(prepare_model_call(view, fixed_input or '', [], files, kwargs, budget))
     if fixed_tokens > budget.effective_input_budget:
-        raise _preparation_error(ModelFailureCode.TOKEN_LIMIT, 'The fixed request does not fit this candidate.')
-    prepared = prepare_history_compaction(
-        copy.deepcopy(history or []), budget=budget, keep_recent=state.keep_recent, workspace=state.workspace,
-        llm=raw, projection_state=projection, current_round_messages=current,
-        non_history_tokens=fixed_tokens, summary_runtime=summary_runtime,
+        raise ContextCapacityError('The fixed request does not fit this candidate.')
+    history, current = summarize_model_history(
+        prior or [], current, budget=budget, estimated_total_tokens=estimated_total_tokens,
+        summarizer=lambda system, user: _call_summarizer_llm(
+            raw, system, user, candidate_budget=budget, control=control),
     )
-    if prepared.summary_event is not None and prepared.summary_event.decision != 'summarized':
-        raise _preparation_error(ModelFailureCode.TOKEN_LIMIT, 'The candidate summary did not pass validation.')
-    if isinstance(current_input, list) and current_count:
-        prepared.input = [*prepared.current_messages, *fixed_current]
+    state.model_history = [*history, *current]
+    state.current_message_count = len(current)
+    if current_count:
+        input = [*model_facing_history(current), *fixed_current]
         if wrapped_input:
-            prepared.input = {'input': prepared.input}
-    else:
-        prepared.input = input
-    prepared.context_compacted = prepared.history != (history or []) or prepared.input != input
-    total = _request_tokens(supplier, prepared.input, prepared.history, files, kwargs)
-    if total > budget.effective_input_budget:
-        raise _preparation_error(ModelFailureCode.TOKEN_LIMIT, 'The prepared request does not fit this candidate.')
-    prepared.projection['next_pressure_tokens'] = _pressure_rearm_tokens(total, budget)
-    return prepared
+            input = {'input': input}
+    return input, model_facing_history(history)
 
 
 class FallbackLLM(ModuleBase, LLMBase):
@@ -252,23 +216,80 @@ class FallbackLLM(ModuleBase, LLMBase):
     def prompt(self, prompt=None, history=None):
         return LLMBase.prompt(self, '' if prompt is None else _copy_prompt(prompt), history=copy.deepcopy(history))
 
+    def bind_history_compactor(self, compactor):
+        from lazyllm.tools.agent import describe_tool_turns, invoke_history_compactor
+
+        state = self.state
+        source_count, source_scope = 0, None
+
+        def compact(history, keep_full_turns=None, **kwargs):
+            nonlocal source_count, source_scope
+            scope = kwargs.pop('runtime_state', None)
+            if scope is not source_scope or len(history) < source_count:
+                state.model_history, source_count = None, 0
+            source_scope = scope
+            kwargs['model_visible_prefix'] = len(history) if state.model_history is None else len(state.model_history)
+            prior = [*(state.model_history or []), *history[source_count:]]
+            current = list(kwargs.get('current_round_messages') or [])
+            kwargs['tool_turns'] = describe_tool_turns(prior, current)
+            compacted_prior, compacted_current = invoke_history_compactor(compactor, prior, keep_full_turns, **kwargs)
+            state.model_history = copy.deepcopy([*compacted_prior, *compacted_current])
+            state.current_message_count = len(compacted_current)
+            source_count = len(history) + len(current)
+            return model_facing_history(compacted_prior), model_facing_history(compacted_current)
+
+        return compact
+
+    def begin_request(self):
+        self.state.call_control = ModelCallControl(
+            time.monotonic() + max(0.001, float(config['model_fallback_timeout_seconds'])), self._check_cancel)
+        return self.state.call_control
+
+    def _check_cancel(self):
+        if self._cancel_check is not None and self._cancel_check(None):
+            raise UserCancelledError('stopped during a model request')
+        return False
+
+    def initialization_budget(self):
+        candidates = [item for item in _ordered_candidates(self.state)
+                      if item.candidate_id != self.state.current.candidate_id]
+        count = max(1, int(config['model_fallback_max_candidates']))
+        budgets = [self.state.budget]
+        budgets.extend(build_context_budget(item.max_input_tokens) for item in candidates[:count - 1])
+        return max(budgets, key=lambda budget: budget.effective_input_budget)
+
+    def auxiliary_call(self, system, user):
+        from .summarizer import _call_summarizer_llm
+        control = self.state.call_control or ModelCallControl(
+            time.monotonic() + max(0.001, float(config['model_fallback_timeout_seconds'])), self._check_cancel)
+        return _call_summarizer_llm(
+            self.state.raw_llm, system, user, candidate_budget=self.state.budget, control=control)
+
     def forward(self, input=None, *, llm_chat_history=None, lazyllm_files=None,
                 stream_output=None, stream=None, **kwargs):
+        control = self.state.call_control or self.begin_request()
+        try:
+            return self._recover(input, llm_chat_history=llm_chat_history, lazyllm_files=lazyllm_files,
+                                 stream_output=stream_output, stream=stream, control=control, **kwargs)
+        finally:
+            self.state.call_control = None
+
+    def _recover(self, input=None, *, llm_chat_history=None, lazyllm_files=None,
+                 stream_output=None, stream=None, control=None, **kwargs):
         state = self.state
         prior_usage = state.usage_snapshot
         current, raw = state.current, state.raw_llm
         original = state.current
-        workspace = (lazyllm.locals.get('_lazyllm_agent') or {}).get('workspace') or {}
-        projection_target = workspace.get('_history_projection_state')
-        projection, summary_runtime = None, None
+        history, files = copy.deepcopy(llm_chat_history), copy.deepcopy(lazyllm_files)
+        if not state.current_message_count and model_facing_history(state.model_history or []) != (history or []):
+            state.model_history = copy.deepcopy(history or [])
+        summary_attempted = context_compacted = False
         reason = ''
         only_context_failures = True
         stream = stream_output if stream_output is not None else stream
         stream = self._stream if stream is None else stream
         outer_sink = stream.get('_stream_sink') if isinstance(stream, dict) else getattr(self, '_stream_sink', None)
-        _, attached_files = self._get_files(copy.deepcopy(input), copy.deepcopy(lazyllm_files))
-        requires_vision = any(is_chat_image_file(path) for path in attached_files) \
-            or _contains_image([input, llm_chat_history])
+        requires_vision = False
 
         def emit(event):
             try:
@@ -280,10 +301,25 @@ class FallbackLLM(ModuleBase, LLMBase):
                 exc._model_fallback_local_failure = True
                 raise
 
+        attempted = set()
+        max_candidates = max(1, int(config['model_fallback_max_candidates']))
+
+        def remaining_candidates():
+            candidates = [item for item in _ordered_candidates(state) if item.candidate_id not in attempted]
+            if requires_vision:
+                candidates = [item for item in candidates
+                              if (item.llm_config.get('llm') or {}).get('vision') is True
+                              or str((item.llm_config.get('llm') or {}).get('type') or '').lower() == 'vlm']
+            return candidates[:max(0, max_candidates - len(attempted))]
+
         while True:
-            if self._cancel_check is not None:
-                if self._cancel_check(None):
-                    raise UserCancelledError('stopped before the next model attempt')
+            try:
+                control.check()
+            except requests.Timeout as exc:
+                exc.fallback_code = 'model_fallback_exhausted'
+                emit({'tag': 'model_fallback_failed', 'fallback_code': exc.fallback_code})
+                raise
+            attempted.add(current.candidate_id)
             local_failure = []
             call_index = 0
             call_open = False
@@ -314,52 +350,45 @@ class FallbackLLM(ModuleBase, LLMBase):
                              stream=selected_stream, copy_static_params=True)
             usage_module_id = self._used_by_moduleid or self._module_id
             view.used_by(usage_module_id)
-            budget = build_context_budget(current.max_input_tokens) if current.max_input_tokens else state.budget
-            with lazyllm.globals.stack_enter(view.identities):
-                supplier_factory = getattr(view, '_get_supplier', None)
-                supplier = supplier_factory() if supplier_factory is not None else view
-                supplier.used_by(usage_module_id)
-                call_kwargs = output_budget_kwargs(view, supplier, budget.reserved_output_tokens, copy.deepcopy(kwargs))
+            budget = build_context_budget(current.max_input_tokens)
+            call_kwargs = copy.deepcopy(kwargs)
             call_kwargs['max_retries'] = 1
-            history, files = copy.deepcopy(llm_chat_history), copy.deepcopy(lazyllm_files)
-            prepared = None
             preparing_context = False
-            candidate_input = copy.deepcopy(input)
             try:
                 role_config = current.llm_config.get('llm') or {}
-                if requires_vision and supplier.type != 'VLM' and role_config.get('vision') is not True:
-                    raise _preparation_error(ModelFailureCode.PROVIDER_REJECTED,
-                                             'The configured model does not support this image input.')
-                if current.max_input_tokens:
-                    if _request_tokens(supplier, input, history, files, call_kwargs) > budget.effective_input_budget:
-                        if not config['context_compression_enabled']:
-                            raise _preparation_error(ModelFailureCode.TOKEN_LIMIT,
-                                                     'The complete request exceeds the configured input budget.')
-                        if summary_runtime is None:
-                            from .active_context import collect_summary_runtime_state
-                            projection = copy.deepcopy(projection_target) \
-                                if projection_target and '_source_prior_len' in projection_target else None
-                            summary_runtime = copy.deepcopy(collect_summary_runtime_state(
-                                lazyllm.globals.get('agentic_config') or {},
-                            ))
-                        preparing_context = True
-                        prepared = _prepare_context(
-                            raw, supplier, input, history, files, call_kwargs, state=state, budget=budget,
-                            projection=projection, summary_runtime=summary_runtime,
-                        )
-                        candidate_input, history = prepared.input, prepared.history
+                request = prepare_model_call(view, input, history, files, call_kwargs, budget)
+                requires_vision = requires_vision or request.requires_vision
+                if requires_vision and request.model_type != 'VLM' and role_config.get('vision') is not True:
+                    raise UnsupportedModelInput('The configured model does not support this image input.')
+                total_tokens = request_tokens(request)
+                if total_tokens > budget.effective_input_budget:
+                    larger_remaining = any(build_context_budget(item.max_input_tokens).effective_input_budget
+                                           > budget.effective_input_budget for item in remaining_candidates())
+                    if not config['context_compression_enabled'] or summary_attempted or larger_remaining:
+                        raise ContextCapacityError('The complete request exceeds the configured input budget.')
+                    summary_attempted = preparing_context = True
+                    input, history = _summarize_context(
+                        raw, view, input, files, call_kwargs, budget=budget,
+                        state=state, control=control, estimated_total_tokens=total_tokens,
+                    )
+                    context_compacted = True
+                    request = prepare_model_call(view, input, history, files, call_kwargs, budget)
+                    if request_tokens(request) > budget.effective_input_budget:
+                        raise ContextCapacityError('The summarized request does not fit this candidate.')
                 preparing_context = False
-                if self._cancel_check is not None and self._cancel_check(None):
-                    raise UserCancelledError('stopped before the prepared model attempt')
+                control.check()
                 state.model_output_index += 1
                 call_index = state.model_output_index
                 output_metadata['call_index'] = call_index
                 call_open = True
                 emit({'tag': 'model_output', 'model_output': {'call_index': call_index, 'phase': 'begin'}})
-                response = view(candidate_input, llm_chat_history=history, lazyllm_files=files,
-                                stream_output=selected_stream, **call_kwargs)
-            except UserCancelledError:
+                response = request.execute(control=control).value
+            except CancelledError:
                 rollback()
+                raise
+            except ModuleExecutionError as exc:
+                rollback()
+                exc._model_fallback_local_failure = True
                 raise
             except Exception as exc:
                 rollback()
@@ -370,16 +399,14 @@ class FallbackLLM(ModuleBase, LLMBase):
                         raise
                     raise failure from exc
                 failure = _failure_from_error(exc)
-                unsupported_call = failure is not None and str(
+                unsupported_call = isinstance(exc, UnsupportedModelInput) or failure is not None and str(
                     failure.provider_error_code or '',
                 ).lower() in _UNSUPPORTED_CALL_CODES
-                terminal = getattr(exc, 'terminal', None)
-                unsupported_call = unsupported_call or (
-                    failure is not None and terminal is not None
-                    and terminal.attempt_count == 0 and failure.code == ModelFailureCode.PROVIDER_REJECTED
-                )
-                if (failure is None
-                        or (failure.code.value not in _RECOVERABLE and not unsupported_call and not preparing_context)):
+                if failure is None:
+                    if not isinstance(exc, ModelCallError):
+                        exc._model_fallback_local_failure = True
+                    raise
+                if failure.code.value not in _RECOVERABLE and not unsupported_call and not preparing_context:
                     raise
                 state.failed_candidates.add(current.candidate_id)
                 if (current.provider_group_id and current.credential_count == 1
@@ -388,15 +415,12 @@ class FallbackLLM(ModuleBase, LLMBase):
                 if not reason:
                     reason = 'provider_rejected' if unsupported_call else failure.code.value
                 only_context_failures = only_context_failures and failure.code.value == 'token_limit'
-                candidates = _ordered_candidates(state)
-                if requires_vision:
-                    candidates = [item for item in candidates
-                                  if (item.llm_config.get('llm') or {}).get('vision') is True
-                                  or str((item.llm_config.get('llm') or {}).get('type') or '').lower() == 'vlm']
+                candidates = remaining_candidates() if time.monotonic() < control.deadline else []
                 for candidate in candidates:
                     try:
                         raw = _make_llm(candidate)
                     except (ValueError, KeyError, AttributeError, TypeError):
+                        attempted.add(candidate.candidate_id)
                         state.failed_candidates.add(candidate.candidate_id)
                         only_context_failures = False
                         continue
@@ -412,7 +436,7 @@ class FallbackLLM(ModuleBase, LLMBase):
                 # FunctionCall clears its SDK aggregate after each tool round.
                 # Merge its current round with the prior snapshot once, even
                 # when this round tried several candidates.
-                state.usage_snapshot = copy.deepcopy(supplier._merge_usage_records(
+                state.usage_snapshot = copy.deepcopy(lazyllm.OnlineChatModule.merge_usage_records(
                     prior_usage, lazyllm.globals['usage'].get(usage_module_id) or {},
                 ))
 
@@ -422,16 +446,7 @@ class FallbackLLM(ModuleBase, LLMBase):
                 if local_failure:
                     raise local_failure[0]
                 result = self._formatter(response)
-                if prepared is not None:
-                    from .pruner import commit_prepared_context
-                    commit_prepared_context(prepared, runtime_state=projection_target, workspace=state.workspace)
-                elif projection_target is not None and current.candidate_id != original.candidate_id:
-                    from .pruner import _pressure_rearm_tokens
-                    total = _request_tokens(supplier, candidate_input, history, files, call_kwargs)
-                    projection_target['next_pressure_tokens'] = _pressure_rearm_tokens(total, budget)
                 state.current, state.raw_llm, state.budget = current, raw, budget
-                if state.tool_retrieval is not None:
-                    state.tool_retrieval.threshold_tokens = int(budget.effective_input_budget * 0.1)
                 initial = state.initial_model_switch
                 commit_event = {'tag': 'model_output',
                                 'model_output': {'call_index': call_index, 'phase': 'commit'}}
@@ -445,7 +460,7 @@ class FallbackLLM(ModuleBase, LLMBase):
                         'from_max_input_tokens': parse_token_limit(initial.get('from_max_input_tokens'))
                         if initial is not None else original.max_input_tokens,
                         'to_max_input_tokens': current.max_input_tokens,
-                        'context_compacted': prepared.context_compacted if prepared is not None else False,
+                        'context_compacted': context_compacted,
                     }))
                 emit(commit_event)
                 call_open = False

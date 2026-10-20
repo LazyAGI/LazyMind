@@ -145,13 +145,13 @@ class ToolStateStore:
             return state
 
 
-def configure_tool_retrieval(agent, plan):
+def configure_tool_retrieval(agent, plan, *, budget_provider=None, initialization_budget_provider=None,
+                             defer_request_validation=False):
     options = plan.execution_options
     cfg = lazyllm.globals.get('agentic_config') or {}
     manager = agent._tools_manager
     skill_manager = agent._skill_manager
     budget = build_context_budget(options.max_input_tokens, llm_config=options.llm_config)
-    fallback_state = getattr(agent, '_model_fallback_state', None)
     initializing = False
 
     def validate_load(definitions):
@@ -163,16 +163,9 @@ def configure_tool_retrieval(agent, plan):
             'skills_prompt': skill_manager.build_prompt() if skill_manager else '',
             'skill_prompt_parts': skill_manager.describe_prompt() if skill_manager else [],
         }
-        active_budget = fallback_state.budget if fallback_state is not None else budget
-        if initializing and fallback_state is not None:
-            from .model_fallback import _ordered_candidates
-            candidates = _ordered_candidates(fallback_state)
-            if any(item.max_input_tokens is None for item in candidates):
-                return
-            active_budget = max(
-                [active_budget, *(build_context_budget(item.max_input_tokens) for item in candidates)],
-                key=lambda item: item.effective_input_budget,
-            )
+        active_budget = budget_provider() if budget_provider is not None else budget
+        if initializing and initialization_budget_provider is not None:
+            active_budget = initialization_budget_provider()
         if estimate_non_history_tokens(prefix, plan.prompt.current_input) > active_budget.effective_input_budget:
             raise ToolExecutionError('加载失败，原因是新增工具定义导致固定上下文超过有效输入上限；'
                                      '请释放可选工具，或只加载所需成员。')
@@ -232,8 +225,6 @@ def configure_tool_retrieval(agent, plan):
         state_store=ToolStateStore(scope, readonly=options.context_preview),
         skill_dependencies=skill_dependencies,
     )
-    if fallback_state is not None:
-        fallback_state.tool_retrieval = controller
     if not options.context_preview:
         initializing = True
         try:
@@ -249,7 +240,7 @@ def configure_tool_retrieval(agent, plan):
                 write_keys=(*(skill_tool._runtime_metadata.write_keys or ()), f'tool-retrieval:{manager._module_id}'))
 
     def validate_context(prefix, history, current_input):
-        if fallback_state is not None:
+        if defer_request_validation:
             # FallbackLLM validates the fully serialized candidate request and
             # can try a larger candidate before FunctionCall clears its state.
             return

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import copy
-import json
 from dataclasses import asdict, replace
 from typing import Any, Callable, Optional
 
@@ -23,7 +21,6 @@ from .models import (
     ContextBudget,
     CompressionTrigger,
     PruneEvent,
-    PreparedContext,
     ToolPruneDetail,
 )
 from .telemetry import append_event
@@ -202,10 +199,7 @@ def prune_tool_results(
     return projected, event
 
 
-def _log_event(event: PruneEvent, *, prepared=None) -> None:
-    if prepared is not None:
-        prepared.prune_events.append(event)
-        return
+def _log_event(event: PruneEvent) -> None:
     source_counts: dict[str, int] = {}
     for detail in event.details:
         source_counts[detail.compactor] = source_counts.get(detail.compactor, 0) + 1
@@ -271,11 +265,7 @@ def _commit_surviving_spills(
     plans: list[tuple[int, ToolCompactionPlan]],
     *,
     workspace: Optional[str],
-    prepared=None,
 ) -> list[dict[str, Any]]:
-    if prepared is not None:
-        prepared.spill_plans.extend(plan for _, plan in plans if plan not in prepared.spill_plans)
-        return entries
     if not workspace:
         return entries
     committed = clone_entries(entries)
@@ -390,13 +380,7 @@ def _record_candidate(
     reason: str,
     metrics: dict[str, Any],
     changed_entries: int,
-    prepared=None,
 ) -> None:
-    if prepared is not None:
-        prepared.candidate_events.append(dict(
-            stage=stage, decision=decision, reason=reason, changed_entries=changed_entries, **metrics,
-        ))
-        return
     append_event(
         'compression_candidate',
         stage=stage,
@@ -416,6 +400,8 @@ def make_history_compactor(
     llm: Any = None,
     summarizer: Optional[Callable[[str, str], str]] = None,
     workspace: Optional[str] = None,
+    budget_provider: Optional[Callable[[], ContextBudget]] = None,
+    retain_message_metadata: bool = False,
 ) -> Callable[..., tuple[list[dict[str, Any]], list[dict[str, Any]]]]:
     """Build a mid-turn history projector compatible with ReactAgent/FunctionCall."""
 
@@ -425,40 +411,23 @@ def make_history_compactor(
     )
 
     def _compact(history, keep_full_turns=None, **kwargs):
-        fallback = getattr(llm, 'state', None)
         return _compact_history(
-            history, keep_full_turns, budget=fallback.budget if fallback is not None else budget,
+            history, keep_full_turns, budget=budget_provider() if budget_provider is not None else budget,
             default_keep=default_keep, trigger=trigger,
-            llm=fallback.raw_llm if fallback is not None else llm, summarizer=summarizer,
-            workspace=workspace, **kwargs,
+            llm=llm, summarizer=summarizer,
+            workspace=workspace, retain_message_metadata=retain_message_metadata, **kwargs,
         )
 
     return _compact
 
 
-def _finish_projection(state, prior_len, prepared):
+def _finish_projection(state, prior_len, *, retain_message_metadata=False):
     mark_projection_sent(state)
-    prior, current = split_projection(state['entries'], prior_len)
-    state['_source_prior_len'] = prior_len
-    state['_projected_current_count'] = len(current)
-    if prepared is not None:
-        prepared.projection = state
-        prepared.history, prepared.current_messages = prior, current
-        return prepared
-    return prior, current
-
-
-def prepare_history_compaction(history, *, budget, keep_recent=None, workspace=None, llm=None, **kwargs):
-    return _compact_history(
-        history, budget=budget,
-        default_keep=int(config['agentic_keep_full_turns']) if keep_recent is None else keep_recent,
-        trigger='mid_turn', workspace=workspace, llm=llm,
-        prepared=PreparedContext(budget), **kwargs,
-    )
+    return split_projection(state['entries'], prior_len, model_facing=not retain_message_metadata)
 
 
 def _compact_history(history, keep_full_turns=None, *, budget, default_keep, trigger,
-                     llm=None, summarizer=None, workspace=None, prepared=None, **kwargs):
+                     llm=None, summarizer=None, workspace=None, **kwargs):
     current_round_messages = list(kwargs.get('current_round_messages') or [])
     combined = list(history) + current_round_messages
     prior_len = len(history)
@@ -468,19 +437,18 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
         0,
         int(default_keep if keep_full_turns is None else keep_full_turns),
     )
-    non_history_tokens = kwargs.get('non_history_tokens')
-    if non_history_tokens is None:
-        non_history_tokens = estimate_non_history_tokens(kwargs.get('prefix') or {}, kwargs.get('current_input'))
+    non_history_tokens = estimate_non_history_tokens(kwargs.get('prefix') or {}, kwargs.get('current_input'))
     non_history_tokens += max(
         0,
         int(kwargs.get('reserved_runtime_context_tokens') or 0),
     )
-    if kwargs.get('projection_state') is not None:
-        state = copy.deepcopy(kwargs['projection_state'])
-        prior_len = int(state['_source_prior_len'])
-    else:
-        state, _rebuilt = reconcile_projection(combined, kwargs.get('runtime_state'))
+    state, _rebuilt = reconcile_projection(combined, kwargs.get('runtime_state'))
     stable = state['entries']
+    # A direct model history supplies its sent prefix without retaining another projection.
+    visible_prefix = kwargs.get('model_visible_prefix')
+    if visible_prefix is not None:
+        for entry in stable:
+            entry['model_visible'] = entry['source_end'] <= visible_prefix
     before_total = non_history_tokens + projection_tokens(stable)
 
     mandatory_plans: list[tuple[int, ToolCompactionPlan]] = []
@@ -501,7 +469,7 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
         candidate = _commit_surviving_spills(
             candidate,
             mandatory_plans,
-            workspace=workspace, prepared=prepared,
+            workspace=workspace,
         )
         after_total = non_history_tokens + projection_tokens(candidate)
         metrics = transition_metrics(
@@ -530,7 +498,7 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
             ),
         )
         event = _event_with_metrics(event, metrics)
-        _log_event(event, prepared=prepared)
+        _log_event(event)
         commit_entries(state, candidate)
         stable = state['entries']
         before_total = after_total
@@ -543,7 +511,7 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
         before_total < pressure_at
         and before_total <= budget.effective_input_budget
     ):
-        return _finish_projection(state, prior_len, prepared)
+        return _finish_projection(state, prior_len, retain_message_metadata=kwargs.get('retain_message_metadata', False))
 
     tool_indices = _entry_tool_indices(stable)
     protected = set(tool_indices[-effective_keep:]) if effective_keep else set()
@@ -580,7 +548,6 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
             remaining_rounds=kwargs.get('remaining_rounds'),
         )
         _record_candidate(
-            prepared=prepared,
             stage='prune',
             decision='accepted' if accepted else 'rejected',
             reason=reason,
@@ -613,7 +580,6 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
             )
             accepted_reason = 'context_safety_best_effort'
             _record_candidate(
-                prepared=prepared,
                 stage='prune',
                 decision='accepted',
                 reason=accepted_reason,
@@ -627,11 +593,9 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
     final_entries: Optional[list[dict[str, Any]]] = None
     if (
         config['context_summary_compression_enabled']
-        and (summary_input_total > budget.effective_input_budget if prepared is not None
-             else summary_input_total >= budget.trigger_tokens)
+        and summary_input_total >= budget.trigger_tokens
     ):
-        from .summarizer import apply_summary_compression, prepare_summary_compression, _max_history_seq
-        from .summary_range import extract_summary_markdown
+        from .summarizer import apply_summary_compression
         from .summary_range import select_summary_range
 
         summary_history = [entry['message'] for entry in summary_input]
@@ -642,8 +606,7 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
             min_recent_user_turns=int(config['context_summary_min_recent_user_turns']),
         )
         if selected is not None:
-            summarize = prepare_summary_compression if prepared is not None else apply_summary_compression
-            summarized, summary_event = summarize(
+            summarized, summary_event = apply_summary_compression(
                 summary_history,
                 budget=budget,
                 trigger=trigger,
@@ -651,17 +614,10 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
                 summarizer=summarizer,
                 force=True,
                 estimated_total_tokens=summary_input_total,
-                **({'runtime_state': kwargs['summary_runtime'], 'candidate_budget': budget}
-                   if prepared is not None else {}),
+                selected=selected,
             )
-            if prepared is not None:
-                prepared.summary_event = summary_event
             if summary_event.decision == 'summarized':
                 replaced = summary_input[selected.replace_start:selected.replace_end]
-                if prepared is not None:
-                    prepared.summary_text = extract_summary_markdown(summarized[selected.replace_start])
-                    prepared.summary_covered = _max_history_seq([entry['message'] for entry in replaced])
-                    prepared.summary_runtime = copy.deepcopy(kwargs['summary_runtime'])
                 summary_entry = {
                     'source_start': min(entry['source_start'] for entry in replaced),
                     'source_end': max(entry['source_end'] for entry in replaced),
@@ -682,7 +638,6 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
                     after_total=final_total,
                 )
                 _record_candidate(
-                    prepared=prepared,
                     stage='summary',
                     decision='accepted',
                     reason=summary_event.reason,
@@ -695,7 +650,7 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
         final_entries = _commit_surviving_spills(
             final_entries,
             planned,
-            workspace=workspace, prepared=prepared,
+            workspace=workspace,
         )
         final_total = non_history_tokens + projection_tokens(final_entries)
         commit_entries(
@@ -707,7 +662,7 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
         accepted_entries = _commit_surviving_spills(
             accepted_entries,
             accepted_plans,
-            workspace=workspace, prepared=prepared,
+            workspace=workspace,
         )
         accepted_total = non_history_tokens + projection_tokens(accepted_entries)
         committed_metrics = transition_metrics(
@@ -735,32 +690,11 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
                 for index, plan in accepted_plans
             ),
         )
-        _log_event(_event_with_metrics(event, committed_metrics), prepared=prepared)
+        _log_event(_event_with_metrics(event, committed_metrics))
         commit_entries(
             state,
             accepted_entries,
             next_pressure_tokens=_pressure_rearm_tokens(accepted_total, budget),
         )
 
-    return _finish_projection(state, prior_len, prepared)
-
-
-def commit_prepared_context(prepared, *, runtime_state=None, workspace=None):
-    from .compactors import workspace_spill_uri
-    from .summarizer import commit_summary_compression
-
-    visible = json.dumps(prepared.projection['entries'], ensure_ascii=False, default=str)
-    for plan in prepared.spill_plans:
-        if plan.compactor == 'spill' and workspace_spill_uri(plan.spill_path) in visible:
-            commit_tool_result_plan(plan, workspace=workspace)
-    for payload in prepared.candidate_events:
-        append_event('compression_candidate', **payload)
-    for event in prepared.prune_events:
-        _log_event(event)
-    if prepared.summary_event is not None:
-        commit_summary_compression(prepared.summary_text, prepared.summary_covered,
-                                   prepared.summary_event, prepared.summary_runtime)
-    if runtime_state is not None:
-        commit_entries(runtime_state, clone_entries(prepared.projection['entries']),
-                       next_pressure_tokens=prepared.projection['next_pressure_tokens'])
-        mark_projection_sent(runtime_state)
+    return _finish_projection(state, prior_len, retain_message_metadata=kwargs.get('retain_message_metadata', False))

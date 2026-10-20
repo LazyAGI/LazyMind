@@ -153,8 +153,13 @@ class AgentExecutor:
                 keep_recent=keep_full_turns,
                 trigger='mid_turn',
                 llm=llm,
+                summarizer=llm.auxiliary_call if fallback_state is not None else None,
+                budget_provider=(lambda: fallback_state.budget) if fallback_state is not None else None,
+                retain_message_metadata=fallback_state is not None,
                 workspace=options.workspace,
             )
+        if fallback_state is not None and history_compactor is not None:
+            history_compactor = llm.bind_history_compactor(history_compactor)
         run_id = uuid.uuid4().hex[:12]
         observer = (
             make_runtime_observer(
@@ -168,6 +173,8 @@ class AgentExecutor:
         configuration_runtime = None if options.context_preview else options.configuration_runtime
 
         def prepare_request():
+            if fallback_state is not None:
+                llm.begin_request()
             if options.before_model_request is not None:
                 result = options.before_model_request()
                 if result is not None:
@@ -228,8 +235,11 @@ class AgentExecutor:
             'extra_stop_condition': options.extra_stop_condition,
             'runtime_observer': runtime_observer,
             'model_context_provider': model_context,
-            'before_model_request': (prepare_request if configuration_runtime is not None
-                                     else options.before_model_request) if not options.context_preview else None,
+            'before_model_request': (
+                prepare_request if configuration_runtime is not None or fallback_state is not None
+                else options.before_model_request) if not options.context_preview else None,
+            'final_summary_call': (
+                (lambda prompt: llm.auxiliary_call('', prompt)) if fallback_state is not None else None),
         }
         kwargs.update({key: value for key, value in optional.items() if value is not None})
         tools = _sanitize_tools(_deduplicate_tools(plan.tools))
@@ -245,7 +255,11 @@ class AgentExecutor:
         configure_skill_sandbox(getattr(agent, '_skill_manager', None))
         from .tool_retrieval import configure_tool_retrieval
         agent._model_fallback_state = fallback_state
-        configure_tool_retrieval(agent, plan)
+        configure_tool_retrieval(
+            agent, plan,
+            budget_provider=(lambda: fallback_state.budget) if fallback_state is not None else None,
+            initialization_budget_provider=llm.initialization_budget if fallback_state is not None else None,
+            defer_request_validation=fallback_state is not None)
         restore_loaded_skill_runtime(getattr(agent, '_skill_manager', None), plan.history)
         trusted_opaque_tools = tuple(
             tool for name in (getattr(agent, '_skill_tool_names', set()) & {'run_script', 'run_skill_script'})
@@ -268,18 +282,6 @@ class AgentExecutor:
         )
         agent._agent_lab_run_id = run_id
         agent._runtime_llm = llm
-        if fallback_state is not None:
-            original_summarize = agent._force_summarize_from_history
-
-            def summarize_with_raw(history):
-                original_llm = agent._llm
-                agent._llm = fallback_state.raw_llm
-                try:
-                    return original_summarize(history)
-                finally:
-                    agent._llm = original_llm
-
-            agent._force_summarize_from_history = summarize_with_raw
         agent._exact_repeat_monitor = repeat_monitor
         agent._runtime_notice_buffer = notice_buffer
         # Restore lazy Toolkit activation before the streaming helper takes over.

@@ -10,50 +10,12 @@ from unittest.mock import patch
 import lazyllm
 import pytest
 
-from test_model_fallback import ScriptedProvider, EFFECT_RECEIPTS, record_fallback_effect
+from fallback_test_support import EFFECT_RECEIPTS, record_fallback_effect, candidate, wrapper, succeed, fail, switches
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions, AgentExecutor, AgentRole, AgentRunPlan, PromptBuilder,
 )
 from lazymind.chat.engine.agent_runtime.executor import _cfg
-from lazymind.chat.engine.agent_runtime.model_fallback import FallbackLLM, create_fallback_state
-from lazymind.chat.engine.agent_runtime.models import ModelCandidate
 from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
-
-
-@pytest.fixture
-def provider():
-    server = ScriptedProvider()
-    yield server
-    server.close()
-
-
-def candidate(provider, model, *, source='openai', window=32768):
-    config = provider.config(model)
-    config['llm']['source'] = source
-    return ModelCandidate('own:' + model, 'own', model, provider_group_id=model,
-                          credential_revision=1, max_input_tokens=window, llm_config=config)
-
-
-def wrapper(current, alternatives, *, initial=None):
-    role = current.llm_config['llm']
-    raw = lazyllm.OnlineChatModule(source=role['source'], model=role['model'], type='llm',
-                                  url=role['base_url'], api_key=role['api_key'], stream=False)
-    options = AgentExecutionOptions(llm_config=current.llm_config, model_candidates=(current, *alternatives),
-                                    current_model_candidate_id=current.candidate_id, initial_model_switch=initial)
-    return FallbackLLM(create_fallback_state(raw, options))
-
-
-def succeed(provider, model):
-    provider.script[model] = [{'message': {'role': 'assistant', 'content': 'done:' + model}}]
-
-
-def fail(provider, model):
-    provider.script[model] = [{'error': 'model_not_found', 'status': 404, 'type': 'invalid_request_error'}]
-
-
-def switches(events):
-    return [item['runtime_event']['data'] for item in events
-            if (item.get('runtime_event') or {}).get('type') == 'model_switched']
 
 
 @pytest.mark.parametrize(('current_source', 'next_source'), [('claude', 'openai'), ('openai', 'claude')])
@@ -78,7 +40,7 @@ def test_native_boundary_success_is_confirmed_without_sdk_lifecycle(provider, cu
             assert not {'candidate_id', 'switch_index', 'fallback_code'} & event['data'].keys()
 
 
-def test_native_healthy_does_not_create_a_switch_or_fake_sdk_events(provider):
+def test_native_healthy_reports_a_real_sdk_outcome_without_a_switch(provider):
     a = candidate(provider, 'native-a', source='claude')
     succeed(provider, 'native-a')
     events = []
@@ -88,7 +50,10 @@ def test_native_healthy_does_not_create_a_switch_or_fake_sdk_events(provider):
         ) == 'done:native-a'
     assert not factory.called
     assert switches(events) == []
-    assert not [event for event in events if event.get('tag') == 'runtime_event']
+    runtime = [event['runtime_event'] for event in events if event.get('tag') == 'runtime_event']
+    assert [event['type'] for event in runtime] == ['model_call_started', 'model_call_finished']
+    assert runtime[-1]['data']['kind'] == 'finish'
+    assert runtime[-1]['data']['finish'] == 'stop'
 
 
 def test_native_swallowed_sink_error_stops_before_commit_or_another_candidate(provider):
@@ -339,8 +304,9 @@ def test_bootstrap_native_success_needs_no_sdk_started_or_finished(provider):
     assert len(switches(events)) == 1
     assert switches(events)[0]['from'] == initial['from']
     assert switches(events)[0]['to']['model_id'] == 'native-b'
-    assert not [item for item in events
-                if (item.get('runtime_event') or {}).get('type') in {'model_call_started', 'model_call_finished'}]
+    assert [item['runtime_event']['type'] for item in events
+            if (item.get('runtime_event') or {}).get('type') in {'model_call_started', 'model_call_finished'}] == [
+                'model_call_started', 'model_call_finished']
     assert wrapped('again', stream={'_stream_sink': events.append}) == 'done:native-b'
     assert len(switches(events)) == 1
     fail(provider, 'native-b')
@@ -421,16 +387,11 @@ def test_service_metrics_follow_winner_and_keep_mixed_real_usage(provider, monke
     assert (metrics['model'], metrics.get('max_input_tokens'), metrics.get('output_tokens')) == (
         'native-b', window, 9,  # A's real 2 plus B's reported 7.
     )
-    if winner_source == 'claude':
-        assert metrics['model_steps'] == 2  # Only A's tool call and failure have SDK events.
-        assert 'model_ms' not in metrics
-        assert 'tok_s' not in metrics
+    assert metrics['model_steps'] == 3
+    assert 'model_ms' in metrics
+    if metrics['model_ms'] > 0:
+        assert metrics['tok_s'] == pytest.approx(9 / (metrics['model_ms'] / 1000))
     else:
-        assert metrics['model_steps'] == 3
-        assert 'model_ms' in metrics
-        if metrics['model_ms'] > 0:
-            assert metrics['tok_s'] == pytest.approx(9 / (metrics['model_ms'] / 1000))
-        else:
-            assert 'tok_s' not in metrics
+        assert 'tok_s' not in metrics
     assert captured[-1]
     assert function_call_usages and all(function_call_usages)

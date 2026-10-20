@@ -10,9 +10,9 @@ from contextlib import ExitStack
 import lazyllm
 import pytest
 
-from test_model_fallback import ScriptedProvider, EFFECT_RECEIPTS, record_fallback_effect
-from test_model_fallback_native import candidate, fail, succeed, switches
-from test_context_summary_compression import VALID_SUMMARY
+from fallback_test_support import EFFECT_RECEIPTS, record_fallback_effect
+from fallback_test_support import candidate, fail, succeed, switches
+from fallback_test_support import VALID_SUMMARY
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions, AgentExecutor, AgentRole, AgentRunPlan, PromptBuilder,
 )
@@ -25,18 +25,10 @@ from lazyllm.tools.agent.toolError import ToolExecutionError
 
 
 @pytest.fixture
-def provider(tmp_path):
-    server = ScriptedProvider()
-    old_agent = lazyllm.locals.get('_lazyllm_agent')
-    old_config = lazyllm.globals.get('agentic_config')
-    lazyllm.locals['_lazyllm_agent'] = {}
+def provider(fallback_provider, tmp_path):
     lazyllm.globals['agentic_config'] = {'user_id': 'compatibility-test', 'conversation_id': 'test'}
-    EFFECT_RECEIPTS.clear()
     with config.temp('agentic_workspace', str(tmp_path)):
-        yield server
-    lazyllm.locals['_lazyllm_agent'] = old_agent
-    lazyllm.globals['agentic_config'] = old_config
-    server.close()
+        yield fallback_provider
 
 
 def raw_model(item, *, vision=False):
@@ -203,7 +195,7 @@ def test_normal_image_size_does_not_exhaust_healthy_vision_candidates(provider, 
 
 @pytest.mark.parametrize('block_type', ['image', 'input_image'])
 def test_native_image_blocks_are_not_counted_as_base64_text(provider, image_data, block_type):
-    from lazymind.chat.engine.agent_runtime.model_fallback import _request_tokens
+    from fallback_test_support import request_tokens_for as _request_tokens
 
     model = raw_model(candidate(provider, 'native-image', source='claude', window=131072), vision=True)
     block = ({'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/png', 'data': image_data}}
@@ -212,13 +204,51 @@ def test_native_image_blocks_are_not_counted_as_base64_text(provider, image_data
     assert 1536 <= tokens < 10000
 
 
+@pytest.mark.parametrize('block_type', ['image_url', 'input_image', 'image'])
+def test_image_history_skips_text_candidates_before_http(provider, block_type):
+    current, text, vision = [candidate(provider, name) for name in ('current', 'text', 'vision')]
+    vision.llm_config['llm']['vision'] = True
+    succeed(provider, 'vision')
+    image = 'data:image/png;base64,ZmFrZQ=='
+    block = ({'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/png', 'data': 'ZmFrZQ=='}}
+             if block_type == 'image' else
+             {'type': block_type, 'image_url': {'url': image} if block_type == 'image_url' else image})
+    history = [{'role': 'user', 'content': [block]}]
+    original = copy.deepcopy(history)
+    model = wrapped(current, [text, vision])
+    assert model('Describe.', llm_chat_history=history) == 'done:vision'
+    assert [request['model'] for request in provider.requests] == ['vision']
+    assert any(message['content'] == [block] for message in provider.requests[0]['messages'])
+    assert history == original
+
+
+@pytest.mark.parametrize('invalid_file', ['missing', 'directory'])
+def test_local_image_preparation_failure_does_not_try_another_candidate(provider, tmp_path, invalid_file):
+    from lazyllm.module.module import ModuleExecutionError
+
+    current, text, vision = [candidate(provider, name) for name in ('current', 'text', 'vision')]
+    for item in (current, vision):
+        item.llm_config['llm']['vision'] = True
+    picture = tmp_path / 'picture.png'
+    if invalid_file == 'directory':
+        picture.mkdir()
+    model = wrapped(current, [text, vision], vision=True)
+    events = []
+    with pytest.raises(ModuleExecutionError):
+        model('Describe.', lazyllm_files=[str(picture)], stream={'_stream_sink': events.append})
+    assert provider.requests == []
+    assert model.state.current.candidate_id == current.candidate_id
+    assert model.state.failed_candidates == set()
+    assert switches(events) == []
+
+
 @pytest.mark.parametrize('normal_image', [False, True])
 def test_image_prefix_does_not_invalidate_a_usable_summary(provider, image_data, normal_image):
     tiny = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jFZkAAAAASUVORK5CYII='
     image = image_data if normal_image else tiny
     a = candidate(provider, 'model-a', window=32768)
     b = candidate(provider, 'model-b', window=8192)
-    c = candidate(provider, 'model-c', window=None)
+    c = candidate(provider, 'model-c', window=4096)
     for item in (a, b, c):
         item.llm_config['llm']['vision'] = True
     fail(provider, 'model-a')
@@ -338,3 +368,21 @@ def test_dynamic_loading_cannot_borrow_an_unused_larger_candidates_budget(provid
     assert {str(path): path.read_bytes() for path in tmp_path.rglob('*.json')} == before
     assert [request['model'] for request in provider.requests] == ['small']
     assert EFFECT_RECEIPTS == []
+
+
+def test_unknown_candidate_does_not_allow_unbounded_tool_initialization(provider, tmp_path):
+    a = candidate(provider, 'small', window=16384)
+    b = candidate(provider, 'unknown', window=None)
+    lazyllm.globals['agentic_config']['enable_tool_retrieval'] = True
+    options = AgentExecutionOptions(
+        llm_config=a.llm_config, model_candidates=(a, b), current_model_candidate_id=a.candidate_id,
+        max_input_tokens=16384, enable_builtin_tools=False, skills=False)
+    plan = AgentRunPlan(
+        role=AgentRole.CHAT,
+        prompt=PromptBuilder.for_role(AgentRole.CHAT).input('完整本轮输入。' * 20000, source='user').build(),
+        tools=[record_fallback_effect], execution_options=options)
+    before = {str(path): path.read_bytes() for path in tmp_path.rglob('*.json')}
+    with pytest.raises(ToolExecutionError, match='固定上下文'):
+        AgentExecutor().create_agent(raw_model(a), plan)
+    assert provider.requests == []
+    assert {str(path): path.read_bytes() for path in tmp_path.rglob('*.json')} == before

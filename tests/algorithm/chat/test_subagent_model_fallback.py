@@ -11,8 +11,8 @@ import lazyllm
 import pytest
 from fastapi import FastAPI
 
-from test_model_fallback import ScriptedProvider, EFFECT_RECEIPTS, record_fallback_effect
-from test_model_fallback_stream import broken_output
+from fallback_test_support import ScriptedProvider, EFFECT_RECEIPTS, record_fallback_effect
+from fallback_test_support import broken_output
 from lazymind.chat.api.subagent_routes import router
 from lazymind.chat.engine.subagent import runner
 from lazymind.config import config

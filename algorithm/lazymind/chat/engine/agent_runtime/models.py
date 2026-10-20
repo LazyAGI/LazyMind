@@ -114,27 +114,10 @@ class FallbackRunState:
     switch_index: int = 0
     initial_model_switch: Optional[dict[str, Any]] = field(default=None, repr=False)
     usage_snapshot: dict[str, Any] = field(default_factory=dict, repr=False)
-    workspace: Optional[str] = field(default=None, repr=False)
-    keep_recent: Optional[int] = None
-    tool_retrieval: Any = field(default=None, repr=False)
     model_output_index: int = 0
-
-
-@dataclass
-class PreparedContext:
-    budget: ContextBudget
-    input: Any = field(default=None, repr=False)
-    history: list[dict[str, Any]] = field(default_factory=list, repr=False)
-    current_messages: list[dict[str, Any]] = field(default_factory=list, repr=False)
-    projection: dict[str, Any] = field(default_factory=dict, repr=False)
-    spill_plans: list[Any] = field(default_factory=list, repr=False)
-    prune_events: list[Any] = field(default_factory=list, repr=False)
-    candidate_events: list[dict[str, Any]] = field(default_factory=list, repr=False)
-    summary_event: Any = field(default=None, repr=False)
-    summary_text: str = field(default='', repr=False)
-    summary_covered: int = 0
-    summary_runtime: dict[str, Any] = field(default_factory=dict, repr=False)
-    context_compacted: bool = False
+    call_control: Any = field(default=None, repr=False)
+    model_history: Optional[list[dict[str, Any]]] = field(default=None, repr=False)
+    current_message_count: int = 0
 
 
 @dataclass(frozen=True)
