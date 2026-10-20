@@ -27,25 +27,13 @@ export interface WorkflowControlRequest extends Pick<WorkflowControlCommand, 'co
 
 export class ReviewRefreshRequired extends Error {}
 
-/** Banner copy after a typed panel command. Recovery is local; continue/stop still depend on the host. */
-export function controlNoticeKey(kind: WorkflowActionKind): string {
-  if (kind === 'save') return 'chat.workflowControlSaved';
-  if (kind === 'confirm') return 'chat.workflowControlConfirmed';
-  if (kind === 'retry' || kind === 'rewind') return 'chat.workflowControlRecovered';
-  return 'chat.workflowControlAccepted';
-}
-
-export const CONTROL_NOTICE_TTL_MS = 4000;
 export const REVIEW_CHANGED_NOTICE = 'chat.workflowControlReviewChanged';
 
 export type OverlayInfoBanner = { key: string; tone: 'info' | 'warning' };
 
-/** Live host-delivery strip. Accepted receipts do not get a second info banner. */
+/** Only delivery problems need a banner; routine delivery stays silent. */
 export function deliveryBanner(delivery: WorkflowControlView['delivery'] | null | undefined, binding?: WorkflowControlView['binding']): OverlayInfoBanner | undefined {
   if (!delivery || delivery.consumed_at) return undefined;
-  if (delivery.status === 'pending' || delivery.status === 'dispatching') {
-    return { key: 'chat.workflowControlDeliveryPending', tone: 'info' };
-  }
   if (delivery.status === 'unknown') return { key: 'chat.workflowControlDeliveryUnknown', tone: 'warning' };
   if (delivery.status === 'failed' && delivery.kind === 'cancel' && binding?.provider === 'codex') {
     return { key: 'chat.workflowControlCodexStopped', tone: 'info' };
@@ -57,7 +45,7 @@ export function deliveryBanner(delivery: WorkflowControlView['delivery'] | null 
 /** At most one info/warning strip so the panel workspace is not squeezed by stacked Alerts. */
 export function overlayInfoBanner(noticeKey: string, delivery: WorkflowControlView['delivery'] | null | undefined, binding?: WorkflowControlView['binding']): OverlayInfoBanner | undefined {
   if (noticeKey === REVIEW_CHANGED_NOTICE) return { key: noticeKey, tone: 'info' };
-  return deliveryBanner(delivery, binding) ?? (noticeKey ? { key: noticeKey, tone: 'info' } : undefined);
+  return deliveryBanner(delivery, binding);
 }
 
 export function deliveryPending(control: WorkflowControlView): boolean {

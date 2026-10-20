@@ -45,3 +45,58 @@ def test_attachment_names_are_deduplicated_only_within_each_turn(tmp_path) -> No
     }, current_turn_seq=2)
 
     assert [item.display_name for item in attachments] == ['design.png', 'design.png']
+
+
+def test_current_small_spreadsheet_is_inlined_but_historical_one_is_not(tmp_path) -> None:
+    current = tmp_path / 'current.csv'
+    historical = tmp_path / 'historical.csv'
+    current.write_text('name,value\ncurrent,7\n', encoding='utf-8')
+    historical.write_text('name,value\nhistorical,9\n', encoding='utf-8')
+    attachments = normalize_attachments(
+        {'2': [str(current)], '1': [str(historical)]},
+        current_turn_seq=2,
+    )
+
+    rendered = render_attachment_content(
+        attachments,
+        role=AgentRole.CHAT,
+        current_turn_seq=2,
+    )
+
+    assert 'Current-turn spreadsheet content' in rendered
+    assert 'current,7' in rendered
+    assert 'historical,9' not in rendered
+
+
+def test_large_spreadsheet_context_tells_model_to_use_python(tmp_path) -> None:
+    path = tmp_path / 'large.csv'
+    path.write_text(
+        'id,value\n' + ''.join(f'{index},{index}\n' for index in range(201)),
+        encoding='utf-8',
+    )
+    attachments = normalize_attachments({'3': [str(path)]}, current_turn_seq=3)
+
+    rendered = render_attachment_content(
+        attachments,
+        role=AgentRole.CHAT,
+        current_turn_seq=3,
+    )
+
+    assert 'Large spreadsheet detected' in rendered
+    assert 'Python execution tool with pandas' in rendered
+    assert '200,200' not in rendered
+
+
+def test_inline_spreadsheet_escapes_prompt_template_placeholders(tmp_path) -> None:
+    path = tmp_path / 'prompt.csv'
+    path.write_text('name,value\ninput,{query}\n', encoding='utf-8')
+    attachments = normalize_attachments({'1': [str(path)]}, current_turn_seq=1)
+
+    rendered = render_attachment_content(
+        attachments,
+        role=AgentRole.CHAT,
+        current_turn_seq=1,
+    )
+
+    assert '{ query }' in rendered
+    assert '{query}' not in rendered

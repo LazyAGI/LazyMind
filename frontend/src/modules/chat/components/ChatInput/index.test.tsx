@@ -1,5 +1,6 @@
-import { fireEvent, render as renderComponent, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render as renderComponent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getRuntimeMode } from "@/runtime/mode";
 import {
   NEW_CHAT_MODEL_SELECTION_KEY,
   useModelSelectionStore,
@@ -7,14 +8,21 @@ import {
   type ChatModelSelectionRequest,
 } from "@/modules/chat/store/modelSelection";
 import ChatInput from ".";
-import { useState, type ReactNode } from "react";
-import { useChatInputStore } from "../../store/chatInput";
+import { createRef, useState, type ReactNode } from "react";
+import { useChatInputStore, type ChatModeDraft } from "../../store/chatInput";
+import { useChatMessageStore } from "../../store/chatMessage";
+import type { ChatFileList, ChatInputImperativeProps } from "./types";
 import type { ChatMention } from "./MentionEditor";
 import { listSkillLinkedWorkflows } from "@/modules/workflow/workflowDraftApi";
 import { message } from "antd";
 import { MemoryRouter } from "react-router-dom";
 
 const render = (ui: ReactNode) => renderComponent(ui, { wrapper: MemoryRouter });
+
+vi.mock("@/runtime/mode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/runtime/mode")>()),
+  getRuntimeMode: vi.fn(() => "local"),
+}));
 
 vi.mock("../SkillRecording", () => ({ default: () => null }));
 
@@ -79,19 +87,34 @@ vi.mock("../ImageUpload", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
   return {
     allowedImageTypes: [".png"],
-    allowedFileTypes: [".pdf"],
+    allowedSpreadsheetTypes: [".csv", ".tsv", ".xls", ".xlsx"],
+    allowedFileTypes: [".pdf", ".csv", ".tsv", ".xls", ".xlsx"],
     allowedTextTypes: [".txt"],
-    allowedUploadTypes: [".png", ".pdf", ".txt"],
-    default: React.forwardRef(function MockImageUpload(_props, ref) {
+    allowedUploadTypes: [".png", ".pdf", ".csv", ".tsv", ".xls", ".xlsx", ".txt"],
+    default: React.forwardRef(function MockImageUpload(props: {
+      max: number;
+      listNum: number;
+      updateFiles: (files: (File & { uid: string; uri: string })[]) => void;
+    }, ref) {
+      const files = React.useRef<(File & { uid: string; uri: string })[]>([]);
       React.useImperativeHandle(ref, () => ({
-        clear: vi.fn(),
-        getFiles: () => [],
+        clear: () => { files.current = []; props.updateFiles([]); },
+        getFiles: () => files.current,
         getUploadingCount: () => 0,
         openFileDialog: vi.fn(),
-        removeFile: vi.fn(),
-        uploadFiles: vi.fn(),
+        removeFile: (uid: string) => {
+          files.current = files.current.filter(file => file.uid !== uid);
+          props.updateFiles(files.current);
+        },
+        uploadFiles: (incoming: File[]) => {
+          for (const file of incoming) {
+            if (files.current.length >= props.max) break;
+            files.current.push(Object.assign(file, { uid: file.name, uri: `/uploads/${file.name}` }));
+          }
+          props.updateFiles(files.current);
+        },
       }));
-      return null;
+      return <span data-testid="upload-slots" data-max={props.max} data-count={props.listNum} />;
     }),
   };
 });
@@ -116,8 +139,15 @@ vi.mock("../BatchChat", async () => {
   };
 });
 
-vi.mock("../ShowChatFileList", () => ({ default: () => null }));
-vi.mock("./ContextUsageButton", () => ({ default: () => null }));
+vi.mock("../ShowChatFileList", () => ({
+  default: ({ fileList, onRemove }: { fileList: ChatFileList[]; onRemove: (uid: string) => void }) => (
+    <div aria-label="attachments">{fileList.map((file, index) => (
+      <button key={index} onClick={() => onRemove(file.uid)}>{file.name}</button>
+    ))}</div>
+  ),
+}));
+const contextPreview = vi.hoisted(() => ({ build: null as null | (() => Record<string, any>) }));
+vi.mock("./ContextUsageButton", () => ({ default: (props: { buildRequest: () => Record<string, any> }) => { contextPreview.build = props.buildRequest; return null; } }));
 vi.mock("./LocalWorkspaceControl", () => ({
   default: ({ conversationId, onChange, onSavingChange }: { onSavingChange?: (saving: boolean) => void; conversationId?: string; onChange: (id: string | undefined, mode: "ask_as_needed" | "allow_all") => void }) => (
     <div data-testid="local-workspace-control">
@@ -136,6 +166,119 @@ vi.mock("@/modules/memory/toolApi", () => ({
 }));
 
 describe("ChatInput model switch save lock", () => {
+  beforeEach(() => {
+    vi.mocked(getRuntimeMode).mockReturnValue("local");
+  });
+
+  it.each([
+    ["cloud", true, true, false],
+    ["local", true, true, true],
+    ["desktop", true, true, true],
+    ["cloud", false, true, false],
+    ["local", false, true, false],
+    ["desktop", false, true, false],
+    ["cloud", true, false, false],
+    ["local", true, false, false],
+    ["desktop", true, false, false],
+  ] as const)("workspace visibility: %s, task=%s, allowed=%s → %s", (runtime, runInBackground, allowLocalWorkspace, visible) => {
+    vi.mocked(getRuntimeMode).mockReturnValue(runtime);
+    const { container } = render(<ChatInput value="" onChange={vi.fn()} isChatContent
+      runInBackground={runInBackground} allowLocalWorkspace={allowLocalWorkspace}
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+
+    expect(Boolean(screen.queryByTestId("local-workspace-control"))).toBe(visible);
+    expect(Boolean(container.querySelector(".chat-input-environment"))).toBe(visible);
+    expect(container.querySelector(".chat-input-surface")?.classList.contains("has-environment")).toBe(visible);
+  });
+
+  it('captures the visible draft before a mode switch request', () => {
+    const rects = vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
+    try {
+      render(<ChatInput value='Keep historical draft' onChange={vi.fn()} isChatContent sessionId='draft-source' runInBackground
+        showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+      window.dispatchEvent(new CustomEvent('lazymind:chat-capture-mode-draft', { detail: { runInBackground: false } }));
+      expect(useChatInputStore.getState().modeDraft).toMatchObject({ text: 'Keep historical draft', mentions: [] });
+    } finally { rects.mockRestore(); useChatInputStore.getState().setModeDraft(); }
+  });
+
+  it('keeps uploads unique and removable across repeated welcome mode switches', async () => {
+    const rects = vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
+    const ref = createRef<ChatInputImperativeProps>();
+    let runInBackground = false;
+    const input = (draft?: ChatModeDraft) => <ChatInput ref={ref} value="Summarize" onChange={vi.fn()}
+      isChatContent={false} runInBackground={runInBackground}
+      transferredDraft={draft} conversationFiles={draft?.files}
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />;
+    try {
+      const view = render(input());
+      await act(async () => ref.current?.uploadFiles([new File(['test'], 'photo.png', { type: 'image/png' })]));
+      const attachments = () => within(screen.getByLabelText('attachments')).queryAllByRole('button');
+      await waitFor(() => expect(attachments()).toHaveLength(1));
+      for (let index = 0; index < 4; index++) {
+        runInBackground = !runInBackground;
+        fireEvent(window, new CustomEvent('lazymind:chat-capture-mode-draft', { detail: { runInBackground } }));
+        const draft = useChatInputStore.getState().modeDraft;
+        expect(draft?.files).toHaveLength(1);
+        view.rerender(input(draft));
+        expect(attachments()).toHaveLength(1);
+        // The uploader still owns one local file and must retain its full capacity.
+        expect(screen.getByTestId('upload-slots')).toHaveAttribute('data-max', '3');
+      }
+      expect(contextPreview.build?.().input).toEqual([
+        expect.objectContaining({ input_type: 'text' }),
+        { input_type: 'image', uri: '/uploads/photo.png', filename: 'photo.png' },
+      ]);
+      fireEvent.click(attachments()[0]);
+      await waitFor(() => expect(attachments()).toHaveLength(0));
+      runInBackground = !runInBackground;
+      fireEvent(window, new CustomEvent('lazymind:chat-capture-mode-draft', { detail: { runInBackground } }));
+      const draft = useChatInputStore.getState().modeDraft;
+      expect(draft?.files).toEqual([]);
+      view.rerender(input(draft));
+      expect(attachments()).toHaveLength(0);
+      fireEvent.click(screen.getByRole('button', { name: 'chat.send' }));
+      await waitFor(() => expect(useChatMessageStore.getState().pendingMessage).toMatchObject({ referencedFiles: [] }));
+    } finally {
+      rects.mockRestore();
+      act(() => { useChatInputStore.getState().setModeDraft(); useChatMessageStore.getState().clearPendingMessage(); });
+    }
+  });
+
+  it('counts only restored-only uploads against new upload slots', async () => {
+    const ref = createRef<ChatInputImperativeProps>();
+    const draft = { text: 'Summarize', mentions: [], files: [{ id: 'upload:old', name: 'old.png', input: {
+      input_type: 'image' as const, uri: '/uploads/old.png', filename: 'old.png',
+    } }] };
+    render(<ChatInput ref={ref} value={draft.text} onChange={vi.fn()} isChatContent={false}
+      transferredDraft={draft} conversationFiles={draft.files}
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+    expect(screen.getByTestId('upload-slots')).toHaveAttribute('data-max', '2');
+    await act(async () => ref.current?.uploadFiles([new File(['test'], 'new.png', { type: 'image/png' })]));
+    await waitFor(() => expect(within(screen.getByLabelText('attachments')).getAllByRole('button')).toHaveLength(2));
+    // The restored file has already reduced max; it must not also count as local.
+    expect(screen.getByTestId('upload-slots')).toHaveAttribute('data-count', '1');
+    expect(screen.getByTestId('upload-slots')).toHaveAttribute('data-max', '2');
+    await act(async () => ref.current?.uploadFiles([new File(['test'], 'other.png', { type: 'image/png' })]));
+    await waitFor(() => expect(within(screen.getByLabelText('attachments')).getAllByRole('button')).toHaveLength(3));
+    fireEvent.click(screen.getByRole('button', { name: 'old.png' }));
+    expect(within(screen.getByLabelText('attachments')).getAllByRole('button')).toHaveLength(2);
+    expect(screen.getByTestId('upload-slots')).toHaveAttribute('data-max', '3');
+    expect(contextPreview.build?.().input).toHaveLength(3);
+  });
+
+  it('adapts a restored current-conversation file identically for preview and send', async () => {
+    const mention = { mention_id: 'file-chip', type: 'file' as const, resource_id: 'history:h1:0', display_name: 'report.pdf', start: 0, end: 10 };
+    useChatInputStore.getState().saveInputContent('file-conversation', 'report.pdf 总结', [mention]);
+    const input = { input_type: 'file' as const, uri: '/uploads/report.pdf', filename: 'report.pdf' };
+    const onSend = vi.fn();
+    render(<ChatInput value='report.pdf 总结' onChange={vi.fn()} isChatContent sessionId='file-conversation'
+      onSend={onSend} conversationFiles={[{ id: mention.resource_id, name: mention.display_name, input }]}
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+    expect(contextPreview.build?.()).toMatchObject({ mentions: [], input: [expect.objectContaining({ input_type: 'text' }), input] });
+    fireEvent.click(screen.getByRole('button', { name: 'chat.send' }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ mentions: [], referencedFiles: [input] })));
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
     useModelSelectionStore.getState().resetForNewChat();
@@ -170,6 +313,7 @@ describe("ChatInput model switch save lock", () => {
     );
 
     const sendButton = screen.getByRole("button", { name: "chat.send" });
+    fireEvent.click(screen.getByRole("button", { name: "chat.addResource" }));
     const skillDepositButton = screen.getByRole("button", {
       name: /chat\.skillDeposit/,
     });
@@ -214,6 +358,7 @@ describe("ChatInput model switch save lock", () => {
     );
 
     const sendButton = screen.getByRole("button", { name: "chat.send" });
+    fireEvent.click(screen.getByRole("button", { name: "chat.addResource" }));
     const skillDepositButton = screen.getByRole("button", {
       name: /chat\.skillDeposit/,
     });

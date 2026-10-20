@@ -62,7 +62,7 @@ export function fingerprintArtifact(raw: unknown): string {
 
 export function rasterCacheKey(sessionId: string, fingerprint: string): string {
   // Bump prefix when capture pipeline changes so stale/failed shots are not reused.
-  return `${sessionId || '_'}::v7::${fingerprint}`;
+  return `${sessionId || '_'}::v8::${fingerprint}`;
 }
 
 export function getRasterPng(key: string): string | null {
@@ -71,7 +71,7 @@ export function getRasterPng(key: string): string | null {
 
 // Cache Storage persists across refreshes and local service restarts. These
 // synthetic same-origin URLs are cache keys only; no server route is requested.
-const DISK_CACHE = 'lazymind-slide-thumbnails-v7';
+const DISK_CACHE = 'lazymind-slide-thumbnails-v8';
 const MAX_SAVED_SHOTS = 96;
 function diskKey(key: string): string {
   return `${location.origin}/__lazymind_slide_thumbnails__/${encodeURIComponent(key)}`;

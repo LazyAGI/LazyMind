@@ -1,3 +1,4 @@
+import type { DragEndEvent } from "@dnd-kit/core";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { beforeEach, expect, it, vi } from "vitest";
@@ -5,12 +6,17 @@ import GroupPage from "./GroupPage";
 import * as api from "./api";
 import { readChatConversationFilters, CHAT_NEW_RUN_IN_BACKGROUND_KEY, CHAT_PENDING_CONVERSATION_GROUP_KEY } from "../constants/chat";
 
+const order = vi.hoisted(() => ({ save: vi.fn(), end: (_event: DragEndEvent): void | Promise<void> => {} }));
+vi.mock("@dnd-kit/core", async original => {
+  const actual = await original<typeof import("@dnd-kit/core")>();
+  return { ...actual, DndContext: (props: React.ComponentProps<typeof actual.DndContext>) => { order.end = props.onDragEnd!; return <actual.DndContext {...props} />; } };
+});
 const t = (key: string) => key;
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t }) }));
 vi.mock("../hooks/useChatModelProviderGuard", () => ({ useChatModelProviderGuard: () => ({ canChat: true }) }));
 vi.mock("../components/ChatInput", () => ({ default: ({ runInBackground, setIsChatContent }: any) => <button onClick={() => setIsChatContent(true)}>{runInBackground ? "Start task" : "Start chat"}</button> }));
 vi.mock("@/components/request", () => ({ axiosInstance: {}, BASE_URL: "", getLocalizedErrorMessage: () => "Save failed" }));
-vi.mock("@/modules/chat/utils/request", () => ({ ChatServiceApi: () => ({}) }));
+vi.mock("@/modules/chat/utils/request", () => ({ ChatServiceApi: () => ({ conversationServiceReorder: order.save }) }));
 vi.mock("../components/ConversationTitleEditor", () => ({ default: () => null }));
 vi.mock("./useOrganizerNameLock", () => ({ default: () => false }));
 vi.mock("./ConversationMembership", () => ({ default: () => null }));
@@ -63,4 +69,24 @@ it("reloads group detail when the source filter changes", async () => {
   await screen.findByText('codex');
   expect(screen.queryByText('all')).not.toBeInTheDocument();
   expect(api.getConversationGroup).toHaveBeenLastCalledWith('chat', '', '', 'codex');
+});
+
+it.each(["group", "project"])("sorts %s members immediately and preserves membership", async kind => {
+  const first = { conversation_id: "a", display_name: "Member A", membership_revision: 7 };
+  const second = { conversation_id: "b", display_name: "Member B", membership_revision: 7 };
+  let saved = false;
+  vi.mocked(api.getConversationGroup).mockImplementation(async () => ({ ...detail("chat", false), group: { ...detail("chat", false).group, kind }, conversations: saved ? [second, first] : [first, second] }));
+  let finish!: (value: unknown) => void;
+  order.save.mockReturnValue(new Promise(resolve => { finish = value => { saved = true; resolve(value); }; }));
+  view();
+  await screen.findByText("Member A");
+  await act(async () => { void order.end({ active: { id: "b" }, over: { id: "a" } } as DragEndEvent); });
+  const titles = () => [...document.querySelectorAll(".conversation-group-page-item [data-conversation-title]")].map(node => node.textContent);
+  expect(titles()).toEqual(["Member B", "Member A"]);
+  expect(order.save).toHaveBeenCalledWith("b", "a", "before");
+  expect(api.updateConversationGroup).not.toHaveBeenCalled();
+  expect(api.updateGroupPlacement).not.toHaveBeenCalled();
+  await act(async () => finish({ data: { conversation_id: "b", history_order: 1, is_pinned: false, order_updates: [] } }));
+  await waitFor(() => expect(api.getConversationGroup).toHaveBeenCalledTimes(2));
+  expect(titles()).toEqual(["Member B", "Member A"]);
 });

@@ -1,7 +1,7 @@
 {
   "name": "@lazymind/dsh-workflow",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.4",
   "type": "module",
   "exports": {
     ".": "./lib/index.js",
@@ -40,17 +40,19 @@
     "@deepseek-ai/dsh-client-ui-conversation": "0.1.6-alpha.1",
     "@deepseek-ai/dsh-client-ui-layout": "0.1.6-alpha.1",
     "@deepseek-ai/dsh-client-ui-renderer": "0.1.6-alpha.1",
-    "@deepseek-ai/dsh-session": "0.1.6-alpha.1",
+    "@deepseek-ai/dsh-goal": "0.1.6-alpha.1",
     "@deepseek-ai/dsh-scope": "0.1.6-alpha.1",
+    "@deepseek-ai/dsh-session": "0.1.6-alpha.1",
     "@deepseek-ai/dsh-system-prompt": "0.1.6-alpha.1",
     "@deepseek-ai/dsh-tools": "0.1.6-alpha.1",
     "@types/node": "24.3.0",
     "@types/react": "18.3.28",
+    "@types/react-dom": "18.3.7",
     "react": "18.3.1",
+    "react-dom": "18.3.1",
     "tsdown": "0.19.0",
     "typescript": "5.9.3",
-    "vitest": "2.1.9",
-    "@deepseek-ai/dsh-goal": "0.1.6-alpha.1"
+    "vitest": "2.1.9"
   },
   "scripts": {
     "bundle": "tsdown",

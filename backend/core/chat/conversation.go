@@ -622,17 +622,16 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-			persisted := persistImmediateRunTerminal(r.Context(), db, convID, historyID, displayQuery, runID, target, historyExt, &RunTerminal{
+			terminal := &RunTerminal{
 				Status:        "failed",
 				Reason:        "model_failure",
-				Code:          "not_found",
+				Code:          "model_configuration",
 				PartialOutput: false,
-			})
-			appErr := common.ResolveAppError(err.Error(), http.StatusServiceUnavailable)
-			if persisted {
-				appErr = appErr.WithDetail(map[string]string{"history_id": historyID})
 			}
-			common.ReplyAppErr(w, appErr)
+			if !persistImmediateRunTerminal(r.Context(), db, convID, historyID, displayQuery, runID, target, historyExt, terminal) {
+				historyID = ""
+			}
+			replyChatTerminalError(w, err.Error(), http.StatusServiceUnavailable, terminal, historyID)
 			return
 		}
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load chat runtime config failed", err), http.StatusInternalServerError)
@@ -2360,6 +2359,8 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 		Order(rootUpdated + " DESC").
 		Order("COALESCE(history_parent_id, conversations.id) ASC").
 		Order("CASE WHEN history_parent_id IS NULL THEN 0 ELSE 1 END ASC").
+		Order("CASE WHEN history_parent_id IS NOT NULL AND conversations.history_order IS NULL THEN 0 ELSE 1 END ASC").
+		Order("CASE WHEN history_parent_id IS NOT NULL THEN conversations.history_order END ASC").
 		Order("updated_at DESC").
 		Order("conversations.id ASC").
 		Offset(offset).

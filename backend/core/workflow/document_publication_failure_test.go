@@ -1,18 +1,25 @@
 package workflow
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"lazymind/core/common/orm"
+	appLog "lazymind/core/log"
 )
 
 func TestDocumentPublicationReportsConversionFailureBeforeWriting(t *testing.T) {
 	for _, provider := range []string{"feishu", "notion", "github", "wechat", "obsidian"} {
 		t.Run(provider, func(t *testing.T) {
+			var logs bytes.Buffer
+			previousLogger := appLog.Logger
+			appLog.Logger = zerolog.New(&logs)
+			t.Cleanup(func() { appLog.Logger = previousLogger })
 			f, input := publicationFixture(t, false)
 			input.Provider = provider
 			conversions := 0
@@ -64,6 +71,18 @@ func TestDocumentPublicationReportsConversionFailureBeforeWriting(t *testing.T) 
 			mustPublicationErrorNil(t, f.db.First(&stored, "id = ?", op.ID).Error)
 			if stored.Status != "failed_no_write" || stored.ErrorCode != "DOCUMENT_CONVERSION_FAILED" {
 				t.Fatalf("durable status=%s code=%s", stored.Status, stored.ErrorCode)
+			}
+			var event map[string]any
+			if err := json.Unmarshal(logs.Bytes(), &event); err != nil {
+				t.Fatalf("missing publication failure log: %v", err)
+			}
+			if event["operation_id"] != stored.ID || event["session_id"] != stored.SessionID || event["artifact_id"] != stored.SourceRevisionID || event["error_code"] != stored.ErrorCode {
+				t.Fatalf("failure log cannot identify the publication: %#v", event)
+			}
+			for _, private := range []string{"private provider details", "fixture-conversion-token", "# Draft"} {
+				if strings.Contains(logs.String(), private) {
+					t.Fatal("publication log contains private content")
+				}
 			}
 			_, _, replayErr := PublishDocumentArtifact(t.Context(), f.db.DB, "owner", f.currentRevisionID, body, nil)
 			if replayErr == nil || publicationFailure(replayErr).code != stored.ErrorCode || conversions != 1 {

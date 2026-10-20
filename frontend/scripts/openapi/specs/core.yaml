@@ -756,6 +756,25 @@ components:
                     format: int64
                     type: integer
             type: object
+        ChatErrorData:
+            properties:
+                detail:
+                    description: Legacy error detail; persisted chat failures include history_id.
+                run_terminal:
+                    $ref: '#/components/schemas/RunTerminal'
+            type: object
+        ChatErrorResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/ChatErrorData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+            type: object
         ChatExport:
             properties:
                 content_type:
@@ -7151,6 +7170,33 @@ components:
                 - reason
                 - settings_url
             type: object
+        ModelFailureCode:
+            enum:
+                - authentication_failed
+                - balance_exhausted
+                - concurrency_limited
+                - conflict
+                - input_filtered
+                - invalid_request
+                - model_configuration
+                - not_found
+                - organization_spend_limit_exceeded
+                - output_filtered
+                - permission_denied
+                - project_spend_limit_exceeded
+                - protocol_error
+                - provider_internal_error
+                - provider_overloaded
+                - provider_rejected
+                - quota_exhausted
+                - rate_limited
+                - request_timeout
+                - service_unavailable
+                - token_limit
+                - transport_error
+                - unprocessable_entity
+                - usage_limit_exceeded
+            type: string
         ModelFeaturesResponse:
             properties:
                 image_embed_enabled:
@@ -8493,6 +8539,16 @@ components:
                         - failed
                         - cancelled
                     type: string
+                transport_diagnostic:
+                    properties:
+                        code:
+                            enum:
+                                - upstream_stream_failed
+                                - upstream_stream_timeout
+                            type: string
+                    required:
+                        - code
+                    type: object
             required:
                 - status
                 - reason
@@ -11736,6 +11792,76 @@ components:
                 - code
                 - message
             type: object
+        knowledgeMarketTaskFileCountsOpenAPIResponse:
+            properties:
+                canceled:
+                    type: integer
+                failed:
+                    type: integer
+                success:
+                    type: integer
+                unfinished:
+                    type: integer
+            required:
+                - canceled
+                - failed
+                - success
+                - unfinished
+            type: object
+        knowledgeMarketTaskFileOpenAPIResponse:
+            properties:
+                file_id:
+                    type: string
+                name:
+                    type: string
+                reason_code:
+                    enum:
+                        - success
+                        - canceled
+                        - waiting
+                        - processing
+                        - unknown
+                        - parse_failed
+                        - import_failed
+                        - missing_task
+                        - rate_limited
+                    type: string
+                status:
+                    enum:
+                        - success
+                        - failed
+                        - canceled
+                        - unfinished
+                    type: string
+            required:
+                - file_id
+                - name
+                - reason_code
+                - status
+            type: object
+        knowledgeMarketTaskFilesOpenAPIResponse:
+            properties:
+                counts:
+                    $ref: '#/components/schemas/knowledgeMarketTaskFileCountsOpenAPIResponse'
+                file_details_available:
+                    type: boolean
+                items:
+                    items:
+                        $ref: '#/components/schemas/knowledgeMarketTaskFileOpenAPIResponse'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    type: integer
+            required:
+                - counts
+                - file_details_available
+                - page
+                - page_size
+                - total
+            type: object
         knowledgeMarketTaskListItemOpenAPIResponse:
             properties:
                 can_cancel:
@@ -11771,6 +11897,8 @@ components:
                 overall_percent:
                     format: int64
                     type: integer
+                parse:
+                    $ref: '#/components/schemas/knowledgeMarketTaskParseOpenAPIResponse'
                 progress:
                     $ref: '#/components/schemas/knowledgeMarketTaskProgressOpenAPIResponse'
                 stage:
@@ -18846,7 +18974,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/ConversationPinResponse'
                     description: Conversation reordered
-            summary: Move a conversation within its pinned or ordinary history
+            summary: Move a conversation within its pinned, recent, group, project or sibling list without changing relationships
     /api/core/conversations/{conversation_id}:restore:
         post:
             parameters:
@@ -19352,6 +19480,12 @@ paths:
                             schema:
                                 type: string
                     description: Chat event stream
+                default:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ChatErrorResponse'
+                    description: Chat rejection; run_terminal, when present, is the same authoritative outcome returned by history
             summary: Chat; optional group_id atomically assigns a newly created conversation
     /api/core/conversations:editable-block:
         patch:
@@ -22990,11 +23124,19 @@ paths:
                         - failed
                         - canceled
                     type: string
-                - description: Async job type; defaults to knowledge_market_install.
+                - description: Async job type or all; defaults to knowledge_market_install.
                   in: query
                   name: job_type
                   required: false
                   schema:
+                    type: string
+                - description: Summary omits per-file failures; pagination is clamped to available pages.
+                  in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - summary
                     type: string
             responses:
                 "200":
@@ -23004,6 +23146,47 @@ paths:
                                 $ref: '#/components/schemas/knowledgeMarketTaskListOpenAPIResponse'
                     description: Background install task list
             summary: List background knowledge market tasks
+            tags:
+                - knowledge-market
+    /api/core/knowledge-market/tasks/{job_id}/files:
+        get:
+            description: Returns the current user's job-owned file page and all four counts. Historical file snapshots are immutable. Unknown states are unfinished. Aggregate-only history reports file_details_available=false. Page numbers are clamped; page and page_size must be positive integers, page_size at most 100.
+            parameters:
+                - in: path
+                  name: job_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - description: Default 10, maximum 100.
+                  in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - description: Default failed.
+                  in: query
+                  name: status
+                  required: false
+                  schema:
+                    enum:
+                        - success
+                        - failed
+                        - canceled
+                        - unfinished
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskFilesOpenAPIResponse'
+                    description: Task file page
+            summary: List files for one knowledge market task
             tags:
                 - knowledge-market
     /api/core/knowledge-market/tasks/{job_id}:

@@ -648,6 +648,10 @@ test("macOS CI notarizes ZIP then DMG and fails when notarization times out", ()
   assert.match(buildWorkflow, /name:\s*Upload rejected DMG notarization diagnostics/);
   assert.match(buildWorkflow, /zip-notarization-log\.json/);
   assert.match(buildWorkflow, /dmg-notarization-log\.json/);
+  assert.equal(buildWorkflow.match(/retry_stapler\(\) \{/g)?.length, 2);
+  assert.equal(buildWorkflow.match(/for attempt in 1 2 3 4 5; do/g)?.length, 2);
+  assert.match(buildWorkflow, /retry_stapler staple "\$\{app_path\}"/);
+  assert.match(buildWorkflow, /retry_stapler validate "\$\{app_path\}"/);
   assert.match(buildWorkflow, /stapler staple "\$\{final_path\}"/);
   assert.match(buildWorkflow, /stapler validate "\$\{final_path\}"/);
   assert.match(buildWorkflow, /test-macos-installer:/);

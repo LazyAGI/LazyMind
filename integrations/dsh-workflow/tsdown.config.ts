@@ -27,7 +27,7 @@ export default defineConfig([
     target: 'es2024',
     dts: false,
     clean: false,
-    external: ['react', 'react/jsx-runtime'],
+    external: ['react', 'react/jsx-runtime', 'react-dom'],
     outputOptions: {
       entryFileNames: 'client.js',
       banner: 'window.__ModuleLoader__.load({ id: "@lazymind/dsh-workflow", factory: (require) => {',

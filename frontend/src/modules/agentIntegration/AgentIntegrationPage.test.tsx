@@ -1,7 +1,12 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createInstance } from "i18next";
+import zhCN from "@/i18n/locales/zh-CN";
+import enUS from "@/i18n/locales/en-US";
 import AgentIntegrationPage from "./AgentIntegrationPage";
+
+const retryI18n = createInstance();
 
 const mocks = vi.hoisted(() => ({
   statuses: vi.fn(),
@@ -44,6 +49,7 @@ vi.mock("./externalCapabilitiesApi", () => ({
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, options?: { defaultValue?: string; agent?: string; count?: number }) => {
+      if (key === "agentIntegration.retryDisconnection") return retryI18n.t(key);
       const agent = options?.agent || "Agent";
       const values: Record<string, string> = {
         "common.refresh": "刷新",
@@ -203,7 +209,11 @@ function expandAgent(id: string) {
 }
 
 describe("AgentIntegrationPage", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await retryI18n.init({
+      lng: "zh-CN", fallbackLng: false,
+      resources: { "zh-CN": { translation: zhCN }, "en-US": { translation: enUS } },
+    });
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.platform.mockReturnValue("win32");
     mocks.statuses.mockResolvedValue({ ok: true, data: { codex: readyCodexStatus } });
@@ -224,6 +234,119 @@ describe("AgentIntegrationPage", () => {
       summary: { total: 0, succeeded: 0, failed: 0, running: 0, model_calls: 0, tool_calls: 0, capabilities: [] },
     });
     mocks.setCapability.mockResolvedValue(undefined);
+  });
+
+  it("offers retry for a partial DSH installation without a separate cleanup button", async () => {
+    const partial = {
+      agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "error",
+      can_connect: true, can_disconnect: true, message: "web: installation failed",
+      profiles: [{ name: "desktop", state: "enabled" }, { name: "web", state: "error" }],
+      requirements: [{ id: "dsh_desktop", description: "DSH Desktop installed", satisfied: true }],
+    };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": partial } });
+    let finish!: (value: unknown) => void;
+    mocks.action.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    render(<AgentIntegrationPage />);
+    const panel = expandAgent("deepseek-harness");
+    const retry = await within(panel).findByRole("button", { name: "agentIntegration.retryConnection" });
+    expect(within(panel).queryByRole("button", { name: "agentIntegration.removePartialConnection" })).not.toBeInTheDocument();
+    expect(within(panel).getByRole("switch")).toBeChecked();
+    expect(within(panel).getByRole("switch")).toBeEnabled();
+    fireEvent.click(retry);
+    expect(mocks.action).toHaveBeenCalledWith("deepseek-harness", "connect");
+    expect(retry).toBeDisabled();
+    const toggle = within(panel).getByRole("switch");
+    expect(toggle).toBeDisabled();
+    fireEvent.click(toggle);
+    fireEvent.click(retry);
+    expect(mocks.action).toHaveBeenCalledTimes(1);
+    await act(async () => finish({ ok: true, data: { ...partial, state: "enabled", message: "" } }));
+    expect(within(panel).getByRole("switch")).toBeChecked();
+    expect(screen.queryByRole("button", { name: "agentIntegration.retryConnection" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["switch", "zh-CN", "重试关闭"], ["retry", "zh-CN", "重试关闭"], ["refresh", "zh-CN", "重试关闭"],
+    ["switch", "en-US", "Retry disconnect"], ["retry", "en-US", "Retry disconnect"], ["refresh", "en-US", "Retry disconnect"],
+  ])("continues a failed DSH disconnect via %s in %s", async (method, language, retryLabel) => {
+    await retryI18n.changeLanguage(language);
+    const enabled = {
+      agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "enabled",
+      can_connect: true, can_disconnect: true,
+      requirements: [{ id: "dsh_desktop", description: "DSH installed", satisfied: true }],
+    };
+    const partial = { ...enabled, state: "error", retry_action: "disconnect", message: "close failed",
+      profiles: [{ name: "desktop", state: "ready" }, { name: "web", state: "error" }] };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": enabled } });
+    mocks.action.mockResolvedValueOnce({ ok: true, data: partial })
+      .mockResolvedValue({ ok: true, data: { ...enabled, state: "ready", can_disconnect: false } });
+    const view = render(<AgentIntegrationPage />);
+    let panel = expandAgent("deepseek-harness");
+    await waitFor(() => expect(within(panel).getByRole("switch")).toBeChecked());
+    fireEvent.click(within(panel).getByRole("switch"));
+    await within(panel).findByRole("button", { name: retryLabel });
+    expect(mocks.action).toHaveBeenLastCalledWith("deepseek-harness", "disconnect");
+    if (method === "refresh") {
+      view.unmount();
+      mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": partial } });
+      render(<AgentIntegrationPage />);
+      panel = expandAgent("deepseek-harness");
+      await within(panel).findByRole("button", { name: retryLabel });
+    }
+    expect(within(panel).getByRole("switch")).toBeChecked();
+    fireEvent.click(method === "switch" ? within(panel).getByRole("switch")
+      : within(panel).getByRole("button", { name: retryLabel }));
+    await waitFor(() => expect(mocks.action).toHaveBeenCalledTimes(2));
+    expect(mocks.action).toHaveBeenLastCalledWith("deepseek-harness", "disconnect");
+    expect(mocks.action).not.toHaveBeenCalledWith("deepseek-harness", "connect");
+    await waitFor(() => expect(within(panel).getByRole("switch")).not.toBeChecked());
+  });
+
+  it.each(["connect", "disconnect"])("keeps both card layouts locked during %s and unlocks after failure", async (operation) => {
+    const status = {
+      agent: "deepseek-harness", display_name: "DeepSeek Harness",
+      state: operation === "connect" ? "ready" : "enabled",
+      can_connect: true, can_disconnect: operation === "disconnect",
+      requirements: [{ id: "dsh_desktop", description: "DSH installed", satisfied: true }],
+    };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": status } });
+    let finish!: (value: unknown) => void;
+    mocks.action.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    render(<AgentIntegrationPage />);
+    const panel = screen.getByTestId("agent-panel-deepseek-harness");
+    const compactSwitch = await within(panel).findByRole("switch");
+    fireEvent.click(compactSwitch);
+    expect(compactSwitch).toBeDisabled();
+    fireEvent.click(compactSwitch);
+    expandAgent("deepseek-harness");
+    const expandedSwitch = within(panel).getByRole("switch");
+    expect(expandedSwitch).toBeDisabled();
+    fireEvent.click(expandedSwitch);
+    expect(mocks.action).toHaveBeenCalledTimes(1);
+    expect(mocks.action).toHaveBeenCalledWith("deepseek-harness", operation);
+    await act(async () => finish({ ok: false, reason: "request_failed" }));
+    expect(expandedSwitch).toBeEnabled();
+    fireEvent.click(expandedSwitch);
+    expect(mocks.action).toHaveBeenCalledTimes(2);
+    await act(async () => finish({ ok: true, data: status }));
+  });
+
+  it.each(["unsupported_version", "dependency_environment", "operation_failed"])("shows one concise DSH %s error and hides raw logs", async (code) => {
+    const status = { agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "error",
+      issue: { code, path: "/Users/example/DSH 中文/profiles/web" },
+      message: "ERR_PNPM_UNEXPECTED_STORE raw stack output that must never appear",
+      can_connect: false, requirements: [{ id: "dsh_desktop", satisfied: true }] };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": status } });
+    render(<AgentIntegrationPage />);
+    const key = `agentIntegration.dshErrors.${code}`;
+    expect(await screen.findAllByText(new RegExp(key))).toHaveLength(1);
+    const panel = expandAgent("deepseek-harness");
+    expect(within(panel).getAllByText(new RegExp(key))).toHaveLength(1);
+    expect(within(panel).queryByText(/raw stack/)).not.toBeInTheDocument();
+    expect(within(panel).queryByRole("button", { name: "agentIntegration.retryConnection" })).not.toBeInTheDocument();
+    expect(within(panel).getByRole("switch")).toBeDisabled();
+    if (code === "dependency_environment") expect(within(panel).getByText(/DSH 中文/)).toBeInTheDocument();
+    else expect(within(panel).queryByText(/DSH 中文/)).not.toBeInTheDocument();
   });
 
   it("hides per-capability configuration while retaining invocation history", async () => {

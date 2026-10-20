@@ -1,3 +1,4 @@
+import { useChatInputStore } from "@/modules/chat/store/chatInput";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Button, Dropdown, Form, Input, Layout, Modal, Popover, Spin, Tooltip, message } from "antd";
@@ -60,6 +61,7 @@ import {
   CHAT_HOME_PATH,
   CHAT_PENDING_CONVERSATION_GROUP_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
+  CHAT_CAPTURE_MODE_DRAFT_EVENT,
   getChatConversationPath,
   selectChatConversationFilter,
   readChatConversationFilters,
@@ -487,7 +489,9 @@ export default function MainLayout() {
     );
   };
 
-  const handleNewChat = (runInBackground = false) => {
+  const handleNewChat = (runInBackground = false, preserveModeDraft = true) => {
+    useChatInputStore.getState().setModeDraft();
+    if (preserveModeDraft) window.dispatchEvent(new CustomEvent(CHAT_CAPTURE_MODE_DRAFT_EVENT, { detail: { runInBackground } }));
     setCreateMenuOpen(false);
     sessionStorage.removeItem(CHAT_PENDING_CONVERSATION_GROUP_KEY);
     selectChatConversationFilter(runInBackground ? "task" : "normal");
@@ -497,7 +501,7 @@ export default function MainLayout() {
   };
 
   const handleNewChatInGroup = (groupId: string, isTaskConv = false) => {
-    handleNewChat(isTaskConv);
+    handleNewChat(isTaskConv, false);
     sessionStorage.setItem(CHAT_PENDING_CONVERSATION_GROUP_KEY, groupId);
   };
 

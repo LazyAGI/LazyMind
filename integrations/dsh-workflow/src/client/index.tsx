@@ -4,13 +4,17 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-tools/types'
 import type { ChatNode } from '@deepseek-ai/dsh-client-ui-chat/client'
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import { eventRun, type RunLink } from '../protocol'
 import { runKey, windowStore } from './window-store'
 
 declare module '@deepseek-ai/dsh-client-ui-chat/client' {
   interface ChatNodeDataMap { 'lazymind-workflow': RunLink }
 }
+
+// Electron drag regions intercept native mouse clicks even above lower z-index content.
+const interactiveRegion = { WebkitAppRegion: 'no-drag' } as CSSProperties
 
 export const inject = ['uiConversation', 'slots']
 
@@ -56,11 +60,38 @@ export function apply(ctx: ClientContext, config: { serverName?: string } = {}):
     const state = useSyncExternalStore(windows.subscribe, windows.snapshot, windows.snapshot)
     const current = state.entries[session.sessionId]
     const frame = useRef<HTMLIFrameElement>(null)
+    const anchor = useRef<HTMLSpanElement>(null)
+    const [tail, setTail] = useState<HTMLDivElement | null>(null)
     const [expanded, setExpanded] = useState(false)
     const [collapsed, setCollapsed] = useState(false)
+    const collapseAnchor = useRef<{ bottom: number; scroller: HTMLElement; runId?: string; sessionId: string } | null>(null)
     const runId = current?.run.runId
     const origin = current ? new URL(current.run.url).origin : undefined
+    useLayoutEffect(() => {
+      // DSH rc.2 exposes the composer seat inside the shared conversation scroller.
+      // Keep our own portal host before that seat: messages grow before the panel,
+      // while the iframe stays mounted and never becomes part of the sticky input.
+      const seat = anchor.current?.closest('[data-composer-seat]')
+      const scroller = seat?.parentElement
+      if (!seat || !scroller?.matches('[data-conversation-scroll]')) return
+      const host = document.createElement('div')
+      host.dataset.lazymindWorkflowTail = ''
+      host.style.cssText = 'flex:none;min-width:0;width:100%;position:relative;'
+      scroller.insertBefore(host, seat)
+      setTail(host)
+      return () => { host.remove() }
+    }, [session.sessionId])
     useEffect(() => { setExpanded(false); setCollapsed(false) }, [runId, session.sessionId])
+    useLayoutEffect(() => {
+      const saved = collapseAnchor.current
+      collapseAnchor.current = null
+      const panel = frame.current?.parentElement
+      if (!saved || !panel || expanded || saved.runId !== runId || saved.sessionId !== session.sessionId
+        || saved.scroller !== tail?.parentElement) return
+      // Keep the panel's bottom at the same screen position as its height changes.
+      // Restoring a folded panel grows it upward instead of below the viewport.
+      saved.scroller.scrollTop += panel.getBoundingClientRect().bottom - saved.bottom
+    }, [collapsed, expanded, runId, session.sessionId, tail])
     useEffect(() => {
       const receive = (event: MessageEvent) => {
         if (!origin || event.origin !== origin || event.source !== frame.current?.contentWindow
@@ -69,31 +100,44 @@ export function apply(ctx: ClientContext, config: { serverName?: string } = {}):
           if (!value) setCollapsed(false)
           return !value
         })
-        if (event.data.type === 'lazymind.workflow.toggle-collapse') setCollapsed(value => !value)
+        if (event.data.type === 'lazymind.workflow.toggle-collapse') {
+          const panel = frame.current?.parentElement
+          const scroller = tail?.parentElement
+          if (!expanded && panel && scroller) collapseAnchor.current = {
+            bottom: panel.getBoundingClientRect().bottom, scroller, runId, sessionId: session.sessionId,
+          }
+          setCollapsed(value => !value)
+        }
       }
       const keydown = (event: KeyboardEvent) => { if (event.key === 'Escape') setExpanded(false) }
       window.addEventListener('message', receive)
       window.addEventListener('keydown', keydown)
       return () => { window.removeEventListener('message', receive); window.removeEventListener('keydown', keydown) }
-    }, [origin, runId])
+    }, [origin, runId, expanded, tail, session.sessionId])
     const syncExpansion = () => {
       if (origin) frame.current?.contentWindow?.postMessage({ type: 'lazymind.workflow.expansion', sessionId: runId, expanded }, origin)
       if (origin) frame.current?.contentWindow?.postMessage({ type: 'lazymind.workflow.collapse', sessionId: runId, collapsed }, origin)
     }
     useEffect(syncExpansion, [expanded, collapsed, origin, runId])
-    if (!current) return null
+    if (!current) return <span ref={anchor} hidden />
     const url = new URL(`/workflow-runs/${encodeURIComponent(current.run.runId)}/embed`, origin)
     url.searchParams.set('hostOrigin', window.location.origin)
-    return <section aria-label="LazyMind Workflow" style={{
-      height: collapsed && !expanded ? 66 : 'min(480px, 55dvh)', minHeight: 0, flexShrink: 0,
+    const panel = <section aria-label="LazyMind Workflow" style={{
+      ...interactiveRegion,
+      height: collapsed && !expanded ? 66 : 'min(900px, 75dvh)', minHeight: 0, flexShrink: 0,
       width: '100%', maxWidth: 'var(--dsh-chat-content-width, 920px)', alignSelf: 'center', boxSizing: 'border-box',
+      margin: expanded ? 0 : '12px auto',
       display: current.minimized ? 'none' : 'flex', flexDirection: 'column',
-      ...(expanded ? { position: 'fixed', inset: 16, width: 'auto', maxWidth: 'none', alignSelf: 'stretch', height: 'auto', zIndex: 1000 } as const : {}),
+      ...(expanded ? { position: 'fixed', inset: 'var(--dsh-frame-overlay-top, 16px) 16px 16px', width: 'auto', maxWidth: 'none', alignSelf: 'stretch', height: 'auto', zIndex: 1000 } as const : {}),
       background: '#fff', borderRadius: 10, overflow: 'hidden',
     }}>
       <iframe ref={frame} key={runKey(current.run)} title="LazyMind Workflow" src={url.href}
-        onLoad={syncExpansion} style={{ width: '100%', height: '100%', flex: 1, minHeight: 0, border: 0 }} />
+        onLoad={syncExpansion} style={{ ...interactiveRegion, width: '100%', height: '100%', flex: 1, minHeight: 0, border: 0 }} />
     </section>
+    // Preserve the panel's place in the transcript while the same iframe is expanded.
+    return <><span ref={anchor} hidden />{tail ? createPortal(
+      <div style={{ display: 'flow-root', height: expanded ? 'calc(min(900px, 75dvh) + 24px)' : undefined }}>{panel}</div>, tail,
+    ) : panel}</>
   }
   ctx.uiConversation.events.register(definition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({ name: 'conversation.chat.node', key: 'lazymind-workflow' }, Entry))

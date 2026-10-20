@@ -62,6 +62,8 @@ func conversationGroupPaths() map[string]any {
 		"/conversation-organizer-runs/{run_id}/items/{conversation_id}":   map[string]any{"patch": operation("correctConversationOrganizerItem", "Correct a result immediately", queryParams(param("path", "run_id", true, strSchema()), param("path", "conversation_id", true, strSchema())), jsonBody(refSchema("ConversationOrganizerCorrectionRequest"), true), 200, "ConversationOrganizerRunResponse")},
 		"/conversations:chat":                                             map[string]any{"post": sseOp("Chat; optional group_id atomically assigns a newly created conversation", jsonBody(refSchema("ConversationChatGroupRequest"), true), response(200, "Chat event stream", strSchema()))},
 	}
+	chatResponses := paths["/conversations:chat"].(map[string]any)["post"].(map[string]any)["responses"].(map[string]any)
+	chatResponses["default"] = response(0, "Chat rejection; run_terminal, when present, is the same authoritative outcome returned by history", refSchema("ChatErrorResponse"))
 	for _, action := range []string{"cancel", "retry", "undo", "confirm"} {
 		paths["/conversation-organizer-runs/{run_id}:"+action] = map[string]any{"post": operation(action+"ConversationOrganizer", action+" organization", runID, nil, 200, "ConversationOrganizerRunResponse")}
 	}
