@@ -48,10 +48,10 @@ def test_mcp_tool_cache_changes_with_server_config(monkeypatch) -> None:
     chat_service._mcp_tool_cache.clear()
 
     asyncio.run(chat_service._build_mcp_tools([{
-        'url': 'https://mcp.example.com', 'allowed_tools': ['search'],
+        'name': 'Docs', 'url': 'https://mcp.example.com', 'allowed_tools': ['search'],
     }]))
     asyncio.run(chat_service._build_mcp_tools([{
-        'url': 'https://mcp.example.com', 'allowed_tools': ['fetch'],
+        'name': 'Docs', 'url': 'https://mcp.example.com', 'allowed_tools': ['fetch'],
     }]))
 
     assert calls == [('search',), ('fetch',)]
@@ -69,7 +69,7 @@ def test_oauth_tools_never_enter_shared_cache(monkeypatch):
     monkeypatch.setattr(chat_service, 'MCPClient', FakeMCPClient)
     chat_service._mcp_tool_cache.clear()
     server = {
-        'url': 'https://mcp.example', 'allowed_tools': ['search'],
+        'name': 'Docs', 'url': 'https://mcp.example', 'allowed_tools': ['search'],
         'oauth': dict(user_id='alice', server_id='s', server_url='https://mcp.example',
                       grant_id='g', grant_version=1),
     }
@@ -112,7 +112,7 @@ def test_oauth_auth_needed_is_not_swallowed(monkeypatch):
             raise MCPAuthorizationRequired()
     monkeypatch.setattr(chat_service, 'MCPClient', FakeMCPClient)
     server = {
-        'url': 'https://mcp.example', 'allowed_tools': ['search'],
+        'name': 'Docs', 'url': 'https://mcp.example', 'allowed_tools': ['search'],
         'oauth': dict(user_id='alice', server_id='s', server_url='https://mcp.example',
                       grant_id='g', grant_version=1),
     }
@@ -239,7 +239,7 @@ def test_oauth_preview_uses_authorized_snapshot_with_execution_schema_identity(m
         {'tool_name': 'unapproved', 'description': 'Hidden', 'input_schema': schema}]}
     preview = ToolManager(chat_service._mcp_tools_for_preview(server, snapshot))
     assert preview.tools_description == actual.tools_description
-    assert list(preview.atomic_tool_catalog()) == ['docs_search_mcp_c8f4ce5b8214']
+    assert list(preview.atomic_tool_catalog()) == ['mcp_personal_docs_search']
     assert next(iter(preview.atomic_tool_catalog().values()))['identity'] == next(
         iter(actual.atomic_tool_catalog().values()))['identity']
     assert chat_service._mcp_tools_for_preview(server, {**snapshot, 'status': 'needs_authorization'}) == []
@@ -313,8 +313,8 @@ def test_builtin_knowledge_tools_are_bound_per_load(monkeypatch):
               'allowed_tools': ['knowledge.create'], 'result_mode': 'structured',
               'auth_provider': headers, 'request_metadata_provider': metadata}
     from lazymind.chat.service.knowledge_management import KnowledgeManagementRuntime
-    host = KnowledgeManagementRuntime({'user_id': 'alice', 'conversation_id': 'c',
-        'history_id': 'h', 'run_id': 'r'}, 'https://mcp.example')
+    host = KnowledgeManagementRuntime(
+        {'user_id': 'alice', 'conversation_id': 'c', 'history_id': 'h', 'run_id': 'r'}, 'https://mcp.example')
     monkeypatch.setattr(host, 'bind_tools', lambda tools: tools)
     server['_knowledge_runtime'] = host
     first = chat_service._load_mcp_server_tools(server, 'system')
@@ -327,7 +327,7 @@ def test_builtin_knowledge_tools_are_bound_per_load(monkeypatch):
 
 
 def test_preview_none_allowlist_uses_all_discovered_schemas():
-    server = {'id': 'static', 'url': 'https://mcp.example', 'allowed_tools': None}
+    server = {'id': 'static', 'name': 'Static', 'url': 'https://mcp.example', 'allowed_tools': None}
     snapshot = {'status': 'ready', 'tools': [
         {'tool_name': 'knowledge.create', 'input_schema': {'type': 'object', 'properties': {}}},
         {'tool_name': 'knowledge.search', 'input_schema': {'type': 'object', 'properties': {}}}]}
@@ -352,22 +352,42 @@ def test_builtin_preview_preserves_positive_scope_without_live_credentials():
     snapshot = {'status': 'ready', 'tools': [
         {'tool_name': 'knowledge.create', 'input_schema': {'type': 'object', 'properties': {}}},
         {'tool_name': 'knowledge.search', 'input_schema': {'type': 'object', 'properties': {}}}]}
-    tools = asyncio.run(chat_service._build_mcp_tools([server], 'system', preview=True,
-                                                     preview_capabilities={'lazymind-knowledge': snapshot}))
+    tools = asyncio.run(chat_service._build_mcp_tools(
+        [server], 'system', preview=True, preview_capabilities={'lazymind-knowledge': snapshot}))
     assert [tool.__mcp_tool_name__ for tool in tools] == ['knowledge.create']
 
 
 def test_trusted_callback_load_failure_never_logs_credentials(monkeypatch):
     messages = []
+
     class Client:
         def __init__(self, **kwargs):
             pass
+
         def get_tools(self, **kwargs):
             raise RuntimeError('Authorization: Bearer credential-secret')
     monkeypatch.setattr(chat_service, 'MCPClient', Client)
     monkeypatch.setattr(chat_service.LOG, 'warning', lambda message: messages.append(message))
+
     async def headers():
         return {}
-    assert chat_service._load_mcp_server_tools({'id': 'run-bound', 'url': 'https://mcp.example',
+    assert chat_service._load_mcp_server_tools({'id': 'run-bound', 'name': 'Bound', 'url': 'https://mcp.example',
                                                'auth_provider': headers}) == []
     assert 'credential-secret' not in ''.join(messages)
+
+
+def test_invalid_tool_names_are_reported_as_naming_errors(monkeypatch):
+    from types import SimpleNamespace
+
+    async def list_tools(self):
+        return SimpleNamespace(tools=[SimpleNamespace(name='---', description='Invalid tool.',
+                               inputSchema={'type': 'object', 'properties': {}})])
+
+    monkeypatch.setattr(chat_service.MCPClient, 'list_tools', list_tools)
+    monkeypatch.setattr(chat_service, '_mcp_tool_cache', {})
+    issues = []
+    tools = asyncio.run(chat_service._build_mcp_tools(
+        [{'id': 'docs', 'name': 'Docs', 'url': 'https://mcp.example'}], issues=issues))
+    assert tools == []
+    assert issues[0]['status'] == 'naming_error'
+    assert 'MCP tool name' in issues[0]['detail']

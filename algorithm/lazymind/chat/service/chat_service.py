@@ -386,71 +386,17 @@ def _mcp_server_cache_key(server: Dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-_MCP_MODEL_TOOL_NAME_MAX_LENGTH = 64
 _BROWSER_AGENT_ROUND_LIMIT = 200
 
 
-def _mcp_model_tool_name(original_name: str) -> str:
-    """Return a registry-safe model alias while the MCP closure keeps its wire name."""
-    original_name = str(original_name or '').strip()
-    alias = re.sub(r'[^A-Za-z0-9_]+', '_', original_name).strip('_') or 'mcp_tool'
-    if alias[0].isdigit():
-        alias = f'mcp_{alias}'
-    if len(alias) > _MCP_MODEL_TOOL_NAME_MAX_LENGTH:
-        digest = hashlib.sha256(original_name.encode()).hexdigest()[:8]
-        alias = f'{alias[:_MCP_MODEL_TOOL_NAME_MAX_LENGTH - len(digest) - 1]}_{digest}'
-    return alias
-
-
-def _normalize_mcp_tool_names(tools: list, server_name: str) -> list:
-    """Prevent dotted MCP method names from becoming LazyLLM registry groups."""
-    used: set[str] = set()
-    aliases: list[tuple[str, str]] = []
-    normalized = list(tools)
-    for index, tool in enumerate(normalized):
-        original_name = str(getattr(tool, '__name__', '') or '').strip()
-        # MCPClient returns callables in production, while tests and third-party
-        # adapters may use opaque schema objects. Keep those objects cacheable and
-        # unchanged instead of failing the entire server load during normalization.
-        if not original_name:
-            continue
-        alias = _mcp_model_tool_name(original_name)
-        if alias in used:
-            digest = hashlib.sha256(
-                f'{server_name}\0{original_name}\0{index}'.encode()
-            ).hexdigest()[:8]
-            alias = f'{alias[:_MCP_MODEL_TOOL_NAME_MAX_LENGTH - len(digest) - 1]}_{digest}'
-        try:
-            tool.__name__ = alias
-            tool._lazymind_mcp_original_name = original_name
-            tool._lazymind_mcp_server_name = server_name
-        except (AttributeError, TypeError):
-            LOG.warning(
-                f'[MCP] kept immutable tool name from {server_name}: {original_name}'
-            )
-            continue
-        used.add(alias)
-        if alias != original_name:
-            aliases.append((original_name, alias))
-    if aliases:
-        LOG.info(f'[MCP] normalized tool names from {server_name}: {aliases}')
-    return normalized
-
-
 def _browser_tool_name(tool: Any) -> str:
-    """Recognize browser tools before or after LazyLLM normalizes their names.
-
-    Callers supply only Core's system MCP tools, not user-configured MCP tools.
-    Keep protocol identity separate from the callable name used by the registry.
-    """
-    if getattr(tool, '_lazymind_mcp_server_name', '') != 'lazymind-browser':
+    """Recognize builtin browser tools by server identity and original MCP method."""
+    from lazyllm.tools import get_tool_runtime_metadata
+    metadata = get_tool_runtime_metadata(tool)
+    if not metadata or metadata.tool_source != 'mcp' or metadata.tool_origin != 'lazymind-browser':
         return ''
-    name = str(getattr(tool, '_lazymind_mcp_original_name', '') or '')
-    if name.startswith('browser.'):
-        return name
-    if name.startswith('browser_'):
-        return 'browser.' + name[len('browser_'):]
-    return ''
+    name = str(getattr(tool, '__mcp_tool_name__', '') or '')
+    return name if name.startswith('browser.') else ''
 
 
 def _agent_max_retries_for_mcp_tools(default_max_retries: int, tools: list) -> int:
@@ -502,26 +448,32 @@ def _set_mcp_tool_metadata(tools, server, namespace='user'):
             descriptor = [namespace, str(server['id']), server.get('url'), transport, [], original]
             encoded = json.dumps(descriptor, ensure_ascii=False, separators=(',', ':')).encode()
             _set_tool_runtime_metadata(tool, {'tool_identity': 'mcp:v1:' + hashlib.sha256(encoded).hexdigest()})
-    return _normalize_mcp_tool_names(tools, str(server.get('name') or 'mcp'))
+        tool._lazymind_mcp_server_name = str(server.get('name') or 'mcp')
+    return tools
 
 
 class _PreviewMCPClient:
+    def __init__(self, *, server_name, tool_name_prefix):
+        self.server_name = server_name
+        self.tool_name_prefix = tool_name_prefix
+
     async def call_tool(self, *_args, **_kwargs):
         raise RuntimeError('Context preview cannot execute MCP tools')
 
 
 def _mcp_tools_for_preview(server, capability=None, namespace='user'):
     from types import SimpleNamespace
-    from lazyllm.tools.mcp.tool_adaptor import generate_lazyllm_tool
+    from lazyllm.tools.mcp.tool_adaptor import generate_lazyllm_tool, _validate_mcp_tool_names
     if not capability or capability.get('status') != 'ready':
         return []
-    from lazymind.chat.service.mcp_loading import mcp_allowed_tools
+    from lazymind.chat.service.mcp_loading import mcp_allowed_tools, mcp_naming_options
     allowed = mcp_allowed_tools(server)
-    tools = [generate_lazyllm_tool(_PreviewMCPClient(), SimpleNamespace(
+    client = _PreviewMCPClient(**mcp_naming_options(server))
+    tools = [generate_lazyllm_tool(client, SimpleNamespace(
         name=item['tool_name'], description=item.get('description') or item['tool_name'],
         inputSchema=item.get('input_schema') or {}))
         for item in capability.get('tools', []) if allowed is None or item['tool_name'] in allowed]
-    return _set_mcp_tool_metadata(tools, server, namespace)
+    return _set_mcp_tool_metadata(_validate_mcp_tool_names(tools), server, namespace)
 
 
 def _mcp_preview_catalog_status(capabilities, extra_servers=()):
@@ -533,7 +485,8 @@ def _mcp_preview_catalog_status(capabilities, extra_servers=()):
 
 
 def _load_mcp_server_tools(server: Dict[str, Any], namespace: str = 'user') -> list:
-    from lazymind.chat.service.mcp_loading import mcp_allowed_tools
+    from lazyllm.tools.mcp.tool_adaptor import MCPToolNameError
+    from lazymind.chat.service.mcp_loading import mcp_allowed_tools, mcp_naming_options
     from lazymind.chat.service.knowledge_management import BUILTIN_ID, KnowledgeManagementRuntime
     if server.get('id') == BUILTIN_ID and not isinstance(server.get('_knowledge_runtime'), KnowledgeManagementRuntime):
         return []
@@ -572,6 +525,7 @@ def _load_mcp_server_tools(server: Dict[str, Any], namespace: str = 'user') -> l
             timeout=server.get('timeout', 5),
             transport=transport,
             result_mode=server.get('result_mode', 'text'),
+            **mcp_naming_options(server),
             **auth_callbacks,
         )
         mcp_tools = client.get_tools(allowed_tools=allowed)
@@ -583,7 +537,7 @@ def _load_mcp_server_tools(server: Dict[str, Any], namespace: str = 'user') -> l
                 _mcp_tool_cache[cache_key] = (time.monotonic(), list(mcp_tools))
         LOG.info(f"[MCP] loaded {len(mcp_tools)} tools from {server.get('name')}")
         return mcp_tools
-    except (MCPAuthorizationRequired, MCPAuthUnavailable):
+    except (MCPAuthorizationRequired, MCPAuthUnavailable, MCPToolNameError):
         raise
     except Exception as e:
         if oauth:
@@ -601,9 +555,13 @@ async def _build_mcp_tools(
     from lazymind.chat.service.mcp_loading import load_mcp_catalog
     catalog = [{'service': str(server.get('id') or index), 'label': server.get('name'),
                 'status': 'ready', 'runtime': server} for index, server in enumerate(mcp_config)]
-    loader = ((lambda server: _mcp_tools_for_preview(
-        server, (preview_capabilities or {}).get(server.get('id')), namespace=namespace)) if preview
-              else (lambda server: _load_mcp_server_tools(server, namespace)))
+
+    def loader(server):
+        if preview:
+            return _mcp_tools_for_preview(
+                server, (preview_capabilities or {}).get(server.get('id')), namespace=namespace)
+        return _load_mcp_server_tools(server, namespace)
+
     results = await load_mcp_catalog(catalog, loader, issues=issues)
     return [tool for result in results for tool in result['tools']]
 
@@ -2125,9 +2083,9 @@ async def _handle_chat_impl(
             'When the user requests browser/page/plugin interaction, preserve that execution method '
             'through reading, editing and verification. Do not switch to database toolkits, direct '
             'APIs or Writer workflows because a page element was not found. Use the latest snapshot '
-            'to click real controls with browser_click. For a person/date table, identify both labels '
-            'in the same snapshot, click with browser_click_intersection and expected_revision, check '
-            'interaction.row and interaction.column, then browser_type_focused with verify_text. '
+            'to click real controls with mcp_browser_click. For a person/date table, identify both labels '
+            'in the same snapshot, click with mcp_browser_click_intersection and expected_revision, check '
+            'interaction.row and interaction.column, then mcp_browser_type_focused with verify_text. '
             'A missing label does not mean the row is absent and does not authorize creating a row. '
             'Inspect visible expand/search controls or scroll the document and inspect the new snapshot. '
             'If scroll reports moved=false, do not repeat identical scrolling. Prefer clicking a visible '
@@ -2307,10 +2265,14 @@ async def _handle_chat_impl(
                 if translator.language == 'zh':
                     reason = ('需要重新授权，请在 MCP 设置中连接账号' if issue['status'] == 'needs_authorization'
                               else '暂时无法连接，请稍后重试')
+                    if issue['status'] == 'naming_error':
+                        reason = '工具命名失败：' + issue['detail']
                     notice = f"MCP 服务 {issue['server']} {reason}。本轮继续使用其他可用工具。"
                 else:
                     reason = ('needs authorization; reconnect in MCP settings'
                               if issue['status'] == 'needs_authorization' else 'is unavailable; try again later')
+                    if issue['status'] == 'naming_error':
+                        reason = 'has invalid tool names: ' + issue['detail']
                     notice = f"MCP server {issue['server']} {reason}. Continuing with other available tools."
                 yield log_and_emit_frame(
                     {'think': notice + '\n', 'text': None, 'sources': []},
