@@ -10,7 +10,7 @@ transitions:
 steps:
   prepare:
     label: Prepare task
-    prompt: Prepare the approved fixture task using the guarded example executor. Save the actual brief-generation receipt, base SHA and Todo event as preparation.
+    prompt: Prepare the approved declared task using the guarded example executor. Save the actual brief-generation receipt, base SHA and Todo event as preparation.
     outputs: [{material: preparation, required: true}]
     acceptance_criteria: Receipt contains the observed nonempty brief hash, task id, expected base SHA and recorded in_progress event.
   validate_dispatch:
@@ -33,7 +33,7 @@ steps:
     acceptance_criteria: Evidence links the actual execution to the resulting files.
   validate_completion:
     label: Validate completion
-    prompt: Check every fixed coverage id and run the unchanged independent tests using the deterministic executor. Reject missing, duplicate or skipped coverage for complete success.
+    prompt: Check every declared coverage id and run the unchanged declared acceptance tests using the deterministic executor. Reject missing, duplicate or skipped coverage for complete success.
     inputs: [{material: evidence, required: true}]
     outputs: [{material: completion, required: true}]
     acceptance_criteria: The exact coverage set is DONE, fixed tests are unchanged and all pass.

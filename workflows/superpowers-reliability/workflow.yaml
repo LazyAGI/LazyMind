@@ -1,4 +1,4 @@
-id: superpowers-reliability
+id: superpowers-reliability-rc1
 name: Superpowers dispatch reliability
 description: Verify dispatch prerequisites and enumerable task completion using the example external executor.
 when_to_use: Use only for the isolated Superpowers reliability example with its guarded external executor.

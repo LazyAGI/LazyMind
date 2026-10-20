@@ -1,8 +1,8 @@
 # Superpowers dispatch reliability
 
 Run this package only with the external executor in
-`examples/superpowers-workflow-reliability/run.py`.
-It executes one approved fixture task in a disposable Git worktree, checks dispatch
+`examples/superpowers-workflow-reliability/cli.py`.
+It executes one approved declared Plan task in a disposable Git worktree, checks dispatch
 prerequisites, records a real child process and verifies enumerable coverage.
 The six JSON outputs contain measured receipts.
 

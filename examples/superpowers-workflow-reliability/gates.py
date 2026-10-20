@@ -53,7 +53,7 @@ class Trace:
 
 
 def git(repo, *args):
-    return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
+    return subprocess.check_output(["git", "-C", str(repo), *args], text=True, stderr=subprocess.PIPE).strip()
 
 
 def identity(repo):
@@ -77,15 +77,17 @@ def check_isolation(repos):
 
 
 class Guard:
-    def __init__(self, repo, state, expected_base, trace):
+    def __init__(self, repo, state, expected_base, trace, task_id="task-1", binding_check=None):
         self.repo = Path(repo).resolve(strict=True)
         self.state = Path(state).resolve()
         self.state.mkdir(parents=True, exist_ok=True)
         self.expected_base = expected_base
+        self.task_id, self.binding_check = task_id, binding_check
         self.trace = trace
         self.brief = self.state / "brief.md"
         self.todo = self.state / "todo.json"
         self.admission = None
+        self.expected_brief_hash = None
         self.launch_count = 0
 
     @contextlib.contextmanager
@@ -103,7 +105,7 @@ class Guard:
                 fcntl.flock(f, fcntl.LOCK_UN)
 
     def set_todo(self, status):
-        event = self.trace.emit("todo_updated", task_id="task-1", status=status)
+        event = self.trace.emit("todo_updated", task_id=self.task_id, status=status)
         save(self.todo, event)
         return event
 
@@ -113,11 +115,13 @@ class Guard:
         data = self.brief.read_bytes()
         if not data.strip():
             raise GateError("BRIEF_EMPTY")
+        if self.expected_brief_hash and digest(data) != self.expected_brief_hash:
+            raise GateError("BRIEF_CHANGED")
         try:
             todo = json.loads(self.todo.read_text())
         except (OSError, ValueError):
             raise GateError("TODO_MISSING") from None
-        if todo.get("task_id") != "task-1" or todo.get("status") != "in_progress":
+        if todo.get("task_id") != self.task_id or todo.get("status") != "in_progress":
             raise GateError("TODO_NOT_IN_PROGRESS")
         events = [json.loads(s) for s in self.trace.path.read_text().splitlines()]
         if todo not in events or todo.get("event") != "todo_updated":
@@ -128,7 +132,9 @@ class Guard:
                                               "actual": observed["head"]})
         if git(self.repo, "status", "--porcelain", "--untracked-files=no"):
             raise GateError("BASE_DIRTY")
-        return {"brief_sha256": digest(data), "brief_bytes": len(data),
+        binding = self.binding_check() if self.binding_check else None
+        return {**({"binding": binding} if binding is not None else {}),
+                "brief_sha256": digest(data), "brief_bytes": len(data),
                 "todo": todo, "git": observed, "expected_base": self.expected_base}
 
     def validate(self):
@@ -142,9 +148,13 @@ class Guard:
             current = self.inspect()
             if self.admission is None or current != self.admission:
                 raise GateError("ADMISSION_CHANGED")
+            brief_bytes = self.brief.read_bytes()
+            if digest(brief_bytes) != current["brief_sha256"]:
+                raise GateError("BRIEF_CHANGED")
+            brief_text = brief_bytes.decode()
             self.trace.emit("dispatch_started", brief_sha256=current["brief_sha256"])
             self.launch_count += 1
-            result = launch(self.brief.read_text())
+            result = launch(brief_text)
             if result.get("returncode") != 0 or not result.get("turn_completed"):
                 self.trace.emit("dispatch_failed", result=result)
                 raise GateError("DISPATCH_FAILED", result)
@@ -207,13 +217,13 @@ print("9 independent acceptance checks passed")
     return result
 
 
-def codex_child(repo, state, brief, model, binary):
+def codex_child(repo, state, brief, model, binary, instructions=None, reasoning="medium"):
     state, repo = Path(state), Path(repo)
     (repo / ".eval").mkdir(exist_ok=True)
     prompt = (
         "You are the implementer SubAgent for an accepted LazyMind Workflow step. "
-        "Implement the following approved task yourself; do not dispatch subagents. "
-        "Only change slug.py and ignored .eval reports. Do not edit tests or push. "
+        "Implement the following approved task yourself; do not dispatch subagents. " +
+        (instructions or "Only change slug.py and ignored .eval reports. Do not edit tests or push. ") +
         "Run the tests before and after, self-review, and write .eval/implementer-report.md. "
         "Local commits are authorized. The coverage checklist in the task is mandatory.\n\n"
         + brief
@@ -221,12 +231,27 @@ def codex_child(repo, state, brief, model, binary):
     (state / "child-prompt.txt").write_text(prompt)
     command = [binary, "exec", "--ignore-user-config", "--ephemeral", "--model", model,
                "--sandbox", "workspace-write", "--json", "--color", "never",
-               "-c", 'model_reasoning_effort="medium"', "--cd", str(repo),
+               "-c", 'model_reasoning_effort=' + json.dumps(reasoning), "--cd", str(repo),
                "--output-last-message", str(state / "child-final.txt"), "-"]
     started, tick = now(), time.monotonic()
     with (state / "child-trace.jsonl").open("w") as out, (state / "child-stderr.log").open("w") as err:
-        result = subprocess.run(command, input=prompt, text=True, stdout=out, stderr=err,
-                                timeout=600)
+        process = subprocess.Popen(command, stdin=subprocess.PIPE, text=True, stdout=out,
+                                   stderr=err, start_new_session=True)
+        try:
+            Trace(state / "trace.jsonl").emit("child_process_started", pid=process.pid, requested_model=model)
+            process.communicate(prompt, timeout=600)
+        except BaseException as error:
+            import signal
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait()
+            if isinstance(error, (KeyboardInterrupt, subprocess.TimeoutExpired)):
+                raise GateError("CHILD_INTERRUPTED" if isinstance(error, KeyboardInterrupt)
+                                else "CHILD_TIMEOUT") from None
+            raise
+        result = process
     events = []
     for line in (state / "child-trace.jsonl").read_text().splitlines():
         try:

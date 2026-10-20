@@ -1,138 +1,181 @@
-# Superpowers dispatch reliability
+# Superpowers Dispatch Reliability Workflow Integration
 
-[中文](README.CN.md) · [Design](../../DESIGN.md) · [Comparison](comparison.md) · [Release audit](../../RELEASE_AUDIT.md)
+[中文](README.CN.md) · [RC acceptance](../../RELEASE_CANDIDATE.md) · [Comparison](comparison.md)
 
-A runnable six-step [Workflow](../../workflows/superpowers-reliability/), a local
-external executor, regression tests and real Codex/Runtime traces for
-[#2282](https://github.com/obra/superpowers/issues/2282) and part of
-[#2245](https://github.com/obra/superpowers/issues/2245).
+Run **one declared development task** in an isolated Git worktree. A six-step
+LazyMind Workflow and its Python executor require a nonempty task brief, observable
+in-progress state and the intended full Git SHA before launching Codex. Completion
+requires every declared coverage item, unchanged acceptance inputs, permitted file
+changes, passing checks and six Runtime Artifacts.
 
-The executor owns the child process and rechecks prerequisites immediately before
-launch. **The YAML alone does not install a Codex-wide hard gate.** No Runtime or
-LazyLLM changes are required.
+This is a manually authored integration of Superpowers dispatch practices, not an
+automatic Skill converter or a complete SDD implementation. The hard gate applies
+to the process this executor launches; YAML alone does not intercept other agents.
 
-## Quick start
+## Quick start: a CSV task
 
-Requirements: Python 3.9+, Git, macOS/Linux (fcntl), authenticated Codex CLI with
-the requested model, and LazyMind at the recorded baseline or a compatible public
-workflow.control.v1 API. [Start LazyMind](../../docs/quick_start.md) before running
-this example. The independent audit used Python 3.9.6, Git 2.50.1 and Codex CLI
-0.155.0-alpha.9 on macOS. Check that your CLI supports `--ignore-user-config`,
-`--ephemeral` and the requested model; another model/build is a different experiment.
-Run only in new disposable repositories.
+Prerequisites: macOS/Linux, Python 3.9+, Git supporting `--path-format=absolute`,
+Bash, an authenticated Codex CLI, and a running LazyMind installation with the
+public `workflow.control.v1` API. [Install/start LazyMind](../../docs/quick_start.md).
+The RC was tested with Python 3.9.6, Git 2.50.1 and Codex CLI 0.155.0-alpha.9.
+Codex must accept `exec --ignore-user-config --ephemeral --json` and the selected
+model. If the CLI is not on PATH, use `--codex /path/to/codex` when configuring.
 
-From this directory:
-
-```bash
-python3 -m unittest discover -s . -p 'test_*.py' -v
-git clone https://github.com/obra/superpowers.git /tmp/superpowers-eval
-git -C /tmp/superpowers-eval checkout bb92a77741419a4ab5f06e711a283343f1ada0c3
-python3 fixtures.py /tmp/workflow-fixture
-```
-
-Put an existing authenticated LazyMind token in a private mode-0600 JSON file,
-`{"token":"..."}`. Never commit it. Set `LAZYMIND_API` to this installation's
-explicit API base, e.g. `http://127.0.0.1:5024/api/core`, and `SESSION_FILE`
-to that private file.
-
-**First installation for this user only** (no existing `superpowers-reliability`):
+Start from a checkout containing this example. Select a **new** writable directory,
+your local gateway URL and a model available to your Codex account:
 
 ```bash
-python3 run.py --url "$LAZYMIND_API" --token-file "$SESSION_FILE" \
-  --state /tmp/workflow-publication --publish-only
+cd examples/superpowers-workflow-reliability
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+export TRIAL=/tmp/lazymind-reliability-trial
+export LAZYMIND_URL=http://127.0.0.1:5024
+export MODEL=gpt-6-astra  # use a model available in your Codex account
+mkdir -m 700 "$TRIAL"
+git clone https://github.com/obra/superpowers.git "$TRIAL/superpowers"
+git -C "$TRIAL/superpowers" checkout bb92a77741419a4ab5f06e711a283343f1ada0c3
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" configure \
+  --url "$LAZYMIND_URL" --local-login --superpowers "$TRIAL/superpowers" --model "$MODEL"
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" install
+.venv/bin/python demo.py "$TRIAL/csv-a"
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" run \
+  --task "$TRIAL/csv-a/task.json" --repo "$TRIAL/csv-a/worktree" --state "$TRIAL/csv-a/run"
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" status --state "$TRIAL/csv-a/run"
 ```
 
-For a repeat run, reuse the installed workflow's exact ref instead. The public
-`GET /workflow-runtime/v1/workflows` catalog lists refs; its corresponding
-`GET /workflow-runtime/v1/workflows/{workflow_ref}` returns the revision and files.
-Compare the scenario/state and compiled graph with this package before reuse.
-The blank-draft publisher is not an updater: publishing the same ID again on the
-tested Runtime fails with a draft uniqueness conflict. No child is launched.
-Enable the published workflow in LazyMind's Workflow settings if it is disabled.
+`5024` is the source runtime's default **local gateway** port; use your selected
+installation's actual gateway, not an unrelated instance. `--local-login` calls
+the explicit loopback installation's local login endpoint. It writes a mode-0600
+session file and never prints the token. For a shared deployment, use HTTPS and
+replace `--local-login` with `--token-file /private/session.json` containing
+`{"token":"YOUR_AUTHENTICATED_TOKEN"}` in mode 0600. A fresh credential for the same
+owner can replace that private file when it expires. Never commit config, credentials,
+run directories or user project traces. Do not use a privileged business account
+for untrusted plans. This example does not configure LazyMind's chat/embedding models.
 
-Set `WORKFLOW_REF` to the exact returned workflow_ref and `BASE_SHA` to the base
-in /tmp/workflow-fixture/fixture.json.
+Install queries **enabled and disabled** visible workflows. First use publishes and
+enables the package in manual mode; subsequent installs reuse the compatible ref.
+Before every run, source files are compared semantically against the published
+revision. An incompatible same-name package is rejected without mutation. Use a
+new config with `configure --workflow-name YOUR_UNIQUE_NAME`, or deliberately update
+it via LazyMind authoring. No blind overwrite, automatic upgrade or ignored HTTP 500.
+The legacy blank-draft publisher's underlying duplicate-ID defect is not changed.
+
+## Repeat use and inspect results
+
+Create another task worktree and a new run directory; **do not republish**:
 
 ```bash
-python3 native.py --root /tmp/native-fixture --superpowers /tmp/superpowers-eval \
-  --model gpt-6-astra --codex codex --persist-session
-
-python3 run.py --url "$LAZYMIND_API" --token-file "$SESSION_FILE" \
-  --state /tmp/workflow-run --workflow-id "$WORKFLOW_REF" \
-  --repo /tmp/workflow-fixture/worktree --base "$BASE_SHA" \
-  --superpowers /tmp/superpowers-eval --model gpt-6-astra --codex codex
+.venv/bin/python demo.py "$TRIAL/csv-b"
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" run \
+  --task "$TRIAL/csv-b/task.json" --repo "$TRIAL/csv-b/worktree" --state "$TRIAL/csv-b/run"
+git -C "$TRIAL/csv-b/worktree" log -1 --oneline
+git -C "$TRIAL/csv-b/worktree" show --stat
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" status --state "$TRIAL/csv-b/run"
 ```
 
-For the audited native trace, use the `thread.started` ID in native/trace.jsonl
-to identify **that run's own** Codex rollout file. Export only its tool events:
+Implementation files remain in `worktree/`. `run/result.json` contains authoritative
+Runtime state and Artifacts; `trace.jsonl` records stage/API events and
+`child-trace.jsonl` records the actual Codex process. `status` independently reads
+Core again into `readback-control.json` and `readback-artifacts.json`. The completion
+Artifact contains check commands/results, changed-file hashes, HEAD and diff.
+The session ID also opens `<your frontend>/workflow-runs/<session_id>`.
+Raw traces are private task data, not automatically safe to publish.
+
+## Your own repository and Plan
+
+Supported: a bounded code change with deterministic, already-authored acceptance
+checks, **one** numbered Plan task, exact implementation file paths and one Codex
+implementer. Multi-task scheduling, automatic reviewer loops and dependency setup
+inside arbitrary projects are outside this RC. Execute only trusted task/check
+commands: they run with your local user permissions.
+
+Commit the Plan, acceptance tests and a `.gitignore` rule for `.eval/` before recording
+the base. Create a fresh linked worktree at that full SHA. Keep the task JSON and
+private run/config directories outside it. The primary checkout is rejected.
 
 ```bash
-python3 export_tool_trace.py --session-file "$NATIVE_ROLLOUT" \
-  --expected-cwd /tmp/native-fixture/worktree \
-  --output /tmp/native-fixture/native/tool-trace.jsonl
+BASE=$(git -C /path/to/repository rev-parse HEAD)
+git -C /path/to/repository worktree add -b my-reviewed-task /path/to/new-worktree "$BASE"
 ```
 
-`--persist-session` retains local session data; omit it for an ephemeral run. The
-exporter checks the experiment cwd and excludes messages/reasoning. Encrypted
-tool message bodies are omitted with hashes. CLI output alone may omit spawn calls.
+Use the generated `task.json` as the schema example. All fields are required:
 
-Each run requires a new fixture/state directory. Existing fixtures are rejected;
-nothing is reset or force-cleaned. Add one `--fault`: missing-brief, empty-brief,
-wrong-base, dispatch-failure, missing-coverage, missing-todo, or stale-todo. Expected failures exit nonzero.
-dispatch-failure uses a labeled failing callback; missing-coverage runs a real
-child before removing a checklist row.
+| Field | Contract |
+| --- | --- |
+| schema_version | `1` |
+| task_id | A short lowercase identifier; present in the selected Plan heading |
+| plan / plan_task | Tracked relative path; integer N selecting `### Task N: task-id` |
+| expected_base | Full 40-character SHA containing the Plan and protected tests |
+| allowed_files | Exact relative implementation paths; no globs, traversal or symlinks |
+| protected_files | Tracked acceptance files that the child and checks must leave unchanged |
+| coverage | Unique `{id, description, checks: [check-id]}` objects; every ID appears in that Plan task |
+| checks | Unique `{id, argv: [executable, arg, ...]}` objects; no shell expansion; all are mapped to coverage |
+
+Each requirement must map to a real assertion in the declared tests. Mapping an ID
+to a command does not prove that the command is meaningful; the manifest and tests
+are trusted caller inputs. The executor runs all commands and protects their declared
+files. It rejects missing/extra/duplicate/skipped coverage and non-text evidence.
+Use the same `run` command with your manifest/worktree. A manifest change requires
+a reviewed new task, not reuse of a failed session with changed inputs.
+
+## Missing brief and recovery
+
+On a **disposable** demo repository, append `--fault missing-brief` to `run`. The
+real upstream script first creates the brief; the explicitly labeled injection
+then deletes it. Validation fails before a child is launched. Expected negative
+runs exit 1. Do not use fault injection against business work.
 
 ```bash
-python3 probe_runtime.py --url "$LAZYMIND_API" --token-file "$SESSION_FILE" \
-  --workflow-id "$WORKFLOW_REF" --state /tmp/runtime-probes
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" restore-brief \
+  --task "$TRIAL/csv-a/task.json" --repo "$TRIAL/csv-a/worktree" --state "$TRIAL/csv-a/run"
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" run --resume \
+  --task "$TRIAL/csv-a/task.json" --repo "$TRIAL/csv-a/worktree" --state "$TRIAL/csv-a/run"
 ```
 
-Recover missing/empty brief validation by regenerating the same file with upstream
-`task-brief PLAN 1 <state>/brief.md`. Open
-`<frontend>/workflow-runs/<session_id>`, click **Retry**, then repeat run.py with
-`--resume` and without `--fault`. It claims the UI-created attempt in the saved
-session. This bounded recovery supports failed dispatch validation after successful
-preparation. It does not automatically replay an uncertain child dispatch.
+Apply these commands to the *failed missing-brief run*, not the completed Quick Start
+run. Restore re-extracts the same committed task. Explicit `--resume` invokes the
+public control Retry operation, retaining the failed Attempt and creating a new
+one in the same session. An already queued UI Retry can also be claimed. Preparation
+must have succeeded and dispatch must never have started. Previous result snapshots
+remain in `previous-results.jsonl` and Core retains Attempt history.
 
-## Parallel reproduction
+For wrong base, edited Plan/tests, or invalid task declarations, inspect the error,
+correct the reviewed inputs and create a fresh worktree/run. Do not reset away work.
+For a failed/timeout/interrupted or uncertain dispatch, use `status`, inspect Git and
+the trace, and resolve the existing session in LazyMind before deliberately starting
+a new task. The executor refuses automatic replay. A handled timeout/SIGINT/SIGTERM
+kills its owned process group; SIGKILL, machine failure, detached grandchildren and
+durable distributed recovery are not guaranteed. Never delete run state to conceal
+an unresolved dispatch. Check commands have a 120-second limit; Codex has 600 seconds.
+
+## Evidence, tests and limits
 
 ```bash
-python3 parallel.py --root /tmp/parallel-fixture --url "$LAZYMIND_API" \
-  --token-file "$SESSION_FILE" --workflow-id "$WORKFLOW_REF" \
-  --superpowers /tmp/superpowers-eval --model gpt-6-astra --codex codex
+.venv/bin/python -m unittest discover -s . -p 'test_*.py' -v
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" preflight
 ```
 
-This creates a fresh repository with two linked worktrees and launches two actual
-Workflow/Codex processes. Success requires separate paths/branches/indexes and
-sessions, two completed results, measured overlap and an unchanged parent repo.
-It never runs a shared-index race in a business repository.
+Preflight checks dependencies/flags, Codex login, pinned clean upstream source,
+Runtime authorization and package compatibility. It cannot attest backend model
+identity or prove model availability without a model call; the accepted dispatch
+records that outcome. The requested model/reasoning are configurable. No model call
+is hidden in installation or preflight.
 
-## Evidence and limits
+See [RC acceptance and real traces](../../RELEASE_CANDIDATE.md),
+[#2282](cases/issue-2282.md), [#2245](cases/issue-2245.md) and
+[comparison](comparison.md). Before: native SDD asks the model to follow dispatch
+prerequisites. After: this executor makes the selected prerequisites executable and
+blocks its launch when they fail. **Both historical normal native samples passed**;
+no natural missing-brief failure or comparative reliability/efficiency gain is claimed.
 
-Both native runs and the final revision-2 normal/parallel Workflow runs pass the
-three unchanged tests and nine independent acceptance checks. The earlier
-revision-1 normal and recovery runs recorded only the three fixed tests; their
-historical evidence has not been backfilled. Missing/empty brief and wrong base produce zero launch attempts.
-Missing coverage and failed dispatch produce no final success Artifact. The same
-failed session was recovered through the official UI. Missing/stale Todo also
-blocks launch. A subsequent real parallel run completed both sessions with
-57.548 seconds of overlap and no parent repository/index changes.
+Core enforces graph admission, Attempt leases and required output slots. This
+executor verifies brief/state/base and task semantics. Its cooperating worktree
+lock is not OS containment. Codex Todo UI synchronization, actual backend model
+attestation, arbitrary-process isolation and full SDD parity are not implemented.
 
-See [2282](cases/issue-2282.md), [2245](cases/issue-2245.md) and the
-[evidence manifest](evidence/manifest.json). Fault callbacks are not Agent E2E.
-The initial CLI stream omits spawn calls. The audited follow-up has three actual
-spawn calls/receipts in its tool-only trace. Encrypted message bodies are omitted;
-neither a spawn receipt nor an agent report attests the actual backend model.
-
-The current application defaults are deepseek-flash and BAAI/bge-m3; both have
-verified, ready configurations. A new Flash UI conversation returned FLASH_READY.
-Historical credential failures are retained without describing current readiness. All coding
-experiments requested gpt-6-astra through Codex CLI 0.155.0-alpha.9. Actual backend
-model identity is N/A. Native SDD includes two reviewers; the minimal Workflow uses
-one implementer and deterministic validation. Total token/time costs are therefore
-not a controlled efficiency comparison.
-
-The Skill was read and manually converted into a bounded package. Publication used
-the Agent Kit's deterministic authoring API with a blank draft; there is no
-server-side Skill snapshot binding or AI-generated conversion claim.
-Traces include MIT-licensed upstream content: [license](UPSTREAM-LICENSE).
+Historical `run.py`, `native.py`, `parallel.py` and their 89-file evidence manifest
+retain the fixed-fixture comparison; `cli.py` is the user-task RC entry point.
+The prior release audit remains a dated snapshot, not certification of later code.
+Upstream text/scripts are MIT licensed: [notice](UPSTREAM-LICENSE). New example code
+uses the repository's [Apache-2.0 license](../../LICENSE).

@@ -4,6 +4,7 @@ from pathlib import Path
 import urllib.request
 import urllib.error
 import uuid
+import socket
 
 from gates import GateError, now
 
@@ -15,6 +16,11 @@ def public(value):
     if isinstance(value, list):
         return [public(v) for v in value]
     return value
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
 
 
 class Runtime:
@@ -30,7 +36,7 @@ class Runtime:
                      "Content-Type": "application/json",
                      "Workflow-Contract-Version": "workflow.v1"})
         try:
-            with urllib.request.urlopen(req, timeout=45) as response:
+            with urllib.request.build_opener(NoRedirect).open(req, timeout=45) as response:
                 status, data = response.status, json.load(response)
         except urllib.error.HTTPError as error:
             status = error.code
@@ -38,6 +44,10 @@ class Runtime:
                 data = json.load(error)
             except ValueError:
                 data = {"error": "non-JSON API error"}
+        except (urllib.error.URLError, TimeoutError, socket.timeout):
+            self.trace.emit("runtime_transport_failed", method=method, path=path,
+                            started_at=started, completed_at=now())
+            raise GateError("RUNTIME_UNREACHABLE") from None
         self.trace.emit("runtime_api", method=method, path=path, started_at=started,
                         completed_at=now(), status=status,
                         request=public(body), response=public(data))
@@ -46,9 +56,12 @@ class Runtime:
         return data.get("result", data.get("data", data))
 
     def publish(self, package):
-        package = Path(package)
-        files = {str(p.relative_to(package)): p.read_text()
-                 for p in package.rglob("*") if p.is_file()}
+        if isinstance(package, dict):
+            files = package
+        else:
+            package = Path(package)
+            files = {str(p.relative_to(package)): p.read_text()
+                     for p in package.rglob("*") if p.is_file()}
         draft = self.call("POST", "/workflow-authoring/v1/drafts",
                           {"name": "Superpowers reliability evaluation",
                            "source_type": "blank", "files": files})
@@ -59,7 +72,7 @@ class Runtime:
             raise GateError("DIAGNOSTICS_FAILED", diagnostics)
         return self.call("POST", f"/workflow-authoring/v1/drafts/{draft_id}:publish", {})
 
-    def start(self, workflow_id):
+    def start(self, workflow_id, objective="Run the approved isolated slug fixture reliability evaluation."):
         command = str(uuid.uuid4())
         preparation = self.call("POST", "/workflow-preparations", {
             "preparation_id": command, "idempotency_key": command,
@@ -67,7 +80,7 @@ class Runtime:
             "controller_host": "external-agent", "control_protocol": "workflow.control.v1",
             "host_binding_required": False, "workflow_mode": "auto",
             "origin_ref": command,
-            "request_context": "Run the approved isolated slug fixture reliability evaluation.",
+            "request_context": objective,
             "input_bindings": {}})
         return self.call("POST", "/workflow-preparations/" +
                          preparation.get("preparation_id", command) + ":consume", {})

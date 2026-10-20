@@ -1,76 +1,133 @@
-# Superpowers 派发可靠性案例
+# Superpowers 派发可靠性 Workflow 集成
 
-[English](README.md) · [设计](../../DESIGN.md) · [对照结果](comparison.md) · [发布审计](../../RELEASE_AUDIT.md)
+[English](README.md) · [RC 验收](../../RELEASE_CANDIDATE.md) · [对照](comparison.md)
 
-本例包含标准 Workflow、局部外部执行器、自动化测试和真实执行证据，覆盖 #2282，
-并部分覆盖 #2245。[Workflow 源码](../../workflows/superpowers-reliability/) 使用
-六个步骤和必需 JSON Artifact；执行器在实际启动 Codex 子进程前检查 Brief、
-可观察 Todo 和真实 HEAD。
+本例在隔离 Git worktree 中执行**一项明确声明的开发任务**。六步骤 Workflow 与外部
+Python 执行器在启动 Codex 前检查非空 Brief、可观察的 in_progress 状态和真实 Base SHA；
+完成后检查 Coverage、受保护测试、文件修改范围、真实测试结果及 Runtime Artifact。
 
-**硬检查仅约束通过此执行器发出的派发。仅加载 YAML 不会拦截所有 Codex 工具。**
-本次未修改 Runtime 或 LazyLLM 子模块。
+这是手工编写的派发可靠性集成，不是自动 Skill 转换器，也不等同于完整 Superpowers SDD。
+硬检查只约束本执行器启动的子进程，单独加载 YAML 不会拦截其他 Agent。
 
 ## 快速开始
 
-需要 Python 3.9+、Git、macOS/Linux、已登录且支持指定模型的 Codex CLI，以及
-具有 workflow.control.v1 正式接口的 LazyMind。先按[启动指南](../../docs/quick_start.md)
-启动服务。本轮独立审计使用 macOS、Python 3.9.6、Git 2.50.1 和 Codex CLI
-0.155.0-alpha.9；CLI 必须支持 --ignore-user-config、--ephemeral 及指定模型。
-更换模型或 CLI 版本属于新的实验条件。完整命令见英文 README；
-从本目录可先运行：
+需要 macOS/Linux、Python 3.9+、支持 `--path-format=absolute` 的 Git、Bash、已登录的
+Codex CLI 和运行中的 LazyMind。[安装/启动服务](../../docs/quick_start.md)。本轮实测
+Python 3.9.6、Git 2.50.1、Codex CLI 0.155.0-alpha.9；CLI 必须支持
+`exec --ignore-user-config --ephemeral --json`。CLI 不在 PATH 时，配置命令可加
+`--codex /path/to/codex`。MODEL 必须替换为自己账号实际可用的模型。
+
+在包含本例的 checkout 中，选择一个不存在的新目录：
 
 ```bash
-python3 -m unittest discover -s . -p 'test_*.py' -v
-python3 fixtures.py /tmp/workflow-fixture
+cd examples/superpowers-workflow-reliability
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+export TRIAL=/tmp/lazymind-reliability-trial
+export LAZYMIND_URL=http://127.0.0.1:5024
+export MODEL=gpt-6-astra
+mkdir -m 700 "$TRIAL"
+git clone https://github.com/obra/superpowers.git "$TRIAL/superpowers"
+git -C "$TRIAL/superpowers" checkout bb92a77741419a4ab5f06e711a283343f1ada0c3
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" configure \
+  --url "$LAZYMIND_URL" --local-login --superpowers "$TRIAL/superpowers" --model "$MODEL"
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" install
+.venv/bin/python demo.py "$TRIAL/csv-a"
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" run \
+  --task "$TRIAL/csv-a/task.json" --repo "$TRIAL/csv-a/worktree" --state "$TRIAL/csv-a/run"
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" status --state "$TRIAL/csv-a/run"
 ```
 
-将已有 LazyMind 会话令牌存入权限为 0600 的私有 JSON 文件，格式为
-`{"token":"..."}`，不要提交到 Git。显式指定当前实例的 API 地址。
-首次安装该用户下的同名 Workflow 时，用 run.py 的 --publish-only 创建、校验和发布，
-然后在 Workflow 设置中启用。重复运行应复用已有的精确 workflow_ref，并通过公开
-目录/详情接口核对版本、场景文件和状态图（路径见英文 README）。该发布入口是创建
-空白草稿，不是更新器；在已安装同名 Workflow 的本轮实例上重复发布实际触发唯一键
-冲突，未启动子进程。原生对照入口为 native.py；加 --persist-session 可保留本次会话，再用
-export_tool_trace.py 按该运行的 thread ID 和准确工作目录提取工具记录（完整命令见
-英文 README）。不导出推理、普通消息或其他会话；加密工具消息只保留哈希。
-所有实验使用新临时仓库，不 reset、不强制清理。
+5024 是源码本地实例的默认**网关**端口，应使用所选实例的实际地址。`--local-login`
+只访问显式指定的 loopback 本地登录接口，凭证保存在权限 0600 的文件，不输出 Token。
+远程部署要求 HTTPS，用 `--token-file /private/session.json` 替代本地登录；文件格式为
+`{"token":"已授权的令牌"}`，权限 0600。凭证过期后可替换为同一用户的新令牌。
+不要提交 config、凭证、运行目录或用户项目 Trace。本例不配置对话/向量模型。
 
---fault 可选择 missing-brief、empty-brief、wrong-base、dispatch-failure、
-missing-coverage、missing-todo、stale-todo；预期失败返回非零退出码。派发失败使用明确标注的故障回调；
-Coverage 缺项在真实子 Agent 完成后删除一行。
-probe_runtime.py 验证真实服务拒绝越过前置步骤和缺少必需产物的成功提交。
+首次 install 查询所有可见 Workflow（包含禁用的），发布后以 manual 模式启用。
+再次 install 会复用兼容 Ref，每次 run 也会检查文件语义及版本。不兼容时拒绝，
+不覆盖旧草稿。需要并存新版本时，用新的 config 并指定
+`configure --workflow-name YOUR_UNIQUE_NAME`，或通过正式 authoring 流程人工升级。
+旧的同名空白发布 Core 缺陷未修改，但正常重复使用已不走该错误路径。
 
-恢复缺失/空 Brief：用上游 task-brief 重新生成同一文件，打开
-`<前端地址>/workflow-runs/<session_id>` 点击“重试”，以相同参数加 --resume、
-去掉 --fault 继续。执行器认领页面创建的同会话执行，不伪装人工批准。
-当前恢复仅支持 Prepare 成功、派发校验失败的情况，不自动重发结果不明的子任务。
+## 第二次运行与产物
 
-并行复现入口为 parallel.py（完整命令见英文 README）。它创建全新临时仓库和
-两个 linked worktree，检查路径/Index 无冲突后并行运行两个真实 Workflow；
-必须观察到实际时间重叠、两会话完成且父仓库不变，才报告成功。
+无需重新发布，执行 `demo.py "$TRIAL/csv-b"`，然后使用同样的 run/status 命令，
+将 csv-a 换成 csv-b，即创建新 Session。完整命令见[英文 README](README.md)。
 
-## 实际完成度
+实际代码留在 worktree；`git log -1`、`git show --stat` 可查看提交。
+`run/result.json` 包含状态与 Artifact，`trace.jsonl` 是阶段/API 轨迹，
+`child-trace.jsonl` 是真实 Codex 进程流。status 重新读取 Core 并保存
+`readback-control.json`、`readback-artifacts.json`。完成产物包含测试命令、输出、
+文件哈希、HEAD 和 diff。也可打开 `<前端>/workflow-runs/<session_id>`。
+这些原始文件可能包含私有任务数据，不会自动对外发布。
 
-两次原生实验及最终 revision-2 的正常/并行 Workflow 均通过 3 个原始测试和
-9 个独立验收用例。早期 revision-1 正常及恢复运行只记录了 3 个原始测试，
-没有为历史证据补写 9 项验收结果。
-本次原生样本没有复现 Brief 缺失或 Base 错误。Workflow 对缺失/空 Brief、错误 Base
-均在启动前阻断，启动计数为 0；Coverage 缺项和派发失败均无最终成功 Artifact。
-同一失败会话经正式页面重试后完成，保留两次 Attempt。Todo 缺失或提前标记完成
-也在启动前阻断。双 Agent 并行实验实际重叠 57.548 秒，两会话分别完成六步骤，
-独立 worktree、分支与 Index，父仓库未改变。本轮独立审计的 28 项自动化测试全部通过。
+## 适配自己的仓库
 
-初次原生 CLI 摘要流未输出 spawn；补跑从本实验会话提取了 3 次真实派发调用与回执，
-确认 Brief 在派发前完成。加密消息体未解密，子 Agent 内部完整工具轨迹及实际
-模型身份仍未核验。桌面 queue 唤醒和任意进程隔离未验证。有界并行实验与小样本不用于
-估算故障率或提升百分比，不能把模型自己的报告当作身份认证。
+支持范围是一份已提交 Plan 中的一个编号任务、一个 Implementer、明确文件范围和事先
+编写的确定性验收测试；不负责复杂项目环境安装、多任务调度或完整 Reviewer 循环。
+Plan 和验收命令必须可信，命令使用本地用户权限执行。
 
-默认对话模型已确认是 deepseek-flash，新对话实际返回 FLASH_READY。BAAI/bge-m3
-已选中，提供商验证及模型就绪接口均通过，先前密钥故障仅作历史保留。
-编码对照两边均保持请求 gpt-6-astra，宿主为
-Codex CLI 0.155.0-alpha.9。原生 Skill 有两轮 Reviewer；精简 Workflow 使用一个
-Implementer 和确定性验收，所以总耗时/Token 不用于效率优劣结论。
+先提交 Plan、测试及忽略 `.eval/` 的规则，记录完整 SHA，再执行
+`git worktree add -b my-reviewed-task /path/to/new-worktree "$BASE"`。
+必须是新的干净 linked worktree；主工作区会被拒绝。Manifest、config 和 state 放在其外。
+以 demo 生成的 task.json 为模板，所有字段必须提供：
 
-本例是阅读固定版本 Skill 后手工编写的包，经 Agent Kit 正式接口发布；没有声称
-服务端 Skill 快照绑定或 AI 自动转换。详见 [#2282](cases/issue-2282.md)、
-[#2245](cases/issue-2245.md) 和 [证据索引](evidence/manifest.json)。
+| 字段 | 要求 |
+| --- | --- |
+| schema_version | 1 |
+| task_id | 小写短标识，出现在选中的 Plan 标题中 |
+| plan / plan_task | 已跟踪的相对路径；整数 N 对应 `### Task N: task-id` |
+| expected_base | 包含 Plan/测试的完整 40 位 Commit SHA |
+| allowed_files | 允许修改的精确相对路径，不支持 glob、越界或 symlink |
+| protected_files | 已提交且禁止修改的验收文件 |
+| coverage | 唯一 `{id, description, checks:[check-id]}`；ID 出现在该 Plan 任务中 |
+| checks | 唯一 `{id, argv:[程序,参数,...]}`，全部与 Coverage 关联；不做 shell 展开 |
+
+每个要求应在测试中有真实断言。仅把 ID 关联到命令不证明命令有效；调用者必须提供
+可信验收。执行器运行这些测试，并拒绝缺项、多项、重复、SKIPPED 或无文本证据的
+Checklist。用自己的 task/repo 参数运行即可；变更 Manifest 不可复用旧失败会话。
+
+## 故障与恢复
+
+仅在一次性 demo 上给 run 添加 `--fault missing-brief`：真实脚本生成 Brief 后，
+故障注入将其删除，Validate 失败且启动数为 0。负例预期 exit 1。
+对这个失败 run（不是已成功的快速开始 run）执行：
+
+```bash
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" restore-brief \
+  --task "$TRIAL/csv-a/task.json" --repo "$TRIAL/csv-a/worktree" --state "$TRIAL/csv-a/run"
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" run --resume \
+  --task "$TRIAL/csv-a/task.json" --repo "$TRIAL/csv-a/worktree" --state "$TRIAL/csv-a/run"
+```
+
+restore 从同一个已提交任务重新生成 Brief。显式 --resume 调用公共 control Retry，
+在同 Session 中保留失败 Attempt 并产生新 Attempt；也可认领 UI 已排队的 Retry。
+仅支持 Prepare 已成功且从未派发的校验失败。旧结果保存在 previous-results.jsonl。
+
+错误 Base、Plan/测试被修改或 Manifest 无效时，检查错误并重新准备经过审阅的输入、
+新 worktree 和 state，不要 reset 掉已有工作。派发失败、中断或结果不确定时先 status、
+检查 Git 和 Trace，在 LazyMind 中处理原 Session，再有意识地创建新的任务；不自动重放。
+已处理的超时/SIGINT/SIGTERM 会终止本执行器拥有的进程组，无法保证 SIGKILL、断电或
+脱离进程组的孙进程。不要删除 state 隐藏未解决派发。子任务限时 600 秒，验收命令 120 秒。
+
+## 验证与边界
+
+```bash
+.venv/bin/python -m unittest discover -s . -p 'test_*.py' -v
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" preflight
+```
+
+预检依赖、CLI 参数与登录、固定上游版本、Runtime 授权和 Workflow 兼容性，不隐藏调用模型。
+模型可用性由实际被 Runtime 接受的派发验证；实际后端身份仍为 N/A。
+Core 控制步骤准入、租约和必需产物，Python 执行器控制 Brief/状态/Base 与任务验收。
+协作锁不等于 OS 隔离；Codex Todo UI 同步、模型认证、任意进程隔离和完整 SDD 对等仍未实现。
+
+Before：原生 Skill 依赖模型遵循派发前约定。After：本执行器把选定前置条件变成可阻断
+自己的派发检查。历史两个正常 Native 样本均成功，没有自然复现缺 Brief；不声称故障率、
+速度或成本提升。详见 [RC 结果](../../RELEASE_CANDIDATE.md)、[#2282](cases/issue-2282.md)、
+[#2245](cases/issue-2245.md)、[对照](comparison.md)。
+
+cli.py 是当前用户任务入口；run.py/native.py/parallel.py 和旧证据保留固定 fixture 对照。
+旧发布审计是有日期的历史快照，不能代替本轮代码验收。上游内容附有 [MIT 许可](UPSTREAM-LICENSE)，
+新增代码使用仓库 [Apache-2.0](../../LICENSE)。
