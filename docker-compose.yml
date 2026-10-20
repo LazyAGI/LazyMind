@@ -170,6 +170,96 @@ services:
       - ./skills:/workspace/skills
       - ./workflows:/workspace/workflows:ro
 
+  sandbox-runner:
+    build:
+      context: .
+      dockerfile: algorithm/sandbox_runner/Dockerfile
+      args:
+        <<: *mirror-args
+    init: true
+    restart: unless-stopped
+    networks:
+      - sandbox-egress-internal
+    read_only: true
+    tmpfs:
+      - /workspace:rw,noexec,nosuid,nodev,size=1g,mode=0711
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    volumes:
+      - sandbox-runner-socket:/run/lazymind-sandbox
+      - sandbox-egress-control:/run/lazymind-egress
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - KILL
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=builtin
+    pids_limit: 512
+    mem_limit: 1g
+    cpus: 2.0
+    healthcheck:
+      test: ["CMD", "python", "-m", "sandbox_runner.client"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    depends_on:
+      sandbox-egress:
+        condition: service_healthy
+    command:
+      - --socket
+      - /run/lazymind-sandbox/runner.sock
+      - --root
+      - /workspace/sessions
+      - --egress-control-socket
+      - /run/lazymind-egress/control.sock
+      - --egress-proxy-url
+      - http://sandbox-egress:18081
+
+  sandbox-egress:
+    build:
+      context: .
+      dockerfile: algorithm/sandbox_runner/Dockerfile
+      args:
+        <<: *mirror-args
+    entrypoint: ["python", "-m", "sandbox_runner.egress_proxy"]
+    command: ["--control-socket", "/run/lazymind-egress/control.sock"]
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    volumes:
+      - sandbox-egress-control:/run/lazymind-egress
+    networks:
+      - sandbox-egress-internal
+      - default
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=builtin
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.5
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -m
+        - sandbox_runner.egress_proxy
+        - --control-socket
+        - /run/lazymind-egress/control.sock
+        - --healthcheck
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
   kong:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-kong:${LAZYMIND_IMAGE_TAG:-latest}
     build:
@@ -931,6 +1021,7 @@ services:
       - "8046"
     volumes:
       - internal-service-credentials:/run/secrets/internal-service:ro
+      - sandbox-runner-socket:/run/lazymind-sandbox
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
       - ./data/observability:/var/lib/lazymind/observability
@@ -980,6 +1071,8 @@ services:
       LAZYMIND_DEFAULT_CHAT_DATASET: algo
       LAZYMIND_AUTH_SERVICE_URL: http://auth-service:8000/api/authservice
       LAZYMIND_CORE_API_URL: http://core:8000
+      LAZYMIND_SKILL_SANDBOX_BACKEND: runner
+      LAZYMIND_SKILL_SANDBOX_SOCKET: /run/lazymind-sandbox/runner.sock
       LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS: ${LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS:-5000}
       LAZYMIND_EPISODE_RECENT_PROGRESS_INJECT_TOPK: ${LAZYMIND_EPISODE_RECENT_PROGRESS_INJECT_TOPK:-3}
       LAZYMIND_FILE_URL_SIGN_SECRET: changeme-in-production
@@ -1024,6 +1117,8 @@ services:
     depends_on:
       internal-service-token-init:
         condition: service_completed_successfully
+      sandbox-runner:
+        condition: service_healthy
       lazyllm-algo:
         condition: service_healthy
       lazyllm-doc-server:
@@ -1212,6 +1307,8 @@ secrets:
 
 volumes:
   internal-service-credentials:
+  sandbox-runner-socket:
+  sandbox-egress-control:
   pgdata:
   redisdata:
   mineru-model-cache:
@@ -1223,3 +1320,7 @@ volumes:
   evo-data:
   ppt-export-node-modules:
   channel-gateway-data:
+
+networks:
+  sandbox-egress-internal:
+    internal: true
