@@ -1,5 +1,18 @@
 # Issue 2282: brief and task-state prerequisites
 
+## Reusable RC
+
+The [CLI](../README.md) now binds the brief to a caller's committed Plan/task and
+immutable declaration. [Fresh missing-brief injection](../evidence/rc/missing-current/result.json)
+blocked before Popen. A separate failed session was restored, retried through the
+logged-in Workflow UI and completed through CLI `--resume`; its failed attempt is
+retained in [Core history](../evidence/rc/missing-brief/result.json).
+An attempted external API Retry returned 403 and was fixed by respecting UI authority;
+[raw trace](../evidence/rc/missing-brief/trace.jsonl) retains that failure.
+The later sections preserve the original fixed-fixture/native observations.
+
+## Historical evidence
+
 [Upstream issue](https://github.com/obra/superpowers/issues/2282) reports omitted
 brief generation and Todo transitions. The retrieved September 27 comment also
 notes the implementer template's missing placeholder explanation/fail-fast.

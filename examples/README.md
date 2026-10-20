@@ -23,4 +23,4 @@ See LazyMind in action through published demos. All videos and articles below ar
 
 ### Runnable experiments
 
-- [Superpowers dispatch reliability](superpowers-workflow-reliability/README.md): runnable Workflow, real execution traces, and labeled fault injection for issues 2282 and 2245.
+- [Superpowers dispatch reliability](superpowers-workflow-reliability/README.md): reusable single-task RC with installation, repeat use, UI-authorized recovery and real fault-injection evidence for issues 2282/2245.

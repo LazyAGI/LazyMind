@@ -1,0 +1,414 @@
+{
+  "result": "FAIL",
+  "failure": "BRIEF_MISSING",
+  "session_id": "d490f23fbc734ed4892fe309c46dee39",
+  "launch_count": 0,
+  "completed_at": "2026-10-20T07:52:13.429806+00:00",
+  "control": {
+    "control": {
+      "protocol": "workflow.control.v1",
+      "session_id": "d490f23fbc734ed4892fe309c46dee39",
+      "state_version": 10,
+      "continuation": "failed",
+      "admission": {
+        "can_begin": false,
+        "reason": "recovery_required"
+      },
+      "reviews": [],
+      "binding": {
+        "bound": false
+      },
+      "delivery": null,
+      "active_executions": 0,
+      "native_execution_ids": [],
+      "active_execution_ids": [],
+      "available_actions": [
+        "stop",
+        "save",
+        "rewind",
+        "retry"
+      ]
+    },
+    "projection": {
+      "past": [
+        "prepare"
+      ],
+      "current": [
+        "validate_dispatch"
+      ],
+      "reachable": null,
+      "ready": null,
+      "retryable": [
+        "validate_dispatch"
+      ],
+      "rewindable": [
+        "prepare"
+      ],
+      "continue": null,
+      "blocked": null,
+      "stale": null,
+      "pruned": null,
+      "bypassed": null,
+      "nodes": {
+        "collect": {
+          "id": "collect",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "dispatch": {
+          "id": "dispatch",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "prepare": {
+          "id": "prepare",
+          "requires_approval": false,
+          "execution": "succeeded",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "record": {
+          "id": "record",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "validate_completion": {
+          "id": "validate_completion",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "validate_dispatch": {
+          "id": "validate_dispatch",
+          "requires_approval": false,
+          "execution": "failed",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "__start__",
+          "to": "prepare",
+          "state": "active"
+        },
+        {
+          "from": "prepare",
+          "to": "validate_dispatch",
+          "state": "active"
+        },
+        {
+          "from": "validate_dispatch",
+          "to": "dispatch",
+          "state": "inactive"
+        },
+        {
+          "from": "dispatch",
+          "to": "collect",
+          "state": "inactive"
+        },
+        {
+          "from": "collect",
+          "to": "validate_completion",
+          "state": "inactive"
+        },
+        {
+          "from": "validate_completion",
+          "to": "record",
+          "state": "inactive"
+        },
+        {
+          "from": "record",
+          "to": "__end__",
+          "state": "inactive"
+        }
+      ],
+      "end_reached": false,
+      "completed": false
+    },
+    "session": {
+      "state_version": 10,
+      "session_id": "d490f23fbc734ed4892fe309c46dee39",
+      "conversation_id": "",
+      "workflow_id": "superpowers-reliability-rc-acceptance",
+      "workflow_mode": "auto",
+      "pinned_revision_id": "b6a4f724-0804-479a-986c-6c5043cb096d",
+      "status": "failed",
+      "current_step_id": "",
+      "intent_context": "{\"text\":\"Execute declared task csv-records\"}",
+      "created_at": "2026-10-20T07:52:13.207091Z",
+      "updated_at": "2026-10-20T07:52:13.416227Z",
+      "slots": [
+        {
+          "artifact_id": "13874226-6ec5-4bef-bf0c-f380996362ad",
+          "slot_id": "preparation",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "preparation",
+          "created_at": "2026-10-20T07:52:13.363808Z",
+          "content_type": "json",
+          "artifact_value": {
+            "binding": {
+              "task_id": "csv-records",
+              "manifest_sha256": "9e0b04a23f70b61cc3a7ce2e3287d4c837efd3b8b28f5884b7e588161069af33",
+              "plan": "docs/plans/csv.md",
+              "plan_task": 1,
+              "protected_sha256": {
+                "docs/plans/csv.md": "ee198b37c9084fc2592e0f4a9628326cceb60d99b0fbefe70658900eace89cac",
+                "test_csv_records.py": "456a875cd18a2ef87f3d08ca27046a8ffafc3246566bc5f259e3685b953cbd01"
+              },
+              "coverage_ids": [
+                "quoted",
+                "headers",
+                "ragged",
+                "empty"
+              ]
+            },
+            "brief_sha256": "d6a6ac463ff92ad4e1a4a0df431fb1b9e867db40a25b4f44957a71ae62b672d6",
+            "brief_bytes": 1929,
+            "todo": {
+              "at": "2026-10-20T07:52:13.287331+00:00",
+              "event": "todo_updated",
+              "task_id": "csv-records",
+              "status": "in_progress"
+            },
+            "git": {
+              "worktree": "<ACCEPTANCE_ROOT>/trial/missing-brief/worktree",
+              "head": "89b69e7d63a2897ba5eb06f0f36cdb20d9f5ccb7",
+              "git_dir": "<ACCEPTANCE_ROOT>/trial/missing-brief/repository/.git/worktrees/worktree",
+              "index": "<ACCEPTANCE_ROOT>/trial/missing-brief/repository/.git/worktrees/worktree/index",
+              "common_dir": "<ACCEPTANCE_ROOT>/trial/missing-brief/repository/.git"
+            },
+            "expected_base": "89b69e7d63a2897ba5eb06f0f36cdb20d9f5ccb7",
+            "task": {
+              "schema_version": 1,
+              "task_id": "csv-records",
+              "plan": "docs/plans/csv.md",
+              "plan_task": 1,
+              "expected_base": "89b69e7d63a2897ba5eb06f0f36cdb20d9f5ccb7",
+              "allowed_files": [
+                "csv_records.py"
+              ],
+              "protected_files": [
+                "test_csv_records.py"
+              ],
+              "coverage": [
+                {
+                  "id": "quoted",
+                  "description": "quoted behavior in the tracked Plan",
+                  "checks": [
+                    "csv-tests"
+                  ]
+                },
+                {
+                  "id": "headers",
+                  "description": "headers behavior in the tracked Plan",
+                  "checks": [
+                    "csv-tests"
+                  ]
+                },
+                {
+                  "id": "ragged",
+                  "description": "ragged behavior in the tracked Plan",
+                  "checks": [
+                    "csv-tests"
+                  ]
+                },
+                {
+                  "id": "empty",
+                  "description": "empty behavior in the tracked Plan",
+                  "checks": [
+                    "csv-tests"
+                  ]
+                }
+              ],
+              "checks": [
+                {
+                  "id": "csv-tests",
+                  "argv": [
+                    "python3",
+                    "-m",
+                    "unittest",
+                    "-v",
+                    "test_csv_records"
+                  ]
+                }
+              ]
+            }
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "prepare",
+          "revision_count": 1,
+          "version_number": 1
+        }
+      ],
+      "steps": [
+        {
+          "step_id": "prepare",
+          "attempt": 1,
+          "task_id": "e15e1e2d-c908-4812-9041-743004e7b114",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-20T07:52:13.22506Z"
+        },
+        {
+          "step_id": "validate_dispatch",
+          "attempt": 1,
+          "task_id": "2f6accd7-4a34-4699-ab9a-b8fdd81f43b9",
+          "status": "failed",
+          "validity": "effective",
+          "created_at": "2026-10-20T07:52:13.394282Z"
+        }
+      ]
+    }
+  },
+  "artifacts": {
+    "artifacts": [
+      {
+        "draft_version": 1,
+        "artifact_id": "13874226-6ec5-4bef-bf0c-f380996362ad",
+        "session_id": "d490f23fbc734ed4892fe309c46dee39",
+        "slot_id": "preparation",
+        "slot": "preparation",
+        "step_id": "prepare",
+        "attempt": 1,
+        "producer_attempt_id": "e15e1e2d-c908-4812-9041-743004e7b114",
+        "revision": 1,
+        "selected": true,
+        "validity": "effective",
+        "change_source": "host",
+        "content_type": "json",
+        "value": {
+          "binding": {
+            "task_id": "csv-records",
+            "manifest_sha256": "9e0b04a23f70b61cc3a7ce2e3287d4c837efd3b8b28f5884b7e588161069af33",
+            "plan": "docs/plans/csv.md",
+            "plan_task": 1,
+            "protected_sha256": {
+              "docs/plans/csv.md": "ee198b37c9084fc2592e0f4a9628326cceb60d99b0fbefe70658900eace89cac",
+              "test_csv_records.py": "456a875cd18a2ef87f3d08ca27046a8ffafc3246566bc5f259e3685b953cbd01"
+            },
+            "coverage_ids": [
+              "quoted",
+              "headers",
+              "ragged",
+              "empty"
+            ]
+          },
+          "brief_sha256": "d6a6ac463ff92ad4e1a4a0df431fb1b9e867db40a25b4f44957a71ae62b672d6",
+          "brief_bytes": 1929,
+          "todo": {
+            "at": "2026-10-20T07:52:13.287331+00:00",
+            "event": "todo_updated",
+            "task_id": "csv-records",
+            "status": "in_progress"
+          },
+          "git": {
+            "worktree": "<ACCEPTANCE_ROOT>/trial/missing-brief/worktree",
+            "head": "89b69e7d63a2897ba5eb06f0f36cdb20d9f5ccb7",
+            "git_dir": "<ACCEPTANCE_ROOT>/trial/missing-brief/repository/.git/worktrees/worktree",
+            "index": "<ACCEPTANCE_ROOT>/trial/missing-brief/repository/.git/worktrees/worktree/index",
+            "common_dir": "<ACCEPTANCE_ROOT>/trial/missing-brief/repository/.git"
+          },
+          "expected_base": "89b69e7d63a2897ba5eb06f0f36cdb20d9f5ccb7",
+          "task": {
+            "schema_version": 1,
+            "task_id": "csv-records",
+            "plan": "docs/plans/csv.md",
+            "plan_task": 1,
+            "expected_base": "89b69e7d63a2897ba5eb06f0f36cdb20d9f5ccb7",
+            "allowed_files": [
+              "csv_records.py"
+            ],
+            "protected_files": [
+              "test_csv_records.py"
+            ],
+            "coverage": [
+              {
+                "id": "quoted",
+                "description": "quoted behavior in the tracked Plan",
+                "checks": [
+                  "csv-tests"
+                ]
+              },
+              {
+                "id": "headers",
+                "description": "headers behavior in the tracked Plan",
+                "checks": [
+                  "csv-tests"
+                ]
+              },
+              {
+                "id": "ragged",
+                "description": "ragged behavior in the tracked Plan",
+                "checks": [
+                  "csv-tests"
+                ]
+              },
+              {
+                "id": "empty",
+                "description": "empty behavior in the tracked Plan",
+                "checks": [
+                  "csv-tests"
+                ]
+              }
+            ],
+            "checks": [
+              {
+                "id": "csv-tests",
+                "argv": [
+                  "python3",
+                  "-m",
+                  "unittest",
+                  "-v",
+                  "test_csv_records"
+                ]
+              }
+            ]
+          }
+        },
+        "deleted": false,
+        "created_at": "2026-10-20T07:52:13.363808Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "task_id": "normalize-labels",
+  "plan": "docs/plan.md",
+  "plan_task": 7,
+  "expected_base": "329e17ab0944f829d58af91c293e0e20d33b5ee8",
+  "allowed_files": [
+    "labels.py"
+  ],
+  "protected_files": [
+    "test_labels.py"
+  ],
+  "coverage": [
+    {
+      "id": "normalize",
+      "description": "normalize",
+      "checks": [
+        "labels-tests"
+      ]
+    },
+    {
+      "id": "dedupe",
+      "description": "dedupe",
+      "checks": [
+        "labels-tests"
+      ]
+    },
+    {
+      "id": "validation",
+      "description": "validation",
+      "checks": [
+        "labels-tests"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "id": "labels-tests",
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "-v",
+        "test_labels"
+      ]
+    }
+  ]
+}

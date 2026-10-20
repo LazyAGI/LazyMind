@@ -1,5 +1,7 @@
 # Superpowers Workflow reliability report / 交付报告
 
+> Historical experimental snapshot. For the reusable RC and new acceptance results, see [RELEASE_CANDIDATE.md](RELEASE_CANDIDATE.md).
+
 原始交付包含可运行代码、27 个回归测试、真实 Runtime/Codex 执行、失败注入证据和中英文
 案例文档。#2282 的受控派发链路已完成真实验证；补跑原生实验记录了实际 spawn 回执。
 #2245 的 Base/Coverage 和双 worktree 真实并行已验证；实际模型身份及任意进程隔离仍无认证保证。

@@ -1,0 +1,620 @@
+[
+  {
+    "label": "units",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      ".",
+      "-p",
+      "test_*.py",
+      "-v"
+    ],
+    "started_at": "2026-10-20T07:49:23.637540+00:00",
+    "completed_at": "2026-10-20T07:49:31.156203+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "clone-upstream",
+    "argv": [
+      "git",
+      "clone",
+      "--quiet",
+      "https://github.com/obra/superpowers.git",
+      "<ACCEPTANCE_ROOT>/trial/superpowers"
+    ],
+    "started_at": "2026-10-20T07:49:31.156925+00:00",
+    "completed_at": "2026-10-20T07:49:39.613738+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "pin-upstream",
+    "argv": [
+      "git",
+      "-C",
+      "<ACCEPTANCE_ROOT>/trial/superpowers",
+      "checkout",
+      "--quiet",
+      "bb92a77741419a4ab5f06e711a283343f1ada0c3"
+    ],
+    "started_at": "2026-10-20T07:49:39.614200+00:00",
+    "completed_at": "2026-10-20T07:49:39.654542+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "configure",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "configure",
+      "--url",
+      "http://127.0.0.1:5024",
+      "--local-login",
+      "--superpowers",
+      "<ACCEPTANCE_ROOT>/trial/superpowers",
+      "--model",
+      "gpt-6-astra",
+      "--workflow-name",
+      "superpowers-reliability-rc-acceptance"
+    ],
+    "started_at": "2026-10-20T07:49:39.654954+00:00",
+    "completed_at": "2026-10-20T07:49:39.727297+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "install-first",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "install"
+    ],
+    "started_at": "2026-10-20T07:49:39.727743+00:00",
+    "completed_at": "2026-10-20T07:49:39.963091+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "preflight",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "preflight"
+    ],
+    "started_at": "2026-10-20T07:49:39.963744+00:00",
+    "completed_at": "2026-10-20T07:49:40.147965+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "prepare-csv-a",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "demo.py",
+      "<ACCEPTANCE_ROOT>/trial/csv-a"
+    ],
+    "started_at": "2026-10-20T07:49:40.148453+00:00",
+    "completed_at": "2026-10-20T07:49:40.272646+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "run-csv-a",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "run",
+      "--task",
+      "<ACCEPTANCE_ROOT>/trial/csv-a/task.json",
+      "--repo",
+      "<ACCEPTANCE_ROOT>/trial/csv-a/worktree",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/csv-a/run"
+    ],
+    "started_at": "2026-10-20T07:49:40.273151+00:00",
+    "completed_at": "2026-10-20T07:50:28.412057+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "readback-csv-a",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "status",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/csv-a/run"
+    ],
+    "started_at": "2026-10-20T07:50:28.412642+00:00",
+    "completed_at": "2026-10-20T07:50:28.542844+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "install-repeat",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "install"
+    ],
+    "started_at": "2026-10-20T07:50:28.543421+00:00",
+    "completed_at": "2026-10-20T07:50:28.722794+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "prepare-csv-b",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "demo.py",
+      "<ACCEPTANCE_ROOT>/trial/csv-b"
+    ],
+    "started_at": "2026-10-20T07:50:28.723392+00:00",
+    "completed_at": "2026-10-20T07:50:28.848324+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "run-csv-b",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "run",
+      "--task",
+      "<ACCEPTANCE_ROOT>/trial/csv-b/task.json",
+      "--repo",
+      "<ACCEPTANCE_ROOT>/trial/csv-b/worktree",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/csv-b/run"
+    ],
+    "started_at": "2026-10-20T07:50:28.848803+00:00",
+    "completed_at": "2026-10-20T07:51:21.659839+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "readback-csv-b",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "status",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/csv-b/run"
+    ],
+    "started_at": "2026-10-20T07:51:21.660816+00:00",
+    "completed_at": "2026-10-20T07:51:21.785627+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "run-custom-labels",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "run",
+      "--task",
+      "<ACCEPTANCE_ROOT>/trial/custom-labels/task.json",
+      "--repo",
+      "<ACCEPTANCE_ROOT>/trial/custom-labels/worktree",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/custom-labels/run"
+    ],
+    "started_at": "2026-10-20T07:51:21.865539+00:00",
+    "completed_at": "2026-10-20T07:52:12.739868+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "readback-custom-labels",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "status",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/custom-labels/run"
+    ],
+    "started_at": "2026-10-20T07:52:12.740929+00:00",
+    "completed_at": "2026-10-20T07:52:12.868138+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "prepare-missing-brief",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "demo.py",
+      "<ACCEPTANCE_ROOT>/trial/missing-brief"
+    ],
+    "started_at": "2026-10-20T07:52:12.868735+00:00",
+    "completed_at": "2026-10-20T07:52:12.990786+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "run-missing-brief",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "run",
+      "--task",
+      "<ACCEPTANCE_ROOT>/trial/missing-brief/task.json",
+      "--repo",
+      "<ACCEPTANCE_ROOT>/trial/missing-brief/worktree",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/missing-brief/run",
+      "--fault",
+      "missing-brief"
+    ],
+    "started_at": "2026-10-20T07:52:12.991325+00:00",
+    "completed_at": "2026-10-20T07:52:13.478053+00:00",
+    "returncode": 1,
+    "expected_returncode": 1
+  },
+  {
+    "label": "readback-missing-brief",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "status",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/missing-brief/run"
+    ],
+    "started_at": "2026-10-20T07:52:13.478685+00:00",
+    "completed_at": "2026-10-20T07:52:13.556052+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "restore-brief",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "restore-brief",
+      "--task",
+      "<ACCEPTANCE_ROOT>/trial/missing-brief/task.json",
+      "--repo",
+      "<ACCEPTANCE_ROOT>/trial/missing-brief/worktree",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/missing-brief/run"
+    ],
+    "started_at": "2026-10-20T07:52:13.557002+00:00",
+    "completed_at": "2026-10-20T07:52:13.851213+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "resume-missing-brief",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "run",
+      "--task",
+      "<ACCEPTANCE_ROOT>/trial/missing-brief/task.json",
+      "--repo",
+      "<ACCEPTANCE_ROOT>/trial/missing-brief/worktree",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/missing-brief/run",
+      "--resume"
+    ],
+    "started_at": "2026-10-20T07:52:13.851815+00:00",
+    "completed_at": "2026-10-20T07:52:14.086618+00:00",
+    "returncode": 1,
+    "expected_returncode": 0
+  },
+  {
+    "label": "resume-missing-brief",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "run",
+      "--task",
+      "<ACCEPTANCE_ROOT>/trial/missing-brief/task.json",
+      "--repo",
+      "<ACCEPTANCE_ROOT>/trial/missing-brief/worktree",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/missing-brief/run",
+      "--resume"
+    ],
+    "started_at": "2026-10-20T07:59:40.232798+00:00",
+    "completed_at": "2026-10-20T08:00:33.873317+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "readback-resume-missing-brief",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "status",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/missing-brief/run"
+    ],
+    "started_at": "2026-10-20T08:00:33.874421+00:00",
+    "completed_at": "2026-10-20T08:00:33.999822+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "prepare-wrong-base",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "demo.py",
+      "<ACCEPTANCE_ROOT>/trial/wrong-base"
+    ],
+    "started_at": "2026-10-20T08:00:34.000580+00:00",
+    "completed_at": "2026-10-20T08:00:34.123480+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "inject-wrong-base",
+    "argv": [
+      "git",
+      "-C",
+      "<ACCEPTANCE_ROOT>/trial/wrong-base/worktree",
+      "commit",
+      "--allow-empty",
+      "-qm",
+      "Injected HEAD mismatch"
+    ],
+    "started_at": "2026-10-20T08:00:34.124366+00:00",
+    "completed_at": "2026-10-20T08:00:34.144910+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "run-wrong-base",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "run",
+      "--task",
+      "<ACCEPTANCE_ROOT>/trial/wrong-base/task.json",
+      "--repo",
+      "<ACCEPTANCE_ROOT>/trial/wrong-base/worktree",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/wrong-base/run"
+    ],
+    "started_at": "2026-10-20T08:00:34.145537+00:00",
+    "completed_at": "2026-10-20T08:00:34.534440+00:00",
+    "returncode": 1,
+    "expected_returncode": 1
+  },
+  {
+    "label": "readback-wrong-base",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "status",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/wrong-base/run"
+    ],
+    "started_at": "2026-10-20T08:00:34.535106+00:00",
+    "completed_at": "2026-10-20T08:00:34.607398+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "prepare-missing-coverage",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "demo.py",
+      "<ACCEPTANCE_ROOT>/trial/missing-coverage"
+    ],
+    "started_at": "2026-10-20T08:00:34.607975+00:00",
+    "completed_at": "2026-10-20T08:00:34.736724+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "run-missing-coverage",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "run",
+      "--task",
+      "<ACCEPTANCE_ROOT>/trial/missing-coverage/task.json",
+      "--repo",
+      "<ACCEPTANCE_ROOT>/trial/missing-coverage/worktree",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/missing-coverage/run",
+      "--fault",
+      "missing-coverage"
+    ],
+    "started_at": "2026-10-20T08:00:34.737380+00:00",
+    "completed_at": "2026-10-20T08:01:31.357577+00:00",
+    "returncode": 1,
+    "expected_returncode": 1
+  },
+  {
+    "label": "readback-missing-coverage",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "status",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/missing-coverage/run"
+    ],
+    "started_at": "2026-10-20T08:01:31.358499+00:00",
+    "completed_at": "2026-10-20T08:01:31.482123+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "incompatible-install",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/incompatible-config.json",
+      "install"
+    ],
+    "started_at": "2026-10-20T08:01:31.482957+00:00",
+    "completed_at": "2026-10-20T08:01:31.656698+00:00",
+    "returncode": 1,
+    "expected_returncode": 1
+  },
+  {
+    "label": "units-current",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      ".",
+      "-p",
+      "test_*.py",
+      "-v"
+    ],
+    "started_at": "2026-10-20T08:02:15.129468+00:00",
+    "completed_at": "2026-10-20T08:02:21.445263+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "install-current",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "install"
+    ],
+    "started_at": "2026-10-20T08:02:21.445923+00:00",
+    "completed_at": "2026-10-20T08:02:21.625333+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "run-custom-unicode",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "run",
+      "--task",
+      "<ACCEPTANCE_ROOT>/trial/custom-unicode/task.json",
+      "--repo",
+      "<ACCEPTANCE_ROOT>/trial/custom-unicode/worktree",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/custom-unicode/run"
+    ],
+    "started_at": "2026-10-20T08:02:21.705924+00:00",
+    "completed_at": "2026-10-20T08:03:09.996282+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "readback-custom-unicode",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "status",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/custom-unicode/run"
+    ],
+    "started_at": "2026-10-20T08:03:09.997371+00:00",
+    "completed_at": "2026-10-20T08:03:10.123727+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "prepare-missing-current",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "demo.py",
+      "<ACCEPTANCE_ROOT>/trial/missing-current"
+    ],
+    "started_at": "2026-10-20T08:03:10.124807+00:00",
+    "completed_at": "2026-10-20T08:03:10.308365+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  },
+  {
+    "label": "run-missing-current",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "run",
+      "--task",
+      "<ACCEPTANCE_ROOT>/trial/missing-current/task.json",
+      "--repo",
+      "<ACCEPTANCE_ROOT>/trial/missing-current/worktree",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/missing-current/run",
+      "--fault",
+      "missing-brief"
+    ],
+    "started_at": "2026-10-20T08:03:10.309312+00:00",
+    "completed_at": "2026-10-20T08:03:10.799754+00:00",
+    "returncode": 1,
+    "expected_returncode": 1
+  },
+  {
+    "label": "readback-missing-current",
+    "argv": [
+      "<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python",
+      "cli.py",
+      "--config",
+      "<ACCEPTANCE_ROOT>/trial/private/config.json",
+      "status",
+      "--state",
+      "<ACCEPTANCE_ROOT>/trial/missing-current/run"
+    ],
+    "started_at": "2026-10-20T08:03:10.800443+00:00",
+    "completed_at": "2026-10-20T08:03:10.876953+00:00",
+    "returncode": 0,
+    "expected_returncode": 0
+  }
+]

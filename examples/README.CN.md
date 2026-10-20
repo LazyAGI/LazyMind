@@ -23,4 +23,4 @@
 
 ### 可运行实验
 
-- [Superpowers 派发可靠性](superpowers-workflow-reliability/README.CN.md)：可运行 Workflow、真实执行轨迹及明确标注的故障注入，覆盖 #2282 并部分覆盖 #2245。
+- [Superpowers 派发可靠性](superpowers-workflow-reliability/README.CN.md)：单任务 RC，支持安装、重复执行、页面授权恢复，并保留 #2282/#2245 的真实故障注入证据。

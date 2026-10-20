@@ -21,6 +21,17 @@ The RC was tested with Python 3.9.6, Git 2.50.1 and Codex CLI 0.155.0-alpha.9.
 Codex must accept `exec --ignore-user-config --ephemeral --json` and the selected
 model. If the CLI is not on PATH, use `--codex /path/to/codex` when configuring.
 
+If you received the unpublished candidate as a Git bundle, first obtain its checkout:
+
+```bash
+git clone https://github.com/LazyAGI/LazyMind.git LazyMind-rc
+git -C LazyMind-rc fetch /path/to/lazymind-superpowers-reliability-rc.bundle feat/superpowers-workflow-eval
+git -C LazyMind-rc switch -c reliability-rc FETCH_HEAD
+cd LazyMind-rc
+```
+
+A reviewed branch checkout can be used directly. No public RC download is claimed before publication.
+
 Start from a checkout containing this example. Select a **new** writable directory,
 your local gateway URL and a model available to your Codex account:
 
@@ -127,11 +138,15 @@ then deletes it. Validation fails before a child is launched. Expected negative
 runs exit 1. Do not use fault injection against business work.
 
 ```bash
+.venv/bin/python demo.py "$TRIAL/recovery"
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" run --fault missing-brief \
+  --task "$TRIAL/recovery/task.json" --repo "$TRIAL/recovery/worktree" --state "$TRIAL/recovery/run"
+# Expected: exit 1, BRIEF_MISSING, launch_count 0.
 .venv/bin/python cli.py --config "$TRIAL/private/config.json" restore-brief \
-  --task "$TRIAL/csv-a/task.json" --repo "$TRIAL/csv-a/worktree" --state "$TRIAL/csv-a/run"
+  --task "$TRIAL/recovery/task.json" --repo "$TRIAL/recovery/worktree" --state "$TRIAL/recovery/run"
 # Open the failed Workflow session in LazyMind and click Retry now.
 .venv/bin/python cli.py --config "$TRIAL/private/config.json" run --resume \
-  --task "$TRIAL/csv-a/task.json" --repo "$TRIAL/csv-a/worktree" --state "$TRIAL/csv-a/run"
+  --task "$TRIAL/recovery/task.json" --repo "$TRIAL/recovery/worktree" --state "$TRIAL/recovery/run"
 ```
 
 Apply these commands to the *failed missing-brief run*, not the completed Quick Start
@@ -152,6 +167,18 @@ a new task. The executor refuses automatic replay. A handled timeout/SIGINT/SIGT
 kills its owned process group; SIGKILL, machine failure, detached grandchildren and
 durable distributed recovery are not guaranteed. Never delete run state to conceal
 an unresolved dispatch. Check commands have a 120-second limit; Codex has 600 seconds.
+
+## A real run
+
+On 2026-10-20 UTC, the [user Task 7 with a Unicode filename](evidence/rc/custom-unicode/trace.jsonl)
+ran Prepare 08:02:21.953–22.097 → Validate 22.127–22.222 → Dispatch
+08:02:22.286–08:03:09.419 → Collect 09.465–09.572 → completion checks
+09.607–09.856 → Record 09.901–09.921. Its real child changed only `标签.py`,
+committed it and passed four protected tests plus independent checks.
+[Result and six selected Artifacts](evidence/rc/custom-unicode/result.json).
+The [next missing-brief injection](evidence/rc/missing-current/trace.jsonl) failed
+validation at 08:03:10.760: zero launch receipts and no Dispatch attempt.
+[Evidence guide, hashes and reproduction](evidence/rc/README.md).
 
 ## Evidence, tests and limits
 

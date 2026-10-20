@@ -1,6 +1,28 @@
 # Comparison / 对照
 
-This includes two small normal native samples, two normal Workflow runs (v1 then v2),
+## RC developer trial (2026-10-20)
+
+The RC accepts a caller-declared task. This table adds new live Runtime/Codex runs;
+it does not retrospectively change the old native samples or claim SDD parity.
+
+| Issue | Check target | Native Skill | LazyMind RC | Actual evidence | Limit |
+| --- | --- | --- | --- | --- | --- |
+| 2282 | Brief before launch | Both normal historical samples passed | Real deletion blocked; 0 processes | [missing-current](evidence/rc/missing-current/result.json) | Explicit fault injection, not natural upstream failure |
+| 2282 | State and recovery | No in_progress observation in historical ledger | Persisted event/Artifact; UI Retry then CLI resumes same session | [retry](evidence/rc/missing-brief/result.json) | Local executor state; no Codex Todo UI sync; no uncertain-dispatch replay |
+| 2245 | Full SHA | Correct base in normal samples | Real new HEAD blocked before launch | [wrong-base](evidence/rc/wrong-base/result.json) | Caller supplies intended SHA |
+| 2245 | Caller-defined coverage | Historical three-item fixture only | CSV four IDs and label task three IDs; protected tests, permitted files and extra behavior checks; missing row blocks success | [independent verification](evidence/rc/verification-live.json), [missing row](evidence/rc/missing-coverage/result.json) | Tests and scope are trusted inputs, not universal semantic proof |
+| Both | First / repeated use | Not evaluated as an installer | One new publication, compatible revision reused by eight sessions | [lifecycle](evidence/rc/README.md) | Existing Runtime/Codex prerequisites; legacy Core duplicate blank-publish defect remains |
+| 2245 | Model / arbitrary-process isolation | N/A | N/A | Requested model and worktree/index receipts only | No new attestation or containment claim |
+
+Six actual children ran in this RC trial; five sessions completed and three ended
+in expected gates. The original pre-fix Retry API call returned 403; the trace retains
+that failure, followed by the supported UI-authorized recovery. [Source versions,
+acceptance scope and readiness](../../RELEASE_CANDIDATE.md). Usage is available per
+child in raw receipts; no cross-method speed, reliability or cost percentage is valid.
+
+## Historical fixed-fixture comparison
+
+The historical set includes two small normal native samples, two normal Workflow runs (v1 then v2),
 labeled fault injection, one same-session UI recovery, and two concurrent Workflow
 executions in disposable linked worktrees. It is not a failure-rate
 or cost benchmark. All coding runs use the same fixture base, task and requested

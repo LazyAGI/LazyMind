@@ -17,6 +17,17 @@ Python 3.9.6、Git 2.50.1、Codex CLI 0.155.0-alpha.9；CLI 必须支持
 `exec --ignore-user-config --ephemeral --json`。CLI 不在 PATH 时，配置命令可加
 `--codex /path/to/codex`。MODEL 必须替换为自己账号实际可用的模型。
 
+若收到未公开发布的 Git bundle，可先获取候选代码（已在本轮验证 bundle checkout）：
+
+```bash
+git clone https://github.com/LazyAGI/LazyMind.git LazyMind-rc
+git -C LazyMind-rc fetch /path/to/lazymind-superpowers-reliability-rc.bundle feat/superpowers-workflow-eval
+git -C LazyMind-rc switch -c reliability-rc FETCH_HEAD
+cd LazyMind-rc
+```
+
+已有候选分支 checkout 可直接继续；当前没有声称已发布公开下载链接。
+
 在包含本例的 checkout 中，选择一个不存在的新目录：
 
 ```bash
@@ -95,11 +106,15 @@ Checklist。用自己的 task/repo 参数运行即可；变更 Manifest 不可�
 对这个失败 run（不是已成功的快速开始 run）执行：
 
 ```bash
+.venv/bin/python demo.py "$TRIAL/recovery"
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" run --fault missing-brief \
+  --task "$TRIAL/recovery/task.json" --repo "$TRIAL/recovery/worktree" --state "$TRIAL/recovery/run"
+# Expected: exit 1, BRIEF_MISSING, launch_count 0.
 .venv/bin/python cli.py --config "$TRIAL/private/config.json" restore-brief \
-  --task "$TRIAL/csv-a/task.json" --repo "$TRIAL/csv-a/worktree" --state "$TRIAL/csv-a/run"
+  --task "$TRIAL/recovery/task.json" --repo "$TRIAL/recovery/worktree" --state "$TRIAL/recovery/run"
 # 在已登录的 LazyMind 页面打开失败 Session，点击“重试”。
 .venv/bin/python cli.py --config "$TRIAL/private/config.json" run --resume \
-  --task "$TRIAL/csv-a/task.json" --repo "$TRIAL/csv-a/worktree" --state "$TRIAL/csv-a/run"
+  --task "$TRIAL/recovery/task.json" --repo "$TRIAL/recovery/worktree" --state "$TRIAL/recovery/run"
 ```
 
 restore 从同一个已提交任务重新生成 Brief。随后在已登录的 Workflow 页面点击“重试”，
@@ -113,6 +128,16 @@ restore 从同一个已提交任务重新生成 Brief。随后在已登录的 Wo
 检查 Git 和 Trace，在 LazyMind 中处理原 Session，再有意识地创建新的任务；不自动重放。
 已处理的超时/SIGINT/SIGTERM 会终止本执行器拥有的进程组，无法保证 SIGKILL、断电或
 脱离进程组的孙进程。不要删除 state 隐藏未解决派发。子任务限时 600 秒，验收命令 120 秒。
+
+## 一条真实轨迹
+
+2026-10-20 UTC，[中文文件自定义任务](evidence/rc/custom-unicode/trace.jsonl) 实际执行：
+Prepare 08:02:21.953–22.097 → Validate 22.127–22.222 → Dispatch
+08:02:22.286–08:03:09.419 → Collect 09.465–09.572 → 验收 09.607–09.856 →
+Record 09.901–09.921。真实子进程只修改并提交 `标签.py`，四项受保护测试及独立断言通过，
+[六份 Artifact 和状态](evidence/rc/custom-unicode/result.json) 可回读。
+紧接着的 [Brief 删除负例](evidence/rc/missing-current/trace.jsonl) 于 08:03:10.760 阻断，
+启动回执为 0，Dispatch 未执行。[证据目录及复现方法](evidence/rc/README.md)。
 
 ## 验证与边界
 

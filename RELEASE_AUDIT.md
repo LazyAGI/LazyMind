@@ -1,5 +1,7 @@
 # 发布前独立审计 / Release audit
 
+> Historical experimental snapshot. For the reusable RC and new acceptance results, see [RELEASE_CANDIDATE.md](RELEASE_CANDIDATE.md).
+
 **结论：GO — 可作为有明确边界的实验性示例提交 LazyMind 独立 PR，并在两个
 Superpowers Issue 中交流。** 本结论适用于本例执行器控制的派发链路，不代表完整修复
 上游 Issue、生产级隔离或效率优势。重复发布缺陷仍存在，已限制并说明首次安装入口。

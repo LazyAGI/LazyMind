@@ -1,0 +1,879 @@
+{
+  "result": "PASS",
+  "failure": null,
+  "session_id": "386906fd7e554079929af6cd05b08d42",
+  "launch_count": 1,
+  "completed_at": "2026-10-20T08:03:09.945054+00:00",
+  "control": {
+    "control": {
+      "protocol": "workflow.control.v1",
+      "session_id": "386906fd7e554079929af6cd05b08d42",
+      "state_version": 31,
+      "continuation": "completed",
+      "admission": {
+        "can_begin": false,
+        "reason": "session_completed"
+      },
+      "reviews": [],
+      "binding": {
+        "bound": false
+      },
+      "delivery": null,
+      "active_executions": 0,
+      "native_execution_ids": [],
+      "active_execution_ids": [],
+      "available_actions": [
+        "save",
+        "rewind",
+        "retry"
+      ]
+    },
+    "projection": {
+      "past": [
+        "collect",
+        "dispatch",
+        "prepare",
+        "record",
+        "validate_completion",
+        "validate_dispatch"
+      ],
+      "current": null,
+      "reachable": null,
+      "ready": null,
+      "retryable": null,
+      "rewindable": [
+        "collect",
+        "dispatch",
+        "prepare",
+        "record",
+        "validate_completion",
+        "validate_dispatch"
+      ],
+      "continue": null,
+      "blocked": null,
+      "stale": null,
+      "pruned": null,
+      "bypassed": null,
+      "nodes": {
+        "collect": {
+          "id": "collect",
+          "requires_approval": false,
+          "execution": "succeeded",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "dispatch": {
+          "id": "dispatch",
+          "requires_approval": false,
+          "execution": "succeeded",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "prepare": {
+          "id": "prepare",
+          "requires_approval": false,
+          "execution": "succeeded",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "record": {
+          "id": "record",
+          "requires_approval": false,
+          "execution": "succeeded",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "validate_completion": {
+          "id": "validate_completion",
+          "requires_approval": false,
+          "execution": "succeeded",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "validate_dispatch": {
+          "id": "validate_dispatch",
+          "requires_approval": false,
+          "execution": "succeeded",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "__start__",
+          "to": "prepare",
+          "state": "active"
+        },
+        {
+          "from": "prepare",
+          "to": "validate_dispatch",
+          "state": "active"
+        },
+        {
+          "from": "validate_dispatch",
+          "to": "dispatch",
+          "state": "active"
+        },
+        {
+          "from": "dispatch",
+          "to": "collect",
+          "state": "active"
+        },
+        {
+          "from": "collect",
+          "to": "validate_completion",
+          "state": "active"
+        },
+        {
+          "from": "validate_completion",
+          "to": "record",
+          "state": "active"
+        },
+        {
+          "from": "record",
+          "to": "__end__",
+          "state": "active"
+        }
+      ],
+      "end_reached": true,
+      "completed": true
+    },
+    "session": {
+      "state_version": 31,
+      "session_id": "386906fd7e554079929af6cd05b08d42",
+      "conversation_id": "",
+      "workflow_id": "superpowers-reliability-rc-acceptance",
+      "workflow_mode": "auto",
+      "pinned_revision_id": "b6a4f724-0804-479a-986c-6c5043cb096d",
+      "status": "completed",
+      "current_step_id": "",
+      "intent_context": "{\"text\":\"Execute declared task normalize-labels\"}",
+      "created_at": "2026-10-20T08:02:21.92132Z",
+      "updated_at": "2026-10-20T08:03:09.918901Z",
+      "slots": [
+        {
+          "artifact_id": "9ee1408c-9d41-4da2-ab60-03e237496a07",
+          "slot_id": "admission",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "admission",
+          "created_at": "2026-10-20T08:02:22.205811Z",
+          "content_type": "json",
+          "artifact_value": {
+            "binding": {
+              "task_id": "normalize-labels",
+              "manifest_sha256": "de1291d51f4bce32001cb70fc99618df4bcfda44dec526e89621272b24913cb5",
+              "plan": "docs/plan.md",
+              "plan_task": 7,
+              "protected_sha256": {
+                "docs/plan.md": "eb7b92febc8ff6d0cb76fd4820cdf3c05b0e09be306d396195d089443b06a85e",
+                "test_labels.py": "ee3073d9c0bd766c6922892a1f6be71b57d962f233bc7a9fdc1378000efb054d"
+              },
+              "coverage_ids": [
+                "normalize",
+                "dedupe",
+                "validation"
+              ]
+            },
+            "brief_sha256": "4db8b0f8e473ac53a7e2b34e7c33eceb45210a85853d74d135ce6e3e8779ad2c",
+            "brief_bytes": 1553,
+            "todo": {
+              "at": "2026-10-20T08:02:22.003426+00:00",
+              "event": "todo_updated",
+              "task_id": "normalize-labels",
+              "status": "in_progress"
+            },
+            "git": {
+              "worktree": "<ACCEPTANCE_ROOT>/trial/custom-unicode/worktree",
+              "head": "9ab3377cd8cbb7d57da2007484af674769beba84",
+              "git_dir": "<ACCEPTANCE_ROOT>/trial/custom-unicode/repository/.git/worktrees/worktree",
+              "index": "<ACCEPTANCE_ROOT>/trial/custom-unicode/repository/.git/worktrees/worktree/index",
+              "common_dir": "<ACCEPTANCE_ROOT>/trial/custom-unicode/repository/.git"
+            },
+            "expected_base": "9ab3377cd8cbb7d57da2007484af674769beba84"
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "validate_dispatch",
+          "revision_count": 1,
+          "version_number": 1
+        },
+        {
+          "artifact_id": "71c64cbc-5883-4345-b2c0-4233a1c73d85",
+          "slot_id": "completion",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "completion",
+          "created_at": "2026-10-20T08:03:09.83615Z",
+          "content_type": "json",
+          "artifact_value": {
+            "binding": {
+              "task_id": "normalize-labels",
+              "manifest_sha256": "de1291d51f4bce32001cb70fc99618df4bcfda44dec526e89621272b24913cb5",
+              "plan": "docs/plan.md",
+              "plan_task": 7,
+              "protected_sha256": {
+                "docs/plan.md": "eb7b92febc8ff6d0cb76fd4820cdf3c05b0e09be306d396195d089443b06a85e",
+                "test_labels.py": "ee3073d9c0bd766c6922892a1f6be71b57d962f233bc7a9fdc1378000efb054d"
+              },
+              "coverage_ids": [
+                "normalize",
+                "dedupe",
+                "validation"
+              ]
+            },
+            "coverage": [
+              {
+                "id": "normalize",
+                "status": "DONE",
+                "evidence": "python3 -m unittest -v test_labels: test_normalize passed; whitespace is stripped, labels lowercased, and blanks omitted."
+              },
+              {
+                "id": "dedupe",
+                "status": "DONE",
+                "evidence": "python3 -m unittest -v test_labels: test_dedupe passed; normalized duplicates are removed while preserving first-occurrence order."
+              },
+              {
+                "id": "validation",
+                "status": "DONE",
+                "evidence": "python3 -m unittest -v test_labels: test_validation and test_empty passed; integers, None, and booleans raise ValueError and empty input returns []."
+              }
+            ],
+            "checks": [
+              {
+                "id": "labels-tests",
+                "argv": [
+                  "python3",
+                  "-m",
+                  "unittest",
+                  "-v",
+                  "test_labels"
+                ],
+                "started_at": "2026-10-20T08:03:09.671668+00:00",
+                "completed_at": "2026-10-20T08:03:09.708442+00:00",
+                "returncode": 0,
+                "stdout": "",
+                "stderr": "test_dedupe (test_labels.Labels) ... ok\ntest_empty (test_labels.Labels) ... ok\ntest_normalize (test_labels.Labels) ... ok\ntest_validation (test_labels.Labels) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n"
+              }
+            ],
+            "changed_files": [
+              "标签.py"
+            ],
+            "head": "3b257ccac10993717df3696a7d73e64ce7a0d3aa",
+            "diff": "diff --git \"a/\\346\\240\\207\\347\\255\\276.py\" \"b/\\346\\240\\207\\347\\255\\276.py\"\nindex 49f95ba..ec1795d 100644\n--- \"a/\\346\\240\\207\\347\\255\\276.py\"\n+++ \"b/\\346\\240\\207\\347\\255\\276.py\"\n@@ -1,2 +1,12 @@\n def normalize_labels(values):\n-    raise NotImplementedError\n+    \"\"\"Normalize labels, omitting blanks and preserving first-occurrence order.\"\"\"\n+    labels = []\n+    seen = set()\n+    for value in values:\n+        if not isinstance(value, str):\n+            raise ValueError(\"Each label must be a string\")\n+        label = value.strip().lower()\n+        if label and label not in seen:\n+            seen.add(label)\n+            labels.append(label)\n+    return labels",
+            "file_sha256": {
+              "标签.py": "4f2a70bb4e5034e7619976bfdad534ad77b04ae086981945c8269a0ddf5abaa2"
+            }
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "validate_completion",
+          "revision_count": 1,
+          "version_number": 1
+        },
+        {
+          "artifact_id": "ede76609-1b68-4f9b-8b36-7253804e2420",
+          "slot_id": "evidence",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "evidence",
+          "created_at": "2026-10-20T08:03:09.554702Z",
+          "content_type": "json",
+          "artifact_value": {
+            "head": "3b257ccac10993717df3696a7d73e64ce7a0d3aa",
+            "report": "# Implementer report\n\nImplemented Task 7, normalize-labels, in 标签.py using built-in Python operations only.\nVerified starting HEAD matched expected base 9ab3377cd8cbb7d57da2007484af674769beba84.\n\n- Before: `python3 -m unittest -v test_labels` ran 4 tests and failed with 6 errors from the existing NotImplementedError (including validation subtests).\n- After: the same declared check passed all 4 tests.\n- Self-review: every element is checked for string type before normalization; strip and lower precede blank filtering and deduplication; a set tracks membership while a list preserves first occurrence order. Empty input returns an empty list. Input is not mutated.\n- `git diff --check` passed. Protected test_labels.py and docs/plan.md remain unchanged.\n- Coverage evidence is recorded for exactly normalize, dedupe, and validation in .eval/coverage.json.\n- Only 标签.py is included in the local implementation commit. No push performed.\n\nNo outstanding implementation issues found.\n",
+            "coverage": [
+              {
+                "id": "normalize",
+                "status": "DONE",
+                "evidence": "python3 -m unittest -v test_labels: test_normalize passed; whitespace is stripped, labels lowercased, and blanks omitted."
+              },
+              {
+                "id": "dedupe",
+                "status": "DONE",
+                "evidence": "python3 -m unittest -v test_labels: test_dedupe passed; normalized duplicates are removed while preserving first-occurrence order."
+              },
+              {
+                "id": "validation",
+                "status": "DONE",
+                "evidence": "python3 -m unittest -v test_labels: test_validation and test_empty passed; integers, None, and booleans raise ValueError and empty input returns []."
+              }
+            ],
+            "child_trace_sha256": "b533d7d032067fbc02ca18c350dd483cb85453ce729c16025547f9e5557481a3"
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "collect",
+          "revision_count": 1,
+          "version_number": 1
+        },
+        {
+          "artifact_id": "20388f59-4ad0-4009-a0cf-5ec98579e0b4",
+          "slot_id": "execution",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "execution",
+          "created_at": "2026-10-20T08:03:09.394572Z",
+          "content_type": "json",
+          "artifact_value": {
+            "started_at": "2026-10-20T08:02:22.395912+00:00",
+            "completed_at": "2026-10-20T08:03:09.383730+00:00",
+            "duration_seconds": 46.988,
+            "returncode": 0,
+            "turn_completed": true,
+            "requested_model": "gpt-6-astra",
+            "actual_backend_model": "N/A",
+            "usage": {
+              "input_tokens": 137464,
+              "cached_input_tokens": 112256,
+              "cache_write_input_tokens": 0,
+              "output_tokens": 1176,
+              "reasoning_output_tokens": 9
+            },
+            "trace_sha256": "b533d7d032067fbc02ca18c350dd483cb85453ce729c16025547f9e5557481a3"
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "dispatch",
+          "revision_count": 1,
+          "version_number": 1
+        },
+        {
+          "artifact_id": "4b8ce809-9d19-4fbd-a81f-aa96b3e5e297",
+          "slot_id": "preparation",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "preparation",
+          "created_at": "2026-10-20T08:02:22.080289Z",
+          "content_type": "json",
+          "artifact_value": {
+            "binding": {
+              "task_id": "normalize-labels",
+              "manifest_sha256": "de1291d51f4bce32001cb70fc99618df4bcfda44dec526e89621272b24913cb5",
+              "plan": "docs/plan.md",
+              "plan_task": 7,
+              "protected_sha256": {
+                "docs/plan.md": "eb7b92febc8ff6d0cb76fd4820cdf3c05b0e09be306d396195d089443b06a85e",
+                "test_labels.py": "ee3073d9c0bd766c6922892a1f6be71b57d962f233bc7a9fdc1378000efb054d"
+              },
+              "coverage_ids": [
+                "normalize",
+                "dedupe",
+                "validation"
+              ]
+            },
+            "brief_sha256": "4db8b0f8e473ac53a7e2b34e7c33eceb45210a85853d74d135ce6e3e8779ad2c",
+            "brief_bytes": 1553,
+            "todo": {
+              "at": "2026-10-20T08:02:22.003426+00:00",
+              "event": "todo_updated",
+              "task_id": "normalize-labels",
+              "status": "in_progress"
+            },
+            "git": {
+              "worktree": "<ACCEPTANCE_ROOT>/trial/custom-unicode/worktree",
+              "head": "9ab3377cd8cbb7d57da2007484af674769beba84",
+              "git_dir": "<ACCEPTANCE_ROOT>/trial/custom-unicode/repository/.git/worktrees/worktree",
+              "index": "<ACCEPTANCE_ROOT>/trial/custom-unicode/repository/.git/worktrees/worktree/index",
+              "common_dir": "<ACCEPTANCE_ROOT>/trial/custom-unicode/repository/.git"
+            },
+            "expected_base": "9ab3377cd8cbb7d57da2007484af674769beba84",
+            "task": {
+              "schema_version": 1,
+              "task_id": "normalize-labels",
+              "plan": "docs/plan.md",
+              "plan_task": 7,
+              "expected_base": "9ab3377cd8cbb7d57da2007484af674769beba84",
+              "allowed_files": [
+                "标签.py"
+              ],
+              "protected_files": [
+                "test_labels.py"
+              ],
+              "coverage": [
+                {
+                  "id": "normalize",
+                  "description": "normalize",
+                  "checks": [
+                    "labels-tests"
+                  ]
+                },
+                {
+                  "id": "dedupe",
+                  "description": "dedupe",
+                  "checks": [
+                    "labels-tests"
+                  ]
+                },
+                {
+                  "id": "validation",
+                  "description": "validation",
+                  "checks": [
+                    "labels-tests"
+                  ]
+                }
+              ],
+              "checks": [
+                {
+                  "id": "labels-tests",
+                  "argv": [
+                    "python3",
+                    "-m",
+                    "unittest",
+                    "-v",
+                    "test_labels"
+                  ]
+                }
+              ]
+            }
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "prepare",
+          "revision_count": 1,
+          "version_number": 1
+        },
+        {
+          "artifact_id": "921ada1b-20eb-4378-8d5a-1c3e819a02de",
+          "slot_id": "result",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "result",
+          "created_at": "2026-10-20T08:03:09.904792Z",
+          "content_type": "json",
+          "artifact_value": {
+            "status": "PASS",
+            "task_id": "normalize-labels",
+            "todo": {
+              "at": "2026-10-20T08:03:09.900912+00:00",
+              "event": "todo_updated",
+              "task_id": "normalize-labels",
+              "status": "completed"
+            },
+            "backend_model": "N/A"
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "record",
+          "revision_count": 1,
+          "version_number": 1
+        }
+      ],
+      "steps": [
+        {
+          "step_id": "prepare",
+          "attempt": 1,
+          "task_id": "ef08b61b-9dbe-41a8-8fd9-2e401ee00539",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-20T08:02:21.939215Z"
+        },
+        {
+          "step_id": "validate_dispatch",
+          "attempt": 1,
+          "task_id": "b3315177-55ee-4f9b-a46f-adcd18eae87b",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-20T08:02:22.111292Z"
+        },
+        {
+          "step_id": "dispatch",
+          "attempt": 1,
+          "task_id": "67541f0d-d269-49bc-b9f9-747e36c851d7",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-20T08:02:22.237727Z"
+        },
+        {
+          "step_id": "collect",
+          "attempt": 1,
+          "task_id": "c08fb8fe-6426-465e-a782-dbb8ae3d331e",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-20T08:03:09.446318Z"
+        },
+        {
+          "step_id": "validate_completion",
+          "attempt": 1,
+          "task_id": "82a4a6f6-9622-46a3-9333-1524115bfbf4",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-20T08:03:09.591047Z"
+        },
+        {
+          "step_id": "record",
+          "attempt": 1,
+          "task_id": "83ad63fb-6e34-4f94-b158-3410ce6d81fa",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-20T08:03:09.875575Z"
+        }
+      ]
+    }
+  },
+  "artifacts": {
+    "artifacts": [
+      {
+        "draft_version": 1,
+        "artifact_id": "9ee1408c-9d41-4da2-ab60-03e237496a07",
+        "session_id": "386906fd7e554079929af6cd05b08d42",
+        "slot_id": "admission",
+        "slot": "admission",
+        "step_id": "validate_dispatch",
+        "attempt": 1,
+        "producer_attempt_id": "b3315177-55ee-4f9b-a46f-adcd18eae87b",
+        "revision": 1,
+        "selected": true,
+        "validity": "effective",
+        "change_source": "host",
+        "content_type": "json",
+        "value": {
+          "binding": {
+            "task_id": "normalize-labels",
+            "manifest_sha256": "de1291d51f4bce32001cb70fc99618df4bcfda44dec526e89621272b24913cb5",
+            "plan": "docs/plan.md",
+            "plan_task": 7,
+            "protected_sha256": {
+              "docs/plan.md": "eb7b92febc8ff6d0cb76fd4820cdf3c05b0e09be306d396195d089443b06a85e",
+              "test_labels.py": "ee3073d9c0bd766c6922892a1f6be71b57d962f233bc7a9fdc1378000efb054d"
+            },
+            "coverage_ids": [
+              "normalize",
+              "dedupe",
+              "validation"
+            ]
+          },
+          "brief_sha256": "4db8b0f8e473ac53a7e2b34e7c33eceb45210a85853d74d135ce6e3e8779ad2c",
+          "brief_bytes": 1553,
+          "todo": {
+            "at": "2026-10-20T08:02:22.003426+00:00",
+            "event": "todo_updated",
+            "task_id": "normalize-labels",
+            "status": "in_progress"
+          },
+          "git": {
+            "worktree": "<ACCEPTANCE_ROOT>/trial/custom-unicode/worktree",
+            "head": "9ab3377cd8cbb7d57da2007484af674769beba84",
+            "git_dir": "<ACCEPTANCE_ROOT>/trial/custom-unicode/repository/.git/worktrees/worktree",
+            "index": "<ACCEPTANCE_ROOT>/trial/custom-unicode/repository/.git/worktrees/worktree/index",
+            "common_dir": "<ACCEPTANCE_ROOT>/trial/custom-unicode/repository/.git"
+          },
+          "expected_base": "9ab3377cd8cbb7d57da2007484af674769beba84"
+        },
+        "deleted": false,
+        "created_at": "2026-10-20T08:02:22.205811Z"
+      },
+      {
+        "draft_version": 1,
+        "artifact_id": "71c64cbc-5883-4345-b2c0-4233a1c73d85",
+        "session_id": "386906fd7e554079929af6cd05b08d42",
+        "slot_id": "completion",
+        "slot": "completion",
+        "step_id": "validate_completion",
+        "attempt": 1,
+        "producer_attempt_id": "82a4a6f6-9622-46a3-9333-1524115bfbf4",
+        "revision": 1,
+        "selected": true,
+        "validity": "effective",
+        "change_source": "host",
+        "content_type": "json",
+        "value": {
+          "binding": {
+            "task_id": "normalize-labels",
+            "manifest_sha256": "de1291d51f4bce32001cb70fc99618df4bcfda44dec526e89621272b24913cb5",
+            "plan": "docs/plan.md",
+            "plan_task": 7,
+            "protected_sha256": {
+              "docs/plan.md": "eb7b92febc8ff6d0cb76fd4820cdf3c05b0e09be306d396195d089443b06a85e",
+              "test_labels.py": "ee3073d9c0bd766c6922892a1f6be71b57d962f233bc7a9fdc1378000efb054d"
+            },
+            "coverage_ids": [
+              "normalize",
+              "dedupe",
+              "validation"
+            ]
+          },
+          "coverage": [
+            {
+              "id": "normalize",
+              "status": "DONE",
+              "evidence": "python3 -m unittest -v test_labels: test_normalize passed; whitespace is stripped, labels lowercased, and blanks omitted."
+            },
+            {
+              "id": "dedupe",
+              "status": "DONE",
+              "evidence": "python3 -m unittest -v test_labels: test_dedupe passed; normalized duplicates are removed while preserving first-occurrence order."
+            },
+            {
+              "id": "validation",
+              "status": "DONE",
+              "evidence": "python3 -m unittest -v test_labels: test_validation and test_empty passed; integers, None, and booleans raise ValueError and empty input returns []."
+            }
+          ],
+          "checks": [
+            {
+              "id": "labels-tests",
+              "argv": [
+                "python3",
+                "-m",
+                "unittest",
+                "-v",
+                "test_labels"
+              ],
+              "started_at": "2026-10-20T08:03:09.671668+00:00",
+              "completed_at": "2026-10-20T08:03:09.708442+00:00",
+              "returncode": 0,
+              "stdout": "",
+              "stderr": "test_dedupe (test_labels.Labels) ... ok\ntest_empty (test_labels.Labels) ... ok\ntest_normalize (test_labels.Labels) ... ok\ntest_validation (test_labels.Labels) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n"
+            }
+          ],
+          "changed_files": [
+            "标签.py"
+          ],
+          "head": "3b257ccac10993717df3696a7d73e64ce7a0d3aa",
+          "diff": "diff --git \"a/\\346\\240\\207\\347\\255\\276.py\" \"b/\\346\\240\\207\\347\\255\\276.py\"\nindex 49f95ba..ec1795d 100644\n--- \"a/\\346\\240\\207\\347\\255\\276.py\"\n+++ \"b/\\346\\240\\207\\347\\255\\276.py\"\n@@ -1,2 +1,12 @@\n def normalize_labels(values):\n-    raise NotImplementedError\n+    \"\"\"Normalize labels, omitting blanks and preserving first-occurrence order.\"\"\"\n+    labels = []\n+    seen = set()\n+    for value in values:\n+        if not isinstance(value, str):\n+            raise ValueError(\"Each label must be a string\")\n+        label = value.strip().lower()\n+        if label and label not in seen:\n+            seen.add(label)\n+            labels.append(label)\n+    return labels",
+          "file_sha256": {
+            "标签.py": "4f2a70bb4e5034e7619976bfdad534ad77b04ae086981945c8269a0ddf5abaa2"
+          }
+        },
+        "deleted": false,
+        "created_at": "2026-10-20T08:03:09.83615Z"
+      },
+      {
+        "draft_version": 1,
+        "artifact_id": "ede76609-1b68-4f9b-8b36-7253804e2420",
+        "session_id": "386906fd7e554079929af6cd05b08d42",
+        "slot_id": "evidence",
+        "slot": "evidence",
+        "step_id": "collect",
+        "attempt": 1,
+        "producer_attempt_id": "c08fb8fe-6426-465e-a782-dbb8ae3d331e",
+        "revision": 1,
+        "selected": true,
+        "validity": "effective",
+        "change_source": "host",
+        "content_type": "json",
+        "value": {
+          "head": "3b257ccac10993717df3696a7d73e64ce7a0d3aa",
+          "report": "# Implementer report\n\nImplemented Task 7, normalize-labels, in 标签.py using built-in Python operations only.\nVerified starting HEAD matched expected base 9ab3377cd8cbb7d57da2007484af674769beba84.\n\n- Before: `python3 -m unittest -v test_labels` ran 4 tests and failed with 6 errors from the existing NotImplementedError (including validation subtests).\n- After: the same declared check passed all 4 tests.\n- Self-review: every element is checked for string type before normalization; strip and lower precede blank filtering and deduplication; a set tracks membership while a list preserves first occurrence order. Empty input returns an empty list. Input is not mutated.\n- `git diff --check` passed. Protected test_labels.py and docs/plan.md remain unchanged.\n- Coverage evidence is recorded for exactly normalize, dedupe, and validation in .eval/coverage.json.\n- Only 标签.py is included in the local implementation commit. No push performed.\n\nNo outstanding implementation issues found.\n",
+          "coverage": [
+            {
+              "id": "normalize",
+              "status": "DONE",
+              "evidence": "python3 -m unittest -v test_labels: test_normalize passed; whitespace is stripped, labels lowercased, and blanks omitted."
+            },
+            {
+              "id": "dedupe",
+              "status": "DONE",
+              "evidence": "python3 -m unittest -v test_labels: test_dedupe passed; normalized duplicates are removed while preserving first-occurrence order."
+            },
+            {
+              "id": "validation",
+              "status": "DONE",
+              "evidence": "python3 -m unittest -v test_labels: test_validation and test_empty passed; integers, None, and booleans raise ValueError and empty input returns []."
+            }
+          ],
+          "child_trace_sha256": "b533d7d032067fbc02ca18c350dd483cb85453ce729c16025547f9e5557481a3"
+        },
+        "deleted": false,
+        "created_at": "2026-10-20T08:03:09.554702Z"
+      },
+      {
+        "draft_version": 1,
+        "artifact_id": "20388f59-4ad0-4009-a0cf-5ec98579e0b4",
+        "session_id": "386906fd7e554079929af6cd05b08d42",
+        "slot_id": "execution",
+        "slot": "execution",
+        "step_id": "dispatch",
+        "attempt": 1,
+        "producer_attempt_id": "67541f0d-d269-49bc-b9f9-747e36c851d7",
+        "revision": 1,
+        "selected": true,
+        "validity": "effective",
+        "change_source": "host",
+        "content_type": "json",
+        "value": {
+          "started_at": "2026-10-20T08:02:22.395912+00:00",
+          "completed_at": "2026-10-20T08:03:09.383730+00:00",
+          "duration_seconds": 46.988,
+          "returncode": 0,
+          "turn_completed": true,
+          "requested_model": "gpt-6-astra",
+          "actual_backend_model": "N/A",
+          "usage": {
+            "input_tokens": 137464,
+            "cached_input_tokens": 112256,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 1176,
+            "reasoning_output_tokens": 9
+          },
+          "trace_sha256": "b533d7d032067fbc02ca18c350dd483cb85453ce729c16025547f9e5557481a3"
+        },
+        "deleted": false,
+        "created_at": "2026-10-20T08:03:09.394572Z"
+      },
+      {
+        "draft_version": 1,
+        "artifact_id": "4b8ce809-9d19-4fbd-a81f-aa96b3e5e297",
+        "session_id": "386906fd7e554079929af6cd05b08d42",
+        "slot_id": "preparation",
+        "slot": "preparation",
+        "step_id": "prepare",
+        "attempt": 1,
+        "producer_attempt_id": "ef08b61b-9dbe-41a8-8fd9-2e401ee00539",
+        "revision": 1,
+        "selected": true,
+        "validity": "effective",
+        "change_source": "host",
+        "content_type": "json",
+        "value": {
+          "binding": {
+            "task_id": "normalize-labels",
+            "manifest_sha256": "de1291d51f4bce32001cb70fc99618df4bcfda44dec526e89621272b24913cb5",
+            "plan": "docs/plan.md",
+            "plan_task": 7,
+            "protected_sha256": {
+              "docs/plan.md": "eb7b92febc8ff6d0cb76fd4820cdf3c05b0e09be306d396195d089443b06a85e",
+              "test_labels.py": "ee3073d9c0bd766c6922892a1f6be71b57d962f233bc7a9fdc1378000efb054d"
+            },
+            "coverage_ids": [
+              "normalize",
+              "dedupe",
+              "validation"
+            ]
+          },
+          "brief_sha256": "4db8b0f8e473ac53a7e2b34e7c33eceb45210a85853d74d135ce6e3e8779ad2c",
+          "brief_bytes": 1553,
+          "todo": {
+            "at": "2026-10-20T08:02:22.003426+00:00",
+            "event": "todo_updated",
+            "task_id": "normalize-labels",
+            "status": "in_progress"
+          },
+          "git": {
+            "worktree": "<ACCEPTANCE_ROOT>/trial/custom-unicode/worktree",
+            "head": "9ab3377cd8cbb7d57da2007484af674769beba84",
+            "git_dir": "<ACCEPTANCE_ROOT>/trial/custom-unicode/repository/.git/worktrees/worktree",
+            "index": "<ACCEPTANCE_ROOT>/trial/custom-unicode/repository/.git/worktrees/worktree/index",
+            "common_dir": "<ACCEPTANCE_ROOT>/trial/custom-unicode/repository/.git"
+          },
+          "expected_base": "9ab3377cd8cbb7d57da2007484af674769beba84",
+          "task": {
+            "schema_version": 1,
+            "task_id": "normalize-labels",
+            "plan": "docs/plan.md",
+            "plan_task": 7,
+            "expected_base": "9ab3377cd8cbb7d57da2007484af674769beba84",
+            "allowed_files": [
+              "标签.py"
+            ],
+            "protected_files": [
+              "test_labels.py"
+            ],
+            "coverage": [
+              {
+                "id": "normalize",
+                "description": "normalize",
+                "checks": [
+                  "labels-tests"
+                ]
+              },
+              {
+                "id": "dedupe",
+                "description": "dedupe",
+                "checks": [
+                  "labels-tests"
+                ]
+              },
+              {
+                "id": "validation",
+                "description": "validation",
+                "checks": [
+                  "labels-tests"
+                ]
+              }
+            ],
+            "checks": [
+              {
+                "id": "labels-tests",
+                "argv": [
+                  "python3",
+                  "-m",
+                  "unittest",
+                  "-v",
+                  "test_labels"
+                ]
+              }
+            ]
+          }
+        },
+        "deleted": false,
+        "created_at": "2026-10-20T08:02:22.080289Z"
+      },
+      {
+        "draft_version": 1,
+        "artifact_id": "921ada1b-20eb-4378-8d5a-1c3e819a02de",
+        "session_id": "386906fd7e554079929af6cd05b08d42",
+        "slot_id": "result",
+        "slot": "result",
+        "step_id": "record",
+        "attempt": 1,
+        "producer_attempt_id": "83ad63fb-6e34-4f94-b158-3410ce6d81fa",
+        "revision": 1,
+        "selected": true,
+        "validity": "effective",
+        "change_source": "host",
+        "content_type": "json",
+        "value": {
+          "status": "PASS",
+          "task_id": "normalize-labels",
+          "todo": {
+            "at": "2026-10-20T08:03:09.900912+00:00",
+            "event": "todo_updated",
+            "task_id": "normalize-labels",
+            "status": "completed"
+          },
+          "backend_model": "N/A"
+        },
+        "deleted": false,
+        "created_at": "2026-10-20T08:03:09.904792Z"
+      }
+    ]
+  }
+}

@@ -1,5 +1,19 @@
 # Issue 2245: base, coverage, model and isolation
 
+## Reusable RC
+
+Coverage is no longer hardcoded in the supported entry point. A committed caller
+Plan, exact file scope, protected tests and coverage-to-check mapping are frozen at
+start. [Task 7 labels](../evidence/rc/custom-labels/result.json) and a
+[Unicode implementation filename](../evidence/rc/custom-unicode/result.json) passed
+actual Codex execution and independent behavior checks. [Wrong HEAD](../evidence/rc/wrong-base/result.json)
+blocked launch; [removed coverage](../evidence/rc/missing-coverage/result.json) blocked
+success after a real child. These are deliberately injected faults. Model attestation
+and hostile-process isolation remain uncovered. RC runs one declared task; the older
+parallel experiment below is historical, not a new RC parallel scheduler claim.
+
+## Historical evidence
+
 [Upstream issue](https://github.com/obra/superpowers/issues/2245) distinguishes
 actual worktree base, launched model identity, enumerable scope, and shared-index
 hazards. The pinned worktree skill detects existing isolation and tests the
@@ -20,7 +34,7 @@ launches. [Actual wrong-head evidence](../evidence/wrong-base-actual/run/result.
 An earlier synthetic case changed the expected SHA instead; it is preserved
 separately under evidence/wrong-base and is not the actual wrong-head test.
 
-Coverage requires exactly spaces, punctuation, empty, with unique DONE entries
+The historical fixture coverage requires exactly spaces, punctuation, empty, with unique DONE entries
 and evidence text. SKIPPED can describe partial work but cannot satisfy complete
 success. Three immutable tests plus nine independent acceptance checks verify
 behavior. A report's existence is insufficient. Removing one row after a real
@@ -52,7 +66,7 @@ No business repository or shared Index was used for the experiment.
   No dangerous shared-index write race or hostile-process test was run.
 - The lock coordinates cooperating executor instances. It does not contain arbitrary
   shell access or prevent another process from changing files after inspection.
-- Coverage is finite fixture acceptance, not proof of general program correctness.
+- Historical coverage is a finite fixture; RC coverage is caller-declared and test-bound. Neither proves arbitrary program correctness.
 - Native SDD's reviewer count differs from the minimal Workflow; cost comparisons
   would confound orchestration and verification effort.
 

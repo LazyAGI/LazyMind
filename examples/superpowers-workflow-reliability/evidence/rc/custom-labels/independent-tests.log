@@ -1,0 +1,9 @@
+test_dedupe (test_labels.Labels) ... ok
+test_empty (test_labels.Labels) ... ok
+test_normalize (test_labels.Labels) ... ok
+test_validation (test_labels.Labels) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.000s
+
+OK

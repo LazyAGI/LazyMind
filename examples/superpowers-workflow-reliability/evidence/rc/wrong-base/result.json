@@ -1,0 +1,189 @@
+{
+  "result": "FAIL",
+  "failure": "BASE_MISMATCH",
+  "session_id": "e7597bfffea04e5a87507d5a475b85c6",
+  "launch_count": 0,
+  "completed_at": "2026-10-20T08:00:34.504696+00:00",
+  "control": {
+    "control": {
+      "protocol": "workflow.control.v1",
+      "session_id": "e7597bfffea04e5a87507d5a475b85c6",
+      "state_version": 5,
+      "continuation": "failed",
+      "admission": {
+        "can_begin": false,
+        "reason": "recovery_required"
+      },
+      "reviews": [],
+      "binding": {
+        "bound": false
+      },
+      "delivery": null,
+      "active_executions": 0,
+      "native_execution_ids": [],
+      "active_execution_ids": [],
+      "available_actions": [
+        "stop",
+        "save",
+        "rewind",
+        "retry"
+      ]
+    },
+    "projection": {
+      "past": null,
+      "current": [
+        "prepare"
+      ],
+      "reachable": null,
+      "ready": null,
+      "retryable": [
+        "prepare"
+      ],
+      "rewindable": null,
+      "continue": null,
+      "blocked": null,
+      "stale": null,
+      "pruned": null,
+      "bypassed": null,
+      "nodes": {
+        "collect": {
+          "id": "collect",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "dispatch": {
+          "id": "dispatch",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "prepare": {
+          "id": "prepare",
+          "requires_approval": false,
+          "execution": "failed",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "record": {
+          "id": "record",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "validate_completion": {
+          "id": "validate_completion",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "validate_dispatch": {
+          "id": "validate_dispatch",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "__start__",
+          "to": "prepare",
+          "state": "active"
+        },
+        {
+          "from": "prepare",
+          "to": "validate_dispatch",
+          "state": "inactive"
+        },
+        {
+          "from": "validate_dispatch",
+          "to": "dispatch",
+          "state": "inactive"
+        },
+        {
+          "from": "dispatch",
+          "to": "collect",
+          "state": "inactive"
+        },
+        {
+          "from": "collect",
+          "to": "validate_completion",
+          "state": "inactive"
+        },
+        {
+          "from": "validate_completion",
+          "to": "record",
+          "state": "inactive"
+        },
+        {
+          "from": "record",
+          "to": "__end__",
+          "state": "inactive"
+        }
+      ],
+      "end_reached": false,
+      "completed": false
+    },
+    "session": {
+      "state_version": 5,
+      "session_id": "e7597bfffea04e5a87507d5a475b85c6",
+      "conversation_id": "",
+      "workflow_id": "superpowers-reliability-rc-acceptance",
+      "workflow_mode": "auto",
+      "pinned_revision_id": "b6a4f724-0804-479a-986c-6c5043cb096d",
+      "status": "failed",
+      "current_step_id": "",
+      "intent_context": "{\"text\":\"Execute declared task csv-records\"}",
+      "created_at": "2026-10-20T08:00:34.375404Z",
+      "updated_at": "2026-10-20T08:00:34.493078Z",
+      "steps": [
+        {
+          "step_id": "prepare",
+          "attempt": 1,
+          "task_id": "bbf6ebcb-4376-4071-96be-d92637774134",
+          "status": "failed",
+          "validity": "effective",
+          "created_at": "2026-10-20T08:00:34.394014Z"
+        }
+      ]
+    }
+  },
+  "artifacts": {
+    "artifacts": []
+  }
+}

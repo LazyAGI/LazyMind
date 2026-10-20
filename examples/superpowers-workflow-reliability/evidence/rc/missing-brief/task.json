@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "task_id": "csv-records",
+  "plan": "docs/plans/csv.md",
+  "plan_task": 1,
+  "expected_base": "89b69e7d63a2897ba5eb06f0f36cdb20d9f5ccb7",
+  "allowed_files": [
+    "csv_records.py"
+  ],
+  "protected_files": [
+    "test_csv_records.py"
+  ],
+  "coverage": [
+    {
+      "id": "quoted",
+      "description": "quoted behavior in the tracked Plan",
+      "checks": [
+        "csv-tests"
+      ]
+    },
+    {
+      "id": "headers",
+      "description": "headers behavior in the tracked Plan",
+      "checks": [
+        "csv-tests"
+      ]
+    },
+    {
+      "id": "ragged",
+      "description": "ragged behavior in the tracked Plan",
+      "checks": [
+        "csv-tests"
+      ]
+    },
+    {
+      "id": "empty",
+      "description": "empty behavior in the tracked Plan",
+      "checks": [
+        "csv-tests"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "id": "csv-tests",
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "-v",
+        "test_csv_records"
+      ]
+    }
+  ]
+}

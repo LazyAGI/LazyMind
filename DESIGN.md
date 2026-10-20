@@ -1,5 +1,7 @@
 # Superpowers dispatch reliability evaluation
 
+> Historical experimental snapshot. For the reusable RC and new acceptance results, see [RELEASE_CANDIDATE.md](RELEASE_CANDIDATE.md).
+
 Baseline: LazyMind `17b5e716cffe754f95eac28f2626971a0fc095f4`;
 Superpowers v7.0.0 `bb92a77741419a4ab5f06e711a283343f1ada0c3`.
 Development branch: `feat/superpowers-workflow-eval`.
