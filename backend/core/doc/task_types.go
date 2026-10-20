@@ -277,6 +277,8 @@ type transferBinding struct {
 }
 
 type taskExt struct {
+	ProcessingLevel      string            `json:"processing_level,omitempty"`
+	ProcessingRevision   int64             `json:"processing_revision,omitempty"`
 	MarketPreviousTaskID string            `json:"market_previous_task_id,omitempty"`
 	MarketSubmission     string            `json:"market_submission,omitempty"`
 	TaskType             string            `json:"task_type,omitempty"`

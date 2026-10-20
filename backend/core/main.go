@@ -136,7 +136,14 @@ func runHistoryInjections(ctx context.Context, db *gorm.DB) error {
 }
 
 func buildCapabilityRuntime() (*capabilitybootstrap.Runtime, error) {
+	moveBudget, err := knowledgeMoveBudget()
+	if err != nil {
+		return nil, err
+	}
 	return capabilitybootstrap.NewRuntime(capabilitybootstrap.Config{
+		EnableKnowledgeManagement: knowledgeManagementEnabled(),
+		MoveBudget:                moveBudget,
+		State:                     store.State(), ValidateKnowledgeExecution: validateKnowledgeExecution, ValidateKnowledgeCommit: validateKnowledgeCommit, PendingKnowledgeConfirmation: persistKnowledgeConfirmation, KnowledgeDecisionRecorded: persistKnowledgeDecision,
 		DB:                        store.DB(),
 		LazyDB:                    store.LazyLLMDB(),
 		AuthServiceBaseURL:        common.AuthServiceBaseURL(),
@@ -269,7 +276,7 @@ func registerCoreRoutes(r *mux.Router) {
 }
 
 func registerCapabilityMCPRoute(r *mux.Router, handler http.Handler) {
-	handleAPI(r, "POST", "/mcp/capabilities/v1", []string{"qa.read"}, handler.ServeHTTP)
+	handleAPI(r, "POST", "/mcp/capabilities/v1", nil, handler.ServeHTTP)
 	r.Handle("/mcp/capabilities/v1", handler).Methods(http.MethodGet, http.MethodDelete)
 }
 
@@ -1008,6 +1015,19 @@ func run(ctx context.Context) error {
 		return &startupError{msg: "initialize capability MCP", err: err}
 	}
 	registerCapabilityMCPRoute(r, capabilityRuntime.MCP)
+	if capabilityRuntime.KnowledgeInternal != nil {
+		r.Handle("/internal/knowledge-management:upload-original", capabilityRuntime.KnowledgeInternalUpload).Methods(http.MethodPost)
+		handleAPI(r, "POST", "/knowledge/originals", []string{"document.write"}, capabilityRuntime.KnowledgeUpload.ServeHTTP)
+		for _, action := range []string{"credential", "prepare", "status", "claim"} {
+			r.Handle("/internal/knowledge-management:"+action, capabilityRuntime.KnowledgeInternal).Methods(http.MethodPost)
+		}
+		r.Handle("/internal/mcp/knowledge-management", capabilityRuntime.KnowledgeMCP).Methods(http.MethodPost, http.MethodGet, http.MethodDelete)
+		handleAPI(r, "POST", "/knowledge-management/confirmations/{confirmation_id}/decision", []string{"document.write"}, capabilityRuntime.KnowledgeDecision)
+	}
+	if err := doc.InitializeDocumentVisibility(ctx, store.DB(), store.LazyLLMDB()); err != nil {
+		return &startupError{msg: "initialize document visibility", err: err}
+	}
+	handleAPI(r, "POST", "/documents:filterActive", []string{"document.read"}, doc.FilterDocumentVisibilityHTTP)
 	log.Logger.Info().Str("path", "/mcp/capabilities/v1").Msg("capability MCP enabled")
 	registerBrowserMCPRoute(r, browser.NewMCPHandler(browser.DefaultHub))
 	log.Logger.Info().Str("path", "/mcp/browser/v1").Msg("browser MCP enabled")

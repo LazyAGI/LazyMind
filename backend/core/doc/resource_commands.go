@@ -1,0 +1,325 @@
+package doc
+
+import (
+	"context"
+	"encoding/json"
+	"gorm.io/gorm"
+	"lazymind/core/acl"
+	"lazymind/core/common/orm"
+	"strings"
+	"time"
+)
+
+func resourceScene(s string) (string, error) {
+	if s == "" {
+		return "general", nil
+	}
+	if s != "general" && s != "paper_collection" {
+		return "", resourceErr("INVALID_ARGUMENT", "invalid scene")
+	}
+	return s, nil
+}
+func (s *ResourceService) CreateKnowledge(ctx context.Context, op ResourceOperationContext, req CreateKnowledgeRequest) (ResourceOperationResult, error) {
+	if err := resourceAccount(op.Caller); err != nil {
+		return ResourceOperationResult{}, err
+	}
+	if err := validateDatasetDisplayName(req.Name); err != nil {
+		return ResourceOperationResult{}, resourceErr("INVALID_ARGUMENT", err.Error())
+	}
+	if hasReservedDatasetDisplayNamePrefix(req.Name) {
+		return ResourceOperationResult{}, resourceErr("INVALID_ARGUMENT", "reserved name")
+	}
+	scene, err := resourceScene(req.Scene)
+	if err != nil {
+		return ResourceOperationResult{}, err
+	}
+	level, err := normalizeProcessingLevel(req.ProcessingLevel)
+	if err != nil {
+		return ResourceOperationResult{}, err
+	}
+	// Resolve replay before external provisioning. The transaction checks again below.
+	if out, found, err := s.replay(ctx, op, "knowledge.create", req); found || err != nil {
+		return out, err
+	}
+	now := time.Now().UTC()
+	id := newDatasetID()
+	if req.PreferredID != "" {
+		id = req.PreferredID
+	}
+	if op.OperationKey != "" {
+		id = "ds_" + resourceHash([]string{resourceTenant(op.Caller.TenantID), op.Caller.UserID, op.OperationKey})[:32]
+	}
+	ds := orm.Dataset{ID: id, KbID: id, DisplayName: req.Name, Desc: req.Description, Scene: scene, ResourceVersion: 1, ResourceUID: id, DatasetInfo: json.RawMessage(`{}`), ProcessingLevel: level, ProcessingRevision: 1, TransitionStatus: TransitionIdle, ProcessingConfig: json.RawMessage(`{}`), EmbeddingModel: "default", EmbeddingModelProvider: "default", TenantID: resourceTenant(op.Caller.TenantID), Type: 1, Ext: json.RawMessage(`{}`), BaseModel: orm.BaseModel{CreateUserID: op.Caller.UserID, CreateUserName: op.Caller.UserName, CreatedAt: now, UpdatedAt: now}}
+	options := Dataset{}
+	if req.PageOptions != nil {
+		options = *req.PageOptions
+	}
+	if strings.TrimSpace(options.Algo.AlgoID) == "" {
+		options.Algo = Algo{AlgoID: defaultMarketAlgoID, DisplayName: defaultMarketAlgoName}
+	}
+	tags, err := normalizeAndValidateDatasetTags(options.Tags)
+	if err != nil {
+		return ResourceOperationResult{}, err
+	}
+	if err := s.knowledgeNameConflict(ctx, s.db, op, req.Name, ""); err != nil {
+		return ResourceOperationResult{}, err
+	}
+	parsers := fetchParsersByAlgoID(ctx, options.Algo.AlgoID)
+	ds.CoverImage = strings.TrimSpace(options.CoverImage)
+	ds.ReaderFallbackAccepted = options.ReaderFallbackAccepted
+	ds.Ext, _ = json.Marshal(map[string]any{"tags": tags, "algo_id": options.Algo.AlgoID, "algo_name": options.Algo.DisplayName, "parsers": parsers})
+
+	if err := s.provision(ctx, op.Caller, &ds); err != nil {
+		return ResourceOperationResult{}, err
+	}
+	return s.mutate(ctx, op, "knowledge.create", req, func(tx *gorm.DB) (ResourceOperationResult, error) {
+		if err := s.knowledgeNameConflict(ctx, tx, op, req.Name, ""); err != nil {
+			return ResourceOperationResult{}, err
+		}
+		if err := tx.Create(&ds).Error; err != nil {
+			return ResourceOperationResult{}, err
+		}
+		if err := tx.Create(&orm.KBModel{ID: ds.KbID, Name: ds.DisplayName, OwnerID: op.Caller.UserID, Visibility: acl.VisibilityPrivate}).Error; err != nil {
+			return ResourceOperationResult{}, err
+		}
+		for _, permission := range roleToPermissions("dataset_maintainer") {
+			grant := orm.ACLModel{ResourceType: acl.ResourceTypeDB, ResourceID: ds.ID, GranteeType: acl.GranteeUser, TargetID: op.Caller.UserID, Permission: permission, CreatedBy: op.Caller.UserID, CreatedAt: now}
+			if err := tx.Create(&grant).Error; err != nil {
+				return ResourceOperationResult{}, err
+			}
+		}
+		return ResourceOperationResult{Items: []ResourceOperationItem{{ResourceRef: ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: ds.ID}, Name: ds.DisplayName, ResourceStatus: "created", EntryURL: "/lib/knowledge/detail/" + ds.ID, After: map[string]any{"description": ds.Desc, "scene": ds.Scene, "processing_level": ds.ProcessingLevel}}}}, nil
+	})
+}
+func (s *ResourceService) knowledgeNameConflict(ctx context.Context, tx *gorm.DB, op ResourceOperationContext, name, exclude string) error {
+	var rows []orm.Dataset
+	if err := tx.Where("display_name = ? AND id <> ? AND deleted_at IS NULL", name, exclude).Limit(s.budget.MaxResources + 1).Find(&rows).Error; err != nil {
+		return err
+	}
+	if len(rows) > s.budget.MaxResources {
+		return resourceErr("OPERATION_TOO_LARGE", "too many name candidates")
+	}
+	for _, ds := range rows {
+		if resourceTenant(ds.TenantID) != resourceTenant(op.Caller.TenantID) {
+			continue
+		}
+		perms := []string{}
+		if ds.CreateUserID == op.Caller.UserID {
+			return resourceErr("CONFLICT", "dataset name already exists")
+		} else {
+			perms, _ = acl.PermissionsForWithDB(tx, acl.ResourceTypeDB, ds.ID, op.Caller.UserID, resourceTransactionGroups(tx))
+		}
+		if len(perms) > 0 {
+			if err := s.checkSource(ctx, tx, op.Caller, ds.ID, acl.PermissionDatasetRead); err != nil {
+				return err
+			}
+			return resourceErr("CONFLICT", "dataset name already exists")
+		}
+	}
+	return nil
+}
+func (s *ResourceService) CreateFolders(ctx context.Context, op ResourceOperationContext, req CreateFoldersRequest) (ResourceOperationResult, error) {
+	if len(req.Folders) == 0 {
+		return ResourceOperationResult{}, resourceErr("INVALID_ARGUMENT", "folders required")
+	}
+	if len(req.Folders) > s.budget.MaxResources {
+		return ResourceOperationResult{}, resourceErr("OPERATION_TOO_LARGE", "too many folders")
+	}
+	return s.mutate(ctx, op, "knowledge.folder.create", req, func(tx *gorm.DB) (ResourceOperationResult, error) {
+		var out ResourceOperationResult
+		ds, err := s.dataset(ctx, tx, op, req.KnowledgeBaseID, acl.PermissionDatasetUpload)
+		if err != nil {
+			return out, err
+		}
+		if err = lockResourceDataset(tx, ds); err != nil {
+			return out, err
+		}
+		if err = resourceParent(tx, ds.ID, req.ParentID); err != nil {
+			return out, err
+		}
+		created := map[string]string{}
+		for _, path := range req.Folders {
+			if strings.HasPrefix(path, "/") || strings.Contains(path, "\\") || strings.Contains(path, ":") {
+				return out, resourceErr("INVALID_ARGUMENT", "relative folder path required")
+			}
+			parts := strings.Split(path, "/")
+			pid := req.ParentID
+			for _, name := range parts {
+				if name == "" || name == "." || name == ".." || strings.TrimSpace(name) != name || len(name) > 512 {
+					return out, resourceErr("INVALID_ARGUMENT", "invalid folder path")
+				}
+				key := pid + "/" + name
+				if existing := created[key]; existing != "" {
+					pid = existing
+					continue
+				}
+				if len(created) >= s.budget.MaxResources {
+					return out, resourceErr("OPERATION_TOO_LARGE", "too many expanded folders")
+				}
+				if err = resourceNameConflict(tx, ds.ID, pid, name, ""); err != nil {
+					return out, err
+				}
+				now := time.Now().UTC()
+				folderID := newDocID()
+				if req.PreferredRootID != "" {
+					if len(req.Folders) != 1 || len(parts) != 1 {
+						return out, resourceErr("INVALID_ARGUMENT", "explicit folder ID requires one folder")
+					}
+					folderID = req.PreferredRootID
+				}
+				row := orm.Document{ID: folderID, DatasetID: ds.ID, DisplayName: name, DocumentType: "FOLDER", PID: pid, ResourceVersion: 1, Tags: json.RawMessage(`[]`), Ext: json.RawMessage(`{}`), BaseModel: orm.BaseModel{CreateUserID: op.Caller.UserID, CreateUserName: op.Caller.UserName, CreatedAt: now, UpdatedAt: now}}
+				if err = tx.Create(&row).Error; err != nil {
+					return out, err
+				}
+				out.Items = append(out.Items, resourceItem(row, "created"))
+				created[key] = row.ID
+				pid = row.ID
+			}
+		}
+		parents := []string{req.ParentID}
+		for _, item := range out.Items {
+			parents = append(parents, item.ResourceRef.ID())
+		}
+		if err = s.refreshAncestorStats(tx, ds.ID, parents...); err != nil {
+			return out, err
+		}
+		return out, nil
+	})
+}
+func (s *ResourceService) UpdateMetadata(ctx context.Context, op ResourceOperationContext, req UpdateMetadataRequest) (ResourceOperationResult, error) {
+	if len(req.Items) == 0 {
+		return ResourceOperationResult{}, resourceErr("INVALID_ARGUMENT", "items required")
+	}
+	if len(req.Items) > s.budget.MaxResources {
+		return ResourceOperationResult{}, resourceErr("OPERATION_TOO_LARGE", "too many metadata items")
+	}
+	committed := false
+	result, err := s.mutate(ctx, op, "knowledge.resource.update_metadata", req, func(tx *gorm.DB) (ResourceOperationResult, error) {
+		var out ResourceOperationResult
+		for _, item := range req.Items {
+			c := item.Changes
+			if c.Name == nil && c.Description == nil && c.Scene == nil && c.Tags == nil {
+				return out, resourceErr("INVALID_ARGUMENT", "changes cannot be empty")
+			}
+			if c.Name != nil && strings.TrimSpace(*c.Name) == "" {
+				return out, resourceErr("INVALID_ARGUMENT", "name cannot be empty")
+			}
+			ds, err := s.dataset(ctx, tx, op, item.Target.KnowledgeBaseID, acl.PermissionDatasetWrite)
+			if err != nil {
+				return out, err
+			}
+			if err = lockResourceDataset(tx, ds); err != nil {
+				return out, err
+			}
+			updates := map[string]any{"updated_at": time.Now().UTC()}
+			before := map[string]any{}
+			after := map[string]any{}
+			var result ResourceOperationItem
+			if item.Target.Kind == "knowledge_base" {
+				if c.Tags != nil {
+					return out, resourceErr("INVALID_ARGUMENT", "knowledge base tags cannot be changed here")
+				}
+				if c.Name != nil {
+					n := strings.TrimSpace(*c.Name)
+					if err = validateDatasetDisplayName(n); err != nil {
+						return out, resourceErr("INVALID_ARGUMENT", err.Error())
+					}
+					if err = s.knowledgeNameConflict(ctx, tx, op, n, ds.ID); err != nil {
+						return out, err
+					}
+					updates["display_name"] = n
+					before["name"] = ds.DisplayName
+					after["name"] = n
+					ds.DisplayName = n
+				}
+				if c.Description != nil {
+					updates["desc"] = *c.Description
+					before["description"] = ds.Desc
+					after["description"] = *c.Description
+				}
+				if c.Scene != nil {
+					if *c.Scene == "" {
+						return out, resourceErr("INVALID_ARGUMENT", "scene cannot be empty")
+					}
+					v, e := resourceScene(*c.Scene)
+					if e != nil {
+						return out, e
+					}
+					updates["scene"] = v
+					before["scene"] = ds.Scene
+					after["scene"] = v
+				}
+				if err = tx.Model(&orm.Dataset{}).Where("id = ?", ds.ID).Updates(updates).Error; err != nil {
+					return out, err
+				}
+				result = ResourceOperationItem{ResourceRef: item.Target, Name: ds.DisplayName, ResourceStatus: "updated", EntryURL: "/lib/knowledge/detail/" + ds.ID}
+			} else {
+				row, e := resourceDocument(tx, item.Target)
+				if e != nil {
+					return out, e
+				}
+				changes, prior, next, e := resourceDocumentChanges(tx, row, c, row.PID)
+				if e != nil {
+					return out, e
+				}
+				for key, value := range changes {
+					updates[key] = value
+				}
+				before, after = prior, next
+				if name, ok := changes["display_name"].(string); ok {
+					row.DisplayName = name
+				}
+				updates["resource_version"] = gorm.Expr("resource_version + 1")
+				r := tx.Model(&orm.Document{}).Where("id = ? AND resource_version = ? AND deleted_at IS NULL", row.ID, row.ResourceVersion).Updates(updates)
+				if r.Error != nil {
+					return out, r.Error
+				}
+				if r.RowsAffected != 1 {
+					return out, resourceErr("CONFLICT", "resource changed")
+				}
+				result = resourceItem(row, "updated")
+			}
+			result.Before = before
+			result.After = after
+			out.Items = append(out.Items, result)
+		}
+		committed = true
+		return out, nil
+	})
+	if err != nil || !committed {
+		return result, err
+	}
+	for i, item := range result.Items {
+		if item.ResourceRef.Kind == "knowledge_base" {
+			if syncErr := s.syncKnowledgeMetadata(ctx, op.Caller, item.ResourceRef.KnowledgeBaseID); syncErr != nil {
+				result.Items[i].Error = resourceErr("METADATA_SYNC_FAILED", syncErr.Error())
+			}
+		}
+	}
+	s.updateReceiptResult(ctx, op, result)
+	return result, nil
+}
+
+// resourceDocumentChanges is shared by metadata edits and combined legacy moves.
+func resourceDocumentChanges(tx *gorm.DB, row orm.Document, c ResourceMetadataChanges, parent string) (map[string]any, map[string]any, map[string]any, error) {
+	updates, before, after := map[string]any{}, map[string]any{}, map[string]any{}
+	if c.Description != nil || c.Scene != nil || (isFolderLikeDocument(row) && c.Tags != nil) {
+		return nil, nil, nil, resourceErr("INVALID_ARGUMENT", "field is not allowed for resource kind")
+	}
+	if c.Name != nil {
+		name := strings.TrimSpace(*c.Name)
+		if name == "" || strings.ContainsAny(name, "/\\") || len(name) > 512 {
+			return nil, nil, nil, resourceErr("INVALID_ARGUMENT", "invalid resource name")
+		}
+		if err := resourceNameConflict(tx, row.DatasetID, parent, name, row.ID); err != nil {
+			return nil, nil, nil, err
+		}
+		updates["display_name"], before["name"], after["name"] = name, row.DisplayName, name
+	}
+	if c.Tags != nil {
+		tags := normalizeBatchDocumentTags(*c.Tags)
+		raw, _ := json.Marshal(tags)
+		updates["tags"], before["tags"], after["tags"] = raw, row.Tags, tags
+	}
+	return updates, before, after, nil
+}

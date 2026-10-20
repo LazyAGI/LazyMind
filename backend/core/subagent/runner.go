@@ -46,6 +46,7 @@ func CancelRuns(taskIDs []string) {
 // snapshot and never receives a database DSN. Runtime events are streamed back
 // to Core, which is the only component that persists steps and artifacts.
 type RunRequest struct {
+	SystemMCPConfig    []any             `json:"system_mcp_config"`
 	TaskID             string            `json:"task_id"`
 	AgentType          string            `json:"agent_type"`
 	Params             map[string]any    `json:"params,omitempty"`
@@ -62,6 +63,7 @@ type RunRequest struct {
 
 // TaskEvent is one event emitted by the SubAgent SSE stream.
 type TaskEvent struct {
+	AskPending map[string]any `json:"ask_pending,omitempty"`
 	Type         string                         `json:"type"`
 	V2ArtifactID string                         `json:"v2_artifact_id,omitempty"`
 	V2RevisionID string                         `json:"v2_revision_id,omitempty"`
@@ -125,8 +127,11 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 		return wrapped
 	}
 	params, _ := req.TaskSpec["params"].(map[string]any)
-	workspaceBound := localworkspace.SnapshotFromParams(params) != nil
+	workspaceBound := localworkspace.SnapshotFromParams(params) != nil || len(req.SystemMCPConfig) > 0
 	generation := uuid.NewString()
+	if err := saveKnowledgeRunPolicy(runCtx, stateStore, req, generation); err != nil {
+		return err
+	}
 	routeAccepted := func(ev TaskEvent) error {
 		accepted, err := routeExecutionEvent(runCtx, db, req.TaskID, generation, ev, func(tx *gorm.DB, event TaskEvent) (bool, error) {
 			ev = event
@@ -265,6 +270,7 @@ func hydrateRunRequest(ctx context.Context, db *gorm.DB, req *RunRequest) error 
 	if req == nil || strings.TrimSpace(req.TaskID) == "" {
 		return fmt.Errorf("task_id is required")
 	}
+	req.SystemMCPConfig = KnowledgeSystemConfig(req.Tools)
 	// Runtime credentials come from the task owner, never a caller's snapshot.
 	req.UserEnvVars = nil
 	task, err := GetTask(ctx, db, req.TaskID)
@@ -477,6 +483,16 @@ func PublishConversationTaskEvent(
 	if err != nil || task.ConversationID == "" {
 		return
 	}
+	if ev.Type == "ask_pending" {
+		confirmation, ok := ev.AskPending["knowledge_management"].(map[string]any)
+		confirmationID, _ := confirmation["confirmation_id"].(string)
+		argumentsDigest, _ := confirmation["arguments_digest"].(string)
+		snapshot, _ := confirmation["snapshot"].(string)
+		if ok && confirmationID != "" && argumentsDigest != "" && snapshot != "" {
+			EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, task.TriggerHistoryID, "ask_pending", ev.AskPending)
+		}
+		return
+	}
 	if task.AgentType == "workflow_step" {
 		switch ev.Type {
 		case "artifact_stream_start", "artifact_stream", "artifact_stream_end", "artifact_stream_abort":
@@ -565,6 +581,36 @@ func workspaceRunKey(taskID string) string { return "rag/subagent/execution:" + 
 // ValidateWorkspaceRun is independent of the parent Chat run: detached tasks
 // survive normal parent completion, but not interruption or a later launch.
 func ValidateWorkspaceRun(ctx context.Context, db *gorm.DB, stateStore state.Store, req localworkspace.OperationRequest) (*localworkspace.ContextSnapshot, error) {
+	params, err := ValidateActiveRun(ctx, db, stateStore, req)
+	if err != nil {
+		return nil, err
+	}
+	invalid := localworkspace.Error("binding_conflict", 409, "conflict")
+	snapshot := localworkspace.SnapshotFromParams(params)
+	if snapshot == nil {
+		if req.WorkspaceID == "" {
+			return nil, nil
+		}
+		return nil, invalid
+	}
+	if snapshot.WorkspaceID != req.WorkspaceID {
+		return nil, invalid
+	}
+	return snapshot, nil
+}
+
+func withWorkspaceRunUpdate(ctx context.Context, db *gorm.DB, taskID string, update func(*gorm.DB) error) error {
+	return common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+		if err := tx.Model(&orm.SubAgentTask{}).Where("id = ?", taskID).
+			UpdateColumn("updated_at", gorm.Expr("updated_at")).Error; err != nil {
+			return err
+		}
+		return update(tx)
+	})
+}
+
+// ValidateActiveRun verifies task ownership and generation without requiring a workspace.
+func ValidateActiveRun(ctx context.Context, db *gorm.DB, stateStore state.Store, req localworkspace.OperationRequest) (map[string]any, error) {
 	invalid := localworkspace.Error("binding_conflict", 409, "conflict")
 	if stateStore == nil || req.TaskID == "" || req.Generation == "" || req.RunID != "" || req.HistoryID != "" {
 		return nil, invalid
@@ -595,25 +641,6 @@ func ValidateWorkspaceRun(ctx context.Context, db *gorm.DB, stateStore state.Sto
 	if len(task.Params) > 0 && json.Unmarshal(task.Params, &params) != nil {
 		return nil, invalid
 	}
-	snapshot := localworkspace.SnapshotFromParams(params)
-	if snapshot == nil {
-		if req.WorkspaceID == "" {
-			return nil, nil
-		}
-		return nil, invalid
-	}
-	if snapshot.WorkspaceID != req.WorkspaceID {
-		return nil, invalid
-	}
-	return snapshot, nil
-}
 
-func withWorkspaceRunUpdate(ctx context.Context, db *gorm.DB, taskID string, update func(*gorm.DB) error) error {
-	return common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
-		if err := tx.Model(&orm.SubAgentTask{}).Where("id = ?", taskID).
-			UpdateColumn("updated_at", gorm.Expr("updated_at")).Error; err != nil {
-			return err
-		}
-		return update(tx)
-	})
+	return params, nil
 }

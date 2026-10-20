@@ -515,11 +515,12 @@ def _mcp_tools_for_preview(server, capability=None, namespace='user'):
     from lazyllm.tools.mcp.tool_adaptor import generate_lazyllm_tool
     if not capability or capability.get('status') != 'ready':
         return []
-    allowed = set(server.get('allowed_tools') or [])
+    from lazymind.chat.service.mcp_loading import mcp_allowed_tools
+    allowed = mcp_allowed_tools(server)
     tools = [generate_lazyllm_tool(_PreviewMCPClient(), SimpleNamespace(
         name=item['tool_name'], description=item.get('description') or item['tool_name'],
         inputSchema=item.get('input_schema') or {}))
-        for item in capability.get('tools', []) if item['tool_name'] in allowed]
+        for item in capability.get('tools', []) if allowed is None or item['tool_name'] in allowed]
     return _set_mcp_tool_metadata(tools, server, namespace)
 
 
@@ -532,16 +533,24 @@ def _mcp_preview_catalog_status(capabilities, extra_servers=()):
 
 
 def _load_mcp_server_tools(server: Dict[str, Any], namespace: str = 'user') -> list:
+    from lazymind.chat.service.mcp_loading import mcp_allowed_tools
+    from lazymind.chat.service.knowledge_management import BUILTIN_ID, KnowledgeManagementRuntime
+    if server.get('id') == BUILTIN_ID and not isinstance(server.get('_knowledge_runtime'), KnowledgeManagementRuntime):
+        return []
+    allowed = mcp_allowed_tools(server)
+    if allowed == []:
+        return []
     url = server.get('url')
     oauth = server.get('auth_type') == 'oauth' or 'oauth' in server
     adapter = MCPOAuthAdapter(server.get('oauth'), url) if oauth else None
-    if oauth and not server.get('allowed_tools'):
-        return []
     if not url:
         LOG.warning(f"[MCP] skipped server {server.get('name')}: missing 'url' field")
         return []
-    cache_key = _mcp_server_cache_key({'namespace': namespace, 'server': server})
-    if not oauth:
+    callback_keys = ('auth_provider', 'auth_recovery', 'request_metadata_provider', 'progress_callback')
+    runtime_bound = oauth or server.get('id') == 'lazymind-knowledge' or any(
+        server.get(key) is not None for key in callback_keys)
+    cache_key = None if runtime_bound else _mcp_server_cache_key({'namespace': namespace, 'server': server})
+    if not runtime_bound:
         now = time.monotonic()
         with _mcp_tool_cache_lock:
             cached = _mcp_tool_cache.get(cache_key)
@@ -554,19 +563,22 @@ def _load_mcp_server_tools(server: Dict[str, Any], namespace: str = 'user') -> l
         # treats the generic value as legacy SSE and sends an incompatible GET.
         if transport == 'http':
             transport = 'streamable-http'
-        auth_callbacks = ({'auth_provider': adapter.headers, 'auth_recovery': adapter.recover}
-                          if adapter else {})
+        auth_callbacks = {key: server[key] for key in callback_keys if server.get(key) is not None}
+        if adapter:
+            auth_callbacks.update(auth_provider=adapter.headers, auth_recovery=adapter.recover)
         client = MCPClient(
             command_or_url=url,
             headers=None if oauth else server.get('headers'),
             timeout=server.get('timeout', 5),
             transport=transport,
+            result_mode=server.get('result_mode', 'text'),
             **auth_callbacks,
         )
-        allowed = server.get('allowed_tools') or None
         mcp_tools = client.get_tools(allowed_tools=allowed)
         mcp_tools = _set_mcp_tool_metadata(mcp_tools, server, namespace)
-        if not oauth:
+        if server.get('_knowledge_runtime') is not None:
+            mcp_tools = server['_knowledge_runtime'].bind_tools(mcp_tools)
+        if not runtime_bound:
             with _mcp_tool_cache_lock:
                 _mcp_tool_cache[cache_key] = (time.monotonic(), list(mcp_tools))
         LOG.info(f"[MCP] loaded {len(mcp_tools)} tools from {server.get('name')}")
@@ -576,19 +588,21 @@ def _load_mcp_server_tools(server: Dict[str, Any], namespace: str = 'user') -> l
     except Exception as e:
         if oauth:
             raise MCPAuthUnavailable() from None
-        LOG.warning(f"[MCP] failed to connect {server.get('name')}: {e}")
+        detail = type(e).__name__ if runtime_bound else str(e)
+        LOG.warning(f"[MCP] failed to connect {server.get('name')}: {detail}")
         return []
 
 
 async def _build_mcp_tools(
     mcp_config: List[Dict[str, Any]], namespace: str = 'user', *, issues: Optional[list] = None,
-    preview: bool = False,
+    preview: bool = False, preview_capabilities: Optional[dict] = None,
 ) -> list:
     """Isolate unavailable servers while preserving healthy tools for this request."""
     from lazymind.chat.service.mcp_loading import load_mcp_catalog
     catalog = [{'service': str(server.get('id') or index), 'label': server.get('name'),
                 'status': 'ready', 'runtime': server} for index, server in enumerate(mcp_config)]
-    loader = ((lambda server: _mcp_tools_for_preview(server, namespace=namespace)) if preview
+    loader = ((lambda server: _mcp_tools_for_preview(
+        server, (preview_capabilities or {}).get(server.get('id')), namespace=namespace)) if preview
               else (lambda server: _load_mcp_server_tools(server, namespace)))
     results = await load_mcp_catalog(catalog, loader, issues=issues)
     return [tool for result in results for tool in result['tools']]
@@ -1523,13 +1537,22 @@ async def _handle_chat_impl(
     configuration_runtime = None
     configuration_preview = runtime.context_usage_preview or runtime.context_prompt_export
     preview_capabilities = {item['service'][4:]: item for item in runtime.mcp_capabilities or []}
+    from lazymind.chat.service.knowledge_management import build_knowledge_runtime, bind_knowledge_server
+    knowledge_management = build_knowledge_runtime(agentic_config, cancel_check=make_cancel_stop_condition())
+
+    def bind_runtime_mcp(server):
+        return server if configuration_preview else bind_knowledge_server(server, knowledge_management)
+
+    def load_runtime_mcp(server, namespace='user'):
+        return _load_mcp_server_tools(bind_knowledge_server(server, knowledge_management), namespace)
+
     if (not sidechat_readonly and not workflow_turn_is_bound and conversation_id and user_id
             and (configuration_preview or (conversation.history_id and conversation.run_id))):
         from lazymind.chat.engine.agent_runtime.tool_configuration import ToolConfigurationRuntime
         configuration_runtime = ToolConfigurationRuntime(
             user_id, conversation_id, conversation.history_id, conversation.run_id,
             loader=(lambda server: _mcp_tools_for_preview(server, preview_capabilities.get(server.get('id'))))
-            if configuration_preview else _load_mcp_server_tools,
+            if configuration_preview else load_runtime_mcp,
             query=language_query, tool_config=runtime.tool_config,
         )
     if sidechat_readonly:
@@ -1592,7 +1615,9 @@ async def _handle_chat_impl(
             else []
         )
         system_mcp_tools = (
-            await _build_mcp_tools(runtime.system_mcp_config, 'system', issues=mcp_issues, preview=configuration_preview)
+            await _build_mcp_tools(
+                [bind_runtime_mcp(server) for server in runtime.system_mcp_config],
+                'system', issues=mcp_issues, preview=configuration_preview, preview_capabilities=preview_capabilities)
             if runtime.system_mcp_config and not workflow_turn_is_bound else []
         )
         system_mcp_tools = _add_browser_visual_tools(
@@ -1605,10 +1630,13 @@ async def _handle_chat_impl(
             extra_mcp = [item for item in (runtime.mcp_config or []) if item.get('id') not in projected]
             if extra_mcp:
                 user_mcp_tools.extend(await _build_mcp_tools(
-                    extra_mcp, issues=mcp_issues, preview=configuration_preview))
+                    [bind_runtime_mcp(server) for server in extra_mcp],
+                    issues=mcp_issues, preview=configuration_preview, preview_capabilities=preview_capabilities))
         else:
             user_mcp_tools = (
-                await _build_mcp_tools(runtime.mcp_config, issues=mcp_issues, preview=configuration_preview)
+                await _build_mcp_tools(
+                    [bind_runtime_mcp(server) for server in runtime.mcp_config],
+                    issues=mcp_issues, preview=configuration_preview, preview_capabilities=preview_capabilities)
                 if runtime.mcp_config and not workflow_turn_is_bound else []
             )
         mcp_tools = [*system_mcp_tools, *user_mcp_tools]
@@ -2161,6 +2189,7 @@ async def _handle_chat_impl(
             tool_state_scope='sidechat' if sidechat_readonly else 'chat',
             context_preview=runtime.context_usage_preview or runtime.context_prompt_export,
             configuration_runtime=configuration_runtime,
+            knowledge_management=knowledge_management,
             workspace_permission=WorkspaceContext.from_snapshot(
                 request.workspace_context, local_runtime=request.local_runtime,
                 user_id=user_id or '',

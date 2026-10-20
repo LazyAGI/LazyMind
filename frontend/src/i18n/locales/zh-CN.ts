@@ -3051,6 +3051,8 @@ const zhCN = {
         applyFailed: "保存修改失败，请重试。",
       },
     },
+    knowledgeConfirmationFailed: "未能确认你的选择。可以重试；如果资源已变化，请重新获取操作预览。",
+    knowledgePreviewLabels: {"resources": "资源范围", "scope": "操作范围", "counts": "影响数量", "impact": "操作影响", "document_count": "文档数", "folder_count": "目录数", "total_bytes": "总字节数", "destination": "目标位置", "warnings": "注意事项"},
     askCardSubmit: "提交",
     askCardPrev: "上一项",
     askCardNext: "下一项",

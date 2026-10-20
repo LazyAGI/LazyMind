@@ -191,19 +191,13 @@ func GetProcessingStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	var total, failed, processing, available int64
-	db := store.DB().WithContext(r.Context())
-	_ = db.Model(&orm.Document{}).Where("dataset_id = ? AND deleted_at IS NULL", datasetID).Count(&total).Error
-	_ = db.Model(&orm.DocumentProcessingState{}).Where("dataset_id = ? AND (parse_status = 'failed' OR chunk_status = 'failed' OR index_status = 'failed')", datasetID).Count(&failed).Error
-	_ = db.Model(&orm.DocumentProcessingState{}).Where("dataset_id = ? AND (parse_status = 'running' OR chunk_status = 'running' OR index_status = 'running')", datasetID).Count(&processing).Error
-	level := effectiveProcessingLevel(ds.ProcessingLevel)
-	statusColumn := map[string]string{ProcessingLevelParsed: "parse_status", ProcessingLevelChunked: "chunk_status", ProcessingLevelIndexed: "index_status"}[level]
-	if level == ProcessingLevelStored {
-		available = total
-	} else if statusColumn != "" {
-		_ = db.Model(&orm.DocumentProcessingState{}).Where("dataset_id = ? AND "+statusColumn+" = 'succeeded'", datasetID).Count(&available).Error
+	coverage, err := datasetProcessingCoverage(r.Context(), store.DB(), store.LazyLLMDB(), *ds)
+	if err != nil {
+		common.ReplyErr(w, "query documents failed", http.StatusBadGateway)
+		return
 	}
-	common.ReplyJSON(w, map[string]any{"dataset_id": datasetID, "processing_level": level, "processing_revision": ds.ProcessingRevision, "transition_status": effectiveTransitionStatus(ds.TransitionStatus), "capabilities": capabilitiesForProcessingLevel(level), "coverage": ProcessingCoverage{Available: available, Total: total, Failed: failed, Processing: processing}})
+	level := effectiveProcessingLevel(ds.ProcessingLevel)
+	common.ReplyJSON(w, map[string]any{"dataset_id": datasetID, "processing_level": level, "processing_revision": ds.ProcessingRevision, "transition_status": effectiveTransitionStatus(ds.TransitionStatus), "capabilities": capabilitiesForProcessingLevel(level), "coverage": coverage})
 }
 
 // EnsureParsed upgrades one document on demand while preserving the
@@ -224,9 +218,14 @@ func EnsureParsed(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	caller, err := resolveDatasetCatalogCallerFromRequest(r)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusForbidden)
+		return
+	}
 	result, err := service.EnsureDocumentParsed(r, EnsureDocumentParsedRequest{
 		UserID: userID, DatasetID: datasetID, DocumentID: documentID,
-		Caller: DatasetCatalogCaller{UserID: userID, Authorization: r.Header.Get("Authorization"), TenantID: r.Header.Get("X-Tenant-Id"), UserRole: r.Header.Get("X-User-Role")},
+		Caller: caller,
 	})
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusBadGateway)
@@ -258,9 +257,14 @@ func ReadDocument(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	caller, err := resolveDatasetCatalogCallerFromRequest(r)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusForbidden)
+		return
+	}
 	result, err := service.GetDocument(r.Context(), DocumentReadRequest{
 		UserID: userID, DatasetID: datasetID, DocumentID: documentID, IncludeContent: true,
-		Caller: DatasetCatalogCaller{UserID: userID, Authorization: r.Header.Get("Authorization"), TenantID: r.Header.Get("X-Tenant-Id"), UserRole: r.Header.Get("X-User-Role")},
+		Caller: caller,
 	})
 	if err != nil {
 		status := http.StatusInternalServerError

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import copy
 import json
 import os
 import re
@@ -420,6 +421,9 @@ def _resolve_runtime_tools(
                 file_tools['native_search'] = native_search
         result = []
         for name in name_list:
+            # Core binds this group to per-run MCP tools after native resolution.
+            if name == 'knowledge_management' or name.startswith('knowledge.'):
+                continue
             if name in {'kb', 'web_search'} and name not in default_by_name:
                 continue
             if name in package_by_name:
@@ -427,7 +431,14 @@ def _resolve_runtime_tools(
             elif name in file_tools:
                 result.append(file_tools[name])
             elif name in default_by_name:
-                result.append(default_by_name[name].tool)
+                if (name == 'kb' and (params or {}).get('workflow_id')
+                        and (params or {}).get('revision_id') and 'knowledge_management' not in name_list):
+                    # load_workflow_tools above validated the exact Core-owned pin.
+                    # Old revisions declared kb before management became a separate group.
+                    from lazymind.chat.engine.tools.lazy_kb import KBToolkit
+                    result.append(KBToolkit(legacy_management=True))
+                else:
+                    result.append(default_by_name[name].tool)
             else:
                 LOG.warning(f'[SubAgent] public Attempt tool {name!r} is unavailable on LazyMind Host')
         return result
@@ -701,6 +712,7 @@ def _build_subagent_plan(
     llm_config: Optional[Dict[str, Any]] = None,
     workspace_permission=None,
     tool_context: ToolResolutionContext | None = None,
+    knowledge_management=None,
 ) -> AgentRunPlan:
     builder = PromptBuilder.for_role(AgentRole.SUBAGENT)
     add_standard_system_sections(
@@ -959,6 +971,7 @@ def _build_subagent_plan(
             required_tool_groups=('KBToolkit',) if ctx.params.get('filters', {}).get('kb_id') else (),
             workspace_permission=workspace_permission,
             tool_context=tool_context,
+            knowledge_management=knowledge_management,
             skills=inherited_skills or None,
             prompt_skills=inherited_prompt_skills,
             skill_search=None if not inherited_skills else core_skill_search,
@@ -1159,6 +1172,7 @@ async def run_subagent_stream(
     task_spec: Optional[Dict[str, Any]] = None,
     initial_steps: Optional[List[Dict[str, Any]]] = None,
     workspace_execution: Optional[Dict[str, Any]] = None,
+    system_mcp_config: Optional[List[Dict[str, Any]]] = None,
     user_env_vars: Optional[Dict[str, str]] = None,
 ):
     """Async generator yielding Task SSE lines.
@@ -1339,6 +1353,8 @@ async def run_subagent_stream(
 
         agentic_config = _build_agentic_config(task, params, effective_agent_type)
         agentic_config['_workspace_execution'] = execution_identity
+        # Only the current Core launch can grant this task management capabilities.
+        agentic_config['system_mcp_config'] = copy.deepcopy(system_mcp_config or [])
         agentic_config['_subagent_workspace'] = ctx.workspace_path
         agentic_config['citation_state'] = source_state
         agentic_config['citation_mode'] = 'collect_only'
@@ -1360,6 +1376,14 @@ async def run_subagent_stream(
             tools_only=bool(ctx.params.get('tools_only')),
             include_artifact_writes=not _publisher_owns_outputs(ctx),
         )
+        from lazymind.chat.service.knowledge_management import build_knowledge_runtime, BUILTIN_ID
+        knowledge_management = build_knowledge_runtime(agentic_config, cancel_check=make_cancel_stop_condition())
+        if knowledge_management is not None:
+            from lazymind.chat.service.chat_service import _load_mcp_server_tools
+            server = next(item for item in agentic_config.get('system_mcp_config') or []
+                          if item.get('id') == BUILTIN_ID)
+            subagent_tools_all.extend(await asyncio.to_thread(
+                _load_mcp_server_tools, knowledge_management.server_config(server), 'system'))
         host_filesystem_enabled = bool(_cfg['trusted_local_mode']) or bool(agentic_config.get('_core_workspace_context'))
         if host_filesystem_enabled and effective_agent_type != 'workflow_step':
             from lazyllm.tools.agent import FileSystemToolkit
@@ -1379,6 +1403,7 @@ async def run_subagent_stream(
             ),
             resume=resume,
             llm_config=model_config,
+            knowledge_management=knowledge_management,
             workspace_permission=WorkspaceContext.from_snapshot(
                 agentic_config.get('_core_workspace_context'),
                 local_runtime=agentic_config.get('_core_local_runtime', True),
@@ -1489,6 +1514,10 @@ async def run_subagent_stream(
                 if kind == 'event':
                     item = payload
                     tag = item.get('tag')
+                    if tag == 'ask_pending' and isinstance(item.get('knowledge_management'), dict):
+                        yield _sse({'type': 'ask_pending', 'task_id': task_id,
+                                    'ask_pending': {key: value for key, value in item.items() if key != 'tag'}})
+                        continue
                     # Persist tool steps for resume / breakpoint recovery.
                     if tag in ('tool_calls', 'tool_results'):
                         pending_event = _drain_outbound_text()

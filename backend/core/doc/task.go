@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -573,6 +574,13 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 				Where("kb_id = ? AND status IN ?", datasetID, internalStates).
 				Pluck("task_id", &lazyllmTaskIDs)
 			if uiStatus == "running" {
+				// Deleted sources retain task history, but no longer represent active uploads.
+				// Require an explicit tombstone so unbound/new uploads remain visible.
+				query = query.Where(`NOT EXISTS (
+					SELECT 1 FROM documents
+					WHERE documents.id = tasks.doc_id AND documents.dataset_id = tasks.dataset_id
+					AND documents.deleted_at IS NOT NULL
+				)`)
 				// Tasks that have not yet been submitted to lazyllm have no lazyllm_task_id.
 				// Their state lives in ext and they are implicitly "running" only when their
 				// ext.task_state is a non-terminal value (CREATING / UPLOADING / UPLOADED / "").
@@ -1488,26 +1496,29 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 // startParseTasksInternalAtLevel allows on-demand readers to request only the
 // parsed artifact without changing the dataset's default processing level.
 func startParseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs []string, requestedLevel string) ([]StartTaskResult, error) {
+	return startParseTasksAtLevel(r.Context(), common.UserID(r), datasetID, taskIDs, requestedLevel)
+}
+
+func startParseTasksAtLevel(ctx context.Context, userID, datasetID string, taskIDs []string, requestedLevel string) ([]StartTaskResult, error) {
 	kbID := datasetKbIDByID(datasetID)
 	if kbID == "" {
 		return nil, fmt.Errorf("dataset kb mapping not found")
 	}
 	var dataset orm.Dataset
-	if err := store.DB().WithContext(r.Context()).Where("id = ? AND deleted_at IS NULL", datasetID).Take(&dataset).Error; err != nil {
+	if err := store.DB().WithContext(ctx).Where("id = ? AND deleted_at IS NULL", datasetID).Take(&dataset).Error; err != nil {
 		return nil, fmt.Errorf("dataset not found")
 	}
 	processingLevel := effectiveProcessingLevel(dataset.ProcessingLevel)
 	if strings.TrimSpace(requestedLevel) != "" {
 		processingLevel = effectiveProcessingLevel(requestedLevel)
 	}
-	userID := common.UserID(r)
-	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), userID)
+	llmConfig, err := modelconfig.LoadLLMConfig(ctx, store.DB(), userID)
 	if err != nil {
 		log.Printf("[startParseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
 		llmConfig = nil
 	}
 	llmConfig = normalizeParsingLLMConfig(llmConfig)
-	ocrConfig, err := modelconfig.LoadOCRConfig(r.Context(), store.DB(), userID)
+	ocrConfig, err := modelconfig.LoadOCRConfig(ctx, store.DB(), userID)
 	if err != nil {
 		log.Printf("[startParseTasksInternal] failed to load ocr_config for user=%s: %v", userID, err)
 		ocrConfig = nil
@@ -1532,12 +1543,12 @@ func startParseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs [
 	for _, taskID := range taskIDs {
 		orderedUniqueIDs = append(orderedUniqueIDs, taskID)
 		var taskRow orm.Task
-		if err := store.DB().WithContext(r.Context()).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", taskID, datasetID).Take(&taskRow).Error; err != nil {
+		if err := store.DB().WithContext(ctx).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", taskID, datasetID).Take(&taskRow).Error; err != nil {
 			resultsByTaskID[taskID] = StartTaskResult{TaskID: taskID, Status: "FAILED", SubmitStatus: "REJECTED", Message: "task not found"}
 			continue
 		}
 		var docRow orm.Document
-		if err := store.DB().WithContext(r.Context()).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", taskRow.DocID, datasetID).Take(&docRow).Error; err != nil {
+		if err := store.DB().WithContext(ctx).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", taskRow.DocID, datasetID).Take(&docRow).Error; err != nil {
 			log.Printf("[startTask] document not found task=%s doc=%s dataset=%s err=%v", taskID, taskRow.DocID, datasetID, err)
 			resultsByTaskID[taskID] = StartTaskResult{TaskID: taskID, DocumentID: taskRow.DocID, DisplayName: taskRow.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: "document not found"}
 			continue
@@ -1548,6 +1559,11 @@ func startParseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs [
 			resultsByTaskID[taskID] = StartTaskResult{TaskID: taskID, DocumentID: docRow.ID, DisplayName: docRow.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: "uploaded file path is empty"}
 			continue
 		}
+		var submittedExt taskExt
+		_ = json.Unmarshal(taskRow.Ext, &submittedExt)
+		submittedExt.ProcessingLevel = processingLevel
+		submittedExt.ProcessingRevision = dataset.ProcessingRevision
+		taskRow.Ext = mustJSON(submittedExt)
 		candidate := startCandidate{task: taskRow, doc: docRow, docExt: dExt}
 		candidates = append(candidates, candidate)
 		if needsOfficeConvertBeforeParse(dExt, ocrConfig, parseProfile) {
@@ -1584,7 +1600,7 @@ func startParseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs [
 			items = append(items, buildAddFileItem(datasetID, candidate.task, candidate.doc, candidate.docExt, parsePath))
 		}
 		if len(baseTasks) > 0 {
-			extResults, err := callExternalAddDocs(r, addRequest{Items: items, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: processingLevel})
+			extResults, err := callExternalAddDocsContext(ctx, addRequest{Items: items, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: processingLevel})
 			if err != nil {
 				for i, taskRow := range baseTasks {
 					resolved := common.ResolveAppError(err.Error(), http.StatusBadGateway)
@@ -1624,8 +1640,8 @@ func startParseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs [
 				defer wg.Done()
 				defer func() { <-guard }()
 				dExt := cloneDocumentExt(candidate.docExt)
-				callOfficeConvertWithRetry(r.Context(), &dExt, parseProfile)
-				persistDocumentConvertState(r.Context(), datasetID, candidate.doc.ID, dExt)
+				callOfficeConvertWithRetry(ctx, &dExt, parseProfile)
+				persistDocumentConvertState(ctx, datasetID, candidate.doc.ID, dExt)
 				if parseProfile == documentParseProfileLocal && strings.TrimSpace(dExt.ConvertStatus) == ConvertStatusFailed {
 					msg := strings.TrimSpace(dExt.ConvertError)
 					if msg == "" {
@@ -1640,7 +1656,7 @@ func startParseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs [
 					return
 				}
 				item := buildAddFileItem(datasetID, candidate.task, candidate.doc, dExt, parsePath)
-				extResults, err := callExternalAddDocs(r, addRequest{Items: []addFileItem{item}, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: processingLevel})
+				extResults, err := callExternalAddDocsContext(ctx, addRequest{Items: []addFileItem{item}, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: processingLevel})
 				if err != nil {
 					resolved := common.ResolveAppError(err.Error(), http.StatusBadGateway)
 					outcomes[idx] = officeOutcome{task: candidate.task, doc: candidate.doc, docExt: dExt, result: StartTaskResult{TaskID: candidate.task.ID, DocumentID: candidate.doc.ID, DisplayName: candidate.doc.DisplayName, Status: "FAILED", SubmitStatus: "FAILED", Message: resolved.Message, Detail: fmt.Sprint(resolved.Detail)}}
@@ -2142,7 +2158,18 @@ func bindExternalAddResults(datasetID string, baseTask orm.Task, baseDoc orm.Doc
 	return err
 }
 
-func bindExternalBatchAddResults(datasetID string, baseTasks []orm.Task, baseDocs []orm.Document, baseDocExts []documentExt, results []addResultItem) ([]orm.Task, error) {
+func bindExternalBatchAddResults(datasetID string, baseTasks []orm.Task, baseDocs []orm.Document, baseDocExts []documentExt, results []addResultItem) (published []orm.Task, publishErr error) {
+	defer func() {
+		if publishErr != nil {
+			ids := make([]string, 0, len(results))
+			for _, result := range results {
+				ids = append(ids, result.DocID)
+			}
+			if err := rejectExternalPublications(store.DB(), datasetID, ids); err != nil {
+				publishErr = errors.Join(publishErr, err)
+			}
+		}
+	}()
 	if len(baseTasks) == 0 || len(baseDocs) == 0 || len(baseDocExts) == 0 {
 		return nil, fmt.Errorf("empty base task/document set")
 	}
@@ -2160,13 +2187,20 @@ func bindExternalBatchAddResults(datasetID string, baseTasks []orm.Task, baseDoc
 			baseTask := baseTasks[i]
 			baseDoc := baseDocs[i]
 			baseDocExt := baseDocExts[i]
+			if err := validateTaskPublication(tx, datasetID, baseTask, baseDoc); err != nil {
+				return err
+			}
 			newLazyllmDoc := strings.TrimSpace(result.DocID)
 			newLazyllmTask := strings.TrimSpace(result.TaskID)
 			displayName := firstNonEmpty(result.DisplayName, baseDoc.DisplayName)
 			docExt := baseDocExt
 			updatesDoc := map[string]any{"lazyllm_doc_id": newLazyllmDoc, "file_id": baseDoc.ID, "display_name": displayName, "ext": mustJSON(docExt), "updated_at": now}
-			if err := tx.Model(&orm.Document{}).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", baseDoc.ID, datasetID).Updates(updatesDoc).Error; err != nil {
-				return err
+			updatedDocument := tx.Model(&orm.Document{}).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", baseDoc.ID, datasetID).Updates(updatesDoc)
+			if updatedDocument.Error != nil {
+				return updatedDocument.Error
+			}
+			if updatedDocument.RowsAffected != 1 {
+				return fmt.Errorf("document ownership changed before publication")
 			}
 			var ext taskExt
 			_ = json.Unmarshal(baseTask.Ext, &ext)
@@ -2175,8 +2209,12 @@ func bindExternalBatchAddResults(datasetID string, baseTasks []orm.Task, baseDoc
 			ext.DisplayName = displayName
 			ext.DataSourceType = "LOCAL_FILE"
 			updatesTask := map[string]any{"lazyllm_task_id": newLazyllmTask, "display_name": displayName, "ext": mustJSON(ext), "updated_at": now}
-			if err := tx.Model(&orm.Task{}).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", baseTask.ID, datasetID).Updates(updatesTask).Error; err != nil {
-				return err
+			updatedTask := tx.Model(&orm.Task{}).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", baseTask.ID, datasetID).Updates(updatesTask)
+			if updatedTask.Error != nil {
+				return updatedTask.Error
+			}
+			if updatedTask.RowsAffected != 1 {
+				return fmt.Errorf("task ownership changed before publication")
 			}
 			created = append(created, orm.Task{ID: baseTask.ID, LazyllmTaskID: newLazyllmTask, DocID: baseTask.DocID, KbID: baseTask.KbID, AlgoID: baseTask.AlgoID, DatasetID: datasetID, TaskType: baseTask.TaskType, DocumentPID: baseTask.DocumentPID, TargetPID: baseTask.TargetPID, TargetDatasetID: baseTask.TargetDatasetID, DisplayName: displayName, Ext: mustJSON(ext), BaseModel: orm.BaseModel{CreateUserID: baseTask.CreateUserID, CreateUserName: baseTask.CreateUserName, CreatedAt: baseTask.CreatedAt, UpdatedAt: now}})
 		}
@@ -2952,6 +2990,8 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 		var ext taskExt
 		_ = json.Unmarshal(taskRow.Ext, &ext)
 		ext.TaskState = string(TaskStateRunning)
+		ext.ProcessingLevel = processingLevel
+		ext.ProcessingRevision = dataset.ProcessingRevision
 		lazyllmTaskID := ""
 		if i < len(lazyllmTaskIDs) {
 			lazyllmTaskID = strings.TrimSpace(lazyllmTaskIDs[i])
@@ -2960,7 +3000,10 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 		if lazyllmTaskID != "" {
 			updates["lazyllm_task_id"] = lazyllmTaskID
 		}
-		_ = store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		publishErr := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+			if err := validateTaskPublication(tx, datasetID, taskRow, docRows[i]); err != nil {
+				return err
+			}
 			if err := tx.Model(&orm.Task{}).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", taskRow.ID, datasetID).Updates(updates).Error; err != nil {
 				return err
 			}
@@ -2969,6 +3012,10 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 			}
 			return nil
 		})
+		if publishErr != nil {
+			results = append(results, StartTaskResult{TaskID: taskRow.ID, DocumentID: docRows[i].ID, DisplayName: docRows[i].DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: publishErr.Error()})
+			continue
+		}
 		results = append(results, StartTaskResult{TaskID: taskRow.ID, DocumentID: docRows[i].ID, DisplayName: docRows[i].DisplayName, Status: "STARTED", SubmitStatus: "SUBMITTED"})
 	}
 	applog.Logger.Info().
@@ -3410,7 +3457,33 @@ func bindTransferTargetsFromReadonly(ctx context.Context, taskRow orm.Task, bind
 			continue
 		}
 		log.Printf("[transfer-bind] persist target lazy doc task=%s binding_index=%d target_doc=%s target_lazy_doc=%s", taskRow.ID, i, strings.TrimSpace(updated[i].TargetDocumentID), strings.TrimSpace(updated[i].TargetLazyDocID))
-		_ = store.DB().WithContext(ctx).Model(&orm.Document{}).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", updated[i].TargetDocumentID, strings.TrimSpace(taskRow.TargetDatasetID)).Updates(map[string]any{"lazyllm_doc_id": updated[i].TargetLazyDocID, "updated_at": now}).Error
+		publishErr := store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var source orm.Document
+			if err := tx.Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", taskRow.DocID, taskRow.DatasetID).Take(&source).Error; err != nil {
+				return err
+			}
+			if err := validateTaskPublication(tx, taskRow.DatasetID, taskRow, source); err != nil {
+				return err
+			}
+			var targetDataset orm.Dataset
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND deleted_at IS NULL", taskRow.TargetDatasetID).Take(&targetDataset).Error; err != nil {
+				return err
+			}
+			result := tx.Model(&orm.Document{}).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", updated[i].TargetDocumentID, taskRow.TargetDatasetID).Updates(map[string]any{"lazyllm_doc_id": updated[i].TargetLazyDocID, "updated_at": now})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("transfer target is no longer active")
+			}
+			return nil
+		})
+		if publishErr != nil {
+			publishErr = errors.Join(publishErr, rejectExternalPublications(store.DB(), taskRow.TargetDatasetID, []string{updated[i].TargetLazyDocID}))
+			updated[i].Status = string(TaskStateFailed)
+			updated[i].ErrorMessage = publishErr.Error()
+			return updated, publishErr
+		}
 	}
 	log.Printf("[transfer-bind] done task=%s", taskRow.ID)
 	return updated, nil

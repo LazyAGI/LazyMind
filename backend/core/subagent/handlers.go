@@ -126,7 +126,7 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 	privateTask["execution_id"] = task.ExecutionID
 	common.ReplyOK(w, map[string]any{"task": privateTask, "params": params,
 		"steps": stepDTOs, "create_user_id": task.CreateUserID, "llm_config": config,
-		"tool_config": toolConfig, "user_env_vars": userEnvVars, "workspace_path": task.WorkspacePath})
+		"system_mcp_config": KnowledgeSystemConfig(append([]string{}, runtimeParams.LegacyTools...)), "tool_config": toolConfig, "user_env_vars": userEnvVars, "workspace_path": task.WorkspacePath})
 }
 
 func workflowToolConfigCapabilities(capabilities, legacyTools []string) []string {

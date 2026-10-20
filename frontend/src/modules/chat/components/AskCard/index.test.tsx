@@ -126,3 +126,70 @@ describe("AskCard read-only history", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 });
+
+vi.mock("@/components/request", () => ({ axiosInstance: { post: vi.fn() }, BASE_URL: "" }));
+
+import { axiosInstance } from "@/components/request";
+
+describe("Knowledge management confirmation", () => {
+  const pending: AskPending = {
+    ask_id: "kb-confirm",
+    knowledge_management: { confirmation_id: "kb-confirm", arguments_digest: "args-digest", snapshot: "version-1" },
+    questions: [{ text: "Delete Papers?", type: "boolean", choices: ["__ask_user_yes__", "__ask_user_no__"] }],
+  };
+
+  it.each([true, false])("shows preview scope and impact with top-level labels %s", (hasLabels) => {
+    render(<AskCard askPending={{ ...pending,
+      title: hasLabels ? "Delete archive" : undefined,
+      description: hasLabels ? "Papers / Archive" : undefined,
+      knowledge_management_preview: {
+        title: "Delete archive", description: "Papers / Archive",
+        resources: [{ resource_ref: { kind: "folder", knowledge_base_id: "kb-1", directory_id: "archive-1" },
+          name: "Archive", path: "Papers/Archive" }],
+        destination: { resource_ref: { knowledge_base_id: "kb-2" }, name: "Reviewed", path: "Research/Reviewed" },
+        document_count: 12, folder_count: 2, total_bytes: 8192,
+        counts: { references: 3 }, impact: ["Remove original documents and search entries"],
+      },
+    }} onSubmit={vi.fn()} />);
+    expect(screen.getAllByText("Papers / Archive")).toHaveLength(1);
+    expect(screen.getAllByText("Delete archive")).toHaveLength(1);
+    const card = screen.getByLabelText("chat.askCardAria");
+    expect(card).toHaveTextContent("kb-1");
+    expect(card).toHaveTextContent("archive-1");
+    expect(card).toHaveTextContent("Papers/Archive");
+    expect(card).toHaveTextContent("Research/Reviewed");
+    expect(card).not.toHaveTextContent("[object Object]");
+    expect(card).toHaveTextContent("12");
+    expect(card).toHaveTextContent("8192");
+    expect(card).toHaveTextContent("references: 3");
+    expect(card).toHaveTextContent("Remove original documents and search entries");
+  });
+
+  it.each(["yes", "no"])("submits explicit %s to the bound decision endpoint without a chat message", async (choice) => {
+    vi.mocked(axiosInstance.post).mockResolvedValueOnce({ data: { data: { status: "allowed" } } });
+    const onSubmit = vi.fn();
+    render(<AskCard askPending={pending} onSubmit={onSubmit} />);
+    const submit = screen.getByRole("button", { name: "chat.askCardSubmit" });
+    expect(submit).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: `common.${choice}` }));
+    fireEvent.click(submit);
+    await waitFor(() => expect(axiosInstance.post).toHaveBeenLastCalledWith(
+      "/api/core/knowledge-management/confirmations/kb-confirm/decision",
+      { decision: choice === "yes" ? "approved" : "rejected", arguments_digest: "args-digest", snapshot: "version-1" },
+    ));
+    expect(onSubmit).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "chat.askCardSubmit" })).toBeNull());
+  });
+
+  it("retains the decision for retry when the business endpoint rejects the request", async () => {
+    vi.mocked(axiosInstance.post).mockRejectedValueOnce(new Error("snapshot changed"));
+    const onSubmit = vi.fn();
+    render(<AskCard askPending={pending} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByRole("button", { name: "common.yes" }));
+    const submit = screen.getByRole("button", { name: "chat.askCardSubmit" });
+    fireEvent.click(submit);
+    await waitFor(() => expect(submit).toBeEnabled());
+    expect(screen.getByRole("alert")).toHaveTextContent("chat.knowledgeConfirmationFailed");
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});

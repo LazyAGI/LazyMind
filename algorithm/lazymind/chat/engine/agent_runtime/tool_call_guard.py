@@ -6,7 +6,7 @@ import json
 import time
 import uuid
 from collections import Counter
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -378,7 +378,7 @@ class ToolExecutionMiddleware:
                  call_quota: ToolCallQuota | None = None,
                  authorization_gate: Any = None,
                  workspace_permission=None, tool_context: ToolResolutionContext | None = None,
-                 trusted_opaque_tools=()):
+                 trusted_opaque_tools=(), knowledge_management=None):
         self._manager = manager
         self._failure_policy = failure_policy or FailureRetryPolicy()
         self._call_quota = call_quota or ToolCallQuota()
@@ -387,6 +387,7 @@ class ToolExecutionMiddleware:
         self._repeat_monitor = repeat_monitor
         self._notice_buffer = notice_buffer
         self._authorization_gate = authorization_gate
+        self._knowledge_management = knowledge_management
         # Capture once at run construction; no workspace authorization reads live globals later.
         self._workspace_permission = workspace_permission or WorkspaceContext.from_config({})
         self._tool_context = tool_context or ToolResolutionContext()
@@ -402,6 +403,14 @@ class ToolExecutionMiddleware:
 
     @contextmanager
     def _execution_scope(self, permission, coordinator, prepared):
+        management = (self._knowledge_management.execution_context(prepared)
+                      if self._knowledge_management is not None else nullcontext())
+        # Business confirmation applies to all dispatch paths, including trusted Work.
+        with self._workspace_execution_scope(permission, coordinator, prepared), management:
+            yield
+
+    @contextmanager
+    def _workspace_execution_scope(self, permission, coordinator, prepared):
         if permission.workflow_full_trust:
             with (tool_resolution_scope(self._tool_context),
                   workspace_permission_scope(permission), host_access_scope(None)):
@@ -591,6 +600,9 @@ class ToolExecutionMiddleware:
                     and record.tool_name in {'run_script', 'run_skill_script'}
                     and self._opaque_tool_is_trusted(record.tool_name)):
                 result = classify_skill_failure(result)
+                record = replace(record, result=result)
+            if self._knowledge_management is not None:
+                result = self._knowledge_management.record_result(record.prepared, result)
                 record = replace(record, result=result)
             states = coordinator.execution_states if coordinator is not None else {}
             workspace_started = states.get(record.index)

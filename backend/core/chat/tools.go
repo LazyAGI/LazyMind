@@ -217,7 +217,7 @@ func applyChatRuntimeConfigs(ctx context.Context, db *gorm.DB, userID string, bo
 	if err := applyConversationSourceRuntimeContext(ctx, db, userID, body); err != nil {
 		return err
 	}
-	return applyBrowserRuntimeConfig(userID, body)
+	return applySystemMCPConfig(userID, body)
 }
 
 // loadUserAgentConfig reads per-user defaults from user_chat_settings and applies

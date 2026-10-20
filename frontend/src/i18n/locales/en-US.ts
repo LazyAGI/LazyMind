@@ -3121,6 +3121,8 @@ const enUS = {
         applyFailed: "Could not save the edit. Please try again.",
       },
     },
+    knowledgeConfirmationFailed: "Could not confirm your decision. Retry, or request a fresh preview if the resources changed.",
+    knowledgePreviewLabels: {"resources": "Resources", "scope": "Scope", "counts": "Affected items", "impact": "Impact", "document_count": "Documents", "folder_count": "Folders", "total_bytes": "Total bytes", "destination": "Destination", "warnings": "Warnings"},
     askCardSubmit: "Submit",
     askCardPrev: "Previous",
     askCardNext: "Next",

@@ -1000,7 +1000,7 @@ def normalize_tool_locale(locale: str | None) -> str:
     return 'zh-CN'
 
 
-def get_all_tool_groups(locale: str | None = None) -> list[dict]:
+def get_all_tool_groups(locale: str | None = None, *, system_mcp_config: list[dict] | None = None) -> list[dict]:
     use_english = normalize_tool_locale(locale) == 'en-US'
     result = []
     for cfg in DEFAULT_TOOLS:
@@ -1020,6 +1020,21 @@ def get_all_tool_groups(locale: str | None = None) -> list[dict]:
             'output_schema': cfg.output_schema or {},
             'required_config': cfg.required_config or [],
         })
+    from lazymind.chat.service.knowledge_management import BUILTIN_ID, MANAGEMENT_TOOLS
+    from lazymind.chat.service.mcp_loading import mcp_allowed_tools
+    context = lazyllm.globals.get('agentic_config') or {}
+    servers = system_mcp_config if system_mcp_config is not None else context.get('system_mcp_config') or []
+    management = next((server for server in servers
+                       if server.get('id') == BUILTIN_ID), None)
+    result.append({
+        'name': 'knowledge_management',
+        'label': 'Knowledge Management' if use_english else '知识库管理',
+        'description': ('Inspect and manage knowledge libraries, folders and original documents.' if use_english
+                        else '查询和管理知识库、目录与原始文档。'),
+        'methods': [{'name': name, 'summary': ''} for name in MANAGEMENT_TOOLS],
+        'can_disable': True, 'active': bool(management and mcp_allowed_tools(management)),
+        'module': 'data', 'capability_id': 'knowledge_management', 'provider_id': BUILTIN_ID,
+    })
     result.append({
         'name': SKILL_TOOL_CONFIG.name,
         'label': SKILL_TOOL_CONFIG.label_en or SKILL_TOOL_CONFIG.label if use_english else SKILL_TOOL_CONFIG.label,

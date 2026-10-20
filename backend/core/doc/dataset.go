@@ -41,6 +41,9 @@ type ParserConfig struct {
 }
 
 type Dataset struct {
+	AllowedActions         []string            `json:"allowed_actions,omitempty"`
+	Scene                  string              `json:"scene,omitempty"`
+	ResourceVersion        int64               `json:"resource_version,omitempty"`
 	Name                   string              `json:"name"`
 	DatasetID              string              `json:"dataset_id"`
 	DisplayName            string              `json:"display_name"`
@@ -613,6 +616,11 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query datasets failed", http.StatusInternalServerError)
 		return
 	}
+	caller, err := resolveDatasetCatalogCallerFromRequest(r)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusForbidden)
+		return
+	}
 	result, err := service.ListDatasets(r.Context(), DatasetListRequest{
 		UserID:       userID,
 		Keyword:      keyword,
@@ -621,7 +629,7 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 		Limit:        pageSize,
 		OrderBy:      orderBy,
 		SourceFilter: sourceFilter,
-		Caller:       datasetCatalogCallerFromRequest(r),
+		Caller:       caller,
 	})
 	if err != nil {
 		replyDatasetCatalogServiceError(w, err, "query datasets failed")
@@ -891,211 +899,32 @@ type kbUpdateRequest struct {
 }
 
 func CreateDataset(w http.ResponseWriter, r *http.Request) {
-	userID := corestore.UserID(r)
-	userName := corestore.UserName(r)
-	if userID == "" {
-		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
-		return
-	}
-
-	// query: dataset_id (optional)
-	datasetID := strings.TrimSpace(r.URL.Query().Get("dataset_id"))
-	if datasetID == "" {
-		datasetID = newDatasetID()
-	}
-
 	var body Dataset
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	if err := validateDatasetDisplayName(body.DisplayName); err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+	if body.ProcessingLevel == ProcessingLevelIndexed && replyEmbedNotReady(w, r, corestore.UserID(r)) {
 		return
 	}
-	displayName := strings.TrimSpace(body.DisplayName)
-	desc := strings.TrimSpace(body.Desc)
-	cover := strings.TrimSpace(body.CoverImage)
-	if hasReservedDatasetDisplayNamePrefix(displayName) {
-		common.ReplyErr(w, "dataset name uses reserved prefix", http.StatusBadRequest)
-		return
-	}
-	normalizedTags, err := normalizeAndValidateDatasetTags(body.Tags)
+	service, op, err := resourcePageService(r)
 	if err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		replyResourceError(w, err)
 		return
 	}
-	body.Tags = normalizedTags
-	processingLevelRequested := strings.TrimSpace(body.ProcessingLevel) != ""
-	processingLevel, err := normalizeProcessingLevel(body.ProcessingLevel)
+	result, err := service.CreateKnowledge(r.Context(), op, CreateKnowledgeRequest{Name: body.DisplayName, Description: body.Desc, Scene: body.Scene, ProcessingLevel: body.ProcessingLevel, PreferredID: strings.TrimSpace(r.URL.Query().Get("dataset_id")), PageOptions: &body})
 	if err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		replyResourceError(w, err)
 		return
 	}
-	// Preserve the old client's creation contract: an omitted level still defaults
-	// to indexed, while readiness is enforced when a new client explicitly asks
-	// for indexed processing.
-	if processingLevelRequested && processingLevel == ProcessingLevelIndexed && replyEmbedNotReady(w, r, userID) {
+	var ds orm.Dataset
+	if err = corestore.DB().WithContext(r.Context()).Where("id = ?", result.Items[0].ResourceRef.KnowledgeBaseID).Take(&ds).Error; err != nil {
+		replyResourceError(w, err)
 		return
 	}
-	// Provide explicit feedback for duplicate dataset names under the same user.
-	var existed int64
-	if err := corestore.DB().
-		Model(&orm.Dataset{}).
-		Where("create_user_id = ? AND display_name = ? AND deleted_at IS NULL", userID, displayName).
-		Count(&existed).Error; err != nil {
-		common.ReplyErr(w, "query datasets failed", http.StatusInternalServerError)
-		return
-	}
-	if existed > 0 {
-		common.ReplyErr(w, "dataset name already exists", http.StatusConflict)
-		return
-	}
-
-	algoID := strings.TrimSpace(body.Algo.AlgoID)
-
-	// 1) text POST /v1/kbs Create KB
-	const createKBPath = "/v1/kbs"
-	kbURL := common.JoinURL(common.AlgoServiceEndpoint(), createKBPath)
-
-	req := kbCreateRequest{
-		KbID:        datasetID,
-		DisplayName: algoDatasetDisplayName(userID, displayName),
-		OwnerID:     userID,
-		AlgoID:      algoID, // omitempty: not sent when empty; DocServer will not bind any algo
-		Meta:        map[string]any{"tags": body.Tags},
-	}
-	if desc != "" {
-		req.Description = &desc
-	}
-
-	kbTimeout := 10 * time.Second
-	kbStart := time.Now()
-	// Accept flexible response shapes; we only need kb_id if provided.
-	var kbResp map[string]any
-	if err := common.ApiPost(r.Context(), kbURL, req, nil, &kbResp, kbTimeout); err != nil {
-		log.Logger.Error().
-			Err(err).
-			Str("kb_url", kbURL).
-			Str("kb_id", datasetID).
-			Str("dataset_id", datasetID).
-			Str("user_id", userID).
-			Str("algo_id", algoID).
-			Dur("timeout", kbTimeout).
-			Dur("elapsed", time.Since(kbStart)).
-			Msg("kb service create failed")
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "kb service create failed", err), http.StatusBadGateway)
-		return
-	}
-
-	// Prefer kb_id returned by external service; fall back to datasetID.
-	kbID := datasetID
-	if v, ok := kbResp["kb_id"]; ok {
-		if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
-			kbID = strings.TrimSpace(s)
-		}
-	}
-	// Some services wrap data as { data: { kb_id: ... } }.
-	if v, ok := kbResp["data"]; ok && kbID == datasetID {
-		if m, ok := v.(map[string]any); ok {
-			if vv, ok := m["kb_id"]; ok {
-				if s, ok := vv.(string); ok && strings.TrimSpace(s) != "" {
-					kbID = strings.TrimSpace(s)
-				}
-			}
-		}
-	}
-	log.Logger.Info().
-		Str("kb_url", kbURL).
-		Str("kb_id", kbID).
-		Str("dataset_id", datasetID).
-		Str("user_id", userID).
-		Str("algo_id", algoID).
-		Dur("elapsed", time.Since(kbStart)).
-		Msg("kb service create ok")
-
-	// 2) text datasets（text kb_id）
-	now := time.Now().UTC()
-	parsers := fetchParsersByAlgoID(r.Context(), algoID)
-	extBytes, _ := json.Marshal(map[string]any{
-		"tags":      body.Tags,
-		"algo_id":   algoID,
-		"algo_name": body.Algo.DisplayName,
-		"parsers":   parsers,
-	})
-
-	ds := orm.Dataset{
-		ID:          datasetID,
-		KbID:        kbID,
-		DisplayName: displayName,
-		Desc:        desc,
-		CoverImage:  cover,
-
-		// text not null，textDefaulttext（text ragservice text）。
-		ResourceUID:            datasetID,
-		BucketName:             "",
-		OssPath:                "",
-		DatasetInfo:            json.RawMessage(`{}`),
-		DatasetState:           0,
-		ProcessingLevel:        processingLevel,
-		ProcessingRevision:     1,
-		TransitionStatus:       TransitionIdle,
-		ReaderFallbackAccepted: body.ReaderFallbackAccepted,
-		ProcessingConfig:       json.RawMessage(`{}`),
-		EmbeddingModel:         "default",
-		EmbeddingModelProvider: "default",
-		ShareType:              0,
-		TenantID:               "",
-		IsDemonstrate:          false,
-		Type:                   uint8(1),
-		Ext:                    extBytes,
-		BaseModel: orm.BaseModel{
-			CreateUserID:   userID,
-			CreateUserName: userName,
-			CreatedAt:      now,
-			UpdatedAt:      now,
-		},
-	}
-
-	if err := corestore.DB().WithContext(context.Background()).Create(&ds).Error; err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "create dataset failed", err), http.StatusInternalServerError)
-		return
-	}
-	if st := acl.GetStore(); st != nil {
-		st.EnsureKB(kbID, displayName, userID)
-		ensureDatasetCreatorMember(st, datasetID, userID)
-	}
-
-	common.ReplyJSON(w, Dataset{
-		Name:                   "datasets/" + ds.ID,
-		DatasetID:              ds.ID,
-		DisplayName:            ds.DisplayName,
-		Desc:                   ds.Desc,
-		CoverImage:             ds.CoverImage,
-		State:                  "STATE_UNSPECIFIED",
-		IsEmpty:                true,
-		DocumentCount:          0,
-		DocumentSize:           0,
-		SegmentCount:           0,
-		TokenCount:             0,
-		Parsers:                parsers,
-		Algo:                   Algo{AlgoID: algoID, DisplayName: body.Algo.DisplayName, Description: body.Algo.Description},
-		Creator:                userName,
-		IsOwner:                true,
-		CreateTime:             ds.CreatedAt,
-		UpdateTime:             ds.UpdatedAt,
-		Acl:                    []string{acl.PermissionDatasetRead, acl.PermissionDatasetWrite, acl.PermissionDatasetUpload},
-		ShareType:              "SHARE_TYPE_UNSPECIFIED",
-		Type:                   datasetTypeToPB(ds.Type),
-		Tags:                   body.Tags,
-		DefaultDataset:         false,
-		ProcessingLevel:        processingLevel,
-		ProcessingRevision:     1,
-		TransitionStatus:       TransitionIdle,
-		ReaderFallbackAccepted: body.ReaderFallbackAccepted,
-		Capabilities:           capabilitiesForProcessingLevel(processingLevel),
-	})
+	common.ReplyJSON(w, Dataset{Name: "datasets/" + ds.ID, DatasetID: ds.ID, DisplayName: ds.DisplayName, Desc: ds.Desc, Scene: ds.Scene, ResourceVersion: ds.ResourceVersion, CoverImage: ds.CoverImage, IsEmpty: true, Parsers: parseDatasetParsers(ds.Ext), Algo: parseDatasetAlgo(ds.Ext), Creator: ds.CreateUserName, IsOwner: true, CreateTime: ds.CreatedAt, UpdateTime: ds.UpdatedAt, Acl: []string{acl.PermissionDatasetRead, acl.PermissionDatasetWrite, acl.PermissionDatasetUpload}, Type: datasetTypeToPB(ds.Type), Tags: parseDatasetTags(ds.Ext), ProcessingLevel: ds.ProcessingLevel, ProcessingRevision: ds.ProcessingRevision, TransitionStatus: ds.TransitionStatus, ReaderFallbackAccepted: ds.ReaderFallbackAccepted, Capabilities: capabilitiesForProcessingLevel(ds.ProcessingLevel)})
 }
+
 func GetDataset(w http.ResponseWriter, r *http.Request) {
 	userID := corestore.UserID(r)
 	if userID == "" {
@@ -1114,10 +943,15 @@ func GetDataset(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "dataset not found", http.StatusNotFound)
 		return
 	}
+	caller, err := resolveDatasetCatalogCallerFromRequest(r)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusForbidden)
+		return
+	}
 	result, err := service.GetDataset(r.Context(), DatasetGetRequest{
 		UserID:    userID,
 		DatasetID: datasetID,
-		Caller:    datasetCatalogCallerFromRequest(r),
+		Caller:    caller,
 	})
 	if err != nil {
 		replyDatasetCatalogGetServiceError(w, err)
@@ -1266,36 +1100,18 @@ func deleteOfficialInstalledDataset(w http.ResponseWriter, r *http.Request, ds *
 // cloud-synced datasets: scan source first, then the KB on the algo service,
 // then the soft delete in a transaction.
 func deleteRegularDataset(w http.ResponseWriter, r *http.Request, ds *orm.Dataset, userID string) {
-	if err := deleteScanSourceForDataset(r.Context(), ds.ID); err != nil {
-		log.Logger.Error().
-			Err(err).
-			Str("dataset_id", ds.ID).
-			Str("user_id", userID).
-			Msg("scan source delete failed")
-		common.ReplyErr(w, "delete scan source failed", http.StatusBadGateway)
+	service, op, err := resourcePageService(r)
+	if err != nil {
+		replyResourceError(w, err)
 		return
 	}
-	if err := deleteDatasetAlgoKB(r.Context(), ds, userID); err != nil {
-		common.ReplyErr(w, "external delete failed", http.StatusBadGateway)
-		return
-	}
-
-	now := time.Now().UTC()
-	if err := corestore.DB().Transaction(func(tx *gorm.DB) error {
-		return softDeleteDataset(r.Context(), tx, ds, userID, now)
-	}); err != nil {
-		log.Logger.Error().
-			Err(err).
-			Str("dataset_id", ds.ID).
-			Str("user_id", userID).
-			Msg("delete dataset failed")
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "delete dataset failed", err), http.StatusInternalServerError)
+	if _, err = service.Delete(r.Context(), op, DeleteResourcesRequest{Targets: []ResourceRef{{Kind: "knowledge_base", KnowledgeBaseID: ds.ID}}}); err != nil {
+		replyResourceError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
 }
 
-// deleteDatasetAlgoKB deletes the KB on the algo service and logs the result.
 func deleteDatasetAlgoKB(ctx context.Context, ds *orm.Dataset, userID string) error {
 	kbID := strings.TrimSpace(ds.KbID)
 	if kbID == "" {
@@ -1436,8 +1252,45 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body Dataset
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	var raw json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
+		return
+	}
+
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &fields)
+	metadataOnly := len(fields) > 0
+	for key := range fields {
+		if key != "display_name" && key != "desc" && key != "scene" {
+			metadataOnly = false
+		}
+	}
+	if metadataOnly {
+		changes := ResourceMetadataChanges{}
+		if _, ok := fields["display_name"]; ok {
+			changes.Name = &body.DisplayName
+		}
+		if _, ok := fields["desc"]; ok {
+			changes.Description = &body.Desc
+		}
+		if _, ok := fields["scene"]; ok {
+			changes.Scene = &body.Scene
+		}
+		service, op, err := resourcePageService(r)
+		if err != nil {
+			replyResourceError(w, err)
+			return
+		}
+		if _, err = service.UpdateMetadata(r.Context(), op, UpdateMetadataRequest{Items: []ResourceMetadataItem{{Target: ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: datasetID}, Changes: changes}}}); err != nil {
+			replyResourceError(w, err)
+			return
+		}
+		GetDataset(w, r)
 		return
 	}
 
@@ -1448,7 +1301,7 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "dataset not found", http.StatusNotFound)
 		return
 	}
-	if !canAccessDataset(&ds, userID, acl.PermRead) || !datasetAllowedByScanSource(r, ds.ID, acl.PermissionDatasetWrite) {
+	if !canAccessDataset(&ds, userID, acl.PermWrite) || !datasetAllowedByScanSource(r, ds.ID, acl.PermissionDatasetWrite) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(common.ForbiddenBody))
@@ -1552,8 +1405,22 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 	ds.Ext = extBytes
 	ds.UpdatedAt = now
 	ds.CreateUserName = userName
+	ds.ResourceVersion++
+	if body.Scene != "" {
+		scene, err := resourceScene(body.Scene)
+		if err != nil {
+			replyResourceError(w, err)
+			return
+		}
+		ds.Scene = scene
+	}
 
-	if err := corestore.DB().Save(&ds).Error; err != nil {
+	updateResult := corestore.DB().WithContext(r.Context()).Model(&orm.Dataset{}).Where("id = ? AND resource_version = ? AND deleted_at IS NULL", ds.ID, ds.ResourceVersion-1).Updates(map[string]any{"display_name": ds.DisplayName, "desc": ds.Desc, "cover_image": ds.CoverImage, "ext": ds.Ext, "updated_at": ds.UpdatedAt, "resource_version": ds.ResourceVersion, "scene": ds.Scene})
+	if updateResult.Error == nil && updateResult.RowsAffected != 1 {
+		replyResourceError(w, resourceErr("CONFLICT", "knowledge base changed during update"))
+		return
+	}
+	if err := updateResult.Error; err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "update dataset failed", err), http.StatusInternalServerError)
 		return
 	}
@@ -1708,7 +1575,7 @@ func calcDatasetStatsWithDB(ctx context.Context, db *gorm.DB, datasetID string) 
 	}
 	var docs []orm.Document
 	if err := db.WithContext(ctx).
-		Select("display_name, ext").
+		Select("document_type, display_name, ext").
 		Where("dataset_id = ? AND deleted_at IS NULL", datasetID).
 		Find(&docs).Error; err != nil {
 		return datasetStats{}
@@ -1740,7 +1607,7 @@ func calcDatasetStatsBatchWithDB(ctx context.Context, db *gorm.DB, datasetIDs []
 	}
 	var docs []orm.Document
 	if err := db.WithContext(ctx).
-		Select("dataset_id, display_name, ext").
+		Select("dataset_id, document_type, display_name, ext").
 		Where("dataset_id IN ? AND deleted_at IS NULL", datasetIDs).
 		Find(&docs).Error; err != nil {
 		return map[string]datasetStats{}

@@ -17,6 +17,8 @@ import (
 const DefaultMaxRequestBodyBytes = 64 << 10
 
 type HandlerConfig struct {
+	ManagementOnly      bool
+	AuthorizeCall       func(context.Context, *mcp.CallToolRequest) (capability.InvocationContext, error)
 	Verifier            auth.TokenVerifier
 	MaxRequestBodyBytes int64
 }
@@ -27,6 +29,7 @@ type requestIdentity struct {
 }
 
 type requestIdentityKey struct{}
+type trustedInvocationKey struct{}
 
 func NewHandler(service *capability.Service, config HandlerConfig) (http.Handler, error) {
 	if service == nil {
@@ -40,14 +43,39 @@ func NewHandler(service *capability.Service, config HandlerConfig) (http.Handler
 		maxBody = DefaultMaxRequestBodyBytes
 	}
 	server := newServer(service)
+	if config.ManagementOnly {
+		server = newManagementServer(service)
+	}
+	if config.AuthorizeCall != nil {
+		server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+			return func(ctx context.Context, method string, request mcp.Request) (mcp.Result, error) {
+				if method == "tools/call" {
+					req, ok := request.(*mcp.CallToolRequest)
+					if !ok {
+						return nil, capability.NewError(capability.Unauthenticated, "mcp.dispatch", "invalid tool call", false, nil)
+					}
+					call, err := config.AuthorizeCall(ctx, req)
+					if err != nil {
+						return cloudToolError(err), nil
+					}
+					ctx = context.WithValue(ctx, trustedInvocationKey{}, call)
+				}
+				return next(ctx, method, request)
+			}
+		})
+	}
+	scopes := []string{capability.RequiredPermission}
+	if service.SupportsKnowledgeManagement() {
+		scopes = nil
+	}
 	transport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{
 		Stateless:                    true,
-		JSONResponse:                 true,
+		JSONResponse:                 !service.SupportsKnowledgeManagement(),
 		MaxRequestBodyBytes:          maxBody,
 		PropagateRequestCancellation: true,
 	})
 	requireToken := auth.RequireBearerToken(config.Verifier, &auth.RequireBearerTokenOptions{
-		Scopes:                 []string{capability.RequiredPermission},
+		Scopes:                 scopes,
 		AllowMissingExpiration: true,
 	})
 	authorized := requireToken(transport)
@@ -65,6 +93,7 @@ func newServer(service *capability.Service) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "lazymind-capabilities", Version: "v1"}, &mcp.ServerOptions{
 		Instructions: "For cloud documents, honor the user's selected tool and account. Otherwise prefer an already available native document tool; use LazyMind as fallback. Never switch accounts to bypass permission denials. Authorization action URLs are paths relative to the user's LazyMind web app.",
 	})
+	addKnowledgeManagementTools(server, service)
 	annotations := readOnlyAnnotations()
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "skill.list", Title: "List LazyMind skills",
@@ -89,7 +118,7 @@ func newServer(service *capability.Service) *mcp.Server {
 	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "knowledge.document.list", Title: "List LazyMind knowledge documents",
-		Description: "List ingested documents in one knowledge base visible to the authenticated LazyMind user. Optional name and path filters are combined; path matches the upload relative directory, not a host filesystem path. Use knowledge.search for parsed content search.", Annotations: annotations,
+		Description: "List documents and logical folders across selected knowledge bases visible to the authenticated LazyMind user, with global pagination. Optional name and path filters are combined; path matches the upload relative directory, not a host filesystem path. Use knowledge.search for parsed content search.", Annotations: annotations,
 	}, func(ctx context.Context, request *mcp.CallToolRequest, input capability.ListKnowledgeDocumentsInput) (*mcp.CallToolResult, capability.ListKnowledgeDocumentsResult, error) {
 		result, err := service.ListKnowledgeDocuments(ctx, invocation(ctx, request), input)
 		return nil, result, err
@@ -195,13 +224,31 @@ func newServer(service *capability.Service) *mcp.Server {
 // A typed zero output would overwrite structured errors in the MCP SDK.
 // Keep the success schema, but return nil output on the error path.
 func addCloudTool[In, Out any](server *mcp.Server, tool *mcp.Tool, handler mcp.ToolHandlerFor[In, Out]) {
+	if strings.HasPrefix(tool.Name, "knowledge.") {
+		input, err := knowledgeInputSchema[In]()
+		if err != nil {
+			panic(err)
+		}
+		tool.InputSchema = input
+	}
 	schema, err := jsonschema.For[Out](nil)
 	if err != nil {
 		panic(err)
 	}
 	tool.OutputSchema = schema
 	mcp.AddTool(server, tool, func(ctx context.Context, request *mcp.CallToolRequest, input In) (*mcp.CallToolResult, any, error) {
+		knowledge := strings.HasPrefix(tool.Name, "knowledge.")
+		if knowledge {
+			notifyKnowledgeProgress(ctx, request, 0, "正在校验并执行知识库操作")
+		}
 		result, output, err := handler(ctx, request, input)
+		if knowledge {
+			message := "调用已结束；请以最终结果中的资源与处理状态为准"
+			if err != nil {
+				message = "调用失败；请查看最终错误及已提交项"
+			}
+			notifyKnowledgeProgress(ctx, request, 1, message)
+		}
 		if err != nil {
 			return cloudToolError(err), nil, nil
 		}
@@ -218,6 +265,9 @@ func cloudToolError(err error) *mcp.CallToolResult {
 		detail = capability.NewError(capability.Internal, "cloud_document", "cloud document operation failed", false, nil)
 	}
 	data := map[string]any{"code": detail.Code, "message": detail.Message, "retryable": detail.Retryable}
+	if detail.Details != nil {
+		data["details"] = detail.Details
+	}
 	if detail.Reason != "" {
 		data["reason"] = detail.Reason
 	}
@@ -230,6 +280,9 @@ func cloudToolError(err error) *mcp.CallToolResult {
 }
 
 func invocation(ctx context.Context, request *mcp.CallToolRequest) capability.InvocationContext {
+	if call, ok := ctx.Value(trustedInvocationKey{}).(capability.InvocationContext); ok {
+		return call
+	}
 	call := capability.InvocationContext{}
 	if identity, ok := ctx.Value(requestIdentityKey{}).(requestIdentity); ok {
 		call.ExternalAgent = identity.agent
@@ -246,6 +299,9 @@ func invocation(ctx context.Context, request *mcp.CallToolRequest) capability.In
 				call.Principal.TenantID, _ = info.Extra[extraTenantID].(string)
 			}
 		}
+	}
+	if request.Params != nil && call.InvocationID != "" {
+		call.OperationKey = call.InvocationID + ":" + request.Params.Name
 	}
 	return call
 }
@@ -267,4 +323,17 @@ func readOnlyAnnotations() *mcp.ToolAnnotations {
 func writeAnnotations() *mcp.ToolAnnotations {
 	no := false
 	return &mcp.ToolAnnotations{ReadOnlyHint: false, IdempotentHint: false, DestructiveHint: &no, OpenWorldHint: &no}
+}
+
+// Notifications are optional hints. Their delivery never changes the durable
+// operation result, and the caller's progress token keeps concurrent calls apart.
+func notifyKnowledgeProgress(ctx context.Context, req *mcp.CallToolRequest, progress float64, message string) {
+	if req == nil || req.Params == nil || req.Session == nil {
+		return
+	}
+	token := req.Params.GetProgressToken()
+	if token == nil {
+		return
+	}
+	_ = req.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{ProgressToken: token, Progress: progress, Total: 1, Message: message})
 }

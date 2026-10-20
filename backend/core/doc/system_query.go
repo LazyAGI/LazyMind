@@ -63,12 +63,18 @@ func AggregateDocuments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, _, err := loadMergedDocumentsBySearch(r.Context(), datasetIDs, "", nil, int(^uint(0)>>1), 0)
+	req.DatasetIDs = datasetIDs
+	caller, err := resolveDatasetCatalogCallerFromRequest(r)
 	if err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query documents failed", err), http.StatusInternalServerError)
+		common.ReplyErr(w, err.Error(), http.StatusForbidden)
 		return
 	}
-	resp := aggregateDocumentRows(rows, req)
+	resp, err := AggregateMetadata(r.Context(), store.DB(), store.LazyLLMDB(), caller, req, AggregateBudget{})
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	common.ReplyJSON(w, resp)
 }
 

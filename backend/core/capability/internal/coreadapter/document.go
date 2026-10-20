@@ -55,48 +55,44 @@ func NewKnowledgeDocumentReaderForDBs(coreDB, lazyDB *gorm.DB) (*KnowledgeDocume
 func (r *KnowledgeDocumentReader) ListKnowledgeDocuments(ctx context.Context, call capability.InvocationContext, query capability.KnowledgeDocumentListQuery) (capability.KnowledgeDocumentListPage, error) {
 	const operation = "knowledge.document.list"
 	userID := strings.TrimSpace(call.Principal.UserID)
-	caller := doc.DatasetCatalogCaller{UserID: userID, TenantID: strings.TrimSpace(call.Principal.TenantID)}
-	if _, err := r.datasets.GetDataset(ctx, doc.DatasetGetRequest{UserID: userID, DatasetID: query.KnowledgeID, Caller: caller}); err != nil {
-		return capability.KnowledgeDocumentListPage{}, mapDatasetError(operation, err)
-	}
+	caller := managementCaller(call)
 
-	base := r.db.WithContext(ctx).Model(&orm.Document{}).
-		Where("dataset_id = ? AND deleted_at IS NULL", query.KnowledgeID).
-		Where("UPPER(COALESCE(document_type, '')) <> ?", "FOLDER")
-	// Escape LIKE metacharacters: filters are literal substrings, not patterns.
-	escape := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_")
-	if query.Name != "" {
-		base = base.Where("LOWER(display_name) LIKE LOWER(?) ESCAPE '!'", "%"+escape.Replace(query.Name)+"%")
+	ids := query.KnowledgeIDs
+	if len(ids) == 0 {
+		ids = []string{query.KnowledgeID}
 	}
-	if query.Path != "" {
-		pathExpr := "json_extract(ext, '$.relative_path')"
-		switch r.db.Dialector.Name() {
-		case "postgres":
-			pathExpr = "ext ->> 'relative_path'"
-		case "mysql":
-			pathExpr = "JSON_UNQUOTE(JSON_EXTRACT(ext, '$.relative_path'))"
-		}
-		base = base.Where("LOWER("+pathExpr+") LIKE LOWER(?) ESCAPE '!'", "%"+escape.Replace(query.Path)+"%")
+	catalog := doc.NewDocumentCatalog(r.db, r.datasets)
+	page, err := catalog.List(ctx, caller, doc.DocumentCatalogQuery{DatasetIDs: ids, ResourceIDs: query.ResourceIDs, ResourceType: query.ResourceType, ParentID: query.ParentID, Recursive: query.Recursive, Match: query.Match, Name: query.Name, Path: query.Path, Offset: query.Offset, Limit: query.Limit})
+	if err != nil {
+		return capability.KnowledgeDocumentListPage{}, mapResourceError(operation, err)
 	}
-	var total int64
-	if err := base.Count(&total).Error; err != nil {
-		return capability.KnowledgeDocumentListPage{}, capability.NewError(capability.Unavailable, operation, "query documents failed", true, err)
-	}
-	var rows []orm.Document
-	if err := base.Order("updated_at DESC, id ASC").Offset(query.Offset).Limit(query.Limit).Find(&rows).Error; err != nil {
-		return capability.KnowledgeDocumentListPage{}, capability.NewError(capability.Unavailable, operation, "query documents failed", true, err)
-	}
+	rows := page.Rows
 	items := make([]capability.KnowledgeDocumentSummary, 0, len(rows))
 	for _, row := range rows {
-		metadata, err := r.documents.GetDocumentMetadata(ctx, doc.DocumentGetRequest{
-			UserID: userID, DatasetID: query.KnowledgeID, DocumentID: row.ID, Caller: caller,
-		})
+		metadata := doc.DocumentMetadata{ID: row.ID, DatasetID: row.DatasetID, Name: row.DisplayName, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
+		var err error
+		if !strings.EqualFold(row.DocumentType, "FOLDER") {
+			metadata, err = r.documents.GetDocumentMetadata(ctx, doc.DocumentGetRequest{
+				UserID: userID, DatasetID: row.DatasetID, DocumentID: row.ID, Caller: caller,
+			})
+		}
 		if err != nil {
 			return capability.KnowledgeDocumentListPage{}, mapDocumentError(operation, err)
 		}
-		items = append(items, mapDocumentSummary(metadata))
+		item := mapDocumentSummary(metadata)
+		item.ParentID = row.PID
+		item.LogicalPath = page.LogicalPaths[row.ID]
+		dataset := page.Datasets[row.DatasetID]
+		item.AllowedActions = append([]string(nil), dataset.AllowedActions...)
+		item.EntryURL = "/lib/knowledge/detail/" + row.DatasetID + "?document=" + row.ID
+		if strings.EqualFold(row.DocumentType, "FOLDER") {
+			item.ResourceType = "folder"
+			item.ProcessingStatus = "not_requested"
+			item.ResourceRef = capability.ResourceRef{Kind: "folder", KnowledgeBaseID: row.DatasetID, FolderID: row.ID}
+		}
+		items = append(items, item)
 	}
-	return capability.KnowledgeDocumentListPage{Items: items, Total: total}, nil
+	return capability.KnowledgeDocumentListPage{Items: items, Total: page.Total}, nil
 }
 
 func (r *KnowledgeDocumentReader) GetKnowledgeDocument(ctx context.Context, call capability.InvocationContext, input capability.GetKnowledgeDocumentInput) (capability.GetKnowledgeDocumentResult, error) {
@@ -134,8 +130,10 @@ func (r *KnowledgeDocumentReader) GetKnowledgeDocument(ctx context.Context, call
 func mapDocumentSummary(item doc.DocumentMetadata) capability.KnowledgeDocumentSummary {
 	return capability.KnowledgeDocumentSummary{
 		ID: item.ID, KnowledgeID: item.DatasetID, Name: item.Name,
-		RelativePath: item.RelativePath,
-		Tags:         append([]string(nil), item.Tags...), ParseStatus: item.ParseStatus,
+		ResourceType: "document", ResourceRef: capability.ResourceRef{Kind: "document", KnowledgeBaseID: item.DatasetID, DocumentID: item.ID},
+		RelativePath:     item.RelativePath,
+		ProcessingStatus: documentProcessingStatus(item.ProcessingLevel, item.ProcessingState),
+		Tags:             append([]string(nil), item.Tags...), ParseStatus: item.ParseStatus,
 		MIMEType: item.MIMEType, SizeBytes: item.SizeBytes,
 		CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt, CreatedBy: item.CreatedBy,
 	}
@@ -175,4 +173,25 @@ func mapDocumentError(operation string, err error) error {
 		}
 	}
 	return capability.NewError(capability.Internal, operation, "internal error", false, err)
+}
+
+func documentProcessingStatus(level string, state orm.DocumentProcessingState) string {
+	if level == "stored" {
+		return "not_requested"
+	}
+	status := state.IndexStatus
+	switch level {
+	case "parsed":
+		status = state.ParseStatus
+	case "chunked":
+		status = state.ChunkStatus
+	}
+	switch status {
+	case "pending", "running", "failed":
+		return status
+	case "succeeded":
+		return "ready"
+	default:
+		return "unknown"
+	}
 }

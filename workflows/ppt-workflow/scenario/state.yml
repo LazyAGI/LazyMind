@@ -260,11 +260,10 @@ steps:
          hits, keep their local_path or image_url + a short caption.
          Use this exact discovery-and-search sequence; do not omit kb_ids:
          a) First call:
-            KBToolkit_list_knowledge_bases(keyword='', page_size=20)
-         b) Read result.datasets and copy the exact dataset_id values (for
-            example ds_abc123). The name field may be prefixed with `datasets/`;
-            pass dataset_id, not the prefixed name. Select the KB whose
-            display_name matches the user's request; if exactly one readable KB
+            knowledge.list(keyword='', page={'page_size': 20})
+         b) Read result.items and copy the exact id values (for
+            example ds_abc123), also available as resource_ref.knowledge_base_id.
+            Select the KB whose name matches the user's request; if exactly one readable KB
             exists, use that one.
          c) Then call semantic search with kb_ids as a JSON LIST, never a string:
             KBToolkit_kb_search(
@@ -278,7 +277,7 @@ steps:
             Each call must contain exactly one search intent; make separate
             calls for unrelated topics.
          d) If search returns `kb_ids is required`, do not repeat the same
-            invalid call. Run list_knowledge_bases, extract dataset_id, and retry
+            invalid call. Run knowledge.list, extract id, and retry
             once with the explicit list. If no readable/matching KB exists,
             record that as a gap and do not claim KB retrieval succeeded.
          e) Treat retrieval as successful only when the tool returns evidence;
@@ -370,6 +369,7 @@ steps:
       Stop after saving.
     tools:
       - kb
+      - knowledge_management
       - web_search
       - wikipedia
       - ppt_search_web_images
@@ -980,6 +980,7 @@ steps:
       - ppt_edit_page_html
       - ppt_delete_page
       - kb
+      - knowledge_management
       - web_search
       - ppt_search_web_images
       - ppt_register_material_images

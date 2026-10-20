@@ -2,6 +2,8 @@ package academic
 
 import (
 	"context"
+	"lazymind/core/common/orm"
+	"lazymind/core/doc"
 	"os"
 	"strings"
 	"testing"
@@ -133,7 +135,9 @@ func TestBibliographySectionStopsAtInlineAppendix(t *testing.T) {
 }
 
 func TestValidateRemoteURLRejectsPrivateAddress(t *testing.T) {
-	if _, err := validateRemoteURL(context.Background(), "http://127.0.0.1/paper.pdf"); err == nil {
+	db := orm.OpenTestDB(t)
+	svc, _ := doc.NewOriginalService(doc.OriginalServiceDeps{DB: db.DB})
+	if _, err := svc.AcquireRemoteOriginal(context.Background(), doc.DatasetCatalogCaller{UserID: "test"}, doc.AcquireRemoteOriginalRequest{URL: "http://127.0.0.1/paper.pdf"}); err == nil {
 		t.Fatal("expected loopback URL to be rejected")
 	}
 }
@@ -213,7 +217,13 @@ func TestAcquirePreviouslyFailedArxivPDFs(t *testing.T) {
 	}
 	for _, id := range ids {
 		t.Run(id, func(t *testing.T) {
-			path, size, err := acquirePDF(context.Background(), FulltextCandidate{
+			db := orm.OpenTestDB(t)
+			if err := db.AutoMigrate(&orm.UploadedFile{}); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("LAZYMIND_UPLOAD_ROOT", t.TempDir())
+			svc, _ := doc.NewOriginalService(doc.OriginalServiceDeps{DB: db.DB})
+			ref, err := acquireCandidateOriginal(context.Background(), svc, doc.DatasetCatalogCaller{UserID: "test"}, FulltextCandidate{
 				URL:            "https://arxiv.org/pdf/" + id + ".pdf",
 				SourceProvider: "arxiv",
 				ExpectedMIME:   "application/pdf",
@@ -221,9 +231,8 @@ func TestAcquirePreviouslyFailedArxivPDFs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("download failed: %v", err)
 			}
-			defer os.Remove(path)
-			if size < 1024 {
-				t.Fatalf("downloaded PDF is too small: %d", size)
+			if ref.Size < 1024 {
+				t.Fatalf("downloaded PDF is too small: %d", ref.Size)
 			}
 		})
 	}

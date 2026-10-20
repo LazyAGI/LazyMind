@@ -4,11 +4,12 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 from urllib.parse import urlparse
 
 from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools import fc_register
+from pydantic import TypeAdapter, WithJsonSchema
 from lazymind.chat.engine.tools.host_file_resolution import FileResolution, validate_storage_id, copy_artifact_input
 from typing_extensions import NotRequired, TypedDict
 from lazymind.chat.engine.attachment_reader import (
@@ -44,6 +45,14 @@ class ArtifactSaveItem(TypedDict):
     source_tool: NotRequired[str]
     sort_order: NotRequired[int]
     caption: NotRequired[str]
+
+
+# Kimi Coding rejects the generated local $ref for array items. Inline the
+# model-facing schema while retaining TypedDict validation at execution time.
+_ArtifactSaveInput = Annotated[
+    ArtifactSaveItem,
+    WithJsonSchema({**TypeAdapter(ArtifactSaveItem).json_schema(), 'additionalProperties': False}),
+]
 
 
 def _materialize_local_path(path: str) -> str:
@@ -548,7 +557,7 @@ def resolve_artifact_files(arguments: dict) -> object:
 
 
 @fc_register(host_file=resolve_artifact_files)
-def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
+def save_artifacts(artifacts: List[_ArtifactSaveInput]) -> Dict[str, Any]:
     """Save one or more output artifacts in one tool call.
 
     Always pass a list, including when saving a single artifact. Every item MUST

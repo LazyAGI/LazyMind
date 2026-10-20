@@ -42,6 +42,8 @@ func (e *DatasetServiceError) Unwrap() error {
 }
 
 type DatasetCatalogCaller struct {
+	UserName      string
+	Permissions   []string
 	UserID        string
 	Authorization string
 	TenantID      string
@@ -64,14 +66,18 @@ func NewDatasetCatalogService(deps DatasetCatalogServiceDeps) (*DatasetCatalogSe
 }
 
 type DatasetListRequest struct {
-	UserID       string
-	Keyword      string
-	Tags         []string
-	Offset       int
-	Limit        int
-	OrderBy      string
-	SourceFilter string
-	Caller       DatasetCatalogCaller
+	DatasetIDs     []string
+	Match          string
+	Scene          string
+	RequiredAction string
+	UserID         string
+	Keyword        string
+	Tags           []string
+	Offset         int
+	Limit          int
+	OrderBy        string
+	SourceFilter   string
+	Caller         DatasetCatalogCaller
 }
 
 type DatasetListResult struct {
@@ -107,10 +113,31 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 		sourceFilter = ""
 	}
 	caller := req.Caller
-	caller.UserID = firstNonEmpty(strings.TrimSpace(caller.UserID), userID)
+	if caller.UserID != "" && strings.TrimSpace(caller.UserID) != userID {
+		return DatasetListResult{}, &DatasetServiceError{Code: DatasetServiceForbidden, Message: "caller identity mismatch"}
+	}
+	caller.UserID = userID
+	action := req.RequiredAction
+	if action == "" {
+		action = "read"
+	}
+	permission := map[string]string{"read": acl.PermissionDatasetRead, "write": acl.PermissionDatasetWrite, "upload": acl.PermissionDatasetUpload}[action]
+	if permission == "" || (req.Match != "" && req.Match != "contains" && req.Match != "exact") {
+		return DatasetListResult{}, &DatasetServiceError{Code: DatasetServiceInvalidArgument, Message: "invalid catalog filter"}
+	}
 
 	order := resolveDatasetListOrder(req.OrderBy)
 	base := s.db.WithContext(ctx).Model(&orm.Dataset{}).Where("datasets.deleted_at IS NULL")
+	base = base.Where("COALESCE(NULLIF(TRIM(datasets.tenant_id), ''), 'default') = ?", resourceTenant(caller.TenantID))
+	if len(req.DatasetIDs) > 0 {
+		base = base.Where("datasets.id IN ?", req.DatasetIDs)
+	}
+	if req.Match == "exact" {
+		base = base.Where("datasets.display_name = ?", keyword)
+	}
+	if req.Scene != "" {
+		base = base.Where("datasets.scene = ?", req.Scene)
+	}
 	if order.usageJoin {
 		base = base.Joins("LEFT JOIN dataset_user_states dus ON dus.dataset_id = datasets.id AND dus.create_user_id = ?", userID)
 	}
@@ -131,7 +158,7 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 		if order.usageJoin {
 			query = query.Select("datasets.*")
 		} else {
-			query = query.Select(`id, kb_id, create_user_id, create_user_name, display_name, "desc", cover_image, created_at, updated_at, ext, type, share_type, dataset_state`)
+			query = query.Select("datasets.*")
 		}
 		query = query.
 			Order(order.clause).
@@ -149,7 +176,7 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 		}
 		for _, ds := range rows {
 			perms := datasetACLForUserWithGroups(&ds, userID, groupIDs)
-			if len(perms) == 0 {
+			if !catalogAllowsAction(perms, permission) {
 				continue
 			}
 			if !datasetMatchesKeyword(&ds, keyword) {
@@ -160,7 +187,7 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 			}
 			candidates = append(candidates, ds)
 		}
-		candidates = filterDatasetsByScanSourceAccessForCaller(ctx, caller, candidates, acl.PermissionDatasetRead)
+		candidates = filterDatasetsByScanSourceAccessForCaller(ctx, caller, candidates, permission)
 
 		if len(candidates) > 0 {
 			candidateIDs := make([]string, len(candidates))
@@ -188,6 +215,7 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 	}
 
 	out := s.datasetsFromRows(ctx, page, userID, groupIDs, pageSourceMap, pageSourceTypeMap)
+	s.addAllowedActions(ctx, caller, out)
 	end := offset + len(page)
 	return DatasetListResult{
 		Datasets:   out,
@@ -210,7 +238,10 @@ func (s *DatasetCatalogService) GetDataset(ctx context.Context, req DatasetGetRe
 		return Dataset{}, &DatasetServiceError{Code: DatasetServiceInvalidArgument, Message: "invalid dataset id"}
 	}
 	caller := req.Caller
-	caller.UserID = firstNonEmpty(strings.TrimSpace(caller.UserID), userID)
+	if caller.UserID != "" && strings.TrimSpace(caller.UserID) != userID {
+		return Dataset{}, &DatasetServiceError{Code: DatasetServiceForbidden, Message: "caller identity mismatch"}
+	}
+	caller.UserID = userID
 
 	var ds orm.Dataset
 	if err := s.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", datasetID).First(&ds).Error; err != nil {
@@ -218,6 +249,9 @@ func (s *DatasetCatalogService) GetDataset(ctx context.Context, req DatasetGetRe
 			return Dataset{}, &DatasetServiceError{Code: DatasetServiceNotFound, Message: "dataset not found", Err: err}
 		}
 		return Dataset{}, &DatasetServiceError{Code: DatasetServiceUnavailable, Message: "query dataset failed", Err: err}
+	}
+	if resourceTenant(ds.TenantID) != resourceTenant(caller.TenantID) {
+		return Dataset{}, &DatasetServiceError{Code: DatasetServiceNotFound, Message: "dataset not found"}
 	}
 	datasetACL := datasetACLForUser(&ds, userID)
 	if len(datasetACL) == 0 {
@@ -231,7 +265,9 @@ func (s *DatasetCatalogService) GetDataset(ctx context.Context, req DatasetGetRe
 	installedMap := batchCheckInstalledMarketDatasets(ctx, userID, []string{ds.ID})
 	cloudMap := map[string]bool{ds.ID: createdByDataSource}
 	sourceTypeMap := buildDatasetSourceTypeMap([]string{ds.ID}, cloudMap, installedMap)
-	return s.datasetFromRow(ctx, ds, userID, datasetACL, calcDatasetStatsWithDB(ctx, s.db, ds.ID), createdByDataSource, sourceTypeMap[ds.ID], nil), nil
+	out := []Dataset{s.datasetFromRow(ctx, ds, userID, datasetACL, calcDatasetStatsWithDB(ctx, s.db, ds.ID), createdByDataSource, sourceTypeMap[ds.ID], nil)}
+	s.addAllowedActions(ctx, caller, out)
+	return out[0], nil
 }
 
 func (s *DatasetCatalogService) datasetsFromRows(ctx context.Context, rows []orm.Dataset, userID string, groupIDs []string, sourceMap map[string]bool, sourceTypeMap map[string]string) []Dataset {
@@ -262,7 +298,8 @@ func (s *DatasetCatalogService) datasetFromRow(ctx context.Context, ds orm.Datas
 	}
 	parsers := mergeParserConfigs(parseDatasetParsers(ds.Ext), liveParsers)
 	return Dataset{
-		Name:                   "datasets/" + ds.ID,
+		Name:  "datasets/" + ds.ID,
+		Scene: firstNonEmpty(ds.Scene, "general"), ResourceVersion: ds.ResourceVersion,
 		DatasetID:              ds.ID,
 		DisplayName:            ds.DisplayName,
 		Desc:                   ds.Desc,
@@ -314,4 +351,16 @@ func datasetFetchSize(pageSize int) int {
 		fetchSize = 500
 	}
 	return fetchSize
+}
+
+func catalogAllowsAction(permissions []string, action string) bool {
+	for _, permission := range permissions {
+		if permission == action || permission == acl.PermissionDatasetWrite {
+			return true
+		}
+		if action == acl.PermissionDatasetRead && permission == acl.PermissionDatasetUpload {
+			return true
+		}
+	}
+	return false
 }

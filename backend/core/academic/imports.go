@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -364,14 +364,20 @@ func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 			continue
 		}
 		_ = store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"stage": "acquire", "updated_at": time.Now().UTC()}).Error
-		contentType, extension, sourceURL := "application/pdf", ".pdf", candidate.URL
-		var path string
-		var err error
-		if candidate.SourceType == "reference_page" || candidate.SourceProvider == "web" {
-			path, _, contentType, extension, sourceURL, err = acquireWebDocument(ctx, candidate.URL)
-		} else {
-			path, _, err = acquirePDF(ctx, candidate)
+		var targetDataset orm.Dataset
+		if err := store.DB().WithContext(ctx).Where("id = ? AND deleted_at IS NULL", batch.TargetDatasetID).Take(&targetDataset).Error; err != nil {
+			failed++
+			markItemFailed(ctx, item, "target_not_found", err)
+			continue
 		}
+		caller := doc.DatasetCatalogCaller{UserID: payload.UserID, UserName: payload.UserName, TenantID: targetDataset.TenantID, Permissions: []string{"document.write"}}
+		originals, err := doc.NewOriginalService(doc.OriginalServiceDeps{DB: store.DB()})
+		if err != nil {
+			failed++
+			markItemFailed(ctx, item, "import_failed", err)
+			continue
+		}
+		original, err := acquireCandidateOriginal(ctx, originals, caller, candidate)
 		if err != nil {
 			failed++
 			markItemFailed(ctx, item, "download_failed", err)
@@ -381,7 +387,6 @@ func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 		_ = store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"stage": "import", "updated_at": time.Now().UTC()}).Error
 		var work orm.AcademicWork
 		if err = store.DB().WithContext(ctx).Where("id = ?", item.AcademicWorkID).Take(&work).Error; err != nil {
-			_ = os.Remove(path)
 			failed++
 			markItemFailed(ctx, item, "work_not_found", err)
 			continue
@@ -390,13 +395,16 @@ func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 		if filename == "" {
 			filename = work.ArxivIDBase
 		}
-		filename = safePaperFilename(filename) + extension
+		filename = safePaperFilename(filename) + filepath.Ext(original.Filename)
 		tags := []string{"paper"}
 		if candidate.SourceProvider == "web" {
 			tags = []string{"reference", "web"}
 		}
-		imported, importErr := doc.ImportLocalFile(ctx, doc.LocalFileImportRequest{DatasetID: batch.TargetDatasetID, ParentID: batch.TargetPID, SourcePath: path, DisplayName: filename, ContentType: contentType, DataSourceType: "ACADEMIC_PROVIDER", Tags: tags, UserID: payload.UserID, UserName: payload.UserName})
-		_ = os.Remove(path)
+		bound, importErr := originals.ImportOriginal(ctx, caller, doc.ImportOriginalRequest{FileRef: original.FileRef, DatasetID: batch.TargetDatasetID, ParentID: batch.TargetPID, DisplayName: filename, DataSourceType: "ACADEMIC_PROVIDER", Tags: tags})
+		imported := doc.LocalFileImportResult{DocumentID: bound.Document.ID, TaskID: bound.Task.ID, ContentSHA256: bound.ContentSHA256, Start: bound.Start}
+		if importErr == nil && bound.SubmissionStatus == "failed" {
+			importErr = fmt.Errorf("%s", bound.SubmissionError)
+		}
 		if importErr != nil && imported.DocumentID == "" {
 			failed++
 			markItemFailed(ctx, item, "import_failed", importErr)
@@ -405,7 +413,7 @@ func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 		}
 		_, version := NormalizeArxivID(candidate.URL)
 		now := time.Now().UTC()
-		link := orm.AcademicWorkDocument{AcademicWorkID: item.AcademicWorkID, DatasetID: batch.TargetDatasetID, DocumentID: imported.DocumentID, VersionKind: map[bool]string{true: "preprint", false: "unknown"}[candidate.SourceProvider == "arxiv"], SourceProvider: candidate.SourceProvider, SourceLocator: sourceURL, SourceVersion: version, ContentSHA256: imported.ContentSHA256, MatchMethod: "import", MatchConfidence: 1, IsPreferredVersion: true, CreatedAt: now, UpdatedAt: now}
+		link := orm.AcademicWorkDocument{AcademicWorkID: item.AcademicWorkID, DatasetID: batch.TargetDatasetID, DocumentID: imported.DocumentID, VersionKind: map[bool]string{true: "preprint", false: "unknown"}[candidate.SourceProvider == "arxiv"], SourceProvider: candidate.SourceProvider, SourceLocator: original.FinalURL, SourceVersion: version, ContentSHA256: imported.ContentSHA256, MatchMethod: "import", MatchConfidence: 1, IsPreferredVersion: true, CreatedAt: now, UpdatedAt: now}
 		if err := store.DB().WithContext(ctx).Create(&link).Error; err != nil {
 			failed++
 			markItemFailed(ctx, item, "link_failed", err)

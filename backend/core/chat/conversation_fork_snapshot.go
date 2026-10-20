@@ -69,6 +69,15 @@ func mergeConversationConfigSnapshot(raw json.RawMessage, body map[string]any) j
 		ext = map[string]any{}
 	}
 	ext["conversation_config_snapshot"] = s
+	delete(ext, "knowledge_management_policy")
+	if configs, ok := body["system_mcp_config"].([]any); ok {
+		for _, entry := range configs {
+			config, _ := entry.(map[string]any)
+			if config["id"] == "lazymind-knowledge" {
+				ext["knowledge_management_policy"] = map[string]any{"allowed_tools": config["allowed_tools"]}
+			}
+		}
+	}
 	return marshalChatHistoryExt(ext)
 }
 

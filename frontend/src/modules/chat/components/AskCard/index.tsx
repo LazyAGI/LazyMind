@@ -3,6 +3,7 @@ import { Button, Checkbox, Input, Progress, Radio } from "antd";
 import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "./index.scss";
+import { axiosInstance, BASE_URL } from "@/components/request";
 
 export interface AskQuestion {
   text: string;
@@ -21,6 +22,8 @@ export interface AskPending {
   /** Optional subtitle / description shown below the title */
   description?: string;
   user_env_delete?: { id: string; name: string; expected_updated_at: string };
+  knowledge_management?: { confirmation_id: string; arguments_digest: string; snapshot: string };
+  knowledge_management_preview?: Record<string, unknown>;
   env_input?: import("../EnvInputCard").EnvironmentInput;
   skill_ambiguity?: { requested_name: string; candidates: string[]; original_query: string };
   mail_draft?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview;
@@ -136,6 +139,15 @@ function formatAnswer(
   }
 }
 
+function previewText(value: unknown): string {
+  if (value == null) return "";
+  if (Array.isArray(value)) return value.map(previewText).filter(Boolean).join("\n");
+  if (typeof value === "object") {
+    return Object.entries(value).map(([key, entry]) => `${key}: ${previewText(entry)}`).join("; ");
+  }
+  return String(value);
+}
+
 function ChoiceLabel({ value }: { value: string }) {
   return <span className="ask-wizard__choice-label">{value}</span>;
 }
@@ -177,7 +189,14 @@ export default function AskCard({
     description,
   } = askPending;
   const questions = normalizedAskQuestions(askPending, t);
-  const displayTitle = title || (titleI18nKey ? t(titleI18nKey) : "");
+  const preview = askPending.knowledge_management_preview;
+  const displayTitle = title || (titleI18nKey ? t(titleI18nKey) : "") || previewText(preview?.title);
+  const displayDescription = description || previewText(preview?.description);
+  const previewEntries = Object.entries(preview ?? {}).flatMap(([key, value]) => {
+    if (key === "title" || key === "description") return [];
+    const text = previewText(value);
+    return !text || text === displayTitle || text === displayDescription ? [] : [[key, text]];
+  });
   const total = questions.length;
 
   const [answers, setAnswers] = useState<AnswerState[]>(() =>
@@ -186,9 +205,10 @@ export default function AskCard({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [decisionFailed, setDecisionFailed] = useState(false);
   const submittingRef = useRef(false);
   const isReadOnly = disabled || submitted || submitting;
-  const needsConfirmation = !!askPending.user_env_delete && !(
+  const needsConfirmation = !!(askPending.user_env_delete || askPending.knowledge_management) && !(
     answers.length === 1 && answers[0]?.type === "boolean" &&
     ["__ask_user_yes__", "__ask_user_no__"].includes(answers[0].value ?? "")
   );
@@ -254,11 +274,24 @@ export default function AskCard({
     };
     submittingRef.current = true;
     setSubmitting(true);
+    setDecisionFailed(false);
     try {
+      if (askPending.knowledge_management) {
+        const confirmation = askPending.knowledge_management;
+        const decision = answers[0]?.type === "boolean" && answers[0].value === "__ask_user_yes__"
+          ? "approved" : "rejected";
+        await axiosInstance.post(
+          `${BASE_URL}/api/core/knowledge-management/confirmations/${encodeURIComponent(confirmation.confirmation_id)}/decision`,
+          { decision, arguments_digest: confirmation.arguments_digest, snapshot: confirmation.snapshot },
+        );
+        setSubmitted(true);
+        return;
+      }
       const accepted = await onSubmit({ text: lines.join("\n"), structured });
       if (accepted !== false && !askPending.user_env_delete) setSubmitted(true);
     } catch {
-      // The caller reports request errors; keep the selected answer available for retry.
+      if (askPending.knowledge_management) setDecisionFailed(true);
+      // Ordinary callers report their own request errors; keep the answer for retry.
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -277,6 +310,7 @@ export default function AskCard({
       className={`ask-wizard${isReadOnly ? " ask-wizard--disabled" : ""}`}
       aria-label={t("chat.askCardAria")}
     >
+      {decisionFailed && <p role="alert">{t("chat.knowledgeConfirmationFailed")}</p>}
       {/* Header */}
       <div className="ask-wizard__header">
         <div className="ask-wizard__header-top">
@@ -284,8 +318,16 @@ export default function AskCard({
             {displayTitle && (
               <h3 className="ask-wizard__title">{displayTitle}</h3>
             )}
-            {description && (
-              <p className="ask-wizard__description">{description}</p>
+            {displayDescription && (
+              <p className="ask-wizard__description">{displayDescription}</p>
+            )}
+            {previewEntries.length > 0 && (
+              <dl className="ask-wizard__knowledge-preview">
+                {previewEntries.map(([key, text]) => <div key={key}>
+                  <dt>{t(`chat.knowledgePreviewLabels.${key}`, { defaultValue: key.replaceAll("_", " ") })}</dt>
+                  <dd>{text}</dd>
+                </div>)}
+              </dl>
             )}
           </div>
           <div className="ask-wizard__meta">

@@ -27,10 +27,12 @@ type SkillReader interface {
 }
 
 type KnowledgeListQuery struct {
-	Keyword string
-	Tags    []string
-	Offset  int
-	Limit   int
+	KnowledgeBaseIDs             []string
+	Match, Scene, RequiredAction string
+	Keyword                      string
+	Tags                         []string
+	Offset                       int
+	Limit                        int
 }
 
 type KnowledgeListPage struct {
@@ -45,11 +47,17 @@ type KnowledgeCatalog interface {
 }
 
 type KnowledgeDocumentListQuery struct {
-	KnowledgeID string
-	Name        string
-	Path        string
-	Offset      int
-	Limit       int
+	KnowledgeIDs []string
+	ResourceIDs  []string
+	ResourceType string
+	ParentID     *string
+	Recursive    bool
+	Match        string
+	KnowledgeID  string
+	Name         string
+	Path         string
+	Offset       int
+	Limit        int
 }
 
 type KnowledgeDocumentListPage struct {

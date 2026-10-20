@@ -278,3 +278,96 @@ def test_loader_cancellation_drains_pending_service_tasks():
             release.set()
 
     asyncio.run(run())
+
+
+def test_static_empty_allowlist_skips_client_and_is_ready(monkeypatch):
+    def unexpected_client(**kwargs):
+        raise AssertionError('empty allowlist must not construct a client')
+
+    monkeypatch.setattr(chat_service, 'MCPClient', unexpected_client)
+    server = {'id': 'empty', 'url': 'https://mcp.example/empty', 'allowed_tools': []}
+    issues = []
+    assert asyncio.run(chat_service._build_mcp_tools([server], issues=issues)) == []
+    assert issues == []
+
+
+def test_builtin_knowledge_tools_are_bound_per_load(monkeypatch):
+    clients = []
+
+    class Client:
+        def __init__(self, **kwargs):
+            clients.append(kwargs)
+
+        def get_tools(self, **kwargs):
+            return [object()]
+
+    async def headers():
+        return {'Authorization': 'Bearer run-specific'}
+
+    async def metadata(name, arguments):
+        return {'operation_key': 'stable'}
+
+    monkeypatch.setattr(chat_service, 'MCPClient', Client)
+    monkeypatch.setattr(chat_service, '_mcp_tool_cache', {})
+    server = {'id': 'lazymind-knowledge', 'url': 'https://mcp.example/internal',
+              'allowed_tools': ['knowledge.create'], 'result_mode': 'structured',
+              'auth_provider': headers, 'request_metadata_provider': metadata}
+    from lazymind.chat.service.knowledge_management import KnowledgeManagementRuntime
+    host = KnowledgeManagementRuntime({'user_id': 'alice', 'conversation_id': 'c',
+        'history_id': 'h', 'run_id': 'r'}, 'https://mcp.example')
+    monkeypatch.setattr(host, 'bind_tools', lambda tools: tools)
+    server['_knowledge_runtime'] = host
+    first = chat_service._load_mcp_server_tools(server, 'system')
+    second = chat_service._load_mcp_server_tools(server, 'system')
+    assert first[0] is not second[0]
+    assert chat_service._mcp_tool_cache == {}
+    assert clients[0]['result_mode'] == 'structured'
+    assert clients[0]['auth_provider'] is headers
+    assert clients[0]['request_metadata_provider'] is metadata
+
+
+def test_preview_none_allowlist_uses_all_discovered_schemas():
+    server = {'id': 'static', 'url': 'https://mcp.example', 'allowed_tools': None}
+    snapshot = {'status': 'ready', 'tools': [
+        {'tool_name': 'knowledge.create', 'input_schema': {'type': 'object', 'properties': {}}},
+        {'tool_name': 'knowledge.search', 'input_schema': {'type': 'object', 'properties': {}}}]}
+    tools = chat_service._mcp_tools_for_preview(server, snapshot)
+    assert [tool.__mcp_tool_name__ for tool in tools] == ['knowledge.create', 'knowledge.search']
+    assert chat_service._mcp_tools_for_preview({**server, 'allowed_tools': []}, snapshot) == []
+
+
+def test_dynamic_catalog_empty_allowlist_never_calls_loader():
+    from lazymind.chat.service.mcp_loading import load_mcp_catalog
+
+    def unexpected_loader(config):
+        raise AssertionError('empty allowlist must not invoke dynamic loader')
+
+    result = asyncio.run(load_mcp_catalog([
+        {'service': 'mcp:none', 'status': 'ready', 'runtime': {'allowed_tools': []}}], unexpected_loader))
+    assert result == [{'service': 'mcp:none', 'tools': [], 'status': 'ready', 'error': None}]
+
+
+def test_builtin_preview_preserves_positive_scope_without_live_credentials():
+    server = {'id': 'lazymind-knowledge', 'allowed_tools': None}
+    snapshot = {'status': 'ready', 'tools': [
+        {'tool_name': 'knowledge.create', 'input_schema': {'type': 'object', 'properties': {}}},
+        {'tool_name': 'knowledge.search', 'input_schema': {'type': 'object', 'properties': {}}}]}
+    tools = asyncio.run(chat_service._build_mcp_tools([server], 'system', preview=True,
+                                                     preview_capabilities={'lazymind-knowledge': snapshot}))
+    assert [tool.__mcp_tool_name__ for tool in tools] == ['knowledge.create']
+
+
+def test_trusted_callback_load_failure_never_logs_credentials(monkeypatch):
+    messages = []
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+        def get_tools(self, **kwargs):
+            raise RuntimeError('Authorization: Bearer credential-secret')
+    monkeypatch.setattr(chat_service, 'MCPClient', Client)
+    monkeypatch.setattr(chat_service.LOG, 'warning', lambda message: messages.append(message))
+    async def headers():
+        return {}
+    assert chat_service._load_mcp_server_tools({'id': 'run-bound', 'url': 'https://mcp.example',
+                                               'auth_provider': headers}) == []
+    assert 'credential-secret' not in ''.join(messages)

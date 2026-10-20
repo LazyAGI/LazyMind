@@ -28,9 +28,13 @@ type Principal struct {
 }
 
 type InvocationContext struct {
-	Principal     Principal
-	ExternalAgent string
-	InvocationID  string
+	ExecutionKey      string
+	OperationKey      string
+	ExpectedSnapshot  string
+	AllowedDatasetIDs []string
+	Principal         Principal
+	ExternalAgent     string
+	InvocationID      string
 }
 
 type ExternalModelSummary struct {
@@ -261,19 +265,27 @@ type GetSkillResult struct {
 }
 
 type ListKnowledgeInput struct {
-	Keyword string      `json:"keyword,omitempty" jsonschema:"optional knowledge base metadata keyword"`
-	Tags    []string    `json:"tags,omitempty" jsonschema:"optional tags; every tag must match"`
-	Page    PageRequest `json:"page,omitempty"`
+	KnowledgeBaseIDs []string    `json:"knowledge_base_ids,omitempty"`
+	Match            string      `json:"match,omitempty" jsonschema:"contains (default) or exact name matching"`
+	Scene            string      `json:"scene,omitempty" jsonschema:"general or paper_collection"`
+	RequiredAction   string      `json:"required_action,omitempty" jsonschema:"read (default), upload, or write"`
+	Keyword          string      `json:"keyword,omitempty" jsonschema:"optional knowledge base metadata keyword"`
+	Tags             []string    `json:"tags,omitempty" jsonschema:"optional tags; every tag must match"`
+	Page             PageRequest `json:"page,omitempty"`
 }
 
 type KnowledgeSummary struct {
-	ID                string    `json:"id"`
-	Name              string    `json:"name"`
-	Description       string    `json:"description,omitempty"`
-	Tags              []string  `json:"tags,omitempty"`
-	UpdatedAt         time.Time `json:"updated_at"`
-	DocumentSizeBytes int64     `json:"document_size_bytes"`
-	DocumentCount     int64     `json:"document_count"`
+	ResourceRef       ResourceRef `json:"resource_ref"`
+	Scene             string      `json:"scene"`
+	AllowedActions    []string    `json:"allowed_actions"`
+	EntryURL          string      `json:"entry_url"`
+	ID                string      `json:"id"`
+	Name              string      `json:"name"`
+	Description       string      `json:"description,omitempty"`
+	Tags              []string    `json:"tags,omitempty"`
+	UpdatedAt         time.Time   `json:"updated_at"`
+	DocumentSizeBytes int64       `json:"document_size_bytes"`
+	DocumentCount     int64       `json:"document_count"`
 }
 
 type ListKnowledgeResult struct {
@@ -282,24 +294,37 @@ type ListKnowledgeResult struct {
 }
 
 type ListKnowledgeDocumentsInput struct {
-	KnowledgeID string      `json:"knowledge_id" jsonschema:"stable LazyMind knowledge base ID"`
-	Name        string      `json:"name,omitempty" jsonschema:"case-insensitive literal substring of the ingested file display name"`
-	Path        string      `json:"path,omitempty" jsonschema:"case-insensitive literal substring of the upload relative directory; not a host filesystem path"`
-	Page        PageRequest `json:"page,omitempty"`
+	KnowledgeIDs []string    `json:"knowledge_ids,omitempty" jsonschema:"Core knowledge IDs; exclusive with knowledge_id"`
+	ResourceIDs  []string    `json:"resource_ids,omitempty"`
+	ResourceType string      `json:"resource_type,omitempty" jsonschema:"document (default), folder or all"`
+	ParentID     *string     `json:"parent_id,omitempty" jsonschema:"omitted: whole library; empty: root; otherwise folder ID; single library only"`
+	Recursive    *bool       `json:"recursive,omitempty" jsonschema:"include descendants; defaults to true"`
+	Match        string      `json:"match,omitempty" jsonschema:"contains (default) or exact name matching"`
+	KnowledgeID  string      `json:"knowledge_id,omitempty" jsonschema:"stable LazyMind knowledge base ID"`
+	Name         string      `json:"name,omitempty" jsonschema:"case-insensitive literal substring of the ingested file display name"`
+	Path         string      `json:"path,omitempty" jsonschema:"case-insensitive literal substring of the upload relative directory; not a host filesystem path"`
+	Page         PageRequest `json:"page,omitempty"`
 }
 
 type KnowledgeDocumentSummary struct {
-	ID           string    `json:"id"`
-	KnowledgeID  string    `json:"knowledge_id"`
-	Name         string    `json:"name"`
-	RelativePath string    `json:"relative_path,omitempty"`
-	Tags         []string  `json:"tags,omitempty"`
-	ParseStatus  string    `json:"parse_status,omitempty"`
-	MIMEType     string    `json:"mime_type,omitempty"`
-	SizeBytes    int64     `json:"size_bytes"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
-	CreatedBy    string    `json:"created_by,omitempty"`
+	ResourceRef      ResourceRef `json:"resource_ref"`
+	ResourceType     string      `json:"resource_type"`
+	ParentID         string      `json:"parent_id"`
+	LogicalPath      string      `json:"logical_path"`
+	AllowedActions   []string    `json:"allowed_actions"`
+	EntryURL         string      `json:"entry_url"`
+	ProcessingStatus string      `json:"processing_status,omitempty"`
+	ID               string      `json:"id"`
+	KnowledgeID      string      `json:"knowledge_id"`
+	Name             string      `json:"name"`
+	RelativePath     string      `json:"relative_path,omitempty"`
+	Tags             []string    `json:"tags,omitempty"`
+	ParseStatus      string      `json:"parse_status,omitempty"`
+	MIMEType         string      `json:"mime_type,omitempty"`
+	SizeBytes        int64       `json:"size_bytes"`
+	CreatedAt        time.Time   `json:"created_at"`
+	UpdatedAt        time.Time   `json:"updated_at"`
+	CreatedBy        string      `json:"created_by,omitempty"`
 }
 
 type ListKnowledgeDocumentsResult struct {

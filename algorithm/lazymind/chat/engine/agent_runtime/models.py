@@ -50,6 +50,7 @@ class AgentExecutionOptions:
     before_model_request: Optional[Callable[[], None]] = None
     model_context_provider: Optional[Callable[[], Optional[str]]] = None
     configuration_runtime: Any = None
+    knowledge_management: Any = None
     skills: Any = None
     prompt_skills: Optional[list[str]] = None
     excluded_skills: Optional[list[str]] = None

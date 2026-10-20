@@ -185,6 +185,12 @@ class AgentEventFrameTranslator:
             return frames
         if event_type == 'ask_pending':
             ask_data = {k: v for k, v in event.items() if k != 'tag'}
+            if isinstance(ask_data.get('knowledge_management'), dict):
+                # This tool waits for Core's decision and continues in the same
+                # run. Unlike ask_user, its card must not suppress the final
+                # result or mark a completed run as awaiting another user turn.
+                frames.append(_stream_frame(extra={'ask_pending': ask_data}))
+                return frames
             mail_draft = ask_data.get('mail_draft')
             extra_drafts = ask_data.get('mail_drafts')
             has_mail_draft = (
