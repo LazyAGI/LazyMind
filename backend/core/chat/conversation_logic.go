@@ -1912,25 +1912,43 @@ func handleNonStreamChat(
 	}()
 	chunks, _, err := StreamChatUpstream(runCtx, baseURL, reqBody)
 	if err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "chat service unavailable", err), http.StatusBadGateway)
+		event := failedRunEvent(runID, "upstream_request_failed", false)
+		if runCtx.Err() != nil {
+			event = cancelledRunEvent(runID, false)
+		}
+		terminal, _ := event.Terminal()
+		terminal = resolveCandidateRunTerminal(runCtx, stateStore, convID, historyID, runID, terminal, "nonstream_request", stateStore != nil && requestUsesRunDecision(reqBody))
+		persisted := persistImmediateRunTerminal(runCtx, db, convID, historyID, query, runID, target, historyExt, terminal)
+		if !persisted {
+			persisted = persistImmediateRunTerminal(runCtx, db, convID, historyID, query, runID, target, historyExt, terminal)
+		}
+		persistedID := historyID
+		if !persisted {
+			persistedID = ""
+		}
+		finalized = true
+		if stateStore != nil {
+			_ = setChatRuntimeStatus(reqCtx, stateStore, convID, historyID, terminal.Status, "", runID, terminal)
+		}
+		replyChatTerminalError(w, "chat service unavailable", http.StatusBadGateway, terminal, persistedID)
 		return
 	}
 	var toolCallTurns int
 	var runEvent *ChatRuntimeEvent
 	var runTerminal *RunTerminal
+	var responseError string
 	for chunk := range chunks {
 		accepted, eventErr := outputOwner.accept(chunk)
 		if eventErr != nil {
 			chunk.Err, chunk.ErrKind = eventErr, UpstreamStreamErrorProtocol
 		}
 		if chunk.Err != nil {
-			if !outputOwner.enabled() {
-				common.ReplyErr(w, fmt.Sprintf("%s: %v", "chat service unavailable", chunk.Err), http.StatusBadGateway)
-				return
-			}
 			outputOwner.rollback(&output)
 			decision, _ := consumeRuntimeChunk(chunk, runID, output.rawResult() != "")
 			runEvent, runTerminal = decision.Event, decision.Terminal
+			if !outputOwner.enabled() {
+				responseError = "chat service unavailable"
+			}
 			break
 		}
 		if !accepted {
@@ -1948,13 +1966,12 @@ func handleNonStreamChat(
 			}
 			accepted, eventErr = acceptChatFallbackEvent(nextBody, chunk.RuntimeEvent, runID, &nextExt)
 			if eventErr != nil {
-				if !outputOwner.enabled() {
-					common.ReplyErr(w, "invalid model fallback event", http.StatusBadGateway)
-					return
-				}
 				outputOwner.rollback(&output)
 				runEvent = failedRunEvent(runID, "model_fallback_protocol_error", output.rawResult() != "")
 				runTerminal, _ = runEvent.Terminal()
+				if !outputOwner.enabled() {
+					responseError = "invalid model fallback event"
+				}
 				break
 			}
 			if !accepted {
@@ -2025,8 +2042,8 @@ func handleNonStreamChat(
 		runTerminal, _ = runEvent.Terminal()
 	}
 	if runTerminal == nil {
-		common.ReplyErr(w, "chat service returned no run terminal", http.StatusBadGateway)
-		return
+		runTerminal, _ = failedRunEvent(runID, "missing_run_terminal", strings.TrimSpace(output.rawResult()) != "").Terminal()
+		responseError = "chat service returned no run terminal"
 	}
 	if outputOwner.enabled() && output.exportSnapshot != nil {
 		output.text = output.exportSnapshot.Content
@@ -2042,8 +2059,15 @@ func handleNonStreamChat(
 	fallbackFailure := runTerminal.Status == "failed" && runTerminal.Reason == "model_failure" &&
 		(runTerminal.Code == "model_fallback_exhausted" || runTerminal.Code == "model_context_not_fit")
 	if answer == "" && !fallbackFailure && !(outputOwner.enabled() && runTerminal.Status != "completed") {
-		common.ReplyErr(w, "chat service returned no answer", http.StatusBadGateway)
-		return
+		if runTerminal.Status == "completed" {
+			runTerminal, _ = failedRunEvent(runID, "upstream_request_failed", output.rawResult() != "").Terminal()
+		}
+		if responseError == "" {
+			responseError = "chat service returned no answer"
+		}
+	}
+	if runCtx.Err() != nil {
+		runTerminal, _ = cancelledRunEvent(runID, output.rawResult() != "").Terminal()
 	}
 	if outputOwner.enabled() {
 		runTerminal.PartialOutput = output.rawResult() != ""
@@ -2056,7 +2080,7 @@ func handleNonStreamChat(
 	{
 		persistCtx, cancel := terminalWriteContext(reqCtx)
 		defer cancel()
-		updated, err := updateOwnedChatHistory(persistCtx, db, historyID, runID, map[string]any{
+		values := map[string]any{
 			"seq":              target.Seq,
 			"raw_content":      query,
 			"content":          query,
@@ -2072,7 +2096,13 @@ func handleNonStreamChat(
 			"ext":              historyExt,
 			"create_time":      now,
 			"update_time":      now,
-		})
+		}
+		updated, err := updateOwnedChatHistory(persistCtx, db, historyID, runID, values)
+		if err != nil {
+			// Retry the idempotent owned write once without losing the accepted
+			// terminal or content. Never repeat the model request.
+			updated, err = updateOwnedChatHistory(persistCtx, db, historyID, runID, values)
+		}
 		if err != nil || !updated {
 			common.ReplyErr(w, "failed to update history", http.StatusInternalServerError)
 			return
@@ -2082,6 +2112,10 @@ func handleNonStreamChat(
 	persistSuccessfulChatModel(reqCtx, db, userIDFromChatRequestBody(reqBody), convID, runID, reqBody, runTerminal)
 	if stateStore != nil {
 		_ = setChatRuntimeStatus(reqCtx, stateStore, convID, historyID, runTerminal.Status, answer, runID, runTerminal)
+	}
+	if responseError != "" {
+		replyChatTerminalError(w, responseError, http.StatusBadGateway, runTerminal, historyID)
+		return
 	}
 	db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
 	touchConversationParent(reqCtx, db, convID, now)
@@ -2194,8 +2228,12 @@ func handleStreamChat(
 		_ = setChatInput(chatCtx, stateStore, convID, historyID, query, target.Seq, historyExt)
 		if requestUsesRunDecision(reqBody) {
 			if err := setChatRuntimeStatus(chatCtx, stateStore, convID, historyID, "generating", "", primaryRunID, nil); err != nil {
-				failPreStreamChatRuns(chatCtx, db, stateStore, convID, dualReply, registeredRuns)
-				common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
+				terminal, persistedID := failPreStreamChatRuns(chatCtx, db, stateStore, convID, dualReply, registeredRuns, target, mergeConversationConfigSnapshot(historyExt, reqBody))
+				if dualReply {
+					common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
+				} else {
+					replyChatTerminalError(w, "store not initialized", http.StatusServiceUnavailable, terminal, persistedID)
+				}
 				return
 			}
 			defer finishRegisteredChatRun(chatCtx, stateStore, convID, historyID, primaryRunID)
@@ -2203,7 +2241,7 @@ func handleStreamChat(
 		if dualReply {
 			_ = setChatInput(chatCtx, stateStore, convID, secondaryHistoryID, query, target.Seq, historyExt)
 			if err := setChatRuntimeStatus(chatCtx, stateStore, convID, secondaryHistoryID, "generating", "", secondaryRunID, nil); err != nil {
-				failPreStreamChatRuns(chatCtx, db, stateStore, convID, dualReply, registeredRuns)
+				failPreStreamChatRuns(chatCtx, db, stateStore, convID, dualReply, registeredRuns, target, historyExt)
 				common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
 				return
 			}
@@ -2221,12 +2259,19 @@ func handleStreamChat(
 	streamDualAnswer(chatCtx, reqCtx, w, flusher, db, stateStore, baseURL, reqBody, convID, query, historyID, secondaryHistoryID, target, historyExt)
 }
 
-func failPreStreamChatRuns(ctx context.Context, db *gorm.DB, stateStore state.Store, convID string, dualReply bool, runs [][2]string) {
+func failPreStreamChatRuns(ctx context.Context, db *gorm.DB, stateStore state.Store, convID string, dualReply bool, runs [][2]string, target chatPersistTarget, historyExt json.RawMessage) (*RunTerminal, string) {
 	statusCtx, cancel := terminalWriteContext(ctx)
 	defer cancel()
+	var primaryTerminal *RunTerminal
+	historyExt = archiveRegeneratedFailedRunAttempt(historyExt, target)
+	historyExt = archiveRegeneratedTrafficAttempt(historyExt, target)
+	persistedID := ""
 	for _, run := range runs {
 		historyID, runID := run[0], run[1]
 		terminal, _ := failedRunEvent(runID, "state_store_unavailable", false).Terminal()
+		if primaryTerminal == nil {
+			primaryTerminal = terminal
+		}
 		values := map[string]any{
 			"run_status": "failed", "run_terminal": terminalJSON(terminal), "update_time": time.Now().UTC(),
 		}
@@ -2235,7 +2280,11 @@ func failPreStreamChatRuns(ctx context.Context, db *gorm.DB, stateStore state.St
 		if dualReply {
 			updated, err = updateOwnedMultiAnswerHistory(statusCtx, db, historyID, runID, values)
 		} else {
+			values["ext"] = historyExt
 			updated, err = updateOwnedChatHistory(statusCtx, db, historyID, runID, values)
+			if updated && err == nil {
+				persistedID = historyID
+			}
 		}
 		if err != nil || !updated {
 			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).
@@ -2249,6 +2298,7 @@ func failPreStreamChatRuns(ctx context.Context, db *gorm.DB, stateStore state.St
 				Str("run_id", runID).Msg("failed to project pre-stream chat run failure to cache")
 		}
 	}
+	return primaryTerminal, persistedID
 }
 
 func elapsedThinkingSeconds(elapsed time.Duration) int64 {

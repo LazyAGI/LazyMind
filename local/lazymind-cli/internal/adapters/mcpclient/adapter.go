@@ -31,12 +31,18 @@ const (
 )
 
 type Adapter struct {
-	dshRunner func(context.Context, string, ...string) error
-	kind      Kind
-	self      string
-	bridge    *mcpbridge.Bridge
-	home      string
-	hostID    string
+	dshTarget    string // Set only on a profile-scoped copy of the adapter.
+	dshCLI       string
+	dshMCPReady  bool
+	dshInspector func(context.Context, string) (dshRuntimeInspection, error)
+	dshRunner    func(context.Context, string, ...string) error
+	kind         Kind
+	self         string
+	bridge       interface {
+		Probe(context.Context) (mcpbridge.ProbeResult, error)
+	}
+	home   string
+	hostID string
 }
 
 type stdioMCPDefinition struct {
@@ -75,12 +81,15 @@ func New(kind Kind, self string, bridge *mcpbridge.Bridge) (*Adapter, error) {
 	return &Adapter{kind: kind, self: resolvedSelf, bridge: bridge, home: home, hostID: hostID}, nil
 }
 
-func (a *Adapter) Status(context.Context) agentintegration.Status {
-	return a.status()
+func (a *Adapter) Status(ctx context.Context) agentintegration.Status {
+	return a.status(ctx)
 }
 
 func (a *Adapter) Connect(ctx context.Context) agentintegration.Status {
-	status := a.status()
+	if a.desktopDSHMode() {
+		return a.connectDSHDesktop(ctx)
+	}
+	status := a.status(ctx)
 	if status.State != agentintegration.Ready {
 		return status
 	}
@@ -110,11 +119,14 @@ func (a *Adapter) Connect(ctx context.Context) agentintegration.Status {
 	if err := writeManagedConfig(a.kind, configPath(a.kind), a.self, a.home, a.hostID, controlled); err != nil {
 		return agentintegration.Fail(status, err.Error())
 	}
-	return a.status()
+	return a.status(ctx)
 }
 
-func (a *Adapter) Disconnect(context.Context) agentintegration.Status {
-	status := a.status()
+func (a *Adapter) Disconnect(ctx context.Context) agentintegration.Status {
+	if a.desktopDSHMode() {
+		return a.disconnectDSHDesktop(ctx)
+	}
+	status := a.status(ctx)
 	if status.State == agentintegration.Conflict || status.State == agentintegration.Failed {
 		return status
 	}
@@ -126,10 +138,13 @@ func (a *Adapter) Disconnect(context.Context) agentintegration.Status {
 	if err := removeManagedConfig(a.kind, configPath(a.kind)); err != nil {
 		return agentintegration.Fail(status, err.Error())
 	}
-	return a.status()
+	return a.status(ctx)
 }
 
-func (a *Adapter) status() agentintegration.Status {
+func (a *Adapter) status(ctx context.Context) agentintegration.Status {
+	if a.desktopDSHMode() {
+		return a.dshDesktopStatus(ctx)
+	}
 	name, _ := displayName(a.kind)
 	status := agentintegration.Status{
 		Agent: string(a.kind), DisplayName: name,

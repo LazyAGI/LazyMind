@@ -101,6 +101,34 @@ func TestOrdinaryModelFallbackOpenAPIUsesSharedPublicFacts(t *testing.T) {
 	}
 }
 
+func TestChatHTTPErrorsReuseRunTerminalContract(t *testing.T) {
+	schemas := manualSchemas()
+	response := schemaPropertiesForTest(t, schemas, "ChatErrorResponse")
+	if response["data"].(map[string]any)["$ref"] != "#/components/schemas/ChatErrorData" {
+		t.Fatal("ChatErrorResponse must expose typed error data")
+	}
+	data := schemaPropertiesForTest(t, schemas, "ChatErrorData")
+	if data["run_terminal"].(map[string]any)["$ref"] != "#/components/schemas/RunTerminal" {
+		t.Fatal("HTTP errors must reuse the persisted terminal schema")
+	}
+	codeSchema, ok := schemas["ModelFailureCode"].(map[string]any)
+	if !ok || codeSchema["enum"] == nil {
+		t.Fatal("model failure codes must be available to generated clients")
+	}
+	wantCodes := make([]any, 0)
+	for _, code := range chat.ModelFailureCodes() {
+		wantCodes = append(wantCodes, code)
+	}
+	if !reflect.DeepEqual(codeSchema["enum"], wantCodes) {
+		t.Fatal("OpenAPI model codes must come from the Core terminal directory")
+	}
+	operation := conversationGroupPaths()["/conversations:chat"].(map[string]any)["post"].(map[string]any)
+	responses := operation["responses"].(map[string]any)
+	if responses["default"] == nil {
+		t.Fatal("chat HTTP rejection contract is missing")
+	}
+}
+
 func TestLearningOpenAPIHasTypedBodiesAndErrors(t *testing.T) {
 	r := mux.NewRouter()
 	registerCoreRoutes(r)

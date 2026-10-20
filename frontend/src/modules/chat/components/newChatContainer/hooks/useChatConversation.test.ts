@@ -1856,7 +1856,7 @@ describe("useChatConversation regeneration recovery", () => {
     expect(result.current.draftWorkspace?.workspace_id).toBe("new-grant");
   });
 
-  it("confirms the prepared conversation after a mapped 503 so model switching can target it", async () => {
+  it.each([false, true])("confirms the prepared conversation after HTTP 503 (terminal contract: %s)", async (authoritative) => {
     const clientConversationId = "44444444-4444-4444-8444-444444444444";
     const { listeners, onOpenSSE } = createPreparedStream(clientConversationId);
     const onOpenResumeSSE = vi.fn();
@@ -1875,9 +1875,14 @@ describe("useChatConversation regeneration recovery", () => {
         type: "error",
         status: 503,
         data: JSON.stringify({
-          code: 2001597,
+          code: authoritative ? 2000000 : 2001597,
           message: "provider-secret: model config unavailable",
-          data: { detail: { history_id: "persisted-preflight-history" } },
+          data: { detail: { history_id: "persisted-preflight-history" },
+            ...(authoritative ? { run_terminal: {
+              status: "failed", reason: "model_failure", code: "model_configuration", partial_output: false,
+              model_invoked: false, diagnostic_id: "diag_http_contract",
+            } } : {}),
+          },
         }),
       });
     });
@@ -1898,13 +1903,19 @@ describe("useChatConversation regeneration recovery", () => {
       run_terminal: {
         status: "failed",
         reason: "model_failure",
-        code: "not_found",
+        code: "model_configuration",
         partial_output: false,
       },
     });
     expect(JSON.stringify(result.current.messageList)).not.toContain(
       "provider-secret",
     );
+    if (authoritative) {
+      expect(result.current.messageList[1].run_terminal).toEqual({
+        status: "failed", reason: "model_failure", code: "model_configuration", partial_output: false,
+        model_invoked: false, diagnostic_id: "diag_http_contract",
+      });
+    }
     expect(result.current.messageList.map(item => item.history_id)).toEqual([
       "persisted-preflight-history", "persisted-preflight-history",
     ]);

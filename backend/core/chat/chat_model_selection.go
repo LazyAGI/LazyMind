@@ -325,11 +325,7 @@ func unavailableAutoChatModels(conversation *orm.Conversation, histories []chatM
 			continue
 		}
 		seen[key] = true
-		switch terminal.Code {
-		case "authentication_failed", "permission_denied", "not_found",
-			"rate_limited", "usage_limit_exceeded", "concurrency_limited", "quota_exhausted",
-			"balance_exhausted", "organization_spend_limit_exceeded", "project_spend_limit_exceeded",
-			"request_timeout", "provider_overloaded", "service_unavailable", "provider_internal_error", "transport_error":
+		if validModelFailureCodes[terminal.Code] {
 			unavailable[key] = true
 		}
 	}

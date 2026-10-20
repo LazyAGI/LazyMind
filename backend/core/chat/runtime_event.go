@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"lazymind/core/common"
+	"sort"
 	"strings"
 )
 
@@ -82,6 +83,17 @@ var validModelFailureOrigins = map[string]struct{}{
 }
 
 var validModelFailureCodes = common.ValidModelFailureCodes
+
+// ModelFailureCodes supplies OpenAPI and its generated clients from the same
+// directory used to validate persisted and streamed terminals.
+func ModelFailureCodes() []string {
+	codes := make([]string, 0, len(validModelFailureCodes))
+	for code := range validModelFailureCodes {
+		codes = append(codes, code)
+	}
+	sort.Strings(codes)
+	return codes
+}
 
 func (e *ChatRuntimeEvent) Validate(expectedRunID string) error {
 	if e == nil {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,8 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
+	appLog "lazymind/core/log"
 	"lazymind/core/workflow"
 )
 
@@ -375,6 +378,10 @@ func TestDocumentDeliveryPublicationConflictAfterExternalSuccess(t *testing.T) {
 }
 
 func TestDocumentDeliveryPublicationUnknownIsNotReplayed(t *testing.T) {
+	var logs bytes.Buffer
+	previousLogger := appLog.Logger
+	appLog.Logger = zerolog.New(&logs)
+	t.Cleanup(func() { appLog.Logger = previousLogger })
 	f, s := newDeliveryFixture(t, "markdown")
 	s.writeStatus = 502
 	body := deliveryBody("ambiguous-write")
@@ -384,6 +391,24 @@ func TestDocumentDeliveryPublicationUnknownIsNotReplayed(t *testing.T) {
 	}
 	if len(s.writes()) != 1 {
 		t.Fatalf("write path not reached: %s", w.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			OperationID string `json:"operation_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	var event map[string]any
+	if err := json.Unmarshal(logs.Bytes(), &event); err != nil {
+		t.Fatalf("missing failure log: %v", err)
+	}
+	if envelope.Data.OperationID == "" || event["operation_id"] != envelope.Data.OperationID || event["error_code"] != "PUBLICATION_OUTCOME_UNKNOWN" {
+		t.Fatalf("failure log cannot identify the publication: %#v", event)
+	}
+	if strings.Contains(logs.String(), "do-not-leak-provider") {
+		t.Fatal("raw provider error reached logs")
 	}
 	before := descriptorSnapshot(t, f)
 	_ = deliveryPublish(t, f, body)

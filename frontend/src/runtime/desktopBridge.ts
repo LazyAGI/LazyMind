@@ -99,6 +99,11 @@ export interface DesktopAgentAction {
 }
 
 export interface DesktopAgentIntegrationStatus {
+  issue?: { code: "unsupported_version" | "dependency_environment" | "operation_failed"; path?: string };
+	can_connect?: boolean;
+	can_disconnect?: boolean;
+	retry_action?: "connect" | "disconnect";
+	profiles?: Array<{ name: string; state: DesktopAgentIntegrationState; message?: string }>;
   agent: DesktopAgent;
   display_name: string;
   version?: string;
@@ -444,7 +449,7 @@ export async function agentIntegrationStatuses(): Promise<DesktopAgentIntegratio
     }
     const payload = await assistantBridgeJSON<{
       agents?: Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
-    }>("/agents", undefined, STATUS_TIMEOUT_MS);
+    }>("/agents", undefined, AGENT_STATUS_TIMEOUT_MS);
     return { ok: true, data: payload.agents || {} };
   } catch (error) {
     return localBridgeFailure(error);
@@ -461,7 +466,9 @@ export async function agentIntegrationAction(agent: DesktopAgent, action: Deskto
     return callLocalAssistantBridge(
       `/agents/${encodeURIComponent(agent)}/${action}`,
       { method: "POST" },
-      action === "login" ? LOGIN_TIMEOUT_MS : agent === "deepseek-harness" && action === "connect" ? INSTALL_TIMEOUT_MS : ACTION_TIMEOUT_MS,
+      action === "login" ? LOGIN_TIMEOUT_MS
+        : agent === "deepseek-harness" && action === "connect" ? INSTALL_TIMEOUT_MS
+        : agent === "deepseek-harness" && action === "disconnect" ? DSH_DISCONNECT_TIMEOUT_MS : ACTION_TIMEOUT_MS,
     );
   } catch (error) {
     return localBridgeFailure(error);
@@ -590,8 +597,12 @@ async function changeAgentExecutable(
 }
 
 const STATUS_TIMEOUT_MS = 10_000;
+// DSH's bounded runtime inspection can take 15 seconds. Leave time for the
+// other agent probes and cleanup, matching the Electron connector budgets.
+const AGENT_STATUS_TIMEOUT_MS = 30_000;
+const DSH_DISCONNECT_TIMEOUT_MS = 60_000;
 const ACTION_TIMEOUT_MS = 15_000;
-const INSTALL_TIMEOUT_MS = 120_000;
+const INSTALL_TIMEOUT_MS = 660_000;
 const BINDING_TIMEOUT_MS = 30_000;
 const LOGIN_TIMEOUT_MS = 125_000;
 

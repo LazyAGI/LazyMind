@@ -13,6 +13,7 @@ SENSITIVE_FILTER_RESPONSE_TEXT = 'Sorry, I have not learned how to answer this q
 
 IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg')
 CHAT_DOCUMENT_EXTENSIONS = ('.pdf', '.doc', '.docx', '.pptx')
+CHAT_SPREADSHEET_EXTENSIONS = ('.csv', '.tsv', '.xls', '.xlsx')
 # Keep this list aligned with frontend allowedTextTypes and core common textFileExtensions.
 CHAT_TEXT_EXTENSIONS = (
     '.txt', '.md', '.markdown', '.lmd', '.csv', '.tsv', '.json', '.jsonl', '.ndjson',
@@ -26,7 +27,9 @@ CHAT_TEXT_EXTENSIONS = (
     '.gradle', '.groovy', '.lua', '.r', '.dart', '.ex', '.exs', '.erl', '.hrl',
     '.clj', '.cljs', '.edn', '.fs', '.fsx', '.vb', '.asm', '.s',
 )
-CHAT_ATTACHMENT_EXTENSIONS = IMAGE_EXTENSIONS + CHAT_DOCUMENT_EXTENSIONS + CHAT_TEXT_EXTENSIONS
+CHAT_ATTACHMENT_EXTENSIONS = (
+    IMAGE_EXTENSIONS + CHAT_DOCUMENT_EXTENSIONS + CHAT_SPREADSHEET_EXTENSIONS + CHAT_TEXT_EXTENSIONS
+)
 DEFAULT_TMP_BLOCK_TOPK = 20
 
 DEFAULT_CHAT_DATASET: str = config['default_chat_dataset']

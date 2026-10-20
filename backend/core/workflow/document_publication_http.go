@@ -15,6 +15,7 @@ import (
 	"lazymind/core/algo"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	appLog "lazymind/core/log"
 	"lazymind/core/modelconfig"
 	corestore "lazymind/core/store"
 	"lazymind/core/subagent"
@@ -532,6 +533,16 @@ func replyPublicationResult(w http.ResponseWriter, result *DocumentPublishResult
 	failure := publicationFailure(err)
 	data := map[string]any{"code": failure.code, "retryable": false}
 	if op != nil {
+		// Correlate failures without logging content, credentials or upstream text.
+		appLog.Logger.Warn().
+			Str("component", "document_publication").
+			Str("operation_id", op.ID).
+			Str("session_id", op.SessionID).
+			Str("artifact_id", op.SourceRevisionID).
+			Str("provider", op.Provider).
+			Str("status", op.Status).
+			Str("error_code", failure.code).
+			Msg("Document publication failed")
 		data["operation_id"] = op.ID
 		data["provider"] = op.Provider
 		data["provider_synced"] = len(op.ReceiptJSON) > 0

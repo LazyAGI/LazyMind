@@ -176,7 +176,7 @@ func configureDSHWorkflow(path, pairingFile, webURL, bridgeURL string, disabled 
 }
 
 func (a *Adapter) dshWorkflowConfigured() bool {
-	document, err := readYAMLDocument(configPath(DeepSeekHarness))
+	document, err := readYAMLDocument(a.dshConfigPath())
 	if err != nil {
 		return false
 	}
@@ -188,8 +188,33 @@ func (a *Adapter) dshWorkflowConfigured() bool {
 	if err != nil {
 		return false
 	}
-	if _, err := dshModuleVersion(filepath.Dir(configPath(DeepSeekHarness)), dshWorkflowPackage); err != nil {
+	if _, err := dshModuleVersion(filepath.Dir(a.dshConfigPath()), dshWorkflowPackage); err != nil {
 		return false
+	}
+	if a.dshTarget != "" {
+		if !a.dshMCPReady {
+			return false
+		}
+		body, err := os.ReadFile(filepath.Join(filepath.Dir(a.dshConfigPath()), "package.json"))
+		var manifest struct {
+			DSH struct {
+				Profile struct {
+					Bundles []string `json:"bundles"`
+				} `json:"profile"`
+			} `json:"dsh"`
+		}
+		if err != nil || json.Unmarshal(body, &manifest) != nil {
+			return false
+		}
+		active := false
+		for _, bundle := range manifest.DSH.Profile.Bundles {
+			if bundle == dshWorkflowPackage {
+				active = true
+			}
+		}
+		if !active || decodeDSHStdio(findDSHEntry(document)).Env["LAZYMIND_WORKFLOW_HOST_CONTROL"] != "1" {
+			return false
+		}
 	}
 	for _, item := range yamlSequence(document).Content {
 		if scalarValue(item, "id") != dshWorkflowRow || scalarValue(item, "disabled") == "true" {
@@ -209,24 +234,28 @@ func (a *Adapter) dshWorkflowConfigured() bool {
 	return false
 }
 
-func (a *Adapter) installDSHWorkflow(ctx context.Context) (bool, error) {
-	profile := filepath.Dir(configPath(DeepSeekHarness))
-	version, err := dshModuleVersion(profile, "@deepseek-ai/dsh-session")
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return false, err
-	}
-	if errors.Is(err, os.ErrNotExist) {
-		// A new official profile inherits its base from the launching CLI and has no
-		// local SDK dependencies. Install our MCP dependency through the supported CLI.
-		binary, findErr := dshExecutable()
-		if findErr != nil {
-			return false, findErr
+func (a *Adapter) installDSHWorkflow(ctx context.Context, beforePublish ...func() error) (bool, error) {
+	var version string
+	var err error
+	profile := filepath.Dir(a.dshConfigPath())
+	if a.dshCLI == "" {
+		version, err = dshModuleVersion(profile, "@deepseek-ai/dsh-session")
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return false, err
 		}
-		output, probeErr := agentexec.Run(ctx, binary, "--version")
-		if probeErr != nil {
-			return false, probeErr
+		if errors.Is(err, os.ErrNotExist) {
+			// Legacy standalone installations still obtain their matching package version.
+			binary, findErr := dshExecutable()
+			if findErr != nil {
+				return false, findErr
+			}
+			output, probeErr := agentexec.Run(ctx, binary, "--version")
+			if probeErr != nil {
+				return false, probeErr
+			}
+			version = strings.TrimPrefix(strings.TrimSpace(output), "v")
 		}
-		version = strings.TrimPrefix(strings.TrimSpace(output), "v")
+
 	}
 	store, err := credentials.NewStore(a.home, "")
 	if err != nil {
@@ -247,10 +276,6 @@ func (a *Adapter) installDSHWorkflow(ctx context.Context) (bool, error) {
 		return false, errors.New("update LazyMind Core and its database before enabling workflow control")
 	}
 	account, err := store.AccountScope()
-	if err != nil {
-		return false, err
-	}
-	pair, err := workflowhost.Ensure(a.home, profile, account)
 	if err != nil {
 		return false, err
 	}
@@ -275,19 +300,35 @@ func (a *Adapter) installDSHWorkflow(ctx context.Context) (bool, error) {
 	run := a.dshRunner
 	if run == nil {
 		run = runDSHPlugin
+		if a.dshCLI != "" {
+			run = a.runBundledDSHPlugin
+		}
 	}
-	if err := run(ctx, dshProfileName(), "add", "--workspace-root", "@deepseek-ai/dsh-mcp-client@"+version, archive); err != nil {
+	args := []string{"add", "--workspace-root", "@deepseek-ai/dsh-mcp-client@" + version, archive}
+	if a.dshCLI != "" {
+		args = []string{"add", archive}
+	}
+	if err := run(ctx, a.dshProfile(), args...); err != nil {
+		return false, err
+	}
+	for _, prepare := range beforePublish {
+		if err := prepare(); err != nil {
+			return false, err
+		}
+	}
+	pair, err := workflowhost.Ensure(a.home, profile, account)
+	if err != nil {
 		return false, err
 	}
 	pairingFile := filepath.Join(a.home, "workflow-hosts", pair.ConnectorID+".json")
-	if err := configureDSHWorkflow(configPath(DeepSeekHarness), pairingFile, webURL, bridgeURL, false); err != nil {
+	if err := configureDSHWorkflow(a.dshConfigPath(), pairingFile, webURL, bridgeURL, false); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
 func (a *Adapter) disconnectDSHWorkflow() error {
-	document, err := readYAMLDocument(configPath(DeepSeekHarness))
+	document, err := readYAMLDocument(a.dshConfigPath())
 	if err != nil {
 		return err
 	}
@@ -302,7 +343,7 @@ func (a *Adapter) disconnectDSHWorkflow() error {
 				return err
 			}
 		}
-		return configureDSHWorkflow(configPath(DeepSeekHarness), "", "", "", true)
+		return configureDSHWorkflow(a.dshConfigPath(), "", "", "", true)
 	}
 	return nil
 }

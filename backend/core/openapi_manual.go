@@ -1,5 +1,7 @@
 package main
 
+import "lazymind/core/chat"
+
 func manualOpenAPISpec() map[string]any {
 	schemas, paths := manualSchemas(), manualPaths()
 	for name, schema := range notificationSchemas() {
@@ -805,6 +807,12 @@ func manualSchemas() map[string]any {
 			prop("data", refSchema("EpisodeMemory")),
 		),
 		"SetChatHistoryResponse": obj(prop("history_id", strSchema())),
+		"ModelFailureCode":       enumStringSchema(chat.ModelFailureCodes()...),
+		"ChatErrorResponse": objReq([]string{"code", "message"},
+			prop("code", intSchema()), prop("message", strSchema()), prop("data", refSchema("ChatErrorData"))),
+		"ChatErrorData": obj(
+			prop("run_terminal", refSchema("RunTerminal")),
+			prop("detail", map[string]any{"description": "Legacy error detail; persisted chat failures include history_id."})),
 		"RunTerminal": objReq(
 			[]string{"status", "reason", "partial_output"},
 			prop("status", enumStringSchema("completed", "interrupted", "failed", "cancelled")),
@@ -814,6 +822,7 @@ func manualSchemas() map[string]any {
 			prop("model_call_id", strSchema()),
 			prop("model_invoked", boolSchema()),
 			prop("diagnostic_id", strSchema()),
+			prop("transport_diagnostic", objReq([]string{"code"}, prop("code", enumStringSchema("upstream_stream_failed", "upstream_stream_timeout")))),
 		),
 		"ChatModelSwitchIdentity": objReq([]string{"candidate_id", "source", "model_id", "provider_group_id"},
 			prop("candidate_id", strSchema()), prop("source", enumStringSchema("own", "shared", "cloud")), prop("model_id", strSchema()), prop("provider_group_id", strSchema()), prop("provider_name", strSchema()), prop("model_name", strSchema())),

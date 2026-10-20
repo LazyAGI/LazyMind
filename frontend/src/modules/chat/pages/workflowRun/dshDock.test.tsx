@@ -2,10 +2,11 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { it, expect } from 'vitest';
 import type { ComponentType } from 'react';
 import * as React from 'react';
+import * as ReactDOM from 'react-dom';
 import * as jsxRuntime from 'react/jsx-runtime';
 import clientBundle from '../../../../../../integrations/dsh-workflow/lib/client.js?raw';
 
-it('docks above input and retains the iframe through updates, expansion and restoration', () => {
+it('scrolls at the transcript tail and retains the iframe through messages, expansion and restoration', () => {
   const seats = new Map<string, ComponentType<any>>();
   const ctx = {
     effect: () => {},
@@ -20,6 +21,7 @@ it('docks above input and retains the iframe through updates, expansion and rest
     load({ factory }: { factory: (require: (name: string) => unknown) => { apply: (context: typeof ctx) => void } }) {
       factory(name => {
         if (name === 'react') return React;
+        if (name === 'react-dom') return ReactDOM;
         if (name === 'react/jsx-runtime') return jsxRuntime;
         throw new Error(`Unexpected browser dependency: ${name}`);
       }).apply(ctx);
@@ -30,16 +32,34 @@ it('docks above input and retains the iframe through updates, expansion and rest
   const Entry = seats.get('conversation.chat.node')!;
   const Dock = seats.get('conversation.input.dock')!;
   const data = { runId: 'run-1', hostSessionId: 'host-1', url: 'http://localhost:8090/workflow-runs/run-1', operation: 'start' };
-  const view = render(<><Entry node={{ data, anchorSeq: 1 }} /><Dock session={{ sessionId: 'host-1' }} /></>);
+  function Conversation({ updated = false }: { updated?: boolean }) {
+    return <div data-conversation-scroll>
+      <div data-testid="messages">
+        <Entry node={{ data, anchorSeq: 1 }} />
+        {updated && <><p>New agent message</p><Entry node={{ data: { ...data, operation: 'state' }, anchorSeq: 2 }} /></>}
+      </div>
+      <div data-composer-seat style={{ position: 'sticky', bottom: 0 }}>
+        <Dock session={{ sessionId: 'host-1' }} /><textarea aria-label="Message" />
+      </div>
+    </div>;
+  }
+  const view = render(<Conversation />);
   const frame = screen.getByTitle('LazyMind Workflow') as HTMLIFrameElement;
   const container = frame.parentElement!;
   const src = frame.src;
+  const tail = frame.closest('[data-lazymind-workflow-tail]')!;
+  expect(tail.parentElement).toHaveAttribute('data-conversation-scroll');
+  expect(tail.previousElementSibling).toBe(screen.getByTestId('messages'));
+  expect(tail.nextElementSibling).toHaveAttribute('data-composer-seat');
+  expect(frame.closest('[data-composer-seat]')).toBeNull();
   expect(container.style.width).toBe('100%');
   expect(container.style.maxWidth).toBe('var(--dsh-chat-content-width, 920px)');
   expect(container.style.alignSelf).toBe('center');
-  view.rerender(<><Entry node={{ data: { ...data, operation: 'state' }, anchorSeq: 2 }} /><Dock session={{ sessionId: 'host-1' }} /></>);
+  view.rerender(<Conversation updated />);
   expect(screen.getByTitle('LazyMind Workflow')).toBe(frame);
   expect(frame.src).toBe(src);
+  expect(tail.previousElementSibling).toContainElement(screen.getByText('New agent message'));
+  expect(screen.getAllByTitle('LazyMind Workflow')).toHaveLength(1);
   const message = (origin: string, source: MessageEventSource | null, sessionId = 'run-1',
     type = 'lazymind.workflow.toggle-expand') => {
     act(() => window.dispatchEvent(new MessageEvent('message', { origin, source,
@@ -52,17 +72,33 @@ it('docks above input and retains the iframe through updates, expansion and rest
   message('http://localhost:8090', frame.contentWindow);
   expect(container.style.position).toBe('fixed');
   expect(container.style.maxWidth).toBe('none');
+  expect(container.parentElement!.style.height).not.toBe('');
   expect(screen.getByTitle('LazyMind Workflow')).toBe(frame);
   fireEvent.keyDown(window, { key: 'Escape' });
   expect(container.style.position).not.toBe('fixed');
   expect(container.style.maxWidth).toBe('var(--dsh-chat-content-width, 920px)');
   expect(screen.getByTitle('LazyMind Workflow')).toBe(frame);
+  const scroller = tail.parentElement!;
+  scroller.scrollTop = 1000;
+  // Model layout in the shared scroller; jsdom does not calculate element boxes.
+  container.getBoundingClientRect = () => ({
+    bottom: 1200 - scroller.scrollTop + (container.style.height === '66px' ? 66 : 700),
+  } as DOMRect);
+  const originalBottom = container.getBoundingClientRect().bottom;
   message('http://localhost:8090', frame.contentWindow, 'run-1', 'lazymind.workflow.toggle-collapse');
   expect(container.style.height).toBe('66px');
+  expect(container.getBoundingClientRect().bottom).toBe(originalBottom);
   message('http://localhost:8090', frame.contentWindow, 'run-1', 'lazymind.workflow.toggle-collapse');
-  expect(container.style.height).toBe('min(480px, 55dvh)');
+  expect(container.style.height).toBe('min(900px, 75dvh)');
+  expect(scroller.scrollTop).toBe(1000);
+  expect(container.getBoundingClientRect().bottom).toBe(originalBottom);
+  scroller.scrollTop = 500;
+  view.rerender(<Conversation updated />);
+  expect(scroller.scrollTop).toBe(500);
   message('http://localhost:8090', frame.contentWindow);
   message('http://localhost:8090', frame.contentWindow);
   expect(container.style.position).not.toBe('fixed');
   expect(screen.getByTitle('LazyMind Workflow')).toBe(frame);
+  view.unmount();
+  expect(tail.isConnected).toBe(false);
 });

@@ -1,6 +1,6 @@
 import { SSE } from "./sse";
 import i18n from "@/i18n";
-import type { ChatModelOutput } from "@/api/generated/core-client";
+import type { ChatModelOutput, RunTerminal as CoreRunTerminal } from "@/api/generated/core-client";
 
 export interface StreamCallbacks {
   message?: (e: CustomEvent) => void;
@@ -34,21 +34,7 @@ export interface StreamRegistrationOptions {
   allowConcurrent?: boolean;
 }
 
-export interface RunTerminal {
-  status: "completed" | "interrupted" | "failed" | "cancelled";
-  reason:
-    | "normal"
-    | "awaiting_user_input"
-    | "model_incomplete"
-    | "model_failure"
-    | "runtime_failure"
-    | "user_cancelled";
-  code?: string;
-  partial_output: boolean;
-  model_call_id?: string;
-  model_invoked?: boolean;
-  diagnostic_id?: string;
-}
+export type RunTerminal = CoreRunTerminal;
 
 export class StreamManager {
   private streams: Map<string, SSE> = new Map();
