@@ -18,7 +18,11 @@
 | 模型 | 外部 Codex 请求 gpt-6-astra / medium；实际后端身份 N/A。LazyMind 对话模型设置与该子进程独立 |
 | 服务 | 既有本地 LazyMind，公开 workflow.control.v1 API；本轮未重建服务或认证运行二进制的 commit，实际服务 SHA=N/A |
 
-原工作已保存为 `4291be83`，在最新 main 上无冲突整理；主 checkout 未修改。新 venv、干净 checkout、
+交付打包时只读查询发现远端 main 又推进到 `87ee4145166d94f18230e55060b009596aed5e59`。
+本候选固定使用上述启动时 fetch 的 `3486910b` 基线；未将后续未验收的上游变化混入 RC。
+提交 PR 时应以当时的主线差异和 CI 为准。
+
+原工作已保存为 `4291be83`，在本轮同步的 main 上无冲突整理；主 checkout 未修改。新 venv、干净 checkout、
 新上游 clone、私有配置、新 Workflow namespace 和八个测试仓库/工作区均独立建立。服务和 Codex 登录
 是明确的前置条件；不把“新的客户端环境”称作全新 OS/服务器安装。
 [每个 Case 的源码版本及文件哈希](examples/superpowers-workflow-reliability/evidence/rc/provenance.json)。
