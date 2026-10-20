@@ -7,7 +7,7 @@ import KnowledgeMarketTaskModal from "./KnowledgeMarketTaskModal";
 
 const cancelTask = vi.hoisted(() => vi.fn());
 vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
-  getKnowledgeMarketTask: vi.fn(), listKnowledgeMarketTasks: vi.fn(),
+  listKnowledgeMarketTaskPage: vi.fn(), listKnowledgeMarketTaskFiles: vi.fn(),
   deleteKnowledgeMarketTask: vi.fn(), retryKnowledgeMarketTask: vi.fn(),
   cancelKnowledgeMarketTask: cancelTask,
 }));
@@ -35,9 +35,6 @@ function fixture(): ControlTask {
     display_state: "blocked", can_cancel: true, can_retry: false, can_delete: false,
   };
 }
-function listTasks(kind?: string) {
-  return Promise.resolve({ items: kind === current.job_type ? [current] : [], total: kind === current.job_type ? 1 : 0, page: 1, page_size: 20 });
-}
 async function mount() {
   await act(async () => { render(
     <ConfigProvider button={{ autoInsertSpace: false }} theme={{ token: { motion: false } }}>
@@ -59,8 +56,8 @@ beforeAll(() => {
 });
 beforeEach(() => {
   vi.useFakeTimers(); vi.clearAllMocks(); cancelTask.mockReset(); current = fixture();
-  vi.mocked(marketApi.listKnowledgeMarketTasks).mockImplementation(listTasks);
-  vi.mocked(marketApi.getKnowledgeMarketTask).mockImplementation(async () => current);
+  vi.mocked(marketApi.listKnowledgeMarketTaskPage).mockImplementation(async () => ({items: [current], total: 1, page: 1, page_size: 10}));
+  vi.mocked(marketApi.listKnowledgeMarketTaskFiles).mockResolvedValue({items: [], total: 0, page: 1, page_size: 10, counts: {success: 0, failed: 0, canceled: 0, unfinished: 0}, file_details_available: false});
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
@@ -82,14 +79,15 @@ describe("knowledge market task control", () => {
     expect(screen.queryByText("正在恢复")).toBeNull();
     expect(screen.queryByRole("button", { name: "恢复服务" })).toBeNull();
   });
-  it("keeps blocked progress and checks status without resubmitting", async () => {
+  it("keeps blocked progress and polls status without a manual recheck button or resubmitting", async () => {
     await mount();
     expect(screen.getByText("60%")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "删除" })).toBeNull();
     expectUnavailableAction(/重试/);
-    const previous = vi.mocked(marketApi.getKnowledgeMarketTask).mock.calls.length;
-    await click(screen.getByRole("button", { name: "重新检查状态" }));
-    expect(marketApi.getKnowledgeMarketTask).toHaveBeenCalledTimes(previous + 1);
+    const previous = vi.mocked(marketApi.listKnowledgeMarketTaskPage).mock.calls.length;
+    expect(screen.queryByRole("button", { name: "重新检查状态" })).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(marketApi.listKnowledgeMarketTaskPage).toHaveBeenCalledTimes(previous + 1);
     expect(marketApi.retryKnowledgeMarketTask).not.toHaveBeenCalled();
     expect(cancelTask).not.toHaveBeenCalled();
   });
@@ -142,20 +140,21 @@ describe("knowledge market task control", () => {
     expect(cancelTask).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("已取消", { exact: true })).toBeNull();
     expect(screen.getByText(/2\s*个.*待确认/)).toBeInTheDocument();
-    const previous = vi.mocked(marketApi.getKnowledgeMarketTask).mock.calls.length;
-    await click(screen.getByRole("button", { name: "重新检查状态" }));
-    expect(marketApi.getKnowledgeMarketTask).toHaveBeenCalledTimes(previous + 1);
+    const previous = vi.mocked(marketApi.listKnowledgeMarketTaskPage).mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(marketApi.listKnowledgeMarketTaskPage).toHaveBeenCalledTimes(previous + 1);
     expect(cancelTask).toHaveBeenCalledTimes(1);
   });
-  it("retains last known rows and supports read-only recheck after polling fails", async () => {
+  it("retains last known rows and automatically recovers after polling fails", async () => {
     await mount();
-    vi.mocked(marketApi.listKnowledgeMarketTasks).mockRejectedValue(new Error("network"));
+    vi.mocked(marketApi.listKnowledgeMarketTaskPage).mockRejectedValue(new Error("network"));
     await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
     expect(screen.getByText("测试资料库")).toBeInTheDocument();
     expect(screen.getByText("状态暂不可确认")).toBeInTheDocument();
     expectUnavailableAction("取消未开始文件");
-    vi.mocked(marketApi.listKnowledgeMarketTasks).mockImplementation(listTasks);
-    await click(screen.getByRole("button", { name: "重新检查状态" }));
+    vi.mocked(marketApi.listKnowledgeMarketTaskPage).mockImplementation(async () => ({items: [current], total: 1, page: 1, page_size: 10}));
+    expect(screen.queryByRole("button", { name: "重新检查状态" })).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
     expect(screen.getByText("处理受阻")).toBeInTheDocument();
     expect(marketApi.retryKnowledgeMarketTask).not.toHaveBeenCalled();
   });
@@ -165,7 +164,7 @@ describe("knowledge market task control", () => {
       parse: { total: 2, done: 1, failed: 1, pending: 0, parsing: 0, state: "partial_failed" } };
     await mount();
     expectUnavailableAction(/重试/);
-    expect(screen.getByText("已完成（部分文档失败）")).toBeInTheDocument();
+    expect(screen.getByText("已完成（部分失败）")).toBeInTheDocument();
     expect(marketApi.retryKnowledgeMarketTask).not.toHaveBeenCalled();
   });
   it("offers an explicit retry for terminal failed files", async () => {
@@ -174,7 +173,7 @@ describe("knowledge market task control", () => {
       parse: { total: 2, done: 1, failed: 1, pending: 0, parsing: 0, state: "partial_failed" } };
     vi.mocked(marketApi.retryKnowledgeMarketTask).mockResolvedValue({ job_id: "retry-job", state: "pending" });
     await mount();
-    await click(screen.getByRole("button", { name: "重试失败文件" }));
+    await click(screen.getByRole("button", { name: "重试" }));
     expect(marketApi.retryKnowledgeMarketTask).toHaveBeenCalledTimes(1);
     expect(marketApi.retryKnowledgeMarketTask).toHaveBeenCalledWith("control-job");
     expect(cancelTask).not.toHaveBeenCalled();

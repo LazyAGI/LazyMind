@@ -40,7 +40,7 @@ var errConversationOrderConflict = errors.New("conversation order changed")
 func lockConversationHistory(tx *gorm.DB, userID string) ([]orm.Conversation, error) {
 	var rows []orm.Conversation
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Select("id", "pinned_at", "history_order", "unpinned_history_order", "updated_at").
+		Select("id", "pinned_at", "history_order", "unpinned_history_order", "updated_at", "is_task_conv").
 		Where("create_user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND is_ephemeral = ? AND (parent_conversation_id IS NULL OR parent_conversation_id = '')", userID, false).
 		Order("id ASC").Find(&rows).Error
 	sort.SliceStable(rows, func(i, j int) bool { return conversationHistoryLess(rows[i], rows[j]) })
@@ -103,8 +103,106 @@ func replyConversationOrderError(w http.ResponseWriter, r *http.Request, err err
 	}
 }
 
-// ReorderConversation moves one root relative to another without overwriting
-// filtered-out or unloaded conversations, and without modifying activity dates.
+// The server derives the list from durable relationships, never from client scope.
+// Pinned roots share the pinned list; other roots belong to their group or recent
+// list. Children can only move among siblings. Membership is never written here.
+func lockConversationOrderScope(ctx context.Context, tx *gorm.DB, userID, id, targetID string) ([]orm.Conversation, error) {
+	active := tx.Model(&orm.Conversation{}).Where("create_user_id=? AND deleted_at IS NULL AND archived_at IS NULL AND is_ephemeral=?", userID, false)
+	var anchors []orm.Conversation
+	if err := active.Session(&gorm.Session{}).Clauses(clause.Locking{Strength: "UPDATE"}).Where("id IN ?", []string{id, targetID}).Order("id").Find(&anchors).Error; err != nil {
+		return nil, err
+	}
+	if len(anchors) != 2 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var origins []orm.ConversationForkOrigin
+	if err := tx.Where("conversation_id IN ?", []string{id, targetID}).Find(&origins).Error; err != nil {
+		return nil, err
+	}
+	forkParents := make(map[string]string, len(origins))
+	for _, origin := range origins {
+		forkParents[origin.ConversationID] = origin.SourceConversationID
+	}
+	left, right := anchors[0], anchors[1]
+	parent := func(row orm.Conversation) string {
+		// Fork provenance takes precedence, matching the sidebar relation resolver.
+		if source, ok := forkParents[row.ID]; ok {
+			return source
+		}
+		if row.ParentConversationID != nil {
+			return *row.ParentConversationID
+		}
+		return ""
+	}
+	if (parent(left) == "") != (parent(right) == "") {
+		return nil, gorm.ErrRecordNotFound
+	}
+	if left.IsTaskConv != right.IsTaskConv || parent(left) != parent(right) || (left.PinnedAt != nil) != (right.PinnedAt != nil) {
+		return nil, errConversationOrderConflict
+	}
+	query := active.Session(&gorm.Session{}).Where("is_task_conv=?", left.IsTaskConv)
+	forks := tx.Model(&orm.ConversationForkOrigin{}).Select("conversation_id")
+	parentID := parent(left)
+	if parentID != "" {
+		var ownerParent orm.Conversation
+		if err := active.Session(&gorm.Session{}).Where("id=? AND is_task_conv=?", parentID, left.IsTaskConv).Take(&ownerParent).Error; err != nil {
+			return nil, err
+		}
+		if left.PinnedAt != nil {
+			return nil, errConversationOrderConflict
+		}
+		siblingForks := tx.Model(&orm.ConversationForkOrigin{}).Select("conversation_id").Where("source_conversation_id=?", parentID)
+		query = query.Where("id IN (?) OR (parent_conversation_id=? AND id NOT IN (?))", siblingForks, parentID, forks).
+			Where("pinned_at IS NULL")
+	} else {
+		query = query.Where("(parent_conversation_id IS NULL OR parent_conversation_id='') AND id NOT IN (?)", forks)
+		if left.PinnedAt != nil {
+			query = query.Where("pinned_at IS NOT NULL")
+		} else {
+			var memberships []orm.ConversationGroupMember
+			if err := tx.Where("user_id=? AND conversation_id IN ?", userID, []string{id, targetID}).Find(&memberships).Error; err != nil {
+				return nil, err
+			}
+			groups := map[string]string{}
+			for _, member := range memberships {
+				groups[member.ConversationID] = member.GroupID
+			}
+			if groups[id] != groups[targetID] {
+				return nil, errConversationOrderConflict
+			}
+			members := tx.Model(&orm.ConversationGroupMember{}).Select("conversation_id").Where("user_id=?", userID)
+			if groupID := groups[id]; groupID != "" {
+				var group orm.ConversationGroup
+				if err := tx.Where("id=? AND user_id=? AND deleted_at IS NULL AND is_task_conv=?", groupID, userID, left.IsTaskConv).Take(&group).Error; err != nil {
+					return nil, err
+				}
+				query = query.Where("id IN (?)", members.Where("group_id=?", groupID))
+			} else {
+				query = query.Where("id NOT IN (?)", members)
+			}
+			query = query.Where("pinned_at IS NULL OR unpinned_history_order IS NOT NULL")
+		}
+	}
+	var rows []orm.Conversation
+	if err := query.Clauses(clause.Locking{Strength: "UPDATE"}).Order("id").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(rows)+1)
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	if parentID != "" {
+		ids = append(ids, parentID)
+	}
+	if err := conversationgroup.RequireOrganizerUnlocked(ctx, tx, userID, ids, ""); err != nil {
+		return nil, err
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return conversationHistoryLess(rows[i], rows[j]) })
+	return rows, nil
+}
+
+// ReorderConversation moves relative to an anchor within the same list, keeping
+// filtered-out and unloaded conversations and leaving activity dates unchanged.
 func ReorderConversation(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(mux.Vars(r)["conversation_id"])
 	var body struct {
@@ -123,8 +221,8 @@ func ReorderConversation(w http.ResponseWriter, r *http.Request) {
 		userID = "0"
 	}
 	var result conversationOrderResult
-	err = conversationCheckpoint(r.Context(), store.DB(), "", func(tx *gorm.DB) error {
-		rows, err := lockConversationHistory(tx, userID)
+	err = conversationgroup.UserTransaction(r.Context(), store.DB(), userID, func(tx *gorm.DB) error {
+		rows, err := lockConversationOrderScope(r.Context(), tx, userID, id, body.TargetID)
 		if err != nil {
 			return err
 		}
@@ -251,7 +349,7 @@ func updateConversationPin(ctx context.Context, db *gorm.DB, userID, id string, 
 		ordered := make([]orm.Conversation, 0, len(rows))
 		manual := false
 		for _, row := range rows {
-			if row.ID != id && (row.PinnedAt != nil) == pinned {
+			if row.ID != id && row.IsTaskConv == moved.IsTaskConv && (row.PinnedAt != nil) == pinned {
 				ordered = append(ordered, row)
 				manual = manual || row.HistoryOrder != nil
 			}

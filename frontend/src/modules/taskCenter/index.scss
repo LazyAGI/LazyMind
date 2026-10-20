@@ -317,7 +317,7 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   display: grid;
   height: 31px;
   padding: 0 18px 0 68px;
-  grid-template-columns: minmax(230px, 1.45fr) minmax(300px, 1.35fr) 160px 62px;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1.35fr) 160px 62px;
   align-items: center;
   gap: 12px;
   border-bottom: 1px solid $border-light;
@@ -331,7 +331,7 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   width: 100%;
   min-height: 62px;
   padding: 6px 18px;
-  grid-template-columns: 38px minmax(230px, 1.45fr) minmax(300px, 1.35fr) 160px 62px;
+  grid-template-columns: 38px minmax(0, 1.45fr) minmax(0, 1.35fr) 160px 62px;
   align-items: center;
   gap: 12px;
   border: 0;
@@ -375,9 +375,10 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   align-items: flex-start;
   gap: 5px;
 
-  > span { display: flex; min-width: 0; align-items: center; gap: 8px; }
-  small { overflow: hidden; color: $muted; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-  .ant-progress { width: 128px; margin: 0; line-height: 1; }
+  > span { display: flex; width: 100%; min-width: 0; align-items: center; gap: 8px; }
+  .ant-tag { flex-shrink: 0; }
+  small { min-width: 0; overflow: hidden; color: $muted; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .ant-progress { width: min(128px, 100%); margin: 0; line-height: 1; }
 }
 
 .workbench-row-action { justify-self: end; color: $blue; font-size: 12px; font-weight: 550; }
@@ -922,8 +923,8 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   .schedule-toolbar > .ant-btn,
   .schedule-view-toggle { flex: 0 0 auto; white-space: nowrap; }
   .attention-task-grid, .schedule-grid.large, .schedule-group-grid.large { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .running-task-head { grid-template-columns: minmax(210px, 1.2fr) minmax(250px, 1fr) 145px 58px; }
-  .running-task-row { grid-template-columns: 38px minmax(210px, 1.2fr) minmax(250px, 1fr) 145px 58px; }
+  .running-task-head { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 145px 58px; }
+  .running-task-row { grid-template-columns: 38px minmax(0, 1.2fr) minmax(0, 1fr) 145px 58px; }
   .schedule-grid.compact .schedule-card { grid-template-columns: minmax(280px, 1.2fr) minmax(210px, 0.8fr) 260px; }
 }
 
@@ -937,7 +938,7 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   .all-tasks-filters { justify-content: flex-start; }
   .all-tasks-filters .ant-input-affix-wrapper { flex: 1 1 260px; }
   .running-task-head { display: none; }
-  .running-task-row { grid-template-columns: 38px minmax(190px, 1fr) minmax(230px, 1fr) 58px; }
+  .running-task-row { grid-template-columns: 38px minmax(0, 1fr) minmax(0, 1fr) 58px; }
   .running-task-row time { display: none; }
   .recent-task-row { grid-template-columns: 20px minmax(220px, 1.2fr) minmax(240px, 1fr) 14px; }
   .recent-task-row time { display: none; }
