@@ -12,15 +12,21 @@
 
   .memory-skill-resource-rail {
     display: flex;
-    flex: 0 0 156px;
+    flex: 0 0 168px;
     flex-direction: column;
-    gap: 5px;
-    padding: 23px 10px 15px;
+    gap: 4px;
+    padding: 16px 10px 14px;
     overflow-y: auto;
     border-right: 1px solid #e5eaf2;
     background: #fbfcfe;
 
-    &__label { margin: 0 12px 12px; color: #667085; font-size: 11px; }
+    &__divider {
+      display: block;
+      height: 1px;
+      margin: 10px 12px;
+      background: #e5eaf2;
+    }
+
     button {
       display: flex;
       align-items: center;
@@ -37,7 +43,6 @@
       white-space: nowrap;
       &:hover { background: #f0f4fa; }
       &.is-active { background: #eaf2ff; color: #1768db; font-weight: 600; }
-      &:last-child { margin-top: 16px; }
     }
   }
 
@@ -63,7 +68,7 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 18px;
+    gap: 8px;
     h2 { margin: 0; color: #101828; font-size: 20px; font-weight: 600; letter-spacing: -.4px; }
   }
   .memory-skill-toolbar-actions { display: flex; flex-wrap: wrap; flex-shrink: 1; padding-bottom: 0; gap: 6px; }
@@ -95,7 +100,26 @@
   }
   .memory-skill-create-split__main { font-size: 12px; }
   .memory-skill-installed { min-height: 0; gap: 0; }
-  .memory-skill-installed-filters { padding: 0 24px 14px; border-bottom: 1px solid #e5eaf2; }
+  .memory-skill-installed-filters {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 24px 14px;
+    border-bottom: 1px solid #e5eaf2;
+  }
+  .memory-skill-batch-toggle {
+    margin-left: auto;
+    height: 32px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #536177;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    &:hover, &.is-active { background: #f5f8fc; color: #1768db; }
+  }
   .memory-skill-source-tabs {
     display: flex;
     align-items: center;
@@ -136,6 +160,11 @@
     .ant-btn { height: 28px; padding: 3px 8px; border-color: #dce3ed; font-size: 12px; }
     .memory-skill-batch-clear { margin-left: auto; }
   }
+  .ant-select.memory-skill-call-mode-select {
+    width: 100%;
+    max-width: 110px;
+    font-size: 12px;
+  }
   .ant-btn.memory-skill-call-mode-select {
     display: inline-flex;
     align-items: center;
@@ -149,8 +178,10 @@
     box-shadow: none;
     font-size: 12px;
     &.is-priority { background: #edf3ff; color: #2563c7; }
-    &.is-on_demand { background: #eff7f4; color: #287864; }
-    &.is-manual { background: #f3f4f7; color: #606b7c; }
+    &.is-on_demand,
+    &.is-auto { background: #eff7f4; color: #287864; }
+    &.is-manual,
+    &.is-disabled { background: #f3f4f7; color: #606b7c; }
     &:hover:not(:disabled) { border-color: currentColor; }
     &:disabled { opacity: .55; }
     .anticon { font-size: 10px; opacity: .7; }
@@ -160,7 +191,13 @@
     .ant-table { border: 0; border-radius: 0; }
     .ant-table-thead > tr > th { background: #fbfcfe; color: #667085; font-size: 11px; font-weight: 500; }
     .ant-table-tbody > tr > td { padding-top: 10px; padding-bottom: 10px; border-bottom-color: #eff2f6; font-size: 12px; }
-    .ant-pagination { padding: 0 20px; }
+    .ant-table-thead > tr > th:first-child,
+    .ant-table-tbody > tr > td:first-child { padding-left: 24px; }
+    .ant-pagination { padding: 0 24px; }
+  }
+  .memory-skill-market-pagination {
+    justify-content: flex-end;
+    padding: 8px 20px 8px;
   }
   .memory-table-main-with-icon { align-items: center; gap: 10px; }
   .memory-table-main-icon {
@@ -191,7 +228,7 @@
   button:focus-visible { outline: 3px solid #8dbfff; outline-offset: 2px; }
 
   @media (max-width: 1100px) {
-    .memory-skill-resource-rail { flex-basis: 140px; padding-inline: 7px; }
+    .memory-skill-resource-rail { flex-basis: 148px; padding-inline: 7px; }
     .memory-skill-toolbar { padding: 16px; }
     .memory-skill-installed-filters { padding-inline: 16px; }
     .memory-skill-market { padding-inline: 16px; }
@@ -205,8 +242,8 @@
       padding: 8px;
       border-right: 0;
       border-bottom: 1px solid #e5eaf2;
-      &__label { display: none; }
-      button { padding: 9px; &:last-child { margin-top: 0; } }
+      &__divider { width: 1px; height: 22px; margin: auto 6px; }
+      button { padding: 9px; }
     }
     .memory-skill-toolbar-actions { justify-content: flex-start; }
     .memory-skill-installed-filters { flex-wrap: wrap; }
@@ -245,8 +282,8 @@
       padding: 8px 12px;
       border-right: 0;
       border-bottom: 1px solid #e5eaf2;
-      &__label { display: none; }
-      button { padding: 8px 12px; &:last-child { margin-top: 0; } }
+      &__divider { width: 1px; height: 22px; margin: auto 6px; }
+      button { padding: 8px 12px; }
     }
     .memory-skill-toolbar { gap: 12px; padding: 16px; }
     .memory-skill-heading-group { width: 100%; justify-content: space-between; }

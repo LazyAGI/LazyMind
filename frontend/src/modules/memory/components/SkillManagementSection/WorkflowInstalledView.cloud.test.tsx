@@ -33,9 +33,9 @@ describe("Desktop 我的工作流 combined catalog", () => {
     mocks.session.mockResolvedValue({ configured: true, reachability: "reachable", state, account_id: "cloud-a" });
     mount();
     expect(await screen.findByText("local-workflow-1", { exact: true })).toBeVisible();
-    expect(screen.getAllByRole("radio")).toHaveLength(3);
-    expect(screen.getByPlaceholderText(t("admin.memoryWorkflowSearchPlaceholder"))).toBeVisible();
-    expect(screen.getByRole("radio", { name: t("admin.memoryWorkflowFilterBuiltin") })).toBeEnabled();
+    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    expect(screen.getByRole("button", { name: t("admin.memoryWorkflowSearchPlaceholder") })).toBeVisible();
+    expect(screen.getByRole("tab", { name: t("admin.memoryWorkflowFilterBuiltin") })).toBeEnabled();
     expect(screen.getByText(t("admin.memoryWorkflowFilterBuiltin"), { exact: true })).toBeVisible();
     if (mode === "desktop" && state === "signed_in") {
       expect(await screen.findByText("cloud-only-workflow", { exact: true })).toBeVisible();
@@ -102,6 +102,7 @@ describe("Desktop 我的工作流 combined catalog", () => {
       return { records: records.slice((page - 1) * size, page * size), total: records.length };
     });
     mount(); await screen.findByText("local-workflow-0", { exact: true });
+    fireEvent.click(screen.getByRole("button", { name: t("admin.memoryWorkflowSearchPlaceholder") }));
     const search = screen.getByPlaceholderText(t("admin.memoryWorkflowSearchPlaceholder"));
     fireEvent.change(search, { target: { value: "local-workflow-120" } }); fireEvent.keyDown(search, { key: "Enter", code: "Enter" });
     expect(await screen.findByText("local-workflow-120", { exact: true })).toBeVisible();

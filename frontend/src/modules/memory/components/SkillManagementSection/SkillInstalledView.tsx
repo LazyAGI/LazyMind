@@ -1,5 +1,6 @@
+import { useEffect, useState } from "react";
 import type { SkillCallMode, SkillOrganizeDepth } from "../../skillApi";
-import { Button, Dropdown, Empty, Input, Popconfirm, Select, Table } from "antd";
+import { Button, Dropdown, Empty, Popconfirm, Table } from "antd";
 import { ApartmentOutlined, DownOutlined } from "@ant-design/icons";
 import { getLocalizedTablePagination } from "@/components/ui/pagination";
 import type { ColumnsType } from "antd/es/table";
@@ -17,14 +18,8 @@ interface SkillInstalledViewProps {
   loading: boolean;
   skillAssets: StructuredAsset[];
   dataSource: SkillTreeNode[];
-  searchInput: string;
-  onSearchInputChange: (value: string) => void;
-  onSearch: (value: string) => void;
   category?: string;
   onCategoryChange: (value?: string) => void;
-  categories: string[];
-  categoriesLoading: boolean;
-  onReset: () => void;
   organizeMode: boolean;
   organizeDepth: SkillOrganizeDepth;
   organizeLoading: boolean;
@@ -58,14 +53,8 @@ export default function SkillInstalledView({
   t,
   loading,
   dataSource,
-  searchInput,
-  onSearchInputChange,
-  onSearch,
   category,
   onCategoryChange,
-  categories,
-  categoriesLoading,
-  onReset,
   organizeMode,
   organizeDepth,
   organizeLoading,
@@ -86,6 +75,12 @@ export default function SkillInstalledView({
   onBatchCallMode,
   batchCallModeLoading = false,
 }: SkillInstalledViewProps) {
+  const [batchManageMode, setBatchManageMode] = useState(false);
+  useEffect(() => {
+    if (organizeMode) {
+      setBatchManageMode(false);
+    }
+  }, [organizeMode]);
   const isDeepOrganize = organizeMode && organizeDepth === "deep";
   const depthHint = t(organizeDepth === "light" ? "admin.memorySkillOrganizeLightHint" : "admin.memorySkillOrganizeDeepHint");
   const organizeActionTitle = t(organizeDepth === "light" ? "admin.memorySkillOrganizeLight" : "admin.memorySkillOrganizeDeep");
@@ -120,13 +115,9 @@ export default function SkillInstalledView({
   const canSubmitOrganize = canSubmitSkillOrganize(
     selectedOrganizeSkillIds.length,
   );
-  const normalSelectionEnabled = Boolean(onSkillSelectionChange && onBatchCallMode);
-  const legacyCategories = categories.filter(
-    (item) => item !== "internal" && item !== "external",
+  const normalSelectionEnabled = Boolean(
+    batchManageMode && onSkillSelectionChange && onBatchCallMode,
   );
-  const selectedLegacyCategory = legacyCategories.includes(category || "")
-    ? category
-    : undefined;
 
   return (
     <div className="memory-skill-installed">
@@ -159,32 +150,23 @@ export default function SkillInstalledView({
             );
           })}
         </div>
-        <Input.Search
-          allowClear
-          value={searchInput}
-          onChange={(event) => onSearchInputChange(event.target.value)}
-          onSearch={onSearch}
-          placeholder={t("admin.memorySkillSearchPlaceholder")}
-          className="memory-skill-installed-search"
-        />
-        {legacyCategories.length > 0 && !isDeepOrganize ? (
-          <Select
-            allowClear
-            aria-label={t("admin.memorySkillLegacyCategoryFilter")}
-            value={selectedLegacyCategory}
-            placeholder={t("admin.memorySkillLegacyCategoryFilter")}
-            loading={categoriesLoading}
-            options={legacyCategories.map((item) => ({
-              label: item,
-              value: item,
-            }))}
-            className="memory-skill-installed-select"
-            onChange={(value) => onCategoryChange(value)}
-          />
+        {!organizeMode && onSkillSelectionChange && onBatchCallMode ? (
+          <button
+            type="button"
+            className={`memory-skill-batch-toggle${batchManageMode ? " is-active" : ""}`}
+            aria-pressed={batchManageMode}
+            onClick={() => {
+              if (batchManageMode) {
+                onClearSkillSelection?.();
+                setBatchManageMode(false);
+                return;
+              }
+              setBatchManageMode(true);
+            }}
+          >
+            {t(batchManageMode ? "admin.memorySkillBatchManageDone" : "admin.memorySkillBatchManage")}
+          </button>
         ) : null}
-        <Button type="default" className="memory-skill-reset-button" onClick={onReset}>
-          {t("admin.memoryReset")}
-        </Button>
       </div>
 
       {organizeMode ? (
@@ -266,7 +248,7 @@ export default function SkillInstalledView({
 
       <div className="memory-list-content" ref={listContentRef}>
         <Table<StructuredAsset>
-          className="admin-page-table memory-table memory-skill-installed-table"
+          className={`admin-page-table memory-table memory-skill-installed-table${organizeMode || normalSelectionEnabled ? " is-selectable" : ""}`}
           rowKey="id"
           loading={loading}
           dataSource={tableData}

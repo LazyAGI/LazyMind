@@ -96,7 +96,7 @@ export default function MemoryManagementListPage() {
         </Space>
       </div>
 
-      {!embedded ? <div className="memory-tab-grid">
+      {!embedded ? <nav className="memory-tab-grid" aria-label={t("admin.memoryManagement")}>
         {memoryTabOrder.map((tabKey: string) => {
           const tabItem = tabMeta[tabKey];
 
@@ -105,6 +105,8 @@ export default function MemoryManagementListPage() {
               key={tabKey}
               type="button"
               className={`memory-tab-card ${activeTab === tabKey ? "is-active" : ""}`}
+              title={tabItem.description}
+              aria-current={activeTab === tabKey ? "page" : undefined}
               onClick={() => {
                 setActiveTab(tabKey);
                 if (tabKey !== "glossary") {
@@ -122,7 +124,7 @@ export default function MemoryManagementListPage() {
             </button>
           );
         })}
-      </div> : null}
+      </nav> : null}
 
       {activeTab !== "experience" && activeTab !== "skills" ? (
         <div className="memory-filter-bar">
@@ -154,8 +156,11 @@ export default function MemoryManagementListPage() {
         {activeTab === "skills" ? (
           <SkillManagementSection />
         ) : activeTab === "experience" ? (
-          <ExperienceOverview />
+          <div className="memory-workspace-surface is-experience">
+            <ExperienceOverview />
+          </div>
         ) : activeTab === "glossary" ? (
+          <div className="memory-workspace-surface is-glossary">
           <GlossaryListSection
             t={t}
             assets={glossaryAssets}
@@ -177,6 +182,7 @@ export default function MemoryManagementListPage() {
             setGlossaryListPageSize={setGlossaryListPageSize}
             setSelectedGlossaryAssetIds={setSelectedGlossaryAssetIds}
           />
+          </div>
         ) : null}
       </div>
     </div>

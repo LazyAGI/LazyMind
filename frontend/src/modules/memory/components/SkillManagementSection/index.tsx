@@ -1,6 +1,6 @@
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Input, message, Modal, Select, Spin, Tooltip } from "antd";
+import { Alert, Button, Input, message, Modal, Popover, Select, Spin, Tooltip } from "antd";
 import { AppstoreOutlined, SearchOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import WorkflowInstalledView from "./WorkflowInstalledView";
@@ -35,6 +35,7 @@ import SkillManagementToolbar, {
   type SkillOrganizeStatus,
 } from "./SkillManagementToolbar";
 import SkillMarketView from "./SkillMarketView";
+import ExpandableTitleSearch from "./ExpandableTitleSearch";
 import {
   collectMarketTags,
   filterMarketSkills,
@@ -51,7 +52,7 @@ import {
 import { skillOrganizeErrorDetails, skillOrganizeErrorText } from "../../skillOrganizeCopy";
 import "./index.scss";
 
-const DEFAULT_MARKET_PAGE_SIZE = 8;
+const DEFAULT_MARKET_PAGE_SIZE = 12;
 
 function describeSkillOrganizeError(
   error: unknown,
@@ -71,6 +72,8 @@ export default function SkillManagementSection() {
   const organizeGenerationRef = useRef(0);
   const navigate = useNavigate();
   const [newWorkflowOpen, setNewWorkflowOpen] = useState(false);
+  const [workflowSearchInput, setWorkflowSearchInput] = useState("");
+  const [workflowQuery, setWorkflowQuery] = useState("");
   const [selectedSkills, setSelectedSkills] = useState<Map<string, StructuredAsset>>(new Map());
   const [batchCallModeLoading, setBatchCallModeLoading] = useState(false);
   const batchCallModeLock = useRef(false);
@@ -134,14 +137,11 @@ export default function SkillManagementSection() {
     setMarketCategory,
     category,
     setCategory,
-    availableCategories,
-    skillCategoriesLoading,
     handleEnableBuiltinSkill: _handleEnableBuiltinSkill,
     builtinSkillEnableLoading,
     searchInput,
     setSearchInput,
     setQuery,
-    resetFilters,
     filteredInstalledSkillTree,
     skillListPage,
     skillListPageSize,
@@ -498,24 +498,6 @@ export default function SkillManagementSection() {
       batchCallModeLock.current = false;
       setBatchCallModeLoading(false);
     }
-  };
-
-  const handleInstalledReset = () => {
-    if (organizeMode && organizeDepth === "deep") {
-      setSearchInput("");
-      setQuery("");
-      setCategory("internal");
-      return;
-    }
-    resetFilters();
-  };
-
-  const handleMarketReset = () => {
-    setMarketKeyword("");
-    setDebouncedMarketKeyword("");
-    setMarketSkillSource("all");
-    setMarketCategory("all");
-    setMarketListPage(1);
   };
 
   const handleSkillMessageCenter = () => {
@@ -984,16 +966,14 @@ export default function SkillManagementSection() {
           </div>
         ) : null}
       </div>
-      <div className="memory-skill-market-search-popover">
-        <Tooltip title={t("admin.memorySkillMarketSearchPlaceholder")}>
-          <Button
-            aria-label={t("admin.memorySkillMarketSearchPlaceholder")}
-            aria-expanded={marketSearchExpanded}
-            icon={<SearchOutlined />}
-            onClick={() => setMarketSearchExpanded((expanded) => !expanded)}
-          />
-        </Tooltip>
-        {marketSearchExpanded ? (
+      <Popover
+        trigger="click"
+        placement="bottomRight"
+        arrow={false}
+        overlayClassName="memory-skill-market-search-overlay"
+        open={marketSearchExpanded}
+        onOpenChange={setMarketSearchExpanded}
+        content={
           <Input.Search
             autoFocus
             allowClear
@@ -1008,8 +988,16 @@ export default function SkillManagementSection() {
             placeholder={t("admin.memorySkillMarketSearchPlaceholder")}
             className="memory-skill-market-search"
           />
-        ) : null}
-      </div>
+        }
+      >
+        <Tooltip title={t("admin.memorySkillMarketSearchPlaceholder")}>
+          <Button
+            aria-label={t("admin.memorySkillMarketSearchPlaceholder")}
+            aria-expanded={marketSearchExpanded}
+            icon={<SearchOutlined />}
+          />
+        </Tooltip>
+      </Popover>
       <Select
         value={marketSkillSource}
         className="memory-skill-market-source"
@@ -1023,7 +1011,6 @@ export default function SkillManagementSection() {
           setMarketListPage(1);
         }}
       />
-      <Button onClick={handleMarketReset}>{t("admin.memoryReset")}</Button>
     </div>
   );
 
@@ -1085,14 +1072,34 @@ export default function SkillManagementSection() {
         onNewWorkflow={() => setNewWorkflowOpen(true)}
         pendingDraftCount={pendingDraftCount}
         onReviewDrafts={() => setDraftReviewOpen(true)}
+        headingExtra={
+          skillView === "installed" ? (
+            <ExpandableTitleSearch
+              value={searchInput}
+              placeholder={t("admin.memorySkillSearchPlaceholder")}
+              onChange={setSearchInput}
+              onSearch={setQuery}
+            />
+          ) : skillView === "workflows" ? (
+            <ExpandableTitleSearch
+              value={workflowSearchInput}
+              placeholder={t("admin.memoryWorkflowSearchPlaceholder")}
+              onChange={setWorkflowSearchInput}
+              onSearch={(value) => {
+                setWorkflowSearchInput(value);
+                setWorkflowQuery(value);
+              }}
+            />
+          ) : null
+        }
       />
 
-      {skillView === "installed" && (organizeError || organizePendingReviewWarning || hasPendingOrganizeDrafts) ? (
+      {skillView === "installed" && (organizeError || organizePendingReviewWarning) ? (
         <Alert
           className="memory-skill-organize-notice"
-          type={organizeError || organizePendingReviewWarning ? "warning" : "info"}
+          type="warning"
           showIcon
-          message={organizeError || t(organizePendingReviewWarning ? "admin.memorySkillOrganizeCancelledPendingReview" : "admin.memorySkillOrganizePendingDraftHint")}
+          message={organizeError || t("admin.memorySkillOrganizeCancelledPendingReview")}
           description={organizeBlockingSkills.length || (organizeError && organizePendingReviewWarning) ? <>
             {organizeError && organizePendingReviewWarning ? <p>{t("admin.memorySkillOrganizeCancelledPendingReview")}</p> : null}
             {organizeBlockingSkills.length ? <ul>{organizeBlockingSkills.map((path) => <li key={path}>{path}</li>)}</ul> : null}
@@ -1113,14 +1120,8 @@ export default function SkillManagementSection() {
           loading={skillLoading}
           skillAssets={skillAssets}
           dataSource={installedTableData}
-          searchInput={searchInput}
-          onSearchInputChange={setSearchInput}
-          onSearch={setQuery}
           category={category}
           onCategoryChange={setCategory}
-          categories={availableCategories}
-          categoriesLoading={skillCategoriesLoading}
-          onReset={handleInstalledReset}
           organizeMode={organizeMode}
           organizeDepth={organizeDepth}
           organizeLoading={organizeSubmitting}
@@ -1186,6 +1187,14 @@ export default function SkillManagementSection() {
           onNewWorkflow={() => setNewWorkflowOpen(true)}
           tableScroll={tableScroll}
           listContentRef={listContentRef}
+          hideSearch
+          searchInput={workflowSearchInput}
+          query={workflowQuery}
+          onSearchInputChange={setWorkflowSearchInput}
+          onSearch={(value) => {
+            setWorkflowSearchInput(value);
+            setWorkflowQuery(value);
+          }}
         />
       ) : null}
 

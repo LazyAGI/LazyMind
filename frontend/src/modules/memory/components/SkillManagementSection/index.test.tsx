@@ -35,16 +35,21 @@ vi.mock("./SkillManagementToolbar", () => ({
     organizeStatus,
     onOrganizeSkills,
     onOrganizeCancelRun,
+    onReviewDrafts,
   }: {
     organizeDisabled: boolean;
     organizeStatus: string;
     onOrganizeSkills: (mode: "light" | "deep") => void;
     onOrganizeCancelRun: () => void;
+    onReviewDrafts?: () => void;
   }) => (
     <div>
       <button onClick={() => onOrganizeSkills("light")}>organize</button>
       <button onClick={() => onOrganizeSkills("deep")}>organize-deep</button>
       <button onClick={onOrganizeCancelRun}>cancel-run</button>
+      {onReviewDrafts ? (
+        <button onClick={onReviewDrafts}>admin.memorySkillDraftReviewTitle</button>
+      ) : null}
       <span data-testid="organize-status">{organizeStatus}</span>
       <span data-testid="organize-disabled">{String(organizeDisabled)}</span>
     </div>
@@ -129,7 +134,7 @@ describe("SkillManagementSection organize task recovery", () => {
     await act(async () => viewMocks.props.onOrganizeSubmit("light"));
     expect(screen.getByText("skills/internal/B")).toBeVisible();
     expect(screen.getByText("skills/internal/C")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", {name: "admin.memorySkillDraftReviewTitle"}));
+    fireEvent.click(screen.getAllByRole("button", {name: "admin.memorySkillDraftReviewTitle"})[0]);
     expect(screen.getByText("draft-review")).toBeVisible();
     await act(async () => viewMocks.review.onApplied());
     expect(refreshSkillAssets).toHaveBeenCalledWith({preserveChangeProposals: true});
@@ -275,7 +280,7 @@ describe("SkillManagementSection organize task recovery", () => {
     rerender(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
     fireEvent.click(screen.getByRole("button", {name: "organize"}));
     expect(screen.getByTestId("selected")).toHaveTextContent(/^A$/);
-    expect(screen.getByText("admin.memorySkillOrganizePendingDraftHint")).toBeVisible();
+    expect(screen.queryByText("admin.memorySkillOrganizePendingDraftHint")).not.toBeInTheDocument();
   });
 
   it("restores and follows a running organize task when the page mounts", async () => {

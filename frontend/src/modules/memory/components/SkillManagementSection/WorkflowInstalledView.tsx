@@ -1,7 +1,8 @@
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Alert, Button, Empty, Input, Popconfirm, Radio, Select, Spin, Table, Tag, Tooltip, message } from 'antd';
-import { CloudDownloadOutlined, CopyOutlined, DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
+import { Alert, Button, Empty, Popconfirm, Select, Spin, Table, Tag, Tooltip, message } from 'antd';
+import ExpandableTitleSearch from './ExpandableTitleSearch';
+import { ApartmentOutlined, CloudDownloadOutlined, CopyOutlined, DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { SelectProps } from 'antd';
 import { useNavigate } from 'react-router-dom';
@@ -35,6 +36,11 @@ interface WorkflowInstalledViewProps {
   onNewWorkflow: () => void;
   tableScroll?: { x?: number; y?: number };
   listContentRef?: React.RefObject<HTMLDivElement>;
+  searchInput?: string;
+  query?: string;
+  onSearchInputChange?: (value: string) => void;
+  onSearch?: (value: string) => void;
+  hideSearch?: boolean;
 }
 
 // Unified row type for the combined table.
@@ -47,13 +53,18 @@ type WorkflowRow =
 type TypeFilter = 'all' | 'builtin' | 'draft';
 type CallModeOption = { value: WorkflowCallMode; label: string; title: string };
 
-const PAGE_SIZE = 10;
+const defaultPageSizeOptions = [20, 50, 100];
 
 export default function WorkflowInstalledView({
   t,
   onNewWorkflow,
   tableScroll,
   listContentRef,
+  searchInput: searchInputProp,
+  query: queryProp,
+  onSearchInputChange,
+  onSearch,
+  hideSearch = false,
 }: WorkflowInstalledViewProps) {
   const navigate = useNavigate();
   const desktop = isDesktopRuntime();
@@ -70,8 +81,13 @@ export default function WorkflowInstalledView({
   const [loading, setLoading] = useState(false);
   const [copyingRowKey, setCopyingRowKey] = useState('');
   const [page, setPage] = useState(1);
-  const [searchInput, setSearchInput] = useState('');
-  const [query, setQuery] = useState('');
+  const [pageSize, setPageSize] = useState(defaultPageSizeOptions[0]);
+  const [localSearchInput, setLocalSearchInput] = useState('');
+  const [localQuery, setLocalQuery] = useState('');
+  const searchInput = searchInputProp ?? localSearchInput;
+  const query = queryProp ?? localQuery;
+  const setSearchInput = onSearchInputChange ?? setLocalSearchInput;
+  const setQuery = onSearch ?? setLocalQuery;
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [infoModalRecord, setInfoModalRecord] = useState<WorkflowDraftRecord | null>(null);
   const [infoModalWorkflowModel, setInfoModalWorkflowModel] = useState<WorkflowModel>(createEmptyWorkflowModel());
@@ -136,14 +152,8 @@ export default function WorkflowInstalledView({
   };
 
   const handleSearch = (value: string) => {
+    setSearchInput(value);
     setQuery(value);
-    setPage(1);
-  };
-
-  const handleReset = () => {
-    setSearchInput('');
-    setQuery('');
-    setTypeFilter('all');
     setPage(1);
   };
 
@@ -206,6 +216,10 @@ export default function WorkflowInstalledView({
     ...cloud.items.filter((row) => !row.local_exists && row.resource_type === 'workflow').map((row): WorkflowRow => ({ _type: 'cloud', id: row.resource_id, name: row.resource_name, ...row })),
   ];
 
+  useEffect(() => {
+    setPage(1);
+  }, [query]);
+
   const q = query.trim().toLowerCase();
   const filteredRows = allRows.filter((row) => {
     if (typeFilter === 'builtin' && row._type !== 'builtin') return false;
@@ -219,49 +233,40 @@ export default function WorkflowInstalledView({
   });
 
   // Client-side pagination.
-  const currentPage = Math.min(page, Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE)));
-  useEffect(() => { setPage((current) => Math.min(current, Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE)))) }, [filteredRows.length]);
-  const pageStart = (currentPage - 1) * PAGE_SIZE;
-  const pageRows = filteredRows.slice(pageStart, pageStart + PAGE_SIZE);
+  const currentPage = Math.min(page, Math.max(1, Math.ceil(filteredRows.length / pageSize)));
+  useEffect(() => { setPage((current) => Math.min(current, Math.max(1, Math.ceil(filteredRows.length / pageSize)))) }, [filteredRows.length, pageSize]);
+  const pageStart = (currentPage - 1) * pageSize;
+  const pageRows = filteredRows.slice(pageStart, pageStart + pageSize);
 
   const columns: ColumnsType<WorkflowRow> = [
     {
-      title: t('admin.memoryWorkflowColId'),
-      key: 'workflow_id',
-      width: 240,
-      render: (_: unknown, row: WorkflowRow) => {
-        const workflowId = rowWorkflowId(row);
-        const href = rowHref(row);
-        return (
-          <Tooltip title={workflowId} mouseEnterDelay={0.4}>
-          <Button
-            type="link"
-            style={{ fontFamily: 'monospace', padding: 0, display: 'block', width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }}
-            onClick={() => navigate(href)}
-          >
-            {workflowId}
-          </Button>
-          </Tooltip>
-        );
-      },
-    },
-    {
-      title: t('admin.memoryWorkflowColName'),
+      title: t('admin.memoryNameDesc'),
       key: 'name',
-      width: 220,
+      width: 280,
       render: (_: unknown, row: WorkflowRow) => {
         const href = rowHref(row);
+        const workflowId = rowWorkflowId(row);
         return (
-          <Tooltip title={row.name} mouseEnterDelay={0.4}>
-          <Button type="link" style={{ padding: 0, display: 'block', width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }} onClick={() => navigate(href)}>
-            {row.name}
-          </Button>
-          </Tooltip>
+          <div className="memory-table-main memory-table-main-with-icon">
+            <span className="memory-table-main-icon" aria-hidden="true">
+              <ApartmentOutlined />
+            </span>
+            <div className="memory-table-main-copy">
+              <div className="memory-table-main-title">
+                <button type="button" className="memory-term-link" onClick={() => navigate(href)}>
+                  {row.name}
+                </button>
+              </div>
+              <Tooltip title={workflowId} mouseEnterDelay={0.4}>
+                <div className="memory-table-main-desc">{workflowId}</div>
+              </Tooltip>
+            </div>
+          </div>
         );
       },
     },
     {
-      title: t('admin.memoryWorkflowColType'),
+      title: t('admin.memorySkillOrigin'),
       key: 'type',
       width: 110,
       render: (_: unknown, row: WorkflowRow) => {
@@ -322,8 +327,7 @@ export default function WorkflowInstalledView({
     {
       title: t('admin.memoryWorkflowColCallMode'),
       key: 'call_mode',
-      width: 180,
-      align: 'center',
+      width: 110,
       render: (_: unknown, row: WorkflowRow) => {
         if (row._type === 'cloud') return null;
         const workflowRef = row._type === 'builtin' ? `builtin:${row.id}` : row._type === 'published' ? row.workflow_ref : row.published_workflow_ref;
@@ -351,7 +355,7 @@ export default function WorkflowInstalledView({
             loading={Boolean(callModePendingByRef[workflowRef])}
             disabled={!workflowRef || Boolean(callModePendingByRef[workflowRef])}
             aria-label={`${t('admin.memoryWorkflowColCallMode')}: ${row.name}`}
-            style={{ width: 160, textAlign: 'left' }}
+            style={{ width: '100%', maxWidth: 110, textAlign: 'left' }}
             optionRender={renderOption}
             onChange={(value: WorkflowCallMode) => void handleCallModeChange(workflowRef, value)}
           />
@@ -362,10 +366,10 @@ export default function WorkflowInstalledView({
     {
       title: t('common.actions'),
       key: 'actions',
-      width: 120,
+      width: 132,
       render: (_: unknown, row: WorkflowRow) => {
         if (row._type === 'cloud' || row._type === 'published') {
-          return <div className="workflow-list-actions">
+          return <div className="memory-resource-actions">
             <Button type="text" size="small" icon={<EyeOutlined />} aria-label={t('admin.memoryCloudViewDetail')} onClick={() => navigate(rowHref(row))} />
             {row._type === 'cloud' ? <Button type="text" size="small" icon={<CloudDownloadOutlined />} aria-label={t('admin.memoryCloudDownload')} loading={downloading === row.id}
               disabled={!['download_required', 'local_missing'].includes(row.presence_status)} onClick={async () => {
@@ -379,7 +383,7 @@ export default function WorkflowInstalledView({
         }
         if (row._type === 'builtin') {
           return (
-            <div className="workflow-list-actions">
+            <div className="memory-resource-actions">
               <Tooltip title={t('admin.memoryWorkflowActionView')}>
                 <Button
                   type="text"
@@ -403,7 +407,7 @@ export default function WorkflowInstalledView({
           );
         }
         return (
-          <div className="workflow-list-actions">
+          <div className="memory-resource-actions">
             <Tooltip title={t('admin.memoryWorkflowActionEdit')}>
               <Button
                 type="text"
@@ -441,11 +445,22 @@ export default function WorkflowInstalledView({
   const pagination = getLocalizedTablePagination(
     {
       current: currentPage,
-      pageSize: PAGE_SIZE,
+      pageSize,
       total: filteredRows.length,
-      showSizeChanger: false,
+      showSizeChanger: true,
+      pageSizeOptions: defaultPageSizeOptions,
       showTotal: (itemTotal) => t('common.totalItems', { total: itemTotal }),
-      onChange: (p) => setPage(p),
+      onChange: (nextPage, nextPageSize) => {
+        setPage(nextPage);
+        if (nextPageSize && nextPageSize !== pageSize) {
+          setPageSize(nextPageSize);
+          setPage(1);
+        }
+      },
+      onShowSizeChange: (_current, nextPageSize) => {
+        setPageSize(nextPageSize);
+        setPage(1);
+      },
     },
     t,
   );
@@ -453,25 +468,35 @@ export default function WorkflowInstalledView({
   return (
     <div className="memory-skill-installed">
       <div className="memory-skill-installed-filters">
-        <Input.Search
-          allowClear
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          onSearch={handleSearch}
-          placeholder={t('admin.memoryWorkflowSearchPlaceholder')}
-          className="memory-skill-installed-search"
-        />
-        <Radio.Group
-          value={typeFilter}
-          onChange={(e) => { setTypeFilter(e.target.value as TypeFilter); setPage(1); }}
-          size="small"
-          style={{ flexShrink: 0 }}
-        >
-          <Radio.Button value="all">{t('admin.memoryWorkflowFilterAll')}</Radio.Button>
-          <Radio.Button value="builtin">{t('admin.memoryWorkflowFilterBuiltin')}</Radio.Button>
-          <Radio.Button value="draft">{t('admin.memoryWorkflowFilterCustom')}</Radio.Button>
-        </Radio.Group>
-        <Button onClick={handleReset}>{t('admin.memoryReset')}</Button>
+        <div className="memory-skill-source-tabs" role="tablist">
+          {([
+            ['all', 'admin.memoryWorkflowFilterAll'],
+            ['builtin', 'admin.memoryWorkflowFilterBuiltin'],
+            ['draft', 'admin.memoryWorkflowFilterCustom'],
+          ] as const).map(([value, labelKey]) => (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={typeFilter === value}
+              className={typeFilter === value ? 'is-active' : undefined}
+              key={value}
+              onClick={() => {
+                setTypeFilter(value);
+                setPage(1);
+              }}
+            >
+              {t(labelKey)}
+            </button>
+          ))}
+        </div>
+        {hideSearch ? null : (
+          <ExpandableTitleSearch
+            value={searchInput}
+            placeholder={t('admin.memoryWorkflowSearchPlaceholder')}
+            onChange={setSearchInput}
+            onSearch={handleSearch}
+          />
+        )}
       </div>
 
       {loadFailed ? <Alert type="error" showIcon message={t('admin.memoryResourceLocalLoadFailed')} action={<Button onClick={() => void loadList()}>{t('common.retry')}</Button>} /> : null}
