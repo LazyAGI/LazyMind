@@ -19,8 +19,6 @@
 .conversation-group-batch-checkbox .ant-checkbox-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-group-member:hover > .ant-btn, .conversation-group-member:focus-within > .ant-btn { opacity: 1; }
 .conversation-group-member { position: relative; }
-.conversation-member-drag-handle { position: absolute; left: 15px; color: #94a3b8; opacity: 0; cursor: grab; }
-.conversation-group-member:hover > .conversation-member-drag-handle, .conversation-group-member:focus-within > .conversation-member-drag-handle { opacity: 1; }
 .conversation-group-member.member-drop-before::before, .conversation-group-member.member-drop-after::after { content: ''; position: absolute; left: 15px; right: 0; height: 2px; background: var(--color-primary, #1677ff); pointer-events: none; }
 .conversation-group-member.member-drop-before::before { top: 0; }
 .conversation-group-member.member-drop-after::after { bottom: 0; }

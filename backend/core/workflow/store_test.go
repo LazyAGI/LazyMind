@@ -26,6 +26,8 @@ func newTestDB(t *testing.T) *orm.DB {
 		&orm.ChatHistory{},
 		&orm.TaskCenterTask{},
 		&orm.WorkflowResource{},
+		&orm.WorkflowRevisionEntry{},
+		&orm.WorkflowBlob{},
 		&orm.WorkflowSession{},
 		&orm.WorkflowSessionStep{},
 		&orm.WorkflowSlotRevision{},

@@ -45,7 +45,12 @@ func TestRecordingGenerationAndDecisions(t *testing.T) {
 				if len(evidence.Events) != 1 || !strings.Contains(string(evidence.Events[0]), "click") {
 					t.Fatalf("missing operation evidence: %+v", evidence)
 				}
-				return algo.RecordingSkillResult{Name: "录制测试", Description: "有证据的操作", Content: "# 步骤\n1. 输入参数。\n2. 检查输出。"}, nil
+				content := "# 步骤\n1. 输入参数。\n2. 检查输出。"
+				if keep {
+					// Generated frontmatter must not conflict with storage metadata.
+					content = "---\nname: different-name\ncategory: other\ndescription: different-description\n---\n" + content
+				}
+				return algo.RecordingSkillResult{Name: "录制测试", Description: "有证据的操作", Content: content}, nil
 			}
 			row := orm.SkillRecording{ID: "record-1", UserID: "user_001", ConversationID: "conv-1", Status: "generating", Frames: "sensitive-source", Evidence: `{"events":[{"kind":"click","seconds":1}],"limitations":[]}`, Notes: "private", CreatedAt: time.Now(), UpdatedAt: time.Now()}
 			if err := db.Create(&row).Error; err != nil {

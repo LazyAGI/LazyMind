@@ -1,12 +1,53 @@
 package executorpolicy
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 )
+
+func TestStatusSerializesNegativeProbeResults(t *testing.T) {
+	body, err := json.Marshal(Status{Provider: "codex", Installed: new(bool), Ready: new(bool), BridgeState: BridgeReady})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"installed", "ready"} {
+		if value, exists := decoded[field]; !exists || value != false {
+			t.Fatalf("%s must be explicitly false so clients do not reuse stale host state: %s", field, body)
+		}
+	}
+}
+
+func TestPolicyActionOmitsUnknownProbeResults(t *testing.T) {
+	store, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := store.SetEnabled("codex", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"installed", "ready"} {
+		if _, exists := decoded[field]; exists {
+			t.Fatalf("policy-only action must not overwrite the client's probe result: %s", body)
+		}
+	}
+}
 
 func TestStoreDefaultsDisabledAndPersistsExplicitEnable(t *testing.T) {
 	home := t.TempDir()

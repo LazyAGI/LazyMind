@@ -146,6 +146,7 @@ def test_generate_exposes_only_present_seedance_frame_and_reference_materials():
     assert generate_tab['composite_behavior']['hide_empty_columns'] is True
     assert [slot['id'] for slot in generate_tab['slots']] == [
         'generated_image_output',
+        'generated_base_image',
         'generated_first_frame',
         'generated_last_frame',
         'generation_reference_images',

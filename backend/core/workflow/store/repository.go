@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"lazymind/core/workflow/publication"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -354,6 +356,16 @@ func (r *Repository) PatchArtifact(ctx context.Context, owner, artifactID string
 	if err != nil {
 		return Artifact{}, err
 	}
+	frozen, directory, err := publication.SnapshotEdit(r.db.WithContext(ctx), current.SessionID, contentType, value)
+	if err != nil {
+		return Artifact{}, err
+	}
+	value = frozen
+	defer func() {
+		if err != nil && directory != "" {
+			_ = os.RemoveAll(directory)
+		}
+	}()
 	now := time.Now().UTC()
 	humanID, revisionID := uuid.NewString(), uuid.NewString()
 	var created orm.WorkflowSlotRevision
@@ -1320,4 +1332,12 @@ func (r *Repository) setNativeSessionStopped(ctx context.Context, owner, session
 		return 0, repositoryError("STORED_LIFECYCLE_RESPONSE_INVALID")
 	}
 	return response.StateVersion, nil
+}
+
+// AtomicCommand executes a trusted command using the supplied transaction on all DBs.
+// Unlike Command's delegated HTTP path, the callback must never write through another DB handle.
+func (r *Repository) AtomicCommand(ctx context.Context, owner, sessionID, commandID, version string, request []byte, execute func(*gorm.DB) (int, json.RawMessage, error)) (Command, bool, error) {
+	r.commandMu.Lock()
+	defer r.commandMu.Unlock()
+	return r.commandTransactional(ctx, owner, sessionID, commandID, version, request, execute)
 }

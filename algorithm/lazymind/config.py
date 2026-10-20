@@ -286,16 +286,6 @@ config.add('agentic_max_rounds_high', int, 60, 'AGENTIC_MAX_ROUNDS_HIGH',
            description='Maximum ChatAgent ReAct rounds in high thinking-depth mode.')
 config.add('agentic_tool_limit_wait_timeout', float, 120, 'AGENTIC_TOOL_LIMIT_WAIT_TIMEOUT',
            description='Seconds ChatAgent waits for a user decision after reaching its initial round limit.')
-config.add(
-    'subagent_completion_evaluation_timeout',
-    float,
-    20.0,
-    'SUBAGENT_COMPLETION_EVALUATION_TIMEOUT',
-    description='Maximum seconds allowed for the SubAgent completion review model call.',
-    post_action=_require_positive_number_config_value(
-        'LAZYMIND_SUBAGENT_COMPLETION_EVALUATION_TIMEOUT'
-    ),
-)
 config.add('agentic_expanded_max_rounds', int, 200, 'AGENTIC_EXPANDED_MAX_ROUNDS',
            description='Maximum ReAct rounds for one ChatAgent invocation after the user continues.')
 config.add('agentic_workspace', str, './workspace', 'AGENTIC_WORKSPACE',

@@ -11,7 +11,7 @@ describe("settings persistence", () => {
 
   it.each<SettingsChangeKey>([
     "developer_mode_active", "task_center_enabled", "schedules_enabled",
-    "skills_enabled", "workflows_enabled", "document_parsing_enabled",
+    "skills_enabled", "workflows_enabled", "document_parsing_enabled", "document_directories_enabled",
   ])("saves %s through the existing preferences API", async (key) => {
     for (const enabled of [false, true]) {
       const preferences = { [key]: enabled };

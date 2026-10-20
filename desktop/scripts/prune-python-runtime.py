@@ -155,8 +155,11 @@ def main():
     try:
         if args.verify_doubao:
             report['doubao_http_mock_smoke'] = 'failed'
+            source = repo / 'algorithm/lazyllm'
+            use_source = os.environ.get('LAZYMIND_RELEASE_BUILD') != 'true' and (source / 'lazyllm').is_dir()
+            verify = ['--verify-source', str(source)] if use_source else ['--verify-installed']
             subprocess.run([sys.executable, '-I', '-B', str(repo / 'desktop/scripts/desktop-python-profile.py'),
-                            '--verify-source', str(repo / 'algorithm/lazyllm')], check=True, timeout=90)
+                            *verify], check=True, timeout=90)
             report['doubao_http_mock_smoke'] = 'passed'
     finally:
         if args.report:

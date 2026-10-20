@@ -103,14 +103,17 @@ function ProviderConnection({ provider }: ProviderConnectionProps) {
   );
   const canRefresh = Boolean(session?.allowed_actions?.includes('refresh'));
   const autoStartRef = useRef(false);
+  const beginScan = useCallback(() => (
+    provider === 'feishu' ? startScan({ createNew: true }) : startScan()
+  ), [provider, startScan]);
 
   useEffect(() => {
     if (autoStartRef.current) {
       return;
     }
     autoStartRef.current = true;
-    void startScan();
-  }, [startScan]);
+    void beginScan();
+  }, [beginScan]);
 
   return (
     <>
@@ -195,7 +198,7 @@ function ProviderConnection({ provider }: ProviderConnectionProps) {
             <Button
               type="primary"
               icon={<QrcodeOutlined />}
-              onClick={() => void startScan()}
+              onClick={() => void beginScan()}
             >
               {isFailed ? t('common.retry') : t(copy('startScan'))}
             </Button>
@@ -410,7 +413,7 @@ export default function TerminalConnectionQuickPanel({
                       <button
                         type="button"
                         aria-label={t('channelGateway.terminal.showAccountQr', {
-                          account: channelAccountLabel(account),
+                          account: channelAccountLabel(account, accounts),
                           provider: t(`channelGateway.terminal.${itemProvider}Title`),
                         })}
                         onClick={() => showAccountQr(account)}
@@ -419,7 +422,7 @@ export default function TerminalConnectionQuickPanel({
                           <ProviderIcon provider={itemProvider} />
                         </span>
                         <span className="terminal-quick-account-copy">
-                          <strong>{channelAccountLabel(account) || t(`channelGateway.terminal.${itemProvider}Title`)}</strong>
+                          <strong>{channelAccountLabel(account, accounts) || t(`channelGateway.terminal.${itemProvider}Title`)}</strong>
                           <small>
                             {t(`channelGateway.${itemProvider}.accountStatusMap.${pendingActivation ? 'pendingActivation' : account.status}`, {
                               defaultValue: pendingActivation ? t('notifications.pendingActivation') : account.status,

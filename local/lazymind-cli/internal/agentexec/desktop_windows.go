@@ -115,7 +115,7 @@ func windowsInstalledApplications() []windowsInstalledApplication {
 					if executable := commandExecutable(registryString(root, entry, "DisplayIcon", view)); executable != "" {
 						location = filepath.Dir(executable)
 					} else if executable := commandExecutable(registryString(root, entry, "UninstallString", view)); executable != "" {
-						location = executable
+						location = filepath.Dir(executable)
 					}
 				}
 				applications = append(applications, windowsInstalledApplication{

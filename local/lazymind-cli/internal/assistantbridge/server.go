@@ -449,7 +449,8 @@ func ExecutorStatuses(policy *executorpolicy.Store) (map[string]executorpolicy.S
 	}
 	for provider, probe := range probes {
 		status := statuses[provider]
-		status.Installed, status.Ready, status.UnavailableReason = probe("")
+		installed, ready, reason := probe("")
+		status.Installed, status.Ready, status.UnavailableReason = &installed, &ready, reason
 		statuses[provider] = status
 	}
 	return statuses, nil

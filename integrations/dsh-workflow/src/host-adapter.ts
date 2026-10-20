@@ -8,7 +8,7 @@ import type { RuntimeAdapter } from '../../workflow-agent-core/src/adapter'
 import { object } from '../../workflow-agent-core/src/protocol'
 import { eventRun } from './events'
 
-/** DSH SDK translation only. Workflow admission and delivery decisions live in the shared runtime. */
+/** DSH SDK translation only. Core owns execution admission; the shared coordinator gates automatic turns. */
 export function dshRuntime(ctx: Context, serverName: string): RuntimeAdapter<Agent> {
   let goals: GoalService | undefined
   ctx.inject(['goals'], goalCtx => {
@@ -55,6 +55,7 @@ export function dshRuntime(ctx: Context, serverName: string): RuntimeAdapter<Age
   }
 
   return {
+    cancellation: 'session',
     id: agent => agent.session.id,
     parent: agent => ctx.agents.list().find(candidate => candidate !== agent && ctx.agents.isOwnedBy(agent.session.id, candidate)),
     isLive: agent => ctx.agents.get(agent.session.id) === agent,
@@ -87,7 +88,6 @@ export function dshRuntime(ctx: Context, serverName: string): RuntimeAdapter<Age
       return inputSeq(agent.session.snapshotEvents(), input.actionId)
     },
     cancel: agent => { ctx.sessionController.cancel({ sessionId: agent.session.id }) },
-    eventSeq: agent => Math.max(0, agent.session.seq - 1),
     reconcile,
     warn: message => ctx.logger.warn(message),
   }

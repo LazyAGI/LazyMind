@@ -8,7 +8,6 @@ import re
 import sys
 import time
 import base64
-import types
 import tempfile
 from collections.abc import AsyncIterator
 from contextlib import aclosing
@@ -74,6 +73,7 @@ from lazymind.chat.service.utils import (
     reset_citation_state,
 )
 from lazymind.chat.workflow.artifacts import build_artifact_context_section
+from lazymind.chat.workflow.execution_policy import policy_for
 from lazymind.config import config as _cfg
 from lazymind.model_config import inject_model_config
 
@@ -356,6 +356,7 @@ def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, A
         import httpx
         from lazymind.config import config
         from lazymind.workflow_sdk import WorkflowClient
+        from lazymind.workflow_toolkit import load_workflow_package_tools
 
         package = WorkflowClient(
             str(config['core_api_url']).rstrip('/'),
@@ -374,32 +375,9 @@ def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, A
             str(package.get('tree_hash') or expected_hash),
             files,
         )
-        remaining = set(names)
-        resolved: Dict[str, Any] = {}
-        for path in sorted(files):
-            if not path.startswith('scripts/') or not path.endswith('.py'):
-                continue
-            script_path = package_root / path
-            raw_source = script_path.read_bytes()
-            source = raw_source.decode('utf-8')
-            module = types.ModuleType(
-                f'_lazymind_workflow_{revision_id.replace("-", "_")}_{len(resolved)}'
-            )
-            module.__file__ = str(script_path)
-            exec(compile(source, module.__file__, 'exec'), module.__dict__)
-            for name in tuple(remaining):
-                candidate = module.__dict__.get(name)
-                if callable(candidate):
-                    # Published Workflow scripts can predate the tool runtime's
-                    # docstring requirement. Their callable name, signature and
-                    # annotations are already pinned by the immutable revision;
-                    # provide a stable description so legacy revisions remain
-                    # executable instead of failing before the first tool call.
-                    if not str(getattr(candidate, '__doc__', '') or '').strip():
-                        candidate.__doc__ = f'Execute the published Workflow tool {name}.'
-                    resolved[name] = candidate
-                    remaining.remove(name)
-        return resolved
+        return load_workflow_package_tools(
+            package, names, workflow_id, revision_id, package_root=package_root,
+        )
     except Exception as exc:
         raise RuntimeError(f'failed to load pinned Workflow script tools: {exc}') from exc
 
@@ -891,7 +869,9 @@ def _build_subagent_plan(
             '"content_type":"text","caption":"<optional label>"}]}\n'
             'The payload field MUST be named value. Never use content, data, body, or text '
             'as a replacement for value. key and value are required inside EVERY artifacts item.\n'
-            'For multiple outputs, put all entries in the same artifacts array. Do not make a '
+            'For multiple outputs, put all ready entries in the same artifacts array, including '
+            'multiple items sharing a list-slot key. Save up to 50 entries per call; split larger '
+            'sets into batches of at most 50. Do not make a '
             'small test/placeholder save before saving the real output.'
         )
         output_lines.append(
@@ -949,6 +929,9 @@ def _build_subagent_plan(
             str(_cfg['skill_fs_url'] or '').strip(),
             workflow_skills_dir(),
         ]))
+    # A declared execution budget overrides defaults; None preserves the
+    # upstream round, retry, tool-discovery and tool-limit path exactly.
+    execution_policy = policy_for(ctx.params)
     return AgentRunPlan(
         role=AgentRole.SUBAGENT,
         prompt=builder.build(),
@@ -982,10 +965,12 @@ def _build_subagent_plan(
             fs=FS if inherited_skills else None,
             skills_dir=skills_dir,
             extra_stop_condition=make_cancel_stop_condition(),
-            max_retries=max(1, int(_cfg['agentic_expanded_max_rounds']) - 1),
+            max_retries=(execution_policy.rounds - 1 if execution_policy else
+                         max(1, int(_cfg['agentic_expanded_max_rounds']) - 1)),
+            expanded_round_limit=execution_policy.rounds if execution_policy else None,
             llm_config=llm_config or {},
             tool_failure_limits=WORKFLOW_TOOL_FAILURE_LIMITS,
-            tool_call_limits=WORKFLOW_TOOL_CALL_LIMITS,
+            tool_call_limits={**WORKFLOW_TOOL_CALL_LIMITS, **(execution_policy.calls if execution_policy else {})},
         ),
     )
 
@@ -1950,7 +1935,6 @@ async def _evaluate_completion_async(
     cancel_check: Any = None,
 ) -> tuple[bool, str, str]:
     """Run the synchronous reviewer off-loop while the owner coroutine controls terminal state."""
-    timeout = float(_cfg['subagent_completion_evaluation_timeout'])
     if cancel_check is not None:
         cancel_check(None)
     evaluation = asyncio.create_task(asyncio.to_thread(
@@ -1961,20 +1945,11 @@ async def _evaluate_completion_async(
         artifacts,
         force_result,
     ))
-    deadline = asyncio.get_running_loop().time() + timeout
     try:
         while True:
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
-                LOG.warning('[SubAgent] completion evaluation timed out after %ss', timeout)
-                return (
-                    False,
-                    'Could not verify task completion before the evaluation deadline.',
-                    'completion_evaluation_failed',
-                )
             done, _ = await asyncio.wait(
                 [evaluation],
-                timeout=min(_COMPLETION_EVALUATION_POLL_SECONDS, remaining),
+                timeout=_COMPLETION_EVALUATION_POLL_SECONDS,
             )
             if done:
                 result = evaluation.result()

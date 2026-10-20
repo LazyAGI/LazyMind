@@ -765,50 +765,36 @@ async def test_cancel_during_completion_review_discards_late_success(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_completion_review_timeout_fails_closed_without_late_success(monkeypatch, tmp_path):
+async def test_completion_review_waits_for_result_without_deadline(monkeypatch):
     release_evaluation = threading.Event()
-    evaluation_finished = threading.Event()
+    evaluation_started = threading.Event()
 
     class SlowModel:
         def share(self, **_kwargs):
             def call(_prompt):
-                release_evaluation.wait(timeout=1)
-                evaluation_finished.set()
+                evaluation_started.set()
+                assert release_evaluation.wait(timeout=2)
                 return json.dumps({
                     'completed': True,
                     'requires_artifact': False,
                     'artifact_keys': [],
-                    'reason': 'Late timeout success must be ignored.',
+                    'reason': 'Analysis delivered after waiting.',
                 })
-
             return call
 
-    terminal_boundary = 0.0
-    evaluator_finished_at_terminal = True
-
-    def record_terminal(chunk):
-        nonlocal terminal_boundary, evaluator_finished_at_terminal
-        if '"current_phase": "completion_evaluation_failed"' in chunk:
-            terminal_boundary = asyncio.get_running_loop().time()
-            evaluator_finished_at_terminal = evaluation_finished.is_set()
-
-    with runner_mod._cfg.temp('subagent_completion_evaluation_timeout', 0.05):
-        raw, events = await _run_completion_review_scenario(
-            monkeypatch,
-            tmp_path,
-            SlowModel(),
-            on_chunk=record_terminal,
-        )
-
-    assert terminal_boundary > 0
-    assert evaluator_finished_at_terminal is False
-    terminal = _terminal(events)
-    assert terminal['status'] == 'failed'
-    assert terminal['current_phase'] == 'completion_evaluation_failed'
-    release_evaluation.set()
-    await asyncio.sleep(0.05)
-    assert not any(event['status'] == 'succeeded' for event in events if 'status' in event)
-    assert 'Late timeout success must be ignored.' not in raw
+    # Even a previously configured short deadline must no longer end the review.
+    monkeypatch.setattr(runner_mod, '_cfg', {'subagent_completion_evaluation_timeout': 0.05})
+    evaluation = asyncio.create_task(runner_mod._evaluate_completion_async(
+        SlowModel(), 'Analyze the request', [], [], 'Analysis delivered.',
+    ))
+    try:
+        assert await asyncio.to_thread(evaluation_started.wait, 1)
+        await asyncio.sleep(0.15)
+        assert not evaluation.done(), 'slow review must not be turned into task failure'
+    finally:
+        release_evaluation.set()
+        result = await asyncio.wait_for(evaluation, timeout=1)
+    assert result == (True, 'Analysis delivered after waiting.', '')
 
 
 @pytest.mark.asyncio

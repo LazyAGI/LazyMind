@@ -129,6 +129,8 @@ func TestAuthServiceInstallRequirementsUsesUVOnly(t *testing.T) {
 }
 
 func TestAuthServiceGenerateAPIPermissionsUsesRuntimeOutput(t *testing.T) {
+	fixtureCredentialDevicePath(t)
+	t.Setenv(cloudCredentialKeyEnvVar, "")
 	repo := t.TempDir()
 	t.Setenv(runtimeRootEnvVar, filepath.Join(repo, "runtime"))
 	writeComposeFixture(t, repo)
@@ -172,7 +174,7 @@ func TestAuthServiceGenerateAPIPermissionsUsesRuntimeOutput(t *testing.T) {
 		t.Fatalf("generate API permissions: %v", err)
 	}
 	runner.assertCommandCount(1)
-	assertEnvContains(t, authServiceEnv(RuntimeConfig{}, paths), authServicePermissionsEnvVar+"="+output)
+	assertEnvContains(t, mustAuthServiceEnv(t, RuntimeConfig{}, paths), authServicePermissionsEnvVar+"="+output)
 }
 
 func TestAuthServiceGenerateAPIPermissionsPreservesOutputStatError(t *testing.T) {

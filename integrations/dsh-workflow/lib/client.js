@@ -1,6 +1,7 @@
 window.__ModuleLoader__.load({ id: "@lazymind/dsh-workflow", factory: (require) => {
 var module = { exports: {} }; var exports = module.exports;
 let react = require("react");
+let react_dom = require("react-dom");
 let react_jsx_runtime = require("react/jsx-runtime");
 
 //#region ../workflow-agent-core/src/protocol.ts
@@ -192,6 +193,7 @@ function windowStore() {
 
 //#endregion
 //#region src/client/index.tsx
+const interactiveRegion = { WebkitAppRegion: "no-drag" };
 const inject = ["uiConversation", "slots"];
 function apply(ctx, config = {}) {
 	const windows = windowStore();
@@ -261,14 +263,43 @@ function apply(ctx, config = {}) {
 	function WorkflowDock({ session }) {
 		const current = (0, react.useSyncExternalStore)(windows.subscribe, windows.snapshot, windows.snapshot).entries[session.sessionId];
 		const frame = (0, react.useRef)(null);
+		const anchor = (0, react.useRef)(null);
+		const [tail, setTail] = (0, react.useState)(null);
 		const [expanded, setExpanded] = (0, react.useState)(false);
 		const [collapsed, setCollapsed] = (0, react.useState)(false);
+		const collapseAnchor = (0, react.useRef)(null);
 		const runId = current?.run.runId;
 		const origin = current ? new URL(current.run.url).origin : void 0;
+		(0, react.useLayoutEffect)(() => {
+			const seat = anchor.current?.closest("[data-composer-seat]");
+			const scroller = seat?.parentElement;
+			if (!seat || !scroller?.matches("[data-conversation-scroll]")) return;
+			const host = document.createElement("div");
+			host.dataset.lazymindWorkflowTail = "";
+			host.style.cssText = "flex:none;min-width:0;width:100%;position:relative;";
+			scroller.insertBefore(host, seat);
+			setTail(host);
+			return () => {
+				host.remove();
+			};
+		}, [session.sessionId]);
 		(0, react.useEffect)(() => {
 			setExpanded(false);
 			setCollapsed(false);
 		}, [runId, session.sessionId]);
+		(0, react.useLayoutEffect)(() => {
+			const saved = collapseAnchor.current;
+			collapseAnchor.current = null;
+			const panel$1 = frame.current?.parentElement;
+			if (!saved || !panel$1 || expanded || saved.runId !== runId || saved.sessionId !== session.sessionId || saved.scroller !== tail?.parentElement) return;
+			saved.scroller.scrollTop += panel$1.getBoundingClientRect().bottom - saved.bottom;
+		}, [
+			collapsed,
+			expanded,
+			runId,
+			session.sessionId,
+			tail
+		]);
 		(0, react.useEffect)(() => {
 			const receive = (event) => {
 				if (!origin || event.origin !== origin || event.source !== frame.current?.contentWindow || event.data?.sessionId !== runId) return;
@@ -276,7 +307,17 @@ function apply(ctx, config = {}) {
 					if (!value) setCollapsed(false);
 					return !value;
 				});
-				if (event.data.type === "lazymind.workflow.toggle-collapse") setCollapsed((value) => !value);
+				if (event.data.type === "lazymind.workflow.toggle-collapse") {
+					const panel$1 = frame.current?.parentElement;
+					const scroller = tail?.parentElement;
+					if (!expanded && panel$1 && scroller) collapseAnchor.current = {
+						bottom: panel$1.getBoundingClientRect().bottom,
+						scroller,
+						runId,
+						sessionId: session.sessionId
+					};
+					setCollapsed((value) => !value);
+				}
 			};
 			const keydown = (event) => {
 				if (event.key === "Escape") setExpanded(false);
@@ -287,7 +328,13 @@ function apply(ctx, config = {}) {
 				window.removeEventListener("message", receive);
 				window.removeEventListener("keydown", keydown);
 			};
-		}, [origin, runId]);
+		}, [
+			origin,
+			runId,
+			expanded,
+			tail,
+			session.sessionId
+		]);
 		const syncExpansion = () => {
 			if (origin) frame.current?.contentWindow?.postMessage({
 				type: "lazymind.workflow.expansion",
@@ -306,24 +353,29 @@ function apply(ctx, config = {}) {
 			origin,
 			runId
 		]);
-		if (!current) return null;
+		if (!current) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+			ref: anchor,
+			hidden: true
+		});
 		const url = new URL(`/workflow-runs/${encodeURIComponent(current.run.runId)}/embed`, origin);
 		url.searchParams.set("hostOrigin", window.location.origin);
-		return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("section", {
+		const panel = /* @__PURE__ */ (0, react_jsx_runtime.jsx)("section", {
 			"aria-label": "LazyMind Workflow",
 			style: {
-				height: collapsed && !expanded ? 66 : "min(480px, 55dvh)",
+				...interactiveRegion,
+				height: collapsed && !expanded ? 66 : "min(900px, 75dvh)",
 				minHeight: 0,
 				flexShrink: 0,
 				width: "100%",
 				maxWidth: "var(--dsh-chat-content-width, 920px)",
 				alignSelf: "center",
 				boxSizing: "border-box",
+				margin: expanded ? 0 : "12px auto",
 				display: current.minimized ? "none" : "flex",
 				flexDirection: "column",
 				...expanded ? {
 					position: "fixed",
-					inset: 16,
+					inset: "var(--dsh-frame-overlay-top, 16px) 16px 16px",
 					width: "auto",
 					maxWidth: "none",
 					alignSelf: "stretch",
@@ -340,6 +392,7 @@ function apply(ctx, config = {}) {
 				src: url.href,
 				onLoad: syncExpansion,
 				style: {
+					...interactiveRegion,
 					width: "100%",
 					height: "100%",
 					flex: 1,
@@ -348,6 +401,16 @@ function apply(ctx, config = {}) {
 				}
 			}, runKey(current.run))
 		});
+		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+			ref: anchor,
+			hidden: true
+		}), tail ? (0, react_dom.createPortal)(/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+			style: {
+				display: "flow-root",
+				height: expanded ? "calc(min(900px, 75dvh) + 24px)" : void 0
+			},
+			children: panel
+		}), tail) : panel] });
 	}
 	ctx.uiConversation.events.register(definition);
 	ctx.slots.inject("conversation.chat.node", () => ctx.slots.register({

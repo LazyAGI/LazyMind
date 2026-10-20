@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary lint-workflow-naming lint-migration-immutability lint-test-locations test test-hermetic test-hermetic-setup test-hermetic-check featured-check skills-build skills-materialize skills-verify-lock build up up-build kong-refresh local-runtime-manager-build lazymind-cli-build assistant-bridge-start assistant-bridge-stop local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-dev desktop-dev-down desktop-darwin-arm64 desktop-darwin-arm64-dmg desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-installer desktop-windows-x64-clean desktop-cache-clean desktop-clean
+.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary lint-workflow-naming lint-migration-immutability lint-test-locations test test-hermetic test-hermetic-setup test-hermetic-check featured-check skills-build skills-materialize skills-verify-lock build up up-build kong-refresh local-pandoc local-runtime-manager-build lazymind-cli-build assistant-bridge-start assistant-bridge-stop local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-dev desktop-dev-down desktop-darwin-arm64 desktop-darwin-arm64-dmg desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-installer desktop-windows-x64-clean desktop-cache-clean desktop-clean
 .DEFAULT_GOAL := help
 
 LOCAL_CONFIG_ENV ?= local/config.env
@@ -24,6 +24,8 @@ LOCAL_BUILD_DIR := $(CURDIR)/local/build
 override export LAZYMIND_LOCAL_BUILD_ROOT := $(LOCAL_BUILD_DIR)
 override LOCAL_RUNTIME_MANAGER_BIN := $(LOCAL_BUILD_DIR)/bin/local-runtime-manager
 override LOCAL_RUNTIME_MANAGER_WIN_BIN := $(LOCAL_BUILD_DIR)/bin/local-runtime-manager.exe
+LOCAL_PANDOC_BIN := $(LOCAL_BUILD_DIR)/bin/pandoc
+LOCAL_PANDOC_ENV :=
 HOST_UNAME_S := $(shell uname -s 2>/dev/null)
 HOST_UNAME_M := $(shell uname -m 2>/dev/null)
 HOST_UNAME_GOARCH := $(if $(filter arm64 aarch64,$(HOST_UNAME_M)),arm64,$(if $(filter x86_64 amd64,$(HOST_UNAME_M)),amd64,unsupported))
@@ -47,6 +49,9 @@ else
 LAZYMIND_CLI_FILENAME := lazymind
 HOST_GOOS := $(if $(filter Darwin,$(HOST_UNAME_S)),darwin,$(if $(filter Linux,$(HOST_UNAME_S)),linux,unsupported))
 HOST_GOARCH := $(HOST_UNAME_GOARCH)
+ifeq ($(HOST_GOOS)-$(HOST_GOARCH),darwin-arm64)
+LOCAL_PANDOC_ENV := LAZYMIND_PANDOC_PATH="$(LOCAL_PANDOC_BIN)"
+endif
 _HOST_DOCKER_USER_FLAG := --user "$$(id -u):$$(id -g)"
 _HOST_DOCKER_PREFIX :=
 endif
@@ -651,12 +656,19 @@ desktop-clean:
 	done
 endif
 
-local-up: skills-materialize local-runtime-manager-build lazymind-cli-build
-	@"$(LOCAL_RUNTIME_MANAGER_BIN)" up
+local-pandoc:
+ifeq ($(HOST_GOOS)-$(HOST_GOARCH),darwin-arm64)
+	@node desktop/scripts/stage-pandoc.mjs "$(LOCAL_BUILD_DIR)" --target darwin-arm64
+else
+	@:
+endif
+
+local-up: skills-materialize local-pandoc local-runtime-manager-build lazymind-cli-build
+	@$(LOCAL_PANDOC_ENV) "$(LOCAL_RUNTIME_MANAGER_BIN)" up
 	@$(MAKE) --no-print-directory assistant-bridge-start
 
-local-up-lan: skills-materialize local-runtime-manager-build lazymind-cli-build
-	@LAZYMIND_LOCAL_NETWORK_PROFILE=lan LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN=true "$(LOCAL_RUNTIME_MANAGER_BIN)" up
+local-up-lan: skills-materialize local-pandoc local-runtime-manager-build lazymind-cli-build
+	@$(LOCAL_PANDOC_ENV) LAZYMIND_LOCAL_NETWORK_PROFILE=lan LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN=true "$(LOCAL_RUNTIME_MANAGER_BIN)" up
 	@$(MAKE) --no-print-directory assistant-bridge-start
 
 local-down:

@@ -28,6 +28,7 @@ import (
 	"lazymind/core/currentmemory"
 	"lazymind/core/datasource"
 	"lazymind/core/doc"
+	"lazymind/core/documentdirectory"
 	"lazymind/core/episode"
 	"lazymind/core/evalset"
 	"lazymind/core/evolution"
@@ -42,6 +43,7 @@ import (
 	"lazymind/core/mcp"
 	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
+	"lazymind/core/product"
 	coreproviderconnection "lazymind/core/providerconnection"
 	"lazymind/core/realtime"
 	"lazymind/core/remotefs"
@@ -652,6 +654,12 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/workflow-preparations", []string{"qa.write"}, workflowFacade.Prepare)
 	handleAPI(r, "POST", "/workflow-preparations/{preparation_id}:consume", []string{"qa.write"}, workflowFacade.Consume)
 	handleAPI(r, "GET", "/workflow-sessions", []string{"qa.read"}, workflowFacade.ListSessions)
+	// Domain endpoints compose the generic storage API.
+	productHandler := product.Handler{Store: product.New(corestore.DB())}
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/product-stage-relay", []string{"qa.read"}, productHandler.ProductStageRelay)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/product-stage-relay", []string{"qa.write"}, productHandler.ProductStageRelay)
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/product-artifacts/{stage}", []string{"qa.read"}, productHandler.ProductProjectArtifact)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/product-decisions/{decision_id}", []string{"qa.write"}, productHandler.ProductDecision)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:advance-step", []string{"qa.write"}, workflowFacade.Command(http.HandlerFunc(workflow.TransitionWorkflowSession)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:advance-step-and-hand-off", []string{"qa.write"}, workflowFacade.Command(http.HandlerFunc(workflow.TransitionWorkflowSession)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin", []string{"qa.write"}, hostedHandler.Begin)
@@ -787,6 +795,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/skill-recordings/decision", []string{"qa.write"}, skillv2handler.DecideSkillRecording)
 	handleAPI(r, "POST", "/skill_organize", []string{"qa.write"}, skillv2handler.SubmitSkillOrganize)
 	handleAPI(r, "POST", "/skill_organize:cancel", []string{"qa.write"}, skillv2handler.CancelSkillOrganize)
+	handleAPI(r, "GET", "/skill_organize/approvals", []string{"qa.read"}, skillv2handler.ListSkillOrganizeApprovals)
+	handleAPI(r, "POST", "/skill_organize/approvals:resolve", []string{"qa.write"}, skillv2handler.ResolveSkillOrganizeApprovals)
 	handleAPI(r, "GET", "/skills/maintenance-task", []string{"qa.read"}, skillv2handler.MaintenanceTaskStatus)
 	handleAPI(r, "GET", "/skills/tags", []string{"qa.read"}, skillv2handler.ListTags)
 	handleAPI(r, "GET", "/skills/categories", []string{"qa.read"}, skillv2handler.ListCategories)
@@ -861,6 +871,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/knowledge-market:update-all", []string{"qa.write"}, systemdeps.RequireRAG(knowledge_market.MarketUpdateAll))
 	handleAPI(r, "GET", "/knowledge-market/tasks", []string{"qa.read"}, knowledge_market.MarketListInstallTasks)
 	handleAPI(r, "GET", "/knowledge-market/tasks/{job_id}", []string{"qa.read"}, knowledge_market.MarketGetInstallTask)
+	handleAPI(r, "GET", "/knowledge-market/tasks/{job_id}/files", []string{"qa.read"}, knowledge_market.MarketTaskFiles)
 	handleAPI(r, "DELETE", "/knowledge-market/tasks/{job_id}", []string{"qa.write"}, knowledge_market.MarketDeleteTask)
 	handleAPI(r, "POST", "/knowledge-market/tasks/{job_id}:retry", []string{"qa.write"}, knowledge_market.MarketRetryTask)
 	handleAPI(r, "POST", "/knowledge-market/tasks/{job_id}:cancel", []string{"qa.write"}, knowledge_market.MarketCancelTask)
@@ -888,6 +899,14 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/conversations/{name}", []string{"qa.read"}, chat.GetConversation)
 	handleAPI(r, "DELETE", "/conversations/{name}", []string{"qa.write"}, chat.DeleteConversation)
 	handleAPI(r, "POST", "/conversations:batchDelete", []string{"qa.write"}, chat.BatchDeleteConversations)
+	handleAPI(r, "GET", "/document-directories", []string{"qa.read"}, documentdirectory.ListHandler)
+	handleAPI(r, "GET", "/document-directories/batches", []string{"qa.read"}, documentdirectory.BatchesHandler)
+	handleAPI(r, "POST", "/document-directories/actions", []string{"qa.write"}, documentdirectory.CommandHandler)
+	handleAPI(r, "GET", "/document-directories/{directory_id}/source-nodes", []string{"qa.read"}, documentdirectory.FolderNodesHandler)
+	handleAPI(r, "GET", "/document-directories/{directory_id}", []string{"qa.read"}, documentdirectory.DetailHandler)
+	handleAPI(r, "GET", "/document-directories/{directory_id}/entries/{entry_id}/mail", []string{"qa.read"}, documentdirectory.ReadMailHandler)
+	handleAPI(r, "GET", "/document-directories/{directory_id}/entries/{entry_id}/local-file", []string{"qa.read"}, documentdirectory.ReadLocalFileHandler)
+	handleAPI(r, "POST", "/internal/conversations/{conversation_id}/document-directories", nil, documentdirectory.InternalHandler)
 	handleAPI(r, "GET", "/conversation-groups", []string{"qa.read"}, conversationgroup.ListGroups)
 	handleAPI(r, "POST", "/conversation-groups", []string{"qa.write"}, conversationgroup.CreateGroup)
 	handleAPI(r, "GET", "/conversation-groups/{group_id}", []string{"qa.read"}, conversationgroup.GetGroup)

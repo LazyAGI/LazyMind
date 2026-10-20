@@ -3,6 +3,7 @@ package workflow
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -237,5 +238,94 @@ func TestOrdinaryWorkflowProjectionRestoresCurrentAttemptPlan(t *testing.T) {
 	}
 	if body.Data.Tasks[0].ProgressPct == nil || *body.Data.Tasks[0].ProgressPct != 50 {
 		t.Fatal("overall progress missing from current attempt")
+	}
+}
+
+func TestOrdinaryWorkflowHidesInternalSlotsFromPinnedPackage(t *testing.T) {
+	for _, hosted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("hosted=%v", hosted), func(t *testing.T) {
+			db, session, now := ordinaryFixture(t)
+			manifest := []byte("slots:\n  - {id: report}\n  - {id: public, exposed: true}\n  - {id: internal, exposed: false}\n  - {id: internal_unbound, exposed: false}\n")
+			hash := "visibility-manifest"
+			if err := db.Create(&orm.WorkflowBlob{Hash: hash, Content: manifest, Size: int64(len(manifest)), CreatedAt: now}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowRevisionEntry{RevisionID: session.WorkflowRevisionID, Path: "workflow.yaml", BlobHash: &hash, EntryType: "file"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			graph, err := loadSessionGraph(t.Context(), db.DB, &session)
+			if err != nil {
+				t.Fatal(err)
+			}
+			graph.ControlEdges = []graphengine.CompiledEdge{{From: "write", To: "__end__"}}
+			graph.Nodes["write"] = graphengine.CompiledNode{ID: "write", Outputs: []string{"report", "public", "internal", "internal_unbound"}}
+			graph.MaterialCardinalities = map[string]string{"report": "single", "public": "list"}
+			graph.MaterialTypes = map[string]string{"report": "text", "public": "text", "internal": "text", "internal_unbound": "text"}
+			if err := db.Model(&orm.WorkflowRevision{}).Where("id = ?", session.WorkflowRevisionID).Update("compiled_graph", graph.JSON()).Error; err != nil {
+				t.Fatal(err)
+			}
+			attemptRow := orm.WorkflowSessionStep{ID: "write-attempt", SessionID: session.ID, StepID: "write", TaskID: "write-task", Attempt: 1, Status: "succeeded", Validity: "effective", CreatedAt: now, UpdatedAt: now}
+			if err := db.Create(&attemptRow).Error; err != nil {
+				t.Fatal(err)
+			}
+			if !hosted {
+				if err := db.Create(&orm.SubAgentTask{ID: "write-task", ConversationID: session.ConversationID, Status: "completed", InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`), CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, slot := range []string{"report", "public", "internal", "internal_unbound"} {
+				value := json.RawMessage(`{"text":"saved"}`)
+				var seq *int
+				if !hosted {
+					one := 1
+					seq = &one
+					if err := db.Create(&orm.SubAgentArtifact{ID: "raw-" + slot, TaskID: "write-task", Slot: slot, Seq: 1, ContentType: "text", Value: value, CreatedAt: now}).Error; err != nil {
+						t.Fatal(err)
+					}
+				}
+				if slot == "internal_unbound" {
+					continue
+				}
+				var listIndex *int
+				if slot == "public" {
+					zero := 0
+					listIndex = &zero
+				}
+				if err := db.Create(&orm.WorkflowSlotRevision{ListIndex: listIndex, ID: "revision-" + slot, SessionID: session.ID, SlotID: slot, Slot: slot, StepID: "write", Attempt: 1, ProducerAttemptID: attemptRow.ID, ArtifactSeq: seq, Revision: 1, Selected: true, Validity: "effective", ContentSnapshot: value, CreatedAt: now}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			// An edited scalar replaces its earlier displayed version; list items remain distinct.
+			if err := db.Model(&orm.WorkflowSlotRevision{}).Where("id = ?", "revision-report").Update("selected", false).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowSlotRevision{ID: "edited-report", SessionID: session.ID, SlotID: "report", Slot: "report", StepID: "write", Attempt: 1, Revision: 2, Selected: true, Validity: "effective", ContentSnapshot: json.RawMessage(`{"text":"edited"}`), CreatedAt: now.Add(time.Second)}).Error; err != nil {
+				t.Fatal(err)
+			}
+			one := 1
+			if err := db.Create(&orm.WorkflowSlotRevision{ID: "second-list-item", SessionID: session.ID, SlotID: "public", Slot: "public", StepID: "write", Attempt: 1, ProducerAttemptID: attemptRow.ID, ListIndex: &one, Revision: 1, Selected: true, Validity: "effective", ContentSnapshot: json.RawMessage(`{"text":"second"}`), CreatedAt: now}).Error; err != nil {
+				t.Fatal(err)
+			}
+			view, err := projectOrdinarySession(t.Context(), db.DB, &session)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(view.Tasks[0].StageArtifacts) != 3 || len(view.Runs[0].FinalArtifacts) != 3 {
+				t.Fatalf("visible output counts: stage=%d final=%d", len(view.Tasks[0].StageArtifacts), len(view.Runs[0].FinalArtifacts))
+			}
+			for _, artifact := range view.Tasks[0].StageArtifacts {
+				if artifact.Name == "report" && artifact.InlineContent != "edited" {
+					t.Fatalf("stale scalar artifact displayed: %+v", artifact)
+				}
+			}
+			encoded, _ := json.Marshal(view)
+			if strings.Contains(string(encoded), "internal") {
+				t.Fatalf("internal slot leaked: %s", encoded)
+			}
+			var count int64
+			if err := db.Model(&orm.WorkflowSlotRevision{}).Where("slot_id = ?", "internal").Count(&count).Error; err != nil || count != 1 {
+				t.Fatal("internal data must remain available to runtime", err)
+			}
+		})
 	}
 }

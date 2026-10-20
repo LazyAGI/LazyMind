@@ -10,16 +10,32 @@ transitions:
         skip_material_collection was not saved because uploaded sources,
         knowledge-base/web research, citations, current facts, real photos,
         product evidence, cases, data, or reference images are still needed.
+    - to: choose_style
+      when: >
+        skip_material_collection was saved and style_flow is exactly
+        preview_choice.
     - to: plan_background_prompts
       when: >
-        skip_material_collection was saved and ppt_capability_requirements is
-        exactly AI_BACKGROUND_IMAGES: enabled.
+        skip_material_collection was saved, style_flow is exactly auto, and
+        ppt_capability_requirements is exactly AI_BACKGROUND_IMAGES: enabled.
     - to: build_outline
       when: >
-        skip_material_collection was saved and ppt_capability_requirements is
-        exactly AI_BACKGROUND_IMAGES: disabled.
+        skip_material_collection was saved, style_flow is exactly auto, and
+        ppt_capability_requirements is exactly AI_BACKGROUND_IMAGES: disabled.
 
   collect_materials:
+    - to: choose_style
+      when: style_flow is exactly preview_choice.
+    - to: plan_background_prompts
+      when: >
+        style_flow is exactly auto and ppt_capability_requirements is exactly
+        AI_BACKGROUND_IMAGES: enabled.
+    - to: build_outline
+      when: >
+        style_flow is exactly auto and ppt_capability_requirements is exactly
+        AI_BACKGROUND_IMAGES: disabled.
+
+  choose_style:
     - to: plan_background_prompts
       when: >
         ppt_capability_requirements is exactly AI_BACKGROUND_IMAGES: enabled.
@@ -52,6 +68,8 @@ steps:
 
       User request:
       {{user_input}}
+      A bare continue/继续 is approval to proceed. Use launch_user_input from the
+      execution context and bound prior artifacts to retain the existing requirements.
 
       {{runtime_instruction}}
 
@@ -75,9 +93,10 @@ steps:
 
       Startup clarification contract:
       - The Chat host collects presentation topic, exact slide count, target
-        customer/audience, visual style, and whether per-slide AI background
-        generation is enabled before creating this workflow session. Extract
-        all five faithfully from {{user_input}}; clarification
+        customer/audience, visual style, whether to generate one style directly
+        or preview three choices, and whether per-slide AI background generation
+        is enabled before creating this workflow session. Extract all six
+        faithfully from {{user_input}}; clarification
         answers may have been merged into the original request.
       - Do not replace an explicitly supplied value with a generic default.
       - Do not interpret the phrase "make a PPT" itself as a presentation topic,
@@ -117,6 +136,9 @@ steps:
         (default: no — do not invent this need)
       - AI background generation: record exactly enabled or disabled from the
         startup answer. This is independent from foreground material images.
+      - Style flow: record exactly auto when the user chose direct generation,
+        or preview_choice when the user chose three previews. This decision is
+        independent from AI background generation.
 
       If the user already attached a PDF/PPTX/report or pasted key facts, fold the
       usable numbers and claims into the brief. collect_materials will reuse
@@ -131,7 +153,19 @@ steps:
                 per-slide AI backgrounds, otherwise
                 'AI_BACKGROUND_IMAGES: disabled',
         )
-        When and only when that marker is disabled, also save:
+        save_artifact(
+          key='style_flow', content_type='text',
+          value='auto' for direct generation, otherwise 'preview_choice',
+        )
+        save_artifact(
+          key='generate_background_images', content_type='text',
+          value='enabled' if AI backgrounds are enabled, otherwise 'disabled',
+        )
+        When and only when style_flow is auto, also save:
+          save_artifact(
+            key='skip_style_choices', content_type='text', value='skip',
+          )
+        When and only when AI background generation is disabled, also save:
           save_artifact(
             key='skip_background_images', content_type='text', value='skip',
           )
@@ -159,6 +193,10 @@ steps:
     outputs:
       - material: requirement_analysis
       - material: ppt_capability_requirements
+      - material: style_flow
+      - material: generate_background_images
+      - material: skip_style_choices
+        required: false
       - material: skip_background_images
         required: false
       - material: skip_material_collection
@@ -168,7 +206,9 @@ steps:
       topic, exact slide count, target customer/audience, communication tone,
       explicit visual constraints, structure, constraints, and assumptions.
       ppt_capability_requirements must be exactly AI_BACKGROUND_IMAGES: enabled
-      or AI_BACKGROUND_IMAGES: disabled. Executor must run the configured
+      or AI_BACKGROUND_IMAGES: disabled. style_flow must be exactly auto or
+      preview_choice and must not be inferred from the background setting.
+      Executor must run the configured
       deterministic check exactly once before this Attempt can pass.
 
   collect_materials:
@@ -191,6 +231,8 @@ steps:
 
       Original user request:
       {{user_input}}
+      A bare continue/继续 is approval to proceed. Use launch_user_input from the
+      execution context and bound prior artifacts to retain the existing requirements.
 
       {{runtime_instruction}}
 
@@ -263,9 +305,21 @@ steps:
             missing after KB image retrieval, or when no applicable KB is available.
             Then register only the necessary results with
             [{"url":..., "caption":..., "source":"web"}, ...] for at most one selected material image per planned slide.
-            If image search is unavailable or returns no usable URL, do not
-            retry repeatedly and do not fail the step. Record the gap in
-            material_summary and continue without material_images.
+            If a selected image URL is expired, inaccessible (for example
+            HTTP 403/404), or returns a page instead of a valid image, discard
+            that candidate and call ppt_search_web_images again for the same
+            slide subject. Select a different image URL/source from the fresh
+            results, then download/register that replacement. Do not repeatedly
+            retry the broken URL, invent a URL, or restart this whole step.
+            One broken link does not mean image search failed: try the fresh
+            candidate before deciding to omit an optional image. Preserve all
+            facts and images already collected successfully. Count replacement
+            searches toward the retrieval budget below and reserve budget for
+            this recovery when selecting image candidates.
+            If image search itself is unavailable or the fresh search yields
+            no usable replacement, record the gap in material_summary and
+            continue without that optional image. An AI background is not a
+            substitute for a real photo/product/reference image the user required.
          c) AI-generated material images — ONLY when the user explicitly asks
             to generate/create material images for the deck (e.g. "生成素材图",
             "用 AI 画几张参考图", "AI generate reference images"). Then call:
@@ -341,6 +395,70 @@ steps:
       as individual image-list artifacts so the Materials tab can preview them
       and later steps can embed them in HTML.
 
+  choose_style:
+    label: Choose Style
+    mode: human
+    skip_if: {material: skip_style_choices}
+    prompt: |
+      Generate exactly three deck-wide visual style previews, publish them for
+      comparison, and stop for the user's choice. Do not build the outline,
+      generate AI backgrounds, or render final slides in this step.
+
+      Requirement analysis:
+      {{requirement_analysis}}
+
+      Material summary (may be empty):
+      {{material_summary}}
+
+      Style flow (must be preview_choice in this step):
+      {{style_flow}}
+
+      AI backgrounds:
+      {{generate_background_images}}
+
+      Original user request:
+      {{user_input}}
+      A bare continue/继续 is approval to proceed. Use launch_user_input from the
+      execution context and bound prior artifacts to retain the existing requirements.
+
+      {{runtime_instruction}}
+
+      Call ppt_prepare_style_choices exactly once. Pass the merged request,
+      positive page count, audience/scene, only the user's explicit style
+      direction as style_hint, generate_background_images=true only when the
+      hidden value is enabled, and omit unused optional arguments. The tool
+      creates exactly three distinct but request-compatible previews, publishes
+      one read-only comparison, and initializes editable style_selection to the
+      recommended candidate A.
+
+      On a retry after previews were already generated, first call ppt_find_deck
+      and pass its deck_dir so the tool reuses the same three previews. Never
+      create another deck merely because the step was resumed.
+
+      The user confirms by leaving A unchanged or editing style_selection to B
+      or C, then clicking Save and Continue. Do not ask the user to edit JSON.
+      Stop immediately after ppt_prepare_style_choices succeeds.
+    tools:
+      - ppt_find_deck
+      - ppt_prepare_style_choices
+    inputs:
+      - material: requirement_analysis
+        required: true
+      - material: material_summary
+        required: false
+      - material: style_flow
+        required: true
+      - material: generate_background_images
+        required: true
+    outputs:
+      - material: style_previews
+        required: true
+      - material: style_selection
+        required: true
+    acceptance_criteria: |
+      Exactly three preview choices A, B, and C are visible. style_selection is
+      one editable, non-empty A/B/C value and the step waits for human approval.
+
   build_outline:
     label: Build Outline
     mode: auto
@@ -361,6 +479,14 @@ steps:
 
       Original user request:
       {{user_input}}
+      A bare continue/继续 is approval to proceed. Use launch_user_input from the
+      execution context and bound prior artifacts to retain the existing requirements.
+
+      Style flow:
+      {{style_flow}}
+
+      Selected preview (A/B/C when applicable):
+      {{style_selection}}
 
       {{runtime_instruction}}
 
@@ -385,8 +511,8 @@ steps:
       Stop after that one insertion publication call. Never call
       ppt_build_outline for a whole-slide insertion.
 
-      When AI backgrounds were enabled, first call ppt_find_deck to locate the
-      deck prepared by the background-prompt step. Then call ppt_build_outline
+      When AI backgrounds were enabled OR style_flow is preview_choice, first
+      call ppt_find_deck to locate the already prepared deck. Then call ppt_build_outline
       once with its deck_dir:
 
       ppt_build_outline — pass only these (omit unused optionals; never pass null):
@@ -396,6 +522,8 @@ steps:
            topic=<short topic>,
            role / audience / scene=<from analysis>,
            style_hint=<ONLY visual constraints explicitly stated by the user>,
+           style_flow=<exact hidden auto or preview_choice value>,
+           style_selection=<exact A/B/C value only for preview_choice>,
            generate_background_images=<true only when startup answer enabled it>,
            key_points_json='["point1","point2"]'  (JSON string, or omit)
            outline_markdown=<REQUIRED: your concise content outline, one ## heading
@@ -413,14 +541,15 @@ steps:
       from requirement_analysis into style_hint. The PPT runtime selects one
       deck-wide style and applies that same contract to every page.
 
-      This call reuses the prepared deck and saves your Markdown without a nested
-      model call. Internal structure, schema validation, image bindings, shared
-      style and rendering are all deferred to generate_ppt. This step only plans
+      This call reuses the prepared deck, locks one authoritative deck-wide style,
+      and saves your Markdown. Internal structure, schema validation, image
+      bindings and rendering are deferred to generate_ppt. This step only plans
       user-visible content; keep page headings clear and content concise.
       This step never generates AI backgrounds; the dedicated stages before it
       already published prompts and images. When AI backgrounds were
-      disabled and those steps were skipped, do not call ppt_find_deck: call
-      ppt_build_outline without deck_dir so it initializes the deck itself.
+      disabled and those steps were skipped, style_flow determines deck reuse:
+      preview_choice reuses the preview deck; auto calls ppt_build_outline without
+      deck_dir so it initializes the deck and creates one unique style first.
 
       This is an atomic step. If ppt_build_outline fails, report that exact tool
       error and stop so only this Workflow step fails and can be retried.
@@ -447,6 +576,10 @@ steps:
         required: false
       - material: ppt_capability_requirements
         required: true
+      - material: style_flow
+        required: true
+      - material: style_selection
+        required: false
     outputs:
       - material: deck_outline
     acceptance_criteria: |
@@ -472,6 +605,8 @@ steps:
 
       Original user request:
       {{user_input}}
+      A bare continue/继续 is approval to proceed. Use launch_user_input from the
+      execution context and bound prior artifacts to retain the existing requirements.
 
       {{runtime_instruction}}
 
@@ -518,9 +653,9 @@ steps:
       用户要求修改、替换或重新生成全部/指定页的底图提示词；或者在已启用
       AI 底图的现有 PPT 中插入整页（插页必须从此步骤开始）。
     prompt: |
-      You are the AI-background art director for one presentation. Produce one
-      editable English image prompt per slide, then finish automatically.
-      Do not generate any image in this step.
+      Write one short, editable English prompt for a 16:9 slide background per page.
+      Each prompt is one paragraph, normally 2–4 sentences. A two-slide deck needs just two
+      paragraphs. Publish them and finish; this step does not generate images.
 
       Requirement analysis:
       {{requirement_analysis}}
@@ -531,20 +666,40 @@ steps:
       Existing background prompts, if this is a targeted revision:
       {{background_prompts}}
 
+      Style flow:
+      {{style_flow}}
+
+      Selected preview (A/B/C when applicable):
+      {{style_selection}}
+
       Original/current user request:
       {{user_input}}
+      A bare continue/继续 is approval to proceed. Use launch_user_input from the
+      execution context and bound prior artifacts to retain the existing requirements.
 
       {{runtime_instruction}}
 
-      On the first full run, call ppt_init_deck once using the analyzed request,
-      exact positive page_count N, audience/scene/style, and
-      generate_background_images=true and ppt_mode=fast. Editable PPT export
-      does not require standard mode; do not select standard. Then call
-      ppt_publish_background_prompts with that deck_dir and exactly N objects:
-        [{"page_no":1,"prompt":"..."}, ..., {"page_no":N,"prompt":"..."}]
+      Prepare the deck before writing the prompts:
+      - For a new auto task, call ppt_init_deck with the analyzed request, exact
+        page_count, audience, scene, the user's style_hint, style_flow=auto, and
+        generate_background_images=true. This only initializes metadata and
+        reuses an already bound deck on retry; no style-generation call is needed.
+      - For preview_choice, call ppt_find_deck, then ppt_prepare_style with its
+        deck_dir, style_flow=preview_choice, and the selected A/B/C style_selection.
+        Reuse that saved preview's style_spec; do not create another style.
+      - For a targeted revision, call ppt_find_deck and keep the existing deck.
 
-      On a targeted rerun, call ppt_find_deck instead of ppt_init_deck, then
-      publish only the selected page objects into that existing deck.
+      Use the user's existing style and colors (or the selected preview). Write
+      a simple scene relevant to each page, leave a calm area for slide text,
+      and keep the backgrounds visually consistent. If layout is unknown, leave
+      the left side calm and put decoration on the right. Backgrounds contain no
+      text, logos, watermarks, charts, or diagrams; foreground photos and page
+      layout are handled later. Reuse the available information and publish
+      directly without exploring alternative compositions or repeated self-review.
+
+      Call ppt_publish_background_prompts with that deck_dir and one object per page:
+        [{"page_no":1,"prompt":"..."}, ..., {"page_no":N,"prompt":"..."}]
+      For a targeted revision, publish only the requested page objects.
 
       Whole-slide insertion into an existing deck: call ppt_find_deck, read the
       two adjacent page outlines with ppt_read_page_outline when available, and
@@ -561,45 +716,6 @@ steps:
       every old prompt/card revision unchanged. Do not publish or rewrite any
       prompt after N.
 
-      Prompt-series contract:
-      - Every prompt is a complete standalone 16:9 slide-background prompt.
-      - Start each prompt with canvas/use and spatial allocation before describing
-        the subject: `16:9 widescreen presentation background`, the page role,
-        exact safe-zone side/region and approximate percentage, then the visual
-        focus and its location. The API ratio alone is not a composition instruction.
-      - Derive the safe zone from the planned page role and content density:
-        left-text/right-visual keeps the left 40–45% continuous, low-texture, and
-        low-contrast; right-text mirrors it; centered cover/title keeps the central
-        55–65% calm; top-title pages keep the top 20–25% calm; data-heavy pages keep
-        most of the canvas quiet with decoration confined to edges/corners. When
-        layout is not yet known, use a calm left 42% and a right-side visual focus
-        consistently rather than switching sides at random.
-      - Never place a face, hard horizon, bright flare, busy silhouette, or high-frequency
-        texture through the content-safe region. Put the strongest contrast and detail
-        inside the declared visual region and make the transition into the safe zone gradual.
-      - Use one shared visual world: identical palette, dominant art medium or camera
-        grammar, lighting direction/softness, material and texture family, shape language,
-        edge-detail strategy, spatial depth, and one recurring visual motif.
-        Compress these fixed properties into one concise series-anchor sentence and repeat
-        that sentence verbatim in every prompt; never rely on a previous page's context.
-      - Evolve that motif with the deck narrative so adjacent backgrounds feel
-        connected, while each page remains recognizably different in at least one
-        structural axis such as distance, density, scale, direction, or motif state.
-      - Describe 5–12 concrete visible elements with explicit spatial relationships.
-        Control materials, lighting, and a 3–5 color palette separately. Use visible
-        evidence such as believable shadows, tactile surfaces, atmospheric depth, or
-        crisp silhouettes instead of empty `beautiful/professional/high quality` stacks.
-      - Use a page-specific visual metaphor tied to that page's message. Do not default
-        unrelated topics to cyan-purple tech glow, glass dashboards, neural networks,
-        floating data particles, random geometric collage, or an all-black background.
-      - Keep title/central safe areas calm and low contrast; detail belongs near
-        edges. No words, letters, numbers, logos, watermarks, UI, charts, labels,
-        or text placeholders.
-      - Backgrounds never carry exact processes, diagrams, tables, axes, KPI values,
-        or fake dashboards; those belong to the later HTML/PPT/SVG chart layer.
-      - Keep the final avoid clause short and targeted. Do not bury the positive scene
-        description under a long negative prompt.
-
       For a targeted request such as “重新生成底图提示词 1、2” or “替换第 3
       页提示词”, preserve all other prompts and pass only the requested page
       objects. The publisher overwrites those sort_order positions. Never append
@@ -610,6 +726,7 @@ steps:
     tools:
       - ppt_init_deck
       - ppt_find_deck
+      - ppt_prepare_style
       - ppt_read_page_outline
       - ppt_publish_background_prompts
     inputs:
@@ -617,16 +734,18 @@ steps:
         required: true
       - material: material_summary
         required: false
+      - material: style_flow
+        required: true
+      - material: style_selection
+        required: false
     outputs:
       - material: background_prompts
         required: true
     acceptance_criteria: |
-      On a full run, background_prompts has exactly one non-empty English prompt
-      for the analyzed page count with aligned sort_order. Every prompt repeats a shared
-      series anchor verbatim and contains page-specific structural variation plus an
-      explicit percentage-based no-text/content-safe-area contract. Materials, lighting,
-      and palette are independently specified. On a targeted rerun, only requested
-      positions are replaced.
+      On a full run, background_prompts contains one short, non-empty English
+      paragraph per requested slide, with aligned sort_order. Prompts follow
+      the existing style, leave space for slide text, and request no text in
+      the background. On a targeted rerun, only requested positions are replaced.
 
   generate_backgrounds:
     label: Generate Backgrounds
@@ -647,6 +766,8 @@ steps:
 
       Original/current user request:
       {{user_input}}
+      A bare continue/继续 is approval to proceed. Use launch_user_input from the
+      execution context and bound prior artifacts to retain the existing requirements.
 
       {{runtime_instruction}}
 
@@ -715,6 +836,8 @@ steps:
 
       Original user request:
       {{user_input}}
+      A bare continue/继续 is approval to proceed. Use launch_user_input from the
+      execution context and bound prior artifacts to retain the existing requirements.
 
       {{runtime_instruction}}
 
@@ -809,18 +932,21 @@ steps:
       Page prompts already exist from plan_page_prompts. Do NOT call ppt_init_deck,
       stage=style, or stage=outline again.
 
-      Call ONE tool:
-        ppt_generate_pages()
+      Call ONE tool exactly once:
+        ppt_generate_pages(concurrency=1)
           — omit deck_dir to auto-find; or pass deck_dir from earlier results.
-          — omit concurrency to use the default 3 parallel page workers; do not force 2.
+          — Generate ALL requested pages sequentially, one page at a time.
+            Never run page-generation tools in parallel or reduce the deck to one page.
           — Internally: approved text → internal outline → asset-plan → shared style → batch-page-html
             (converts current edited briefs without changing approved content;
              reuses unchanged structure and style on retries)
             (uses each slide_outline brief, including Outline-tab edits;
              auto-publishes preview_html + notes).
 
-      Do NOT call ppt_run_stage(asset-plan|batch-page-html) separately unless
-      ppt_generate_pages failed and you are recovering.
+      If generation fails, report its error and stop immediately. Do not call
+      ppt_generate_pages again, switch to ppt_run_stage, or regenerate missing
+      pages in this Attempt. The tool owns its bounded internal retries; another
+      workflow Attempt must be requested by the user.
       Stop after success. Do NOT export PPTX from tools.
 
       ## Hard rules
@@ -877,8 +1003,9 @@ steps:
       - material: preview_html
       - material: preview_notes
     acceptance_criteria: |
-      For a full run: at least 2 aligned preview_html HTML pages must be saved
-      (DOCTYPE/html documents), with matching preview_notes sort_order.
+      For a full run: the exact requested number of preview_html HTML pages must
+      be saved (DOCTYPE/html documents), with matching preview_notes sort_order.
+      Generate pages sequentially; a two-page request still requires both pages.
       preview_notes must be aligned with preview_html; the auto-generated draft is
       sufficient unless the user explicitly requests a richer speaker script.
       For a single-page edit: only the requested sort_order rows need updating.

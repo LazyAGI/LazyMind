@@ -16,6 +16,20 @@ test("pins the executable paths used by the official Pandoc archives", async () 
   assert.equal(config.targets["windows-x64"].archivePath, "pandoc-3.11/pandoc.exe");
 });
 
+test("source local runtimes stage and expose the pinned Pandoc executable", async () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const makefile = await readFile(path.join(root, "Makefile"), "utf8");
+  const windowsScript = await readFile(path.join(root, "local", "scripts", "local-win.ps1"), "utf8");
+
+  assert.match(makefile, /local-pandoc:[\s\S]*stage-pandoc\.mjs[\s\S]*--target darwin-arm64/);
+  assert.match(makefile, /local-up:.*local-pandoc/);
+  assert.match(makefile, /LOCAL_PANDOC_ENV := LAZYMIND_PANDOC_PATH="\$\(LOCAL_PANDOC_BIN\)"/);
+  assert.match(windowsScript, /function Stage-Pandoc[\s\S]*stage-pandoc\.mjs[\s\S]*--target windows-x64/);
+  assert.match(windowsScript, /\$env:LAZYMIND_PANDOC_PATH = \$pandocBin/);
+  assert.match(windowsScript, /'up' \{ Build-Manager; Stage-Pandoc;/);
+  assert.match(windowsScript, /'up-lan'[\s\S]*Build-Manager\s+Stage-Pandoc/);
+});
+
 test("orders an explicit Pandoc mirror before domestic and upstream URLs", () => {
   const selected = resolvePandocTarget({
     schemaVersion: 1,

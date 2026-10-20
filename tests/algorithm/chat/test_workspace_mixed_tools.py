@@ -1,4 +1,6 @@
 """Real owner tools use the generic host-access approval/claim/complete path."""
+from pathlib import Path
+
 import lazyllm
 
 from lazymind.chat.engine.subagent.context import SubAgentContext
@@ -34,8 +36,11 @@ def test_real_artifact_read_uses_local_guard_without_core(workspace_runtime, tmp
     middleware, core, task, emitted = artifact_runtime(workspace_runtime, tmp_path, monkeypatch)
     result = middleware.execute_with_records(artifact_call(source))
     assert result.results[0]['ok'], result.results
-    assert (task / source.name).read_text() == 'external artifact'
     assert emitted and not core.events
+    saved = Path(emitted[0]['value']['path'])
+    assert saved.is_relative_to(task)
+    assert saved.name == source.name
+    assert saved.read_text() == 'external artifact'
 
 
 def test_denied_artifact_preserves_existing_target(workspace_runtime, tmp_path, monkeypatch):
@@ -62,7 +67,7 @@ def test_artifact_context_change_during_batch_approval_fails_before_copy(workspa
     core.on_poll = approve
     result = middleware.execute_with_records([
         artifact_call(source),
-        {'function': {'name': 'write', 'arguments': {'path': str(tmp_path / 'out'), 'content': 'x'}}},
+        {'function': {'name': 'write', 'arguments': {'file_path': str(tmp_path / 'out'), 'content': 'x'}}},
     ])
     assert not result.results[0]['ok'] and not emitted
     assert not (other / source.name).exists()
@@ -79,8 +84,8 @@ def test_read_path_change_during_batch_approval_never_executes(workspace_runtime
         operation.update(status='allowed', decision='allowed')
     core.on_poll = approve
     result = middleware.execute_with_records([
-        {'function': {'name': 'read', 'arguments': {'path': str(original)}}},
-        {'function': {'name': 'write', 'arguments': {'path': str(tmp_path / 'out'), 'content': 'x'}}},
+        {'function': {'name': 'read', 'arguments': {'file_path': str(original)}}},
+        {'function': {'name': 'write', 'arguments': {'file_path': str(tmp_path / 'out'), 'content': 'x'}}},
     ])
     assert not result.results[0]['ok']
     assert other.read_bytes() == b'other'
@@ -105,7 +110,7 @@ def test_external_unbound_snapshot_allows_task_artifacts_not_host_writes(workspa
     assert emitted and not core.events
     outside = tmp_path / 'external-write.txt'
     denied = middleware.execute_with_records({'function': {'name': 'write', 'arguments': {
-        'path': str(outside), 'content': 'must not write',
+        'file_path': str(outside), 'content': 'must not write',
     }}})
     assert not denied.results[0]['ok']
     assert not outside.exists() and not core.events

@@ -1,5 +1,9 @@
 *.sh text eol=lf
 
+# Builtin Skill packages are hashed byte-for-byte into the frozen lockfile.
+# Keep their source bytes stable when checked out on Windows.
+skills/search/personal-document-search/** text eol=lf
+
 # Published showcase ZIPs are identified by exact source bytes on every OS.
 # Disable checkout line-ending conversion for both text and binary assets.
 skills/featured/**/assets/** -text

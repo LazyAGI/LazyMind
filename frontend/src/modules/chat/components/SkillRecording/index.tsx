@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
-import { Alert, Button, Input, Space, Tag } from "antd";
+import { Alert, Button, Input, Progress, Space, Tag } from "antd";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { getChatConversationPath, CHAT_CONVERSATION_LIST_REFRESH_EVENT } from "../../constants/chat";
@@ -166,7 +166,9 @@ export default function SkillRecordingPanel({ conversationId, open, onClose }: {
       </Space>
     </article>}
     {rows.map((row) => <article className="skill-recording-card" key={row.id}><header><h3>{row.name || t("recording.title")}</h3><Tag color={row.status === "pending" ? "orange" : undefined}>{t(`recording.status.${row.status}`)}</Tag></header>
-      <p>{row.error || row.description || t("recording.analyzing")}</p>
+      <p>{row.error || row.description || t(row.status === "generating" && (row.progress ?? 0) >= 90 ? "recording.synthesizing" : "recording.analyzing")}</p>
+      {row.status === "generating" && <Progress percent={Math.max(0, Math.min(90, row.progress ?? 0))} status="active" />}
+      {(row.status === "pending" || row.status === "kept") && <Progress percent={100} />}
       {(row.status === "pending" || row.status === "kept") && <Button onClick={() => navigate(`/memory-management/skills/${encodeURIComponent(row.skill_id)}`)}>{t(row.status === "pending" ? "recording.review" : "recording.view")}</Button>}
       {(row.status === "failed" || row.status === "needs_input") && <>
         <Input.TextArea aria-label={t("recording.notes")} placeholder={t("recording.notes")} value={notes} onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setNotes(e.target.value)} maxLength={8000} />

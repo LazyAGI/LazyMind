@@ -99,9 +99,6 @@ func TestLifecycleHTTPPreservesLegacyAndControlledBehavior(t *testing.T) {
 				if denied := callLifecycle(t, h, false, "agent-resume", true, true); denied.Code != http.StatusForbidden {
 					t.Fatalf("MCP bypassed human control: %d %s", denied.Code, denied.Body.String())
 				}
-				if pending := callLifecycle(t, h, false, "resume", true, false); pending.Code != http.StatusConflict {
-					t.Fatalf("resumed before host cancellation: %d %s", pending.Code, pending.Body.String())
-				}
 				var action orm.WorkflowHostAction
 				if err := db.Where("command_id = ? AND kind = ?", "stop", "cancel").First(&action).Error; err != nil {
 					t.Fatal(err)
@@ -110,6 +107,9 @@ func TestLifecycleHTTPPreservesLegacyAndControlledBehavior(t *testing.T) {
 				claim, err := service.ClaimHostAction(context.Background(), "owner", action.ID, identity)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if pending := callLifecycle(t, h, false, "resume", true, false); pending.Code != http.StatusConflict {
+					t.Fatalf("resumed before host cancellation: %d %s", pending.Code, pending.Body.String())
 				}
 				if _, err := service.SettleHostAction(context.Background(), "owner", action.ID, workflowcore.WorkflowHostReceipt{
 					ConnectorID: identity.ConnectorID, Credential: identity.Credential, InstanceID: identity.InstanceID, DispatchToken: claim.DispatchToken, Status: "accepted",

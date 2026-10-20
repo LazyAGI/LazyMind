@@ -6,6 +6,7 @@ import NotificationSettings from './NotificationSettings';
 import ScheduleNotificationPanel from './ScheduleNotificationPanel';
 import NotificationHistory from './NotificationHistory';
 import RuleEditor from './RuleEditor';
+import TargetPicker from './TargetPicker';
 import { emptyRule, type NotificationConfig } from './api';
 const mocks = vi.hoisted(() => ({ prefs: vi.fn(), patch: vi.fn(), schedule: vi.fn(), put: vi.fn(), tasks: vi.fn(), runs: vi.fn(), accounts: vi.fn(), groups: vi.fn(), targets: vi.fn(), execution: vi.fn(), attempts: vi.fn(), retry: vi.fn(), desktop: vi.fn() }));
 vi.mock('@/modules/channelGateway/api', async importOriginal => ({ ...await importOriginal<typeof import('@/modules/channelGateway/api')>(), listChannelAccounts: mocks.accounts }));
@@ -364,4 +365,16 @@ describe('notification settings and task UI', () => {
     expect(await screen.findByRole('button', { name: 'notifications.retry' })).toBeDisabled();
   });
 
+});
+
+
+it('offers reauthorization instead of retry for expired WeCom permission', async () => {
+  mocks.targets.mockRejectedValueOnce({ response: { data: { error: { code: 'WECOM_CAPABILITY_REAUTH_REQUIRED' } } } });
+  mount(<TargetPicker provider="wecom" accounts={[]} current={{ enabled: true, account_id: 'bot' }} onSave={vi.fn()} onClose={vi.fn()} inline />);
+  expect(await screen.findByText('notifications.wecomAuthorizationExpired')).toBeInTheDocument();
+  expect(screen.getByText('notifications.wecomReauthorizeHint')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'notifications.wecomRepairAuthorization' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'notifications.wecomRefreshAuthorization' })).toBeEnabled();
+  expect(screen.queryByText('notifications.noWecomTargets')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'notifications.retry' })).toBeNull();
 });

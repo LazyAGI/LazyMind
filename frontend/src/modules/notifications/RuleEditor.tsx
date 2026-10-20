@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Button, Select, Spin, Switch, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -21,6 +21,13 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const [authorizationErrors, setAuthorizationErrors] = useState<Record<string, boolean>>({});
+  const updateAuthorization = useCallback((accountId: string, required: boolean) => {
+    setAuthorizationErrors(old => old[accountId] === required ? old : { ...old, [accountId]: required });
+  }, []);
+  const updateAccount = useCallback((account: ChannelAccount) => {
+    setAccounts(old => old.map(item => item.id === account.id ? account : item));
+  }, []);
   const [desktopAuthorized, setDesktopAuthorized] = useState(desktopNotificationsAuthorized);
   const openConnection = (provider: ChannelProvider = 'feishu') => navigate(`/settings?section=channels&provider=${provider}`);
   useEffect(() => {
@@ -59,11 +66,12 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
       const hasAvailableAccount = availableAccounts.length > 0;
       const available = channel === 'desktop' ? desktopAuthorized : variant === 'task' && rule?.account_id ? Boolean(account && isChannelAccountAvailable(account)) : hasAvailableAccount;
       const canConfigure = channel === 'desktop' ? desktopAuthorized : hasAvailableAccount;
+      const authorizationRequired = channel === 'wecom' && Boolean(rule?.account_id && authorizationErrors[rule.account_id]);
       const pendingActivation = channel === 'wechat' && !available && (account ? isChannelAccountPendingActivation(account) : providerAccounts.some(isChannelAccountPendingActivation));
       return <div key={channel} className={`notification-channel-block is-${channel}`}><div className="notification-row notification-channel">
         <ChannelBrand channel={channel} avatar={account?.avatar_url} />
-        <div className="notification-grow"><strong>{t('notifications.' + channel)}</strong> <Tag className={`notification-status is-${channel === 'desktop' ? desktopAuthorized ? 'connected' : 'disconnected' : pendingActivation ? 'pending' : available ? 'connected' : 'disconnected'}`}>{t('notifications.' + (channel === 'desktop' ? desktopAuthorized ? 'authorized' : 'notAuthorized' : pendingActivation ? 'pendingActivation' : available ? 'connected' : 'notConnected'))}</Tag>
-          {channel === 'desktop' && !isDesktopRuntime() ? <BrowserPermission /> : <p>{channel === 'desktop' ? t('notifications.desktopHint') : variant === 'settings' ? t('notifications.' + channel + 'Hint') : rule?.account_id ? `${account ? channelAccountLabel(account) : t('notifications.accountUnavailable')} · ${rule.recipient_id || t('notifications.chooseRecipient')}` : t('notifications.' + channel + 'Hint')}</p>}
+        <div className="notification-grow"><strong>{t('notifications.' + channel)}</strong> <Tag className={`notification-status is-${channel === 'desktop' ? desktopAuthorized ? 'connected' : 'disconnected' : pendingActivation ? 'pending' : authorizationRequired ? 'expired' : available ? 'connected' : 'disconnected'}`}>{t('notifications.' + (channel === 'desktop' ? desktopAuthorized ? 'authorized' : 'notAuthorized' : pendingActivation ? 'pendingActivation' : authorizationRequired ? 'wecomAuthorizationExpired' : available ? 'connected' : 'notConnected'))}</Tag>
+          {channel === 'desktop' && !isDesktopRuntime() ? <BrowserPermission /> : <p>{channel === 'desktop' ? t('notifications.desktopHint') : variant === 'settings' ? t('notifications.' + channel + 'Hint') : rule?.account_id ? `${account ? channelAccountLabel(account, accounts) : t('notifications.accountUnavailable')} · ${rule.recipient_id || t('notifications.chooseRecipient')}` : t('notifications.' + channel + 'Hint')}</p>}
           {variant === 'task' && channel !== 'desktop' && rule?.account_id && !available && !loading && <small className="notification-warning">{t(pendingActivation ? 'notifications.pendingActivationHint' : 'notifications.unavailable')}</small>}
         </div>
         {channel !== 'desktop' && !canConfigure && <Button className="notification-configure-action" icon={<ArrowRightOutlined />} disabled={disabled || loading} onClick={() => openConnection(channel)}>{t('notifications.connect')}</Button>}
@@ -71,7 +79,7 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
           onChange({ ...value, channels: { ...value.channels, [channel]: variant === 'settings' ? { enabled } : { ...rule, enabled } } });
         }} />}
       </div>
-      {variant === 'task' && channel !== 'desktop' && rule?.enabled && canConfigure && <TargetPicker key={channel} disabled={disabled} inline provider={channel} accounts={availableAccounts} current={rule} onClose={() => {}} onSave={target => {
+      {variant === 'task' && channel !== 'desktop' && rule?.enabled && canConfigure && <TargetPicker key={channel} disabled={disabled} inline provider={channel} accounts={providerAccounts} onAccountConnected={updateAccount} onAuthorizationChange={updateAuthorization} current={rule} onClose={() => {}} onSave={target => {
         onChange({ ...value, channels: { ...value.channels, [channel]: target } });
       }} />}
       </div>;

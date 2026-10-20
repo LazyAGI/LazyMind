@@ -43,6 +43,9 @@ class WorkflowAgentContribution:
     agentic_config_patch: Dict[str, Any]
     runtime_context: str
     runtime_policy: Optional[Dict[str, Any]] = None
+    # Trusted host extensions may explicitly adopt a server-created successor.
+    # This callback is never exposed as a model tool.
+    bind_successor: Optional[Callable[[Dict[str, Any]], None]] = None
 
 
 @dataclass(frozen=True)
@@ -1090,6 +1093,37 @@ def build_workflow_discovery_context(
     return WorkflowDiscoveryContext(activations, prompt)
 
 
+def _trigger_input_contract(package: Dict[str, Any]):
+    runtime = package.get('runtime') or (package.get('compiled_graph') or {}).get('runtime') or {}
+    return runtime.get('trigger_inputs')
+
+
+def _trigger_input_types(package: Dict[str, Any]) -> Dict[str, str]:
+    inputs = workflow_package_input_types(package)
+    declared = _trigger_input_contract(package)
+    return inputs if declared is None else {key: value for key, value in inputs.items() if key in declared}
+
+
+def _normalize_trigger_input_bindings(value: Optional[Union[Dict[str, str], str]]) -> Dict[str, str]:
+    """Decode a model's JSON-encoded bindings without relaxing the string-map contract."""
+    if value is None:
+        return {}
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError as exc:
+            raise WorkflowClientError(
+                'WORKFLOW_INPUT_INVALID', 'input_bindings must be an object or a JSON-encoded object.',
+            ) from exc
+    if not isinstance(value, dict) or any(
+        not isinstance(key, str) or not isinstance(item, str) for key, item in value.items()
+    ):
+        raise WorkflowClientError(
+            'WORKFLOW_INPUT_INVALID', 'input_bindings must map material IDs to string values.',
+        )
+    return value
+
+
 def _workflow_trigger_tools(
     activations: List[Dict[str, Any]], allowed_refs: set[str], current_query: str = '',
     conversation_id: str = '', session_holder: Optional[Dict[str, str]] = None,
@@ -1130,7 +1164,7 @@ def _workflow_trigger_tools(
         if allowed_refs:
             try:
                 package_hint = _client().get_workflow(workflow_id, revision_id).result
-                input_types_hint = workflow_package_input_types(package_hint)
+                input_types_hint = _trigger_input_types(package_hint)
             except Exception as exc:
                 LOG.debug('Could not preload Workflow %s input contract: %s', workflow_id, exc)
 
@@ -1140,9 +1174,10 @@ def _workflow_trigger_tools(
             supports_scalar_bindings: bool,
         ) -> Any:
             def run_trigger(
-                input_bindings: Optional[Dict[str, str]] = None,
+                input_bindings: Optional[Union[Dict[str, str], str]] = None,
                 request_context: Optional[str] = None,
             ) -> Dict[str, Any]:
+                input_bindings = _normalize_trigger_input_bindings(input_bindings)
                 # The Host-composed query is authoritative. A clearly marked
                 # original-request + clarification envelope remains supported
                 # for callers that already merged those two sections. An
@@ -1186,14 +1221,19 @@ def _workflow_trigger_tools(
                     }
                 client = _client()
                 package = bound_package or client.get_workflow(bound_id, bound_revision).result
-                input_types = workflow_package_input_types(package)
+                input_types = _trigger_input_types(package)
+                if _trigger_input_contract(package) is not None and set(input_bindings or {}) - input_types.keys():
+                    raise WorkflowClientError(
+                        'WORKFLOW_INPUT_NOT_EXPOSED', 'Use only inputs advertised by this package.',
+                    )
                 resolved_bindings: Dict[str, Any] = {}
                 for material_id, attachment_ref in (input_bindings or {}).items():
                     binding = str(attachment_ref or '').strip()
                     if not binding:
-                        raise WorkflowClientError(
-                            'WORKFLOW_INPUT_EMPTY', f'Input {material_id} is empty.',
-                        )
+                        # Blank model placeholders are absent bindings. Core
+                        # owns required-input checks; optional fields must keep
+                        # their Workflow defaults instead of blocking startup.
+                        continue
                     material_type = input_types.get(str(material_id), '')
                     if material_type in {'text', 'json'}:
                         resolved_bindings[material_id] = _import_text_binding(
@@ -1306,7 +1346,7 @@ def _workflow_trigger_tools(
             if attachments_available:
                 @fc_register(host_file='NONE')
                 def bound_trigger(
-                    input_bindings: Optional[Dict[str, str]] = None,
+                    input_bindings: Optional[Union[Dict[str, str], str]] = None,
                     request_context: Optional[str] = None,
                 ) -> Dict[str, Any]:
                     """Initialize with optional attachments and a merged clarified request."""
@@ -1314,7 +1354,7 @@ def _workflow_trigger_tools(
             elif supports_scalar_bindings:
                 @fc_register(host_file='NONE')
                 def bound_trigger(
-                    input_bindings: Optional[Dict[str, str]] = None,
+                    input_bindings: Optional[Union[Dict[str, str], str]] = None,
                     request_context: Optional[str] = None,
                 ) -> Dict[str, Any]:
                     """Initialize with scalar bindings and a merged clarified request."""
@@ -1349,7 +1389,8 @@ def _workflow_trigger_tools(
                 f'{material_id} ({material_type})'
                 for material_id, material_type in sorted(input_types_hint.items())
             )
-            + '. Use these exact IDs as input_bindings keys.'
+            + '. Pass input_bindings as an object mapping these exact IDs to string values, '
+            'for example {"material_id": "value"}.'
             if input_types_hint else ''
         )
         attachment_guidance = (
@@ -1361,6 +1402,9 @@ def _workflow_trigger_tools(
         )
         trigger_workflow.__doc__ = (
             description + input_contract + attachment_guidance
+            + ' Omit inputs whose values were not supplied; do not invent values or '
+            'fill absent inputs with empty placeholders. Pass explicitly supplied '
+            'optional scalar preferences as well as required inputs.'
             + ' If this turn follows startup clarification, request_context must merge the '
             'original request with every clarification answer; otherwise omit it. The Host '
             'forwards the exact current_query and ignores model-authored paraphrases.'
@@ -1467,6 +1511,23 @@ def resolve_workflow_injection(
         ]
     session_holder: Dict[str, str] = {'session_id': session_id}
 
+    def bind_successor(result: Dict[str, Any]) -> None:
+        target = str(result.get('session_id') or '')
+        if (not target or result.get('source_session_id') != session_holder['session_id']
+                or result.get('workflow_id') != workflow_id
+                or (conversation_id and result.get('conversation_id') != conversation_id)
+                or (revision_id and result.get('workflow_revision_id') != revision_id)):
+            raise WorkflowClientError(
+                'WORKFLOW_SESSION_HANDOFF_INVALID',
+                'Successor must preserve the bound conversation and package revision.',
+            )
+        # Authorize and refresh through the same SDK before changing the turn binding.
+        state = _client().get_state(target)
+        if state.get('session_id') != target:
+            raise WorkflowClientError('WORKFLOW_SESSION_HANDOFF_INVALID', 'Successor session could not be verified.')
+        session_holder['session_id'] = target
+        _agentic_config()['workflow_session_id'] = target
+
     @fc_register(host_file='NONE')
     def selected_session_id() -> str:
         return session_holder.get('session_id', '')
@@ -1564,7 +1625,7 @@ def resolve_workflow_injection(
         else:
             tools = [authoring_group]
     if session_id:
-        tools = _safe_session_tools(toolkit, session_id)
+        tools = _safe_session_tools(toolkit, selected_session_id)
         patch.update({
             'workflow_id': workflow_id,
             'workflow_session_id': session_id,
@@ -1574,7 +1635,7 @@ def resolve_workflow_injection(
             'focused_tab': context.get('focused_tab') or '',
             'focused_sort_order': context.get('focused_sort_order'),
         })
-        tools.append(_handoff_tool(session_id))
+        tools.append(_handoff_tool(selected_session_id))
         session_projection = (
             projection.get('projection')
             if isinstance(projection.get('projection'), dict) else {}
@@ -1641,8 +1702,10 @@ def resolve_workflow_injection(
             + 'In Human Approval chat mode, approval is for a step result after that step runs; '
             + 'it is not permission to start the step. Decide approval checkpoints by priority: '
             + 'first obey explicit user instructions in the current request; when absent, use '
-            + 'the Ready step default from ready_step_details, projection.nodes[step_id].mode, '
-            + 'or projection.nodes[step_id].requires_approval. mode=human/default_approval=required '
+            + 'the effective requires_approval flag from ready_step_details or projection.nodes[step_id]. '
+            + 'requires_approval=false overrides a package mode=human: use advance_step and continue. '
+            + 'Only when that flag is absent, fall back to the step mode/default_approval. '
+            + 'mode=human/default_approval=required '
             + 'means execute that Ready step with advance_step_and_hand_off so the Host stops '
             + 'after execution for human review of its outputs. mode=auto/default_approval=not_required '
             + 'means execute with advance_step and continue. Never ask whether to execute a Ready '
@@ -1663,7 +1726,7 @@ def resolve_workflow_injection(
             # user-requested continuous run can keep advancing.  Only the
             # explicit hand-off variant transfers ownership and ends the turn.
             tools, ['advance_step_and_hand_off'],
-            patch, runtime_context, runtime_policy,
+            patch, runtime_context, runtime_policy, bind_successor,
         )
 
     del disabled_builtin_workflows
@@ -1700,7 +1763,9 @@ def resolve_workflow_injection(
             + 'until terminal, required input, explicit user boundary, or failure. In Human Approval '
             + 'chat mode, approval is for the step result after execution, not for starting the step. '
             + 'Explicit user approval instructions override step defaults; otherwise use '
-            + 'ready_step_details/projection.nodes mode and requires_approval to decide. If a Ready '
+            + 'the effective requires_approval flag in ready_step_details/projection.nodes, '
+            + 'falling back to mode only when the flag is absent. requires_approval=false '
+            + 'overrides a package mode=human: use advance_step and continue. If a Ready '
             + 'Workflow step requires human approval, execute it with advance_step_and_hand_off so '
             + 'the Host stops after execution for output review. Do not ask whether to execute it, '
             + 'and do not merely announce that later steps will run. For recovery, '

@@ -3,6 +3,8 @@ package common
 import "net/http"
 
 func init() {
+	registerAdditionalErrorPattern("recording stream http %d", "Review endpoint request failed", http.StatusBadGateway, 2001853)
+	registerAdditionalErrorAlias("recording stream ended without result", "Review endpoint request failed", http.StatusBadGateway, 2001853)
 	registerAdditionalError("notes too long", http.StatusBadRequest, 2002930)
 	registerAdditionalError("recording not found", http.StatusNotFound, 2002931)
 	registerAdditionalError("recording cannot be retried", http.StatusConflict, 2002932)

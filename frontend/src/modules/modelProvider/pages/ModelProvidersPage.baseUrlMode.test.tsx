@@ -116,12 +116,19 @@ describe("provider Base URL modes", () => {
     expect(dialog.getByRole("textbox", { name: "Base URL" })).toHaveValue(baseUrl);
   });
 
+  it("opens legacy Token Plan settings with the API root", async () => {
+    const provider = { ...openAI, name: "SenseNova", base_url: "https://api.sensenova.cn/compatible-mode/v1/" };
+    const dialog = await openConfig(provider, "https://token.sensenova.cn/v1/chat/completions/");
+    expect(dialog.getByRole("textbox", { name: "Base URL" })).toHaveValue("https://token.sensenova.cn/v1/");
+    expect(dialog.getByText("modelProvider.sensenovaTokenPlanMode")).toBeInTheDocument();
+  });
+
   it("retains SenseNova's classic, Token Plan and custom presets", async () => {
     const provider = { ...openAI, name: "SenseNova", base_url: "https://api.sensenova.cn/compatible-mode/v1/" };
     const dialog = await openConfig(provider);
     expect(dialog.getByText(classicLabel)).toBeInTheDocument();
     selectMode("modelProvider.sensenovaTokenPlanMode");
-    expect(dialog.getByRole("textbox", { name: "Base URL" })).toHaveValue("https://token.sensenova.cn/v1/chat/completions/");
+    expect(dialog.getByRole("textbox", { name: "Base URL" })).toHaveValue("https://token.sensenova.cn/v1/");
     selectMode(customLabel);
     expect(dialog.getByRole("textbox", { name: "Base URL" })).toHaveValue("");
     selectMode(classicLabel);

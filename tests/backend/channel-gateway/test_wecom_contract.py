@@ -1,4 +1,6 @@
+import datetime as dt
 import json
+from unittest.mock import Mock
 import uuid
 
 import pytest
@@ -11,8 +13,8 @@ PREFIX = '/api/channel-gateway/v1'
 
 
 def test_wecom_uses_readable_bot_name_instead_of_bot_id():
-    assert _bot_label({'bot_name': '产品日报助手'}, 3) == '产品日报助手'
-    assert _bot_label({}, 3) == '企业微信机器人 3'
+    assert _bot_label({'bot_name': '产品日报助手'}) == '产品日报助手'
+    assert _bot_label({}) == '企业微信机器人'
 
 
 @pytest.mark.parametrize('credentials', [{}, {'bot_id': 'bot'}, {'secret': 'test-only'},
@@ -102,3 +104,82 @@ def test_wecom_recent_sessions_become_searchable_notification_targets(gateway, a
     assert gateway.store.notification_context('owner', row['id'], 'encrypted-group', 'wecom') == {
         'transport': 'cli',
     }
+
+
+@pytest.mark.parametrize('provider_code', [850002, 850003])
+def test_wecom_session_authorization_failure_has_actionable_error(gateway, account, monkeypatch, provider_code):
+    row = account('wecom')
+    service = gateway.components.delivery_worker._providers.delivery('wecom')
+    monkeypatch.setattr(service, '_token', lambda *_args, **_kwargs: 'test-token')
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {'errcode': provider_code, 'errmsg': 'no authorization'}
+
+    monkeypatch.setattr('channel_gateway.wecom.service.httpx.post', lambda *_args, **_kwargs: Response())
+    response = gateway.client.get(f'{PREFIX}/channel-accounts/{row["id"]}/notification-targets')
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'WECOM_CAPABILITY_REAUTH_REQUIRED'
+    assert response.json()['error']['retryable'] is False
+
+
+@pytest.mark.parametrize('mode', ['credentials', 'qr'])
+def test_wecom_wrong_robot_reauthorization_explains_recovery_and_preserves_original(
+        gateway, account, monkeypatch, mode):
+    original = account('wecom', identity='original-bot')
+    assert gateway.store.disconnect_account('owner', original['id'], retain_credentials=True)
+    before = gateway.store.get_account('owner', original['id'])
+    service = gateway.components.delivery_worker._providers.delivery('wecom')
+    verify = Mock()
+    restart = Mock()
+    monkeypatch.setattr('channel_gateway.wecom.service.verify_credentials', verify)
+    monkeypatch.setattr(service._runtime, 'restart_account', restart)
+
+    if mode == 'credentials':
+        response = gateway.client.post(f'{PREFIX}/connection-sessions', json={
+            'provider': 'wecom', 'account_id': original['id'],
+            'credentials': {'bot_id': 'different-bot', 'secret': 'test-only'},
+        })
+        assert response.status_code == 409, response.text
+        error = response.json()['error']
+        assert 'BotID 与原机器人不同' in error['message']
+        assert '原机器人的 BotID 和 Secret' in error['message']
+    else:
+        session, _ = gateway.store.reserve_session(
+            session_id=f'cs_{uuid.uuid4().hex}', owner_user_id='owner', provider='wecom',
+            idempotency_key=None, expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=5),
+            requested_account_id=original['id'],
+        )
+        session = gateway.store.set_qr_ready(
+            session['id'], gateway.cipher.encrypt('owner', {'scode': 'test-only'}),
+            session['expires_at'], '等待扫码',
+        )
+
+        class Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {'data': {'status': 'success', 'bot_info': {
+                    'botid': 'different-bot', 'secret': 'test-only',
+                }}}
+
+        monkeypatch.setattr('channel_gateway.wecom.service.httpx.get', lambda *_args, **_kwargs: Response())
+        service._poll_qr(session['id'], session['qr_version'], 'owner')
+        view = service.get_session('owner', session['id'])
+        assert view['status'] == 'failed'
+        error = view['error']
+        assert '扫码授权的是另一个机器人' in error['message']
+        assert '关闭后重新授权并选择原机器人' in error['message']
+
+    assert error['code'] == 'ACCOUNT_IDENTITY_MISMATCH'
+    assert error['retryable'] is False
+    assert '原机器人和任务通知设置未改动' in error['message']
+    assert '如需使用新机器人，请单独添加连接' in error['message']
+    assert gateway.store.get_account('owner', original['id']) == before
+    assert len(gateway.store.list_accounts('owner', 'wecom')) == 1
+    verify.assert_not_called()
+    restart.assert_not_called()

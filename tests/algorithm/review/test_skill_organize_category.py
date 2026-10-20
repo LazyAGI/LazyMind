@@ -245,13 +245,15 @@ def test_apply_same_key_replaces_skill_md_and_preserves_package_files():
     result = _apply_fs_draft(draft, store, [source], mode='deep')
 
     assert result == {
+        'staged': True,
         'deleted_keys': [],
         'upserted_keys': ['internal/beta'],
     }
     assert store.packages[('internal', 'beta')] == {
-        'SKILL.md': new_content,
+        'SKILL.md': old_content,
         'assets/example.txt': 'supporting file',
     }
+    assert not any(call[0] in {'replace_files', 'rename', 'remove'} for call in store.calls)
 
 
 def test_apply_internal_merge_keeps_target_source_package():
@@ -294,19 +296,14 @@ def test_apply_internal_merge_keeps_target_source_package():
     result = _apply_fs_draft(draft, store, sources, mode='deep')
 
     assert result == {
+        'staged': True,
         'deleted_keys': ['internal/alpha'],
         'upserted_keys': ['internal/merged'],
     }
-    assert ('internal', 'alpha') not in store.packages
-    assert ('internal', 'beta') not in store.packages
-    assert store.packages[('internal', 'merged')] == {
-        'SKILL.md': merged_content,
-        'references/beta.md': 'beta reference',
-    }
-    assert [call[0] for call in store.calls if call[0] in {'rename', 'remove'}] == [
-        'rename',
-        'remove',
-    ]
+    assert store.packages[('internal', 'alpha')]['SKILL.md'] == alpha_content
+    assert store.packages[('internal', 'beta')]['SKILL.md'] == beta_content
+    assert ('internal', 'merged') not in store.packages
+    assert not any(call[0] in {'replace_files', 'rename', 'remove'} for call in store.calls)
 
 
 def test_refactor_derives_source_and_category_from_its_only_source_key():

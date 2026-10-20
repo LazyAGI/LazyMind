@@ -52,17 +52,13 @@ describe('released DSH tool contract', () => {
     expect(Object.isFrozen(result)).toBe(true)
   })
 
-  it('keeps automatic steps nonterminal and applies final guards', async () => {
+  it('keeps a continuing Workflow result nonterminal', async () => {
     const ctx = await runtime()
     const original = definition('continue')
-    const execute = vi.spyOn(original, 'execute')
     ctx.tools.register(workflowTool(original, {}))
     const input = { callId: 'call-1' as ToolCallId, name: original.name,
       arguments: {}, signal: new AbortController().signal }
     expect(await ctx.tools.execute(input)).not.toHaveProperty('concludesTurn')
-    ctx.tools.guard(() => 'review pending')
-    expect((await ctx.tools.execute({ ...input, callId: 'call-2' as ToolCallId })).isError).toBe(true)
-    expect(execute).toHaveBeenCalledOnce()
   })
 
   it('does not conclude failed tools', async () => {

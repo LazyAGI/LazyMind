@@ -296,6 +296,18 @@
   background: #fcfdfd;
 }
 
+.wecom-original-connection {
+  form { display: grid; gap: 10px; }
+  label { color: #475467; }
+  .ant-btn { margin-top: 8px; }
+  .wecom-original-credentials {
+    border-top: 1px solid #e7ebf0;
+    padding-top: 16px;
+    summary { cursor: pointer; color: #475467; }
+    .ant-alert { margin-bottom: 14px; }
+  }
+}
+
 .wechat-section-kicker {
   color: var(--wechat-dark) !important;
   font-size: 12px;

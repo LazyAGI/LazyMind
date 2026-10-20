@@ -30,6 +30,7 @@ func (h WorkflowControlHandler) Capabilities(w http.ResponseWriter, r *http.Requ
 }
 
 type WorkflowHostBindingRequest struct {
+	Cancellation    string `json:"cancellation,omitempty"`
 	ConnectorID     string `json:"connector_id"`
 	Credential      string `json:"credential"`
 	Provider        string `json:"provider"`
@@ -41,6 +42,12 @@ func (s WorkflowControlService) Bind(ctx context.Context, owner, sessionID strin
 	if input.ConnectorID == "" || len(input.ConnectorID) > 128 || len(input.Credential) < 32 || len(input.Credential) > 256 ||
 		input.DriverSessionID == "" || len(input.DriverSessionID) > 255 || input.Provider == "" {
 		return nil, controlstore.Reject("INVALID_COMMAND", "connector, credential, provider and driver session are required")
+	}
+	if input.Cancellation == "" {
+		input.Cancellation = "session"
+	}
+	if input.Cancellation != "none" && input.Cancellation != "session" {
+		return nil, controlstore.Reject("INVALID_COMMAND", "unsupported host cancellation capability")
 	}
 	err := controlstore.Transaction(ctx, s.DB, sessionID, func(tx *gorm.DB, session *orm.WorkflowSession) error {
 		if err := controlOwner(*session, owner); err != nil {
@@ -66,8 +73,8 @@ func (s WorkflowControlService) Bind(ctx context.Context, owner, sessionID strin
 			}
 			binding.Provider, binding.ConnectorID, binding.DriverSession = input.Provider, input.ConnectorID, input.DriverSessionID
 			binding.CredentialHash = controlstore.Hash([]byte(input.Credential))
-			binding.Generation++
 		}
+		binding.Cancellation = input.Cancellation
 		encoded, err := json.Marshal(binding)
 		if err != nil {
 			return err
@@ -77,7 +84,7 @@ func (s WorkflowControlService) Bind(ctx context.Context, owner, sessionID strin
 			if err := tx.Model(session).Update("control_binding_json", session.ControlBindingJSON).Error; err != nil {
 				return err
 			}
-			if err := controlstore.BumpEvent(tx, session, "binding.changed", session.ID, "", map[string]any{"generation": binding.Generation}); err != nil {
+			if err := controlstore.BumpEvent(tx, session, "binding.changed", session.ID, "", map[string]any{"driver_session_id": binding.DriverSession}); err != nil {
 				return err
 			}
 		}
@@ -115,13 +122,11 @@ func (s WorkflowControlService) HostActions(ctx context.Context, owner string, i
 		if err := s.DB.WithContext(ctx).Where("id = ?", action.SessionID).First(&session).Error; err != nil {
 			return page, err
 		}
-		binding, err := controlstore.AuthorizeHost(session, identity.ConnectorID, identity.Credential)
+		_, err := controlstore.AuthorizeHost(session, identity.ConnectorID, identity.Credential)
 		if err != nil {
 			return page, err
 		}
-		if action.BindingGeneration == binding.Generation {
-			page.Actions = append(page.Actions, action)
-		}
+		page.Actions = append(page.Actions, action)
 	}
 	if len(candidates) == pageSize {
 		page.NextPageToken = candidates[len(candidates)-1].ID
@@ -141,8 +146,8 @@ func authorizeHostAction(tx *gorm.DB, session orm.WorkflowSession, owner, id str
 	if err := tx.Where("id = ? AND session_id = ?", id, session.ID).First(action).Error; err != nil {
 		return binding, err
 	}
-	if action.BindingGeneration != binding.Generation {
-		return binding, controlstore.Reject("BINDING_STALE", "host action belongs to an older binding")
+	if action.ConnectorID != binding.ConnectorID || action.NativeSessionID != binding.DriverSession {
+		return binding, controlstore.Reject("BINDING_CONFLICT", "host action belongs to another connector or session")
 	}
 	return binding, nil
 }
@@ -180,12 +185,9 @@ func (s WorkflowControlService) ClaimHostAction(ctx context.Context, owner, acti
 	}
 	err := controlstore.Transaction(ctx, s.DB, hint.SessionID, func(tx *gorm.DB, session *orm.WorkflowSession) error {
 		action := &result.Action
-		binding, err := authorizeHostAction(tx, *session, owner, actionID, identity, action)
+		_, err := authorizeHostAction(tx, *session, owner, actionID, identity, action)
 		if err != nil {
 			return err
-		}
-		if action.NativeSessionID != binding.DriverSession {
-			return controlstore.Reject("BINDING_STALE", "host action belongs to an older binding")
 		}
 		if action.ConsumedAt != nil && action.Status == "pending" {
 			return controlstore.Reject("ACTION_CONSUMED", "workflow execution already consumed this continuation")
@@ -210,22 +212,7 @@ func (s WorkflowControlService) ClaimHostAction(ctx context.Context, owner, acti
 			result.Control, err = controlstore.Read(tx, *session)
 			return err
 		}
-		if action.Kind == "continue" {
-			if action.ExecutionID == "" {
-				if err := controlstore.GuardBegin(tx, *session); err != nil {
-					return err
-				}
-				if err := ensureNoActiveAttempts(tx, session.ID); err != nil {
-					return err
-				}
-			} else {
-				if err := controlstore.GuardClaim(tx, *session); err != nil {
-					return err
-				}
-			}
-		} else if action.Kind == "cancel" && session.Status != "stopped" {
-			return controlstore.Reject("BINDING_STALE", "workflow no longer requests cancellation")
-		}
+		// Delivery grants no execution authority; Begin/Claim validate current Workflow state.
 		secret := make([]byte, 32)
 		if _, err := rand.Read(secret); err != nil {
 			return err

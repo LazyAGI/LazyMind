@@ -20,7 +20,7 @@
 
 一个 JSON 对象，包含：
 - `style_spec` —— deck 级风格指南（含 palette / typography / design_style / color_tone / primary_color）。
-- `page_outline` —— 本页结构化大纲（title / subtitle / bullets / narrative / data_points / page_kind / use_table / use_image / visual_hints 等）。
+- `page_outline` —— 本页结构化大纲。`title` / `subtitle` / `bullets` / `narrative` / `data_points` 是观众可见内容；`slide_intent` / `visual_hints` / `page_kind` 是内部生成指令，不是页面文案。
 - `page_no` —— 当前是第几页。
 - `inherited_table` —— 若非空，是来自用户文档的一张表格的原始行数据，**必须完整体现在页面上**。
 - `inherited_image_local_path` —— 若非空，是来自用户文档的一张图片的相对路径，**必须作为页面前景图片使用**（不得当背景）。
@@ -33,9 +33,9 @@
 
 ## 重写要求
 
-1. **保留所有信息**：title / subtitle / bullets（每条 head + detail）/ narrative / data_points / inherited_table 的所有行和列 / inherited_image 的存在及其语义 —— 全部必须落到 query 里，不得省略、不得改写数字 / 专有名词 / 百分比。
+1. **保留全部观众可见信息**：title / subtitle / bullets（每条 head + detail）/ narrative / data_points / inherited_table 的所有行和列 / inherited_image 的存在及其语义 —— 全部必须落到 query 里，不得省略、不得改写数字 / 专有名词 / 百分比。`slide_intent` 和 `visual_hints` 只用于理解叙事目的与版面，不得作为正文、标题、注释或页脚原样输出。旧 `narrative` 若含“本页/该页/用于介绍/画面采用/布局/版式/预告后续”等制作说明，只提炼业务结论。
 2. **数量必须照实（硬性）**：query 里说的要点数、指标卡片数、栏数，必须等于 `page_outline` 里 bullets / data_points 的**实际条数**。**不得新增** outline 里没有的要点或指标，**不得**为了凑满栅格而补一格、留空一格或写"第 N 格可留空 / 用文字补充"。`visual_hints` 里若写着与实际条数不符的数量（例如只有 3 个 data_points 却说"四个指标卡片"），以实际条数为准，并按实际条数描述版面（3 条就说三栏）。用户删掉过条目时，多写一格等于把删掉的内容又补回页面上。
-3. **明确版面意图**：按 `page_kind` 和 `page_outline.visual_hints` 给出具体的版面倾向。例如 "顶部是大标题 + 副标题，中部左右分栏：左侧是 4 张 KPI 卡片，右侧是一张条形图" 或 "整页满屏，标题居左上大号，右侧是一张占约 60% 面积的配图"。
+3. **明确版面意图但不要把它当文案**：按 `page_kind` 和 `page_outline.visual_hints` 给出具体版面倾向，同时明确这些句子只是生成指令，页面中不得出现“本页、画面、布局、版式、预告、听众/观众”等制作说明。
 4. **page_kind 对应语气**：
    - `title`/`cover` 封面 —— 强调视觉冲击和仪式感，标题超大，留白克制。
    - `section`/`section_header` 过渡 —— 章节感，大号数字或章节名，留白多。

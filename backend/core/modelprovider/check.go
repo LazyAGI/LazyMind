@@ -91,7 +91,7 @@ func doCheck(ctx context.Context, category, providerName, baseURL, apiKey, model
 	// If no model is specified, default to a representative model that the platform supports.
 	if model == "" && strings.EqualFold(providerName, "SenseNova") &&
 		normalizeBaseURLForCompare(baseURL) == normalizeBaseURLForCompare(sensenovaNewPlatformBaseURL) {
-		model = "sensenova-6.7-flash-lite"
+		model = "sensenova-6.8-flash-lite"
 	}
 	var checkEndpoint string
 	switch category {

@@ -115,12 +115,12 @@ func TestStopFencesOldWritesAndResumePreservesReview(t *testing.T) {
 	if row.Status != "cancelled" || row.LeaseToken != "" {
 		t.Fatalf("old grant survived stop: %+v", row)
 	}
-	_, err = svc.Execute(ctx, "owner", "run", WorkflowControlCommand{CommandID: "resume-1", Kind: "resume", StateVersion: stopped.Control.StateVersion})
-	expectControlCode(t, err, "DELIVERY_PENDING")
 	claim, err := svc.ClaimHostAction(ctx, "owner", stopped.Receipt.ActionID, id)
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, err = svc.Execute(ctx, "owner", "run", WorkflowControlCommand{CommandID: "resume-1", Kind: "resume", StateVersion: claim.Control.StateVersion})
+	expectControlCode(t, err, "DELIVERY_PENDING")
 	_, err = svc.SettleHostAction(ctx, "owner", claim.Action.ID, WorkflowHostReceipt{ConnectorID: id.ConnectorID, Credential: id.Credential, InstanceID: id.InstanceID, DispatchToken: claim.DispatchToken, Status: "accepted", NativeEventSeq: 10})
 	if err != nil {
 		t.Fatal(err)
@@ -130,41 +130,13 @@ func TestStopFencesOldWritesAndResumePreservesReview(t *testing.T) {
 	if err != nil || resumed.Control.Continuation != "awaiting_user" {
 		t.Fatalf("resume bypassed review: %+v %v", resumed, err)
 	}
-	_, err = svc.HostAction(ctx, "owner", claim.Action.ID, id)
-	expectControlCode(t, err, "BINDING_STALE")
-}
-
-func TestCodexStopRemainsSuccessfulAfterUnsupportedCancellation(t *testing.T) {
-	svc, _ := hostControlFixture(t)
-	ctx := context.Background()
-	if err := svc.DB.Model(&orm.WorkflowSession{}).Where("id = ?", "run").Update("control_binding_json",
-		`{"required":true,"provider":"codex","connector_id":"connector","driver_session_id":"driver","generation":1}`).Error; err != nil {
-		t.Fatal(err)
+	old, err := svc.HostAction(ctx, "owner", claim.Action.ID, id)
+	if err != nil || old.Action.Status != "accepted" || old.Action.ConsumedAt == nil {
+		t.Fatalf("settled cancellation must remain readable: %+v %v", old, err)
 	}
-	// A stale panel version must not prevent revoking execution authority.
-	command := WorkflowControlCommand{CommandID: "codex-stop", Kind: "stop", StateVersion: -1}
-	stopped, err := svc.Execute(ctx, "owner", "run", command)
-	if err != nil || stopped.Control.Continuation != "stopped" {
-		t.Fatalf("stop: %+v %v", stopped, err)
-	}
-	// Model the dispatcher receipt without invoking a real Codex task.
-	if err := svc.DB.Model(&orm.WorkflowHostAction{}).Where("id = ?", stopped.Receipt.ActionID).
-		Updates(map[string]any{"status": "failed", "last_error": "This host does not support interrupting the current turn; Workflow is stopped in Core."}).Error; err != nil {
-		t.Fatal(err)
-	}
-	refreshed := currentControl(t, svc.DB)
-	if refreshed.Continuation != "stopped" || refreshed.Delivery == nil || refreshed.Delivery.Status != "failed" {
-		t.Fatalf("host cancellation failure changed the stopped snapshot: %+v", refreshed)
-	}
-	// Retrying an uncertain response reuses the receipt after host settlement.
-	replayed, err := svc.Execute(ctx, "owner", "run", command)
-	if err != nil || replayed.Receipt != stopped.Receipt || replayed.Control.Continuation != "stopped" {
-		t.Fatalf("replayed stop: %+v %v", replayed, err)
-	}
-	command.CommandID = "codex-stop-again"
-	repeated, err := svc.Execute(ctx, "owner", "run", command)
-	if err != nil || repeated.Control.Continuation != "stopped" {
-		t.Fatalf("repeated stop: %+v %v", repeated, err)
+	stoppedAgain, err := svc.Execute(ctx, "owner", "run", WorkflowControlCommand{CommandID: "stop-2", Kind: "stop"})
+	if err != nil || stoppedAgain.Receipt.ActionID == claim.Action.ID {
+		t.Fatalf("new Stop reused old cancellation: %+v %v", stoppedAgain, err)
 	}
 }
 
@@ -417,7 +389,7 @@ func TestRewindCancelsOnlyDependentActiveExecutions(t *testing.T) {
 					t.Fatal(err)
 				}
 				if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Updates(map[string]any{
-					"control_protocol": controlpolicy.Protocol, "control_binding_json": `{"connector_id":"connector","driver_session_id":"driver","generation":1}`, "origin_host": "external-agent", "controller_host": "external-agent", "status": "active",
+					"control_protocol": controlpolicy.Protocol, "control_binding_json": `{"connector_id":"connector","driver_session_id":"driver"}`, "origin_host": "external-agent", "controller_host": "external-agent", "status": "active",
 				}).Error; err != nil {
 					t.Fatal(err)
 				}
@@ -582,7 +554,7 @@ func TestContinueEditedCompletedRunCreatesFreshExecution(t *testing.T) {
 	}
 	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Updates(map[string]any{
 		"control_protocol": controlpolicy.Protocol, "controller_host": "external-agent", "status": "completed",
-		"control_binding_json": `{"required":true,"edit_paused":true,"driver_session_id":"driver","connector_id":"connector","generation":1}`,
+		"control_binding_json": `{"required":true,"edit_paused":true,"driver_session_id":"driver","connector_id":"connector"}`,
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -612,5 +584,128 @@ func TestContinueEditedCompletedRunCreatesFreshExecution(t *testing.T) {
 	replay, err := svc.Execute(t.Context(), "batch-user", session.ID, command)
 	if err != nil || replay.Receipt != result.Receipt {
 		t.Fatalf("replay changed recovery: %+v %v", replay, err)
+	}
+}
+
+// A wake is only an invitation to read state, including when execution is no
+// longer allowed. The delivery lock must not become a second execution gate.
+func TestHostClaimDoesNotAuthorizeExecution(t *testing.T) {
+	for _, status := range []string{"stopped", "completed"} {
+		t.Run(status, func(t *testing.T) {
+			svc, id := hostControlFixture(t)
+			ctx := context.Background()
+			if err := svc.DB.Model(&orm.WorkflowSession{}).Where("id = ?", "run").Update("status", status).Error; err != nil {
+				t.Fatal(err)
+			}
+			var session orm.WorkflowSession
+			if err := svc.DB.First(&session, "id = ?", "run").Error; err != nil {
+				t.Fatal(err)
+			}
+			actionID, err := controlstore.EnqueueHostAction(svc.DB, session, "notification", "continue", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			claim, err := svc.ClaimHostAction(ctx, "owner", actionID, id)
+			if err != nil || claim.DispatchToken == "" {
+				t.Fatalf("delivery incorrectly checked execution state: %+v %v", claim, err)
+			}
+			if err := controlstore.GuardBegin(svc.DB, session); err == nil {
+				t.Fatal("delivery granted execution authority")
+			}
+		})
+	}
+}
+
+func TestPendingCancelCanBeRetiredBeforeDispatch(t *testing.T) {
+	svc, id := hostControlFixture(t)
+	ctx := context.Background()
+	stopped, err := svc.Execute(ctx, "owner", "run", WorkflowControlCommand{CommandID: "stop", Kind: "stop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = controlstore.Transaction(ctx, svc.DB, "run", func(tx *gorm.DB, session *orm.WorkflowSession) error {
+		_, _, err := controlstore.ApplyLifecycle(tx, session, "resume", false)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim, err := svc.ClaimHostAction(ctx, "owner", stopped.Receipt.ActionID, id)
+	if err != nil || claim.DispatchToken != "" || claim.Action.Status != "superseded" {
+		t.Fatalf("retired cancel was dispatched: %+v %v", claim, err)
+	}
+}
+
+func TestLateReceiptSurvivesStopAndDoesNotBlockNewContinuation(t *testing.T) {
+	svc, id := hostControlFixture(t)
+	ctx := context.Background()
+	var session orm.WorkflowSession
+	if err := svc.DB.First(&session, "id = ?", "run").Error; err != nil {
+		t.Fatal(err)
+	}
+	oldID, err := controlstore.EnqueueHostAction(svc.DB, session, "wake", "continue", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim, err := svc.ClaimHostAction(ctx, "owner", oldID, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Execute(ctx, "owner", "run", WorkflowControlCommand{CommandID: "stop", Kind: "stop"}); err != nil {
+		t.Fatal(err)
+	}
+	late, err := svc.SettleHostAction(ctx, "owner", oldID, WorkflowHostReceipt{ConnectorID: id.ConnectorID, Credential: id.Credential, InstanceID: id.InstanceID, DispatchToken: claim.DispatchToken, Status: "accepted"})
+	if err != nil || late.ConsumedAt == nil || late.Status != "accepted" {
+		t.Fatalf("late receipt was lost: %+v %v", late, err)
+	}
+	err = controlstore.Transaction(ctx, svc.DB, "run", func(tx *gorm.DB, session *orm.WorkflowSession) error {
+		if _, _, err := controlstore.ApplyLifecycle(tx, session, "resume", false); err != nil {
+			return err
+		}
+		next, err := controlstore.EnqueueHostAction(tx, *session, "new-wake", "continue", "")
+		if next == oldID {
+			t.Error("old notification reused after Resume")
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUnsupportedCancellationPreservesStopAndAllowsResume(t *testing.T) {
+	svc, id := hostControlFixture(t)
+	ctx := context.Background()
+	if _, err := svc.Bind(ctx, "owner", "run", WorkflowHostBindingRequest{ConnectorID: id.ConnectorID, Credential: id.Credential, Provider: "deepseek-harness", DriverSessionID: "driver", Cancellation: "none"}); err != nil {
+		t.Fatal(err)
+	}
+	// Stop revokes authority even when the panel has an old state version.
+	command := WorkflowControlCommand{CommandID: "stop", Kind: "stop", StateVersion: -1}
+	stopped, err := svc.Execute(ctx, "owner", "run", command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	action, err := svc.HostAction(ctx, "owner", stopped.Receipt.ActionID, id)
+	if err != nil || action.Action.Status != "failed" || action.Action.LastError == "" {
+		t.Fatalf("unsupported cancel must not report success: %+v %v", action, err)
+	}
+	if stopped.Control.Continuation != "stopped" || stopped.Control.Delivery == nil || stopped.Control.Delivery.Status != "failed" {
+		t.Fatalf("unsupported host cancellation changed Core Stop: %+v", stopped.Control)
+	}
+	replayed, err := svc.Execute(ctx, "owner", "run", command)
+	if err != nil || replayed.Receipt != stopped.Receipt {
+		t.Fatalf("Stop replay lost its receipt: %+v %v", replayed, err)
+	}
+	command.CommandID = "stop-again"
+	repeated, err := svc.Execute(ctx, "owner", "run", command)
+	if err != nil || repeated.Control.Continuation != "stopped" {
+		t.Fatalf("repeated Stop: %+v %v", repeated, err)
+	}
+	// Unsupported cancellation needs no dispatcher receipt before Resume.
+	if err := controlstore.Transaction(ctx, svc.DB, "run", func(tx *gorm.DB, session *orm.WorkflowSession) error {
+		_, _, err := controlstore.ApplyLifecycle(tx, session, "resume", false)
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

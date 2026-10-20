@@ -69,6 +69,22 @@ COMPOUND_CARD_HTML = """<!doctype html>
 </article></main></body></html>
 """
 
+LEGACY_VISUAL_HTML = """<!doctype html>
+<html><head><title>Infrastructure</title></head><body>
+<main class="slide"><h1 data-el="title">AI Infrastructure</h1>
+  <div class="art-zone"><svg aria-label="X/Y chart"><text>X</text><text>Y</text></svg></div>
+</main></body></html>
+"""
+
+RASTER_PROXY_HTML = """<!doctype html>
+<html><head><title>北京故宫</title></head><body>
+<main class="slide wrapper"><div id="bg"><img alt="exact render"></div><div id="ct">
+  <div data-el="text-4" data-group="slide-1-text"
+       data-lazymind-ppt-proxy="true" data-lazymind-proxy-cover="#F5EEDF"
+       style="position:absolute;left:95px;top:650px;width:637.5px;height:115px;opacity:0;background:#F5EEDF">北京故宫</div>
+</div></main></body></html>
+"""
+
 
 def make_deck(root: Path) -> tuple[Path, Path]:
     deck = root / 'deck'
@@ -190,8 +206,14 @@ class DeckInitializationTests(unittest.TestCase):
     def test_build_outline_continues_when_no_material_images_exist(self):
         stages: list[str] = []
 
-        def run_stage(_deck_dir, *, stage):
+        def run_stage(deck_dir, *, stage, sample=None):
             stages.append(stage)
+            if stage == 'style':
+                (Path(deck_dir) / 'style_spec.json').write_text(json.dumps({
+                    'design_style': {'id': 1},
+                    'palette': {'primary': '#2563EB'},
+                    'typography': {'heading_font': 'Inter'},
+                }))
             return {'status': 'ok', 'pages': 4}
 
         with mock.patch.object(TOOLS, 'ppt_init_deck', return_value={
@@ -218,7 +240,7 @@ class DeckInitializationTests(unittest.TestCase):
             )
 
         attach.assert_not_called()
-        self.assertEqual(stages, ['preflight', 'content-outline'])
+        self.assertEqual(stages, ['preflight', 'style', 'preflight', 'content-outline'])
         self.assertEqual(result['material_images_attached'], 0)
         self.assertTrue(result['deck_outline_published'])
         self.assertEqual(result['background_images_count'], 0)
@@ -1241,7 +1263,7 @@ class PartialEditTests(unittest.TestCase):
 
             attempts = {1: 0, 2: 0}
 
-            def capture(_command, current_deck, page_no):
+            def capture(_command, current_deck, page_no, **_kwargs):
                 attempts[page_no] += 1
                 if page_no == 1 and attempts[page_no] == 1:
                     return 1, {'status': 'failed', 'error': 'HTTP 504'}
@@ -1304,7 +1326,7 @@ class PartialEditTests(unittest.TestCase):
 
             attempts = {1: 0, 2: 0}
 
-            def capture(_command, current_deck, page_no):
+            def capture(_command, current_deck, page_no, **_kwargs):
                 attempts[page_no] += 1
                 if page_no == 1 and attempts[page_no] == 1:
                     return 1, {'status': 'failed', 'error': 'HTTP 504'}
@@ -1346,13 +1368,15 @@ class PartialEditTests(unittest.TestCase):
                 first = TOOLS._batch_page_html_publish_progressive(deck, concurrency=1)
                 self.assertEqual(first['failed'], 1)
                 result = TOOLS._batch_page_html_publish_progressive(deck, concurrency=1)
+                again = TOOLS._batch_page_html_publish_progressive(deck, concurrency=1)
+                self.assertEqual(again['status'], 'ok')
 
             self.assertEqual(result['status'], 'ok')
             self.assertEqual(result['published_count'], 2)
-            self.assertEqual(published, [1, 2])
+            self.assertEqual(published, [1, 2, 1, 2])
             self.assertEqual(attempts, {1: 2, 2: 1})
             self.assertEqual(result['retry_count'], 0)
-            self.assertFalse(list(deck.glob('.page_retry_*.json')))
+            self.assertEqual(len(list(deck.glob('.page_retry_*.json'))), 2)
 
     def test_batch_page_html_does_not_retry_timed_out_page(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1554,13 +1578,18 @@ class DeferredStyleDispatchTests(unittest.TestCase):
             result = TOOLS._run_stage_inprocess('batch-page-html', Path('/unused'))
             self.assertEqual(result['status'], 'ok')
             self.assertEqual(events, ['style', 'pages'])
-            rs._capture_cmd.assert_called_once_with(rs.cmd_ensure_style, Path('/unused'))
+            rs._capture_cmd.assert_called_once_with(
+                rs.cmd_ensure_style,
+                Path('/unused'),
+                llm_call=TOOLS._agent_llm_call,
+            )
             rs._capture_cmd.side_effect = None
             rs._capture_cmd.return_value = (1, {'status': 'failed', 'error': 'style timeout'})
             result = TOOLS._run_stage_inprocess('batch-page-html', Path('/unused'))
             self.assertEqual(result['failed_stage'], 'style')
             self.assertEqual(batch.call_count, 1)
-        mc.set_llm_impl.assert_called_with(None)
+        mc.set_llm_impl.assert_not_called()
+        mc.set_vlm_impl.assert_not_called()
 
     def test_single_page_retry_also_prepares_style_before_loading_brief(self):
         mc, rs = mock.Mock(), mock.Mock()
@@ -1573,7 +1602,15 @@ class DeferredStyleDispatchTests(unittest.TestCase):
                 mock.patch.object(TOOLS, '_load_slide_outline_briefs', return_value={1: 'Edited content'}):
             TOOLS._run_stage_inprocess('page-html', Path('/unused'), page=1)
         self.assertEqual(events, ['style', 'page'])
-        rs._capture_cmd.assert_called_with(rs.cmd_page_html_from_brief, Path('/unused'), 1, 'Edited content')
+        rs._capture_cmd.assert_called_with(
+            rs.cmd_page_html_from_brief,
+            Path('/unused'),
+            1,
+            'Edited content',
+            llm_call=TOOLS._agent_llm_call,
+        )
+        mc.set_llm_impl.assert_not_called()
+        mc.set_vlm_impl.assert_not_called()
 
 
 class CompletionGateTests(unittest.TestCase):
@@ -1626,7 +1663,7 @@ class CompletionGateTests(unittest.TestCase):
                 {'page_no': n, 'title': str(n)} for n in range(1, 6)
             ]}))
             calls = {n: 0 for n in range(1, 6)}
-            def capture(_fn, current_deck, number):
+            def capture(_fn, current_deck, number, **_kwargs):
                 calls[number] += 1
                 if number == 2 and calls[number] == 1:
                     return 1, {'status': 'failed', 'error': 'provider data_inspection_failed'}
@@ -1682,12 +1719,25 @@ class DeferredTextOutlineTest(unittest.TestCase):
                 mock.patch.object(TOOLS, 'ppt_run_stage') as stages,
                 mock.patch.object(TOOLS, '_agent_llm_call') as model,
             ):
+                def run_stage(deck_dir, *, stage, sample=None):
+                    if stage == 'style':
+                        (Path(deck_dir) / 'style_spec.json').write_text(json.dumps({
+                            'design_style': {'id': 1},
+                            'palette': {'primary': '#2563EB'},
+                            'typography': {'heading_font': 'Inter'},
+                        }))
+                    return {'status': 'ok'}
+
+                stages.side_effect = run_stage
                 result = TOOLS.ppt_build_outline(
                     '一页总结', page_count=1, deck_dir=str(deck),
                     outline_markdown='## 总结\n用户确认的三个结论。',
                 )
             self.assertTrue(result['structure_deferred'])
-            stages.assert_not_called()
+            self.assertEqual(
+                [call.kwargs['stage'] for call in stages.call_args_list],
+                ['preflight', 'style'],
+            )
             model.assert_not_called()
             self.assertFalse((deck / 'outline.json').exists())
 
@@ -1765,3 +1815,227 @@ class DeferredTextOutlineTest(unittest.TestCase):
             prepare.assert_called_once_with(deck)
             legacy.assert_not_called()
             render.assert_not_called()
+
+
+class MultiTargetLegacyAndRasterEditTests(unittest.TestCase):
+    def test_multi_selection_delete_is_atomic(self):
+        selection = {
+            'type': 'ppt_html',
+            'page': 1,
+            'el': 'mission-1',
+            'scope': 'multi',
+            'targets': [
+                {'el': 'mission-1'},
+                {'el': 'mission-2'},
+                {'el': 'mission-3'},
+            ],
+        }
+
+        ops, old_text, _new_text = TOOLS._selection_edit_ops(
+            '删除这些卡片', selection, TOOLS._HtmlTree(MISSION_LIST_HTML),
+        )
+
+        self.assertEqual([operation['el'] for operation in ops], [
+            'mission-1', 'mission-2', 'mission-3',
+        ])
+        self.assertTrue(all(operation['op'] == 'delete_node' for operation in ops))
+        self.assertIn('夜之城', old_text)
+        edited, _applied, _notes, _removed = TOOLS._apply_html_ops(MISSION_LIST_HTML, ops)
+        self.assertNotIn('data-el="mission-1"', edited)
+        self.assertNotIn('data-el="mission-2"', edited)
+        self.assertNotIn('data-el="mission-3"', edited)
+
+    def test_multi_selection_rejects_parent_and_child(self):
+        with self.assertRaisesRegex(ValueError, 'parent and its child'):
+            TOOLS._selection_edit_ops(
+                '改成蓝色',
+                {
+                    'type': 'ppt_html',
+                    'page': 1,
+                    'el': 'mission-1',
+                    'scope': 'multi',
+                    'targets': [
+                        {'el': 'mission-1'},
+                        {'el': 'mission-1-title'},
+                    ],
+                },
+                TOOLS._HtmlTree(MISSION_LIST_HTML),
+            )
+
+    def test_legacy_dom_path_materializes_stable_anchor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            encoded = TOOLS.base64.b64encode(LEGACY_VISUAL_HTML.encode('utf-8')).decode('ascii')
+            preview = TOOLS.ppt_preview_selection_edit(
+                artifact={'path': f'data:text/plain;base64,{encoded}', 'type': 'text'},
+                instruction='修改成算力',
+                selection={
+                    'type': 'ppt_html',
+                    'page': 1,
+                    'el': '__lazymind_auto_div_0_1',
+                    'dom_path': [0, 1],
+                    'tag': 'div',
+                    'selected_text': 'X',
+                },
+                artifact_store=tmp,
+                slot='preview_html',
+            )
+
+        self.assertIn(
+            'class="art-zone" data-el="__lazymind_auto_div_0_1"',
+            preview['candidate_html'],
+        )
+        self.assertIn('<text>算力</text><text>Y</text>', preview['candidate_html'])
+
+    def test_raster_proxy_edit_reveals_only_proxy_and_keeps_background(self):
+        edited, applied, _notes, removed = TOOLS._apply_html_ops(
+            RASTER_PROXY_HTML,
+            [{'op': 'replace_text', 'el': 'text-4', 'value': '紫禁城'}],
+        )
+
+        self.assertIn('>紫禁城</div>', edited)
+        self.assertIn('opacity: 1', edited)
+        self.assertIn('id="bg"', edited)
+        self.assertIn('北京故宫', removed)
+        self.assertTrue(any('retexted el="text-4"' in item for item in applied))
+
+    def test_deleting_raster_proxy_keeps_cover_and_exact_background(self):
+        edited, applied, _notes, removed = TOOLS._apply_html_ops(
+            RASTER_PROXY_HTML,
+            [{'op': 'delete_node', 'el': 'text-4'}],
+        )
+
+        self.assertIn('data-el="text-4"', edited)
+        self.assertIn('opacity: 1', edited)
+        self.assertIn('background: #F5EEDF', edited)
+        self.assertNotIn('>北京故宫</div>', edited)
+        self.assertIn('id="bg"', edited)
+        self.assertIn('北京故宫', removed)
+        self.assertTrue(any('cleared raster-backed proxy' in item for item in applied))
+
+
+class PageGenerationRecoveryTests(unittest.TestCase):
+    def test_parallel_status_capture_is_isolated_and_keeps_stdout(self):
+        import sys
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        _mc, runtime = TOOLS._load_sn_ppt_modules()
+        barrier = threading.Barrier(2)
+        original_stdout = sys.stdout
+
+        def command(page):
+            barrier.wait(timeout=5)
+            self.assertIs(sys.stdout, original_stdout)
+            return runtime._ok(page_no=page)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(runtime._capture_cmd, command, 1)
+            second = pool.submit(runtime._capture_cmd, command, 2)
+            self.assertEqual(first.result(timeout=5), (0, {'status': 'ok', 'page_no': 1}))
+            self.assertEqual(second.result(timeout=5), (0, {'status': 'ok', 'page_no': 2}))
+        self.assertIs(sys.stdout, original_stdout)
+        # Failed/nested commands must not leave a capture sink installed.
+        with self.assertRaises(ValueError):
+            runtime._capture_cmd(lambda: (_ for _ in ()).throw(ValueError('broken')))
+        self.assertIsNone(runtime._COMMAND_RESULT.get())
+
+    def test_failed_attempt_blocks_agent_replay_but_new_attempt_can_retry(self):
+        from types import SimpleNamespace
+
+        with tempfile.TemporaryDirectory() as tmp:
+            deck, _ = make_deck(Path(tmp))
+            ctx = SimpleNamespace(task_id='attempt-one', emit=mock.Mock())
+            runtime = mock.Mock()
+            runtime._capture_cmd.side_effect = TOOLS._PPTModelTimeoutError('timed out')
+            with (
+                mock.patch.object(TOOLS, 'require_context', return_value=ctx),
+                mock.patch.object(TOOLS, '_load_sn_ppt_modules', return_value=(mock.Mock(), runtime)),
+                mock.patch.object(TOOLS, '_load_slide_outline_briefs', return_value={}),
+                mock.patch.object(TOOLS, '_ui_slot_order_list', return_value=[]),
+                mock.patch.object(TOOLS, '_resolve_deck_dir', return_value=deck),
+            ):
+                result = TOOLS._batch_page_html_publish_progressive(deck, concurrency=1)
+                self.assertEqual(result['status'], 'failed')
+                with self.assertRaisesRegex(ToolExecutionError, 'already failed'):
+                    TOOLS.ppt_generate_pages(str(deck))
+                with self.assertRaisesRegex(ToolExecutionError, 'already failed'):
+                    TOOLS.ppt_run_stage(str(deck), stage='page-html', page=1)
+                runtime._capture_cmd.assert_called_once()
+                phases = [c.args[0]['current_phase'] for c in ctx.emit.call_args_list]
+                self.assertTrue(any('第 1 页生成失败' in phase for phase in phases))
+            with mock.patch.object(TOOLS, 'require_context', return_value=SimpleNamespace(task_id='attempt-two')):
+                TOOLS._page_attempt_guard(deck)  # retry is allowed in a new Attempt
+
+    def test_waiting_progress_is_emitted_before_page_call_returns(self):
+        import threading
+        from concurrent.futures import wait as real_wait
+        from types import SimpleNamespace
+
+        with tempfile.TemporaryDirectory() as tmp:
+            deck, _ = make_deck(Path(tmp))
+            release = threading.Event()
+            ctx = SimpleNamespace(task_id='progress-attempt', emit=mock.Mock())
+            runtime = mock.Mock()
+
+            def capture(*args, **kwargs):
+                self.assertTrue(release.wait(timeout=5))
+                return 0, {'status': 'ok'}
+
+            def wait_once(futures, **kwargs):
+                if not release.is_set():
+                    release.set()
+                    return set(), futures
+                return real_wait(futures, **kwargs)
+
+            runtime._capture_cmd.side_effect = capture
+            with (
+                mock.patch.object(TOOLS, 'require_context', return_value=ctx),
+                mock.patch.object(TOOLS, '_load_sn_ppt_modules', return_value=(mock.Mock(), runtime)),
+                mock.patch.object(TOOLS, '_load_slide_outline_briefs', return_value={}),
+                mock.patch.object(TOOLS, '_ui_slot_order_list', return_value=[]),
+                mock.patch.object(TOOLS, '_publish_one_page', return_value={'ok': True}),
+                mock.patch.object(TOOLS, 'wait', side_effect=wait_once),
+            ):
+                result = TOOLS._batch_page_html_publish_progressive(deck, concurrency=1)
+            self.assertEqual(result['status'], 'ok')
+            phases = [c.args[0]['current_phase'] for c in ctx.emit.call_args_list]
+            self.assertTrue(any('等待页面 [1]' in phase for phase in phases))
+            self.assertTrue(any('已发布 1 页' in phase for phase in phases))
+
+    def test_legacy_parallel_argument_still_generates_all_pages_serially(self):
+        import threading
+
+        with tempfile.TemporaryDirectory() as tmp:
+            deck, _ = make_deck(Path(tmp))
+            outline = json.dumps({'pages': [{'page_no': 1}, {'page_no': 2}]})
+            (deck / 'outline.json').write_text(outline, encoding='utf-8')
+            second_started = threading.Event()
+            first_finished = threading.Event()
+            generated = []
+            runtime = mock.Mock()
+
+            def capture(command, current_deck, page, **kwargs):
+                if page == 1:
+                    self.assertFalse(second_started.wait(timeout=0.05))
+                    first_finished.set()
+                else:
+                    second_started.set()
+                    self.assertTrue(first_finished.is_set())
+                generated.append(page)
+                (current_deck / 'pages' / f'page_{page:03d}.html').write_text(PAGE_HTML, encoding='utf-8')
+                return 0, {'status': 'ok', 'page_no': page}
+
+            runtime._capture_cmd.side_effect = capture
+            with (
+                mock.patch.object(TOOLS, '_load_sn_ppt_modules', return_value=(mock.Mock(), runtime)),
+                mock.patch.object(TOOLS, '_load_slide_outline_briefs', return_value={}),
+                mock.patch.object(TOOLS, '_ui_slot_order_list', return_value=[]),
+                mock.patch.object(TOOLS, '_publish_one_page', return_value={'ok': True}),
+            ):
+                result = TOOLS._batch_page_html_publish_progressive(deck, concurrency=8)
+            self.assertEqual(result['status'], 'ok')
+            self.assertEqual(result['concurrency'], 1)
+            self.assertEqual(result['submitted'], 2)
+            self.assertEqual(generated, [1, 2])
+            self.assertEqual((deck / 'outline.json').read_text(encoding='utf-8'), outline)
+            self.assertEqual(len(list((deck / 'pages').glob('*.html'))), 2)

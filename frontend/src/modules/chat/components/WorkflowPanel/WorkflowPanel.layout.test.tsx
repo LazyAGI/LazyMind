@@ -311,6 +311,17 @@ describe('shared workflow compact layout', () => {
     expect(screen.getByText('正文 notes')).toBeVisible();
   });
 
+  it('labels grouped artifact tabs without suggesting they count execution tasks', async () => {
+    fixture.ui.task_presentation = { grouped: true, hidden_steps: ['route'] };
+    fixture.session.steps!.unshift({ ...fixture.session.steps![0], id: 'route', step_id: 'route' });
+    render(<WorkflowPanel conversationId='layout-test' />);
+    const tabs = await screen.findByRole('tablist', { name: '产物' });
+    expect(within(tabs).getAllByRole('tab')).toHaveLength(2);
+    expect(tabs.querySelectorAll('.workflow-panel__tab-badge')).toHaveLength(0);
+    fireEvent.click(within(tabs).getByRole('tab', { name: '写作准备' }));
+    expect(fixture.setFocusedTab).toHaveBeenCalledWith('layout-test', 'prepare');
+  });
+
   it('keeps long step navigation usable with the keyboard and preserves multiple slot headings', async () => {
     fixture.ui.tabs = Array.from({ length: 7 }, (_, i) => ({ id: `step${i}`, label: `阶段 ${i + 1}`, layout: 'list', slots: [] }));
     fixture.ui.tabs[6].slots = [

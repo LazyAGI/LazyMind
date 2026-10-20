@@ -203,7 +203,7 @@ def stage_input_file(path: str) -> str:
 
 
 def copy_artifact_input(source: str, workspace: str) -> str:
-    """Copy the authorized input through pinned source and destination handles."""
+    """Copy an authorized external input into a private, non-overwriting directory."""
     import shutil
 
     destination = os.path.join(workspace, os.path.basename(source))
@@ -211,24 +211,29 @@ def copy_artifact_input(source: str, workspace: str) -> str:
         return os.path.basename(destination)
     guard = _host_guard()
     request = get_workspace_permission_context()
-    if guard is None and (request is None or not request.bound):
-        os.makedirs(workspace, exist_ok=True)
-        shutil.copy2(source, destination)
-        return os.path.basename(destination)
     os.makedirs(workspace, exist_ok=True)
-    with open_input_file(source) as incoming:
-        if guard is not None or os.name == 'nt':
-            if os.path.islink(destination):
-                raise ToolExecutionError('Artifact destination must not be a symbolic link')
-            with open(destination, 'wb') as outgoing:
+    # Preserve filenames, but never reuse a destination from another input or
+    # failed batch. Preparation must not change an already published artifact.
+    directory = tempfile.mkdtemp(prefix='.artifact-', dir=workspace)
+    destination = os.path.join(directory, os.path.basename(source))
+    try:
+        incoming = (open(source, 'rb') if guard is None and (request is None or not request.bound)
+                    else open_input_file(source))
+        with incoming:
+            if guard is None and request is not None and request.bound and os.name != 'nt':
+                parent, name = _pinned_parent(destination)
+                try:
+                    descriptor = os.open(
+                        name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent,
+                    )
+                finally:
+                    os.close(parent)
+                outgoing = os.fdopen(descriptor, 'wb')
+            else:
+                outgoing = open(destination, 'xb')
+            with outgoing:
                 shutil.copyfileobj(incoming, outgoing)
-        else:
-            parent, name = _pinned_parent(destination)
-            try:
-                descriptor = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=parent)
-                with os.fdopen(descriptor, 'wb') as outgoing:
-                    outgoing.truncate(0)
-                    shutil.copyfileobj(incoming, outgoing)
-            finally:
-                os.close(parent)
-    return os.path.basename(destination)
+    except BaseException:
+        shutil.rmtree(directory)
+        raise
+    return os.path.relpath(destination, workspace)

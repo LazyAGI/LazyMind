@@ -1548,6 +1548,9 @@ func startParseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs [
 			resultsByTaskID[taskID] = StartTaskResult{TaskID: taskID, DocumentID: docRow.ID, DisplayName: docRow.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: "uploaded file path is empty"}
 			continue
 		}
+		if normalizeSpreadsheetDirectParse(&dExt) {
+			persistDocumentConvertState(r.Context(), datasetID, docRow.ID, dExt)
+		}
 		candidate := startCandidate{task: taskRow, doc: docRow, docExt: dExt}
 		candidates = append(candidates, candidate)
 		if needsOfficeConvertBeforeParse(dExt, ocrConfig, parseProfile) {

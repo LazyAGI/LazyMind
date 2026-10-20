@@ -547,6 +547,9 @@ export interface CompositeBehavior {
 }
 
 export interface WorkflowUI {
+  extensions?: string[];
+  group_downloads?: boolean;
+  task_presentation?: { grouped?: boolean; hide_final_artifacts?: boolean; hidden_steps?: string[] };
   name?: string;
   tabs?: TabDef[];
   /** Defer tabs with hide_when_material until this planning material exists. */

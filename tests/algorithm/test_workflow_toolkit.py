@@ -261,3 +261,19 @@ def test_lazyllm_skill_manager_discovers_shared_workflow_skill():
         dir=workflow_skills_dir(), skills=[WORKFLOW_SKILL_NAME],
     ).build_prompt()
     assert 'workflow-agent-kit:' in prompt
+
+
+@pytest.mark.parametrize('path', [
+    'scripts/tests/test_tool.py', 'scripts/nested/tests/helper.py',
+    'scripts/nested/__tests__/helper.py', 'scripts/test_tool.py',
+    'scripts/a_test.py', 'scripts/conftest.py',
+])
+def test_legacy_package_loader_excludes_test_code_without_manifest(path):
+    package = {'files': {
+        'scripts/__init__.py': None,
+        path: b'raise AssertionError("test code executed")',
+        'scripts/z_tools.py': b'def selected_tool():\n    return "ok"\n',
+    }}
+    assert load_workflow_package_tools(
+        package, ['selected_tool'], 'renamed-workflow', 'revision-1',
+    )['selected_tool']() == 'ok'

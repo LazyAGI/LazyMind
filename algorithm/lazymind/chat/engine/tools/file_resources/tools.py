@@ -56,7 +56,8 @@ def read_file_resource(
     """Read a document resource, attachment, workspace file, remote Skill URI, or authorized local PDF/Office file.
 
     Large files are always windowed by a UTF-8 byte budget. The footer is the
-    only EOF signal: continue with next_offset when present; stop at End of file.
+    only EOF signal. When more evidence is needed, pass the returned next_offset explicitly.
+    Omitting offset reads the first window again; pagination does not require reading to EOF.
     After search_file_resource, pass offset near the hit line to inspect surrounding context.
 
     Args:
@@ -64,7 +65,7 @@ def read_file_resource(
             or local PDF/Office absolute path.
         offset: 1-based first line (default 1).
         limit: Maximum lines to return (default 2000, max 4000).
-        turn: Optional 1-based conversation turn used to disambiguate attachments.
+        turn: Optional 1-based conversation turn used to disambiguate attachments, NOT a page number.
     """
     return _read_file(target, offset, limit, turn)
 
@@ -117,7 +118,7 @@ def search_file_resource(
             or local PDF/Office absolute path.
         pattern: Literal substring or regular expression.
         max_results: Maximum matches (default 50).
-        turn: Optional 1-based conversation turn used to disambiguate attachments.
+        turn: Optional 1-based conversation turn used to disambiguate attachments, NOT a page number.
     """
     return _grep(target, pattern, max_results, turn)
 

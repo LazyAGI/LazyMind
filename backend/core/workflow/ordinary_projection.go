@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -39,7 +40,11 @@ func projectOrdinarySession(ctx context.Context, db *gorm.DB, session *orm.Workf
 	if err != nil {
 		return out, err
 	}
-	runtime, err := loadRuntimeSnapshot(ctx, db, session.ID)
+	hiddenSlots, err := ordinaryHiddenSlots(ctx, db, session.WorkflowRevisionID)
+	if err != nil {
+		return out, err
+	}
+	runtime, err := loadRuntimeSnapshot(ctx, db, session.ID, graph)
 	if err != nil {
 		return out, err
 	}
@@ -103,6 +108,7 @@ func projectOrdinarySession(ctx context.Context, db *gorm.DB, session *orm.Workf
 			continue
 		}
 		node := graph.Nodes[stepID]
+		rawArtifactSlots := map[string]string{}
 		view := taskdisplay.NewTask()
 		row, exists := current[stepID]
 		if exists && row.TaskID != "" {
@@ -111,6 +117,28 @@ func projectOrdinarySession(ctx context.Context, db *gorm.DB, session *orm.Workf
 				view, err = subagent.OrdinaryTask(ctx, db, &task)
 				if err != nil {
 					return out, err
+				}
+				// The task adapter does not know the pinned Workflow slot policy.
+				// Filter its raw artifacts too, including outputs without a slot revision yet.
+				if len(view.StageArtifacts) > 0 {
+					var originals []orm.SubAgentArtifact
+					if err := db.WithContext(ctx).Select("id", "slot").Where("task_id = ?", row.TaskID).Find(&originals).Error; err != nil {
+						return out, err
+					}
+					hiddenIDs := map[string]bool{}
+					for _, original := range originals {
+						rawArtifactSlots[original.ID] = original.Slot
+						if hiddenSlots[original.Slot] {
+							hiddenIDs[original.ID] = true
+						}
+					}
+					visible := view.StageArtifacts[:0]
+					for _, artifact := range view.StageArtifacts {
+						if !hiddenIDs[strings.Split(artifact.ArtifactID, ":")[0]] {
+							visible = append(visible, artifact)
+						}
+					}
+					view.StageArtifacts = visible
 				}
 			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return out, err
@@ -145,21 +173,26 @@ func projectOrdinarySession(ctx context.Context, db *gorm.DB, session *orm.Workf
 			applyOrdinaryAttemptEvents(&view, row, events)
 			// Slot revisions establish explicit visibility and attempt ownership for
 			// hosted outputs too. Do not promote unrelated task artifacts to slots.
-			artifacts, err := ordinaryAttemptArtifacts(ctx, db, session.ID, row, graph, view.DisplayKey)
+			artifacts, err := ordinaryAttemptArtifacts(ctx, db, session.ID, row, graph, view.DisplayKey, hiddenSlots)
 			if err != nil {
 				return out, err
 			}
 			// A bound SubAgent artifact and its slot revision reference the same
 			// saved output. Use the slot identity once so final refs resolve too.
 			bound := map[string]bool{}
+			boundSingleSlots := map[string]bool{}
 			for _, artifact := range artifacts {
+				if graph.MaterialCardinalities[artifact.slot] != "list" {
+					boundSingleSlots[artifact.slot] = true
+				}
 				if artifact.sourceID != "" {
 					bound[artifact.sourceID] = true
 				}
 			}
 			unbound := view.StageArtifacts[:0]
 			for _, artifact := range view.StageArtifacts {
-				if !bound[strings.Split(artifact.ArtifactID, ":")[0]] {
+				rawID := strings.Split(artifact.ArtifactID, ":")[0]
+				if !bound[rawID] && !boundSingleSlots[rawArtifactSlots[rawID]] {
 					unbound = append(unbound, artifact)
 				}
 			}
@@ -299,13 +332,40 @@ type ordinarySlotArtifact struct {
 	revisionID string
 }
 
-func ordinaryAttemptArtifacts(ctx context.Context, db *gorm.DB, sessionID string, row orm.WorkflowSessionStep, graph *graphengine.CompiledStateGraph, displayKey string) ([]ordinarySlotArtifact, error) {
+func ordinaryAttemptArtifacts(ctx context.Context, db *gorm.DB, sessionID string, row orm.WorkflowSessionStep, graph *graphengine.CompiledStateGraph, displayKey string, hiddenSlots map[string]bool) ([]ordinarySlotArtifact, error) {
 	var revisions []orm.WorkflowSlotRevision
 	if err := db.WithContext(ctx).Where("session_id = ? AND (producer_attempt_id = ? OR ((producer_attempt_id = '' OR producer_attempt_id IS NULL) AND step_id = ? AND attempt = ?)) AND validity IN ?", sessionID, row.ID, row.StepID, row.Attempt, []string{"", "effective"}).Order("created_at ASC, id ASC").Find(&revisions).Error; err != nil {
 		return nil, err
 	}
+	// A saved edit is another revision of one artifact, not another deliverable.
+	// Preserve distinct list indices and prefer the selected revision per item.
+	itemKey := func(revision orm.WorkflowSlotRevision) string {
+		index := "single"
+		if revision.ListIndex != nil {
+			index = strconv.Itoa(*revision.ListIndex)
+		}
+		return revision.SlotID + ":" + index
+	}
+	current := map[string]orm.WorkflowSlotRevision{}
+	for _, revision := range revisions {
+		key := itemKey(revision)
+		previous, ok := current[key]
+		if !ok || (revision.Selected && !previous.Selected) ||
+			(revision.Selected == previous.Selected && revision.Revision > previous.Revision) {
+			current[key] = revision
+		}
+	}
 	result := []ordinarySlotArtifact{}
 	for _, revision := range revisions {
+		latest := current[itemKey(revision)]
+		// Legacy outputs can share slot/index and revision number. Without a
+		// newer revision there is no evidence that one supersedes another.
+		if revision.Selected != latest.Selected || revision.Revision != latest.Revision {
+			continue
+		}
+		if hiddenSlots[revision.SlotID] {
+			continue
+		}
 		value, err := LoadSlotRevisionValue(ctx, db, revision)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			continue
@@ -481,4 +541,35 @@ func getOrdinarySessionProjection(w http.ResponseWriter, r *http.Request) {
 		taskdisplay.Observe(r.Context(), taskdisplay.EventMissingProcess, 0, missing)
 	}
 	common.ReplyOK(w, result)
+}
+
+// ordinaryHiddenSlots honors explicit visibility declarations from the Session's
+// immutable package. Omitted exposed fields retain the existing visible default.
+func ordinaryHiddenSlots(ctx context.Context, db *gorm.DB, revisionID string) (map[string]bool, error) {
+	var row struct{ Content []byte }
+	result := db.WithContext(ctx).Table(orm.WorkflowRevisionEntry{}.TableName()+" AS entries").
+		Select("blobs.content").Joins("JOIN "+orm.WorkflowBlob{}.TableName()+" AS blobs ON blobs.hash = entries.blob_hash").
+		Where("entries.revision_id = ? AND entries.path = ?", revisionID, "workflow.yaml").Take(&row)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	var manifest struct {
+		Slots []struct {
+			ID      string `yaml:"id"`
+			Exposed *bool  `yaml:"exposed"`
+		} `yaml:"slots"`
+	}
+	if err := yaml.Unmarshal(row.Content, &manifest); err != nil {
+		return nil, err
+	}
+	hidden := map[string]bool{}
+	for _, slot := range manifest.Slots {
+		if slot.Exposed != nil && !*slot.Exposed {
+			hidden[slot.ID] = true
+		}
+	}
+	return hidden, nil
 }

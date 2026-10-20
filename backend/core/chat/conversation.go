@@ -443,13 +443,43 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	target := resolvePersistTarget(histories, raw, seq)
 	upstreamHistories := historiesForUpstream(histories, target)
 	sessionID := upstreamSessionID(convID)
+	skillSelectionHandled := false
+	if !target.IsRegeneration {
+		resolution, err := submitSkillAmbiguitySelection(r.Context(), db, histories, raw["ask_answers_structured"])
+		if err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
+		if resolution != nil {
+			query = resolution.Query
+			displayQuery = resolution.DisplayQuery
+			skillSelectionHandled = true
+		}
+	}
 	resourceContext, err := evolution.BuildChatResourceContext(r.Context(), db, userID, userName, sessionID)
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "build chat resource context failed", err), http.StatusInternalServerError)
 		return
 	}
+	restoreWorkflowClarificationKnowledgeBaseMentions(raw, histories)
 	query, mentionedResources, err := applyChatMentions(r.Context(), db, raw, userID, convID, sessionID, query, resourceContext)
 	if err != nil {
+		var earlyFlusher http.Flusher
+		if stream {
+			var ok bool
+			earlyFlusher, ok = w.(http.Flusher)
+			if !ok {
+				common.ReplyErr(w, "streaming not supported", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			common.SetLanguageResponseHeaders(w, r.Header.Get("Accept-Language"))
+		}
+		if maybeReplySkillAmbiguity(r.Context(), db, store.State(), w, earlyFlusher, convID, displayQuery, target, raw, histories, err, stream) {
+			return
+		}
 		common.ReplyErr(w, err.Error(), http.StatusForbidden)
 		return
 	}
@@ -592,17 +622,16 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-			persisted := persistImmediateRunTerminal(r.Context(), db, convID, historyID, displayQuery, runID, target, historyExt, &RunTerminal{
+			terminal := &RunTerminal{
 				Status:        "failed",
 				Reason:        "model_failure",
-				Code:          "not_found",
+				Code:          "model_configuration",
 				PartialOutput: false,
-			})
-			appErr := common.ResolveAppError(err.Error(), http.StatusServiceUnavailable)
-			if persisted {
-				appErr = appErr.WithDetail(map[string]string{"history_id": historyID})
 			}
-			common.ReplyAppErr(w, appErr)
+			if !persistImmediateRunTerminal(r.Context(), db, convID, historyID, displayQuery, runID, target, historyExt, terminal) {
+				historyID = ""
+			}
+			replyChatTerminalError(w, err.Error(), http.StatusServiceUnavailable, terminal, historyID)
 			return
 		}
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load chat runtime config failed", err), http.StatusInternalServerError)
@@ -835,7 +864,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	// Only mark answered when the request carries a full ask_answers_structured payload,
 	// meaning the user actually submitted the AskCard. If the user ignored the card or
 	// only partially filled it, we do NOT mark it answered so the card stays interactive.
-	if !target.IsRegeneration {
+	if !target.IsRegeneration && !skillSelectionHandled {
 		if structured, hasStructured := raw["ask_answers_structured"]; hasStructured {
 			continuation, err := submitObjectiveVocabularyAnswers(r.Context(), db, userID, histories, structured)
 			if err != nil {
@@ -2330,6 +2359,8 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 		Order(rootUpdated + " DESC").
 		Order("COALESCE(history_parent_id, conversations.id) ASC").
 		Order("CASE WHEN history_parent_id IS NULL THEN 0 ELSE 1 END ASC").
+		Order("CASE WHEN history_parent_id IS NOT NULL AND conversations.history_order IS NULL THEN 0 ELSE 1 END ASC").
+		Order("CASE WHEN history_parent_id IS NOT NULL THEN conversations.history_order END ASC").
 		Order("updated_at DESC").
 		Order("conversations.id ASC").
 		Offset(offset).

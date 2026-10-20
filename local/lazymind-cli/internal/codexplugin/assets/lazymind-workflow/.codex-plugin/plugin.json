@@ -15,7 +15,11 @@
     "capabilities": [],
     "defaultPrompt": [
       "启动一个 LazyMind Workflow"
-    ]
+    ],
+    "composerIcon": "./assets/lazymind.png",
+    "composerIconDark": "./assets/lazymind.png",
+    "logo": "./assets/lazymind.png",
+    "logoDark": "./assets/lazymind.png"
   },
   "mcpServers": "./.mcp.json"
 }

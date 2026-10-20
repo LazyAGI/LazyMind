@@ -34,7 +34,23 @@ class RemoteExecutorClient:
 
     @staticmethod
     def data(response: httpx.Response) -> Dict[str, Any]:
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            # Preserve Core's structured cause in the persisted attempt error.
+            # A bare HTTP status hides deterministic input-contract failures.
+            try:
+                body = response.json()
+            except ValueError:
+                raise exc
+            error = body.get('error') if isinstance(body, dict) else None
+            if isinstance(error, dict) and isinstance(error.get('message'), str):
+                code = str(error.get('code') or 'WORKFLOW_REMOTE_ERROR')
+                raise httpx.HTTPStatusError(
+                    f'{code}: {error["message"]} (HTTP {response.status_code})',
+                    request=exc.request, response=response,
+                ) from exc
+            raise
         body = response.json()
         value = body.get('data', body)
         return value if isinstance(value, dict) else {}

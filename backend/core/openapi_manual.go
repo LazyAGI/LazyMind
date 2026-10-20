@@ -1,7 +1,15 @@
 package main
 
+import "lazymind/core/chat"
+
 func manualOpenAPISpec() map[string]any {
 	schemas, paths := manualSchemas(), manualPaths()
+	for name, schema := range documentDirectorySchemas() {
+		schemas[name] = schema
+	}
+	for path, operations := range documentDirectoryPaths() {
+		paths[path] = operations
+	}
 	for name, schema := range notificationSchemas() {
 		schemas[name] = schema
 	}
@@ -802,6 +810,12 @@ func manualSchemas() map[string]any {
 			prop("data", refSchema("EpisodeMemory")),
 		),
 		"SetChatHistoryResponse": obj(prop("history_id", strSchema())),
+		"ModelFailureCode":       enumStringSchema(chat.ModelFailureCodes()...),
+		"ChatErrorResponse": objReq([]string{"code", "message"},
+			prop("code", intSchema()), prop("message", strSchema()), prop("data", refSchema("ChatErrorData"))),
+		"ChatErrorData": obj(
+			prop("run_terminal", refSchema("RunTerminal")),
+			prop("detail", map[string]any{"description": "Legacy error detail; persisted chat failures include history_id."})),
 		"RunTerminal": objReq(
 			[]string{"status", "reason", "partial_output"},
 			prop("status", enumStringSchema("completed", "interrupted", "failed", "cancelled")),
@@ -811,6 +825,7 @@ func manualSchemas() map[string]any {
 			prop("model_call_id", strSchema()),
 			prop("model_invoked", boolSchema()),
 			prop("diagnostic_id", strSchema()),
+			prop("transport_diagnostic", objReq([]string{"code"}, prop("code", enumStringSchema("upstream_stream_failed", "upstream_stream_timeout")))),
 		),
 		"ChatRuntimeEvent":            obj(prop("schema_version", intSchema()), prop("event_id", strSchema()), prop("run_id", strSchema()), prop("type", strSchema()), prop("data", obj())),
 		"ChatChunkResponse":           obj(prop("exports", array(refSchema("ChatExport"))), prop("conversation_id", strSchema()), prop("seq", intSchema()), prop("message", strSchema()), prop("delta", strSchema()), prop("delta_mode", enumStringSchema("append", "replace")), prop("history_id", strSchema()), prop("sources", array(obj())), prop("prompt_questions", array(strSchema())), prop("reasoning_content", strSchema()), prop("thinking_duration_s", int64Schema()), prop("capability_dependency", obj()), prop("runtime_event", refSchema("ChatRuntimeEvent")), prop("performance_metrics", refSchema("RunPerformanceMetrics")), prop("execution", refSchema("ExternalExecutionProjection")), prop("model_route", refSchema("ChatModelRoute"))),
@@ -1051,7 +1066,7 @@ func manualPaths() map[string]any {
 			"Unpin a conversation", queryParams(param("path", "conversation_id", true, strSchema())), nil, response(200, "Conversation unpinned", refSchema("ConversationPinResponse")),
 		)},
 		"/conversations/{conversation_id}:reorder": map[string]any{"post": op(
-			"Move a conversation within its pinned or ordinary history", queryParams(param("path", "conversation_id", true, strSchema())), jsonBody(refSchema("ConversationReorderRequest"), true),
+			"Move a conversation within its pinned, recent, group, project or sibling list without changing relationships", queryParams(param("path", "conversation_id", true, strSchema())), jsonBody(refSchema("ConversationReorderRequest"), true),
 			response(200, "Conversation reordered", refSchema("ConversationPinResponse")),
 		)},
 		"/conversations/{conversation_id}:restore": map[string]any{"post": op(

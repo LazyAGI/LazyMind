@@ -197,6 +197,7 @@ def commit_entries(
     next_pressure_tokens: Optional[int] = None,
 ) -> None:
     state['entries'] = entries
+    state['compression_revision'] = state.get('compression_revision', 0) + 1
     if next_pressure_tokens is not None:
         state['next_pressure_tokens'] = max(0, int(next_pressure_tokens))
 

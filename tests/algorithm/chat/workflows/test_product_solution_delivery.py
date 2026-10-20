@@ -779,6 +779,87 @@ def test_preflight_accepts_user_facing_option_labels(tmp_path):
     assert result['execution_plan']['reference_sample_status'] == 'none-confirmed'
 
 
+def test_preflight_accepts_full_process_without_reference_sample(tmp_path):
+    tools = _load_contract_tools(tmp_path)
+
+    result = tools.normalize_product_parameters(
+        '企业会议知识助手', '全流程', '全流程', '300', '无',
+    )
+
+    assert result['execution_plan']['stage_chain'] == list(tools.STAGE_ORDER)
+    assert result['execution_plan']['execution_depth'] == 'full'
+    assert result['execution_plan']['word_target'] == 300
+    assert result['execution_plan']['reference_sample_status'] == 'none-confirmed'
+
+
+@pytest.mark.parametrize('wrapped', [False, True])
+def test_router_publishes_chinese_bindings_without_model_override(tmp_path, monkeypatch, wrapped):
+    tools = _load_contract_tools(tmp_path)
+    remote = {
+        'product_goal': '解决会议信息分散、纪要难沉淀的问题，主要给企业员工和部门主管使用',
+        'execution_depth': '全流程', 'requested_stage': 'full',
+        'word_target': '300', 'reference_sample_choice': '无',
+    }
+    if wrapped:
+        for field in ('execution_depth', 'reference_sample_choice'):
+            remote[field] = {'data': json.dumps(remote[field], ensure_ascii=False)}
+    original = json.loads(json.dumps(remote))
+    tools.require_context().params = {'remote_inputs': remote}
+    published = {}
+
+    def save_values(artifacts, _publisher):
+        published.update({key: content for key, content, _kind in artifacts})
+        return list(published)
+
+    monkeypatch.setattr(tools, '_publish_values', save_values)
+    result = tools.publish_product_route(
+        {'selected_stage': 'direction', 'route_source': 'explicit', 'confidence': 'explicit',
+         'route_reason': '用户要求全流程', 'stage_chain': list(tools.STAGE_ORDER),
+         'stage_chain_authorized': True},
+        product_goal='模型占位目标', execution_depth='light', word_target='800',
+        reference_sample_choice='provided', requested_stage='prd',
+    )
+
+    assert result['status'] == 'published'
+    assert result['control']['next_step'] == 'build_direction_outline'
+    plan = published['execution_plan']
+    assert plan['planned_stage_chain'] == list(tools.STAGE_ORDER)
+    assert plan['product_goal'] == original['product_goal']
+    assert plan['execution_depth'] == 'full'
+    assert plan['word_target'] == 300
+    assert plan['reference_sample_status'] == 'none-confirmed'
+    assert json.loads(Path(published['resource_profiles']).read_text()) == []
+    assert remote == original
+
+
+@pytest.mark.parametrize('choice', ['', 'default'])
+@pytest.mark.parametrize('sample', ['', '已上传的参考样例'])
+def test_bound_product_defaults_still_infer_reference_presence(tmp_path, choice, sample):
+    tools = _load_contract_tools(tmp_path)
+    remote = {'execution_depth': '', 'reference_sample_choice': choice, 'reference_sample': sample}
+    params = {'remote_inputs': remote}
+
+    tools._normalize_bound_product_inputs(params)
+
+    assert params['remote_inputs']['execution_depth'] == 'auto'
+    assert params['remote_inputs']['reference_sample_choice'] == ('provided' if sample else 'none-confirmed')
+    assert remote['execution_depth'] == ''
+    assert remote['reference_sample_choice'] == choice
+
+
+@pytest.mark.parametrize('field', ['execution_depth', 'reference_sample_choice'])
+def test_router_rejects_unknown_bound_preferences_before_publication(tmp_path, monkeypatch, field):
+    tools = _load_contract_tools(tmp_path)
+    tools.require_context().params = {'remote_inputs': {'product_goal': '企业会议知识助手', field: '未知选项'}}
+    published = []
+    monkeypatch.setattr(tools, '_publish_values', lambda *args: published.append(args))
+
+    with pytest.raises(ValueError, match=f'PRODUCT_INPUT_INVALID: {field}'):
+        tools.publish_product_route({})
+
+    assert published == []
+
+
 def test_preflight_rejects_missing_conditional_text_answers(tmp_path):
     tools = _load_contract_tools(tmp_path)
 
@@ -800,3 +881,132 @@ def test_preflight_does_not_reject_large_requested_documents(tmp_path):
     )
 
     assert result['execution_plan']['word_target'] == 50000
+
+
+@pytest.mark.parametrize('stage', ['direction', 'competitive', 'design', 'prd', 'prototype', 'review', 'handoff'])
+def test_assessment_publisher_saves_normalized_typed_output_and_keeps_unknowns(tmp_path, monkeypatch, stage):
+    tools = _load_contract_tools(tmp_path)
+    tools.require_context().params = {'remote_inputs': {'execution_plan': {'selected_stage': stage}}}
+    saved = []
+    monkeypatch.setattr(tools, '_save_artifact', lambda **kwargs: saved.append(kwargs))
+
+    result = tools.publish_product_stage_assessment(
+        stage=stage, execution_depth='light',
+        checks={'scope': {'status': 'passed', 'evidence': '用户明确不涉及付费'},
+                'unperformed': {'status': 'passed'}},
+        decisions=[{'summary': '预约以 30 分钟为单位', 'status': 'proposed'}],
+        open_questions=['管理员的取消权限待确认'],
+    )
+
+    assert result['status'] == 'published'
+    assert result['saved_slots'] == [stage + '_assessment']
+    assert len(saved) == 1
+    artifact = saved[0]
+    assert artifact['key'] == stage + '_assessment'
+    assert artifact['content_type'] == 'json'
+    assert artifact['internal_publish'] is True
+    assert artifact['value']['status'] == 'draft'
+    assert artifact['value']['implementation_readiness'] == 'not-assessed'
+    assert artifact['value']['checks']['scope']['evidence'] == '用户明确不涉及付费'
+    assert artifact['value']['checks']['unperformed']['status'] == 'not-checked'
+    assert artifact['value']['open_questions'] == ['管理员的取消权限待确认']
+    assert artifact['value']['decisions'][0]['status'] == 'proposed'
+
+
+@pytest.mark.parametrize('arguments', [
+    {'stage': 'prd'},
+    {'stage': 'direction', 'checks': {'scope': {'status': 'unknown-state'}}},
+])
+def test_assessment_publisher_rejects_invalid_reports_before_saving(tmp_path, monkeypatch, arguments):
+    tools = _load_contract_tools(tmp_path)
+    tools.require_context().params = {'remote_inputs': {'execution_plan': {'selected_stage': 'direction'}}}
+    saved = []
+    monkeypatch.setattr(tools, '_save_artifact', lambda **kwargs: saved.append(kwargs))
+
+    with pytest.raises(ValueError):
+        tools.publish_product_stage_assessment(**arguments)
+
+    assert saved == []
+
+
+@pytest.mark.parametrize('stage', ['direction', 'competitive', 'design', 'prd', 'prototype', 'review'])
+@pytest.mark.parametrize('readiness', ['ready-with-open-items', '方向定义已满足就绪条件，可进入设计阶段'])
+def test_assessment_replays_prose_report_without_model_repair(tmp_path, monkeypatch, stage, readiness):
+    tools = _load_contract_tools(tmp_path)
+    tools.require_context().params = {'remote_inputs': {'execution_plan': {'selected_stage': stage}}}
+    saved = []
+    monkeypatch.setattr(tools, '_save_artifact', lambda **kwargs: saved.append(kwargs))
+    checks = {'target_users_defined': '管理员与学生在用户与问题章节中定义。'}
+    notes = ['座位规模未知']
+
+    result = tools.publish_product_stage_assessment(
+        stage=stage, status='reviewable', execution_depth='light', checks=checks,
+        implementation_readiness=readiness, quality_notes=notes,
+    )
+
+    assert result['status'] == 'published'
+    assert len(saved) == 1
+    report = saved[0]['value']
+    assert report['status'] == 'draft'
+    assert report['implementation_readiness'] == 'not-assessed'
+    assert report['checks']['target_users_defined'] == {
+        'status': 'not-checked', 'evidence': checks['target_users_defined'],
+    }
+    assert any(readiness in note for note in report['quality_notes'])
+    assert notes == ['座位规模未知']
+    assert isinstance(checks['target_users_defined'], str)
+
+
+def test_assessment_publisher_accepts_schema_parsed_nested_fields(tmp_path, monkeypatch):
+    tools = _load_contract_tools(tmp_path)
+    tools.require_context().params = {'remote_inputs': {'execution_plan': {'selected_stage': 'direction'}}}
+    saved = []
+    monkeypatch.setattr(tools, '_save_artifact', lambda **kwargs: saved.append(kwargs))
+
+    tools.publish_product_stage_assessment(
+        stage='direction', status='reviewable',
+        checks={'scope': tools.ProductAssessmentCheck(status='passed', evidence='原始需求：不涉及付费')},
+        decisions=[tools.ProductAssessmentDecision(value='预约以 30 分钟为单位')],
+        open_questions=[tools.ProductAssessmentQuestion(question='座位规模未知')],
+    )
+
+    assert saved[0]['value']['status'] == 'reviewable'
+    assert saved[0]['value']['checks']['scope']['status'] == 'passed'
+    assert saved[0]['value']['decisions'][0]['status'] == 'proposed'
+    assert saved[0]['value']['open_questions'][0]['question'] == '座位规模未知'
+
+
+def test_handoff_publisher_still_rejects_unstructured_readiness(tmp_path, monkeypatch):
+    tools = _load_contract_tools(tmp_path)
+    tools.require_context().params = {'remote_inputs': {'execution_plan': {'selected_stage': 'handoff'}}}
+    saved = []
+    monkeypatch.setattr(tools, '_save_artifact', lambda **kwargs: saved.append(kwargs))
+
+    with pytest.raises(ValueError, match='implementation_readiness'):
+        tools.publish_product_stage_assessment(stage='handoff', implementation_readiness='看起来可以开发了')
+    assert saved == []
+
+
+def test_publication_validation_checks_bound_bodies_before_any_output(tmp_path):
+    tools = _load_contract_tools(tmp_path)
+    remote = {'direction_document': '# Direction', 'direction_document_html': '<h1>Direction</h1>',
+              'direction_assessment': {'stage': 'direction', 'status': 'draft'}}
+    tools.require_context = lambda: types.SimpleNamespace(params={'remote_inputs': remote})
+    manifest = {'stage': 'direction', 'workspace_id': 'workspace',
+                'host_artifact': {'slot': 'direction_document', **tools._bound_artifact_descriptor(remote['direction_document'])},
+                'representations': {kind: {'slot': slot, **tools._bound_artifact_descriptor(remote[slot])}
+                                    for kind, slot in tools.STAGE_REPRESENTATIONS['direction'].items()}}
+    handoff = {'stage_manifest': manifest, 'workspace_state': {'workspace_id': 'workspace', 'current_run': {'selected_stage': 'direction'}},
+               'delivery_summary': 'done'}
+    tools._validate_product_publication(handoff)
+    remote['direction_document'] = '# Changed after manifest'
+    saved = []
+    tools.build_product_handoff_state = lambda: handoff
+    tools._publish_values = lambda *args: saved.append(args)
+    with pytest.raises(ValueError, match='CONTENT_MISMATCH'):
+        tools.publish_product_handoff_state()
+    assert saved == []
+    del remote['direction_document_html']
+    with pytest.raises(ValueError):
+        tools.publish_product_handoff_state()
+    assert saved == []

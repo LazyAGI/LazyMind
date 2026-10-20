@@ -20,6 +20,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/artifactfile"
 	"lazymind/core/workflow/artifactgraph"
+	"lazymind/core/workflow/publication"
 )
 
 // DBArtifactSink is the shared executor output writer. Host implementations
@@ -138,8 +139,11 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 	controlled := controlstore.Controlled(sessionInfo)
 	var storedValue json.RawMessage
 	var cleanupDirectory string
-	var err error
-	if controlled {
+	transactionalOutputs, err := publication.PublicationEnabled(sink.DB.WithContext(ctx), sessionInfo)
+	if err != nil {
+		return err
+	}
+	if controlled || transactionalOutputs {
 		artifact, err = NormalizeArtifact(attempt, artifact)
 		if err != nil {
 			return err
@@ -226,31 +230,33 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		if err != nil {
 			return err
 		}
-		selected := tx.Model(&orm.WorkflowSlotRevision{}).Where(
-			"session_id = ? AND slot_id = ? AND selected = ?", attempt.SessionID, artifact.Slot, true,
-		)
-		if cardinality == "list" {
-			selected = selected.Where("list_index = ?", *listIndex)
-		}
-		var replaced []orm.WorkflowSlotRevision
-		if err := selected.Select("id").Find(&replaced).Error; err != nil {
-			return err
-		}
-		replacedIDs := make([]string, 0, len(replaced))
-		for _, revision := range replaced {
-			replacedIDs = append(replacedIDs, revision.ID)
-		}
-		if err := artifactgraph.InvalidateConsumers(ctx, tx, attempt.SessionID, replacedIDs...); err != nil {
-			return err
-		}
-		selected = tx.Model(&orm.WorkflowSlotRevision{}).Where(
-			"session_id = ? AND slot_id = ? AND selected = ?", attempt.SessionID, artifact.Slot, true,
-		)
-		if cardinality == "list" {
-			selected = selected.Where("list_index = ?", *listIndex)
-		}
-		if err := selected.Update("selected", false).Error; err != nil {
-			return err
+		if !transactionalOutputs {
+			selected := tx.Model(&orm.WorkflowSlotRevision{}).Where(
+				"session_id = ? AND slot_id = ? AND selected = ?", attempt.SessionID, artifact.Slot, true,
+			)
+			if cardinality == "list" {
+				selected = selected.Where("list_index = ?", *listIndex)
+			}
+			var replaced []orm.WorkflowSlotRevision
+			if err := selected.Select("id").Find(&replaced).Error; err != nil {
+				return err
+			}
+			replacedIDs := make([]string, 0, len(replaced))
+			for _, revision := range replaced {
+				replacedIDs = append(replacedIDs, revision.ID)
+			}
+			if err := artifactgraph.InvalidateConsumers(ctx, tx, attempt.SessionID, replacedIDs...); err != nil {
+				return err
+			}
+			selected = tx.Model(&orm.WorkflowSlotRevision{}).Where(
+				"session_id = ? AND slot_id = ? AND selected = ?", attempt.SessionID, artifact.Slot, true,
+			)
+			if cardinality == "list" {
+				selected = selected.Where("list_index = ?", *listIndex)
+			}
+			if err := selected.Update("selected", false).Error; err != nil {
+				return err
+			}
 		}
 		seq := artifact.Seq
 		if err := tx.Create(&orm.WorkflowHumanArtifact{ID: valueID, SessionID: attempt.SessionID,
@@ -259,11 +265,18 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 			return err
 		}
 		row := orm.WorkflowSlotRevision{ID: uuid.NewString(), SessionID: attempt.SessionID, SlotID: artifact.Slot,
-			Revision: revision, ListIndex: listIndex, Selected: true, ArtifactSeq: &seq, HumanArtifactID: &valueID,
+			Revision: revision, ListIndex: listIndex, Selected: !transactionalOutputs, ArtifactSeq: &seq, HumanArtifactID: &valueID,
 			ChangeSource: "host", Slot: artifact.Slot, StepID: attempt.StepID, Attempt: attempt.AttemptNo,
 			Validity: "effective", ProducerAttemptID: attempt.AttemptID, CreatedAt: now}
 		if err := tx.Create(&row).Error; err != nil {
 			return err
+		}
+		// The model's selected=true default overrides a zero bool on Create.
+		if transactionalOutputs {
+			if err := tx.Model(&orm.WorkflowSlotRevision{}).Where("id = ?", row.ID).
+				Update("selected", false).Error; err != nil {
+				return err
+			}
 		}
 		// Keep list membership durable even when a package publisher supplies an
 		// explicit list_index. appendArtifactListOrder is idempotent, so ordinary

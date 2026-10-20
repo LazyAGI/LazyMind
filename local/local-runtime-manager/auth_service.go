@@ -34,6 +34,10 @@ func NewAuthServiceManager(r CommandRunner) *AuthServiceManager {
 }
 
 func (m *AuthServiceManager) Run(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	env, err := authServiceEnv(cfg, paths)
+	if err != nil {
+		return err
+	}
 	if err := paths.EnsureAllDirs(); err != nil {
 		return err
 	}
@@ -60,7 +64,7 @@ func (m *AuthServiceManager) Run(ctx context.Context, cfg RuntimeConfig, paths R
 		strconv.Itoa(cfg.AuthService.Port),
 	)
 	cmd.Dir = filepath.Join(paths.RepoRoot, authServiceSourceDirName)
-	cmd.Env = append(os.Environ(), authServiceEnv(cfg, paths)...)
+	cmd.Env = append(os.Environ(), env...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	configureChildProcess(cmd, false)
@@ -272,7 +276,11 @@ func pythonDependencyCacheEnv(paths RuntimePaths) []string {
 	)
 }
 
-func authServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
+func authServiceEnv(cfg RuntimeConfig, paths RuntimePaths) ([]string, error) {
+	cloudKey, err := cloudCredentialKey()
+	if err != nil {
+		return nil, err
+	}
 	return []string{
 		"LAZYMIND_RUNTIME_MODE=local",
 		"LAZYMIND_DATABASE_URL=" + cfg.AuthService.DatabaseURL,
@@ -282,7 +290,7 @@ func authServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_JWT_SECRET=" + envText("LAZYMIND_JWT_SECRET", "dev-secret-change-me"),
 		"LAZYMIND_JWT_TTL_MINUTES=" + envText("LAZYMIND_JWT_TTL_MINUTES", "60"),
 		"LAZYMIND_JWT_REFRESH_TTL_DAYS=" + envText("LAZYMIND_JWT_REFRESH_TTL_DAYS", "7"),
-		"LAZYMIND_AUTH_CLOUD_SECRET_KEY=" + envText("LAZYMIND_AUTH_CLOUD_SECRET_KEY", "dev-ragscan-secret-key-change-me"),
+		cloudCredentialKeyEnvVar + "=" + cloudKey,
 		"LAZYMIND_MCP_OAUTH_PUBLIC_BASE_URL=" + envText("LAZYMIND_MCP_OAUTH_PUBLIC_BASE_URL", fmt.Sprintf("http://127.0.0.1:%d", cfg.FrontendPort)),
 		"LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN=" + internalServiceToken(),
 		"LAZYMIND_BOOTSTRAP_ADMIN_USERNAME=" + envText("LAZYMIND_BOOTSTRAP_ADMIN_USERNAME", "admin"),
@@ -291,7 +299,7 @@ func authServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_CHAT_UNLIKE_SWITCH=" + envText("LAZYMIND_CHAT_UNLIKE_SWITCH", "true"),
 		authServicePermissionsEnvVar + "=" + authServicePermissionsPath(paths),
 		authServiceOpenAPIExportEnvVar + "=0",
-	}
+	}, nil
 }
 
 func waitForAuthDatabase(ctx context.Context, databaseURL string) error {

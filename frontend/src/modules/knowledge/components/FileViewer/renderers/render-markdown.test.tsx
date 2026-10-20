@@ -6,8 +6,8 @@ import RenderMarkdown from "./render-markdown";
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string) => ({
-      markdownRender: "Preview",
-      markdownSource: "Source",
+      "chat.markdownRender": "Preview",
+      "chat.markdownSource": "Source",
       "knowledge.markdownViewMode": "Markdown view mode",
     })[key] || key,
   }),

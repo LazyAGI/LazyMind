@@ -25,6 +25,7 @@ const { createInputRecorder } = require("./input-recording");
 const { createRecordingHelper } = require("./recording-helper");
 const { resolveWindowsDesktopPaths } = require("./desktop-paths");
 const { resolveRuntimeLocalFile } = require("./runtime-local-file");
+const { revealDirectoryFile } = require("./directory-file");
 const {
   desktopRuntimeReady,
   isRuntimeOwnershipConflict,
@@ -172,7 +173,9 @@ const runtimeOwnershipHandoffTimeoutMs = 30 * 1000;
 const agentHostRestartMaxDelayMs = 30 * 1000;
 const agentHostStableAfterMs = 60 * 1000;
 const agentConnectorActionTimeoutMs = 15 * 1000;
-const agentConnectorInstallTimeoutMs = 120 * 1000;
+const agentConnectorStatusTimeoutMs = 30 * 1000;
+const agentConnectorDisconnectTimeoutMs = 60 * 1000;
+const agentConnectorInstallTimeoutMs = 660 * 1000;
 const agentConnectorBindingTimeoutMs = 30 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
 const startupMetricsHistoryPath = path.join(desktopLogsDir, "startup-metrics.jsonl");
@@ -292,11 +295,18 @@ const desktopNotifications = createDesktopNotifications({
   report: (code) => appendStartupLog("desktop", code),
 });
 
+// Renderer navigation and session IPC must agree on the exact origin;
+// localhost and 127.0.0.1 are different origins even on the same port.
+function desktopFrontendOrigin(frontendPort) {
+  const port = Number(frontendPort);
+  return Number.isInteger(port) && port > 0 && port <= 65535 ? `http://localhost:${port}` : "";
+}
+
 function notificationFrontendOrigin() {
   if (isExternalRuntimeDev) {
     return new URL(desktopDevURL).origin;
   }
-  return `http://127.0.0.1:${Number(currentStatus?.config?.frontendPort)}`;
+  return desktopFrontendOrigin(currentStatus?.config?.frontendPort);
 }
 
 function loadEditablePptDependencyConfig() {
@@ -391,7 +401,6 @@ function sidecarEnv() {
   );
   env.LAZYMIND_MODEL_PROVIDER_SECRET_KEY ||= deriveDesktopCredentialKey(desktopCredentialIdentity, "model-provider");
   env.LAZYMIND_MCP_SECRET_KEY ||= deriveDesktopCredentialKey(desktopCredentialIdentity, "mcp");
-  env.LAZYMIND_AUTH_CLOUD_SECRET_KEY ||= deriveDesktopCredentialKey(desktopCredentialIdentity, "cloud-oauth");
   env.LAZYMIND_EDITABLE_PPT_WINDOWS_X64_URL ||= editablePptDependencyConfig.windowsX64.url || "";
   env.LAZYMIND_EDITABLE_PPT_WINDOWS_X64_SHA256 ||= editablePptDependencyConfig.windowsX64.sha256 || "";
   env.LAZYMIND_EDITABLE_PPT_DARWIN_ARM64_URL ||= editablePptDependencyConfig.darwinArm64.url || "";
@@ -715,7 +724,9 @@ function runAgentConnector(agent, action) {
   const installWorkflow = agent === "deepseek-harness" && action === "connect";
   const run = () => runConnectorJSON(
     ["internal", "agent", agent, action],
-    installWorkflow ? agentConnectorInstallTimeoutMs : agentConnectorActionTimeoutMs,
+    installWorkflow ? agentConnectorInstallTimeoutMs
+      : agent === "deepseek-harness" && action === "disconnect" ? agentConnectorDisconnectTimeoutMs
+      : action === "status" ? agentConnectorStatusTimeoutMs : agentConnectorActionTimeoutMs,
   );
   if (installWorkflow) {
     const address = new URL(process.env.LAZYMIND_ASSISTANT_BRIDGE_URL || "http://127.0.0.1:19091").host;
@@ -909,7 +920,7 @@ async function runInstallerWarmup() {
           callback({ cancel: true });
         }
       });
-      await warmupWindow.loadURL(`http://localhost:${status.config.frontendPort}`);
+      await warmupWindow.loadURL(desktopFrontendOrigin(status.config.frontendPort));
     },
     stopRuntime: () => runSidecar("down", maintenanceArgs, {
       env: { ...sidecarEnv(), LAZYMIND_LOCAL_DOWN_TIMEOUT: "120s" },
@@ -2179,7 +2190,7 @@ function createHiddenRendererAttempt(frontendPort) {
   rendererReadyWait = readyWait;
   startupMetricsRecorder.mark("frontendLoadStarted");
   const ready = Promise.all([
-    window.loadURL(`http://localhost:${frontendPort}/agent/chat/home`),
+    window.loadURL(`${desktopFrontendOrigin(frontendPort)}/agent/chat/home`),
     readyWait.promise,
   ]);
   return {
@@ -3024,6 +3035,20 @@ async function materializeArtifactFile(payload, destPath) {
 }
 
 ipcMain.handle("lazymind:showItemInFolder", async (_event, payload) => {
+  if (payload?.directoryEntry) {
+    return revealDirectoryFile(payload.directoryEntry, {
+      showItemInFolder: value => shell.showItemInFolder(value),
+      lookup: async ({ directoryId, entryId }) => {
+        const { corePort, userId } = await desktopWorkspaceRuntime();
+        const response = await fetch(`http://127.0.0.1:${corePort}/document-directories/${encodeURIComponent(directoryId)}/entries/${encodeURIComponent(entryId)}/local-file?metadata_only=true`, {
+          headers: { "X-User-Id": userId }, signal: AbortSignal.timeout(30_000),
+        });
+        const result = await response.json();
+        if (!response.ok || result.code !== 0) throw new Error("Directory file is unavailable");
+        return result.data;
+      },
+    });
+  }
   const source = typeof payload === "string" ? payload : String(payload?.source || "");
   const localPath = await resolveExistingArtifactPath(source);
   if (localPath) {

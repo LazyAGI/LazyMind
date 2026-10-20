@@ -1,5 +1,26 @@
 # Windows RAG 手动发布与固定组件历史记录
 
+## 2026-10-08：Windows 构建修复（当前流程）
+
+基于 upstream/main `3cf9169fe`，合入 chenzhex/cz/fix-pack 的 `4d7d54fa3`：固定内置 Skill 文件的 Git 换行符，避免 Windows checkout 改写受校验的字节。
+
+当前主线已改为在 Windows 构建时生成新的 RAG ZIP、本地验证通过后输出独立附件，再手动上传 HF/ModelScope；下文固定复用旧 ZIP 的描述属于历史流程。清单中的远端 URL 是发布目标，不表示 CI 从该 URL 下载新包。
+
+### Milvus 索引写入修复与证据边界
+
+同事构建 37752878668 的依赖版本、ZIP 校验和 RAG 导入均通过，Milvus 往返验证报 `No data left in file`，但未上传子进程日志，不能从摘要确定具体失败调用。
+
+检查 Milvus Lite 3.0 源码发现：后台索引直接保存到最终 `.idx` 文件；验证在 flush 后终止服务，而 flush 不等待后台索引完成。中断序列化可留下空/不完整索引，重启按“文件存在”加载它。本机对原始 BruteForceIndex 中断写入后加载，已复现 `EOFError: No data left in file`；这是与日志相符的可复现缺陷，仍需 Windows CI 确认是否完全解释该次失败。
+
+- Windows 构建补丁升级为 `milvus-lite-3.0-windows-storage-v2`：保留 manifest 的 `os.replace` 修复，增加索引同目录临时文件写入、fsync、原子替换；临时文件使用 `.tmp` 后缀，避免被现有孤儿 `.idx` 清理逻辑误删。
+- 两个源文件都校验固定版本、原始/补丁 SHA 和 wheel RECORD；先验证全部输入，再修改，并在写入失败时回滚已改源文件。修改发生在计算组件 fingerprint 之前，生成新的 ZIP/revision；不覆盖旧远端资源，不修改用户已有数据。
+- 不跳过 Milvus 插入、落盘、重启检索和删除测试。增加阶段标记、失败堆栈摘要，并在失败时上传 `run-*/**/*.log`，包括 Milvus 客户端和两次服务端日志。
+
+本机验证包含强制终止索引写入后不发布半成品、失败不覆盖旧索引、补丁幂等/RECORD/回滚、Skill 换行符，以及真实 Milvus 3.0 的插入、flush、重启检索和删除。真实往返验证在 macOS 临时环境执行，不替代 Windows 原生验收；原生 Windows junction 测试在本机跳过。
+
+下一次 Windows 构建必须执行干净构建。成功后下载该次生成的 RAG ZIP，按同次清单的文件名、SHA 和大小原样上传；不要上传此前验证失败的 `7a0c9cc875b9993b` 包。已有损坏索引的自动修复不在本次范围内。
+
+
 最近更新：2026-09-28。**当前策略为 Windows 在 Actions 生成组件 ZIP、维护者手动上传；Mac ARM64 保持已发布固定版本。** 本节之后保留此前固定包与本地候选包的历史记录。Mac Intel 的独立接入范围仍见其交接文档，本次不改 Mac 脚本或清单。
 
 ## 2026-09-28：同步 upstream/main

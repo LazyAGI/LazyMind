@@ -26,6 +26,9 @@ func TestApprovalPreferencesAreSharedAcrossControllers(t *testing.T) {
 				if got.Nodes["review"].RequiresApproval != required {
 					t.Fatalf("controller=%s required=%v projection=%+v", session.ControllerHost, required, got)
 				}
+				if got.Nodes["review"].Mode != "auto" {
+					t.Fatalf("controller=%s opted-out step still exposes a human mode: %+v", session.ControllerHost, got)
+				}
 			}
 			if _, err := saveWorkflowApprovalPreference(db.DB, "owner", "workflow", "review", scope); err != nil {
 				t.Fatal(err)

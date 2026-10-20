@@ -4,7 +4,6 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { parseArgs, promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { createCoordinator } from '../../workflow-agent-core/src/coordinator'
 import { createDispatcher } from '../../workflow-agent-core/src/dispatcher'
 import { HostBridge } from '../../workflow-agent-core/src/transport'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -61,9 +60,8 @@ async function main() {
     lifetime.signal.throwIfAborted()
     const bridge = new HostBridge(values['bridge-url']!, pairing)
     const adapter = new CodexAdapter(binary, profile)
-    const coordinator = createCoordinator(adapter, bridge, '', lifetime.signal)
     console.log(`Codex Workflow queue dispatcher ready. MCP pairing file: ${path}. Native turn interruption is unavailable.`)
-    await createDispatcher(adapter, coordinator, bridge, instanceId, lifetime.signal).poll()
+    await createDispatcher(adapter, undefined, bridge, instanceId, lifetime.signal).poll()
   } finally {
     lifetime.abort()
     if (parentWatch) clearInterval(parentWatch)

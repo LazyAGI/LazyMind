@@ -14,7 +14,6 @@ interface Registration {
   context?: Context
   ready: Promise<unknown>
   dispose(): Promise<void>
-  disposeGuard(): void
   wrappers: Map<string, { original: ToolDefinition; dispose(): void }>
 }
 export interface HostConfig { serverName: string; webUrl: string }
@@ -34,7 +33,7 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
   const call = (exec: Readonly<ToolExecution> | ToolRunContext): ToolCall<Agent> => ({
     agent: exec.agent, operation: workflowOperation(exec.name, config.serverName),
     arguments: 'arguments' in exec ? exec.arguments : undefined,
-    returnsResult: exec.name === 'structured_output', signal: exec.signal,
+    signal: exec.signal,
     callId: exec.callId, nested: !!exec.parent,
   })
 
@@ -64,12 +63,11 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
     const existing = registrations.get(agent)
     if (existing) return existing
     coordinator.ensure(agent)
-    const entry: Registration = { ready: Promise.resolve(), dispose: async () => {}, disposeGuard: () => {}, wrappers: new Map() }
+    const entry: Registration = { ready: Promise.resolve(), dispose: async () => {}, wrappers: new Map() }
     registrations.set(agent, entry)
     // Inherit the real Agent context's scope tag, never a second copy of dsh-scope.
     const registration = agent.ctx.inject(['tools'], injected => {
       entry.context = injected
-      entry.disposeGuard = injected.tools.guard(exec => coordinator.denial(exec.agent ?? agent, call(exec)))
       wrap(agent, entry)
     })
     entry.ready = registration.await()
@@ -87,11 +85,6 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
     }) })
     return allowed ? next() : { kind: 'reject' as const }
   })()))
-  ctx.on('tools/pre-execute', (exec, next) => own((async () => {
-    if (exec.agent) await ensure(exec.agent).ready
-    const reason = await coordinator.beforeTool(call(exec))
-    return reason ? { kind: 'deny' as const, reason } : next()
-  })()))
   ctx.on('tools/ptc-dispatch-log', async (dispatch, next) => {
     const content = await next()
     const run = coordinator.takeNestedLink(dispatch.subCallId)
@@ -101,7 +94,6 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
   ctx.on('agent/disposed', ({ agent }) => {
     const entry = registrations.get(agent)
     if (entry) {
-      entry.disposeGuard()
       for (const wrapper of entry.wrappers.values()) wrapper.dispose()
       registrations.delete(agent)
       void own(entry.dispose())
@@ -116,7 +108,6 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
     await polling
     await Promise.allSettled([...tracked])
     for (const entry of registrations.values()) {
-      entry.disposeGuard()
       for (const wrapper of entry.wrappers.values()) wrapper.dispose()
       await entry.dispose()
     }

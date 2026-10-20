@@ -5,13 +5,163 @@ import i18n from "@/i18n";
 
 import * as XLSX from "xlsx";
 
-type JsPreviewType = JsExcelPreview;
+// The pinned preview library exposes selection hooks and sheetIndex at runtime.
+type JsPreviewType = JsExcelPreview & { sheetIndex?: number };
+type ExcelSheet = { name: string; rows: Record<number, { cells: Record<number, { text?: string | number | boolean }> }> };
+type ExcelRange = { startRowIndex: number; startColumnIndex: number; endRowIndex: number; endColumnIndex: number };
+export type ExcelSelection = { text: string; context: string; page: number };
+
+function hasRenderableCells(workbookSheets: ExcelSheet[]): boolean {
+  return workbookSheets.some((sheet) =>
+    Object.values(sheet.rows || {}).some((row) =>
+      Object.values(row.cells || {}).some((cell) =>
+        cell.text !== undefined && cell.text !== null && String(cell.text) !== "",
+      ),
+    ),
+  );
+}
+
+function previewMatchesWorkbook(fileData: ArrayBuffer, previewSheets: ExcelSheet[]): boolean {
+  if (!hasRenderableCells(previewSheets)) {
+    return false;
+  }
+
+  try {
+    const workbook = XLSX.read(new Uint8Array(fileData), {
+      type: "array",
+      cellDates: true,
+    });
+    const sourceSheets = workbook.SheetNames.filter((sheetName) => {
+      const sheet = workbook.Sheets[sheetName];
+      return XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "" })
+        .some((row) => row.some((value) => value !== "" && value !== null && value !== undefined));
+    });
+    const renderedNames = previewSheets.map((sheet) => sheet.name);
+    return sourceSheets.length > 0 &&
+      sourceSheets.length === renderedNames.length &&
+      sourceSheets.every((sheetName, index) => sheetName === renderedNames[index]);
+  } catch (error) {
+    console.warn("Failed to validate XLSX preview data:", error);
+    return false;
+  }
+}
+
+function normalizeXlsxForPreview(fileData: ArrayBuffer): ArrayBuffer | null {
+  try {
+    const workbook = XLSX.read(new Uint8Array(fileData), {
+      type: "array",
+      cellDates: true,
+      cellStyles: true,
+    });
+    const normalized = XLSX.write(workbook, {
+      type: "array",
+      bookType: "xlsx",
+      cellStyles: true,
+    }) as ArrayBuffer | Uint8Array;
+    if (normalized instanceof ArrayBuffer) {
+      return normalized;
+    }
+    return normalized.buffer.slice(
+      normalized.byteOffset,
+      normalized.byteOffset + normalized.byteLength,
+    ) as ArrayBuffer;
+  } catch (error) {
+    console.warn("Failed to normalize XLSX preview data:", error);
+    return null;
+  }
+}
+
+function renderWorkbookTableFallback(
+  container: HTMLDivElement,
+  fileData: ArrayBuffer,
+): boolean {
+  try {
+    const workbook = XLSX.read(new Uint8Array(fileData), {
+      type: "array",
+      cellDates: true,
+      cellStyles: true,
+    });
+    if (workbook.SheetNames.length === 0) {
+      return false;
+    }
+
+    const root = document.createElement("div");
+    root.className = "excel-table-fallback";
+    const panes = document.createElement("div");
+    panes.className = "excel-table-fallback-panes";
+    const tabs = document.createElement("div");
+    tabs.className = "excel-table-fallback-tabs";
+    const paneElements: HTMLDivElement[] = [];
+    const tabButtons: HTMLButtonElement[] = [];
+
+    const activateSheet = (activeIndex: number) => {
+      paneElements.forEach((pane, index) => {
+        pane.hidden = index !== activeIndex;
+      });
+      tabButtons.forEach((button, index) => {
+        button.classList.toggle("active", index === activeIndex);
+      });
+    };
+
+    workbook.SheetNames.forEach((sheetName, sheetIndex) => {
+      const sheet = workbook.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json<(string | number | boolean)[]>(sheet, {
+        header: 1,
+        raw: false,
+        defval: "",
+      });
+      const pane = document.createElement("div");
+      pane.className = "excel-table-fallback-pane";
+      const table = document.createElement("table");
+      table.className = "excel-table-fallback-grid";
+
+      rows.forEach((row) => {
+        const tr = document.createElement("tr");
+        row.forEach((value) => {
+          const td = document.createElement("td");
+          td.textContent = String(value ?? "");
+          tr.appendChild(td);
+        });
+        table.appendChild(tr);
+      });
+      pane.appendChild(table);
+      panes.appendChild(pane);
+      paneElements.push(pane);
+
+      const tab = document.createElement("button");
+      tab.type = "button";
+      tab.textContent = sheetName;
+      tab.addEventListener("click", () => activateSheet(sheetIndex));
+      tabs.appendChild(tab);
+      tabButtons.push(tab);
+    });
+
+    root.appendChild(panes);
+    root.appendChild(tabs);
+    container.replaceChildren(root);
+    activateSheet(0);
+    return true;
+  } catch (error) {
+    console.warn("Failed to render XLSX table fallback:", error);
+    return false;
+  }
+}
+
+function requiresTableRenderer(fileData: ArrayBuffer): boolean {
+  try {
+    const workbook = XLSX.read(new Uint8Array(fileData), { type: "array" });
+    return !workbook.Props?.Application && !workbook.Props?.Creator;
+  } catch {
+    return false;
+  }
+}
 
 interface RenderOfficeProps {
   fileData: ArrayBuffer;
   fileType: "excel";
   content: Segment["content"] | null;
   metadata: Record<string, unknown> | null;
+  onSelection?: (selection: ExcelSelection | null, point: Pick<MouseEvent, "clientX" | "clientY">) => void;
 }
 
 const RenderExcel = (props: RenderOfficeProps) => {
@@ -19,6 +169,33 @@ const RenderExcel = (props: RenderOfficeProps) => {
   const reader = useRef<JsPreviewType | null>(null);
   const showFile = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
+  const sheets = useRef<ExcelSheet[]>([]);
+  const selectedRange = useRef<ExcelRange | null>(null);
+
+  const handleCellSelection = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!(event.target instanceof Element) || !event.target.closest(".vue-office-excel")) return;
+    const range = selectedRange.current;
+    const page = (reader.current?.sheetIndex ?? 0) + 1;
+    const sheet = sheets.current[page - 1];
+    if (!range || !sheet || range.startRowIndex < 0 || range.startColumnIndex < 0) {
+      props.onSelection?.(null, event);
+      return;
+    }
+    const rowIndexes = Object.keys(sheet.rows).map(Number).filter(Number.isInteger).sort((a, b) => a - b);
+    const rows = rowIndexes.filter((row) => row >= range.startRowIndex && row <= range.endRowIndex);
+    const contextRows = [...new Set([rowIndexes[0], ...rows])].filter((row) => row !== undefined);
+    const columnIndexes = [...new Set(contextRows.flatMap((row) => Object.keys(sheet.rows[row].cells).map(Number)))].sort((a, b) => a - b);
+    const columns = columnIndexes.filter((column) => column >= range.startColumnIndex && column <= range.endColumnIndex);
+    const rowText = (row: number, cols: number[]) => cols.map((col) => String(sheet.rows[row]?.cells[col]?.text ?? "")).join("\t");
+    const text = rows.map((row) => rowText(row, columns)).join("\n").trim();
+    const address = XLSX.utils.encode_range({
+      s: { r: range.startRowIndex, c: range.startColumnIndex },
+      e: { r: range.endRowIndex, c: range.endColumnIndex },
+    });
+    props.onSelection?.(text ? {
+      text, page, context: [sheet.name, address, ...contextRows.map((row) => rowText(row, columnIndexes))].join("\n"),
+    } : null, event);
+  };
 
   const contentText = useMemo(() => content || "", [content]);
   const metaTitle = useMemo(
@@ -94,6 +271,8 @@ const RenderExcel = (props: RenderOfficeProps) => {
       }
 
       showFile.current.innerHTML = "";
+      sheets.current = [];
+      selectedRange.current = null;
 
       try {
         const ab = fileData as ArrayBuffer;
@@ -195,13 +374,55 @@ const RenderExcel = (props: RenderOfficeProps) => {
             console.error("Failed to parse .xls with SheetJS:", xlsErr);
           }
         }
+
+        // Render minimal-metadata XLSX workbooks from the source bytes. The canvas
+        // preview library can resolve successfully and then asynchronously
+        // replace valid workbooks with an empty synthetic sheet ("sheet4").
+        // A SheetJS-backed table is deterministic and keeps every worksheet.
+        if (requiresTableRenderer(fileData) && renderWorkbookTableFallback(showFile.current, fileData)) {
+          return;
+        }
       } catch (hdrErr) {
         console.warn("Header check failed:", hdrErr);
       }
 
-      reader.current = readerType.init(showFile.current);
-      if (reader.current && reader.current.preview) {
+      const options = {
+        showContextmenu: false,
+        transformData: (data: ExcelSheet[]) => { sheets.current = data; return data; },
+        cellSelected: ({ rowIndex, columnIndex }: { rowIndex: number; columnIndex: number }) => {
+          selectedRange.current = { startRowIndex: rowIndex, endRowIndex: rowIndex, startColumnIndex: columnIndex, endColumnIndex: columnIndex };
+        },
+        cellsSelected: (range: ExcelRange) => { selectedRange.current = range; },
+      };
+      const initReader = () => readerType.init(showFile.current!, options) as JsPreviewType;
+      reader.current = initReader();
+      if (reader.current?.preview) {
         await reader.current.preview(fileData);
+
+        // Some valid XLSX producers emit workbook metadata that the pinned
+        // preview library accepts without throwing but renders as an empty
+        // grid. Re-serializing through SheetJS keeps the workbook values and
+        // sheets while giving the canvas preview a canonical XLSX package.
+        if (!previewMatchesWorkbook(fileData, sheets.current)) {
+          const normalized = normalizeXlsxForPreview(fileData);
+          if (normalized) {
+            reader.current.destroy?.();
+            showFile.current.innerHTML = "";
+            sheets.current = [];
+            selectedRange.current = null;
+            reader.current = initReader();
+            await reader.current.preview(normalized);
+            if (!previewMatchesWorkbook(fileData, sheets.current)) {
+              reader.current.destroy?.();
+              reader.current = null;
+              renderWorkbookTableFallback(showFile.current, fileData);
+            }
+          } else {
+            reader.current.destroy?.();
+            reader.current = null;
+            renderWorkbookTableFallback(showFile.current, fileData);
+          }
+        }
       }
     } catch (err) {
       console.error("Office preview error:", err);
@@ -240,7 +461,10 @@ const RenderExcel = (props: RenderOfficeProps) => {
   }, []);
 
   return (
-    <div className="file-viewer-container">
+    <div className="file-viewer-container" onMouseUp={handleCellSelection}
+      onMouseDownCapture={(event) => {
+        if (event.target instanceof Element && event.target.closest(".x-spreadsheet-bottombar")) selectedRange.current = null;
+      }}>
       <div ref={showFile} className="file-viewer-content"></div>
       {loading && (
         <div

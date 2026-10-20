@@ -24,13 +24,29 @@ type Action struct {
 	URL  string `json:"url,omitempty"`
 }
 
+type Issue struct {
+	Code string `json:"code"`
+	Path string `json:"path,omitempty"`
+}
+
 type Status struct {
-	Agent        string        `json:"agent"`
-	DisplayName  string        `json:"display_name"`
-	State        State         `json:"state"`
-	Requirements []Requirement `json:"requirements,omitempty"`
-	Action       *Action       `json:"action,omitempty"`
-	Message      string        `json:"message,omitempty"`
+	RetryAction   string          `json:"retry_action,omitempty"`
+	Issue         *Issue          `json:"issue,omitempty"`
+	CanConnect    bool            `json:"can_connect,omitempty"`
+	CanDisconnect bool            `json:"can_disconnect,omitempty"`
+	Profiles      []ProfileStatus `json:"profiles,omitempty"`
+	Agent         string          `json:"agent"`
+	DisplayName   string          `json:"display_name"`
+	State         State           `json:"state"`
+	Requirements  []Requirement   `json:"requirements,omitempty"`
+	Action        *Action         `json:"action,omitempty"`
+	Message       string          `json:"message,omitempty"`
+}
+
+type ProfileStatus struct {
+	Name    string `json:"name"`
+	State   State  `json:"state"`
+	Message string `json:"message,omitempty"`
 }
 
 func MissingRequirement(requirements []Requirement) bool {

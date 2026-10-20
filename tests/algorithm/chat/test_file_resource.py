@@ -239,6 +239,33 @@ def test_office_attachment_parse_is_cached_by_content(monkeypatch, tmp_path):
     assert list((tmp_path / 'attachment-text-cache').glob('*/parsed.txt'))
 
 
+def test_xlsx_attachment_is_materialized_as_searchable_text(monkeypatch, tmp_path):
+    import pandas as pd
+
+    attachment = tmp_path / 'sales.xlsx'
+    pd.DataFrame({'city': ['上海'], 'amount': [12]}).to_excel(attachment, index=False)
+    _set_scope(monkeypatch, tmp_path, files=[attachment])
+
+    result = workspace_tools.read_file_resource('sales.xlsx')
+
+    assert result['kind'] == 'attachment_document'
+    assert 'Spreadsheet parsed with pandas' in result['text']
+    assert '上海,12' in result['text']
+    assert list((tmp_path / 'attachment-text-cache').glob('*/parsed.txt'))
+
+
+def test_csv_attachment_uses_the_same_pandas_resource_path(monkeypatch, tmp_path):
+    attachment = tmp_path / 'sales.csv'
+    attachment.write_text('city,amount\n上海,12\n', encoding='utf-8')
+    _set_scope(monkeypatch, tmp_path, files=[attachment])
+
+    result = workspace_tools.read_file_resource('sales.csv')
+
+    assert result['kind'] == 'attachment_document'
+    assert 'Spreadsheet parsed with pandas' in result['text']
+    assert '上海,12' in result['text']
+
+
 def test_duplicate_resource_name_is_rejected(monkeypatch, tmp_path):
     _set_scope(monkeypatch, tmp_path)
     store = FileResourceStore(str(tmp_path))

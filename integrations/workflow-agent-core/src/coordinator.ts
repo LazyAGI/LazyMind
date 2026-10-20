@@ -1,4 +1,4 @@
-import type { RuntimeAdapter, ToolCall, HostInput } from './adapter'
+import { AdmissionRejected, type RuntimeAdapter, type ToolCall, type HostInput } from './adapter'
 import { BridgeError, type HostTransport, type ActionClaim } from './transport'
 import { interaction, object, readControl, type RunLink, type WorkflowControl } from './protocol'
 
@@ -17,7 +17,6 @@ export interface Scope<A> {
   automatic: boolean
   goalId?: string
   returnPending: boolean
-  actionId?: string
   turn?: number
 }
 
@@ -87,24 +86,6 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
     const goal = runtime.goal?.(root)
     if (goal && ownedAt && goal.createdAt <= ownedAt) scope.goalId = goal.id
     else if (goal && ownedAt && goal.createdAt > ownedAt) scope.automatic = false
-  }
-
-  function denial(scope: Scope<A>, exec: Readonly<ToolCall<A>>): string | undefined {
-    const operation = exec.operation
-    if (operation && (READS.has(operation) || operation === 'session_stop')) return undefined
-    if (!scope.runId) return undefined
-    if (exec.returnsResult && completion(scope)) return undefined
-    if (scope.unknown && (scope.activeOwned || operation)) return 'Workflow state is unavailable; retry after reconnecting LazyMind.'
-    if (!paused(scope)) return undefined
-    if (scope.control?.continuation === 'stopped') return operation || scope.activeOwned ? 'This Workflow has been stopped.' : undefined
-    if (operation === 'artifact_publish' || operation === 'step_complete' || operation === 'step_resume' || operation === 'step_claim') {
-      const id = object(exec.arguments)?.execution_id
-      return typeof id === 'string' && scope.control?.active_execution_ids?.includes(id) ? undefined : 'Only an already granted execution may finish while review is pending.'
-    }
-    if (operation) return 'Review the submitted artifacts in the LazyMind panel before starting new Workflow work.'
-    if (scope.grants.size > 0 || scope.manual) return undefined
-    if (scope.activeOwned) return 'This Workflow is waiting for user review.'
-    return undefined
   }
 
   function ensure(agent: A): Scope<A> {
@@ -206,7 +187,6 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
       try { claim = await bridge.action(source.requestId, signal(caller)) }
       catch (error) {
         if (error instanceof BridgeError && (error.status === 404 || error.status === 403)) continue
-        if (error instanceof BridgeError && error.code === 'BINDING_STALE') throw error
         if (!claim) continue
       }
       if (claim && claim.action.native_session_id === runtime.id(agent)) { actionCache.set(source.requestId, claim); return claim }
@@ -216,14 +196,11 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
 
   async function beforeTurn(payload: { agent: A; turn: number; messages: readonly HostInput[]; signal: AbortSignal }): Promise<boolean> {
     const scope = ensure(payload.agent)
-    if (scope.turn !== payload.turn) { scope.turn = payload.turn; scope.manual = false; scope.activeOwned = scope.automatic; scope.actionId = undefined }
+    if (scope.turn !== payload.turn) { scope.turn = payload.turn; scope.manual = false; scope.activeOwned = scope.automatic }
     try {
       const action = await lookupInput(payload.agent, payload.messages, payload.signal)
       if (action) {
-        if (action.action.status === 'superseded' || action.action.binding_generation !== action.control.binding?.generation
-          || action.action.consumed_at && scope.actionId !== action.action.id) return false
         scope.runId = action.action.session_id
-        scope.actionId = action.action.id
         scope.activeOwned = scope.automatic = true
         scope.manual = false
         publish(scope.runId, action.control)
@@ -231,6 +208,7 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
         scope.manual = true; scope.activeOwned = scope.automatic = false
       }
       if ((!scope.manual || scope.activeOwned) && !completion(scope)) await refresh(scope, payload.signal)
+      if (action && !paused(scope)) resumeGoal(scope)
       suspendGoal(ensure(driver(scope.agent)))
       if (scope.runId && scope.activeOwned && paused(scope) && !scope.manual && scope.grants.size === 0 && !completion(scope)) return false
       return true
@@ -240,30 +218,24 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
     }
   }
 
-  async function beforeTool(exec: ToolCall<A>): Promise<string | undefined> {
-    if (!exec.agent) return undefined
-    const scope = ensure(exec.agent)
-    if (exec.returnsResult && completion(scope)) return undefined
-    const operation = exec.operation
-    const runId = object(exec.arguments)?.session_id
-    if (operation && !READS.has(operation) && typeof runId === 'string' && runId !== scope.runId) {
-      try {
-        const fresh = await bridge.state(runId, signal(exec.signal))
-        if (fresh.binding?.driver_session_id !== runtime.id(driver(exec.agent))) return 'This Workflow belongs to another driver session.'
-        scope.runId = runId
-        publish(runId, fresh)
-      } catch (error) { return `Workflow state unavailable: ${String(error)}` }
-    }
-    if (scope.runId && (scope.activeOwned || operation && !READS.has(operation))) {
-      try { await refresh(scope, exec.signal) } catch { return 'Workflow state is unavailable; reconnect LazyMind.' }
-    }
-    return denial(scope, exec)
-  }
-
   return {
-    ensure, driver, publish, suspendGoal, resumeGoal, afterResult, beforeTurn, beforeTool,
+    ensure, driver, publish, suspendGoal, resumeGoal, afterResult, beforeTurn,
+    async cancelSession(agent: A, claim: ActionClaim) {
+      const { action, control } = claim
+      if (action.consumed_at || control.continuation !== 'stopped') {
+        throw new AdmissionRejected('Cancellation no longer applies to this Workflow.')
+      }
+      const scope = ensure(agent)
+      if (scope.runId !== action.session_id) return
+      publish(action.session_id, control)
+      // Check synchronously at the host call, after all remote reads. A user turn
+      // must never inherit cancellation merely because an older execution exists.
+      if (scope.activeOwned && scope.automatic && !scope.manual && runtime.isRunning?.(agent) !== false) {
+        await runtime.cancel(agent)
+      }
+      suspendGoal(scope)
+    },
     cacheClaim(claim: ActionClaim) { actionCache.set(claim.action.id, claim) },
-    denial(agent: A, exec: ToolCall<A>) { return denial(ensure(agent), exec) },
     shouldConclude(agent: A, control: WorkflowControl | null) {
       const scope = ensure(agent)
       return scope.activeOwned && !completion(scope) && (scope.unknown || !!scope.runId

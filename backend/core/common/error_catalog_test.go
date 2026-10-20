@@ -462,3 +462,14 @@ func TestResolveToolConfigurationErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestRecordingStreamErrorsResolveToUpstreamFailure(t *testing.T) {
+	for _, message := range []string{"recording stream HTTP 503", "recording stream ended without result"} {
+		t.Run(message, func(t *testing.T) {
+			appErr := ResolveAppError(message, 502)
+			if appErr.Code != 2001853 || appErr.HTTPStatus != 502 || appErr.Message != "Review endpoint request failed" {
+				t.Fatalf("unexpected recording stream error: %+v", appErr)
+			}
+		})
+	}
+}

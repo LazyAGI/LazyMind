@@ -3,7 +3,9 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { Spin, message, Empty } from "antd";
@@ -33,8 +35,10 @@ import {
 import { normalizeProxyableUrl } from "@/modules/knowledge/utils/request";
 import { isSingleEnglishWord } from "@/modules/knowledge/api/translation";
 import { paragraphSelectionsOverlap } from "./paragraphSelection";
+import { extractPdfSelectionContext } from "@/components/ui/pdfSelectionContext";
 
 import "./index.scss";
+import type { ExcelSelection } from "./renderers/render-excel";
 
 export interface FileViewerRef {
   exportImagePdf: () => Promise<void>;
@@ -109,8 +113,29 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
   const [content, setContent] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [mediaObjectUrl, setMediaObjectUrl] = useState("");
-  const [textSelectionAction, setTextSelectionAction] = useState<{ text: string; left: number; top: number } | null>(null);
+  const [textSelectionAction, setTextSelectionAction] = useState<{ text: string; context: string; page?: number; left: number; top: number } | null>(null);
   const [paragraphSelections, setParagraphSelections] = useState<PdfTextSelection[]>([]);
+  const textSelectionActionRef = useRef<HTMLSpanElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+
+  const handleExcelSelection = useCallback((selection: ExcelSelection | null, point: Pick<MouseEvent, "clientX" | "clientY">) => {
+    if (props.paragraphSelectionMode || (!props.onPdfSelection && !props.onPdfTranslateSelection)) return;
+    const container = previewRef.current;
+    if (!selection || !container) { setTextSelectionAction(null); return; }
+    const rect = container.getBoundingClientRect();
+    setTextSelectionAction({ ...selection,
+      left: Math.min(Math.max(point.clientX - rect.left, 52), rect.width - 52),
+      top: Math.max(point.clientY - rect.top - 42, 8),
+    });
+  }, [props.onPdfSelection, props.onPdfTranslateSelection, props.paragraphSelectionMode]);
+
+  useLayoutEffect(() => {
+    const toolbar = textSelectionActionRef.current;
+    if (!textSelectionAction || !toolbar || !toolbar.parentElement?.clientWidth) return;
+    const halfWidth = toolbar.offsetWidth / 2;
+    const left = Math.max(halfWidth, Math.min(textSelectionAction.left, toolbar.parentElement.clientWidth - halfWidth));
+    if (left !== textSelectionAction.left) setTextSelectionAction({ ...textSelectionAction, left });
+  }, [textSelectionAction]);
 
   useEffect(()=>{if(props.paragraphSelectionMode){setTextSelectionAction(null);setParagraphSelections([])}},[props.paragraphSelectionMode]);
 
@@ -181,6 +206,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
   }, [fileSuffix]);
 
   const handlePreviewSelection = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.target instanceof Node && textSelectionActionRef.current?.contains(event.target)) return;
     if (props.paragraphSelectionMode) {
       const selection=window.getSelection();
       const text=selection?.toString().trim()||"";
@@ -199,22 +225,27 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
       selection.removeAllRanges();
       return;
     }
-    if (fileType === "pdf" || !props.onPdfTranslateSelection) return;
+    if (fileType === "pdf" || (!props.onPdfSelection && !props.onPdfTranslateSelection)) return;
+    if (fileType === "excel" && event.target instanceof Element && event.target.closest(".vue-office-excel")) return;
     const selection = window.getSelection();
     const text = selection?.toString().trim() || "";
-    if (!selection || selection.isCollapsed || !text) {
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed || !text) {
       setTextSelectionAction(null);
       return;
     }
     const container = event.currentTarget;
     if (!container.contains(selection.anchorNode) || !container.contains(selection.focusNode)) return;
+    const ancestor = selection.getRangeAt(0).commonAncestorContainer;
+    const element = ancestor instanceof Element ? ancestor : ancestor.parentElement;
+    const contextElement = element?.closest("p, li, pre, td, th, blockquote") || element;
     const rect = container.getBoundingClientRect();
     setTextSelectionAction({
       text,
+      context: extractPdfSelectionContext(contextElement?.textContent || "", text),
       left: Math.min(Math.max(event.clientX - rect.left, 52), rect.width - 52),
       top: Math.max(event.clientY - rect.top - 42, 8),
     });
-  }, [fileType, props.onPdfTranslateSelection, props.paragraphSelectionMode, t]);
+  }, [fileType, props.onPdfSelection, props.onPdfTranslateSelection, props.paragraphSelectionMode, t]);
 
   const getFileData = useCallback(
     async (
@@ -377,6 +408,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             fileType={fileType}
             metadata={meta}
             content={content}
+            onSelection={handleExcelSelection}
           />
         );
       case "pptx":
@@ -434,6 +466,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
       }
   }, [
     content,
+    handleExcelSelection,
     fileData,
     fileType,
     mediaObjectUrl,
@@ -489,26 +522,39 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
   return (
     <div className={`file-viewer-container${props.paragraphSelectionMode?" is-paragraph-selecting":""}`}>
       {props.paragraphSelectionMode?<div className="file-viewer-paragraph-selection-panel"><div className="file-viewer-paragraph-selection-bar"><span>{t("learning.paragraphSelectionInstruction")}</span><strong>{t("learning.paragraphSelectionCount",{count:paragraphSelections.length})}</strong>{paragraphSelections.length?<button type="button" onClick={()=>setParagraphSelections([])}>{t("learning.clearParagraphSelections")}</button>:null}<button type="button" onClick={props.onParagraphSelectionCancel}>{t("learning.exitParagraphSelection")}</button><button type="button" disabled={!paragraphSelections.length} onClick={()=>props.onParagraphSelectionConfirm?.(paragraphSelections)}>{t("common.confirm")}</button></div>{paragraphSelections.length?<div className="file-viewer-paragraph-selection-list">{paragraphSelections.map((item,index)=><div key={`${item.page}-${item.text}-${index}`} title={item.text}><span>{index+1}. {item.text}</span><button type="button" aria-label={t("learning.removeSelectedParagraph",{index:index+1})} onClick={()=>setParagraphSelections(current=>current.filter((_,currentIndex)=>currentIndex!==index))}>×</button></div>)}</div>:null}</div>:null}
-      <div className="file-viewer-content" onMouseUp={handlePreviewSelection}>
+      <div ref={previewRef} className="file-viewer-content" onMouseUp={handlePreviewSelection}>
         {textSelectionAction&&!props.paragraphSelectionMode ? (
           <span
+            ref={textSelectionActionRef}
             className="file-viewer-selection-translate-wrap"
             style={{ left: textSelectionAction.left, top: textSelectionAction.top }}
-            title={!props.translationConfigured&&!isSingleEnglishWord(textSelectionAction.text) ? t("knowledge.translationConfigureTip") : undefined}
           >
-            <button
+            {props.onPdfSelection ? <button
+              type="button"
+              className="file-viewer-selection-translate"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                props.onPdfSelection?.({ text: textSelectionAction.text, context: textSelectionAction.context, page: textSelectionAction.page ?? 1 });
+                window.getSelection()?.removeAllRanges();
+                setTextSelectionAction(null);
+              }}
+            >
+              {t("knowledge.askPdfSelection")}
+            </button> : null}
+            {props.onPdfTranslateSelection ? <button
               type="button"
               className="file-viewer-selection-translate"
               disabled={!props.translationConfigured&&!isSingleEnglishWord(textSelectionAction.text)}
+              title={!props.translationConfigured&&!isSingleEnglishWord(textSelectionAction.text) ? t("knowledge.translationConfigureTip") : undefined}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
-                props.onPdfTranslateSelection?.({ text: textSelectionAction.text, page: 1 });
+                props.onPdfTranslateSelection?.({ text: textSelectionAction.text, page: textSelectionAction.page ?? 1 });
                 window.getSelection()?.removeAllRanges();
                 setTextSelectionAction(null);
               }}
             >
               {t("knowledge.translateSelection")}
-            </button>
+            </button> : null}
             {props.onAddVocabularySelection && isSingleEnglishWord(textSelectionAction.text) ? <button
               type="button"
               className="file-viewer-selection-translate"

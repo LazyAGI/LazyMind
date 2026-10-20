@@ -370,6 +370,26 @@ export interface SaveWriterDocumentResult extends RenderWriterDocumentResult {
   draft_version: number;
 }
 
+export interface PptHtmlComputedStyle {
+  font_size?: string;
+  width?: string;
+  height?: string;
+  line_height?: string;
+  letter_spacing?: string;
+  text_align?: string;
+  font_weight?: string;
+}
+
+export interface PptHtmlSelectionTarget {
+  el: string;
+  index?: number;
+  dom_path?: number[];
+  tag?: string;
+  group?: string;
+  selected_text?: string;
+  computed_style?: PptHtmlComputedStyle;
+}
+
 export type RewriteSelection =
   | { type: 'ir'; node_id: string; selected_text?: string }
   | { type: 'markdown'; selected_text: string }
@@ -379,17 +399,13 @@ export type RewriteSelection =
     el: string;
     /** 1-based occurrence among elements carrying the same data-el. */
     index?: number;
+    dom_path?: number[];
+    tag?: string;
     group?: string;
     selected_text?: string;
-    computed_style?: {
-      font_size?: string;
-      width?: string;
-      height?: string;
-      line_height?: string;
-      letter_spacing?: string;
-      text_align?: string;
-      font_weight?: string;
-    };
+    computed_style?: PptHtmlComputedStyle;
+    targets?: PptHtmlSelectionTarget[];
+    scope?: 'item' | 'multi';
   };
 
 export interface RewriteSelectionPreviewRequest {
@@ -422,6 +438,7 @@ export interface RewriteSelectionPreview {
     index?: number;
     group?: string;
     page?: number;
+    count?: number;
   };
   preview: {
     old_text: string;

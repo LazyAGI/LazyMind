@@ -17,7 +17,7 @@ const publicName = (name: string) => name.startsWith('mcp__lazymind__workflow_')
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
 
-async function fixture(seedPTC = false, native = false, laterManualInput = false, seedStart = false) {
+async function fixture({ history, native = false }: { history?: 'start' | 'completion'; native?: boolean } = {}) {
   const ctx = new Context()
   const prompt = ctx.plugin(SystemPrompt)
   await prompt.await(); cleanup.push(() => prompt.dispose())
@@ -46,7 +46,7 @@ async function fixture(seedPTC = false, native = false, laterManualInput = false
     isOwnedBy: (id: string, parent: Agent) => parents.get(agents.find(a => a.session.id === id)!) === parent })
   let control: WorkflowControl = { protocol: 'workflow.control.v1', session_id: 'run-1', state_version: 1,
     continuation: 'continue', admission: { can_begin: true }, active_execution_ids: [], active_executions: 0,
-    binding: { driver_session_id: 'native-root', generation: 1, bound: true } }
+    binding: { driver_session_id: 'native-root', bound: true } }
   const bridge: HostTransport = {
     bind: vi.fn(async () => control), state: vi.fn(async () => control),
     actions: vi.fn(async () => ({ actions: [] })),
@@ -63,11 +63,13 @@ async function fixture(seedPTC = false, native = false, laterManualInput = false
   ctx.tools.register(definition('mcp__lazymind__workflow_start', async () => ({ structuredContent: {
     session_id: 'run-1', interaction_url: 'http://localhost:8090/workflow-runs/run-1', control,
   } })))
-  ctx.tools.register(definition('mcp__lazymind__workflow_step_begin', async () => {
+  const begin = vi.fn<ToolDefinition['execute']>(async () => {
     control = { ...control, state_version: 2, active_execution_ids: ['attempt-1'], active_executions: 1, ...(native ? { native_execution_ids: ['attempt-1'], continuation: 'awaiting_executor', admission: { can_begin: false } } : {}) }
     return { structuredContent: { execution: { execution_id: 'attempt-1', executor_host: native ? 'lazymind' : 'external-agent' }, state: { control } } }
-  }))
-  ctx.tools.register(definition('mcp__lazymind__workflow_artifact_publish', async () => ({ structuredContent: { saved: true } })))
+  })
+  ctx.tools.register(definition('mcp__lazymind__workflow_step_begin', begin))
+  const publish = vi.fn<ToolDefinition['execute']>(async () => ({ structuredContent: { saved: true } }))
+  ctx.tools.register(definition('mcp__lazymind__workflow_artifact_publish', publish))
   ctx.tools.register(definition('mcp__lazymind__workflow_step_complete', async () => {
     control = { ...control, state_version: 3, active_execution_ids: [], active_executions: 0,
       continuation: 'awaiting_user', admission: { can_begin: false, reason: 'review_pending' } }
@@ -76,7 +78,7 @@ async function fixture(seedPTC = false, native = false, laterManualInput = false
   const shell = vi.fn(async () => ({ done: true }))
   ctx.tools.register(definition('shell', shell))
   child.ctx.tools.register(definition('structured_output', async (_args, exec) => { exec.concludeTurn(); return { recorded: true } }))
-  if (seedPTC) {
+  if (history === 'completion') {
     control = { ...control, continuation: 'awaiting_user', state_version: 3, admission: { can_begin: false } }
     root.session.append('tool/ptc-dispatch', {
       rootCallId: 'code' as ToolExecutionInput['callId'], parentCallId: 'code' as ToolExecutionInput['callId'],
@@ -87,17 +89,13 @@ async function fixture(seedPTC = false, native = false, laterManualInput = false
       }})}],
     })
   }
-  if (seedStart) root.session.append('tool/ptc-dispatch', {
+  if (history === 'start') root.session.append('tool/ptc-dispatch', {
     rootCallId: 'start' as ToolExecutionInput['callId'], parentCallId: 'start' as ToolExecutionInput['callId'],
     subCallId: 'start:1' as ToolExecutionInput['callId'], name: publicName('mcp__lazymind__workflow_start'),
     arguments: {}, isError: false, content: [{ type: 'text', text: JSON.stringify({ lazymind_workflow: {
       runId: 'run-1', url: 'http://localhost:8090/workflow-runs/run-1', hostSessionId: root.session.id, operation: 'start',
     } }) }],
   })
-  if (laterManualInput) root.session.append('user/message', {
-    id: 'unrelated-input', source: { kind: 'user', rpcId: 'unrelated-input' },
-    content: [{ type: 'text', text: 'Work on something else' }],
-  } as unknown as UserMessage, { surfaceOp: 'append' })
   const installed = ctx.inject(['tools', 'agents'], injected => {
     const dispose = installHost(injected, bridge, { serverName: 'lazymind', webUrl: 'http://localhost:8090' }, 'instance-1')
     injected.effect(() => dispose)
@@ -105,23 +103,28 @@ async function fixture(seedPTC = false, native = false, laterManualInput = false
   await installed.await()
   cleanup.push(() => installed.dispose())
   let call = 0
-  const execute = (name: string, agent = root, args: unknown = {}, parent?: ToolExecutionInput['parent']) => ctx.tools.execute({
-    callId: `call-${++call}` as ToolExecutionInput['callId'], name: publicName(name), agent, arguments: args, parent, signal: new AbortController().signal,
+  const execute = (name: string, agent = root, args: unknown = {}) => ctx.tools.execute({
+    callId: `call-${++call}` as ToolExecutionInput['callId'], name: publicName(name), agent, arguments: args, signal: new AbortController().signal,
   })
-  return { ctx, root, child, unrelated, bridge, shell, execute, definition }
+  const turn = (agent = root, messages: UserMessage[] = []) => ctx.waterfall(scopeTarget(agent, agent), 'agent/pre-step', {
+    agent, turn: 2, step: 0, messages, signal: new AbortController().signal,
+  }, async () => ({ kind: 'enter' as const, messages }))
+  return { turn, ctx, root, child, unrelated, bridge, shell, execute, begin, publish }
 }
 
 describe('workflow host isolation through DSH public scopes', () => {
-  it('ends human submission and blocks the next tool in the same batch without blocking other sessions', async () => {
+  it('concludes human submission and gates the next automatic step without guarding tools', async () => {
     const f = await fixture()
     await f.execute('mcp__lazymind__workflow_start')
     await f.execute('mcp__lazymind__workflow_step_begin', f.root, { session_id: 'run-1' })
     const result = await f.execute('mcp__lazymind__workflow_step_complete', f.root, { session_id: 'run-1', execution_id: 'attempt-1' })
     expect(result).toMatchObject({ isError: false, concludesTurn: true })
-    expect((await f.execute('shell')).isError).toBe(true)
-    expect(f.shell).not.toHaveBeenCalled()
+    expect((await f.turn()).kind).toBe('reject')
+    expect((await f.turn(f.unrelated)).kind).toBe('enter')
+    // Direct tool calls reach their implementation; Core owns Workflow request validation.
+    expect((await f.execute('shell')).isError).toBe(false)
     expect((await f.execute('shell', f.unrelated)).isError).toBe(false)
-    expect(f.shell).toHaveBeenCalledOnce()
+    expect(f.shell).toHaveBeenCalledTimes(2)
   })
 
   it('lets a child report its required structured output while its parent remains paused', async () => {
@@ -131,69 +134,55 @@ describe('workflow host isolation through DSH public scopes', () => {
     const submitted = await f.execute('mcp__lazymind__workflow_step_complete', f.child, { session_id: 'run-1', execution_id: 'attempt-1' })
     expect(submitted.isError).toBe(false)
     expect(submitted).not.toHaveProperty('concludesTurn')
-    expect((await f.execute('shell', f.child)).isError).toBe(true)
+    expect((await f.turn()).kind).toBe('reject')
+    vi.mocked(f.bridge.state).mockClear().mockRejectedValue(new Error('bridge offline'))
+    expect((await f.turn(f.child)).kind).toBe('enter')
+    expect(f.bridge.state).not.toHaveBeenCalled()
     expect(await f.execute('structured_output', f.child)).toMatchObject({ isError: false, concludesTurn: true })
-    expect((await f.execute('mcp__lazymind__workflow_step_begin', f.root, { session_id: 'run-1' })).isError).toBe(true)
   })
 
-  it('accepts an unrelated explicit user turn while the workflow remains guarded', async () => {
+  it('allows user conversation and forwards Core rejection without a host tool gate', async () => {
     const f = await fixture()
     await f.execute('mcp__lazymind__workflow_start')
     await f.execute('mcp__lazymind__workflow_step_begin', f.root, { session_id: 'run-1' })
     await f.execute('mcp__lazymind__workflow_step_complete', f.root, { session_id: 'run-1', execution_id: 'attempt-1' })
     const messages = [{ source: { kind: 'user', rpcId: 'manual-1' }, content: [{ type: 'text', text: 'Check something else' }] }] as unknown as UserMessage[]
-    const decision = await f.ctx.waterfall(scopeTarget(f.root, f.root), 'agent/pre-step', {
-      agent: f.root, turn: 2, step: 0, messages, signal: new AbortController().signal,
-    }, async () => ({ kind: 'enter' as const, messages }))
+    const decision = await f.turn(f.root, messages)
     expect(decision.kind).toBe('enter')
     expect((await f.execute('shell', f.root)).isError).toBe(false)
-    expect((await f.execute('mcp__lazymind__workflow_step_begin', f.root, { session_id: 'run-1' })).isError).toBe(true)
+    vi.mocked(f.bridge.state).mockClear()
+    f.begin.mockRejectedValueOnce(new Error('WORKFLOW_ADMISSION_DENIED: review pending'))
+    const args = { session_id: 'run-1', step_id: 'next' }
+    const rejected = await f.execute('mcp__lazymind__workflow_step_begin', f.root, args)
+    expect(f.begin).toHaveBeenLastCalledWith(args, expect.anything())
+    expect(rejected.isError).toBe(true)
+    expect(JSON.stringify(rejected.content)).toContain('WORKFLOW_ADMISSION_DENIED: review pending')
+    expect(f.bridge.state).not.toHaveBeenCalled()
   })
 })
 
-
 it('restores a review barrier from a standard PTC event before an automatic step after restart', async () => {
-  const f = await fixture(true)
-  const decision = await f.ctx.waterfall(scopeTarget(f.root, f.root), 'agent/pre-step', {
-    agent: f.root, turn: 2, step: 0, messages: [], signal: new AbortController().signal,
-  }, async () => ({kind: 'enter' as const, messages: []}))
-  expect(decision.kind).toBe('reject')
-  expect((await f.execute('shell')).isError).toBe(true)
+  const f = await fixture({ history: 'completion' })
+  expect((await f.turn()).kind).toBe('reject')
 })
-
 
 it('concludes a created workflow when synchronous binding is unavailable', async () => {
   const f = await fixture()
   vi.mocked(f.bridge.bind).mockRejectedValueOnce(new Error('bridge offline'))
-  vi.mocked(f.bridge.state).mockResolvedValue({protocol: 'workflow.control.v1', session_id: 'run-1', state_version: 1, continuation: 'binding_required', admission: {can_begin: false}, binding: {generation: 0, bound: false}})
+  vi.mocked(f.bridge.state).mockResolvedValue({protocol: 'workflow.control.v1', session_id: 'run-1', state_version: 1, continuation: 'binding_required', admission: {can_begin: false}, binding: {bound: false}})
   const result = await f.execute('mcp__lazymind__workflow_start')
   expect(result).toMatchObject({isError: false, concludesTurn: true})
-  expect((await f.execute('shell')).isError).toBe(true)
+  expect((await f.turn()).kind).toBe('reject')
 })
 
-it('lets a child return its committed result even when the subsequent Bridge read is unavailable', async () => {
-  const f = await fixture()
-  await f.execute('mcp__lazymind__workflow_start')
-  await f.execute('mcp__lazymind__workflow_step_begin', f.child, {session_id: 'run-1'})
-  const read = vi.mocked(f.bridge.state)
-  // Pre-execute read succeeds; only the committed result's synchronization fails.
-  const current = await f.bridge.state('run-1', new AbortController().signal)
-  read.mockResolvedValueOnce(current).mockRejectedValue(new Error('bridge offline'))
-  const submitted=await f.execute('mcp__lazymind__workflow_step_complete',f.child,{session_id:'run-1',execution_id:'attempt-1'})
-  expect(submitted.isError).toBe(false)
-  expect((await f.execute('structured_output', f.child)).isError).toBe(false)
-})
-
-
-it('yields native tool steps without granting DSH permission to imitate their tools', async () => {
-  const f = await fixture(false, true)
+it('yields automatic execution while Core runs a native step', async () => {
+  const f = await fixture({ native: true })
   await f.execute('mcp__lazymind__workflow_start')
   expect(await f.execute('mcp__lazymind__workflow_step_begin', f.root, { session_id: 'run-1' })).toMatchObject({ isError: false, concludesTurn: true })
-  expect((await f.execute('shell')).isError).toBe(true)
+  expect((await f.turn()).kind).toBe('reject')
   expect(f.shell).not.toHaveBeenCalled()
   expect((await f.execute('shell', f.unrelated)).isError).toBe(false)
 })
-
 
 it('does not bind historical discovery reads to the current driver', async () => {
   const f = await fixture()
@@ -203,39 +192,26 @@ it('does not bind historical discovery reads to the current driver', async () =>
   expect((await f.execute('mcp__lazymind__workflow_start')).isError).toBe(false)
 })
 
-it.each([
-  { granted: false, restored: false, manual: false },
-  { granted: true, restored: false, manual: false },
-  { granted: false, restored: true, manual: false },
-  { granted: false, restored: true, manual: true },
-])('panel continuation preserves ownership and grants: %j', async ({granted, restored, manual}) => {
-  const f = await fixture(restored, false, manual)
-  if (!restored) await f.execute('mcp__lazymind__workflow_start')
-  if (granted) await f.execute('mcp__lazymind__workflow_step_begin', f.root, { session_id: 'run-1' })
-  const prior = await f.bridge.state('run-1', new AbortController().signal)
-  // The panel command has already committed the review before Core emits its action.
-  const control = restored ? { ...prior, continuation: 'continue', admission: { can_begin: true } } : prior
+it('delivers a queued wake through the DSH session API without cancelling the current turn', async () => {
+  const f = await fixture()
+  await f.execute('mcp__lazymind__workflow_start')
+  const control = await f.bridge.state('run-1', new AbortController().signal)
   const cancel = vi.fn()
   const prompt = vi.fn(async (_input: { content: Array<{text: string}> }) => ({}))
   f.ctx.provide('sessionController', { resolveAgent: async () => ({ agent: f.root }), cancel, prompt })
   const action = { id: 'panel-continue', session_id: 'run-1', kind: 'continue' as const,
-    native_session_id: f.root.session.id, binding_generation: 1, status: 'pending' }
+    native_session_id: f.root.session.id, status: 'pending' }
   const claim = { action: { ...action, status: 'dispatching' }, dispatch_token: 'dispatch', control }
   vi.mocked(f.bridge.claim).mockResolvedValue(claim)
-  vi.mocked(f.bridge.action).mockResolvedValue(claim)
   vi.mocked(f.bridge.settle).mockResolvedValue(undefined)
   vi.mocked(f.bridge.actions).mockResolvedValueOnce({ actions: [action] })
   await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce(), { timeout: 2500 })
-  expect(prompt.mock.calls[0][0].content[0].text).toContain('requires review AFTER execution')
-  if (granted || manual) expect(cancel).not.toHaveBeenCalled()
-  else {
-    expect(cancel).toHaveBeenCalledWith({ sessionId: f.root.session.id })
-    expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(prompt.mock.invocationCallOrder[0])
-  }
+  expect(prompt).toHaveBeenCalledWith(expect.objectContaining({ sessionId: f.root.session.id, requestId: action.id, mode: 'queue' }), expect.any(AbortSignal))
+  expect(f.bridge.action).not.toHaveBeenCalled()
+  expect(cancel).not.toHaveBeenCalled()
 })
 
-
-it('publishes during an active grant without completing it, including review draining', async () => {
+it('preserves publication success and Core rejection without concluding the turn', async () => {
   const f = await fixture()
   await f.execute('mcp__lazymind__workflow_start')
   await f.execute('mcp__lazymind__workflow_step_begin', f.root, { session_id: 'run-1' })
@@ -243,31 +219,28 @@ it('publishes during an active grant without completing it, including review dra
   const published = await f.execute('mcp__lazymind__workflow_artifact_publish', f.root, args)
   expect(published.isError).toBe(false)
   expect(published.concludesTurn).not.toBe(true)
-  vi.mocked(f.bridge.state).mockResolvedValue({ protocol: 'workflow.control.v1', session_id: 'run-1', state_version: 5,
-    continuation: 'draining', admission: { can_begin: false }, active_execution_ids: ['attempt-1'], active_executions: 1 })
-  await f.execute('mcp__lazymind__workflow_state', f.root)
-  expect((await f.execute('mcp__lazymind__workflow_artifact_publish', f.root, args)).isError).toBe(false)
-  expect((await f.execute('mcp__lazymind__workflow_artifact_publish', f.root, { ...args, execution_id: 'other' })).isError).toBe(true)
+  f.publish.mockRejectedValueOnce(new Error('INVALID_EXECUTION_HANDLE'))
+  const invalid = { ...args, execution_id: 'other' }
+  const rejected = await f.execute('mcp__lazymind__workflow_artifact_publish', f.root, invalid)
+  expect(f.publish).toHaveBeenLastCalledWith(invalid, expect.anything())
+  expect(rejected.isError).toBe(true)
+  expect(JSON.stringify(rejected.content)).toContain('INVALID_EXECUTION_HANDLE')
+  expect(rejected.concludesTurn).not.toBe(true)
 })
 
-
 it('repairs an unbound run after restart only when the driver owns its persisted start receipt', async () => {
-  const f = await fixture(false, false, false, true)
+  const f = await fixture({ history: 'start' })
   vi.mocked(f.bridge.state).mockResolvedValue({ protocol: 'workflow.control.v1', session_id: 'run-1', state_version: 1,
-    continuation: 'binding_required', admission: { can_begin: false }, binding: { generation: 0, bound: false } })
-  const decision = await f.ctx.waterfall(scopeTarget(f.root, f.root), 'agent/pre-step', {
-    agent: f.root, turn: 2, step: 0, messages: [], signal: new AbortController().signal,
-  }, async () => ({ kind: 'enter' as const, messages: [] }))
+    continuation: 'binding_required', admission: { can_begin: false }, binding: { bound: false } })
+  const decision = await f.turn()
   expect(f.bridge.bind).toHaveBeenCalledWith('run-1', f.root.session.id, expect.any(AbortSignal))
   expect(decision.kind).toBe('enter')
 })
 
 it('does not repair binding based only on a completion receipt', async () => {
-  const f = await fixture(true)
+  const f = await fixture({ history: 'completion' })
   vi.mocked(f.bridge.state).mockResolvedValue({ protocol: 'workflow.control.v1', session_id: 'run-1', state_version: 1,
-    continuation: 'binding_required', admission: { can_begin: false }, binding: { generation: 0, bound: false } })
-  await f.ctx.waterfall(scopeTarget(f.root, f.root), 'agent/pre-step', {
-    agent: f.root, turn: 2, step: 0, messages: [], signal: new AbortController().signal,
-  }, async () => ({ kind: 'enter' as const, messages: [] }))
+    continuation: 'binding_required', admission: { can_begin: false }, binding: { bound: false } })
+  await f.turn()
   expect(f.bridge.bind).not.toHaveBeenCalled()
 })

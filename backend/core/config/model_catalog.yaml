@@ -962,7 +962,7 @@ model_providers:
 
           配置时提供两个 Base URL 可选：
           - 经典模式：https://api.sensenova.cn/compatible-mode/v1/
-          - Token Plan 模式：https://token.sensenova.cn/v1/chat/completions/
+          - Token Plan 模式：https://token.sensenova.cn/v1/
 
           申请教程1（经典）：
 
@@ -988,7 +988,7 @@ model_providers:
 
           Available Base URLs:
           - Classic mode: https://api.sensenova.cn/compatible-mode/v1/
-          - Token Plan mode: https://token.sensenova.cn/v1/chat/completions/
+          - Token Plan mode: https://token.sensenova.cn/v1/
 
           For classic mode, register and complete developer verification, open API Key Management, and create a named key.
 
@@ -1050,21 +1050,27 @@ model_providers:
           type: llm
         - name: glm-5.2
           type: llm
+        - name: deepseek-flash
+          type: llm
+          vision: true
+        - name: kimi-k3
+          type: llm
+          vision: true
         # Token Plan is free during public beta: https://platform.sensenova.cn/
-        # Image input: https://github.com/OpenSenseNova/SenseNova6.7/blob/main/API_CN.md (2026-09-18).
-        - name: sensenova-6.7-flash-lite
+        # Current Token Plan models: https://platform.sensenova.cn/docs (2026-10-13).
+        - name: sensenova-6.8-flash-lite
           type: llm
           vision: true
           free_auto_select_priority: 1
-          free_auto_select_base_urls: ["https://token.sensenova.cn/v1/chat/completions/"]
-        - name: sensenova-u1-fast
-          type: text2image
+          free_auto_select_base_urls: ["https://token.sensenova.cn/v1/"]
+        - name: sensenova-u1.5-fast
+          type: image_editing
           free_auto_select_priority: 1
-          free_auto_select_base_urls: ["https://token.sensenova.cn/v1/chat/completions/"]
+          free_auto_select_base_urls: ["https://token.sensenova.cn/v1/"]
         - name: sensenova-u1.5-lite
           type: image_editing
           free_auto_select_priority: 2
-          free_auto_select_base_urls: ["https://token.sensenova.cn/v1/chat/completions/"]
+          free_auto_select_base_urls: ["https://token.sensenova.cn/v1/"]
 
     - name: SiliconFlow
       description:

@@ -489,11 +489,7 @@ func unavailableAutoChatModels(conversation *orm.Conversation, histories []chatM
 			continue
 		}
 		seen[key] = true
-		switch terminal.Code {
-		case "authentication_failed", "permission_denied", "not_found",
-			"rate_limited", "usage_limit_exceeded", "concurrency_limited", "quota_exhausted",
-			"balance_exhausted", "organization_spend_limit_exceeded", "project_spend_limit_exceeded",
-			"request_timeout", "provider_overloaded", "service_unavailable", "provider_internal_error", "transport_error":
+		if validModelFailureCodes[terminal.Code] {
 			unavailable[key] = true
 		}
 	}
@@ -1229,6 +1225,26 @@ func persistSuccessfulChatModel(ctx context.Context, db *gorm.DB, userID, conver
 		UpdateColumn("chat_model_snapshot", raw).Error; err != nil {
 		log.Logger.Warn().Err(err).Str("conversation_id", conversationID).Str("run_id", runID).Msg("failed to save successful chat model")
 	}
+}
+
+// LoadOrganizerChatLLMConfig reuses Main Chat selection, including a conversation override.
+// Resolve credentials at execution time instead of persisting them in batch inputs.
+func LoadOrganizerChatLLMConfig(ctx context.Context, db *gorm.DB, userID, conversationID string) (map[string]any, error) {
+	if db == nil {
+		return nil, errChatModelUnavailable
+	}
+	body := map[string]any{"conversation_id": conversationID}
+	if err := applyConversationChatModelConfig(ctx, db, userID, body); err != nil {
+		return nil, err
+	}
+	if config, ok := body["llm_config"].(map[string]any); ok {
+		return config, nil
+	}
+	role, err := LoadDefaultChatLLMConfig(ctx, db, userID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"llm": role}, nil
 }
 
 // LoadDefaultChatLLMConfig returns the same llm role that chat would use when

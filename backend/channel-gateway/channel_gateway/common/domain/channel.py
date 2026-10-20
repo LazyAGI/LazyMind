@@ -50,18 +50,27 @@ def account_identity(row: dict[str, Any]) -> dict[str, str]:
         value = {}
     if not isinstance(value, dict):
         value = {}
-    return {key: str(value.get(key) or '')[:limit] for key, limit in (
+    fields = (('bot_id', 256), ('bot_name', 128)) if row.get('provider') == 'wecom' else (
         ('app_id', 256), ('authorized_name', 128), ('authorized_id', 256),
-    )}
+    )
+    return {key: str(value.get(key) or '')[:limit] for key, limit in fields}
 
 
 def account_view(row: dict[str, Any]) -> dict[str, Any]:
+    identity = account_identity(row) if row['provider'] in {'feishu', 'wecom'} else {}
+    label = row['label']
+    if row['provider'] == 'wecom' and not row.get('label_custom'):
+        if identity['bot_name']:
+            label = identity['bot_name']
+        elif re.fullmatch(r'企业微信机器人 \d+', label):
+            label = '企业微信机器人'
     return {
         'id': row['id'],
         'provider': row['provider'],
-        'label': row['label'],
+        'label': label,
+        'label_custom': bool(row.get('label_custom')),
         'default_recipient_id': row.get('default_recipient_id') or '',
-        'identity': account_identity(row) if row['provider'] == 'feishu' else {},
+        'identity': identity,
         'binding_status': ('unbound' if not row.get('credentials_ciphertext') else
                            'connected' if row['status'] == 'connected' else 'paused'),
         'status': row['status'],

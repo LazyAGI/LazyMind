@@ -12,7 +12,7 @@ import { createUserApi } from "@/modules/signin/utils/request";
 import type { UserItem } from "@/api/generated/auth-client";
 import { getLocalizedTablePagination } from "@/components/ui/pagination";
 
-const USERNAME_COLUMN_WIDTH = 220;
+const USERNAME_COLUMN_WIDTH = "32%";
 
 type AdminUserItem = UserItem & {
   is_bootstrap_admin?: boolean;
@@ -184,14 +184,14 @@ const UserManagement = () => {
       title: t("admin.email"),
       dataIndex: "email",
       key: "email",
-      width: 180,
+      ellipsis: true,
       render: (email: string) => email || "-",
     },
     {
       title: t("admin.role"),
       dataIndex: "role_name",
       key: "role_name",
-      width: 120,
+      width: 144,
       render: (roleName: string) => (
         <Tag color={roleName?.toLowerCase().includes("admin") ? "blue" : "green"}>
           {roleName || t("admin.normalUser")}
@@ -202,7 +202,7 @@ const UserManagement = () => {
       title: t("admin.status"),
       dataIndex: "status",
       key: "status",
-      width: 80,
+      width: 104,
       render: (status: string) => (
         <Tag color={!isUserDisabled(status) ? "success" : "default"}>
           {!isUserDisabled(status) ? t("admin.normal") : t("admin.disabled")}
@@ -213,7 +213,7 @@ const UserManagement = () => {
       title: t("admin.actions"),
       key: "action",
       fixed: 'right' as const,
-      width: 240,
+      width: 216,
       render: (_: any, record: AdminUserItem) => {
         const disabled = isUserDisabled(record.status);
         const isBootstrapAdmin = !!record.is_bootstrap_admin;
@@ -321,12 +321,13 @@ const UserManagement = () => {
 
       <Table
         className="admin-page-table"
+        size="small"
         columns={columns}
         dataSource={users}
         rowKey={(record) => resolveUserId(record) || record.username}
         loading={loading}
         tableLayout="fixed"
-        scroll={{ x: 800 }}
+        scroll={{ x: 900 }}
         pagination={getLocalizedTablePagination({
           ...pagination,
           showSizeChanger: true,

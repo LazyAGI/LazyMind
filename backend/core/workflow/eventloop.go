@@ -33,19 +33,22 @@ type chatStatusCacheEntry struct {
 // WorkflowStepParams is the shared launch payload used by the v2 transition
 // handler and the isolated pre-v2 task_created compatibility entry point.
 type WorkflowStepParams struct {
-	WorkflowID   string `json:"workflow_id"`
-	WorkflowRef  string `json:"workflow_ref,omitempty"`
-	RevisionID   string `json:"revision_id,omitempty"`
-	RevisionNo   int64  `json:"revision_no,omitempty"`
-	TreeHash     string `json:"tree_hash,omitempty"`
-	RemoteRoot   string `json:"remote_root,omitempty"`
-	StepID       string `json:"step_id"`
-	SessionID    string `json:"session_id"`
-	UserInput    string `json:"user_input"`
-	IsColdStart  bool   `json:"is_cold_start"`
-	HandOff      *bool  `json:"hand_off,omitempty"`
-	HostedTaskID string `json:"hosted_task_id,omitempty"`
-	PreflightID  string `json:"preflight_id,omitempty"`
+	WorkflowID  string `json:"workflow_id"`
+	WorkflowRef string `json:"workflow_ref,omitempty"`
+	RevisionID  string `json:"revision_id,omitempty"`
+	RevisionNo  int64  `json:"revision_no,omitempty"`
+	TreeHash    string `json:"tree_hash,omitempty"`
+	RemoteRoot  string `json:"remote_root,omitempty"`
+	StepID      string `json:"step_id"`
+	SessionID   string `json:"session_id"`
+	UserInput   string `json:"user_input"`
+	// LaunchUserInput remains fixed while UserInput carries the current turn.
+	LaunchUserInput  string `json:"launch_user_input,omitempty"`
+	CurrentUserInput string `json:"current_user_input,omitempty"`
+	IsColdStart      bool   `json:"is_cold_start"`
+	HandOff          *bool  `json:"hand_off,omitempty"`
+	HostedTaskID     string `json:"hosted_task_id,omitempty"`
+	PreflightID      string `json:"preflight_id,omitempty"`
 
 	// ChatSessionID identifies the ChatAgent turn for task lifecycle context.
 	ChatSessionID string `json:"chat_session_id,omitempty"`

@@ -516,6 +516,13 @@
     &::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
   }
 
+  &__tabs-label {
+    flex-shrink: 0;
+    padding: 0 6px;
+    color: #64748b;
+    font-size: 12px;
+  }
+
   &__tab {
     display: inline-flex;
     align-items: center;

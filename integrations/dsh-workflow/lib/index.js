@@ -125,6 +125,11 @@ async function loadPairing(path) {
 }
 
 //#endregion
+//#region ../workflow-agent-core/src/adapter.ts
+/** Use only when the host definitely did not receive the input. */
+var AdmissionRejected = class extends Error {};
+
+//#endregion
 //#region ../workflow-agent-core/src/coordinator.ts
 const READS = new Set([
 	"list",
@@ -220,22 +225,6 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 		const goal = runtime.goal?.(root);
 		if (goal && ownedAt && goal.createdAt <= ownedAt) scope.goalId = goal.id;
 		else if (goal && ownedAt && goal.createdAt > ownedAt) scope.automatic = false;
-	}
-	function denial(scope, exec) {
-		const operation = exec.operation;
-		if (operation && (READS.has(operation) || operation === "session_stop")) return void 0;
-		if (!scope.runId) return void 0;
-		if (exec.returnsResult && completion(scope)) return void 0;
-		if (scope.unknown && (scope.activeOwned || operation)) return "Workflow state is unavailable; retry after reconnecting LazyMind.";
-		if (!paused(scope)) return void 0;
-		if (scope.control?.continuation === "stopped") return operation || scope.activeOwned ? "This Workflow has been stopped." : void 0;
-		if (operation === "artifact_publish" || operation === "step_complete" || operation === "step_resume" || operation === "step_claim") {
-			const id = object(exec.arguments)?.execution_id;
-			return typeof id === "string" && scope.control?.active_execution_ids?.includes(id) ? void 0 : "Only an already granted execution may finish while review is pending.";
-		}
-		if (operation) return "Review the submitted artifacts in the LazyMind panel before starting new Workflow work.";
-		if (scope.grants.size > 0 || scope.manual) return void 0;
-		if (scope.activeOwned) return "This Workflow is waiting for user review.";
 	}
 	function ensure(agent) {
 		const existing = scopes.get(agent);
@@ -353,7 +342,6 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 				claim = await bridge.action(source.requestId, signal(caller));
 			} catch (error) {
 				if (error instanceof BridgeError && (error.status === 404 || error.status === 403)) continue;
-				if (error instanceof BridgeError && error.code === "BINDING_STALE") throw error;
 				if (!claim) continue;
 			}
 			if (claim && claim.action.native_session_id === runtime.id(agent)) {
@@ -368,14 +356,11 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 			scope.turn = payload.turn;
 			scope.manual = false;
 			scope.activeOwned = scope.automatic;
-			scope.actionId = void 0;
 		}
 		try {
 			const action = await lookupInput(payload.agent, payload.messages, payload.signal);
 			if (action) {
-				if (action.action.status === "superseded" || action.action.binding_generation !== action.control.binding?.generation || action.action.consumed_at && scope.actionId !== action.action.id) return false;
 				scope.runId = action.action.session_id;
-				scope.actionId = action.action.id;
 				scope.activeOwned = scope.automatic = true;
 				scope.manual = false;
 				publish(scope.runId, action.control);
@@ -384,6 +369,7 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 				scope.activeOwned = scope.automatic = false;
 			}
 			if ((!scope.manual || scope.activeOwned) && !completion(scope)) await refresh(scope, payload.signal);
+			if (action && !paused(scope)) resumeGoal(scope);
 			suspendGoal(ensure(driver(scope.agent)));
 			if (scope.runId && scope.activeOwned && paused(scope) && !scope.manual && scope.grants.size === 0 && !completion(scope)) return false;
 			return true;
@@ -391,27 +377,6 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 			runtime.warn(`lazymind-workflow: control gate deferred a step: ${String(error)}`);
 			return false;
 		}
-	}
-	async function beforeTool(exec) {
-		if (!exec.agent) return void 0;
-		const scope = ensure(exec.agent);
-		if (exec.returnsResult && completion(scope)) return void 0;
-		const operation = exec.operation;
-		const runId = object(exec.arguments)?.session_id;
-		if (operation && !READS.has(operation) && typeof runId === "string" && runId !== scope.runId) try {
-			const fresh = await bridge.state(runId, signal(exec.signal));
-			if (fresh.binding?.driver_session_id !== runtime.id(driver(exec.agent))) return "This Workflow belongs to another driver session.";
-			scope.runId = runId;
-			publish(runId, fresh);
-		} catch (error) {
-			return `Workflow state unavailable: ${String(error)}`;
-		}
-		if (scope.runId && (scope.activeOwned || operation && !READS.has(operation))) try {
-			await refresh(scope, exec.signal);
-		} catch {
-			return "Workflow state is unavailable; reconnect LazyMind.";
-		}
-		return denial(scope, exec);
 	}
 	return {
 		ensure,
@@ -421,12 +386,17 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 		resumeGoal,
 		afterResult,
 		beforeTurn,
-		beforeTool,
+		async cancelSession(agent, claim) {
+			const { action, control } = claim;
+			if (action.consumed_at || control.continuation !== "stopped") throw new AdmissionRejected("Cancellation no longer applies to this Workflow.");
+			const scope = ensure(agent);
+			if (scope.runId !== action.session_id) return;
+			publish(action.session_id, control);
+			if (scope.activeOwned && scope.automatic && !scope.manual && runtime.isRunning?.(agent) !== false) await runtime.cancel(agent);
+			suspendGoal(scope);
+		},
 		cacheClaim(claim) {
 			actionCache.set(claim.action.id, claim);
-		},
-		denial(agent, exec) {
-			return denial(ensure(agent), exec);
 		},
 		shouldConclude(agent, control) {
 			const scope = ensure(agent);
@@ -456,37 +426,18 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 }
 
 //#endregion
-//#region ../workflow-agent-core/src/adapter.ts
-/** Use only when the host definitely did not receive the input. */
-var AdmissionRejected = class extends Error {};
-
-//#endregion
 //#region ../workflow-agent-core/src/dispatcher.ts
 /** Polling and delivery policy are shared; only host admission/history live in the adapter. */
-function createDispatcher(runtime, coordinator, bridge, instanceId, signal) {
-	const { ensure, publish, suspendGoal, resumeGoal } = coordinator;
+function createDispatcher(runtime, host, bridge, instanceId, signal) {
 	async function deliver(action) {
-		if (action.kind === "cancel" && action.status !== "pending") {
-			if (runtime.supportsCancel === false) return;
-			const current$1 = await bridge.action(action.id, signal);
-			if (current$1.control.binding?.generation !== action.binding_generation || current$1.control.continuation !== "stopped") return;
-			const resolved$1 = await runtime.resolve(action.native_session_id);
-			if ("error" in resolved$1) return;
-			const scope$1 = ensure(resolved$1.agent);
-			if (scope$1.runId === action.session_id && (scope$1.activeOwned || scope$1.grants.size > 0)) await runtime.cancel(resolved$1.agent);
-			if (scope$1.runId === action.session_id) suspendGoal(scope$1);
-			const seq$1 = runtime.eventSeq?.(resolved$1.agent) ?? 0;
-			if (seq$1 > 0) await bridge.settle(action.id, instanceId, "", "accepted", seq$1, "", signal);
-			return;
-		}
-		if (action.kind === "continue" && action.status !== "pending") {
-			const current$1 = await bridge.action(action.id, signal);
+		if (action.status !== "pending") {
+			const current = await bridge.action(action.id, signal);
 			if (![
 				"pending",
 				"dispatching",
 				"unknown"
-			].includes(current$1.action.status)) return;
-			if (current$1.action.status !== "pending") {
+			].includes(current.action.status)) return;
+			if (current.action.status !== "pending" && action.kind === "continue") {
 				const seq$1 = await runtime.reconcile?.(action.native_session_id, action.id, signal) ?? 0;
 				if (seq$1 > 0) {
 					await bridge.settle(action.id, instanceId, "", "accepted", seq$1, "", signal);
@@ -495,43 +446,33 @@ function createDispatcher(runtime, coordinator, bridge, instanceId, signal) {
 			}
 		}
 		const claim = await bridge.claim(action.id, instanceId, signal);
-		coordinator.cacheClaim(claim);
 		if (!claim.dispatch_token || claim.action.status !== "dispatching") return;
-		const resolved = await runtime.resolve(action.native_session_id);
-		if ("error" in resolved) {
-			await bridge.settle(action.id, instanceId, claim.dispatch_token, "failed", 0, resolved.error, signal);
-			return;
-		}
-		const scope = ensure(resolved.agent);
-		if (scope.runId === action.session_id) publish(action.session_id, claim.control);
-		const current = await bridge.action(action.id, signal);
-		if (current.action.consumed_at || current.action.status !== "dispatching" || current.control.binding?.generation !== action.binding_generation) return;
-		if (!(action.kind === "cancel" ? current.control.continuation === "stopped" : action.execution_id ? !["stopped", "binding_required"].includes(current.control.continuation) : current.control.continuation === "continue" && current.control.admission.can_begin)) {
-			await bridge.settle(action.id, instanceId, claim.dispatch_token, "failed", 0, "Workflow control changed before host admission", signal);
-			return;
-		}
-		if (action.kind === "cancel" && runtime.supportsCancel === false) {
-			await bridge.settle(action.id, instanceId, claim.dispatch_token, "failed", 0, "This host does not support interrupting the current turn; Workflow is stopped in Core.", signal);
-			return;
-		}
+		action = claim.action;
+		host?.cacheClaim(claim);
 		let seq = 0;
+		let admissionStarted = false;
 		try {
+			if (action.kind === "cancel" && runtime.cancellation === "none") throw new AdmissionRejected("This host does not support interrupting the current turn; Workflow is stopped in Core.");
+			const resolved = await runtime.resolve(action.native_session_id);
+			if ("error" in resolved) throw new AdmissionRejected(resolved.error);
 			if (action.kind === "cancel") {
-				if (scope.runId === action.session_id && (scope.activeOwned || scope.grants.size > 0)) await runtime.cancel(resolved.agent);
-				if (scope.runId === action.session_id) suspendGoal(scope);
+				if (!host) throw new AdmissionRejected("Session cancellation requires a host ownership guard.");
+				const current = await bridge.action(action.id, signal);
+				admissionStarted = true;
+				await host.cancelSession(resolved.agent, current);
 			} else {
-				if (runtime.continuationMode !== "queue" && !action.execution_id && scope.runId === action.session_id && scope.activeOwned && scope.grants.size === 0) await runtime.cancel(resolved.agent);
+				signal.throwIfAborted();
+				admissionStarted = true;
 				seq = await runtime.prompt(resolved.agent, {
 					actionId: action.id,
-					message: action.execution_id ? `LazyMind workflow ${action.session_id} has an execution update. Call workflow.state, then workflow.step.claim with execution_id=${action.execution_id}. If an execution_handle is returned, execute the granted contract and submit with that handle. If executor_host is lazymind, only observe. Do not create a new workflow.` : `The user clicked Continue in the LazyMind panel for workflow ${action.session_id} and has finished the current review. Call workflow.state, then workflow.step.begin for a ready step when control.continuation=continue and admission.can_begin=true. A human step requires review AFTER execution; its mode or requires_approval flag does not require another confirmation before begin. Continue until awaiting_user, awaiting_executor, stopped, or completed. Execute each granted step_contract and submit using execution_handle. Do not ask the user to confirm the review again or create a new workflow.`
+					message: continuationMessage(action)
 				}, signal);
-				if (scope.runId === action.session_id) resumeGoal(scope);
 			}
-			if (action.kind === "cancel") seq = runtime.eventSeq?.(resolved.agent) ?? 0;
-			await bridge.settle(action.id, instanceId, claim.dispatch_token, "accepted", seq, "", signal);
 		} catch (error) {
-			await bridge.settle(action.id, instanceId, claim.dispatch_token, error instanceof AdmissionRejected ? "failed" : "unknown", 0, String(error), signal);
+			await bridge.settle(action.id, instanceId, claim.dispatch_token, !admissionStarted || error instanceof AdmissionRejected ? "failed" : "unknown", 0, String(error), signal);
+			return;
 		}
+		await bridge.settle(action.id, instanceId, claim.dispatch_token, "accepted", seq, "", signal);
 	}
 	async function poll() {
 		while (!signal.aborted) {
@@ -542,12 +483,7 @@ function createDispatcher(runtime, coordinator, bridge, instanceId, signal) {
 					for (const action of page.actions) try {
 						await deliver(action);
 					} catch (error) {
-						if (!(error instanceof BridgeError && [
-							"DELIVERY_PENDING",
-							"ACTION_CONSUMED",
-							"BINDING_STALE",
-							"WORKFLOW_ADMISSION_DENIED"
-						].includes(error.code)) && !signal.aborted) runtime.warn(`lazymind-workflow: delivery pending: ${String(error)}`);
+						if (!(error instanceof BridgeError && ["DELIVERY_PENDING", "ACTION_CONSUMED"].includes(error.code)) && !signal.aborted) runtime.warn(`lazymind-workflow: delivery pending: ${String(error)}`);
 					}
 					after = page.next_page_token ?? "";
 				} while (after && !signal.aborted);
@@ -582,6 +518,10 @@ function delay(ms, signal) {
 		}, ms);
 		signal.addEventListener("abort", abort, { once: true });
 	});
+}
+function continuationMessage(action) {
+	const request = action.execution_id ? `When applicable, call workflow.step.claim with execution_id=${action.execution_id}. For a completed internal execution, inspect its result and the current state instead of executing it again.` : "When control.continuation=continue and admission.can_begin=true, call workflow.step.begin for a ready step.";
+	return `LazyMind workflow ${action.session_id} has a control notification. Call workflow.state first; the notification may be delayed. ${request} Execute only a granted external step_contract and publish/submit using its execution_handle. If executor_host is lazymind, let Core execute it. After submission, use the returned state to continue. Yield when awaiting_user, awaiting_executor, draining, stopped, binding_required, completed, or failed; do not poll while waiting. A human step requires review AFTER execution. Do not assume this notification means a review was approved. Do not create a new workflow.`;
 }
 
 //#endregion
@@ -660,7 +600,7 @@ function eventRun(event, serverName) {
 
 //#endregion
 //#region src/host-adapter.ts
-/** DSH SDK translation only. Workflow admission and delivery decisions live in the shared runtime. */
+/** DSH SDK translation only. Core owns execution admission; the shared coordinator gates automatic turns. */
 function dshRuntime(ctx, serverName) {
 	let goals;
 	ctx.inject(["goals"], (goalCtx) => {
@@ -720,6 +660,7 @@ function dshRuntime(ctx, serverName) {
 		}
 	}
 	return {
+		cancellation: "session",
 		id: (agent) => agent.session.id,
 		parent: (agent) => ctx.agents.list().find((candidate) => candidate !== agent && ctx.agents.isOwnedBy(agent.session.id, candidate)),
 		isLive: (agent) => ctx.agents.get(agent.session.id) === agent,
@@ -762,7 +703,6 @@ function dshRuntime(ctx, serverName) {
 		cancel: (agent) => {
 			ctx.sessionController.cancel({ sessionId: agent.session.id });
 		},
-		eventSeq: (agent) => Math.max(0, agent.session.seq - 1),
 		reconcile,
 		warn: (message) => ctx.logger.warn(message)
 	};
@@ -860,7 +800,6 @@ function installHost(ctx, bridge, config, instanceId) {
 		agent: exec.agent,
 		operation: workflowOperation(exec.name, config.serverName),
 		arguments: "arguments" in exec ? exec.arguments : void 0,
-		returnsResult: exec.name === "structured_output",
 		signal: exec.signal,
 		callId: exec.callId,
 		nested: !!exec.parent
@@ -901,13 +840,11 @@ function installHost(ctx, bridge, config, instanceId) {
 		const entry = {
 			ready: Promise.resolve(),
 			dispose: async () => {},
-			disposeGuard: () => {},
 			wrappers: /* @__PURE__ */ new Map()
 		};
 		registrations.set(agent, entry);
 		const registration = agent.ctx.inject(["tools"], (injected) => {
 			entry.context = injected;
-			entry.disposeGuard = injected.tools.guard((exec) => coordinator.denial(exec.agent ?? agent, call(exec)));
 			wrap(agent, entry);
 		});
 		entry.ready = registration.await();
@@ -929,14 +866,6 @@ function installHost(ctx, bridge, config, instanceId) {
 			})
 		}) ? next() : { kind: "reject" };
 	})()));
-	ctx.on("tools/pre-execute", (exec, next) => own((async () => {
-		if (exec.agent) await ensure(exec.agent).ready;
-		const reason = await coordinator.beforeTool(call(exec));
-		return reason ? {
-			kind: "deny",
-			reason
-		} : next();
-	})()));
 	ctx.on("tools/ptc-dispatch-log", async (dispatch, next) => {
 		const content = await next();
 		const run = coordinator.takeNestedLink(dispatch.subCallId);
@@ -951,7 +880,6 @@ function installHost(ctx, bridge, config, instanceId) {
 	ctx.on("agent/disposed", ({ agent }) => {
 		const entry = registrations.get(agent);
 		if (entry) {
-			entry.disposeGuard();
 			for (const wrapper of entry.wrappers.values()) wrapper.dispose();
 			registrations.delete(agent);
 			own(entry.dispose());
@@ -965,7 +893,6 @@ function installHost(ctx, bridge, config, instanceId) {
 		await polling;
 		await Promise.allSettled([...tracked]);
 		for (const entry of registrations.values()) {
-			entry.disposeGuard();
 			for (const wrapper of entry.wrappers.values()) wrapper.dispose();
 			await entry.dispose();
 		}

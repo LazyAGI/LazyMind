@@ -4,6 +4,7 @@ import "time"
 
 // SkillRecording is a durable conversation card. Source frames are erased after generation.
 type SkillRecording struct {
+	Progress       int       `json:"progress" gorm:"-"`
 	Evidence       string    `json:"-"`
 	Attempt        int       `json:"-"`
 	ID             string    `json:"id" gorm:"primaryKey"`

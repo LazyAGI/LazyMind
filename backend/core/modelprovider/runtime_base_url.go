@@ -84,3 +84,12 @@ func canonicalOpenRouterBaseURL(baseURL string) string {
 	parsed.Fragment = ""
 	return parsed.String()
 }
+
+// canonicalSenseNovaTokenPlanURL accepts the legacy chat endpoint saved by older clients.
+func canonicalSenseNovaTokenPlanURL(baseURL string) string {
+	normalized := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if normalized == "https://token.sensenova.cn/v1" || normalized == "https://token.sensenova.cn/v1/chat/completions" {
+		return sensenovaNewPlatformBaseURL
+	}
+	return baseURL
+}
