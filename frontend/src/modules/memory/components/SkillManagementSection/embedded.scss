@@ -53,6 +53,11 @@
     min-width: 0;
     min-height: 0;
     overflow: hidden;
+
+    &:has(.skill-draft-review) {
+      overflow: hidden;
+      min-height: 0;
+    }
   }
 
   .memory-skill-toolbar {

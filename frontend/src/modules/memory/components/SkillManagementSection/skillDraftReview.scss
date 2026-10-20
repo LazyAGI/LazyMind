@@ -1,9 +1,14 @@
 .skill-draft-review {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+  min-height: 0;
+  max-height: calc(100vh - 160px);
   padding: 14px 16px;
+  overflow: auto;
+  overscroll-behavior: contain;
   border: 1px solid #f0f0f0;
   border-radius: 8px;
   background: #fff;

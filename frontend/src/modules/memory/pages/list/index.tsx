@@ -1,10 +1,4 @@
-import {
-  Button,
-  Input,
-  Select,
-  Space,
-  Tooltip,
-} from "antd";
+import { Tooltip } from "antd";
 import { QuestionCircleOutlined } from "@ant-design/icons";
 import { useMemoryManagementOutletContext } from "../../context";
 import ExperienceOverview from "../../components/ExperienceOverview";
@@ -19,7 +13,6 @@ export default function MemoryManagementListPage() {
     activeTab,
     glossaryChangeProposals,
     openModal,
-    currentTabMeta,
     memoryTabOrder,
     tabMeta,
     setActiveTab,
@@ -74,26 +67,6 @@ export default function MemoryManagementListPage() {
             </Tooltip>
           </div>
         </div>
-        <Space>
-          {showGlossaryInboxUi && activeTab === "glossary" ? (
-            <Button onClick={() => setGlossaryInboxOpen(true)}>
-              {t("admin.memoryGlossaryInboxButton", {
-                count: glossaryChangeProposals.length,
-              })}
-            </Button>
-          ) : null}
-          {activeTab !== "experience" && activeTab !== "skills" ? (
-            <Button
-              type="primary"
-              className="admin-page-primary-button"
-              onClick={() => openModal("add")}
-            >
-              {activeTab === "glossary"
-                ? t("admin.memoryCreateGlossaryButton")
-                : t("admin.memoryCreateButton", { unit: currentTabMeta.unit })}
-            </Button>
-          ) : null}
-        </Space>
       </div>
 
       {!embedded ? <nav className="memory-tab-grid" aria-label={t("admin.memoryManagement")}>
@@ -126,30 +99,6 @@ export default function MemoryManagementListPage() {
         })}
       </nav> : null}
 
-      {activeTab !== "experience" && activeTab !== "skills" ? (
-        <div className="memory-filter-bar">
-          <Input.Search
-            allowClear
-            value={searchInput}
-            onChange={(event) => setSearchInput(event.target.value)}
-            onSearch={(value) => setQuery(value)}
-            placeholder={t("admin.memorySearchPlaceholder")}
-            className="memory-filter-search"
-          />
-          {activeTab === "glossary" ? (
-            <Select
-              allowClear
-              value={glossarySource}
-              placeholder={t("admin.memoryAllSources")}
-              options={availableGlossarySourceOptions}
-              className="memory-filter-select"
-              onChange={(value) => setGlossarySource(value)}
-            />
-          ) : null}
-          <Button onClick={resetFilters}>{t("admin.memoryReset")}</Button>
-        </div>
-      ) : null}
-
       <div
         className={`memory-list-content ${activeTab === "skills" ? "is-skill-management" : ""}`}
       >
@@ -172,9 +121,18 @@ export default function MemoryManagementListPage() {
             glossaryLoadError={glossaryLoadError}
             glossaryLoading={glossaryLoading}
             glossarySource={glossarySource}
+            availableGlossarySourceOptions={availableGlossarySourceOptions}
+            searchInput={searchInput}
+            query={query}
+            inboxCount={glossaryChangeProposals.length}
+            showInbox={showGlossaryInboxUi}
+            onSearchInputChange={setSearchInput}
+            onSearch={setQuery}
+            onSourceChange={setGlossarySource}
+            onCreate={() => openModal("add")}
+            onOpenInbox={() => setGlossaryInboxOpen(true)}
             handleBatchDeleteGlossary={handleBatchDeleteGlossary}
             handleBatchMergeGlossary={handleBatchMergeGlossary}
-            query={query}
             refreshGlossaryAssets={refreshGlossaryAssets}
             selectedGlossaryAssetIds={selectedGlossaryAssetIds}
             selectedGlossaryAssets={selectedGlossaryAssets}

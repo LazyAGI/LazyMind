@@ -171,7 +171,7 @@ import "./index.scss";
 
 const backendSuggestionPageSize = 20;
 const defaultSkillListPageSize = 20;
-const defaultGlossaryListPageSize = 4;
+const defaultGlossaryListPageSize = 20;
 const showGlossaryInboxUi = true;
 const MERGED_GLOSSARY_GROUP_OPTION_ID = "__merged_glossary_group__";
 const MERGED_GLOSSARY_GROUP_OPTION_ID_PREFIX = `${MERGED_GLOSSARY_GROUP_OPTION_ID}:`;
@@ -4791,9 +4791,9 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       key: "source",
       width: 150,
       render: (source: GlossarySource) => (
-        <Tag color={glossarySourceColorMap[source]}>
+        <OriginMark kind={source === "ai" ? "ai" : "internal"}>
           {glossarySourceLabelMap[source]}
-        </Tag>
+        </OriginMark>
       ),
     },
     {

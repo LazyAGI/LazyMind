@@ -27,13 +27,8 @@
     flex: 0 0 auto;
   }
 
-  .memory-filter-bar {
-    flex: 0 0 auto;
-  }
-
   .memory-list-content {
-    overflow-y: auto;
-    scrollbar-gutter: stable;
+    overflow: hidden;
   }
 }
 
@@ -1456,7 +1451,116 @@
   }
 
   &.is-glossary {
-    padding: 16px 20px 12px;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+}
+
+.memory-glossary-shell {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+
+  .memory-skill-toolbar {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 20px 24px 16px;
+    border-bottom: 0;
+  }
+
+  .memory-skill-heading-group {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+
+    h2 {
+      margin: 0;
+      color: #101828;
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: -0.4px;
+    }
+  }
+
+  .memory-skill-toolbar-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    padding-bottom: 0;
+  }
+
+  .memory-skill-review-drafts {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #536177;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+
+    &:hover {
+      background: #f5f8fc;
+    }
+  }
+
+  .memory-skill-create-split__main {
+    font-size: 12px;
+  }
+
+  .memory-skill-installed-filters {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 24px 14px;
+    border-bottom: 1px solid #e5eaf2;
+  }
+
+  .memory-skill-source-tabs {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+
+    button {
+      padding: 7px 0;
+      border: 0;
+      background: transparent;
+      color: #667085;
+      font: inherit;
+      font-size: 13px;
+      white-space: nowrap;
+      cursor: pointer;
+
+      &:hover {
+        color: #1768db;
+      }
+
+      &.is-active {
+        color: #172a46;
+        font-weight: 600;
+      }
+    }
+  }
+
+  .memory-glossary-section {
+    padding: 12px 24px 16px;
   }
 }
 
@@ -1558,7 +1662,7 @@
 }
 
 .memory-glossary-table {
-  --memory-glossary-row-height: 112px;
+  --memory-glossary-row-height: 118px;
 
   padding-bottom: 8px;
   flex: 1;
@@ -1611,6 +1715,37 @@
 
   .ant-pagination {
     margin-bottom: 0;
+  }
+
+  &.memory-skill-installed-table {
+    .ant-table-thead > tr > th {
+      font-size: 13px;
+    }
+
+    .ant-table-tbody > tr > td {
+      font-size: 13px;
+    }
+
+    .memory-table-main-title,
+    .memory-term-link {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .memory-content-preview,
+    .memory-content-preview-glossary {
+      font-size: 13px;
+    }
+
+    .memory-tag-group .ant-tag,
+    .memory-protect-tag.ant-tag {
+      font-size: 12px;
+    }
+
+    .memory-origin-mark,
+    .memory-status-mark {
+      font-size: 12px;
+    }
   }
 }
 
@@ -5505,9 +5640,22 @@
     overflow: visible;
   }
 
+  .memory-list-page.is-skills-tab,
+  .memory-list-page.is-glossary-tab {
+    height: calc(100vh - clamp(20px, 3vh, 32px));
+    max-height: calc(100vh - clamp(20px, 3vh, 32px));
+    overflow: hidden;
+  }
+
   .memory-list-content,
   .memory-glossary-section {
     overflow: visible;
+  }
+
+  .memory-list-page.is-skills-tab .memory-list-content,
+  .memory-list-page.is-glossary-tab .memory-list-content,
+  .memory-list-page.is-glossary-tab .memory-glossary-section {
+    overflow: hidden;
   }
 
   .memory-experience-overview {
