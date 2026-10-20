@@ -1,0 +1,31 @@
+{
+  "result": "PASS",
+  "native": [
+    {
+      "run": "native-initial",
+      "source": "native-trace.jsonl",
+      "usage": {
+        "input_tokens": 806945,
+        "cached_input_tokens": 769024,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 5014,
+        "reasoning_output_tokens": 66
+      },
+      "time_scope": "initial N/A; audited launch.json whole controller elapsed; not complete child-only totals"
+    },
+    {
+      "run": "native-audited",
+      "source": "native-audited/native/trace.jsonl",
+      "usage": {
+        "input_tokens": 709293,
+        "cached_input_tokens": 660992,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3786,
+        "reasoning_output_tokens": 47
+      },
+      "time_scope": "initial N/A; audited launch.json whole controller elapsed; not complete child-only totals"
+    }
+  ],
+  "workflow": "execution receipts and terminal CLI usage were independently matched in runtime-claims-check.json",
+  "comparability": "different reviewer/controller scopes; no reliability, speed or cost percentage inferred"
+}

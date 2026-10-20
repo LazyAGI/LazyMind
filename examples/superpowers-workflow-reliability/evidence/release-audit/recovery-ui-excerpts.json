@@ -1,0 +1,50 @@
+{
+  "kind": "selected-own-tool-receipts-not-new-UI-run",
+  "session_id": "941af8acf6224e7eb4bcf99cd19fd160",
+  "selection": "two tool calls and exact relevant AX output lines; no messages/reasoning/sidebar retained",
+  "records": [
+    {
+      "at": "2026-10-19T16:19:19.246Z",
+      "type": "function_call",
+      "call_id": "call_92bcaee9d3f14377bf83ecea1a45c205",
+      "source_record_sha256": "ad624b5ec931194afedcc3edad9d59d639bdc10042518393e104d7fefad6b03d",
+      "arguments": {
+        "code": "await recoveryTab.getAXState()",
+        "title": "查看 Workflow 的重试控制"
+      }
+    },
+    {
+      "at": "2026-10-19T16:19:19.468Z",
+      "type": "function_call_output",
+      "call_id": "call_92bcaee9d3f14377bf83ecea1a45c205",
+      "source_record_sha256": "ba3ee25a5acb2d46293653e1ddd80e5505357838a5966fd9d7b77ad1d7f60a91",
+      "output_excerpts": [
+        "Browser tab: 3, Title: \"LazyMind\", URL: \"http://127.0.0.1:8090/workflow-runs/941af8acf6224e7eb4bcf99cd19fd160\".",
+        "+\t\t\t\t\t79 tab (selected, settable, boolean) Validate dispatch preconditions Step status: failed, Description: Step status: failed, ID: workflow-tab-941af8acf6224e7eb4bcf99cd19fd160-validate_dispatch, Value: 1",
+        "+\t\t\t\t\t90 button 重试"
+      ]
+    },
+    {
+      "at": "2026-10-19T16:19:22.299Z",
+      "type": "function_call",
+      "call_id": "call_6369193aa0d04dacb4c8d26dad3f37f9",
+      "source_record_sha256": "f0b9f9b4b46fa33f3c449a1974259e9e70c1ed4699757f1487bbaeef0899b5ca",
+      "arguments": {
+        "code": "await recoveryTab.click(90); await recoveryTab.getAXState()",
+        "title": "按实验要求在同一 Workflow 中发起正式重试"
+      }
+    },
+    {
+      "at": "2026-10-19T16:19:22.785Z",
+      "type": "function_call_output",
+      "call_id": "call_6369193aa0d04dacb4c8d26dad3f37f9",
+      "source_record_sha256": "2442eec2e644ba374f9f8e424bf7dbe22206b9d319175c37d466018bdec7169e",
+      "output_excerpts": [
+        "Browser tab: 3, Title: \"LazyMind\", URL: \"http://127.0.0.1:8090/workflow-runs/941af8acf6224e7eb4bcf99cd19fd160\".",
+        "Removed element IDs: 90",
+        "~\t\t\t\t\t79 tab (selected, settable, boolean) Validate dispatch preconditions Step status: queued, Description: Step status: queued, ID: workflow-tab-941af8acf6224e7eb4bcf99cd19fd160-validate_dispatch, Value: 1",
+        "~\t\t\t\t\t87 text 正在生成步骤结果…"
+      ]
+    }
+  ]
+}

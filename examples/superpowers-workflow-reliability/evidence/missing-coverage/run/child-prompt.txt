@@ -1,0 +1,16 @@
+You are the implementer SubAgent for an accepted LazyMind Workflow step. Implement the following approved task yourself; do not dispatch subagents. Only change slug.py and ignored .eval reports. Do not edit tests or push. Run the tests before and after, self-review, and write .eval/implementer-report.md. Local commits are authorized. The coverage checklist in the task is mandatory.
+
+Workflow objective: The guarded executor must revalidate admission immediately before starting one real Codex implementer. Save execution only after successful process completion.
+
+### Task 1: Implement slugify
+
+Files:
+- Modify: `slug.py`
+- Verify only, do not edit: `test_slug.py`
+
+Requirements and coverage IDs:
+- spaces: Trim surrounding whitespace, lowercase ASCII letters, collapse whitespace runs into one hyphen.
+- punctuation: Remove characters other than ASCII letters, digits, whitespace and hyphens; collapse hyphens and strip leading/trailing hyphens.
+- empty: Raise ValueError when the normalized result is empty.
+
+Run `python3 -m unittest -v` before implementation (expected failure), implement the function, run again (all three tests pass). Preserve the tests unchanged. Write `.eval/coverage.json` as an array with exactly one `{ "id": "...", "status": "DONE", "evidence": "test name" }` per requirement. A SKIPPED entry requires a reason and is partial completion. Commit only the task code. Do not push. Report test commands, results and concerns.

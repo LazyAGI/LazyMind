@@ -1,0 +1,541 @@
+{
+  "checked_at": "2026-10-20T03:11:34.126991+00:00",
+  "files": [
+    {
+      "path": "baseline.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-prompt.txt",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-final.txt",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-final.patch",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-stderr.log",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-independent-checks.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-independent-checks.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "fault-summary.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "unit-tests.log",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "unit-tests-continued.log",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "model-readiness.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "flash-chat-verification.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-worktree/.eval/native-report.md",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-worktree/.eval/progress.md",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-worktree/.eval/implementer-report.md",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-worktree/.eval/task-review.md",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-worktree/.eval/final-review.md",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-worktree/.eval/coverage.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-audited/native/trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-audited/native/launch.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-audited/native/prompt.txt",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-audited/native/final.txt",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-audited/native/stderr.log",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-audited/native/final.patch",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-audited/native/tool-trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-audited/native/tool-trace.manifest.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-audited/native/independent-checks.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "workflow-normal/trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "workflow-normal/result.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "workflow-normal/child-trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "workflow-normal/child-final.txt",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "workflow-normal/child-stderr.log",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "workflow-normal/child-prompt.txt",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "workflow-final/trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "workflow-final/result.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "workflow-final/child-trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "workflow-final/child-final.txt",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "workflow-final/child-stderr.log",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "workflow-final/child-prompt.txt",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "missing-brief/run/trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "missing-brief/run/result.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "empty-brief/run/trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "empty-brief/run/result.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "wrong-base/run/trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "wrong-base/run/result.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "wrong-base-actual/run/trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "wrong-base-actual/run/result.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "dispatch-failure/run/trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "dispatch-failure/run/result.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "missing-coverage/run/trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "missing-coverage/run/result.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "missing-coverage/run/child-trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "missing-coverage/run/child-final.txt",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "missing-coverage/run/child-stderr.log",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "missing-coverage/run/child-prompt.txt",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "retry-missing-brief/run/trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "retry-missing-brief/run/result.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "retry-missing-brief/run/child-trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "retry-missing-brief/run/child-final.txt",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "retry-missing-brief/run/child-stderr.log",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "retry-missing-brief/run/child-prompt.txt",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "runtime-probes/trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "runtime-probes/result.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "final-publication/trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "final-publication/diagnostics.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "final-publication/publication.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "missing-todo/run/trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "missing-todo/run/result.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "stale-todo/run/trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "stale-todo/run/result.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "parallel-workflows/result.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "parallel-workflows/before.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "parallel-workflows/run-1/trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "parallel-workflows/run-1/result.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "parallel-workflows/run-1/child-trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "parallel-workflows/run-1/child-final.txt",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "parallel-workflows/run-1/child-stderr.log",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "parallel-workflows/run-1/child-prompt.txt",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "parallel-workflows/run-1/runner.log",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "parallel-workflows/run-2/trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "parallel-workflows/run-2/result.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "parallel-workflows/run-2/child-trace.jsonl",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "parallel-workflows/run-2/child-final.txt",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "parallel-workflows/run-2/child-stderr.log",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "parallel-workflows/run-2/child-prompt.txt",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "parallel-workflows/run-2/runner.log",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-audited/worktree/.eval/native-report.md",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    },
+    {
+      "path": "native-audited/worktree/.eval/coverage.json",
+      "export_matches": true,
+      "raw_available": true,
+      "raw_matches": true
+    }
+  ],
+  "count": 89,
+  "result": "PASS"
+}

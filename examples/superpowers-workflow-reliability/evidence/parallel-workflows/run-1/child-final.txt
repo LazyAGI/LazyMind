@@ -1,0 +1,7 @@
+Implemented and committed only `slug.py` in `049548a`.
+
+- `python3 -m unittest -v`: before—3 expected errors; after—all 3 passed.
+- Self-review and 9 additional edge-case checks passed.
+- Tests unchanged; no push performed.
+- Wrote `.eval/coverage.json` with all three requirements `DONE` and `.eval/implementer-report.md`.
+- No concerns within the approved task scope.

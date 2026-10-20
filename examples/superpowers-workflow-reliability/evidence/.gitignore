@@ -1,0 +1,2 @@
+# Only allowlisted, sanitized experiment logs are exported here.
+!*.log

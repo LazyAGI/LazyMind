@@ -1,0 +1,8 @@
+{
+  "result": "PASS",
+  "upstream_license_sha256": "a37e0e9697144819e1d965176ac4ae5bc3fa02d11e7812036bbcadf6dafe2400",
+  "copy_byte_equal": true,
+  "upstream_license": "MIT, Copyright (c) 2025 Jesse Vincent",
+  "repository_license": "Apache-2.0",
+  "scope": "upstream Skill text retained in tool traces is accompanied by exact MIT notice"
+}

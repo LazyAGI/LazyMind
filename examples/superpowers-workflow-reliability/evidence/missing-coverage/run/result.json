@@ -1,0 +1,504 @@
+{
+  "result": "FAIL",
+  "failure": "COVERAGE_MISMATCH",
+  "launch_count": 1,
+  "session_id": "1d9beaa46785488981fa3d8eec5c582b",
+  "completed_at": "2026-10-19T16:16:49.362244+00:00",
+  "control": {
+    "control": {
+      "protocol": "workflow.control.v1",
+      "session_id": "1d9beaa46785488981fa3d8eec5c582b",
+      "state_version": 25,
+      "continuation": "failed",
+      "admission": {
+        "can_begin": false,
+        "reason": "recovery_required"
+      },
+      "reviews": [],
+      "binding": {
+        "bound": false
+      },
+      "delivery": null,
+      "active_executions": 0,
+      "native_execution_ids": [],
+      "active_execution_ids": [],
+      "available_actions": [
+        "stop",
+        "save",
+        "rewind",
+        "retry"
+      ]
+    },
+    "projection": {
+      "past": [
+        "collect",
+        "dispatch",
+        "prepare",
+        "validate_dispatch"
+      ],
+      "current": [
+        "validate_completion"
+      ],
+      "reachable": null,
+      "ready": null,
+      "retryable": [
+        "validate_completion"
+      ],
+      "rewindable": [
+        "collect",
+        "dispatch",
+        "prepare",
+        "validate_dispatch"
+      ],
+      "continue": null,
+      "blocked": null,
+      "stale": null,
+      "pruned": null,
+      "bypassed": null,
+      "nodes": {
+        "collect": {
+          "id": "collect",
+          "requires_approval": false,
+          "execution": "succeeded",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "dispatch": {
+          "id": "dispatch",
+          "requires_approval": false,
+          "execution": "succeeded",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "prepare": {
+          "id": "prepare",
+          "requires_approval": false,
+          "execution": "succeeded",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "record": {
+          "id": "record",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "validate_completion": {
+          "id": "validate_completion",
+          "requires_approval": false,
+          "execution": "failed",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "validate_dispatch": {
+          "id": "validate_dispatch",
+          "requires_approval": false,
+          "execution": "succeeded",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "validate_dispatch",
+          "to": "dispatch",
+          "state": "active"
+        },
+        {
+          "from": "dispatch",
+          "to": "collect",
+          "state": "active"
+        },
+        {
+          "from": "collect",
+          "to": "validate_completion",
+          "state": "active"
+        },
+        {
+          "from": "validate_completion",
+          "to": "record",
+          "state": "inactive"
+        },
+        {
+          "from": "record",
+          "to": "__end__",
+          "state": "inactive"
+        },
+        {
+          "from": "__start__",
+          "to": "prepare",
+          "state": "active"
+        },
+        {
+          "from": "prepare",
+          "to": "validate_dispatch",
+          "state": "active"
+        }
+      ],
+      "end_reached": false,
+      "completed": false
+    },
+    "session": {
+      "state_version": 25,
+      "session_id": "1d9beaa46785488981fa3d8eec5c582b",
+      "conversation_id": "",
+      "workflow_id": "superpowers-reliability",
+      "workflow_mode": "auto",
+      "pinned_revision_id": "90f1e32d-4383-4302-b27e-ed4ff1a48582",
+      "status": "failed",
+      "current_step_id": "",
+      "intent_context": "{\"text\":\"Run the approved isolated slug fixture reliability evaluation.\"}",
+      "created_at": "2026-10-19T16:16:04.784651Z",
+      "updated_at": "2026-10-19T16:16:49.358413Z",
+      "slots": [
+        {
+          "artifact_id": "ff6ab0a7-abc3-4004-9617-ffb6a102c900",
+          "slot_id": "admission",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "admission",
+          "created_at": "2026-10-19T16:16:04.933479Z",
+          "content_type": "json",
+          "artifact_value": {
+            "brief_sha256": "71d841e43454a236adf286386c66e6788855784f3838b4b4c3ad7d38d53d68ab",
+            "brief_bytes": 886,
+            "todo": {
+              "at": "2026-10-19T16:16:04.815795+00:00",
+              "event": "todo_updated",
+              "task_id": "task-1",
+              "status": "in_progress"
+            },
+            "git": {
+              "worktree": "$EVAL_ROOT/missing-coverage/fixture/worktree",
+              "head": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd",
+              "git_dir": "$EVAL_ROOT/missing-coverage/fixture/repository/.git/worktrees/worktree",
+              "index": "$EVAL_ROOT/missing-coverage/fixture/repository/.git/worktrees/worktree/index",
+              "common_dir": "$EVAL_ROOT/missing-coverage/fixture/repository/.git"
+            },
+            "expected_base": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd"
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "validate_dispatch",
+          "revision_count": 1,
+          "version_number": 1
+        },
+        {
+          "artifact_id": "cd6763f3-d7fa-43d6-9355-1514e35e845d",
+          "slot_id": "evidence",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "evidence",
+          "created_at": "2026-10-19T16:16:49.27979Z",
+          "content_type": "json",
+          "artifact_value": {
+            "head": "c377f2911226b5e3f53541958fda86de2bafed1a",
+            "diff": "diff --git a/slug.py b/slug.py\nindex ca1a85a..21e48b8 100644\n--- a/slug.py\n+++ b/slug.py\n@@ -1,2 +1,10 @@\n+import re\n+\n+\n def slugify(text):\n-    raise NotImplementedError\n+    \"\"\"Normalize text to an ASCII slug, rejecting an empty result.\"\"\"\n+    text = re.sub(r\"[^A-Za-z0-9\\s-]\", \"\", text).lower()\n+    slug = re.sub(r\"[\\s-]+\", \"-\", text).strip(\"-\")\n+    if not slug:\n+        raise ValueError(\"Slug must not be empty\")\n+    return slug",
+            "report": "# Implementer report\n\nImplemented slugify in slug.py: retain ASCII letters/digits, whitespace and hyphens; lowercase; collapse whitespace and hyphens; strip boundary hyphens; reject empty results with ValueError.\n\n## Validation\n- Before implementation: `python3 -m unittest -v` — 3 tests ran, 3 expected NotImplementedError errors (exit 1).\n- After implementation: `python3 -m unittest -v` — all 3 tests passed (exit 0).\n- Supplementary inline Python assertions — 5 normalization cases and 4 empty cases passed, covering Unicode whitespace, repeated/boundary hyphens, mixed separators, non-ASCII removal, digits, and empty normalization.\n- `git diff --check` — passed.\n- `git diff --exit-code -- test_slug.py` — passed; tests unchanged.\n- `git check-ignore .eval/coverage.json .eval/implementer-report.md` — both reports ignored.\n\n## Mandatory coverage checklist\n- spaces: DONE — test_slug.SlugTests.test_spaces\n- punctuation: DONE — test_slug.SlugTests.test_punctuation\n- empty: DONE — test_slug.SlugTests.test_empty\n\n## Self-review and concerns\nReviewed normalization order and character classes against each requirement. Filtering precedes lowercasing so non-ASCII characters cannot become retained ASCII letters. Unicode whitespace is handled by the whitespace class. Existing tests cover the three requirement IDs; supplementary checks cover their additional edge cases without editing tests. No unresolved concerns within the approved scope. Executor admission and execution persistence were not part of this slug.py task.\n\nOnly slug.py is to be committed; reports remain ignored. No push performed.\n",
+            "coverage": [
+              {
+                "id": "spaces",
+                "status": "DONE",
+                "evidence": "test_slug.SlugTests.test_spaces"
+              },
+              {
+                "id": "punctuation",
+                "status": "DONE",
+                "evidence": "test_slug.SlugTests.test_punctuation"
+              }
+            ],
+            "trace_sha256": "264c2d9473056a85db066b09cdb4787803186a59060152f7c63214f4c105ad1a"
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "collect",
+          "revision_count": 1,
+          "version_number": 1
+        },
+        {
+          "artifact_id": "665e5e12-5955-4255-8efd-3e9633c505eb",
+          "slot_id": "execution",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "execution",
+          "created_at": "2026-10-19T16:16:49.197828Z",
+          "content_type": "json",
+          "artifact_value": {
+            "started_at": "2026-10-19T16:16:05.033266+00:00",
+            "completed_at": "2026-10-19T16:16:49.183790+00:00",
+            "duration_seconds": 44.151,
+            "returncode": 0,
+            "turn_completed": true,
+            "requested_model": "gpt-6-astra",
+            "actual_backend_model": "N/A",
+            "usage": {
+              "input_tokens": 91577,
+              "cached_input_tokens": 78208,
+              "cache_write_input_tokens": 0,
+              "output_tokens": 1425,
+              "reasoning_output_tokens": 13
+            },
+            "trace_sha256": "264c2d9473056a85db066b09cdb4787803186a59060152f7c63214f4c105ad1a"
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "dispatch",
+          "revision_count": 1,
+          "version_number": 1
+        },
+        {
+          "artifact_id": "b039b7ac-d0b7-4141-9ef6-9cfb1bd98977",
+          "slot_id": "preparation",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "preparation",
+          "created_at": "2026-10-19T16:16:04.854096Z",
+          "content_type": "json",
+          "artifact_value": {
+            "brief_sha256": "71d841e43454a236adf286386c66e6788855784f3838b4b4c3ad7d38d53d68ab",
+            "brief_bytes": 886,
+            "todo": {
+              "at": "2026-10-19T16:16:04.815795+00:00",
+              "event": "todo_updated",
+              "task_id": "task-1",
+              "status": "in_progress"
+            },
+            "git": {
+              "worktree": "$EVAL_ROOT/missing-coverage/fixture/worktree",
+              "head": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd",
+              "git_dir": "$EVAL_ROOT/missing-coverage/fixture/repository/.git/worktrees/worktree",
+              "index": "$EVAL_ROOT/missing-coverage/fixture/repository/.git/worktrees/worktree/index",
+              "common_dir": "$EVAL_ROOT/missing-coverage/fixture/repository/.git"
+            },
+            "expected_base": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd"
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "prepare",
+          "revision_count": 1,
+          "version_number": 1
+        }
+      ],
+      "steps": [
+        {
+          "step_id": "prepare",
+          "attempt": 1,
+          "task_id": "a1f0ea0c-e44b-443b-9202-5f16be1af27d",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-19T16:16:04.795815Z"
+        },
+        {
+          "step_id": "validate_dispatch",
+          "attempt": 1,
+          "task_id": "41c73188-fba5-49df-8cba-8e435bbca8ae",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-19T16:16:04.879927Z"
+        },
+        {
+          "step_id": "dispatch",
+          "attempt": 1,
+          "task_id": "16524e5b-8009-454b-9c91-a33638e36c54",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-19T16:16:04.960186Z"
+        },
+        {
+          "step_id": "collect",
+          "attempt": 1,
+          "task_id": "64bd1714-cc28-474b-8be0-cbd335df54f8",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-19T16:16:49.239437Z"
+        },
+        {
+          "step_id": "validate_completion",
+          "attempt": 1,
+          "task_id": "278bf836-6acd-42b4-92c2-5a47e394de00",
+          "status": "failed",
+          "validity": "effective",
+          "created_at": "2026-10-19T16:16:49.317599Z"
+        }
+      ]
+    }
+  },
+  "artifacts": {
+    "artifacts": [
+      {
+        "draft_version": 1,
+        "artifact_id": "ff6ab0a7-abc3-4004-9617-ffb6a102c900",
+        "session_id": "1d9beaa46785488981fa3d8eec5c582b",
+        "slot_id": "admission",
+        "slot": "admission",
+        "step_id": "validate_dispatch",
+        "attempt": 1,
+        "producer_attempt_id": "41c73188-fba5-49df-8cba-8e435bbca8ae",
+        "revision": 1,
+        "selected": true,
+        "validity": "effective",
+        "change_source": "host",
+        "content_type": "json",
+        "value": {
+          "brief_sha256": "71d841e43454a236adf286386c66e6788855784f3838b4b4c3ad7d38d53d68ab",
+          "brief_bytes": 886,
+          "todo": {
+            "at": "2026-10-19T16:16:04.815795+00:00",
+            "event": "todo_updated",
+            "task_id": "task-1",
+            "status": "in_progress"
+          },
+          "git": {
+            "worktree": "$EVAL_ROOT/missing-coverage/fixture/worktree",
+            "head": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd",
+            "git_dir": "$EVAL_ROOT/missing-coverage/fixture/repository/.git/worktrees/worktree",
+            "index": "$EVAL_ROOT/missing-coverage/fixture/repository/.git/worktrees/worktree/index",
+            "common_dir": "$EVAL_ROOT/missing-coverage/fixture/repository/.git"
+          },
+          "expected_base": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd"
+        },
+        "deleted": false,
+        "created_at": "2026-10-19T16:16:04.933479Z"
+      },
+      {
+        "draft_version": 1,
+        "artifact_id": "cd6763f3-d7fa-43d6-9355-1514e35e845d",
+        "session_id": "1d9beaa46785488981fa3d8eec5c582b",
+        "slot_id": "evidence",
+        "slot": "evidence",
+        "step_id": "collect",
+        "attempt": 1,
+        "producer_attempt_id": "64bd1714-cc28-474b-8be0-cbd335df54f8",
+        "revision": 1,
+        "selected": true,
+        "validity": "effective",
+        "change_source": "host",
+        "content_type": "json",
+        "value": {
+          "head": "c377f2911226b5e3f53541958fda86de2bafed1a",
+          "diff": "diff --git a/slug.py b/slug.py\nindex ca1a85a..21e48b8 100644\n--- a/slug.py\n+++ b/slug.py\n@@ -1,2 +1,10 @@\n+import re\n+\n+\n def slugify(text):\n-    raise NotImplementedError\n+    \"\"\"Normalize text to an ASCII slug, rejecting an empty result.\"\"\"\n+    text = re.sub(r\"[^A-Za-z0-9\\s-]\", \"\", text).lower()\n+    slug = re.sub(r\"[\\s-]+\", \"-\", text).strip(\"-\")\n+    if not slug:\n+        raise ValueError(\"Slug must not be empty\")\n+    return slug",
+          "report": "# Implementer report\n\nImplemented slugify in slug.py: retain ASCII letters/digits, whitespace and hyphens; lowercase; collapse whitespace and hyphens; strip boundary hyphens; reject empty results with ValueError.\n\n## Validation\n- Before implementation: `python3 -m unittest -v` — 3 tests ran, 3 expected NotImplementedError errors (exit 1).\n- After implementation: `python3 -m unittest -v` — all 3 tests passed (exit 0).\n- Supplementary inline Python assertions — 5 normalization cases and 4 empty cases passed, covering Unicode whitespace, repeated/boundary hyphens, mixed separators, non-ASCII removal, digits, and empty normalization.\n- `git diff --check` — passed.\n- `git diff --exit-code -- test_slug.py` — passed; tests unchanged.\n- `git check-ignore .eval/coverage.json .eval/implementer-report.md` — both reports ignored.\n\n## Mandatory coverage checklist\n- spaces: DONE — test_slug.SlugTests.test_spaces\n- punctuation: DONE — test_slug.SlugTests.test_punctuation\n- empty: DONE — test_slug.SlugTests.test_empty\n\n## Self-review and concerns\nReviewed normalization order and character classes against each requirement. Filtering precedes lowercasing so non-ASCII characters cannot become retained ASCII letters. Unicode whitespace is handled by the whitespace class. Existing tests cover the three requirement IDs; supplementary checks cover their additional edge cases without editing tests. No unresolved concerns within the approved scope. Executor admission and execution persistence were not part of this slug.py task.\n\nOnly slug.py is to be committed; reports remain ignored. No push performed.\n",
+          "coverage": [
+            {
+              "id": "spaces",
+              "status": "DONE",
+              "evidence": "test_slug.SlugTests.test_spaces"
+            },
+            {
+              "id": "punctuation",
+              "status": "DONE",
+              "evidence": "test_slug.SlugTests.test_punctuation"
+            }
+          ],
+          "trace_sha256": "264c2d9473056a85db066b09cdb4787803186a59060152f7c63214f4c105ad1a"
+        },
+        "deleted": false,
+        "created_at": "2026-10-19T16:16:49.27979Z"
+      },
+      {
+        "draft_version": 1,
+        "artifact_id": "665e5e12-5955-4255-8efd-3e9633c505eb",
+        "session_id": "1d9beaa46785488981fa3d8eec5c582b",
+        "slot_id": "execution",
+        "slot": "execution",
+        "step_id": "dispatch",
+        "attempt": 1,
+        "producer_attempt_id": "16524e5b-8009-454b-9c91-a33638e36c54",
+        "revision": 1,
+        "selected": true,
+        "validity": "effective",
+        "change_source": "host",
+        "content_type": "json",
+        "value": {
+          "started_at": "2026-10-19T16:16:05.033266+00:00",
+          "completed_at": "2026-10-19T16:16:49.183790+00:00",
+          "duration_seconds": 44.151,
+          "returncode": 0,
+          "turn_completed": true,
+          "requested_model": "gpt-6-astra",
+          "actual_backend_model": "N/A",
+          "usage": {
+            "input_tokens": 91577,
+            "cached_input_tokens": 78208,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 1425,
+            "reasoning_output_tokens": 13
+          },
+          "trace_sha256": "264c2d9473056a85db066b09cdb4787803186a59060152f7c63214f4c105ad1a"
+        },
+        "deleted": false,
+        "created_at": "2026-10-19T16:16:49.197828Z"
+      },
+      {
+        "draft_version": 1,
+        "artifact_id": "b039b7ac-d0b7-4141-9ef6-9cfb1bd98977",
+        "session_id": "1d9beaa46785488981fa3d8eec5c582b",
+        "slot_id": "preparation",
+        "slot": "preparation",
+        "step_id": "prepare",
+        "attempt": 1,
+        "producer_attempt_id": "a1f0ea0c-e44b-443b-9202-5f16be1af27d",
+        "revision": 1,
+        "selected": true,
+        "validity": "effective",
+        "change_source": "host",
+        "content_type": "json",
+        "value": {
+          "brief_sha256": "71d841e43454a236adf286386c66e6788855784f3838b4b4c3ad7d38d53d68ab",
+          "brief_bytes": 886,
+          "todo": {
+            "at": "2026-10-19T16:16:04.815795+00:00",
+            "event": "todo_updated",
+            "task_id": "task-1",
+            "status": "in_progress"
+          },
+          "git": {
+            "worktree": "$EVAL_ROOT/missing-coverage/fixture/worktree",
+            "head": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd",
+            "git_dir": "$EVAL_ROOT/missing-coverage/fixture/repository/.git/worktrees/worktree",
+            "index": "$EVAL_ROOT/missing-coverage/fixture/repository/.git/worktrees/worktree/index",
+            "common_dir": "$EVAL_ROOT/missing-coverage/fixture/repository/.git"
+          },
+          "expected_base": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd"
+        },
+        "deleted": false,
+        "created_at": "2026-10-19T16:16:04.854096Z"
+      }
+    ]
+  }
+}

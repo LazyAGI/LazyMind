@@ -1,0 +1,247 @@
+{
+  "resource_id": "87147093-96ab-4d73-8ca7-2b112932060e",
+  "workflow_ref": "user:7ea37626-c7d6-4e8b-b988-d0d11bb41917:superpowers-reliability",
+  "workflow_id": "superpowers-reliability",
+  "name": "Superpowers reliability evaluation",
+  "description": "Verify dispatch prerequisites and enumerable task completion using the example external executor.",
+  "when_to_use": "Use only for the isolated Superpowers reliability example with its guarded external executor.",
+  "source_type": "blank",
+  "revision_id": "1410bea3-ed40-4af0-909f-72dc084695dc",
+  "revision_no": 2,
+  "tree_hash": "16d56b23098b396bda01a141987cef258215e401ab8068f10b6f6dca26d17630",
+  "graph_hash": "ef851aaa695b07cce570427878fd4c3ccdccd5e0654a565c09959e4ecb48ea39",
+  "graph_schema_version": "3",
+  "compiled_graph": {
+    "schema_version": "3",
+    "graph_hash": "ef851aaa695b07cce570427878fd4c3ccdccd5e0654a565c09959e4ecb48ea39",
+    "start_route": "all",
+    "runtime": {},
+    "nodes": {
+      "collect": {
+        "id": "collect",
+        "label": "Collect execution evidence",
+        "route": "all",
+        "input_expression": {
+          "material": "execution"
+        },
+        "outputs": [
+          "evidence"
+        ],
+        "required_outputs": [
+          "evidence"
+        ],
+        "prompt": "Collect real trace hashes, Git diff, child report and coverage checklist without substituting a model summary for raw evidence.",
+        "acceptance_criteria": [
+          "Evidence links the actual execution to the resulting files."
+        ]
+      },
+      "dispatch": {
+        "id": "dispatch",
+        "label": "Dispatch SubAgent",
+        "route": "all",
+        "input_expression": {
+          "material": "admission"
+        },
+        "outputs": [
+          "execution"
+        ],
+        "required_outputs": [
+          "execution"
+        ],
+        "prompt": "The guarded executor must revalidate admission immediately before starting one real Codex implementer. Save execution only after successful process completion.",
+        "acceptance_criteria": [
+          "A real child was started after revalidation and returned zero with a terminal turn completion."
+        ]
+      },
+      "prepare": {
+        "id": "prepare",
+        "label": "Prepare task",
+        "route": "all",
+        "outputs": [
+          "preparation"
+        ],
+        "required_outputs": [
+          "preparation"
+        ],
+        "prompt": "Prepare the approved fixture task using the guarded example executor. Save the actual brief-generation receipt, base SHA and Todo event as preparation.",
+        "acceptance_criteria": [
+          "Receipt contains the observed nonempty brief hash, task id, expected base SHA and recorded in_progress event."
+        ]
+      },
+      "record": {
+        "id": "record",
+        "label": "Record result",
+        "route": "all",
+        "input_expression": {
+          "material": "completion"
+        },
+        "outputs": [
+          "result"
+        ],
+        "required_outputs": [
+          "result"
+        ],
+        "prompt": "Record final success and completed Todo only after all completion checks have succeeded.",
+        "acceptance_criteria": [
+          "Final status and observable Todo both agree with validated execution."
+        ]
+      },
+      "validate_completion": {
+        "id": "validate_completion",
+        "label": "Validate completion",
+        "route": "all",
+        "input_expression": {
+          "material": "evidence"
+        },
+        "outputs": [
+          "completion"
+        ],
+        "required_outputs": [
+          "completion"
+        ],
+        "prompt": "Check every fixed coverage id and run the unchanged independent tests using the deterministic executor. Reject missing, duplicate or skipped coverage for complete success.",
+        "acceptance_criteria": [
+          "The exact coverage set is DONE, fixed tests are unchanged and all pass."
+        ]
+      },
+      "validate_dispatch": {
+        "id": "validate_dispatch",
+        "label": "Validate dispatch preconditions",
+        "route": "all",
+        "input_expression": {
+          "material": "preparation"
+        },
+        "outputs": [
+          "admission"
+        ],
+        "required_outputs": [
+          "admission"
+        ],
+        "prompt": "Use the deterministic executor to inspect the prepared files and actual Git HEAD. Save admission only when every dispatch check passes.",
+        "acceptance_criteria": [
+          "All actual prerequisites pass; absent evidence must fail the attempt."
+        ]
+      }
+    },
+    "control_edges": [
+      {
+        "id": "dispatch->collect",
+        "from": "dispatch",
+        "to": "collect"
+      },
+      {
+        "id": "collect->validate_completion",
+        "from": "collect",
+        "to": "validate_completion"
+      },
+      {
+        "id": "validate_completion->record",
+        "from": "validate_completion",
+        "to": "record"
+      },
+      {
+        "id": "record->__end__",
+        "from": "record",
+        "to": "__end__"
+      },
+      {
+        "id": "__start__->prepare",
+        "from": "__start__",
+        "to": "prepare"
+      },
+      {
+        "id": "prepare->validate_dispatch",
+        "from": "prepare",
+        "to": "validate_dispatch"
+      },
+      {
+        "id": "validate_dispatch->dispatch",
+        "from": "validate_dispatch",
+        "to": "dispatch"
+      }
+    ],
+    "material_producers": {
+      "admission": {
+        "kind": "step",
+        "step_id": "validate_dispatch"
+      },
+      "completion": {
+        "kind": "step",
+        "step_id": "validate_completion"
+      },
+      "evidence": {
+        "kind": "step",
+        "step_id": "collect"
+      },
+      "execution": {
+        "kind": "step",
+        "step_id": "dispatch"
+      },
+      "preparation": {
+        "kind": "step",
+        "step_id": "prepare"
+      },
+      "result": {
+        "kind": "step",
+        "step_id": "record"
+      }
+    },
+    "material_types": {
+      "admission": "json",
+      "completion": "json",
+      "evidence": "json",
+      "execution": "json",
+      "preparation": "json",
+      "result": "json"
+    },
+    "material_cardinalities": {
+      "admission": "single",
+      "completion": "single",
+      "evidence": "single",
+      "execution": "single",
+      "preparation": "single",
+      "result": "single"
+    },
+    "input_expressions": {
+      "collect": {
+        "material": "execution"
+      },
+      "dispatch": {
+        "material": "admission"
+      },
+      "record": {
+        "material": "completion"
+      },
+      "validate_completion": {
+        "material": "evidence"
+      },
+      "validate_dispatch": {
+        "material": "preparation"
+      }
+    },
+    "optional_inputs": {
+      "collect": null,
+      "dispatch": null,
+      "prepare": null,
+      "record": null,
+      "validate_completion": null,
+      "validate_dispatch": null
+    },
+    "static_order": [
+      "__start__",
+      "prepare",
+      "validate_dispatch",
+      "dispatch",
+      "collect",
+      "validate_completion",
+      "record",
+      "__end__"
+    ]
+  },
+  "contains_scripts": false,
+  "files": {
+    "scenario/scenario.md": "IyBTdXBlcnBvd2VycyBkaXNwYXRjaCByZWxpYWJpbGl0eQoKUnVuIHRoaXMgcGFja2FnZSBvbmx5IHdpdGggdGhlIGV4dGVybmFsIGV4ZWN1dG9yIGluCmBleGFtcGxlcy9zdXBlcnBvd2Vycy13b3JrZmxvdy1yZWxpYWJpbGl0eS9ydW4ucHlgLgpJdCBleGVjdXRlcyBvbmUgYXBwcm92ZWQgZml4dHVyZSB0YXNrIGluIGEgZGlzcG9zYWJsZSBHaXQgd29ya3RyZWUsIGNoZWNrcyBkaXNwYXRjaApwcmVyZXF1aXNpdGVzLCByZWNvcmRzIGEgcmVhbCBjaGlsZCBwcm9jZXNzIGFuZCB2ZXJpZmllcyBlbnVtZXJhYmxlIGNvdmVyYWdlLgpUaGUgc2l4IEpTT04gb3V0cHV0cyBjb250YWluIG1lYXN1cmVkIHJlY2VpcHRzLgoKVGhlIFlBTUwgZGVmaW5lcyBncmFwaCBkZXBlbmRlbmNpZXMgYW5kIHJlcXVpcmVkIGFydGlmYWN0cy4gVGhlIGFjY29tcGFueWluZwpleGVjdXRvciBvd25zIHRoZSBwcmUtZGlzcGF0Y2ggYW5kIGNvbXBsZXRpb24gY2hlY2tzLiBMb2FkaW5nIHRoaXMgcGFja2FnZSBpbnRvCmFub3RoZXIgaG9zdCBkb2VzIG5vdCBpbnRlcmNlcHQgdGhhdCBob3N0J3MgdG9vbHMuIE1vZGVsIGlkZW50aXR5IGlzIHJlY29yZGVkIG9ubHkKd2hlbiBvYnNlcnZhYmxlOyBhIHJlcXVlc3RlZCBtb2RlbCBuYW1lIGlzIG5vdCBwcm9vZiBvZiB0aGUgYmFja2VuZCBtb2RlbC4KClN0ZXBzOiBgcHJlcGFyZWAgZ2VuZXJhdGVzIHRoZSBicmllZiBhbmQgb2JzZXJ2YWJsZSBUb2RvOyBgdmFsaWRhdGVfZGlzcGF0Y2hgCmNoZWNrcyBhY3R1YWwgcHJlcmVxdWlzaXRlczsgYGRpc3BhdGNoYCByZWNoZWNrcyBhbmQgc3RhcnRzIHRoZSBjaGlsZDsgYGNvbGxlY3RgCnJldGFpbnMgZXhlY3V0aW9uIGV2aWRlbmNlOyBgdmFsaWRhdGVfY29tcGxldGlvbmAgY2hlY2tzIGNvdmVyYWdlIGFuZCB0ZXN0czsKYHJlY29yZGAgbWFya3MgdGhlIHRhc2sgY29tcGxldGUuCg==",
+    "scenario/state.yml": "aW5pdGlhbDogX19zdGFydF9fCnRyYW5zaXRpb25zOgogIF9fc3RhcnRfXzogW3t0bzogcHJlcGFyZX1dCiAgcHJlcGFyZTogW3t0bzogdmFsaWRhdGVfZGlzcGF0Y2h9XQogIHZhbGlkYXRlX2Rpc3BhdGNoOiBbe3RvOiBkaXNwYXRjaH1dCiAgZGlzcGF0Y2g6IFt7dG86IGNvbGxlY3R9XQogIGNvbGxlY3Q6IFt7dG86IHZhbGlkYXRlX2NvbXBsZXRpb259XQogIHZhbGlkYXRlX2NvbXBsZXRpb246IFt7dG86IHJlY29yZH1dCiAgcmVjb3JkOiBbe3RvOiBfX2VuZF9ffV0Kc3RlcHM6CiAgcHJlcGFyZToKICAgIGxhYmVsOiBQcmVwYXJlIHRhc2sKICAgIHByb21wdDogUHJlcGFyZSB0aGUgYXBwcm92ZWQgZml4dHVyZSB0YXNrIHVzaW5nIHRoZSBndWFyZGVkIGV4YW1wbGUgZXhlY3V0b3IuIFNhdmUgdGhlIGFjdHVhbCBicmllZi1nZW5lcmF0aW9uIHJlY2VpcHQsIGJhc2UgU0hBIGFuZCBUb2RvIGV2ZW50IGFzIHByZXBhcmF0aW9uLgogICAgb3V0cHV0czogW3ttYXRlcmlhbDogcHJlcGFyYXRpb24sIHJlcXVpcmVkOiB0cnVlfV0KICAgIGFjY2VwdGFuY2VfY3JpdGVyaWE6IFJlY2VpcHQgY29udGFpbnMgdGhlIG9ic2VydmVkIG5vbmVtcHR5IGJyaWVmIGhhc2gsIHRhc2sgaWQsIGV4cGVjdGVkIGJhc2UgU0hBIGFuZCByZWNvcmRlZCBpbl9wcm9ncmVzcyBldmVudC4KICB2YWxpZGF0ZV9kaXNwYXRjaDoKICAgIGxhYmVsOiBWYWxpZGF0ZSBkaXNwYXRjaCBwcmVjb25kaXRpb25zCiAgICBwcm9tcHQ6IFVzZSB0aGUgZGV0ZXJtaW5pc3RpYyBleGVjdXRvciB0byBpbnNwZWN0IHRoZSBwcmVwYXJlZCBmaWxlcyBhbmQgYWN0dWFsIEdpdCBIRUFELiBTYXZlIGFkbWlzc2lvbiBvbmx5IHdoZW4gZXZlcnkgZGlzcGF0Y2ggY2hlY2sgcGFzc2VzLgogICAgaW5wdXRzOiBbe21hdGVyaWFsOiBwcmVwYXJhdGlvbiwgcmVxdWlyZWQ6IHRydWV9XQogICAgb3V0cHV0czogW3ttYXRlcmlhbDogYWRtaXNzaW9uLCByZXF1aXJlZDogdHJ1ZX1dCiAgICBhY2NlcHRhbmNlX2NyaXRlcmlhOiBBbGwgYWN0dWFsIHByZXJlcXVpc2l0ZXMgcGFzczsgYWJzZW50IGV2aWRlbmNlIG11c3QgZmFpbCB0aGUgYXR0ZW1wdC4KICBkaXNwYXRjaDoKICAgIGxhYmVsOiBEaXNwYXRjaCBTdWJBZ2VudAogICAgcHJvbXB0OiBUaGUgZ3VhcmRlZCBleGVjdXRvciBtdXN0IHJldmFsaWRhdGUgYWRtaXNzaW9uIGltbWVkaWF0ZWx5IGJlZm9yZSBzdGFydGluZyBvbmUgcmVhbCBDb2RleCBpbXBsZW1lbnRlci4gU2F2ZSBleGVjdXRpb24gb25seSBhZnRlciBzdWNjZXNzZnVsIHByb2Nlc3MgY29tcGxldGlvbi4KICAgIGlucHV0czogW3ttYXRlcmlhbDogYWRtaXNzaW9uLCByZXF1aXJlZDogdHJ1ZX1dCiAgICBvdXRwdXRzOiBbe21hdGVyaWFsOiBleGVjdXRpb24sIHJlcXVpcmVkOiB0cnVlfV0KICAgIGFjY2VwdGFuY2VfY3JpdGVyaWE6IEEgcmVhbCBjaGlsZCB3YXMgc3RhcnRlZCBhZnRlciByZXZhbGlkYXRpb24gYW5kIHJldHVybmVkIHplcm8gd2l0aCBhIHRlcm1pbmFsIHR1cm4gY29tcGxldGlvbi4KICBjb2xsZWN0OgogICAgbGFiZWw6IENvbGxlY3QgZXhlY3V0aW9uIGV2aWRlbmNlCiAgICBwcm9tcHQ6IENvbGxlY3QgcmVhbCB0cmFjZSBoYXNoZXMsIEdpdCBkaWZmLCBjaGlsZCByZXBvcnQgYW5kIGNvdmVyYWdlIGNoZWNrbGlzdCB3aXRob3V0IHN1YnN0aXR1dGluZyBhIG1vZGVsIHN1bW1hcnkgZm9yIHJhdyBldmlkZW5jZS4KICAgIGlucHV0czogW3ttYXRlcmlhbDogZXhlY3V0aW9uLCByZXF1aXJlZDogdHJ1ZX1dCiAgICBvdXRwdXRzOiBbe21hdGVyaWFsOiBldmlkZW5jZSwgcmVxdWlyZWQ6IHRydWV9XQogICAgYWNjZXB0YW5jZV9jcml0ZXJpYTogRXZpZGVuY2UgbGlua3MgdGhlIGFjdHVhbCBleGVjdXRpb24gdG8gdGhlIHJlc3VsdGluZyBmaWxlcy4KICB2YWxpZGF0ZV9jb21wbGV0aW9uOgogICAgbGFiZWw6IFZhbGlkYXRlIGNvbXBsZXRpb24KICAgIHByb21wdDogQ2hlY2sgZXZlcnkgZml4ZWQgY292ZXJhZ2UgaWQgYW5kIHJ1biB0aGUgdW5jaGFuZ2VkIGluZGVwZW5kZW50IHRlc3RzIHVzaW5nIHRoZSBkZXRlcm1pbmlzdGljIGV4ZWN1dG9yLiBSZWplY3QgbWlzc2luZywgZHVwbGljYXRlIG9yIHNraXBwZWQgY292ZXJhZ2UgZm9yIGNvbXBsZXRlIHN1Y2Nlc3MuCiAgICBpbnB1dHM6IFt7bWF0ZXJpYWw6IGV2aWRlbmNlLCByZXF1aXJlZDogdHJ1ZX1dCiAgICBvdXRwdXRzOiBbe21hdGVyaWFsOiBjb21wbGV0aW9uLCByZXF1aXJlZDogdHJ1ZX1dCiAgICBhY2NlcHRhbmNlX2NyaXRlcmlhOiBUaGUgZXhhY3QgY292ZXJhZ2Ugc2V0IGlzIERPTkUsIGZpeGVkIHRlc3RzIGFyZSB1bmNoYW5nZWQgYW5kIGFsbCBwYXNzLgogIHJlY29yZDoKICAgIGxhYmVsOiBSZWNvcmQgcmVzdWx0CiAgICBwcm9tcHQ6IFJlY29yZCBmaW5hbCBzdWNjZXNzIGFuZCBjb21wbGV0ZWQgVG9kbyBvbmx5IGFmdGVyIGFsbCBjb21wbGV0aW9uIGNoZWNrcyBoYXZlIHN1Y2NlZWRlZC4KICAgIGlucHV0czogW3ttYXRlcmlhbDogY29tcGxldGlvbiwgcmVxdWlyZWQ6IHRydWV9XQogICAgb3V0cHV0czogW3ttYXRlcmlhbDogcmVzdWx0LCByZXF1aXJlZDogdHJ1ZX1dCiAgICBhY2NlcHRhbmNlX2NyaXRlcmlhOiBGaW5hbCBzdGF0dXMgYW5kIG9ic2VydmFibGUgVG9kbyBib3RoIGFncmVlIHdpdGggdmFsaWRhdGVkIGV4ZWN1dGlvbi4K",
+    "workflow.yaml": "ZGVzY3JpcHRpb246IFZlcmlmeSBkaXNwYXRjaCBwcmVyZXF1aXNpdGVzIGFuZCBlbnVtZXJhYmxlIHRhc2sgY29tcGxldGlvbiB1c2luZyB0aGUgZXhhbXBsZSBleHRlcm5hbCBleGVjdXRvci4KaWQ6IHN1cGVycG93ZXJzLXJlbGlhYmlsaXR5Cm5hbWU6IFN1cGVycG93ZXJzIGRpc3BhdGNoIHJlbGlhYmlsaXR5CnNsb3RzOgogICAgLSBjYXJkaW5hbGl0eTogc2luZ2xlCiAgICAgIGlkOiBwcmVwYXJhdGlvbgogICAgICBsYWJlbDogUHJlcGFyYXRpb24KICAgICAgdHlwZToganNvbgogICAgLSBjYXJkaW5hbGl0eTogc2luZ2xlCiAgICAgIGlkOiBhZG1pc3Npb24KICAgICAgbGFiZWw6IERpc3BhdGNoIGFkbWlzc2lvbgogICAgICB0eXBlOiBqc29uCiAgICAtIGNhcmRpbmFsaXR5OiBzaW5nbGUKICAgICAgaWQ6IGV4ZWN1dGlvbgogICAgICBsYWJlbDogQ2hpbGQgZXhlY3V0aW9uCiAgICAgIHR5cGU6IGpzb24KICAgIC0gY2FyZGluYWxpdHk6IHNpbmdsZQogICAgICBpZDogZXZpZGVuY2UKICAgICAgbGFiZWw6IEV4ZWN1dGlvbiBldmlkZW5jZQogICAgICB0eXBlOiBqc29uCiAgICAtIGNhcmRpbmFsaXR5OiBzaW5nbGUKICAgICAgaWQ6IGNvbXBsZXRpb24KICAgICAgbGFiZWw6IENvbXBsZXRpb24gY2hlY2tzCiAgICAgIHR5cGU6IGpzb24KICAgIC0gY2FyZGluYWxpdHk6IHNpbmdsZQogICAgICBpZDogcmVzdWx0CiAgICAgIGxhYmVsOiBSZXN1bHQKICAgICAgdHlwZToganNvbgpzdGVwczoKICAgIC0gaWQ6IHByZXBhcmUKICAgICAgbGFiZWw6IFByZXBhcmUgdGFzawogICAgLSBpZDogdmFsaWRhdGVfZGlzcGF0Y2gKICAgICAgbGFiZWw6IFZhbGlkYXRlIGRpc3BhdGNoIHByZWNvbmRpdGlvbnMKICAgIC0gaWQ6IGRpc3BhdGNoCiAgICAgIGxhYmVsOiBEaXNwYXRjaCBTdWJBZ2VudAogICAgLSBpZDogY29sbGVjdAogICAgICBsYWJlbDogQ29sbGVjdCBleGVjdXRpb24gZXZpZGVuY2UKICAgIC0gaWQ6IHZhbGlkYXRlX2NvbXBsZXRpb24KICAgICAgbGFiZWw6IFZhbGlkYXRlIGNvbXBsZXRpb24KICAgIC0gaWQ6IHJlY29yZAogICAgICBsYWJlbDogUmVjb3JkIHJlc3VsdAp1aToKICAgIHRhYnM6CiAgICAgICAgLSBpZDogcHJlcGFyZQogICAgICAgICAgbGFiZWw6IFByZXBhcmUgdGFzawogICAgICAgICAgbGF5b3V0OiB2ZXJ0aWNhbAogICAgICAgICAgc2xvdHM6CiAgICAgICAgICAgIC0gY2FyZGluYWxpdHk6IHNpbmdsZQogICAgICAgICAgICAgIGlkOiBwcmVwYXJhdGlvbgogICAgICAgICAgICAgIGxhYmVsOiBQcmVwYXJhdGlvbgogICAgICAgICAgICAgIHR5cGU6IGpzb24KICAgICAgICAgIHN0ZXBfaWQ6IHByZXBhcmUKICAgICAgICAtIGlkOiB2YWxpZGF0ZV9kaXNwYXRjaAogICAgICAgICAgbGFiZWw6IFZhbGlkYXRlIGRpc3BhdGNoIHByZWNvbmRpdGlvbnMKICAgICAgICAgIGxheW91dDogdmVydGljYWwKICAgICAgICAgIHNsb3RzOgogICAgICAgICAgICAtIGNhcmRpbmFsaXR5OiBzaW5nbGUKICAgICAgICAgICAgICBpZDogYWRtaXNzaW9uCiAgICAgICAgICAgICAgbGFiZWw6IERpc3BhdGNoIGFkbWlzc2lvbgogICAgICAgICAgICAgIHR5cGU6IGpzb24KICAgICAgICAgIHN0ZXBfaWQ6IHZhbGlkYXRlX2Rpc3BhdGNoCiAgICAgICAgLSBpZDogZGlzcGF0Y2gKICAgICAgICAgIGxhYmVsOiBEaXNwYXRjaCBTdWJBZ2VudAogICAgICAgICAgbGF5b3V0OiB2ZXJ0aWNhbAogICAgICAgICAgc2xvdHM6CiAgICAgICAgICAgIC0gY2FyZGluYWxpdHk6IHNpbmdsZQogICAgICAgICAgICAgIGlkOiBleGVjdXRpb24KICAgICAgICAgICAgICBsYWJlbDogQ2hpbGQgZXhlY3V0aW9uCiAgICAgICAgICAgICAgdHlwZToganNvbgogICAgICAgICAgc3RlcF9pZDogZGlzcGF0Y2gKICAgICAgICAtIGlkOiBjb2xsZWN0CiAgICAgICAgICBsYWJlbDogQ29sbGVjdCBleGVjdXRpb24gZXZpZGVuY2UKICAgICAgICAgIGxheW91dDogdmVydGljYWwKICAgICAgICAgIHNsb3RzOgogICAgICAgICAgICAtIGNhcmRpbmFsaXR5OiBzaW5nbGUKICAgICAgICAgICAgICBpZDogZXZpZGVuY2UKICAgICAgICAgICAgICBsYWJlbDogRXhlY3V0aW9uIGV2aWRlbmNlCiAgICAgICAgICAgICAgdHlwZToganNvbgogICAgICAgICAgc3RlcF9pZDogY29sbGVjdAogICAgICAgIC0gaWQ6IHZhbGlkYXRlX2NvbXBsZXRpb24KICAgICAgICAgIGxhYmVsOiBWYWxpZGF0ZSBjb21wbGV0aW9uCiAgICAgICAgICBsYXlvdXQ6IHZlcnRpY2FsCiAgICAgICAgICBzbG90czoKICAgICAgICAgICAgLSBjYXJkaW5hbGl0eTogc2luZ2xlCiAgICAgICAgICAgICAgaWQ6IGNvbXBsZXRpb24KICAgICAgICAgICAgICBsYWJlbDogQ29tcGxldGlvbiBjaGVja3MKICAgICAgICAgICAgICB0eXBlOiBqc29uCiAgICAgICAgICBzdGVwX2lkOiB2YWxpZGF0ZV9jb21wbGV0aW9uCiAgICAgICAgLSBpZDogcmVjb3JkCiAgICAgICAgICBsYWJlbDogUmVjb3JkIHJlc3VsdAogICAgICAgICAgbGF5b3V0OiB2ZXJ0aWNhbAogICAgICAgICAgc2xvdHM6CiAgICAgICAgICAgIC0gY2FyZGluYWxpdHk6IHNpbmdsZQogICAgICAgICAgICAgIGlkOiByZXN1bHQKICAgICAgICAgICAgICBsYWJlbDogUmVzdWx0CiAgICAgICAgICAgICAgdHlwZToganNvbgogICAgICAgICAgc3RlcF9pZDogcmVjb3JkCndoZW5fdG9fdXNlOiBVc2Ugb25seSBmb3IgdGhlIGlzb2xhdGVkIFN1cGVycG93ZXJzIHJlbGlhYmlsaXR5IGV4YW1wbGUgd2l0aCBpdHMgZ3VhcmRlZCBleHRlcm5hbCBleGVjdXRvci4K"
+  }
+}

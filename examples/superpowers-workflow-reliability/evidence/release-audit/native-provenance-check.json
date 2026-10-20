@@ -1,0 +1,26 @@
+{
+  "result": "PASS",
+  "source_matches_manifest": true,
+  "tool_export_byte_equal_to_original_raw": true,
+  "events": 34,
+  "brief_call_at": "2026-10-19T16:34:20.081Z",
+  "brief_receipt_at": "2026-10-19T16:34:20.229Z",
+  "spawns": [
+    {
+      "call_id": "call_8a735dcbe9aa423bbd8d3311c67e9d85",
+      "call_at": "2026-10-19T16:34:42.789Z",
+      "receipt_at": "2026-10-19T16:34:42.916Z"
+    },
+    {
+      "call_id": "call_c721096cb2ca48db9f735ff796473cc0",
+      "call_at": "2026-10-19T16:36:02.297Z",
+      "receipt_at": "2026-10-19T16:36:02.386Z"
+    },
+    {
+      "call_id": "call_ba13c377ede24032a59c431909308768",
+      "call_at": "2026-10-19T16:36:38.359Z",
+      "receipt_at": "2026-10-19T16:36:38.463Z"
+    }
+  ],
+  "backend_model_attestation": "N/A"
+}

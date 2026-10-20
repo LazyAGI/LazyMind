@@ -1,0 +1,8 @@
+Implemented and committed as `cf52caa` (only `slug.py`).
+
+- `python3 -m unittest -v`: before—3 expected errors; after—3 passed.
+- Six supplemental edge cases passed; self-review completed.
+- Tests unchanged; no push.
+- Wrote `.eval/implementer-report.md` and `.eval/coverage.json`, with all three requirements marked `DONE`.
+
+No concerns within the approved task scope.

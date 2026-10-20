@@ -1,0 +1,8 @@
+{
+  "result": "PASS",
+  "overlap_recomputed_seconds": 57.548,
+  "parent_snapshot_equal": true,
+  "distinct_worktrees": true,
+  "distinct_indexes": true,
+  "limits": "saved bounded cooperative experiment independently cross-checked; not rerun parallel or adversarial processes"
+}

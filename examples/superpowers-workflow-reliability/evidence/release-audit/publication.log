@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "$AUDIT_ROOT/checkout/examples/superpowers-workflow-reliability/run.py", line 159, in <module>
+    main()
+  File "$AUDIT_ROOT/checkout/examples/superpowers-workflow-reliability/run.py", line 47, in main
+    result = runtime.publish(package)
+  File "$AUDIT_ROOT/checkout/examples/superpowers-workflow-reliability/runtime.py", line 60, in publish
+    return self.call("POST", f"/workflow-authoring/v1/drafts/{draft_id}:publish", {})
+  File "$AUDIT_ROOT/checkout/examples/superpowers-workflow-reliability/runtime.py", line 45, in call
+    raise GateError("RUNTIME_REJECTED", {"status": status, "response": public(data)})
+gates.GateError: RUNTIME_REJECTED

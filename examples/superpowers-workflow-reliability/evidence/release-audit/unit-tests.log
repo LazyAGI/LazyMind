@@ -1,0 +1,33 @@
+test_actual_head_change_blocks_launch (test_gates.Gates) ... ok
+test_changed_brief_invalidates_prior_admission (test_gates.Gates) ... ok
+test_checklist_cannot_hide_failing_code (test_gates.Gates) ... ok
+test_coverage_missing_duplicate_extra_and_skipped (test_gates.Gates) ... ok
+test_coverage_requires_nonempty_text_evidence (test_gates.Gates) ... ok
+test_dirty_base (test_gates.Gates) ... ok
+test_dispatch_failure_is_not_success (test_gates.Gates) ... ok
+test_distinct_worktrees_have_distinct_indexes (test_gates.Gates) ... ok
+test_empty_brief_blocks_actual_callback (test_gates.Gates) ... ok
+test_lock_prevents_duplicate_launch (test_gates.Gates) ... ok
+test_missing_brief_blocks_actual_callback (test_gates.Gates) ... ok
+test_missing_terminal_event_is_not_success (test_gates.Gates) ... ok
+test_missing_todo (test_gates.Gates) ... ok
+test_modified_tests_rejected (test_gates.Gates) ... ok
+test_normal_dispatch (test_gates.Gates) ... ok
+test_same_worktree_rejected (test_gates.Gates) ... ok
+test_stale_todo (test_gates.Gates) ... ok
+test_symlink_brief_blocked (test_gates.Gates) ... ok
+test_unobserved_todo (test_gates.Gates) ... ok
+test_validation_cannot_be_skipped (test_gates.Gates) ... ok
+test_wrong_base (test_gates.Gates) ... ok
+test_accepts_distinct_overlapping_workers (test_parallel.ParallelEvidence) ... ok
+test_incomplete_results_cannot_pass (test_parallel.ParallelEvidence) ... ok
+test_parent_repository_must_remain_unchanged (test_parallel.ParallelEvidence) ... ok
+test_serial_success_is_not_parallel_success (test_parallel.ParallelEvidence) ... ok
+test_shared_index_and_shared_session_fail (test_parallel.ParallelEvidence) ... ok
+test_encrypted_message_is_omitted (test_trace_export.ToolTraceExport) ... ok
+test_only_tool_events_from_matching_workspace (test_trace_export.ToolTraceExport) ... ok
+
+----------------------------------------------------------------------
+Ran 28 tests in 3.626s
+
+OK

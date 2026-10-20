@@ -1,0 +1,7 @@
+Implemented and committed as `c377f29` (only `slug.py`).
+
+- `python3 -m unittest -v`: before—3 expected errors; after—all 3 passed.
+- Nine supplementary edge-case checks passed.
+- Tests unchanged; self-review complete; no unresolved concerns.
+- Wrote `.eval/implementer-report.md` and `.eval/coverage.json`, with exactly three `DONE` entries.
+- Working tree clean. No push performed.

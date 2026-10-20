@@ -1,0 +1,40 @@
+{
+  "parent": {
+    "worktree": "$EVAL_ROOT/parallel-workflows/repository",
+    "head": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd",
+    "git_dir": "$EVAL_ROOT/parallel-workflows/repository/.git",
+    "index": "$EVAL_ROOT/parallel-workflows/repository/.git/index",
+    "common_dir": "$EVAL_ROOT/parallel-workflows/repository/.git",
+    "branch": "main",
+    "tree": "00efc799a02b0a9a8aeca332ba154ba5cdfddce3",
+    "tracked_status": "",
+    "slug_sha256": "f834e1b5b244ca3f875cf0b3dfab486fc64b3d945328d255761f207292fbbfcc",
+    "index_sha256": "c261e46c8cf52f66810cb76bc57d369edb23084a3494ff20e20f4e69e6440d22"
+  },
+  "workers": [
+    {
+      "worktree": "$EVAL_ROOT/parallel-workflows/worktree",
+      "head": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd",
+      "git_dir": "$EVAL_ROOT/parallel-workflows/repository/.git/worktrees/worktree",
+      "index": "$EVAL_ROOT/parallel-workflows/repository/.git/worktrees/worktree/index",
+      "common_dir": "$EVAL_ROOT/parallel-workflows/repository/.git",
+      "branch": "evaluation",
+      "tree": "00efc799a02b0a9a8aeca332ba154ba5cdfddce3",
+      "tracked_status": "",
+      "slug_sha256": "f834e1b5b244ca3f875cf0b3dfab486fc64b3d945328d255761f207292fbbfcc",
+      "index_sha256": "453d46fd0cc5a270d5ae670515598a8ea374a213b4b284d23e0ac2439fb91157"
+    },
+    {
+      "worktree": "$EVAL_ROOT/parallel-workflows/worktree-b",
+      "head": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd",
+      "git_dir": "$EVAL_ROOT/parallel-workflows/repository/.git/worktrees/worktree-b",
+      "index": "$EVAL_ROOT/parallel-workflows/repository/.git/worktrees/worktree-b/index",
+      "common_dir": "$EVAL_ROOT/parallel-workflows/repository/.git",
+      "branch": "evaluation-b",
+      "tree": "00efc799a02b0a9a8aeca332ba154ba5cdfddce3",
+      "tracked_status": "",
+      "slug_sha256": "f834e1b5b244ca3f875cf0b3dfab486fc64b3d945328d255761f207292fbbfcc",
+      "index_sha256": "cf04f7c1f01a5bab3299be23bcbcc6083f14b5eeaa3f4e5971bf8ed08541cfd5"
+    }
+  ]
+}

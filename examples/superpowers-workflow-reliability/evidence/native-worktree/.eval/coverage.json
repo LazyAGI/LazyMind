@@ -1,0 +1,5 @@
+[
+  { "id": "spaces", "status": "DONE", "evidence": "test_spaces" },
+  { "id": "punctuation", "status": "DONE", "evidence": "test_punctuation" },
+  { "id": "empty", "status": "DONE", "evidence": "test_empty" }
+]

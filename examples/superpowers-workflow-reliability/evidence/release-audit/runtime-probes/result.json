@@ -1,0 +1,215 @@
+{
+  "kind": "real-runtime-api-negative-tests",
+  "model_calls": 0,
+  "checks": [
+    {
+      "case": "downstream_before_preparation",
+      "rejected": true,
+      "error": {
+        "status": 409,
+        "response": {
+          "error": {
+            "code": "STEP_NOT_REACHABLE",
+            "message": "target step is not currently reachable"
+          },
+          "ok": false
+        }
+      }
+    },
+    {
+      "case": "success_without_required_output",
+      "rejected": true,
+      "error": {
+        "status": 422,
+        "response": {
+          "contract_version": "workflow.v1",
+          "ok": false,
+          "error": {
+            "code": "REQUIRED_OUTPUT_MISSING",
+            "message": "required output missing: preparation",
+            "retryable": false
+          }
+        }
+      }
+    }
+  ],
+  "control": {
+    "control": {
+      "protocol": "workflow.control.v1",
+      "session_id": "10ea0dbbafa940afa7a7e348bab80cad",
+      "state_version": 5,
+      "continuation": "failed",
+      "admission": {
+        "can_begin": false,
+        "reason": "recovery_required"
+      },
+      "reviews": [],
+      "binding": {
+        "bound": false
+      },
+      "delivery": null,
+      "active_executions": 0,
+      "native_execution_ids": [],
+      "active_execution_ids": [],
+      "available_actions": [
+        "stop",
+        "save",
+        "rewind",
+        "retry"
+      ]
+    },
+    "projection": {
+      "past": null,
+      "current": [
+        "prepare"
+      ],
+      "reachable": null,
+      "ready": null,
+      "retryable": [
+        "prepare"
+      ],
+      "rewindable": null,
+      "continue": null,
+      "blocked": null,
+      "stale": null,
+      "pruned": null,
+      "bypassed": null,
+      "nodes": {
+        "collect": {
+          "id": "collect",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "dispatch": {
+          "id": "dispatch",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "prepare": {
+          "id": "prepare",
+          "requires_approval": false,
+          "execution": "failed",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "record": {
+          "id": "record",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "validate_completion": {
+          "id": "validate_completion",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "validate_dispatch": {
+          "id": "validate_dispatch",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "dispatch",
+          "to": "collect",
+          "state": "inactive"
+        },
+        {
+          "from": "collect",
+          "to": "validate_completion",
+          "state": "inactive"
+        },
+        {
+          "from": "validate_completion",
+          "to": "record",
+          "state": "inactive"
+        },
+        {
+          "from": "record",
+          "to": "__end__",
+          "state": "inactive"
+        },
+        {
+          "from": "__start__",
+          "to": "prepare",
+          "state": "active"
+        },
+        {
+          "from": "prepare",
+          "to": "validate_dispatch",
+          "state": "inactive"
+        },
+        {
+          "from": "validate_dispatch",
+          "to": "dispatch",
+          "state": "inactive"
+        }
+      ],
+      "end_reached": false,
+      "completed": false
+    },
+    "session": {
+      "state_version": 5,
+      "session_id": "10ea0dbbafa940afa7a7e348bab80cad",
+      "conversation_id": "",
+      "workflow_id": "superpowers-reliability",
+      "workflow_mode": "auto",
+      "pinned_revision_id": "1410bea3-ed40-4af0-909f-72dc084695dc",
+      "status": "failed",
+      "current_step_id": "",
+      "intent_context": "{\"text\":\"Run the approved isolated slug fixture reliability evaluation.\"}",
+      "created_at": "2026-10-20T03:13:22.669483Z",
+      "updated_at": "2026-10-20T03:13:22.721407Z",
+      "steps": [
+        {
+          "step_id": "prepare",
+          "attempt": 1,
+          "task_id": "337ad087-b5f6-463e-9c14-2290d3a315c2",
+          "status": "failed",
+          "validity": "effective",
+          "created_at": "2026-10-20T03:13:22.695257Z"
+        }
+      ]
+    }
+  }
+}

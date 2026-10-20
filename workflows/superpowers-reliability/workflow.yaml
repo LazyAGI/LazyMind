@@ -1,0 +1,18 @@
+id: superpowers-reliability
+name: Superpowers dispatch reliability
+description: Verify dispatch prerequisites and enumerable task completion using the example external executor.
+when_to_use: Use only for the isolated Superpowers reliability example with its guarded external executor.
+steps:
+  - {id: prepare, label: Prepare task}
+  - {id: validate_dispatch, label: Validate dispatch preconditions}
+  - {id: dispatch, label: Dispatch SubAgent}
+  - {id: collect, label: Collect execution evidence}
+  - {id: validate_completion, label: Validate completion}
+  - {id: record, label: Record result}
+slots:
+  - {id: preparation, label: Preparation, type: json, cardinality: single}
+  - {id: admission, label: Dispatch admission, type: json, cardinality: single}
+  - {id: execution, label: Child execution, type: json, cardinality: single}
+  - {id: evidence, label: Execution evidence, type: json, cardinality: single}
+  - {id: completion, label: Completion checks, type: json, cardinality: single}
+  - {id: result, label: Result, type: json, cardinality: single}

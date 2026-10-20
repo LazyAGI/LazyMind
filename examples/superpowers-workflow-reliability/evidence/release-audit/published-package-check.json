@@ -1,0 +1,17 @@
+{
+  "scenario/scenario.md": {
+    "local_sha256": "6a493b2091945d9b59ba458090f14bac76520edbe22cdeb2a9ddac498051c896",
+    "published_sha256": "6a493b2091945d9b59ba458090f14bac76520edbe22cdeb2a9ddac498051c896",
+    "exact_equal": true
+  },
+  "scenario/state.yml": {
+    "local_sha256": "b7d25c44eaad714b030b1882936ec255244a886a2eafa74c35b46c887347028c",
+    "published_sha256": "b7d25c44eaad714b030b1882936ec255244a886a2eafa74c35b46c887347028c",
+    "exact_equal": true
+  },
+  "workflow.yaml": {
+    "local_sha256": "a4b5c008ba593cf33769bb39b074de7b89f63558381c5648911e0c86010fc4b3",
+    "published_sha256": "00f6ae07ca14ab8d00a2518846f21debe6b506c52211212586f4feb7ab056675",
+    "exact_equal": false
+  }
+}

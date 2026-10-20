@@ -1,0 +1,593 @@
+{
+  "result": "PASS",
+  "cases": [
+    {
+      "case": "workflow-normal",
+      "session_id": "b9109941958e40b891e93d8549a69814",
+      "task_result": "PASS",
+      "failure": null,
+      "launch_count": 1,
+      "completed": true,
+      "states": {
+        "collect": "succeeded",
+        "dispatch": "succeeded",
+        "prepare": "succeeded",
+        "record": "succeeded",
+        "validate_completion": "succeeded",
+        "validate_dispatch": "succeeded"
+      },
+      "selected_slots": [
+        "admission",
+        "completion",
+        "evidence",
+        "execution",
+        "preparation",
+        "result"
+      ],
+      "live_projection_and_slots_match": true,
+      "revision": "90f1e32d-4383-4302-b27e-ed4ff1a48582",
+      "start": "2026-10-19T16:12:41.348019+00:00",
+      "end": "2026-10-19T16:14:14.506008+00:00",
+      "dispatch_events": 1,
+      "child": {
+        "started_at": "2026-10-19T16:13:32.466671+00:00",
+        "completed_at": "2026-10-19T16:14:14.187038+00:00",
+        "duration_seconds": 41.72,
+        "returncode": 0,
+        "turn_completed": true,
+        "requested_model": "gpt-6-astra",
+        "actual_backend_model": "N/A",
+        "usage": {
+          "input_tokens": 111315,
+          "cached_input_tokens": 97664,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 1207,
+          "reasoning_output_tokens": 25
+        },
+        "trace_sha256": "775763c1612a41afacff15e7bb4ff6c9ec263ebcb13adc136a8166489a9a337e"
+      },
+      "terminal_receipt_matches_usage": true,
+      "completion": {
+        "returncode": 0,
+        "test_sha256": "a76731b2cff72f34ce12f400d3c4c40429e5ff36e5c9073723dd0c3f998a9b35",
+        "changed_files": [
+          "slug.py"
+        ],
+        "independent_acceptance": null
+      }
+    },
+    {
+      "case": "workflow-final",
+      "session_id": "c78250e22e9349f6977d90b9ea1d178f",
+      "task_result": "PASS",
+      "failure": null,
+      "launch_count": 1,
+      "completed": true,
+      "states": {
+        "collect": "succeeded",
+        "dispatch": "succeeded",
+        "prepare": "succeeded",
+        "record": "succeeded",
+        "validate_completion": "succeeded",
+        "validate_dispatch": "succeeded"
+      },
+      "selected_slots": [
+        "admission",
+        "completion",
+        "evidence",
+        "execution",
+        "preparation",
+        "result"
+      ],
+      "live_projection_and_slots_match": true,
+      "revision": "1410bea3-ed40-4af0-909f-72dc084695dc",
+      "start": "2026-10-19T16:22:56.541707+00:00",
+      "end": "2026-10-19T16:23:47.478182+00:00",
+      "dispatch_events": 1,
+      "child": {
+        "started_at": "2026-10-19T16:22:56.869857+00:00",
+        "completed_at": "2026-10-19T16:23:47.079776+00:00",
+        "duration_seconds": 50.21,
+        "returncode": 0,
+        "turn_completed": true,
+        "requested_model": "gpt-6-astra",
+        "actual_backend_model": "N/A",
+        "usage": {
+          "input_tokens": 92354,
+          "cached_input_tokens": 83712,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 1395,
+          "reasoning_output_tokens": 15
+        },
+        "trace_sha256": "f69e8b833d0bd21fc3e60ecd9dfa3827f9d3718c3c32a1a3a00d5663ba358c5e"
+      },
+      "terminal_receipt_matches_usage": true,
+      "completion": {
+        "returncode": 0,
+        "test_sha256": "a76731b2cff72f34ce12f400d3c4c40429e5ff36e5c9073723dd0c3f998a9b35",
+        "changed_files": [
+          "slug.py"
+        ],
+        "independent_acceptance": {
+          "returncode": 0,
+          "stdout": "9 independent acceptance checks passed\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "case": "missing-brief/run",
+      "session_id": "6a618755f1134b2a86febc24276f2341",
+      "task_result": "FAIL",
+      "failure": "BRIEF_MISSING",
+      "launch_count": 0,
+      "completed": false,
+      "states": {
+        "collect": "none",
+        "dispatch": "none",
+        "prepare": "succeeded",
+        "record": "none",
+        "validate_completion": "none",
+        "validate_dispatch": "failed"
+      },
+      "selected_slots": [
+        "preparation"
+      ],
+      "live_projection_and_slots_match": true,
+      "revision": "90f1e32d-4383-4302-b27e-ed4ff1a48582",
+      "start": "2026-10-19T16:16:03.441696+00:00",
+      "end": "2026-10-19T16:16:03.587940+00:00",
+      "dispatch_events": 0
+    },
+    {
+      "case": "empty-brief/run",
+      "session_id": "088e96a0843e470bb0d38f22b9aecdc8",
+      "task_result": "FAIL",
+      "failure": "BRIEF_EMPTY",
+      "launch_count": 0,
+      "completed": false,
+      "states": {
+        "collect": "none",
+        "dispatch": "none",
+        "prepare": "succeeded",
+        "record": "none",
+        "validate_completion": "none",
+        "validate_dispatch": "failed"
+      },
+      "selected_slots": [
+        "preparation"
+      ],
+      "live_projection_and_slots_match": true,
+      "revision": "90f1e32d-4383-4302-b27e-ed4ff1a48582",
+      "start": "2026-10-19T16:16:03.745351+00:00",
+      "end": "2026-10-19T16:16:03.887259+00:00",
+      "dispatch_events": 0
+    },
+    {
+      "case": "wrong-base/run",
+      "session_id": "8ec3f614fb6f4d3ca2567f17903aa0fd",
+      "task_result": "FAIL",
+      "failure": "BASE_MISMATCH",
+      "launch_count": 0,
+      "completed": false,
+      "states": {
+        "collect": "none",
+        "dispatch": "none",
+        "prepare": "succeeded",
+        "record": "none",
+        "validate_completion": "none",
+        "validate_dispatch": "failed"
+      },
+      "selected_slots": [
+        "preparation"
+      ],
+      "live_projection_and_slots_match": true,
+      "revision": "90f1e32d-4383-4302-b27e-ed4ff1a48582",
+      "start": "2026-10-19T16:16:04.049998+00:00",
+      "end": "2026-10-19T16:16:04.224484+00:00",
+      "dispatch_events": 0
+    },
+    {
+      "case": "wrong-base-actual/run",
+      "session_id": "f1c3ce25d2f34b4a905f40400e1e0bc6",
+      "task_result": "FAIL",
+      "failure": "BASE_MISMATCH",
+      "launch_count": 0,
+      "completed": false,
+      "states": {
+        "collect": "none",
+        "dispatch": "none",
+        "prepare": "succeeded",
+        "record": "none",
+        "validate_completion": "none",
+        "validate_dispatch": "failed"
+      },
+      "selected_slots": [
+        "preparation"
+      ],
+      "live_projection_and_slots_match": true,
+      "revision": "1410bea3-ed40-4af0-909f-72dc084695dc",
+      "start": "2026-10-19T16:27:15.408944+00:00",
+      "end": "2026-10-19T16:27:15.652350+00:00",
+      "dispatch_events": 0
+    },
+    {
+      "case": "missing-coverage/run",
+      "session_id": "1d9beaa46785488981fa3d8eec5c582b",
+      "task_result": "FAIL",
+      "failure": "COVERAGE_MISMATCH",
+      "launch_count": 1,
+      "completed": false,
+      "states": {
+        "collect": "succeeded",
+        "dispatch": "succeeded",
+        "prepare": "succeeded",
+        "record": "none",
+        "validate_completion": "failed",
+        "validate_dispatch": "succeeded"
+      },
+      "selected_slots": [
+        "admission",
+        "evidence",
+        "execution",
+        "preparation"
+      ],
+      "live_projection_and_slots_match": true,
+      "revision": "90f1e32d-4383-4302-b27e-ed4ff1a48582",
+      "start": "2026-10-19T16:16:04.772558+00:00",
+      "end": "2026-10-19T16:16:49.388087+00:00",
+      "dispatch_events": 1,
+      "child": {
+        "started_at": "2026-10-19T16:16:05.033266+00:00",
+        "completed_at": "2026-10-19T16:16:49.183790+00:00",
+        "duration_seconds": 44.151,
+        "returncode": 0,
+        "turn_completed": true,
+        "requested_model": "gpt-6-astra",
+        "actual_backend_model": "N/A",
+        "usage": {
+          "input_tokens": 91577,
+          "cached_input_tokens": 78208,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 1425,
+          "reasoning_output_tokens": 13
+        },
+        "trace_sha256": "264c2d9473056a85db066b09cdb4787803186a59060152f7c63214f4c105ad1a"
+      },
+      "terminal_receipt_matches_usage": true
+    },
+    {
+      "case": "dispatch-failure/run",
+      "session_id": "f297fb89464544bbb11d9003398a7dc0",
+      "task_result": "FAIL",
+      "failure": "DISPATCH_FAILED",
+      "launch_count": 1,
+      "completed": false,
+      "states": {
+        "collect": "none",
+        "dispatch": "failed",
+        "prepare": "succeeded",
+        "record": "none",
+        "validate_completion": "none",
+        "validate_dispatch": "succeeded"
+      },
+      "selected_slots": [
+        "admission",
+        "preparation"
+      ],
+      "live_projection_and_slots_match": true,
+      "revision": "90f1e32d-4383-4302-b27e-ed4ff1a48582",
+      "start": "2026-10-19T16:16:04.358561+00:00",
+      "end": "2026-10-19T16:16:04.640261+00:00",
+      "dispatch_events": 1
+    },
+    {
+      "case": "missing-todo/run",
+      "session_id": "36879d14f2ab48e88614dc6120bc3ad0",
+      "task_result": "FAIL",
+      "failure": "TODO_MISSING",
+      "launch_count": 0,
+      "completed": false,
+      "states": {
+        "collect": "none",
+        "dispatch": "none",
+        "prepare": "succeeded",
+        "record": "none",
+        "validate_completion": "none",
+        "validate_dispatch": "failed"
+      },
+      "selected_slots": [
+        "preparation"
+      ],
+      "live_projection_and_slots_match": true,
+      "revision": "1410bea3-ed40-4af0-909f-72dc084695dc",
+      "start": "2026-10-20T02:37:44.647049+00:00",
+      "end": "2026-10-20T02:37:44.855388+00:00",
+      "dispatch_events": 0
+    },
+    {
+      "case": "stale-todo/run",
+      "session_id": "56b94277acaa403e867452e62647de4e",
+      "task_result": "FAIL",
+      "failure": "TODO_NOT_IN_PROGRESS",
+      "launch_count": 0,
+      "completed": false,
+      "states": {
+        "collect": "none",
+        "dispatch": "none",
+        "prepare": "succeeded",
+        "record": "none",
+        "validate_completion": "none",
+        "validate_dispatch": "failed"
+      },
+      "selected_slots": [
+        "preparation"
+      ],
+      "live_projection_and_slots_match": true,
+      "revision": "1410bea3-ed40-4af0-909f-72dc084695dc",
+      "start": "2026-10-20T02:37:44.996793+00:00",
+      "end": "2026-10-20T02:37:45.216801+00:00",
+      "dispatch_events": 0
+    },
+    {
+      "case": "retry-missing-brief/run",
+      "session_id": "941af8acf6224e7eb4bcf99cd19fd160",
+      "task_result": "PASS",
+      "failure": null,
+      "launch_count": 1,
+      "completed": true,
+      "states": {
+        "collect": "succeeded",
+        "dispatch": "succeeded",
+        "prepare": "succeeded",
+        "record": "succeeded",
+        "validate_completion": "succeeded",
+        "validate_dispatch": "succeeded"
+      },
+      "selected_slots": [
+        "admission",
+        "completion",
+        "evidence",
+        "execution",
+        "preparation",
+        "result"
+      ],
+      "live_projection_and_slots_match": true,
+      "revision": "90f1e32d-4383-4302-b27e-ed4ff1a48582",
+      "start": "2026-10-19T16:16:49.644277+00:00",
+      "end": "2026-10-19T16:20:25.510299+00:00",
+      "dispatch_events": 1,
+      "child": {
+        "started_at": "2026-10-19T16:19:40.752997+00:00",
+        "completed_at": "2026-10-19T16:20:25.166008+00:00",
+        "duration_seconds": 44.413,
+        "returncode": 0,
+        "turn_completed": true,
+        "requested_model": "gpt-6-astra",
+        "actual_backend_model": "N/A",
+        "usage": {
+          "input_tokens": 91624,
+          "cached_input_tokens": 65408,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 1281,
+          "reasoning_output_tokens": 10
+        },
+        "trace_sha256": "c8506552029a61e932b1985a2688d220b78477ca71ea9a0d7d6e329daa142b12"
+      },
+      "terminal_receipt_matches_usage": true,
+      "completion": {
+        "returncode": 0,
+        "test_sha256": "a76731b2cff72f34ce12f400d3c4c40429e5ff36e5c9073723dd0c3f998a9b35",
+        "changed_files": [
+          "slug.py"
+        ],
+        "independent_acceptance": null
+      }
+    },
+    {
+      "case": "parallel-workflows/run-1",
+      "session_id": "65d437d3a40242ae9b2b02f27303540f",
+      "task_result": "PASS",
+      "failure": null,
+      "launch_count": 1,
+      "completed": true,
+      "states": {
+        "collect": "succeeded",
+        "dispatch": "succeeded",
+        "prepare": "succeeded",
+        "record": "succeeded",
+        "validate_completion": "succeeded",
+        "validate_dispatch": "succeeded"
+      },
+      "selected_slots": [
+        "admission",
+        "completion",
+        "evidence",
+        "execution",
+        "preparation",
+        "result"
+      ],
+      "live_projection_and_slots_match": true,
+      "revision": "1410bea3-ed40-4af0-909f-72dc084695dc",
+      "start": "2026-10-20T02:33:48.901186+00:00",
+      "end": "2026-10-20T02:34:47.298702+00:00",
+      "dispatch_events": 1,
+      "child": {
+        "started_at": "2026-10-20T02:33:49.330849+00:00",
+        "completed_at": "2026-10-20T02:34:46.882032+00:00",
+        "duration_seconds": 57.551,
+        "returncode": 0,
+        "turn_completed": true,
+        "requested_model": "gpt-6-astra",
+        "actual_backend_model": "N/A",
+        "usage": {
+          "input_tokens": 134088,
+          "cached_input_tokens": 109568,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 1343,
+          "reasoning_output_tokens": 12
+        },
+        "trace_sha256": "91436e90f86683595ec5024e563608c77135227139f537cc35d490e23ec3cb3c"
+      },
+      "terminal_receipt_matches_usage": true,
+      "completion": {
+        "returncode": 0,
+        "test_sha256": "a76731b2cff72f34ce12f400d3c4c40429e5ff36e5c9073723dd0c3f998a9b35",
+        "changed_files": [
+          "slug.py"
+        ],
+        "independent_acceptance": {
+          "returncode": 0,
+          "stdout": "9 independent acceptance checks passed\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "case": "parallel-workflows/run-2",
+      "session_id": "1c037e51ea124b7581003bba4432e951",
+      "task_result": "PASS",
+      "failure": null,
+      "launch_count": 1,
+      "completed": true,
+      "states": {
+        "collect": "succeeded",
+        "dispatch": "succeeded",
+        "prepare": "succeeded",
+        "record": "succeeded",
+        "validate_completion": "succeeded",
+        "validate_dispatch": "succeeded"
+      },
+      "selected_slots": [
+        "admission",
+        "completion",
+        "evidence",
+        "execution",
+        "preparation",
+        "result"
+      ],
+      "live_projection_and_slots_match": true,
+      "revision": "1410bea3-ed40-4af0-909f-72dc084695dc",
+      "start": "2026-10-20T02:33:48.901192+00:00",
+      "end": "2026-10-20T02:34:57.623826+00:00",
+      "dispatch_events": 1,
+      "child": {
+        "started_at": "2026-10-20T02:33:49.334265+00:00",
+        "completed_at": "2026-10-20T02:34:57.268484+00:00",
+        "duration_seconds": 67.934,
+        "returncode": 0,
+        "turn_completed": true,
+        "requested_model": "gpt-6-astra",
+        "actual_backend_model": "N/A",
+        "usage": {
+          "input_tokens": 157110,
+          "cached_input_tokens": 132352,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 1357,
+          "reasoning_output_tokens": 50
+        },
+        "trace_sha256": "b759c337f8efcd24429e3237ddf0883c24c073db4b8a044819bde6582bb01945"
+      },
+      "terminal_receipt_matches_usage": true,
+      "completion": {
+        "returncode": 0,
+        "test_sha256": "a76731b2cff72f34ce12f400d3c4c40429e5ff36e5c9073723dd0c3f998a9b35",
+        "changed_files": [
+          "slug.py"
+        ],
+        "independent_acceptance": {
+          "returncode": 0,
+          "stdout": "9 independent acceptance checks passed\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "case": "normal",
+      "session_id": "82299a57b40d4ee6837ef4c1bd116c89",
+      "task_result": "PASS",
+      "failure": null,
+      "launch_count": 1,
+      "completed": true,
+      "states": {
+        "collect": "succeeded",
+        "dispatch": "succeeded",
+        "prepare": "succeeded",
+        "record": "succeeded",
+        "validate_completion": "succeeded",
+        "validate_dispatch": "succeeded"
+      },
+      "selected_slots": [
+        "admission",
+        "completion",
+        "evidence",
+        "execution",
+        "preparation",
+        "result"
+      ],
+      "live_projection_and_slots_match": true,
+      "revision": "1410bea3-ed40-4af0-909f-72dc084695dc",
+      "start": "2026-10-20T03:08:08.855319+00:00",
+      "end": "2026-10-20T03:09:05.794840+00:00",
+      "dispatch_events": 1,
+      "child": {
+        "started_at": "2026-10-20T03:08:09.211490+00:00",
+        "completed_at": "2026-10-20T03:09:05.478860+00:00",
+        "duration_seconds": 56.268,
+        "returncode": 0,
+        "turn_completed": true,
+        "requested_model": "gpt-6-astra",
+        "actual_backend_model": "N/A",
+        "usage": {
+          "input_tokens": 158179,
+          "cached_input_tokens": 133504,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 1209,
+          "reasoning_output_tokens": 23
+        },
+        "trace_sha256": "04fe7ba0c876d8dcc2aca97bb002a531ea7cf6fdbee96e91df99846568ab81d2"
+      },
+      "terminal_receipt_matches_usage": true,
+      "completion": {
+        "returncode": 0,
+        "test_sha256": "a76731b2cff72f34ce12f400d3c4c40429e5ff36e5c9073723dd0c3f998a9b35",
+        "changed_files": [
+          "slug.py"
+        ],
+        "independent_acceptance": {
+          "returncode": 0,
+          "stdout": "9 independent acceptance checks passed\n",
+          "stderr": ""
+        }
+      },
+      "child_trace_present": true,
+      "child_output_present": true
+    },
+    {
+      "case": "brief-missing",
+      "session_id": "ac1391a53d2049b69d4d23ae26e4a9bc",
+      "task_result": "FAIL",
+      "failure": "BRIEF_MISSING",
+      "launch_count": 0,
+      "completed": false,
+      "states": {
+        "collect": "none",
+        "dispatch": "none",
+        "prepare": "succeeded",
+        "record": "none",
+        "validate_completion": "none",
+        "validate_dispatch": "failed"
+      },
+      "selected_slots": [
+        "preparation"
+      ],
+      "live_projection_and_slots_match": true,
+      "revision": "1410bea3-ed40-4af0-909f-72dc084695dc",
+      "start": "2026-10-20T03:09:05.931357+00:00",
+      "end": "2026-10-20T03:09:06.101791+00:00",
+      "dispatch_events": 0,
+      "child_trace_present": false,
+      "child_output_present": false
+    }
+  ]
+}

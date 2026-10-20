@@ -1,0 +1,9 @@
+Completed in commit `59e2e97`. Real subagents implemented and reviewed; both reviews approved. All 3 tests pass; tests unchanged.
+
+Report: [.eval/native-report.md](.eval/native-report.md). Branch preserved; nothing pushed.
+
+**Rulings I made**
+
+- Inherited gpt-6-astra throughout as requested; tradeoff: higher compute cost.
+- Preserved the branch without an options prompt; integration remains for you.
+- Kept ordinary Python errors for non-string inputs; broader support would require a later API change.

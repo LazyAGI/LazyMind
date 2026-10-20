@@ -1,0 +1,272 @@
+{
+  "result": "FAIL",
+  "failure": "BASE_MISMATCH",
+  "launch_count": 0,
+  "session_id": "f1c3ce25d2f34b4a905f40400e1e0bc6",
+  "completed_at": "2026-10-19T16:27:15.645379+00:00",
+  "control": {
+    "control": {
+      "protocol": "workflow.control.v1",
+      "session_id": "f1c3ce25d2f34b4a905f40400e1e0bc6",
+      "state_version": 10,
+      "continuation": "failed",
+      "admission": {
+        "can_begin": false,
+        "reason": "recovery_required"
+      },
+      "reviews": [],
+      "binding": {
+        "bound": false
+      },
+      "delivery": null,
+      "active_executions": 0,
+      "native_execution_ids": [],
+      "active_execution_ids": [],
+      "available_actions": [
+        "stop",
+        "save",
+        "rewind",
+        "retry"
+      ]
+    },
+    "projection": {
+      "past": [
+        "prepare"
+      ],
+      "current": [
+        "validate_dispatch"
+      ],
+      "reachable": null,
+      "ready": null,
+      "retryable": [
+        "validate_dispatch"
+      ],
+      "rewindable": [
+        "prepare"
+      ],
+      "continue": null,
+      "blocked": null,
+      "stale": null,
+      "pruned": null,
+      "bypassed": null,
+      "nodes": {
+        "collect": {
+          "id": "collect",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "dispatch": {
+          "id": "dispatch",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "prepare": {
+          "id": "prepare",
+          "requires_approval": false,
+          "execution": "succeeded",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "record": {
+          "id": "record",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "validate_completion": {
+          "id": "validate_completion",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "validate_dispatch": {
+          "id": "validate_dispatch",
+          "requires_approval": false,
+          "execution": "failed",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "dispatch",
+          "to": "collect",
+          "state": "inactive"
+        },
+        {
+          "from": "collect",
+          "to": "validate_completion",
+          "state": "inactive"
+        },
+        {
+          "from": "validate_completion",
+          "to": "record",
+          "state": "inactive"
+        },
+        {
+          "from": "record",
+          "to": "__end__",
+          "state": "inactive"
+        },
+        {
+          "from": "__start__",
+          "to": "prepare",
+          "state": "active"
+        },
+        {
+          "from": "prepare",
+          "to": "validate_dispatch",
+          "state": "active"
+        },
+        {
+          "from": "validate_dispatch",
+          "to": "dispatch",
+          "state": "inactive"
+        }
+      ],
+      "end_reached": false,
+      "completed": false
+    },
+    "session": {
+      "state_version": 10,
+      "session_id": "f1c3ce25d2f34b4a905f40400e1e0bc6",
+      "conversation_id": "",
+      "workflow_id": "superpowers-reliability",
+      "workflow_mode": "auto",
+      "pinned_revision_id": "1410bea3-ed40-4af0-909f-72dc084695dc",
+      "status": "failed",
+      "current_step_id": "",
+      "intent_context": "{\"text\":\"Run the approved isolated slug fixture reliability evaluation.\"}",
+      "created_at": "2026-10-19T16:27:15.453211Z",
+      "updated_at": "2026-10-19T16:27:15.626251Z",
+      "slots": [
+        {
+          "artifact_id": "c627d249-7fb6-4fc6-94e8-0b2e754fee6b",
+          "slot_id": "preparation",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "preparation",
+          "created_at": "2026-10-19T16:27:15.541985Z",
+          "content_type": "json",
+          "artifact_value": {
+            "brief_sha256": "71d841e43454a236adf286386c66e6788855784f3838b4b4c3ad7d38d53d68ab",
+            "brief_bytes": 886,
+            "todo": {
+              "at": "2026-10-19T16:27:15.491362+00:00",
+              "event": "todo_updated",
+              "task_id": "task-1",
+              "status": "in_progress"
+            },
+            "git": {
+              "worktree": "$EVAL_ROOT/wrong-base-actual/fixture/worktree",
+              "head": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd",
+              "git_dir": "$EVAL_ROOT/wrong-base-actual/fixture/repository/.git/worktrees/worktree",
+              "index": "$EVAL_ROOT/wrong-base-actual/fixture/repository/.git/worktrees/worktree/index",
+              "common_dir": "$EVAL_ROOT/wrong-base-actual/fixture/repository/.git"
+            },
+            "expected_base": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd"
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "prepare",
+          "revision_count": 1,
+          "version_number": 1
+        }
+      ],
+      "steps": [
+        {
+          "step_id": "prepare",
+          "attempt": 1,
+          "task_id": "f51bdd2a-d537-419d-9654-78fbe57183a9",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-19T16:27:15.466468Z"
+        },
+        {
+          "step_id": "validate_dispatch",
+          "attempt": 1,
+          "task_id": "2bbcbf25-d817-488c-b2f6-3c8cd4fc69ec",
+          "status": "failed",
+          "validity": "effective",
+          "created_at": "2026-10-19T16:27:15.570846Z"
+        }
+      ]
+    }
+  },
+  "artifacts": {
+    "artifacts": [
+      {
+        "draft_version": 1,
+        "artifact_id": "c627d249-7fb6-4fc6-94e8-0b2e754fee6b",
+        "session_id": "f1c3ce25d2f34b4a905f40400e1e0bc6",
+        "slot_id": "preparation",
+        "slot": "preparation",
+        "step_id": "prepare",
+        "attempt": 1,
+        "producer_attempt_id": "f51bdd2a-d537-419d-9654-78fbe57183a9",
+        "revision": 1,
+        "selected": true,
+        "validity": "effective",
+        "change_source": "host",
+        "content_type": "json",
+        "value": {
+          "brief_sha256": "71d841e43454a236adf286386c66e6788855784f3838b4b4c3ad7d38d53d68ab",
+          "brief_bytes": 886,
+          "todo": {
+            "at": "2026-10-19T16:27:15.491362+00:00",
+            "event": "todo_updated",
+            "task_id": "task-1",
+            "status": "in_progress"
+          },
+          "git": {
+            "worktree": "$EVAL_ROOT/wrong-base-actual/fixture/worktree",
+            "head": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd",
+            "git_dir": "$EVAL_ROOT/wrong-base-actual/fixture/repository/.git/worktrees/worktree",
+            "index": "$EVAL_ROOT/wrong-base-actual/fixture/repository/.git/worktrees/worktree/index",
+            "common_dir": "$EVAL_ROOT/wrong-base-actual/fixture/repository/.git"
+          },
+          "expected_base": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd"
+        },
+        "deleted": false,
+        "created_at": "2026-10-19T16:27:15.541985Z"
+      }
+    ]
+  }
+}

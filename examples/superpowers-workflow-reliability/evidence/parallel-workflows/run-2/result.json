@@ -1,0 +1,673 @@
+{
+  "result": "PASS",
+  "failure": null,
+  "launch_count": 1,
+  "session_id": "1c037e51ea124b7581003bba4432e951",
+  "completed_at": "2026-10-20T02:34:57.614106+00:00",
+  "control": {
+    "control": {
+      "protocol": "workflow.control.v1",
+      "session_id": "1c037e51ea124b7581003bba4432e951",
+      "state_version": 31,
+      "continuation": "completed",
+      "admission": {
+        "can_begin": false,
+        "reason": "session_completed"
+      },
+      "reviews": [],
+      "binding": {
+        "bound": false
+      },
+      "delivery": null,
+      "active_executions": 0,
+      "native_execution_ids": [],
+      "active_execution_ids": [],
+      "available_actions": [
+        "save",
+        "rewind",
+        "retry"
+      ]
+    },
+    "projection": {
+      "past": [
+        "collect",
+        "dispatch",
+        "prepare",
+        "record",
+        "validate_completion",
+        "validate_dispatch"
+      ],
+      "current": null,
+      "reachable": null,
+      "ready": null,
+      "retryable": null,
+      "rewindable": [
+        "collect",
+        "dispatch",
+        "prepare",
+        "record",
+        "validate_completion",
+        "validate_dispatch"
+      ],
+      "continue": null,
+      "blocked": null,
+      "stale": null,
+      "pruned": null,
+      "bypassed": null,
+      "nodes": {
+        "collect": {
+          "id": "collect",
+          "requires_approval": false,
+          "execution": "succeeded",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "dispatch": {
+          "id": "dispatch",
+          "requires_approval": false,
+          "execution": "succeeded",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "prepare": {
+          "id": "prepare",
+          "requires_approval": false,
+          "execution": "succeeded",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "record": {
+          "id": "record",
+          "requires_approval": false,
+          "execution": "succeeded",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "validate_completion": {
+          "id": "validate_completion",
+          "requires_approval": false,
+          "execution": "succeeded",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "validate_dispatch": {
+          "id": "validate_dispatch",
+          "requires_approval": false,
+          "execution": "succeeded",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "dispatch",
+          "to": "collect",
+          "state": "active"
+        },
+        {
+          "from": "collect",
+          "to": "validate_completion",
+          "state": "active"
+        },
+        {
+          "from": "validate_completion",
+          "to": "record",
+          "state": "active"
+        },
+        {
+          "from": "record",
+          "to": "__end__",
+          "state": "active"
+        },
+        {
+          "from": "__start__",
+          "to": "prepare",
+          "state": "active"
+        },
+        {
+          "from": "prepare",
+          "to": "validate_dispatch",
+          "state": "active"
+        },
+        {
+          "from": "validate_dispatch",
+          "to": "dispatch",
+          "state": "active"
+        }
+      ],
+      "end_reached": true,
+      "completed": true
+    },
+    "session": {
+      "state_version": 31,
+      "session_id": "1c037e51ea124b7581003bba4432e951",
+      "conversation_id": "",
+      "workflow_id": "superpowers-reliability",
+      "workflow_mode": "auto",
+      "pinned_revision_id": "1410bea3-ed40-4af0-909f-72dc084695dc",
+      "status": "completed",
+      "current_step_id": "",
+      "intent_context": "{\"text\":\"Run the approved isolated slug fixture reliability evaluation.\"}",
+      "created_at": "2026-10-20T02:33:48.958347Z",
+      "updated_at": "2026-10-20T02:34:57.596428Z",
+      "slots": [
+        {
+          "artifact_id": "be76c262-1d1d-4109-8604-730f1b5ac4b7",
+          "slot_id": "admission",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "admission",
+          "created_at": "2026-10-20T02:33:49.166142Z",
+          "content_type": "json",
+          "artifact_value": {
+            "brief_sha256": "71d841e43454a236adf286386c66e6788855784f3838b4b4c3ad7d38d53d68ab",
+            "brief_bytes": 886,
+            "todo": {
+              "at": "2026-10-20T02:33:49.007782+00:00",
+              "event": "todo_updated",
+              "task_id": "task-1",
+              "status": "in_progress"
+            },
+            "git": {
+              "worktree": "$EVAL_ROOT/parallel-workflows/worktree-b",
+              "head": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd",
+              "git_dir": "$EVAL_ROOT/parallel-workflows/repository/.git/worktrees/worktree-b",
+              "index": "$EVAL_ROOT/parallel-workflows/repository/.git/worktrees/worktree-b/index",
+              "common_dir": "$EVAL_ROOT/parallel-workflows/repository/.git"
+            },
+            "expected_base": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd"
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "validate_dispatch",
+          "revision_count": 1,
+          "version_number": 1
+        },
+        {
+          "artifact_id": "2d9685c7-2fdb-4c76-b3e6-5b190c9aa727",
+          "slot_id": "completion",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "completion",
+          "created_at": "2026-10-20T02:34:57.518267Z",
+          "content_type": "json",
+          "artifact_value": {
+            "started_at": "2026-10-20T02:34:57.454928+00:00",
+            "completed_at": "2026-10-20T02:34:57.513150+00:00",
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "test_empty (test_slug.SlugTests) ... ok\ntest_punctuation (test_slug.SlugTests) ... ok\ntest_spaces (test_slug.SlugTests) ... ok\n\n----------------------------------------------------------------------\nRan 3 tests in 0.000s\n\nOK\n",
+            "coverage": [
+              {
+                "id": "spaces",
+                "status": "DONE",
+                "evidence": "test_slug.SlugTests.test_spaces"
+              },
+              {
+                "id": "punctuation",
+                "status": "DONE",
+                "evidence": "test_slug.SlugTests.test_punctuation"
+              },
+              {
+                "id": "empty",
+                "status": "DONE",
+                "evidence": "test_slug.SlugTests.test_empty"
+              }
+            ],
+            "test_sha256": "a76731b2cff72f34ce12f400d3c4c40429e5ff36e5c9073723dd0c3f998a9b35",
+            "changed_files": [
+              "slug.py"
+            ],
+            "independent_acceptance": {
+              "returncode": 0,
+              "stdout": "9 independent acceptance checks passed\n",
+              "stderr": ""
+            }
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "validate_completion",
+          "revision_count": 1,
+          "version_number": 1
+        },
+        {
+          "artifact_id": "d420d94d-1d3d-4689-a878-dfad225165b5",
+          "slot_id": "evidence",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "evidence",
+          "created_at": "2026-10-20T02:34:57.378318Z",
+          "content_type": "json",
+          "artifact_value": {
+            "head": "5c944072bdecfff6d96b27c08d786ca06647650a",
+            "diff": "diff --git a/slug.py b/slug.py\nindex ca1a85a..21e48b8 100644\n--- a/slug.py\n+++ b/slug.py\n@@ -1,2 +1,10 @@\n+import re\n+\n+\n def slugify(text):\n-    raise NotImplementedError\n+    \"\"\"Normalize text to an ASCII slug, rejecting an empty result.\"\"\"\n+    text = re.sub(r\"[^A-Za-z0-9\\s-]\", \"\", text).lower()\n+    slug = re.sub(r\"[\\s-]+\", \"-\", text).strip(\"-\")\n+    if not slug:\n+        raise ValueError(\"Slug must not be empty\")\n+    return slug",
+            "report": "# Implementer report\n\nImplemented Task 1 in `slug.py`: filter to ASCII letters, digits, whitespace and hyphens; lowercase retained letters; collapse whitespace/hyphen runs; trim boundary hyphens; raise ValueError for an empty result.\n\nValidation:\n- Before implementation: `python3 -m unittest -v` exited 1, with all three tests failing with NotImplementedError as expected.\n- After implementation: `python3 -m unittest -v` exited 0; all three tests passed (test_spaces, test_punctuation, test_empty).\n- Supplemental inline Python assertions passed six edge cases covering tabs/newlines/Unicode whitespace, mixed repeated hyphens and punctuation, removal of non-ASCII letters before case conversion, and empty/whitespace-only/punctuation-only normalized results.\n- `git diff --check` passed.\n- `git diff --exit-code -- test_slug.py` passed: tests unchanged.\n- `git check-ignore .eval/coverage.json .eval/implementer-report.md` confirmed both reports are ignored.\n\nSelf-review: filtering before lowercasing prevents non-ASCII letters from becoming permitted ASCII characters. Combined whitespace/hyphen normalization collapses adjacent separators and removes boundary separators. All three mandatory coverage IDs are DONE in coverage.json. Only slug.py is included in the task commit; no tests edited and no push performed.\n\nConcerns: none for the requested slugify scope. Guarded-executor admission and process-completion behavior are outside this task's permitted file scope and were not changed or verified.\n",
+            "coverage": [
+              {
+                "id": "spaces",
+                "status": "DONE",
+                "evidence": "test_slug.SlugTests.test_spaces"
+              },
+              {
+                "id": "punctuation",
+                "status": "DONE",
+                "evidence": "test_slug.SlugTests.test_punctuation"
+              },
+              {
+                "id": "empty",
+                "status": "DONE",
+                "evidence": "test_slug.SlugTests.test_empty"
+              }
+            ],
+            "trace_sha256": "b759c337f8efcd24429e3237ddf0883c24c073db4b8a044819bde6582bb01945"
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "collect",
+          "revision_count": 1,
+          "version_number": 1
+        },
+        {
+          "artifact_id": "c712962c-e766-432d-b085-e45590b2d308",
+          "slot_id": "execution",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "execution",
+          "created_at": "2026-10-20T02:34:57.275489Z",
+          "content_type": "json",
+          "artifact_value": {
+            "started_at": "2026-10-20T02:33:49.334265+00:00",
+            "completed_at": "2026-10-20T02:34:57.268484+00:00",
+            "duration_seconds": 67.934,
+            "returncode": 0,
+            "turn_completed": true,
+            "requested_model": "gpt-6-astra",
+            "actual_backend_model": "N/A",
+            "usage": {
+              "input_tokens": 157110,
+              "cached_input_tokens": 132352,
+              "cache_write_input_tokens": 0,
+              "output_tokens": 1357,
+              "reasoning_output_tokens": 50
+            },
+            "trace_sha256": "b759c337f8efcd24429e3237ddf0883c24c073db4b8a044819bde6582bb01945"
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "dispatch",
+          "revision_count": 1,
+          "version_number": 1
+        },
+        {
+          "artifact_id": "269a17cb-3585-4356-803c-29dc83cb1c25",
+          "slot_id": "preparation",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "preparation",
+          "created_at": "2026-10-20T02:33:49.053275Z",
+          "content_type": "json",
+          "artifact_value": {
+            "brief_sha256": "71d841e43454a236adf286386c66e6788855784f3838b4b4c3ad7d38d53d68ab",
+            "brief_bytes": 886,
+            "todo": {
+              "at": "2026-10-20T02:33:49.007782+00:00",
+              "event": "todo_updated",
+              "task_id": "task-1",
+              "status": "in_progress"
+            },
+            "git": {
+              "worktree": "$EVAL_ROOT/parallel-workflows/worktree-b",
+              "head": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd",
+              "git_dir": "$EVAL_ROOT/parallel-workflows/repository/.git/worktrees/worktree-b",
+              "index": "$EVAL_ROOT/parallel-workflows/repository/.git/worktrees/worktree-b/index",
+              "common_dir": "$EVAL_ROOT/parallel-workflows/repository/.git"
+            },
+            "expected_base": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd"
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "prepare",
+          "revision_count": 1,
+          "version_number": 1
+        },
+        {
+          "artifact_id": "bc417eca-cc41-4111-a69e-5c053e3d4276",
+          "slot_id": "result",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "result",
+          "created_at": "2026-10-20T02:34:57.579375Z",
+          "content_type": "json",
+          "artifact_value": {
+            "status": "PASS",
+            "todo": {
+              "at": "2026-10-20T02:34:57.574773+00:00",
+              "event": "todo_updated",
+              "task_id": "task-1",
+              "status": "completed"
+            },
+            "model_identity": "N/A",
+            "parallel_execution": "NOT_RUN"
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "record",
+          "revision_count": 1,
+          "version_number": 1
+        }
+      ],
+      "steps": [
+        {
+          "step_id": "prepare",
+          "attempt": 1,
+          "task_id": "a061ff3a-b9b4-4010-996e-048f84b51e33",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-20T02:33:48.975343Z"
+        },
+        {
+          "step_id": "validate_dispatch",
+          "attempt": 1,
+          "task_id": "5698e815-5e67-45ff-abe6-e24128aff798",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-20T02:33:49.102325Z"
+        },
+        {
+          "step_id": "dispatch",
+          "attempt": 1,
+          "task_id": "65d72a64-25e8-40dc-9a1b-f50305fbbf38",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-20T02:33:49.241947Z"
+        },
+        {
+          "step_id": "collect",
+          "attempt": 1,
+          "task_id": "841752c0-3cc9-4f17-a57a-5fb442d200c9",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-20T02:34:57.327808Z"
+        },
+        {
+          "step_id": "validate_completion",
+          "attempt": 1,
+          "task_id": "b0e549f8-228b-470f-bdea-ea5c00a27d15",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-20T02:34:57.417961Z"
+        },
+        {
+          "step_id": "record",
+          "attempt": 1,
+          "task_id": "87e1d8de-a024-4d70-ac66-49cfb92e0245",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-20T02:34:57.556987Z"
+        }
+      ]
+    }
+  },
+  "artifacts": {
+    "artifacts": [
+      {
+        "draft_version": 1,
+        "artifact_id": "be76c262-1d1d-4109-8604-730f1b5ac4b7",
+        "session_id": "1c037e51ea124b7581003bba4432e951",
+        "slot_id": "admission",
+        "slot": "admission",
+        "step_id": "validate_dispatch",
+        "attempt": 1,
+        "producer_attempt_id": "5698e815-5e67-45ff-abe6-e24128aff798",
+        "revision": 1,
+        "selected": true,
+        "validity": "effective",
+        "change_source": "host",
+        "content_type": "json",
+        "value": {
+          "brief_sha256": "71d841e43454a236adf286386c66e6788855784f3838b4b4c3ad7d38d53d68ab",
+          "brief_bytes": 886,
+          "todo": {
+            "at": "2026-10-20T02:33:49.007782+00:00",
+            "event": "todo_updated",
+            "task_id": "task-1",
+            "status": "in_progress"
+          },
+          "git": {
+            "worktree": "$EVAL_ROOT/parallel-workflows/worktree-b",
+            "head": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd",
+            "git_dir": "$EVAL_ROOT/parallel-workflows/repository/.git/worktrees/worktree-b",
+            "index": "$EVAL_ROOT/parallel-workflows/repository/.git/worktrees/worktree-b/index",
+            "common_dir": "$EVAL_ROOT/parallel-workflows/repository/.git"
+          },
+          "expected_base": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd"
+        },
+        "deleted": false,
+        "created_at": "2026-10-20T02:33:49.166142Z"
+      },
+      {
+        "draft_version": 1,
+        "artifact_id": "2d9685c7-2fdb-4c76-b3e6-5b190c9aa727",
+        "session_id": "1c037e51ea124b7581003bba4432e951",
+        "slot_id": "completion",
+        "slot": "completion",
+        "step_id": "validate_completion",
+        "attempt": 1,
+        "producer_attempt_id": "b0e549f8-228b-470f-bdea-ea5c00a27d15",
+        "revision": 1,
+        "selected": true,
+        "validity": "effective",
+        "change_source": "host",
+        "content_type": "json",
+        "value": {
+          "started_at": "2026-10-20T02:34:57.454928+00:00",
+          "completed_at": "2026-10-20T02:34:57.513150+00:00",
+          "returncode": 0,
+          "stdout": "",
+          "stderr": "test_empty (test_slug.SlugTests) ... ok\ntest_punctuation (test_slug.SlugTests) ... ok\ntest_spaces (test_slug.SlugTests) ... ok\n\n----------------------------------------------------------------------\nRan 3 tests in 0.000s\n\nOK\n",
+          "coverage": [
+            {
+              "id": "spaces",
+              "status": "DONE",
+              "evidence": "test_slug.SlugTests.test_spaces"
+            },
+            {
+              "id": "punctuation",
+              "status": "DONE",
+              "evidence": "test_slug.SlugTests.test_punctuation"
+            },
+            {
+              "id": "empty",
+              "status": "DONE",
+              "evidence": "test_slug.SlugTests.test_empty"
+            }
+          ],
+          "test_sha256": "a76731b2cff72f34ce12f400d3c4c40429e5ff36e5c9073723dd0c3f998a9b35",
+          "changed_files": [
+            "slug.py"
+          ],
+          "independent_acceptance": {
+            "returncode": 0,
+            "stdout": "9 independent acceptance checks passed\n",
+            "stderr": ""
+          }
+        },
+        "deleted": false,
+        "created_at": "2026-10-20T02:34:57.518267Z"
+      },
+      {
+        "draft_version": 1,
+        "artifact_id": "d420d94d-1d3d-4689-a878-dfad225165b5",
+        "session_id": "1c037e51ea124b7581003bba4432e951",
+        "slot_id": "evidence",
+        "slot": "evidence",
+        "step_id": "collect",
+        "attempt": 1,
+        "producer_attempt_id": "841752c0-3cc9-4f17-a57a-5fb442d200c9",
+        "revision": 1,
+        "selected": true,
+        "validity": "effective",
+        "change_source": "host",
+        "content_type": "json",
+        "value": {
+          "head": "5c944072bdecfff6d96b27c08d786ca06647650a",
+          "diff": "diff --git a/slug.py b/slug.py\nindex ca1a85a..21e48b8 100644\n--- a/slug.py\n+++ b/slug.py\n@@ -1,2 +1,10 @@\n+import re\n+\n+\n def slugify(text):\n-    raise NotImplementedError\n+    \"\"\"Normalize text to an ASCII slug, rejecting an empty result.\"\"\"\n+    text = re.sub(r\"[^A-Za-z0-9\\s-]\", \"\", text).lower()\n+    slug = re.sub(r\"[\\s-]+\", \"-\", text).strip(\"-\")\n+    if not slug:\n+        raise ValueError(\"Slug must not be empty\")\n+    return slug",
+          "report": "# Implementer report\n\nImplemented Task 1 in `slug.py`: filter to ASCII letters, digits, whitespace and hyphens; lowercase retained letters; collapse whitespace/hyphen runs; trim boundary hyphens; raise ValueError for an empty result.\n\nValidation:\n- Before implementation: `python3 -m unittest -v` exited 1, with all three tests failing with NotImplementedError as expected.\n- After implementation: `python3 -m unittest -v` exited 0; all three tests passed (test_spaces, test_punctuation, test_empty).\n- Supplemental inline Python assertions passed six edge cases covering tabs/newlines/Unicode whitespace, mixed repeated hyphens and punctuation, removal of non-ASCII letters before case conversion, and empty/whitespace-only/punctuation-only normalized results.\n- `git diff --check` passed.\n- `git diff --exit-code -- test_slug.py` passed: tests unchanged.\n- `git check-ignore .eval/coverage.json .eval/implementer-report.md` confirmed both reports are ignored.\n\nSelf-review: filtering before lowercasing prevents non-ASCII letters from becoming permitted ASCII characters. Combined whitespace/hyphen normalization collapses adjacent separators and removes boundary separators. All three mandatory coverage IDs are DONE in coverage.json. Only slug.py is included in the task commit; no tests edited and no push performed.\n\nConcerns: none for the requested slugify scope. Guarded-executor admission and process-completion behavior are outside this task's permitted file scope and were not changed or verified.\n",
+          "coverage": [
+            {
+              "id": "spaces",
+              "status": "DONE",
+              "evidence": "test_slug.SlugTests.test_spaces"
+            },
+            {
+              "id": "punctuation",
+              "status": "DONE",
+              "evidence": "test_slug.SlugTests.test_punctuation"
+            },
+            {
+              "id": "empty",
+              "status": "DONE",
+              "evidence": "test_slug.SlugTests.test_empty"
+            }
+          ],
+          "trace_sha256": "b759c337f8efcd24429e3237ddf0883c24c073db4b8a044819bde6582bb01945"
+        },
+        "deleted": false,
+        "created_at": "2026-10-20T02:34:57.378318Z"
+      },
+      {
+        "draft_version": 1,
+        "artifact_id": "c712962c-e766-432d-b085-e45590b2d308",
+        "session_id": "1c037e51ea124b7581003bba4432e951",
+        "slot_id": "execution",
+        "slot": "execution",
+        "step_id": "dispatch",
+        "attempt": 1,
+        "producer_attempt_id": "65d72a64-25e8-40dc-9a1b-f50305fbbf38",
+        "revision": 1,
+        "selected": true,
+        "validity": "effective",
+        "change_source": "host",
+        "content_type": "json",
+        "value": {
+          "started_at": "2026-10-20T02:33:49.334265+00:00",
+          "completed_at": "2026-10-20T02:34:57.268484+00:00",
+          "duration_seconds": 67.934,
+          "returncode": 0,
+          "turn_completed": true,
+          "requested_model": "gpt-6-astra",
+          "actual_backend_model": "N/A",
+          "usage": {
+            "input_tokens": 157110,
+            "cached_input_tokens": 132352,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 1357,
+            "reasoning_output_tokens": 50
+          },
+          "trace_sha256": "b759c337f8efcd24429e3237ddf0883c24c073db4b8a044819bde6582bb01945"
+        },
+        "deleted": false,
+        "created_at": "2026-10-20T02:34:57.275489Z"
+      },
+      {
+        "draft_version": 1,
+        "artifact_id": "269a17cb-3585-4356-803c-29dc83cb1c25",
+        "session_id": "1c037e51ea124b7581003bba4432e951",
+        "slot_id": "preparation",
+        "slot": "preparation",
+        "step_id": "prepare",
+        "attempt": 1,
+        "producer_attempt_id": "a061ff3a-b9b4-4010-996e-048f84b51e33",
+        "revision": 1,
+        "selected": true,
+        "validity": "effective",
+        "change_source": "host",
+        "content_type": "json",
+        "value": {
+          "brief_sha256": "71d841e43454a236adf286386c66e6788855784f3838b4b4c3ad7d38d53d68ab",
+          "brief_bytes": 886,
+          "todo": {
+            "at": "2026-10-20T02:33:49.007782+00:00",
+            "event": "todo_updated",
+            "task_id": "task-1",
+            "status": "in_progress"
+          },
+          "git": {
+            "worktree": "$EVAL_ROOT/parallel-workflows/worktree-b",
+            "head": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd",
+            "git_dir": "$EVAL_ROOT/parallel-workflows/repository/.git/worktrees/worktree-b",
+            "index": "$EVAL_ROOT/parallel-workflows/repository/.git/worktrees/worktree-b/index",
+            "common_dir": "$EVAL_ROOT/parallel-workflows/repository/.git"
+          },
+          "expected_base": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd"
+        },
+        "deleted": false,
+        "created_at": "2026-10-20T02:33:49.053275Z"
+      },
+      {
+        "draft_version": 1,
+        "artifact_id": "bc417eca-cc41-4111-a69e-5c053e3d4276",
+        "session_id": "1c037e51ea124b7581003bba4432e951",
+        "slot_id": "result",
+        "slot": "result",
+        "step_id": "record",
+        "attempt": 1,
+        "producer_attempt_id": "87e1d8de-a024-4d70-ac66-49cfb92e0245",
+        "revision": 1,
+        "selected": true,
+        "validity": "effective",
+        "change_source": "host",
+        "content_type": "json",
+        "value": {
+          "status": "PASS",
+          "todo": {
+            "at": "2026-10-20T02:34:57.574773+00:00",
+            "event": "todo_updated",
+            "task_id": "task-1",
+            "status": "completed"
+          },
+          "model_identity": "N/A",
+          "parallel_execution": "NOT_RUN"
+        },
+        "deleted": false,
+        "created_at": "2026-10-20T02:34:57.579375Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,272 @@
+{
+  "result": "FAIL",
+  "failure": "BRIEF_MISSING",
+  "launch_count": 0,
+  "session_id": "6a618755f1134b2a86febc24276f2341",
+  "completed_at": "2026-10-19T16:16:03.576899+00:00",
+  "control": {
+    "control": {
+      "protocol": "workflow.control.v1",
+      "session_id": "6a618755f1134b2a86febc24276f2341",
+      "state_version": 10,
+      "continuation": "failed",
+      "admission": {
+        "can_begin": false,
+        "reason": "recovery_required"
+      },
+      "reviews": [],
+      "binding": {
+        "bound": false
+      },
+      "delivery": null,
+      "active_executions": 0,
+      "native_execution_ids": [],
+      "active_execution_ids": [],
+      "available_actions": [
+        "stop",
+        "save",
+        "rewind",
+        "retry"
+      ]
+    },
+    "projection": {
+      "past": [
+        "prepare"
+      ],
+      "current": [
+        "validate_dispatch"
+      ],
+      "reachable": null,
+      "ready": null,
+      "retryable": [
+        "validate_dispatch"
+      ],
+      "rewindable": [
+        "prepare"
+      ],
+      "continue": null,
+      "blocked": null,
+      "stale": null,
+      "pruned": null,
+      "bypassed": null,
+      "nodes": {
+        "collect": {
+          "id": "collect",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "dispatch": {
+          "id": "dispatch",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "prepare": {
+          "id": "prepare",
+          "requires_approval": false,
+          "execution": "succeeded",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "record": {
+          "id": "record",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "validate_completion": {
+          "id": "validate_completion",
+          "requires_approval": false,
+          "execution": "none",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        },
+        "validate_dispatch": {
+          "id": "validate_dispatch",
+          "requires_approval": false,
+          "execution": "failed",
+          "validity": "effective",
+          "reachability": "unreachable",
+          "readiness": "not_applicable",
+          "branch": "active",
+          "evaluation": {
+            "satisfied": true
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "validate_dispatch",
+          "to": "dispatch",
+          "state": "inactive"
+        },
+        {
+          "from": "dispatch",
+          "to": "collect",
+          "state": "inactive"
+        },
+        {
+          "from": "collect",
+          "to": "validate_completion",
+          "state": "inactive"
+        },
+        {
+          "from": "validate_completion",
+          "to": "record",
+          "state": "inactive"
+        },
+        {
+          "from": "record",
+          "to": "__end__",
+          "state": "inactive"
+        },
+        {
+          "from": "__start__",
+          "to": "prepare",
+          "state": "active"
+        },
+        {
+          "from": "prepare",
+          "to": "validate_dispatch",
+          "state": "active"
+        }
+      ],
+      "end_reached": false,
+      "completed": false
+    },
+    "session": {
+      "state_version": 10,
+      "session_id": "6a618755f1134b2a86febc24276f2341",
+      "conversation_id": "",
+      "workflow_id": "superpowers-reliability",
+      "workflow_mode": "auto",
+      "pinned_revision_id": "90f1e32d-4383-4302-b27e-ed4ff1a48582",
+      "status": "failed",
+      "current_step_id": "",
+      "intent_context": "{\"text\":\"Run the approved isolated slug fixture reliability evaluation.\"}",
+      "created_at": "2026-10-19T16:16:03.456375Z",
+      "updated_at": "2026-10-19T16:16:03.574438Z",
+      "slots": [
+        {
+          "artifact_id": "389b1137-40ef-472f-a42d-514f0aed9c09",
+          "slot_id": "preparation",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "preparation",
+          "created_at": "2026-10-19T16:16:03.527207Z",
+          "content_type": "json",
+          "artifact_value": {
+            "brief_sha256": "71d841e43454a236adf286386c66e6788855784f3838b4b4c3ad7d38d53d68ab",
+            "brief_bytes": 886,
+            "todo": {
+              "at": "2026-10-19T16:16:03.489567+00:00",
+              "event": "todo_updated",
+              "task_id": "task-1",
+              "status": "in_progress"
+            },
+            "git": {
+              "worktree": "$EVAL_ROOT/missing-brief/fixture/worktree",
+              "head": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd",
+              "git_dir": "$EVAL_ROOT/missing-brief/fixture/repository/.git/worktrees/worktree",
+              "index": "$EVAL_ROOT/missing-brief/fixture/repository/.git/worktrees/worktree/index",
+              "common_dir": "$EVAL_ROOT/missing-brief/fixture/repository/.git"
+            },
+            "expected_base": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd"
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "prepare",
+          "revision_count": 1,
+          "version_number": 1
+        }
+      ],
+      "steps": [
+        {
+          "step_id": "prepare",
+          "attempt": 1,
+          "task_id": "13825c17-230b-4816-8705-3429424314ac",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-19T16:16:03.468282Z"
+        },
+        {
+          "step_id": "validate_dispatch",
+          "attempt": 1,
+          "task_id": "40aaa79e-dcb4-4df6-a933-ea581ee207ac",
+          "status": "failed",
+          "validity": "effective",
+          "created_at": "2026-10-19T16:16:03.553035Z"
+        }
+      ]
+    }
+  },
+  "artifacts": {
+    "artifacts": [
+      {
+        "draft_version": 1,
+        "artifact_id": "389b1137-40ef-472f-a42d-514f0aed9c09",
+        "session_id": "6a618755f1134b2a86febc24276f2341",
+        "slot_id": "preparation",
+        "slot": "preparation",
+        "step_id": "prepare",
+        "attempt": 1,
+        "producer_attempt_id": "13825c17-230b-4816-8705-3429424314ac",
+        "revision": 1,
+        "selected": true,
+        "validity": "effective",
+        "change_source": "host",
+        "content_type": "json",
+        "value": {
+          "brief_sha256": "71d841e43454a236adf286386c66e6788855784f3838b4b4c3ad7d38d53d68ab",
+          "brief_bytes": 886,
+          "todo": {
+            "at": "2026-10-19T16:16:03.489567+00:00",
+            "event": "todo_updated",
+            "task_id": "task-1",
+            "status": "in_progress"
+          },
+          "git": {
+            "worktree": "$EVAL_ROOT/missing-brief/fixture/worktree",
+            "head": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd",
+            "git_dir": "$EVAL_ROOT/missing-brief/fixture/repository/.git/worktrees/worktree",
+            "index": "$EVAL_ROOT/missing-brief/fixture/repository/.git/worktrees/worktree/index",
+            "common_dir": "$EVAL_ROOT/missing-brief/fixture/repository/.git"
+          },
+          "expected_base": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd"
+        },
+        "deleted": false,
+        "created_at": "2026-10-19T16:16:03.527207Z"
+      }
+    ]
+  }
+}

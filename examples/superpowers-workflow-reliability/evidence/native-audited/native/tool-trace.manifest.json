@@ -1,0 +1,13 @@
+{
+  "source_session_id": "01a15503-52b5-7820-aa8c-4fa41d171238",
+  "source_sha256": "e1dca185972e39b64dc52ad7db96af6d4d029fe237de0a325a3bd491b5272728",
+  "tool_events": 34,
+  "opaque_encrypted_payloads": "omitted with hash",
+  "excluded": [
+    "messages",
+    "reasoning",
+    "world_state",
+    "turn_context",
+    "unrelated_sessions"
+  ]
+}

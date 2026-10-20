@@ -1,0 +1,82 @@
+{
+  "result": "PASS",
+  "kind": "independent-deterministic-patch-replay-not-new-agent-E2E",
+  "runs": [
+    {
+      "case": "native-initial",
+      "fixture_base": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd",
+      "patch_sha256": "7b96d0ac961b06fff67ecf2b30aed2e29aab4f3cc747c395b860822cee5eb255",
+      "validation": {
+        "started_at": "2026-10-20T03:11:34.501734+00:00",
+        "completed_at": "2026-10-20T03:11:34.552933+00:00",
+        "returncode": 0,
+        "stdout": "",
+        "stderr": "test_empty (test_slug.SlugTests) ... ok\ntest_punctuation (test_slug.SlugTests) ... ok\ntest_spaces (test_slug.SlugTests) ... ok\n\n----------------------------------------------------------------------\nRan 3 tests in 0.000s\n\nOK\n",
+        "coverage": [
+          {
+            "id": "spaces",
+            "status": "DONE",
+            "evidence": "test_spaces"
+          },
+          {
+            "id": "punctuation",
+            "status": "DONE",
+            "evidence": "test_punctuation"
+          },
+          {
+            "id": "empty",
+            "status": "DONE",
+            "evidence": "test_empty"
+          }
+        ],
+        "test_sha256": "a76731b2cff72f34ce12f400d3c4c40429e5ff36e5c9073723dd0c3f998a9b35",
+        "changed_files": [
+          "slug.py"
+        ],
+        "independent_acceptance": {
+          "returncode": 0,
+          "stdout": "9 independent acceptance checks passed\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "case": "native-audited",
+      "fixture_base": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd",
+      "patch_sha256": "7e12a2369cff9b31a87a1eb29aa76f2c062419cf914f02979d46fa19f285f4f4",
+      "validation": {
+        "started_at": "2026-10-20T03:11:34.651241+00:00",
+        "completed_at": "2026-10-20T03:11:34.693136+00:00",
+        "returncode": 0,
+        "stdout": "",
+        "stderr": "test_empty (test_slug.SlugTests) ... ok\ntest_punctuation (test_slug.SlugTests) ... ok\ntest_spaces (test_slug.SlugTests) ... ok\n\n----------------------------------------------------------------------\nRan 3 tests in 0.000s\n\nOK\n",
+        "coverage": [
+          {
+            "id": "spaces",
+            "status": "DONE",
+            "evidence": "test_spaces"
+          },
+          {
+            "id": "punctuation",
+            "status": "DONE",
+            "evidence": "test_punctuation"
+          },
+          {
+            "id": "empty",
+            "status": "DONE",
+            "evidence": "test_empty"
+          }
+        ],
+        "test_sha256": "a76731b2cff72f34ce12f400d3c4c40429e5ff36e5c9073723dd0c3f998a9b35",
+        "changed_files": [
+          "slug.py"
+        ],
+        "independent_acceptance": {
+          "returncode": 0,
+          "stdout": "9 independent acceptance checks passed\n",
+          "stderr": ""
+        }
+      }
+    }
+  ]
+}
