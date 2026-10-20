@@ -1,25 +1,25 @@
 schema_version: 2
 id: cute-baby-avatar
 type: chat
-version: 1.0.0
+version: 1.1.0
 status: published
 default_locale: zh-CN
 provider: SkillHub
-
 skill:
   source_url: https://skillhub.cn/skills/org-ni2p9rei/cute-baby-avatar
   category: design
   required_version: 1.0.1
-
 placement:
   home: true
   gallery: false
   order: 31
-
 classification:
   category: 设计创意
-  tags: [萌娃头像, 图片生成, 照片编辑, 风格选择]
-
+  tags:
+  - 萌娃头像
+  - 图片生成
+  - 照片编辑
+  - 风格选择
 assets:
   cover:
     file: assets/cover.png
@@ -33,40 +33,99 @@ assets:
   avatar_preview:
     file: assets/avatar-preview.html
     role: result
-
+  adult_photo:
+    file: assets/adult-photo.png
+    role: result
+  adult_avatar:
+    file: assets/adult-avatar.png
+    role: result
+  adult_preview:
+    file: assets/adult-preview.html
+    role: result
+  nine_preview_image:
+    file: assets/nine-preview.png
+    role: result
+  nine_preview:
+    file: assets/nine-preview.html
+    role: result
 presentation:
   card:
     title: 萌娃头像生成
-    description: 上传照片或描述人物，选好款式后生成一张萌娃头像
+    description: 儿童照片转头像、成人照片创意幼态化，或制作九款风格头像套装
     output_type: images
     output_label: 头像与提示词
     cover_asset: cover
-    result_summary: 对照儿童照片与萌宠帽头像，查看照片转头像的效果及提示词
+    result_summary: 查看儿童照片、成人照片与九宫格套装的输入和输出示例
   detail:
     title: 萌娃头像生成
-    description: 支持照片或文字描述，先选择自然俏皮、苹果头、甜系配饰等款式，再生成萌娃头像及逐张提示词。此入口默认一张，可按需指定多张或九张独立头像套装。来源：https://skillhub.cn/skills/org-ni2p9rei/cute-baby-avatar。
-    attachment_hint: 上传人物照片，或描述发型、五官、表情及希望的款式
-
+    description: 选择儿童照片、成人照片或九宫格套装任务。儿童照片保留原有年龄与人物特征；成人照片按指定年龄创意幼态化；套装默认九种款式各生成一张独立头像，均附可复用提示词。来源：https://skillhub.cn/skills/org-ni2p9rei/cute-baby-avatar。
+    attachment_hint: 上传清晰的单人人物照片，并说明喜欢的款式；成人照片请补充目标年龄感
 tasks:
-  - id: create-avatar
-    selector:
-      title: 照片或文字生成头像
-      description: 先选款式，生成一张独立头像及可复用提示词
-      output_label: 头像与提示词
-    launch:
-      prompt_short: 帮我生成一张萌娃头像，先让我提供照片或人物描述并选择款式。
-      prompt: 请使用萌娃头像生成 Skill，帮我生成一张萌娃头像，并附上可复用的提示词。我可以上传照片或用文字描述人物；请先引导我提供照片或人物描述，并展示可选款式，等我选好后再生图。如果我已经明确提供了这些信息，请直接使用，不要重复询问。除非我另行指定数量，本次只生成一张独立的 1:1 白底纯头部头像。没有照片时使用虚构人物；有照片时使用原始照片作为身份参照。若当前没有可用的生图或参考图编辑能力，请明确说明限制，不要把提示词或示例图当作本次生成结果。
-    replay:
-      steps:
-        - title: 确认人物与款式
-          description: 接收照片或人物描述，展示款式并等待用户选择
-        - title: 生成独立头像
-          description: 按已选款式生成一张 1:1 白底纯头部头像
-        - title: 交付图片与提示词
-          description: 展示可保存的头像成图，并附可复用提示词
-    result:
-      template: html_preview_v1
-      eyebrow: 照片转头像示例
-      title: 萌宠帽 · 输入与输出对照
-      summary: 以带背景和上半身的儿童照片为输入，生成白底纯头部的小熊帽头像，展示前后对照与可复用提示词。
-      html_asset: avatar_preview
+- id: create-avatar
+  selector:
+    title: 儿童照片
+    description: 保留孩子的年龄与人物特征，选择款式生成一张头像
+    output_label: 头像与提示词
+  launch:
+    prompt_short: 帮我把儿童照片制作成一张萌娃头像，先让我上传照片并选择款式。
+    prompt: 请使用萌娃头像生成 Skill，根据儿童照片制作一张萌娃头像，并附可复用提示词。请先接收清晰的单人儿童照片，展示可选款式并等待我选择；已有照片或已明确款式时直接沿用，避免重复询问。保留照片人物的可见年龄、脸型、五官比例、肤色、发色和辨识特征，使用原始照片作为身份参照。除非我另行指定，本次只生成一张独立的 1:1 白底纯头部头像，完整保留头发、耳朵及头饰，四周留白。如果未提供儿童照片，请先索要照片并等待。若当前工具缺少参考图编辑能力，请明确说明限制并交付提示词，不要把示例图当作本次成图。
+  replay:
+    steps:
+    - title: 接收儿童照片与款式
+      description: 查看儿童照片，确认目标人物并等待用户选择款式
+    - title: 生成独立头像
+      description: 保留可见年龄与人物特征，生成一张 1:1 白底纯头部头像
+    - title: 交付图片与提示词
+      description: 展示可保存的头像成图，并附可复用提示词
+  result:
+    template: html_preview_v1
+    eyebrow: 照片转头像示例
+    title: 萌宠帽 · 输入与输出对照
+    summary: 以带背景和上半身的儿童照片为输入，生成白底纯头部的小熊帽头像，展示前后对照与可复用提示词。
+    html_asset: avatar_preview
+- id: adult-photo
+  selector:
+    title: 成人照片
+    description: 根据成人照片创意幼态化，确认年龄感与款式后生成头像
+    output_label: 幼态头像与提示词
+  launch:
+    prompt_short: 帮我根据成人照片制作一张萌娃头像，先确认目标年龄感和款式。
+    prompt: 请使用萌娃头像生成 Skill，根据成人照片创作一张幼态萌娃头像，并附可复用提示词。请先接收清晰的单人成人照片，确认我希望的目标年龄感和款式；已有信息直接使用，缺少的内容合并询问并等待确认。简短说明这是创意幼态化，并非本人真实童年的复原。以原始成人照片作为身份参照，保留主要辨识特征、原肤色与发色，结合我指定的儿童年龄比例创作。除非我另行指定，本次只生成一张独立的 1:1 白底纯头部头像，完整保留头发、耳朵及头饰，四周留白。如果未提供成人照片，请先索要并等待。若当前工具缺少参考图编辑能力，请明确说明限制并交付提示词，不要宣称已还原真实童年或把示例图当作本次成图。
+  replay:
+    steps:
+    - title: 接收成人照片
+      description: 查看单人成人照片并提取可见辨识特征
+    - title: 确认年龄与款式
+      description: 确认目标年龄感和款式，说明创意幼态化的含义
+    - title: 生成与交付
+      description: 生成一张独立头像，检查主要特征并交付图片与提示词
+  result:
+    template: html_preview_v1
+    eyebrow: 成人照片创意幼态化示例
+    title: 成人照片 → 萌宠帽萌娃头像
+    summary: 用虚构成人参考照片，创作约 5 岁、戴小熊帽的幼态头像；展示输入、输出及提示词。
+    html_asset: adult_preview
+- id: nine-avatar-set
+  selector:
+    title: 九宫格套装
+    description: 同一人物九种风格各一张，交付 9 张独立头像及提示词
+    output_label: 9 张头像与提示词
+  launch:
+    prompt_short: 根据我的照片制作九宫格套装：九种款式各一张，交付 9 张独立头像和逐张提示词，并附九宫格预览。
+    prompt: 请使用萌娃头像生成 Skill，根据我的单人人物照片制作九宫格套装。我已选择九宫格套装，按款式目录顺序生成：自然俏皮、苹果头、甜系配饰、水果糖果、生日款、Y2K 耳机、复古潮童、贝雷帽、萌宠帽，各一张。请先接收照片；儿童照片保留可见年龄与人物特征，成人照片先确认目标年龄感并说明是创意幼态化，已有信息不重复询问，无需再次要求我选择款式。交付 9 张独立的 1:1 白底纯头部头像，编号 01–09，并附逐张可复用提示词；九张完成后另附一张 3×3 九宫格预览，不能用拼图替代独立文件。每张均直接使用同一原始照片作为身份参照，保持人物、年龄感、肤色和留白一致，按款式变化配饰与表情。我若明确自选九张组合，则以我的组合为准。若当前工具缺少参考图编辑能力，请明确说明限制；如有缺图，说明实际完成数量及待补项目，不要用示例图冒充成图。
+  replay:
+    steps:
+    - title: 确认人物照片
+      description: 查看照片；成人照片补充目标年龄感，沿用已选九宫格套装
+    - title: 逐张生成九款头像
+      description: 每张使用同一原始参照，九种款式各一张，保持人物特征一致
+    - title: 检查数量与一致性
+      description: 逐张检查人物、配饰、构图及完整性，按 01–09 编号
+    - title: 交付独立图与预览
+      description: 交付 9 张独立头像、逐张提示词及额外的 3×3 预览
+  result:
+    template: html_preview_v1
+    eyebrow: 九款风格预览
+    title: 同一个孩子 · 九种头像风格
+    summary: 以同一儿童照片展示九种风格的套装预览；实际任务交付 9 张独立头像，并额外提供九宫格预览。
+    html_asset: nine_preview
