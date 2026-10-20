@@ -17,6 +17,7 @@ export default function ExpandableTitleSearch({
   onSearch,
 }: ExpandableTitleSearchProps) {
   const [open, setOpen] = useState(Boolean(value));
+  const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<InputRef>(null);
   const fieldRef = useRef<HTMLDivElement>(null);
   const fieldId = useId();
@@ -41,15 +42,37 @@ export default function ExpandableTitleSearch({
     }
   }, [open]);
 
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    const closeIfOutside = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Node) || rootRef.current?.contains(target)) {
+        return;
+      }
+      setOpen(false);
+    };
+
+    document.addEventListener("pointerdown", closeIfOutside);
+    return () => document.removeEventListener("pointerdown", closeIfOutside);
+  }, [open]);
+
   return (
-    <div className={`memory-skill-title-search${open ? " is-open" : ""}`}>
+    <div
+      ref={rootRef}
+      className={`memory-skill-title-search${open ? " is-open" : ""}`}
+    >
       <button
         type="button"
         aria-label={placeholder}
         aria-expanded={open}
         aria-controls={fieldId}
-        className={open || value ? "is-active" : undefined}
-        onClick={() => setOpen((current) => !current)}
+        aria-hidden={open}
+        tabIndex={open ? -1 : undefined}
+        className={`memory-skill-title-search__toggle${value ? " is-active" : ""}`}
+        onClick={() => setOpen(true)}
       >
         <SearchOutlined aria-hidden="true" />
       </button>

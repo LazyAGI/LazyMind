@@ -22,7 +22,29 @@ describe("ExpandableTitleSearch", () => {
 
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveAttribute("aria-hidden", "true");
     expect(field).toHaveAttribute("aria-hidden", "false");
     expect(field).not.toHaveAttribute("inert");
+  });
+
+  it("collapses when clicking outside", () => {
+    render(
+      <div>
+        <ExpandableTitleSearch
+          value=""
+          placeholder="Search skills"
+          onChange={vi.fn()}
+          onSearch={vi.fn()}
+        />
+        <button type="button">outside</button>
+      </div>,
+    );
+
+    const toggle = screen.getByRole("button", { name: "Search skills" });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "outside" }));
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
   });
 });
