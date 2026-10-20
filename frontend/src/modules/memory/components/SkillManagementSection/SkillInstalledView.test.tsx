@@ -217,6 +217,26 @@ describe("SkillInstalledView source and normal selection", () => {
     expect(onCategoryChange).toHaveBeenCalledWith(undefined);
   });
 
+  it("hides call mode and actions while organizing", () => {
+    renderViewWith({
+      organizeMode: true,
+      columns: [
+        { key: "name", title: "Name", render: () => "skill-name" },
+        { key: "callMode", title: "Call mode", render: () => "On demand" },
+        { key: "actions", title: "Actions", render: () => "Edit" },
+      ],
+      onSkillSelectionChange: vi.fn(),
+      onClearSkillSelection: vi.fn(),
+      onBatchCallMode: vi.fn(),
+    });
+
+    expect(screen.queryByRole("button", { name: "Batch manage" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Call mode")).not.toBeInTheDocument();
+    expect(screen.queryByText("Actions")).not.toBeInTheDocument();
+    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
+    expect(screen.getAllByText("skill-name").length).toBeGreaterThan(0);
+  });
+
   it("does not show checkboxes until batch manage is turned on", () => {
     renderViewWith({
       onSkillSelectionChange: vi.fn(),

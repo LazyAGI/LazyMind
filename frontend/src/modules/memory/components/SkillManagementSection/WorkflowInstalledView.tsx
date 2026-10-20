@@ -1,8 +1,9 @@
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Alert, Button, Empty, Popconfirm, Select, Spin, Table, Tag, Tooltip, message } from 'antd';
+import { Button, Empty, Popconfirm, Select, Table, Tooltip, message } from 'antd';
 import ExpandableTitleSearch from './ExpandableTitleSearch';
-import { OriginMark } from './OriginMark';
+import { OriginMark, StatusMark } from './OriginMark';
+import SkillModuleState from './SkillModuleState';
 import { ApartmentOutlined, CloudDownloadOutlined, CopyOutlined, DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { SelectProps } from 'antd';
@@ -326,12 +327,30 @@ export default function WorkflowInstalledView({
       render: (_: unknown, row: WorkflowRow) => {
         if (row._type === 'builtin') return null;
         if (row._type === 'cloud') return null;
-        if (row._type === 'published') return <Tag color="success">{t('admin.memoryWorkflowStatusPublished')} v{row.revision_no}</Tag>;
+        if (row._type === 'published') {
+          return (
+            <span className="memory-status-cluster">
+              <StatusMark kind="published">{t('admin.memoryWorkflowStatusPublished')}</StatusMark>
+              <StatusMark kind="revision">v{row.revision_no}</StatusMark>
+            </span>
+          );
+        }
         const status = row.generate_status;
-        if (status === 'generating') return <Tag color="processing">{t('admin.memoryWorkflowStatusGenerating')}</Tag>;
-        if (status === 'failed') return <Tag color="error">{t('admin.memoryWorkflowStatusFailed')}</Tag>;
-        if (row.published) return <div style={{ display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}><Tag color="success" style={{ marginInlineEnd: 0 }}>{t('admin.memoryWorkflowStatusPublished')}</Tag><Tag style={{ marginInlineEnd: 0 }}>v{row.current_revision_no}</Tag></div>;
-        return <Tag>{t('admin.memoryWorkflowStatusUnpublished')}</Tag>;
+        if (status === 'generating') {
+          return <StatusMark kind="generating">{t('admin.memoryWorkflowStatusGenerating')}</StatusMark>;
+        }
+        if (status === 'failed') {
+          return <StatusMark kind="failed">{t('admin.memoryWorkflowStatusFailed')}</StatusMark>;
+        }
+        if (row.published) {
+          return (
+            <span className="memory-status-cluster">
+              <StatusMark kind="published">{t('admin.memoryWorkflowStatusPublished')}</StatusMark>
+              <StatusMark kind="revision">v{row.current_revision_no}</StatusMark>
+            </span>
+          );
+        }
+        return <StatusMark kind="unpublished">{t('admin.memoryWorkflowStatusUnpublished')}</StatusMark>;
       },
     },
     {
@@ -520,9 +539,19 @@ export default function WorkflowInstalledView({
         )}
       </div>
 
-      {loadFailed ? <Alert type="error" showIcon message={t('admin.memoryResourceLocalLoadFailed')} action={<Button onClick={() => void loadList()}>{t('common.retry')}</Button>} /> : null}
-      {cloud.error ? <Alert type="error" showIcon message={t('admin.memoryCloudLoadFailed')} action={<Button onClick={() => void cloud.reload()}>{t('common.retry')}</Button>} /> : null}
-      {cloud.loading ? <div role="status"><Spin size="small" /> {t('admin.memoryCloudLoading')}</div> : null}
+      {loadFailed ? (
+        <SkillModuleState tone="error" retryLabel={t('common.retry')} onRetry={() => void loadList()}>
+          {t('admin.memoryResourceLocalLoadFailed')}
+        </SkillModuleState>
+      ) : null}
+      {cloud.error ? (
+        <SkillModuleState tone="error" retryLabel={t('common.retry')} onRetry={() => void cloud.reload()}>
+          {t('admin.memoryCloudLoadFailed')}
+        </SkillModuleState>
+      ) : null}
+      {cloud.loading ? (
+        <SkillModuleState tone="loading">{t('admin.memoryCloudLoading')}</SkillModuleState>
+      ) : null}
       <div className="memory-list-content" ref={listContentRef}>
         {filteredRows.length === 0 && !loading ? (
           <Empty

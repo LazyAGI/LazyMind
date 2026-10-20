@@ -101,7 +101,12 @@ export default function SkillInstalledView({
     },
     t,
   );
-  const visibleColumns: ColumnsType<SkillTreeNode> = columns.filter((column) => column.key !== "tags");
+  const visibleColumns: ColumnsType<SkillTreeNode> = columns.filter((column) => {
+    if (column.key === "tags") {
+      return false;
+    }
+    return !(organizeMode && (column.key === "actions" || column.key === "callMode"));
+  });
   if (organizeMode && tableData.some((record) => record.draft?.hasUncommittedDraft)) {
     visibleColumns.push({
       key: "organizeDraftStatus",
@@ -248,7 +253,7 @@ export default function SkillInstalledView({
 
       <div className="memory-list-content" ref={listContentRef}>
         <Table<StructuredAsset>
-          className={`admin-page-table memory-table memory-skill-installed-table${organizeMode || normalSelectionEnabled ? " is-selectable" : ""}`}
+          className={`admin-page-table memory-table memory-skill-installed-table${organizeMode || normalSelectionEnabled ? " is-selectable" : ""}${organizeMode ? " is-organize" : ""}`}
           rowKey="id"
           loading={loading}
           dataSource={tableData}

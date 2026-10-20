@@ -941,6 +941,90 @@
   color: #3f4b5b;
 }
 
+.memory-status-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.memory-status-mark {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.memory-status-mark.is-published,
+.memory-status-mark.is-added {
+  background: #c8f5e4;
+  color: #0b7a5a;
+}
+
+.memory-status-mark.is-generating,
+.memory-status-mark.is-pending,
+.memory-status-mark.is-modified,
+.memory-status-mark.is-refactor {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.memory-status-mark.is-failed,
+.memory-status-mark.is-removed,
+.memory-status-mark.is-delete {
+  background: #fde8e8;
+  color: #b42318;
+}
+
+.memory-status-mark.is-unpublished,
+.memory-status-mark.is-revision {
+  background: #e8eaef;
+  color: #5d6776;
+}
+
+.memory-status-mark.is-merge {
+  background: #ead4ff;
+  color: #7c1fbf;
+}
+
+.memory-skill-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid #e6edf5;
+  border-radius: 8px;
+  background: #f7f9fc;
+  color: #536177;
+  font-size: 13px;
+  line-height: 1.4;
+
+  &.is-error {
+    border-color: #f3c4c4;
+    background: #fdf4f4;
+    color: #b42318;
+  }
+
+  &.is-success {
+    border-color: #bfe4d4;
+    background: #f3faf6;
+    color: #0b7a5a;
+  }
+
+  &.is-warning {
+    border-color: #f0d7a8;
+    background: #fff8eb;
+    color: #8a5a12;
+  }
+}
+
 .memory-skill-tile-desc {
   margin: 0;
   min-height: calc(2em * 1.55);
@@ -1007,6 +1091,11 @@
   text-align: center;
   color: #667085;
   background: #fbfcff;
+}
+
+.memory-skill-installed-table.is-organize .memory-resource-actions {
+  opacity: 0.35;
+  pointer-events: none;
 }
 
 .memory-skill-installed {

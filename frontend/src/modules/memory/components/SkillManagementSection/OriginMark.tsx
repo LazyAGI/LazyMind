@@ -21,6 +21,30 @@ export function OriginMark({
   return <span className={`memory-origin-mark is-${kind}`}>{children}</span>;
 }
 
+export type StatusKind =
+  | "published"
+  | "generating"
+  | "failed"
+  | "unpublished"
+  | "revision"
+  | "pending"
+  | "merge"
+  | "delete"
+  | "refactor"
+  | "added"
+  | "removed"
+  | "modified";
+
+export function StatusMark({
+  kind,
+  children,
+}: {
+  kind: StatusKind;
+  children: ReactNode;
+}) {
+  return <span className={`memory-status-mark is-${kind}`}>{children}</span>;
+}
+
 export function resolveSkillOriginKind(record: {
   originBuiltinSkillUid?: string;
   cloudResourceId?: string;

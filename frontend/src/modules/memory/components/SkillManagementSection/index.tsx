@@ -1,6 +1,7 @@
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Input, message, Modal, Popover, Select, Spin, Tooltip } from "antd";
+import { Alert, Button, Input, message, Modal, Popover, Select, Tooltip } from "antd";
+import SkillModuleState from "./SkillModuleState";
 import { AppstoreOutlined, SearchOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import WorkflowInstalledView from "./WorkflowInstalledView";
@@ -565,6 +566,7 @@ export default function SkillManagementSection() {
     setOrganizeDraftConflict(false);
     setOrganizeStatus("idle");
     setOrganizeMode(true);
+    setSelectedSkills(new Map());
   };
 
   const handleSkillViewChange = (
@@ -1126,9 +1128,19 @@ export default function SkillManagementSection() {
         />
       ) : null}
 
-      {skillView === "installed" && cloudSkillError ? <Alert type="error" showIcon message={t("admin.memoryCloudLoadFailed")} action={<Button aria-label={t("common.retry")} onClick={() => void retryCloudSkills()}>{t("common.retry")}</Button>} /> : null}
-      {skillView === "installed" && skillListError ? <Alert type="error" showIcon message={t("admin.memoryResourceLocalLoadFailed")} action={<Button aria-label={t("common.retry")} onClick={() => void refreshSkillAssets()}>{t("common.retry")}</Button>} /> : null}
-      {skillView === "installed" && cloudSkillLoading ? <div role="status"><Spin size="small" /> {t("admin.memoryCloudLoading")}</div> : null}
+      {skillView === "installed" && cloudSkillError ? (
+        <SkillModuleState tone="error" retryLabel={t("common.retry")} onRetry={() => void retryCloudSkills()}>
+          {t("admin.memoryCloudLoadFailed")}
+        </SkillModuleState>
+      ) : null}
+      {skillView === "installed" && skillListError ? (
+        <SkillModuleState tone="error" retryLabel={t("common.retry")} onRetry={() => void refreshSkillAssets()}>
+          {t("admin.memoryResourceLocalLoadFailed")}
+        </SkillModuleState>
+      ) : null}
+      {skillView === "installed" && cloudSkillLoading ? (
+        <SkillModuleState tone="loading">{t("admin.memoryCloudLoading")}</SkillModuleState>
+      ) : null}
 
       {skillView === "installed" ? (
         <SkillInstalledView

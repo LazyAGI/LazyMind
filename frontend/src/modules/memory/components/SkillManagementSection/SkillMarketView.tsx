@@ -3,6 +3,7 @@ import type { StructuredAsset } from "../../shared";
 import { getMarketSource } from "./skillMarketMockData";
 import { isMarketSkillInstalled } from "./skillHelpers";
 import { renderSkillCategoryIcon } from "./skillCategoryIcon";
+import SkillModuleState from "./SkillModuleState";
 
 interface SkillMarketViewProps {
   t: (key: string, options?: Record<string, unknown>) => string;
@@ -43,7 +44,9 @@ export default function SkillMarketView({
     <div className="memory-skill-market">
       <div className="memory-skill-market-scroll">
         {loading ? (
-          <div className="memory-skill-market-loading">{t("common.loading")}</div>
+          <div className="memory-skill-market-loading">
+            <SkillModuleState tone="loading">{t("common.loading")}</SkillModuleState>
+          </div>
         ) : skillAssets.length ? (
           <section className="memory-skill-section">
             <div className="memory-skill-recommend-grid">
