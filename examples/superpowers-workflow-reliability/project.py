@@ -1,6 +1,5 @@
 """Six accepted Runtime steps for a declared project task; no fixture IDs."""
 import json
-import uuid
 from pathlib import Path
 
 from gates import Guard, GateError, codex_child, digest, git, now, save

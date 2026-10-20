@@ -32,8 +32,8 @@ HINTS = {
     "WORKFLOW_AMBIGUOUS": "Choose a unique workflow name; the visible catalog has multiple matches.",
     "RUNTIME_REJECTED": "Inspect the private trace for the HTTP status; 401/403 requires a fresh login for the owning user. Do not blindly repeat failed publication.",
     "RUNTIME_UNREACHABLE": "Check the configured URL and LazyMind health. Inspect saved session/trace before retrying an uncertain write.",
-    "BRIEF_MISSING": "Run restore-brief with the same task/repo/state, then run --resume.",
-    "BRIEF_EMPTY": "Run restore-brief with the same task/repo/state, then run --resume.",
+    "BRIEF_MISSING": "Run restore-brief with the same task/repo/state, click Retry in the authenticated Workflow page, then run --resume.",
+    "BRIEF_EMPTY": "Run restore-brief with the same task/repo/state, click Retry in the authenticated Workflow page, then run --resume.",
     "BASE_MISMATCH": "Use the declared full SHA in a clean new linked worktree; do not reset a worktree containing work.",
     "LINKED_WORKTREE_REQUIRED": "Use git worktree add to create a dedicated linked worktree at the intended base.",
     "REPORT_IGNORE_REQUIRED": "Commit a .gitignore rule for .eval/ before capturing the task base SHA.",
@@ -211,7 +211,7 @@ def main():
             if c['projection']['nodes']['dispatch']['execution'] != 'none':
                 raise GateError('UNSAFE_REPLAY_REFUSED')
             task.prepare_brief(config['superpowers'], state / 'brief.md', trace)
-            return {'result': 'BRIEF_RESTORED', 'next': 'run --resume with the same arguments'}
+            return {'result': 'BRIEF_RESTORED', 'next': 'Click Retry in the authenticated Workflow page, then run --resume with the same arguments'}
         if not args.resume:
             if git(task.repo, 'status', '--porcelain') or (task.repo / '.eval').exists():
                 raise GateError('WORKTREE_NOT_FRESH')
