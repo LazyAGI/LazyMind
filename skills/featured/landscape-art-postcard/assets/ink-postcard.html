@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline'">
+  <title>画幅与表达自由组合 · 风景水墨样式预览</title>
+  <style>
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100%;background:#f3f0e9;color:#34464a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+    body{padding:26px 18px 30px}
+    main{max-width:1040px;margin:0 auto}
+    header{margin:0 0 24px}
+    .kicker{margin:0 0 9px;color:#697d80;font-size:11px;line-height:1.6;letter-spacing:.12em}
+    h1{margin:0;font-size:clamp(23px,4vw,32px);font-weight:500;line-height:1.4;letter-spacing:.05em}
+    .intro{margin:10px 0 0;color:#6d7979;font-size:13px;line-height:1.8;max-width:760px}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:26px 22px;align-items:start}
+    figure{min-width:0;margin:0;background:#fcfaf4;border:1px solid #e3e5dc;border-radius:8px;overflow:hidden}
+    figure.wide{grid-column:1/-1;width:100%}
+    figure.portrait{width:100%;max-width:480px;justify-self:center}
+    figure.solo{grid-column:1/-1}
+    .image{padding:8px;background:#fcfaf4}
+    img{display:block;width:100%;height:auto}
+    figcaption{padding:13px 16px 17px;border-top:1px solid #e9e8e1}
+    .tags{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 9px}
+    .tags span{padding:3px 8px;border:1px solid #d8dfd8;border-radius:99px;color:#62766f;font-size:10px;line-height:1.4}
+    h2{font-size:16px;line-height:1.5;font-weight:500;margin:0 0 6px}
+    .note{margin:0;color:#75817b;font-size:12px;line-height:1.8}
+    footer{margin:24px 0 0;padding-top:16px;border-top:1px solid #dce1d9;color:#77817d;font-size:12px;line-height:1.9}
+    footer p{margin:0 0 4px}
+    @media(max-width:600px){body{padding:20px 10px 24px}.grid{grid-template-columns:minmax(0,1fr);gap:20px}figure.wide,figure.solo{grid-column:auto}.image{padding:5px}figcaption{padding:12px}.intro{font-size:12px}}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="kicker">水墨明信片 · 三种组合</p>
+      <h1>画幅与表达自由组合</h1>
+      <p class="intro">同一处风景，可以成为横版或竖版明信片，也可以让摄影与水墨上下对照。</p>
+    </header>
+    <section class="grid" aria-label="可组合样式示例">
+      <figure class="wide">
+        <div class="image"><img src="{{asset_url:ink_postcard_landscape}}" alt="横版纯水墨明信片：完整湖湾绘画，下方有 A / 01 小编号、Blue Stillness 标题和英文短句" decoding="async"></div>
+        <figcaption>
+          <div class="tags"><span>明信片</span><span>纯画</span><span>淡彩水墨</span><span>横版 3:2</span></div>
+          <h2>舒展的湖湾</h2>
+          <p class="note">横向展开湖景，底部安排标题、短句和小编号，风景仍是画面主角。</p>
+        </figcaption>
+      </figure>
+      <figure class="portrait">
+        <div class="image"><img src="{{asset_url:ink_postcard}}" alt="竖版纯水墨湖湾明信片：水墨画、Blue Stillness 标题、英文短句和小编号" loading="lazy" decoding="async"></div>
+        <figcaption>
+          <div class="tags"><span>明信片</span><span>纯画</span><span>淡彩水墨</span><span>竖版 2:3</span></div>
+          <h2>纵向的旅行记忆</h2>
+          <p class="note">整幅风景为水墨重绘，以纵向留白承接标题、短句与小编号。</p>
+        </figcaption>
+      </figure>
+      <figure class="portrait">
+        <div class="image"><img src="{{asset_url:photo_ink_postcard}}" alt="竖版原图加画明信片：上方湖湾实景照片，下方同景淡彩水墨和 Blue Stillness 英文文案" loading="lazy" decoding="async"></div>
+        <figcaption>
+          <div class="tags"><span>明信片</span><span>上原图下画</span><span>摄影＋水墨</span><span>竖版 2:3</span></div>
+          <h2>实景与画意</h2>
+          <p class="note">上方为同景摄影，下方为水墨重构与英文文案；这是原图加画的组合。</p>
+        </figcaption>
+      </figure>
+    </section>
+    <footer>
+      <p>点击“试一试”后只需上传一张风景照片，直接沿用案例预设，每次默认创作一张。</p>
+      <p>本案例试用预设：竖版 2:3、水墨纯画配英文标题、短句和小编号。其他样张展示可自由组合的变化；你主动提出新的风格、形式或比例时再调整，无需额外填写。</p>
+    </footer>
+  </main>
+</body>
+</html>

@@ -505,6 +505,63 @@
       "sizeBytes": 32924,
       "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-karpathy-llm-wiki-5806bd68e3a99dc5.zip"
     },
+    "landscape-art-postcard/1.1.1": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-landscape-art-postcard-8973c2dfa7b6a534.zip",
+      "filename": "lazymind-featured-landscape-art-postcard-8973c2dfa7b6a534.zip",
+      "files": {
+        "landscape-art-postcard/1.1.1/2e9784655d35-surreal-valley-portrait.png": {
+          "sha256": "2e9784655d350e11afb37edfb6ab059beae006b81dcd6e2efb247156541e4abf",
+          "sizeBytes": 2948017
+        },
+        "landscape-art-postcard/1.1.1/30b4b0fbd409-ink-blue-stillness.png": {
+          "sha256": "30b4b0fbd40917bb880af178addb70000812568d779c7c15bde91f1841ccf5fa",
+          "sizeBytes": 2683371
+        },
+        "landscape-art-postcard/1.1.1/4b8787499c04-torn-postcard.html": {
+          "sha256": "4b8787499c045f9bfd8bb46c203e205eb03978515bf638ede9562ace472c3700",
+          "sizeBytes": 3551
+        },
+        "landscape-art-postcard/1.1.1/569efd8e7e80-postcard-blue-stillness-landscape.png": {
+          "sha256": "569efd8e7e802df70a2ca7674b760a4298bf950684cea445fb5508e36d90e3c5",
+          "sizeBytes": 2829423
+        },
+        "landscape-art-postcard/1.1.1/56a98c5d1484-ink-postcard.html": {
+          "sha256": "56a98c5d14844e894bc641680f46fcfb715abc12de11c619624a832c03dd9de4",
+          "sizeBytes": 4857
+        },
+        "landscape-art-postcard/1.1.1/66c6c5f08415-surreal-lake-landscape.png": {
+          "sha256": "66c6c5f08415808cf612be3a8ab11320bce737ba35c2988f91969b684a295a7f",
+          "sizeBytes": 2956377
+        },
+        "landscape-art-postcard/1.1.1/6e8eef5c9e8e-ink-valley-portrait.png": {
+          "sha256": "6e8eef5c9e8e14b4da88d5da99636bc6e0004c1d4a77ea355968d53a492504f9",
+          "sizeBytes": 2738625
+        },
+        "landscape-art-postcard/1.1.1/7ad9815659e6-ink-artwork.html": {
+          "sha256": "7ad9815659e6db8d4de45ca6f1ecbc66877d05037de7ac6a3392836550669f64",
+          "sizeBytes": 4087
+        },
+        "landscape-art-postcard/1.1.1/91888dd9c967-postcard-photo-ink-portrait.png": {
+          "sha256": "91888dd9c96778676a103a9e06454dce9c9852503b8c781cf13913f2097bdcf6",
+          "sizeBytes": 2302638
+        },
+        "landscape-art-postcard/1.1.1/bca7eee88c59-postcard-blue-stillness.png": {
+          "sha256": "bca7eee88c5967960d7f580313ac0961b4a72a42964e1ca3ce11237f906985df",
+          "sizeBytes": 2633517
+        },
+        "landscape-art-postcard/1.1.1/d9dd57e9d425-surreal-ink-artwork.html": {
+          "sha256": "d9dd57e9d42506603a0160713140993e2603cb324f0b8163ad10d2cafdf0b1ab",
+          "sizeBytes": 4269
+        },
+        "landscape-art-postcard/1.1.1/ecf8b59bd5d4-torn-meadows-landscape.png": {
+          "sha256": "ecf8b59bd5d46fec4f557aa7c14c678456eec26a72b15d3065f0e4fae53cd2cb",
+          "sizeBytes": 2826216
+        }
+      },
+      "sha256": "8123f119030d84023ea29c308bb483eb219d4420bc030b50ad1496398b7f8a29",
+      "sizeBytes": 21158396,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-landscape-art-postcard-8973c2dfa7b6a534.zip"
+    },
     "live-commerce-script-studio/1.0.0": {
       "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-live-commerce-script-studio-9d5d52df3eb983d4.zip",
       "filename": "lazymind-featured-live-commerce-script-studio-9d5d52df3eb983d4.zip",
@@ -1195,6 +1252,10 @@
     "karpathy-llm-wiki/1.0.1/bea16ce3ae82-cover.jpg": {
       "sha256": "bea16ce3ae820255168f1ef490d4ee8e83e321911f5ec5bf080137cdedf47e15",
       "sizeBytes": 29569
+    },
+    "landscape-art-postcard/1.1.1/832b2a481bb2-cover.jpg": {
+      "sha256": "832b2a481bb24ff8416b63bc4846eb296bf9802d71db7a0ad0f0863cb02678e4",
+      "sizeBytes": 26408
     },
     "live-commerce-script-studio/1.0.0/726cd93ba4ea-cover.jpg": {
       "sha256": "726cd93ba4ead44b6e8939d74756d74642b842e1be6618ef0dad9f6791b7d2a5",
