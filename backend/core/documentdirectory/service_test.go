@@ -17,7 +17,7 @@ import (
 )
 
 func testDB(t *testing.T) *gorm.DB {
-	return orm.MigrateTestDB(t, &orm.DocumentFolderInventory{}, &orm.DocumentFolderNode{}, &orm.DocumentDirectory{}, &orm.DocumentDirectoryGroup{}, &orm.DocumentDirectoryEntry{}, &orm.DocumentObservation{}, &orm.DocumentDirectoryBatch{}, &orm.AsyncJob{}, &orm.ConversationIdleEvent{}).DB
+	return orm.MigrateTestDB(t, &orm.UserUIPreferences{}, &orm.DocumentFolderInventory{}, &orm.DocumentFolderNode{}, &orm.DocumentDirectory{}, &orm.DocumentDirectoryGroup{}, &orm.DocumentDirectoryEntry{}, &orm.DocumentObservation{}, &orm.DocumentDirectoryBatch{}, &orm.AsyncJob{}, &orm.ConversationIdleEvent{}).DB
 }
 func must(t *testing.T, err error) {
 	t.Helper()
@@ -258,7 +258,7 @@ func TestMigrationUpgradeRollbackPreservesExistingData(t *testing.T) {
 	if title != "keep" {
 		t.Fatal("unrelated data lost")
 	}
-	must(t, db.AutoMigrate(&orm.DocumentFolderInventory{}, &orm.DocumentFolderNode{}))
+	must(t, db.AutoMigrate(&orm.UserUIPreferences{}, &orm.DocumentFolderInventory{}, &orm.DocumentFolderNode{}))
 	d := create(t, db, "migration")
 	_, err := Get(context.Background(), db, "u", d.ID) // async_jobs is external to this migration
 	if err != nil && !strings.Contains(err.Error(), "async_jobs") {
@@ -619,7 +619,6 @@ func TestRestoreChecksOriginalGroupAndPreservesReading(t *testing.T) {
 func TestFeaturePauseStopsWritesAndPreservesDirectories(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
-	must(t, db.AutoMigrate(&orm.UserUIPreferences{}))
 	d := create(t, db, "keep")
 	b, j := batch(t, db, d, Input{})
 	must(t, SaveObservations(ctx, db, "u", "c", "h", "r", "query", []Observation{{CallID: "capture", Candidates: []Candidate{sample("/a")}}}))
