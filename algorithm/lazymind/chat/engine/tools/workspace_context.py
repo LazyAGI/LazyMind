@@ -113,6 +113,9 @@ class ToolResolutionContext:
     managed_roots: tuple[str, ...] = ()
     managed_files: frozenset[str] = frozenset()
     citation_state: dict = field(default_factory=dict)
+    # Immutable root captured when the current Chat/SubAgent/Workflow run is built.
+    # Spill URIs must never fall back to a mutable cwd or another execution's root.
+    spill_workspace: str = ''
 
 
 def normalize_managed_roots(roots):

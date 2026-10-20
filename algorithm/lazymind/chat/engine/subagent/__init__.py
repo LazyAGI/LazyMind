@@ -7,6 +7,7 @@ SUBAGENT_CORE_TOOL_NAMES = (
     'list_knowledge_bases',
     'search_file_resource',
     'read_file_resource',
+    'read_resource',
     'read_user_attachment',
     'find_user_attachment',
     'string_replace',

@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlparse
 
 import lazyllm
+from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.attachment_reader import (
     is_chat_document_file,
@@ -22,6 +23,7 @@ from lazymind.chat.service.utils.static_file_url import (
 )
 
 from .store import FileResourceStore, sha256_file
+from .spill import ResourceReadError, resolve_spill_locator
 
 _ATTACHMENT_CACHE_DIR = 'attachment-text-cache'
 _MAX_SOURCE_BYTES = 100 * 1024 * 1024
@@ -262,29 +264,16 @@ def _workspace_spill_target(
     """Resolve a compacted tool-result URI inside one trusted workspace."""
     if not target.startswith('workspace://'):
         return None
-    relative = target.removeprefix('workspace://')
-    relative_path = Path(relative)
-    if (
-        not relative
-        or relative_path.is_absolute()
-        or relative_path.parts[:1] != ('tool_spills',)
-        or '..' in relative_path.parts
-    ):
-        raise ValueError('invalid workspace tool-result reference')
-    resolved = os.path.realpath(os.path.join(workspace, *relative_path.parts))
-    spill_root = os.path.join(workspace, 'tool_spills')
     try:
-        inside_workspace = os.path.commonpath((spill_root, resolved)) == spill_root
-    except ValueError:
-        inside_workspace = False
-    if not inside_workspace or not os.path.isfile(resolved):
-        raise ValueError(f"workspace tool-result reference '{target}' was not found")
+        locator = resolve_spill_locator(target, workspace)
+    except ResourceReadError as exc:
+        raise ValueError(str(exc)) from exc
     return ResolvedTextResource(
         target=target,
-        path=resolved,
-        display_name=os.path.basename(resolved),
+        path=locator.path,
+        display_name=locator.display_name,
         kind='workspace',
-        workspace=workspace,
+        workspace=locator.workspace,
     )
 
 
@@ -376,18 +365,33 @@ def resolve_text_target(
     from lazymind.chat.engine.tools.conversation_workspace import (
         _current_artifact_scope, _resolve_workspace_path, chat_agent_workspace,
     )
-    user_id, conversation_id = _current_artifact_scope()
-
-    workspace = os.path.realpath(chat_agent_workspace(user_id, conversation_id))
     if key.startswith('workspace://'):
+        from lazymind.chat.engine.tools.workspace_context import get_tool_resolution_context
+
         cfg = _agentic_config()
-        if cfg.get('agent_type') == 'workflow_step':
+        resolution = get_tool_resolution_context()
+        configured_workspace = str(getattr(resolution, 'spill_workspace', '') or '').strip()
+        if configured_workspace:
+            active_workspace = configured_workspace
+        elif cfg.get('agent_type') == 'workflow_step':
             active_workspace = str(cfg.get('workflow_workspace_path') or '').strip()
             if not active_workspace:
                 raise ValueError('workflow workspace is unavailable')
         else:
-            active_workspace = str(cfg.get('_subagent_workspace') or workspace).strip()
+            try:
+                user_id, conversation_id = _current_artifact_scope()
+                chat_workspace = chat_agent_workspace(user_id, conversation_id)
+            except (KeyError, RuntimeError, ToolExecutionError, ValueError):
+                chat_workspace = ''
+            active_workspace = str(cfg.get('_subagent_workspace') or '').strip()
+            if not active_workspace:
+                active_workspace = chat_workspace
+            if not active_workspace:
+                raise ValueError('spill workspace is unavailable')
         return _workspace_spill_target(key, workspace=os.path.realpath(active_workspace))
+    user_id, conversation_id = _current_artifact_scope()
+
+    workspace = os.path.realpath(chat_agent_workspace(user_id, conversation_id))
     store = FileResourceStore(workspace)
     manifest = _resolve_file_resource(store, key)
     if manifest:
