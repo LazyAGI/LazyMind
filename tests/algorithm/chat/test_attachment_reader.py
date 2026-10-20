@@ -25,6 +25,13 @@ def test_text_files_are_supported_chat_attachments():
     assert all(ar.is_chat_attachment_file(path) for path in files)
 
 
+def test_spreadsheets_are_supported_chat_attachments():
+    files = ['/data/table.csv', '/data/table.tsv', '/data/book.xls', '/data/book.XLSX']
+
+    assert all(ar.is_chat_spreadsheet_file(path) for path in files)
+    assert all(ar.is_chat_attachment_file(path) for path in files)
+
+
 def test_filter_chat_image_files():
     files = ['/data/a.png', '/data/report.pdf', '/data/b.JPEG']
     assert ar.filter_chat_image_files(files) == ['/data/a.png', '/data/b.JPEG']
@@ -54,6 +61,16 @@ def test_parse_attachment_content_reads_text_without_ocr(monkeypatch, tmp_path):
     )
 
     assert ar.parse_attachment_content(str(text_path)) == 'name: 测试\nenabled: true\n'
+
+
+def test_parse_attachment_content_routes_csv_to_spreadsheet_extractor(tmp_path):
+    path = tmp_path / 'metrics.csv'
+    path.write_text('name,value\nrequests,8\n', encoding='utf-8')
+
+    content = ar.parse_attachment_content(str(path))
+
+    assert 'Spreadsheet parsed with pandas' in content
+    assert 'requests,8' in content
 
 
 def test_read_chat_text_file_truncates_and_rejects_nul(tmp_path):

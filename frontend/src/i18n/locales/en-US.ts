@@ -2706,7 +2706,7 @@ const enUS = {
     docImageExclusive: "Cannot upload documents and images at the same time",
     maxFilesWarning: "Maximum 3 files allowed",
     unsupportedFileType: "Only {{types}} file formats are supported",
-    supportedUploadTypeSummary: "images, PDF/Office documents, and common plain-text/code/config files",
+    supportedUploadTypeSummary: "images, PDF/Office documents, CSV/TSV/Excel spreadsheets, and common plain-text/code/config files",
     thinking: "Thinking...",
     modelRetrying:
       "The model service call failed. Retrying (attempt {{attempt}}/{{max}})…",
@@ -3414,7 +3414,7 @@ const enUS = {
     taskGreetingSuffix: ", what task would you like to run?",
     // Drag upload
     dragToUpload: "Drop files here to upload",
-    dragSupportedFormats: "Supported formats: PDF, Word (DOC, DOCX), PPTX, Images (PNG, JPG)",
+    dragSupportedFormats: "Supported formats: PDF, Word, PPTX, CSV, TSV, Excel (XLS, XLSX), images, and common text files",
     unsupportedFileTypeDrag: "This file type is not supported",
     // Disclaimer
     disclaimerAI: "AI-generated content does not represent the developer's views",
