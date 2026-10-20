@@ -1,0 +1,16 @@
+schema_version: 1
+id: diagram-design/publish-chat-output-v1
+description: Preserve shared diagram rules and profile resolution while publishing finished chat artifacts
+target:
+  uid: bsk_511CA68AE122BBDFF527864096EB
+  version: 0.0.0+08dc4a36ad25
+  origin_tree_sha256: 08dc4a36ad25012256b46f91b283a376d3094933b2c92322275d04d1cc47103f
+operations:
+  - op: upsert
+    path: SKILL.md
+    file: files/SKILL.md
+    before_sha256: 1801db2ce04d82e52154098c99d63ddc87c552fda5186d261919ed6e02183158
+  - op: upsert
+    path: references/design-guide.md
+    file: files/references/design-guide.md
+    before_sha256: absent

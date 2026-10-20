@@ -17,6 +17,7 @@ export interface FeishuAuthAccount {
   chatEnabled: boolean;
   canUseChat?: boolean;
   status: OAuthState;
+  authorizationPending?: boolean;
   connection: FeishuDataSourceConnection | null;
   createdAt: string;
   updatedAt?: string;

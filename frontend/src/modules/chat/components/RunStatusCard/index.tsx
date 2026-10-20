@@ -10,19 +10,24 @@ import { MODEL_FAILURE_CODES } from "@/modules/chat/utils/chatStreamError";
 
 import "./index.scss";
 
-const KNOWN_CODES = new Set([
-  ...MODEL_FAILURE_CODES,
+const RUNTIME_FAILURE_CODES = new Set([
   "request_rejected",
-  "length",
-  "content_filter",
-  "insufficient_system_resource",
-  "unknown",
   "user_env_unavailable",
   "user_env_invalid_name",
 ]);
 
+const KNOWN_CODES = new Set([
+  ...MODEL_FAILURE_CODES,
+  ...RUNTIME_FAILURE_CODES,
+  "length",
+  "content_filter",
+  "insufficient_system_resource",
+  "unknown",
+]);
+
 const MODEL_SETTINGS_CODES = new Set([
   "authentication_failed",
+  "model_configuration",
   "permission_denied",
   "not_found",
   "usage_limit_exceeded",
@@ -32,10 +37,20 @@ const MODEL_SETTINGS_CODES = new Set([
   "project_spend_limit_exceeded",
 ]);
 
-const API_CREDENTIAL_CODES = new Set([
-  "authentication_failed",
-  "permission_denied",
-]);
+const CODE_TITLE_KEYS: Record<string, string> = {
+  authentication_failed: "chat.apiKeyUnavailableTitle",
+  permission_denied: "chat.runStatus.titles.permission",
+  model_configuration: "chat.runStatus.titles.configuration",
+  not_found: "chat.modelUnavailableTitle",
+  request_timeout: "chat.runStatus.titles.timeout",
+  rate_limited: "chat.runStatus.titles.rateLimit",
+  concurrency_limited: "chat.runStatus.titles.concurrencyLimit",
+  usage_limit_exceeded: "chat.runStatus.titles.usageLimit",
+  quota_exhausted: "chat.runStatus.titles.quota",
+  balance_exhausted: "chat.runStatus.titles.quota",
+  organization_spend_limit_exceeded: "chat.runStatus.titles.quota",
+  project_spend_limit_exceeded: "chat.runStatus.titles.quota",
+};
 
 export interface RunTerminalView {
   status: "completed" | "interrupted" | "failed" | "cancelled";
@@ -43,10 +58,23 @@ export interface RunTerminalView {
   code?: string;
   partial_output: boolean;
   diagnostic_id?: string;
+  model_invoked?: boolean;
 }
 
 function isUserCancelledTerminal(terminal: RunTerminalView): boolean {
   return terminal.status === "cancelled";
+}
+
+function isModelTerminal(terminal: RunTerminalView): boolean {
+  return terminal.reason === "model_failure" || terminal.reason === "model_incomplete";
+}
+
+function canChangeModel(terminal: RunTerminalView): boolean {
+  return terminal.model_invoked !== false && (
+    isModelTerminal(terminal) ||
+    terminal.code === "upstream_request_failed" ||
+    terminal.code === "upstream_stream_failed"
+  );
 }
 
 export function runStatusDescription(
@@ -55,11 +83,13 @@ export function runStatusDescription(
 ): string {
   const parts: string[] = [];
   if (!isUserCancelledTerminal(terminal)) {
-    const reasonKey = terminal.code && KNOWN_CODES.has(terminal.code)
+    const reasonKey = terminal.code && KNOWN_CODES.has(terminal.code) && (
+      isModelTerminal(terminal) || RUNTIME_FAILURE_CODES.has(terminal.code)
+    )
       ? `chat.runStatus.codes.${terminal.code}`
       : terminal.reason === "model_incomplete"
         ? "chat.runStatus.incompleteUnknown"
-        : terminal.reason === "runtime_failure"
+        : terminal.reason === "runtime_failure" && !canChangeModel(terminal)
           ? "chat.runStatus.runtimeError"
           : "chat.runStatus.providerError";
     parts.push(t(reasonKey));
@@ -75,6 +105,12 @@ export function runStatusDescription(
 export function runStatusTitleKey(terminal: RunTerminalView): string {
   if (isUserCancelledTerminal(terminal)) {
     return "chat.runStatus.cancelled";
+  }
+  const codeTitle = isModelTerminal(terminal) && terminal.code && Object.prototype.hasOwnProperty.call(CODE_TITLE_KEYS, terminal.code)
+    ? CODE_TITLE_KEYS[terminal.code]
+    : undefined;
+  if (codeTitle) {
+    return codeTitle;
   }
   if (terminal.reason === "model_failure") {
     return "chat.runStatus.failed";
@@ -109,8 +145,9 @@ export default function RunStatusCard({
   if (!terminal || terminal.status === "completed") {
     return null;
   }
-  const isCredentialFailure = API_CREDENTIAL_CODES.has(terminal.code || "");
-  const isModelUnavailable = terminal.code === "not_found";
+  const isCancelled = isUserCancelledTerminal(terminal);
+  const isCredentialFailure = !isCancelled && isModelTerminal(terminal) && terminal.code === "authentication_failed";
+  const isModelUnavailable = !isCancelled && isModelTerminal(terminal) && terminal.code === "not_found";
   const description = isCredentialFailure
     ? [
         t("chat.apiKeyUnavailableDescription", {
@@ -131,30 +168,10 @@ export default function RunStatusCard({
             : t("chat.runStatus.noOutput"),
         ].join(" ")
       : runStatusDescription(terminal, t);
-  const displayCode = terminal.code && (
-    KNOWN_CODES.has(terminal.code) || terminal.reason === "runtime_failure"
-  )
-    ? terminal.code
-    : undefined;
-  const diagnosticDetails = displayCode || terminal.diagnostic_id ? (
-    <div className="chat-run-status-card__diagnostic" role="status">
-      {displayCode ? (
-        <div>
-          {t("chat.runStatus.failureCode", { code: displayCode })}
-        </div>
-      ) : null}
-      {terminal.diagnostic_id ? (
-        <div>
-          {t("chat.runStatus.diagnosticId", { id: terminal.diagnostic_id })}
-        </div>
-      ) : null}
-    </div>
-  ) : null;
-  const isCancelled = isUserCancelledTerminal(terminal);
   const className = isCancelled
     ? "chat-run-status-card chat-run-status-card--cancelled"
     : "chat-run-status-card";
-  const isModelFailure = terminal.reason === "model_failure";
+  const shouldChangeModel = canChangeModel(terminal);
   const shouldCheckSettings = MODEL_SETTINGS_CODES.has(terminal.code || "");
   const modelSettingsUrl = (() => {
     const params = new URLSearchParams({ section: "models", view: "providers" });
@@ -181,10 +198,10 @@ export default function RunStatusCard({
       ) : null}
       {onRetry ? (
         <Button size="small" disabled={retryDisabled} onClick={onRetry}>
-          {t(shouldCheckSettings ? "chat.continueAfterConfiguration" : "chat.tryAgain")}
+          {t(shouldCheckSettings ? "chat.runStatus.retryAfterSettings" : "chat.tryAgain")}
         </Button>
       ) : null}
-      {isModelFailure ? (
+      {shouldChangeModel ? (
         <Button
           size="small"
           aria-label={t("chat.changeModel")}
@@ -208,17 +225,8 @@ export default function RunStatusCard({
       type={isCancelled ? "warning" : "error"}
       showIcon
       icon={isCancelled ? <StopOutlined aria-hidden="true" /> : undefined}
-      message={t(isCredentialFailure
-        ? "chat.apiKeyUnavailableTitle"
-        : isModelUnavailable
-          ? "chat.modelUnavailableTitle"
-        : runStatusTitleKey(terminal))}
-      description={
-        <>
-          <div>{description}</div>
-          {diagnosticDetails}
-        </>
-      }
+      message={t(runStatusTitleKey(terminal))}
+      description={description}
       action={actions}
     />
   );

@@ -8,6 +8,26 @@
 
   .ant-popover-inner-content {
     padding: 0;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+
+    &::-webkit-scrollbar { width: 8px; }
+    &::-webkit-scrollbar-track { background: transparent; }
+    &::-webkit-scrollbar-button { display: none; }
+    &::-webkit-scrollbar-thumb {
+      border: 2px solid transparent;
+      border-radius: 999px;
+      background: rgba(122, 135, 155, 0.36);
+      background-clip: padding-box;
+
+      &:hover { background-color: rgba(122, 135, 155, 0.6); }
+    }
+
+    @supports not selector(::-webkit-scrollbar) {
+      scrollbar-width: thin;
+      scrollbar-color: #cfd4db transparent;
+      &:hover { scrollbar-color: #a5afbf transparent; }
+    }
   }
 }
 

@@ -2336,7 +2336,37 @@ type knowledgeMarketTaskListQueryParams struct {
 	Page     int32  `query:"page"`
 	PageSize int32  `query:"page_size"`
 	Status   string `query:"status" enum:"pending,running,succeeded,failed,canceled" desc:"Filter background tasks by async job status."`
-	JobType  string `query:"job_type" desc:"Async job type; defaults to knowledge_market_install."`
+	JobType  string `query:"job_type" desc:"Async job type or all; defaults to knowledge_market_install."`
+	View     string `query:"view" enum:"summary" desc:"Summary omits per-file failures; pagination is clamped to available pages."`
+}
+
+type knowledgeMarketTaskFilesQueryParams struct {
+	Page     int32  `query:"page"`
+	PageSize int32  `query:"page_size" desc:"Default 10, maximum 100."`
+	Status   string `query:"status" enum:"success,failed,canceled,unfinished" desc:"Default failed."`
+}
+
+type knowledgeMarketTaskFileOpenAPIResponse struct {
+	FileID     string `json:"file_id"`
+	Name       string `json:"name"`
+	Status     string `json:"status" enum:"success,failed,canceled,unfinished"`
+	ReasonCode string `json:"reason_code" enum:"success,canceled,waiting,processing,unknown,parse_failed,import_failed,missing_task,rate_limited"`
+}
+
+type knowledgeMarketTaskFileCountsOpenAPIResponse struct {
+	Success    int `json:"success"`
+	Failed     int `json:"failed"`
+	Canceled   int `json:"canceled"`
+	Unfinished int `json:"unfinished"`
+}
+
+type knowledgeMarketTaskFilesOpenAPIResponse struct {
+	Items                []knowledgeMarketTaskFileOpenAPIResponse     `json:"items"`
+	Page                 int                                          `json:"page"`
+	PageSize             int                                          `json:"page_size"`
+	Total                int                                          `json:"total"`
+	Counts               knowledgeMarketTaskFileCountsOpenAPIResponse `json:"counts"`
+	FileDetailsAvailable bool                                         `json:"file_details_available"`
 }
 
 type knowledgeMarketTaskProgressOpenAPIResponse struct {
@@ -2345,10 +2375,11 @@ type knowledgeMarketTaskProgressOpenAPIResponse struct {
 }
 
 type knowledgeMarketTaskListItemOpenAPIResponse struct {
-	DisplayState string `json:"display_state,omitempty"`
-	CanCancel    bool   `json:"can_cancel,omitempty"`
-	CanRetry     bool   `json:"can_retry,omitempty"`
-	CanDelete    bool   `json:"can_delete,omitempty"`
+	Parse        *knowledgeMarketTaskParseOpenAPIResponse `json:"parse,omitempty"`
+	DisplayState string                                   `json:"display_state,omitempty"`
+	CanCancel    bool                                     `json:"can_cancel,omitempty"`
+	CanRetry     bool                                     `json:"can_retry,omitempty"`
+	CanDelete    bool                                     `json:"can_delete,omitempty"`
 
 	Stage          string                                     `json:"stage,omitempty"`
 	OverallPercent int64                                      `json:"overall_percent,omitempty"`
@@ -4158,6 +4189,13 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:        []string{"knowledge-market"},
 			PathParams:  knowledgeMarketTaskPathParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Background install task detail", knowledgeMarketTaskDetailOpenAPIResponse{})},
+		},
+		{
+			Method: "GET", Path: "/knowledge-market/tasks/{job_id}/files",
+			Summary:     "List files for one knowledge market task",
+			Description: "Returns the current user's job-owned file page and all four counts. Historical file snapshots are immutable. Unknown states are unfinished. Aggregate-only history reports file_details_available=false. Page numbers are clamped; page and page_size must be positive integers, page_size at most 100.",
+			Tags:        []string{"knowledge-market"}, PathParams: knowledgeMarketTaskPathParams{}, QueryParams: knowledgeMarketTaskFilesQueryParams{},
+			Responses: map[int]openAPIResponse{200: resp("Task file page", knowledgeMarketTaskFilesOpenAPIResponse{})},
 		},
 		{
 			Method:      "DELETE",

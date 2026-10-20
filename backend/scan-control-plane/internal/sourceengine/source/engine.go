@@ -19,9 +19,16 @@ type DefaultEngine struct {
 	clock              func() time.Time
 	newID              func(string) string
 	defaultDatasetAlgo coreclient.DatasetAlgo
+	creatorResolver    CreatorResolver
 }
 
 type Option func(*DefaultEngine)
+
+func WithCreatorResolver(resolver CreatorResolver) Option {
+	return func(e *DefaultEngine) {
+		e.creatorResolver = resolver
+	}
+}
 
 func NewDefaultEngine(repo SourceRepository, registry connector.ConnectorRegistry, core coreclient.ResourceClient, schedule ScheduleEngine, options ...Option) *DefaultEngine {
 	if schedule == nil {
