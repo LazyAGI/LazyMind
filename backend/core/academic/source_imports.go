@@ -17,6 +17,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
+	"lazymind/core/learning"
 	"lazymind/core/store"
 )
 
@@ -45,18 +46,17 @@ func sourceImportCaller(b orm.PaperImportBatch) doc.DatasetCatalogCaller {
 
 // A write locks the dataset row on both PostgreSQL and SQLite. The prepared
 // source policy is rechecked by ResolveResourceDataset inside this transaction.
-func lockSourceTarget(ctx context.Context, tx *gorm.DB, c doc.DatasetCatalogCaller, id string) error {
+func lockSourceTarget(ctx context.Context, tx *gorm.DB, c doc.DatasetCatalogCaller, id string) (orm.Dataset, error) {
 	// Acquire the write lock before any read. SQLite cannot upgrade an older
 	// read snapshot if another importer committed between the read and write.
 	result := tx.Model(&orm.Dataset{}).Where("id = ? AND deleted_at IS NULL", id).UpdateColumn("resource_version", gorm.Expr("resource_version + 1"))
 	if result.Error != nil {
-		return result.Error
+		return orm.Dataset{}, result.Error
 	}
 	if result.RowsAffected != 1 {
-		return errors.New("target unavailable")
+		return orm.Dataset{}, errors.New("target unavailable")
 	}
-	_, e := doc.ResolveResourceDataset(ctx, tx, c, id, acl.PermissionDatasetWrite)
-	return e
+	return doc.ResolveResourceDataset(ctx, tx, c, id, acl.PermissionDatasetWrite)
 }
 func prepareSourceTarget(ctx context.Context, c doc.DatasetCatalogCaller, id string) (context.Context, error) {
 	return doc.PrepareResourceAuthorization(ctx, c, []doc.ResourceAuthorizationRequest{{DatasetID: id, Action: acl.PermissionDatasetWrite}, {DatasetID: id, Action: acl.PermissionDatasetUpload}})
@@ -97,6 +97,14 @@ func createSourceImport(w http.ResponseWriter, r *http.Request, user string, req
 	c := sourceCaller(r)
 	target := req.TargetDatasetID
 	if req.NewKnowledgeBase != nil {
+		if req.NewKnowledgeBase.Scene != "" {
+			scene, err := learning.NormalizeScene(req.NewKnowledgeBase.Scene)
+			if err != nil || scene != "academic_papers" {
+				replyError(w, 422, "INVALID_TARGET_SCENE", "来源论文只能加入论文集")
+				return
+			}
+		}
+		req.NewKnowledgeBase.Scene = "academic_papers"
 		svc, e := doc.NewResourceService(doc.ResourceServiceDeps{DB: store.DB(), LazyDB: store.LazyLLMDB()})
 		if e != nil {
 			replyError(w, 503, "CREATE_UNAVAILABLE", e.Error())
@@ -124,8 +132,12 @@ func createSourceImport(w http.ResponseWriter, r *http.Request, user string, req
 	policy, _ := json.Marshal(sourceImportPolicy{OriginKey: req.SourceContext.key(), Context: *req.SourceContext, RequestHash: hash, TenantID: c.TenantID, CreatedLibrary: req.NewKnowledgeBase != nil})
 	batch := orm.PaperImportBatch{ID: batchID, EntryType: "conversation_sources", TargetDatasetID: target, SourceDocumentIDsJSON: json.RawMessage("[]"), PolicySnapshotJSON: policy, Status: "pending", TotalItems: len(unique), IdempotencyKey: req.IdempotencyKey, CreatedBy: user, CreatedAt: now, UpdatedAt: now}
 	e = store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if e := lockSourceTarget(ctx, tx, c, target); e != nil {
+		dataset, e := lockSourceTarget(ctx, tx, c, target)
+		if e != nil {
 			return e
+		}
+		if scene, err := learning.NormalizeScene(dataset.Scene); err != nil || scene != "academic_papers" {
+			return errors.New("来源论文只能加入论文集")
 		}
 		var replay orm.PaperImportBatch
 		if e := tx.Where("id = ?", batchID).Take(&replay).Error; e == nil {
@@ -441,7 +453,7 @@ func ListSourceTargets(w http.ResponseWriter, r *http.Request) {
 	rows := []doc.Dataset{}
 	offset := 0
 	for {
-		page, e := svc.ListDatasets(r.Context(), doc.DatasetListRequest{UserID: user, RequiredAction: "write", Offset: offset, Limit: 100, Caller: sourceCaller(r)})
+		page, e := svc.ListDatasets(r.Context(), doc.DatasetListRequest{UserID: user, Scene: "academic_papers", RequiredAction: "write", Offset: offset, Limit: 100, Caller: sourceCaller(r)})
 		if e != nil {
 			replyError(w, 503, "TARGETS_UNAVAILABLE", e.Error())
 			return
@@ -512,7 +524,7 @@ func retrySourceImport(w http.ResponseWriter, r *http.Request, b orm.PaperImport
 	}
 	if len(retryIDs) > 0 {
 		e = store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			if e := lockSourceTarget(ctx, tx, c, b.TargetDatasetID); e != nil {
+			if _, e := lockSourceTarget(ctx, tx, c, b.TargetDatasetID); e != nil {
 				return e
 			}
 			// Do not run two workers against the same batch, even for different selections.

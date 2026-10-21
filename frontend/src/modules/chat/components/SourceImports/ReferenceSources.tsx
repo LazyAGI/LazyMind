@@ -78,7 +78,6 @@ export function ChatSourcePanel({ sources, onClose, embedded = false }: { source
   const imports = useSourceImports();
   useEffect(() => { void imports?.load(); }, [imports?.load]);
   const [selected, setSelected] = useState<ChatSource | null>(null);
-  const [multi, setMulti] = useState(false);
   const [page, setPage] = useState(1);
   const [keys, setKeys] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -86,7 +85,8 @@ export function ChatSourcePanel({ sources, onClose, embedded = false }: { source
   const currentPage = Math.min(page, Math.max(1, Math.ceil(groups.length / 20)));
   useEffect(() => { setPage(currentPage); }, [currentPage]);
   const rows = groups.slice((currentPage - 1) * 20, currentPage * 20);
-  const available = uniquePapers(rows.flatMap(group => group.paper || []));
+  const available = uniquePapers(groups.flatMap(group => group.paper || []));
+  const selectable = Boolean(imports && available.length);
   const chosen = uniquePapers(groups.flatMap(group => group.paper && keys.has(group.paper.paper_key || "") ? [group.paper] : []));
   const toggle = (key: string, checked: boolean) => setKeys(current => { const next = new Set(current); checked ? next.add(key) : next.delete(key); return next; });
   return <aside className="chat-source-panel" aria-label={t("chat.references")}>
@@ -99,8 +99,15 @@ export function ChatSourcePanel({ sources, onClose, embedded = false }: { source
     </div>}
     {imports?.inspectError && <Alert type="warning" message={tr("inspectionUnavailable")} />}
     {!selected && imports && <div className="source-selection-bar">
-      {multi ? <Checkbox checked={available.length > 0 && available.every(row => keys.has(row.paper_key!))} indeterminate={available.some(row => keys.has(row.paper_key!)) && !available.every(row => keys.has(row.paper_key!))} disabled={!available.length} onChange={(e: { target: { checked: boolean } }) => setKeys(current => { const next = new Set(current); available.forEach(row => e.target.checked ? next.add(row.paper_key!) : next.delete(row.paper_key!)); return next; })}>{tr("selectPage")}</Checkbox> : <span>{groups.length < sources.length ? tr("sourceCount", { v0: groups.length, v1: sources.length }) : tr("reference", { v0: sources.length })}</span>}
-      <div>{imports.items.length > 0 && <Button type="link" onClick={() => imports.setOpened(true)}>{tr("history")}</Button>}<Button type="link" onClick={() => { setMulti(value => !value); setKeys(new Set()); }}>{multi ? tr("cancelSelection") : tr("multiSelect")}</Button></div>
+      <span>{groups.length < sources.length ? tr("sourceCount", { v0: groups.length, v1: sources.length }) : tr("reference", { v0: sources.length })}</span>
+      <div className="source-selection-controls">
+        {selectable && <Checkbox
+          checked={available.every(row => keys.has(row.paper_key!))}
+          indeterminate={available.some(row => keys.has(row.paper_key!)) && !available.every(row => keys.has(row.paper_key!))}
+          onChange={(event: { target: { checked: boolean } }) => setKeys(event.target.checked ? new Set(available.map(row => row.paper_key!)) : new Set())}
+        >{tr("selectPapers")}</Checkbox>}
+        {imports.items.length > 0 && <Button type="link" onClick={() => imports.setOpened(true)}>{tr("history")}</Button>}
+      </div>
     </div>}
     <div className="chat-source-panel-body">
       {selected ? <div className="chat-source-detail"><h3>{getSourceLabel(selected)}</h3><small>{getSourceSubtitle(selected)}</small><p>{getSourceEvidenceText(selected) || t("chat.contextPanel.noExcerpt")}</p><SourceImportActions source={selected} /></div> : <div className="chat-source-list">
@@ -110,8 +117,8 @@ export function ChatSourcePanel({ sources, onClose, embedded = false }: { source
           const multiple = group.sources.length > 1;
           const isExpanded = expanded.has(group.key);
           return <div key={group.key}>
-            <div className={multi ? "source-select-row" : ""}>
-              {multi && (paper?.eligible && paper.paper_key ? <Checkbox aria-label={tr("selectSource", { v0: getSourceLabel(source) })} checked={keys.has(paper.paper_key)} onChange={(e: { target: { checked: boolean } }) => toggle(paper.paper_key!, e.target.checked)} /> : <span style={{ width: 16 }} title={paper?.reason || tr("sourceIneligible")} />)}
+            <div className={selectable ? "source-select-row" : ""}>
+              {selectable && (paper?.eligible && paper.paper_key ? <Checkbox aria-label={tr("selectSource", { v0: getSourceLabel(source) })} checked={keys.has(paper.paper_key)} onChange={(e: { target: { checked: boolean } }) => toggle(paper.paper_key!, e.target.checked)} /> : <span style={{ width: 16 }} title={paper?.reason || tr("sourceIneligible")} />)}
               <button type="button" className="chat-source-item" aria-expanded={multiple ? isExpanded : undefined} onClick={() => {
                 if (!multiple) { setSelected(source); return; }
                 setExpanded(current => {
@@ -141,7 +148,7 @@ export function ChatSourcePanel({ sources, onClose, embedded = false }: { source
       </div>}
     </div>
     {!selected && groups.length > 20 && <div className="source-selection-footer"><Pagination size="small" current={currentPage} pageSize={20} total={groups.length} showSizeChanger={false} onChange={setPage} /></div>}
-    {multi && <div className="source-selection-footer"><span>{tr("selectedPrefix")}{chosen.length}{tr("selectedPapersSuffix")}<Button type="link" size="small" onClick={() => setKeys(new Set())}>{tr("clear")}</Button></span><Button type="primary" disabled={!chosen.length} onClick={() => imports?.choose(chosen)}>{tr("importSelected")}</Button></div>}
+    {!selected && selectable && <div className="source-selection-footer"><span>{tr("selectedPrefix")}{chosen.length}{tr("selectedPapersSuffix")}<Button type="link" size="small" disabled={!chosen.length} onClick={() => setKeys(new Set())}>{tr("clear")}</Button></span><Button type="primary" disabled={!chosen.length} onClick={() => imports?.choose(chosen)}>{tr("add")}</Button></div>}
   </aside>;
 }
 
@@ -158,7 +165,7 @@ export function ReferenceSourcesButton({ sources }: { sources?: ChatSourceCollec
         trigger="click"
         placement="topLeft"
         open={sourcesOpen}
-        onOpenChange={setSourcesOpen}
+        onOpenChange={(open: boolean) => { if (!imports?.choosing) setSourcesOpen(open); }}
         destroyOnHidden
         overlayClassName="chat-sources-popover"
         content={

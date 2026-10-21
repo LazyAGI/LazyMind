@@ -236,7 +236,7 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 			return e
 		}
 		e = store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			if e := lockSourceTarget(ctx, tx, caller, b.TargetDatasetID); e != nil {
+			if _, e := lockSourceTarget(ctx, tx, caller, b.TargetDatasetID); e != nil {
 				return e
 			}
 			if e := sourceJobFence(tx, job, b.ID); e != nil {

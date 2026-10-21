@@ -1,9 +1,8 @@
 import { tr } from "./translations";
 import { knowledgeCreationDefaults, knowledgeCreationMetadata } from "@/modules/knowledge/utils/creation";
 import { sourceContextKey, useSourceImportState } from "./state";
-import { useTranslation } from "react-i18next";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Alert, Button, Form, Input, Modal, Popover, Radio, Select, Space, message } from "antd";
+import { Alert, Button, Form, Input, Modal, Popover, Radio, Select, Space, message, theme } from "antd";
 import { CloseOutlined, DatabaseOutlined, PlusOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { v4 as uuid } from "uuid";
@@ -26,6 +25,7 @@ interface ImportContext {
   refresh: () => Promise<void>;
   submittedBatch: string;
   opened: boolean;
+  choosing: boolean;
   setOpened: (open: boolean) => void;
 }
 const Context = createContext<ImportContext | null>(null);
@@ -57,7 +57,7 @@ export function SourceImportProvider({ context, sources, children }: { context: 
     await Promise.all([inspect(sourceKey), refresh()]);
   }, [enabled, sourceKey, inspect, refresh]);
   useEffect(() => { setSelection(null); setOpened(false); setSubmittedBatch(""); }, [key]);
-  return <Context.Provider value={{ inspections, inspectError, load, items, queryError, choose: rows => setSelection(uniquePapers(rows)), refresh, submittedBatch, opened, setOpened }}>
+  return <Context.Provider value={{ inspections, inspectError, load, items, queryError, choose: rows => setSelection(uniquePapers(rows)), refresh, submittedBatch, opened, choosing: selection !== null, setOpened }}>
     {children}
     <SourceImportResults />
     {selection && <TargetModal rows={selection} context={stableContext} onCancel={() => setSelection(null)} onSubmitted={batch => { setSelection(null); setSubmittedBatch(batch); setOpened(true); void refresh(); }} />}
@@ -65,7 +65,7 @@ export function SourceImportProvider({ context, sources, children }: { context: 
 }
 
 function TargetModal({ rows, context, onCancel, onSubmitted }: { rows: api.InspectedSource[]; context: api.SourceContext; onCancel: () => void; onSubmitted: (batch: string) => void }) {
-  const { t } = useTranslation();
+  const { token } = theme.useToken();
   const [targets, setTargets] = useState<api.SourceTarget[]>([]);
   const [options, setOptions] = useState<KnowledgeOptions>();
   const [mode, setMode] = useState("existing");
@@ -93,7 +93,7 @@ function TargetModal({ rows, context, onCancel, onSubmitted }: { rows: api.Inspe
         : {
           new_knowledge_base: {
             ...knowledgeCreationMetadata(values.name, values.description, values.tags),
-            scene: values.scene,
+            scene: "academic_papers",
             processing_level: values.processing_level,
             algo_id: values.algo_id,
           },
@@ -115,7 +115,7 @@ function TargetModal({ rows, context, onCancel, onSubmitted }: { rows: api.Inspe
     } finally { setBusy(false); }
   };
   const levels: Record<string, string> = { stored: tr("originalOnly"), parsed: tr("parse"), chunked: tr("parseChunk"), indexed: tr("parseIndex") };
-  return <Modal open title={tr("add")} okText={createdTarget ? tr("retryImport") : tr("confirmImport")} cancelText={tr("cancel")} confirmLoading={busy} onOk={() => void submit()} onCancel={busy ? undefined : onCancel} maskClosable={!busy} closable={!busy} cancelButtonProps={{ disabled: busy }}>
+  return <Modal open zIndex={token.zIndexPopupBase + 200} title={tr("add")} okText={createdTarget ? tr("retryImport") : tr("confirmImport")} cancelText={tr("cancel")} confirmLoading={busy} onOk={() => void submit()} onCancel={busy ? undefined : onCancel} maskClosable={!busy} closable={!busy} cancelButtonProps={{ disabled: busy }}>
     <p>{tr("selectedPrefix")}{rows.length}{tr("papersSuffix")}</p>
     {error && <Alert type="error" showIcon message={error} />}
     {createdTarget && <Alert type="info" message={<span>{tr("createdWithoutTask")}<a href={`/lib/knowledge/detail/${encodeURIComponent(createdTarget)}`}>{tr("viewLibrary")}</a>。</span>} />}
@@ -125,7 +125,7 @@ function TargetModal({ rows, context, onCancel, onSubmitted }: { rows: api.Inspe
         <Form.Item name="name" label={tr("name")} rules={[{ required: true, message: tr("enterName") }, { pattern: KNOWLEDGE_BASE_NAME_PATTERN, message: tr("namePattern") }]}><Input maxLength={KNOWLEDGE_BASE_NAME_MAX_LENGTH} /></Form.Item>
         <Form.Item name="tags" label={tr("tags")} rules={[{ required: true, type: "array", min: 1, max: KNOWLEDGE_BASE_TAG_MAX_COUNT, message: tr("addTags") }]}><TagSelect tags={[]} maxTagLength={KNOWLEDGE_BASE_TAG_MAX_LENGTH} /></Form.Item>
         <Form.Item name="description" label={tr("description")}><Input.TextArea maxLength={KNOWLEDGE_BASE_DESCRIPTION_MAX_LENGTH} /></Form.Item>
-        <Form.Item name="scene" label={tr("scene")} rules={[{ required: true }]}><Select options={options?.scenes.map(row => ({ value: row.key, label: t(row.name_i18n_key) }))} /></Form.Item>
+        <Form.Item label={tr("scene")}><span>{tr("paperCollection")}</span></Form.Item>
         <Form.Item name="processing_level" label={tr("processing")} rules={[{ required: true }]}><Select options={options?.processing_levels.map(value => ({ value, label: levels[value] || value }))} /></Form.Item>
       </>}
     </Form>
