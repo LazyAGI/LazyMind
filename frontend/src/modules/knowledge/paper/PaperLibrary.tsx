@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { Button, Input, Popconfirm, Radio, Select, message } from "antd";
+import { Button, Dropdown, Input, Modal, Radio, Select, message } from "antd";
 import {
   applyPaperEdits,
   assignFolders,
@@ -34,7 +34,9 @@ import {
   type PaperLibraryData,
   type ReadingStatus,
 } from "./model";
-import { loadPaperLibrary, savePaperLibrary } from "./store";
+import { loadPaperLibrary, loadPaperLibraryV3, savePaperLibrary, savePaperLibraryV3 } from "./store";
+import type { PaperLibraryDataV3 } from "./libraryModel";
+import PaperDetailDrawer from "./PaperDetailDrawer";
 import { lookupIdentifier, searchSemanticScholar, searchZotero } from "./scholar";
 import { paperFromPdf } from "./pdfMeta";
 import "./PaperLibrary.scss";
@@ -74,6 +76,8 @@ async function copyText(value: string, label: string) {
 
 export default function PaperLibrary({ datasetId, preview, onUploadPdf }: Props) {
   const [data, setData] = useState<PaperLibraryData>(() => loadPaperLibrary(datasetId, preview));
+  const [modernData, setModernData] = useState<PaperLibraryDataV3>(() => loadPaperLibraryV3(datasetId, preview));
+  const [detailPaperId, setDetailPaperId] = useState<string | null>(null);
   const [folderId, setFolderId] = useState<string | null>(null);
   const [status, setStatus] = useState<ReadingStatus | "all">("all");
   const [conditions, setConditions] = useState<FilterCondition[]>([]);
@@ -100,6 +104,22 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf }: Props)
   const persist = (next: PaperLibraryData) => {
     setData(next);
     savePaperLibrary(datasetId, next);
+    const current = loadPaperLibraryV3(datasetId, false);
+    const modern: PaperLibraryDataV3 = {
+      ...current,
+      folders: next.folders,
+      papers: next.papers.map((item) => {
+        const previous = current.papers.find((paper) => paper.id === item.id);
+        return previous ? { ...previous, ...item } : { ...item, metadata: { identifiers: { doi: item.doi, arxiv: item.arxiv }, confidence: {} }, attachmentIds: [], noteIds: [], annotationIds: [], collectionIds: [], relatedPaperIds: [] };
+      }),
+    };
+    setModernData(modern);
+    savePaperLibraryV3(datasetId, modern);
+  };
+  const persistModern = (next: PaperLibraryDataV3) => {
+    setModernData(next);
+    savePaperLibraryV3(datasetId, next);
+    setData({ folders: next.folders, papers: next.papers.map(({ metadata, attachmentIds, noteIds, annotationIds, collectionIds, relatedPaperIds, ...item }) => item) });
   };
 
   const scoped = useMemo(() => papersInView(data, folderId), [data, folderId]);
@@ -248,9 +268,13 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf }: Props)
         </div>
         <div className="paper-library-actions">
           <Button type="primary" onClick={() => { setPending(null); setSheet("import"); }}>导入</Button>
-          <Button onClick={() => download("papers.bib", toBibTeX(exportItems))}>BibTeX</Button>
-          <Button onClick={() => download("papers.ris", toRIS(exportItems))}>RIS</Button>
-          <Button onClick={() => download("papers.csv", toCSV(exportItems, data.folders))}>CSV</Button>
+          <Dropdown menu={{ items: [
+            { key: "bib", label: "BibTeX", onClick: () => download("papers.bib", toBibTeX(exportItems)) },
+            { key: "ris", label: "RIS", onClick: () => download("papers.ris", toRIS(exportItems)) },
+            { key: "csv", label: "CSV", onClick: () => download("papers.csv", toCSV(exportItems, data.folders)) },
+          ] }}>
+            <Button>导出</Button>
+          </Dropdown>
         </div>
       </header>
       <div className="paper-library-layout">
@@ -296,11 +320,14 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf }: Props)
                 <button type="button" aria-label="移除条件" onClick={() => setConditions(conditions.filter((item) => item !== condition))}>×</button>
               </span>
             ))}
-            <div className="paper-library-seg" role="group" aria-label="排序">
-              {([["library", "库内顺序"], ["newest", "最新"], ["oldest", "最早"]] as const).map(([key, label]) => (
-                <button key={key} type="button" aria-pressed={yearOrder === key} onClick={() => setYearOrder(key)}>{label}</button>
-              ))}
-            </div>
+            <Select
+              className="paper-library-sort"
+              size="small"
+              value={yearOrder}
+              aria-label="排序"
+              options={[{ value: "library", label: "库内顺序" }, { value: "newest", label: "最新" }, { value: "oldest", label: "最早" }]}
+              onChange={(value) => setYearOrder(value)}
+            />
             <Button type="text" onClick={() => setSheet("filter")}>添加筛选</Button>
           </div>
           {!visible.length && <div className="paper-library-empty">没有符合条件的论文。可以导入 DOI、arXiv、BibTeX、RIS、CSV，或上传 PDF。</div>}
@@ -314,7 +341,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf }: Props)
               />
               <div className="paper-library-main">
                 <div className="paper-library-title-line">
-                  <h2 className="paper-library-title">{item.title}</h2>
+                  <h2 className="paper-library-title"><button type="button" className="paper-library-title-button" onClick={() => setDetailPaperId(item.id)}>{item.title}</button></h2>
                   <Select
                     className="paper-library-status"
                     size="small"
@@ -344,24 +371,20 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf }: Props)
                   {item.incomplete && <span className="paper-library-warn">待补全</span>}
                   {item.parse === "failed" && <span className="paper-library-warn">解析失败</span>}
                   {item.parse === "parsing" && <span className="paper-library-source">解析中</span>}
-                  {(Object.keys(citationLabel) as CitationStyle[]).map((style) => (
-                    <button key={style} type="button" className="paper-library-cite-button" onClick={() => copyText(formatCitation(item, style), citationLabel[style])}>
-                      {citationLabel[style]}
-                    </button>
-                  ))}
-                  {paperLink(item) && <a className="paper-library-link" href={paperLink(item)!} target="_blank" rel="noreferrer">原文</a>}
-                  <button type="button" className="paper-library-cite-button" onClick={() => { setEditing(item); setSheet("edit"); }}>编辑</button>
-                  <Select
-                    className="paper-library-move"
-                    size="small"
-                    value={item.folderId || "none"}
-                    aria-label={`${item.title} 的文件夹`}
-                    options={folderOptions}
-                    onChange={(value) => placePapers([item.id], value)}
-                  />
-                  <Popconfirm title="从论文集移除这篇题录？" okText="移除" cancelText="取消" onConfirm={() => dropPapers([item.id])}>
-                    <button type="button" className="paper-library-cite-button danger">移除</button>
-                  </Popconfirm>
+                  <Dropdown menu={{ items: [
+                    ...(Object.keys(citationLabel) as CitationStyle[]).map((style) => ({
+                      key: style,
+                      label: citationLabel[style],
+                      onClick: () => copyText(formatCitation(item, style), citationLabel[style]),
+                    })),
+                    { key: "link", label: "原文", disabled: !paperLink(item), onClick: () => { const href = paperLink(item); if (href) window.open(href, "_blank", "noopener"); } },
+                    { key: "edit", label: "编辑", onClick: () => { setEditing(item); setSheet("edit"); } },
+                    { type: "divider" },
+                    { key: "move", label: "移动到", children: folderOptions.map((option) => ({ key: option.value, label: option.label, onClick: () => placePapers([item.id], option.value) })) },
+                    { key: "remove", label: "移除", danger: true, onClick: () => Modal.confirm({ title: "从论文集移除这篇题录？", okText: "移除", cancelText: "取消", onOk: () => dropPapers([item.id]) }) },
+                  ] }}>
+                    <button type="button" className="paper-library-cite-button" aria-label={`${item.title} 的更多操作`}>更多</button>
+                  </Dropdown>
                 </div>
               </div>
             </article>
@@ -369,14 +392,16 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf }: Props)
           {selectedPapers.length > 0 && (
         <div className="paper-library-bar" role="region" aria-label="已选论文">
           <span className="hint">已选 {selectedPapers.length} 篇，可阅读 {readyCount} 篇</span>
-          <Button onClick={() => copyText(selectedPapers.map((item) => formatCitation(item, "gbt")).join("\n"), "国标引用")}>复制国标</Button>
           <Select className="paper-library-move" size="small" value={bulkFolder} aria-label="移动到文件夹" options={folderOptions} onChange={setBulkFolder} />
           <Button onClick={() => placePapers(selected, bulkFolder)}>移动</Button>
-          <Popconfirm title={`移除已选的 ${selectedPapers.length} 篇题录？`} okText="移除" cancelText="取消" onConfirm={() => dropPapers(selected)}>
-            <Button>移除</Button>
-          </Popconfirm>
-          <Button disabled={readyCount < 2} onClick={() => setSheet("review")}>生成综述（{readyCount}）</Button>
-          <Button disabled={readyCount < 1} onClick={() => message.info("自动拓展会带着这些种子论文进入研究流程")}>自动拓展（{readyCount}）</Button>
+          <Button onClick={() => Modal.confirm({ title: `移除已选的 ${selectedPapers.length} 篇题录？`, okText: "移除", cancelText: "取消", onOk: () => dropPapers(selected) })}>移除</Button>
+          <Dropdown menu={{ items: [
+            { key: "gbt", label: "复制国标", onClick: () => copyText(selectedPapers.map((item) => formatCitation(item, "gbt")).join("\n"), "国标引用") },
+            { key: "review", label: `生成综述（${readyCount}）`, disabled: readyCount < 2, onClick: () => setSheet("review") },
+            { key: "expand", label: `自动拓展（${readyCount}）`, disabled: readyCount < 1, onClick: () => message.info("自动拓展会带着这些种子论文进入研究流程") },
+          ] }}>
+            <Button>更多</Button>
+          </Dropdown>
           </div>
           )}
         </div>
@@ -389,9 +414,17 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf }: Props)
               <Button type="text" onClick={() => setSheet(null)}>关闭</Button>
             </header>
             {sheet === "import" && (
-              <div className="paper-library-import">
-                <section>
-                  <h3>DOI / arXiv</h3>
+              <div className="paper-library-import paper-library-import-v2">
+                <section className="paper-library-upload-hero">
+                  <div className="paper-library-upload-icon">↥</div>
+                  <h3>把论文放进文献库</h3>
+                  <p>优先上传 PDF。系统会先识别 DOI 和元数据，再把文件作为这篇文献的附件保存。</p>
+                  <input ref={fileRef} hidden type="file" accept=".pdf,.bib,.ris,.csv,application/pdf,text/csv" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importFile(file); }} />
+                  <Button type="primary" size="large" onClick={() => fileRef.current?.click()}>选择 PDF 或文献文件</Button>
+                  <span className="paper-library-upload-hint">支持 PDF · BibTeX · RIS · CSV</span>
+                </section>
+                <section className="paper-library-quick-import">
+                  <h3>已有 DOI 或 arXiv 编号？</h3>
                   <p>粘贴 DOI、arXiv 编号或链接。库里已经有的不会再插入。</p>
                   <Input value={identifier} placeholder="10.48550/arXiv.1706.03762 或 1706.03762" onChange={(event) => setIdentifier(event.target.value)} onPressEnter={importIdentifier} />
                   <Button type="primary" loading={searching} onClick={importIdentifier}>查重并导入</Button>
@@ -413,18 +446,11 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf }: Props)
                   <Input.TextArea rows={6} value={bibliography} placeholder={format === "csv" ? "题名,作者,出处,年份,DOI,arXiv,标签,文件夹" : "粘贴文献记录"} onChange={(event) => setBibliography(event.target.value)} />
                   <Button onClick={importBibliography}>识别</Button>
                 </section>
-                <section>
-                  <h3>PDF</h3>
-                  <p>读取文件信息和首页文字。抽到 DOI 会补作者和出处；抽不到则保留文件名，并标成待补全。</p>
-                  <input ref={fileRef} hidden type="file" accept=".pdf,.bib,.ris,.csv,application/pdf,text/csv" onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    event.target.value = "";
-                    if (file) void importFile(file);
-                  }} />
-                  <Button type="primary" onClick={() => fileRef.current?.click()}>选择 PDF 或文献文件</Button>
-                </section>
-                <section>
-                  <h3>外部文库</h3>
+                <section className="paper-library-external-import">
+                  <details>
+                    <summary>连接外部文库 <span>Semantic Scholar · Zotero</span></summary>
+                    <div className="paper-library-external-body">
+                  <h3>从外部文库检索</h3>
                   <Input value={query} placeholder="Semantic Scholar 检索词" onChange={(event) => setQuery(event.target.value)} />
                   <Button loading={searching} onClick={async () => {
                     setSearching(true);
@@ -459,6 +485,8 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf }: Props)
                       </button>
                     ))}
                   </div>
+                    </div>
+                  </details>
                 </section>
                 {pending && (
                   <section className="paper-library-plan">
@@ -482,6 +510,14 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf }: Props)
             )}
           </aside>
         </div>
+      )}
+      {detailPaperId && modernData.papers.some((item) => item.id === detailPaperId) && (
+        <PaperDetailDrawer
+          paper={modernData.papers.find((item) => item.id === detailPaperId)!}
+          data={modernData}
+          onClose={() => setDetailPaperId(null)}
+          onChange={persistModern}
+        />
       )}
     </section>
   );
