@@ -1,5 +1,7 @@
 import asyncio
+import copy
 import json
+import pickle
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -388,6 +390,21 @@ def test_private_http_error_retains_structured_recovery_details(monkeypatch, ope
         host._post(operation, {})
     envelope = json.loads(str(raised.value))
     assert envelope == {'content': [], 'structuredContent': error, 'isError': True}
+
+
+@pytest.mark.parametrize('body', [
+    {'error': {'code': 'RESOURCE_LIMIT_EXCEEDED', 'message': 'Split this batch', 'details': {'limit': 100}}},
+    'Invalid upstream response',
+])
+def test_private_http_error_survives_copy_and_pickle(body):
+    from lazymind.chat.service.knowledge_management import _CoreManagementError
+
+    error = _CoreManagementError(body, 422)
+    for restored in (copy.copy(error), copy.deepcopy(error), pickle.loads(pickle.dumps(error))):
+        assert type(restored) is _CoreManagementError
+        assert restored.args == (body, 422)
+        assert restored.envelope == error.envelope
+        assert str(restored) == str(error)
 
 
 def test_pending_confirmation_keeps_complete_preview_for_live_and_persisted_card(monkeypatch):

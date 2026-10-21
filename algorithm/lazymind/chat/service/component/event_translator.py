@@ -180,7 +180,8 @@ class AgentEventFrameTranslator:
             frames.append(_stream_frame(extra={'task_created': task_created}))
             return frames
         if event_type == 'knowledge_operation_result':
-            frames.append(_stream_frame(extra={'knowledge_operation_result': {k: v for k, v in event.items() if k != 'tag'}}))
+            operation_result = {k: v for k, v in event.items() if k != 'tag'}
+            frames.append(_stream_frame(extra={'knowledge_operation_result': operation_result}))
             return frames
         if event_type == 'artifact_created':
             artifact = {k: v for k, v in event.items() if k != 'tag'}

@@ -63,7 +63,7 @@ type RunRequest struct {
 
 // TaskEvent is one event emitted by the SubAgent SSE stream.
 type TaskEvent struct {
-	AskPending map[string]any `json:"ask_pending,omitempty"`
+	AskPending   map[string]any                 `json:"ask_pending,omitempty"`
 	Type         string                         `json:"type"`
 	V2ArtifactID string                         `json:"v2_artifact_id,omitempty"`
 	V2RevisionID string                         `json:"v2_revision_id,omitempty"`

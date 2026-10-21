@@ -37,7 +37,9 @@ async def run_subagent(
         Body(description='Core-owned durable step snapshot used for resume'),
     ] = None,
     workspace_execution: Annotated[Optional[Dict[str, Any]], Body(description='Core private execution identity')] = None,
-    system_mcp_config: Annotated[Optional[List[Dict[str, Any]]], Body(description='Core private per-run MCP scope')] = None,
+    system_mcp_config: Annotated[
+        Optional[List[Dict[str, Any]]], Body(description='Core private per-run MCP scope'),
+    ] = None,
 ):
     from lazymind.chat.engine.subagent.runner import run_subagent_stream
 

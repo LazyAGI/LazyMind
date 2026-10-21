@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
-import os
 from functools import wraps
 import time
 from contextlib import contextmanager
@@ -32,6 +31,7 @@ _REQUEST = ContextVar('knowledge_management_request', default=None)
 
 class _CoreManagementError(ToolExecutionError):
     def __init__(self, body, status_code):
+        super().__init__(body, status_code)
         error = body.get('error') if isinstance(body, dict) else None
         if isinstance(error, dict) and isinstance(error.get('code'), str):
             details = {key: copy.deepcopy(error[key]) for key in ('code', 'message', 'details') if key in error}
@@ -39,7 +39,9 @@ class _CoreManagementError(ToolExecutionError):
             details = {'code': 'KNOWLEDGE_REQUEST_FAILED', 'message': 'Knowledge management request failed',
                        'details': {'status_code': status_code}}
         self.envelope = {'content': [], 'structuredContent': details, 'isError': True}
-        super().__init__(json.dumps(self.envelope, ensure_ascii=False))
+
+    def __str__(self):
+        return json.dumps(self.envelope, ensure_ascii=False)
 
 
 def _resolve_upload_files(arguments):
@@ -69,11 +71,12 @@ class KnowledgeManagementRuntime:
     def __init__(self, execution, core_api_url, *, allowed_tools=None, cancel_check=None):
         execution = copy.deepcopy(execution)
         if not execution.get('user_id') or not execution.get('conversation_id') or not (
-            (execution.get('history_id') and execution.get('run_id')) or
-            (execution.get('task_id') and execution.get('generation'))
+            (execution.get('history_id') and execution.get('run_id'))
+            or (execution.get('task_id') and execution.get('generation'))
         ):
             raise ToolExecutionError('Knowledge management requires an active execution identity')
-        if any(execution.get(key) for key in ('attempt_id', 'workflow_id', 'step_id')) and not execution.get('lease_token'):
+        if (any(execution.get(key) for key in ('attempt_id', 'workflow_id', 'step_id'))
+                and not execution.get('lease_token')):
             raise ToolExecutionError('Knowledge management requires an active workflow lease')
         self.execution = MappingProxyType(execution)
         self.core_api_url = core_api_url.rstrip('/')
@@ -159,7 +162,8 @@ class KnowledgeManagementRuntime:
         arguments = thaw(prepared.validated_arguments)
         original_digest = digest(arguments)
         if (wire_name, original_digest) in self._uncertain_calls:
-            raise ToolExecutionError('Previous knowledge mutation outcome is uncertain; reconcile its receipt before retrying')
+            raise ToolExecutionError(
+                'Previous knowledge mutation outcome is uncertain; reconcile its receipt before retrying')
         arguments_digest = digest(arguments)
         payload = {'execution': dict(self.execution), 'wire_name': wire_name,
                    'arguments': arguments, 'call_id': prepared.call_id}
@@ -201,14 +205,18 @@ class KnowledgeManagementRuntime:
         if status != 'allowed':
             raise ToolExecutionError('Knowledge management confirmation ' + str(status or 'unavailable'))
         self._check_cancel()
-        claim = self._post('claim', {**payload, 'operation_key': prepared_state['operation_key'],
-                                   'arguments_digest': arguments_digest, 'snapshot': prepared_state['snapshot'],
-                                   'confirmation_id': confirmation_id or ''})
+        claim = self._post('claim', {
+            **payload, 'operation_key': prepared_state['operation_key'],
+            'arguments_digest': arguments_digest, 'snapshot': prepared_state['snapshot'],
+            'confirmation_id': confirmation_id or '',
+        })
         metadata = claim.get('metadata')
         if (claim.get('status') != 'allowed' or not isinstance(metadata, dict)
                 or metadata.get('operation_key') != prepared_state['operation_key']):
             raise ToolExecutionError('Knowledge management claim unavailable')
-        token = _REQUEST.set((self, wire_name, arguments_digest, copy.deepcopy(metadata), original_digest, arguments, {}))
+        token = _REQUEST.set((
+            self, wire_name, arguments_digest, copy.deepcopy(metadata), original_digest, arguments, {},
+        ))
         try:
             yield
         finally:
@@ -227,7 +235,8 @@ class KnowledgeManagementRuntime:
             return result
         if envelope.get('isError') is not True:
             operation = envelope.get('structuredContent', envelope)
-            if isinstance(operation, dict) and operation.get('action') == wire_name and isinstance(operation.get('items'), list):
+            if (isinstance(operation, dict) and operation.get('action') == wire_name
+                    and isinstance(operation.get('items'), list)):
                 items = [{key: copy.deepcopy(item[key]) for key in (
                     'resource_ref', 'previous_ref', 'name', 'parent_id', 'resource_status', 'processing_status',
                     'processing_error', 'cleanup_status', 'error', 'input_index', 'task_id',

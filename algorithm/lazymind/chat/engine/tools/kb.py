@@ -23,6 +23,7 @@ from lazymind.chat.engine.tools._utils import (
     truncate_text,
 )
 from lazymind.chat.engine.tools.algo import DOCUMENT, search_kb
+from lazymind.chat.engine.tools.infra.kb_ownership import filter_active_nodes
 from lazymind.chat.service.utils import (
     basename_from_path,
     local_path_from_static_file_url,
@@ -258,8 +259,6 @@ def _bounded_page_size(value: int, default: int = 20) -> int:
         return default
     return min(page_size, 100)
 
-
-from lazymind.chat.engine.tools.infra.kb_ownership import filter_active_nodes
 
 class KBToolkit:
     """Knowledge-base discovery, inspection, search, and navigation tools.
