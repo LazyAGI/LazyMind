@@ -26,28 +26,14 @@ MCP 按稳定 Server ID 构造 `mcp:<id>` 动态检索组，名称用于描述�
 MCPClient 支持接收稳定 Server ID；LazyMind 使用主线的 Host 授权身份构造逻辑，
 通过通用运行元数据声明稳定 Server ID 与安全工具 identity。该 identity 还区分来源命名空间、
 服务地址、传输方式、启动参数与 wire name，显示名称或凭据轮换不改变身份。
-LazyMind 按稳定工具 identity 去重，再交给 LazyLLM ToolManager 注册。模型 schema、执行路由、
-日志和界面统一使用 MCP adapter 生成的 `mcp_<server>_<tool>`，不追加哈希或数字，也不截断。
-内置服务的 namespace 固定为 `kbmanager`、`browser`，仅分别移除原始方法的
-`knowledge.`、`browser.` 前缀；服务 ID、权限标识和实际 MCP 方法名不变。
-例如 `knowledge.list` → `mcp_kbmanager_list`，
-`knowledge.document.list` → `mcp_kbmanager_document_list`，
-`browser.open` → `mcp_browser_open`，外部 Notion 的 `search` → `mcp_notion_search`。
-
-外部服务复用配置中的 Server 名，转小写，将非 ASCII 字母、数字、下划线的连续字符替换为
-`_`，去掉首尾 `_`。工具名保留大小写，以相同字符范围规范化。
-名称为空、完整名称超过 64 字符、不同来源的最终名称重复或规范化冲突均明确报错。
-同 Server 的 `foo.bar` 和 `foo-bar` 因此不能同时注册。
-正常加载、配置预览与 SubAgent 共用命名参数；缓存不在注册时改名。
-Server 改名会改变可见名称，对应可选工具需要重新加载。
-独立使用 MCPClient 时可传 `server_name`、`tool_name_prefix`；
-不传 namespace 的旧客户端保留原有规范化名称，不生成哈希。
-
-浏览器策略和知识库权限继续使用真实服务身份及原始 MCP 方法名。
-历史消息不重写，旧哈希名称不建立执行别名；待执行旧调用作为过期名称拒绝，
-后续模型轮次通过当前工具目录重新发现。用户自定义 Skill 引用旧名称时报告依赖不可用，
-不猜测替换。该命名机制适用于开启和关闭检索的模式。
-其他独立函数保持单工具检索，基础工具及 Host 场景必需工具保持原预加载规则。
+LazyMind 按稳定工具 identity 去重，再交给 LazyLLM ToolManager 注册。带稳定 ID 的 MCP
+工具始终使用原始 wire name 和工具 identity 派生的固定别名，不依赖当前是否存在同名工具、
+Server 显示名称或注册顺序。ToolManager 将 identity 当作不透明字符串，仅用于 hash；
+可读前缀取自 adapter 的 `__mcp_tool_name__`，缺少时固定使用 `mcp`。相同 Server 内 `foo.bar` 和 `foo-bar` 也保持独立身份。
+别名使用请求内 wrapper，保留原始远端调用及 schema 元数据，不修改共享缓存中的 callable。
+最终名称仍碰撞时明确报错，不使用随注册集合变化的数字后缀。无 ID 的旧配置维持原名行为。
+该名称消歧同时适用于开启和关闭检索的模式。其他独立函数保持单工具检索，
+基础工具及 Host 场景必需工具保持原预加载规则。
 
 LazyMind 显式设置 `max_search_results=5`、`matched_member_limit=3`；LazyLLM 提供相同默认值，
 其他 Host 可通过这两个正整数参数覆盖候选上限和成员摘要上限。搜索不加载 schema。
@@ -69,14 +55,10 @@ LazyLLM 的工具描述只说明组／成员加载及下一轮生效的机制，
 不变。原子目录新增 `group_descriptions` 祖先映射，确保外层组使用自己的描述。
 
 加载在同一笔事务中先卸载再加载。未知名称、权限限制、必需工具保护或持久化错误都会
-阻止提交。状态仍保存原子工具名，恢复时不会自动扩组。状态格式为 version 3：
-保留 `loaded`、`skills`，新增 `mcp_bindings`，记录已加载 MCP 的“可读名称 → 内部 identity”。
-可选 MCP 工具必须名称和 identity 同时匹配才恢复；服务替换、地址或身份变化、权限撤销会丢弃
-对应记录，其他工具增删及注册顺序不影响恢复。凭据轮换不改变身份。
-
-version 1、2 的可选加载记录一次性失效；Host 必需工具和已记录 Skill 的依赖按当前目录重新计算。
-只读预览不落盘，初始化通过硬上限校验后才原子写入 version 3；文件锁、校验和原子替换保持不变，
-失败不修改旧文件。
+阻止提交。状态仍保存原子工具名，恢复时不会自动扩组。状态格式升级为 version 2：
+version 1 只有旧 public name，无法可靠识别原来的 Server，因此忽略其中的全部可选加载记录，
+重新计算 Host 必需工具及已记录 Skill 的当前依赖；可选工具需重新加载。只读预览不落盘，
+初始化通过硬上限校验后才原子写入 version 2；失败保留旧文件。
 
 工具软预算为现有有效输入预算的 10%。卸载后未超过阈值即可完整加入本批工具，
 超过后只能卸载或幂等加载。Host 必需工具和已读取 Skill 的允许依赖绕过软预算，
@@ -213,9 +195,7 @@ API 文档定向检查 7 passed，全量 Python lint（algorithm/backend/evo）�
 Top-5 均为 42/43、双意图均为 3/3，部分加载后的查询结果也一致。
 这些验证使用离线目录与受控 MCP client，不代表外部 MCP 服务端到端验收。
 
-### MCP 稳定身份与加载状态修复（历史实现）
-
-以下记录描述此前哈希别名与 version 2 的实现，已由本文开头的无哈希命名及 version 3 状态取代。
+### MCP 稳定身份与加载状态修复
 
 带稳定 Server ID 的 MCP 工具始终使用 identity 派生的固定模型名称，替代上文历史实现中
 “发生冲突时才生成别名”的行为。加入或移除其他 Server、同名本地工具不会改变已有工具名称；
