@@ -28,13 +28,6 @@ routes its validation to LazyMind. Only then does Codex execute the authorized
 implementation step in a disposable local directory. A configured LazyMind chat
 model is therefore also required.
 
-## Watch the demo
-
-[Follow the 75-second recording walkthrough](DEMO.md): original successful Skill
-sample → plugin start → missing-Brief fault → blocked implementation → failed
-history and normal-run review. Native repair is an open acceptance item. The page
-links real screenshots and receipts; the shot list is not a recorded product video.
-
 ## Try in Codex
 
 Requires macOS/Linux, a running LazyMind **from this PR branch** with a working
@@ -86,28 +79,24 @@ existing Workflow plugin. The plugin does not need a separate Codex CLI install.
    Expect `BRIEF_MISSING` in the native gate event, a failed validation step and no
    admitted implementation attempt. A native validation SubAgent already ran;
    this is **not** a claim of zero model calls or zero operating-system processes.
-   In the **Brief** tab edit its JSON, replacing `"brief": null` with:
 
-   ```json
-   {"brief":"Implement normalize_label(value) in labels.py: strip surrounding whitespace and lowercase; test ASCII, Unicode and empty input in a disposable directory.","fault_injection":"FAULT_BRIEF_MISSING"}
-   ```
+   Preserve the failure for inspection. Edited-input same-session Retry is a
+   follow-up product acceptance item, not a required trial step.
 
-   Keep the injection label as provenance. The intended recovery is **Gate → Retry**
-   after confirming the new saved version.
-   **Current limitation:** our real Panel test saved the human revision and marked
-   validation stale, but disabled Retry despite Core reporting no active execution.
-   Thus edited-input same-session recovery is **BLOCKED**, not a verified Quick Start
-   outcome. The unchanged-input Retry ran and failed again. See
-   [the exact observation](REVIEW_RESPONSE.md#remaining-product-boundaries). Repair the
-   source Brief, not the Gate output. Human edits and approvals are trusted user
-   operations; they are not an adversarial security boundary.
+If Codex stops after native validation, continue in the same bound task:
+“Re-read the LazyMind Workflow state and continue only the next authorized step.”
+Open the returned Panel URL manually if needed. Queue `accepted` is not execution
+proof; do not fabricate a thread ID or bypass Core admission.
 
-If the Panel cannot wake Codex, inspect the connection/HostAction status and follow
-its offered recovery action. Do not fabricate a thread ID or interpret queue
-`accepted` as proof of execution. [Current verification status](REVIEW_RESPONSE.md)
-distinguishes native Runtime, actual plugin tools, and desktop queue/UI acceptance.
+## Real evidence
 
-## Evidence and technical cases
+[Reproduce the demo](DEMO.md): actual plugin MCP calls, native Gate execution,
+normal completion after human approval, and missing-Brief rejection with no
+implementation attempt. The [receipts and image hashes](evidence/showcase/receipt.json)
+include the independent Core **409** admission refusal. Normal plugin execution
+used manual same-thread continuation; it is not uninterrupted desktop E2E.
+Two real Panel screenshots are available. Video is **NOT_RECORDED**; the optional
+60-second recording guide is not a software or review prerequisite.
 
 - [#2282: Brief admission and recovery](cases/issue-2282.md) is the main demo.
 - [#2245: full Git SHA and finite coverage](cases/issue-2245.md) is supplementary.
@@ -130,7 +119,12 @@ python3 verify_rc_evidence.py
 
 These commands test code and historical evidence; they do not run a plugin E2E.
 
-## Limits
+## Limitations
+
+Desktop automatic continuation and native edited-input same-session Retry remain
+unfinished product acceptance items; they are outside this PR's bounded Showcase
+acceptance. The tested Panel saved a human Brief revision but disabled Retry.
+[Exact observations and follow-ups](REVIEW_RESPONSE.md#remaining-product-boundaries).
 
 The native demo checks a **Brief Artifact**, not a Superpowers brief file on the
 Codex host. It gates Core's implementation authorization; ordinary Codex tools

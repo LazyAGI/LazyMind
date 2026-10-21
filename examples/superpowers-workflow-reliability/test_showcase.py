@@ -68,7 +68,10 @@ class RecordedShowcaseTests(unittest.TestCase):
             else:
                 self.assertEqual(hashlib.sha256((self.root / name).read_bytes()).hexdigest(), expected)
         for name, expected in self.receipt['screenshots'].items():
-            self.assertEqual(hashlib.sha256((self.evidence / name).read_bytes()).hexdigest(), expected)
+            data = (self.evidence / name).read_bytes()
+            self.assertEqual(hashlib.sha256(data).hexdigest(), expected)
+            self.assertEqual(Path(name).suffix, '.jpg')
+            self.assertTrue(data.startswith(b'\xff\xd8\xff') and data.endswith(b'\xff\xd9'))
 
     def test_recorded_admission_boundary(self):
         records = self.receipt['records']

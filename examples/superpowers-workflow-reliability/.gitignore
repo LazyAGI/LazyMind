@@ -13,3 +13,9 @@ child-*.txt
 /release-drafts.md
 /export_evidence.py
 /probe_runtime.py
+
+# Publish recordings as PR comment attachments, not repository assets.
+*.mp4
+*.mov
+*.gif
+*.webm

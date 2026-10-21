@@ -28,7 +28,7 @@ created a human revision and invalidated the validator; the tested Panel then
 disabled Retry. Edited-input recovery is **BLOCKED**, not a completed native E2E.
 Do not repair by editing the Gate output. Human edits and approvals are trusted user actions. Implementation requires two Artifacts and human review.
 [Current acceptance status](../REVIEW_RESPONSE.md) says which parts were observed;
-[recording instructions](../DEMO.md) do not substitute for a completed video.
+[reproduction guide](../DEMO.md) includes optional recording instructions; video is NOT_RECORDED.
 
 ## Stronger filesystem checks remain available
 

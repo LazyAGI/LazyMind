@@ -17,8 +17,8 @@
     "workflows/superpowers-brief-showcase/scripts/brief.py": "aae5d2764cf4e40967c234f29e9707b98df9a0bd53e27253a0cab198481789c3"
   },
   "screenshots": {
-    "blocked.png": "2aec9dfc183f7d017512a361b6b6eb1161a557b4eec0af49fddf24935556f0cd",
-    "review.png": "d8ff1539b12087049363acc2b83592f94a9b452225c4925829d7f4123855b60b"
+    "blocked.jpg": "2aec9dfc183f7d017512a361b6b6eb1161a557b4eec0af49fddf24935556f0cd",
+    "review.jpg": "d8ff1539b12087049363acc2b83592f94a9b452225c4925829d7f4123855b60b"
   },
   "outcomes": {
     "normal_plugin_mcp_manual_continuation": "PASS",

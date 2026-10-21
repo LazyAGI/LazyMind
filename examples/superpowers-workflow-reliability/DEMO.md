@@ -1,48 +1,63 @@
-# Brief gate: real screens and a recording plan
+# Try the Brief gate
 
-[Try in Codex](README.md#try-in-codex) · [Selected receipts](evidence/showcase/receipt.json)
+[Setup in Codex](README.md#try-in-codex) · [Real receipts](evidence/showcase/receipt.json)
 
-**Status:** real Codex-plugin MCP calls, native Runtime execution and browser
-screenshots captured. **No continuous video/GIF was recorded.** The available
-browser automation captures stills; it does not expose video recording. Desktop
-automatic queue continuation and edited-input recovery remain open acceptance
-items. Do not present this shot list as a finished product video.
+The native Skill baseline **passed**. Missing Brief is explicit **fault injection**,
+not a natural reproduction of #2282. Video status: **NOT_RECORDED**; recording is optional.
 
-## What was actually seen
+## Reproduce two separate runs
 
-![Real Panel: missing Brief blocks validation](evidence/showcase/blocked.png)
+1. Connect the official plugin and enable the package using the setup above. Ask:
+   “Use the LazyMind Workflow plugin to run Superpowers Brief Gate Showcase.
+   Open its Panel. Implement only in a new disposable directory and stop for review.”
+2. Inspect **Brief → Gate → Code and tests**. If Codex stops after native validation,
+   continue in the same bound task: “Re-read the LazyMind Workflow state and continue
+   only the next authorized step.” Our actual plugin test used manual continuation.
+   Inspect `labels.py`, the three tests and their Artifacts; approve with the Panel's
+   **Continue execution / 继续执行** button and check completion.
+3. Start a **new** Workflow session with:
 
-The Brief was deliberately null. A native `check_showcase_brief` event returned
-`BRIEF_MISSING`. Core rejected a direct implementation-admission request with HTTP
-409 `WORKFLOW_ADMISSION_DENIED`, reason `recovery_required`.
+   ```text
+   Use the LazyMind Workflow plugin to run Superpowers Brief Gate Showcase.
+   FAULT_BRIEF_MISSING
+   ```
 
-![Real Panel: actual implementation and tests await human review](evidence/showcase/review.png)
+4. Confirm the Brief contains `null`, Gate fails with `BRIEF_MISSING`, and
+   implementation has no admitted attempt. Preserve the failed state for inspection.
 
-This is the separate **normal** session: Codex wrote the file, ran three tests and
-published the outputs through MCP. Independent file/Artifact comparison and tests
-passed. Only the actual Panel approval completed the session. The normal image is
-not a recovered version of the failed session.
+![Normal session: code and test Artifacts awaiting approval](evidence/showcase/review.jpg)
+![Injected session: failed native Brief gate](evidence/showcase/blocked.jpg)
 
-## Reproducible 75-second shot plan
+The [receipts](evidence/showcase/receipt.json) retain separate Session IDs, plugin
+calls, completion after approval, file/Artifact checks and a real Core **409
+WORKFLOW_ADMISSION_DENIED** probe. The normal image is not recovery of the failed
+session. A native validator ran; only implementation was blocked. Git Base and
+Coverage belong to [Advanced CLI](ADVANCED.md), a separate execution path.
 
-Use a disposable test task, the [README instructions](README.md#try-in-codex), an
-OS screen recorder and the real Panel. Keep credentials and unrelated tasks out of
-frame. Record actions live; label any time cuts. Never fabricate terminal output.
+## Optional 60-second recording
 
-| Time | Action / screen | Short English caption |
+Prepare both runs above, leaving the normal one awaiting approval. Open their live
+Panels and the actual Codex conversation. Record a walkthrough of prepared sessions,
+**not** a 60-second execution benchmark. On macOS press **Shift–Command–5**, select
+the Codex/Panel area and save outside Git (e.g. Movies); hide credentials and unrelated
+tasks. [Apple recorder instructions](https://support.apple.com/en-au/guide/mac-help/mh26782/27/mac/27).
+
+| Time | Live action | English narration |
 | --- | --- | --- |
-| 0–10s | Open the [native successful sample](evidence/public/native.json) and #2282 case; show its PASS | “The native Skill sample passed. Missing Brief is a deliberate fault injection.” |
-| 10–25s | In a Codex task with the installed plugin, send the normal request; show actual workflow.start and Panel | “Codex stays the controller. LazyMind owns step admission.” |
-| 25–40s | Show native Gate success, implementation artifacts and real review boundary | “Inspect the brief, code and actual test output before approval.” |
-| 40–60s | Start a separate session with FAULT_BRIEF_MISSING; show null input, failed Gate and no implementation attempt | “Fault injection: the native check blocks implementation authorization.” |
-| 60–75s | Show failed history and the current recovery limitation; link Advanced recovery | “Failed state is preserved. Native edited-input Retry still needs a product fix.” |
+| 0–8s | Show [native PASS](evidence/public/native.json) and #2282 context | “Missing Brief is deliberate fault injection.” |
+| 8–18s | Show actual plugin start and manual continuation in Codex | “Keep Codex. LazyMind controls Workflow admission.” |
+| 18–35s | Click normal Panel Brief, Gate, Code and tests | “Inspect the Brief, source and actual test output.” |
+| 35–43s | Approve; show completed status | “Human review completes this run.” |
+| 43–55s | Switch to the failed run; show null Brief and Gate error | “Implementation was not admitted.” |
+| 55–60s | Show the limitations below; stop recording | “Automatic continuation and native Retry remain follow-ups.” |
 
-Do not record a successful same-session native recovery ending until it has really
-passed. After that gap is resolved, replace the last shot with: edit the source
-Brief → confirm its new saved version → Retry Gate → observe the new attempt and
-implementation → review. Preserve the failed attempt and source revision in view.
+Keep recording if an action takes longer; label any later time cuts. Never stitch
+screenshots or synthetic UI into a claimed continuous recording. Desktop automatic
+continuation and edited-input same-session Retry remain unfinished follow-ups,
+not prerequisites for trying or reviewing this Showcase.
 
-In our CLI-hosted test, queue notifications were accepted but the CLI turn exited;
-we explicitly resumed the same Codex thread. The desktop `open_in_codex` tool was
-not available to that CLI process, so this task opened the real returned Panel in
-the browser. These are integration limits, not a fully automatic desktop demo.
+Play back the recording, then drag the `.mov`/`.mp4` into a [PR #852 comment](https://github.com/LazyAGI/LazyMind/pull/852),
+wait for the attachment URL, preview and submit ([GitHub instructions](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/attaching-files)).
+Caption: “Live walkthrough of prepared plugin sessions; manual continuation;
+missing Brief is fault injection.” Keep video/GIF files out of Git.
+No recording or comment has been published by this update.

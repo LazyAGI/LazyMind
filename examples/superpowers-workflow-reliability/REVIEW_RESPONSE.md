@@ -8,11 +8,11 @@
 | Feedback | Change and evidence | Status |
 | --- | --- | --- |
 | Show native LazyMind value | New three-step package: Codex prepares a Brief; Core routes validation to the native worker and runs its pinned post-step check; only then may Codex implement. Core owns attempts, artifacts and final human review. No Python scheduling loop. Real MCP and Runtime receipts below. | Implemented; local filesystem guarantees stay Advanced |
-| Show a Before/After demo | Real failure/review screenshots, native Skill PASS baseline, explicit fault injection, server-side 409 refusal and [75-second recording script](DEMO.md). | Partial: no continuous video; native edited-input recovery BLOCKED |
+| Show a Before/After demo | Real failure/review screenshots, native Skill PASS baseline, explicit fault injection, server-side 409 refusal and [developer reproduction guide](DEMO.md), with optional 60-second recording instructions. | Demonstration evidence ready; video NOT_RECORDED and optional; native recovery is a follow-up |
 | Keep developers in Codex | Reuses the official plugin installer, session binding, MCP and queue. README starts with the plugin; original CLI is Advanced. No Superpowers clone, independent Python driver or CLI configuration needed for normal native execution after package enablement. | Real plugin MCP run passed with manual continuation; automatic desktop E2E BLOCKED |
 | Bound #2245 claims | Base SHA and finite Coverage remain separately tested in the unchanged Advanced executor. No full SDD/model attestation/OS isolation claim. | Addressed |
 
-## This round's actual acceptance
+## Native integration acceptance — before this closeout
 
 The final package was published as revision `3d166c5b-9133-4556-9960-dec83b54c92b`
 on 2026-10-21. The official CLI/plugin was built from merged main
@@ -68,7 +68,7 @@ model arguments. `tools_only` excludes generic Artifact writing inside that nati
 step. Core still does not attest external code/test Artifacts or intercept raw
 Codex tools. The local guarded executor therefore stays intact in Advanced.
 
-Two separate product acceptance items remain:
+These follow-up product acceptance items are outside this PR's bounded Showcase acceptance:
 
 1. Reproduce edited-input recovery on freshly built Core/frontend, then fix the
    stale failed-node recovery UI if confirmed. The existing installation preserved
@@ -83,6 +83,21 @@ Two separate product acceptance items remain:
    pre-tool hook or local registered-tool execution boundary. That would be a
    separate product design/PR, not an example-level promise.
 
-Ready for another architectural/code review, **not** for advertising completed
-native recovery or a fully automatic desktop demo. No performance or success-rate
-gain is claimed. No external issue comments were posted.
+## Showcase closeout
+
+**REQUEST_REVIEW_READY** for the bounded Example: native admission/state/Artifacts,
+Codex plugin access, real normal/fault/Panel evidence and explicit limits are
+demonstrated. This does not certify uninterrupted desktop E2E or edited-input
+recovery. Full SDD, model attestation and arbitrary parallel isolation stay outside
+scope. No performance or success-rate gain is claimed.
+
+The closeout changes only documentation, screenshot filenames and an offline
+format assertion. Both screenshots were JPEG bytes with `.png` names; they are
+now `.jpg`, with unchanged bytes/SHA-256 and updated links/receipt keys. Video is
+**NOT_RECORDED**; [manual recording and PR attachment instructions](DEMO.md) are
+optional. No new live E2E or external issue comment is claimed by this closeout.
+The prior `834352ae` [CI run](https://github.com/LazyAGI/LazyMind/actions/runs/39559521984)
+passed all 18 jobs. Current-head CI remains visible on the PR.
+
+Closeout validation: 68 regressions, seven-case offline verifier, two doc checks,
+Python lint, relative links, image signatures/hashes and whitespace checks passed.

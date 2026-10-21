@@ -4,7 +4,17 @@ A reusable Superpowers Dispatch Reliability Workflow integration built with Lazy
 [PR #852](https://github.com/LazyAGI/LazyMind/pull/852) adds an executable single-task
 example, not a complete Superpowers SDD conversion or production Runtime change.
 
-## Review round — 2026-10-21
+## Showcase closeout — 2026-10-21
+
+Documentation and image-format correction only; no execution behavior changes.
+The 68 automated regressions, seven-case offline verifier, two repository doc
+checks and Python lint passed again. Both JPEG screenshots retain their original
+SHA-256 after renaming; links and receipt keys now use `.jpg`. No live E2E was
+rerun in this closeout. Prior plugin and CLI runs remain separately labeled below.
+Video is NOT_RECORDED and optional; outstanding product items do not block the
+bounded Showcase's REQUEST_REVIEW_READY assessment in [REVIEW_RESPONSE](REVIEW_RESPONSE.md).
+
+## Native integration review — 2026-10-21
 
 Latest main `5398ef079c9e3051fbd5d89ae7fbca9c13ebc5d0` merged without conflicts
 for this review; the clean LazyLLM checkout was aligned to main's
