@@ -1,3 +1,4 @@
+import { mergeRun } from "../utils/ordinaryTaskState";
 import { create } from "zustand";
 import { requestConversationStatusRefresh } from "@/modules/chat/utils/conversationStatusEvents";
 import { AgentAppsAuth } from "@/components/auth";
@@ -817,6 +818,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
                 lastSwitchIndex = snapshot.model_switch.switch_index;
               }
             }
+            void get().loadConversationTasks(conversationId);
             scheduleWorkflowSessionRefresh(conversationId);
             if (current && TERMINAL_TASK_STATUSES.has(current.status)) get().unsubscribeTask(taskId);
             return;
@@ -1062,10 +1064,10 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             });
             const runs: OrdinaryRunView[] = res?.data?.data?.runs ?? res?.data?.runs ?? [];
             return {
-              runsByConversation: ordinaryMode ? { ...state.runsByConversation, [conversationId]: runs.map(run => {
+              runsByConversation: { ...state.runsByConversation, [conversationId]: runs.map(run => {
                 const current = state.runsByConversation[conversationId]?.find(item => item.run_id === run.run_id);
-                return current && current.revision > run.revision ? current : run;
-              }) } : state.runsByConversation,
+                return mergeRun(current, run);
+              }) },
               tasksByConversation: {
                 ...state.tasksByConversation,
                 [conversationId]: [...mergedTasks, ...liveAdditions],
@@ -1246,6 +1248,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           const event = UIUtils.jsonParser(raw);
           if (!event || !event.type) return;
           const { type, payload } = event;
+          if (type === "task_run_updated") { void get().loadConversationTasks(conversationId); return; }
           if (get().viewMode === "ordinary" && ["task_created", "task_updated"].includes(type)) {
             if (type === "task_created" && payload?.task_id) {
               liveTaskIdsCreatedDuringLoad.get(conversationId)?.add(payload.task_id);

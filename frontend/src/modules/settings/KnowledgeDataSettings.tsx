@@ -26,6 +26,9 @@ import ExternalServicesPage from "@/modules/modelProvider/pages/ExternalServices
 
 interface KnowledgeDataSettingsProps {
   routeParams?: URLSearchParams;
+  documentDirectoriesEnabled: boolean;
+  documentDirectoriesSaving: boolean;
+  onDocumentDirectoriesChange: (enabled: boolean) => void;
   documentParsingEnabled: boolean;
   documentParsingSaving: boolean;
   controlsDisabled: boolean;
@@ -52,6 +55,9 @@ interface ToolGroupDefinition {
 
 export default function KnowledgeDataSettings({
   routeParams,
+  documentDirectoriesEnabled,
+  documentDirectoriesSaving,
+  onDocumentDirectoriesChange,
   documentParsingEnabled,
   documentParsingSaving,
   controlsDisabled,
@@ -314,6 +320,25 @@ export default function KnowledgeDataSettings({
         <p>{t("settingsPage.knowledge.description")}</p>
       </div>
     </header>
+    <section className="settings-knowledge-group is-parser">
+      <header className="settings-knowledge-group-head">
+        <span><FolderOpenOutlined /></span>
+        <div>
+          <h2>{t("settingsPage.controls.documentDirectories.title")}</h2>
+          <p>{t("settingsPage.controls.documentDirectories.summary")}</p>
+        </div>
+        <div className="settings-knowledge-parser-controls">
+          <Switch
+            aria-label={t("settingsPage.controls.documentDirectories.title")}
+            checked={documentDirectoriesEnabled}
+            className="settings-ref-switch"
+            disabled={controlsDisabled}
+            loading={documentDirectoriesSaving}
+            onChange={onDocumentDirectoriesChange}
+          />
+        </div>
+      </header>
+    </section>
     {capabilityContent}
     {!toolsLoading && !toolsError && managedTools.length === 0 ? <Empty description={t("settingsPage.knowledge.empty")} /> : null}
   </section>;

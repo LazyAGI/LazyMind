@@ -19,6 +19,7 @@ import (
 	"lazymind/core/common/taskdisplay"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/tasktiming"
 	"lazymind/core/workflow/attempt"
 	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
@@ -210,6 +211,13 @@ func projectOrdinarySession(ctx context.Context, db *gorm.DB, session *orm.Workf
 		}
 		view.StageArtifacts = deduplicateOrdinaryArtifacts(view.StageArtifacts)
 		out.Tasks = append(out.Tasks, view)
+	}
+	timed, timingErr := tasktiming.Snapshot(ctx, db, session.CreateUserID, session.ConversationID, session.ID, time.Now().UTC())
+	if timingErr != nil {
+		return out, timingErr
+	}
+	if timed != nil {
+		run.ExecutionID, run.Status, run.Timing, run.Revision = timed.ExecutionID, timed.Status, timed.Timing, timed.Revision
 	}
 	out.Runs = append(out.Runs, run)
 	return out, nil

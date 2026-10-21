@@ -1,3 +1,5 @@
+import ScopedConversationList from "../components/RecordList/ScopedConversationList";
+import { moveConversationItems } from "../components/RecordList/conversationReorder";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { EditOutlined, FolderOpenOutlined, MessageOutlined, MoreOutlined, PlusOutlined } from "@ant-design/icons";
 import { Alert, Button, Dropdown, Empty, Form, Modal, Spin, message } from "antd";
@@ -39,6 +41,7 @@ export default function ConversationGroupPage() {
   const [loadError, setLoadError] = useState(false);
   const [editing, setEditing] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [chatConfig, setChatConfig] = useState<ChatConfig>({});
   const [saveError, setSaveError] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -51,15 +54,24 @@ export default function ConversationGroupPage() {
     return () => window.removeEventListener(CHAT_CONVERSATION_FILTER_EVENT, refreshSources);
   }, []);
   const loadGeneration = useRef(0);
-  const load = useCallback(async (append = false, token = "") => {
+  const loadedCount = useRef(conversations.length);
+  loadedCount.current = conversations.length;
+  const [sorting, setSorting] = useState(false);
+  const load = useCallback(async (append = false, token = "", preserveWindow = false) => {
     if (!groupId) return;
     const generation = ++loadGeneration.current;
     setLoading(true);
     try {
       const detail = await getConversationGroup(groupId, token, "", assistants);
+      while (preserveWindow && detail.nextPageToken && detail.conversations.length < loadedCount.current) {
+        const next = await getConversationGroup(groupId, detail.nextPageToken, "", assistants);
+        detail.conversations.push(...next.conversations);
+        if (next.nextPageToken === detail.nextPageToken) { detail.nextPageToken = ""; break; }
+        detail.nextPageToken = next.nextPageToken;
+      }
       if (generation !== loadGeneration.current) return;
       setGroup(detail.group);
-      setConversations((current) => append ? [...current, ...detail.conversations] : detail.conversations);
+      setConversations((current) => [...new Map((append ? [...current, ...detail.conversations] : detail.conversations).map(item => [item.conversation_id, item])).values()]);
       setNextPageToken(detail.nextPageToken);
       setLoadError(false);
     } catch {
@@ -128,15 +140,23 @@ export default function ConversationGroupPage() {
     <div className="conversation-group-page-composer"><ChatInput runInBackground={Boolean(group.is_task_conv)} draftGroupId={group.id} disabled={!modelGuard.canChat} disabledReason={t(modelGuard.isChecking ? "chat.modelProviderChecking" : "chat.modelProviderRequiredTitle")} embeddingReady={modelGuard.embeddingReady} multimodalEmbeddingReady={modelGuard.multimodalEmbeddingReady} rerankReady={modelGuard.rerankReady} value={prompt} onChange={setPrompt} isChatContent={false} showHistoryButton={false} showHistoryList={false} showPromptSuggestions={false} chatConfig={chatConfig} setChatConfig={setChatConfig} placeholder={t("conversationOrganizer.composerPlaceholder", { name: group.name })} setIsChatContent={value => { if (value) startChat(); }} /></div>
     <section className="conversation-group-page-list">
       <div className="conversation-group-page-list-heading">{t(group.kind === "project" ? "conversationProject.conversations" : "conversationOrganizer.groupConversations")}<span>{group.member_count}</span></div>
-      {conversations.length === 0 ? <div className="conversation-group-page-empty"><Empty description={t("conversationOrganizer.empty")} /><Button type="primary" icon={<PlusOutlined />} onClick={startChat}>{t("conversationOrganizer.startFirst")}</Button></div> : conversations.map((conversation) => <div className="conversation-group-page-item" key={conversation.conversation_id} draggable={group.kind !== "project" && renamingId !== conversation.conversation_id} onDragStart={e => startConversationDrag(e, conversation.conversation_id, group.id, Boolean(conversation.is_task_conv))}>
-        {renamingId === conversation.conversation_id ? <ConversationTitleEditor key={conversation.conversation_id} conversationId={conversation.conversation_id} initialTitle={conversation.display_name} onClose={() => setRenamingId(null)} /> : <>
-        <button onClick={() => navigate(getChatConversationPath(conversation.conversation_id))}><MessageOutlined /><span>{conversation.display_name || conversation.conversation_id}<small>{conversation.summary}</small></span></button>
+      {conversations.length === 0 ? <div className="conversation-group-page-empty"><Empty description={t("conversationOrganizer.empty")} /><Button type="primary" icon={<PlusOutlined />} onClick={startChat}>{t("conversationOrganizer.startFirst")}</Button></div> : <ScopedConversationList items={conversations} scope={`${groupId}:${assistants || ""}`} disabled={loading || sorting || Boolean(renamingId)}
+        isItemDisabled={item => Boolean(item.pinned_at)}
+        onSavingChange={saving => { if (saving) ++loadGeneration.current; setSorting(saving); }}
+        onCommitted={move => setConversations(previous => moveConversationItems(previous, move))}
+        onRefresh={() => load(false, "", true)}>
+        {conversation => <div className="conversation-group-page-item" key={conversation.conversation_id} draggable={group.kind !== "project" && renamingId !== conversation.conversation_id} onDragStart={e => startConversationDrag(e, conversation.conversation_id, group.id, Boolean(conversation.is_task_conv))}
+          onContextMenu={event => { if (renamingId) return; event.preventDefault(); event.stopPropagation(); setOpenMenuId(conversation.conversation_id); }}>
+        <button data-conversation-title onClick={() => navigate(getChatConversationPath(conversation.conversation_id))}><MessageOutlined /><span>{conversation.display_name || conversation.conversation_id}<small>{conversation.summary}</small></span></button>
         <time>{conversation.updated_at ? new Date(conversation.updated_at).toLocaleDateString() : ""}</time>
-        <ConversationMembership onRename={() => setRenamingId(conversation.conversation_id)} pinned={Boolean(conversation.pinned_at)} isTaskConv={Boolean(conversation.is_task_conv)} conversationId={conversation.conversation_id} groupId={group.id} groupKind={group.kind} title={conversation.display_name} />
-        </>}
-      </div>)}
-      {nextPageToken && <Button block loading={loading} onClick={() => void load(true, nextPageToken)}>{t("conversationOrganizer.loadMore")}</Button>}
+        <ConversationMembership onRename={() => setRenamingId(conversation.conversation_id)} pinned={Boolean(conversation.pinned_at)} isTaskConv={Boolean(conversation.is_task_conv)} conversationId={conversation.conversation_id} groupId={group.id} groupKind={group.kind} title={conversation.display_name}
+          menuOpen={!renamingId && openMenuId === conversation.conversation_id} onMenuOpenChange={open => setOpenMenuId(current => open && !renamingId ? conversation.conversation_id : current === conversation.conversation_id ? null : current)} />
+      </div>}</ScopedConversationList>}
+      {nextPageToken && <Button block loading={loading} disabled={sorting} onClick={() => void load(true, nextPageToken)}>{t("conversationOrganizer.loadMore")}</Button>}
     </section>
+    {renamingId && <ConversationTitleEditor key={renamingId} conversationId={renamingId}
+      initialTitle={conversations.find(item => item.conversation_id === renamingId)?.display_name}
+      onClose={() => { setOpenMenuId(null); setRenamingId(null); }} />}
     <Modal open={editing} title={t(group.kind === "project" ? "conversationProject.edit" : "conversationOrganizer.editGroup")} okText={t("conversationOrganizer.save")} cancelText={t("common.cancel")} onOk={() => void save()} onCancel={() => setEditing(false)}>
       {saveError && <Alert type="error" showIcon message={saveError} />}
       <Form form={form} layout="vertical"><GroupFields project={group.kind === "project"} nameDisabled={namesLocked && group.kind !== "project"} scopeHint={t(namesLocked ? "conversationOrganizer.namesLocked" : "conversationOrganizer.scopeEditHint")} /></Form>

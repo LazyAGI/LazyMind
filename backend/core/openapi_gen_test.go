@@ -649,6 +649,10 @@ func TestOpenAPISpecIncludesKnowledgeMarketSurface(t *testing.T) {
 
 	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
 	listProps := schemaPropertiesForTest(t, schemas, "knowledgeMarketListItemOpenAPIResponse")
+	taskListProps := schemaPropertiesForTest(t, schemas, "knowledgeMarketTaskListOpenAPIResponse")
+	if _, ok := taskListProps["unfinished_count"]; !ok {
+		t.Fatalf("task list must expose the global unfinished count")
+	}
 	if _, ok := listProps["version"]; !ok {
 		t.Fatalf("list item schema must document version")
 	}

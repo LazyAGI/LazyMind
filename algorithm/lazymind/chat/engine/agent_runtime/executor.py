@@ -170,6 +170,27 @@ class AgentExecutor:
         )
         repeat_monitor = ExactRepeatMonitor()
         notice_buffer = OneShotNoticeBuffer()
+        if history_compactor is not None:
+            compact_history = history_compactor
+
+            def history_compactor(history, keep_full_turns=None, **kwargs):
+                import inspect
+                state = kwargs.get('runtime_state', {})
+                previous = state.get('compression_revision', 0)
+                parameters = inspect.signature(compact_history).parameters
+                if not any(p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters.values()):
+                    kwargs = {key: value for key, value in kwargs.items() if key in parameters}
+                result = compact_history(history, keep_full_turns, **kwargs)
+                if state.get('compression_revision', 0) != previous:
+                    repeat_monitor.context_compacted()
+                    notice_buffer.clear()
+                return result
+
+        def stop_condition(value):
+            # Cancellation must be evaluated before the normal final-answer path.
+            if options.extra_stop_condition and options.extra_stop_condition(value):
+                return True
+            return options.stop_on_repeated_results and repeat_monitor.stop_requested
         configuration_runtime = None if options.context_preview else options.configuration_runtime
 
         def prepare_request():
@@ -195,6 +216,12 @@ class AgentExecutor:
 
         def model_context():
             notices = []
+            # FunctionCall bounds this context. Deliver the actionable one-shot
+            # notice before potentially larger configuration/evidence snapshots.
+            notice = notice_buffer.take()
+            if notice:
+                repeat_monitor.notice_delivered()
+                notices.append(notice)
             if not options.context_preview and options.model_context_provider is not None:
                 notice = options.model_context_provider()
                 if isinstance(notice, str) and notice.strip():
@@ -203,9 +230,10 @@ class AgentExecutor:
                 notice = configuration_runtime.model_context()
                 if notice:
                     notices.append(notice)
-            notice = notice_buffer.take()
-            if notice:
-                notices.append(notice)
+            if options.directory_runtime is not None:
+                evidence_context = options.directory_runtime.model_context()
+                if evidence_context:
+                    notices.append(evidence_context)
             return '\n\n'.join(notices) or None
 
         kwargs = {
@@ -232,7 +260,7 @@ class AgentExecutor:
             'history_compactor': history_compactor,
             'fs': _skill_filesystem(options.fs, options.skills_dir),
             'skills_dir': options.skills_dir,
-            'extra_stop_condition': options.extra_stop_condition,
+            'extra_stop_condition': stop_condition if options.stop_on_repeated_results else options.extra_stop_condition,
             'runtime_observer': runtime_observer,
             'model_context_provider': model_context,
             'before_model_request': (
@@ -279,6 +307,7 @@ class AgentExecutor:
             workspace_permission=permission,
             tool_context=options.tool_context,
             trusted_opaque_tools=trusted_opaque_tools,
+            directory_runtime=options.directory_runtime,
         )
         agent._agent_lab_run_id = run_id
         agent._runtime_llm = llm
@@ -399,6 +428,8 @@ class AgentExecutor:
                 )
                 raise
             failed = False
+            if getattr(execution_options, 'directory_runtime', None) is not None:
+                await asyncio.to_thread(execution_options.directory_runtime.finish)
             yield 'final', result
         finally:
             try:

@@ -15,6 +15,7 @@ import { message } from "antd";
 import { ChatConversationsResponseFinishReasonEnum } from "@/api/generated/chatbot-client";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
 import { RoleTypes } from "@/modules/chat/constants/common";
+import { collectConversationFiles } from "../ChatInput/composerReferences";
 import ChatInput, {
   ChatInputImperativeProps,
   SKILL_DEPOSIT_MIN_TOOL_CALL_TURNS,
@@ -633,6 +634,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
 
             {conversation.creationError && <p role="alert">{conversation.creationError}</p>}
             <ChatInput
+              conversationFiles={collectConversationFiles(conversation.messageList)}
               draftWorkspace={conversation.draftWorkspace}
               sideChatAction={props.sideChatAction}
               value={conversation.content}

@@ -23,10 +23,10 @@ def test_full_trust_writes_outside_workspace_without_approval(workspace_runtime,
         active=bound, workspace_id='workspace' if bound else '',
     )
     target = tmp_path / 'outside.txt'
-    result = middleware.execute_with_records(call('write', path=str(target), content='workflow'))
+    result = middleware.execute_with_records(call('write', file_path=str(target), content='workflow'))
     assert result.results[0]['ok'], result.results
     assert target.read_text() == 'workflow'
-    assert middleware.execute_with_records(call('read', path=str(target))).results[0]['value']['content'] == 'workflow'
+    assert middleware.execute_with_records(call('read', file_path=str(target))).results[0]['value']['content'] == 'workflow'
     assert not core.events
 
 
@@ -61,7 +61,7 @@ def test_full_trust_keeps_cancellation(workspace_runtime, tmp_path):
     middleware, core, _ = workspace_runtime(cancel_check=cancel)
     middleware._workspace_permission = replace(middleware._workspace_permission, workflow_full_trust=True)
     with pytest.raises(UserCancelledError):
-        middleware.execute_with_records(call('write', path=str(tmp_path / 'cancelled'), content='no'))
+        middleware.execute_with_records(call('write', file_path=str(tmp_path / 'cancelled'), content='no'))
     assert not (tmp_path / 'cancelled').exists()
     assert not core.events
 
@@ -81,9 +81,9 @@ def test_concurrent_chat_still_requires_approval(workspace_runtime, tmp_path):
     core.on_poll = reject
     with ThreadPoolExecutor(max_workers=2) as pool:
         trusted = pool.submit(workflow.execute_with_records,
-                              call('write', path=str(tmp_path / 'workflow'), content='yes'))
+                              call('write', file_path=str(tmp_path / 'workflow'), content='yes'))
         untrusted = pool.submit(chat.execute_with_records,
-                                call('write', path=str(tmp_path / 'chat'), content='no'))
+                                call('write', file_path=str(tmp_path / 'chat'), content='no'))
         assert trusted.result().results[0]['ok']
         assert not untrusted.result().results[0]['ok']
     assert (tmp_path / 'workflow').read_text() == 'yes'
@@ -95,7 +95,7 @@ def test_concurrent_chat_still_requires_approval(workspace_runtime, tmp_path):
 def test_full_trust_keeps_invalid_arguments_rejected(workspace_runtime, tmp_path):
     middleware, core, _ = workspace_runtime()
     middleware._workspace_permission = replace(middleware._workspace_permission, workflow_full_trust=True)
-    result = middleware.execute_with_records(call('write', path=str(tmp_path / 'invalid')))
+    result = middleware.execute_with_records(call('write', file_path=str(tmp_path / 'invalid')))
     assert not result.results[0]['ok']
     assert not (tmp_path / 'invalid').exists()
     assert not core.events

@@ -174,6 +174,37 @@ describe("TaskCenter display modes", () => {
     });
   });
 
+  it("shows authoritative initialization timing before the first child exists", () => {
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [task("previous-turn", 1, "succeeded")] }, runsByConversation: { "conversation-1": [{
+      run_id: "accepted", execution_id: "round", revision: 1, status: "waiting", final_output_refs: [],
+      timing: { requested_at: iso(0), finished_at: null, measured_at: iso(10), elapsed_ms: 10000, cumulative_execution_ms: 0, running_attempt_count: 0 },
+    }] } });
+    render(<TaskCenter sessionId="conversation-1" />);
+    expect(screen.getByText("taskCenter.ordinaryInitializing")).toBeInTheDocument();
+    expect(screen.getByText(/Elapsed 10/)).toBeInTheDocument();
+    expect(screen.getByText(/Subtasks 0/)).toBeInTheDocument();
+  });
+
+  it("shows a resumed ordinary task associated with the new chat round", () => {
+    const resumed = { ...task("resumed", 1, "running"), agent_type: "research", trigger_history_id: "new-history",
+      ordinary: ordinary("resumed", { title: "Resumed research", status: "running", run_id: "new-history", execution_id: "new-attempt" }) };
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [resumed] }, runsByConversation: { "conversation-1": [{
+      run_id: "new-history", execution_id: "new-root", revision: 1, status: "running", final_output_refs: [],
+      timing: { requested_at: iso(20), finished_at: null, measured_at: iso(25), elapsed_ms: 5000, cumulative_execution_ms: 0, running_attempt_count: 0 },
+    }] } });
+    render(<TaskCenter sessionId="conversation-1" />);
+    expect(screen.getByText("Resumed research")).toBeInTheDocument();
+    expect(screen.queryByText("taskCenter.ordinaryInitializing")).not.toBeInTheDocument();
+  });
+
+  it("shows real workflow completion progress without counting retries twice", () => {
+    const view = ordinary("collect-3", { session_id: "session-1", workflow_step_id: "collect", status: "failed" });
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{ ...task("collect-3", 1, "failed"), ordinary: view }] } });
+    render(<TaskCenter sessionId="conversation-1" />);
+    expect(screen.getByRole("progressbar")).toHaveAttribute("value", "0");
+    expect(screen.getByRole("progressbar")).toHaveAttribute("max", "1");
+  });
+
   it("shows the designed progress bar and estimated timeline for a completed plan", () => {
     const planned = {
       ...task("planned", 1, "succeeded"), agent_type: "research", progress_pct: 100,

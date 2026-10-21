@@ -137,14 +137,16 @@ type ChatPersonalizationOptions struct {
 }
 
 type ChatAgentOptions struct {
-	EnableToolRetrieval bool                    `json:"enable_tool_retrieval"`
-	DisabledTools       []string                `json:"disabled_tools,omitempty"`
-	AvailableSkills     []string                `json:"available_skills,omitempty"`
-	SearchableSkills    []string                `json:"searchable_skills,omitempty"`
-	ExcludedSkills      []string                `json:"excluded_skills,omitempty"`
-	LoadedSkills        []evolution.LoadedSkill `json:"loaded_skills,omitempty"`
-	HasSubagents        bool                    `json:"has_subagents"`
-	EnableSubagent      *bool                   `json:"enable_subagent,omitempty"`
+	DocumentDirectoriesGeneration int64                   `json:"document_directories_generation"`
+	DocumentDirectoriesEnabled    *bool                   `json:"document_directories_enabled,omitempty"`
+	EnableToolRetrieval           bool                    `json:"enable_tool_retrieval"`
+	DisabledTools                 []string                `json:"disabled_tools,omitempty"`
+	AvailableSkills               []string                `json:"available_skills,omitempty"`
+	SearchableSkills              []string                `json:"searchable_skills,omitempty"`
+	ExcludedSkills                []string                `json:"excluded_skills,omitempty"`
+	LoadedSkills                  []evolution.LoadedSkill `json:"loaded_skills,omitempty"`
+	HasSubagents                  bool                    `json:"has_subagents"`
+	EnableSubagent                *bool                   `json:"enable_subagent,omitempty"`
 }
 
 type ChatWorkflowOptions struct {
@@ -713,6 +715,10 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if v, ok := body["enable_workflow"].(bool); ok {
 		req.Workflow.EnableWorkflow = &v
+	}
+	req.Agent.DocumentDirectoriesGeneration, _ = body["document_directories_generation"].(int64)
+	if v, ok := body["document_directories_enabled"].(bool); ok {
+		req.Agent.DocumentDirectoriesEnabled = &v
 	}
 	req.Agent.EnableToolRetrieval, _ = body["enable_tool_retrieval"].(bool)
 	if v, ok := body["enable_subagent"].(bool); ok {

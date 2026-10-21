@@ -7,7 +7,7 @@ import (
 )
 
 func TestOrdinaryConversationEventWhitelist(t *testing.T) {
-	for _, typ := range []string{"task_created", "task_updated", "artifact_created", "driver_input", "auto_chat_started", "workflow_step_feedback"} {
+	for _, typ := range []string{"task_created", "task_updated", "artifact_created", "driver_input", "auto_chat_started", "task_run_updated", "workflow_step_feedback"} {
 		input := &ConvEvent{Type: typ, Replayed: true, Payload: map[string]any{
 			"task_id": "task-1", "session_id": "session-1", "status": "running",
 			"history_id": "history-1",

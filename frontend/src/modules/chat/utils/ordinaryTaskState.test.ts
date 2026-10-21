@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OrdinaryTaskView, PublicProcessStep, PublicArtifact } from "../types/ordinaryTask";
-import { mergeOrdinarySnapshot, readOrdinaryTask } from "./ordinaryTaskState";
+import { mergeOrdinarySnapshot, mergeRun, readOrdinaryTask } from "./ordinaryTaskState";
 import type { ChatModelSwitchRecord } from "@/api/generated/core-client";
 
 function step(id: string): PublicProcessStep {
@@ -33,6 +33,13 @@ describe("ordinary task snapshots", () => {
     const next = { ...snapshot(3), display_key: "task:one:new", execution_id: "new" };
     expect(mergeOrdinarySnapshot(incoming, next).model_switch).toBeUndefined();
     expect(mergeOrdinarySnapshot(incoming, next).failure_code).toBeUndefined();
+  });
+
+  it("accepts newer legacy run fields and rejects stale legacy runs", () => {
+    const current = { run_id: "legacy", revision: 2, final_output_refs: ["report"] };
+    expect(mergeRun(current, { ...current, revision: 1, final_output_refs: [] })).toBe(current);
+    expect(mergeRun(current, { ...current, revision: 3, final_output_refs: ["updated"] }).final_output_refs).toEqual(["updated"]);
+    expect(mergeRun(undefined, current)).toBe(current);
   });
   it("does not accept a legacy raw task response as a public snapshot", () => {
     expect(readOrdinaryTask({ task_id: "one", objective: "internal", steps: [] })).toBeUndefined();

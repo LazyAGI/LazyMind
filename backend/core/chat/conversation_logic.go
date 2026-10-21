@@ -28,6 +28,7 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
+	"lazymind/core/tasktiming"
 	"lazymind/core/vocabulary"
 	"lazymind/core/workflow"
 )
@@ -2187,6 +2188,13 @@ func handleStreamChat(
 	}
 	chatCtx, chatCancel := context.WithCancel(context.Background())
 	defer chatCancel()
+	chatCtx = tasktiming.WithRequestTime(chatCtx, tasktiming.RequestedAt(reqCtx))
+	if err := beginChatTiming(chatCtx, db, convID, historyID, primaryRunID); err != nil {
+		writeSSEChunk(w, flusher, &ChatChunkResponse{ConversationID: convID, HistoryID: historyID, RuntimeEvent: failedRunEvent(primaryRunID, "history_run_claim_failed", false)})
+		return
+	}
+	defer settleChatTiming(chatCtx, db, convID, historyID, primaryRunID, dualReply)
+
 	if workspaceBound, _ := reqBody["_workspace_bound"].(bool); stateStore == nil && workspaceBound {
 		common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
 		return
@@ -3985,12 +3993,10 @@ func handleTaskCreated(
 				return nil, err
 			}
 			paramsJSON, _ = json.Marshal(params)
-			if err := db.WithContext(chatCtx).Model(&orm.SubAgentTask{}).Where("id = ? AND create_user_id = ? AND conversation_id = ?",
-				existing.ID, userID, convID).Updates(map[string]any{"params": paramsJSON, "updated_at": time.Now().UTC()}).Error; err != nil {
+			existing, err = subagent.PrepareTaskResume(chatCtx, db, existing, historyID, paramsJSON)
+			if err != nil {
 				return nil, err
 			}
-			existing.Params = paramsJSON
-			_ = subagent.UpdateStatus(chatCtx, db, existing.ID, subagent.StatusRunning)
 			_ = subagent.WriteStatus(chatCtx, stateStore, existing.ID, map[string]any{
 				"status": subagent.StatusRunning, "progress": existing.ProgressPct,
 			})

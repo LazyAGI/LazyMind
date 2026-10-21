@@ -29,6 +29,7 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
+	"lazymind/core/tasktiming"
 	"lazymind/core/workflow"
 )
 
@@ -79,6 +80,7 @@ func writeSSEChunk(w http.ResponseWriter, flusher http.Flusher, v any) {
 }
 
 func Chat(w http.ResponseWriter, r *http.Request) {
+	r = r.WithContext(tasktiming.WithRequestTime(r.Context(), time.Now().UTC()))
 	ChatConversations(w, r)
 }
 
@@ -835,6 +837,23 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	baseURL := chatServiceURL()
 	reqCtx := r.Context()
 	stateStore := store.State()
+	if stateStore != nil && !isExternalChatProvider(conversationRecord.ChatExecutor) {
+		if err := taskcenter.RegisterChatExecution(reqCtx, db, userID, convID, sessionID); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				common.ReplyErr(w, "conversation not found", http.StatusNotFound)
+			} else {
+				common.ReplyErr(w, "chat service unavailable", http.StatusServiceUnavailable)
+			}
+			return
+		}
+		defer func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := taskcenter.FinishChatExecution(cleanupCtx, db, userID, convID, sessionID); err != nil {
+				log.Warn().Err(err).Msg("finish chat execution tracking failed")
+			}
+		}()
+	}
 
 	if !stream {
 		handleNonStreamChat(w, reqCtx, db, stateStore, baseURL, reqBody, convID, displayQuery, target, historyExt)
@@ -857,7 +876,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			Status:         "running",
 		}
 		// Conversation type was fixed atomically at creation.
-		_ = taskcenter.CreateTask(reqCtx, db, bgTask)
+		if err := taskcenter.CreateTask(reqCtx, db, bgTask); err != nil {
+			common.ReplyErr(w, "create task failed", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// Mark the last assistant turn that had an ask_pending as answered.
@@ -2467,6 +2489,8 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 		Order(rootUpdated + " DESC").
 		Order("COALESCE(history_parent_id, conversations.id) ASC").
 		Order("CASE WHEN history_parent_id IS NULL THEN 0 ELSE 1 END ASC").
+		Order("CASE WHEN history_parent_id IS NOT NULL AND conversations.history_order IS NULL THEN 0 ELSE 1 END ASC").
+		Order("CASE WHEN history_parent_id IS NOT NULL THEN conversations.history_order END ASC").
 		Order("updated_at DESC").
 		Order("conversations.id ASC").
 		Offset(offset).

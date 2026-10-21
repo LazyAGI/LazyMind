@@ -266,6 +266,8 @@ func applyChatFeatureControls(ctx context.Context, db *gorm.DB, userID string, b
 	if err != nil {
 		return err
 	}
+	body["document_directories_enabled"] = controls.DocumentDirectoriesEnabled
+	body["document_directories_generation"] = controls.DocumentDirectoriesGeneration
 	if controls.TaskCenterEnabled && controls.WorkflowsEnabled {
 		return nil
 	}

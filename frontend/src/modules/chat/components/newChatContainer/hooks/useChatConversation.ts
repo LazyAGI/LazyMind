@@ -50,6 +50,7 @@ import {
   buildCitedMessageText,
   MAX_CITE_MESSAGE_COUNT,
 } from "../utils/citeMessage";
+import { useFeaturedSelectionStore } from "@/modules/chat/store/featuredSelection";
 import { getFileUrls } from "../utils/fileInputs";
 import type { ChatContainerProps, ChatImperativeProps } from "../types";
 import type { useUserMessageEdit } from "./useUserMessageEdit";
@@ -1289,6 +1290,7 @@ export function useChatConversation({
     let conversationId = currentConversationIdRef.current;
     if (!conversationId) {
       conversationId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+      useFeaturedSelectionStore.getState().moveSelection("new", conversationId);
       currentConversationIdRef.current = conversationId;
     }
     clearStreamRecovery(conversationId);
@@ -1340,6 +1342,7 @@ export function useChatConversation({
             return;
           }
           const normalizedId = preparedId.trim();
+          useFeaturedSelectionStore.getState().moveSelection(conversationId, normalizedId);
           conversationId = normalizedId;
           currentConversationIdRef.current = normalizedId;
           pendingClientConversationIdRef.current = normalizedId;
@@ -1776,6 +1779,11 @@ export function useChatConversation({
       })),
     ];
 
+    for (const file of params.referencedFiles || []) {
+      if (file.uri && !inputs.some(input => 'uri' in input && input.uri === file.uri)) inputs.push(file);
+    }
+    if (params.featuredSelection) useFeaturedSelectionStore.getState().setSelection(currentConversationIdRef.current || 'new', params.featuredSelection);
+
     if (clearInput) {
       setContent("");
       clearMultiData();
@@ -1790,8 +1798,8 @@ export function useChatConversation({
         (historyId): historyId is string => Boolean(historyId?.trim()),
       ),
       role: RoleTypes.USER,
-      images: tempGroup?.image,
-      files: tempGroup?.file,
+      images: [...(tempGroup?.image || []), ...(params.referencedFiles || []).filter(file => file.input_type === 'image' && !tempFileGroup?.image?.some(upload => upload.uri === file.uri)).map(file => ({ uid: file.uri, base64: file.input_base64 || file.uri }))],
+      files: [...(tempGroup?.file || []), ...(params.referencedFiles || []).filter(file => file.input_type === 'file' && !tempFileGroup?.file?.some(upload => upload.uri === file.uri)).map(file => ({ uid: file.uri, name: file.filename }))],
       fileList: submittedFileList,
       inputs,
       finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,

@@ -8,6 +8,7 @@ import {
   CopyOutlined,
   DatabaseOutlined,
   EditOutlined,
+  FileTextOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
 import { RoleTypes } from "@/modules/chat/constants/common";
@@ -30,7 +31,9 @@ const MENTION_ICONS = {
   skill: <ThunderboltOutlined />,
   workflow: <AppstoreOutlined />,
   tool: <ThunderboltOutlined />,
+  file: <FileTextOutlined />,
   conversation: <CommentOutlined />,
+  document_directory: <BookOutlined />,
 };
 
 function mentionHref(mention: ChatMention) {
@@ -48,6 +51,8 @@ function mentionHref(mention: ChatMention) {
       return "/settings?section=system_tools";
     case "conversation":
       return getChatConversationPath(mention.resource_id);
+    case "document_directory":
+      return `/document-directories/${id}`;
     default:
       return undefined;
   }

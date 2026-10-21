@@ -4,6 +4,7 @@ import {
   useRef,
   forwardRef,
   useEffect,
+  useLayoutEffect,
   useCallback,
   useImperativeHandle,
   useId,
@@ -13,13 +14,10 @@ import {
 import { RcFile } from "antd/es/upload";
 import { Button, message, Modal, Popover, Select, Spin, Tag, Tooltip } from "antd";
 import {
-  AppstoreOutlined,
   BookOutlined,
   BulbOutlined,
-  CheckOutlined,
   CloseOutlined,
   CommentOutlined,
-  DownOutlined,
   EditOutlined,
   PaperClipOutlined,
   SettingOutlined,
@@ -41,6 +39,7 @@ import { fileToBase64 } from "@/modules/chat/utils/upload";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
 import { resolveMarkdownImageUrlAsync } from "@/modules/knowledge/utils/imageUrl";
+import { getRuntimeMode, isLocalLikeRuntimeMode } from "@/runtime/mode";
 
 import "./index.scss";
 
@@ -61,6 +60,9 @@ import MentionEditor, {
   type ChatMention,
   type MentionEditorRef,
 } from "./MentionEditor";
+import FeaturedCapabilityMenu from "./FeaturedCapabilityMenu";
+import { buildComposerReferences, type ComposerFileCandidate } from "./composerReferences";
+import { useFeaturedSelectionStore } from "@/modules/chat/store/featuredSelection";
 import ContextUsageButton from "./ContextUsageButton";
 import PerformanceStatsBar from "./PerformanceStatsBar";
 import type { SessionPerformanceStats } from "../../utils/performanceStats";
@@ -80,6 +82,7 @@ import {
 
 // Stable empty array reference — must NOT be inline `?? []` in a zustand selector
 // because a new array on every call triggers useSyncExternalStore to fire React error #185.
+const EMPTY_COMPOSER_FILES: ComposerFileCandidate[] = [];
 const EMPTY_DISMISSED: Array<{ session_id: string; workflow_id: string }> = [];
 const THINKING_DEPTH_LABEL_KEYS: Record<ThinkingDepth, string> = {
   low: "chat.thinkingDepthLow",
@@ -135,7 +138,7 @@ import {
   useChatThinkStore,
   type ThinkingDepth,
 } from "@/modules/chat/store/chatThink";
-import { CHAT_SUBMIT_INPUT_EVENT } from "@/modules/chat/constants/chat";
+import { CHAT_SUBMIT_INPUT_EVENT, CHAT_CAPTURE_MODE_DRAFT_EVENT } from "@/modules/chat/constants/chat";
 import { useChatNewMessageStore } from "@/modules/chat/store/chatNewMessage";
 import { useTranslation } from "react-i18next";
 import { PromptServiceApi } from "@/modules/chat/utils/request";
@@ -417,6 +420,8 @@ function preprocessUpload(
 }
 
 interface ChatInputProps {
+  transferredDraft?: { mentions: ChatMention[]; files: ComposerFileCandidate[]; featuredSelection?: import("@/modules/chat/store/featuredSelection").FeaturedSelection };
+  conversationFiles?: ComposerFileCandidate[];
   draftWorkspace?: Pick<SendMessageParams, "workspace_id" | "workspace_permission_mode" | "project_name">;
   value: string;
   onChange: (value: string) => void;
@@ -511,99 +516,9 @@ interface ShowcaseSelectControl {
 }
 
 export interface ShowcaseSelection {
+  onClear?: () => void;
   skill: ShowcaseSelectControl;
   task?: ShowcaseSelectControl;
-}
-
-function ShowcaseSelectButton({
-  control,
-  kind,
-}: {
-  control: ShowcaseSelectControl;
-  kind: "skill" | "task";
-}) {
-  const [open, setOpen] = useState(false);
-  const selectedLabel = control.selectedLabel ?? control.placeholder ?? "";
-  const buttonLabel = control.valuePrefix
-    ? `${control.valuePrefix}${selectedLabel}`
-    : selectedLabel;
-
-  const content = (
-    <div className={`chat-showcase-menu chat-showcase-menu--${kind}`}>
-      <div className="chat-showcase-menu-header">
-        <strong>{control.heading}</strong>
-        {control.subheading ? <span>{control.subheading}</span> : null}
-      </div>
-      <div className="chat-showcase-menu-options" role="listbox" aria-label={control.ariaLabel}>
-        {control.options.map((option) => {
-          const selected = option.value === control.value;
-          return (
-            <button
-              key={option.value}
-              type="button"
-              className={`chat-showcase-menu-option${selected ? " is-selected" : ""}`}
-              role="option"
-              aria-selected={selected}
-              onClick={() => {
-                control.onChange(option.value);
-                setOpen(false);
-              }}
-            >
-              {kind === "skill" ? (
-                <span className="chat-showcase-menu-option-icon" aria-hidden="true">
-                  <AppstoreOutlined />
-                </span>
-              ) : null}
-              <span className="chat-showcase-menu-option-copy">
-                <strong>{option.label}</strong>
-                {option.description ? <small>{option.description}</small> : null}
-              </span>
-              {selected ? <CheckOutlined className="chat-showcase-menu-check" aria-hidden="true" /> : null}
-            </button>
-          );
-        })}
-      </div>
-      {control.moreLabel && control.onMore ? (
-        <button
-          type="button"
-          className="chat-showcase-menu-more"
-          onClick={() => {
-            control.onMore?.();
-            setOpen(false);
-          }}
-        >
-          {control.moreLabel} <span aria-hidden="true">→</span>
-        </button>
-      ) : null}
-    </div>
-  );
-
-  return (
-    <Popover
-      arrow={false}
-      content={content}
-      destroyOnHidden
-      open={open}
-      overlayClassName={`chat-showcase-popover chat-showcase-popover--${kind}`}
-      placement="topLeft"
-      trigger="click"
-      onOpenChange={(nextOpen: boolean) => {
-        if (!control.disabled) setOpen(nextOpen);
-      }}
-    >
-      <button
-        type="button"
-        className={`chat-showcase-trigger${control.value ? " is-selected" : ""}${open ? " is-open" : ""}`}
-        aria-label={control.ariaLabel}
-        aria-expanded={open}
-        disabled={control.disabled}
-      >
-        {kind === "skill" ? <AppstoreOutlined aria-hidden="true" /> : <BulbOutlined aria-hidden="true" />}
-        <span>{buttonLabel}</span>
-        <DownOutlined className="chat-showcase-trigger-arrow" aria-hidden="true" />
-      </button>
-    </Popover>
-  );
 }
 
 export interface SkillDepositStats {
@@ -714,6 +629,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       thinkingDepth: controlledThinkingDepth,
       onThinkingDepthChange,
     } = props;
+    const showWorkspaceEnvironment = runInBackground && allowLocalWorkspace && isLocalLikeRuntimeMode(getRuntimeMode());
     const [workspaceId, setWorkspaceId] = useState<string>();
     const [projectName, setProjectName] = useState<string>();
     const [projectValid, setProjectValid] = useState(true);
@@ -770,20 +686,37 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const { t } = useTranslation();
     const [recordingOpen, setRecordingOpen] = useState(false);
     const [text, setText] = useState("");
+    const [featuredMentions, setFeaturedMentions] = useState<ChatMention[]>([]);
+    const [featuredBusy, setFeaturedBusy] = useState(false);
+    const handleFeaturedBindingChange = useCallback((items: ChatMention[], busy: boolean) => { setFeaturedMentions(items); setFeaturedBusy(busy); }, []);
     const [mentions, setMentions] = useState<ChatMention[]>([]);
     const [resolvingSkillWorkflow, setResolvingSkillWorkflow] = useState(false);
     const effectiveMentions = useMemo(() => {
       if (!allowMentions) return [];
       const merged = new Map<string, ChatMention>();
-      for (const mention of [...boundMentions, ...mentions]) {
+      for (const mention of [...boundMentions, ...featuredMentions, ...mentions]) {
         if (!allowKnowledgeBaseSelection && mention.type === "knowledge_base") continue;
         merged.set(`${mention.type}:${mention.resource_id}`, mention);
       }
       return [...merged.values()];
-    }, [allowKnowledgeBaseSelection, allowMentions, boundMentions, mentions]);
+    }, [allowKnowledgeBaseSelection, allowMentions, boundMentions, featuredMentions, mentions]);
     const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialConversationSettings);
     const [contextUsageReset, setContextUsageReset] = useState(0);
-    const [addMenuOpen, setAddMenuOpen] = useState(false);
+    const [menuHeight, setMenuHeight] = useState(420);
+    const [activeMenu, setActiveMenu] = useState<string | null>(null);
+    useLayoutEffect(() => {
+      const updateHeight = () => {
+        const rect = innerRef.current?.querySelector('.input-bottom-actions')?.getBoundingClientRect();
+        if (!rect || !rect.height) return;
+        setMenuHeight(Math.max(1, Math.min(420, Math.max(rect.top - 16, window.innerHeight - rect.bottom - 16))));
+      };
+      updateHeight();
+      window.addEventListener('resize', updateHeight);
+      window.addEventListener('scroll', updateHeight, true);
+      return () => { window.removeEventListener('resize', updateHeight); window.removeEventListener('scroll', updateHeight, true); };
+    }, [activeMenu]);
+    const addMenuOpen = activeMenu === "add";
+    const setAddMenuOpen = (open: boolean) => setActiveMenu(open ? "add" : null);
     const [knowledgeToolsEnabled, setKnowledgeToolsEnabled] = useState<{
       kb: boolean | null;
     }>({ kb: null });
@@ -838,6 +771,38 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     }, [initialConversationSettings]);
 
     const [fileList, setFileList] = useState<ChatFileList[]>([]);
+    const [removedTransferredFiles, setRemovedTransferredFiles] = useState<string[]>([]);
+    useEffect(() => { setRemovedTransferredFiles([]); }, [props.transferredDraft]);
+    const localUploadIds = new Set(fileList.map(file => `upload:${file.uid}`));
+    const transferredUploads = [...new Map((props.transferredDraft?.files || EMPTY_COMPOSER_FILES).map(file => [file.id, file])).values()]
+      .filter(file => file.id.startsWith('upload:') && file.input?.uri && !removedTransferredFiles.includes(file.id) && !localUploadIds.has(file.id));
+    const displayedFiles = [...fileList, ...transferredUploads.map(file => ({ uid: file.id, name: file.name, base64: file.input?.input_type === 'image' ? file.input.uri : '', suffix: file.name.slice(file.name.lastIndexOf('.')), size: '' }))];
+    const conversationFiles = props.conversationFiles ?? EMPTY_COMPOSER_FILES;
+    const composerFiles = useMemo(() => {
+      const uploaded = fileListRef.current?.getFiles() ?? [];
+      const files = [...conversationFiles.filter(file => !removedTransferredFiles.includes(file.id)), ...fileList.map(file => {
+        const stored = uploaded.find(item => item.uid === file.uid);
+        return { id: `upload:${file.uid}`, name: file.name, disabled: !stored?.uri,
+          input: stored?.uri ? { input_type: allowedImageTypes.includes(file.suffix.toLowerCase()) ? 'image' as const : 'file' as const, uri: stored.uri, filename: file.name } : undefined };
+      })];
+      return [...new Map(files.map(file => [file.id, file])).values()];
+    }, [conversationFiles, fileList, removedTransferredFiles]);
+    const prepareReferences = () => buildComposerReferences(effectiveMentions, composerFiles, [...transferredUploads.map(file => file.input!), ...(fileListRef.current?.getFiles() ?? []).filter(file => file.uri).map(file => ({
+      input_type: allowedImageTypes.includes(file.name.substring(file.name.lastIndexOf('.')).toLowerCase()) ? 'image' as const : 'file' as const,
+      uri: file.uri, filename: file.name,
+    }))], value);
+    useEffect(() => { setActiveMenu(null); }, [runInBackground, sessionId]);
+    useEffect(() => {
+      const transferDraft = (event: Event) => {
+        const detail = (event as CustomEvent).detail;
+        if (!allowMentions || !allowLocalWorkspace || detail?.runInBackground === undefined || detail.runInBackground === runInBackground
+          || !innerRef.current?.getClientRects().length) return;
+        detail.draft = { text: value, mentions: [...mentions], featuredSelection: useFeaturedSelectionStore.getState().selections[sessionId || "new"], files: composerFiles.filter(file => file.id.startsWith('upload:') && Boolean(file.input?.uri) || mentions.some(mention => mention.type === 'file' && mention.resource_id === file.id)) };
+        useChatInputStore.getState().setModeDraft(detail.draft);
+      };
+      window.addEventListener(CHAT_CAPTURE_MODE_DRAFT_EVENT, transferDraft, true);
+      return () => window.removeEventListener(CHAT_CAPTURE_MODE_DRAFT_EVENT, transferDraft, true);
+    }, [runInBackground, value, mentions, composerFiles, sessionId, allowMentions, allowLocalWorkspace]);
     const { setPendingMessage, clearPendingMessage } = useChatMessageStore();
     const { saveInputContent, getInputContent, getInputMentions, clearInputContent } =
       useChatInputStore();
@@ -1030,6 +995,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     };
 
     const removeImage = (uid: string) => {
+      setRemovedTransferredFiles(ids => [...ids, `upload:${uid}`]);
       fileListRef.current?.removeFile(uid);
       setFileList((prev) => {
         const target = prev.find((item) => item.uid === uid);
@@ -1209,14 +1175,16 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       if ((runInBackground && (!projectValid || workspacePermissionSavingRef.current)) || modelSelectionSaving) {
         return;
       }
-      if (isStreaming || isSendDisabled || resolvingSkillWorkflow) {
+      if (isStreaming || isSendDisabled || resolvingSkillWorkflow || featuredBusy) {
         return;
       }
       const normalizedText = value.trim();
+      const references = prepareReferences();
+      if (references.unavailable) { message.warning(t('chat.mentionFileUnavailable')); return; }
       setResolvingSkillWorkflow(true);
-      let resolvedMentions = effectiveMentions;
+      let resolvedMentions = references.mentions;
       try {
-        resolvedMentions = await resolveSkillWorkflowMentions(effectiveMentions);
+        resolvedMentions = await resolveSkillWorkflowMentions(references.mentions);
       } finally {
         setResolvingSkillWorkflow(false);
       }
@@ -1251,6 +1219,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         },
         thinking_depth: effectiveThinkingDepth,
         mentions: resolvedMentions,
+        referencedFiles: references.inputs,
+        featuredSelection: useFeaturedSelectionStore.getState().selections[sessionId || "new"],
         citeMessage: normalizedCiteMessages.join("\n\n"),
         citeMessages: normalizedCiteMessages,
         citeHistoryIds: citeHistoryIds?.filter(
@@ -1489,9 +1459,10 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           </div>
         ) : null}
         <div className="input-container">
+          <div className={`chat-input-surface${showWorkspaceEnvironment ? " has-environment" : ""}`}>
           <div className="input-top">
             <div className="input-field">
-              <ShowChatFileList fileList={fileList} onRemove={removeImage} />
+              <ShowChatFileList fileList={displayedFiles} onRemove={uid => uid.startsWith("upload:") ? setRemovedTransferredFiles(ids => [...ids, uid]) : removeImage(uid)} />
               {normalizedCiteMessages.length > 0 && (
                 <div className="cite-message-preview-list">
                   {normalizedCiteMessages.map((messageText, index) => (
@@ -1542,7 +1513,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
               <MentionEditor
                 key={sessionId}
                 ref={textAreaRef}
-                initialMentions={sessionId !== undefined ? getInputMentions(sessionId) : undefined}
+                runInBackground={runInBackground}
+                conversationId={sessionId}
+                fileCandidates={composerFiles}
+                onQueryOpen={() => setActiveMenu(null)}
+                initialMentions={sessionId !== undefined ? getInputMentions(sessionId) : props.transferredDraft?.mentions}
                 placeholder={placeholder || t(allowMentions
                   ? "chat.inputPlaceholder"
                   : "chat.inputPlaceholderWithoutMentions")}
@@ -1575,7 +1550,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
               />
 
               <div className="input-bottom-actions">
-                <div className="input-bottom-actions-left">
+                <div className="input-bottom-actions-left chat-core-actions">
                   <div className="chat-add-resource">
                     <Popover
                       trigger="click"
@@ -1590,6 +1565,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         setAddMenuOpen(open);
                       }}
                       placement="topLeft"
+                      styles={{ body: { height: menuHeight } }}
                       classNames={{ root: "chat-add-resource-popover" }}
                       content={
                         <div className="chat-add-resource-menu">
@@ -1599,7 +1575,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                             <button
                               type="button"
                               onClick={() => {
-                                if (fileList.length >= MAX_UPLOAD_FILES) {
+                                if (displayedFiles.length >= MAX_UPLOAD_FILES) {
                                   message.warning(t("chat.maxFilesWarning"));
                                   setAddMenuOpen(false);
                                   return;
@@ -1613,6 +1589,32 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                               <PaperClipOutlined />
                               {t("chat.addAttachment")}
                             </button>
+                  {showSkillDeposit && isChatContent && (
+                    <Tooltip title={skillDepositTooltip}>
+                      <div
+                        className={`input-bottom-actions-left-item skill-deposit-action${
+                          isSkillDepositDisabled ? " is-disabled" : ""
+                        }`}
+                        aria-disabled={isSkillDepositDisabled}
+                        role="button"
+                        tabIndex={isSkillDepositDisabled ? -1 : 0}
+                        onClick={handleSkillDeposit}
+                        onKeyDown={(event) => {
+                          if (
+                            isSkillDepositDisabled ||
+                            (event.key !== "Enter" && event.key !== " ")
+                          ) {
+                            return;
+                          }
+                          event.preventDefault();
+                          handleSkillDeposit();
+                        }}
+                      >
+                        <BulbOutlined />
+                        {t("chat.skillDeposit")}
+                      </div>
+                    </Tooltip>
+                  )}
                           {allowKnowledgeBaseSelection ? (
                             <Tooltip title={knowledgeBaseEnabled ? undefined : knowledgeBaseDisabledReason}>
                               <span className="chat-add-resource-menu-tooltip-anchor">
@@ -1648,7 +1650,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       }
                     >
                       <Tooltip title={t(allowKnowledgeBaseSelection ? "chat.addResourceTooltip" : "chat.addFileTooltip")}>
-                        <div
+                        <button type="button"
                           className={`input-bottom-actions-left-item${addMenuOpen ? " selected" : ""}${disabled || isPromptPolishing ? " is-disabled" : ""}`}
                           role="button"
                           tabIndex={disabled || isPromptPolishing ? -1 : 0}
@@ -1656,7 +1658,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         >
                           <AddIcon />
                           {t("chat.addResource")}
-                        </div>
+                        </button>
                       </Tooltip>
                     </Popover>
                     {allowKnowledgeBaseSelection ? (
@@ -1679,7 +1681,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         listNum={fileList.length}
                         ref={fileListRef}
                         types={uploadTypes}
-                        max={MAX_UPLOAD_FILES}
+                        max={Math.max(0, MAX_UPLOAD_FILES - transferredUploads.length)}
                         onBeforeAddFiles={onBeforeAddFiles}
                         disabled={disabled || isPromptPolishing}
                         disabledReason={isPromptPolishing ? t("chat.promptPolishing") : disabledReason}
@@ -1687,40 +1689,43 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       />
                     </div>
                   </div>
-                  {runInBackground && allowLocalWorkspace && <LocalWorkspaceControl
-                    approvalContainer={approvalContainer}
-                    draftWorkspace={props.draftWorkspace}
-                    initialProject={initialProject}
-                    onProjectChange={handleProjectChange}
-                    conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
-                    configResetKey={configResetKey}
-                    onSavingChange={handleWorkspaceSavingChange}
-                    disabled={disabled || isStreaming}
-                    onChange={(id, permissionMode) => {
-                      setWorkspaceId(id);
-                      setWorkspacePermissionMode(permissionMode);
-                    }}
-                  />}
-                  {showcaseSelection ? (
-                    <div className="chat-showcase-selection" data-testid="showcase-selection">
-                      <ShowcaseSelectButton
-                        control={{
-                          ...showcaseSelection.skill,
-                          disabled: disabled || isStreaming || showcaseSelection.skill.disabled,
-                        }}
-                        kind="skill"
-                      />
-                      {showcaseSelection.task ? (
-                        <ShowcaseSelectButton
-                          control={{
-                            ...showcaseSelection.task,
-                            disabled: disabled || isStreaming || showcaseSelection.task.disabled,
-                          }}
-                          kind="task"
-                        />
-                      ) : null}
-                    </div>
+                  {showModelSelector ? (
+                    <ChatModelSelector
+                      key={`${sessionId || "new"}:${configResetKey ?? ""}`}
+                      conversationId={sessionId}
+                      menuHeight={menuHeight}
+                      open={activeMenu === "model"}
+                      onOpenChange={open => setActiveMenu(open ? "model" : null)}
+                      thinkingDepth={showThinkingDepth ? effectiveThinkingDepth : undefined}
+                      thinkingDepthDisabled={disabled || isStreaming || Boolean(fixedThinkingDepth)}
+                      onThinkingDepthChange={handleThinkingDepthChange}
+                      disabled={
+                        isStreaming ||
+                        modelSelectorBusy ||
+                        workflowBlocksModelSwitch ||
+                        backgroundTaskBlocksModelSwitch
+                      }
+                      disabledReason={
+                        isStreaming
+                          ? t("chat.modelSelectorGenerating")
+                          : modelSelectorBusy
+                            ? t("runtime.aiServiceInitializingMessage")
+                            : workflowBlocksModelSwitch
+                              ? t("chat.modelSelectorWorkflowRunning")
+                              : backgroundTaskBlocksModelSwitch
+                                ? t("chat.modelSelectorBackgroundTaskRunning")
+                                : undefined
+                      }
+                      onSavingChange={handleModelSavingChange}
+                      onSelectionChange={handleModelSelectionChange}
+                    />
                   ) : null}
+                  {allowMentions && <FeaturedCapabilityMenu
+                    menuHeight={menuHeight} selectionKey={sessionId || "new"} controls={showcaseSelection} runInBackground={runInBackground}
+                    open={activeMenu === 'featured'} onOpenChange={open => setActiveMenu(open ? 'featured' : null)}
+                    disabled={disabled || isStreaming} onBindingChange={handleFeaturedBindingChange}
+                    onPromptChange={prompt => textAreaRef.current?.setPlainText(prompt)}
+                  />}
                   {showHistoryButton && openHistory && (
                     <div
                       className={`input-bottom-actions-left-item ${showHistoryList ? "selected" : ""}`}
@@ -1730,33 +1735,10 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     </div>
                   )}
                   {sideChatAction}
-                  {showSkillDeposit && isChatContent && (
-                    <Tooltip title={skillDepositTooltip}>
-                      <div
-                        className={`input-bottom-actions-left-item skill-deposit-action${
-                          isSkillDepositDisabled ? " is-disabled" : ""
-                        }`}
-                        aria-disabled={isSkillDepositDisabled}
-                        role="button"
-                        tabIndex={isSkillDepositDisabled ? -1 : 0}
-                        onClick={handleSkillDeposit}
-                        onKeyDown={(event) => {
-                          if (
-                            isSkillDepositDisabled ||
-                            (event.key !== "Enter" && event.key !== " ")
-                          ) {
-                            return;
-                          }
-                          event.preventDefault();
-                          handleSkillDeposit();
-                        }}
-                      >
-                        <BulbOutlined />
-                        {t("chat.skillDeposit")}
-                      </div>
-                    </Tooltip>
-                  )}
                   {showConversationConfig && <ChatConfigModal
+                    menuHeight={menuHeight}
+                    open={activeMenu === "config"}
+                    onOpenChange={open => setActiveMenu(open ? "config" : null)}
                     key={configResetKey != null ? `config-reset-${configResetKey}` : undefined}
                     conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
                     initialSettings={initialConversationSettings}
@@ -1789,37 +1771,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       }))}
                     />
                   )}
-                  {showModelSelector ? (
-                    <ChatModelSelector
-                      key={`${sessionId || "new"}:${configResetKey ?? ""}`}
-                      conversationId={sessionId}
-                      thinkingDepth={showThinkingDepth ? effectiveThinkingDepth : undefined}
-                      thinkingDepthDisabled={disabled || isStreaming || Boolean(fixedThinkingDepth)}
-                      onThinkingDepthChange={handleThinkingDepthChange}
-                      disabled={
-                        isStreaming ||
-                        modelSelectorBusy ||
-                        workflowBlocksModelSwitch ||
-                        backgroundTaskBlocksModelSwitch
-                      }
-                      disabledReason={
-                        isStreaming
-                          ? t("chat.modelSelectorGenerating")
-                          : modelSelectorBusy
-                            ? t("runtime.aiServiceInitializingMessage")
-                            : workflowBlocksModelSwitch
-                              ? t("chat.modelSelectorWorkflowRunning")
-                              : backgroundTaskBlocksModelSwitch
-                                ? t("chat.modelSelectorBackgroundTaskRunning")
-                                : undefined
-                      }
-                      onSavingChange={handleModelSavingChange}
-                      onSelectionChange={handleModelSelectionChange}
-                    />
-                  ) : null}
                   <div className="input-bottom-actions-right-item">
                     <ContextUsageButton
-                      disabled={disabled || isUploading || isStreaming}
+                      disabled={disabled || isUploading || isStreaming || featuredBusy || prepareReferences().unavailable}
                       resetKey={`${sessionId ?? "new"}:${contextUsageReset}`}
                       staleKey={JSON.stringify({
                         text: value,
@@ -1837,7 +1791,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         workspacePermissionMode: runInBackground ? workspacePermissionMode : undefined,
                       })}
                       buildRequest={() => {
-                        const files = fileListRef.current?.getFiles() ?? [];
+                        const references = prepareReferences();
                         return {
                           ...(sessionId && !sessionId.startsWith("temp_")
                             ? { conversation_id: sessionId }
@@ -1847,17 +1801,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                               input_type: "text",
                               text: buildCitedMessageText(value.trim(), normalizedCiteMessages),
                             },
-                            ...files.map((file) => ({
-                              input_type: allowedImageTypes.includes(
-                                file.name.substring(file.name.lastIndexOf(".")).toLowerCase(),
-                              )
-                                ? "image"
-                                : "file",
-                              uri: file.uri,
-                              filename: file.name,
-                            })),
+                            ...references.inputs,
                           ],
-                          mentions: effectiveMentions,
+                          mentions: references.mentions,
                           cite_messages: normalizedCiteMessages,
                           filters: {
                             kb_id: chatConfig?.knowledgeBaseId ?? [],
@@ -1875,7 +1821,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   <div className="input-bottom-actions-right-item">
                     <SendButton
                       isStreaming={isStreaming}
-                      sendDisabled={isSendDisabled}
+                      sendDisabled={isSendDisabled || featuredBusy}
                       disabled={disabled}
                       sendLabel={t("chat.send")}
                       stopLabel={t("chat.stopGenerate")}
@@ -1886,6 +1832,23 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 </div>
               </div>
             </div>
+          </div>
+          {showWorkspaceEnvironment && <div className="chat-input-environment">
+            <LocalWorkspaceControl
+                    approvalContainer={approvalContainer}
+                    draftWorkspace={props.draftWorkspace}
+                    initialProject={initialProject}
+                    onProjectChange={handleProjectChange}
+                    conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
+                    configResetKey={configResetKey}
+                    onSavingChange={handleWorkspaceSavingChange}
+                    disabled={disabled || isStreaming}
+                    onChange={(id, permissionMode) => {
+                      setWorkspaceId(id);
+                      setWorkspacePermissionMode(permissionMode);
+                    }}
+            />
+          </div>}
           </div>
           {shouldShowPromptSuggestions ? (
             <div

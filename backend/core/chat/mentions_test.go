@@ -273,6 +273,17 @@ func TestMentionIsDeniedHandlesConjunctionsAndCommonDenialWords(t *testing.T) {
 	}
 }
 
+func TestRetiredDirectoryMentionDoesNotBindChatResources(t *testing.T) {
+	db := orm.MigrateTestDB(t)
+	raw := map[string]any{"mentions": []any{
+		map[string]any{"type": "document_directory", "resource_id": "old-directory", "display_name": "Old directory"},
+	}}
+	query, resolved, err := applyChatMentions(context.Background(), db.DB, raw, "user-1", "conversation-1", "session-1", "question", nil)
+	if err != nil || query != "question" || len(resolved.ResourceMentions) != 0 {
+		t.Fatalf("retired reference should not bind resources: query=%q, resolved=%#v, err=%v", query, resolved, err)
+	}
+}
+
 func TestApplyExplicitResourceBindingsIncludesOnlyCurrentMentions(t *testing.T) {
 	body := map[string]any{}
 	applyExplicitResourceBindings(body, resolvedChatMentions{

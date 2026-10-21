@@ -67,6 +67,8 @@ class ChatPersonalizationOptions(BaseModel):
 
 
 class ChatAgentOptions(BaseModel):
+    document_directories_enabled: bool = True
+    document_directories_generation: int = 0
     enable_tool_retrieval: bool = False
     disabled_tools: Optional[List[str]] = None
     available_skills: Optional[List[str]] = None

@@ -418,6 +418,9 @@ describe("task center workflow events", () => {
         ordinary("model-task", { revision: 3, status: "succeeded", model_switch: latest }),
       ] } } });
       await store.loadConversationTasks("conversation-1");
+      await vi.waitFor(() => {
+        expect(store.getTasks("conversation-1")[0]?.ordinary).toMatchObject({ revision: 3, status: "succeeded", model_switch: latest });
+      });
       expect(notice).not.toHaveBeenCalled();
       const delayed = ordinary("model-task", { revision: 2, status: "running", model_switch: record });
       emit(delayed);

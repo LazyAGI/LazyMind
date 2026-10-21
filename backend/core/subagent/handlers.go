@@ -16,6 +16,7 @@ import (
 	"lazymind/core/localworkspace"
 	"lazymind/core/modelconfig"
 	"lazymind/core/store"
+	"lazymind/core/tasktiming"
 	"lazymind/core/userenv"
 )
 
@@ -456,7 +457,12 @@ func ListConversationTasks(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, dto)
 	}
-	common.ReplyOK(w, map[string]any{"tasks": out})
+	runs, timingErr := tasktiming.List(ctx, db, userID, convID, time.Now().UTC())
+	if timingErr != nil {
+		replyTaskError(w, r, "query task display failed", http.StatusInternalServerError)
+		return
+	}
+	common.ReplyOK(w, map[string]any{"tasks": out, "runs": runs})
 }
 
 // GetTaskDetail handles GET /tasks/{task_id}.
