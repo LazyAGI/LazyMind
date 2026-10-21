@@ -1,0 +1,60 @@
+id: superpowers-brief-showcase
+name: Superpowers Brief Gate Showcase
+description: A native Brief gate followed by a Codex development task and human review.
+when_to_use: Only when explicitly trying the Superpowers Brief Gate demo in Codex.
+tool_scripts:
+- path: scripts/brief.py
+  functions:
+  - copy_bound_brief
+  - check_showcase_brief
+runtime:
+  post_step_checks:
+  - step_id: validate_brief
+    tool: check_showcase_brief
+    arguments:
+      candidate: admission
+steps:
+- id: prepare
+  label: Prepare Brief
+- id: validate_brief
+  label: Validate Brief
+- id: implement
+  label: Implement and review
+slots:
+- id: brief
+  label: Dispatch Brief
+  type: json
+  cardinality: single
+- id: admission
+  label: Checked Brief
+  type: json
+  cardinality: single
+- id: implementation
+  label: labels.py
+  type: text
+  cardinality: single
+- id: checks
+  label: Test output
+  type: text
+  cardinality: single
+ui:
+  tabs:
+  - id: brief
+    step_id: prepare
+    label: Brief
+    layout: list
+    slots:
+    - id: brief
+  - id: admission
+    step_id: validate_brief
+    label: Gate
+    layout: list
+    slots:
+    - id: admission
+  - id: implementation
+    step_id: implement
+    label: Code and tests
+    layout: list
+    slots:
+    - id: implementation
+    - id: checks

@@ -1,22 +1,26 @@
-# Native Skill and LazyMind Workflow
+# What changes when execution enters a Workflow?
 
-The native sample uses unmodified Superpowers v7.0.0 at
-`bb92a77741419a4ab5f06e711a283343f1ada0c3`. It passed its slug task and independent
-checks. The reusable Workflow examples use CSV and custom tasks. These executions
-have different scope (native includes reviewers); they are **not a fair benchmark**.
-No reliability percentage, speedup or token-efficiency comparison is supported.
+The original native Skill normal sample **passed**. All negative cases below are
+explicit injections, not naturally reproduced upstream failures. No fair repeated
+trial supports reliability, latency, token or cost improvement percentages.
 
-| Issue | Check | Native Skill | LazyMind Workflow | Actual evidence | Limits |
-| --- | --- | --- | --- | --- | --- |
-| #2282 | Brief before dispatch | Brief command precedes implementer spawn in normal sample | Nonempty frozen brief checked before owned Popen | [Native](evidence/public/native.json), [normal](evidence/public/normal.json), [missing](evidence/public/brief-missing.json) | Missing brief is deliberate injection, not natural bug reproduction |
-| #2282 | Observable task state | Model-followed convention; no attested Host Todo history published | Persisted in_progress event checked; completed only after acceptance | [Normal events](evidence/public/normal.json) | Executor state; no Codex Todo UI synchronization |
-| #2282 | Recovery | Not evaluated here | Failed Attempt retained; UI Retry then same-session resume | [Recovery](evidence/public/recovery.json) | Only before dispatch; uncertain launches are not replayed |
-| #2245 | Actual base | Normal native task completed; no negative comparison | Actual full HEAD checked against declared SHA before child | [Wrong base](evidence/public/wrong-base.json) | Expected SHA must be trusted; injected actual empty commit |
-| #2245 | Enumerable coverage | Three requirements and tests passed | Exact dynamic checklist plus protected checks and allowed-file scope | [Missing coverage](evidence/public/missing-coverage.json), [custom tasks](evidence/public/reuse-custom.json) | Missing row injected after real child; tests must meaningfully encode requirements |
-| #2245 | Model identity | Requested model only | Requested model recorded; actual backend N/A | [Native](evidence/public/native.json), [normal](evidence/public/normal.json) | No identity hard gate |
-| #2245 | Parallel isolation | Not claimed | Linked worktree/index validation and cooperating locks | [Guard tests](test_gates.py), [parallel regression](test_parallel.py) | These tests are not live parallel E2E; arbitrary-process containment remains unsupported |
+| Issue / check | Native Skill | Native plugin showcase | Advanced six-step executor | Evidence / boundary |
+| --- | --- | --- | --- | --- |
+| #2282 Brief | Normal published run passed | Native check must succeed before Core authorizes implementation | Rechecks nonempty on-disk Brief immediately before owned Codex launch | [Case](cases/issue-2282.md), [native record](evidence/public/native.json); artifact vs filesystem checks differ |
+| #2282 state | Skill instructions | Core graph, attempts, Panel and human review | Same Core primitives plus persisted in_progress/completed events | No Codex Todo UI synchronization |
+| #2282 recovery | No claim | Unchanged-input Retry failed again; edited-input recovery BLOCKED in tested Panel | Restore on-disk brief, UI Retry, CLI --resume | [Current status](REVIEW_RESPONSE.md), [historical CLI recovery](evidence/public/recovery.json) |
+| #2245 Base SHA | Successful normal observation, no adversarial trial | Not implemented in this small demo | Actual HEAD must equal full expected SHA before launch | [Wrong-base injection](evidence/public/wrong-base.json) |
+| #2245 Coverage | Native task tests passed | Human reviews code and agent-reported test Artifacts | Exact declared coverage set, protected tests and permitted changes gate success | [Missing-coverage injection](evidence/public/missing-coverage.json) |
+| Model / isolation / full SDD | Not evaluated comparatively | Not implemented | Cooperating worktree/index checks only | No model attestation, OS containment or full planning/reviewer loop |
 
-The public directory contains selected historical records, not complete traces.
-Its [manifest and guide](evidence/public/README.md) explain provenance and offline
-checking. [PR validation](PR_VALIDATION.md) distinguishes current reruns, historical
-real E2E and unit/API doubles. Full SDD conversion is outside this integration.
+Core owns authorization, dependency admission, attempt fencing, required output
+slots and user recovery controls. The package's native Python function validates
+Brief **business semantics**; Core alone does not understand a Superpowers Brief.
+The function runs through the existing pinned tool loader and post-step-check
+extension, not an external loop that later syncs statuses. The Advanced executor
+still owns the actual local child-process boundary. Neither path intercepts
+ordinary Codex tools outside the explicitly selected Workflow.
+
+See [PR validation](PR_VALIDATION.md) for historical vs current runs and
+[public evidence](evidence/public/README.md) for provenance. Unit tests, package
+compilation, native-worker API probes and actual plugin/desktop E2Es are distinct.

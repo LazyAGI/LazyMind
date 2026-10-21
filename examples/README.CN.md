@@ -23,4 +23,4 @@
 
 ### 可运行实验
 
-- [Superpowers 派发可靠性](superpowers-workflow-reliability/README.CN.md)：单任务 RC，支持安装、重复执行、页面授权恢复，并保留 #2282/#2245 的真实故障注入证据。
+- [Superpowers 派发可靠性](superpowers-workflow-reliability/README.CN.md)：从 Codex 体验原生 Brief Gate 与 Panel 产物；保留 Advanced Git/Coverage、已验证的 CLI 恢复，并明确原生恢复限制。

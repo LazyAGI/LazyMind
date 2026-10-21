@@ -1,220 +1,147 @@
-# Superpowers Dispatch Reliability Workflow Integration
+# See a missing Brief stop a Workflow
 
-[中文](README.CN.md) · [Public evidence](evidence/public/README.md) · [PR validation](PR_VALIDATION.md) · [Comparison](comparison.md)
+[中文](README.CN.md) · [Demo walkthrough](DEMO.md) · [Advanced CLI](ADVANCED.md) · [Review response](REVIEW_RESPONSE.md)
 
 A reusable Superpowers Dispatch Reliability Workflow integration built with LazyMind.
 
-Run **one declared development task** in an isolated Git worktree. A six-step
-LazyMind Workflow and its Python executor require a nonempty task brief, observable
-in-progress state and the intended full Git SHA before launching Codex. Completion
-requires every declared coverage item, unchanged acceptance inputs, permitted file
-changes, passing checks and six Runtime Artifacts.
+Superpowers [#2282](https://github.com/obra/superpowers/issues/2282) asks what happens
+when an implementer is dispatched before its task brief is ready. A Skill tells an
+agent what to do; this example gives **one explicitly selected Workflow** an
+observable admission boundary. The historical native Skill sample succeeded; we
+use labeled fault injection to show the missing-Brief condition, not a claimed
+natural reproduction of the upstream bug.
 
-This is a manually authored integration of Superpowers dispatch practices, not an
-automatic Skill converter or a complete SDD implementation. The hard gate applies
-to the process this executor launches; YAML alone does not intercept other agents.
+## Why LazyMind?
 
-[Workflow definition](../../workflows/superpowers-reliability/workflow.yaml) ·
-[Executor](project.py) · [Hard gates](gates.py)
+- **Reliable:** Core admits the implementation step only after its predecessor
+  succeeds. A pinned native business check rejects a missing or empty Brief.
+- **Observable:** the Panel shows the Brief, step state, code and actual test-output
+  Artifacts. Failed attempts remain visible.
+- **Recoverable:** Core preserves attempts and user recovery controls. The Advanced
+  path has verified UI Retry; edited-input recovery in this native demo is currently
+  **BLOCKED** on the tested installation (details below).
 
-## Quick start: a CSV task
+The [small native package](../../workflows/superpowers-brief-showcase/workflow.yaml)
+uses the existing Codex plugin, graph, script-tool loader, post-step checks and
+human review. No Python program drives this graph. Codex prepares the Brief; Core
+routes its validation to LazyMind. Only then does Codex execute the authorized
+implementation step in a disposable local directory. A configured LazyMind chat
+model is therefore also required.
 
-Prerequisites: macOS/Linux, Python 3.9+, Git supporting `--path-format=absolute`,
-Bash, an authenticated Codex CLI, and a running LazyMind installation with the
-public `workflow.control.v1` API. [Install/start LazyMind](../../docs/quick_start.md).
-The RC was tested with Python 3.9.6, Git 2.50.1 and Codex CLI 0.155.0-alpha.9.
-Codex must accept `exec --ignore-user-config --ephemeral --json` and the selected
-model. If the CLI is not on PATH, use `--codex /path/to/codex` when configuring.
+## Watch the demo
 
-Get the review branch from the public contributor fork (the PR targets
-`LazyAGI/LazyMind:main`):
+[Follow the 75-second recording walkthrough](DEMO.md): original successful Skill
+sample → plugin start → missing-Brief fault → blocked implementation → failed
+history and normal-run review. Native repair is an open acceptance item. The page
+links real screenshots and receipts; the shot list is not a recorded product video.
 
-```bash
-git clone --branch feat/superpowers-workflow-eval --single-branch \
-  https://github.com/NicoYang1984/LazyMind.git LazyMind-rc
-cd LazyMind-rc
-```
+## Try in Codex
 
-If you already checked out the PR branch, continue below. The original offline RC
-bundle remains an optional historical handoff method: clone the upstream repository,
-then `git fetch /path/to/lazymind-superpowers-reliability-rc.bundle feat/superpowers-workflow-eval`
-and `git switch -c reliability-rc FETCH_HEAD`. The bundle path is a placeholder for a
-file supplied separately; the public fork checkout above does not require it.
+Requires macOS/Linux, a running LazyMind **from this PR branch** with a working
+native Workflow worker/chat model, desktop Codex, and Node.js >= 22.19 for its
+existing Workflow plugin. The plugin does not need a separate Codex CLI install.
 
-Start from a checkout containing this example. Select a **new** writable directory,
-your local gateway URL and a model available to your Codex account:
+1. Get this branch and run/restart LazyMind with its normal
+   [setup](../../docs/quick_start.md). Startup registers the new Workflow package.
+   In Workflow settings enable **Superpowers Brief Gate Showcase** in manual mode.
 
-```bash
-cd examples/superpowers-workflow-reliability
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-export TRIAL=/tmp/lazymind-reliability-trial
-export LAZYMIND_URL=http://127.0.0.1:5024
-export MODEL=gpt-6-astra  # use a model available in your Codex account
-mkdir -m 700 "$TRIAL"
-git clone https://github.com/obra/superpowers.git "$TRIAL/superpowers"
-git -C "$TRIAL/superpowers" checkout bb92a77741419a4ab5f06e711a283343f1ada0c3
-.venv/bin/python cli.py --config "$TRIAL/private/config.json" configure \
-  --url "$LAZYMIND_URL" --local-login --superpowers "$TRIAL/superpowers" --model "$MODEL"
-.venv/bin/python cli.py --config "$TRIAL/private/config.json" install
-.venv/bin/python cli.py --config "$TRIAL/private/config.json" preflight
-.venv/bin/python demo.py "$TRIAL/csv-a"
-.venv/bin/python cli.py --config "$TRIAL/private/config.json" run \
-  --task "$TRIAL/csv-a/task.json" --repo "$TRIAL/csv-a/worktree" --state "$TRIAL/csv-a/run"
-.venv/bin/python cli.py --config "$TRIAL/private/config.json" status --state "$TRIAL/csv-a/run"
-```
+   ```bash
+   git clone --branch feat/superpowers-workflow-eval --single-branch \
+     https://github.com/NicoYang1984/LazyMind.git LazyMind-showcase
+   cd LazyMind-showcase
+   ```
 
-`5024` is the source runtime's default **local gateway** port; use your selected
-installation's actual gateway, not an unrelated instance. `--local-login` calls
-the explicit loopback installation's local login endpoint. It writes a mode-0600
-session file and never prints the token. For a shared deployment, use HTTPS and
-replace `--local-login` with `--token-file /private/session.json` containing
-`{"token":"YOUR_AUTHENTICATED_TOKEN"}` in mode 0600. A fresh credential for the same
-owner can replace that private file when it expires. Never commit config, credentials,
-run directories or user project traces. Do not use a privileged business account
-for untrusted plans. This example does not configure LazyMind's chat/embedding models.
+   For an already deployed server, an administrator may publish the four files in
+   [the package](../../workflows/superpowers-brief-showcase/) through the existing
+   [Workflow Agent Kit authoring API](../../skills/workflow-agent-kit/references/existing-workflow-authoring.md).
+   Custom scripts require the deployment's normal trust approval. The execution
+   plugin does not expose authoring tools; it cannot install a missing package.
 
-Install queries **enabled and disabled** visible workflows. First use publishes and
-enables the package in manual mode; subsequent installs reuse the compatible ref.
-Before every run, source files are compared semantically against the published
-revision. An incompatible same-name package is rejected without mutation. Use a
-new config with `configure --workflow-name YOUR_UNIQUE_NAME`, or deliberately update
-it via LazyMind authoring. No blind overwrite, automatic upgrade or ignored HTTP 500.
-The legacy blank-draft publisher's underlying duplicate-ID defect is not changed.
+2. In LazyMind **Settings → External Agent integrations → Codex**, click Connect.
+   Follow the [official plugin guide](../../integrations/codex-workflow/README.md).
+   If just installed, open a fresh Codex task so the host loads its tools. Existing
+   connected tasks can continue using the tools already loaded in them. No other
+   Codex tasks are intercepted or modified.
 
-## Repeat use and inspect results
+3. In Codex, ask:
 
-Create another task worktree and a new run directory; **do not republish**:
+   > Use the LazyMind Workflow plugin to run Superpowers Brief Gate Showcase.
+   > Open its Panel. Implement only in a new disposable directory and stop for review.
 
-```bash
-.venv/bin/python demo.py "$TRIAL/csv-b"
-.venv/bin/python cli.py --config "$TRIAL/private/config.json" run \
-  --task "$TRIAL/csv-b/task.json" --repo "$TRIAL/csv-b/worktree" --state "$TRIAL/csv-b/run"
-git -C "$TRIAL/csv-b/worktree" log -1 --oneline
-git -C "$TRIAL/csv-b/worktree" show --stat
-.venv/bin/python cli.py --config "$TRIAL/private/config.json" status --state "$TRIAL/csv-b/run"
-```
+   Codex discovers the package, starts and binds the session, opens its returned
+   Panel URL and begins the ready step. It publishes the Brief, starts native
+   validation and ends its turn while LazyMind checks that bound revision. The
+   official queue integration is intended to wake the same bound task afterward;
+   Codex re-reads Core state before implementation. Our CLI-hosted test required
+   explicit continuation; automatic desktop execution after queue acceptance remains unverified.
+   Inspect `labels.py`, the three assertions and test output, then approve in the Panel.
 
-Implementation files remain in `worktree/`. `run/result.json` contains authoritative
-Runtime state and Artifacts; `trace.jsonl` records stage/API events and
-`child-trace.jsonl` records the actual Codex process. `status` independently reads
-Core again into `readback-control.json` and `readback-artifacts.json`. The completion
-Artifact contains check commands/results, changed-file hashes, HEAD and diff.
-The session ID also opens `<your frontend>/workflow-runs/<session_id>`.
-Raw traces are private task data, not automatically safe to publish.
+4. Repeat with a **new** Workflow session and this explicit fault request:
 
-## Your own repository and Plan
+   ```text
+   Use the LazyMind Workflow plugin to run Superpowers Brief Gate Showcase.
+   FAULT_BRIEF_MISSING
+   ```
 
-Supported: a bounded code change with deterministic, already-authored acceptance
-checks, **one** numbered Plan task, exact implementation file paths and one Codex
-implementer. Multi-task scheduling, automatic reviewer loops and dependency setup
-inside arbitrary projects are outside this RC. Execute only trusted task/check
-commands: they run with your local user permissions.
+   Expect `BRIEF_MISSING` in the native gate event, a failed validation step and no
+   admitted implementation attempt. A native validation SubAgent already ran;
+   this is **not** a claim of zero model calls or zero operating-system processes.
+   In the **Brief** tab edit its JSON, replacing `"brief": null` with:
 
-Commit the Plan, acceptance tests and a `.gitignore` rule for `.eval/` before recording
-the base. Create a fresh linked worktree at that full SHA. Keep the task JSON and
-private run/config directories outside it. The primary checkout is rejected.
+   ```json
+   {"brief":"Implement normalize_label(value) in labels.py: strip surrounding whitespace and lowercase; test ASCII, Unicode and empty input in a disposable directory.","fault_injection":"FAULT_BRIEF_MISSING"}
+   ```
 
-```bash
-BASE=$(git -C /path/to/repository rev-parse HEAD)
-git -C /path/to/repository worktree add -b my-reviewed-task /path/to/new-worktree "$BASE"
-```
+   Keep the injection label as provenance. The intended recovery is **Gate → Retry**
+   after confirming the new saved version.
+   **Current limitation:** our real Panel test saved the human revision and marked
+   validation stale, but disabled Retry despite Core reporting no active execution.
+   Thus edited-input same-session recovery is **BLOCKED**, not a verified Quick Start
+   outcome. The unchanged-input Retry ran and failed again. See
+   [the exact observation](REVIEW_RESPONSE.md#remaining-product-boundaries). Repair the
+   source Brief, not the Gate output. Human edits and approvals are trusted user
+   operations; they are not an adversarial security boundary.
 
-Use the generated `task.json` as the schema example. Runnable input seeds are in
-[tasks/custom-labels](tasks/custom-labels/docs/plan.md) and the
-[Unicode variant](tasks/custom-unicode/docs/plan.md). Copy a seed (including
-`.gitignore`, but keep `task.json` outside the target repository), commit the inputs
-and create a linked worktree. Replace `expected_base` in its task JSON with your
-new full SHA, then use the same `run` command. These seeds select Plan Task 7 and
-use different coverage IDs from the CSV demo. All manifest fields are required:
+If the Panel cannot wake Codex, inspect the connection/HostAction status and follow
+its offered recovery action. Do not fabricate a thread ID or interpret queue
+`accepted` as proof of execution. [Current verification status](REVIEW_RESPONSE.md)
+distinguishes native Runtime, actual plugin tools, and desktop queue/UI acceptance.
 
-| Field | Contract |
-| --- | --- |
-| schema_version | `1` |
-| task_id | A short lowercase identifier; present in the selected Plan heading |
-| plan / plan_task | Tracked relative path; integer N selecting `### Task N: task-id` |
-| expected_base | Full 40-character SHA containing the Plan and protected tests |
-| allowed_files | Exact relative implementation paths; no globs, traversal or symlinks |
-| protected_files | Tracked acceptance files that the child and checks must leave unchanged |
-| coverage | Unique `{id, description, checks: [check-id]}` objects; every ID appears in that Plan task |
-| checks | Unique `{id, argv: [executable, arg, ...]}` objects; no shell expansion; all are mapped to coverage |
+## Evidence and technical cases
 
-Each requirement must map to a real assertion in the declared tests. Mapping an ID
-to a command does not prove that the command is meaningful; the manifest and tests
-are trusted caller inputs. The executor runs all commands and protects their declared
-files. It rejects missing/extra/duplicate/skipped coverage and non-text evidence.
-Use the same `run` command with your manifest/worktree. A manifest change requires
-a reviewed new task, not reuse of a failed session with changed inputs.
+- [#2282: Brief admission and recovery](cases/issue-2282.md) is the main demo.
+- [#2245: full Git SHA and finite coverage](cases/issue-2245.md) is supplementary.
+- [Comparison and control boundaries](comparison.md).
+- [Compact historical evidence](evidence/public/README.md) and
+  [validation record](PR_VALIDATION.md). Recorded success/fault evidence is not a
+  claim that a fresh execution has just passed.
 
-## Missing brief and recovery
+The [Advanced guide](ADVANCED.md) retains the CSV Quick Start, install/reuse,
+custom single-task Plans and dynamic Coverage, six-step executor, real Git checks
+and UI Retry. It uses Python because that executor owns and rechecks the local
+Codex process-launch boundary. It remains the path for those stronger local checks.
 
-On a **disposable** demo repository, append `--fault missing-brief` to `run`. The
-real upstream script first creates the brief; the explicitly labeled injection
-then deletes it. Validation fails before a child is launched. Expected negative
-runs exit 1. Do not use fault injection against business work.
+Run the example regressions from this directory after installing `requirements.txt`:
 
 ```bash
-.venv/bin/python demo.py "$TRIAL/recovery"
-.venv/bin/python cli.py --config "$TRIAL/private/config.json" run --fault missing-brief \
-  --task "$TRIAL/recovery/task.json" --repo "$TRIAL/recovery/worktree" --state "$TRIAL/recovery/run"
-# Expected: exit 1, BRIEF_MISSING, launch_count 0.
-.venv/bin/python cli.py --config "$TRIAL/private/config.json" restore-brief \
-  --task "$TRIAL/recovery/task.json" --repo "$TRIAL/recovery/worktree" --state "$TRIAL/recovery/run"
-# Open the failed Workflow session in LazyMind and click Retry now.
-.venv/bin/python cli.py --config "$TRIAL/private/config.json" run --resume \
-  --task "$TRIAL/recovery/task.json" --repo "$TRIAL/recovery/worktree" --state "$TRIAL/recovery/run"
+python3 -m unittest discover -s . -p 'test_*.py' -v
+python3 verify_rc_evidence.py
 ```
 
-Apply these commands to the *failed missing-brief run*, not the completed Quick Start
-run. Restore re-extracts the same committed task. After restoring the brief, open the failed session in the authenticated LazyMind
-Workflow page and click **Retry**. Then run `--resume` to claim that queued Attempt.
-The public API deliberately denies external executors permission to issue user
-recovery controls (403); the CLI reports UI_RETRY_REQUIRED instead of impersonating
-the browser. Core retains the failed Attempt and creates a new one in the same
-session. Preparation
-must have succeeded and dispatch must never have started. Previous result snapshots
-remain in `previous-results.jsonl` and Core retains Attempt history.
+These commands test code and historical evidence; they do not run a plugin E2E.
 
-For wrong base, edited Plan/tests, or invalid task declarations, inspect the error,
-correct the reviewed inputs and create a fresh worktree/run. Do not reset away work.
-For a failed/timeout/interrupted or uncertain dispatch, use `status`, inspect Git and
-the trace, and resolve the existing session in LazyMind before deliberately starting
-a new task. The executor refuses automatic replay. A handled timeout/SIGINT/SIGTERM
-kills its owned process group; SIGKILL, machine failure, detached grandchildren and
-durable distributed recovery are not guaranteed. Never delete run state to conceal
-an unresolved dispatch. Check commands have a 120-second limit; Codex has 600 seconds.
+## Limits
 
-## Evidence and tests
+The native demo checks a **Brief Artifact**, not a Superpowers brief file on the
+Codex host. It gates Core's implementation authorization; ordinary Codex tools
+outside this Workflow remain callable. Code/test Artifacts from the external step
+are agent-reported: Core does not attest their correspondence to host files.
+Inspect the actual disposable files, or use the Advanced executor for deterministic
+Git/coverage checks. Native validation uses LazyMind's model; implementation uses
+Codex's configured model. Neither path certifies backend model identity.
 
-The [public evidence guide](evidence/public/README.md) contains selected historical
-records for normal E2E, three deliberate faults, same-session UI Retry and reusable
-custom tasks. Each excerpt records source paths, hashes and JSON pointers. These
-are **selected events, not complete traces**. Full development archives are not
-needed to install, run or test the example.
-
-```bash
-.venv/bin/python -m unittest discover -s . -p 'test_*.py' -v
-.venv/bin/python verify_rc_evidence.py
-```
-
-The second command checks recorded evidence offline; it does not execute a new E2E.
-[PR validation](PR_VALIDATION.md) separates historical acceptance from the latest
-fresh-checkout checks. For live behavior, use `run` and `status` above.
-
-Preflight checks dependencies, CLI flags/login, pinned clean Superpowers source,
-Runtime authorization and package compatibility. Model availability is tested only
-by actual dispatch; backend identity remains N/A. There is no hidden model call in
-installation or preflight.
-
-See [#2282](cases/issue-2282.md), [#2245](cases/issue-2245.md) and the
-[comparison](comparison.md). The published native normal sample passed; no natural
-missing-brief failure or measured reliability, speed or token-efficiency gain is claimed.
-Core enforces graph admission, Attempt leases and required output slots. This
-executor checks brief/state/base and task semantics. Its cooperating worktree lock
-is not OS containment. Codex Todo UI synchronization, backend model attestation,
-arbitrary-process isolation and full SDD parity are not implemented.
-
-`cli.py` is the reusable entry point. `native.py`, `run.py`, `parallel.py` and
-`fixture/` retain the small fixed-task reproduction harness and its regression tests.
-They do not depend on archived logs. Upstream text/scripts are MIT licensed:
-[notice](UPSTREAM-LICENSE). New code uses the repository's [Apache-2.0](../../LICENSE).
+No full SDD planning/reviewer loop, arbitrary-process containment, shared-index
+safety guarantee, Codex Todo UI synchronization or measured speed/reliability/token
+gain is claimed. No production Core/Adapter change is required by this example.
+New code is [Apache-2.0](../../LICENSE); pinned Superpowers material retains its
+[MIT notice](UPSTREAM-LICENSE).

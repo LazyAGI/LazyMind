@@ -4,6 +4,31 @@ A reusable Superpowers Dispatch Reliability Workflow integration built with Lazy
 [PR #852](https://github.com/LazyAGI/LazyMind/pull/852) adds an executable single-task
 example, not a complete Superpowers SDD conversion or production Runtime change.
 
+## Review round — 2026-10-21
+
+Latest main `5398ef079c9e3051fbd5d89ae7fbca9c13ebc5d0` merged without conflicts
+for this review; the clean LazyLLM checkout was aligned to main's
+`4d99455e12fa9cb53b0ed100b36c3c2b010a6b79`. No feature diff changes Core, Adapter,
+production Runtime or the submodule pointer. The prior `eec75260` CI run completed
+successfully before this round.
+
+Added a small **native** Brief showcase beside the unchanged six-step executor.
+[REVIEW_RESPONSE](REVIEW_RESPONSE.md) and [selected receipts](evidence/showcase/receipt.json)
+record the actual plugin MCP calls, final package revision, normal completion,
+independent file/test check, missing-Brief injection and real HTTP 409 admission
+refusal. These new sessions did not use the Python execution loop. The original
+53 RC and later 58-test cleanup counts below remain dated historical results.
+
+The final normal native session passed with **manual CLI continuation and real UI
+approval**. The negative session blocked implementation and a blind UI Retry failed
+again. Edited-input same-session recovery and uninterrupted desktop queue execution
+are **BLOCKED**, not E2E successes. No continuous video was recorded; actual Panel
+stills and a recording script are in [DEMO](DEMO.md). Local validation and GitHub CI
+for this revision are recorded in REVIEW_RESPONSE. A new clean checkout passed
+68 tests, install/reuse/preflight and separate CLI normal/missing-Brief E2Es. The
+older runs below retain their historical classification; no CLI run is relabeled
+as a plugin E2E.
+
 ## Versions and historical acceptance
 
 - Main merged without conflicts: `87ee4145166d94f18230e55060b009596aed5e59`.
@@ -22,9 +47,9 @@ Unit/API doubles and injected callbacks are not live E2E. The compact
 records, Git changes, timestamps, session IDs, recovery attempts and source hashes.
 Full historical logs are deliberately outside the tracked Example.
 
-## Cleanup validation
+## Previous cleanup validation
 
-This pass changes documentation, public evidence and its offline verifier/tests.
+That cleanup changed documentation, public evidence and its offline verifier/tests.
 The seven execution modules, Workflow contract, existing 53 tests, fixtures and
 licenses are unchanged. Custom input seeds were relocated to `tasks/`; old audit
 reports and one-off exporters/probes were removed from tracking with local copies.
@@ -32,7 +57,7 @@ reports and one-off exporters/probes were removed from tracking with local copie
 On **2026-10-21**, a new local Git clone received the staged candidate tree;
 its old evidence directories and root reports were absent. The same seven execution
 module hashes match the public manifest. No locally retained archive was available
-to the tests. This pass reran **2 Runtime sessions / 1 actual Codex child**:
+to the tests. That cleanup reran **2 Runtime sessions / 1 actual Codex child**:
 
 | Check | Result |
 | --- | --- |

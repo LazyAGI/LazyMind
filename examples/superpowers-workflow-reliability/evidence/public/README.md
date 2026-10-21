@@ -46,3 +46,8 @@ acceptance from current checkout validation. Source revisions changed during RC:
 recovery spans `633ed8fe` → `a3a227af`, Unicode uses `732fab2e`, and the selected
 normal/brief runs use `113585a4`. Each case carries its exact provenance. The
 existing Runtime service binary's commit remains N/A.
+
+The separate [native plugin showcase receipts](../showcase/receipt.json) and
+[real Panel screenshots](../../DEMO.md) were captured on 2026-10-21. They are not
+part of this historical CLI manifest. Their normal run required manual continuation;
+native edited-input recovery and uninterrupted desktop E2E are BLOCKED.

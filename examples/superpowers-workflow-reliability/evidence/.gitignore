@@ -12,3 +12,10 @@
 !/public/recovery.json
 !/public/reuse-custom.json
 !/public/native.json
+
+# Small review-round native showcase evidence.
+!/showcase/
+/showcase/*
+!/showcase/receipt.json
+!/showcase/blocked.png
+!/showcase/review.png
