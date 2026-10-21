@@ -61,11 +61,10 @@ from lazymind.chat.engine.tools.skill_listing import core_skill_search
 from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 from lazymind.chat.service.component.tool_registry import (
-    ATTACHMENT_EDIT_TOOL_CONFIG,
     DEFAULT_TOOLS,
-    USER_ATTACHMENT_TOOL_CONFIGS,
     collect_system_prompt_appendices,
     filter_tools,
+    visible_attachment_configs,
     tool_is_active,
 )
 from lazymind.chat.service.utils import (
@@ -456,8 +455,8 @@ def _build_subagent_tools(
 ) -> List[Any]:
     """Combine mandatory SubAgent infra tools with optional domain tools.
 
-    Read-only artifact tools are always included; knowledge discovery requires
-    configured knowledge bases. Publisher-owned workflow steps can disable generic artifact
+    Read-only artifact tools are always included; knowledge discovery comes from
+    the scoped management MCP provider. Publisher-owned workflow steps can disable generic artifact
     writes so domain tools remain the only authority for their output slots.
     Attachment tools are included as one group when the parent task carries attachment
     context, so the runtime tool list and its system prompt stay consistent.
@@ -473,8 +472,6 @@ def _build_subagent_tools(
         list_skill_files,
         subagent_tools.find_artifact,
     ]
-    if any(cfg.name == 'kb' and tool_is_active(cfg) for cfg in DEFAULT_TOOLS):
-        base.append(subagent_tools.list_knowledge_bases)
     if include_artifact_writes:
         base.extend([
             subagent_tools.save_artifacts,
@@ -491,7 +488,7 @@ def _build_subagent_tools(
 def _resolve_attachment_configs(
     agentic_config: Dict[str, Any], agent_type: str, params: Dict[str, Any],
 ) -> List[Any]:
-    configs = [*USER_ATTACHMENT_TOOL_CONFIGS, ATTACHMENT_EDIT_TOOL_CONFIG]
+    configs = visible_attachment_configs(agentic_config.get('disabled_tools') or [])
     if agent_type == 'workflow_step':
         declared = params.get('legacy_tools') or params.get('tools') or []
         declared_names = {str(name).strip() for name in declared}

@@ -1,6 +1,7 @@
 # flake8: noqa: Q000
 from __future__ import annotations
 
+from collections.abc import Collection
 import inspect
 import json
 import re
@@ -656,6 +657,11 @@ ATTACHMENT_EDIT_TOOL_CONFIG = ToolConfig(
     module='attachment',
     appendix_system_prompt=ATTACHMENT_EDIT_TOOL_POLICY_APPENDIX,
 )
+
+def visible_attachment_configs(disabled: Collection[str] = ()) -> list[ToolConfig]:
+    return [config for config in (*USER_ATTACHMENT_TOOL_CONFIGS, ATTACHMENT_EDIT_TOOL_CONFIG)
+            if config.name not in disabled]
+
 
 DEFAULT_TOOLS: list[ToolConfig] = [
     ToolConfig(

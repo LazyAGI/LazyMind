@@ -54,13 +54,13 @@ from lazymind.chat.service.component.tool_policy import build_sidechat_tool_conf
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
     ASK_USER_TOOL_CONFIG,
-    ATTACHMENT_EDIT_TOOL_CONFIG,
     DEFAULT_TOOLS,
     USER_ATTACHMENT_TOOL_CONFIGS,
     collect_query_appendices,
     apply_tool_supersession,
     collect_system_prompt_appendices,
     filter_tools,
+    visible_attachment_configs,
     is_workflow_rewind_action,
     normalize_history_for_agent,
     build_session_env_tool_config,
@@ -654,14 +654,11 @@ def _build_chat_artifact_tools(*, host_filesystem_enabled: bool = False) -> list
     return tools
 
 
-def _build_user_attachment_tools(has_files: bool) -> list:
+def _build_user_attachment_tools(has_files: bool, disabled=()) -> list:
     """Register attachment lookup, reading, and text editing when uploads exist."""
     if not has_files:
         return []
-    return [
-        *(config.tool for config in USER_ATTACHMENT_TOOL_CONFIGS),
-        ATTACHMENT_EDIT_TOOL_CONFIG.tool,
-    ]
+    return [config.tool for config in visible_attachment_configs(disabled)]
 
 
 def _build_ask_user_tool(runtime_policy: Any = None) -> list:
@@ -1610,11 +1607,10 @@ async def _handle_chat_impl(
         )
         # User attachment tools are only meaningful when the user has uploaded files.
         attachment_tools = (
-            [] if workflow_turn_is_bound else _build_user_attachment_tools(bool(files_map))
+            [] if workflow_turn_is_bound else _build_user_attachment_tools(bool(files_map), disabled)
         )
         attachment_configs = (
-            [*USER_ATTACHMENT_TOOL_CONFIGS, ATTACHMENT_EDIT_TOOL_CONFIG]
-            if attachment_tools else []
+            visible_attachment_configs(disabled) if attachment_tools else []
         )
         # ask_user is a ChatAgent-only stop-tool. It is NOT in DEFAULT_TOOLS so SubAgents
         # (whose tool resolution falls back to DEFAULT_TOOLS) never see it.

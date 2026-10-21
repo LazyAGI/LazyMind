@@ -2137,3 +2137,21 @@ async def test_subagent_forwards_execution_scoped_operation_receipts(monkeypatch
     result = next(event for event in _sse_to_events(raw) if event.get('type') == 'knowledge_operation_result')
     assert result['execution_id'] == 'execution-1'
     assert result['knowledge_operation'] == receipt
+
+
+@pytest.mark.parametrize('agent_type,params', [
+    ('research', {}),
+    ('workflow_step', {'legacy_tools': ['read_user_attachment', 'find_user_attachment', 'string_replace']}),
+])
+def test_attachment_registration_cannot_bypass_subagent_visibility(agent_type, params):
+    config = {'files': {'1': ['paper.pdf']}, 'disabled_tools': ['find_user_attachment', 'string_replace']}
+    configs = runner_mod._resolve_attachment_configs(config, agent_type, params)
+    assert [item.name for item in configs] == ['read_user_attachment']
+    config['disabled_tools'].append('read_user_attachment')
+    assert runner_mod._resolve_attachment_configs(config, agent_type, params) == []
+
+
+def test_subagent_has_no_unscoped_knowledge_management_helper(monkeypatch):
+    # Native retrieval being ready must not expose the old management API outside MCP.
+    monkeypatch.setattr(runner_mod, 'tool_is_active', lambda _: True)
+    assert runner_mod.subagent_tools.list_knowledge_bases not in runner_mod._build_subagent_tools([])
