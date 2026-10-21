@@ -15,5 +15,6 @@ Import confirmation and recovery:
 - Selecting a PDF only stages its metadata and browser `File`. Uploading and document-task creation begin after the user confirms adding it. Cancelling before confirmation performs no backend write.
 - Once an upload returns a document ID, retain it while the confirmation remains open so retrying a failed library snapshot save does not upload the same file again.
 - Batch import retries first recover the saved document and processing task. Download a replacement only if the prior document/file is unavailable; preserve processing errors and save document identity before association writes.
+- Persist partial document identity with a bounded detached context when the job is cancelled, then stop processing. Cancellation must not erase the identity needed by the next retry.
 - Optional metadata-provider failures do not stop the fallback chain. Successful fallbacks retain provider diagnostics; exhausted failures return their combined errors. Unpaywall 404 is an absent record, not a service outage.
 - Cross-process arXiv imports use database-backed coordination; deployment requirements and subprocess tests are documented in `backend/core/academic/arxivsource/README.md`.

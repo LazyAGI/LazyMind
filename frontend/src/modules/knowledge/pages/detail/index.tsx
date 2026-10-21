@@ -16,7 +16,7 @@ import {
   MODEL_FEATURES_CHANGED_EVENT,
 } from "@/hooks/useModelFeatures";
 import type { MenuProps } from "antd";
-import { useEffect, useRef, useState, useCallback, MouseEvent } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo, MouseEvent } from "react";
 import { useParams } from "react-router-dom";
 import {
   CopyOutlined,
@@ -50,7 +50,7 @@ import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 import { inspectFinishedImportTasks, mergeTrackedImportTasks, reconcileImportTaskFailures, type ImportTaskFailure, type ImportTaskState } from "./importTaskFailures";
 import { TaskTab } from "./components/ImportTaskList";
 import { KnowledgeBaseServiceApi } from "@/modules/knowledge/utils/request";
-import { buildUploadTaskItems } from "@/modules/knowledge/utils/uploadByHash";
+import { createPaperPdfUploader } from "@/modules/knowledge/paper/pdfUpload";
 import { RuntimeReadinessError, waitForRuntimeCapability } from "@/runtime/readiness";
 import { DocumentServiceApi, TaskServiceApi } from "../../utils/request";
 import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
@@ -144,6 +144,7 @@ const Detail = () => {
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
 
   const { id = "" } = useParams();
+  const uploadPaperPdfTask = useMemo(() => createPaperPdfUploader(id), [id]);
   const activeDatasetIdRef = useRef(id);
   activeDatasetIdRef.current = id;
   const paperLibrary = isPaperLibrary(id, detail?.dataset_id === id ? detail.library_kind : undefined);
@@ -440,29 +441,13 @@ const Detail = () => {
       throw error;
     }
 
-    const items = await buildUploadTaskItems({
-      datasetId: id,
-      fileItems: [{ originFile: file, path: file.name }],
-    });
-    if (!items.length) throw new Error(t("knowledge.uploadResultMissing"));
-
-    const created = await TaskServiceApi().createTasks(id, { items });
-    const taskIds = (created.data.tasks || []).map((task) => task.task_id).filter((taskId): taskId is string => Boolean(taskId));
-    if (!taskIds.length) throw new Error("文件已上传，但未能建立导入任务，请重试");
-
-    const started = await TaskServiceApi().startTasks(id, {
-      task_ids: taskIds,
-      start_mode: hasWritePermission ? "DEFAULT" : "UPLOAD",
-    });
-    const result = started.data.tasks?.[0];
-    if (started.data.failed_count > 0 || result?.status === "FAILED" || result?.submit_status === "REJECTED" || result?.submit_status === "FAILED") {
-      throw new Error(result?.message || "文件导入任务未能启动，请重试");
+    const { documentId, tasks } = await uploadPaperPdfTask(file, hasWritePermission ? "DEFAULT" : "UPLOAD");
+    if (activeDatasetIdRef.current === id) {
+      importingTaskListRef.current = mergeTrackedImportTasks(importingTaskListRef.current, tasks);
+      getImportingTotal();
+      getDetail();
     }
-
-    importingTaskListRef.current = mergeTrackedImportTasks(importingTaskListRef.current, created.data.tasks || []);
-    getImportingTotal();
-    getDetail();
-    return result?.document_id || created.data.tasks?.[0]?.document_id;
+    return documentId;
   }
 
   const isDocumentParsingUnavailable = documentParsingEnabled !== true;

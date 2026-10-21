@@ -240,6 +240,93 @@ func TestPaperImportRetryReusesPartialImportResult(t *testing.T) {
 	}
 }
 
+func TestPaperImportRetryPreservesPartialImportAfterCancellation(t *testing.T) {
+	db, job, item := paperImportRetryFixture(t)
+	if err := db.AutoMigrate(&orm.UploadedFile{}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", t.TempDir())
+	if err := db.Unscoped().Delete(&orm.Document{}, "id = ?", item.DocumentID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&item).Updates(map[string]any{"document_id": "", "document_task_id": "", "content_sha256": "", "status": "pending"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.Dataset{}).Where("id = ?", "dataset").Update("processing_level", "parsed").Error; err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// ImportLocalFile has committed its document and task before submission
+	// first queries the task. Cancel there to exercise its real partial result.
+	if err := db.Callback().Query().Before("gorm:query").Register("cancel_before_import_submission", func(tx *gorm.DB) {
+		if tx.Statement.Table == "tasks" {
+			cancel()
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	downloads, imports := 0, 0
+	var partial doc.LocalFileImportResult
+	var partialErr error
+	service := paperImportService{
+		acquire: func(context.Context, FulltextCandidate) (string, int64, error) {
+			downloads++
+			path := filepath.Join(t.TempDir(), "download.pdf")
+			content := []byte("%PDF-1.7\ndownloaded paper")
+			return path, int64(len(content)), os.WriteFile(path, content, 0600)
+		},
+		importFile: func(ctx context.Context, request doc.LocalFileImportRequest) (doc.LocalFileImportResult, error) {
+			imports++
+			result, err := doc.ImportLocalFile(ctx, request)
+			if imports == 1 {
+				partial, partialErr = result, err
+			}
+			return result, err
+		},
+	}
+	if _, err := service.handleJob(ctx, job, importErrorReporter{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled import must remain a failure: %v", err)
+	}
+	if partial.DocumentID == "" || partial.TaskID == "" || partialErr == nil {
+		t.Fatalf("expected saved document/task and processing failure: result=%+v error=%v", partial, partialErr)
+	}
+	if err := db.Take(&item, "id = ?", item.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if item.Status != "failed" || item.DocumentID != partial.DocumentID || item.DocumentTaskID != partial.TaskID || item.ContentSHA256 != partial.ContentSHA256 || !strings.Contains(string(item.ErrorDetailsJSON), "context canceled") {
+		t.Fatalf("cancellation lost partial import identity or failure: %+v", item)
+	}
+	var links int64
+	if err := db.Model(&orm.AcademicWorkDocument{}).Count(&links).Error; err != nil || links != 0 {
+		t.Fatalf("canceled import must stop before association: count=%d error=%v", links, err)
+	}
+	if err := db.Callback().Query().Remove("cancel_before_import_submission"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.Dataset{}).Where("id = ?", "dataset").Update("processing_level", "stored").Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.handleJob(context.Background(), job, importErrorReporter{}); err != nil {
+		t.Fatalf("retry did not recover canceled import: %v", err)
+	}
+	if err := db.Take(&item, "id = ?", item.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	var documents, tasks int64
+	for _, query := range []struct {
+		model any
+		count *int64
+	}{{&orm.Document{}, &documents}, {&orm.Task{}, &tasks}, {&orm.AcademicWorkDocument{}, &links}} {
+		if err := db.Model(query.model).Count(query.count).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if item.Status != "succeeded" || item.DocumentID != partial.DocumentID || item.DocumentTaskID != partial.TaskID || documents != 1 || tasks != 1 || links != 1 || downloads != 1 || imports != 1 {
+		t.Fatalf("retry duplicated canceled import: item=%+v documents=%d tasks=%d links=%d downloads=%d imports=%d", item, documents, tasks, links, downloads, imports)
+	}
+}
+
 func TestPaperImportRetryKeepsAlreadyRunningTask(t *testing.T) {
 	db, job, item := paperImportRetryFixture(t)
 	if err := db.Model(&orm.Dataset{}).Where("id = ?", "dataset").Update("processing_level", "parsed").Error; err != nil {

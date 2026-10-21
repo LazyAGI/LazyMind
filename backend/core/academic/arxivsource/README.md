@@ -52,6 +52,8 @@ paper, err := arxivsource.NewClient().Lookup(ctx, identifier.ID())
 
 PDF 存在性检查、下载、文件入库和关联保存全程由数据库连接持有互斥锁，按规范化的 arXiv base ID 串行化，因此也覆盖同一知识库、同一版本的重复请求，以及跨知识库或版本共享的父条目。PostgreSQL 使用独立物理连接上的 session advisory lock，支持共享数据库和附件存储的多个 Core 实例；等待锁不会占用应用连接池。
 
+PostgreSQL 锁连接单独禁用 `idle_session_timeout`，避免下载期间空闲超时释放锁；应用连接池仍保留原有超时策略。导入会定期检查锁连接，并在下载完成、创建文档前再次检查；检测到会话丢失后取消下载和后续数据库操作，返回明确的锁丢失错误。
+
 SQLite 使用主数据库旁的 `<数据库文件>.academic-import-locks/` 目录，按编号散列到最多 128 个按需创建的协调数据库，在其中持有 `BEGIN IMMEDIATE`。这样不会锁住文档写入所用的主数据库。多个 Core 进程必须访问同一主库和协调目录；桌面本地 SQLite proxy 通过 `PRAGMA database_list` 获取该路径。远程 proxy、内存数据库或不可访问的数据库路径会明确失败，不会退回进程内锁。运行期间不要删除协调目录。两种数据库的锁都随连接关闭或进程退出释放，无需过期租约或数据库迁移；已经保存的文档继续通过恢复标记或可信导入任务恢复。
 
 数据库锁语义参考：[PostgreSQL advisory locks](https://www.postgresql.org/docs/current/explicit-locking.html#ADVISORY-LOCKS)、[SQLite transactions](https://www.sqlite.org/lang_transaction.html)。

@@ -527,12 +527,17 @@ func (s paperImportService) handleJob(ctx context.Context, job asyncjob.Job, rep
 }
 
 func finishPaperImportItem(ctx context.Context, batch *orm.PaperImportBatch, item *orm.PaperImportItem, candidate FulltextCandidate, sourceURL string, imported doc.LocalFileImportResult, importErr error) error {
-	// Preserve partial success before any later failure, including an association
-	// write failure, so a retry can continue with this exact document.
-	if err := store.DB().WithContext(ctx).Model(item).Updates(map[string]any{
+	// Preserve partial success even if processing submission was canceled, so
+	// a retry can continue with this exact document.
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := store.DB().WithContext(persistCtx).Model(item).Updates(map[string]any{
 		"document_id": imported.DocumentID, "document_task_id": imported.TaskID,
 		"content_sha256": imported.ContentSHA256, "stage": "import", "updated_at": time.Now().UTC(),
 	}).Error; err != nil {
+		return errors.Join(importErr, err)
+	}
+	if err := ctx.Err(); err != nil {
 		return errors.Join(importErr, err)
 	}
 	if importErr = validatePaperImportResult(imported, importErr); importErr != nil {

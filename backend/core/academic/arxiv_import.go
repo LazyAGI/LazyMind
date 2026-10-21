@@ -181,7 +181,7 @@ type arxivDocumentExt struct {
 	Marker     *arxivDocumentMarker `json:"arxiv_import,omitempty"`
 }
 
-func (s *arxivImportService) importPaper(ctx context.Context, input, datasetID, userID, userName string) (ArxivImportResult, error) {
+func (s *arxivImportService) importPaper(ctx context.Context, input, datasetID, userID, userName string) (result ArxivImportResult, err error) {
 	paper, err := s.lookup(ctx, input)
 	if err != nil {
 		return ArxivImportResult{}, err
@@ -194,11 +194,17 @@ func (s *arxivImportService) importPaper(ctx context.Context, input, datasetID, 
 	paper.AbsURL, paper.PDFURL = identifier.AbsURL(), identifier.PDFURL()
 	// Parent identity is shared across datasets and revisions, so serialize by
 	// base identifier; attachment lookup below still matches dataset + version.
-	unlock, err := lockArxivImport(ctx, s.db, identifier.BaseID)
+	lock, err := lockArxivImport(ctx, s.db, identifier.BaseID)
 	if err != nil {
 		return ArxivImportResult{}, err
 	}
-	defer unlock()
+	defer lock.release()
+	ctx = lock.ctx
+	defer func() {
+		if cause := context.Cause(ctx); errors.Is(cause, errArxivImportLockLost) {
+			err = cause
+		}
+	}()
 	items, err := s.library(ctx, datasetID)
 	if err != nil {
 		return ArxivImportResult{}, err
@@ -212,6 +218,9 @@ func (s *arxivImportService) importPaper(ctx context.Context, input, datasetID, 
 	if orphan, ok, findErr := s.findUnlinkedImport(ctx, datasetID, paper); findErr != nil {
 		return ArxivImportResult{}, findErr
 	} else if ok {
+		if err = lock.check(); err != nil {
+			return ArxivImportResult{}, err
+		}
 		result, linkErr := s.associate(ctx, paper, orphan, doc.LocalFileImportResult{}, nil)
 		if linkErr != nil {
 			return result, linkErr
@@ -223,6 +232,11 @@ func (s *arxivImportService) importPaper(ctx context.Context, input, datasetID, 
 		return ArxivImportResult{}, fmt.Errorf("arXiv PDF 下载失败：%w", err)
 	}
 	defer os.Remove(path)
+	// Check again at the write boundary: a lost private session must not let a
+	// completed download proceed to document creation between health probes.
+	if err = lock.check(); err != nil {
+		return ArxivImportResult{}, err
+	}
 	filename := safePaperFilename(paper.Title+" [arXiv "+identifier.ID()+"]") + ".pdf"
 	imported, importErr := s.importFile(ctx, doc.LocalFileImportRequest{DatasetID: datasetID, SourcePath: path, DisplayName: filename, ContentType: "application/pdf", DataSourceType: "ARXIV_IMPORT", Tags: []string{"paper", "arxiv:" + identifier.ID()}, UserID: userID, UserName: userName})
 	importErr = validatePaperImportResult(imported, importErr)

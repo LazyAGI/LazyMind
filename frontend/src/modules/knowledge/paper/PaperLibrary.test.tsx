@@ -1075,6 +1075,27 @@ describe("paper library backend arXiv import", () => {
 
 
 describe("backend durable paper library", () => {
+  it("protects an edit draft while saving and restores editing after a failed write", async () => {
+    let fail!: (error: Error) => void;
+    vi.mocked(savePersistedPaperLibrary).mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+    await renderLibrary();
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "Folder paper 的更多操作" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "编辑" }));
+    const dialog = await screen.findByRole("dialog", { name: "编辑题录" });
+    fireEvent.change(within(dialog).getByLabelText("题名"), { target: { value: "Keep this draft" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "保存题录" }));
+    await waitFor(() => expect(savePersistedPaperLibrary).toHaveBeenCalledOnce());
+    for (const input of within(dialog).getAllByRole("textbox")) expect(input).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "关闭" })).toBeDisabled();
+    fireEvent.click(dialog.parentElement!);
+    expect(dialog).toBeInTheDocument();
+    await act(async () => fail(new Error("服务器保存失败")));
+    expect(within(dialog).getByLabelText("题名")).toHaveValue("Keep this draft");
+    expect(within(dialog).getByLabelText("题名")).toBeEnabled();
+    expect(within(dialog).getByRole("button", { name: "关闭" })).toBeEnabled();
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("服务器保存失败");
+  });
+
   it("retains a stale edit draft without overwriting another member's changes after refresh", async () => {
     await renderLibrary();
     fireEvent.mouseEnter(screen.getByRole("button", { name: "Folder paper 的更多操作" }));

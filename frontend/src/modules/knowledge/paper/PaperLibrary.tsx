@@ -932,11 +932,11 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
         </div>
       </Modal>
       {sheet && (
-        <div className="paper-library-mask" onClick={(event) => { if (event.target === event.currentTarget) setSheet(null); }}>
+        <div className="paper-library-mask" onClick={(event) => { if (!saving && event.target === event.currentTarget) setSheet(null); }}>
           <aside className="paper-library-sheet" role="dialog" aria-modal="true" aria-label={sheet === "edit" ? "编辑题录" : "生成综述"}>
             <header className="paper-library-sheet-head">
               <h2>{sheet === "edit" ? "编辑题录" : "生成综述"}</h2>
-              <Button type="text" onClick={() => setSheet(null)}>关闭</Button>
+              <Button type="text" disabled={saving} onClick={() => setSheet(null)}>关闭</Button>
             </header>
             {sheet === "edit" && editError && <Alert type="error" showIcon message="题录尚未保存" description={editError} />}
             {sheet === "edit" && editing && <EditForm key={editing.id} paper={editing} disabled={disabled} onSave={saveEdits} />}
@@ -993,13 +993,13 @@ function EditForm({ paper, onSave, disabled }: { disabled: boolean; paper: Paper
   const [tags, setTags] = useState(paper.tags.join(";"));
   return (
     <div className="paper-library-import">
-      <label>题名<Input value={title} onChange={(event: ChangeEvent<HTMLInputElement>) => setTitle(event.target.value)} /></label>
-      <label>作者<Input value={authors} onChange={(event: ChangeEvent<HTMLInputElement>) => setAuthors(event.target.value)} /></label>
-      <label>出处<Input value={venue} onChange={(event: ChangeEvent<HTMLInputElement>) => setVenue(event.target.value)} /></label>
-      <label>年份<Input value={year} onChange={(event: ChangeEvent<HTMLInputElement>) => setYear(event.target.value)} /></label>
-      <label>DOI<Input value={doi} onChange={(event: ChangeEvent<HTMLInputElement>) => setDoi(event.target.value)} /></label>
-      <label>arXiv<Input value={arxiv} onChange={(event: ChangeEvent<HTMLInputElement>) => setArxiv(event.target.value)} /></label>
-      <label>标签<Input value={tags} placeholder="用分号分开" onChange={(event: ChangeEvent<HTMLInputElement>) => setTags(event.target.value)} /></label>
+      <label>题名<Input disabled={disabled} value={title} onChange={(event: ChangeEvent<HTMLInputElement>) => setTitle(event.target.value)} /></label>
+      <label>作者<Input disabled={disabled} value={authors} onChange={(event: ChangeEvent<HTMLInputElement>) => setAuthors(event.target.value)} /></label>
+      <label>出处<Input disabled={disabled} value={venue} onChange={(event: ChangeEvent<HTMLInputElement>) => setVenue(event.target.value)} /></label>
+      <label>年份<Input disabled={disabled} value={year} onChange={(event: ChangeEvent<HTMLInputElement>) => setYear(event.target.value)} /></label>
+      <label>DOI<Input disabled={disabled} value={doi} onChange={(event: ChangeEvent<HTMLInputElement>) => setDoi(event.target.value)} /></label>
+      <label>arXiv<Input disabled={disabled} value={arxiv} onChange={(event: ChangeEvent<HTMLInputElement>) => setArxiv(event.target.value)} /></label>
+      <label>标签<Input disabled={disabled} value={tags} placeholder="用分号分开" onChange={(event: ChangeEvent<HTMLInputElement>) => setTags(event.target.value)} /></label>
       <Button type="primary" disabled={disabled} onClick={() => onSave({
         title,
         authors,

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	_ "github.com/glebarez/go-sqlite"
@@ -19,11 +20,19 @@ import (
 	"lazymind/core/common"
 )
 
+var errArxivImportLockLost = errors.New("arXiv import database lock was lost")
+
+type arxivImportGuard struct {
+	ctx     context.Context
+	check   func() error
+	release func()
+}
+
 // The database holds this lock for the entire check/download/store/link sequence.
 // Serializing by canonical base ID also protects the shared parent across datasets
 // and revisions. Closing the owning connection, including process termination,
-// releases the lock; no expiring lease can admit a second live importer.
-func lockArxivImport(ctx context.Context, db *gorm.DB, baseID string) (func(), error) {
+// releases the lock. The guard cancels PostgreSQL imports on detected session loss.
+func lockArxivImport(ctx context.Context, db *gorm.DB, baseID string) (*arxivImportGuard, error) {
 	switch db.Dialector.Name() {
 	case "postgres":
 		return lockPostgresArxivImport(ctx, db, "academic-arxiv-import:"+baseID)
@@ -34,14 +43,21 @@ func lockArxivImport(ctx context.Context, db *gorm.DB, baseID string) (func(), e
 	}
 }
 
-func lockPostgresArxivImport(ctx context.Context, db *gorm.DB, key string) (func(), error) {
+func lockPostgresArxivImport(ctx context.Context, db *gorm.DB, key string) (*arxivImportGuard, error) {
 	dialect, ok := db.Dialector.(*postgres.Dialector)
 	if !ok || dialect.DSN == "" {
 		return nil, errors.New("arXiv import locking requires a PostgreSQL connection DSN")
 	}
 	// Use a private physical session rather than consuming the application's
 	// connection pool: a pool full of lock waiters would starve the active import.
-	conn, err := pgx.Connect(ctx, dialect.DSN)
+	config, err := pgx.ParseConfig(dialect.DSN)
+	if err != nil {
+		return nil, fmt.Errorf("configure arXiv import lock: %w", err)
+	}
+	// Downloads intentionally leave this session idle. Keep the application's
+	// idle-session policy intact, but do not let it expire an active import lock.
+	config.RuntimeParams["idle_session_timeout"] = "0"
+	conn, err := pgx.ConnectConfig(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("connect arXiv import lock: %w", err)
 	}
@@ -59,7 +75,7 @@ func lockPostgresArxivImport(ctx context.Context, db *gorm.DB, key string) (func
 			return nil, err
 		}
 		if locked {
-			return closeConn, nil
+			return guardPostgresArxivImport(ctx, conn, closeConn), nil
 		}
 		if err = waitArxivImportLock(ctx); err != nil {
 			closeConn()
@@ -68,7 +84,56 @@ func lockPostgresArxivImport(ctx context.Context, db *gorm.DB, key string) (func
 	}
 }
 
-func lockSQLiteArxivImport(ctx context.Context, db *gorm.DB, key string) (func(), error) {
+func guardPostgresArxivImport(ctx context.Context, conn *pgx.Conn, closeConn func()) *arxivImportGuard {
+	lockCtx, cancel := context.WithCancelCause(ctx)
+	var session sync.Mutex // pgx sessions cannot execute concurrent operations.
+	check := func() error {
+		session.Lock()
+		defer session.Unlock()
+		if cause := context.Cause(lockCtx); cause != nil {
+			return cause
+		}
+		probe, stop := context.WithTimeout(lockCtx, time.Second)
+		defer stop()
+		if err := conn.Ping(probe); err != nil {
+			// Retain an external request cancellation; otherwise identify lock
+			// loss explicitly rather than reporting it as user cancellation.
+			if lockCtx.Err() == nil {
+				cancel(fmt.Errorf("%w: %v", errArxivImportLockLost, err))
+			}
+			return context.Cause(lockCtx)
+		}
+		return nil
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-lockCtx.Done():
+				return
+			case <-ticker.C:
+				if check() != nil {
+					return
+				}
+			}
+		}
+	}()
+	var once sync.Once
+	return &arxivImportGuard{ctx: lockCtx, check: check, release: func() {
+		once.Do(func() {
+			cancel(nil)
+			<-done
+			session.Lock()
+			defer session.Unlock()
+			closeConn()
+		})
+	}}
+}
+
+func lockSQLiteArxivImport(ctx context.Context, db *gorm.DB, key string) (*arxivImportGuard, error) {
 	if proxy, ok := db.Dialector.(interface{ IsSQLiteProxy() bool }); ok && proxy.IsSQLiteProxy() {
 		endpoint, err := url.Parse(os.Getenv("LAZYMIND_SQLITE_SERVER_URL"))
 		if err != nil || endpoint == nil {
@@ -139,7 +204,8 @@ func lockSQLiteArxivImport(ctx context.Context, db *gorm.DB, key string) (func()
 	}
 	for {
 		if _, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err == nil {
-			return closeConn, nil
+			var once sync.Once
+			return &arxivImportGuard{ctx: ctx, check: ctx.Err, release: func() { once.Do(closeConn) }}, nil
 		}
 		if !common.IsSQLiteBusy(err) {
 			closeConn()

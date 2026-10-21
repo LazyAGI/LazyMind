@@ -1,6 +1,14 @@
 import type { StartTasksResponse } from "@/api/generated/core-client";
 import { localizeErrorCode } from "@/components/request";
 
+/** Only explicit per-task failures prove that an unstarted task can be retried. */
+export class ImportTaskStartError extends Error {
+  constructor(message: string, readonly rejectedTaskIds: readonly string[]) {
+    super(message);
+    this.name = 'ImportTaskStartError';
+  }
+}
+
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -20,10 +28,12 @@ export function assertImportTasksStarted(data: StartTasksResponse | undefined, e
   const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
   const failed = tasks.filter((task) => task.status?.toUpperCase() !== "STARTED" || ["FAILED", "REJECTED"].includes(task.submit_status?.toUpperCase() || ""));
   if (failed.length) {
-    throw new Error(failed.map((task) => {
+    throw new ImportTaskStartError(failed.map((task) => {
       const reason = getImportErrorMessage(task, "任务未能启动");
       return task.display_name ? `${task.display_name}：${reason}` : reason;
-    }).join("\n"));
+    }).join("\n"), failed.filter((task) => task.status?.toUpperCase() === "FAILED"
+      || ["FAILED", "REJECTED"].includes(task.submit_status?.toUpperCase() || ""))
+      .map((task) => text(task.task_id)).filter(Boolean));
   }
   if (!data || !tasks.length || data.failed_count > 0 || data.started_count !== tasks.length || tasks.length < expectedCount || data.started_count < data.requested_count) {
     throw new Error("导入任务未全部启动，服务返回了失败或不完整的结果。请在导入任务中查看详情后重试。");
