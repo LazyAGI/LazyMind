@@ -83,6 +83,9 @@ describe("KnowledgeDataSettings", () => {
   it("opens multimodal recognition in the Models & Services settings section", async () => {
     render(<KnowledgeDataSettings
       controlsDisabled={false}
+      documentDirectoriesEnabled={true}
+      documentDirectoriesSaving={false}
+      onDocumentDirectoriesChange={vi.fn()}
       documentParsingEnabled={false}
       documentParsingSaving={false}
       headingRef={createRef<HTMLHeadingElement>()}
@@ -97,6 +100,9 @@ describe("KnowledgeDataSettings", () => {
   it("keeps the nested switch independent from row navigation", async () => {
     render(<KnowledgeDataSettings
       controlsDisabled={false}
+      documentDirectoriesEnabled={true}
+      documentDirectoriesSaving={false}
+      onDocumentDirectoriesChange={vi.fn()}
       documentParsingEnabled={false}
       documentParsingSaving={false}
       headingRef={createRef<HTMLHeadingElement>()}
@@ -115,6 +121,9 @@ describe("KnowledgeDataSettings", () => {
   it("keeps knowledge, data and file rows in settings while search retains configuration links", async () => {
     render(<KnowledgeDataSettings
       controlsDisabled={false}
+      documentDirectoriesEnabled={true}
+      documentDirectoriesSaving={false}
+      onDocumentDirectoriesChange={vi.fn()}
       documentParsingEnabled={false}
       documentParsingSaving={false}
       headingRef={createRef<HTMLHeadingElement>()}
@@ -144,6 +153,9 @@ describe("KnowledgeDataSettings", () => {
 
     render(<KnowledgeDataSettings
       controlsDisabled={false}
+      documentDirectoriesEnabled={true}
+      documentDirectoriesSaving={false}
+      onDocumentDirectoriesChange={vi.fn()}
       documentParsingEnabled={false}
       documentParsingSaving={false}
       headingRef={createRef<HTMLHeadingElement>()}
@@ -160,6 +172,9 @@ describe("KnowledgeDataSettings", () => {
     const onDocumentParsingChange = vi.fn();
     render(<KnowledgeDataSettings
       controlsDisabled={false}
+      documentDirectoriesEnabled={true}
+      documentDirectoriesSaving={false}
+      onDocumentDirectoriesChange={vi.fn()}
       documentParsingEnabled={false}
       documentParsingSaving={false}
       headingRef={createRef<HTMLHeadingElement>()}
@@ -185,6 +200,9 @@ describe("KnowledgeDataSettings", () => {
     };
     const { rerender } = render(<KnowledgeDataSettings
       {...props}
+      documentDirectoriesEnabled={true}
+      documentDirectoriesSaving={false}
+      onDocumentDirectoriesChange={vi.fn()}
       documentParsingEnabled={false}
     />);
 
@@ -196,6 +214,9 @@ describe("KnowledgeDataSettings", () => {
 
     rerender(<KnowledgeDataSettings
       {...props}
+      documentDirectoriesEnabled={true}
+      documentDirectoriesSaving={false}
+      onDocumentDirectoriesChange={vi.fn()}
       documentParsingEnabled
     />);
 
@@ -205,4 +226,15 @@ describe("KnowledgeDataSettings", () => {
     expect(within(parsingHeader!).getByText("已启用")).toBeInTheDocument();
     expect(within(parsingHeader!).queryByText(/1\s*\/\s*1/)).not.toBeInTheDocument();
   });
+});
+
+it("shows the independent directory switch and forwards changes", async () => {
+ const changed = vi.fn();
+ const { rerender } = render(<KnowledgeDataSettings controlsDisabled={false} documentDirectoriesEnabled documentDirectoriesSaving={false} onDocumentDirectoriesChange={changed} documentParsingEnabled documentParsingSaving={false} onDocumentParsingChange={vi.fn()} headingRef={createRef<HTMLHeadingElement>()} />);
+ const toggle = await screen.findByRole("switch", { name: "settingsPage.controls.documentDirectories.title" });
+ expect(toggle).toHaveAttribute("aria-checked", "true");
+ fireEvent.click(toggle);
+ expect(changed).toHaveBeenCalledWith(false, expect.anything());
+ rerender(<KnowledgeDataSettings controlsDisabled={false} documentDirectoriesEnabled={false} documentDirectoriesSaving={false} onDocumentDirectoriesChange={changed} documentParsingEnabled documentParsingSaving={false} onDocumentParsingChange={vi.fn()} headingRef={createRef<HTMLHeadingElement>()} />);
+ expect(toggle).toHaveAttribute("aria-checked", "false");
 });

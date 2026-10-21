@@ -30,6 +30,7 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
+	"lazymind/core/tasktiming"
 	"lazymind/core/workflow"
 )
 
@@ -80,6 +81,7 @@ func writeSSEChunk(w http.ResponseWriter, flusher http.Flusher, v any) {
 }
 
 func Chat(w http.ResponseWriter, r *http.Request) {
+	r = r.WithContext(tasktiming.WithRequestTime(r.Context(), time.Now().UTC()))
 	ChatConversations(w, r)
 }
 
@@ -836,6 +838,23 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	baseURL := chatServiceURL()
 	reqCtx := r.Context()
 	stateStore := store.State()
+	if stateStore != nil && !isExternalChatProvider(conversationRecord.ChatExecutor) {
+		if err := taskcenter.RegisterChatExecution(reqCtx, db, userID, convID, sessionID); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				common.ReplyErr(w, "conversation not found", http.StatusNotFound)
+			} else {
+				common.ReplyErr(w, "chat service unavailable", http.StatusServiceUnavailable)
+			}
+			return
+		}
+		defer func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := taskcenter.FinishChatExecution(cleanupCtx, db, userID, convID, sessionID); err != nil {
+				log.Warn().Err(err).Msg("finish chat execution tracking failed")
+			}
+		}()
+	}
 
 	if !stream {
 		handleNonStreamChat(w, reqCtx, db, stateStore, baseURL, reqBody, convID, displayQuery, target, historyExt)

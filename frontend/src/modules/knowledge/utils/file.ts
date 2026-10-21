@@ -58,6 +58,8 @@ class FileUtils {
     }
     try {
       const url = new URL(uri, window.location.origin);
+      // Object/data URLs have no filename; the viewer must use its supplied name.
+      if (url.protocol === "blob:" || url.protocol === "data:") return "";
       const pathname = url.pathname;
       return this.getSuffix(pathname);
     } catch {

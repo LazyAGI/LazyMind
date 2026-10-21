@@ -17,6 +17,7 @@ import (
 	"lazymind/core/artifact"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/tasktiming"
 )
 
 // Status values for a SubAgent task.
@@ -231,14 +232,20 @@ func ListArtifactsByConversationForUser(
 // UpdateStatus transitions a task to running and refreshes heartbeat.
 func UpdateStatus(ctx context.Context, db *gorm.DB, taskID, status string) error {
 	now := time.Now().UTC()
-	return db.WithContext(ctx).Model(&orm.SubAgentTask{}).Where("id = ?", taskID).
-		Updates(map[string]any{
-			"status":           status,
-			"last_heartbeat":   now,
-			"updated_at":       now,
-			"display_revision": gorm.Expr("display_revision + 1"),
-			"started_at":       gorm.Expr("COALESCE(started_at, ?)", now),
-		}).Error
+	return taskTransaction(ctx, db, func(tx *gorm.DB) error {
+		result := tx.Model(&orm.SubAgentTask{}).Where("id = ?", taskID).
+			Updates(map[string]any{
+				"status":           status,
+				"last_heartbeat":   now,
+				"updated_at":       now,
+				"display_revision": gorm.Expr("display_revision + 1"),
+				"started_at":       gorm.Expr("COALESCE(started_at, ?)", now),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		return tasktiming.SyncSubagent(ctx, tx, taskID)
+	})
 }
 
 // AcceptTaskStart applies a runner's task_start event only while the task is
@@ -246,16 +253,27 @@ func UpdateStatus(ctx context.Context, db *gorm.DB, taskID, status string) error
 // must never revive a task that Stop already made terminal.
 func AcceptTaskStart(ctx context.Context, db *gorm.DB, taskID string) (bool, error) {
 	now := time.Now().UTC()
-	result := db.WithContext(ctx).Model(&orm.SubAgentTask{}).
-		Where("id = ? AND status IN ?", taskID, []string{StatusPending, StatusRunning}).
-		Updates(map[string]any{
-			"status":           StatusRunning,
-			"started_at":       gorm.Expr("COALESCE(started_at, ?)", now),
-			"last_heartbeat":   now,
-			"updated_at":       now,
-			"display_revision": gorm.Expr("display_revision + 1"),
-		})
-	return result.RowsAffected > 0, result.Error
+	var accepted bool
+	err := taskTransaction(ctx, db, func(tx *gorm.DB) error {
+		result := tx.Model(&orm.SubAgentTask{}).
+			Where("id = ? AND status IN ?", taskID, []string{StatusPending, StatusRunning}).
+			Updates(map[string]any{
+				"status":           StatusRunning,
+				"started_at":       gorm.Expr("COALESCE(started_at, ?)", now),
+				"last_heartbeat":   now,
+				"updated_at":       now,
+				"display_revision": gorm.Expr("display_revision + 1"),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		accepted = result.RowsAffected > 0
+		if accepted {
+			return tasktiming.SyncSubagent(ctx, tx, taskID)
+		}
+		return nil
+	})
+	return accepted, err
 }
 
 // UpdateProgress writes progress percentage / phase / eta and refreshes heartbeat.
@@ -312,10 +330,21 @@ func acceptFinalStatusWithPhase(
 		updates["current_phase"] = phase
 	}
 	terminal := []string{StatusSucceeded, StatusFailed, StatusInterrupted, StatusCanceled}
-	result := db.WithContext(ctx).Model(&orm.SubAgentTask{}).
-		Where("id = ? AND (status NOT IN ? OR status = ?)", taskID, terminal, status).
-		Updates(updates)
-	return result.RowsAffected > 0, result.Error
+	var accepted bool
+	err := taskTransaction(ctx, db, func(tx *gorm.DB) error {
+		result := tx.Model(&orm.SubAgentTask{}).
+			Where("id = ? AND (status NOT IN ? OR status = ?)", taskID, terminal, status).
+			Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		accepted = result.RowsAffected > 0
+		if accepted {
+			return tasktiming.SyncSubagent(ctx, tx, taskID)
+		}
+		return nil
+	})
+	return accepted, err
 }
 
 type SavedArtifact struct {
@@ -438,11 +467,29 @@ func CountByConversation(ctx context.Context, db *gorm.DB, convID string) (int64
 
 // MarkInterrupted flags running tasks whose heartbeat is older than maxAge as interrupted.
 func MarkInterrupted(ctx context.Context, db *gorm.DB, maxAge time.Duration) (int64, error) {
-	cutoff := time.Now().UTC().Add(-maxAge)
-	res := db.WithContext(ctx).Model(&orm.SubAgentTask{}).
-		Where("status = ? AND last_heartbeat < ?", StatusRunning, cutoff).
-		Updates(map[string]any{"status": StatusInterrupted, "updated_at": time.Now().UTC(), "finished_at": time.Now().UTC(), "display_revision": gorm.Expr("display_revision + 1")})
-	return res.RowsAffected, res.Error
+	now := time.Now().UTC()
+	var ids []string
+	var count int64
+	err := taskTransaction(ctx, db, func(tx *gorm.DB) error {
+		if err := tx.Model(&orm.SubAgentTask{}).Where("status = ? AND last_heartbeat < ?", StatusRunning, now.Add(-maxAge)).Pluck("id", &ids).Error; err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		result := tx.Model(&orm.SubAgentTask{}).Where("id IN ? AND status = ?", ids, StatusRunning).Updates(map[string]any{"status": StatusInterrupted, "updated_at": now, "finished_at": now, "display_revision": gorm.Expr("display_revision + 1")})
+		if result.Error != nil {
+			return result.Error
+		}
+		count = result.RowsAffected
+		for _, id := range ids {
+			if err := tasktiming.SyncSubagent(ctx, tx, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return count, err
 }
 
 // InterruptConversation marks every active ordinary SubAgent task in a conversation
@@ -459,10 +506,19 @@ func InterruptConversation(ctx context.Context, db *gorm.DB, convID, summary str
 			return nil
 		}
 		now := time.Now().UTC()
-		return tx.Model(&orm.SubAgentTask{}).Where("id IN ?", taskIDs).Updates(map[string]any{
+		result := tx.Model(&orm.SubAgentTask{}).Where("id IN ?", taskIDs).Updates(map[string]any{
 			"status": StatusInterrupted, "summary": summary,
 			"last_heartbeat": now, "updated_at": now, "finished_at": now, "display_revision": gorm.Expr("display_revision + 1"),
-		}).Error
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		for _, id := range taskIDs {
+			if err := tasktiming.SyncSubagent(ctx, tx, id); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	return taskIDs, err
 }

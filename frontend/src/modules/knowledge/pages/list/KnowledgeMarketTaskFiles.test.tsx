@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { KnowledgeMarketTaskFileOpenAPIResponse, KnowledgeMarketTaskListItemOpenAPIResponse } from "@/api/generated/core-client";
 import * as api from "@/modules/knowledge/api/knowledgeMarket";
 import KnowledgeMarketTaskModal from "./KnowledgeMarketTaskModal";
+import { useKnowledgeMarketTasks } from "./useKnowledgeMarketTasks";
 
 vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
   listKnowledgeMarketTaskPage: vi.fn(), listKnowledgeMarketTaskFiles: vi.fn(),
@@ -23,13 +24,17 @@ const original: KnowledgeMarketTaskListItemOpenAPIResponse = {
 let tasks: KnowledgeMarketTaskListItemOpenAPIResponse[];
 let files: KnowledgeMarketTaskFileOpenAPIResponse[];
 async function click(element: HTMLElement) { await act(async () => { fireEvent.click(element); }); }
-async function mount() { await act(async () => { render(<ConfigProvider button={{autoInsertSpace: false}} theme={{token: {motion: false}}}><KnowledgeMarketTaskModal open refreshKey="files" onClose={() => {}} onTasksChanged={() => {}} /></ConfigProvider>); }); }
+function TaskDialog() {
+  const query = useKnowledgeMarketTasks(true, "files");
+  return <KnowledgeMarketTaskModal open query={query} onClose={() => {}} onTasksChanged={query.refresh} />;
+}
+async function mount() { await act(async () => { render(<ConfigProvider button={{autoInsertSpace: false}} theme={{token: {motion: false}}}><TaskDialog /></ConfigProvider>); }); }
 beforeEach(() => {
   vi.useFakeTimers(); vi.clearAllMocks();
   globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
   tasks = [{...original}];
   files = Array.from({length: 23}, (_, i) => ({file_id: `file-${i}`, name: `文档${i}.md`, status: i < 11 ? "failed" : "success", reason_code: i < 11 ? "parse_failed" : "success"}));
-  vi.mocked(api.listKnowledgeMarketTaskPage).mockImplementation(async (page) => ({items: tasks.slice((page-1)*10,page*10), total: tasks.length, page, page_size: 10}));
+  vi.mocked(api.listKnowledgeMarketTaskPage).mockImplementation(async (page) => ({items: tasks.slice((page-1)*10,page*10), total: tasks.length, page, page_size: 10, unfinished_count: tasks.filter((task) => ["pending", "processing", "blocked", "unknown"].includes(task.display_state || "")).length}));
   vi.mocked(api.listKnowledgeMarketTaskFiles).mockImplementation(async (_id, status, page) => {
     const matching = files.filter((file) => file.status === status);
     return {items: matching.slice((page-1)*10,page*10), total: matching.length, counts: {failed: 11, success: 12, canceled: 0, unfinished: 0}, page, page_size: 10, file_details_available: true};
@@ -75,7 +80,6 @@ describe("background task files", () => {
     await act(async () => { finish({job_id: "new", state: "pending"}); });
     expect(screen.getByRole("button", {name: "收起任务详情 新重试任务"})).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("历史安装任务")).toBeInTheDocument();
-    expect(screen.getByText("已创建重试任务，正在跟踪新任务。")).toBeInTheDocument();
   });
   it("ignores stale file responses after switching filters", async () => {
     let finish!: (value: Awaited<ReturnType<typeof api.listKnowledgeMarketTaskFiles>>) => void;

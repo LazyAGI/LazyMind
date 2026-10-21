@@ -14,7 +14,7 @@ import (
 
 func newTestTaskDB(t *testing.T) *orm.DB {
 	t.Helper()
-	return orm.MigrateTestDB(t, &orm.TaskCenterTask{}, &orm.UserNotificationPreferences{}, &orm.TaskNotification{}, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowEvent{})
+	return orm.MigrateTestDB(t, &orm.TaskCenterTask{}, &orm.Conversation{}, &orm.UserNotificationPreferences{}, &orm.TaskNotification{}, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowEvent{})
 }
 
 // ──────────────────────────────────────────────

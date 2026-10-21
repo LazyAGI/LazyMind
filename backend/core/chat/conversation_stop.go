@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -11,6 +12,7 @@ import (
 	"lazymind/core/log"
 	"lazymind/core/state"
 	"lazymind/core/subagent"
+	"lazymind/core/tasktiming"
 	"lazymind/core/workflow"
 )
 
@@ -82,5 +84,8 @@ func StopConversationExecution(ctx context.Context, db *gorm.DB, stateStore stat
 			log.Logger.Warn().Err(err).Str("conversation_id", conversationID).Msg("failed to notify Python chat cancellation")
 		}
 	}()
+	if stopSignalErr == nil {
+		return tasktiming.CancelConversation(ctx, db, userID, conversationID, time.Now().UTC())
+	}
 	return stopSignalErr
 }

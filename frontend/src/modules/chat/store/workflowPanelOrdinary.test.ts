@@ -37,6 +37,19 @@ describe('ordinary workflow recovery', () => {
     expect(applyOrdinaryWorkflowSnapshot(restored, { ...snapshot(5), session_id: 'different' })).toBe(restored);
   });
 
+  it('updates legacy run outputs by revision without fabricating timing', () => {
+    const current = applyOrdinaryWorkflowSnapshot(session(), snapshot(1));
+    const next = snapshot(2);
+    next.runs[0].final_output_refs = ['report'];
+    next.runs[0].final_artifacts = [{ artifact_id: 'report', revision: 1, producer_display_key: 'workflow:session:write:attempt-2', name: 'report.txt', content_type: 'text/plain', size_bytes: 10, state: 'ready', preview_kind: 'text', capabilities: { preview: true, open: false, download: true }, created_at: '2026-10-20T00:00:00Z' }];
+    const updated = applyOrdinaryWorkflowSnapshot(current, next);
+    expect(updated.ordinary_runs?.[0].revision).toBe(2);
+    expect(updated.ordinary_runs?.[0].final_output_refs).toEqual(['report']);
+    expect(updated.ordinary_runs?.[0].final_artifacts).toEqual(next.runs[0].final_artifacts);
+    expect(updated.ordinary_runs?.[0].timing).toBeUndefined();
+    expect(applyOrdinaryWorkflowSnapshot(updated, snapshot(1))).toBe(updated);
+  });
+
   it('keeps a loaded page when setSession receives the same revision', () => {
     const initial = applyOrdinaryWorkflowSnapshot(session(), snapshot(4));
     useWorkflowStore.getState().setSession('conversation', initial);

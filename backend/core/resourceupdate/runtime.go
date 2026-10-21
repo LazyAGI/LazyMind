@@ -37,18 +37,6 @@ func Start(ctx context.Context, db *gorm.DB, stateStore state.Store, cfg Config)
 	go func() { defer wg.Done(); runSchedulerLoop(ctx, scheduler, cfg.SchedulerTickInterval) }()
 	go func() { defer wg.Done(); runWorkerLoop(ctx, worker, cfg.WorkerInterval) }()
 	go func() { defer wg.Done(); runScannerLoop(ctx, scanner, cfg.ScannerInterval) }()
-	if stateStore != nil {
-		idleProcessor := NewIdleProcessor(db, stateStore, cfg, workerID+"-idle")
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			runIdleFallbackLoop(ctx, idleProcessor, cfg.ConversationIdleFallbackScanInterval)
-		}()
-		if cfg.ConversationIdleEnableExpiredKeyNotify {
-			wg.Add(1)
-			go func() { defer wg.Done(); runIdleExpiredKeyNotifyLoop(ctx, stateStore, idleProcessor) }()
-		}
-	}
 	go func() {
 		wg.Wait()
 		close(done)
@@ -113,4 +101,25 @@ func LogStartup(enabled bool) {
 	resourceUpdateInfo(logEventRuntimeStarted).
 		Bool("enabled", enabled).
 		Msg(fmt.Sprintf("resource update runtime enabled=%v", enabled))
+}
+
+// StartIdle is shared by normal chat features; memory review remains opt-in.
+func StartIdle(ctx context.Context, db *gorm.DB, stateStore state.Store, cfg Config, memoryEnabled bool) <-chan struct{} {
+	done := make(chan struct{})
+	if stateStore == nil {
+		close(done)
+		return done
+	}
+	cfg = normalizeConfig(cfg)
+	processor := NewIdleProcessor(db, stateStore, cfg, defaultWorkerID("conversation-idle"))
+	processor.skipMemory = !memoryEnabled
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); runIdleFallbackLoop(ctx, processor, cfg.ConversationIdleFallbackScanInterval) }()
+	if cfg.ConversationIdleEnableExpiredKeyNotify {
+		wg.Add(1)
+		go func() { defer wg.Done(); runIdleExpiredKeyNotifyLoop(ctx, stateStore, processor) }()
+	}
+	go func() { wg.Wait(); close(done) }()
+	return done
 }

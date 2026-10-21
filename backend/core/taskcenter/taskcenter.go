@@ -53,6 +53,16 @@ func CreateTask(ctx context.Context, db *gorm.DB, t *orm.TaskCenterTask) error {
 	}
 	t.UpdatedAt = now
 	return notificationTx(ctx, db, func(tx *gorm.DB) error {
+		if t.ConversationID != "" {
+			var conversation orm.Conversation
+			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND create_user_id=?", t.ConversationID, t.UserID).Take(&conversation).Error
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			if err == nil && conversation.DeletedAt != nil {
+				return gorm.ErrRecordNotFound
+			}
+		}
 		if err := snapshotNotifications(ctx, tx, t); err != nil {
 			return err
 		}
@@ -278,9 +288,44 @@ func RestoreTasksForConversations(ctx context.Context, db *gorm.DB, userID strin
 	if len(conversationIDs) == 0 {
 		return nil
 	}
-	return db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-		Where("user_id = ? AND conversation_id IN ? AND archived_reason = ?", userID, conversationIDs, reason).
-		Updates(map[string]any{"archived_at": nil, "archived_reason": "", "updated_at": now}).Error
+	restore := func(tx *gorm.DB) error {
+		var schedules []string
+		if err := tx.WithContext(ctx).Model(&orm.TaskCenterTask{}).
+			Where("user_id = ? AND conversation_id IN ? AND archived_reason = ? AND schedule_id IS NOT NULL", userID, conversationIDs, reason).
+			Pluck("schedule_id", &schedules).Error; err != nil {
+			return err
+		}
+		if err := tx.WithContext(ctx).Model(&orm.TaskCenterTask{}).
+			Where("user_id = ? AND conversation_id IN ? AND archived_reason = ?", userID, conversationIDs, reason).
+			Updates(map[string]any{"archived_at": nil, "archived_reason": "", "updated_at": now}).Error; err != nil {
+			return err
+		}
+		return recountScheduleRuns(ctx, tx, userID, schedules)
+	}
+	if _, nested := db.Statement.ConnPool.(gorm.TxCommitter); nested || db.SkipDefaultTransaction {
+		return restore(db)
+	}
+	return common.ImmediateTransactionWithSQLiteBusyRetry(ctx, db, restore)
+}
+
+func recountScheduleRuns(ctx context.Context, db *gorm.DB, userID string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	var schedules []orm.UserSchedule
+	if err := db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id=? AND id IN ?", userID, ids).Order("id").Find(&schedules).Error; err != nil {
+		return err
+	}
+	for _, schedule := range schedules {
+		var count int64
+		if err := db.WithContext(ctx).Model(&orm.TaskCenterTask{}).Where("user_id=? AND schedule_id=? AND archived_at IS NULL", userID, schedule.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if err := db.WithContext(ctx).Model(&orm.UserSchedule{}).Where("user_id=? AND id=?", userID, schedule.ID).Update("run_count", count).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func MarkConversationPurged(ctx context.Context, db *gorm.DB, userID, conversationID string, now time.Time) error {
@@ -798,68 +843,6 @@ func CancelTaskByID(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, nil)
 }
 
-// RemoveTaskHandler handles POST /task-center/tasks/{task_id}:remove.
-// The task and its task-conversation share the recovery lifecycle.
-func RemoveTaskHandler(w http.ResponseWriter, r *http.Request) {
-	userID := strings.TrimSpace(store.UserID(r))
-	path := strings.TrimPrefix(r.URL.Path, "/task-center/tasks/")
-	id := strings.TrimSuffix(path, ":remove")
-	id = strings.Split(id, ":")[0]
-	if userID == "" {
-		common.ReplyErr(w, "user not found", http.StatusUnauthorized)
-		return
-	}
-
-	db := store.DB()
-	if db == nil {
-		common.ReplyErr(w, "db unavailable", http.StatusInternalServerError)
-		return
-	}
-	existing, err := trashTaskRun(r.Context(), db, userID, id)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		common.ReplyErr(w, "task not found", http.StatusNotFound)
-		return
-	}
-	if err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if existing.ConversationID != "" && OnConversationTrashHook != nil {
-		OnConversationTrashHook(existing.ConversationID)
-	}
-	if !isTerminal(existing.Status) {
-		if existing.ConversationID != "" && OnCancelHook != nil {
-			go OnCancelHook(r.Context(), existing.ConversationID)
-		}
-	}
-	common.ReplyOK(w, nil)
-}
-
-func trashTaskRun(ctx context.Context, db *gorm.DB, userID, id string) (orm.TaskCenterTask, error) {
-	var existing orm.TaskCenterTask
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("id = ? AND user_id = ? AND archived_at IS NULL", id, userID).First(&existing).Error; err != nil {
-			return err
-		}
-		now := time.Now().UTC()
-		expiresAt := now.Add(30 * 24 * time.Hour)
-		result := tx.Model(&orm.Conversation{}).
-			Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", existing.ConversationID, userID).
-			Updates(map[string]any{
-				"deleted_at": now, "trash_expires_at": expiresAt,
-				"archived_at": nil, "archive_folder_id": nil, "updated_at": now,
-			})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return gorm.ErrRecordNotFound
-		}
-		return ArchiveTasksForConversations(ctx, tx, userID, []string{existing.ConversationID}, ArchivedReasonConversationTrash, now)
-	})
-	return existing, err
-}
-
 func archiveTaskRun(ctx context.Context, db *gorm.DB, userID, id string) (orm.TaskCenterTask, error) {
 	var existing orm.TaskCenterTask
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -888,15 +871,7 @@ func archiveTaskRun(ctx context.Context, db *gorm.DB, userID, id string) (orm.Ta
 			return err
 		}
 		if existing.ScheduleID != nil && *existing.ScheduleID != "" {
-			var visibleRuns int64
-			if err := tx.Model(&orm.TaskCenterTask{}).
-				Where("schedule_id = ? AND user_id = ? AND archived_at IS NULL", *existing.ScheduleID, userID).
-				Count(&visibleRuns).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&orm.UserSchedule{}).
-				Where("id = ? AND user_id = ?", *existing.ScheduleID, userID).
-				Update("run_count", visibleRuns).Error; err != nil {
+			if err := recountScheduleRuns(ctx, tx, userID, []string{*existing.ScheduleID}); err != nil {
 				return err
 			}
 		}

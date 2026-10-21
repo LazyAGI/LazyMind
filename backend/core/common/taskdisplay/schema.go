@@ -95,7 +95,18 @@ type OrdinaryTaskView struct {
 
 	CapabilityDependency *CapabilityDependency `json:"capability_dependency,omitempty"`
 }
+type RunTiming struct {
+	RequestedAt           time.Time  `json:"requested_at"`
+	FinishedAt            *time.Time `json:"finished_at" nullable:"true" required:"true"`
+	MeasuredAt            time.Time  `json:"measured_at"`
+	ElapsedMS             *int64     `json:"elapsed_ms" nullable:"true" required:"true"`
+	CumulativeExecutionMS *int64     `json:"cumulative_execution_ms" nullable:"true" required:"true"`
+	RunningAttemptCount   int        `json:"running_attempt_count"`
+}
 type OrdinaryRunView struct {
+	ExecutionID     string           `json:"execution_id,omitempty"`
+	Status          string           `json:"status,omitempty"`
+	Timing          *RunTiming       `json:"timing,omitempty"`
 	RunID           string           `json:"run_id"`
 	Revision        int64            `json:"revision"`
 	FinalOutputRefs []string         `json:"final_output_refs"`

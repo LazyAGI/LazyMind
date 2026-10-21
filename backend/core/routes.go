@@ -28,6 +28,7 @@ import (
 	"lazymind/core/currentmemory"
 	"lazymind/core/datasource"
 	"lazymind/core/doc"
+	"lazymind/core/documentdirectory"
 	"lazymind/core/episode"
 	"lazymind/core/evalset"
 	"lazymind/core/evolution"
@@ -598,6 +599,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/task-center/desktop-notifications/{notification_id}:ack", []string{"qa.write"}, taskcenter.AcknowledgeDesktopNotification)
 	handleAPI(r, "GET", "/task-center/tasks/{task_id}", []string{"qa.read"}, taskcenter.GetTaskByID)
 	handleAPI(r, "POST", "/task-center/tasks/{task_id}:cancel", []string{"qa.write"}, taskcenter.CancelTaskByID)
+	handleAPI(r, "GET", "/task-center/tasks/{task_id}/removal-preview", []string{"qa.write"}, taskcenter.TaskRemovalPreviewHandler)
 	handleAPI(r, "POST", "/task-center/tasks/{task_id}:remove", []string{"qa.write"}, taskcenter.RemoveTaskHandler)
 	handleAPI(r, "GET", "/task-center/schedules/{schedule_id}/tasks", []string{"qa.read"}, taskcenter.ListScheduleTasks)
 
@@ -899,6 +901,14 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/conversations/{name}", []string{"qa.read"}, chat.GetConversation)
 	handleAPI(r, "DELETE", "/conversations/{name}", []string{"qa.write"}, chat.DeleteConversation)
 	handleAPI(r, "POST", "/conversations:batchDelete", []string{"qa.write"}, chat.BatchDeleteConversations)
+	handleAPI(r, "GET", "/document-directories", []string{"qa.read"}, documentdirectory.ListHandler)
+	handleAPI(r, "GET", "/document-directories/batches", []string{"qa.read"}, documentdirectory.BatchesHandler)
+	handleAPI(r, "POST", "/document-directories/actions", []string{"qa.write"}, documentdirectory.CommandHandler)
+	handleAPI(r, "GET", "/document-directories/{directory_id}/source-nodes", []string{"qa.read"}, documentdirectory.FolderNodesHandler)
+	handleAPI(r, "GET", "/document-directories/{directory_id}", []string{"qa.read"}, documentdirectory.DetailHandler)
+	handleAPI(r, "GET", "/document-directories/{directory_id}/entries/{entry_id}/mail", []string{"qa.read"}, documentdirectory.ReadMailHandler)
+	handleAPI(r, "GET", "/document-directories/{directory_id}/entries/{entry_id}/local-file", []string{"qa.read"}, documentdirectory.ReadLocalFileHandler)
+	handleAPI(r, "POST", "/internal/conversations/{conversation_id}/document-directories", nil, documentdirectory.InternalHandler)
 	handleAPI(r, "GET", "/conversation-groups", []string{"qa.read"}, conversationgroup.ListGroups)
 	handleAPI(r, "POST", "/conversation-groups", []string{"qa.write"}, conversationgroup.CreateGroup)
 	handleAPI(r, "GET", "/conversation-groups/{group_id}", []string{"qa.read"}, conversationgroup.GetGroup)

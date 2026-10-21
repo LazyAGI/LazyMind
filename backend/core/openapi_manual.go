@@ -4,6 +4,12 @@ import "lazymind/core/chat"
 
 func manualOpenAPISpec() map[string]any {
 	schemas, paths := manualSchemas(), manualPaths()
+	for name, schema := range documentDirectorySchemas() {
+		schemas[name] = schema
+	}
+	for path, operations := range documentDirectoryPaths() {
+		paths[path] = operations
+	}
 	for name, schema := range notificationSchemas() {
 		schemas[name] = schema
 	}
@@ -591,7 +597,10 @@ func manualSchemas() map[string]any {
 		"ConversationBatchDeleteRequest":   objReq([]string{"conversation_ids"}, prop("conversation_ids", array(strSchema()))),
 		"ConversationBatchDeleteResponse":  obj(prop("deleted_count", intSchema()), prop("deleted_ids", array(strSchema()))),
 		"ConversationArchiveFolderRequest": objReq([]string{"name"}, prop("name", strSchema())),
-		"ConversationArchiveRequest":       obj(prop("folder_id", nullableSchema(strSchema()))),
+		"ConversationArchiveRequest":       obj(prop("folder_id", nullableSchema(strSchema())), prop("only_if_active", boolSchema())),
+		"ConversationArchiveResponse": objReq([]string{"conversation_id", "newly_archived", "archived_at"},
+			prop("conversation_id", strSchema()), prop("newly_archived", boolSchema()), prop("archived_at", dateTimeSchema())),
+		"ConversationUnarchiveRequest": obj(prop("expected_archived_at", dateTimeSchema())),
 		"ConversationArchiveFolder": objReq(
 			[]string{"id", "name", "dialog_count", "task_count", "total_count", "created_at", "updated_at"},
 			prop("id", strSchema()), prop("name", strSchema()),
@@ -660,6 +669,9 @@ func manualSchemas() map[string]any {
 			prop("waiting_inputs", int64Schema()), prop("running", int64Schema()), prop("succeeded", int64Schema()),
 			prop("failed", int64Schema()), prop("canceled", int64Schema()),
 		),
+		"TaskRemovalPreview": objReq([]string{"task_id", "task_count", "conversation_count", "active_task_count", "impact_version"}, prop("task_id", strSchema()), prop("task_count", intSchema()), prop("conversation_count", intSchema()), prop("active_task_count", intSchema()), prop("impact_version", strSchema())),
+		"TaskRemovalRequest": obj(prop("impact_version", strSchema())),
+		"TaskRemovalResult":  objReq([]string{"removed_task_ids", "trashed_conversation_ids", "cancellation_pending"}, prop("removed_task_ids", array(strSchema())), prop("trashed_conversation_ids", array(strSchema())), prop("cancellation_pending", boolSchema())),
 		"TaskCenterTaskListResponse": objReq(
 			[]string{"items", "total", "page", "page_size"}, prop("items", array(refSchema("TaskCenterTaskResponse"))),
 			prop("total", int64Schema()), prop("page", intSchema()), prop("page_size", intSchema()), prop("status_counts", refSchema("TaskCenterStatusCounts")),
@@ -1048,10 +1060,10 @@ func manualPaths() map[string]any {
 		},
 		"/conversations/{conversation_id}:archive": map[string]any{"post": op(
 			"Archive or move a conversation", queryParams(param("path", "conversation_id", true, strSchema())), jsonBody(refSchema("ConversationArchiveRequest"), true),
-			response(200, "Conversation archived", refSchema("EmptyObject")),
+			response(200, "Conversation archived", refSchema("ConversationArchiveResponse")),
 		)},
 		"/conversations/{conversation_id}:unarchive": map[string]any{"post": op(
-			"Unarchive a conversation", queryParams(param("path", "conversation_id", true, strSchema())), nil, response(200, "Conversation unarchived", refSchema("EmptyObject")),
+			"Unarchive a conversation. A stale expected_archived_at returns business code 2004815; an already active conversation satisfies a conditional retry.", queryParams(param("path", "conversation_id", true, strSchema())), jsonBody(refSchema("ConversationUnarchiveRequest"), false), response(200, "Conversation unarchived", refSchema("EmptyObject")),
 		)},
 		"/conversations/{conversation_id}:pin": map[string]any{"post": op(
 			"Pin a conversation", queryParams(param("path", "conversation_id", true, strSchema())), nil, response(200, "Conversation pinned", refSchema("ConversationPinResponse")),
@@ -1096,6 +1108,8 @@ func manualPaths() map[string]any {
 				param("query", "keyword", false, strSchema()), param("query", "page", false, intSchema()), param("query", "page_size", false, intSchema()),
 			), nil, response(200, "Task-center task page", refSchema("TaskCenterTaskListResponse")),
 		)},
+		"/task-center/tasks/{task_id}/removal-preview": map[string]any{"get": op("Preview removal of a task and related conversations", queryParams(param("path", "task_id", true, strSchema())), nil, response(200, "Removal impact", refSchema("TaskRemovalPreview")))},
+		"/task-center/tasks/{task_id}:remove":          map[string]any{"post": op("Move task and related conversations to Trash", queryParams(param("path", "task_id", true, strSchema())), jsonBody(refSchema("TaskRemovalRequest"), false), response(200, "Removal committed", refSchema("TaskRemovalResult")))},
 		"/task-center/tasks/{task_id}": map[string]any{"get": op(
 			"Get a task-center task", queryParams(param("path", "task_id", true, strSchema())), nil,
 			response(200, "Task-center task", refSchema("TaskCenterTaskResponse")),

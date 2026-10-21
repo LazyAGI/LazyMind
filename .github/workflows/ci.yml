@@ -28,17 +28,19 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.11'
+      - name: Test Skill lock verification selection
+        run: python3 -m unittest discover -s scripts/tests -p test_skill_lock_verification_mode.py
       - name: Verify pinned SkillHub packages and lock artifacts
         working-directory: backend/core
         run: |
-          extra_args=()
+          verify_args=(--verify-lock-artifacts)
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             # An unrelated PR cannot change the pinned Skill archives. Keep
             # Featured Workflow validation, without downloading every remote
             # SkillHub package on every CI run.
             if git -C ../.. diff --quiet "${{ github.event.pull_request.base.sha }}" HEAD -- \
               skills/builtin-sources.yaml skills/builtin-skills.lock.json \
-              skills/patches skills/featured \
+              skills/patches skills/featured skills/search \
               backend/core/cmd/builtin-skill-bundle \
               backend/core/skillv2/builtin backend/core/skillv2/metadata \
               backend/core/skillv2/skillpackage backend/core/skillv2/skillpatch \
@@ -48,8 +50,15 @@ jobs:
                 --check-featured
               exit 0
             fi
-            git show "${{ github.event.pull_request.base.sha }}:skills/builtin-skills.lock.json" > /tmp/base-builtin-skills.lock.json
-            extra_args+=(--verify-lock-base /tmp/base-builtin-skills.lock.json)
+            mode=$(python3 ../../scripts/skill_lock_verification_mode.py "${{ github.event.pull_request.base.sha }}")
+            if [[ "$mode" == "local" ]]; then
+              # Rebuild and hash-check local packages using the existing frozen
+              # catalog path; unchanged remote packages need no download.
+              verify_args=(--catalog-only --frozen-lockfile)
+            else
+              git show "${{ github.event.pull_request.base.sha }}:skills/builtin-skills.lock.json" > /tmp/base-builtin-skills.lock.json
+              verify_args+=(--verify-lock-base /tmp/base-builtin-skills.lock.json)
+            fi
           fi
           go run ./cmd/builtin-skill-bundle \
             --sources ../../skills/builtin-sources.yaml \
@@ -58,8 +67,7 @@ jobs:
             --output ../../skills/.runtime/builtin-skills \
             --featured-sources ../../skills/featured \
             --featured-output ../../skills/.runtime/featured-skills \
-            --verify-lock-artifacts \
-            "${extra_args[@]}"
+            "${verify_args[@]}"
 
   lint:
     runs-on: ubuntu-latest
@@ -475,12 +483,20 @@ jobs:
           python -c "from lazyllm import fc_register; print('fc_register OK')"
 
       - name: Test with coverage
+        # Git Bash enables Windows backup privileges, bypassing directory ACL tests.
+        shell: python
         env:
           LAZYLLM_INIT_DOC: "1"
         run: |
-          coverage run --source=algorithm -m pytest tests/algorithm/ -v
-          coverage html -d htmlcov-algorithm
-          coverage xml -o coverage-algorithm.xml
+          import subprocess
+          import sys
+
+          for arguments in [
+              ['run', '--source=algorithm', '-m', 'pytest', 'tests/algorithm/', '-v'],
+              ['html', '-d', 'htmlcov-algorithm'],
+              ['xml', '-o', 'coverage-algorithm.xml'],
+          ]:
+              subprocess.run([sys.executable, '-m', 'coverage', *arguments], check=True)
 
       - name: Upload HTML report
         uses: actions/upload-artifact@v4

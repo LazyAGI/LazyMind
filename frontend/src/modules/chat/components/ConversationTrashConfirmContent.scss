@@ -1,0 +1,30 @@
+.ant-modal.conversation-trash-confirm {
+  max-width: calc(100vw - 32px);
+
+  .ant-modal-confirm-paragraph {
+    min-width: 0;
+  }
+}
+
+.conversation-trash-confirm-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  p {
+    margin: 0;
+  }
+
+  .conversation-trash-confirm-name {
+    display: -webkit-box;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    white-space: pre-line;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    line-height: 22px;
+    max-height: 44px;
+    font-weight: 500;
+  }
+}

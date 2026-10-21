@@ -228,12 +228,15 @@ func (r *IdleRecorder) RecordConversationMessage(ctx context.Context, record Con
 	return nil
 }
 
+var DirectoryIdleHandler func(context.Context, *gorm.DB, orm.ConversationIdleEvent) error
+
 type IdleProcessor struct {
-	db       *gorm.DB
-	store    idleStateStore
-	cfg      Config
-	workerID string
-	clock    clockFunc
+	skipMemory bool
+	db         *gorm.DB
+	store      idleStateStore
+	cfg        Config
+	workerID   string
+	clock      clockFunc
 }
 
 func NewIdleProcessor(db *gorm.DB, store state.Store, cfg Config, workerID string) *IdleProcessor {
@@ -351,6 +354,11 @@ func (p *IdleProcessor) ProcessEvent(ctx context.Context, eventID string) error 
 		}
 		return err
 	}
+	if DirectoryIdleHandler != nil {
+		if err := DirectoryIdleHandler(ctx, p.db, candidate); err != nil {
+			return err
+		}
+	}
 	history, historyErr := p.store.ReadHistory(ctx, conversationIdleHistoryKey(candidate.ConversationID))
 	now := p.clock().UTC()
 	cleanupConversationID := ""
@@ -393,6 +401,10 @@ func (p *IdleProcessor) ProcessEvent(ctx context.Context, eventID string) error 
 			return err
 		}
 
+		if p.skipMemory {
+			cleanupConversationID = event.ConversationID
+			return tx.Model(&orm.ConversationIdleEvent{}).Where("id = ?", event.ID).Updates(map[string]any{"status": orm.ConversationIdleEventStatusTriggered, "triggered_at": now, "updated_at": now}).Error
+		}
 		if historyErr != nil {
 			cleanupConversationID = event.ConversationID
 			return p.markEventFailed(tx, event.ID, now, "read_history_failed", historyErr.Error())
