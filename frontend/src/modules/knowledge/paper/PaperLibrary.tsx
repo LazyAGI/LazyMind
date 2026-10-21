@@ -510,7 +510,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
         <div className="paper-library-tools" role="toolbar" aria-label="文献工具">
           <PaperSearch open={activeTool === "search"} value={keyword} onChange={setKeyword}
             onOpenChange={setSearchOpen} />
-          <Popover trigger="click" placement="bottomRight" arrow={false} destroyOnHidden overlayClassName="paper-library-tool-popover"
+          <Popover trigger="click" placement="bottomRight" align={{ overflow: { adjustX: true, adjustY: true, shiftX: true, shiftY: true } }} arrow={false} destroyOnHidden overlayClassName="paper-library-tool-popover"
             open={activeTool === "filter"} onOpenChange={(open: boolean) => setActiveTool((current) => open ? "filter" : current === "filter" ? null : current)}
             content={<div role="dialog" aria-label="筛选文献" onKeyDown={(event) => { if (event.key === "Escape") setActiveTool(null); }}>
               <PaperFilterPanel papers={data.papers} value={filters} onChange={setFilters} />

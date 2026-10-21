@@ -352,6 +352,13 @@
   .paper-library-checkbox, .paper-library-star { opacity: 1; }
 }
 
+@container paperLibrary (max-width: 420px) {
+  .paper-library-head { flex-wrap: wrap; row-gap: 8px; }
+  .paper-library-heading { flex: 1 0 100%; }
+  .paper-library-tools { width: 100%; }
+  .paper-library-search.is-open { flex: 1; min-width: 0; width: auto; }
+}
+
 .paper-library-sync-error { margin: 0 0 16px; }
 .paper-library-arxiv-source { display: flex; align-items: center; gap: 9px; margin-bottom: 14px; color: #667085;
   > span { font-size: 10px; font-weight: 700; letter-spacing: 1.2px; color: #b34e46; background: #fbefed; border-radius: 4px; padding: 3px 6px; }
