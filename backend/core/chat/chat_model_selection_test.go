@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -293,6 +294,10 @@ func TestAutoChatModelStaysWithSuccessfulModelAndRoutingIsReadOnly(t *testing.T)
 	}
 	if route := apply(map[string]any{"query": "new turn"}); route.ModelID != "model-default" || route.Reason != "model_unavailable" {
 		t.Fatalf("unavailable successful model did not switch: %#v", route)
+	}
+	organizer, err := LoadOrganizerChatLLMConfig(context.Background(), db, "user-1", conversation.ID)
+	if err != nil || organizer["llm"].(map[string]any)["model"] != "other-chat" {
+		t.Fatal("auto organizer did not select an available replacement", err)
 	}
 	retryBody := map[string]any{"conversation_id": conversation.ID, chatModelRetryRouteBodyKey: first}
 	if err := applyConversationChatModelConfig(context.Background(), db, "user-1", retryBody); err != nil {

@@ -1168,6 +1168,12 @@ func LoadOrganizerChatLLMConfig(ctx context.Context, db *gorm.DB, userID, conver
 	if err := applyConversationChatModelConfig(ctx, db, userID, body); err != nil {
 		return nil, err
 	}
+	// Organizer calls do not run the chat fallback protocol to confirm a fixed-model switch.
+	if fallback, _ := body[chatModelFallbackBodyKey].(*chatFallbackState); fallback != nil && fallback.initialSwitch != nil {
+		if route := chatModelRouteFromBody(body); route != nil && route.Mode == chatModelModeFixed {
+			return nil, errChatModelUnavailable
+		}
+	}
 	if config, ok := body["llm_config"].(map[string]any); ok {
 		return config, nil
 	}
