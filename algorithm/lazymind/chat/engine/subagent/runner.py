@@ -1524,7 +1524,8 @@ async def run_subagent_stream(
                     tag = item.get('tag')
                     if tag == 'knowledge_operation_result':
                         yield _sse({'type': 'knowledge_operation_result', 'task_id': task_id,
-                                    'execution_id': task.get('execution_id') or execution_identity.get('execution_id', ''),
+                                    'execution_id': (task.get('execution_id')
+                                                     or execution_identity.get('execution_id', '')),
                                     'knowledge_operation': {key: value for key, value in item.items() if key != 'tag'}})
                         continue
                     if tag == 'ask_pending' and isinstance(item.get('knowledge_management'), dict):

@@ -477,3 +477,22 @@ def test_success_emits_trusted_resource_card_without_navigation_url(monkeypatch)
     assert events[0][1]['call_id'] == 'call-1'
     assert 'entry_url' not in events[0][1]['items'][0]
     assert events[0][1]['items'][0]['processing_status'] == 'submitted'
+
+
+def test_confirmation_polling_uses_one_second_interval(monkeypatch):
+    from lazymind.chat.service import knowledge_management as module
+    from lazymind.chat.engine.agent_runtime.workspace_authorization import digest
+    call = prepared()
+    pending = {'operation_key': 'op', 'arguments_digest': digest(call.validated_arguments),
+               'snapshot': 'v', 'requires_confirmation': True, 'confirmation_id': 'c', 'status': 'pending'}
+    states = iter([pending, pending, {**pending, 'status': 'allowed'}])
+    sleeps = []
+    monkeypatch.setattr(module.time, 'sleep', sleeps.append)
+    host, requests = runtime(monkeypatch, {
+        'prepare': pending, 'status': lambda _: next(states),
+        'claim': {'status': 'allowed', 'metadata': {'operation_key': 'op'}},
+    })
+    with host.execution_context(call):
+        pass
+    assert sleeps == [1, 1]
+    assert [path.split(':')[-1] for path, _, _ in requests] == ['prepare', 'status', 'status', 'status', 'claim']

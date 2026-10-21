@@ -147,7 +147,8 @@ class KnowledgeManagementRuntime:
 
     async def request_metadata(self, wire_name, arguments):
         current = _REQUEST.get()
-        if not current or current.runtime is not self or current.wire_name != wire_name or current.arguments_digest != digest(arguments):
+        if (not current or current.runtime is not self or current.wire_name != wire_name
+                or current.arguments_digest != digest(arguments)):
             raise ToolExecutionError('Knowledge management call has no matching trusted dispatch')
         return dict(current.metadata)
 
@@ -209,7 +210,7 @@ class KnowledgeManagementRuntime:
                     raise ToolExecutionError('Knowledge management confirmation snapshot changed')
                 status = response.get('status')
                 if status == 'pending':
-                    time.sleep(.2)
+                    time.sleep(1)
         if status != 'allowed':
             raise ToolExecutionError('Knowledge management confirmation ' + str(status or 'unavailable'))
         self._check_cancel()
