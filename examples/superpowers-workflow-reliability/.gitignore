@@ -4,6 +4,8 @@
 /trial/
 /config.json
 /session.json
+*.session.json
+child-*.txt
 *.jsonl
 *.log
 /model-setup.json
