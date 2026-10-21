@@ -58,6 +58,7 @@ import {
   parseLlmMaxInputTokens,
   resolveLlmMaxInputTokens,
 } from "../maxInputTokens";
+import { ModelModalityMarks } from "../components/ModelModalityMarks";
 import "../index.scss";
 
 export type ModelCapability =
@@ -679,7 +680,11 @@ export default function ModelProviderPage({
   const [verifyGroupForm] = Form.useForm<VerifyGroupFormValues>();
   const [deletionModal, deletionModalContext] = Modal.useModal();
 
-  const [providerOptions, setProviderOptions] = useState<ProviderOption[]>(builtInProviders);
+  // builtInProviders stays in this file. Startup no longer renders that hardcoded list.
+  const useHardcodedProviderCatalog = false;
+  const [providerOptions, setProviderOptions] = useState<ProviderOption[]>(
+    useHardcodedProviderCatalog ? builtInProviders : [],
+  );
   const [addedProviderList, setAddedProviderList] = useState<AddedProvider[]>([]);
   const [configModal, setConfigModal] = useState<ProviderConfigModalState | null>(null);
   const [customModelModal, setCustomModelModal] = useState<CustomModelModalState | null>(null);
@@ -2074,6 +2079,7 @@ export default function ModelProviderPage({
                                           <div className="model-provider-model-row" key={model.id}>
                                             <div className="model-provider-model-meta">
                                               <strong>{model.name}</strong>
+                                              <ModelModalityMarks providerName={provider.name} modelName={model.name} />
                                               <CapabilityTag label={getCapabilityLabel(model.capability)} />
                                               {model.vision && model.capability === "LLM_CHAT" ? <Tag>{t("modelProvider.visionSupported")}</Tag> : null}
                                               {model.builtIn ? null : <Tag className="model-provider-custom-tag">{t("modelProvider.custom")}</Tag>}
