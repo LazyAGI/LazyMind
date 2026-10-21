@@ -17,8 +17,10 @@ interface ArchiveConversationModalProps {
   title?: string;
   itemKind?: "dialog" | "task";
   open: boolean;
+  submitDisabled?: boolean;
+  onSubmittingChange?: (submitting: boolean) => void;
   onCancel: () => void;
-  onArchived: (archivedIds: string[], failedIds: string[]) => void;
+  onArchived: (archivedIds: string[], failedIds: string[], affectedIds: string[]) => void;
 }
 
 export default function ArchiveConversationModal({
@@ -27,6 +29,8 @@ export default function ArchiveConversationModal({
   title,
   itemKind = "dialog",
   open,
+  submitDisabled = false,
+  onSubmittingChange,
   onCancel,
   onArchived,
 }: ArchiveConversationModalProps) {
@@ -71,17 +75,21 @@ export default function ArchiveConversationModal({
   };
 
   const submit = async () => {
-    if (!ids.length || submittingRef.current) return;
+    if (!ids.length || submittingRef.current || submitDisabled) return;
     submittingRef.current = true;
+    onSubmittingChange?.(true);
     setLoading(true);
     const archivedIds: string[] = [];
     const failedIds: string[] = [];
+    const affectedIds = new Set<string>();
     try {
       // Keep requests bounded and retain failed items for an explicit retry.
       for (const id of ids) {
         try {
-          await archiveConversation(id, folderId === "unfiled" ? null : folderId);
+          const affected = await archiveConversation(id, folderId === "unfiled" ? null : folderId);
           archivedIds.push(id);
+          affectedIds.add(id);
+          affected?.forEach(affectedId => affectedIds.add(affectedId));
         } catch (error) {
           if (ids.length === 1) message.error(getLocalizedErrorMessage(error));
           failedIds.push(id);
@@ -90,10 +98,11 @@ export default function ArchiveConversationModal({
       if (failedIds.length && ids.length > 1) {
         message.error(t(archivedIds.length ? "chat.batchArchivePartialFailure" : "settingsPage.recovery.operationFailed", { count: failedIds.length }));
       }
-      if (archivedIds.length) onArchived(archivedIds, failedIds);
+      if (archivedIds.length) onArchived(archivedIds, failedIds, [...affectedIds]);
     } finally {
       submittingRef.current = false;
       setLoading(false);
+      onSubmittingChange?.(false);
     }
   };
 
@@ -109,7 +118,7 @@ export default function ArchiveConversationModal({
       foldersLoading={folderLoading}
       folderLoadError={folderError}
       submitting={loading}
-      submitDisabled={!ids.length}
+      submitDisabled={!ids.length || submitDisabled}
       createFolder={createArchiveFolder}
       onFolderCreated={handleFolderCreated}
       onSelectFolder={setFolderId}

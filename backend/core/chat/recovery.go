@@ -293,7 +293,7 @@ func ArchiveConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	notifySessionEnvClear(archivedConversationIDs...)
-	writeConversationJSON(w, http.StatusOK, map[string]any{})
+	writeConversationJSON(w, http.StatusOK, map[string]any{"archived_ids": archivedConversationIDs})
 }
 
 func UnarchiveConversation(w http.ResponseWriter, r *http.Request) {

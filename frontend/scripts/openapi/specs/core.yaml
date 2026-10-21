@@ -1733,6 +1733,16 @@ components:
                     nullable: true
                     type: string
             type: object
+        ConversationArchiveResponse:
+            properties:
+                archived_ids:
+                    description: All affected conversation IDs, including dependent side chats.
+                    items:
+                        type: string
+                    type: array
+            required:
+                - archived_ids
+            type: object
         ConversationBatchDeleteRequest:
             properties:
                 conversation_ids:
@@ -2366,6 +2376,9 @@ components:
             type: object
         ConversationListResponse:
             properties:
+                selection_complete:
+                    description: True only for the complete lightweight selection snapshot. Such a response has no next page.
+                    type: boolean
                 conversations:
                     items:
                         $ref: '#/components/schemas/ConversationItem'
@@ -17938,6 +17951,16 @@ paths:
                   required: false
                   schema:
                     type: string
+                - in: query
+                  name: selection_snapshot
+                  description: Return all matching selectable roots and their placement/lock metadata in one database snapshot; ignores history pagination.
+                  schema:
+                    type: boolean
+                - in: query
+                  name: selection_group_id
+                  description: Restrict a selection snapshot to this owned group.
+                  schema:
+                    type: string
             responses:
                 "200":
                     content:
@@ -18414,7 +18437,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/EmptyObject'
+                                $ref: '#/components/schemas/ConversationArchiveResponse'
                     description: Conversation archived
             summary: Archive or move a conversation
     /api/core/conversations/{conversation_id}:pin:

@@ -1,10 +1,11 @@
 import ScopedConversationList from "../components/RecordList/ScopedConversationList";
 import { moveConversationItems } from "../components/RecordList/conversationReorder";
+import { readConversationSelection } from "../components/RecordList/conversationSelection";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import ConversationPreview from "../components/ConversationPreview";
 import { MessageOutlined, FolderOpenOutlined, PlusOutlined, EllipsisOutlined, PushpinOutlined, LoadingOutlined } from "@ant-design/icons";
 import { Button, Checkbox, Dropdown, message } from "antd";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import dayjs from "dayjs";
@@ -16,15 +17,22 @@ import ConversationTitleEditor from "../components/ConversationTitleEditor";
 import ConversationGroupDropZone from "./ConversationGroupDropZone";
 import { CONVERSATION_DRAG, GROUP_DRAG, readConversationDrag, startConversationDrag } from "./drag";
 const isGroupPinned = (group: ConversationGroup) => Boolean(group.pinned);
+const uniqueMembers = (members: ConversationGroupMember[]) => [...new Map(members.map(member => [member.conversation_id, member])).values()];
+type GroupPageRequest = { groupId: string; kind: "more" | "select" };
 
 export type GroupBatchSelection = {
   checkedIds: string[];
+  // Defined only after a complete selection snapshot has been read; excludes pinned members.
+  matchingGroupMemberIds?: Readonly<Record<string, readonly string[]>>;
   onToggle: (id: string, checked: boolean) => void;
   onToggleMany: (ids: string[], checked: boolean) => void;
   onMembersChange: (members: ConversationGroupMember[], scope?: string) => void;
+  onInvalidate?: () => void;
+  beginSelection?: () => (() => boolean);
 };
 type Props = { assistants?: string; projectsOnly?: boolean; isTaskConv?: boolean; includeProjects?: boolean; showTypeHeading?: boolean; batchSelection?: GroupBatchSelection; namesLocked?: boolean; groups: ConversationGroup[]; searchText?: string; currentConversationId?: string; onNew?: (id: string) => void; onEdit: (group: ConversationGroup | "new" | "new-project") => void; onRemove: (group: ConversationGroup) => void };
 export default function SidebarGroups({ assistants, groups, searchText = "", currentConversationId, onNew, onEdit, onRemove, namesLocked = false, batchSelection, isTaskConv = false, includeProjects = true, showTypeHeading = false, projectsOnly = false }: Props) {
+  const keyword = searchText.trim();
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
@@ -49,15 +57,45 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
   };
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [members, setMembers] = useState<Record<string, ConversationGroupMember[]>>({});
+  const membersRef = useRef(members);
+  membersRef.current = members;
+  const batchSelectionRef = useRef(batchSelection);
+  batchSelectionRef.current = batchSelection;
   const pageCounts = useRef<Record<string, number>>({});
-  useEffect(() => { pageCounts.current = {}; }, [searchText]);
   const [tokens, setTokens] = useState<Record<string, string>>({});
   const [matches, setMatches] = useState<Set<string> | null>(null);
+  // A later global snapshot supersedes earlier local group snapshots, including
+  // transitions back to an unknown global set. A subsequent group read can still
+  // supply a newer local set without retaining an entire old global map.
+  const groupSnapshotVersion = useMemo(() => ({}), [batchSelection?.matchingGroupMemberIds]);
+  const [selectedGroupSnapshots, setSelectedGroupSnapshots] = useState<Record<string, { version: object; ids: string[] }>>({});
+  const localGroupIds = (id: string) => selectedGroupSnapshots[id]?.version === groupSnapshotVersion
+    ? selectedGroupSnapshots[id].ids : undefined;
+  useEffect(() => {
+    pageCounts.current = {};
+    setMembers({}); setTokens({}); setMatches(null);
+    setSelectedGroupSnapshots({});
+  }, [keyword, assistants, isTaskConv]);
   const [dropTarget, setDropTarget] = useState("");
   const [memberDropTarget, setMemberDropTarget] = useState<{ id: string; position: 'before' | 'after' } | null>(null);
   const [busy, setBusy] = useState(false);
   const memberSaveRef = useRef(false);
-  const [selectingGroup, setSelectingGroup] = useState('');
+  const refreshPendingRef = useRef(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const pageRequestRef = useRef<GroupPageRequest | null>(null);
+  const [pageRequest, setPageRequest] = useState<GroupPageRequest | null>(null);
+  const beginPageRequest = (groupId: string, kind: GroupPageRequest["kind"]) => {
+    if (pageRequestRef.current || refreshPendingRef.current) return null;
+    const request = { groupId, kind };
+    pageRequestRef.current = request;
+    setPageRequest(request);
+    return request;
+  };
+  const finishPageRequest = (request: GroupPageRequest) => {
+    if (pageRequestRef.current !== request) return;
+    pageRequestRef.current = null;
+    setPageRequest(null);
+  };
   const selectionVersion = useRef(0);
   const onMembersChange = batchSelection?.onMembersChange;
   useEffect(() => {
@@ -66,50 +104,83 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
     ), String(isTaskConv));
   }, [groups, matches, members, onMembersChange, isTaskConv]);
   const load = useCallback(async () => {
-    const matched = searchText ? (await listConversationGroups(searchText, isTaskConv, assistants)).filter(g => projectsOnly ? g.kind === "project" : includeProjects || g.kind !== "project") : groups;
+    const matched = keyword ? (await listConversationGroups(keyword, isTaskConv, assistants)).filter(g => projectsOnly ? g.kind === "project" : includeProjects || g.kind !== "project") : groups;
     const details = await Promise.all(matched.map(async g => {
-      const keyword = g.name.toLowerCase().includes(searchText.toLowerCase()) ? "" : searchText;
       const detail = await getConversationGroup(g.id, "", keyword, assistants);
       for (let page = 1; page < (pageCounts.current[g.id] || 1) && detail.nextPageToken; page++) {
         const next = await getConversationGroup(g.id, detail.nextPageToken, keyword, assistants);
         detail.conversations.push(...next.conversations);
         detail.nextPageToken = next.nextPageToken;
       }
+      detail.conversations = uniqueMembers(detail.conversations);
       return [g.id, detail] as const;
     }));
     return { matched, details };
-  }, [groups, searchText, isTaskConv, includeProjects, projectsOnly, assistants]);
+  }, [groups, keyword, isTaskConv, includeProjects, projectsOnly, assistants]);
   const refreshVersion = useRef(0);
   const refresh = useCallback(async () => {
     const version = ++refreshVersion.current;
+    refreshPendingRef.current = true;
+    setRefreshing(true);
+    pageRequestRef.current = null;
+    setPageRequest(null);
     try {
       const { matched, details } = await load();
       if (version !== refreshVersion.current) return;
+      setSelectedGroupSnapshots({});
+      // Loaded pages cannot reveal changes to off-page members. Revalidate the
+      // complete selection on refresh, even when the visible rows are unchanged.
+      if (Object.keys(membersRef.current).length || batchSelectionRef.current?.matchingGroupMemberIds) {
+        batchSelectionRef.current?.onInvalidate?.();
+      }
       setMatches(new Set(matched.map(g => g.id)));
       setMembers(Object.fromEntries(details.map(([id, detail]) => [id, detail.conversations])));
       setTokens(Object.fromEntries(details.map(([id, detail]) => [id, detail.nextPageToken])));
-    } catch { /* Keep the current members available for retry. */ }
+    } catch { /* Keep the current query's members available for retry. */ }
+    finally {
+      if (version === refreshVersion.current) {
+        refreshPendingRef.current = false;
+        setRefreshing(false);
+      }
+    }
   }, [load]);
   useEffect(() => { void refresh(); return () => { ++refreshVersion.current; }; }, [refresh]);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const batchMode = Boolean(batchSelection);
   useEffect(() => {
-    setSelectingGroup('');
+    pageRequestRef.current = null;
+    setPageRequest(null);
+    setSelectedGroupSnapshots({});
+    return () => { pageRequestRef.current = null; };
+  }, [batchMode]);
+  useEffect(() => {
+    if (pageRequestRef.current?.kind === "select") {
+      pageRequestRef.current = null;
+      setPageRequest(null);
+    }
     memberSaveRef.current = false; setBusy(false);
     return () => { selectionVersion.current++; };
-  }, [load, batchMode, batchSelection?.checkedIds]);
+  }, [load, batchMode, batchSelection?.checkedIds, batchSelection?.matchingGroupMemberIds]);
   const toggle = (setter: typeof setCollapsed, id: string) => setter(old => { const next = new Set(old); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   const placement = async (id: string, input: { pinned?: boolean; before_group_id?: string }) => {
     setBusy(true);
     try { await updateGroupPlacement(id, input); emitConversationGroupsChanged(); } finally { setBusy(false); }
   };
   const more = async (g: ConversationGroup) => {
-    if (!batchSelection && expanded.has(g.id) && !tokens[g.id]) { toggle(setExpanded, g.id); return; }
-    if (!batchSelection && !expanded.has(g.id)) { toggle(setExpanded, g.id); return; }
-    const detail = await getConversationGroup(g.id, tokens[g.id], g.name.toLowerCase().includes(searchText.toLowerCase()) ? "" : searchText, assistants);
-    pageCounts.current[g.id] = (pageCounts.current[g.id] || 1) + 1;
-    setMembers(old => ({ ...old, [g.id]: [...(old[g.id] || []), ...detail.conversations] }));
-    setTokens(old => ({ ...old, [g.id]: detail.nextPageToken }));
+    if (!batchSelection && !keyword && expanded.has(g.id) && !tokens[g.id]) { toggle(setExpanded, g.id); return; }
+    if (!batchSelection && !keyword && !expanded.has(g.id)) { toggle(setExpanded, g.id); return; }
+    if (!tokens[g.id]) return;
+    const request = beginPageRequest(g.id, "more");
+    if (!request) return;
+    const version = refreshVersion.current;
+    try {
+      const detail = await getConversationGroup(g.id, tokens[g.id], keyword, assistants);
+      if (pageRequestRef.current !== request || version !== refreshVersion.current) return;
+      pageCounts.current[g.id] = (pageCounts.current[g.id] || 1) + 1;
+      setMembers(old => ({ ...old, [g.id]: uniqueMembers([...(old[g.id] || []), ...detail.conversations]) }));
+      setTokens(old => ({ ...old, [g.id]: detail.nextPageToken }));
+    } catch { /* Keep the current page and cursor so the user can retry. */ }
+    finally { finishPageRequest(request); }
   };
   const moveMember = async (groupId: string, id: string, target?: { target_conversation_id: string; position: 'before' | 'after' }, sameGroup = false) => {
     if (memberSaveRef.current) return;
@@ -133,33 +204,37 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
     }
   };
   const selectGroup = async (g: ConversationGroup, checked: boolean) => {
-    if (!batchSelection || selectingGroup) return;
+    if (!batchSelection) return;
+    const request = beginPageRequest(g.id, "select");
+    if (!request) return;
+    const intentCurrent = batchSelection.beginSelection?.() ?? (() => true);
     const version = selectionVersion.current;
-    const conversations = [...(members[g.id] || [])];
-    let token = tokens[g.id];
-    let pages = pageCounts.current[g.id] || 1;
-    setSelectingGroup(g.id);
+    const refreshGeneration = refreshVersion.current;
+    const isCurrent = () => intentCurrent() && pageRequestRef.current === request && version === selectionVersion.current && refreshGeneration === refreshVersion.current;
     try {
-      while (checked && token) {
-        const detail = await getConversationGroup(g.id, token, g.name.toLowerCase().includes(searchText.toLowerCase()) ? '' : searchText, assistants);
-        if (version !== selectionVersion.current) return;
-        conversations.push(...detail.conversations);
-        token = detail.nextPageToken;
-        pages++;
-      }
-      pageCounts.current[g.id] = pages;
-      setMembers(old => ({ ...old, [g.id]: conversations }));
-      setTokens(old => ({ ...old, [g.id]: token }));
-      batchSelection.onToggleMany(conversations.filter(c => !c.pinned_at).map(c => c.conversation_id), checked);
-    } catch { /* The shared request interceptor displays the API error; keep selection unchanged. */ }
-    finally { if (version === selectionVersion.current) setSelectingGroup(''); }
+      // The complete map is a rendering cache, not authority for a later action.
+      // Refresh the group snapshot even when global selection populated that map.
+      const conversations = await readConversationSelection(keyword, isTaskConv, assistants, g.id);
+      if (!isCurrent()) return;
+      const ids = conversations.filter(c => !c.pinned_at).map(c => c.conversation_id!);
+      setSelectedGroupSnapshots(previous => ({ ...previous, [g.id]: { version: groupSnapshotVersion, ids } }));
+      batchSelection.onToggleMany(ids, checked);
+      const cached = localGroupIds(g.id) ?? batchSelection.matchingGroupMemberIds?.[g.id];
+      const knownIds = cached ?? (members[g.id] || []).filter(c => !c.pinned_at).map(c => c.conversation_id);
+      if ((cached && cached.length !== ids.length) || knownIds.some(id => !ids.includes(id))) batchSelection.onInvalidate?.();
+    } catch { if (isCurrent()) message.error(t('chat.fork.historyLoadFailed')); }
+    finally { finishPageRequest(request); }
   };
   const block = (g: ConversationGroup) => {
     const all = (members[g.id] || []).filter(c => !c.pinned_at);
-    const selectedCount = all.filter(c => batchSelection?.checkedIds.includes(c.conversation_id)).length;
-    const allSelected = all.length > 0 && selectedCount === all.length && !tokens[g.id];
-    const open = Boolean(searchText) || !collapsed.has(g.id);
-    const visible = batchSelection || searchText || expanded.has(g.id) ? all : all.slice(0, 5);
+    const completeIds = localGroupIds(g.id) ?? (batchSelection?.matchingGroupMemberIds === undefined
+      ? undefined : batchSelection.matchingGroupMemberIds[g.id] || []);
+    const selectableIds = completeIds ?? all.map(c => c.conversation_id);
+    const selectedCount = selectableIds.filter(id => batchSelection?.checkedIds.includes(id)).length;
+    const allSelected = selectableIds.length > 0 && selectedCount === selectableIds.length && (completeIds !== undefined || !tokens[g.id]);
+    const canSelectGroup = completeIds === undefined ? Boolean(members[g.id]) && (all.length > 0 || Boolean(tokens[g.id])) : selectableIds.length > 0;
+    const open = Boolean(keyword) || !collapsed.has(g.id);
+    const visible = batchSelection || keyword || expanded.has(g.id) ? all : all.slice(0, 5);
     const selected = location.pathname.endsWith(`/groups/${g.id}`);
     const renderMember = (c: ConversationGroupMember) => <ConversationPreview key={c.conversation_id} conversationId={c.conversation_id} title={c.display_name || c.conversation_id} summary={c.summary} updateTime={c.updated_at} isTask={Boolean(c.is_task_conv)} groupName={g.name} disabled={Boolean(batchSelection) || renamingId === c.conversation_id}><div className={`conversation-group-member ${c.conversation_id === currentConversationId ? "active" : ""} ${memberDropTarget?.id === c.conversation_id ? `member-drop-${memberDropTarget.position}` : ''}`} draggable={g.kind !== "project" && renamingId !== c.conversation_id && !batchSelection && !searchText && !busy}
           onDragStart={e => startConversationDrag(e, c.conversation_id, g.id, Boolean(c.is_task_conv))}
@@ -180,7 +255,7 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
             const row = e.currentTarget.getBoundingClientRect();
             void moveMember(g.id, source.id, { target_conversation_id: c.conversation_id, position: e.clientY > row.top + row.height / 2 ? 'after' : 'before' }, source.groupId === g.id);
           }}>
-          {batchSelection ? <Checkbox className="conversation-group-batch-checkbox" checked={batchSelection.checkedIds.includes(c.conversation_id)} onChange={event => batchSelection.onToggle(c.conversation_id, event.target.checked)}><span title={c.display_name}>{c.display_name || c.conversation_id}</span></Checkbox> : renamingId === c.conversation_id ? <ConversationTitleEditor key={c.conversation_id} conversationId={c.conversation_id} initialTitle={c.display_name} onClose={() => setRenamingId(null)} /> : <button data-conversation-title onClick={() => navigate(getChatConversationPath(c.conversation_id))}>{c.display_name || c.conversation_id}</button>}
+          {batchSelection ? <Checkbox className="conversation-group-batch-checkbox" disabled={refreshing} checked={batchSelection.checkedIds.includes(c.conversation_id)} onChange={event => batchSelection.onToggle(c.conversation_id, event.target.checked)}><span title={c.display_name}>{c.display_name || c.conversation_id}</span></Checkbox> : renamingId === c.conversation_id ? <ConversationTitleEditor key={c.conversation_id} conversationId={c.conversation_id} initialTitle={c.display_name} onClose={() => setRenamingId(null)} /> : <button data-conversation-title onClick={() => navigate(getChatConversationPath(c.conversation_id))}>{c.display_name || c.conversation_id}</button>}
           {renamingId !== c.conversation_id && c.updated_at && dayjs(c.updated_at).isValid() && <time className="conversation-group-member-time" dateTime={c.updated_at}>{dayjs(c.updated_at).format("MM/DD")}</time>}
           {!batchSelection && renamingId !== c.conversation_id && <ConversationMembership onRename={() => setRenamingId(c.conversation_id)} pinned={Boolean(c.pinned_at)} isTaskConv={Boolean(c.is_task_conv)} conversationId={c.conversation_id} groupId={g.id} groupKind={g.kind} title={c.display_name} />}
 
@@ -202,9 +277,9 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
       } catch { /* The shared request interceptor displays the API error. */ }
     }}>
       <div className={`conversation-group-row ${selected ? "is-selected" : ""}`} draggable={!batchSelection && !searchText && !busy} onDragStart={e => { e.dataTransfer.setData(GROUP_DRAG, g.id); e.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { setDropTarget(''); setMemberDropTarget(null); }}>
-        {batchSelection && <Checkbox aria-label={t('conversationOrganizer.selectAllInGroup', { name: g.name })} title={t('conversationOrganizer.selectAllInGroup', { name: g.name })} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} disabled={Boolean(selectingGroup) || !members[g.id] || (!all.length && !tokens[g.id])} onChange={event => void selectGroup(g, event.target.checked)} />}
+        {batchSelection && <Checkbox aria-label={t('conversationOrganizer.selectAllInGroup', { name: g.name })} title={t('conversationOrganizer.selectAllInGroup', { name: g.name })} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} disabled={refreshing || Boolean(pageRequest) || !canSelectGroup} onChange={event => void selectGroup(g, event.target.checked)} />}
         <button className="conversation-group-name" title={g.path || g.name} aria-expanded={open} disabled={busy} onClick={() => void toggleCollapsed(g.id)}>{g.kind === "project" ? <FolderOpenOutlined /> : <MessageOutlined />}<span>{g.name}</span></button>
-        {selectingGroup === g.id && <LoadingOutlined aria-label={t('common.loading')} />}
+        {pageRequest?.groupId === g.id && pageRequest.kind === "select" && <LoadingOutlined aria-label={t('common.loading')} />}
         {!batchSelection && <><Button type="text" size="small" icon={<PlusOutlined />} aria-label={t("conversationOrganizer.newChatInNamedGroup", { name: g.name })} onClick={() => onNew?.(g.id)} />
         <Dropdown trigger={["click"]} menu={{ items: [
           { key: "open", label: t(g.kind === "project" ? "conversationProject.open" : "conversationOrganizer.openGroup"), onClick: () => navigate(`/agent/chat/groups/${g.id}`) },
@@ -220,7 +295,7 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
           onCommitted={move => setMembers(previous => ({ ...previous, [g.id]: moveConversationItems(previous[g.id] || [], move) }))}
           onRefresh={refresh}>{renderMember}</ScopedConversationList>}
 
-        {(batchSelection ? Boolean(tokens[g.id]) : all.length > 5 || tokens[g.id]) && <Button type="link" size="small" className="conversation-group-more" disabled={Boolean(selectingGroup)} onClick={() => void more(g)}>{t(!batchSelection && expanded.has(g.id) && !tokens[g.id] ? "conversationOrganizer.showLess" : "conversationOrganizer.showMore")}</Button>}
+        {(batchSelection || keyword ? Boolean(tokens[g.id]) : all.length > 5 || tokens[g.id]) && <Button type="link" size="small" className="conversation-group-more" disabled={refreshing || Boolean(pageRequest)} loading={pageRequest?.groupId === g.id && pageRequest.kind === "more"} onClick={() => void more(g)}>{t(!batchSelection && !keyword && expanded.has(g.id) && !tokens[g.id] ? "conversationOrganizer.showLess" : "conversationOrganizer.showMore")}</Button>}
       </div>}
     </ConversationGroupDropZone>;
   };

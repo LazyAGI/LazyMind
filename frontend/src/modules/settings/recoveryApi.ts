@@ -119,11 +119,12 @@ export async function listTrashedConversations(options: {
   return toPage(response.data);
 }
 
-export async function archiveConversation(conversationId: string, folderId?: string | null): Promise<void> {
-  await coreApi.apiCoreConversationsConversationIdArchivePost({
+export async function archiveConversation(conversationId: string, folderId?: string | null): Promise<string[]> {
+  const response = await coreApi.apiCoreConversationsConversationIdArchivePost({
     conversationId,
     conversationArchiveRequest: { folder_id: folderId || null },
   }, { silentError: true } as never);
+  return response.data.archived_ids;
 }
 
 export async function unarchiveConversation(conversationId: string): Promise<void> {

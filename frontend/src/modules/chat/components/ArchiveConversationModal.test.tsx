@@ -163,12 +163,13 @@ describe("ArchiveConversationModal", () => {
   it("archives a batch to one folder and reports only successful ids", async () => {
     mocks.archiveConversation.mockImplementation(async (id: string) => {
       if (id === "failed") throw new Error("archive failed");
+      return id === "first" ? [id, "first-child"] : [id];
     });
     const { onArchived } = renderModal({ conversationId: undefined, conversationIds: ["first", "failed", "last"] });
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(await within(dialog).findByRole("radio", { name: /产品设计/ }));
     fireEvent.click(within(dialog).getByRole("button", { name: "归档" }));
-    await waitFor(() => expect(onArchived).toHaveBeenCalledWith(["first", "last"], ["failed"]));
+    await waitFor(() => expect(onArchived).toHaveBeenCalledWith(["first", "last"], ["failed"], ["first", "first-child", "last"]));
     expect(mocks.archiveConversation.mock.calls).toEqual([["first", "folder-1"], ["failed", "folder-1"], ["last", "folder-1"]]);
   });
 
@@ -186,6 +187,6 @@ describe("ArchiveConversationModal", () => {
     await waitFor(() => expect(submit).not.toHaveClass("ant-btn-loading"));
     expect(onArchived).not.toHaveBeenCalled();
     fireEvent.click(submit);
-    await waitFor(() => expect(onArchived).toHaveBeenCalledWith(["first"], []));
+    await waitFor(() => expect(onArchived).toHaveBeenCalledWith(["first"], [], ["first"]));
   });
 });
