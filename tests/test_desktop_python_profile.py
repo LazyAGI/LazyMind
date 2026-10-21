@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('profile', ROOT / 'desktop/scripts/desktop-python-profile.py')
@@ -27,6 +28,42 @@ class ProfileTests(unittest.TestCase):
         (info / 'LICENSE').write_text('license')
         (info / 'RECORD').write_text('\n'.join(f'{p},,' for p in [
             f'{module}/__init__.py', f'{info.name}/METADATA', f'{info.name}/LICENSE', f'{info.name}/RECORD']))
+
+    def test_verifies_pip_install_when_source_is_not_selected(self):
+        with patch.object(profile.subprocess, 'run') as run:
+            profile.verify()
+        command = run.call_args.args[0]
+        self.assertIn('--verify-installed', command)
+        self.assertNotIn('--verify-source', command)
+        run.assert_called_once_with(command, check=True, timeout=90)
+
+    def test_verifies_explicit_development_source(self):
+        source = self.runtime / 'app/algorithm/lazyllm'
+        with patch.object(profile.subprocess, 'run') as run:
+            profile.verify(source)
+        command = run.call_args.args[0]
+        self.assertEqual(command[-2:], ['--verify-source', str(source)])
+        run.assert_called_once_with(command, check=True, timeout=90)
+
+    def test_installed_smoke_requires_a_complete_lazyllm_package(self):
+        with patch.object(profile.importlib.util, 'find_spec', return_value=None):
+            with self.assertRaisesRegex(RuntimeError, 'Pip-installed LazyLLM not found'):
+                profile.smoke()
+
+    def test_release_build_never_selects_submodule_source(self):
+        source = self.runtime / 'app/algorithm/lazyllm'
+        (source / 'lazyllm').mkdir(parents=True)
+        with patch.dict(profile.os.environ, {'LAZYMIND_RELEASE_BUILD': 'true'}):
+            self.assertIsNone(profile.select_source(source))
+
+    def test_development_build_prefers_packaged_then_repo_source(self):
+        packaged = self.runtime / 'app/algorithm/lazyllm'
+        repo = self.runtime / 'repo/algorithm/lazyllm'
+        (repo / 'lazyllm').mkdir(parents=True)
+        with patch.dict(profile.os.environ, {'LAZYMIND_RELEASE_BUILD': 'false'}):
+            self.assertEqual(profile.select_source(packaged, repo), repo)
+            (packaged / 'lazyllm').mkdir(parents=True)
+            self.assertEqual(profile.select_source(packaged, repo), packaged)
 
     def test_removes_only_unused_providers_and_keeps_grpc_for_split(self):
         self.distribution('volcengine-python-sdk', 'volcenginesdkarkruntime')

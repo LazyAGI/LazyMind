@@ -25,8 +25,8 @@ const RenderMarkdown = ({ fileData }: RenderMarkdownProps) => {
         <Segmented<MarkdownView>
           aria-label={t("knowledge.markdownViewMode")}
           options={[
-            { label: t("markdownRender"), value: "preview" },
-            { label: t("markdownSource"), value: "source" },
+            { label: t("chat.markdownRender"), value: "preview" },
+            { label: t("chat.markdownSource"), value: "source" },
           ]}
           value={view}
           onChange={setView}

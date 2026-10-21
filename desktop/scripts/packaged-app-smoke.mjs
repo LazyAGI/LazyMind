@@ -91,8 +91,11 @@ export async function waitForPackagedRuntime(runtimeRoot, options = {}) {
   while (Date.now() <= deadline) {
     try {
       const state = await readState();
-      if (state.profile === "desktop" && state.overallStatus === "ready") return state;
-      lastError = new Error(`runtime status is ${state.overallStatus || "unknown"}`);
+      // First-launch warmup also reports ready, then stops its services. Wait
+      // for the normal runtime so that cleanup cannot interrupt the API tests.
+      const maintenance = state.config?.maintenanceMode;
+      if (state.profile === "desktop" && state.overallStatus === "ready" && !maintenance) return state;
+      lastError = new Error(`runtime status is ${state.overallStatus || "unknown"}${maintenance ? ` (${maintenance})` : ""}`);
     } catch (error) {
       lastError = error;
     }
@@ -127,7 +130,13 @@ export async function verifyPackagedAPI(state, request = globalThis.fetch) {
     }),
   });
   if (!conversionResponse.ok) {
-    throw new Error(`Markdown-to-LaTeX conversion failed: HTTP ${conversionResponse.status}`);
+    const details = [`Markdown-to-LaTeX conversion failed: HTTP ${conversionResponse.status}`];
+    try {
+      details.push(`Core response: ${(await conversionResponse.text()).slice(0, 4096)}`);
+    } catch (error) {
+      details.push(`Conversion diagnostics unavailable: ${error.message}`);
+    }
+    throw new Error(details.join("\n"));
   }
   const latex = await conversionResponse.text();
   if (!latex.includes("\\documentclass") || !latex.includes("Desktop Pandoc Smoke")) {

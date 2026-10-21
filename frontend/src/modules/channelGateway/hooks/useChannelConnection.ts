@@ -26,6 +26,23 @@ const TERMINAL_STATUSES = new Set([
   'failed',
 ]);
 
+// A newly mounted panel must wait for the previous panel's pending creation
+// and cleanup, otherwise it can reuse a session that is about to be canceled.
+const pendingSessionOperations = new Map<ChannelProvider, Promise<unknown>>();
+
+function enqueueSessionOperation<T>(provider: ChannelProvider, operation: () => Promise<T>): Promise<T> {
+  const previous = pendingSessionOperations.get(provider) || Promise.resolve();
+  const next = previous.catch(() => undefined).then(operation);
+  pendingSessionOperations.set(provider, next);
+  const remove = () => { if (pendingSessionOperations.get(provider) === next) pendingSessionOperations.delete(provider); };
+  void next.then(remove, remove);
+  return next;
+}
+
+function canCancelSession(session: ConnectionSession | null): boolean {
+  return Boolean(session && !TERMINAL_STATUSES.has(session.status) && session.allowed_actions.includes('cancel'));
+}
+
 function getErrorMessage(error: unknown, fallback: string): string {
   return getLocalizedErrorMessage(error) || fallback;
 }
@@ -45,6 +62,7 @@ export function useChannelConnection(provider: ChannelProvider) {
   });
   const pollTimerRef = useRef<number | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const cancellableSessionIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
 
   const clearPollTimer = useCallback(() => {
@@ -81,12 +99,28 @@ export function useChannelConnection(provider: ChannelProvider) {
       }
       setSession(next);
       sessionIdRef.current = next?.id ?? null;
+      cancellableSessionIdRef.current = next && canCancelSession(next) ? next.id : null;
       if (!next || next.status !== 'verification_required') {
         setChallengeValue('');
       }
     },
     [],
   );
+
+  const cancelCurrentSessionSilently = useCallback(async () => {
+    const sessionId = cancellableSessionIdRef.current;
+    if (!sessionId) return;
+    cancellableSessionIdRef.current = null;
+    // The provider may finish or another panel may cancel before this request
+    // reaches the server. Cleanup errors must not appear as navigation errors.
+    try {
+      await cancelConnectionSession(sessionId, { silentError: true });
+    } catch {
+      if (mountedRef.current && sessionIdRef.current === sessionId) {
+        cancellableSessionIdRef.current = sessionId;
+      }
+    }
+  }, []);
 
   const schedulePoll = useCallback(
     (sessionId: string, delayMs: number) => {
@@ -123,6 +157,23 @@ export function useChannelConnection(provider: ChannelProvider) {
     [applySession, clearPollTimer, loadAccounts, provider, t, translationKey],
   );
 
+  const acceptSessionResult = useCallback(async (next: ConnectionSession) => {
+    if (!mountedRef.current) {
+      cancellableSessionIdRef.current = null;
+      if (provider !== 'feishu' && canCancelSession(next)) {
+        await cancelConnectionSession(next.id, { silentError: true }).catch(() => undefined);
+      }
+      return;
+    }
+    applySession(next);
+    if (next.status === 'connected') {
+      message.success(provider === 'wecom' ? t('notifications.connected') : t(`${translationKey}.connectSuccess`));
+      await loadAccounts();
+    } else if (!TERMINAL_STATUSES.has(next.status)) {
+      schedulePoll(next.id, Math.max(500, next.poll_after_ms || 1000));
+    }
+  }, [applySession, loadAccounts, provider, schedulePoll, t, translationKey]);
+
   const startScan = useCallback(async (options?: { createNew?: boolean; reauthorize?: boolean; accountId?: string; credentials?: { bot_id: string; secret: string } }) => {
     if (sessionStarting) {
       return;
@@ -130,28 +181,19 @@ export function useChannelConnection(provider: ChannelProvider) {
     setSessionStarting(true);
     clearPollTimer();
     try {
-      if (sessionIdRef.current) {
-        try {
-          await cancelConnectionSession(sessionIdRef.current);
-        } catch {
-          // ignore cancel failures when starting a new session
-        }
-      }
-      const next = await createConnectionSession(provider, {
-        idempotencyKey: uuidv4(),
-        ...options,
+      await enqueueSessionOperation(provider, async () => {
+        if (!mountedRef.current) return;
+        await cancelCurrentSessionSilently();
+        if (!mountedRef.current) return;
+        const next = await createConnectionSession(provider, {
+          idempotencyKey: uuidv4(),
+          silentError: true,
+          ...options,
+        });
+        await acceptSessionResult(next);
       });
-      if (!mountedRef.current) return;
-      applySession(next);
-      if (next.status === 'connected') {
-        message.success(provider === 'wecom' ? t('notifications.connected') : t(`${translationKey}.connectSuccess`));
-        await loadAccounts();
-        return;
-      }
-      if (!TERMINAL_STATUSES.has(next.status)) {
-        schedulePoll(next.id, Math.max(500, next.poll_after_ms || 1000));
-      }
     } catch (error) {
+      if (!mountedRef.current) return;
       message.error(
         getErrorMessage(error, t(`${translationKey}.startFailed`)),
       );
@@ -161,11 +203,10 @@ export function useChannelConnection(provider: ChannelProvider) {
       }
     }
   }, [
-    applySession,
+    acceptSessionResult,
+    cancelCurrentSessionSilently,
     clearPollTimer,
-    loadAccounts,
     provider,
-    schedulePoll,
     sessionStarting,
     t,
     translationKey,
@@ -178,11 +219,16 @@ export function useChannelConnection(provider: ChannelProvider) {
     }
     setActionLoading(true);
     clearPollTimer();
+    cancellableSessionIdRef.current = null;
     try {
-      await cancelConnectionSession(sessionId);
+      await enqueueSessionOperation(provider, () => cancelConnectionSession(sessionId, { silentError: true }));
+      if (!mountedRef.current) return;
       applySession(null);
       message.success(t(`${translationKey}.cancelSuccess`));
     } catch (error) {
+      if (!mountedRef.current) return;
+      cancellableSessionIdRef.current = sessionId;
+      schedulePoll(sessionId, 1000);
       message.error(
         getErrorMessage(error, t(`${translationKey}.cancelFailed`)),
       );
@@ -191,7 +237,7 @@ export function useChannelConnection(provider: ChannelProvider) {
         setActionLoading(false);
       }
     }
-  }, [actionLoading, applySession, clearPollTimer, t, translationKey]);
+  }, [actionLoading, applySession, clearPollTimer, provider, schedulePoll, t, translationKey]);
 
   const disconnectAccount = useCallback(async (accountId: string) => {
     if (disconnectingAccountId) {
@@ -221,12 +267,13 @@ export function useChannelConnection(provider: ChannelProvider) {
     setActionLoading(true);
     clearPollTimer();
     try {
-      const next = await refreshConnectionSession(sessionId);
-      applySession(next);
-      if (!TERMINAL_STATUSES.has(next.status)) {
-        schedulePoll(next.id, Math.max(500, next.poll_after_ms || 1000));
-      }
+      await enqueueSessionOperation(provider, async () => {
+        if (!mountedRef.current) return;
+        const next = await refreshConnectionSession(sessionId, { silentError: true });
+        await acceptSessionResult(next);
+      });
     } catch (error) {
+      if (!mountedRef.current) return;
       message.error(
         getErrorMessage(error, t(`${translationKey}.refreshFailed`)),
       );
@@ -235,7 +282,7 @@ export function useChannelConnection(provider: ChannelProvider) {
         setActionLoading(false);
       }
     }
-  }, [actionLoading, applySession, clearPollTimer, schedulePoll, t, translationKey]);
+  }, [acceptSessionResult, actionLoading, clearPollTimer, provider, t, translationKey]);
 
   const submitChallenge = useCallback(async () => {
     const sessionId = sessionIdRef.current;
@@ -250,18 +297,13 @@ export function useChannelConnection(provider: ChannelProvider) {
     setActionLoading(true);
     clearPollTimer();
     try {
-      const next = await submitConnectionChallenge(sessionId, value);
-      if (!mountedRef.current) return;
-      applySession(next);
-      if (next.status === 'connected') {
-        message.success(provider === 'wecom' ? t('notifications.connected') : t(`${translationKey}.connectSuccess`));
-        await loadAccounts();
-        return;
-      }
-      if (!TERMINAL_STATUSES.has(next.status)) {
-        schedulePoll(next.id, Math.max(500, next.poll_after_ms || 1000));
-      }
+      await enqueueSessionOperation(provider, async () => {
+        if (!mountedRef.current) return;
+        const next = await submitConnectionChallenge(sessionId, value, 'numeric_code', { silentError: true });
+        await acceptSessionResult(next);
+      });
     } catch (error) {
+      if (!mountedRef.current) return;
       message.error(
         getErrorMessage(error, t(`${translationKey}.challengeFailed`)),
       );
@@ -275,11 +317,10 @@ export function useChannelConnection(provider: ChannelProvider) {
     }
   }, [
     actionLoading,
-    applySession,
+    acceptSessionResult,
     challengeValue,
     provider,
     clearPollTimer,
-    loadAccounts,
     schedulePoll,
     t,
     translationKey,
@@ -296,14 +337,13 @@ export function useChannelConnection(provider: ChannelProvider) {
     return () => {
       mountedRef.current = false;
       clearPollTimer();
-      const sessionId = sessionIdRef.current;
       // Feishu registration can keep provisioning after the user leaves this page.
       // Cancel it only when the user explicitly presses Cancel.
-      if (sessionId && provider !== 'feishu') {
-        void cancelConnectionSession(sessionId).catch(() => undefined);
+      if (provider !== 'feishu') {
+        void enqueueSessionOperation(provider, cancelCurrentSessionSilently);
       }
     };
-  }, [clearPollTimer, loadAccounts, provider]);
+  }, [cancelCurrentSessionSilently, clearPollTimer, loadAccounts, provider]);
 
   return {
     t,

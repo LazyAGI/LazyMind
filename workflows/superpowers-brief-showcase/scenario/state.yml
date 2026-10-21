@@ -1,0 +1,68 @@
+initial: __start__
+transitions:
+  __start__:
+  - to: prepare
+  prepare:
+  - to: validate_brief
+  implement:
+  - to: __end__
+  validate_brief:
+  - to: implement
+steps:
+  prepare:
+    label: Prepare Brief
+    mode: auto
+    prompt: |-
+      Publish the JSON brief Artifact without starting implementation. Normal value:
+      {"brief": "Implement normalize_label(value) in labels.py: strip surrounding whitespace and lowercase; test ASCII, Unicode and empty input in a disposable directory.", "fault_injection": null}
+      If the user's request contains a whole line FAULT_BRIEF_MISSING, publish
+      {"brief": null, "fault_injection": "FAULT_BRIEF_MISSING"} instead.
+      For FAULT_BRIEF_EMPTY publish {"brief": "", "fault_injection": "FAULT_BRIEF_EMPTY"}.
+      These are explicit demo fault injections, not natural upstream failures. Do not
+      repair a requested injection or perform any implementation. Core owns next-step
+      admission; finish this granted attempt and read the returned state.
+    outputs:
+    - material: brief
+      required: true
+  implement:
+    label: Implement and review
+    mode: human
+    prompt: |
+      Follow the validated brief input. In a NEW disposable local directory, write
+      labels.py implementing normalize_label(value) as stripping surrounding spaces
+      and lowercasing. Write and actually run unittest assertions for "  Hello  "
+      -> "hello", " CAFÉ " -> "café", and "   " -> "". Do not change the user's
+      repository or any other task. Save the exact labels.py source as implementation
+      and actual test command, exit status and stdout/stderr as checks. Mention the
+      disposable directory in your local reply only. This demo does not attest host
+      files or test results: the developer should inspect them. Complete using the
+      current execution handle, then stop at the Core human review boundary.
+    inputs:
+    - material: admission
+      required: true
+    outputs:
+    - material: implementation
+      required: true
+    - material: checks
+      required: true
+    acceptance_criteria: Both artifacts contain the actual implementation and test output; human review
+      is required.
+  validate_brief:
+    label: Validate Brief
+    mode: auto
+    tools_only: true
+    terminal_tools_only: true
+    tools:
+    - copy_bound_brief
+    terminal_tools:
+    - copy_bound_brief
+    prompt: Call copy_bound_brief once with no arguments. It copies the exact bound input revision, not
+      a model-authored replacement. Runtime checks that copy before committing this step. Do not repair
+      it. Return the tool result.
+    inputs:
+    - material: brief
+      required: true
+      transport: value
+    outputs:
+    - material: admission
+      required: true

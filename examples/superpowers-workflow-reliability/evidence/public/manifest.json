@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "archive_commit": "1e108c6b35d0b74c1096f1f410b7b0d6fd910de1",
+  "upstream_sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
+  "runtime_binary_sha": "N/A",
+  "format": "Selected JSON Pointer values. JSONL pointers use zero-based line indexes. Not full traces. Source hashes refer to previously sanitized historical exports.",
+  "source_sha256": {
+    "cli.py": "ac8d3fa918fb79a93913ce95b53c5df0360257d95d9790cd824825a7c06e97ce",
+    "project.py": "60a8d1f92b590c3b9b66eb145ff75e2097a9d9eb98216c0100708d04bd0ec34f",
+    "task.py": "55ecae5dab9ac17d5295140d1de818eedf07ee397d5706b5edc0e8d8be70c7de",
+    "gates.py": "b31e859becd23f6852c0065578dc9539a8ffd1f12f2972f1c3e04cfc25cd4521",
+    "runtime.py": "3a1def032d49c4f2ba08c95b348a7378b6957069efa45f9199fd083ea512d8ec",
+    "lifecycle.py": "373201f24fe420e6b447de6c9db95e5fc6b4843e65874071ea88b9909724bf18",
+    "demo.py": "134b8e897a80b0992c9c2564c6174c3feb4ee767503f106f6c62e43ac9106dcf"
+  },
+  "files": {
+    "brief-missing.json": "2827ea22e5a32853b68a9a5b6374c5b0de39ef4145737dec1ea201f581b4d01d",
+    "missing-coverage.json": "1754eca5840c750ad688b57a5352dd55191752ebc37ab4d6cd1895c0a9e7b348",
+    "native.json": "bbad02de7aa0abdaa2410a7d835a70c24c0d776088ec48a940cfd751c10246aa",
+    "normal.json": "2ed29fe02dad182e72569306aaa698460eeeb670108b1b2d92fb54b653b0061c",
+    "recovery.json": "ee39b294a1ea0ca7dc79f650a19281572abb9d99cc1cbec6232a40a35e5e50cb",
+    "reuse-custom.json": "8329d1d39571d59e34f59a53c24cd080f490e0fcba5207838afe3122f3dc0ae6",
+    "wrong-base.json": "fd464a4f7a2c30b3fd283aae0431de3242b30f81302d01413d5bb347c3eafb6b"
+  }
+}

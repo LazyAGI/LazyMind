@@ -138,3 +138,10 @@ lazymind-history-injection*.zip
 
 # Native recorder build source (not a build artifact).
 !desktop/scripts/build-recording-helper.cjs
+
+# Local Superpowers example development archive (not installation inputs).
+/.local-archive/
+/DESIGN.md
+/REPORT.md
+/RELEASE_AUDIT.md
+/RELEASE_CANDIDATE.md

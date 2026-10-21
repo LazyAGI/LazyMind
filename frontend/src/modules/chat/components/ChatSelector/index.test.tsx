@@ -43,3 +43,14 @@ describe("ChatSelector", () => {
     expect(screen.queryByPlaceholderText("chat.searchKnowledge")).not.toBeInTheDocument();
   });
 });
+
+describe("ChatSelector model requirements", () => {
+  it.each([
+    { embeddingReady: false, multimodalEmbeddingReady: true },
+    { embeddingReady: true, multimodalEmbeddingReady: false },
+  ])("still blocks selection when required embedding is unavailable: %j", (readiness) => {
+    const { container } = render(<MemoryRouter><ChatSelector chatConfig={{}} {...readiness} /></MemoryRouter>);
+    expect(container.querySelector('[aria-disabled="true"]')).not.toBeNull();
+    expect(screen.queryByPlaceholderText("chat.searchKnowledge")).not.toBeInTheDocument();
+  });
+});

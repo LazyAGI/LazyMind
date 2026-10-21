@@ -40,7 +40,7 @@ func TestNativeClaimPreservesExternalControllerNotification(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := orm.WorkflowSession{ID: "controlled", ControllerHost: "external-agent", Status: "active",
-		ControlProtocol: "workflow.control.v1", ControlBindingJSON: `{"required":true,"driver_session_id":"driver","generation":1}`}
+		ControlProtocol: "workflow.control.v1", ControlBindingJSON: `{"required":true,"driver_session_id":"driver"}`}
 	if err := db.Create(&session).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestNativeClaimPreservesExternalControllerNotification(t *testing.T) {
 		t.Fatal(err)
 	}
 	action := orm.WorkflowHostAction{ID: "resume-notification", SessionID: session.ID, Kind: "continue",
-		ExecutionID: "native-attempt", Status: "pending", BindingGeneration: 1}
+		ExecutionID: "native-attempt", Status: "pending"}
 	if err := db.Create(&action).Error; err != nil {
 		t.Fatal(err)
 	}

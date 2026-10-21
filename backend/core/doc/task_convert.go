@@ -48,6 +48,10 @@ const (
 
 func newDocumentExt(storedPath, storedName, originalFilename string, fileSize int64, contentType, relativePath string, tags []string) documentExt {
 	d := documentExt{StoredPath: storedPath, StoredName: storedName, OriginalFilename: originalFilename, FileSize: fileSize, ContentType: contentType, RelativePath: relativePath, Tags: append([]string(nil), tags...)}
+	if isSpreadsheetDocument(storedPath, contentType, originalFilename) {
+		normalizeSpreadsheetDirectParse(&d)
+		return d
+	}
 	if isOfficeDocument(storedPath, contentType, originalFilename) {
 		d.ConvertRequired = true
 		d.ConvertStatus = ConvertStatusPending
@@ -92,6 +96,41 @@ func previewContentTypeForContent(d documentExt) string {
 		return v
 	}
 	return strings.TrimSpace(d.ContentType)
+}
+
+// isSpreadsheetDocument identifies tabular Office files that the parsing service
+// reads directly with pandas. They must not lose cell structure through PDF conversion.
+func isSpreadsheetDocument(storedPath, contentType, originalFilename string) bool {
+	name := originalFilename
+	if name == "" {
+		name = filepath.Base(storedPath)
+	}
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".xls", ".xlsx":
+		return true
+	}
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	return strings.Contains(ct, "spreadsheetml") || strings.Contains(ct, "excel")
+}
+
+// normalizeSpreadsheetDirectParse removes legacy Office-to-PDF state so both
+// new uploads and reparses use the original workbook with PandasExcelReader.
+func normalizeSpreadsheetDirectParse(d *documentExt) bool {
+	if d == nil || !isSpreadsheetDocument(d.StoredPath, d.ContentType, d.OriginalFilename) {
+		return false
+	}
+	changed := d.ConvertRequired || d.ConvertStatus != ConvertStatusNone ||
+		d.ConvertError != "" || d.ConvertProvider != "" || d.ParseStoredPath != "" ||
+		d.ParseStoredName != "" || d.ParseContentType != "" || d.ParseFileSize != 0
+	d.ConvertRequired = false
+	d.ConvertStatus = ConvertStatusNone
+	d.ConvertError = ""
+	d.ConvertProvider = ""
+	d.ParseStoredPath = ""
+	d.ParseStoredName = ""
+	d.ParseContentType = ""
+	d.ParseFileSize = 0
+	return changed
 }
 
 // isOfficeDocument text Content-Type text Office Document
@@ -222,6 +261,9 @@ func NeedsOfficeConvertForPath(filePath, originalFilename string, ocrConfig map[
 	if !isOfficeDocument(src, "", name) {
 		return false
 	}
+	if isSpreadsheetDocument(src, "", name) {
+		return false
+	}
 	if isOfficialMinerURawPresentation(src, name) && isOfficialMinerU(ocrConfig) {
 		return false
 	}
@@ -267,6 +309,11 @@ func ResolveParsePath(ctx context.Context, sourcePath string, ocrConfig map[stri
 
 // parsePathForIngestion returns the file path passed to the parsing service.
 func parsePathForIngestion(d documentExt, ocrConfig map[string]any, profile documentParseProfile) string {
+	if isSpreadsheetDocument(d.StoredPath, d.ContentType, d.OriginalFilename) {
+		if src := strings.TrimSpace(d.StoredPath); src != "" {
+			return src
+		}
+	}
 	if needsOfficeConvertBeforeParse(d, ocrConfig, profile) {
 		return parsePathForAdd(d)
 	}
@@ -314,6 +361,10 @@ func officeConvertWorkers() int {
 func applyOfficeConversion(ctx context.Context, d *documentExt, profile documentParseProfile) {
 	src := strings.TrimSpace(d.StoredPath)
 	if src == "" {
+		return
+	}
+	if isSpreadsheetDocument(src, d.ContentType, d.OriginalFilename) {
+		normalizeSpreadsheetDirectParse(d)
 		return
 	}
 	if !isOfficeDocument(src, d.ContentType, d.OriginalFilename) {
@@ -535,10 +586,13 @@ func callOfficeConvertWithRetry(ctx context.Context, d *documentExt, profile doc
 		return
 	}
 	src := strings.TrimSpace(d.StoredPath)
-	if src == "" || !isOfficeDocument(src, d.ContentType, d.OriginalFilename) {
-		d.ConvertRequired = false
-		if strings.TrimSpace(d.ConvertStatus) == "" {
+	if src == "" || isSpreadsheetDocument(src, d.ContentType, d.OriginalFilename) ||
+		!isOfficeDocument(src, d.ContentType, d.OriginalFilename) {
+		if !normalizeSpreadsheetDirectParse(d) {
+			d.ConvertRequired = false
 			d.ConvertStatus = ConvertStatusNone
+			d.ConvertError = ""
+			d.ConvertProvider = ""
 		}
 		return
 	}

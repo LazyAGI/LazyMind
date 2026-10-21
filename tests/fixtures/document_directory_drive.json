@@ -1,0 +1,166 @@
+{
+  "source": {
+    "provider": "google_drive",
+    "namespace": "account-1",
+    "drive_id": "DRIVE_456"
+  },
+  "node": {
+    "node_key": "ee94418cdc3d3ccfce9bf04bd4d15304f407d73911e846ad97e97d68f6a1a392",
+    "parent_key": "root",
+    "path": "Contract",
+    "name": "Contract",
+    "kind": "file",
+    "listed": false,
+    "candidate": {
+      "source": "google_drive",
+      "namespace": "account-1",
+      "resource_id": "FILE_123",
+      "title": "Contract",
+      "locator": {
+        "id": "FILE_123",
+        "path": "/drive/DRIVE_456/FILE_123",
+        "url": ""
+      },
+      "read_state": "unread",
+      "access_state": "accessible",
+      "content_version": "2026-10-16T00:00:00Z"
+    }
+  },
+  "cases": [
+    {
+      "path": "/FILE_123",
+      "observation": {
+        "call_id": "read-0",
+        "source": "google_drive",
+        "operation": "read",
+        "scope": {
+          "path": "/FILE_123"
+        },
+        "status": "success",
+        "incomplete": false,
+        "candidates": [
+          {
+            "source": "google_drive",
+            "namespace": "account-1",
+            "resource_id": "FILE_123",
+            "title": "",
+            "locator": {
+              "url": "",
+              "path": "/FILE_123"
+            },
+            "excerpt": "\"Contract body identifying Project X\"",
+            "read_state": "read",
+            "read_at": "2026-10-16T02:43:20+00:00",
+            "access_state": "accessible",
+            "content_version": "",
+            "version_stable": null,
+            "trashed": null
+          }
+        ]
+      }
+    },
+    {
+      "path": "googledrive:/FILE_123",
+      "observation": {
+        "call_id": "read-1",
+        "source": "google_drive",
+        "operation": "read",
+        "scope": {
+          "path": "googledrive:/FILE_123"
+        },
+        "status": "success",
+        "incomplete": false,
+        "candidates": [
+          {
+            "source": "google_drive",
+            "namespace": "account-1",
+            "resource_id": "FILE_123",
+            "title": "",
+            "locator": {
+              "url": "",
+              "path": "googledrive:/FILE_123"
+            },
+            "excerpt": "\"Contract body identifying Project X\"",
+            "read_state": "read",
+            "read_at": "2026-10-16T02:43:20+00:00",
+            "access_state": "accessible",
+            "content_version": "",
+            "version_stable": null,
+            "trashed": null
+          }
+        ]
+      }
+    },
+    {
+      "path": "/drive/DRIVE_456/FILE_123",
+      "observation": {
+        "call_id": "read-2",
+        "source": "google_drive",
+        "operation": "read",
+        "scope": {
+          "path": "/drive/DRIVE_456/FILE_123"
+        },
+        "status": "success",
+        "incomplete": false,
+        "candidates": [
+          {
+            "source": "google_drive",
+            "namespace": "account-1",
+            "resource_id": "FILE_123",
+            "title": "",
+            "locator": {
+              "url": "",
+              "path": "/drive/DRIVE_456/FILE_123"
+            },
+            "excerpt": "\"Contract body identifying Project X\"",
+            "read_state": "read",
+            "read_at": "2026-10-16T02:43:20+00:00",
+            "access_state": "accessible",
+            "content_version": "",
+            "version_stable": null,
+            "trashed": null
+          }
+        ]
+      }
+    },
+    {
+      "path": "googledrive:/drive/DRIVE_456/FILE_123",
+      "observation": {
+        "call_id": "read-3",
+        "source": "google_drive",
+        "operation": "read",
+        "scope": {
+          "path": "googledrive:/drive/DRIVE_456/FILE_123"
+        },
+        "status": "success",
+        "incomplete": false,
+        "candidates": [
+          {
+            "source": "google_drive",
+            "namespace": "account-1",
+            "resource_id": "FILE_123",
+            "title": "",
+            "locator": {
+              "url": "",
+              "path": "googledrive:/drive/DRIVE_456/FILE_123"
+            },
+            "excerpt": "\"Contract body identifying Project X\"",
+            "read_state": "read",
+            "read_at": "2026-10-16T02:43:20+00:00",
+            "access_state": "accessible",
+            "content_version": "",
+            "version_stable": null,
+            "trashed": null
+          }
+        ]
+      }
+    }
+  ],
+  "metadata": {
+    "id": "FILE_123",
+    "name": "Contract",
+    "mimeType": "application/vnd.google-apps.document",
+    "modifiedTime": "2026-10-16T00:00:00Z"
+  },
+  "body": "Contract body identifying Project X"
+}

@@ -217,3 +217,59 @@ func TestRemoveStepIDHidesExhaustedRetryTarget(t *testing.T) {
 		t.Fatalf("retryable=%v, want [review]", got)
 	}
 }
+
+func TestRuntimeSnapshotUsesDeclaredProducerForStartupNameCollision(t *testing.T) {
+	for _, state := range []string{"absent", "effective", "stale"} {
+		t.Run(state, func(t *testing.T) {
+			db, session, now := ordinaryFixture(t)
+			graph, err := loadSessionGraph(t.Context(), db.DB, &session)
+			if err != nil {
+				t.Fatal(err)
+			}
+			graph.MaterialProducers = map[string]graphengine.ProducerRef{
+				"normalized_mode": {Kind: "step", StepID: "write"},
+				"references":      {Kind: "external"},
+			}
+			graph.MaterialCardinalities = map[string]string{"normalized_mode": "single", "references": "list"}
+			for _, input := range []struct{ id, material string }{
+				{"startup-answer", "normalized_mode"}, {"reference-a", "references"}, {"reference-b", "references"},
+			} {
+				if err := db.Create(&orm.WorkflowInputBinding{ID: input.id, WorkflowSessionID: session.ID,
+					MaterialID: input.material, ResourceID: input.id, ResourceRevision: 1, Validity: "effective", CreatedAt: now}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if state != "absent" {
+				if err := db.Create(&orm.WorkflowSlotRevision{ID: "normalized-output", SessionID: session.ID,
+					SlotID: "normalized_mode", Slot: "normalized_mode", StepID: "write", Revision: 1,
+					Selected: true, Validity: state, CreatedAt: now}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			snapshot, err := loadRuntimeSnapshot(t.Context(), db.DB, session.ID, graph)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mode := graphengine.Evaluate(&graphengine.Expression{Material: "normalized_mode"}, snapshot.Materials)
+			if state == "effective" {
+				if !mode.Satisfied || len(mode.Witnesses) != 1 || mode.Witnesses[0].RevisionID != "normalized-output" {
+					t.Fatalf("normalized output must be the sole witness: %+v", mode)
+				}
+				binding := attemptInputBindingFromWitness(db.DB, session.ID, "next-attempt", mode.Witnesses[0], now)
+				if binding.SourceType != "artifact" || binding.MaterialRevisionID != "normalized-output" {
+					t.Fatalf("wrong frozen input: %+v", binding)
+				}
+			} else if mode.Satisfied || len(mode.Witnesses) != 0 {
+				t.Fatalf("startup answer must not substitute for %s output: %+v", state, mode)
+			}
+			refs := graphengine.Evaluate(&graphengine.Expression{Material: "references"}, snapshot.Materials)
+			if !refs.Satisfied || len(refs.Witnesses) != 2 {
+				t.Fatalf("external list lost bindings: %+v", refs)
+			}
+			var count int64
+			if err := db.Model(&orm.WorkflowInputBinding{}).Where("id = ?", "startup-answer").Count(&count).Error; err != nil || count != 1 {
+				t.Fatalf("startup answer was modified: count=%d error=%v", count, err)
+			}
+		})
+	}
+}

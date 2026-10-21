@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -23,6 +24,14 @@ import (
 const recordingPendingTag = "recording:pending"
 
 var recordingGenerate = algo.GenerateRecordingSkill
+
+// Progress is transient and isolated per attempt; durable status remains in the database.
+var recordingProgress sync.Map
+
+type recordingProgressKey struct {
+	ID      string
+	Attempt int
+}
 
 func ListSkillRecordings(w http.ResponseWriter, r *http.Request) {
 	db, ok := requireDB(w)
@@ -53,6 +62,13 @@ func ListSkillRecordings(w http.ResponseWriter, r *http.Request) {
 
 	for i := range rows {
 		row := &rows[i]
+		if row.Status == "generating" {
+			if value, ok := recordingProgress.Load(recordingProgressKey{row.ID, row.Attempt}); ok {
+				row.Progress = value.(int)
+			}
+		} else if row.Status == "pending" || row.Status == "kept" || row.Status == "discarded" {
+			row.Progress = 100
+		}
 		if row.Status != "pending" && row.Status != "kept" && row.Status != "discarded" {
 			continue
 		}
@@ -246,6 +262,9 @@ func generateRecordedSkill(db *gorm.DB, row orm.SkillRecording, uname string, fr
 			return
 		}
 	}
+	key := recordingProgressKey{row.ID, row.Attempt}
+	defer recordingProgress.Delete(key)
+	ctx = algo.WithRecordingProgress(ctx, func(percent int) { recordingProgress.Store(key, percent) })
 	result, err := recordingGenerate(ctx, frames, row.Notes, evidence, cfg)
 	if err != nil {
 		fail("failed", "Unable to analyze the recording. Check the vision model configuration and retry.")
@@ -263,7 +282,13 @@ func generateRecordedSkill(db *gorm.DB, row orm.SkillRecording, uname string, fr
 		fail("needs_input", "Please describe the purpose, inputs and expected output, or record the missing steps.")
 		return
 	}
-	source, cleanup, err := createSkillSourceFromRequest(ctx, result.Name, "internal", result.Description, result.Content, nil, skillSourceRequest{})
+	// Treat generated Markdown as body text, even if it begins with model-supplied
+	// frontmatter. Storage metadata is supplied by the recording pipeline.
+	content := result.Content
+	if strings.HasPrefix(strings.TrimSpace(content), "---") {
+		content = "# " + result.Name + "\n\n" + content
+	}
+	source, cleanup, err := createSkillSourceFromRequest(ctx, result.Name, "internal", result.Description, content, nil, skillSourceRequest{})
 	if err != nil {
 		fail("failed", "Invalid generated skill. Please retry.")
 		return

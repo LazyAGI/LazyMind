@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, cleanup } from '@testing-library/react';
-import { useState } from 'react';
+import { createRef, useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const workflowApi = vi.hoisted(() => ({ patchSlotItem: vi.fn(), previewRewriteSelection: vi.fn(), executeArtifactAction: vi.fn() }));
@@ -225,6 +225,76 @@ describe('ArtifactRewriteDialog', () => {
     expect(submit).toBeDisabled();
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(requestPreview).not.toHaveBeenCalled();
+  });
+
+  it.each(['ppt_html', 'markdown'] as const)('keeps interaction-root behavior confined to PPT (%s)', type => {
+    const interactionRootRef = createRef<HTMLDivElement>();
+    const onClose = vi.fn();
+    render(
+      <>
+        <div ref={interactionRootRef}>
+          <button type='button'>another target</button>
+        </div>
+        <ArtifactRewriteDialog
+          open
+          sessionId='session-1'
+          slotId='preview_html'
+          listIndex={0}
+          baseRevision={1}
+          selection={type === 'ppt_html' ? { ...selection, type: 'ppt_html', page: 1, el: 'title' } : selection}
+          interactionRootRef={interactionRootRef}
+          onClose={onClose}
+          onApplied={vi.fn()}
+          requestPreview={vi.fn()}
+        />
+      </>,
+    );
+
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'another target' }));
+
+    if (type === 'ppt_html') expect(onClose).not.toHaveBeenCalled();
+    else expect(onClose).toHaveBeenCalledOnce();
+    expect(screen.getByRole('textbox')).toBeInTheDocument();
+  });
+
+  it('preserves multi-target and legacy DOM-path fields in PPT rewrite requests', async () => {
+    const pptSelection: ArtifactRewriteSelection = {
+      type: 'ppt_html',
+      page: 2,
+      el: '__lazymind_auto_div_0_1',
+      dom_path: [0, 1],
+      tag: 'div',
+      scope: 'multi',
+      targets: [
+        { el: 'card-1', index: 1, group: 'cards', selected_text: 'One' },
+        { el: '__lazymind_auto_div_0_1', index: 1, dom_path: [0, 1], tag: 'div' },
+      ],
+      selectedText: '',
+    };
+    previewApi.mockResolvedValue({ data: { data: {
+      status: 'ready', action: 'rewrite_selection', base_revision: 1, representation: 'ppt_html',
+      target: { type: 'block', block_type: 'multi', count: 2 },
+      preview: { old_text: '', new_text: '' },
+      patch: { type: 'ppt_html_patch', payload: {} },
+      artifact: { content_type: 'text', value: '<html></html>' },
+    } } });
+
+    render(<ArtifactRewriteDialog open sessionId='session' slotId='preview_html' listIndex={1}
+      baseRevision={1} selection={pptSelection} onClose={vi.fn()} onApplied={vi.fn()}
+      onPreviewReady={vi.fn()} />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Align these cards' } });
+    fireEvent.click(screen.getByRole('button', { name: 'chat.artifactRewrite.preview' }));
+
+    await waitFor(() => expect(previewApi).toHaveBeenCalled());
+    expect(previewApi.mock.lastCall?.[3].input.selection).toEqual({
+      type: 'ppt_html',
+      page: 2,
+      el: '__lazymind_auto_div_0_1',
+      dom_path: [0, 1],
+      tag: 'div',
+      targets: pptSelection.targets,
+      scope: 'multi',
+    });
   });
 
   it.each(['concise', 'fluent', 'formal'])('prepares the full %s instruction without submitting and clears its selected state after a custom edit', key => {

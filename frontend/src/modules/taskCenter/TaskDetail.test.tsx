@@ -3,10 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Task } from './api';
 import TaskDetail from './TaskDetail';
-import { getTask, listScheduleTasks } from './api';
+import { getTask, getTaskGoal, listScheduleTasks } from './api';
 import { axiosInstance } from '@/components/request';
 
-vi.mock('./api', () => ({ getTask: vi.fn(), listScheduleTasks: vi.fn() }));
+vi.mock('./api', () => ({ getTask: vi.fn(), getTaskGoal: vi.fn(), listScheduleTasks: vi.fn() }));
 vi.mock('@/modules/notifications/NotificationHistory', () => ({ default: ({ taskId }: { taskId: string }) => <div data-testid='notification-history'>{taskId}</div> }));
 vi.mock('@/modules/notifications/ScheduleNotificationPanel', () => ({ default: ({ scheduleId, taskId, showHistory }: { scheduleId: string; taskId: string; showHistory: boolean }) => <button data-schedule={scheduleId} data-task={taskId} data-history={showHistory}>配置通知</button> }));
 
@@ -86,12 +86,54 @@ const task: Task = {
 
 beforeEach(() => {
   vi.mocked(getTask).mockReset().mockResolvedValue(task);
+  vi.mocked(getTaskGoal).mockReset().mockResolvedValue(undefined);
   vi.mocked(listScheduleTasks).mockReset().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 5 });
   vi.mocked(axiosInstance.get).mockReset().mockResolvedValue({ data: {} });
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('TaskDetail', () => {
+  it.each(['mouseEnter', 'focus'] as const)('shows a full goal on %s without changing the preview', async trigger => {
+    render(<TaskDetail task={task} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+    const preview = screen.getByText(task.title!);
+    expect(preview).toHaveAttribute('tabindex', '0');
+    fireEvent[trigger](preview);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(task.title!);
+    expect(preview).toHaveTextContent(task.title!);
+    expect(getTaskGoal).not.toHaveBeenCalled();
+  });
+
+  it('loads the complete original input only when a truncated background goal is opened', async () => {
+    const truncated = { ...task, task_type: 'background_chat', title: 'Research...' };
+    vi.mocked(getTask).mockResolvedValue(truncated);
+    vi.mocked(getTaskGoal).mockResolvedValue('Research the full original task with every requirement');
+    render(<TaskDetail task={truncated} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+    expect(getTaskGoal).not.toHaveBeenCalled();
+    const preview = screen.getByText('Research...');
+    fireEvent.mouseEnter(preview);
+    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent('Research the full original task with every requirement'));
+    expect(preview).toHaveTextContent('Research...');
+    expect(getTaskGoal).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels a pending full-goal lookup when switching tasks and ignores its late result', async () => {
+    const truncated = { ...task, task_type: 'background_chat', title: 'Research...' };
+    let finish!: (value: string) => void;
+    vi.mocked(getTaskGoal).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    vi.mocked(getTask).mockResolvedValue(truncated);
+    const { rerender } = render(<TaskDetail task={truncated} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+    fireEvent.focus(screen.getByText('Research...'));
+    await waitFor(() => expect(getTaskGoal).toHaveBeenCalledTimes(1));
+    const signal = vi.mocked(getTaskGoal).mock.calls[0][1];
+    const next = { ...task, id: 'next-task', title: 'Another goal' };
+    vi.mocked(getTask).mockResolvedValue(next);
+    rerender(<TaskDetail task={next} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+    expect(signal.aborted).toBe(true);
+    await act(async () => { finish('Previous task full text'); });
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Another goal');
+    expect(screen.queryByText('Previous task full text')).not.toBeInTheDocument();
+  });
+
   const scheduled: Task = { ...task, id: 'scheduled-run', task_type: 'scheduled', status: 'succeeded', schedule_id: 'schedule-1', schedule: {
     id: 'schedule-1', name: '每日简报', cron_expr: '0 9 * * *', timezone: 'Asia/Shanghai', enabled: true, run_count: 12,
     last_run_at: '2026-09-24T01:00:00Z', next_run_at: '2026-09-25T01:00:00Z',
@@ -128,10 +170,6 @@ describe('TaskDetail', () => {
     fireEvent.click(screen.getByRole('button', { name: '编 辑' }));
     expect(onOpenConversation).toHaveBeenCalledWith(queued.conversation_id);
     fireEvent.click(screen.getByRole('button', { name: /删除/ }));
-    expect(onDelete).not.toHaveBeenCalled();
-    const confirm = await screen.findByText('任务和对应会话将保留 30 天');
-    const dialog = confirm.closest('[role="dialog"]')!;
-    fireEvent.click(within(dialog as HTMLElement).getByRole('button', { name: '移入回收站' }));
     await waitFor(() => expect(onDelete).toHaveBeenCalledWith(queued));
   });
 
@@ -245,10 +283,6 @@ describe('TaskDetail', () => {
     expect(onArchive).toHaveBeenCalledWith(task);
 
     fireEvent.click(await screen.findByRole('menuitem', { name: /移入回收站/ }));
-    await screen.findByText('任务和对应会话将保留 30 天');
-    const dialogs = screen.getAllByRole('dialog');
-    const dialog = dialogs[dialogs.length - 1];
-    fireEvent.click(within(dialog).getByRole('button', { name: '移入回收站' }));
     await waitFor(() => expect(onDelete).toHaveBeenCalledWith(task));
   });
 });

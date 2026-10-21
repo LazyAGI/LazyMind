@@ -113,6 +113,7 @@ func TestRaccoonUsesDesktopConfiguration(t *testing.T) {
 
 func TestDeepSeekDetectsInitializedWebProfileWithoutCLIPath(t *testing.T) {
 	root := t.TempDir()
+	setTestHome(t, root)
 	home := filepath.Join(root, ".dsh")
 	t.Setenv("DSH_HOME", home)
 	t.Setenv("LAZYMIND_DSH_PATH", filepath.Join(root, "missing-dsh"))
@@ -305,6 +306,7 @@ func bindDesktopForTest(t *testing.T, target agentexec.BindingTarget) {
 
 func setTestHome(t *testing.T, home string) {
 	t.Helper()
+	t.Setenv("LAZYMIND_DSH_DESKTOP_PATH", filepath.Join(home, "missing-desktop"))
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 }

@@ -512,10 +512,6 @@ func (c *Client) Begin(ctx context.Context, input BeginInput) (BeginResult, erro
 	if err != nil {
 		return BeginResult{}, err
 	}
-	if !contains(state.Projection.Ready, input.StepID) && !contains(state.Projection.Retryable, input.StepID) && !contains(state.Projection.Rewindable, input.StepID) {
-		return BeginResult{}, fmt.Errorf("step %q is not ready; ready=%v retryable=%v rewindable=%v", input.StepID,
-			state.Projection.Ready, state.Projection.Retryable, state.Projection.Rewindable)
-	}
 
 	if input.CommandID == "" {
 		input.CommandID, err = newID("mcp-step-")
@@ -637,15 +633,6 @@ func (c *Client) GetArtifact(ctx context.Context, artifactID string) (Artifact, 
 	var result Artifact
 	err := c.api.DoJSON(ctx, http.MethodGet, "/workflow-artifacts/"+url.PathEscape(artifactID), nil, &result)
 	return result, err
-}
-
-func contains(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
 }
 
 func AwaitingReview(state Projection) bool {

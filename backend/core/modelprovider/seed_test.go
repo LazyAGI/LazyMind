@@ -196,9 +196,11 @@ func TestModelCatalogIncludesCurrentSenseNovaModels(t *testing.T) {
 		"SenseNova-V6-Turbo":           "vlm",
 		"nova-embedding-stable":        "embed",
 		"deepseek-v4-flash":            "llm",
+		"deepseek-flash":               "llm",
+		"kimi-k3":                      "llm",
 		"glm-5.2":                      "llm",
-		"sensenova-6.7-flash-lite":     "llm",
-		"sensenova-u1-fast":            "text2image",
+		"sensenova-6.8-flash-lite":     "llm",
+		"sensenova-u1.5-fast":          "image_editing",
 		"sensenova-u1.5-lite":          "image_editing",
 	}
 
@@ -242,7 +244,7 @@ func TestReconcileSenseNovaCatalogScope(t *testing.T) {
 	now := time.Now().UTC()
 	if err := db.Create(&[]orm.DefaultModel{
 		{ID: "default-classic", DefaultModelProviderID: "provider", ProviderName: "SenseNova", Name: "SenseChat-5", ModelType: "llm", CreatedAt: now, UpdatedAt: now},
-		{ID: "default-token", DefaultModelProviderID: "provider", ProviderName: "SenseNova", Name: "sensenova-6.7-flash-lite", ModelType: "llm", CreatedAt: now, UpdatedAt: now},
+		{ID: "default-token", DefaultModelProviderID: "provider", ProviderName: "SenseNova", Name: "sensenova-6.8-flash-lite", ModelType: "llm", CreatedAt: now, UpdatedAt: now},
 		{ID: "default-retired", DefaultModelProviderID: "provider", ProviderName: "SenseNova", Name: "SenseChat-5-1202", ModelType: "llm", CreatedAt: now, UpdatedAt: now},
 	}).Error; err != nil {
 		t.Fatalf("create default models: %v", err)
@@ -263,10 +265,10 @@ func TestReconcileSenseNovaCatalogScope(t *testing.T) {
 	}
 	groupModels := []orm.UserModelProviderGroupModel{
 		{ID: "classic-current", UserModelProviderID: "user-provider", UserModelProviderGroupID: "classic", ProviderName: "SenseNova", Name: "SenseChat-5", ModelType: "llm", IsDefault: true, BaseModel: orm.BaseModel{CreateUserID: "user", CreatedAt: now, UpdatedAt: now}},
-		{ID: "classic-token", UserModelProviderID: "user-provider", UserModelProviderGroupID: "classic", ProviderName: "SenseNova", Name: "sensenova-6.7-flash-lite", ModelType: "llm", IsDefault: true, BaseModel: orm.BaseModel{CreateUserID: "user", CreatedAt: now, UpdatedAt: now}},
+		{ID: "classic-token", UserModelProviderID: "user-provider", UserModelProviderGroupID: "classic", ProviderName: "SenseNova", Name: "sensenova-6.8-flash-lite", ModelType: "llm", IsDefault: true, BaseModel: orm.BaseModel{CreateUserID: "user", CreatedAt: now, UpdatedAt: now}},
 		{ID: "classic-retired", UserModelProviderID: "user-provider", UserModelProviderGroupID: "classic", ProviderName: "SenseNova", Name: "SenseChat-5-1202", ModelType: "llm", IsDefault: true, BaseModel: orm.BaseModel{CreateUserID: "user", CreatedAt: now, UpdatedAt: now}},
 		{ID: "token-classic", UserModelProviderID: "user-provider", UserModelProviderGroupID: "token", ProviderName: "SenseNova", Name: "SenseChat-5", ModelType: "llm", IsDefault: true, BaseModel: orm.BaseModel{CreateUserID: "user", CreatedAt: now, UpdatedAt: now}},
-		{ID: "token-current", UserModelProviderID: "user-provider", UserModelProviderGroupID: "token", ProviderName: "SenseNova", Name: "sensenova-6.7-flash-lite", ModelType: "llm", IsDefault: true, BaseModel: orm.BaseModel{CreateUserID: "user", CreatedAt: now, UpdatedAt: now}},
+		{ID: "token-current", UserModelProviderID: "user-provider", UserModelProviderGroupID: "token", ProviderName: "SenseNova", Name: "sensenova-6.8-flash-lite", ModelType: "llm", IsDefault: true, BaseModel: orm.BaseModel{CreateUserID: "user", CreatedAt: now, UpdatedAt: now}},
 		{ID: "custom-retired", UserModelProviderID: "user-provider", UserModelProviderGroupID: "custom", ProviderName: "SenseNova", Name: "SenseChat-5-1202", ModelType: "llm", IsDefault: true, BaseModel: orm.BaseModel{CreateUserID: "user", CreatedAt: now, UpdatedAt: now}},
 	}
 	if err := db.Create(&groupModels).Error; err != nil {
@@ -281,7 +283,7 @@ func TestReconcileSenseNovaCatalogScope(t *testing.T) {
 
 	err = reconcileCatalogScope(db, "provider", "SenseNova", "https://api.sensenova.cn/compatible-mode/v1/", []catalogModel{
 		{Name: "SenseChat-5", Type: "llm"},
-		{Name: "sensenova-6.7-flash-lite", Type: "llm"},
+		{Name: "sensenova-6.8-flash-lite", Type: "llm"},
 	})
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -307,7 +309,7 @@ func TestReconcileSenseNovaCatalogScope(t *testing.T) {
 	if err := db.Model(&orm.DefaultModel{}).Order("name").Pluck("name", &defaultModelNames).Error; err != nil {
 		t.Fatalf("load default models: %v", err)
 	}
-	wantDefaultNames := []string{"SenseChat-5", "sensenova-6.7-flash-lite"}
+	wantDefaultNames := []string{"SenseChat-5", "sensenova-6.8-flash-lite"}
 	if !reflect.DeepEqual(defaultModelNames, wantDefaultNames) {
 		t.Fatalf("default model names = %v, want %v", defaultModelNames, wantDefaultNames)
 	}
@@ -546,5 +548,42 @@ func TestReconcileCatalogPreservesCustomModelsAndEndpoints(t *testing.T) {
 	}
 	if !reflect.DeepEqual(ids, []string{"new", "other"}) {
 		t.Fatalf("defaults = %v", ids)
+	}
+}
+
+func TestUpgradeLegacyTokenPlanURLPreservesCustomURLs(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&orm.UserModelProvider{}, &orm.UserModelProviderGroup{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.UserModelProvider{ID: "nova", DefaultModelProviderID: "catalog-nova"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	urls := []string{"https://token.sensenova.cn/v1/chat/completions/", "https://token.sensenova.cn/v1/chat/completions", "https://proxy.example/v2/", "https://api.sensenova.cn/compatible-mode/v1/"}
+	for _, u := range urls {
+		if err := db.Create(&orm.UserModelProviderGroup{ID: u, UserModelProviderID: "nova", BaseURL: u}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 2 {
+		if err := upgradeLegacyTokenPlanURL(db, "catalog-nova"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, u := range urls {
+		var row orm.UserModelProviderGroup
+		if err := db.Where("id = ?", u).Take(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+		want := u
+		if i < 2 {
+			want = sensenovaNewPlatformBaseURL
+		}
+		if row.BaseURL != want {
+			t.Fatalf("URL = %q, want %q", row.BaseURL, want)
+		}
 	}
 }

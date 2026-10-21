@@ -8,6 +8,8 @@ const delay = (milliseconds) => new Promise((resolve) => {
   setTimeout(resolve, milliseconds);
 });
 const stagedRuntimePaths = new Map();
+const windowsDesktopLauncher = process.env.LAZYMIND_DESKTOP_WINDOWS_LAUNCHER;
+const macDesktopLauncher = process.env.LAZYMIND_DESKTOP_MAC_LAUNCHER;
 
 const runtimeStage = process.env.LAZYMIND_DESKTOP_RUNTIME_STAGE;
 if (!runtimeStage) {
@@ -161,6 +163,10 @@ async function adhocSignAppBundle(appPath) {
   if (fs.existsSync(electronFramework)) {
     await codesignWithRetry(["--force", "--sign", "-", "--timestamp=none", electronFramework], electronFramework);
   }
+  const internalElectron = path.join(appPath, "Contents", "MacOS", "LazyMindApp");
+  if (fs.existsSync(internalElectron)) {
+    await codesignWithRetry(["--force", "--sign", "-", "--timestamp=none", internalElectron], internalElectron);
+  }
 
   for (const entry of fs.readdirSync(frameworksDir)) {
     const absolutePath = path.join(frameworksDir, entry);
@@ -203,7 +209,7 @@ async function splitPythonComponents(runtimeRoot) {
       ];
       if (published) componentArgs.push(
         "--catalog", path.resolve(__dirname, "../python-components/darwin-arm64.json"),
-        "--lock", path.resolve(__dirname, "../python-components/darwin-arm64-requirements.lock"),
+        "--lock", process.env.LAZYMIND_PYTHON_COMPONENT_LOCK || path.resolve(__dirname, "../python-components/darwin-arm64-requirements.lock"),
         "--cache", path.resolve(__dirname, "../cache/published-python/darwin-arm64"),
       );
       if (rebuild) componentArgs.push("--slim-providers");
@@ -269,6 +275,24 @@ async function signAndStageEmbeddedRuntime(context) {
       }
     });
     await Promise.all(workers);
+    const internalElectron = path.join(appPath, "Contents", "MacOS", "LazyMindApp");
+    if (fs.existsSync(internalElectron)) {
+      const args = [
+        "--sign",
+        identity,
+        "--force",
+        "--timestamp",
+        "--options",
+        "runtime",
+        "--entitlements",
+        entitlements,
+      ];
+      if (keychainFile) {
+        args.push("--keychain", keychainFile);
+      }
+      args.push(internalElectron);
+      await codesignWithRetry(args, internalElectron);
+    }
     await splitPythonComponents(runtimeRoot);
     stageEmbeddedRuntime(context.appOutDir);
     return;
@@ -316,6 +340,70 @@ async function restoreRuntimeAndFinalizeSignature(context) {
   await execFile("/usr/bin/codesign", ["--verify", "--deep", "--strict", appPath]);
   console.log("Restored embedded runtime and resealed the outer app signature");
 }
+
+function installWindowsDesktopLauncher(context) {
+  if (context.electronPlatformName !== "win32") {
+    return;
+  }
+  // Keep Electron's RunAsNode support for LazyMind's internal export workers,
+  // but shield the public entry point from a polluted parent environment.
+  if (!windowsDesktopLauncher || !fs.statSync(windowsDesktopLauncher, { throwIfNoEntry: false })?.isFile()) {
+    throw new Error("LAZYMIND_DESKTOP_WINDOWS_LAUNCHER must point to the built Windows launcher");
+  }
+  const productFilename = context.packager.appInfo.productFilename;
+  const publicExecutable = path.join(context.appOutDir, `${productFilename}.exe`);
+  const electronExecutable = path.join(context.appOutDir, "LazyMindApp.exe");
+  if (!fs.existsSync(publicExecutable)) {
+    throw new Error(`Packaged Electron executable was not found: ${publicExecutable}`);
+  }
+  if (fs.existsSync(electronExecutable)) {
+    throw new Error(`Refusing to overwrite the internal Electron executable: ${electronExecutable}`);
+  }
+  fs.renameSync(publicExecutable, electronExecutable);
+  try {
+    fs.copyFileSync(windowsDesktopLauncher, publicExecutable, fs.constants.COPYFILE_EXCL);
+  } catch (error) {
+    fs.renameSync(electronExecutable, publicExecutable);
+    throw error;
+  }
+  console.log(`Installed Windows startup launcher; Electron runtime: ${path.basename(electronExecutable)}`);
+}
+
+function installMacDesktopLauncher(context) {
+  if (context.electronPlatformName !== "darwin") {
+    return;
+  }
+  if (!macDesktopLauncher || !fs.statSync(macDesktopLauncher, { throwIfNoEntry: false })?.isFile()) {
+    throw new Error("LAZYMIND_DESKTOP_MAC_LAUNCHER must point to the built macOS launcher");
+  }
+  const productFilename = context.packager?.appInfo?.productFilename || "LazyMind";
+  const executableDirectory = path.join(context.appOutDir, `${productFilename}.app`, "Contents", "MacOS");
+  const publicExecutable = path.join(executableDirectory, productFilename);
+  const electronExecutable = path.join(executableDirectory, "LazyMindApp");
+  if (!fs.existsSync(publicExecutable)) {
+    throw new Error(`Packaged Electron executable was not found: ${publicExecutable}`);
+  }
+  if (fs.existsSync(electronExecutable)) {
+    throw new Error(`Refusing to overwrite the internal Electron executable: ${electronExecutable}`);
+  }
+  fs.renameSync(publicExecutable, electronExecutable);
+  try {
+    fs.copyFileSync(macDesktopLauncher, publicExecutable, fs.constants.COPYFILE_EXCL);
+    fs.chmodSync(publicExecutable, 0o755);
+  } catch (error) {
+    fs.rmSync(publicExecutable, { force: true });
+    fs.renameSync(electronExecutable, publicExecutable);
+    throw error;
+  }
+  console.log(`Installed macOS startup launcher; Electron runtime: ${path.basename(electronExecutable)}`);
+}
+
+async function preparePackagedDesktop(context) {
+  installWindowsDesktopLauncher(context);
+  installMacDesktopLauncher(context);
+  await signAndStageEmbeddedRuntime(context);
+}
+
 if (process.env.LAZYMIND_DESKTOP_WINDOWS_ICON) {
   extraResources.push({
     from: process.env.LAZYMIND_DESKTOP_WINDOWS_ICON,
@@ -380,6 +468,6 @@ module.exports = {
     differentialPackage: false,
     runAfterFinish: true,
   },
-  afterPack: signAndStageEmbeddedRuntime,
+  afterPack: preparePackagedDesktop,
   afterSign: restoreRuntimeAndFinalizeSignature,
 };

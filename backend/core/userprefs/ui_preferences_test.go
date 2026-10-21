@@ -622,3 +622,35 @@ func TestPatchUIPreferencesRejectsEmptyPatch(t *testing.T) {
 		t.Fatalf("empty patch should not create row, got count %d", count)
 	}
 }
+
+func TestDocumentDirectoriesPreferenceDefaultsAndRoundTrip(t *testing.T) {
+	db := newUIPreferencesTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	for _, tc := range []struct {
+		body    string
+		enabled bool
+	}{{"", true}, {`{"document_directories_enabled":false}`, false}, {`{"document_directories_enabled":true}`, true}} {
+		method := http.MethodPatch
+		if tc.body == "" {
+			method = http.MethodGet
+		}
+		req := httptest.NewRequest(method, "/api/core/user/ui-preferences", strings.NewReader(tc.body))
+		req.Header.Set("X-User-Id", "directory-user")
+		rec := httptest.NewRecorder()
+		if method == http.MethodGet {
+			GetUIPreferences(rec, req)
+		} else {
+			PatchUIPreferences(rec, req)
+		}
+		var response struct {
+			Data map[string]any `json:"data"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != 200 || response.Data["document_directories_enabled"] != tc.enabled {
+			t.Fatalf("body=%s response=%s", tc.body, rec.Body.String())
+		}
+	}
+}

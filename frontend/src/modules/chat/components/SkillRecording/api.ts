@@ -3,7 +3,7 @@ export interface RecordingFrame { image: string; seconds: number }
 export interface SkillRecording {
   id: string; conversation_id: string; skill_id: string;
   status: "generating" | "needs_input" | "failed" | "pending" | "kept" | "discarded";
-  name: string; description: string; error: string;
+  name: string; description: string; error: string; progress?: number;
 }
 const url = `${BASE_URL}/api/core/skill-recordings`;
 function unwrap<T>(body: T | { code?: number; message?: string; data: T }): T {

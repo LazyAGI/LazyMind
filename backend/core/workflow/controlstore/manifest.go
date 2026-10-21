@@ -168,12 +168,8 @@ func GuardMaterialEdit(tx *gorm.DB, session orm.WorkflowSession, slot string) er
 		return Reject("EXECUTION_ACTIVE", "stop this step before editing its output")
 	}
 	if Controlled(session) && session.Status == "stopped" {
-		binding, err := DecodeBinding(session)
-		if err != nil {
-			return err
-		}
 		var pending int64
-		if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND binding_generation = ? AND kind = 'cancel' AND status IN ?", session.ID, binding.Generation, []string{"pending", "dispatching", "unknown"}).Count(&pending).Error; err != nil {
+		if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND consumed_at IS NULL AND kind = 'cancel' AND status IN ?", session.ID, []string{"pending", "dispatching", "unknown"}).Count(&pending).Error; err != nil {
 			return err
 		}
 		if pending > 0 {

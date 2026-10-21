@@ -1077,6 +1077,16 @@ class CloudOAuthService:
                 status='PENDING',
             )
 
+        if reauthorize_target_id and provider_impl.provider_name() == 'feishu':
+            with SessionLocal() as db:
+                target = CloudAuthConnectionRepository.get_by_id(db, reauthorize_target_id)
+                if target is None:
+                    raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
+                meta = _json_loads(target.provider_account_meta)
+                meta['authorization_pending'] = True
+                target.provider_account_meta = _json_dumps(meta)
+                CloudAuthConnectionRepository.save(db, target)
+
         return {
             'connection_id': connection_id,
             'tenant_id': tenant_id,
@@ -1190,6 +1200,10 @@ class CloudOAuthService:
 
             row.auth_state_ciphertext = self._encrypt_payload(auth_state_payload, field_name='auth_state')
             self._apply_profile(row, profile, fallback_display_name=f'{provider_impl.provider_name()} account')
+            if provider_impl.provider_name() == 'feishu':
+                meta = _json_loads(row.provider_account_meta)
+                meta.pop('authorization_pending', None)
+                row.provider_account_meta = _json_dumps(meta)
             row.status = 'ACTIVE'
             row.last_error = ''
             if reauthorize_connection_id and reauthorize_connection_id != row.connection_id:
@@ -1531,11 +1545,28 @@ class CloudOAuthService:
         if (
             not normalized_connection
             or not normalized_owner
-            or not provider_account_id
-            or not provider_tenant_key
             or normalized_profile_ref != f'{normalized_owner}/{normalized_connection}'
             or normalized_location not in {'local', 'cli_sidecar'}
         ):
+            raise_error(ErrorCodes.INVALID_REQUEST)
+        if (provider_account_meta or {}).get('authorization_pending') is True:
+            with SessionLocal() as db:
+                row = CloudAuthConnectionRepository.get_by_id(db, normalized_connection)
+                if row is None:
+                    raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
+                self._ensure_connection_owner(row, tenant_id='', user_id=normalized_owner)
+                if (
+                    row.provider != 'feishu'
+                    or row.connection_method != 'cli_personal_app'
+                    or row.profile_ref != normalized_profile_ref
+                ):
+                    raise_error(ErrorCodes.CLOUD_REAUTHORIZED_ACCOUNT_MISMATCH)
+                meta = _json_loads(row.provider_account_meta)
+                meta['authorization_pending'] = True
+                row.provider_account_meta = _json_dumps(meta)
+                CloudAuthConnectionRepository.save(db, row)
+                return self._connection_payload(row)
+        if not provider_account_id or not provider_tenant_key:
             raise_error(ErrorCodes.INVALID_REQUEST)
         identity_meta = {
             key: value.strip()
@@ -1557,6 +1588,13 @@ class CloudOAuthService:
         })
         with SessionLocal() as db:
             try:
+                previous = CloudAuthConnectionRepository.get_by_id(db, normalized_connection)
+                if previous is not None and previous.owner_user_id == normalized_owner:
+                    pending = _json_loads(previous.provider_account_meta).get('authorization_pending')
+                    if pending and (provider_account_meta or {}).get('authorization_completed') is not True:
+                        pending_meta = _json_loads(meta)
+                        pending_meta['authorization_pending'] = True
+                        meta = _json_dumps(pending_meta)
                 row = CloudAuthConnectionRepository.upsert_feishu_cli(
                     db,
                     connection_id=normalized_connection,
@@ -1922,6 +1960,8 @@ class CloudOAuthService:
 
     @staticmethod
     def _ensure_connection_active(row) -> None:
+        if (getattr(row, 'status', '') or '').strip().upper() == 'EXPIRED':
+            raise_error(ErrorCodes.CLOUD_CONNECTION_REAUTH_REQUIRED)
         if (getattr(row, 'status', '') or '').strip().upper() != 'ACTIVE':
             raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
 
@@ -2154,6 +2194,8 @@ class CloudOAuthService:
                             'status': 'ACTIVE',
                         }
                 self._record_refresh_failure(db, row, exc)
+                if row.status == 'EXPIRED':
+                    raise_error(ErrorCodes.CLOUD_CONNECTION_REAUTH_REQUIRED)
                 if isinstance(exc, AppException):
                     raise
                 raise_error(ErrorCodes.CLOUD_TOKEN_UNAVAILABLE, extra_msg=_truncate_error(exc))

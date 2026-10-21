@@ -5,6 +5,8 @@ import type { ThinkingDepth } from "@/modules/chat/store/chatThink";
 import type { ChatMention } from "./MentionEditor";
 import type { ChatConfig } from "../ChatConfigs";
 import type { ChatModelSelectionRequest } from "@/modules/chat/store/modelSelection";
+import type { ComposerFileInput } from './composerReferences';
+import type { FeaturedSelection } from '@/modules/chat/store/featuredSelection';
 
 export interface ChatFileList {
   uid: string;
@@ -20,6 +22,8 @@ export interface SendMessageParams {
   /** Preserve the resource selection when the welcome composer unmounts. */
   chatConfigSnapshot?: ChatConfig;
   mentions?: ChatMention[];
+  referencedFiles?: ComposerFileInput[];
+  featuredSelection?: FeaturedSelection;
   citeMessage?: string;
   citeMessages?: string[];
   citeHistoryIds?: (string | undefined)[];

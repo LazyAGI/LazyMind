@@ -175,4 +175,22 @@ describe('TerminalConnectionQuickPanel', () => {
     expect(screen.getByText(/已连接 · 运行中/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '在下方重新展示测试企业微信机器人的企业微信二维码' })).toBeInTheDocument();
   });
+
+  it('starts a new Feishu QR connection instead of reusing existing robots, including retries', async () => {
+    mocks.listChannelAccounts.mockImplementation((provider: string) => Promise.resolve({
+      items: provider === 'feishu' ? ['first', 'second'].map(id => ({
+        id, provider, label: id, status: 'connected', runtime_status: 'running',
+        updated_at: '2026-08-14T08:00:00Z',
+      })) : [],
+    }));
+    render(<TerminalConnectionQuickPanel onManage={vi.fn()} />);
+    await screen.findByRole('button', { name: '2 个已连接' });
+    mocks.startScan.mockClear();
+
+    fireEvent.click(screen.getByRole('tab', { name: '飞书' }));
+    await waitFor(() => expect(mocks.startScan).toHaveBeenCalledWith({ createNew: true }));
+    mocks.startScan.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: /channelGateway\.feishu\.startScan/ }));
+    expect(mocks.startScan).toHaveBeenCalledWith({ createNew: true });
+  });
 });

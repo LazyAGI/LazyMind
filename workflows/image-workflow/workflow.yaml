@@ -232,6 +232,7 @@ ui:
       composite_tab_position: left
       slots:
         - id: generated_image_output
+        - id: generated_base_image
         - id: generated_first_frame
         - id: generated_last_frame
         - id: generation_reference_images
@@ -239,6 +240,7 @@ ui:
         direction: row
         children:
           - slot: generated_image_output
+          - slot: generated_base_image
           - slot: generated_first_frame
           - slot: generated_last_frame
           - slot: generation_reference_images

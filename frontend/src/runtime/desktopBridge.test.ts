@@ -14,6 +14,7 @@ import {
   agentExecutableBindings,
   authorizeLocalWorkspace,
   agentIntegrationStatuses,
+  agentIntegrationAction,
   bindAgentExecutable,
   executorIntegrationAction,
   executorIntegrationPolicies,
@@ -26,6 +27,32 @@ describe("browser Assistant Bridge session synchronization", () => {
     mocks.user.mockReset();
     vi.restoreAllMocks();
     Reflect.deleteProperty(window, "lazymindDesktop");
+  });
+
+  it.each([
+    { name: "slow DSH status", request: () => agentIntegrationStatuses(), delay: 20_000, ok: true },
+    { name: "slow DSH disconnect", request: () => agentIntegrationAction("deepseek-harness", "disconnect"), delay: 20_000, ok: true },
+    { name: "stalled DSH disconnect", request: () => agentIntegrationAction("deepseek-harness", "disconnect"), delay: 65_000, ok: false },
+  ])("handles $name within a bounded request budget", async ({ request, delay, ok }) => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+        .mockImplementationOnce((_url, init) => new Promise((resolve, reject) => {
+          const timer = setTimeout(() => resolve(new Response(JSON.stringify({
+            agents: {}, agent: "deepseek-harness", state: "ready",
+          }), { status: 200 })), delay);
+          init?.signal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            reject(new DOMException("Request timed out", "AbortError"));
+          }, { once: true });
+        }));
+      const result = request();
+      await vi.advanceTimersByTimeAsync(delay);
+      expect((await result).ok).toBe(ok);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("forwards workspace selection tokens through the narrow Desktop bridge", async () => {

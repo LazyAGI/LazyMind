@@ -5,9 +5,8 @@ export class AdmissionRejected extends Error {}
 
 /** A is an opaque host agent handle. Only delivery is required of every host. */
 export interface RuntimeAdapter<A> {
-  /** Queue-only hosts cannot interrupt the current turn before continuation. */
-  readonly continuationMode?: 'queue'
-  readonly supportsCancel?: false
+  /** Current adapters support session interruption or no interruption. */
+  readonly cancellation: 'none' | 'session'
   id(agent: A): string
   /** Optional observation capabilities used by hosts with turn/tool hooks. */
   parent?(agent: A): A | undefined
@@ -21,9 +20,9 @@ export interface RuntimeAdapter<A> {
   resolve(sessionId: string): Promise<{ agent: A } | { error: string }>
   /** Resolves after host admission, not after execution. Throws if admission is uncertain. */
   prompt(agent: A, input: { actionId: string; message: string }, signal: AbortSignal): Promise<number>
+  /** Session cancellation is called only through the host ownership guard. */
   cancel(agent: A): void | Promise<void>
   /** Optional durable event evidence; absence never licenses an uncertain retry. */
-  eventSeq?(agent: A): number
   /** Exact durable input event sequence, or zero if no evidence was found. */
   reconcile?(sessionId: string, actionId: string, signal: AbortSignal): Promise<number>
   warn(message: string): void
@@ -43,7 +42,6 @@ export interface ToolCall<A> {
   /** Normalized Workflow operation; null for ordinary host tools. */
   operation: string | null
   arguments?: unknown
-  returnsResult?: boolean
   signal: AbortSignal
   callId: string
   nested?: boolean

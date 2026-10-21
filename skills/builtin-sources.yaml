@@ -4,7 +4,7 @@ bundled_skills:
   - uid: bsk_01KPERSONALDOCSEARCH20260923
     path: search/personal-document-search
     category: search
-    version: 1.0.0
+    version: 1.0.7
     provider: LazyMind
 skills:
   - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=deep-research.zip'
@@ -130,9 +130,11 @@ skills:
   - source_url: https://skillhub.cn/skills/clawhub_tarigha/financial-calculator
     category: finance
     provider: SkillHub
-  - source_url: https://skillhub.cn/skills/clawhub_huangjingzhi07/file-organizer-zh
+  # Pin the original publisher; SkillHub serves another publisher's package for this slug.
+  - source_url: https://clawhub.ai/api/v1/download?slug=file-organizer-zh&ownerHandle=huangjingzhi07&version=1.0.0
+    uid: bsk_E0D17ED0B1839E52A7891792856B
     category: data
-    provider: SkillHub
+    provider: ClawHub
   - source_url: https://skillhub.cn/skills/user_0bead322/paperdown
     category: writing
     provider: SkillHub
@@ -145,9 +147,11 @@ skills:
   - source_url: https://skillhub.cn/skills/user_b3d06a4a/duplicate-file-cleaner
     category: data
     provider: SkillHub
-  - source_url: https://skillhub.cn/skills/clawhub_shashwatgtm/competitive-intelligence-market-research
+  # Pin the original publisher; SkillHub serves another publisher's package for this slug.
+  - source_url: https://clawhub.ai/api/v1/download?slug=competitive-intelligence-market-research&ownerHandle=shashwatgtm&version=1.0.0
+    uid: bsk_E5BC6DABA0FAAD8289162068B3FB
     category: research
-    provider: SkillHub
+    provider: ClawHub
   - source_url: https://skillhub.cn/skills/clawhub_skipzhang/task-decomposer
     category: project-management
     provider: SkillHub

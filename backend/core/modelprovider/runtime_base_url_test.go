@@ -6,6 +6,10 @@ func TestLazyLLMBaseURLNormalizesOpenAIAndOfficialOpenRouter(t *testing.T) {
 	tests := []struct {
 		name, provider, input, want string
 	}{
+		{"token plan legacy chat URL", "SenseNova", "https://token.sensenova.cn/v1/chat/completions/", "https://token.sensenova.cn/v1/chat/completions/"},
+		{"token plan root", "SenseNova", "https://token.sensenova.cn/v1", "https://token.sensenova.cn/v1"},
+		{"classic SenseNova", "SenseNova", "https://api.sensenova.cn/compatible-mode/v1/", "https://api.sensenova.cn/compatible-mode/v1/"},
+		{"SenseNova proxy", "SenseNova", "https://proxy.example/v1/", "https://proxy.example/v1/"},
 		{"host and port get v1", "OpenAI", "http://127.0.0.1:8000", "http://127.0.0.1:8000/v1/"},
 		{"request suffix is cropped", "OpenAI", "http://model.test:8000/v1/chat/completions", "http://model.test:8000/v1/"},
 		{"prefixed v1 is preserved", "OpenAI", "https://model.test/api/v1/models?debug=1#result", "https://model.test/api/v1/"},

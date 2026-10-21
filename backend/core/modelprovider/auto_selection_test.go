@@ -124,7 +124,7 @@ func TestPreferredAutoModelScopesSenseNovaPreferencesToTokenPlan(t *testing.T) {
 	models := []orm.UserModelProviderGroupModel{
 		{ID: "classic-first", Name: "SenseChat-5", ModelType: "llm"},
 		{
-			ID: "token-plan", Name: "sensenova-6.7-flash-lite", ModelType: "llm",
+			ID: "token-plan", Name: "sensenova-6.8-flash-lite", ModelType: "llm",
 			FreeAutoSelectPriority: 1,
 			FreeAutoSelectBaseURLs: `["https://token.sensenova.cn/v1/chat/completions"]`,
 		},

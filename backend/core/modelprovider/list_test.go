@@ -121,7 +121,7 @@ func TestListUserProvidersReturnsCatalogDescriptionForRequestedLanguage(t *testi
 		t.Fatalf("unexpected catalog free auto-selection metadata: %#v", freeModel)
 	}
 	var scopedFreeModel orm.DefaultModel
-	if err := db.Where("provider_name = ? AND name = ?", "SenseNova", "sensenova-6.7-flash-lite").
+	if err := db.Where("provider_name = ? AND name = ?", "SenseNova", "sensenova-6.8-flash-lite").
 		Take(&scopedFreeModel).Error; err != nil {
 		t.Fatalf("load scoped catalog free model: %v", err)
 	}

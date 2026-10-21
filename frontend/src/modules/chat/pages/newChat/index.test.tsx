@@ -3,6 +3,7 @@ import { forwardRef, useImperativeHandle } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { useChatInputStore } from "@/modules/chat/store/chatInput";
 import NewChatPage from "./index";
 import type { ShowcaseCase } from "@/modules/showcase/api";
 
@@ -214,6 +215,7 @@ vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
 
 describe("NewChatPage featured templates", () => {
   beforeEach(() => {
+    useChatInputStore.getState().setModeDraft();
     window.sessionStorage.clear();
     mocks.setThinkingDepth.mockClear();
     mocks.listShowcaseCases.mockReset();
@@ -295,6 +297,30 @@ describe("NewChatPage featured templates", () => {
       );
       expect(mocks.latestChatInputProps.runInBackground).toBe(false);
     });
+  });
+
+  it('preserves the welcome draft and uploaded files when switching entry mode', async () => {
+    window.sessionStorage.setItem('chat_new_run_in_background', '0');
+    render(<MemoryRouter initialEntries={['/agent/chat/home']}><NewChatPage /></MemoryRouter>);
+    await waitFor(() => expect(mocks.latestChatInputProps).not.toBeNull());
+    act(() => mocks.latestChatInputProps.onChange('Keep this draft @'));
+    const cleared = mocks.clearFiles.mock.calls.length;
+    act(() => window.dispatchEvent(new CustomEvent('lazymind:chat-select-conversation', { detail: { conversationId: '', runInBackground: true } })));
+    await waitFor(() => expect(mocks.latestChatInputProps.runInBackground).toBe(true));
+    expect(mocks.latestChatInputProps.value).toBe('Keep this draft @');
+    expect(mocks.clearFiles).toHaveBeenCalledTimes(cleared);
+  });
+
+  it('restores the draft transferred from a historical conversation on mode change', async () => {
+    const mention = { mention_id: 'draft-skill', type: 'skill', resource_id: 's1', display_name: 'Skill', start: 0, end: 5 };
+    render(<MemoryRouter initialEntries={['/agent/chat/home/existing']}><Routes><Route path='/agent/chat/home/:conversationId' element={<NewChatPage />} /></Routes></MemoryRouter>);
+    await waitFor(() => expect(mocks.latestChatInputProps).not.toBeNull());
+    useChatInputStore.getState().setModeDraft({ text: 'Skill draft', mentions: [{ ...mention, type: 'skill' }], files: [] });
+    act(() => window.dispatchEvent(new CustomEvent('lazymind:chat-select-conversation', { detail: {
+      conversationId: '', runInBackground: true,
+    } })));
+    await waitFor(() => expect(mocks.latestChatInputProps.value).toBe('Skill draft'));
+    expect(mocks.latestChatInputProps.transferredDraft.mentions).toEqual([mention]);
   });
 
   it("opens a work demo in New task mode even when Quick Q&A was active", async () => {

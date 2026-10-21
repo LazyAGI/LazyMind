@@ -29,19 +29,25 @@ test('Mac component staging restores the runtime on mismatched Python architectu
  const {createRequire}=await import('node:module');
  const require=createRequire(import.meta.url);
  const root=mkdtempSync(path.join(tmpdir(),'mac-component-failure-'));
- const oldStage=process.env.LAZYMIND_DESKTOP_RUNTIME_STAGE,oldMode=process.env.LAZYMIND_DESKTOP_SIGNING_MODE;
+ const oldStage=process.env.LAZYMIND_DESKTOP_RUNTIME_STAGE,oldMode=process.env.LAZYMIND_DESKTOP_SIGNING_MODE,oldLauncher=process.env.LAZYMIND_DESKTOP_MAC_LAUNCHER;
  try {
   const runtime=path.join(root,'LazyMind.app/Contents/Resources/runtime');
+  const macos=path.join(root,'LazyMind.app/Contents/MacOS');mkdirSync(macos,{recursive:true});
   const bin=path.join(runtime,'deps/python/algorithm/bin');mkdirSync(bin,{recursive:true});
+  const launcher=path.join(root,'launcher');writeFileSync(launcher,'launcher',{mode:0o755});
+  writeFileSync(path.join(macos,'LazyMind'),'electron',{mode:0o755});
   writeFileSync(path.join(bin,'python'),`#!/bin/sh\necho ${process.arch==='arm64'?'x86_64':'arm64'}\n`,{mode:0o755});
-  process.env.LAZYMIND_DESKTOP_RUNTIME_STAGE=runtime;process.env.LAZYMIND_DESKTOP_SIGNING_MODE='none';
+  process.env.LAZYMIND_DESKTOP_RUNTIME_STAGE=runtime;process.env.LAZYMIND_DESKTOP_SIGNING_MODE='none';process.env.LAZYMIND_DESKTOP_MAC_LAUNCHER=launcher;
   const config=require('../electron/electron-builder.config.cjs');
-  await assert.rejects(config.afterPack({electronPlatformName:'darwin',arch:process.arch==='arm64'?3:1,appOutDir:root}),/does not match native build/);
+  await assert.rejects(config.afterPack({electronPlatformName:'darwin',arch:process.arch==='arm64'?3:1,appOutDir:root,packager:{appInfo:{productFilename:'LazyMind'}}}),/does not match native build/);
+  assert.equal(readFileSync(path.join(macos,'LazyMind'),'utf8'),'launcher');
+  assert.equal(readFileSync(path.join(macos,'LazyMindApp'),'utf8'),'electron');
   assert.ok(existsSync(path.join(bin,'python')));
   assert.equal(existsSync(path.join(root,'.lazymind-runtime-for-signing')),false);
  } finally {
   if(oldStage===undefined) delete process.env.LAZYMIND_DESKTOP_RUNTIME_STAGE;else process.env.LAZYMIND_DESKTOP_RUNTIME_STAGE=oldStage;
   if(oldMode===undefined) delete process.env.LAZYMIND_DESKTOP_SIGNING_MODE;else process.env.LAZYMIND_DESKTOP_SIGNING_MODE=oldMode;
+  if(oldLauncher===undefined) delete process.env.LAZYMIND_DESKTOP_MAC_LAUNCHER;else process.env.LAZYMIND_DESKTOP_MAC_LAUNCHER=oldLauncher;
   rmSync(root,{recursive:true,force:true});
  }
 });

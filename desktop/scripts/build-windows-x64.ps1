@@ -14,6 +14,7 @@ $runtimeRoot = Join-Path $targetRoot 'runtime'
 $distRoot = Join-Path $repoRoot 'desktop\dist'
 $electronRoot = Join-Path $repoRoot 'desktop\electron'
 $installerResourcesRoot = Join-Path $targetRoot 'installer-resources'
+$desktopLauncherPath = Join-Path $targetRoot 'lazymind-desktop-launcher.exe'
 $pythonVersion = '3.11.15'
 $goBuildArgs = @('-trimpath', '-buildvcs=false', '-ldflags=-s -w')
 
@@ -98,6 +99,7 @@ function Initialize-Environment {
     $env:LAZYMIND_DESKTOP_RUNTIME_STAGE = $runtimeRoot
     $env:LAZYMIND_DESKTOP_OUTPUT_DIR = $distRoot
     $env:LAZYMIND_DESKTOP_WINDOWS_ICON = Join-Path $targetRoot 'LazyMind.ico'
+    $env:LAZYMIND_DESKTOP_WINDOWS_LAUNCHER = $desktopLauncherPath
     $env:LAZYMIND_DESKTOP_INSTALLER_RESOURCES = $installerResourcesRoot
     if (-not $env:ELECTRON_CACHE) {
         $env:ELECTRON_CACHE = Join-Path $repoRoot 'desktop\cache\electron'
@@ -235,7 +237,7 @@ function Assert-WindowsGUISubsystem([string]$Path) {
     }
     $subsystem = [BitConverter]::ToUInt16($bytes, $subsystemOffset)
     if ($subsystem -ne 2) {
-        throw "Desktop local-runtime-manager must use the Windows GUI subsystem; got PE subsystem $subsystem"
+        throw "Desktop executable must use the Windows GUI subsystem; got PE subsystem $subsystem"
     }
 }
 
@@ -450,6 +452,8 @@ function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind 
         (Join-Path $electronRoot 'assets\LazyMind.icns'),
         $env:LAZYMIND_DESKTOP_WINDOWS_ICON
     )
+    Build-GoBinary (Join-Path $repoRoot 'local\local-runtime-manager') $desktopLauncherPath @('.\cmd\desktop-launcher') -WindowsGUI
+    Assert-WindowsGUISubsystem $desktopLauncherPath
     Invoke-NativeWithRetry 'Electron dependency install' 'pnpm.cmd' @('install', '--frozen-lockfile', '--prefer-offline') $electronRoot
     Remove-GeneratedPath (Join-Path $distRoot 'win-unpacked')
     Remove-GeneratedPath (Join-Path $distRoot 'LazyMind-win-x64.zip')
@@ -489,6 +493,9 @@ function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind 
     $finalZip = Join-Path $distRoot $finalZipName
     if (-not (Test-Path -LiteralPath (Join-Path $distRoot 'win-unpacked\LazyMind.exe') -PathType Leaf)) {
         throw 'Electron Builder did not produce win-unpacked/LazyMind.exe'
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $distRoot 'win-unpacked\LazyMindApp.exe') -PathType Leaf)) {
+        throw 'Electron Builder did not preserve the internal Electron executable as win-unpacked/LazyMindApp.exe'
     }
     if (-not (Test-Path -LiteralPath $builderZip -PathType Leaf)) {
         throw "Electron Builder did not produce $builderZip"
@@ -549,16 +556,23 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     Invoke-Native 'uv.exe' @('venv', '--managed-python', '--no-python-downloads', '--relocatable', '--seed', '--link-mode', 'copy', '--python', $python, $algorithmVenv)
     $algorithmPython = Join-Path $algorithmVenv 'Scripts\python.exe'
     $lazyLLMVersion = if ($env:LAZYMIND_LAZYLLM_VERSION) { $env:LAZYMIND_LAZYLLM_VERSION } else { (Get-Content -LiteralPath (Join-Path $repoRoot 'LAZYLLM_VERSION') -Raw).Trim() }
+    $effectiveComponentLock = Join-Path $targetRoot 'windows-amd64-requirements.lock'
+    Invoke-Native $python @(
+        (Join-Path $repoRoot 'desktop\scripts\materialize-python-component-lock.py'),
+        (Join-Path $repoRoot 'desktop\python-components\windows-amd64-requirements.lock'),
+        $effectiveComponentLock,
+        $lazyLLMVersion
+    )
     Write-Host '==> Installing the locked Windows algorithm dependencies for a separate RAG ZIP'
     Invoke-NativeWithRetry 'Locked Windows algorithm dependencies' 'uv.exe' @(
         'pip', 'install', '--python', $algorithmPython, '--link-mode', 'copy', '--strict',
-        '-r', (Join-Path $repoRoot 'desktop\python-components\windows-amd64-requirements.lock'),
+        '-r', $effectiveComponentLock,
         '-r', (Join-Path $repoRoot 'algorithm\requirements.txt'),
         '-r', (Join-Path $repoRoot 'algorithm\requirements-local.txt')
     )
     Invoke-Native $algorithmPython @('-c', "import importlib.metadata as m; assert m.version('lazyllm') == '$lazyLLMVersion'")
     Invoke-Native $algorithmPython @('-B', '-m', 'unittest', 'discover', '-s', (Join-Path $repoRoot 'tests'), '-p', 'test_desktop_windows_milvus.py', '-v')
-    Write-Host '==> Applying the verified Windows Milvus manifest replacement fix'
+    Write-Host '==> Applying the verified Windows Milvus storage fixes'
     Invoke-Native $algorithmPython @((Join-Path $repoRoot 'desktop\scripts\patch-windows-milvus.py'), $runtimeRoot)
     Write-Host '==> Pruning bundled Python runtime'
     $pythonPruneArgs = @(

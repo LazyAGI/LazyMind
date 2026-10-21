@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Empty, Pagination, Spin, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { listScheduleTasks, type Task } from './api';
+import { TASKS_REMOVED_EVENT } from './events';
 import { taskStatusDescription } from './taskStatusDescription';
 
 export default function ScheduleRunHistory({ scheduleId, currentId, onSelect }: {
@@ -19,11 +20,12 @@ export default function ScheduleRunHistory({ scheduleId, currentId, onSelect }: 
     let active = true;
     setLoading(true); setFailed(false);
     listScheduleTasks(scheduleId, page, 5).then(value => {
-      if (active) setResult({ ...value, page });
+      if (active) { const lastPage = Math.max(1, Math.ceil(value.total / 5)); if (page > lastPage) setPage(lastPage); else setResult({ ...value, page }); }
     }).catch(() => { if (active) setFailed(true); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [scheduleId, page, version]);
+  useEffect(() => { const refresh = () => setVersion(v => v + 1); window.addEventListener(TASKS_REMOVED_EVENT, refresh); return () => window.removeEventListener(TASKS_REMOVED_EVENT, refresh); }, []);
   const items = result.page === page ? result.items : [];
   const changePage = (nextPage: number) => {
     // Keep the drawer from collapsing while rows load or on a shorter last page.

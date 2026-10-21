@@ -1,0 +1,8 @@
+.workflow-task-progress {
+  margin: 12px; padding: 12px;
+  header, summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  ol { margin: 0; padding-left: 20px; }
+  li { padding: 10px 0; }
+  summary { cursor: pointer; }
+  p { color: var(--text-secondary, #64748b); }
+}

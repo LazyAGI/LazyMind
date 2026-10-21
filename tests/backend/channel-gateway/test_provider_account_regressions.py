@@ -13,7 +13,7 @@ from channel_gateway.feishu.domain import FeishuAppCredentials
 from channel_gateway.wechat.client import WeChatClient
 from channel_gateway.wechat.domain import WeChatConfig, WeChatRejectedError
 from channel_gateway.wechat.runtime import WeChatRuntime, _AccountWorker
-from channel_gateway.wechat.service import WeChatConnectionService, _wechat_account_label
+from channel_gateway.wechat.service import WeChatConnectionService, _LoginWorker, _wechat_account_label
 
 
 class AccountStore:
@@ -164,6 +164,89 @@ def test_wechat_resume_requires_scanning_when_retained_token_is_rejected():
 
     assert error.value.code == 'WECHAT_REAUTHORIZATION_REQUIRED'
     assert store.calls == []
+
+
+class QRLoginClient:
+    def __init__(self):
+        self.local_tokens = []
+        self.already_bound = False
+
+    def start_login(self, local_tokens=()):
+        self.local_tokens.append(local_tokens)
+        self.already_bound = bool(local_tokens)
+        return 'qr-id', 'https://wechat.test.invalid/qr', 'https://ilinkai.weixin.qq.com'
+
+    def poll_login_status(self, *args):
+        if self.already_bound:
+            return {'status': 'binded_redirect'}
+        return {
+            'status': 'confirmed', 'bot_token': 'renewed-token',
+            'ilink_bot_id': 'original-bot', 'ilink_user_id': 'recipient-a',
+            'baseurl': 'https://ilinkai.weixin.qq.com',
+        }
+
+
+@pytest.mark.parametrize('requested_account', [False, True])
+@pytest.mark.parametrize('qr_state', ['new', 'expired', 'already_bound'])
+def test_wechat_scan_after_disconnect_renews_original_account(
+    gateway, account, incoming, monkeypatch, requested_account, qr_state,
+):
+    original = account(identity='original-bot')
+    incoming(original, context='retained-notification-context')
+    other = account(identity='another-bot')
+    client = QRLoginClient()
+    connected = []
+    service = WeChatConnectionService(
+        config=WeChatConfig('https://ilinkai.weixin.qq.com', 480, 40, 3, 1800, '/tmp', 1024),
+        store=gateway.store, cipher=gateway.cipher, client=client,
+        on_account_connected=connected.append,
+    )
+    monkeypatch.setattr(service, '_start_worker', lambda *args: None)
+    service.disconnect_account('owner', original['id'])
+    session = service.create_session(
+        owner_user_id='owner', idempotency_key=None,
+        account_id=original['id'] if requested_account else None,
+    )
+
+    def poll(current):
+        worker = _LoginWorker(stop_event=threading.Event())
+        version = current['qr']['version']
+        service._workers[(current['id'], version)] = worker
+        service._poll_worker(current['id'], version, worker)
+
+    if qr_state == 'expired':
+        gateway.store.mark_expired(session['id'], session['qr']['version'])
+    elif qr_state == 'already_bound':
+        # An old QR generated before the fix can still receive this status.
+        client.already_bound = True
+        poll(session)
+        failed = service.get_session('owner', session['id'])
+        assert failed['status'] == 'failed'
+        assert failed['error']['retryable'] is True
+        assert 'refresh' in failed['allowed_actions']
+    if qr_state != 'new':
+        session = service.refresh_session('owner', session['id'])
+    poll(session)
+
+    completed = service.get_session('owner', session['id'])
+    assert completed['status'] == 'connected'
+    assert completed['account']['id'] == original['id']
+    assert client.local_tokens == [()] * (1 if qr_state == 'new' else 2)
+    assert connected == [original['id']]
+    rows = gateway.store.list_accounts('owner', 'wechat')
+    assert {row['id'] for row in rows} == {original['id'], other['id']}
+    restored = gateway.store.get_account('owner', original['id'])
+    credentials = gateway.cipher.decrypt('owner', restored['credentials_ciphertext'])
+    assert credentials['token'] == 'renewed-token'
+    targets = gateway.store.notification_targets('owner', original['id'])['items']
+    assert targets[0]['recipient_id'] == 'recipient-a'
+    # Disconnect invalidates the old conversation context. A new message
+    # activates notifications again without changing the task's recipient id.
+    assert targets[0]['available'] is False
+    incoming(restored, context='renewed-notification-context')
+    assert gateway.store.notification_context('owner', original['id'], 'recipient-a', 'wechat') == {
+        'context_token': 'renewed-notification-context',
+    }
 
 
 def test_wechat_runtime_disconnects_account_when_provider_rejects_token():

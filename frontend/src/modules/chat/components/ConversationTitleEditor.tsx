@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
-import { Button } from "antd";
+import { Button, Modal } from "antd";
 import "./ConversationTitleEditor.scss";
 import { useTranslation } from "react-i18next";
 import { ChatServiceApi } from "../utils/request";
@@ -51,7 +51,6 @@ export default function ConversationTitleEditor({ conversationId, initialTitle =
 
   useEffect(() => {
     active.current = true;
-    const host = input.current?.closest<HTMLElement>(".record, .conversation-group-member, .conversation-group-page-item");
     void load();
     return () => {
       active.current = false;
@@ -59,7 +58,6 @@ export default function ConversationTitleEditor({ conversationId, initialTitle =
       queueMicrotask(() => {
         if (active.current || !restoreFocus.current) return;
         if (returnFocus.current?.isConnected) returnFocus.current.focus();
-        else if (host?.isConnected) (host.querySelector<HTMLButtonElement>("button") || host).focus();
       });
     };
   }, [load]);
@@ -77,11 +75,11 @@ export default function ConversationTitleEditor({ conversationId, initialTitle =
     onClose();
   };
 
-  const save = async (restore: boolean) => {
+  const save = async () => {
     if (!valid || revision === null || loading || pending.current || closing.current) return;
-    restoreFocus.current = restore;
+    restoreFocus.current = true;
     if (normalized === originalTitle.current.trim()) {
-      close(restore);
+      close(true);
       return;
     }
     pending.current = true;
@@ -109,7 +107,12 @@ export default function ConversationTitleEditor({ conversationId, initialTitle =
     }
   };
 
-  return <div className="conversation-title-editor" aria-busy={loading || saving}
+  return <Modal open title={t("conversationOrganizer.renameConversation")} width={420}
+    className="conversation-title-modal" maskClosable={false} keyboard={!saving} closable={!saving}
+    okText={t("common.save")} cancelText={t("common.cancel")} confirmLoading={saving}
+    okButtonProps={{ disabled: loading || !valid || revision === null, "aria-label": t("common.save") }} cancelButtonProps={{ disabled: saving }}
+    onOk={() => void save()} onCancel={() => { if (!pending.current) close(true); }}>
+    <div className="conversation-title-editor" aria-busy={loading || saving}
     onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}
     onKeyDown={event => {
       event.stopPropagation();
@@ -118,7 +121,9 @@ export default function ConversationTitleEditor({ conversationId, initialTitle =
         close(true);
       }
     }}>
-    <input autoFocus ref={input} className="conversation-title-editor-input" value={title} readOnly={loading || saving}
+    <label htmlFor={`${helpId}-input`}>{t("conversationRename.name")}</label>
+    <input autoFocus ref={input} id={`${helpId}-input`} className="conversation-title-editor-input" value={title} readOnly={loading || saving}
+      autoComplete="off"
       aria-label={t("conversationRename.name")} aria-describedby={error || (!loading && !valid) ? helpId : undefined}
       aria-invalid={!valid && !loading}
       onChange={(event: ChangeEvent<HTMLInputElement>) => {
@@ -126,17 +131,10 @@ export default function ConversationTitleEditor({ conversationId, initialTitle =
         setTitle(event.target.value);
         setError(current => current === "conversationRename.loadFailed" ? current : "");
       }}
-      onBlur={() => {
-        if (closing.current) return;
-        restoreFocus.current = false;
-        if (pending.current || error) return;
-        if (loading && !keepDraft.current) close(false);
-        else void save(false);
-      }}
       onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
         if (event.key === "Enter" && !event.nativeEvent.isComposing && event.keyCode !== 229) {
           event.preventDefault();
-          void save(true);
+          void save();
         }
       }} />
     {(error || (!loading && !valid)) && <div id={helpId} className="conversation-title-editor-error" role="alert">
@@ -144,5 +142,6 @@ export default function ConversationTitleEditor({ conversationId, initialTitle =
       {error === "conversationRename.loadFailed" && <Button type="link" size="small" disabled={loading}
         onClick={() => void load()}>{t("common.retry")}</Button>}
     </div>}
-  </div>;
+    </div>
+  </Modal>;
 }

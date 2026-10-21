@@ -6,6 +6,7 @@ import {
   packagedRuntimePaths,
   runPackagedAppSmoke,
   terminatePackagedApp,
+  verifyPackagedAPI,
   waitForPackagedRuntime,
 } from "./packaged-app-smoke.mjs";
 
@@ -45,6 +46,26 @@ function successfulAPIFetch(url) {
   return { ok: true };
 }
 
+test("conversion failure includes the response body", async () => {
+  const state = { config: { localProxy: { Port: 18090 } } };
+  await assert.rejects(verifyPackagedAPI(state, async (url) => {
+    if (url.endsWith("writer-download-conversions:convert")) {
+      return new Response("writer download conversion failed", { status: 422 });
+    }
+    return successfulAPIFetch(url);
+  }), /HTTP 422\nCore response: writer download conversion failed/);
+});
+
+test("a failed response read preserves the original conversion failure", async () => {
+  const state = { config: { localProxy: { port: 18090 } } };
+  await assert.rejects(verifyPackagedAPI(state, async (url) => {
+    if (url.endsWith("writer-download-conversions:convert")) {
+      return { ok: false, status: 422, text: async () => { throw new Error("connection closed"); } };
+    }
+    return successfulAPIFetch(url);
+  }), /HTTP 422[\s\S]*Conversion diagnostics unavailable: connection closed/);
+});
+
 test("waits through missing and starting state until Desktop is ready", async () => {
   const values = [new Error("missing"), { profile: "desktop", overallStatus: "starting" }, { profile: "desktop", overallStatus: "ready" }];
   const state = await waitForPackagedRuntime("/runtime", {
@@ -57,6 +78,22 @@ test("waits through missing and starting state until Desktop is ready", async ()
     },
   });
   assert.equal(state.overallStatus, "ready");
+});
+
+test("waits for normal startup after the ready installer-warmup runtime shuts down", async () => {
+  const normalState = { profile: "desktop", overallStatus: "ready", config: {} };
+  const values = [
+    { profile: "desktop", overallStatus: "ready", config: { maintenanceMode: "installer-warmup" } },
+    { profile: "desktop", overallStatus: "stopped", config: { maintenanceMode: "installer-warmup" } },
+    { profile: "desktop", overallStatus: "starting", config: {} },
+    normalState,
+  ];
+  const state = await waitForPackagedRuntime("/runtime", {
+    pollIntervalMs: 0,
+    timeoutMs: 100,
+    readState: async () => values.shift(),
+  });
+  assert.equal(state, normalState);
 });
 
 test("force kills a packaged app that stays resident after SIGTERM", async () => {

@@ -36,6 +36,7 @@ const GroupManagement = lazy(() => import("@/modules/admin/pages/group"));
 const GroupDetail = lazy(() => import("@/modules/admin/pages/group/detail.tsx"));
 const DatabaseConnectionsPage = lazy(() => import("@/modules/dataSource/database"));
 const DataSourceFeishuCallback = lazy(() => import("@/modules/dataSource/common/feishuCallback"));
+const DocumentDirectoriesPage = lazy(() => import("@/modules/documentDirectories/DirectoryPage"));
 const CloudDocumentsPage = lazy(() => import("@/modules/modelProvider/pages/CloudDocumentsPage"));
 const FeishuAccountPage = lazy(() => import("@/modules/modelProvider/pages/FeishuAccountPage"));
 const WeChatOfficialAccountPage = lazy(() => import("@/modules/modelProvider/pages/WeChatOfficialAccountPage"));
@@ -202,6 +203,8 @@ export default function AppRouter() {
             path="channels/feishu"
             element={<Navigate to="/channels?provider=feishu" replace />}
           />
+          <Route path="document-directories" element={<DocumentDirectoriesPage />} />
+          <Route path="document-directories/:directoryId" element={<DocumentDirectoriesPage />} />
           <Route path="cloud-documents" element={<CloudDocumentsLayout />}>
             <Route index element={<CloudDocumentsPage />} />
             <Route path="mail" element={<EmailConnectionPage />} />

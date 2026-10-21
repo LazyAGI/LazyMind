@@ -24,6 +24,7 @@ import {
 import { getKnowledgeBaseCapabilities, getLearningCatalog, saveKnowledgeBaseCapabilities, type LearningCapability } from "@/modules/learning/api";
 import CapabilitySettings, { capabilityRefsFromForm, parseCapabilitySettings } from "@/modules/learning/CapabilitySettings";
 import { isPaperLibrary } from "@/modules/knowledge/paper/store";
+import "./index.scss";
 
 const { TextArea } = Input;
 const KNOWLEDGE_TAG_MAX_LENGTH = 20;
@@ -186,6 +187,7 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
 
     return (
       <Modal
+        className="knowledge-update-modal"
         open={visible}
         title={
           data
@@ -198,7 +200,7 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
         width={576}
         okButtonProps={{ disabled: loading }}
       >
-        <Form form={form} layout="vertical">
+        <Form form={form} layout="vertical" className="knowledge-update-form">
           <Form.Item
             name="display_name"
             label={t("knowledge.knowledgeBaseName")}

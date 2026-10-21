@@ -290,11 +290,14 @@ func removeDSHConfig(path string) error {
 func readYAMLDocument(path string) (*yaml.Node, error) {
 	document := &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.SequenceNode}}}
 	body, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) || len(bytes.TrimSpace(body)) == 0 {
+	if errors.Is(err, os.ErrNotExist) {
 		return document, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return document, nil
 	}
 	if err := yaml.Unmarshal(body, document); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", path, err)

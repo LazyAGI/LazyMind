@@ -48,9 +48,31 @@ beforeEach(() => {
   chatActions.prepareMessage.mockClear();
   ensureDocumentParsed.mockClear();
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe("document question context", () => {
+  it("prepares the same text again for a new selection action without duplicating unchanged selections", async () => {
+    vi.useFakeTimers();
+    ensureDocumentParsed.mockResolvedValueOnce({ status: "parsed" });
+    const selection = { source: "pdf" as const, text: "capabilities", page: 1 };
+    const props = { datasetId: "dataset-a", documentId: "document-md", fileName: "source.md", onClose: vi.fn() };
+    const { rerender } = render(<PdfTemporaryChat {...props} selection={selection} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+    expect(chatActions.prepareMessage).toHaveBeenCalledOnce();
+
+    rerender(<PdfTemporaryChat {...props} selection={selection} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+    expect(chatActions.prepareMessage).toHaveBeenCalledOnce();
+
+    rerender(<PdfTemporaryChat {...props} selection={{ ...selection }} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+    expect(chatActions.prepareMessage).toHaveBeenCalledTimes(2);
+    expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ text: "", citeMessage: "capabilities", appendCitations: true });
+  });
+
   it("starts on-demand parsing when document chat is first opened", async () => {
     render(<PdfTemporaryChat datasetId="dataset-a" documentId="document-pdf" fileName="source.pdf" onClose={() => {}} />);
     await act(async () => { await Promise.resolve(); });

@@ -21,8 +21,10 @@ func platformExecutableCandidates(names []string) []string {
 	pathValue := effectiveWindowsPath()
 	pathExt := windowsPathExtensions()
 	for _, name := range names {
-		if path := lookPathIn(name, pathValue, pathExt); path != "" {
-			candidates = append(candidates, path)
+		for _, directory := range filepath.SplitList(pathValue) {
+			if path := lookPathIn(name, directory, pathExt); path != "" {
+				candidates = append(candidates, path)
+			}
 		}
 		if path := appPath(name); path != "" {
 			candidates = append(candidates, path)

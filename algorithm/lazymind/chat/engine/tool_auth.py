@@ -27,4 +27,4 @@ def inject_tool_config(tool_config: Optional[dict[str, Any]]) -> None:
         if name not in {'google', 'bing', 'bocha', 'tavily'}
     }
     clear_mail_tool_auth()
-    _inject_tool_config(tool_config)
+    _inject_tool_config({k: v for k, v in (tool_config or {}).items() if k != 'document_directory_scopes'})

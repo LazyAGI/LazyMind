@@ -17,7 +17,7 @@ const skillApiMocks = vi.hoisted(() => ({
   listSkillOrganizeTasks: vi.fn(),
   waitForSkillOrganize: vi.fn(),
 }));
-const viewMocks = vi.hoisted(() => ({ props: {} as Record<string, any>, review: {} as Record<string, any> }));
+const viewMocks = vi.hoisted(() => ({ props: {} as Record<string, any>, review: {} as Record<string, any>, approval: {} as Record<string, any> }));
 const contextMocks = vi.hoisted(() => ({
   useMemoryManagementOutletContext: vi.fn(),
 }));
@@ -26,6 +26,7 @@ vi.mock("../../skillApi", () => skillApiMocks);
 vi.mock("../../context", () => contextMocks);
 vi.mock("./skillDraftReview", () => ({ listPendingSkillDrafts: vi.fn().mockResolvedValue([]) }));
 vi.mock("./SkillDraftReviewPanel", () => ({ default: (props: Record<string, any>) => { viewMocks.review = props; return <span>draft-review</span>; } }));
+vi.mock("./SkillOrganizeApprovalPanel", () => ({ default: (props: Record<string, any>) => { viewMocks.approval = props; return props.expanded ? <span>organize-approval</span> : null; } }));
 vi.mock("@/components/auth", () => ({
   AgentAppsAuth: { getUserInfo: () => ({ role: "user" }) },
 }));
@@ -329,7 +330,9 @@ describe("SkillManagementSection organize task recovery", () => {
     await waitFor(() => {
       expect(screen.getByTestId("organize-status")).toHaveTextContent("success");
       expect(screen.getByTestId("organize-disabled")).toHaveTextContent("false");
+      expect(screen.getByText("organize-approval")).toBeVisible();
     });
+    expect(viewMocks.approval.hiddenRequestId).toBe("");
     expect(refreshSkillAssets).toHaveBeenCalledWith({ page: 1 });
   });
 

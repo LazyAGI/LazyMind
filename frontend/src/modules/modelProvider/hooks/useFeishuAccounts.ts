@@ -40,12 +40,14 @@ export function useFeishuAccounts() {
   const [addingAccount, setAddingAccount] = useState(false);
   const chatUpdates = useRef(new Set<string>());
   const [chatUpdatingAccountIds, setChatUpdatingAccountIds] = useState<string[]>([]);
+  const refreshRequest = useRef(0);
 
   const persistAccounts = (nextAccounts: FeishuAuthAccount[]) => {
     setAccounts(nextAccounts);
   };
 
   const refreshAccounts = useCallback(async () => {
+    const request = ++refreshRequest.current;
     setAccountsLoading(true);
     try {
       const response =
@@ -53,6 +55,7 @@ export function useFeishuAccounts() {
           provider: "feishu",
           status: null,
         });
+      if (request !== refreshRequest.current) return;
       setAccounts((currentAccounts) =>
         getCloudConnectionItems(response.data).map((item) =>
           mapCloudConnectionToFeishuAccount(item, currentAccounts),
@@ -60,7 +63,7 @@ export function useFeishuAccounts() {
       );
     } catch {
     } finally {
-      setAccountsLoading(false);
+      if (request === refreshRequest.current) setAccountsLoading(false);
     }
   }, [t]);
 
@@ -96,9 +99,14 @@ export function useFeishuAccounts() {
     };
 
     window.addEventListener("message", handleMessage);
+    const refreshOnReturn = () => { void refreshAccounts(); };
+    window.addEventListener("focus", refreshOnReturn);
+    window.addEventListener("pageshow", refreshOnReturn);
 
     return () => {
       window.removeEventListener("message", handleMessage);
+      window.removeEventListener("focus", refreshOnReturn);
+      window.removeEventListener("pageshow", refreshOnReturn);
       clearOauthAttempt();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -240,7 +248,7 @@ export function useFeishuAccounts() {
       account.credential_location === "cloud";
 
     if (connectionId && isManagedOrCLI) {
-      void startFeishuCLISession(connectionId, undefined, t)
+      void startFeishuCLISession(connectionId, () => { void refreshAccounts(); }, t)
         .then(async (completedConnectionId) => {
           if (!completedConnectionId) {
             message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
@@ -252,7 +260,8 @@ export function useFeishuAccounts() {
         })
         .catch(() => {
           message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
-        });
+        })
+        .finally(() => { void refreshAccounts(); });
       return;
     }
 

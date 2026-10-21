@@ -79,6 +79,7 @@ def test_artifact_batch_normalizes_all_file_shapes(host_root, monkeypatch):
     result = artifacts.resolve_artifact_files(arguments)
     assert {item.path for item in result.files if item.operation == 'read'} == {
         str(host_root / name) for name in ('one.txt', 'two.txt', 'three.txt', 'four.png')}
+    assert {item.path for item in result.files if item.operation == 'write'} == {str(host_root / 'task')}
     assert result.arguments['artifacts'][1]['value'] == [str(host_root / 'two.txt'), str(host_root / 'three.txt')]
     assert result.arguments['artifacts'][2]['value']['caption'] == 'image'
     assert arguments['artifacts'][0]['value']['path'] == '../one.txt'

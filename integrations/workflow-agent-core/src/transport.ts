@@ -6,7 +6,8 @@ export interface HostAction {
   session_id: string
   kind: 'continue' | 'cancel'
   native_session_id: string
-  binding_generation: number
+  /** Legacy wire field, ignored by delivery and runtime control. */
+  binding_generation?: number
   execution_id?: string
   status: string
   consumed_at?: string

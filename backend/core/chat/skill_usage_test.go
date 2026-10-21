@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -70,6 +71,14 @@ func TestSkillUsageRecognizesExplicitNameNotIncidentalText(t *testing.T) {
 	skills := []orm.SkillV2Skill{{ID: "a", Category: "external", SkillName: "paper"}, {ID: "b", Category: "internal", SkillName: "paper"}}
 	if _, err := explicitSkillMentions("请使用 paper Skill", skills); err == nil {
 		t.Fatal("ambiguous name must require disambiguation")
+	} else {
+		var ambiguity *skillNameAmbiguousError
+		if !errors.As(err, &ambiguity) {
+			t.Fatalf("ambiguity error type = %T, want skillNameAmbiguousError", err)
+		}
+		if ambiguity.RequestedName != "paper" || !sameStrings(ambiguity.Candidates, []string{"external/paper", "internal/paper"}) {
+			t.Fatalf("ambiguity = %#v", ambiguity)
+		}
 	}
 	for _, query := range []string{"paper Skill 是什么？", "请使用 paperclip", "不要使用 paperclip"} {
 		got, err := explicitSkillMentions(query, skills)
@@ -89,6 +98,46 @@ func TestSkillUsageStructuredMentionDisambiguatesExactName(t *testing.T) {
 	got, err := explicitSkillMentions("请使用 @paper Skill", skills, chatMention{Type: "skill", ResourceID: "b", DisplayName: "paper", Start: &position})
 	if err != nil || len(got) != 1 || got[0].ResourceID != "b" {
 		t.Fatalf("structured choice ignored: %v %v", got, err)
+	}
+}
+
+func TestSkillAmbiguitySelectionRestoresOriginalTaskWithFullName(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.ChatHistory{})
+	ask := buildSkillAmbiguityAskPending("使用 wechat-cover skill，生成封面", &skillNameAmbiguousError{
+		RequestedName: "wechat-cover",
+		Candidates:    []string{"design/wechat-cover", "external/wechat-cover"},
+	})
+	ext, err := json.Marshal(map[string]any{"ask_pending": ask})
+	if err != nil {
+		t.Fatal(err)
+	}
+	history := orm.ChatHistory{ID: "history", ConversationID: "conv", Ext: ext}
+	if err := db.Create(&history).Error; err != nil {
+		t.Fatal(err)
+	}
+	structured := map[string]any{
+		"ask_id": ask.AskID,
+		"questions": []any{map[string]any{
+			"text":           ask.Questions[0].Text,
+			"type":           "single",
+			"choices":        []any{"design/wechat-cover", "external/wechat-cover"},
+			"custom_choices": []any{"design/wechat-cover", "external/wechat-cover"},
+			"answer":         map[string]any{"type": "single", "value": "design/wechat-cover"},
+		}},
+	}
+	resolution, err := submitSkillAmbiguitySelection(context.Background(), db.DB, []orm.ChatHistory{history}, structured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolution == nil || resolution.Query != "使用 design/wechat-cover skill，生成封面" || resolution.DisplayQuery != "使用 wechat-cover skill，生成封面" {
+		t.Fatalf("resolution = %#v", resolution)
+	}
+	var updated orm.ChatHistory
+	if err := db.First(&updated, "id = ?", "history").Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(updated.Ext), `"ask_answered":true`) {
+		t.Fatalf("selection did not mark card answered: %s", updated.Ext)
 	}
 }
 

@@ -17,6 +17,9 @@ import {
 import './ChatConfigModal.scss';
 
 interface ChatConfigPopoverProps {
+  menuHeight?: number;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   /** Prevents opening or editing while the parent composer is unavailable. */
   disabled?: boolean;
   /** When provided, settings are saved to the server immediately on change. */
@@ -80,6 +83,8 @@ export function buildExecutorCatalog(
 }
 
 export default function ChatConfigPopover({
+  menuHeight,  open: controlledOpen,
+  onOpenChange,
   disabled = false,
   conversationId,
   initialSettings,
@@ -88,7 +93,9 @@ export default function ChatConfigPopover({
   lockedWorkflowMode,
 }: ChatConfigPopoverProps) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = (next: boolean) => { setInternalOpen(next); onOpenChange?.(next); };
   const [settings, setSettings] = useState<ConversationRuntimeSettings | null>(
     initialSettings ?? null,
   );
@@ -443,13 +450,14 @@ export default function ChatConfigPopover({
 
   return (
     <Popover
+      styles={{ body: { height: menuHeight } }}
       content={content}
       open={disabled ? false : open}
       onOpenChange={handleOpenChange}
       trigger="click"
       placement="topLeft"
       arrow={false}
-      overlayClassName="chat-config-popover-overlay"
+      overlayClassName="chat-composer-menu chat-config-popover-overlay"
       destroyTooltipOnHide
     >
       <button

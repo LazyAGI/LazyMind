@@ -43,6 +43,7 @@ import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { getLocalizedErrorMessage, axiosInstance, BASE_URL, localizeErrorCode } from '@/components/request';
 import { getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import { taskStatusDescription } from './taskStatusDescription';
+import { TASKS_REMOVED_EVENT } from './events';
 
 /* ── KnowledgeSelect: reusable KB selector with embedding guard ────────── */
 interface KnowledgeSelectProps {
@@ -226,7 +227,9 @@ function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
       <TimePicker
         value={time}
         onChange={handleTimeChange}
+        onCalendarChange={handleTimeChange}
         format='HH:mm'
+        needConfirm={false}
         allowClear={false}
         style={{ width: 80 }}
       />
@@ -385,7 +388,8 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   const [activeBatchTask, setActiveBatchTask] = useState('');
   const [batchGroupName, setBatchGroupName] = useState('');
   const [batchTasks, setBatchTasks] = useState<BatchScheduleDraft[]>([]);
-  const [selectedSchedule, setSelectedSchedule] = useState<Schedule | null>(null);
+  const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null);
+  const selectedSchedule = schedules.find((schedule) => schedule.id === selectedScheduleId) ?? null;
   // Filter state
   const [statusFilter, setStatusFilter] = useState<'all' | 'enabled' | 'disabled'>('enabled');
   const [keyword, setKeyword] = useState('');
@@ -416,7 +420,11 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   }, [t, statusFilter]);
 
   useEffect(() => {
-    if (active) void fetchSchedules();
+    if (!active) return;
+    void fetchSchedules();
+    const removed = () => void fetchSchedules();
+    window.addEventListener(TASKS_REMOVED_EVENT, removed);
+    return () => window.removeEventListener(TASKS_REMOVED_EVENT, removed);
   }, [active, fetchSchedules]);
 
   // Client-side filter: status tab + keyword search
@@ -483,7 +491,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
     try {
       await deleteSchedule(schedule.id);
       setDeleteTarget(null);
-      if (selectedSchedule?.id === schedule.id) setSelectedSchedule(null);
+      if (selectedScheduleId === schedule.id) setSelectedScheduleId(null);
       message.success(t('taskCenter.scheduleDeleteSuccess'));
       await fetchSchedules();
     } catch (error) {
@@ -555,17 +563,16 @@ export default function ScheduleList({ active }: ScheduleListProps) {
         })),
       };
       if (editTarget) {
-        await updateSchedule(editTarget.id, payload);
+        const updatedSchedule = await updateSchedule(editTarget.id, payload);
+        setSchedules((items) => items.map((schedule) => schedule.id === updatedSchedule.id
+          ? { ...updatedSchedule, dependencies: updatedSchedule.dependencies ?? payload.dependencies }
+          : schedule));
         message.success(t('taskCenter.scheduleUpdateSuccess'));
       } else {
         await createSchedule(payload);
         message.success(t('taskCenter.createSuccess'));
       }
       setModalOpen(false);
-      setEditTarget(null);
-      form.resetFields();
-      setFileList([]);
-      setUploadedPaths([]);
       void fetchSchedules();
     } catch {
       // Form validation stays local; API errors use the shared interceptor.
@@ -613,7 +620,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
       onDragStart={(event) => event.dataTransfer.setData('text/schedule-id', schedule.id)}
       className={`schedule-card ${schedule.enabled ? '' : 'is-disabled'}`}
       key={schedule.id}
-      onClick={() => setSelectedSchedule(schedule)}
+      onClick={() => setSelectedScheduleId(schedule.id)}
     >
       <div className='schedule-card-identity'>
         <span className='schedule-icon'><CalendarOutlined /></span>
@@ -762,7 +769,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           ) : <Empty className='schedule-empty' description={t('taskCenter.empty')} />}
         </section>
       </Spin>
-      <Drawer className='schedule-detail-drawer' width={460} open={Boolean(selectedSchedule)} onClose={() => setSelectedSchedule(null)} title={selectedSchedule?.name || t('taskCenter.scheduleName')} footer={selectedSchedule ? <div className='schedule-detail-actions'><Button danger size='large' disabled={Boolean(deletingScheduleId)} onClick={() => setDeleteTarget(selectedSchedule)}>{t('taskCenter.scheduleDelete')}</Button><Button type='primary' size='large' onClick={() => handleOpenEdit(selectedSchedule)}>{t('taskCenter.scheduleEdit')}</Button></div> : null}>
+      <Drawer className='schedule-detail-drawer' width={460} open={Boolean(selectedSchedule)} onClose={() => setSelectedScheduleId(null)} title={selectedSchedule?.name || t('taskCenter.scheduleName')} footer={selectedSchedule ? <div className='schedule-detail-actions'><Button danger size='large' disabled={Boolean(deletingScheduleId)} onClick={() => setDeleteTarget(selectedSchedule)}>{t('taskCenter.scheduleDelete')}</Button><Button type='primary' size='large' onClick={() => handleOpenEdit(selectedSchedule)}>{t('taskCenter.scheduleEdit')}</Button></div> : null}>
         {selectedSchedule && <div className='schedule-detail-content'>
           <section><h3>{t('taskCenter.scheduleDescription')}</h3><p>{selectedSchedule.prompt_template}</p></section>
           <section><h3>{t('taskCenter.scheduleTriggerPeriod')}</h3><p>{describeCron(selectedSchedule.cron_expr, t)} · {selectedSchedule.timezone}</p></section>
@@ -802,8 +809,8 @@ export default function ScheduleList({ active }: ScheduleListProps) {
         open={modalOpen}
         zIndex={1100}
         onOk={() => void (creationType === 'group' ? handleBatchCreate() : handleCreate())}
-        onCancel={() => {
-          setModalOpen(false);
+        onCancel={() => setModalOpen(false)}
+        afterClose={() => {
           setEditTarget(null);
           form.resetFields();
           setFileList([]);

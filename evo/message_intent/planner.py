@@ -6,7 +6,13 @@ from typing import Any
 
 from evo.llm import LazyLLMClient, parse_json_object
 
-from .schemas import TurnPlan
+from .schemas import FlowAction, TurnPlan
+
+
+_RESUME_COMMANDS = frozenset({
+    '继续', '继续执行', '继续运行', '请继续', '恢复', '恢复执行', '恢复运行',
+    'continue', 'resume', 'resume execution',
+})
 
 
 PROMPT = """
@@ -31,6 +37,8 @@ Changing an artifact, rolling back, adding/deleting a case, and cancelling a run
 separate confirmation. Return the executable action first; the application creates that
 confirmation. Only return confirmation when projection.has_pending_confirmation is true.
 Stage approval is a flow approve action and is different from destructive-action confirmation.
+When runtime.status is paused, a request to continue execution means flow resume.
+Resuming a user pause does not approve any pending stage.
 
 Use intent_catalog as the source of truth for stages, artifact ids and configuration targets.
 The thread's run_config.llm_config is fixed at creation, including all model roles,
@@ -44,6 +52,24 @@ If information is missing, return needs_input with a clarify action.
 
 class StructuredPlanError(ValueError):
     pass
+
+
+def plan_resume_turn(context: Mapping[str, Any]) -> TurnPlan | None:
+    projection = context.get('projection') or {}
+    runtime = (context.get('flow_snapshot') or {}).get('runtime') or {}
+    text = str(context.get('user_text') or '').strip().rstrip('。.!！').strip().casefold()
+    if (
+        context.get('origin') != 'user'
+        or runtime.get('status') != 'paused'
+        or projection.get('has_pending_confirmation')
+        or text not in _RESUME_COMMANDS
+    ):
+        return None
+    return TurnPlan(
+        turn_decision='next_action',
+        active_agenda=list(projection.get('active_agenda') or []),
+        next_action=FlowAction(kind='flow', command='resume'),
+    )
 
 
 def plan_next_turn(context: Mapping[str, Any],
@@ -90,4 +116,4 @@ def _json(value: object) -> str:
     return text if len(text) <= 12000 else text[:12000]
 
 
-__all__ = ['StructuredPlanError', 'answer_query', 'plan_next_turn']
+__all__ = ['StructuredPlanError', 'answer_query', 'plan_next_turn', 'plan_resume_turn']

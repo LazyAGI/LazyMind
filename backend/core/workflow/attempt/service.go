@@ -10,6 +10,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/common/taskdisplay"
+	"lazymind/core/tasktiming"
 	"lazymind/core/workflow/controlstore"
 
 	"github.com/google/uuid"
@@ -104,9 +105,9 @@ func appendEvent(tx *gorm.DB, row orm.WorkflowSessionStep, owner, eventType stri
 	if owner == "" {
 		owner = session.CreateUserID
 	}
-	return tx.Create(&orm.WorkflowEvent{SessionID: row.SessionID, OwnerUserID: owner,
+	return tasktiming.PersistWorkflowEvent(tx, &orm.WorkflowEvent{SessionID: row.SessionID, OwnerUserID: owner,
 		ContractVersion: ContractVersion, EventType: eventType, EntityID: row.ID,
-		StateVersion: session.StateVersion, PayloadJSON: payload, CreatedAt: now}).Error
+		StateVersion: session.StateVersion, PayloadJSON: payload, CreatedAt: now})
 }
 
 // Queue persists the authoritative queued Attempt and generic Outbox in one
@@ -406,6 +407,9 @@ func (s *Service) Terminal(ctx context.Context, attemptID, token, status, code s
 		}
 		if updated.RowsAffected != 1 {
 			return ErrAlreadyTerminal
+		}
+		if err := finishTransactionalOutputs(ctx, tx, current, status); err != nil {
+			return err
 		}
 		outboxStatus := "completed"
 		if status == "cancelled" {

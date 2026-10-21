@@ -10,7 +10,7 @@ export interface WorkflowControl {
   native_execution_ids?: string[]
   active_execution_ids?: string[]
   active_executions?: number
-  binding?: { provider?: string; connector_id?: string; driver_session_id?: string; generation: number; bound: boolean }
+  binding?: { provider?: string; connector_id?: string; driver_session_id?: string; generation?: number; bound: boolean }
 }
 
 export function object(value: unknown): Record<string, unknown> | null {

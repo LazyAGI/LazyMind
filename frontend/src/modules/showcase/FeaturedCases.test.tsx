@@ -57,7 +57,28 @@ describe("FeaturedCases", () => {
     expect(screen.queryByText("Chat skill")).not.toBeInTheDocument();
   });
 
-  it("limits the home preview and leaves the full list behind View More", () => {
+  it("shows an appended ninth chat capability after the existing eight", () => {
+    const chatCases = Array.from({ length: 9 }, (_, index) => ({
+      id: `chat-${index + 1}`,
+      title: `Chat ${index + 1}`,
+      type: "chat",
+      featured: true,
+      featured_order: index + 1,
+      hot: false,
+    })) as ShowcaseCase[];
+
+    render(
+      <MemoryRouter>
+        <FeaturedCases type="chat" items={[...chatCases].reverse()} isLoading={false} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getAllByText(/^Chat \d+$/).map((card) => card.textContent)).toEqual(
+      chatCases.map((item) => item.title),
+    );
+  });
+
+  it("limits the work home preview and leaves the full list behind View More", () => {
     const workCases = Array.from({ length: 9 }, (_, index) => ({
       id: `work-${index + 1}`,
       title: `Work ${index + 1}`,

@@ -158,6 +158,8 @@ Desktop binds only to `127.0.0.1`. It retains the normal Local/Desktop auto-logi
 
 Local and Desktop share the platform LazyMind data directory so knowledge bases remain available when switching modes, but they cannot run concurrently. Stop Local before opening Desktop and close Desktop before starting Local. Electron also enforces a single Desktop instance.
 
+Local and Desktop also share the existing device key for auth-service cloud credentials. The identity stays in `~/Library/Application Support/lazymind-desktop/credential-device.json` on macOS and `%LOCALAPPDATA%\LazyMind\Desktop\credential-device.json` on Windows. Empty `LAZYMIND_AUTH_CLOUD_SECRET_KEY` and the old development default select this device key; existing credentials encrypted with the old default remain readable. Explicit custom keys are preserved and must be configured consistently in both modes. Keep the identity file when retaining the database. An invalid identity stops auth-service startup instead of generating a replacement key.
+
 On Windows, all Desktop-generated files live under `%LOCALAPPDATA%\LazyMind`:
 
 ```text

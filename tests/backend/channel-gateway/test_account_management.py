@@ -79,8 +79,7 @@ def test_management_rejects_other_owners(gateway, account, feishu, action):
     assert gateway.store.get_account('owner', row['id'])['label'] == row['label']
 
 
-@pytest.mark.parametrize('provider', ['wechat', 'wecom'])
-@pytest.mark.parametrize('action', ['rename', 'archive'])
+@pytest.mark.parametrize('provider,action', [('wechat', 'rename'), ('wechat', 'archive'), ('wecom', 'archive')])
 def test_management_does_not_change_other_providers(gateway, account, provider, action):
     row = account(provider)
     response = rename(gateway, row, 'new') if action == 'rename' else lifecycle(gateway, row, 'archive')

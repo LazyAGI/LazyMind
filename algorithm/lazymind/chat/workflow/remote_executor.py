@@ -23,6 +23,7 @@ import httpx
 
 from lazymind.config import config
 from lazymind.chat.workflow.client import RemoteExecutorClient
+from lazymind.chat.workflow.execution_policy import bounded_frames, policy_for
 from lazymind.chat.engine.agent_runtime.env_runtime import inject_runtime_env
 from lazymind.chat.engine.tools.workspace_context import workflow_execution_scope
 
@@ -223,8 +224,11 @@ class RemoteWorkflowExecutor:
                             'lease_token': lease,
                         },
                     )
-                    async with aclosing(stream):
-                        async for frame in stream:
+                    frames = bounded_frames(
+                        stream, params, lambda: self._cancel_subagent(task_id),
+                    ) if policy_for(params) else stream
+                    async with aclosing(frames):
+                        async for frame in frames:
                             event = self._parse_frame(frame)
                             if event is None:
                                 continue
@@ -279,6 +283,13 @@ class RemoteWorkflowExecutor:
                         }
             except Exception as exc:
                 failure = str(exc)
+                if isinstance(exc, httpx.HTTPStatusError):
+                    try:
+                        error = exc.response.json().get('error') or {}
+                        if isinstance(error, dict) and error.get('message'):
+                            failure = f"{error.get('code', 'WORKFLOW_RUNTIME_FAILED')}: {error['message']}"
+                    except (ValueError, AttributeError):
+                        pass
                 terminal_event = {
                     'type': 'error', 'status': 'failed', 'message': failure,
                 }

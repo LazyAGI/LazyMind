@@ -15,6 +15,7 @@ func TestNormalizeBaseURLForCompare_TrimsTrailingSlashes(t *testing.T) {
 	}{
 		{"https://api.example.com/", "https://api.example.com"},
 		{"https://api.example.com//", "https://api.example.com"},
+		{"https://token.sensenova.cn/v1/chat/completions/", "https://token.sensenova.cn/v1"},
 		{"https://api.example.com", "https://api.example.com"},
 		{"https://api.example.com/v1/", "https://api.example.com/v1"},
 		{"  https://example.com/  ", "https://example.com"},
@@ -38,8 +39,8 @@ func TestShouldSeedSenseNovaModelScopesClassicAndTokenPlan(t *testing.T) {
 		want         bool
 	}{
 		{name: "classic model in classic group", model: "SenseChat-5", want: true},
-		{name: "token model excluded from classic", model: "sensenova-6.7-flash-lite", want: false},
-		{name: "token model in token group", model: "sensenova-6.7-flash-lite", useTokenPlan: true, want: true},
+		{name: "token model excluded from classic", model: "sensenova-6.8-flash-lite", want: false},
+		{name: "token model in token group", model: "sensenova-6.8-flash-lite", useTokenPlan: true, want: true},
 		{name: "classic model excluded from token", model: "SenseChat-5", useTokenPlan: true, want: false},
 	}
 	for _, tt := range tests {

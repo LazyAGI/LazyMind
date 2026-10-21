@@ -28,7 +28,7 @@ type WorkflowHostAction struct {
 	SessionID         string     `gorm:"type:varchar(36);not null;index" json:"session_id"`
 	CommandID         string     `gorm:"type:varchar(255);not null;uniqueIndex" json:"command_id"`
 	Kind              string     `gorm:"type:varchar(16);not null" json:"kind"`
-	BindingGeneration int64      `gorm:"not null" json:"binding_generation"`
+	BindingGeneration int64      `gorm:"not null" json:"-"` // Legacy storage column; no longer a control epoch.
 	ConnectorID       string     `gorm:"type:varchar(128);not null;index" json:"connector_id"`
 	NativeSessionID   string     `gorm:"type:varchar(255);not null" json:"native_session_id"`
 	ExecutionID       string     `gorm:"type:varchar(36);not null;default:''" json:"execution_id,omitempty"`

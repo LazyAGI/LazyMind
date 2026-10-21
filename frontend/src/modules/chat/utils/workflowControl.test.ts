@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { controlActions, controlNoticeKey, deliveryBanner, deliveryPending, overlayInfoBanner, REVIEW_CHANGED_NOTICE, ReviewRefreshRequired, type WorkflowControlView } from './workflowControl';
+import { controlActions, deliveryBanner, deliveryPending, overlayInfoBanner, REVIEW_CHANGED_NOTICE, ReviewRefreshRequired, type WorkflowControlView } from './workflowControl';
 
 const state = (): WorkflowControlView => ({
   protocol: 'workflow.control.v1', session_id: 'run-1', state_version: 3, continuation: 'awaiting_user',
@@ -43,12 +43,6 @@ describe('typed workflow user commands', () => {
 });
 
 
-it('uses recovery copy for rewind/retry instead of the host-delivery banner', () => {
-  expect(controlNoticeKey('rewind')).toBe('chat.workflowControlRecovered');
-  expect(controlNoticeKey('retry')).toBe('chat.workflowControlRecovered');
-  expect(controlNoticeKey('confirm_and_continue')).toBe('chat.workflowControlAccepted');
-});
-
 it('allows lifecycle resume after cancellation is accepted, without resending accepted continuation', () => {
   const control = state();
   control.delivery = { id: 'cancel', kind: 'cancel', status: 'accepted' };
@@ -71,15 +65,11 @@ it('keeps panel controls available after a settled execution notification is del
   expect(deliveryPending(control)).toBe(true);
 });
 
-it('never stacks the click acknowledgement on top of a live delivery strip', () => {
+it('keeps routine host delivery silent while preserving actionable notices', () => {
   const pending = { id: 'act-1', kind: 'continue' as const, status: 'pending' as const };
-  expect(overlayInfoBanner('chat.workflowControlAccepted', pending)).toEqual({
-    key: 'chat.workflowControlDeliveryPending', tone: 'info',
-  });
-  expect(deliveryBanner({ ...pending, status: 'accepted' })).toBeUndefined();
-  expect(overlayInfoBanner('chat.workflowControlAccepted', { ...pending, status: 'accepted' })).toEqual({
-    key: 'chat.workflowControlAccepted', tone: 'info',
-  });
+  for (const status of ['pending', 'dispatching', 'accepted']) {
+    expect(overlayInfoBanner('', { ...pending, status })).toBeUndefined();
+  }
   expect(overlayInfoBanner(REVIEW_CHANGED_NOTICE, pending)).toEqual({
     key: REVIEW_CHANGED_NOTICE, tone: 'info',
   });

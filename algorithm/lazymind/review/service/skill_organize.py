@@ -24,14 +24,14 @@ from lazymind.review.skill_organize.config import (
     STAGE_VALIDATION,
 )
 from lazymind.review.skill_organize.db import insert_skill_organize_result
-from lazymind.review.skill_organize.materializer import materialize_fs_draft
-from lazymind.review.skill_organize.metadata_client import load_search_metadata, update_search_metadata
+from lazymind.review.skill_organize.approval import build_approval_items
+from lazymind.review.skill_organize.materializer import materialize_organized_draft
+from lazymind.review.skill_organize.metadata_client import load_search_metadata
 from lazymind.review.skill_organize.parser import parse_skill_summaries
 from lazymind.review.skill_organize.planner import build_organize_plan
 from lazymind.review.skill_organize.reports import write_stage_file
 from lazymind.review.skill_organize.schemas import (
     SkillFsDraft,
-    SkillFsDraftItem,
     SkillOrganizeRequest,
     SkillOrganizeResult,
     SourceSkill,
@@ -295,7 +295,7 @@ def _run_skill_organize(
             started_perf,
             {'plan_count': len(plan.plans)},
         )
-        draft = materialize_fs_draft(plan, source_skills, llm, mode=request.mode)
+        draft, partials = materialize_organized_draft(plan, source_skills, llm, mode=request.mode)
         write_stage_file(work_dir, taskid, STAGE_DRAFT, draft)
 
         current_stage = ORG_STAGE_APPLY
@@ -312,6 +312,7 @@ def _run_skill_organize(
             },
         )
         fs_apply = _apply_fs_draft(draft, remote_store, source_skills, mode=request.mode)
+        fs_apply['approval_items'] = build_approval_items(plan, partials)
         _ensure_skill_organize_not_cancelled(request.requestid)
         write_stage_file(work_dir, taskid, STAGE_VALIDATION, {'status': 'completed', 'fs_apply': fs_apply})
 
@@ -469,13 +470,18 @@ def _load_source_skills(request: SkillOrganizeRequest, store: SkillRemoteStore) 
 def _apply_fs_draft(
     draft: SkillFsDraft, store: SkillRemoteStore, source_skills: list[SourceSkill], *, mode: str = 'light',
 ) -> dict:
+    """Validate a generated draft without changing official skills.
+
+    Rename, deletion, file replacement, and search metadata stay pending until
+    the user accepts the corresponding plan item.
+    """
     validate_fs_draft(draft, source_skills, mode=mode)
     source_by_key = {item.key: item for item in source_skills}
-    upsert_operations: list[tuple[SkillFsDraftItem, str, str, str, str]] = []
-    same_key_snapshots: dict[str, tuple[dict[str, str], dict[str, str]]] = {}
-    delete_operations: list[tuple[str, str, str]] = []
+    upserted_keys: list[str] = []
+    deleted_keys: list[str] = []
 
     for item in draft.upsert_skills:
+        check_model_cancelled()
         source_category, source_name = parse_skill_key(item.source_key)
         target_storage_category, target_name = parse_skill_key(item.target_key)
         source_dir = store.package_dir(source_category, source_name)
@@ -485,57 +491,23 @@ def _apply_fs_draft(
             before = store.list_files(source_category, source_name)
             if mode == 'light' and before.get('SKILL.md') != source_by_key[item.source_key].content:
                 raise ValueError('light organization source changed during planning; retry organization')
-            after = dict(before)
-            after['SKILL.md'] = item.content
-            same_key_snapshots[item.source_key] = (before, after)
         else:
             target_dir = store.package_dir(target_storage_category, target_name)
             if store.fs.exists(target_dir):
                 raise FileExistsError(f'Skill package {item.target_key} already exists.')
-        upsert_operations.append(
-            (item, source_category, source_name, target_storage_category, target_name)
-        )
+        upserted_keys.append(item.target_key)
 
     for key in draft.delete_keys:
+        check_model_cancelled()
         category, name = parse_skill_key(key)
         if key not in source_by_key:
             raise ValueError(f'cannot delete unknown source skill {key!r}')
         if not store.fs.exists(store.package_dir(category, name)):
             raise FileNotFoundError(f'Skill package {key} does not exist.')
-        delete_operations.append((key, category, name))
-
-    upserted_keys: list[str] = []
-    deleted_keys: list[str] = []
-    for item, source_category, source_name, target_storage_category, target_name in upsert_operations:
-        check_model_cancelled()
-        if item.source_key == item.target_key:
-            before, after = same_key_snapshots[item.source_key]
-            store.replace_files(source_category, source_name, before, after)
-        else:
-            store.rename(
-                source_category,
-                source_name,
-                target_storage_category,
-                target_name,
-                skill_content=item.content,
-            )
-        upserted_keys.append(item.target_key)
-
-    for key, category, name in delete_operations:
-        check_model_cancelled()
-        store.remove(category, name)
         deleted_keys.append(key)
 
-    metadata_updates = [
-        {'skill_key': item.target_key, **item.search_metadata.model_dump(exclude_none=True)}
-        for item in draft.upsert_skills if item.search_metadata.model_dump(exclude_none=True)
-    ]
-    if metadata_updates:
-        check_model_cancelled()
-        update_search_metadata(metadata_updates)
-
     return {
-        **({'metadata_updated_keys': [item['skill_key'] for item in metadata_updates]} if metadata_updates else {}),
+        'staged': True,
         'deleted_keys': deleted_keys,
         'upserted_keys': upserted_keys,
     }

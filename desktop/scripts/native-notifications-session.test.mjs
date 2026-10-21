@@ -4,6 +4,7 @@ import vm from "node:vm";
 import test from "node:test";
 import { createRequire } from "node:module";
 const { createNotificationSession } = createRequire(import.meta.url)("../electron/src/notification-session.js");
+const { isTrustedNotificationSender } = createRequire(import.meta.url)("../electron/src/native-notifications.js");
 
 const source = fs.readFileSync(new URL("../electron/src/main.js", import.meta.url), "utf8");
 function fixture() {
@@ -31,6 +32,55 @@ function fixture() {
   vm.runInNewContext(source.slice(start, end), context);
   return { handlers, calls, context, finish };
 }
+
+test("packaged renderer origin passes actual session IPC while other origins and frames remain rejected", async () => {
+  const originFunctions = source.slice(source.indexOf("function desktopFrontendOrigin("),
+    source.indexOf("function loadEditablePptDependencyConfig("));
+  const rendererSource = source.slice(source.indexOf("function createHiddenRendererAttempt("));
+  const rendererURL = rendererSource.match(/window\.loadURL\(([^\n]+)\),/)[1];
+  for (const port of [8090, 50124]) {
+    const h = fixture();
+    Object.assign(h.context, {
+      URL, isExternalRuntimeDev: false, currentStatus: { config: { frontendPort: port } },
+      frontendPort: port, isTrustedNotificationSender,
+    });
+    vm.runInNewContext(originFunctions, h.context);
+    const frame = { url: vm.runInNewContext(rendererURL, h.context) };
+    const webContents = { mainFrame: frame, isDestroyed: () => false };
+    h.context.mainWindow = { webContents, isDestroyed: () => false };
+    const event = { sender: webContents, senderFrame: frame };
+    const origin = h.context.notificationFrontendOrigin();
+    assert.equal(new URL(frame.url).origin, origin);
+    assert.equal(origin, `http://localhost:${port}`);
+    h.finish();
+    await h.handlers.get("lazymind:assistantSessionSet")(event, { access_token: "synthetic" });
+    assert.ok(h.calls.includes("set"), "renderer login must reach the connector");
+    await h.handlers.get("lazymind:assistantSessionClear")(event);
+    assert.ok(h.calls.includes("clear"));
+
+    for (const url of [`http://127.0.0.1:${port}`, `http://localhost:${port + 1}`, "https://example.com"]) {
+      frame.url = url;
+      const before = h.calls.length;
+      for (const channel of ["lazymind:assistantSessionSet", "lazymind:assistantSessionClear"]) {
+        await assert.rejects(h.handlers.get(channel)(event, {}), /DESKTOP_SESSION_UNAVAILABLE/);
+      }
+      assert.equal(h.calls.length, before);
+    }
+    frame.url = `${origin}/agent/chat/home`;
+    for (const invalidEvent of [
+      { ...event, senderFrame: { url: frame.url } },
+      { ...event, sender: {} },
+    ]) {
+      await assert.rejects(h.handlers.get("lazymind:assistantSessionSet")(invalidEvent, {}), /DESKTOP_SESSION_UNAVAILABLE/);
+    }
+    h.context.currentStatus = undefined;
+    assert.equal(h.context.notificationFrontendOrigin(), "");
+    assert.equal(isTrustedNotificationSender(event, h.context.mainWindow, h.context.notificationFrontendOrigin()), false);
+    h.context.isExternalRuntimeDev = true;
+    h.context.desktopDevURL = "http://127.0.0.1:5173/agent/chat/home";
+    assert.equal(h.context.notificationFrontendOrigin(), "http://127.0.0.1:5173");
+  }
+});
 
 test("actual session IPC serializes credentials and a pending login cannot restart notifications after logout", async () => {
   const h = fixture();

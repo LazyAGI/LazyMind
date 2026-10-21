@@ -12,8 +12,7 @@ const queue: QueueRunner = async (binary, args, signal, codexHome) => {
 
 /** Admission only: no native turn inspection, cancellation, or uncertain retries. */
 export class CodexAdapter implements RuntimeAdapter<string> {
-  readonly continuationMode = 'queue' as const
-  readonly supportsCancel = false as const
+  readonly cancellation = 'none' as const
   constructor(private binary: string, private codexHome: string, private run: QueueRunner = queue) {}
   id(threadId: string) { return threadId }
   warn(message: string) { console.warn(message) }

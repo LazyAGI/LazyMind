@@ -15,6 +15,7 @@ import (
 	"gorm.io/gorm/clause"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/tasktiming"
 	"lazymind/core/workflow/controlpolicy"
 )
 
@@ -39,12 +40,12 @@ func (e *Error) Error() string          { return e.Code + ": " + e.Message }
 func Reject(code, message string) error { return &Error{Code: code, Message: message} }
 
 type Binding struct {
+	Cancellation   string `json:"cancellation,omitempty"`
 	EditPaused     bool   `json:"edit_paused,omitempty"`
 	Required       bool   `json:"required"`
 	Provider       string `json:"provider,omitempty"`
 	ConnectorID    string `json:"connector_id,omitempty"`
 	DriverSession  string `json:"driver_session_id,omitempty"`
-	Generation     int64  `json:"generation"`
 	CredentialHash string `json:"credential_hash,omitempty"`
 }
 
@@ -52,7 +53,6 @@ type BindingView struct {
 	Provider      string `json:"provider,omitempty"`
 	ConnectorID   string `json:"connector_id,omitempty"`
 	DriverSession string `json:"driver_session_id,omitempty"`
-	Generation    int64  `json:"generation"`
 	Bound         bool   `json:"bound"`
 }
 
@@ -148,7 +148,7 @@ func Read(tx *gorm.DB, session orm.WorkflowSession) (*Snapshot, error) {
 	result := &Snapshot{Protocol: controlpolicy.Protocol, SessionID: session.ID, StateVersion: session.StateVersion,
 		Reviews: []orm.WorkflowReviewCheckpoint{}, AvailableActions: []string{},
 		Binding: BindingView{Provider: binding.Provider, ConnectorID: binding.ConnectorID,
-			DriverSession: binding.DriverSession, Generation: binding.Generation, Bound: binding.DriverSession != ""}}
+			DriverSession: binding.DriverSession, Bound: binding.DriverSession != ""}}
 	if err := tx.Where("session_id = ?", session.ID).Order("created_at ASC, id ASC").Find(&result.Reviews).Error; err != nil {
 		return nil, err
 	}
@@ -176,7 +176,7 @@ func Read(tx *gorm.DB, session orm.WorkflowSession) (*Snapshot, error) {
 		result.Admission = controlpolicy.Admission{Reason: "edits_pending_continue"}
 	}
 	var action orm.WorkflowHostAction
-	err = tx.Where("session_id = ? AND binding_generation = ?", session.ID, binding.Generation).Order("created_at DESC, id DESC").First(&action).Error
+	err = tx.Where("session_id = ? AND consumed_at IS NULL", session.ID).Order("created_at DESC, id DESC").First(&action).Error
 	if err == nil {
 		result.Delivery = &action
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -269,7 +269,7 @@ func BumpEvent(tx *gorm.DB, session *orm.WorkflowSession, kind, entity, commandI
 	if err := tx.Where("id = ?", session.ID).First(session).Error; err != nil {
 		return err
 	}
-	return tx.Create(&orm.WorkflowEvent{SessionID: session.ID, OwnerUserID: session.CreateUserID,
+	return tasktiming.PersistWorkflowEvent(tx, &orm.WorkflowEvent{SessionID: session.ID, OwnerUserID: session.CreateUserID,
 		ContractVersion: "workflow.v1", EventType: kind, EntityID: entity, StateVersion: session.StateVersion,
-		CommandID: commandID, PayloadJSON: data, CreatedAt: now}).Error
+		CommandID: commandID, PayloadJSON: data, CreatedAt: now})
 }

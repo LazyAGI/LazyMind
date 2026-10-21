@@ -211,7 +211,14 @@ func (s *arxivImportService) importPaper(ctx context.Context, input, datasetID, 
 	}
 	for _, item := range items {
 		if item.Paper.BaseID == paper.BaseID && item.SourceVersion == paper.Version {
-			return alreadyPresentArxiv(item)
+			if err = lock.check(); err != nil {
+				return item, err
+			}
+			var document orm.Document
+			if err = s.db.WithContext(ctx).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", item.DocumentID, datasetID).Take(&document).Error; err != nil {
+				return item, err
+			}
+			return s.recoverSavedImport(ctx, item.Paper, document, userID, userName, &item)
 		}
 	}
 	// Recover a document left behind if metadata/link persistence previously failed.
@@ -221,11 +228,7 @@ func (s *arxivImportService) importPaper(ctx context.Context, input, datasetID, 
 		if err = lock.check(); err != nil {
 			return ArxivImportResult{}, err
 		}
-		result, linkErr := s.associate(ctx, paper, orphan, doc.LocalFileImportResult{}, nil)
-		if linkErr != nil {
-			return result, linkErr
-		}
-		return alreadyPresentArxiv(result)
+		return s.recoverSavedImport(ctx, paper, orphan, userID, userName, nil)
 	}
 	path, _, err := s.acquire(ctx, FulltextCandidate{URL: paper.PDFURL, SourceType: "pdf", SourceProvider: "arxiv", Version: paper.Version, ExpectedMIME: "application/pdf"})
 	if err != nil {
@@ -241,7 +244,7 @@ func (s *arxivImportService) importPaper(ctx context.Context, input, datasetID, 
 	imported, importErr := s.importFile(ctx, doc.LocalFileImportRequest{DatasetID: datasetID, SourcePath: path, DisplayName: filename, ContentType: "application/pdf", DataSourceType: "ARXIV_IMPORT", Tags: []string{"paper", "arxiv:" + identifier.ID()}, UserID: userID, UserName: userName})
 	importErr = validatePaperImportResult(imported, importErr)
 	if importErr == nil && (strings.EqualFold(imported.Start.Status, "FAILED") || strings.EqualFold(imported.Start.SubmitStatus, "FAILED") || strings.EqualFold(imported.Start.SubmitStatus, "REJECTED")) {
-		importErr = errors.New(firstNonEmpty(imported.Start.Message, imported.Start.Detail, "文献处理任务未能启动"))
+		importErr = fmt.Errorf("文献处理任务未能启动: %s", firstNonEmpty(imported.Start.Message, imported.Start.Detail, "处理服务拒绝了任务"))
 	}
 	partial := ArxivImportResult{Paper: paper, DocumentID: imported.DocumentID, DocumentTaskID: imported.TaskID, ProcessingStatus: "failed"}
 	if imported.DocumentID == "" {
@@ -264,6 +267,63 @@ func (s *arxivImportService) importPaper(ctx context.Context, input, datasetID, 
 		return result, fmt.Errorf("PDF 已保存，但处理未成功，请在文档任务中重试：%s", result.ProcessingError)
 	}
 	return result, nil
+}
+
+// A saved file can outlive the request before its processing task is submitted.
+// Recover that task under the import lock, including attachments associated by
+// older recovery code. Running and terminal tasks retain their existing state.
+func (s *arxivImportService) recoverSavedImport(ctx context.Context, paper arxivsource.Metadata, document orm.Document, userID, userName string, present *ArxivImportResult) (ArxivImportResult, error) {
+	result := ArxivImportResult{Paper: paper, DocumentID: document.ID, Status: "already_present"}
+	if present != nil {
+		result = *present
+	}
+	var task orm.Task
+	err := s.db.WithContext(ctx).Where("doc_id = ? AND dataset_id = ? AND deleted_at IS NULL", document.ID, document.DatasetID).Order("updated_at DESC, created_at DESC").Take(&task).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return result, err
+	}
+	var control struct {
+		State string `json:"task_state"`
+	}
+	if task.ID != "" {
+		if err := json.Unmarshal(task.Ext, &control); err != nil {
+			return result, err
+		}
+	}
+	needsSubmission := strings.TrimSpace(task.LazyllmTaskID) == "" && strings.TrimSpace(control.State) == ""
+	if needsSubmission {
+		// A legacy task may have an authoritative parser record even without
+		// a Core binding. Do not submit that already accepted work twice.
+		_, found, err := arxivExternalTask(ctx, task, document)
+		if err != nil {
+			return result, err
+		}
+		needsSubmission = !found
+	}
+	if !needsSubmission && present != nil {
+		return alreadyPresentArxiv(*present)
+	}
+	var imported doc.LocalFileImportResult
+	var importErr error
+	if needsSubmission {
+		imported, importErr = doc.ResumeLocalFileImport(ctx, doc.ResumeLocalFileImportRequest{DatasetID: document.DatasetID, DocumentID: document.ID, TaskID: task.ID, UserID: userID, UserName: userName})
+		importErr = validatePaperImportResult(imported, importErr)
+		result.DocumentTaskID = imported.TaskID
+		// Submission can update document registration and file metadata. Read
+		// those changes before adding our recovery marker to the document ext.
+		if err := s.db.WithContext(ctx).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", document.ID, document.DatasetID).Take(&document).Error; err != nil {
+			return result, errors.Join(importErr, err)
+		}
+	}
+	result, linkErr := s.associate(ctx, paper, document, imported, importErr)
+	result.Status = "already_present"
+	if linkErr != nil {
+		return result, errors.Join(importErr, linkErr)
+	}
+	if importErr != nil {
+		return result, fmt.Errorf("PDF 已保存，但处理未成功，请在文档任务中重试：%w", importErr)
+	}
+	return alreadyPresentArxiv(result)
 }
 
 func alreadyPresentArxiv(item ArxivImportResult) (ArxivImportResult, error) {

@@ -124,7 +124,7 @@ func SubmitSkillOrganize(w http.ResponseWriter, r *http.Request) {
 	accepted := err == nil && status == http.StatusOK && resp != nil && resp.Code == 0 && skillOrganizeResponseStatusAccepted(resp.Data.Status) &&
 		resp.Data.RequestID == normalized.RequestID && strings.TrimSpace(resp.Data.TaskID) != ""
 	if accepted {
-		if noteErr := noteSkillOrganizeAccepted(r.Context(), db, reservation.ID, strings.TrimSpace(resp.Data.TaskID), normalized); noteErr != nil {
+		if noteErr := noteSkillOrganizeAccepted(r.Context(), db, reservation.ID, strings.TrimSpace(resp.Data.TaskID), normalized, skillIDs); noteErr != nil {
 			replyError(w, "update skill organize reservation failed", http.StatusInternalServerError)
 			return
 		}
@@ -181,11 +181,12 @@ func createSkillOrganizeReservation(ctx context.Context, db *gorm.DB, userID, re
 	return task, db.WithContext(ctx).Create(&task).Error
 }
 
-func noteSkillOrganizeAccepted(ctx context.Context, db *gorm.DB, taskID, resultID string, req skillOrganizeSubmitRequest) error {
+func noteSkillOrganizeAccepted(ctx context.Context, db *gorm.DB, taskID, resultID string, req skillOrganizeSubmitRequest, skillIDs []string) error {
 	requestJSON, err := json.Marshal(map[string]any{
 		"requestid": strings.TrimSpace(req.RequestID),
 		"mode":      strings.TrimSpace(req.Mode),
 		"skills":    req.Skills,
+		"skill_ids": append([]string(nil), skillIDs...),
 	})
 	if err != nil {
 		return err

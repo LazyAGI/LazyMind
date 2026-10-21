@@ -34,8 +34,11 @@ import {
   type KnowledgeSquareType,
   type OfficialKnowledgeBase,
 } from "./knowledgeSquareData";
+import type { KnowledgeListState } from "./knowledgeListState";
 
 interface KnowledgeSquareProps {
+  filters: KnowledgeListState;
+  onFiltersChange: (patch: Partial<KnowledgeListState>) => void;
   items: OfficialKnowledgeBase[];
   domains: Record<KnowledgeSquareType, string[]>;
   loading: boolean;
@@ -71,6 +74,8 @@ function formatDate(value: string) {
 }
 
 export default function KnowledgeSquare({
+  filters,
+  onFiltersChange,
   items,
   domains,
   loading,
@@ -83,10 +88,7 @@ export default function KnowledgeSquare({
   onLoadDetail,
 }: KnowledgeSquareProps) {
   const { t } = useTranslation();
-  const [type, setType] = useState<KnowledgeSquareType>("industry");
-  const [domain, setDomain] = useState("");
-  const [status, setStatus] = useState<KnowledgeSquareInstallStatus>("all");
-  const [keyword, setKeyword] = useState("");
+  const { squareType: type, squareDomain: domain, squareStatus: status, squareKeyword: keyword } = filters;
   const [detailItem, setDetailItem] = useState<OfficialKnowledgeBase | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState(false);
@@ -122,14 +124,11 @@ export default function KnowledgeSquare({
   );
 
   const setActiveType = (nextType: KnowledgeSquareType) => {
-    setType(nextType);
-    setDomain("");
+    onFiltersChange({ squareType: nextType, squareDomain: "" });
   };
 
   const resetFilters = () => {
-    setKeyword("");
-    setStatus("all");
-    setDomain("");
+    onFiltersChange({ squareKeyword: "", squareStatus: "all", squareDomain: "" });
   };
 
   const openDetail = (item: OfficialKnowledgeBase) => {
@@ -193,7 +192,7 @@ export default function KnowledgeSquare({
           placeholder={t("knowledge.squareSearchPlaceholder")}
           aria-label={t("knowledge.squareSearchPlaceholder")}
           onChange={(event: ChangeEvent<HTMLInputElement>) =>
-            setKeyword(event.target.value)
+            onFiltersChange({ squareKeyword: event.target.value })
           }
         />
         <Select<KnowledgeSquareInstallStatus>
@@ -205,7 +204,7 @@ export default function KnowledgeSquare({
             { value: "installed", label: t("knowledge.installed") },
             { value: "updatable", label: t("knowledge.updateAvailable") },
           ]}
-          onChange={setStatus}
+          onChange={(squareStatus: KnowledgeSquareInstallStatus) => onFiltersChange({ squareStatus })}
         />
         <Button onClick={resetFilters}>{t("common.reset")}</Button>
       </div>
@@ -219,7 +218,7 @@ export default function KnowledgeSquare({
             key={item || "all"}
             className={domain === item ? "is-active" : ""}
             type="button"
-            onClick={() => setDomain(item)}
+            onClick={() => onFiltersChange({ squareDomain: item })}
           >
             {item || t("common.all")}
           </button>

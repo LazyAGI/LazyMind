@@ -85,3 +85,10 @@ describe("recording flow", () => {
     expect(decided).toHaveBeenCalledWith(keep);
   });
 });
+
+it.each([45, 90])("shows analysis percentage %s without frame counts", async (progress) => {
+  vi.mocked(api.listRecordings).mockResolvedValue([{ ...pending, name: "", description: "", status: "generating", progress }]);
+  render(<MemoryRouter><Panel open={false} conversationId="c" onClose={vi.fn()} /></MemoryRouter>);
+  expect(await screen.findByText(`${progress}%`)).toBeVisible();
+  expect(screen.getByText(progress === 90 ? "recording.synthesizing" : "recording.analyzing")).toBeVisible();
+});

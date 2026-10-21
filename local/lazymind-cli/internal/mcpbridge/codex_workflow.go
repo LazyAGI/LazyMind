@@ -68,6 +68,6 @@ func (b *Bridge) bindCodexController(ctx context.Context, runID, threadID string
 	var result map[string]any
 	return b.api.DoJSON(ctx, http.MethodPost, "/workflow-sessions/"+url.PathEscape(runID)+"/host-binding", map[string]any{
 		"connector_id": pair.ConnectorID, "credential": pair.Token, "provider": pair.Provider,
-		"driver_session_id": threadID,
+		"driver_session_id": threadID, "cancellation": "none",
 	}, &result)
 }

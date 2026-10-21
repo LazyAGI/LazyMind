@@ -32,6 +32,12 @@ class WindowsMilvusPatchTests(unittest.TestCase):
         self.record = self.info / 'RECORD'
         self.record.write_text(f'{fix.SOURCE},{fix.record_hash(self.original)},{len(self.original)}\n'
                                f'{self.info.name}/METADATA,,\n{self.info.name}/RECORD,,\n')
+        self.index_source = self.site / fix.INDEX_SOURCE
+        self.index_source.write_bytes(fix.INDEX_OLD)
+        self.enterContext(patch.object(fix, 'INDEX_ORIGINAL_SHA256', fix.digest(fix.INDEX_OLD)))
+        self.enterContext(patch.object(fix, 'INDEX_PATCHED_SHA256', fix.digest(fix.INDEX_NEW)))
+        with self.record.open('a') as record:
+            record.write(f'{fix.INDEX_SOURCE},{fix.record_hash(fix.INDEX_OLD)},{len(fix.INDEX_OLD)}\n')
         self.record_original = self.record.read_bytes()
 
     def test_updates_record_and_is_idempotent(self):
@@ -79,6 +85,14 @@ class WindowsMilvusPatchTests(unittest.TestCase):
                 fix.patch_site(self.site)
         self.assertEqual(self.source.read_bytes(), self.original)
         self.assertEqual(self.record.read_bytes(), self.record_original)
+        self.assertEqual(self.index_source.read_bytes(), fix.INDEX_OLD)
+
+    def test_rejects_unreviewed_index_before_modifying_manifest(self):
+        self.index_source.write_bytes(fix.INDEX_OLD + b'# changed')
+        with self.assertRaisesRegex(RuntimeError, 'hash changed'):
+            fix.patch_site(self.site)
+        self.assertEqual(self.source.read_bytes(), self.original)
+        self.assertEqual(self.record.read_bytes(), self.record_original)
 
     def test_verifier_rejects_unpatched_component(self):
         with self.assertRaisesRegex(RuntimeError, 'fix is missing'):
@@ -92,6 +106,52 @@ class WindowsMilvusPatchTests(unittest.TestCase):
                 fix.main()
         self.assertEqual(error.exception.code, 2)
         self.assertEqual(self.source.read_bytes(), self.original)
+
+
+class AtomicIndexPublicationTests(unittest.TestCase):
+    def test_process_death_does_not_publish_empty_index_and_retry_succeeds(self):
+        import subprocess
+        import sys
+        import textwrap
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / 'segment.vector.brute_force.idx'
+            # Terminate after opening the output, before the serializer writes.
+            # os._exit also skips finally blocks, like Windows TerminateProcess.
+            script = '''import os
+from pathlib import Path
+class Index:
+    def save(self, destination):
+        with open(destination, 'wb'):
+            os._exit(71)
+idx = Index()
+'''
+            script += f'path = {str(target)!r}\nindex_dir = {directory!r}\n'
+            script += textwrap.dedent(fix.INDEX_NEW.decode())
+            result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 71, result.stderr)
+            self.assertFalse(target.exists(), 'an interrupted index must not be visible to the loader')
+            self.assertTrue(list(Path(directory).glob('.index-*.tmp')))
+            class CompleteIndex:
+                def save(self, destination):
+                    Path(destination).write_bytes(b'complete index')
+            exec(textwrap.dedent(fix.INDEX_NEW.decode()),
+                 {'os': __import__('os'), 'idx': CompleteIndex(), 'path': str(target), 'index_dir': directory})
+            self.assertEqual(target.read_bytes(), b'complete index')
+
+    def test_serialization_failure_preserves_existing_index(self):
+        import textwrap
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / 'segment.idx'
+            target.write_bytes(b'existing valid index')
+            class BrokenIndex:
+                def save(self, destination):
+                    Path(destination).write_bytes(b'partial')
+                    raise OSError('disk full')
+            with self.assertRaisesRegex(OSError, 'disk full'):
+                exec(textwrap.dedent(fix.INDEX_NEW.decode()),
+                     {'os': __import__('os'), 'idx': BrokenIndex(), 'path': str(target), 'index_dir': directory})
+            self.assertEqual(target.read_bytes(), b'existing valid index')
+            self.assertFalse(list(Path(directory).glob('.index-*')))
 
 
 if __name__ == '__main__':

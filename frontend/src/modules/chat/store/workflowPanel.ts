@@ -17,7 +17,7 @@ import {
 } from '@/modules/chat/utils/workflowEventStream';
 import { reconcileWorkflowSessionStatus } from '@/modules/chat/store/workflowStatus';
 import type { OrdinaryTaskView, OrdinaryRunView } from '@/modules/chat/types/ordinaryTask';
-import { mergeOrdinarySnapshot, readOrdinaryTask } from '@/modules/chat/utils/ordinaryTaskState';
+import { mergeRun, mergeOrdinarySnapshot, readOrdinaryTask } from '@/modules/chat/utils/ordinaryTaskState';
 
 export function buildWorkflowSearchConfig(
   chatConfig?: Pick<ChatConfig, "knowledgeBaseId" | "creators" | "tags">,
@@ -355,7 +355,7 @@ export function applyOrdinaryWorkflowSnapshot(session: WorkflowSession, snapshot
   const existing = new Map((session.ordinary_tasks ?? []).map(task => [task.display_key, task]));
   const tasks = snapshot.tasks.map(readOrdinaryTask).filter((task): task is OrdinaryTaskView => !!task)
     .map(task => mergeOrdinarySnapshot(existing.get(task.display_key), task));
-  return { ...session, ordinary_tasks: tasks, ordinary_runs: snapshot.runs,
+  return { ...session, ordinary_tasks: tasks, ordinary_runs: snapshot.runs.map(run => mergeRun(session.ordinary_runs?.find(current => current.run_id === run.run_id), run)),
     ordinary_revision: snapshot.revision, ordinary_error: false, steps: attachOrdinarySteps(session.steps, tasks) };
 }
 
@@ -547,6 +547,9 @@ export interface CompositeBehavior {
 }
 
 export interface WorkflowUI {
+  extensions?: string[];
+  group_downloads?: boolean;
+  task_presentation?: { grouped?: boolean; hide_final_artifacts?: boolean; hidden_steps?: string[] };
   name?: string;
   tabs?: TabDef[];
   /** Defer tabs with hide_when_material until this planning material exists. */

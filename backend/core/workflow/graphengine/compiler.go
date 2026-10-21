@@ -499,6 +499,45 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			graph.SkipExpansions = append(graph.SkipExpansions, CompiledBypass{NodeID: id, From: reverse[id], To: adj[id]})
 		}
 	}
+	for step, limit := range graph.Runtime.ExecutionLimits {
+		_, exists := graph.Nodes[step]
+		valid := exists && limit.Rounds >= 1 && limit.Rounds <= 64 && limit.Timeout >= 1 && limit.Timeout <= 3600
+		for name, count := range limit.ToolCalls {
+			valid = valid && strings.TrimSpace(name) != "" && count >= 1 && count <= 100
+		}
+		if !valid {
+			result.Diagnostics = append(result.Diagnostics, nodeDiag("E_RUNTIME_EXECUTION_LIMIT_INVALID", "error", "workflow.yaml.runtime.execution_limits", step, "execution limits require a declared step and bounded positive values"))
+		}
+	}
+	if graph.Runtime.TriggerInputs != nil {
+		for _, material := range *graph.Runtime.TriggerInputs {
+			if !knownMaterials[material] || graph.MaterialProducers[material].Kind != "external" {
+				result.Diagnostics = append(result.Diagnostics, materialDiag("E_RUNTIME_TRIGGER_INPUT_INVALID", "error", "workflow.yaml.runtime.trigger_inputs", material, "trigger input must name an external material"))
+			}
+		}
+	}
+	if pub := graph.Runtime.Publication; pub != nil {
+		_, exists := graph.Nodes[pub.Step]
+		if !exists || !graph.Runtime.TransactionalOutputs || len(pub.RequiredSlots) == 0 {
+			result.Diagnostics = append(result.Diagnostics, nodeDiag("E_RUNTIME_PUBLICATION_INVALID", "error", "workflow.yaml.runtime.publication", pub.Step, "publication requires a declared step, transactional outputs and required slots"))
+		}
+		for _, slot := range pub.RequiredSlots {
+			if !knownMaterials[slot] || graph.MaterialProducers[slot].Kind != "step" || graph.MaterialProducers[slot].StepID != pub.Step {
+				result.Diagnostics = append(result.Diagnostics, materialDiag("E_RUNTIME_PUBLICATION_SLOT_UNKNOWN", "error", "workflow.yaml.runtime.publication", slot, "required publication slot must be produced by the publication step"))
+			}
+		}
+	}
+	publishedSlots := map[string]bool{}
+	if graph.Runtime.Publication != nil {
+		for _, slot := range graph.Runtime.Publication.RequiredSlots {
+			publishedSlots[slot] = true
+		}
+	}
+	for target, source := range graph.Runtime.PublishedInputAliases {
+		if !publishedSlots[source] || graph.Runtime.Publication == nil || graph.MaterialProducers[target].Kind != "external" || !knownMaterials[source] || graph.MaterialTypes[target] != graph.MaterialTypes[source] {
+			result.Diagnostics = append(result.Diagnostics, materialDiag("E_RUNTIME_INPUT_ALIAS_INVALID", "error", "workflow.yaml.runtime.published_input_aliases", target, "published alias requires a publication and matching declared input/output types"))
+		}
+	}
 	result.Diagnostics = append(result.Diagnostics, validateUI(plugin.UI, knownMaterials, exposed, materialSpecs, profile)...)
 	if scenario != "" {
 		for id := range graph.Nodes {

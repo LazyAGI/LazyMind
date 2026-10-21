@@ -12,6 +12,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $buildRoot = Join-Path $repoRoot 'local\build'
 $managerDir = Join-Path $repoRoot 'local\local-runtime-manager'
 $managerBin = Join-Path $buildRoot 'bin\local-runtime-manager.exe'
+$pandocBin = Join-Path $buildRoot 'bin\pandoc.exe'
 $configFile = Join-Path $repoRoot 'local\config.env'
 $configExample = Join-Path $repoRoot 'local\config.env.example'
 
@@ -120,6 +121,15 @@ function Materialize-OfflineSkills {
     }
 }
 
+function Stage-Pandoc {
+    & node.exe (Join-Path $repoRoot 'desktop\scripts\stage-pandoc.mjs') $buildRoot --target windows-x64
+    if ($LASTEXITCODE -ne 0) { throw "Pandoc staging failed with exit code $LASTEXITCODE" }
+    if (-not (Test-Path -LiteralPath $pandocBin -PathType Leaf)) {
+        throw "Pandoc staging did not produce the expected executable: $pandocBin"
+    }
+    $env:LAZYMIND_PANDOC_PATH = $pandocBin
+}
+
 function Invoke-Manager([string[]]$Arguments) {
     if (-not (Test-Path -LiteralPath $managerBin -PathType Leaf)) {
         throw "Local runtime manager was not built: $managerBin"
@@ -142,11 +152,12 @@ Initialize-Environment
 switch ($Action) {
     'doctor' { Invoke-Doctor }
     'build' { Build-Manager }
-    'up' { Build-Manager; Materialize-OfflineSkills; Invoke-Manager @('up') }
+    'up' { Build-Manager; Stage-Pandoc; Materialize-OfflineSkills; Invoke-Manager @('up') }
     'up-lan' {
         $env:LAZYMIND_LOCAL_NETWORK_PROFILE = 'lan'
         $env:LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN = 'true'
         Build-Manager
+        Stage-Pandoc
         Materialize-OfflineSkills
         Invoke-Manager @('up')
     }

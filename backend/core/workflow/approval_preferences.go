@@ -47,6 +47,7 @@ func applyApprovalPreferences(ctxDB *gorm.DB, userID, workflowID string, project
 	if !workflowWideApprovalRequired {
 		for stepID, node := range projection.Nodes {
 			node.RequiresApproval = false
+			node.Mode = "auto"
 			projection.Nodes[stepID] = node
 		}
 	}
@@ -59,6 +60,12 @@ func applyApprovalPreferences(ctxDB *gorm.DB, userID, workflowID string, project
 			continue
 		}
 		node.RequiresApproval = row.ApprovalRequired
+		// Expose the effective mode to every controller, not the package default.
+		// Otherwise agents can still hand off while the UI hides approval controls.
+		node.Mode = "auto"
+		if row.ApprovalRequired {
+			node.Mode = "human"
+		}
 		projection.Nodes[row.StepID] = node
 	}
 	return projection

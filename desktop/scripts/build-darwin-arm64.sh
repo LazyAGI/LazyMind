@@ -17,6 +17,7 @@ if [[ "$(sysctl -in sysctl.proc_translated 2>/dev/null || true)" == 1 ]]; then
 fi
 BUILD_ROOT="${ROOT}/desktop/build/darwin-${TARGET_ARCH}"
 RUNTIME_ROOT="${BUILD_ROOT}/runtime"
+DESKTOP_LAUNCHER="${BUILD_ROOT}/lazymind-desktop-launcher"
 DIST_ROOT="${ROOT}/desktop/dist"
 APP_ICON="${ROOT}/desktop/electron/assets/LazyMind.icns"
 PACKAGE_KIND="${LAZYMIND_DESKTOP_PACKAGE_KIND:-zip}"
@@ -248,6 +249,7 @@ install_feishu_cli
 echo "==> Building Go desktop runtime binaries"
 (cd "${ROOT}/backend/feishu-credential-helper" && "${GO_BIN}" build ${GO_BUILD_FLAGS[@]+"${GO_BUILD_FLAGS[@]}"} -mod=readonly -o "${RUNTIME_ROOT}/bin/feishu-credential-helper" .)
 shasum -a 256 "${RUNTIME_ROOT}/bin/feishu-credential-helper" | awk '{print $1}' > "${RUNTIME_ROOT}/bin/feishu-credential-helper.sha256"
+(cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${DESKTOP_LAUNCHER}" ./cmd/desktop-launcher)
 (cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/local-runtime-manager" .)
 (cd "${ROOT}/local/lazymind-cli" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/lazymind" ./cmd/lazymind)
 (cd "${ROOT}/local/local-proxy" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/local-proxy" ./cmd/local-proxy)
@@ -287,8 +289,13 @@ rm -rf "${RUNTIME_ROOT}/deps/python/algorithm"
 "${UV_BIN}" venv --managed-python --no-python-downloads --relocatable --seed --link-mode copy --python "${PYTHON}" "${RUNTIME_ROOT}/deps/python/algorithm"
 if [[ "${TARGET_ARCH}" == "arm64" && "${LAZYMIND_DESKTOP_DEFER_PYTHON:-true}" != "false" ]]; then
   echo "==> Installing frozen dependencies for the published Mac ARM64 RAG component"
+  EFFECTIVE_COMPONENT_LOCK="${BUILD_ROOT}/darwin-arm64-requirements.lock"
+  "${PYTHON}" "${ROOT}/desktop/scripts/materialize-python-component-lock.py" \
+    "${ROOT}/desktop/python-components/darwin-arm64-requirements.lock" \
+    "${EFFECTIVE_COMPONENT_LOCK}" "${LAZYLLM_VERSION}"
+  export LAZYMIND_PYTHON_COMPONENT_LOCK="${EFFECTIVE_COMPONENT_LOCK}"
   "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict \
-    -r "${ROOT}/desktop/python-components/darwin-arm64-requirements.lock" \
+    -r "${EFFECTIVE_COMPONENT_LOCK}" \
     -r "${ROOT}/algorithm/requirements.txt" -r "${ROOT}/algorithm/requirements-local.txt"
   "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" -c "import importlib.metadata as m; assert m.version('lazyllm') == '${LAZYLLM_VERSION}'"
 else
@@ -429,6 +436,7 @@ fi
 remove_generated_path "${DIST_ROOT}/${MAC_OUT}/LazyMind.app"
 export LAZYMIND_DESKTOP_RUNTIME_STAGE="${RUNTIME_ROOT}"
 export LAZYMIND_DESKTOP_OUTPUT_DIR="${DIST_ROOT}"
+export LAZYMIND_DESKTOP_MAC_LAUNCHER="${DESKTOP_LAUNCHER}"
 export LAZYMIND_DESKTOP_PACKAGE_KIND
 export LAZYMIND_DESKTOP_SIGNING_MODE
 if [[ "${PACKAGE_KIND}" == "dmg" ]]; then

@@ -36,6 +36,7 @@ import (
 	skillservice "lazymind/core/skillv2/service"
 	skillshare "lazymind/core/skillv2/share"
 	skillurl "lazymind/core/skillv2/sourceurl"
+	"lazymind/core/skillv2/taskguard"
 	"lazymind/core/store"
 )
 
@@ -820,9 +821,6 @@ func Commit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !ensureUserDraftWriteAllowed(w, r, db, userID, skillID) {
-		return
-	}
 	var req struct {
 		DraftVersion int64 `json:"draft_version"`
 	}
@@ -833,11 +831,15 @@ func Commit(w http.ResponseWriter, r *http.Request) {
 		replyError(w, "draft_version required", http.StatusBadRequest)
 		return
 	}
-	resp, err := newRevisionService(db).CommitDraft(r.Context(), skillrevision.CommitDraftRequest{SkillID: skillID, UserID: userID, DraftVersion: req.DraftVersion})
-	if err != nil {
-		replyServiceError(w, err)
+	value, ok := resolveUserDraft(w, r, db, userID, skillID, func(tx *gorm.DB, _ taskguard.SkillOperationDecision) (any, error) {
+		return newRevisionService(tx).CommitDraft(r.Context(), skillrevision.CommitDraftRequest{
+			SkillID: skillID, UserID: userID, DraftVersion: req.DraftVersion,
+		})
+	})
+	if !ok {
 		return
 	}
+	resp := value.(skillrevision.CommitDraftResponse)
 	common.ReplyOK(w, map[string]any{"revision_id": resp.RevisionID, "revision_no": resp.RevisionNo})
 }
 

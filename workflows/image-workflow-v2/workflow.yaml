@@ -1,0 +1,179 @@
+id: image-workflow-v2
+name: AI Image Production V2
+description: >
+  Locally customized image production workflow with three final-deliverable
+  routes: ordinary image generation, authoritative-source local editing, and
+  static or dynamic meme-pack production. Ordinary generation and local editing
+  use LazyMind's built-in Baoyu adapter pinned to Seedream 5.0; meme production
+  keeps the existing native LazyMind media toolchain and establishes an
+  approved canonical character and extracts one grounded visual identity lock
+  before state planning. The same lock is reused unchanged for every dynamic key
+  image, and each state uses exactly one key image as the locked visual
+  reference for video generation with a motion-only prompt. Dynamic packs include concise theme-appropriate
+  captions by default: the workflow proposes one caption per state for approval
+  before production. Media is generated without overlay captions; approved exact
+  captions are rendered locally after inspecting the actual whitespace.
+
+when_to_use: >
+  Prefer the original image-workflow for general image generation and editing
+  with configured model roles. Choose V2 explicitly for Seedream 5.0 or reviewed
+  multi-state meme production. Use for static memes, animated
+  GIF stickers, reaction images, or multi-state meme packs that benefit from
+  explicit planning and review. Final meme delivery overrides whether a source
+  image is uploaded, searched, or generated. For memes, choose exactly one
+  delivery mode: static or dynamic.
+
+runtime:
+  publisher_owned_slots: [route_plan, material_summary, ordinary_prompt, ordinary_output, authoritative_image, edit_contract, edit_candidate]
+
+tool_scripts:
+  - path: scripts/baoyu.py
+    functions:
+      - baoyu_image_generator
+      - baoyu_image_editor
+      - generate_ordinary_image
+      - generate_edit_candidate
+  - path: scripts/tools.py
+    functions:
+      - classify_image_request
+      - prepare_ordinary_request
+      - publish_edit_contract
+      - image_search_and_validate
+      - validate_image_ref
+      - image_media_preflight
+      - compose_character_anchor_sheet
+      - save_validated_meme_brief
+      - select_meme_delivery_route
+      - meme_add_caption
+      - meme_video_to_captioned_gif
+
+steps:
+  - {id: classify_request, label: Classify Final Deliverable}
+  - {id: ordinary_prepare, label: Prepare Ordinary Image}
+  - {id: ordinary_generate, label: Generate Ordinary Image}
+  - {id: edit_prepare, label: Prepare Local Edit}
+  - {id: edit_candidate, label: Generate and Review Edit}
+  - {id: meme_brief, label: Confirm Meme Brief}
+  - {id: meme_preflight, label: Preflight Media Runtime}
+  - {id: canonical_character, label: Confirm Canonical Character}
+  - {id: build_identity_anchors, label: Build Eye and Mouth Anchors}
+  - {id: understand_states, label: Understand Communication States}
+  - {id: design_best_performances, label: Design Best Performances}
+  - {id: plan_static, label: Plan Static Hero Frames}
+  - {id: render_static, label: Render Text-Free Hero Frames}
+  - {id: caption_static, label: Caption Static Results}
+  - {id: plan_dynamic, label: Plan Key Images and Motion}
+  - {id: render_keyframes, label: Render Key Images}
+  - {id: video_canary, label: Generate and Review Video Canary}
+  - {id: render_dynamic, label: Render Remaining Videos}
+  - {id: caption_dynamic, label: Caption and Convert GIFs}
+  - {id: review_pack, label: Review Final Pack}
+
+slots:
+  - {id: source_image, label: Uploaded Source Image, type: image, cardinality: single, external: true, required: false}
+  - {id: route_plan, label: Route Plan, type: json, cardinality: single}
+  - {id: material_images, label: Reference Materials, type: image, cardinality: list, ordered: true}
+  - {id: material_summary, label: Material Summary, type: text, cardinality: single}
+  - {id: ordinary_prompt, label: Ordinary Image Prompt, type: text, cardinality: single}
+  - {id: ordinary_output, label: Ordinary Image Output, type: image, cardinality: list, ordered: true}
+  - {id: authoritative_image, label: Authoritative Source Image, type: image, cardinality: single}
+  - {id: edit_contract, label: Local Edit Contract, type: json, cardinality: single}
+  - {id: edit_candidate, label: Local Edit Candidate, type: image, cardinality: single}
+  - {id: meme_brief_data, label: Meme Brief, type: json, cardinality: single}
+  - {id: preflight_report, label: Preflight Report, type: json, cardinality: single}
+  - {id: canonical_character_image, label: Canonical Character, type: image, cardinality: single}
+  - {id: character_identity_prompt, label: Character Identity Prompt, type: text, cardinality: single}
+  - {id: face_anchor_images, label: Eye and Mouth Anchor Images, type: image, cardinality: list, ordered: true}
+  - {id: face_anchor_grid, label: 2x2 Eye and Mouth Anchor Grid, type: image, cardinality: single}
+  - {id: state_specs, label: State Performance Propositions, type: json, cardinality: single}
+  - {id: best_performances, label: Best Performances, type: json, cardinality: single}
+  - {id: static_plan, label: Static Hero-Frame Plan, type: json, cardinality: single}
+  - {id: hero_no_text, label: Text-Free Hero Frames, type: image, cardinality: list, ordered: true}
+  - {id: static_final, label: Final Static Memes, type: image, cardinality: list, ordered: true}
+  - {id: dynamic_plan, label: Key-Image Dynamic Plan, type: json, cardinality: single}
+  - {id: master_keyframes, label: Key Images, type: image, cardinality: list, ordered: true}
+  - {id: canary_video, label: Video Canary, type: file, cardinality: single}
+  - {id: canary_state_id, label: Canary State, type: text, cardinality: single}
+  - {id: skip_remaining_dynamic, label: Skip Remaining Videos, type: json, cardinality: single}
+  - {id: remaining_videos, label: Remaining Videos, type: file, cardinality: list, ordered: true}
+  - {id: gif_output, label: Final Animated GIFs, type: image, cardinality: list, ordered: true}
+  - {id: pack_review, label: Final Pack Review, type: json, cardinality: single}
+
+ui:
+  tabs:
+    - id: plan
+      label: Plan
+      layout: list
+      slots:
+        - {id: route_plan}
+        - {id: material_summary}
+        - {id: ordinary_prompt}
+        - {id: edit_contract}
+        - {id: meme_brief_data}
+        - {id: preflight_report}
+        - {id: state_specs}
+        - {id: best_performances}
+        - {id: static_plan}
+        - {id: dynamic_plan}
+    - id: character
+      label: Character
+      layout: grid
+      slots:
+        - {id: source_image}
+        - {id: material_images}
+        - {id: authoritative_image}
+        - {id: canonical_character_image}
+        - {id: character_identity_prompt}
+        - {id: face_anchor_images}
+        - {id: face_anchor_grid}
+      composite_behavior: {hide_empty_columns: true, empty_column_scope: selected}
+    - id: production
+      label: Production
+      layout: grid
+      slots:
+        - {id: hero_no_text}
+        - {id: master_keyframes}
+        - {id: canary_video}
+        - {id: remaining_videos}
+      composite_behavior: {hide_empty_columns: true, empty_column_scope: selected}
+    - id: result
+      label: Result
+      layout: composite
+      slots:
+        - {id: ordinary_output}
+        - {id: edit_candidate}
+        - {id: static_final}
+        - {id: gif_output}
+        - {id: pack_review}
+      composite_layout: [ordinary_output, edit_candidate, static_final, gif_output, pack_review]
+      composite_behavior: {hide_empty_columns: true, empty_column_scope: selected}
+
+i18n:
+  zh-CN:
+    name: AI 图片生产 V2
+    steps:
+      classify_request: {label: 识别最终交付物}
+      ordinary_prepare: {label: 准备普通生图}
+      ordinary_generate: {label: 生成普通图片}
+      edit_prepare: {label: 准备局部编辑}
+      edit_candidate: {label: 生成并确认编辑结果}
+      meme_brief: {label: 确认表情包需求}
+      meme_preflight: {label: 媒体环境预检}
+      canonical_character: {label: 确认标准角色}
+      build_identity_anchors: {label: 生成嘴眼锚定图}
+      understand_states: {label: 理解沟通状态}
+      design_best_performances: {label: 设计最佳表演}
+      plan_static: {label: 规划静态主画面}
+      render_static: {label: 生成无字静态图}
+      caption_static: {label: 添加静态字幕}
+      plan_dynamic: {label: 规划关键图与动态效果}
+      render_keyframes: {label: 生成关键图}
+      video_canary: {label: 生成并确认视频样片}
+      render_dynamic: {label: 生成其余视频}
+      caption_dynamic: {label: 添加字幕并转换 GIF}
+      review_pack: {label: 整包审查}
+    tabs:
+      plan: {label: 方案}
+      character: {label: 角色}
+      production: {label: 图片制作}
+      result: {label: 最终结果}

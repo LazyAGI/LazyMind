@@ -90,11 +90,15 @@ def milvus_roundtrip(overlay, data, logs):
                 else:
                     raise RuntimeError('Milvus server readiness timeout')
                 client = MilvusClient(uri=f'http://127.0.0.1:{port}', timeout=20)
+                print(f'MILVUS_CYCLE_{cycle}_CONNECTED', flush=True)
                 if cycle == 1:
                     client.create_collection(collection_name='component_check', dimension=2, timeout=20)
+                    print('MILVUS_COLLECTION_CREATED', flush=True)
                     client.insert(collection_name='component_check',
                                   data=[{'id': 1, 'vector': [1., 0.], 'text': 'durable component data'}], timeout=20)
+                    print('MILVUS_INSERT_OK', flush=True)
                 else:
+                    print('MILVUS_RESTART_LOADING', flush=True)
                     client.load_collection(collection_name='component_check', timeout=20)
                 result = client.search(collection_name='component_check', data=[[1., 0.]], limit=1,
                                        output_fields=['text'], timeout=20)
@@ -139,7 +143,7 @@ def run_child(name, arguments, logs):
             raise RuntimeError(f'{name} timed out; see {log_path}')
     if result != 0:
         lines = log_path.read_text(encoding='utf-8', errors='replace').strip().splitlines()
-        detail = lines[-1][-2000:] if lines else 'No child output'
+        detail = '\n'.join(lines[-60:])[-12000:] if lines else 'No child output'
         raise RuntimeError(f'{name} failed (exit {result}): {detail}; see {log_path}')
 
 
@@ -296,7 +300,7 @@ def main():
                     'windows_milvus_patch', Path(__file__).with_name('patch-windows-milvus.py'))
                 patch = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(patch)
-                check('Windows Milvus manifest fix + RECORD', lambda: patch.verify_site(overlay))
+                check('Windows Milvus storage fixes + RECORD', lambda: patch.verify_site(overlay))
             check('RAG overlay imports', lambda: run_child(
                 'overlay', ['--overlay', str(overlay), '--runtime', str(args.runtime.resolve())], logs))
             check('Milvus insert + flush + restart + search + drop', lambda: run_child(

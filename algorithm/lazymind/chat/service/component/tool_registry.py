@@ -188,7 +188,15 @@ ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         '- `read_user_attachment(filename, turn=N)`: transitional compatibility reader. '
         'Prefer `search_file_resource(target, pattern)` and `read_file_resource(target, offset, limit)` for document text; '
         'image descriptions remain available through this compatibility tool.\n'
-        'Supported uploads: images, pdf/doc/docx/pptx, and common plain-text/code/config files.\n'
+        'Supported uploads: images, pdf/doc/docx/pptx, csv/tsv/xls/xlsx spreadsheets, and '
+        'common plain-text/code/config files. Small spreadsheets are parsed with pandas and included '
+        'in full in context: answer from that content and do not call Python or calculator merely to '
+        're-read, re-sum, or verify values already present. For a large spreadsheet, any whole-file '
+        'analysis MUST resolve its path with `find_user_attachment` and use an available Python execution '
+        'tool with pandas, plus openpyxl when workbook structure or formulas matter. Inspect all sheets, '
+        'select and report the actual header/data range, define hidden-row and total-row handling, validate '
+        'record coverage and anomalies, and never infer whole-file results from a preview or manually copy '
+        'preview values into calculator calls. Do not modify or recalculate the original unless requested.\n'
         '- Default to the current turn (marked 当前轮次) when the user says '
         '"this image / 这张图 / 这个文件" without naming a turn.\n'
         '- For uploaded whitelist documents, prefer `kb_tmp_search` then `read_file_resource`. '
@@ -228,10 +236,15 @@ ASK_USER_QUERY_APPENDIX = (
     'write that brief follow-up in assistant prose instead.'
 )
 SESSION_ENV_QUERY_APPENDIX = (
-    'For environment setup, call set_session_env with the name only. It opens a secure input card. '
-    'Never request or copy values through chat, ask_user, tool arguments, scripts, or messages. '
-    'If a user has already pasted a value, do not repeat it; direct them to the secure input card. '
-    'After the backend reports configuration complete, resume the interrupted task without asking again.'
+    'Call set_session_env only after the user explicitly asks to configure, set, save, or provide an '
+    'environment variable. If missing_env appears first, do not use interactive tools; end the turn with '
+    'a short user-facing note naming the missing variable, why it is needed, and how to get it. Do not ask '
+    'how to proceed or describe internal tool/policy decisions. Recommend only in-product configuration: '
+    'reply when ready to configure through the secure input card, or add it in Settings > Integrations > '
+    'Environment Variables. Do not suggest shell exports or config-file edits. When configuration is '
+    'explicit, call set_session_env with the name only; it opens a secure input card. Never request, '
+    'repeat, or copy secret values through chat, ask_user, tool arguments, scripts, or messages. After '
+    'configuration completes, resume the interrupted task.'
 )
 SESSION_ENV_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {'tool_policy': SESSION_ENV_QUERY_APPENDIX}
 USER_ENV_QUERY_APPENDIX = (

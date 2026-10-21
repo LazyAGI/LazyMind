@@ -908,7 +908,7 @@ llm:
   SenseChat_Character: "4K"
   SenseChat_Character_Pro: "4K"
   SenseChat_Turbo: "32K"
-  sensenova-6.7-flash-lite: "256K"
+  sensenova-6.8-flash-lite: "256K"
   sensenova_6.7_flash_lite: "256K"
   solar-pro4: "512K"
   solar_pro4: "512K"

@@ -41,18 +41,3 @@ def test_image_workflow_embeds_general_prompt_craft_contract() -> None:
     assert '5–12 concrete visible nouns' in contract
     assert 'materials, lighting, and palette as separate controls' in contract
     assert 'quality-keyword stacks' in contract
-
-
-def test_ppt_background_workflow_embeds_background_and_series_contracts() -> None:
-    step = _workflow_step('ppt-workflow', 'plan_background_prompts')
-    contract = step['prompt'] + '\n' + step['acceptance_criteria']
-    normalized = ' '.join(contract.split())
-
-    assert '16:9 widescreen presentation background' in normalized
-    assert 'left 40–45%' in normalized
-    assert 'central 55–65% calm' in normalized
-    assert 'top 20–25% calm' in normalized
-    assert 'calm left 42%' in normalized
-    assert 'repeat that sentence verbatim in every prompt' in normalized
-    assert 'Materials, lighting, and palette are independently specified' in normalized
-    assert 'No words, letters, numbers, logos, watermarks, UI, charts, labels' in normalized

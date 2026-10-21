@@ -547,6 +547,7 @@ func TestBundledWorkflowsCompileForRuntime(t *testing.T) {
 	for _, workflowID := range []string{
 		"writer-workflow",
 		"image-workflow",
+		"image-workflow-v2",
 		"test-workflow",
 		"ppt-workflow",
 		"bid_tech_proposal_writer",

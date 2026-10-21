@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -136,6 +137,10 @@ func TestAvailableChatModelsUseUserSelectionAsDefault(t *testing.T) {
 	if cfg["model"] != "gpt-5" || cfg["source"] != "openai" {
 		t.Fatalf("default chat llm = %#v", cfg)
 	}
+	organizer, err := LoadOrganizerChatLLMConfig(context.Background(), db, "user-1", "")
+	if err != nil || organizer["llm"].(map[string]any)["model"] != "gpt-5" {
+		t.Fatal("standalone organizer did not inherit the default chat model", err)
+	}
 }
 
 func TestConversationFixedModelOverridesOnlyLLMAndNeverFallsBack(t *testing.T) {
@@ -174,6 +179,16 @@ func TestConversationFixedModelOverridesOnlyLLMAndNeverFallsBack(t *testing.T) {
 	if config["embed_main"].(map[string]any)["model"] != "embedding-model" {
 		t.Fatalf("non-chat role changed: %#v", config)
 	}
+	organizer, err := LoadOrganizerChatLLMConfig(context.Background(), db, "user-1", conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inherited := organizer["llm"].(map[string]any); inherited["model"] != llm["model"] || inherited["api_key"] != llm["api_key"] || inherited["base_url"] != llm["base_url"] {
+		t.Fatal("organizer must inherit the conversation model instead of the default")
+	}
+	if _, err := LoadOrganizerChatLLMConfig(context.Background(), db, "other-user", conversation.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatal("organizer accepted another user's conversation", err)
+	}
 
 	if err := db.Model(&orm.UserModelProviderGroupModel{}).Where("id = ?", "model-b").Update("deleted_at", time.Now().UTC()).Error; err != nil {
 		t.Fatalf("delete bound model: %v", err)
@@ -181,6 +196,9 @@ func TestConversationFixedModelOverridesOnlyLLMAndNeverFallsBack(t *testing.T) {
 	body["llm_config"] = map[string]any{"llm": map[string]any{"model": "gpt-default"}}
 	if err := applyConversationChatModelConfig(context.Background(), db, "user-1", body); !errors.Is(err, errChatModelUnavailable) {
 		t.Fatalf("deleted fixed model error=%v, want unavailable without fallback", err)
+	}
+	if _, err := LoadOrganizerChatLLMConfig(context.Background(), db, "user-1", conversation.ID); !errors.Is(err, errChatModelUnavailable) {
+		t.Fatal("organizer silently replaced an unavailable conversation model", err)
 	}
 
 	legacy := orm.Conversation{ID: "conversation-legacy", BaseModel: orm.BaseModel{
@@ -310,6 +328,8 @@ func TestAutoChatModelUsesProviderFailureOnlyForNextTurn(t *testing.T) {
 	}{
 		{name: "provider unavailable", terminal: RunTerminal{Status: "failed", Reason: "model_failure", Code: "service_unavailable"}, wantModelID: "model-other"},
 		{name: "credentials unavailable", terminal: RunTerminal{Status: "failed", Reason: "model_failure", Code: "authentication_failed"}, wantModelID: "model-other"},
+		{name: "configuration unavailable", terminal: RunTerminal{Status: "failed", Reason: "model_failure", Code: "model_configuration"}, wantModelID: "model-other"},
+		{name: "provider model not found", terminal: RunTerminal{Status: "failed", Reason: "model_failure", Code: "not_found"}, wantModelID: "model-other"},
 		{name: "context limit", terminal: RunTerminal{Status: "failed", Reason: "model_failure", Code: "token_limit"}, wantModelID: "model-default"},
 		{name: "tool failure", terminal: RunTerminal{Status: "failed", Reason: "runtime_failure", Code: "tool_error"}, wantModelID: "model-default"},
 		{name: "cancelled", terminal: RunTerminal{Status: "cancelled", Reason: "user_cancelled"}, wantModelID: "model-default"},
@@ -652,7 +672,8 @@ func TestChatConversationPersistsSafeModelPreflightFailure(t *testing.T) {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
 		Data    struct {
-			Detail struct {
+			RunTerminal *RunTerminal `json:"run_terminal"`
+			Detail      struct {
 				HistoryID string `json:"history_id"`
 			} `json:"detail"`
 		} `json:"data"`
@@ -685,8 +706,33 @@ func TestChatConversationPersistsSafeModelPreflightFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse preflight terminal: %v", err)
 	}
-	if terminal.Status != "failed" || terminal.Reason != "model_failure" || terminal.Code != "not_found" || terminal.PartialOutput {
+	if terminal.Status != "failed" || terminal.Reason != "model_failure" || terminal.Code != "model_configuration" || terminal.PartialOutput {
 		t.Fatalf("unexpected preflight terminal: %#v", terminal)
+	}
+	if !reflect.DeepEqual(failureResponse.Data.RunTerminal, terminal) {
+		t.Fatalf("HTTP/persisted terminal mismatch: HTTP=%+v stored=%+v", failureResponse.Data.RunTerminal, terminal)
+	}
+	historyRequest := httptest.NewRequest(http.MethodGet, "/api/core/conversations/"+conversation.ID+":history", nil)
+	historyRequest.Header.Set("X-User-Id", "user-1")
+	historyRequest = mux.SetURLVars(historyRequest, map[string]string{"name": conversation.ID + ":history"})
+	historyResponse := httptest.NewRecorder()
+	GetConversationHistory(historyResponse, historyRequest)
+	var restored struct {
+		History []struct {
+			RunTerminal *RunTerminal `json:"run_terminal"`
+		} `json:"history"`
+	}
+	if historyResponse.Code != http.StatusOK {
+		t.Fatalf("history refresh status=%d body=%s", historyResponse.Code, historyResponse.Body.String())
+	}
+	if err := json.Unmarshal(historyResponse.Body.Bytes(), &restored); err != nil {
+		t.Fatalf("decode refreshed history: %v", err)
+	}
+	if len(restored.History) != 1 || restored.History[0].RunTerminal == nil || restored.History[0].RunTerminal.Code != "model_configuration" {
+		t.Fatalf("history refresh lost configuration failure: %#v", restored.History)
+	}
+	if !reflect.DeepEqual(restored.History[0].RunTerminal, failureResponse.Data.RunTerminal) {
+		t.Fatalf("HTTP/history GET terminal mismatch: HTTP=%+v restored=%+v", failureResponse.Data.RunTerminal, restored.History[0].RunTerminal)
 	}
 	var ext struct {
 		Input []map[string]any `json:"input"`
@@ -712,13 +758,20 @@ func TestChatConversationPersistsSafeModelPreflightFailure(t *testing.T) {
 	if len(histories) != 1 {
 		t.Fatalf("regenerated preflight created duplicate rows: %#v", histories)
 	}
+	if err := json.Unmarshal(second.Body.Bytes(), &failureResponse); err != nil {
+		t.Fatal(err)
+	}
+	regeneratedTerminal, err := parseRunTerminal(histories[0].RunTerminal)
+	if err != nil || !reflect.DeepEqual(failureResponse.Data.RunTerminal, regeneratedTerminal) {
+		t.Fatalf("regenerated HTTP/history mismatch: HTTP=%+v stored=%+v err=%v", failureResponse.Data.RunTerminal, regeneratedTerminal, err)
+	}
 	var regeneratedExt struct {
 		Attempts []failedRunAttempt `json:"failed_run_attempts"`
 	}
 	if err := json.Unmarshal(histories[0].Ext, &regeneratedExt); err != nil {
 		t.Fatalf("decode regenerated preflight ext: %v", err)
 	}
-	if len(regeneratedExt.Attempts) != 1 || regeneratedExt.Attempts[0].RunID != history.RunID || regeneratedExt.Attempts[0].RunTerminal.Code != "not_found" {
+	if len(regeneratedExt.Attempts) != 1 || regeneratedExt.Attempts[0].RunID != history.RunID || regeneratedExt.Attempts[0].RunTerminal.Code != "model_configuration" {
 		t.Fatalf("previous preflight failure was not archived: %#v", regeneratedExt.Attempts)
 	}
 }
@@ -781,6 +834,9 @@ func TestChatConversationPersistsUnavailableInitialSelection(t *testing.T) {
 			var failureResponse struct {
 				Code    int    `json:"code"`
 				Message string `json:"message"`
+				Data    struct {
+					RunTerminal *RunTerminal `json:"run_terminal"`
+				} `json:"data"`
 			}
 			if err := json.Unmarshal(recorder.Body.Bytes(), &failureResponse); err != nil {
 				t.Fatalf("decode initial failure: %v", err)
@@ -822,8 +878,11 @@ func TestChatConversationPersistsUnavailableInitialSelection(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parse initial terminal: %v", err)
 			}
-			if terminal.Status != "failed" || terminal.Reason != "model_failure" || terminal.Code != "not_found" || terminal.PartialOutput {
+			if terminal.Status != "failed" || terminal.Reason != "model_failure" || terminal.Code != "model_configuration" || terminal.PartialOutput {
 				t.Fatalf("unexpected initial terminal: %#v", terminal)
+			}
+			if !reflect.DeepEqual(failureResponse.Data.RunTerminal, terminal) {
+				t.Fatalf("initial HTTP/history mismatch: HTTP=%+v stored=%+v", failureResponse.Data.RunTerminal, terminal)
 			}
 			var ext struct {
 				Input []map[string]any `json:"input"`

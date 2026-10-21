@@ -254,12 +254,29 @@ jobs:
         run: |
           set -euo pipefail
           smoke_root="${RUNNER_TEMP}/lazymind-packaged-smoke"
-          LAZYMIND_DESKTOP_RUNTIME_ROOT="${smoke_root}" node desktop/scripts/packaged-app-smoke.mjs \
+          ELECTRON_RUN_AS_NODE=1 LAZYMIND_DESKTOP_RUNTIME_ROOT="${smoke_root}" node desktop/scripts/packaged-app-smoke.mjs \
             --app "${GITHUB_WORKSPACE}/desktop/dist/mac-arm64/LazyMind.app" \
             --runtime-root "${smoke_root}" \
             --platform darwin \
             --timeout-ms 300000 \
             --leave-running true
+          launcher_log="${HOME}/Library/Logs/LazyMind/desktop-launcher.log"
+          test -f "${launcher_log}"
+          grep -Fq "removed inherited ELECTRON_RUN_AS_NODE" "${launcher_log}"
+
+      - name: Upload failed packaged conversion diagnostics
+        if: failure() && steps.packaged_smoke.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-packaged-smoke-diagnostics
+          path: |
+            ~/Library/Logs/LazyMind/chat.log
+            ~/Library/Logs/LazyMind/core.log
+            ~/Library/Logs/LazyMind/frontend.log
+            ~/Library/Logs/lazymind-desktop/installer-warmup.log
+            ~/Library/Logs/lazymind-desktop/desktop-shutdown.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Submit app ZIP for notarization
         if: steps.release.outputs.official_release == 'true'
@@ -404,8 +421,26 @@ jobs:
         run: |
           set -euo pipefail
           app_path="${GITHUB_WORKSPACE}/desktop/dist/mac-arm64/LazyMind.app"
-          xcrun stapler staple "${app_path}"
-          xcrun stapler validate "${app_path}"
+
+          retry_stapler() {
+            local action="$1"
+            local target="$2"
+            local attempt
+            for attempt in 1 2 3 4 5; do
+              if xcrun stapler "${action}" "${target}"; then
+                return 0
+              fi
+              if [[ "${attempt}" -eq 5 ]]; then
+                echo "::error::stapler ${action} failed after ${attempt} attempts"
+                return 1
+              fi
+              echo "::warning::stapler ${action} attempt ${attempt} failed; retrying in $(( attempt * 15 )) seconds"
+              sleep "$(( attempt * 15 ))"
+            done
+          }
+
+          retry_stapler staple "${app_path}"
+          retry_stapler validate "${app_path}"
           spctl --assess --type execute --verbose=4 "${app_path}"
 
       - name: Package app as DMG
@@ -557,8 +592,26 @@ jobs:
           set -euo pipefail
           final_path="${NOTARIZATION_DMG/.notarization.dmg/.dmg}"
           mv "${NOTARIZATION_DMG}" "${final_path}"
-          xcrun stapler staple "${final_path}"
-          xcrun stapler validate "${final_path}"
+
+          retry_stapler() {
+            local action="$1"
+            local target="$2"
+            local attempt
+            for attempt in 1 2 3 4 5; do
+              if xcrun stapler "${action}" "${target}"; then
+                return 0
+              fi
+              if [[ "${attempt}" -eq 5 ]]; then
+                echo "::error::stapler ${action} failed after ${attempt} attempts"
+                return 1
+              fi
+              echo "::warning::stapler ${action} attempt ${attempt} failed; retrying in $(( attempt * 15 )) seconds"
+              sleep "$(( attempt * 15 ))"
+            done
+          }
+
+          retry_stapler staple "${final_path}"
+          retry_stapler validate "${final_path}"
           spctl --assess --type open --context context:primary-signature --verbose=4 "${final_path}"
           echo "installer_path=${final_path}" >> "${GITHUB_OUTPUT}"
           echo "artifact_name=$(basename "${final_path}")" >> "${GITHUB_OUTPUT}"

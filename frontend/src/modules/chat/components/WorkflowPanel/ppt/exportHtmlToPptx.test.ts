@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   applyHtmlPreviewCompatibilityFallbacks,
   htmlForStaticPreview,
+  htmlForRasterCapture,
+  waitForAnimationFrames,
 } from './exportHtmlToPptx';
 
 describe('PPT HTML preview compatibility', () => {
@@ -56,4 +58,33 @@ describe('PPT HTML preview compatibility', () => {
     expect(applyHtmlPreviewCompatibilityFallbacks(document)).toBe(0);
     expect(canvas.hasAttribute('data-lazymind-unsupported-visual')).toBe(false);
   });
+});
+
+
+it('does not hang raster exports when a hidden iframe never dispatches animation frames', async () => {
+  vi.useFakeTimers();
+  try {
+    const hiddenWindow = {requestAnimationFrame: vi.fn((_callback: FrameRequestCallback) => 7), cancelAnimationFrame: vi.fn()};
+    const finished = waitForAnimationFrames(hiddenWindow, 2);
+    await vi.advanceTimersByTimeAsync(130);
+    await finished;
+    expect(hiddenWindow.requestAnimationFrame).toHaveBeenCalledTimes(2);
+    expect(hiddenWindow.cancelAnimationFrame).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally { vi.useRealTimers(); }
+});
+
+
+it('does not hide the rasterizer SVG wrapper with slide compatibility CSS', () => {
+  const prepared = htmlForRasterCapture('<html><head></head><body><h1>Slide</h1></body></html>');
+  const svg = new DOMParser().parseFromString(
+    '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject id="capture"><body xmlns="http://www.w3.org/1999/xhtml"><svg xmlns="http://www.w3.org/2000/svg"><foreignObject id="source" /></svg></body></foreignObject></svg>',
+    'image/svg+xml',
+  );
+  const rules = [...prepared.matchAll(/([^{}>]+)\{opacity:0!important;visibility:hidden!important;background:transparent!important;\}/g)];
+  expect(rules).toHaveLength(2);
+  for (const rule of rules) {
+    expect(svg.querySelector('#capture')!.matches(rule[1])).toBe(false);
+    expect(svg.querySelector('#source')!.matches(rule[1])).toBe(true);
+  }
 });

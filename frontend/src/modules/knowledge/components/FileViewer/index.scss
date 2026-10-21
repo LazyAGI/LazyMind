@@ -34,6 +34,61 @@
       }
     }
   }
+  .excel-table-fallback {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    flex-direction: column;
+    background: #fff;
+  }
+  .excel-table-fallback-panes {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
+  .excel-table-fallback-pane {
+    width: max-content;
+    min-width: 100%;
+  }
+  .excel-table-fallback-grid {
+    border-collapse: collapse;
+    color: #262626;
+    font-size: 13px;
+    td {
+      min-width: 96px;
+      max-width: 320px;
+      padding: 6px 10px;
+      border-right: 1px solid #e5e7eb;
+      border-bottom: 1px solid #e5e7eb;
+      white-space: nowrap;
+    }
+    tr:first-child td {
+      background: #f5f7fa;
+      font-weight: 600;
+    }
+  }
+  .excel-table-fallback-tabs {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 4px;
+    overflow-x: auto;
+    padding: 6px 8px;
+    border-top: 1px solid #d9d9d9;
+    background: #fafafa;
+    button {
+      padding: 4px 12px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: #595959;
+      cursor: pointer;
+    }
+    button.active {
+      background: #e6f4ff;
+      color: #1677ff;
+      font-weight: 600;
+    }
+  }
   .vue-office-docx .docx-wrapper {
     padding: 0.625rem !important;
   }
@@ -211,6 +266,10 @@
 
 .file-viewer-selection-translate-wrap {
   position: absolute;
+  display: flex;
+  flex-wrap: wrap;
+  width: max-content;
+  max-width: 100%;
   z-index: 40;
   transform: translateX(-50%);
 }

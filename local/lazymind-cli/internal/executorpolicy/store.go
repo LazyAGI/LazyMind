@@ -21,8 +21,8 @@ const (
 type Status struct {
 	Provider          string      `json:"provider"`
 	Enabled           bool        `json:"enabled"`
-	Installed         bool        `json:"installed,omitempty"`
-	Ready             bool        `json:"ready,omitempty"`
+	Installed         *bool       `json:"installed,omitempty"`
+	Ready             *bool       `json:"ready,omitempty"`
 	UnavailableReason string      `json:"unavailable_reason,omitempty"`
 	BridgeState       BridgeState `json:"bridge_state,omitempty"`
 }

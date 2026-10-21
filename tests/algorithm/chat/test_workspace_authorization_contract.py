@@ -94,8 +94,8 @@ def test_workspace_real_core_http_roundtrip():
                     time.sleep(.02)
                 assert item is not None and not future.done()
                 assert not (root / 'denied.txt').exists()
-                if method == 'write' and arguments.get('mode') == 'create':
-                    assert not (root / arguments['path']).exists()
+                if method == 'write' and arguments['file_path'] == 'created.txt':
+                    assert not (root / arguments['file_path']).exists()
                 assert not {'content', 'lease_token', 'root'} & item.keys()
                 if action == 'cancel':
                     cancelled.set()
@@ -109,20 +109,20 @@ def test_workspace_real_core_http_roundtrip():
                 cancelled.set()
                 raise
     try:
-        assert approved('write', {'path': 'created.txt', 'content': 'one'})['ok']
-        assert invoke('read', {'path': 'created.txt'})['value']['content'] == 'one'
-        assert approved('write', {'mode': 'append', 'path': 'created.txt', 'content': '+two'})['ok']
-        assert invoke('read', {'path': 'created.txt'})['value']['content'] == 'one+two'
-        assert approved('edit', {'path': 'created.txt', 'old_text': 'two', 'new_text': 'three'})['ok']
+        assert approved('write', {'file_path': 'created.txt', 'content': 'one'})['ok']
+        assert invoke('read', {'file_path': 'created.txt'})['value']['content'] == 'one'
+        assert approved('edit', {'file_path': 'created.txt', 'old_string': 'one', 'new_string': 'one+two'})['ok']
+        assert invoke('read', {'file_path': 'created.txt'})['value']['content'] == 'one+two'
+        assert approved('edit', {'file_path': 'created.txt', 'old_string': 'two', 'new_string': 'three'})['ok']
         assert (root / 'created.txt').read_text() == 'one+three'
-        assert not approved('write', {'path': 'denied.txt', 'content': 'deny'}, 'reject')['ok']
+        assert not approved('write', {'file_path': 'denied.txt', 'content': 'deny'}, 'reject')['ok']
         assert approved('remove', {'path': 'created.txt'})['ok']
         assert not (root / 'created.txt').exists()
         if not fixture['identity'].get('attempt_id'):
             assert approved('shell', {'cmd': 'echo once'})['ok']
             assert approved('shell', {'cmd': 'echo second'})['ok']
             assert approved('shell', {'cmd': 'echo third'})['ok']
-        assert not approved('write', {'path': 'cancelled.txt', 'content': 'cancel'}, 'cancel')['ok']
+        assert not approved('write', {'file_path': 'cancelled.txt', 'content': 'cancel'}, 'cancel')['ok']
         assert not (root / 'cancelled.txt').exists()
     finally:
         cancelled.set()

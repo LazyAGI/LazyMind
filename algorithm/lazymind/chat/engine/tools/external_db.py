@@ -2,15 +2,16 @@ from __future__ import annotations
 
 from lazyllm.tools import fc_register
 
-import json
 import re
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from urllib.parse import urlencode
 
 from lazyllm.tools.agent import ToolExecutionError
-from lazyllm.tools.sql.sql_manager import SqlManager
 
 from lazymind.chat.engine.tools.infra import get_core_api
+
+if TYPE_CHECKING:
+    from .external_db_manager import ReadOnlySqlManager
 
 _DANGEROUS_SQL = re.compile(
     r'\b(insert|update|delete|drop|alter|truncate|create|replace|merge|grant|revoke|upsert|call|execute)\b',
@@ -70,21 +71,6 @@ def _options_str(options: Any) -> Optional[str]:
     return urlencode(values) if values else None
 
 
-class ReadOnlySqlManager(SqlManager):
-    def _ensure_database_exists(self, conn_url: str):  # noqa: ARG002
-        return
-
-    def execute_readonly_query(self, statement: str) -> Any:
-        sql = _validate_readonly_sql(statement)
-        if not sql:
-            raise ValueError('Only one read-only SELECT/WITH statement is allowed')
-        raw = self.execute_query(sql)
-        try:
-            return json.loads(raw)
-        except ValueError:
-            return raw
-
-
 class ExternalDatabaseToolkit:
     """Read-only tools for querying user-configured external relational databases."""
 
@@ -102,6 +88,8 @@ class ExternalDatabaseToolkit:
         return get_core_api(f'/data-sources/database-connections/{connection_id}:secret')
 
     def _manager(self, connection_id: str) -> ReadOnlySqlManager:
+        from .external_db_manager import ReadOnlySqlManager
+
         conn = self._connection(connection_id)
         db_type = str(conn.get('db_type') or '').strip().lower()
         if db_type == 'postgres':

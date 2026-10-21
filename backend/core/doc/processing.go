@@ -240,7 +240,7 @@ func EnsureParsed(w http.ResponseWriter, r *http.Request) {
 
 // ReadDocument returns authorized document text for chat and other read-only
 // consumers. Unlike :content, this is a JSON endpoint: textual source files are
-// read directly, while binary PDFs use parsed root nodes. It intentionally does
+// read directly, while other formats use parsed root nodes. It intentionally does
 // not require semantic chunks or a vector index.
 func ReadDocument(w http.ResponseWriter, r *http.Request) {
 	datasetID, documentID := datasetIDFromPath(r), documentIDFromPath(r)

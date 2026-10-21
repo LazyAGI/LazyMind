@@ -359,7 +359,7 @@ func TestNativeExecutionSharesAtomicReviewAndHostContinuation(t *testing.T) {
 			}
 			if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "session-1").Updates(map[string]any{
 				"control_protocol":     controlpolicy.Protocol,
-				"control_binding_json": `{"driver_session_id":"driver","connector_id":"connector","generation":1}`,
+				"control_binding_json": `{"driver_session_id":"driver","connector_id":"connector"}`,
 			}).Error; err != nil {
 				t.Fatal(err)
 			}
@@ -461,7 +461,7 @@ func TestNativeCompletionReplacesUnconsumedStartNotification(t *testing.T) {
 			}
 			if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "session-1").Updates(map[string]any{
 				"control_protocol":     controlpolicy.Protocol,
-				"control_binding_json": `{"driver_session_id":"driver","connector_id":"connector","generation":1}`,
+				"control_binding_json": `{"driver_session_id":"driver","connector_id":"connector"}`,
 			}).Error; err != nil {
 				t.Fatal(err)
 			}
@@ -471,7 +471,7 @@ func TestNativeCompletionReplacesUnconsumedStartNotification(t *testing.T) {
 				t.Fatal(err)
 			}
 			old := orm.WorkflowHostAction{ID: "start-notification", SessionID: "session-1", Kind: "continue",
-				ExecutionID: "attempt-1", Status: status, BindingGeneration: 1, ConnectorID: "connector", NativeSessionID: "driver"}
+				ExecutionID: "attempt-1", Status: status, ConnectorID: "connector", NativeSessionID: "driver"}
 			if err := db.Create(&old).Error; err != nil {
 				t.Fatal(err)
 			}

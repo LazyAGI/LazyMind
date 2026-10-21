@@ -7,6 +7,7 @@ import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import MainLayout from "./MainLayout";
+import { TASKS_REMOVED_EVENT } from '@/modules/taskCenter/events';
 import {
   CHAT_CONVERSATION_LIST_REFRESH_EVENT,
   CHAT_SELECT_CONVERSATION_EVENT,
@@ -19,7 +20,15 @@ const mocks = vi.hoisted(() => ({
   initialOnRemove: null as null | ((conversation: { conversation_id?: string }) => void),
   latestRecordListProps: null as any,
   refreshRecordList: vi.fn(),
+  fetchPreferences: vi.fn().mockResolvedValue({ document_directories_enabled: true }),
+  listDirectoryBatches: vi.fn().mockResolvedValue([]),
 }));
+
+vi.mock("@/modules/user/uiPreferencesApi", () => ({
+ fetchUserUiPreferences: mocks.fetchPreferences,
+ USER_UI_PREFERENCES_CHANGED_EVENT: "lazymind:user-ui-preferences-changed",
+}));
+vi.mock("@/modules/documentDirectories/api", () => ({ listBatches: mocks.listDirectoryBatches }));
 
 vi.mock("react-i18next", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react-i18next")>()),
@@ -111,6 +120,11 @@ function LocationProbe() {
 }
 
 describe("MainLayout conversation removal", () => {
+  it.each(['/agent/chat/home/removed', '/task-center'])("only leaves a deleted conversation that is currently open: %s", async path => {
+    render(<MemoryRouter initialEntries={[path]}><MainLayout /><LocationProbe /></MemoryRouter>);
+    act(() => window.dispatchEvent(new CustomEvent(TASKS_REMOVED_EVENT, { detail: { removed_task_ids: ['task'], trashed_conversation_ids: ['removed'], cancellation_pending: true } })));
+    await waitFor(() => expect(screen.getByTestId('location-path')).toHaveTextContent(path === '/task-center' ? path : '/agent/chat/home'));
+  });
   beforeEach(() => {
     sessionStorage.clear();
     localStorage.clear();
@@ -128,6 +142,23 @@ describe("MainLayout conversation removal", () => {
     fireEvent.click(screen.getByRole("button", { name: /layout.newChat/ }));
     expect(screen.getByRole("button", { name: /layout.newChat/ })).toHaveAttribute("aria-pressed", "true");
     expect(readChatConversationFilters()).toEqual({ filter: "normal", sources: ["codex", "workbuddy"] });
+  });
+
+  it('captures the draft before notifying the page about a mode change', () => {
+    const events: string[] = [];
+    const capture = () => events.push('capture');
+    const select = () => events.push('select');
+    window.addEventListener('lazymind:chat-capture-mode-draft', capture);
+    window.addEventListener(CHAT_SELECT_CONVERSATION_EVENT, select);
+    try {
+      sessionStorage.setItem(CHAT_CONVERSATION_FILTER_KEY, '["task"]');
+      render(<MemoryRouter><MainLayout /></MemoryRouter>);
+      fireEvent.click(screen.getByRole('button', { name: /layout.newChat/ }));
+      expect(events).toEqual(['capture', 'select']);
+    } finally {
+      window.removeEventListener('lazymind:chat-capture-mode-draft', capture);
+      window.removeEventListener(CHAT_SELECT_CONVERSATION_EVENT, select);
+    }
   });
 
   it("uses a detail route for the selected conversation and returns home when it is removed", async () => {
@@ -591,5 +622,43 @@ describe("MainLayout resizable navigation", () => {
     expect(resizeHandle()).toHaveAttribute("aria-valuenow", "72");
     expect(screen.getByRole("button", { name: "common.create" })).toBeVisible();
     expect(screen.queryByText("Entire page loading")).not.toBeInTheDocument();
+  });
+});
+
+describe("MainLayout document directory feature control", () => {
+  it("hides navigation, stops polling and redirects an open directory when disabled", async () => {
+    mocks.fetchPreferences.mockResolvedValue({ document_directories_enabled: true });
+    mocks.listDirectoryBatches.mockClear();
+    render(<MemoryRouter initialEntries={["/document-directories"]}>
+      <Routes><Route element={<MainLayout />}>
+        <Route path="/document-directories" element={<div>Directory content</div>} />
+        <Route path="/settings" element={<div>Knowledge settings</div>} />
+      </Route></Routes>
+    </MemoryRouter>);
+    expect(await screen.findByText("Directory content")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "layout.resourceLib" }));
+    expect(await screen.findByText("directories.title")).toBeInTheDocument();
+    await waitFor(() => expect(mocks.listDirectoryBatches).toHaveBeenCalled());
+    const calls = mocks.listDirectoryBatches.mock.calls.length;
+    act(() => window.dispatchEvent(new CustomEvent("lazymind:user-ui-preferences-changed", { detail: { document_directories_enabled: false } })));
+    expect(await screen.findByText("Knowledge settings")).toBeInTheDocument();
+    expect(screen.queryByText("Directory content")).not.toBeInTheDocument();
+    expect(screen.queryByText("directories.title")).not.toBeInTheDocument();
+    expect(mocks.listDirectoryBatches).toHaveBeenCalledTimes(calls);
+    act(() => window.dispatchEvent(new CustomEvent("lazymind:user-ui-preferences-changed", { detail: { document_directories_enabled: true } })));
+    expect(await screen.findByText("directories.title")).toBeInTheDocument();
+  });
+  it("does not load directory content or batches for an initially disabled user", async () => {
+    mocks.fetchPreferences.mockResolvedValueOnce({ document_directories_enabled: false });
+    mocks.listDirectoryBatches.mockClear();
+    render(<MemoryRouter initialEntries={["/document-directories/example"]}>
+      <Routes><Route element={<MainLayout />}>
+        <Route path="/document-directories/:id" element={<div>Directory content</div>} />
+        <Route path="/settings" element={<div>Knowledge settings</div>} />
+      </Route></Routes>
+    </MemoryRouter>);
+    expect(await screen.findByText("Knowledge settings")).toBeInTheDocument();
+    expect(screen.queryByText("Directory content")).not.toBeInTheDocument();
+    expect(mocks.listDirectoryBatches).not.toHaveBeenCalled();
   });
 });

@@ -101,6 +101,7 @@ class AccountView(BaseModel):
     avatar_url: str | None = None
     capabilities: dict = Field(default_factory=dict)
     identity: dict[str, str] = Field(default_factory=dict)
+    label_custom: bool = False
     binding_status: Literal['connected', 'paused', 'unbound']
     default_recipient_id: str = ''
 

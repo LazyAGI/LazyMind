@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import lazyllm
 import pytest
+from lazyllm.tools.agent.toolsManager import ModuleTool
 
 from lazymind.chat.workflow.workflow_manager import (
     enforce_startup_clarification_policy,
@@ -48,6 +49,18 @@ def _tool_names(contribution):
     return names
 
 
+@pytest.mark.parametrize('workflow_id', ['writer-workflow', 'image-workflow', 'ppt-workflow', 'product_solution_delivery'])
+def test_manager_never_injects_domain_navigation_tools(workflow_id):
+    with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory:
+        client_factory.return_value.get_state.return_value = {
+            'session_id': 'session-1', 'status': 'active', 'state_version': 3,
+        }
+        contribution = resolve_workflow_injection({'session_id': 'session-1', 'workflow_id': workflow_id})
+    product_tools = {'get_product_stage_options', 'read_product_project_artifact', 'relay_product_stage'}
+    names = _tool_names(contribution)
+    assert names & product_tools == set()
+
+
 def test_mentioned_workflow_is_injected_as_authoritative_selection():
     catalog = [{
         'workflow_ref': 'builtin:image-workflow',
@@ -81,7 +94,8 @@ def test_mentioned_workflow_is_injected_as_authoritative_selection():
     assert 'bind_workflow_input' not in _tool_names(contribution)
 
 
-def test_dynamic_trigger_loads_pinned_remote_package_without_listing():
+@pytest.mark.parametrize('json_encoded', [False, True])
+def test_dynamic_trigger_loads_pinned_remote_package_without_listing(json_encoded):
     lazyllm.globals['agentic_config']['files'] = ['/safe/report.pdf']
     toolkit = MagicMock()
     toolkit.prepare_workflow.return_value = {
@@ -121,9 +135,11 @@ def test_dynamic_trigger_loads_pinned_remote_package_without_listing():
             }],
         )
 
-        result = _tool(contribution, 'trigger_image_workflow')(
-            {'source': 'report.pdf'},
-        )
+        trigger = _tool(contribution, 'trigger_image_workflow')
+        bindings = {'source': 'report.pdf'}
+        tool = ModuleTool(apply_func=trigger, schema_func=trigger)
+        arguments = tool._validate_input({'input_bindings': json.dumps(bindings) if json_encoded else bindings})
+        result = trigger(**arguments)
 
     client_factory.return_value.list_workflows.assert_not_called()
     client_factory.return_value.get_workflow.assert_called_once_with(
@@ -144,7 +160,8 @@ def test_dynamic_trigger_loads_pinned_remote_package_without_listing():
     toolkit.advance_step.assert_not_called()
 
 
-def test_dynamic_trigger_imports_scalar_binding_without_conversation_attachments():
+@pytest.mark.parametrize('json_encoded', [False, True])
+def test_dynamic_trigger_imports_scalar_binding_without_conversation_attachments(json_encoded):
     toolkit = MagicMock()
     toolkit.prepare_workflow.return_value = {
         'session_id': 'session-1', 'state_version': 1, 'ready_steps': ['draft'],
@@ -178,9 +195,11 @@ def test_dynamic_trigger_imports_scalar_binding_without_conversation_attachments
             }],
         )
 
-        result = _tool(contribution, 'trigger_report_workflow')({
-            'target_length': '3000',
-        })
+        trigger = _tool(contribution, 'trigger_report_workflow')
+        bindings = {'target_length': '3000'}
+        tool = ModuleTool(apply_func=trigger, schema_func=trigger)
+        arguments = tool._validate_input({'input_bindings': json.dumps(bindings) if json_encoded else bindings})
+        result = trigger(**arguments)
 
     import_text.assert_called_once_with('target_length', '3000')
     assert result['session_id'] == 'session-1'
@@ -192,6 +211,107 @@ def test_dynamic_trigger_imports_scalar_binding_without_conversation_attachments
             },
         }, request_context='write about 3000 words', workflow_mode='dynamic',
     )
+
+
+@pytest.mark.parametrize('bindings', [
+    '{bad json', '[]', 'null', '"text"', '{"target_length":300}',
+    '{"target_length":{"data":"300"}}', '{"unexposed":"300"}',
+])
+def test_trigger_rejects_invalid_json_bindings_before_import_or_preparation(bindings):
+    with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
+        'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit',
+    ) as toolkit, patch('lazymind.chat.workflow.workflow_manager._import_text_binding') as import_text:
+        client_factory.return_value.get_workflow.return_value.result = {
+            'workflow_id': 'report', 'revision_id': 'revision-1',
+            'runtime': {'trigger_inputs': ['target_length']},
+            'compiled_graph': {
+                'material_types': {'target_length': 'text'},
+                'material_producers': {'target_length': {'kind': 'external'}},
+            },
+        }
+        contribution = resolve_workflow_injection(
+            None, current_query='write about 300 words',
+            workflow_catalog=[{
+                'workflow_ref': 'builtin:report', 'workflow_id': 'report', 'revision_id': 'revision-1',
+            }],
+            allowed_workflow_refs=['builtin:report'],
+            workflow_activations=[{
+                'workflow_ref': 'builtin:report', 'workflow_id': 'report',
+                'revision_id': 'revision-1', 'tool_name': 'trigger_report_workflow',
+            }],
+        )
+        trigger = _tool(contribution, 'trigger_report_workflow')
+        tool = ModuleTool(apply_func=trigger, schema_func=trigger)
+        arguments = tool._validate_input({'input_bindings': bindings})
+
+        with pytest.raises(WorkflowClientError):
+            trigger(**arguments)
+
+    import_text.assert_not_called()
+    toolkit.return_value.prepare_workflow.assert_not_called()
+
+
+@pytest.mark.parametrize('json_encoded', [False, True])
+@pytest.mark.parametrize('has_required_input', [False, True])
+def test_trigger_omits_blank_bindings_and_preserves_runtime_missing_inputs(json_encoded, has_required_input):
+    toolkit = MagicMock()
+    toolkit.prepare_workflow.return_value = (
+        {'session_id': 'session-1', 'ready_steps': ['draft']}
+        if has_required_input else {'status': 'needs_input', 'missing_inputs': ['topic']}
+    )
+    bindings = {'topic': '社区自习室' if has_required_input else ' ',
+                'target_length': '', 'source': '  ', 'reference': '\n', 'preferences': '\t'}
+    with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
+        'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
+    ), patch('lazymind.chat.workflow.workflow_manager._import_text_binding', return_value={
+        'resource_id': 'topic-resource', 'revision': 1, 'content_hash': 'sha256:topic',
+    }) as import_text, patch(
+        'lazymind.chat.workflow.workflow_manager._resolve_workflow_attachment',
+    ) as resolve_attachment:
+        client = client_factory.return_value
+        client.get_workflow.return_value.result = {
+            'workflow_id': 'report', 'revision_id': 'revision-1',
+            'runtime': {'trigger_inputs': list(bindings)},
+            'compiled_graph': {
+                'material_types': {'topic': 'text', 'target_length': 'text', 'source': 'file',
+                                   'reference': 'image', 'preferences': 'json'},
+                'material_producers': {key: {'kind': 'external'} for key in bindings},
+            },
+        }
+        client.get_state.return_value = {
+            'session_id': 'session-1', 'projection': {'ready': ['draft']},
+        }
+        contribution = resolve_workflow_injection(
+            None, current_query='设计社区自习室预约产品，只做产品方向，使用默认结构',
+            workflow_catalog=[{
+                'workflow_ref': 'builtin:report', 'workflow_id': 'report', 'revision_id': 'revision-1',
+            }],
+            allowed_workflow_refs=['builtin:report'],
+            workflow_activations=[{
+                'workflow_ref': 'builtin:report', 'workflow_id': 'report',
+                'revision_id': 'revision-1', 'tool_name': 'trigger_report_workflow',
+            }],
+        )
+        trigger = _tool(contribution, 'trigger_report_workflow')
+        tool = ModuleTool(apply_func=trigger, schema_func=trigger)
+        arguments = tool._validate_input({'input_bindings': json.dumps(bindings) if json_encoded else bindings})
+
+        result = trigger(**arguments)
+
+    expected = {'topic': import_text.return_value} if has_required_input else {}
+    assert toolkit.prepare_workflow.call_args.kwargs['input_bindings'] == expected
+    resolve_attachment.assert_not_called()
+    if has_required_input:
+        import_text.assert_called_once_with('topic', '社区自习室')
+        assert result['session_id'] == 'session-1'
+        assert result['outcome'] == 'ready'
+    else:
+        import_text.assert_not_called()
+        client.get_state.assert_not_called()
+        assert result['outcome'] == 'waiting_for_input'
+        assert result['missing_inputs'] == ['topic']
+        assert 'session_id' not in result
+    toolkit.advance_step.assert_not_called()
 
 
 def test_selected_workflow_declares_missing_only_startup_clarification():
@@ -674,6 +794,40 @@ def test_active_workflow_forwards_current_edit_request_and_focus_to_step():
     command = toolkit.advance_step.call_args.args[2][0]
     assert command.user_input == '把这一页标题改成期末练习'
     assert 'sort order 2' in command.runtime_instruction
+
+
+def test_manager_preserves_continue_for_all_workflows():
+    toolkit = MagicMock()
+    toolkit.get_ready_steps.return_value = {
+        'session_id': 'session-1', 'state_version': 7,
+        'ready_steps': ['analyze_requirements'],
+        'retryable_steps': [], 'rewindable_steps': [], 'continue_steps': [],
+    }
+    toolkit.advance_step.return_value = {'status': 'succeeded'}
+    with patch('lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit',
+               return_value=toolkit), patch(
+        'lazymind.chat.workflow.workflow_manager._client',
+    ) as client_factory:
+        client_factory.return_value.get_state.return_value = {
+            'status': 'waiting', 'state_version': 7,
+            'projection': {'ready': ['analyze_requirements']},
+        }
+        ppt = resolve_workflow_injection(
+            {'session_id': 'session-1', 'workflow_id': 'ppt-workflow'},
+            conversation_id='conversation-1', current_query='继续',
+        )
+        lazyllm.globals['agentic_config'].update(ppt.agentic_config_patch)
+        _tool(ppt, 'advance_step')(['analyze_requirements'])
+
+        writer = resolve_workflow_injection(
+            {'session_id': 'session-1', 'workflow_id': 'writer'},
+            conversation_id='conversation-1', current_query='继续',
+        )
+        lazyllm.globals['agentic_config'].update(writer.agentic_config_patch)
+        _tool(writer, 'advance_step')(['analyze_requirements'])
+
+    assert toolkit.advance_step.call_args_list[0].args[2][0].user_input == '继续'
+    assert toolkit.advance_step.call_args_list[1].args[2][0].user_input == '继续'
 
 
 def test_dynamic_trigger_defaults_request_context_to_current_query():

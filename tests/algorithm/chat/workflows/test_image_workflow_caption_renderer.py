@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import sys
 
 import pytest
 from PIL import Image, ImageFont, ImageSequence
@@ -12,7 +13,7 @@ def _repo_root() -> Path:
 
 
 def _load_tools():
-    path = _repo_root() / 'workflows' / 'image-workflow' / 'scripts' / 'tools.py'
+    path = _repo_root() / 'algorithm' / 'lazymind' / 'chat' / 'engine' / 'tools' / 'infra' / 'image_workflow_support.py'
     spec = importlib.util.spec_from_file_location('image_workflow_tools', path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -92,6 +93,21 @@ def test_cjk_font_selection_rejects_incomplete_latin_font(monkeypatch, latin_fon
         pass
     else:
         raise AssertionError('A font without Chinese glyphs must not be accepted for Chinese captions')
+
+
+@pytest.mark.skipif(sys.platform != 'darwin', reason='Requires macOS system fonts')
+def test_caption_layout_uses_macos_system_font_for_chinese(monkeypatch):
+    monkeypatch.delenv('LAZYMIND_MEME_FONT_PATH', raising=False)
+    tools = _load_tools()
+    caption = '好懒，躺平！'
+
+    font_path = tools._caption_font_path(caption)
+    assert tools._font_missing_characters(font_path, caption) == []
+    layout = tools._caption_layout((600, 600), caption, font_path=font_path)
+    left, top, right, bottom = layout['text_bbox_px']
+    box_left, box_top, box_right, box_bottom = layout['caption_box_px']
+    assert box_left <= left < right <= box_right
+    assert box_top <= top < bottom <= box_bottom
 
 
 def test_caption_renderer_changes_only_pixels_inside_layout_box(tmp_path, monkeypatch, latin_font):

@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"lazymind/core/workflow/publication"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -19,6 +21,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/taskcenter"
+	"lazymind/core/tasktiming"
 	"lazymind/core/workflow/artifactgraph"
 	"lazymind/core/workflow/controlpolicy"
 	"lazymind/core/workflow/controlstore"
@@ -354,6 +357,16 @@ func (r *Repository) PatchArtifact(ctx context.Context, owner, artifactID string
 	if err != nil {
 		return Artifact{}, err
 	}
+	frozen, directory, err := publication.SnapshotEdit(r.db.WithContext(ctx), current.SessionID, contentType, value)
+	if err != nil {
+		return Artifact{}, err
+	}
+	value = frozen
+	defer func() {
+		if err != nil && directory != "" {
+			_ = os.RemoveAll(directory)
+		}
+	}()
 	now := time.Now().UTC()
 	humanID, revisionID := uuid.NewString(), uuid.NewString()
 	var created orm.WorkflowSlotRevision
@@ -717,6 +730,9 @@ func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, co
 				created.ControlProtocol, created.ControlBindingJSON = control.Protocol, string(binding)
 			}
 			if err := tx.Create(&created).Error; err != nil {
+				return err
+			}
+			if err := tasktiming.BindWorkflow(ctx, tx, created, now); err != nil {
 				return err
 			}
 			createdNow = true
@@ -1093,7 +1109,7 @@ func (r *Repository) commandTransactional(ctx context.Context, owner, sessionID,
 			_ = json.Unmarshal(response, &responseObject)
 			stateVersion, _ := responseObject["state_version"].(float64)
 			event := &Event{SessionID: sessionID, OwnerUserID: owner, ContractVersion: version, EventType: "workflow.patch", EntityID: sessionID, StateVersion: int64(stateVersion), CommandID: commandID, PayloadJSON: response, CreatedAt: time.Now().UTC()}
-			if err := tx.Create(event).Error; err != nil {
+			if err := tasktiming.PersistWorkflowEvent(tx, event); err != nil {
 				return err
 			}
 			committedEvent = event
@@ -1147,7 +1163,7 @@ func (r *Repository) commandSQLite(ctx context.Context, owner, sessionID, comman
 			ContractVersion: version, EventType: "workflow.patch", EntityID: sessionID,
 			StateVersion: int64(stateVersion), CommandID: commandID,
 			PayloadJSON: response, CreatedAt: time.Now().UTC()}
-		return tx.Create(committedEvent).Error
+		return tasktiming.PersistWorkflowEvent(tx, committedEvent)
 	})
 	if err != nil {
 		return Command{}, false, err
@@ -1175,11 +1191,11 @@ func (r *Repository) AppendEvent(ctx context.Context, event *Event) error {
 			if _, err := controlstore.LockSession(tx, event.SessionID); err != nil {
 				return err
 			}
-			return tx.Create(event).Error
+			return tasktiming.PersistWorkflowEvent(tx, event)
 		}); err != nil {
 			return err
 		}
-	} else if err := db.Create(event).Error; err != nil {
+	} else if err := tasktiming.PersistWorkflowEvent(db, event); err != nil {
 		return err
 	}
 	r.publish(*event)
@@ -1320,4 +1336,12 @@ func (r *Repository) setNativeSessionStopped(ctx context.Context, owner, session
 		return 0, repositoryError("STORED_LIFECYCLE_RESPONSE_INVALID")
 	}
 	return response.StateVersion, nil
+}
+
+// AtomicCommand executes a trusted command using the supplied transaction on all DBs.
+// Unlike Command's delegated HTTP path, the callback must never write through another DB handle.
+func (r *Repository) AtomicCommand(ctx context.Context, owner, sessionID, commandID, version string, request []byte, execute func(*gorm.DB) (int, json.RawMessage, error)) (Command, bool, error) {
+	r.commandMu.Lock()
+	defer r.commandMu.Unlock()
+	return r.commandTransactional(ctx, owner, sessionID, commandID, version, request, execute)
 }

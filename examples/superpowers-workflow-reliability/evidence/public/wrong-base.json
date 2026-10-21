@@ -1,0 +1,84 @@
+{
+  "classification": "fault injection: actual empty commit in disposable worktree; real Runtime; no child",
+  "execution_source": "a3a227afb3096deb4ea4084b431bdc968a4d3754",
+  "records": {
+    "result": {
+      "source": "evidence/rc/wrong-base/result.json",
+      "sha256": "6543f894be6b05bab0a8b3c6ff44a3875aa936c6a41ba8e1089997e4214784ad",
+      "format": "json",
+      "values": {
+        "/result": "FAIL",
+        "/failure": "BASE_MISMATCH",
+        "/session_id": "e7597bfffea04e5a87507d5a475b85c6",
+        "/launch_count": 0,
+        "/completed_at": "2026-10-20T08:00:34.504696+00:00",
+        "/control/session/status": "failed",
+        "/control/session/pinned_revision_id": "b6a4f724-0804-479a-986c-6c5043cb096d",
+        "/control/projection/completed": false,
+        "/control/projection/nodes/collect/execution": "none",
+        "/control/projection/nodes/dispatch/execution": "none",
+        "/control/projection/nodes/prepare/execution": "failed",
+        "/control/projection/nodes/record/execution": "none",
+        "/control/projection/nodes/validate_completion/execution": "none",
+        "/control/projection/nodes/validate_dispatch/execution": "none",
+        "/control/session/steps/0/step_id": "prepare",
+        "/control/session/steps/0/attempt": 1,
+        "/control/session/steps/0/status": "failed"
+      }
+    },
+    "events": {
+      "source": "evidence/rc/wrong-base/trace.jsonl",
+      "sha256": "97482f7589b78ecff042444f34f967c4c4798c4b9d9299efd7ec75a1a3ec260c",
+      "format": "jsonl",
+      "values": {
+        "/7/at": "2026-10-20T08:00:34.383257+00:00",
+        "/7/event": "project_run_started",
+        "/7/task_id": "csv-records",
+        "/7/resume": false,
+        "/7/fault": null,
+        "/7/requested_model": "gpt-6-astra",
+        "/7/actual_backend_model": "N/A",
+        "/11/at": "2026-10-20T08:00:34.407922+00:00",
+        "/11/event": "step_started",
+        "/11/step": "prepare",
+        "/11/attempt_id": "bbf6ebcb-4376-4071-96be-d92637774134",
+        "/12/at": "2026-10-20T08:00:34.456478+00:00",
+        "/12/event": "brief_generated",
+        "/12/started_at": "2026-10-20T08:00:34.449360+00:00",
+        "/12/returncode": 0,
+        "/12/task_id": "csv-records",
+        "/12/plan_sha256": "ee198b37c9084fc2592e0f4a9628326cceb60d99b0fbefe70658900eace89cac",
+        "/13/at": "2026-10-20T08:00:34.457385+00:00",
+        "/13/event": "todo_updated",
+        "/13/task_id": "csv-records",
+        "/13/status": "in_progress",
+        "/15/at": "2026-10-20T08:00:34.495232+00:00",
+        "/15/event": "step_failed",
+        "/15/step": "prepare",
+        "/15/error_code": "BASE_MISMATCH",
+        "/16/at": "2026-10-20T08:00:34.495393+00:00",
+        "/16/event": "run_blocked",
+        "/16/step": "prepare",
+        "/16/code": "BASE_MISMATCH",
+        "/16/launch_count": 0,
+        "/19/at": "2026-10-20T08:00:34.505155+00:00",
+        "/19/event": "project_run_completed",
+        "/19/result": "FAIL",
+        "/19/failure": "BASE_MISMATCH"
+      }
+    },
+    "independent_readback": {
+      "source": "evidence/rc/verification-live.json",
+      "sha256": "2f3c4e5d8c23c42b169d0648b57609b8b13a58efc8b7bcece1f3fa76317b0d93",
+      "format": "json",
+      "values": {
+        "/cases/wrong-base/session_id": "e7597bfffea04e5a87507d5a475b85c6",
+        "/cases/wrong-base/base": "0eef69f92a2d158a4889a018fabaa1e33e86634a",
+        "/cases/wrong-base/final_head": "c0e7ba498a7aa75ea6ec8c4bdc96342360d5f004",
+        "/cases/wrong-base/changed_files": [],
+        "/cases/wrong-base/protected_inputs_unchanged": true,
+        "/cases/wrong-base/parent_main_unchanged": true
+      }
+    }
+  }
+}

@@ -1,7 +1,6 @@
 package controlstore
 
 import (
-	"encoding/json"
 	"errors"
 	"time"
 
@@ -42,7 +41,6 @@ func ApplyLifecycle(tx *gorm.DB, session *orm.WorkflowSession, commandID string,
 				attempts = attempts.Where("validity = ?", "effective")
 				updates = map[string]any{"status": "cancelled", "lease_token": "", "lease_expires_at": nil,
 					"fencing_generation": gorm.Expr("fencing_generation + 1"), "updated_at": now}
-				binding.Generation++
 			}
 			if controlled {
 				var taskIDs []string
@@ -65,8 +63,8 @@ func ApplyLifecycle(tx *gorm.DB, session *orm.WorkflowSession, commandID string,
 				return "", false, err
 			}
 			if controlled {
-				if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND status = ? AND kind = ?", session.ID, "pending", "continue").
-					Updates(map[string]any{"status": "superseded", "updated_at": now}).Error; err != nil {
+				if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND consumed_at IS NULL AND kind = ?", session.ID, "continue").
+					Updates(map[string]any{"consumed_at": now, "status": gorm.Expr("CASE WHEN status = 'pending' THEN 'superseded' ELSE status END"), "updated_at": now}).Error; err != nil {
 					return "", false, err
 				}
 			}
@@ -77,15 +75,24 @@ func ApplyLifecycle(tx *gorm.DB, session *orm.WorkflowSession, commandID string,
 			return "", false, Reject("WORKFLOW_NOT_STOPPED", "the workflow is not stopped")
 		}
 		if controlled {
+			// A pending cancel has not reached the host. Retire it atomically with
+			// Resume; an already dispatched session cancellation must settle first.
+			if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND kind = 'cancel' AND consumed_at IS NULL AND status = 'pending'", session.ID).
+				Updates(map[string]any{"status": "superseded", "consumed_at": now, "updated_at": now}).Error; err != nil {
+				return "", false, err
+			}
 			var cancelling int64
-			if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND binding_generation = ? AND kind = 'cancel' AND status IN ?", session.ID, binding.Generation,
+			if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND consumed_at IS NULL AND kind = 'cancel' AND status IN ?", session.ID,
 				[]string{"pending", "dispatching", "unknown"}).Count(&cancelling).Error; err != nil {
 				return "", false, err
 			}
 			if cancelling != 0 {
 				return "", false, Reject("DELIVERY_PENDING", "wait for the host to acknowledge cancellation before resuming")
 			}
-			binding.Generation++
+			// Retire completed cancellation requests so the next Stop gets its own notification.
+			if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND kind = 'cancel' AND consumed_at IS NULL", session.ID).Update("consumed_at", now).Error; err != nil {
+				return "", false, err
+			}
 			session.Status = "waiting"
 		} else {
 			session.Status = "active"
@@ -94,14 +101,6 @@ func ApplyLifecycle(tx *gorm.DB, session *orm.WorkflowSession, commandID string,
 	}
 	if changed {
 		updates := map[string]any{"status": session.Status, "updated_at": now}
-		if controlled {
-			encoded, err := json.Marshal(binding)
-			if err != nil {
-				return "", false, err
-			}
-			session.ControlBindingJSON = string(encoded)
-			updates["control_binding_json"] = session.ControlBindingJSON
-		}
 		if err := tx.Model(session).Updates(updates).Error; err != nil {
 			return "", false, err
 		}
@@ -121,10 +120,10 @@ func EnqueueHostAction(tx *gorm.DB, session orm.WorkflowSession, commandID, kind
 		return "", Reject("BINDING_REQUIRED", "a paired host is required to resume automatically")
 	}
 	var previous orm.WorkflowHostAction
-	err = tx.Where("session_id = ? AND binding_generation = ? AND kind = ? AND consumed_at IS NULL AND status IN ?",
-		session.ID, binding.Generation, kind, []string{"pending", "dispatching", "unknown", "accepted"}).Order("created_at DESC").First(&previous).Error
+	err = tx.Where("session_id = ? AND kind = ? AND consumed_at IS NULL AND status IN ?",
+		session.ID, kind, []string{"pending", "dispatching", "unknown", "accepted"}).Order("created_at DESC").First(&previous).Error
 	if err == nil {
-		if previous.Status == "unknown" {
+		if previous.Status == "unknown" && kind == "continue" {
 			return "", Reject("DELIVERY_UNKNOWN", "reconcile the previous host delivery before sending another")
 		}
 		if previous.ExecutionID != executionID {
@@ -137,8 +136,12 @@ func EnqueueHostAction(tx *gorm.DB, session orm.WorkflowSession, commandID, kind
 	}
 	now := time.Now().UTC()
 	action := orm.WorkflowHostAction{ID: uuid.NewString(), SessionID: session.ID, CommandID: commandID, Kind: kind,
-		BindingGeneration: binding.Generation, ConnectorID: binding.ConnectorID, NativeSessionID: binding.DriverSession,
+		ConnectorID: binding.ConnectorID, NativeSessionID: binding.DriverSession,
 		ExecutionID: executionID, Status: "pending", CreatedAt: now, UpdatedAt: now}
+	if kind == "cancel" && binding.Cancellation == "none" {
+		action.Status = "failed"
+		action.LastError = "This host does not support interrupting the current turn; Workflow is stopped in Core."
+	}
 	return action.ID, tx.Create(&action).Error
 }
 
