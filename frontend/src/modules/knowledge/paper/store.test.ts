@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { migratePaperLibrary } from "./libraryModel";
 import { emptyLibrary, sampleLibrary } from "./model";
-import { isPaperLibrary, loadPaperLibraryV3, markPaperLibrary, savePaperLibraryV3 } from "./store";
+import { isPaperLibrary, loadPreviewPaperLibrary, markPaperLibrary, savePreviewPaperLibrary } from "./store";
 
 afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
 
@@ -27,14 +27,14 @@ describe("library kind resolution", () => {
 
 it("rolls back a partial library write so a failed import does not appear after reload", () => {
   const before = migratePaperLibrary(emptyLibrary());
-  savePaperLibraryV3("write-test", before);
+  savePreviewPaperLibrary("write-test", before);
   const write = localStorage.setItem.bind(localStorage);
   vi.spyOn(localStorage, "setItem").mockImplementation((key, value) => {
     if (key.includes(".v2.") && value.includes("Attention Is All You Need")) throw new Error("storage quota exceeded");
     write(key, value);
   });
-  expect(() => savePaperLibraryV3("write-test", migratePaperLibrary(sampleLibrary()))).toThrow("storage quota exceeded");
-  expect(loadPaperLibraryV3("write-test")).toEqual(before);
+  expect(() => savePreviewPaperLibrary("write-test", migratePaperLibrary(sampleLibrary()))).toThrow("storage quota exceeded");
+  expect(loadPreviewPaperLibrary("write-test")).toEqual(before);
 });
 
 describe("new library persistence failures", () => {
@@ -44,7 +44,7 @@ describe("new library persistence failures", () => {
       if (key.includes(".v2.")) throw new Error("storage unavailable");
       write(key, value);
     });
-    expect(() => savePaperLibraryV3("new-test", migratePaperLibrary(sampleLibrary()))).toThrow("storage unavailable");
-    expect(loadPaperLibraryV3("new-test").papers).toEqual([]);
+    expect(() => savePreviewPaperLibrary("new-test", migratePaperLibrary(sampleLibrary()))).toThrow("storage unavailable");
+    expect(loadPreviewPaperLibrary("new-test").papers).toEqual([]);
   });
 });

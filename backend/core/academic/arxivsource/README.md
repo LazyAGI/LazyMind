@@ -48,9 +48,19 @@ paper, err := arxivsource.NewClient().Lookup(ctx, identifier.ID())
 
 接口使用现有登录身份和知识库权限。导入按 base ID 关联父条目、按知识库和版本去重 PDF。`processing_status` 区分 `ready`、`parsing`、`failed`；文件已保存但后续处理失败仍返回错误，文档 ID 保留用于恢复。前端只走这些 Core 接口，不需要 `/arxiv` 开发代理。
 
+### 多实例导入
+
+PDF 存在性检查、下载、文件入库和关联保存全程由数据库连接持有互斥锁，按规范化的 arXiv base ID 串行化，因此也覆盖同一知识库、同一版本的重复请求，以及跨知识库或版本共享的父条目。PostgreSQL 使用独立物理连接上的 session advisory lock，支持共享数据库和附件存储的多个 Core 实例；等待锁不会占用应用连接池。
+
+SQLite 使用主数据库旁的 `<数据库文件>.academic-import-locks/` 目录，按编号散列到最多 128 个按需创建的协调数据库，在其中持有 `BEGIN IMMEDIATE`。这样不会锁住文档写入所用的主数据库。多个 Core 进程必须访问同一主库和协调目录；桌面本地 SQLite proxy 通过 `PRAGMA database_list` 获取该路径。远程 proxy、内存数据库或不可访问的数据库路径会明确失败，不会退回进程内锁。运行期间不要删除协调目录。两种数据库的锁都随连接关闭或进程退出释放，无需过期租约或数据库迁移；已经保存的文档继续通过恢复标记或可信导入任务恢复。
+
+数据库锁语义参考：[PostgreSQL advisory locks](https://www.postgresql.org/docs/current/explicit-locking.html#ADVISORY-LOCKS)、[SQLite transactions](https://www.sqlite.org/lang_transaction.html)。
+
 ## 验证
 
 在 `backend/core` 运行 `go test -race ./academic/arxivsource`。测试使用本地 HTTP 服务，覆盖格式解析、版本锁定、错误传播、恶意或错误响应、请求串行化、间隔和取消，不依赖真实网络。下载 URL 的版本保留与冲突测试位于 `academic/acquirer_arxiv_test.go`。
+
+`go test ./academic -run '^(TestArxivImport|TestSQLiteArxivImport)'` 验证独立进程的并发去重、进程退出后恢复、取消等待和本地 SQLite proxy 锁共享。设置 `TEST_DB_DRIVER=postgres` 与测试用 `TEST_DB_DSN` 可对 PostgreSQL 执行相同的导入和进程测试。
 
 依据：[标识符规范](https://info.arxiv.org/help/arxiv_identifier.html)、[旧编号规范化](https://info.arxiv.org/help/arxiv_identifier_for_services.html)、[API 和版本语义](https://info.arxiv.org/help/api/user-manual.html)、[API 请求限制](https://info.arxiv.org/help/api/tou.html)。
 

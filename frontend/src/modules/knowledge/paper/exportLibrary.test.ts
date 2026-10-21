@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { downloadPaperCitations } from "./exportLibrary";
 import type { PaperItem } from "./model";
-import { loadPaperLibrary, savePaperLibrary } from "./store";
+import { asLegacyLibrary, migratePaperLibrary } from "./libraryModel";
+import { loadPreviewPaperLibrary, savePreviewPaperLibrary } from "./store";
 
 const paper = (id: string, title: string): PaperItem => ({
   id, title, authors: "Ada Lovelace", venue: "Research Journal", year: 2026,
@@ -37,10 +38,10 @@ describe("library-level citation downloads", () => {
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
       filename = this.download;
     });
-    savePaperLibrary("alpha", { folders: [{ id: "folder-one", name: "Alpha Folder" }], papers: [paper("alpha", "Unique Alpha Paper")] });
-    savePaperLibrary("beta", { folders: [], papers: [paper("beta", "Unique Beta Paper")] });
+    savePreviewPaperLibrary("alpha", migratePaperLibrary({ folders: [{ id: "folder-one", name: "Alpha Folder" }], papers: [paper("alpha", "Unique Alpha Paper")] }));
+    savePreviewPaperLibrary("beta", migratePaperLibrary({ folders: [], papers: [paper("beta", "Unique Beta Paper")] }));
 
-    downloadPaperCitations(loadPaperLibrary("alpha"), format, "研究:资料");
+    downloadPaperCitations(asLegacyLibrary(loadPreviewPaperLibrary("alpha")), format, "研究:资料");
 
     expect(filename).toBe(`研究_资料.${format}`);
     expect(createObjectURL).toHaveBeenCalledTimes(1);

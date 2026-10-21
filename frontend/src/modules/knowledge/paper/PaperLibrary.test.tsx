@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import PaperLibrary from "./PaperLibrary";
 import { migratePaperLibrary, type PaperLibraryDataV3 } from "./libraryModel";
 import type { PaperItem } from "./model";
-import { loadPaperLibraryV3, savePaperLibraryV3, loadPersistedPaperLibrary, savePersistedPaperLibrary } from "./store";
+import { loadPreviewPaperLibrary, savePreviewPaperLibrary, loadPersistedPaperLibrary, savePersistedPaperLibrary } from "./store";
 import { paperFromPdf } from "./pdfMeta";
 import { lookupIdentifier } from "./scholar";
 import { importArxivPaper, listImportedArxivPapers, type ArxivImportResult } from "./arxivImport";
@@ -49,7 +49,7 @@ function seedLibrary() {
   data.papers[0].annotationIds.push("annotation-a");
   data.annotations.push({ id: "annotation-a", paperId: "a", comment: "Keep this annotation", color: "yellow", createdAt: "2026-10-21" });
   data.attachments[0].contentRef = "stored-pdf-a";
-  savePaperLibraryV3(datasetId, data);
+  savePreviewPaperLibrary(datasetId, data);
   return data;
 }
 
@@ -138,9 +138,9 @@ beforeEach(() => {
   vi.mocked(listImportedArxivPapers).mockReset().mockResolvedValue([]);
   ConfigProvider.config({ holderRender: (children: React.ReactNode) => <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider> });
   seedLibrary();
-  vi.mocked(loadPersistedPaperLibrary).mockReset().mockImplementation(async (id) => ({ data: loadPaperLibraryV3(id), revision: 0, canWrite: true }));
+  vi.mocked(loadPersistedPaperLibrary).mockReset().mockImplementation(async (id) => ({ data: loadPreviewPaperLibrary(id), revision: 0, canWrite: true }));
   vi.mocked(savePersistedPaperLibrary).mockReset().mockImplementation(async (id, data, revision) => {
-    savePaperLibraryV3(id, data);
+    savePreviewPaperLibrary(id, data);
     return { data, revision: revision + 1, canWrite: true };
   });
 });
@@ -158,12 +158,12 @@ afterEach(async () => {
 
 describe("paper library navigation and import", () => {
   it("opens the primary readable PDF in the current tab from the paper title", async () => {
-    const data = loadPaperLibraryV3(datasetId);
+    const data = loadPreviewPaperLibrary(datasetId);
     const primary = { ...data.attachments[0], id: "primary-pdf", contentRef: "primary-doc", isPrimary: true };
     data.attachments[0].isPrimary = false;
     data.attachments.push(primary);
     data.papers[0].attachmentIds.push(primary.id);
-    savePaperLibraryV3(datasetId, data);
+    savePreviewPaperLibrary(datasetId, data);
     await renderLibrary();
     const link = screen.getByRole("link", { name: "Folder paper" });
     expect(link).toHaveAttribute("href", `/lib/knowledge/knowledge/${datasetId}/primary-doc`);
@@ -192,7 +192,7 @@ describe("paper library navigation and import", () => {
     await renderLibrary();
     const title = screen.getByRole("heading", { name: "Folder paper" });
     await act(async () => fireEvent.click(within(title.parentElement!).getByRole("button", { name: "取消收藏" })));
-    expect(loadPaperLibraryV3(datasetId).papers.find((paper) => paper.id === "a")?.important).toBe(false);
+    expect(loadPreviewPaperLibrary(datasetId).papers.find((paper) => paper.id === "a")?.important).toBe(false);
     expect(open).not.toHaveBeenCalled();
   });
 
@@ -290,9 +290,9 @@ describe("paper library navigation and import", () => {
   });
 
   it("filters reading state and real PDF availability from the grouped panel", async () => {
-    const data = loadPaperLibraryV3(datasetId);
+    const data = loadPreviewPaperLibrary(datasetId);
     data.papers[1].status = "read";
-    savePaperLibraryV3(datasetId, data);
+    savePreviewPaperLibrary(datasetId, data);
     await renderLibrary();
     fireEvent.click(libraryTools().getByRole("button", { name: "筛选" }));
     const filter = within(await screen.findByRole("dialog", { name: "筛选文献" }));
@@ -320,9 +320,9 @@ describe("paper library navigation and import", () => {
   });
 
   it("does not filter the library when a paper tag is clicked", async () => {
-    const data = loadPaperLibraryV3(datasetId);
+    const data = loadPreviewPaperLibrary(datasetId);
     data.papers[0].tags = ["RAG"];
-    savePaperLibraryV3(datasetId, data);
+    savePreviewPaperLibrary(datasetId, data);
     await renderLibrary();
     fireEvent.click(screen.getByText("RAG", { exact: true }));
     for (const title of ["Folder paper", "Other favorite", "Unfiled paper"]) {
@@ -375,19 +375,19 @@ describe("paper library navigation and import", () => {
     fireEvent.change(within(dialog).getByRole("textbox", { name: "文件夹名称" }), { target: { value: "新主题" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /创\s*建/ }));
     await waitFor(() => expect(browse().getByRole("button", { name: /新主题/ })).toHaveAttribute("aria-current", "true"));
-    expect(loadPaperLibraryV3(datasetId).folders.some((folder) => folder.name === "新主题")).toBe(true);
+    expect(loadPreviewPaperLibrary(datasetId).folders.some((folder) => folder.name === "新主题")).toBe(true);
     expect(browse().getByRole("button", { name: "删除文件夹" })).toBeEnabled();
   });
 
   it("deletes a selected folder while preserving its papers, notes and attachments", async () => {
-    const before = loadPaperLibraryV3(datasetId);
+    const before = loadPreviewPaperLibrary(datasetId);
     await renderLibrary();
     fireEvent.click(browse().getByRole("button", { name: /第一个文件夹/ }));
     fireEvent.click(browse().getByRole("button", { name: "删除文件夹" }));
     const dialog = await screen.findByRole("dialog", { name: "删除文件夹「第一个文件夹」？" });
     fireEvent.click(within(dialog).getByRole("button", { name: "删除文件夹" }));
     await waitFor(() => expect(browse().queryByRole("button", { name: /第一个文件夹/ })).not.toBeInTheDocument());
-    const after = loadPaperLibraryV3(datasetId);
+    const after = loadPreviewPaperLibrary(datasetId);
     expect(after.papers).toHaveLength(3);
     expect(after.papers.find((paper) => paper.id === "a")?.folderId).toBeNull();
     expect(after.notes).toEqual(before.notes);
@@ -399,14 +399,14 @@ describe("paper library navigation and import", () => {
   });
 
   it("preserves rich paper data when adding a folder through the ordinary update path", async () => {
-    const before = loadPaperLibraryV3(datasetId);
+    const before = loadPreviewPaperLibrary(datasetId);
     await renderLibrary();
     fireEvent.click(browse().getByRole("button", { name: "新建文件夹" }));
     const dialog = await screen.findByRole("dialog", { name: "新建文件夹" });
     fireEvent.change(within(dialog).getByRole("textbox", { name: "文件夹名称" }), { target: { value: "文献整理" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /创\s*建/ }));
-    await waitFor(() => expect(loadPaperLibraryV3(datasetId).folders).toHaveLength(3));
-    const after = loadPaperLibraryV3(datasetId);
+    await waitFor(() => expect(loadPreviewPaperLibrary(datasetId).folders).toHaveLength(3));
+    const after = loadPreviewPaperLibrary(datasetId);
     expect(after.papers).toEqual(before.papers);
     expect(after.notes).toEqual(before.notes);
     expect(after.attachments).toEqual(before.attachments);
@@ -414,14 +414,14 @@ describe("paper library navigation and import", () => {
   });
 
   it("keeps the folder and its papers when deletion is cancelled", async () => {
-    const before = loadPaperLibraryV3(datasetId);
+    const before = loadPreviewPaperLibrary(datasetId);
     await renderLibrary();
     fireEvent.click(browse().getByRole("button", { name: /第一个文件夹/ }));
     fireEvent.click(browse().getByRole("button", { name: "删除文件夹" }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: /取\s*消/ }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(loadPaperLibraryV3(datasetId)).toEqual(before);
+    expect(loadPreviewPaperLibrary(datasetId)).toEqual(before);
     expect(browse().getByRole("button", { name: /第一个文件夹/ })).toHaveAttribute("aria-current", "true");
   });
 
@@ -439,17 +439,19 @@ describe("paper library navigation and import", () => {
     expect(fileInput).not.toBeNull();
     fireEvent.change(fileInput!, { target: { files: [file] } });
 
+    const addButton = await within(dialog).findByRole("button", { name: "加入论文库" });
+    expect(onUploadPdf).not.toHaveBeenCalled();
+    fireEvent.click(addButton);
     await waitFor(() => expect(onUploadPdf).toHaveBeenCalledOnce());
     expect(paperFromPdf).toHaveBeenCalledOnce();
     expect(onUploadPdf.mock.calls[0]).toEqual([vi.mocked(paperFromPdf).mock.calls[0][0]]);
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: "加入论文库" })).not.toBeInTheDocument();
-    expect(loadPaperLibraryV3(datasetId).papers.some((item) => item.id === paper.id)).toBe(false);
+    expect(addButton).toBeDisabled();
+    expect(loadPreviewPaperLibrary(datasetId).papers.some((item) => item.id === paper.id)).toBe(false);
 
     await act(async () => finishUpload("document-uploaded-pdf"));
-    const addButton = await within(dialog).findByRole("button", { name: "加入论文库" });
-    await act(async () => fireEvent.click(addButton));
-    const saved = loadPaperLibraryV3(datasetId);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    const saved = loadPreviewPaperLibrary(datasetId);
     const attachment = saved.attachments.find((item) => item.paperId === paper.id);
     expect(attachment).toMatchObject({
       name: file.name, size: file.size, mimeType: "application/pdf",
@@ -461,12 +463,12 @@ describe("paper library navigation and import", () => {
   });
 
   it("preserves notes and metadata when loading a library without attachments", async () => {
-    const data = loadPaperLibraryV3(datasetId);
+    const data = loadPreviewPaperLibrary(datasetId);
     data.attachments = [];
     data.papers.forEach((paper) => { paper.attachmentIds = []; });
-    savePaperLibraryV3(datasetId, data);
+    savePreviewPaperLibrary(datasetId, data);
 
-    const loaded = loadPaperLibraryV3(datasetId);
+    const loaded = loadPreviewPaperLibrary(datasetId);
     expect(loaded).toEqual(data);
     expect(loaded.notes).toHaveLength(1);
     expect(loaded.attachments).toEqual([]);
@@ -488,7 +490,7 @@ describe("paper library navigation and import", () => {
     await act(async () => message.destroy());
     expect(within(dialog).getByRole("alert")).toHaveTextContent("arXiv 服务暂时不可用");
     expect(within(dialog).queryByRole("button", { name: "加入论文库" })).not.toBeInTheDocument();
-    expect(loadPaperLibraryV3(datasetId).papers).toHaveLength(3);
+    expect(loadPreviewPaperLibrary(datasetId).papers).toHaveLength(3);
   });
 
   it("only exposes file, identifier and bibliography imports", async () => {
@@ -518,16 +520,17 @@ describe("paper library navigation and import", () => {
     await renderLibrary({ onUploadPdf });
     const dialog = await openImportDialog("直接上传", "上传文献");
     fireEvent.change(dialog.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(["%PDF-test"], "test.pdf", { type: "application/pdf" })] } });
+    fireEvent.click(await within(dialog).findByRole("button", { name: "加入论文库" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(errorText);
-    expect(within(dialog).queryByRole("button", { name: "加入论文库" })).not.toBeInTheDocument();
-    expect(loadPaperLibraryV3(datasetId).papers).toHaveLength(3);
+    expect(within(dialog).getByRole("button", { name: "加入论文库" })).toBeEnabled();
+    expect(loadPreviewPaperLibrary(datasetId).papers).toHaveLength(3);
   });
 
-  it("discards an earlier uploaded candidate when the next file cannot be read", async () => {
+  it("discards an earlier unconfirmed candidate when the next file cannot be read", async () => {
     vi.mocked(paperFromPdf)
       .mockResolvedValueOnce(makePaper("new", "Previous upload", null))
       .mockRejectedValueOnce(new Error("PDF 文件已损坏"));
-    const before = loadPaperLibraryV3(datasetId);
+    const before = loadPreviewPaperLibrary(datasetId);
     await renderLibrary({ onUploadPdf: async () => "uploaded-document" });
     const dialog = await openImportDialog("直接上传", "上传文献");
     const input = dialog.querySelector<HTMLInputElement>('input[type="file"]')!;
@@ -537,7 +540,40 @@ describe("paper library navigation and import", () => {
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("PDF 文件已损坏");
     expect(within(dialog).queryByRole("button", { name: "加入论文库" })).not.toBeInTheDocument();
     expect(within(dialog).queryByText("Previous upload")).not.toBeInTheDocument();
-    expect(loadPaperLibraryV3(datasetId)).toEqual(before);
+    expect(loadPreviewPaperLibrary(datasetId)).toEqual(before);
+  });
+
+  it("cancels PDF confirmation without creating an upload, document or library record", async () => {
+    const upload = vi.fn().mockResolvedValue("should-not-upload");
+    const before = loadPreviewPaperLibrary(datasetId);
+    vi.mocked(paperFromPdf).mockResolvedValueOnce(makePaper("new-pdf", "Unconfirmed PDF", null));
+    await renderLibrary({ onUploadPdf: upload });
+    const dialog = await openImportDialog("直接上传", "上传文献");
+    fireEvent.change(dialog.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(["pdf"], "cancel.pdf")] } });
+    await within(dialog).findByRole("button", { name: "加入论文库" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(upload).not.toHaveBeenCalled();
+    expect(savePersistedPaperLibrary).not.toHaveBeenCalled();
+    expect(loadPreviewPaperLibrary(datasetId)).toEqual(before);
+  });
+
+  it("reuses a confirmed upload if saving its paper snapshot fails and is retried", async () => {
+    const upload = vi.fn().mockResolvedValue("one-uploaded-document");
+    vi.mocked(paperFromPdf).mockResolvedValueOnce(makePaper("new-pdf", "Retry PDF", null));
+    await renderLibrary({ onUploadPdf: upload });
+    const dialog = await openImportDialog("直接上传", "上传文献");
+    fireEvent.change(dialog.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(["pdf"], "retry.pdf")] } });
+    const confirm = await within(dialog).findByRole("button", { name: "加入论文库" });
+    vi.mocked(savePersistedPaperLibrary).mockRejectedValueOnce(new Error("数据库保存失败"));
+    fireEvent.click(confirm);
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("数据库保存失败");
+    expect(upload).toHaveBeenCalledOnce();
+    await waitFor(() => expect(confirm).toBeEnabled());
+    fireEvent.click(confirm);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(upload).toHaveBeenCalledOnce();
+    expect(loadPreviewPaperLibrary(datasetId).attachments.find((item) => item.paperId === "new-pdf")?.contentRef).toBe("one-uploaded-document");
   });
 
   it("keeps the import dialog and original library when saving fails, then permits retry", async () => {
@@ -551,21 +587,21 @@ describe("paper library navigation and import", () => {
     fireEvent.click(confirm);
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("后端暂时无法保存");
     expect(screen.queryByRole("heading", { name: "Retry candidate" })).not.toBeInTheDocument();
-    expect(loadPaperLibraryV3(datasetId).papers).toHaveLength(3);
+    expect(loadPreviewPaperLibrary(datasetId).papers).toHaveLength(3);
     expect(within(dialog).getByRole("button", { name: "加入论文库" })).toBeInTheDocument();
     await act(async () => fireEvent.click(confirm));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Retry candidate" })).toBeInTheDocument();
-    expect(loadPaperLibraryV3(datasetId).papers).toHaveLength(4);
+    expect(loadPreviewPaperLibrary(datasetId).papers).toHaveLength(4);
   });
 });
 
 describe("paper library table and drag to folders", () => {
   it("shows title, publication year, venue and citation count in aligned columns", async () => {
-    const data = loadPaperLibraryV3(datasetId);
+    const data = loadPreviewPaperLibrary(datasetId);
     data.papers[0].citationCount = 1250;
     data.papers[1].citationCount = 0;
-    savePaperLibraryV3(datasetId, data);
+    savePreviewPaperLibrary(datasetId, data);
     await renderLibrary();
 
     for (const name of ["标题", "年份", "刊物", "引用量"]) {
@@ -582,13 +618,13 @@ describe("paper library table and drag to folders", () => {
   });
 
   it("moves a dragged paper into a folder without changing its rich content", async () => {
-    const before = loadPaperLibraryV3(datasetId);
+    const before = loadPreviewPaperLibrary(datasetId);
     await renderLibrary();
     const handle = screen.getByRole("button", { name: "拖动 Folder paper" });
     expect(handle).toHaveAttribute("draggable", "true");
     await dragPaperToFolder("Folder paper", "第二个文件夹");
 
-    const saved = loadPaperLibraryV3(datasetId);
+    const saved = loadPreviewPaperLibrary(datasetId);
     expect(saved.papers.find((paper) => paper.id === "a")?.folderId).toBe("second");
     expect(saved.papers.find((paper) => paper.id === "a")).toEqual({ ...before.papers[0], folderId: "second" });
     expect(saved.notes).toEqual(before.notes);
@@ -606,7 +642,7 @@ describe("paper library table and drag to folders", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "选择 Unfiled paper" }));
     await dragPaperToFolder("Folder paper", "第二个文件夹");
 
-    const saved = loadPaperLibraryV3(datasetId);
+    const saved = loadPreviewPaperLibrary(datasetId);
     expect(saved.papers.find((paper) => paper.id === "a")?.folderId).toBe("second");
     expect(saved.papers.find((paper) => paper.id === "c")?.folderId).toBe("second");
     expect(saved.papers.find((paper) => paper.id === "b")?.folderId).toBe("second");
@@ -617,13 +653,13 @@ describe("paper library table and drag to folders", () => {
     await renderLibrary();
     fireEvent.click(screen.getByRole("checkbox", { name: "选择 Unfiled paper" }));
     await dragPaperToFolder("Folder paper", "第二个文件夹");
-    const saved = loadPaperLibraryV3(datasetId);
+    const saved = loadPreviewPaperLibrary(datasetId);
     expect(saved.papers.find((paper) => paper.id === "a")?.folderId).toBe("second");
     expect(saved.papers.find((paper) => paper.id === "c")?.folderId).toBeNull();
   });
 
   it("ignores external files and text dropped on a folder", async () => {
-    const before = loadPaperLibraryV3(datasetId);
+    const before = loadPreviewPaperLibrary(datasetId);
     await renderLibrary();
     const transfer = dragTransfer();
     transfer.setData("text/plain", "a");
@@ -631,22 +667,22 @@ describe("paper library table and drag to folders", () => {
     const target = browse().getByRole("button", { name: /第二个文件夹/ });
     fireEvent.dragOver(target, { dataTransfer: transfer });
     fireEvent.drop(target, { dataTransfer: transfer });
-    expect(loadPaperLibraryV3(datasetId)).toEqual(before);
+    expect(loadPreviewPaperLibrary(datasetId)).toEqual(before);
   });
 
   it("rejects a valid-looking paper payload without an active internal drag", async () => {
-    const before = loadPaperLibraryV3(datasetId);
+    const before = loadPreviewPaperLibrary(datasetId);
     await renderLibrary();
     const transfer = dragTransfer();
     transfer.setData("application/x-lazymind-papers", JSON.stringify({ datasetId, ids: ["a"] }));
     const target = browse().getByRole("button", { name: /第二个文件夹/ });
     fireEvent.dragOver(target, { dataTransfer: transfer });
     fireEvent.drop(target, { dataTransfer: transfer });
-    expect(loadPaperLibraryV3(datasetId)).toEqual(before);
+    expect(loadPreviewPaperLibrary(datasetId)).toEqual(before);
   });
 
   it("ignores a malformed paper drag payload", async () => {
-    const before = loadPaperLibraryV3(datasetId);
+    const before = loadPreviewPaperLibrary(datasetId);
     await renderLibrary();
     const transfer = dragTransfer();
     const handle = screen.getByRole("button", { name: "拖动 Folder paper" });
@@ -657,11 +693,11 @@ describe("paper library table and drag to folders", () => {
     fireEvent.dragOver(target, { dataTransfer: transfer });
     fireEvent.drop(target, { dataTransfer: transfer });
     fireEvent.dragEnd(handle, { dataTransfer: transfer });
-    expect(loadPaperLibraryV3(datasetId)).toEqual(before);
+    expect(loadPreviewPaperLibrary(datasetId)).toEqual(before);
   });
 
   it("rejects papers added to an active drag payload that were not dragged", async () => {
-    const before = loadPaperLibraryV3(datasetId);
+    const before = loadPreviewPaperLibrary(datasetId);
     await renderLibrary();
     const transfer = dragTransfer();
     const handle = screen.getByRole("button", { name: "拖动 Folder paper" });
@@ -671,18 +707,18 @@ describe("paper library table and drag to folders", () => {
     fireEvent.dragOver(target, { dataTransfer: transfer });
     fireEvent.drop(target, { dataTransfer: transfer });
     fireEvent.dragEnd(handle, { dataTransfer: transfer });
-    expect(loadPaperLibraryV3(datasetId)).toEqual(before);
+    expect(loadPreviewPaperLibrary(datasetId)).toEqual(before);
   });
 
   it("keeps a paper in its original folder and reports persistence failure", async () => {
-    const before = loadPaperLibraryV3(datasetId);
+    const before = loadPreviewPaperLibrary(datasetId);
     await renderLibrary();
     fireEvent.click(browse().getByRole("button", { name: /第一个文件夹/ }));
     vi.mocked(savePersistedPaperLibrary).mockRejectedValueOnce(new Error("后端暂时无法保存"));
     await dragPaperToFolder("Folder paper", "第二个文件夹");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("后端暂时无法保存");
-    expect(loadPaperLibraryV3(datasetId)).toEqual(before);
+    expect(loadPreviewPaperLibrary(datasetId)).toEqual(before);
     expect(screen.getByRole("heading", { name: "Folder paper" })).toBeInTheDocument();
     fireEvent.click(browse().getByRole("button", { name: /第二个文件夹/ }));
     expect(screen.queryByRole("heading", { name: "Folder paper" })).not.toBeInTheDocument();
@@ -738,7 +774,7 @@ describe("paper library pointer dragging", () => {
     await beginPointerDrag("Folder paper", "第二个文件夹");
     await releasePointer();
 
-    await waitFor(() => expect(loadPaperLibraryV3(datasetId).papers.find((paper) => paper.id === "a")?.folderId).toBe("second"));
+    await waitFor(() => expect(loadPreviewPaperLibrary(datasetId).papers.find((paper) => paper.id === "a")?.folderId).toBe("second"));
     expect(screen.queryByRole("heading", { name: "Folder paper" })).not.toBeInTheDocument();
   });
 
@@ -750,7 +786,7 @@ describe("paper library pointer dragging", () => {
     await releasePointer();
 
     await waitFor(() => {
-      const saved = loadPaperLibraryV3(datasetId);
+      const saved = loadPreviewPaperLibrary(datasetId);
       expect(saved.papers.find((paper) => paper.id === "a")?.folderId).toBe("second");
       expect(saved.papers.find((paper) => paper.id === "c")?.folderId).toBe("second");
     });
@@ -759,18 +795,18 @@ describe("paper library pointer dragging", () => {
   });
 
   it("does not save when dropping into the paper's existing folder", async () => {
-    const before = loadPaperLibraryV3(datasetId);
+    const before = loadPreviewPaperLibrary(datasetId);
     await renderLibrary();
     const save = vi.spyOn(localStorage, "setItem");
     await beginPointerDrag("Folder paper", "第一个文件夹");
     await releasePointer();
 
     expect(save).not.toHaveBeenCalled();
-    expect(loadPaperLibraryV3(datasetId)).toEqual(before);
+    expect(loadPreviewPaperLibrary(datasetId)).toEqual(before);
   });
 
   it("cancels a pointer drag without saving or moving the paper", async () => {
-    const before = loadPaperLibraryV3(datasetId);
+    const before = loadPreviewPaperLibrary(datasetId);
     await renderLibrary();
     const save = vi.spyOn(localStorage, "setItem");
     await beginPointerDrag("Folder paper", "第二个文件夹");
@@ -780,7 +816,7 @@ describe("paper library pointer dragging", () => {
     await releasePointer();
 
     expect(save).not.toHaveBeenCalled();
-    expect(loadPaperLibraryV3(datasetId)).toEqual(before);
+    expect(loadPreviewPaperLibrary(datasetId)).toEqual(before);
     expect(screen.getByRole("heading", { name: "Folder paper" })).toBeInTheDocument();
   });
 });
@@ -814,14 +850,14 @@ describe("paper library backend arXiv import", () => {
   }
 
   it("previews arXiv metadata without saving a placeholder or using legacy import confirmation", async () => {
-    const before = loadPaperLibraryV3(datasetId);
+    const before = loadPreviewPaperLibrary(datasetId);
     const success = vi.spyOn(message, "success");
     await renderLibrary();
     const dialog = await lookupArxivCandidate();
     expect(within(dialog).getByRole("button", { name: "导入文献与 PDF" })).toBeEnabled();
     expect(within(dialog).queryByRole("button", { name: "加入论文库" })).not.toBeInTheDocument();
     expect(importArxivPaper).not.toHaveBeenCalled();
-    expect(loadPaperLibraryV3(datasetId)).toEqual(before);
+    expect(loadPreviewPaperLibrary(datasetId)).toEqual(before);
     expect(success).not.toHaveBeenCalled();
   });
 
@@ -833,12 +869,12 @@ describe("paper library backend arXiv import", () => {
     const dialog = await lookupArxivCandidate();
     fireEvent.click(within(dialog).getByRole("button", { name: "导入文献与 PDF" }));
     expect(importArxivPaper).toHaveBeenCalledWith("arXiv:2404.06654v3", datasetId);
-    expect(loadPaperLibraryV3(datasetId).papers).toHaveLength(3);
+    expect(loadPreviewPaperLibrary(datasetId).papers).toHaveLength(3);
     expect(success).not.toHaveBeenCalled();
     await act(async () => finish(result));
 
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    const saved = loadPaperLibraryV3(datasetId);
+    const saved = loadPreviewPaperLibrary(datasetId);
     const paper = saved.papers.find((item) => item.arxiv === "2404.06654");
     expect(paper).toMatchObject({ title: result.paper.title, arxivVersion: "v3", academicWorkId: result.work_id });
     expect(paper?.parse).not.toBe("ready");
@@ -849,32 +885,32 @@ describe("paper library backend arXiv import", () => {
   });
 
   it("shows backend import failure without saving or showing success and permits retry", async () => {
-    const before = loadPaperLibraryV3(datasetId);
+    const before = loadPreviewPaperLibrary(datasetId);
     vi.mocked(importArxivPaper).mockRejectedValueOnce(new Error("arXiv PDF 下载失败，请重试")).mockResolvedValueOnce(result);
     const success = vi.spyOn(message, "success");
     await renderLibrary();
     const dialog = await lookupArxivCandidate();
     fireEvent.click(within(dialog).getByRole("button", { name: "导入文献与 PDF" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("arXiv PDF 下载失败，请重试");
-    expect(loadPaperLibraryV3(datasetId)).toEqual(before);
+    expect(loadPreviewPaperLibrary(datasetId)).toEqual(before);
     expect(success).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "导入文献与 PDF" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(importArxivPaper).toHaveBeenCalledTimes(2);
-    expect(loadPaperLibraryV3(datasetId).attachments.some((attachment) => attachment.contentRef === result.document_id)).toBe(true);
+    expect(loadPreviewPaperLibrary(datasetId).attachments.some((attachment) => attachment.contentRef === result.document_id)).toBe(true);
   });
 
   it("imports a newer arXiv version into the existing parent without discarding notes or the old PDF", async () => {
-    const data = loadPaperLibraryV3(datasetId);
+    const data = loadPreviewPaperLibrary(datasetId);
     data.papers[0] = { ...data.papers[0], source: "arxiv", arxiv: "2404.06654", arxivVersion: "v1" };
-    savePaperLibraryV3(datasetId, data);
+    savePreviewPaperLibrary(datasetId, data);
     vi.mocked(importArxivPaper).mockResolvedValueOnce(result);
     await renderLibrary();
     const dialog = await lookupArxivCandidate();
     const confirm = await within(dialog).findByRole("button", { name: "导入文献与 PDF" });
     fireEvent.click(confirm);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    const saved = loadPaperLibraryV3(datasetId);
+    const saved = loadPreviewPaperLibrary(datasetId);
     const matches = saved.papers.filter((paper) => paper.arxiv === "2404.06654");
     expect(matches).toHaveLength(1);
     expect(matches[0]).toMatchObject({ id: "a", arxivVersion: "v3", folderId: "first", important: true, noteIds: ["note-a"] });
@@ -889,7 +925,7 @@ describe("paper library backend arXiv import", () => {
     await renderLibrary();
     expect(await screen.findByRole("heading", { name: result.paper.title })).toBeInTheDocument();
     expect(listImportedArxivPapers).toHaveBeenCalledWith(datasetId);
-    const saved = loadPaperLibraryV3(datasetId);
+    const saved = loadPreviewPaperLibrary(datasetId);
     expect(saved.papers.find((paper) => paper.arxiv === "2404.06654")).toMatchObject({ parse: "failed", processingError: "文档解析启动失败" });
     expect(saved.attachments.some((attachment) => attachment.contentRef === result.document_id)).toBe(true);
     expect(importArxivPaper).not.toHaveBeenCalled();
@@ -917,12 +953,12 @@ describe("paper library backend arXiv import", () => {
   });
 
   it("keeps removed arXiv papers hidden after reload and restores their notes only on explicit import", async () => {
-    const original = loadPaperLibraryV3(datasetId);
+    const original = loadPreviewPaperLibrary(datasetId);
     original.papers[0] = { ...original.papers[0], source: "arxiv", arxiv: result.paper.base_id, arxivVersion: "v3", academicWorkId: result.work_id };
-    savePaperLibraryV3(datasetId, original);
+    savePreviewPaperLibrary(datasetId, original);
     vi.mocked(listImportedArxivPapers).mockResolvedValue([{ ...result, processing_status: "ready" }]);
     const view = await renderLibrary();
-    await waitFor(() => expect(loadPaperLibraryV3(datasetId).attachments.some((item) => item.contentRef === result.document_id)).toBe(true));
+    await waitFor(() => expect(loadPreviewPaperLibrary(datasetId).attachments.some((item) => item.contentRef === result.document_id)).toBe(true));
     fireEvent.mouseEnter(screen.getByRole("button", { name: "Folder paper 的更多操作" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "移除" }));
     const removeDialog = await screen.findByRole("dialog", { name: "从论文集移除这篇题录？" });
@@ -935,7 +971,7 @@ describe("paper library backend arXiv import", () => {
     await waitFor(() => expect(listImportedArxivPapers).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole("heading", { name: "Folder paper" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: result.paper.title })).not.toBeInTheDocument();
-    const removed = loadPaperLibraryV3(datasetId);
+    const removed = loadPreviewPaperLibrary(datasetId);
     expect(removed.hiddenArxivWorkIds).toContain(result.work_id);
     expect(removed.notes).toEqual(original.notes);
 
@@ -943,7 +979,7 @@ describe("paper library backend arXiv import", () => {
     const importDialog = await lookupArxivCandidate();
     fireEvent.click(within(importDialog).getByRole("button", { name: "导入文献与 PDF" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    const restored = loadPaperLibraryV3(datasetId);
+    const restored = loadPreviewPaperLibrary(datasetId);
     expect(restored.papers.find((item) => item.academicWorkId === result.work_id)).toMatchObject({ id: "a", title: "Folder paper", folderId: "first", important: true, noteIds: ["note-a"], annotationIds: ["annotation-a"] });
     expect(restored.hiddenArxivWorkIds).not.toContain(result.work_id);
     expect(restored.notes).toEqual(original.notes);
@@ -953,16 +989,16 @@ describe("paper library backend arXiv import", () => {
   it("preserves papers synchronized while folder deletion is awaiting confirmation", async () => {
     let finishSync!: (value: ArxivImportResult[]) => void;
     vi.mocked(listImportedArxivPapers).mockImplementationOnce(() => new Promise((resolve) => { finishSync = resolve; }));
-    const original = loadPaperLibraryV3(datasetId);
+    const original = loadPreviewPaperLibrary(datasetId);
     await renderLibrary();
     fireEvent.click(browse().getByRole("button", { name: /第一个文件夹/ }));
     fireEvent.click(browse().getByRole("button", { name: "删除文件夹" }));
     const dialog = await screen.findByRole("dialog", { name: "删除文件夹「第一个文件夹」？" });
     await act(async () => finishSync([{ ...result, processing_status: "ready" }]));
-    expect(loadPaperLibraryV3(datasetId).papers).toHaveLength(4);
+    expect(loadPreviewPaperLibrary(datasetId).papers).toHaveLength(4);
     fireEvent.click(within(dialog).getByRole("button", { name: "删除文件夹" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    const saved = loadPaperLibraryV3(datasetId);
+    const saved = loadPreviewPaperLibrary(datasetId);
     expect(saved.papers).toHaveLength(4);
     expect(saved.papers.find((item) => item.academicWorkId === result.work_id)).toBeDefined();
     expect(saved.attachments.some((item) => item.contentRef === result.document_id)).toBe(true);
@@ -974,7 +1010,7 @@ describe("paper library backend arXiv import", () => {
     let finish!: (item: ArxivImportResult) => void;
     vi.mocked(importArxivPaper).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
     const other = migratePaperLibrary({ folders: [], papers: [makePaper("other-library", "Other library paper", null)] });
-    savePaperLibraryV3("other-dataset", other);
+    savePreviewPaperLibrary("other-dataset", other);
     const view = await renderLibrary();
     const dialog = await lookupArxivCandidate();
     fireEvent.click(within(dialog).getByRole("button", { name: "导入文献与 PDF" }));
@@ -983,22 +1019,22 @@ describe("paper library backend arXiv import", () => {
     if (returnToOriginal) await act(async () => view.rerender(<ConfigProvider theme={{ token: { motion: false } }}><PaperLibrary datasetId={datasetId} /></ConfigProvider>));
     await act(async () => finish(result));
     expect(savePersistedPaperLibrary).not.toHaveBeenCalled();
-    expect(loadPaperLibraryV3("other-dataset")).toEqual(other);
-    expect(loadPaperLibraryV3(datasetId).papers.map((paper) => paper.id)).toEqual(["a", "b", "c"]);
+    expect(loadPreviewPaperLibrary("other-dataset")).toEqual(other);
+    expect(loadPreviewPaperLibrary(datasetId).papers.map((paper) => paper.id)).toEqual(["a", "b", "c"]);
     expect(screen.queryByRole("heading", { name: result.paper.title })).not.toBeInTheDocument();
   });
 
   it("does not issue a late snapshot write after the library is unmounted", async () => {
     let finish!: (item: ArxivImportResult) => void;
     vi.mocked(importArxivPaper).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
-    const before = loadPaperLibraryV3(datasetId);
+    const before = loadPreviewPaperLibrary(datasetId);
     const view = await renderLibrary();
     const dialog = await lookupArxivCandidate();
     fireEvent.click(within(dialog).getByRole("button", { name: "导入文献与 PDF" }));
     view.unmount();
     await act(async () => finish(result));
     expect(savePersistedPaperLibrary).not.toHaveBeenCalled();
-    expect(loadPaperLibraryV3(datasetId)).toEqual(before);
+    expect(loadPreviewPaperLibrary(datasetId)).toEqual(before);
   });
 
   it("hydrates backend arXiv papers for readers without attempting to save", async () => {
@@ -1013,12 +1049,12 @@ describe("paper library backend arXiv import", () => {
   });
 
   it("does not let a delayed arXiv poll overwrite an in-flight user save", async () => {
-    const before = loadPaperLibraryV3(datasetId);
+    const before = loadPreviewPaperLibrary(datasetId);
     let finishSync!: (items: ArxivImportResult[]) => void;
     let finishSave!: () => void;
     vi.mocked(listImportedArxivPapers).mockImplementationOnce(() => new Promise((resolve) => { finishSync = resolve; })).mockResolvedValue([result]);
     vi.mocked(savePersistedPaperLibrary).mockImplementationOnce((id, data, revision) => new Promise((resolve) => {
-      finishSave = () => { savePaperLibraryV3(id, data); resolve({ data, revision: revision + 1, canWrite: true }); };
+      finishSave = () => { savePreviewPaperLibrary(id, data); resolve({ data, revision: revision + 1, canWrite: true }); };
     }));
     await renderLibrary();
     const star = within(screen.getByRole("heading", { name: "Folder paper" }).parentElement!).getByRole("button", { name: "取消收藏" });
@@ -1030,7 +1066,7 @@ describe("paper library backend arXiv import", () => {
     expect(star).toHaveAttribute("aria-pressed", "false");
     await act(async () => fireEvent.focus(window));
     expect(await screen.findByRole("heading", { name: result.paper.title })).toBeInTheDocument();
-    const saved = loadPaperLibraryV3(datasetId);
+    const saved = loadPreviewPaperLibrary(datasetId);
     expect(saved.papers.find((paper) => paper.id === "a")?.important).toBe(false);
     expect(saved.notes).toEqual(before.notes);
     expect(saved.papers.find((paper) => paper.id === "a")?.metadata).toEqual(before.papers[0].metadata);
@@ -1045,7 +1081,7 @@ describe("backend durable paper library", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "编辑" }));
     const dialog = await screen.findByRole("dialog", { name: "编辑题录" });
     fireEvent.change(within(dialog).getByLabelText("题名"), { target: { value: "My unsaved title" } });
-    const shared = loadPaperLibraryV3(datasetId);
+    const shared = loadPreviewPaperLibrary(datasetId);
     shared.papers[0].tags = ["Shared tag"];
     vi.mocked(loadPersistedPaperLibrary).mockResolvedValueOnce({ data: shared, revision: 8, canWrite: true });
     await act(async () => fireEvent.focus(window));
@@ -1058,7 +1094,7 @@ describe("backend durable paper library", () => {
   });
 
   it("honors reader access and never writes an arXiv synchronization snapshot", async () => {
-    vi.mocked(loadPersistedPaperLibrary).mockResolvedValueOnce({ data: loadPaperLibraryV3(datasetId), revision: 3, canWrite: false });
+    vi.mocked(loadPersistedPaperLibrary).mockResolvedValueOnce({ data: loadPreviewPaperLibrary(datasetId), revision: 3, canWrite: false });
     await renderLibrary();
     expect(screen.getByRole("heading", { name: "Folder paper" })).toBeInTheDocument();
     expect(browse().getByRole("button", { name: /导入/ })).toBeDisabled();
@@ -1075,12 +1111,12 @@ describe("backend durable paper library", () => {
     fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "10.1000/example" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "查找文献" }));
     await within(dialog).findByRole("button", { name: "加入论文库" });
-    const shared = loadPaperLibraryV3(datasetId);
+    const shared = loadPreviewPaperLibrary(datasetId);
     shared.folders.push({ id: "remote-folder", name: "Shared folder" });
     vi.mocked(loadPersistedPaperLibrary).mockResolvedValueOnce({ data: shared, revision: 9, canWrite: true });
     await act(async () => fireEvent.focus(window));
     await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "加入论文库" })));
-    expect(loadPaperLibraryV3(datasetId).folders).toContainEqual({ id: "remote-folder", name: "Shared folder" });
+    expect(loadPreviewPaperLibrary(datasetId).folders).toContainEqual({ id: "remote-folder", name: "Shared folder" });
     expect(screen.getByRole("heading", { name: "New import" })).toBeInTheDocument();
   });
 
@@ -1103,7 +1139,7 @@ describe("backend durable paper library", () => {
     let finish!: () => void;
     const success = vi.spyOn(message, "success");
     vi.mocked(savePersistedPaperLibrary).mockImplementationOnce((id, data, revision) => new Promise((resolve) => {
-      finish = () => { savePaperLibraryV3(id, data); resolve({ data, revision: revision + 1, canWrite: true }); };
+      finish = () => { savePreviewPaperLibrary(id, data); resolve({ data, revision: revision + 1, canWrite: true }); };
     }));
     vi.mocked(lookupIdentifier).mockResolvedValueOnce(makePaper("new", "Awaiting backend", null));
     await renderLibrary();
@@ -1114,20 +1150,20 @@ describe("backend durable paper library", () => {
     await act(async () => fireEvent.click(addButton));
     expect(within(dialog).getByRole("button", { name: /加入论文库/ })).toBeDisabled();
     expect(screen.queryByRole("heading", { name: "Awaiting backend" })).not.toBeInTheDocument();
-    expect(loadPaperLibraryV3(datasetId).papers).toHaveLength(3);
+    expect(loadPreviewPaperLibrary(datasetId).papers).toHaveLength(3);
     expect(success).not.toHaveBeenCalled();
     await act(async () => finish());
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Awaiting backend" })).toBeInTheDocument();
     expect(success).toHaveBeenCalledOnce();
-    expect(loadPaperLibraryV3(datasetId).papers.find((item) => item.id === "new")?.attachmentIds).toEqual([]);
+    expect(loadPreviewPaperLibrary(datasetId).papers.find((item) => item.id === "new")?.attachmentIds).toEqual([]);
   });
 
   it("rejects a failed star save visibly without changing metadata and refreshes shared changes on focus", async () => {
-    const before = loadPaperLibraryV3(datasetId);
+    const before = loadPreviewPaperLibrary(datasetId);
     before.attachments = [];
     before.papers.forEach((paper) => { paper.attachmentIds = []; });
-    savePaperLibraryV3(datasetId, before);
+    savePreviewPaperLibrary(datasetId, before);
     let fail!: (error: Error) => void;
     vi.mocked(savePersistedPaperLibrary).mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
     await renderLibrary();
@@ -1137,14 +1173,14 @@ describe("backend durable paper library", () => {
     expect(star).toHaveAttribute("aria-pressed", "true");
     await act(async () => fail(new Error("文献已由其他成员修改，请重新加载")));
     expect(screen.getByRole("alert")).toHaveTextContent("其他成员修改");
-    expect(loadPaperLibraryV3(datasetId)).toEqual(before);
+    expect(loadPreviewPaperLibrary(datasetId)).toEqual(before);
     const shared: PaperLibraryDataV3 = { ...before, papers: before.papers.map((paper) => ({ ...paper, title: paper.id === "a" ? "Shared update" : paper.title })) };
     vi.mocked(loadPersistedPaperLibrary).mockResolvedValueOnce({ data: shared, revision: 12, canWrite: true });
     await act(async () => fireEvent.focus(window));
     expect(screen.getByRole("heading", { name: "Shared update" })).toBeInTheDocument();
     fireEvent.click(within(screen.getByRole("heading", { name: "Shared update" }).parentElement!).getByRole("button", { name: "取消收藏" }));
-    await waitFor(() => expect(loadPaperLibraryV3(datasetId).papers[0].important).toBe(false));
-    const saved = loadPaperLibraryV3(datasetId);
+    await waitFor(() => expect(loadPreviewPaperLibrary(datasetId).papers[0].important).toBe(false));
+    const saved = loadPreviewPaperLibrary(datasetId);
     expect(saved.notes).toEqual(before.notes);
     expect(saved.papers[0].metadata).toEqual(before.papers[0].metadata);
     expect(saved.attachments).toEqual([]);

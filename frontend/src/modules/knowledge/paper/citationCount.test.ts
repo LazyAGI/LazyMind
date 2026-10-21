@@ -2,7 +2,7 @@ import { afterEach, expect, it } from "vitest";
 import { parseLibraryBackup, serializeLibraryBackup } from "./exportLibrary";
 import { asLegacyLibrary, migratePaperLibrary } from "./libraryModel";
 import { normalizeLibrary, type PaperItem } from "./model";
-import { loadPaperLibrary, savePaperLibraryV3 } from "./store";
+import { loadPreviewPaperLibrary, savePreviewPaperLibrary } from "./store";
 
 afterEach(() => localStorage.clear());
 
@@ -15,8 +15,8 @@ it("preserves known, zero, and unknown citation counts through migration, storag
   ] });
   const modern = migratePaperLibrary(library);
   const backup = parseLibraryBackup(serializeLibraryBackup(modern));
-  savePaperLibraryV3("citation-roundtrip", backup);
-  for (const restored of [asLegacyLibrary(backup), loadPaperLibrary("citation-roundtrip")]) {
+  savePreviewPaperLibrary("citation-roundtrip", backup);
+  for (const restored of [asLegacyLibrary(backup), asLegacyLibrary(loadPreviewPaperLibrary("citation-roundtrip"))]) {
     expect(restored.papers.map((paper) => paper.citationCount)).toEqual([42, 0, undefined]);
     expect(restored.papers[2]).not.toHaveProperty("citationCount");
   }

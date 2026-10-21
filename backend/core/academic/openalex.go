@@ -3,6 +3,7 @@ package academic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -50,6 +51,9 @@ func resolveDOIOpenAccess(ctx context.Context, doi string) (string, string, stri
 		return "", "", "", fmt.Errorf("Unpaywall lookup failed: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return "", "", "", nil
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", "", "", fmt.Errorf("Unpaywall lookup returned HTTP %d", resp.StatusCode)
 	}
@@ -97,6 +101,7 @@ func resolveWithOpenAlex(ctx context.Context, citation string) (WorkInput, bool,
 	year := extractYear(citation)
 	bestScore := 0.0
 	var best WorkInput
+	var providerErrors []error
 	for _, entry := range result.Results {
 		score := tokenCoverage(title, entry.Title)
 		arxivID, _ := NormalizeArxivID(entry.IDs.Arxiv)
@@ -123,7 +128,7 @@ func resolveWithOpenAlex(ctx context.Context, citation string) (WorkInput, bool,
 		} else {
 			pdfURL, license, version, err := resolveDOIOpenAccess(ctx, doi)
 			if err != nil {
-				return WorkInput{}, false, err
+				providerErrors = append(providerErrors, err)
 			}
 			if pdfURL != "" {
 				provenance["pdf_url"] = pdfURL
@@ -135,5 +140,5 @@ func resolveWithOpenAlex(ctx context.Context, citation string) (WorkInput, bool,
 		best = WorkInput{Title: entry.Title, Year: entry.PublicationYear, DOI: doi, ArxivID: arxivID,
 			Provider: "openalex", ProviderWorkID: strings.TrimPrefix(entry.ID, "https://openalex.org/"), Provenance: provenance}
 	}
-	return best, bestScore > 0, nil
+	return best, bestScore > 0, errors.Join(providerErrors...)
 }

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"io"
 	"net/http"
 	"os"
@@ -53,28 +52,6 @@ type arxivImportService struct {
 
 func newArxivImportService(db *gorm.DB) *arxivImportService {
 	return &arxivImportService{db: db, lookup: arxivsource.NewClient().Lookup, acquire: acquirePDF, importFile: doc.ImportLocalFile}
-}
-
-// Bounded, process-wide locks cover all service instances without retaining keys.
-// A request waiting for another import can still be cancelled by its context.
-var arxivImportLocks = func() [128]chan struct{} {
-	var locks [128]chan struct{}
-	for i := range locks {
-		locks[i] = make(chan struct{}, 1)
-	}
-	return locks
-}()
-
-func lockArxivImport(ctx context.Context, key string) (func(), error) {
-	hash := fnv.New32a()
-	_, _ = hash.Write([]byte(key))
-	lock := arxivImportLocks[hash.Sum32()%uint32(len(arxivImportLocks))]
-	select {
-	case lock <- struct{}{}:
-		return func() { <-lock }, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
 }
 
 func LookupArxiv(w http.ResponseWriter, r *http.Request) {
@@ -217,7 +194,7 @@ func (s *arxivImportService) importPaper(ctx context.Context, input, datasetID, 
 	paper.AbsURL, paper.PDFURL = identifier.AbsURL(), identifier.PDFURL()
 	// Parent identity is shared across datasets and revisions, so serialize by
 	// base identifier; attachment lookup below still matches dataset + version.
-	unlock, err := lockArxivImport(ctx, identifier.BaseID)
+	unlock, err := lockArxivImport(ctx, s.db, identifier.BaseID)
 	if err != nil {
 		return ArxivImportResult{}, err
 	}

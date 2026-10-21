@@ -594,23 +594,25 @@ func resolveReferenceWithExternal(ctx context.Context, tx *gorm.DB, ref *orm.Aca
 	if input.Title == "" {
 		input.Title = ref.RawText
 	}
+	var providerDiagnostics []string
 	if allowExternal && input.ArxivID == "" {
+		var providerErrors []error
 		openAlex, openAlexOK, err := resolveWithOpenAlex(ctx, ref.RawText)
 		if err != nil {
-			return orm.AcademicWork{}, "", "", err
+			providerErrors = append(providerErrors, err)
 		}
 		openAlexHasFulltext := openAlex.ArxivID != ""
 		if pdfURL, _ := openAlex.Provenance["pdf_url"].(string); strings.TrimSpace(pdfURL) != "" {
 			openAlexHasFulltext = true
 		}
-		// A usable fulltext result completes resolution. Only query the next
-		// provider when needed; failures from any attempted lookup still surface.
+		// Optional provider failures must not prevent a usable fallback. Keep
+		// diagnostics and report them if no provider can supply a usable result.
 		var candidate WorkInput
 		var arxivOK bool
 		if !openAlexOK || !openAlexHasFulltext {
 			candidate, arxivOK, err = resolveWithArxiv(ctx, ref.RawText)
 			if err != nil {
-				return orm.AcademicWork{}, "", "", err
+				providerErrors = append(providerErrors, err)
 			}
 		}
 		if openAlexOK && openAlexHasFulltext {
@@ -619,18 +621,35 @@ func resolveReferenceWithExternal(ctx context.Context, tx *gorm.DB, ref *orm.Aca
 			}
 			input = openAlex
 		} else if arxivOK {
-			candidate.DOI = input.DOI
+			candidate.DOI = firstNonEmpty(input.DOI, openAlex.DOI, candidate.DOI)
 			input = candidate
+		} else if err := errors.Join(providerErrors...); err != nil {
+			return orm.AcademicWork{}, "", "", err
 		} else if openAlexOK {
 			if input.DOI != "" {
 				openAlex.DOI = input.DOI
 			}
 			input = openAlex
 		}
+		for _, err := range providerErrors {
+			providerDiagnostics = append(providerDiagnostics, err.Error())
+		}
 	}
 	work, method, err := findOrCreateWork(ctx, tx, input)
 	if err != nil {
 		return work, "", "", err
+	}
+	if len(providerDiagnostics) > 0 {
+		var provenance map[string]any
+		_ = json.Unmarshal(work.ProvenanceJSON, &provenance)
+		if provenance == nil {
+			provenance = map[string]any{}
+		}
+		provenance["provider_errors"] = providerDiagnostics
+		work.ProvenanceJSON, _ = json.Marshal(provenance)
+		if err := tx.WithContext(ctx).Model(&work).Updates(map[string]any{"metadata_provenance_json": work.ProvenanceJSON, "updated_at": time.Now().UTC()}).Error; err != nil {
+			return work, "", "", err
+		}
 	}
 	status, confidence := "high_confidence", 0.9
 	if method == "doi" || method == "arxiv" {

@@ -27,12 +27,8 @@ export function markPaperLibrary(datasetId: string) {
   localStorage.setItem(kindKey, JSON.stringify([...ids]));
 }
 
-export function loadPaperLibrary(datasetId: string, preview = false): PaperLibraryData {
-  const modern = loadPaperLibraryV3(datasetId, preview);
-  return asLegacyLibrary(modern);
-}
-
-export function loadPaperLibraryV3(datasetId: string, preview = false): PaperLibraryDataV3 {
+/** Read browser data only for the explicit demo. Production reads use loadPersistedPaperLibrary. */
+export function loadPreviewPaperLibrary(datasetId: string, preview = false): PaperLibraryDataV3 {
   const modernRaw = localStorage.getItem(dataKeyV3(datasetId));
   if (modernRaw) {
     try {
@@ -52,12 +48,7 @@ export function loadPaperLibraryV3(datasetId: string, preview = false): PaperLib
 }
 
 /** Browser-only preview/legacy helper. Production mutations must use savePersistedPaperLibrary. */
-export function savePaperLibrary(datasetId: string, data: PaperLibraryData) {
-  saveLibraryRecords(datasetId, JSON.stringify(migratePaperLibrary(data)), JSON.stringify(data));
-}
-
-/** Browser-only preview/legacy helper. Production mutations must use savePersistedPaperLibrary. */
-export function savePaperLibraryV3(datasetId: string, data: PaperLibraryDataV3) {
+export function savePreviewPaperLibrary(datasetId: string, data: PaperLibraryDataV3) {
   saveLibraryRecords(datasetId, JSON.stringify(data), JSON.stringify(asLegacyLibrary(data)));
 }
 

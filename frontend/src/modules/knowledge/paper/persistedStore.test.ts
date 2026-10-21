@@ -2,7 +2,7 @@ import { createHash, webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyLibraryV3, migratePaperLibrary, type PaperLibraryDataV3 } from './libraryModel';
 import { sampleLibrary } from './model';
-import { loadPersistedPaperLibrary, savePersistedPaperLibrary, savePaperLibraryV3 } from './store';
+import { loadPersistedPaperLibrary, savePersistedPaperLibrary, savePreviewPaperLibrary } from './store';
 
 const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }));
 vi.mock('@/components/request', () => ({ BASE_URL: '', axiosInstance: api }));
@@ -56,7 +56,7 @@ describe('server-owned paper library', () => {
   });
 
   it('does not use the old browser copy when the server read fails', async () => {
-    savePaperLibraryV3('shared', migratePaperLibrary(sampleLibrary()));
+    savePreviewPaperLibrary('shared', migratePaperLibrary(sampleLibrary()));
     api.get.mockRejectedValue({ response: { status: 503, data: { message: '数据库不可用' } } });
     await expect(loadPersistedPaperLibrary('shared')).rejects.toThrow('数据库不可用');
     expect(api.put).not.toHaveBeenCalled();
@@ -71,7 +71,7 @@ describe('server-owned paper library', () => {
 
   it('migrates old browser records once and retains their original server backup', async () => {
     const legacy = migratePaperLibrary(sampleLibrary());
-    savePaperLibraryV3('shared', legacy);
+    savePreviewPaperLibrary('shared', legacy);
     const migrated = await loadPersistedPaperLibrary('shared');
     expect(migrated.data.papers).toEqual(legacy.papers);
     expect(migrated.data.migrationSnapshots?.[0].data).toEqual(legacy);
@@ -87,7 +87,7 @@ describe('server-owned paper library', () => {
     server.data = clone(legacy);
     server.revision = 3;
     server.data.papers[0].title = 'New shared title';
-    savePaperLibraryV3('shared', legacy);
+    savePreviewPaperLibrary('shared', legacy);
     const migrated = await loadPersistedPaperLibrary('shared');
     expect(migrated.data.papers[0].title).toBe('New shared title');
     expect(migrated.data.migrationSnapshots?.[0].data.papers[0].title).toBe(legacy.papers[0].title);
@@ -95,7 +95,7 @@ describe('server-owned paper library', () => {
 
   it('leaves old records recoverable after failed migration and can retry', async () => {
     const legacy = migratePaperLibrary(sampleLibrary());
-    savePaperLibraryV3('shared', legacy);
+    savePreviewPaperLibrary('shared', legacy);
     api.put.mockRejectedValueOnce(new Error('Connection lost'));
     await expect(loadPersistedPaperLibrary('shared')).rejects.toThrow('Connection lost');
     expect(JSON.parse(localStorage.getItem('lazymind.paper-library.data.v3.shared')!)).toEqual(legacy);
@@ -113,14 +113,14 @@ describe('server-owned paper library', () => {
   it('migrates on HTTP origins without Web Crypto using the same SHA-256 fingerprint', async () => {
     vi.stubGlobal('crypto', {});
     const data = migratePaperLibrary(sampleLibrary());
-    savePaperLibraryV3('shared', data);
+    savePreviewPaperLibrary('shared', data);
     const raw = localStorage.getItem('lazymind.paper-library.data.v3.shared')!;
     const result = await loadPersistedPaperLibrary('shared');
     expect(result.data.migrationSnapshots?.[0].id).toBe(`browser-${createHash('sha256').update(raw).digest('hex')}`);
   });
 
   it('re-reads after a migration conflict instead of overwriting shared edits', async () => {
-    savePaperLibraryV3('shared', migratePaperLibrary(sampleLibrary()));
+    savePreviewPaperLibrary('shared', migratePaperLibrary(sampleLibrary()));
     api.put.mockImplementationOnce(async () => {
       server.data.folders.push({ id: 'other', name: 'Another user' });
       server.revision = 1;
@@ -133,7 +133,7 @@ describe('server-owned paper library', () => {
   });
 
   it('retains legacy data and reports permission failure instead of pretending to migrate', async () => {
-    savePaperLibraryV3('shared', migratePaperLibrary(sampleLibrary()));
+    savePreviewPaperLibrary('shared', migratePaperLibrary(sampleLibrary()));
     server.can_write = false;
     await expect(loadPersistedPaperLibrary('shared')).rejects.toThrow('编辑权限');
     expect(api.put).not.toHaveBeenCalled();

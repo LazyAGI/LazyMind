@@ -29,7 +29,7 @@ import {
   type PaperLibraryData,
   type ReadingStatus,
 } from "./model";
-import { loadPaperLibraryV3, savePaperLibraryV3, loadPersistedPaperLibrary, savePersistedPaperLibrary } from "./store";
+import { loadPreviewPaperLibrary, savePreviewPaperLibrary, loadPersistedPaperLibrary, savePersistedPaperLibrary } from "./store";
 import { asLegacyLibrary, emptyLibraryV3, createAttachment, type Attachment, type PaperLibraryDataV3 } from "./libraryModel";
 import PaperDetailDrawer from "./PaperDetailDrawer";
 import { lookupIdentifier } from "./scholar";
@@ -79,10 +79,11 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
   if (datasetScopeRef.current.datasetId !== datasetId || datasetScopeRef.current.isDemo !== isDemo) datasetScopeRef.current = { datasetId, isDemo, active: true };
   const datasetScope = datasetScopeRef.current;
   const isCurrentScope = () => datasetScopeRef.current === datasetScope && datasetScope.active;
-  const [modernData, setModernData] = useState<PaperLibraryDataV3>(() => isDemo ? loadPaperLibraryV3(datasetId, true) : emptyLibraryV3());
+  const [modernData, setModernData] = useState<PaperLibraryDataV3>(() => isDemo ? loadPreviewPaperLibrary(datasetId, true) : emptyLibraryV3());
   const [data, setData] = useState<PaperLibraryData>(() => asLegacyLibrary(modernData));
   const [loading, setLoading] = useState(!isDemo);
   const [saving, setSaving] = useState(false);
+  const [confirmingImport, setConfirmingImport] = useState(false);
   const [canWrite, setCanWrite] = useState(isDemo);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const revisionRef = useRef(0);
@@ -91,7 +92,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
   const busyRef = useRef(false);
   const activeDatasetRef = useRef(datasetId);
   activeDatasetRef.current = datasetId;
-  const disabled = loading || saving || !canWrite;
+  const disabled = loading || saving || confirmingImport || !canWrite;
   const modernDataRef = useRef(modernData);
   const syncGeneration = useRef(0);
   const [syncRevision, setSyncRevision] = useState(0);
@@ -122,6 +123,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
   const [searching, setSearching] = useState(false);
   const [pending, setPending] = useState<{ fresh: PaperItem[]; skipped: PaperItem[]; folders: PaperLibraryData["folders"]; baseFolderIds?: string[] } | null>(null);
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
+  const [pendingPdf, setPendingPdf] = useState<{ paperId: string; file: File } | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -169,6 +171,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
     canWriteRef.current = isDemo;
     setCanWrite(isDemo);
     setSaving(false);
+    setConfirmingImport(false);
     setPersistenceError(null);
     setSyncError(null);
     setSelected([]);
@@ -180,8 +183,9 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
     setPending(null);
     setPendingArxiv(null);
     setPendingAttachments([]);
+    setPendingPdf(null);
     if (isDemo) {
-      applySnapshot(loadPaperLibraryV3(datasetId, true));
+      applySnapshot(loadPreviewPaperLibrary(datasetId, true));
       setLoading(false);
     } else {
       applySnapshot(emptyLibraryV3());
@@ -205,7 +209,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
     setPersistenceError(null);
     try {
       if (isDemo) {
-        savePaperLibraryV3(datasetId, next);
+        savePreviewPaperLibrary(datasetId, next);
         applySnapshot(next);
       } else {
         const saved = await savePersistedPaperLibrary(datasetId, next, revisionRef.current);
@@ -302,6 +306,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
     setPendingArxiv(null);
     setPending(null);
     setPendingAttachments([]);
+    setPendingPdf(null);
   };
 
   const showImportError = (error: unknown, fallback: string) => {
@@ -323,7 +328,10 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
   };
 
   const commit = async () => {
-    if (disabled || busyRef.current || !pending?.fresh.length) return;
+    if (disabled || busyRef.current || searching || !pending?.fresh.length) return;
+    busyRef.current = true;
+    syncGeneration.current += 1;
+    setConfirmingImport(true);
     setImportError(null);
     try {
       const current = asLegacyLibrary(modernDataRef.current);
@@ -337,13 +345,28 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
       }
       const planned = planImport(current.papers, pending.fresh.map((paper) => ({ ...paper, folderId: paper.folderId ? folderIds.get(paper.folderId) || null : null })));
       if (planned.fresh.length) {
-        await persist({ folders, papers: [...planned.fresh, ...current.papers] }, pendingAttachments.filter((attachment) => planned.fresh.some((paper) => paper.id === attachment.paperId)));
+        let attachments = pendingAttachments.filter((attachment) => planned.fresh.some((paper) => paper.id === attachment.paperId));
+        if (pendingPdf && !isDemo && planned.fresh.some((paper) => paper.id === pendingPdf.paperId)
+          && !attachments.some((attachment) => attachment.paperId === pendingPdf.paperId && attachment.contentRef)) {
+          if (!onUploadPdf) throw new Error("当前论文库无法上传 PDF，请刷新页面后重试");
+          const documentId = await onUploadPdf(pendingPdf.file);
+          if (!isCurrentScope()) return;
+          if (typeof documentId !== "string" || !documentId.trim()) throw new Error("PDF 上传未返回有效文档 ID，请重试");
+          attachments = attachments.map((attachment) => attachment.paperId === pendingPdf.paperId ? { ...attachment, contentRef: documentId.trim() } : attachment);
+          // Keep the accepted upload for retry if the subsequent library save fails.
+          setPendingAttachments(attachments);
+        }
+        busyRef.current = false;
+        await persist({ folders, papers: [...planned.fresh, ...current.papers] }, attachments);
+        if (!isCurrentScope()) return;
         message.success(`已加入 ${planned.fresh.length} 篇，跳过 ${pending.skipped.length + planned.skipped.length} 篇`);
       } else message.info(`库中已有，跳过 ${planned.skipped.length} 篇`);
       clearImportResult();
       setImportMethod(null);
     } catch (error) {
-      showImportError(error, "文献保存失败，请重试");
+      if (isCurrentScope()) showImportError(error, "文献保存失败，请重试");
+    } finally {
+      if (isCurrentScope()) { busyRef.current = false; setConfirmingImport(false); }
     }
   };
 
@@ -598,16 +621,11 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
         const item = await paperFromPdf(file);
         if (!isCurrentScope()) return;
         const duplicate = duplicateOf(data.papers, item);
-        let documentId: string | undefined;
-        if (!duplicate && !preview) {
-          if (!onUploadPdf) throw new Error("当前论文库无法上传 PDF，请刷新页面后重试");
-          const uploadedId = await onUploadPdf(file);
-          if (!isCurrentScope()) return;
-          if (typeof uploadedId !== "string" || !uploadedId.trim()) throw new Error("PDF 上传未返回有效文档 ID，请重试");
-          documentId = uploadedId.trim();
-        }
         stage([item]);
-        if (!duplicate) setPendingAttachments([createAttachment({ paperId: item.id, name: file.name, kind: "pdf", mimeType: "application/pdf", size: file.size, source: "local", isPrimary: true, contentRef: documentId || undefined })]);
+        if (!duplicate) {
+          setPendingPdf({ paperId: item.id, file });
+          setPendingAttachments([createAttachment({ paperId: item.id, name: file.name, kind: "pdf", mimeType: "application/pdf", size: file.size, source: "local", isPrimary: true })]);
+        }
         if (item.incomplete) message.warning("题录不完整，已标成待补全");
         return;
       }
@@ -857,15 +875,15 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
       <Modal
         title={importMethod ? importTitles[importMethod] : "导入文献"}
         open={!!importMethod}
-        onCancel={() => { if (!searching && !saving) { setImportMethod(null); clearImportResult(); } }}
+        onCancel={() => { if (!searching && !saving && !confirmingImport) { setImportMethod(null); clearImportResult(); } }}
         footer={null} width={560} centered destroyOnHidden
         className="paper-library-import-modal"
-        closable={!searching && !saving} maskClosable={!searching && !saving} keyboard={!searching && !saving}
+        closable={!searching && !saving && !confirmingImport} maskClosable={!searching && !saving && !confirmingImport} keyboard={!searching && !saving && !confirmingImport}
       >
         <div className="paper-library-import-content">
           {importError && <Alert type="error" showIcon message="导入未完成" description={importError} />}
           {importMethod === "upload" && <>
-            <p>上传 PDF 或文献文件，识别题录后确认加入论文库。</p>
+            <p>选择 PDF 或文献文件，先识别题录；确认加入论文库后才会上传 PDF。</p>
             <Upload.Dragger accept=".pdf,.bib,.ris,.csv" showUploadList={false} disabled={disabled || searching} beforeUpload={async (file: File) => { await importFile(file); return false; }}>
               <UploadOutlined className="paper-library-drop-icon" />
               <strong>{searching ? "正在识别文献…" : "点击选择，或拖拽文件到这里"}</strong>
@@ -909,7 +927,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
               {pending.fresh.map((item) => <p key={item.id}>{item.title}{item.incomplete && <small>题录待补全</small>}</p>)}
               {pending.skipped.map((item, index) => <p key={`${item.id}-${index}`} className="paper-library-import-skipped">已跳过重复：{item.title}</p>)}
             </div>
-            {!!pending.fresh.length && <div className="paper-library-modal-actions"><Button type="primary" loading={saving} disabled={disabled} onClick={commit}>加入论文库</Button></div>}
+            {!!pending.fresh.length && <div className="paper-library-modal-actions"><Button type="primary" loading={saving || confirmingImport} disabled={disabled || searching} onClick={commit}>加入论文库</Button></div>}
           </section>}
         </div>
       </Modal>

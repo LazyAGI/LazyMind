@@ -10,6 +10,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
 	"lazymind/core/doc"
+	"lazymind/core/store"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -23,10 +24,10 @@ import (
 
 func arxivImportTestService(t *testing.T) (*arxivImportService, *atomic.Int32) {
 	t.Helper()
-	db := importErrorDB(t)
-	if err := db.AutoMigrate(&orm.Dataset{}, &orm.Document{}, &orm.Task{}, &orm.DocumentProcessingState{}); err != nil {
-		t.Fatal(err)
-	}
+	db := orm.MigrateTestDB(t, &orm.AcademicWork{}, &orm.AcademicWorkDocument{}, &orm.AcademicReference{}, &orm.PaperImportBatch{}, &orm.PaperImportItem{}, &orm.Dataset{}, &orm.Document{}, &orm.Task{}, &orm.DocumentProcessingState{}).DB
+	previous, previousLazy, previousState := store.DB(), store.LazyLLMDB(), store.State()
+	store.Init(db, db, previousState)
+	t.Cleanup(func() { store.Init(previous, previousLazy, previousState) })
 	sqlDB, _ := db.DB()
 	sqlDB.SetMaxOpenConns(1)
 	for _, id := range []string{"dataset", "other"} {
