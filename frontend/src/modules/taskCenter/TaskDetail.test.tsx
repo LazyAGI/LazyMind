@@ -170,10 +170,6 @@ describe('TaskDetail', () => {
     fireEvent.click(screen.getByRole('button', { name: '编 辑' }));
     expect(onOpenConversation).toHaveBeenCalledWith(queued.conversation_id);
     fireEvent.click(screen.getByRole('button', { name: /删除/ }));
-    expect(onDelete).not.toHaveBeenCalled();
-    const confirm = await screen.findByText('任务和对应会话将保留 30 天');
-    const dialog = confirm.closest('[role="dialog"]')!;
-    fireEvent.click(within(dialog as HTMLElement).getByRole('button', { name: '移入回收站' }));
     await waitFor(() => expect(onDelete).toHaveBeenCalledWith(queued));
   });
 
@@ -287,10 +283,6 @@ describe('TaskDetail', () => {
     expect(onArchive).toHaveBeenCalledWith(task);
 
     fireEvent.click(await screen.findByRole('menuitem', { name: /移入回收站/ }));
-    await screen.findByText('任务和对应会话将保留 30 天');
-    const dialogs = screen.getAllByRole('dialog');
-    const dialog = dialogs[dialogs.length - 1];
-    fireEvent.click(within(dialog).getByRole('button', { name: '移入回收站' }));
     await waitFor(() => expect(onDelete).toHaveBeenCalledWith(task));
   });
 });

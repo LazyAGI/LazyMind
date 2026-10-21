@@ -1732,6 +1732,22 @@ components:
                 folder_id:
                     nullable: true
                     type: string
+                only_if_active:
+                    type: boolean
+            type: object
+        ConversationArchiveResponse:
+            properties:
+                archived_at:
+                    format: date-time
+                    type: string
+                conversation_id:
+                    type: string
+                newly_archived:
+                    type: boolean
+            required:
+                - conversation_id
+                - newly_archived
+                - archived_at
             type: object
         ConversationBatchDeleteRequest:
             properties:
@@ -2870,6 +2886,12 @@ components:
                 total_size:
                     format: int64
                     type: integer
+            type: object
+        ConversationUnarchiveRequest:
+            properties:
+                expected_archived_at:
+                    format: date-time
+                    type: string
             type: object
         CoreEmptyResponse:
             properties:
@@ -7463,6 +7485,8 @@ components:
             type: object
         OrdinaryRunView:
             properties:
+                execution_id:
+                    type: string
                 final_artifacts:
                     items:
                         $ref: '#/components/schemas/PublicArtifact'
@@ -7476,6 +7500,10 @@ components:
                     type: integer
                 run_id:
                     type: string
+                status:
+                    type: string
+                timing:
+                    $ref: '#/components/schemas/RunTiming'
             required:
                 - revision
                 - run_id
@@ -8554,6 +8582,36 @@ components:
                 - reason
                 - partial_output
             type: object
+        RunTiming:
+            properties:
+                cumulative_execution_ms:
+                    format: int64
+                    nullable: true
+                    type: integer
+                elapsed_ms:
+                    format: int64
+                    nullable: true
+                    type: integer
+                finished_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                measured_at:
+                    format: date-time
+                    type: string
+                requested_at:
+                    format: date-time
+                    type: string
+                running_attempt_count:
+                    type: integer
+            required:
+                - cumulative_execution_ms
+                - elapsed_ms
+                - finished_at
+                - measured_at
+                - requested_at
+                - running_attempt_count
+            type: object
         ScheduleMoveRequest:
             properties:
                 group_id:
@@ -9438,6 +9496,47 @@ components:
                     type: string
                 task_type:
                     type: string
+            type: object
+        TaskRemovalPreview:
+            properties:
+                active_task_count:
+                    type: integer
+                conversation_count:
+                    type: integer
+                impact_version:
+                    type: string
+                task_count:
+                    type: integer
+                task_id:
+                    type: string
+            required:
+                - task_id
+                - task_count
+                - conversation_count
+                - active_task_count
+                - impact_version
+            type: object
+        TaskRemovalRequest:
+            properties:
+                impact_version:
+                    type: string
+            type: object
+        TaskRemovalResult:
+            properties:
+                cancellation_pending:
+                    type: boolean
+                removed_task_ids:
+                    items:
+                        type: string
+                    type: array
+                trashed_conversation_ids:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - removed_task_ids
+                - trashed_conversation_ids
+                - cancellation_pending
             type: object
         TaskResponse:
             properties:
@@ -11928,10 +12027,14 @@ components:
                     type: integer
                 total:
                     type: integer
+                unfinished_count:
+                    description: Current user's unfinished knowledge market tasks across all pages and filters, including ongoing file parsing.
+                    type: integer
             required:
                 - page
                 - page_size
                 - total
+                - unfinished_count
             type: object
         knowledgeMarketTaskParseOpenAPIResponse:
             properties:
@@ -18872,7 +18975,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/EmptyObject'
+                                $ref: '#/components/schemas/ConversationArchiveResponse'
                     description: Conversation archived
             summary: Archive or move a conversation
     /api/core/conversations/{conversation_id}:pin:
@@ -19051,6 +19154,12 @@ paths:
                   required: true
                   schema:
                     type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConversationUnarchiveRequest'
+                required: false
             responses:
                 "200":
                     content:
@@ -19058,7 +19167,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/EmptyObject'
                     description: Conversation unarchived
-            summary: Unarchive a conversation
+            summary: Unarchive a conversation. A stale expected_archived_at returns business code 2004815; an already active conversation satisfies a conditional retry.
     /api/core/conversations/{conversation_id}:unpin:
         post:
             parameters:
@@ -29028,6 +29137,22 @@ paths:
             summary: Read immutable run configuration and delivery history
             tags:
                 - TaskNotifications
+    /api/core/task-center/tasks/{task_id}/removal-preview:
+        get:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TaskRemovalPreview'
+                    description: Removal impact
+            summary: Preview removal of a task and related conversations
     /api/core/task-center/tasks/{task_id}:cancel:
         post:
             parameters:
@@ -29048,10 +29173,20 @@ paths:
                   required: true
                   schema:
                     type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/TaskRemovalRequest'
+                required: false
             responses:
                 "200":
-                    description: OK
-            summary: POST /task-center/tasks/{task_id}:remove
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TaskRemovalResult'
+                    description: Removal committed
+            summary: Move task and related conversations to Trash
     /api/core/tasks/{task_id}:
         get:
             description: view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.

@@ -4,6 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import type { KnowledgeMarketTaskDetailOpenAPIResponse } from "@/api/generated/core-client";
 import * as marketApi from "@/modules/knowledge/api/knowledgeMarket";
 import KnowledgeMarketTaskModal from "./KnowledgeMarketTaskModal";
+import { useKnowledgeMarketTasks } from "./useKnowledgeMarketTasks";
 
 const cancelTask = vi.hoisted(() => vi.fn());
 vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
@@ -35,10 +36,14 @@ function fixture(): ControlTask {
     display_state: "blocked", can_cancel: true, can_retry: false, can_delete: false,
   };
 }
+function TaskDialog() {
+  const query = useKnowledgeMarketTasks(true, "control");
+  return <KnowledgeMarketTaskModal open query={query} onClose={() => {}} onTasksChanged={query.refresh} />;
+}
 async function mount() {
   await act(async () => { render(
     <ConfigProvider button={{ autoInsertSpace: false }} theme={{ token: { motion: false } }}>
-      <KnowledgeMarketTaskModal open refreshKey="control" onClose={() => {}} onTasksChanged={() => {}} />
+      <TaskDialog />
     </ConfigProvider>,
   ); });
 }
@@ -56,7 +61,7 @@ beforeAll(() => {
 });
 beforeEach(() => {
   vi.useFakeTimers(); vi.clearAllMocks(); cancelTask.mockReset(); current = fixture();
-  vi.mocked(marketApi.listKnowledgeMarketTaskPage).mockImplementation(async () => ({items: [current], total: 1, page: 1, page_size: 10}));
+  vi.mocked(marketApi.listKnowledgeMarketTaskPage).mockImplementation(async () => ({items: [current], total: 1, page: 1, page_size: 10, unfinished_count: ["pending", "processing", "blocked", "unknown"].includes(current.display_state) ? 1 : 0}));
   vi.mocked(marketApi.listKnowledgeMarketTaskFiles).mockResolvedValue({items: [], total: 0, page: 1, page_size: 10, counts: {success: 0, failed: 0, canceled: 0, unfinished: 0}, file_details_available: false});
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
@@ -152,7 +157,7 @@ describe("knowledge market task control", () => {
     expect(screen.getByText("测试资料库")).toBeInTheDocument();
     expect(screen.getByText("状态暂不可确认")).toBeInTheDocument();
     expectUnavailableAction("取消未开始文件");
-    vi.mocked(marketApi.listKnowledgeMarketTaskPage).mockImplementation(async () => ({items: [current], total: 1, page: 1, page_size: 10}));
+    vi.mocked(marketApi.listKnowledgeMarketTaskPage).mockImplementation(async () => ({items: [current], total: 1, page: 1, page_size: 10, unfinished_count: ["pending", "processing", "blocked", "unknown"].includes(current.display_state) ? 1 : 0}));
     expect(screen.queryByRole("button", { name: "重新检查状态" })).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
     expect(screen.getByText("处理受阻")).toBeInTheDocument();

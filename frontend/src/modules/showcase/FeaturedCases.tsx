@@ -21,7 +21,7 @@ export default function FeaturedCases({ type, items, isLoading, onTry }: Feature
     return items
       .filter((item) => item.featured && matchesShowcaseEntryType(item.type, type))
       .sort((left, right) => left.featured_order - right.featured_order)
-      .slice(0, FEATURED_HOME_LIMIT);
+      .slice(0, type === "chat" ? undefined : FEATURED_HOME_LIMIT);
   }, [items, type]);
 
   if (!isLoading && featuredItems.length === 0) {

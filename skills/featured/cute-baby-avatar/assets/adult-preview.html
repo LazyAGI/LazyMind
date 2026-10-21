@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>成人照片 · 创意幼态化对照</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #fff8f3; color: #352e2b; font: 15px/1.75 system-ui, -apple-system, "PingFang SC", sans-serif; }
+    main { max-width: 1040px; margin: auto; padding: 28px 24px; }
+    .label { color: #9c563f; font-size: 12px; letter-spacing: .12em; }
+    h1 { margin: 8px 0; font-size: 28px; line-height: 1.3; }
+    .intro { color: #746962; margin: 0 0 22px; }
+    .comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+    figure, section { margin: 0; padding: 18px; background: white; border: 1px solid #ecdfd5; border-radius: 20px; }
+    .step { display: inline-block; margin-bottom: 12px; padding: 3px 10px; border-radius: 99px; color: #746962; background: #f6f3ef; font-size: 12px; }
+    .output .step { color: #90543a; background: #fff1e6; }
+    img { display: block; width: 100%; max-width: 340px; height: auto; aspect-ratio: 1; object-fit: contain; margin: auto; border-radius: 12px; }
+    figcaption { margin-top: 12px; }
+    figcaption strong { display: block; font-size: 16px; }
+    figcaption span { color: #746962; font-size: 13px; }
+    h2 { font-size: 17px; margin: 0 0 10px; }
+    .prompt { margin-top: 20px; }
+    .prompt p { margin: 0; }
+    .wide { margin-top: 18px; }
+    .wide img { max-width: 680px; }
+    .style-list { columns: 3; padding-left: 22px; }
+    @media (max-width: 600px) { .style-list { columns: 2; } }
+    .note { color: #746962; font-size: 12px; margin: 16px 0 0; }
+    @media (max-width: 420px) { main { padding: 20px 12px; } .comparison { gap: 10px; } figure { padding: 10px; border-radius: 14px; } h1 { font-size: 23px; } figcaption strong { font-size: 14px; } }
+  </style>
+</head>
+<body>
+<main>
+  <span class="label">成人照片 / CREATIVE TRANSFORMATION</span>
+  <h1>成人照片 → 萌娃头像</h1>
+  <p class="intro">以约 28 岁的虚构成人照片为参考，创作约 5 岁的小熊帽头像，保留主要五官特征、黑色短发和自然肤色。</p>
+  <div class="comparison" aria-label="成人照片和幼态头像对照">
+    <figure>
+      <span class="step">01 · 输入 / INPUT</span>
+      <img src="{{asset_url:adult_photo}}" alt="输入：虚构成年女性的普通半身照片，黑色短发、蓝色上衣、灰色背景">
+      <figcaption><strong>输入成人照片</strong><span>普通照片，包含头部、肩膀与上半身</span></figcaption>
+    </figure>
+    <figure class="output">
+      <span class="step">02 · 输出 / OUTPUT</span>
+      <img src="{{asset_url:adult_avatar}}" alt="输出：根据成人参照创作的约五岁萌娃，戴棕色小熊帽，俏皮嘟嘴，白底纯头部">
+      <figcaption><strong>约 5 岁 · 萌宠帽款</strong><span>创意幼态化，保留主要辨识特征</span></figcaption>
+    </figure>
+  </div>
+  <section class="prompt">
+    <h2>本例提示词</h2>
+    <p>以输入成人照片为唯一身份参照，创作约 5 岁的萌娃头像。保留原人物的主要五官辨识点、深棕色眼睛、自然肤色、黑色短发，表情调整为俏皮嘟嘴，结合儿童比例调整脸颊和面部轮廓。添加棕色小熊耳朵毛绒帽，完整露出面部。输出一张独立的 1:1 白底纯头部头像，保留完整头发、下巴和帽子，四周留白。移除背景、脖子、肩膀、衣服和身体，画面不含文字、水印或拼图。</p>
+  </section>
+  <p class="note">输入成人照为 AI 合成参考，输出使用本例提供的萌宠帽头像。成人照片转萌娃是创意幼态化，不代表本人真实童年的复原。实际任务先确认照片、目标年龄感和款式，再使用可用的参考图编辑工具生成。</p>
+</main>
+</body>
+</html>

@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -315,6 +318,60 @@ func notifyTaskCancel(taskID string) {
 		return
 	}
 	_ = resp.Body.Close()
+}
+
+// CancelRemovedTaskExecutions runs after committed removal. Restore is fenced
+// until its durable cancellation job completes, so this cannot stop a new run.
+func CancelRemovedTaskExecutions(ctx context.Context, db *gorm.DB, stateStore state.Store, owner, convID string, before time.Time, executionIDs []string) error {
+	var sessions []orm.WorkflowSession
+	if err := db.WithContext(ctx).Where("create_user_id=? AND conversation_id=? AND created_at<=? AND status=?", owner, convID, before, SessionStatusActive).Find(&sessions).Error; err != nil {
+		return err
+	}
+	for index := range sessions {
+		stopWorkflowSession(ctx, db, stateStore, &sessions[index])
+		var current orm.WorkflowSession
+		if err := db.WithContext(ctx).Where("id=?", sessions[index].ID).Take(&current).Error; err != nil {
+			return err
+		}
+		if current.Status == SessionStatusActive {
+			return fmt.Errorf("workflow stop pending")
+		}
+	}
+	for _, id := range executionIDs {
+		prefix := convID + "_"
+		started, err := strconv.ParseInt(strings.TrimPrefix(id, prefix), 10, 64)
+		if !strings.HasPrefix(id, prefix) || err != nil || started > before.UnixMilli() {
+			return fmt.Errorf("invalid removal execution identity")
+		}
+		if err := cancelRemovedChatExecution(ctx, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func cancelRemovedChatExecution(ctx context.Context, executionID string) error {
+	body, _ := json.Marshal(map[string]string{"task_id": executionID})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, common.JoinURL(common.ChatServiceEndpoint(), "/api/workflow/task-cancel"), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := chatCancelHTTPClient.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("chat stop unavailable")
+	}
+	var result struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 1024)).Decode(&result); err != nil || !result.OK {
+		return fmt.Errorf("chat stop unavailable")
+	}
+	return nil
 }
 
 // NotifyChatCancel posts a cancel signal to the Python chat service so that

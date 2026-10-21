@@ -1,18 +1,21 @@
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Input, message, Progress, Segmented, Select, Table, Tooltip } from 'antd';
+import { Button, Input, message, Progress, Segmented, Select, Space, Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { AppstoreOutlined, CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, EllipsisOutlined, HourglassOutlined, ReloadOutlined, SearchOutlined, StopOutlined, SyncOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, DeleteOutlined, EllipsisOutlined, HourglassOutlined, ReloadOutlined, SearchOutlined, StopOutlined, SyncOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { listTasks, removeTask } from './api';
+import TaskRemovalDialog from './TaskRemovalDialog';
+import { TASKS_REMOVED_EVENT, type TasksRemovedDetail } from './events';
+import { listTasks } from './api';
 import type { Task } from './api';
 import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
-import { CONVERSATION_TITLE_CHANGED_EVENT, getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
+import { CHAT_CONVERSATION_LIST_REFRESH_EVENT, CONVERSATION_TITLE_CHANGED_EVENT, getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
 import ArchiveConversationModal from '@/modules/chat/components/ArchiveConversationModal';
 import { unarchiveConversation } from '@/modules/settings/recoveryApi';
 import { RECOVERY_ARCHIVE_PATH } from '@/modules/settings/recoveryRoute';
+import { emitConversationListRefresh } from '@/modules/chat/utils/conversationActivity';
 
 const PAGE_SIZE = 20;
 const POLL_INTERVAL_MS = 5_000;
@@ -36,6 +39,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
   const [type, setType] = useState('');
   const [keyword, setKeyword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [removingTask, setRemovingTask] = useState<Task | null>(null);
   const [selected, setSelected] = useState<Task | null>(null);
   const [archiveTask, setArchiveTask] = useState<Task | null>(null);
   const [graphTask, setGraphTask] = useState<Task | null>(null);
@@ -47,6 +51,8 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
     try {
       const response = await listTasks({ status: status || undefined, task_type: type || undefined, keyword: keyword || undefined, page, page_size: PAGE_SIZE });
       if (current !== request.current) return;
+      const lastPage = Math.max(1, Math.ceil((response.total ?? 0) / PAGE_SIZE));
+      if (page > lastPage) { onPageChange(lastPage); return; }
       setTasks(response.items ?? []);
       setTotal(response.total ?? 0);
       if (response.status_counts) setStatusCounts(response.status_counts);
@@ -56,16 +62,27 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
     } finally {
       if (current === request.current) setLoading(false);
     }
-  }, [keyword, page, status, type]);
+  }, [keyword, page, status, type, onPageChange]);
 
   useEffect(() => {
     if (!active) return;
     void load();
     const renamed = () => void load();
+    const removed = (event: Event) => {
+      const detail = (event as CustomEvent<TasksRemovedDetail>).detail;
+      ++request.current;
+      setSelected(current => current && detail.removed_task_ids.includes(current.id) ? null : current);
+      setGraphTask(current => current && detail.removed_task_ids.includes(current.id) ? null : current);
+      void load();
+    };
+    window.addEventListener(TASKS_REMOVED_EVENT, removed);
     window.addEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
+    window.addEventListener(CHAT_CONVERSATION_LIST_REFRESH_EVENT, renamed);
     return () => {
       ++request.current;
       window.removeEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
+      window.removeEventListener(CHAT_CONVERSATION_LIST_REFRESH_EVENT, renamed);
+      window.removeEventListener(TASKS_REMOVED_EVENT, removed);
     };
   }, [active, load]);
 
@@ -118,7 +135,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
         return <div className='task-time-cell'><Tooltip title={updatedAt}><span>{updatedAt}</span></Tooltip><Tooltip title={createdAt}><small>{createdAt}</small></Tooltip></div>;
       },
     },
-    { title: '', width: 56, align: 'center', render: (_, task) => <Button type='text' icon={<EllipsisOutlined />} aria-label={t('taskCenter.viewDetails')} onClick={(event: React.MouseEvent<HTMLElement>) => { event.stopPropagation(); setSelected(task); }} /> },
+    { title: '', width: 104, align: 'center', render: (_, task) => <Space size={0}><Tooltip title={t('taskCenter.trashTask')}><Button danger type='text' icon={<DeleteOutlined />} aria-label={t('taskCenter.removalRowAria', { name: task.conversation_title || task.title || t('taskCenter.noTitle') })} onClick={(event: React.MouseEvent<HTMLElement>) => { event.stopPropagation(); setRemovingTask(task); }} /></Tooltip><Button type='text' icon={<EllipsisOutlined />} aria-label={t('taskCenter.viewDetails')} onClick={(event: React.MouseEvent<HTMLElement>) => { event.stopPropagation(); setSelected(task); }} /></Space> },
   ];
 
   const statusOptions = [
@@ -137,22 +154,6 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
     navigate(getChatConversationPath(id));
   };
 
-  const handleDelete = async (task: Task) => {
-    try {
-      await removeTask(task.id);
-    } catch (error) {
-      message.error(getLocalizedErrorMessage(error));
-      return;
-    }
-    setSelected(null);
-    message.success(t('taskCenter.taskRemoveSuccess'));
-    if (tasks.length === 1 && page > 1) {
-      onPageChange(page - 1);
-      return;
-    }
-    await load();
-  };
-
   const showArchivedFeedback = (task: Task) => {
     const messageKey = `task-archived:${task.conversation_id}`;
     message.open({
@@ -166,7 +167,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
             .then(() => {
               message.destroy(messageKey);
               message.success(t('settingsPage.recovery.unarchived'));
-              void load();
+              emitConversationListRefresh();
             })
             .catch((error) => message.error(getLocalizedErrorMessage(error)));
         }}>{t('settingsPage.recovery.undo')}</Button>
@@ -191,7 +192,8 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
         </div>
       </div>
       <Table rowKey='id' className='task-table' tableLayout='fixed' loading={loading} columns={columns} dataSource={tasks} onRow={(task: Task) => ({ onClick: () => setSelected(task) })} rowClassName={(task: Task) => `task-table-row status-${task.status}`} pagination={{ current: page, pageSize: PAGE_SIZE, total, onChange: onPageChange, showSizeChanger: false, showTotal: (value: number) => t('taskCenter.taskTotalItems', { total: value }) }} />
-      <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={(sessionId) => selected && setGraphTask({ ...selected, workflow_session_id: sessionId })} onArchive={setArchiveTask} onDelete={handleDelete} />
+      <TaskRemovalDialog task={removingTask} onClose={() => setRemovingTask(null)} />
+      <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={(sessionId) => selected && setGraphTask({ ...selected, workflow_session_id: sessionId })} onArchive={setArchiveTask} onDelete={setRemovingTask} />
       <ArchiveConversationModal
         open={Boolean(archiveTask)}
         conversationId={archiveTask?.conversation_id}

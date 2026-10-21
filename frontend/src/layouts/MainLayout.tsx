@@ -1,3 +1,4 @@
+import { TASKS_REMOVED_EVENT, type TasksRemovedDetail } from '@/modules/taskCenter/events';
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -189,6 +190,13 @@ export default function MainLayout() {
 
   const [currentSidebarConversationId, setCurrentSidebarConversationId] =
     useState(routeConversationId);
+  useEffect(() => {
+    const removed = (event: Event) => {
+      if (routeConversationId && (event as CustomEvent<TasksRemovedDetail>).detail.trashed_conversation_ids.includes(routeConversationId)) navigate(CHAT_HOME_PATH);
+    };
+    window.addEventListener(TASKS_REMOVED_EVENT, removed);
+    return () => window.removeEventListener(TASKS_REMOVED_EVENT, removed);
+  }, [routeConversationId, navigate]);
   const currentSidebarConversationIdRef = useRef(
     currentSidebarConversationId,
   );

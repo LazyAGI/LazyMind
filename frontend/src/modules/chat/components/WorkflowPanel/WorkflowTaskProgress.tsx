@@ -9,10 +9,13 @@ export function WorkflowTaskProgress({ timeline, status, title, label, details, 
 }) {
   const { i18n } = useTranslation();
   const zh = !i18n.language?.startsWith('en');
-  const items = timeline.items.filter(item => !hiddenSteps.includes(item.step?.step_id ?? item.ordinary?.workflow_step_id ?? ''));
+  const items = timeline.items.filter(item => item.state !== 'outdated'
+    && !['pruned', 'bypassed', 'stale'].includes(item.ordinary?.status ?? '') && !hiddenSteps.includes(item.step?.step_id ?? item.ordinary?.workflow_step_id ?? ''));
   return <article className="workflow-task-progress ordinary-task-card" aria-label={zh ? '工作流任务执行记录' : 'Workflow task history'}>
     <header><strong>{zh ? '工作流任务' : 'Workflow task'}</strong><span>{status}</span></header>
     <p role="status">{zh ? `已完成 ${items.filter(item => item.state === 'complete').length} / ${items.length} 个步骤` : `${items.filter(item => item.state === 'complete').length} / ${items.length} steps completed`}</p>
+    <progress className="ordinary-workflow-progress" aria-label={zh ? '子任务完成进度' : 'Subtask completion progress'}
+      max={Math.max(1, items.length)} value={items.length > 0 ? items.filter(item => item.state === 'complete').length : undefined} />
     {items.length === 0 && <p>{zh ? '暂无可展示的阶段结果。' : 'No stage results yet.'}</p>}
     <ol aria-label={zh ? '累计执行步骤' : 'Accumulated steps'}>
       {items.map(item => <li key={item.id}>

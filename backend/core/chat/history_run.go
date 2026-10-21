@@ -9,6 +9,9 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/log"
+	"lazymind/core/store"
+	"lazymind/core/subagent"
+	"lazymind/core/tasktiming"
 )
 
 // claimChatHistoryRun transfers a reused history row to a new run before that
@@ -43,7 +46,13 @@ func updateOwnedChatHistory(ctx context.Context, db *gorm.DB, historyID, runID s
 	err := conversationCheckpoint(ctx, db, history.ConversationID, func(tx *gorm.DB) error {
 		result := tx.Model(&orm.ChatHistory{}).Where("id = ? AND run_id = ?", historyID, runID).Updates(values)
 		affected = result.RowsAffected
-		return result.Error
+		if result.Error != nil {
+			return result.Error
+		}
+		if status, ok := values["run_status"].(string); ok && affected > 0 && status != "generating" {
+			return tasktiming.FinishChat(ctx, tx, runID, status, time.Now().UTC())
+		}
+		return nil
 	})
 	if err != nil {
 		return false, err
@@ -52,6 +61,9 @@ func updateOwnedChatHistory(ctx context.Context, db *gorm.DB, historyID, runID s
 		log.Logger.Info().Str("history_id", historyID).Str("run_id", runID).
 			Msg("ignored stale chat history write")
 		return false, nil
+	}
+	if status, ok := values["run_status"].(string); ok && status != "generating" {
+		subagent.EventHooks.CallConversationEvent(ctx, store.State(), history.ConversationID, historyID, "task_run_updated", map[string]any{})
 	}
 	return true, nil
 }

@@ -15,9 +15,11 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"lazymind/core/state"
 	"lazymind/core/store"
+	"lazymind/core/taskcenter"
 )
 
 func recoveryTestDB(t *testing.T) *orm.DB {
@@ -34,6 +36,7 @@ func recoveryTestDB(t *testing.T) *orm.DB {
 		&orm.EpisodeMemory{},
 		&orm.SkillV2Draft{},
 		&orm.TaskCenterTask{},
+		&orm.AsyncJob{},
 	)
 	stateStore, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "recovery-state.db"))
 	if err != nil {
@@ -45,6 +48,53 @@ func recoveryTestDB(t *testing.T) *orm.DB {
 		_ = stateStore.Close()
 	})
 	return db
+}
+
+func TestRestoreWaitsForRemovalCancellationAndCommitsFailedJobRetry(t *testing.T) {
+	db := recoveryTestDB(t)
+	seedRecoveryConversation(t, db, "removal-retry", true)
+	if err := db.Create(&orm.TaskCenterTask{ID: "retry-task", UserID: "u1", ConversationID: "removal-retry", TaskType: "background_chat", Status: "running"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	previous := taskcenter.OnConversationTrashHook
+	taskcenter.OnConversationTrashHook = nil
+	t.Cleanup(func() { taskcenter.OnConversationTrashHook = previous })
+	w, r := recoveryRequest(http.MethodPost, "/task-center/tasks/retry-task:remove", nil, nil)
+	taskcenter.RemoveTaskHandler(w, r)
+	if w.Code != 200 {
+		t.Fatalf("remove: %d %s", w.Code, w.Body.String())
+	}
+	var job orm.AsyncJob
+	if err := db.Where("resource_id=?", "removal-retry").First(&job).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&job).Update("status", string(asyncjob.StatusFailed)).Error; err != nil {
+		t.Fatal(err)
+	}
+	w, r = recoveryRequest(http.MethodPost, "/conversations/removal-retry:restore", nil, map[string]string{"name": "removal-retry:restore"})
+	RestoreConversation(w, r)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("restore: %d %s", w.Code, w.Body.String())
+	}
+	var savedJob orm.AsyncJob
+	if err := db.First(&savedJob, "id=?", job.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if savedJob.Status != string(asyncjob.StatusPending) || string(savedJob.PayloadJSON) != string(job.PayloadJSON) {
+		t.Fatalf("retry not committed or payload lost: %+v", savedJob)
+	}
+	var c orm.Conversation
+	if err := db.First(&c, "id=?", "removal-retry").Error; err != nil || c.DeletedAt == nil {
+		t.Fatalf("restored before stop: %v", err)
+	}
+	if err := db.Model(&job).Update("status", string(asyncjob.StatusSucceeded)).Error; err != nil {
+		t.Fatal(err)
+	}
+	w, r = recoveryRequest(http.MethodPost, "/conversations/removal-retry:restore", nil, map[string]string{"name": "removal-retry:restore"})
+	RestoreConversation(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("restore after stop: %d %s", w.Code, w.Body.String())
+	}
 }
 
 func seedRecoveryConversation(t *testing.T, db *orm.DB, id string, task bool) {

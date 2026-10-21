@@ -117,7 +117,7 @@ func marketDisplay(job orm.AsyncJob, parse parseProgressInfo) string {
 
 func addMarketControl(r *http.Request, db *gorm.DB, data map[string]any, job orm.AsyncJob, parse parseProgressInfo) {
 	state := marketDisplay(job, parse)
-	terminal := state != "unknown" && state != "pending" && state != "processing"
+	terminal := marketTaskTerminal(state)
 	worker := "unknown"
 	if !terminal || parse.Failed > 0 || job.Status == "failed" {
 		worker = marketWorkerHealth(r.Context())
@@ -140,6 +140,10 @@ func addMarketControl(r *http.Request, db *gorm.DB, data map[string]any, job orm
 	}
 	data["display_state"], data["can_cancel"], data["can_delete"] = state, canCancel, terminal
 	data["can_retry"] = terminal && latest && worker == "available" && (parse.Failed > 0 || job.Status == "failed")
+}
+
+func marketTaskTerminal(state string) bool {
+	return state != "unknown" && state != "pending" && state != "processing" && state != "blocked"
 }
 
 func MarketCancelTask(w http.ResponseWriter, r *http.Request) {

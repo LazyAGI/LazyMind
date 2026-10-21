@@ -2398,10 +2398,11 @@ type knowledgeMarketTaskListItemOpenAPIResponse struct {
 }
 
 type knowledgeMarketTaskListOpenAPIResponse struct {
-	Items    []knowledgeMarketTaskListItemOpenAPIResponse `json:"items"`
-	Page     int32                                        `json:"page"`
-	PageSize int32                                        `json:"page_size"`
-	Total    int32                                        `json:"total"`
+	UnfinishedCount int                                          `json:"unfinished_count" desc:"Current user's unfinished knowledge market tasks across all pages and filters, including ongoing file parsing."`
+	Items           []knowledgeMarketTaskListItemOpenAPIResponse `json:"items"`
+	Page            int32                                        `json:"page"`
+	PageSize        int32                                        `json:"page_size"`
+	Total           int32                                        `json:"total"`
 }
 
 type knowledgeMarketTaskPayloadOpenAPIResponse struct {

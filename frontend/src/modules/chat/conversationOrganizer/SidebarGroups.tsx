@@ -92,6 +92,7 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
   }, [load]);
   useEffect(() => { void refresh(); return () => { ++refreshVersion.current; }; }, [refresh]);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const batchMode = Boolean(batchSelection);
   useEffect(() => {
     setSelectingGroup('');
@@ -161,7 +162,8 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
     const open = Boolean(searchText) || !collapsed.has(g.id);
     const visible = batchSelection || searchText || expanded.has(g.id) ? all : all.slice(0, 5);
     const selected = location.pathname.endsWith(`/groups/${g.id}`);
-    const renderMember = (c: ConversationGroupMember) => <ConversationPreview key={c.conversation_id} conversationId={c.conversation_id} title={c.display_name || c.conversation_id} summary={c.summary} updateTime={c.updated_at} isTask={Boolean(c.is_task_conv)} groupName={g.name} disabled={Boolean(batchSelection) || renamingId === c.conversation_id}><div className={`conversation-group-member ${c.conversation_id === currentConversationId ? "active" : ""} ${memberDropTarget?.id === c.conversation_id ? `member-drop-${memberDropTarget.position}` : ''}`} draggable={g.kind !== "project" && renamingId !== c.conversation_id && !batchSelection && !searchText && !busy}
+    const renderMember = (c: ConversationGroupMember) => <ConversationPreview key={c.conversation_id} conversationId={c.conversation_id} title={c.display_name || c.conversation_id} summary={c.summary} updateTime={c.updated_at} isTask={Boolean(c.is_task_conv)} groupName={g.name} disabled={Boolean(batchSelection) || renamingId === c.conversation_id || openMenuId === c.conversation_id}><div className={`conversation-group-member ${c.conversation_id === currentConversationId ? "active" : ""} ${memberDropTarget?.id === c.conversation_id ? `member-drop-${memberDropTarget.position}` : ''}`} draggable={g.kind !== "project" && renamingId !== c.conversation_id && !batchSelection && !searchText && !busy}
+          onContextMenu={event => { if (batchSelection || renamingId) return; event.preventDefault(); event.stopPropagation(); setOpenMenuId(c.conversation_id); }}
           onDragStart={e => startConversationDrag(e, c.conversation_id, g.id, Boolean(c.is_task_conv))}
           onDragEnd={() => { setDropTarget(''); setMemberDropTarget(null); }}
           onDragOver={e => {
@@ -180,9 +182,10 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
             const row = e.currentTarget.getBoundingClientRect();
             void moveMember(g.id, source.id, { target_conversation_id: c.conversation_id, position: e.clientY > row.top + row.height / 2 ? 'after' : 'before' }, source.groupId === g.id);
           }}>
-          {batchSelection ? <Checkbox className="conversation-group-batch-checkbox" checked={batchSelection.checkedIds.includes(c.conversation_id)} onChange={event => batchSelection.onToggle(c.conversation_id, event.target.checked)}><span title={c.display_name}>{c.display_name || c.conversation_id}</span></Checkbox> : renamingId === c.conversation_id ? <ConversationTitleEditor key={c.conversation_id} conversationId={c.conversation_id} initialTitle={c.display_name} onClose={() => setRenamingId(null)} /> : <button data-conversation-title onClick={() => navigate(getChatConversationPath(c.conversation_id))}>{c.display_name || c.conversation_id}</button>}
-          {renamingId !== c.conversation_id && c.updated_at && dayjs(c.updated_at).isValid() && <time className="conversation-group-member-time" dateTime={c.updated_at}>{dayjs(c.updated_at).format("MM/DD")}</time>}
-          {!batchSelection && renamingId !== c.conversation_id && <ConversationMembership onRename={() => setRenamingId(c.conversation_id)} pinned={Boolean(c.pinned_at)} isTaskConv={Boolean(c.is_task_conv)} conversationId={c.conversation_id} groupId={g.id} groupKind={g.kind} title={c.display_name} />}
+          {batchSelection ? <Checkbox className="conversation-group-batch-checkbox" checked={batchSelection.checkedIds.includes(c.conversation_id)} onChange={event => batchSelection.onToggle(c.conversation_id, event.target.checked)}><span title={c.display_name}>{c.display_name || c.conversation_id}</span></Checkbox> : <button data-conversation-title onClick={() => navigate(getChatConversationPath(c.conversation_id))}>{c.display_name || c.conversation_id}</button>}
+          {c.updated_at && dayjs(c.updated_at).isValid() && <time className="conversation-group-member-time" dateTime={c.updated_at}>{dayjs(c.updated_at).format("MM/DD")}</time>}
+          {!batchSelection && <ConversationMembership onRename={() => setRenamingId(c.conversation_id)} pinned={Boolean(c.pinned_at)} isTaskConv={Boolean(c.is_task_conv)} conversationId={c.conversation_id} groupId={g.id} groupKind={g.kind} title={c.display_name}
+            menuOpen={!renamingId && openMenuId === c.conversation_id} onMenuOpenChange={open => setOpenMenuId(current => open && !renamingId ? c.conversation_id : current === c.conversation_id ? null : current)} />}
 
         </div></ConversationPreview>;
     return <ConversationGroupDropZone key={g.id} groupId={g.id} groupName={g.name} isTaskConv={Boolean(g.is_task_conv)} disabled={g.kind === "project" || Boolean(batchSelection || searchText || busy)} className={`conversation-group ${dropTarget === g.id ? "group-drop-target" : ""}`} onDragOver={e => { if (!batchSelection && !searchText && !busy && ((g.kind !== "project" && e.dataTransfer.types.includes(CONVERSATION_DRAG)) || e.dataTransfer.types.includes(GROUP_DRAG))) { e.preventDefault(); setDropTarget(g.id); } }} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTarget(""); }} onDrop={async e => {
@@ -226,6 +229,9 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
   };
   const visibleGroups = groups.filter(g => !matches || matches.has(g.id));
   return <>
+    {renamingId && <ConversationTitleEditor key={renamingId} conversationId={renamingId}
+      initialTitle={Object.values(members).flat().find(item => item.conversation_id === renamingId)?.display_name}
+      onClose={() => { setOpenMenuId(null); setRenamingId(null); }} />}
     {showTypeHeading && <div className="conversation-groups-heading">{t(isTaskConv ? "chat.taskConversation" : "chat.normalConversation")}</div>}
     {visibleGroups.some(isGroupPinned) && <><div className="conversation-groups-heading">{t("conversationOrganizer.pinnedGroups")}</div>{visibleGroups.filter(isGroupPinned).map(block)}</>}
     <div className="conversation-groups-heading"><span>{t("conversationOrganizer.groups")}</span>{!batchSelection && <Dropdown trigger={["click"]} menu={{ items: [
