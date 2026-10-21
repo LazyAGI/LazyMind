@@ -1,65 +1,41 @@
 <!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline'">
-  <title>同一风景，另一重空间 · 风景水墨样式预览</title>
-  <style>
-    *{box-sizing:border-box}
-    html,body{margin:0;min-height:100%;background:#f3f0e9;color:#34464a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
-    body{padding:26px 18px 30px}
-    main{max-width:1040px;margin:0 auto}
-    header{margin:0 0 24px}
-    .kicker{margin:0 0 9px;color:#697d80;font-size:11px;line-height:1.6;letter-spacing:.12em}
-    h1{margin:0;font-size:clamp(23px,4vw,32px);font-weight:500;line-height:1.4;letter-spacing:.05em}
-    .intro{margin:10px 0 0;color:#6d7979;font-size:13px;line-height:1.8;max-width:760px}
-    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:26px 22px;align-items:start}
-    figure{min-width:0;margin:0;background:#fcfaf4;border:1px solid #e3e5dc;border-radius:8px;overflow:hidden}
-    figure.wide{grid-column:1/-1;width:100%}
-    figure.portrait{width:100%;max-width:480px;justify-self:center}
-    figure.solo{grid-column:1/-1}
-    .image{padding:8px;background:#fcfaf4}
-    img{display:block;width:100%;height:auto}
-    figcaption{padding:13px 16px 17px;border-top:1px solid #e9e8e1}
-    .tags{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 9px}
-    .tags span{padding:3px 8px;border:1px solid #d8dfd8;border-radius:99px;color:#62766f;font-size:10px;line-height:1.4}
-    h2{font-size:16px;line-height:1.5;font-weight:500;margin:0 0 6px}
-    .note{margin:0;color:#75817b;font-size:12px;line-height:1.8}
-    footer{margin:24px 0 0;padding-top:16px;border-top:1px solid #dce1d9;color:#77817d;font-size:12px;line-height:1.9}
-    footer p{margin:0 0 4px}
-    @media(max-width:600px){body{padding:20px 10px 24px}.grid{grid-template-columns:minmax(0,1fr);gap:20px}figure.wide,figure.solo{grid-column:auto}.image{padding:5px}figcaption{padding:12px}.intro{font-size:12px}}
-  </style>
-</head>
-<body>
-  <main>
-    <header>
-      <p class="kicker">超现实水墨画 · 两种画幅</p>
-      <h1>同一风景，另一重空间</h1>
-      <p class="intro">以水墨为主画风，将原景中的一个元素放大，重新想象风景的尺度与空间。</p>
-    </header>
-    <section class="grid" aria-label="可组合样式示例">
-      <figure class="wide">
-        <div class="image"><img src="{{asset_url:surreal_ink_landscape}}" alt="横版无字超现实水墨湖湾：蓝灰湖山和一个取自原景的巨型元素，以淡彩晕染绘成" decoding="async"></div>
-        <figcaption>
-          <div class="tags"><span>画作</span><span>纯画无字</span><span>水墨＋超现实</span><span>横版 3:2</span></div>
-          <h2>湖湾的另一重尺度</h2>
-          <p class="note">湖湾、山影与同源巨物组成新的空间关系；全幅为水墨，不保留摄影贴片。</p>
-        </figcaption>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline'"><title>让熟悉的风景，长出一点想象</title><style>
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:#f3f0e9;color:#34464a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;line-height:1.7}
+main{max-width:1120px;margin:auto;padding:28px 22px 36px}h1,h2,h3,p,figure{margin:0}h1{font-size:clamp(25px,4vw,36px);font-weight:500;line-height:1.4;letter-spacing:.025em}h2{font-size:clamp(23px,3.5vw,31px);font-weight:500;line-height:1.5}h3{font-size:21px;font-weight:500;line-height:1.5}
+.eyebrow{color:#627775;font-size:11px;letter-spacing:.1em;margin-bottom:8px}.intro{color:#6d7979;font-size:14px;margin-top:12px;max-width:820px}.preset{display:block;background:#e8ede5;color:#506756;border:1px solid #dce3d8;border-radius:6px;padding:9px 13px;font-size:12px;margin-top:18px}.comparison{margin-top:30px;background:#fbfaf6;border:1px solid #dfe3da;border-radius:9px;overflow:hidden}.comparison-head{padding:20px 22px 16px;border-bottom:1px solid #e5e8df;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.tags{display:flex;gap:6px;flex-wrap:wrap}.tags span{padding:3px 8px;border:1px solid #d6ded5;border-radius:4px;font-size:10px;color:#65776b}.pair{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.35fr);gap:26px;padding:22px;align-items:start}.frame{padding:7px;background:#f0eee7;border:1px solid #e5e5dc}.result .frame{background:#fcfaf3}img{display:block;max-width:100%;width:100%;height:auto}.result.portrait img{max-width:440px;margin:auto}.image-label{display:flex;justify-content:space-between;gap:10px;font-size:11px;color:#698078;margin-bottom:9px}.image-label b{font-weight:500;letter-spacing:.05em}.image-label span{color:#829087}.image-note{font-size:12px;color:#718078;margin-top:10px}.insight{border-top:1px solid #e0e6dd;margin-top:20px;padding-top:16px;font-size:13px;color:#5b6f65}.insight strong{display:block;font-weight:500;font-size:11px;color:#829084;margin-bottom:4px}.insight p+p{margin-top:13px}.result figcaption{font-size:12px;color:#718078;margin-top:10px}footer{font-size:12px;color:#75827a;border-top:1px solid #dce1d7;margin-top:28px;padding-top:17px}footer p+p{margin-top:4px}.nav{display:flex;gap:8px;flex-wrap:wrap;margin-top:22px}.nav a{color:#506b5c;text-decoration:none;padding:7px 13px;border:1px solid #d5dfd2;background:#fbfaf4;border-radius:4px;font-size:13px}.nav a:hover,.nav a:focus-visible{background:#e4ebdf;outline:2px solid #a9baaa;outline-offset:2px}.case-section{margin-top:54px;scroll-margin-top:20px}.overview{padding-bottom:27px;border-bottom:1px solid #dce1d7}.count{color:#637b6c;font-size:12px;margin-top:10px}
+@media(max-width:650px){main{padding:21px 11px 28px}.pair{grid-template-columns:minmax(0,1fr);gap:22px;padding:13px}.comparison-head{padding:15px 13px;gap:10px}.comparison{margin-top:24px}.insight{margin-top:13px;padding-top:12px}.source .frame img{max-height:280px;object-fit:contain}.result.portrait img{max-width:440px}.case-section{margin-top:38px}h3{font-size:18px}.intro{font-size:13px}.tags span{font-size:10px}.preset{font-size:11px}.frame{padding:5px}}
+</style></head><body><main><header><p class="eyebrow">超现实水墨画 · 两种原图对照</p><h1>让熟悉的风景，长出一点想象</h1><p class="intro">从照片里已有的树木出发，只改变一个元素的尺度，其余风景仍能与原图对应。</p><p class="preset">试用默认：横版 3:2 · 完整水墨纯画 · 一个同源巨物 · 无字无符号</p></header>
+<article class="comparison">
+  <header class="comparison-head"><h3>秋林雪山 · 湖中的金色巨树</h3><div class="tags"><span>无字画作</span><span>完整水墨</span><span>横版 3:2</span><span>案例预设</span></div></header>
+  <div class="pair">
+    <aside class="source">
+      <figure><div class="image-label"><b>01 · 原图</b><span>秋林雪山</span></div>
+        <div class="frame"><img src="{{asset_url:original_autumn}}" alt="原图：金色秋林、蓝青雪山与横向湖面" loading="lazy" decoding="async"></div>
+        <figcaption class="image-note">金色秋林、蓝青雪山与横向湖面。</figcaption>
       </figure>
-      <figure class="portrait solo">
-        <div class="image"><img src="{{asset_url:surreal_ink_portrait}}" alt="竖版无字超现实水墨山谷：山势、道路村舍与一个原景巨型元素，以柔和水墨重新构成" loading="lazy" decoding="async"></div>
-        <figcaption>
-          <div class="tags"><span>画作</span><span>纯画无字</span><span>水墨＋超现实</span><span>竖版 2:3</span></div>
-          <h2>山谷的悬浮想象</h2>
-          <p class="note">竖向山势与同景元素形成空间错位，保留柔和晕染与纸张留白，不加入文字或印章。</p>
-        </figcaption>
+      <div class="insight"><p><strong>保留的景物</strong>保留蓝青雪山、金色秋林和湖面的原景配色。</p><p><strong>这次的表达</strong>从原景金色树木提取唯一巨物，在湖中形成不可能的尺度关系，全景统一为水墨。</p></div>
+    </aside>
+    <figure class="result">
+      <div class="image-label"><b>02 · 生成结果</b><span>横版 3:2</span></div>
+      <div class="frame"><img src="{{asset_url:surreal_ink_landscape}}" alt="生成结果：秋林雪山 · 湖中的金色巨树，无字画作、完整水墨、横版 3:2" loading="lazy" decoding="async"></div>
+      <figcaption>从原景金色树木提取唯一巨物，在湖中形成不可能的尺度关系，全景统一为水墨。</figcaption>
+    </figure>
+  </div>
+</article><article class="comparison">
+  <header class="comparison-head"><h3>高山湖泊 · 越过雪峰的冷杉</h3><div class="tags"><span>无字画作</span><span>完整水墨</span><span>竖版 2:3</span><span>可选组合</span></div></header>
+  <div class="pair">
+    <aside class="source">
+      <figure><div class="image-label"><b>01 · 原图</b><span>高山湖泊</span></div>
+        <div class="frame"><img src="{{asset_url:original_alpine}}" alt="原图：蓝天雪山、针叶林与湖中倒影" loading="lazy" decoding="async"></div>
+        <figcaption class="image-note">蓝天雪山、针叶林与湖中倒影。</figcaption>
       </figure>
-    </section>
-    <footer>
-      <p>点击“试一试”后只需上传一张风景照片，直接沿用案例预设，每次默认创作一张。</p>
-      <p>本案例试用预设：横版 3:2、一个同源巨物的无字超现实水墨纯画。其他样张展示可自由组合的变化；你主动提出新的风格、形式或比例时再调整，无需额外填写。</p>
-    </footer>
-  </main>
-</body>
-</html>
+      <div class="insight"><p><strong>保留的景物</strong>保留原景雪峰、针叶林和湖中倒影。</p><p><strong>这次的表达</strong>只放大一株原景冷杉，以纵向画幅表现尺度反差，不添加无关星球或装饰。</p></div>
+    </aside>
+    <figure class="result portrait">
+      <div class="image-label"><b>02 · 生成结果</b><span>竖版 2:3</span></div>
+      <div class="frame"><img src="{{asset_url:surreal_ink_portrait}}" alt="生成结果：高山湖泊 · 越过雪峰的冷杉，无字画作、完整水墨、竖版 2:3" loading="lazy" decoding="async"></div>
+      <figcaption>只放大一株原景冷杉，以纵向画幅表现尺度反差，不添加无关星球或装饰。</figcaption>
+    </figure>
+  </div>
+</article>
+<footer><p>以上为所示原图的风格转换示例；试用时使用你上传的照片，每次默认生成一张。</p><p>选定案例后只需上传照片。想换风格、构图、画幅或文案时，直接说明即可。</p></footer></main></body></html>

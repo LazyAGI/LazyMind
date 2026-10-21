@@ -1,7 +1,7 @@
 schema_version: 2
 id: landscape-art-postcard
 type: chat
-version: 1.1.1
+version: 1.1.2
 status: published
 default_locale: zh-CN
 provider: SkillHub
@@ -18,31 +18,43 @@ classification:
   tags: [风景转绘, 水墨画, 明信片, 自由组合]
 assets:
   cover:
-    file: assets/cover.png
+    file: assets/cover-cloud-dawn.png
     role: cover
+  original_cloud:
+    file: assets/original-cloud.jpg
+    role: result
+  original_alpine:
+    file: assets/original-alpine.jpg
+    role: result
+  original_coast:
+    file: assets/original-coast.jpg
+    role: result
+  original_autumn:
+    file: assets/original-autumn.jpg
+    role: result
   ink_artwork:
-    file: assets/ink-blue-stillness.png
+    file: assets/ink-cloud-dawn-landscape.png
     role: result
   ink_artwork_portrait:
-    file: assets/ink-valley-portrait.png
+    file: assets/ink-autumn-portrait.png
     role: result
   ink_postcard:
-    file: assets/postcard-blue-stillness.png
+    file: assets/postcard-alpine-portrait.png
     role: result
   ink_postcard_landscape:
-    file: assets/postcard-blue-stillness-landscape.png
+    file: assets/postcard-crimson-coast-landscape.png
     role: result
   photo_ink_postcard:
-    file: assets/postcard-photo-ink-portrait.png
+    file: assets/photo-ink-cloud-dawn-portrait.png
     role: result
   torn_postcard:
-    file: assets/torn-meadows-landscape.png
+    file: assets/torn-crimson-coast-landscape.png
     role: result
   surreal_ink_landscape:
-    file: assets/surreal-lake-landscape.png
+    file: assets/surreal-autumn-lake-landscape.png
     role: result
   surreal_ink_portrait:
-    file: assets/surreal-valley-portrait.png
+    file: assets/surreal-alpine-pine-portrait.png
     role: result
   ink_artwork_preview:
     file: assets/ink-artwork.html
@@ -63,7 +75,7 @@ presentation:
     output_type: images
     output_label: 水墨画与明信片
     cover_asset: cover
-    result_summary: 四种组合案例，包含纯画、原图加画、撕口，以及横竖不同画幅
+    result_summary: 四张原图对照八张成品，展示纯画、原图加画、撕口和横竖画幅
   detail:
     title: 风景水墨画-明信片生成
     description: 将整幅风景画转绘成水墨风景的画或明信片。具体风格、表达形式，画面比例由你定。
@@ -94,9 +106,9 @@ tasks:
           description: 直接生成一张横版 3:2 画作；用户主动修改时覆盖预设
     result:
       template: html_preview_v1
-      eyebrow: 无字水墨画 · 两种画幅
-      title: 湖湾与山谷
-      summary: 横版湖湾与竖版山谷展示纯画组合；可按你的照片和要求调整。
+      eyebrow: 无字水墨画 · 原图与结果
+      title: 云海晨光与秋日雪线
+      summary: 日出云海与秋林雪山，分别展示横版和竖版的完整无字水墨转绘。
       html_asset: ink_artwork_preview
   - id: ink-postcard
     selector:
@@ -125,9 +137,9 @@ tasks:
           description: 横竖分别安排留白与文字，具体比例优先，默认交付一张
     result:
       template: html_preview_v1
-      eyebrow: 水墨明信片 · 三种组合
-      title: 画幅与表达自由组合
-      summary: 横版纯画、竖版纯画，以及上原图下水墨的三张明信片样式。
+      eyebrow: 水墨明信片 · 三种原图对照
+      title: 给不同的风景，一张纪念卡
+      summary: 三张不同原图，分别制作竖版纯画、横版纯画和上摄影下水墨明信片。
       html_asset: ink_postcard_preview
   - id: torn-postcard
     selector:
@@ -156,9 +168,9 @@ tasks:
           description: 直接按横版 3:2 排标题与小编号，交付一张
     result:
       template: html_preview_v1
-      eyebrow: 撕口明信片 · 横版示例
-      title: 让风景跨过纸页
-      summary: 横版草甸湖泊以同景摄影、水墨和不规则撕口展示另一种组合。
+      eyebrow: 撕口明信片 · 原图与结果
+      title: 沿着海岸，让照片走进画里
+      summary: 红霞海岸原图与撕口明信片对照，展示摄影锚点、连续海岸和同景水墨的融合。
       html_asset: torn_postcard_preview
   - id: surreal-ink-artwork
     selector:
@@ -187,7 +199,7 @@ tasks:
           description: 直接按横版 3:2 安排留白，默认交付一张
     result:
       template: html_preview_v1
-      eyebrow: 超现实水墨画 · 两种画幅
-      title: 同一风景，另一重空间
-      summary: 横版湖湾与竖版山谷，以水墨主画风组合超现实空间表达。
+      eyebrow: 超现实水墨画 · 两种原图对照
+      title: 让熟悉的风景，长出一点想象
+      summary: 秋林中的金色树与湖岸冷杉分别成为唯一巨物，展示横竖不同画幅的超现实水墨。
       html_asset: surreal_ink_artwork_preview

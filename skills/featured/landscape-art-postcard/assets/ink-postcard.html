@@ -1,73 +1,57 @@
 <!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline'">
-  <title>画幅与表达自由组合 · 风景水墨样式预览</title>
-  <style>
-    *{box-sizing:border-box}
-    html,body{margin:0;min-height:100%;background:#f3f0e9;color:#34464a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
-    body{padding:26px 18px 30px}
-    main{max-width:1040px;margin:0 auto}
-    header{margin:0 0 24px}
-    .kicker{margin:0 0 9px;color:#697d80;font-size:11px;line-height:1.6;letter-spacing:.12em}
-    h1{margin:0;font-size:clamp(23px,4vw,32px);font-weight:500;line-height:1.4;letter-spacing:.05em}
-    .intro{margin:10px 0 0;color:#6d7979;font-size:13px;line-height:1.8;max-width:760px}
-    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:26px 22px;align-items:start}
-    figure{min-width:0;margin:0;background:#fcfaf4;border:1px solid #e3e5dc;border-radius:8px;overflow:hidden}
-    figure.wide{grid-column:1/-1;width:100%}
-    figure.portrait{width:100%;max-width:480px;justify-self:center}
-    figure.solo{grid-column:1/-1}
-    .image{padding:8px;background:#fcfaf4}
-    img{display:block;width:100%;height:auto}
-    figcaption{padding:13px 16px 17px;border-top:1px solid #e9e8e1}
-    .tags{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 9px}
-    .tags span{padding:3px 8px;border:1px solid #d8dfd8;border-radius:99px;color:#62766f;font-size:10px;line-height:1.4}
-    h2{font-size:16px;line-height:1.5;font-weight:500;margin:0 0 6px}
-    .note{margin:0;color:#75817b;font-size:12px;line-height:1.8}
-    footer{margin:24px 0 0;padding-top:16px;border-top:1px solid #dce1d9;color:#77817d;font-size:12px;line-height:1.9}
-    footer p{margin:0 0 4px}
-    @media(max-width:600px){body{padding:20px 10px 24px}.grid{grid-template-columns:minmax(0,1fr);gap:20px}figure.wide,figure.solo{grid-column:auto}.image{padding:5px}figcaption{padding:12px}.intro{font-size:12px}}
-  </style>
-</head>
-<body>
-  <main>
-    <header>
-      <p class="kicker">水墨明信片 · 三种组合</p>
-      <h1>画幅与表达自由组合</h1>
-      <p class="intro">同一处风景，可以成为横版或竖版明信片，也可以让摄影与水墨上下对照。</p>
-    </header>
-    <section class="grid" aria-label="可组合样式示例">
-      <figure class="wide">
-        <div class="image"><img src="{{asset_url:ink_postcard_landscape}}" alt="横版纯水墨明信片：完整湖湾绘画，下方有 A / 01 小编号、Blue Stillness 标题和英文短句" decoding="async"></div>
-        <figcaption>
-          <div class="tags"><span>明信片</span><span>纯画</span><span>淡彩水墨</span><span>横版 3:2</span></div>
-          <h2>舒展的湖湾</h2>
-          <p class="note">横向展开湖景，底部安排标题、短句和小编号，风景仍是画面主角。</p>
-        </figcaption>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline'"><title>给不同的风景，一张纪念卡</title><style>
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:#f3f0e9;color:#34464a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;line-height:1.7}
+main{max-width:1120px;margin:auto;padding:28px 22px 36px}h1,h2,h3,p,figure{margin:0}h1{font-size:clamp(25px,4vw,36px);font-weight:500;line-height:1.4;letter-spacing:.025em}h2{font-size:clamp(23px,3.5vw,31px);font-weight:500;line-height:1.5}h3{font-size:21px;font-weight:500;line-height:1.5}
+.eyebrow{color:#627775;font-size:11px;letter-spacing:.1em;margin-bottom:8px}.intro{color:#6d7979;font-size:14px;margin-top:12px;max-width:820px}.preset{display:block;background:#e8ede5;color:#506756;border:1px solid #dce3d8;border-radius:6px;padding:9px 13px;font-size:12px;margin-top:18px}.comparison{margin-top:30px;background:#fbfaf6;border:1px solid #dfe3da;border-radius:9px;overflow:hidden}.comparison-head{padding:20px 22px 16px;border-bottom:1px solid #e5e8df;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.tags{display:flex;gap:6px;flex-wrap:wrap}.tags span{padding:3px 8px;border:1px solid #d6ded5;border-radius:4px;font-size:10px;color:#65776b}.pair{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.35fr);gap:26px;padding:22px;align-items:start}.frame{padding:7px;background:#f0eee7;border:1px solid #e5e5dc}.result .frame{background:#fcfaf3}img{display:block;max-width:100%;width:100%;height:auto}.result.portrait img{max-width:440px;margin:auto}.image-label{display:flex;justify-content:space-between;gap:10px;font-size:11px;color:#698078;margin-bottom:9px}.image-label b{font-weight:500;letter-spacing:.05em}.image-label span{color:#829087}.image-note{font-size:12px;color:#718078;margin-top:10px}.insight{border-top:1px solid #e0e6dd;margin-top:20px;padding-top:16px;font-size:13px;color:#5b6f65}.insight strong{display:block;font-weight:500;font-size:11px;color:#829084;margin-bottom:4px}.insight p+p{margin-top:13px}.result figcaption{font-size:12px;color:#718078;margin-top:10px}footer{font-size:12px;color:#75827a;border-top:1px solid #dce1d7;margin-top:28px;padding-top:17px}footer p+p{margin-top:4px}.nav{display:flex;gap:8px;flex-wrap:wrap;margin-top:22px}.nav a{color:#506b5c;text-decoration:none;padding:7px 13px;border:1px solid #d5dfd2;background:#fbfaf4;border-radius:4px;font-size:13px}.nav a:hover,.nav a:focus-visible{background:#e4ebdf;outline:2px solid #a9baaa;outline-offset:2px}.case-section{margin-top:54px;scroll-margin-top:20px}.overview{padding-bottom:27px;border-bottom:1px solid #dce1d7}.count{color:#637b6c;font-size:12px;margin-top:10px}
+@media(max-width:650px){main{padding:21px 11px 28px}.pair{grid-template-columns:minmax(0,1fr);gap:22px;padding:13px}.comparison-head{padding:15px 13px;gap:10px}.comparison{margin-top:24px}.insight{margin-top:13px;padding-top:12px}.source .frame img{max-height:280px;object-fit:contain}.result.portrait img{max-width:440px}.case-section{margin-top:38px}h3{font-size:18px}.intro{font-size:13px}.tags span{font-size:10px}.preset{font-size:11px}.frame{padding:5px}}
+</style></head><body><main><header><p class="eyebrow">水墨明信片 · 三种原图对照</p><h1>给不同的风景，一张纪念卡</h1><p class="intro">高山湖泊、红霞海岸和云海日出，分别展示竖版、横版与上摄影下绘画的组合。</p><p class="preset">试用默认：竖版 2:3 · 水墨纯画 · 英文标题、短句与小编号</p></header>
+<article class="comparison">
+  <header class="comparison-head"><h3>高山湖泊 · 竖版纯画</h3><div class="tags"><span>明信片</span><span>纯画</span><span>竖版 2:3</span><span>案例预设</span></div></header>
+  <div class="pair">
+    <aside class="source">
+      <figure><div class="image-label"><b>01 · 原图</b><span>高山湖泊</span></div>
+        <div class="frame"><img src="{{asset_url:original_alpine}}" alt="原图：蓝天雪山、针叶林与湖中倒影" loading="lazy" decoding="async"></div>
+        <figcaption class="image-note">蓝天雪山、针叶林与湖中倒影。</figcaption>
       </figure>
-      <figure class="portrait">
-        <div class="image"><img src="{{asset_url:ink_postcard}}" alt="竖版纯水墨湖湾明信片：水墨画、Blue Stillness 标题、英文短句和小编号" loading="lazy" decoding="async"></div>
-        <figcaption>
-          <div class="tags"><span>明信片</span><span>纯画</span><span>淡彩水墨</span><span>竖版 2:3</span></div>
-          <h2>纵向的旅行记忆</h2>
-          <p class="note">整幅风景为水墨重绘，以纵向留白承接标题、短句与小编号。</p>
-        </figcaption>
+      <div class="insight"><p><strong>保留的景物</strong>保留中央雪峰、湖岸树群与倒影的对应。</p><p><strong>这次的表达</strong>整幅转绘为淡彩水墨，底部以标题、短句和 A / 01 编号组织文字层级。</p></div>
+    </aside>
+    <figure class="result portrait">
+      <div class="image-label"><b>02 · 生成结果</b><span>竖版 2:3</span></div>
+      <div class="frame"><img src="{{asset_url:ink_postcard}}" alt="生成结果：高山湖泊 · 竖版纯画，明信片、纯画、竖版 2:3" loading="lazy" decoding="async"></div>
+      <figcaption>整幅转绘为淡彩水墨，底部以标题、短句和 A / 01 编号组织文字层级。</figcaption>
+    </figure>
+  </div>
+</article><article class="comparison">
+  <header class="comparison-head"><h3>红霞海岸 · 横版纯画</h3><div class="tags"><span>明信片</span><span>纯画</span><span>横版 3:2</span><span>可选组合</span></div></header>
+  <div class="pair">
+    <aside class="source">
+      <figure><div class="image-label"><b>01 · 原图</b><span>红霞海岸</span></div>
+        <div class="frame"><img src="{{asset_url:original_coast}}" alt="原图：红霞、山脊、农田半岛与青绿海湾" loading="lazy" decoding="async"></div>
+        <figcaption class="image-note">红霞、山脊、农田半岛与青绿海湾。</figcaption>
       </figure>
-      <figure class="portrait">
-        <div class="image"><img src="{{asset_url:photo_ink_postcard}}" alt="竖版原图加画明信片：上方湖湾实景照片，下方同景淡彩水墨和 Blue Stillness 英文文案" loading="lazy" decoding="async"></div>
-        <figcaption>
-          <div class="tags"><span>明信片</span><span>上原图下画</span><span>摄影＋水墨</span><span>竖版 2:3</span></div>
-          <h2>实景与画意</h2>
-          <p class="note">上方为同景摄影，下方为水墨重构与英文文案；这是原图加画的组合。</p>
-        </figcaption>
+      <div class="insight"><p><strong>保留的景物</strong>保留横向山脊、田块、海湾与红霞的色彩关系。</p><p><strong>这次的表达</strong>在舒展的横幅绘画下方留出文字区，以 Evening Coast 标题和小编号完成纪念卡。</p></div>
+    </aside>
+    <figure class="result">
+      <div class="image-label"><b>02 · 生成结果</b><span>横版 3:2</span></div>
+      <div class="frame"><img src="{{asset_url:ink_postcard_landscape}}" alt="生成结果：红霞海岸 · 横版纯画，明信片、纯画、横版 3:2" loading="lazy" decoding="async"></div>
+      <figcaption>在舒展的横幅绘画下方留出文字区，以 Evening Coast 标题和小编号完成纪念卡。</figcaption>
+    </figure>
+  </div>
+</article><article class="comparison">
+  <header class="comparison-head"><h3>云海日出 · 上摄影下水墨</h3><div class="tags"><span>明信片</span><span>原图＋画</span><span>竖版 2:3</span><span>可选组合</span></div></header>
+  <div class="pair">
+    <aside class="source">
+      <figure><div class="image-label"><b>01 · 原图</b><span>云海日出</span></div>
+        <div class="frame"><img src="{{asset_url:original_cloud}}" alt="原图：金橙晨光、紫灰云海与前景雪峰" loading="lazy" decoding="async"></div>
+        <figcaption class="image-note">金橙晨光、紫灰云海与前景雪峰。</figcaption>
       </figure>
-    </section>
-    <footer>
-      <p>点击“试一试”后只需上传一张风景照片，直接沿用案例预设，每次默认创作一张。</p>
-      <p>本案例试用预设：竖版 2:3、水墨纯画配英文标题、短句和小编号。其他样张展示可自由组合的变化；你主动提出新的风格、形式或比例时再调整，无需额外填写。</p>
-    </footer>
-  </main>
-</body>
-</html>
+      <div class="insight"><p><strong>保留的景物</strong>同一场景的日光、云海和雪峰在两种表达中对应。</p><p><strong>这次的表达</strong>上方摄影区、下方同景水墨区与一组底部文案，共同构成画册式明信片。</p></div>
+    </aside>
+    <figure class="result portrait">
+      <div class="image-label"><b>02 · 生成结果</b><span>竖版 2:3</span></div>
+      <div class="frame"><img src="{{asset_url:photo_ink_postcard}}" alt="生成结果：云海日出 · 上摄影下水墨，明信片、原图＋画、竖版 2:3" loading="lazy" decoding="async"></div>
+      <figcaption>上方摄影区、下方同景水墨区与一组底部文案，共同构成画册式明信片。</figcaption>
+    </figure>
+  </div>
+</article>
+<footer><p>以上为所示原图的风格转换示例；试用时使用你上传的照片，每次默认生成一张。</p><p>选定案例后只需上传照片。想换风格、构图、画幅或文案时，直接说明即可。</p></footer></main></body></html>

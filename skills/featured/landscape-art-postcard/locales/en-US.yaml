@@ -9,7 +9,7 @@ presentation:
     output_type: images
     output_label: Ink art and postcards
     cover_asset: cover
-    result_summary: Four combinations with full paintings, photo-and-art layouts, torn edges, and landscape or portrait formats
+    result_summary: Four source photos and eight results across painting, photo-and-art, torn edges, and two orientations
   detail:
     title: Landscape ink art and postcards
     description: Turn a complete landscape into ink art or a postcard. Choose the style, composition, and aspect ratio.
@@ -38,9 +38,9 @@ tasks:
           description: Deliver one image by default; custom ratios take priority over 3:2 or 2:3 defaults
     result:
       template: html_preview_v1
-      eyebrow: Text-free ink art · Two formats
-      title: A quiet bay and a mountain valley
-      summary: Landscape and portrait paintings illustrate adjustable combinations for your own photo.
+      eyebrow: Text-free ink art · Before and after
+      title: Dawn clouds and autumn mountains
+      summary: Compare two source photos with landscape and portrait text-free ink paintings.
       html_asset: ink_artwork_preview
   - id: ink-postcard
     selector:
@@ -67,9 +67,9 @@ tasks:
           description: Recompose text and negative space for the chosen ratio; deliver one image by default
     result:
       template: html_preview_v1
-      eyebrow: Ink postcards · Three combinations
-      title: Mix formats and expression
-      summary: Three samples show landscape artwork, portrait artwork, and a photograph above an ink painting.
+      eyebrow: Ink postcards · Three source scenes
+      title: Three scenes, three postcard compositions
+      summary: Source photos become a portrait ink postcard, a landscape postcard, and a photo-above-art design.
       html_asset: ink_postcard_preview
   - id: torn-postcard
     selector:
@@ -96,9 +96,9 @@ tasks:
           description: Arrange text and a small marker for the requested format; deliver one image by default
     result:
       template: html_preview_v1
-      eyebrow: Torn-edge postcard · Landscape example
-      title: A landscape crossing the page
-      summary: A meadow and lake combine same-scene photography, ink washes, and an irregular tear.
+      eyebrow: Torn-edge postcard · Before and after
+      title: A coastline crossing from photo into ink
+      summary: Compare the coastal source photo with a torn-edge postcard joining same-scene photography and ink.
       html_asset: torn_postcard_preview
   - id: surreal-ink-artwork
     selector:
@@ -125,7 +125,7 @@ tasks:
           description: Arrange negative space for the orientation; honor custom ratios and deliver one image by default
     result:
       template: html_preview_v1
-      eyebrow: Surreal ink art · Two formats
-      title: The same scene, another space
-      summary: Landscape lake and portrait valley examples combine an ink medium with surreal spatial expression.
+      eyebrow: Surreal ink art · Two source scenes
+      title: Familiar landscapes, impossible trees
+      summary: Compare two source scenes with a single scene-derived giant tree in landscape and portrait ink paintings.
       html_asset: surreal_ink_artwork_preview
