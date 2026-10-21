@@ -5,9 +5,9 @@
   "packageManager": "pnpm@10.0.0",
   "type": "module",
   "scripts": {
-    "predev": "bash scripts/openapi/generate-auth.sh",
+    "predev": "bash scripts/openapi/generate-auth.sh && python3 scripts/generate_upstream_model_catalog.py --frontend-out src/modules/modelProvider/upstreamModelCatalog.json",
     "dev": "vite --clearScreen false",
-    "prebuild": "node scripts/openapi/check-stale.mjs",
+    "prebuild": "node scripts/openapi/check-stale.mjs && python3 scripts/generate_upstream_model_catalog.py --frontend-out src/modules/modelProvider/upstreamModelCatalog.json",
     "build": "vite build",
     "preview": "vite preview",
     "gen:openapi": "node scripts/openapi/generate-api.mjs",

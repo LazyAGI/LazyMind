@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
-"""Build the bundled model catalog from models.dev and OpenRouter.
+"""Fetch the model catalog from models.dev and OpenRouter at build time.
 
-Cherry Studio generates provider metadata the same way: fetch both public
-catalogs, union modalities, and keep the larger context window. This script
-writes the compact JSON the backend seeds and the frontend renders.
+The JSON is not checked in. Core's image build and the frontend build each
+run this script and write the file they compile against.
 """
 
+import argparse
 import json
 import os
 import sys
 import urllib.request
 from datetime import datetime, timezone
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-OUTPUTS = [
-    os.path.join(ROOT, 'backend', 'core', 'config', 'upstream_model_catalog.json'),
-    os.path.join(ROOT, 'frontend', 'src', 'modules', 'modelProvider', 'upstreamModelCatalog.json'),
-]
+def find_root():
+    current = os.path.abspath(os.path.dirname(__file__))
+    while current != os.path.dirname(current):
+        if os.path.isfile(os.path.join(current, 'Makefile')) and os.path.isdir(os.path.join(current, 'backend')):
+            return current
+        current = os.path.dirname(current)
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+
+
+ROOT = find_root()
 
 PROVIDER_SOURCES = {
     'Claude': ['anthropic'],
@@ -127,7 +132,25 @@ def keep_sensenova(name):
     return lowered.startswith('sensenova') or lowered.startswith('sensechat') or lowered.startswith('sense-')
 
 
+def output_paths(args):
+    if args.backend_out or args.frontend_out:
+        paths = []
+        if args.backend_out:
+            paths.append(args.backend_out)
+        if args.frontend_out:
+            paths.append(args.frontend_out)
+        return paths
+    return [
+        os.path.join(ROOT, 'backend', 'core', 'config', 'upstream_model_catalog.json'),
+        os.path.join(ROOT, 'frontend', 'src', 'modules', 'modelProvider', 'upstreamModelCatalog.json'),
+    ]
+
+
 def main():
+    parser = argparse.ArgumentParser(description='Fetch the models.dev and OpenRouter catalog.')
+    parser.add_argument('--backend-out')
+    parser.add_argument('--frontend-out')
+    args = parser.parse_args()
     models_dev = fetch_json('https://models.dev/api.json')
     openrouter = fetch_json('https://openrouter.ai/api/v1/models')
     providers = {}
@@ -156,7 +179,7 @@ def main():
         'providers': providers,
     }
     encoded = json.dumps(payload, ensure_ascii=False, indent=2) + '\n'
-    for path in OUTPUTS:
+    for path in output_paths(args):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'w', encoding='utf-8') as handle:
             handle.write(encoded)

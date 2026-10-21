@@ -55,6 +55,10 @@ func TestInferUpstreamCatalogModel(t *testing.T) {
 }
 
 func TestBundledUpstreamCatalogHasModalities(t *testing.T) {
+	path := "../config/upstream_model_catalog.json"
+	if _, err := os.Stat(path); err != nil {
+		t.Skip("upstream catalog is fetched at image build time and is not checked in")
+	}
 	catalog, err := loadUpstreamCatalog("../config/upstream_model_catalog.json")
 	if err != nil {
 		t.Fatalf("load upstream catalog: %v", err)
