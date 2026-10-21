@@ -65,8 +65,9 @@ import {
   effectiveProcessingLevel,
   type ProcessingLevel,
 } from "@/modules/knowledge/utils/processingLevel";
-import { isPaperLibrary, loadPaperLibrary } from "@/modules/knowledge/paper/store";
-import { downloadPaperCitations } from "@/modules/knowledge/paper/exportLibrary";
+import { isPaperLibrary } from "@/modules/knowledge/paper/store";
+import { downloadPaperCitations, loadPaperLibraryForExport } from "@/modules/knowledge/paper/exportLibrary";
+import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 import KnowledgeLibraryActions from "./KnowledgeLibraryActions";
 
 import { ListPageTable } from "@/components/ui";
@@ -1310,10 +1311,14 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           dataset={data}
           onEdit={() => createUpdateRef.current?.onOpen(data)}
           onAuthorize={runtimeFeatures.hideUserGroupSurfaces ? undefined : () => navigate(`/lib/knowledge/auth/${data.dataset_id}`)}
-          onExport={isPaperLibrary(data.dataset_id, data.library_kind) ? (format) => {
-            const library = loadPaperLibrary(data.dataset_id || "");
-            if (!library.papers.length) { message.info("这个论文库还没有可导出的文献"); return; }
-            downloadPaperCitations(library, format, data.display_name || "papers");
+          onExport={isPaperLibrary(data.dataset_id, data.library_kind) ? async (format) => {
+            try {
+              const library = await loadPaperLibraryForExport(data.dataset_id || "");
+              if (!library.papers.length) { message.info("这个论文库还没有可导出的文献"); return; }
+              downloadPaperCitations(library, format, data.display_name || "papers");
+            } catch (error) {
+              message.error(getImportErrorMessage(error, "导出失败，请重试"));
+            }
           } : undefined}
           onDelete={() => {
             const knowledgeName = data.display_name || data.dataset_id || "";

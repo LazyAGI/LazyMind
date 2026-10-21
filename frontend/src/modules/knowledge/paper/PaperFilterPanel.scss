@@ -1,6 +1,10 @@
 .paper-filter-panel {
   width: 302px;
   max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 100px);
+  max-height: calc(100dvh - 100px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   color: #344054;
   font-size: 13px;
 }

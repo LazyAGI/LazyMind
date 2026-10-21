@@ -1,7 +1,15 @@
-import type { PaperLibraryDataV3 } from './libraryModel';
+import { asLegacyLibrary, type PaperLibraryDataV3 } from './libraryModel';
 import { toBibTeX, toCSV, toRIS, type PaperItem, type PaperLibraryData } from './model';
+import { loadPaperLibraryV3 } from './store';
+import { listImportedArxivPapers } from './arxivImport';
+import { mergeArxivImports } from './arxivLibrary';
 
 export type PaperCitationFormat = 'bib' | 'ris' | 'csv';
+
+export async function loadPaperLibraryForExport(datasetId: string): Promise<PaperLibraryData> {
+  const imported = await listImportedArxivPapers(datasetId);
+  return asLegacyLibrary(mergeArxivImports(loadPaperLibraryV3(datasetId), imported));
+}
 
 export function downloadPaperCitations(library: PaperLibraryData, format: PaperCitationFormat, name = 'papers') {
   const content = format === 'bib' ? toBibTeX(library.papers) : format === 'ris' ? toRIS(library.papers) : toCSV(library.papers, library.folders);

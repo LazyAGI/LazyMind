@@ -284,7 +284,7 @@ func RetryImport(w http.ResponseWriter, r *http.Request) {
 	common.ReplyJSON(w, map[string]any{"batch_id": batch.ID, "job_id": queued.ID, "status": "pending", "retry_items": failed})
 }
 
-func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (asyncjob.Result, error) {
+func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (result asyncjob.Result, jobErr error) {
 	var payload paperImportPayload
 	if json.Unmarshal(job.PayloadJSON, &payload) != nil || payload.BatchID == "" {
 		return asyncjob.Result{Permanent: true, ErrorCode: "invalid_payload"}, errors.New("invalid paper import payload")
@@ -293,6 +293,19 @@ func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 	if err := store.DB().WithContext(ctx).Where("id = ?", payload.BatchID).Take(&batch).Error; err != nil {
 		return asyncjob.Result{Permanent: true, ErrorCode: "batch_not_found"}, err
 	}
+	finished := false
+	defer func() {
+		if jobErr == nil || finished {
+			return
+		}
+		// Interrupted jobs must leave visible, retryable items even when their
+		// request context has expired. Keep this final persistence attempt bounded.
+		finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := failInterruptedPaperImport(finalCtx, batch.ID, result.ErrorCode, jobErr); err != nil {
+			jobErr = errors.Join(jobErr, fmt.Errorf("save interrupted import failure: %w", err))
+		}
+	}()
 	var items []orm.PaperImportItem
 	if err := store.DB().WithContext(ctx).Where("batch_id = ? AND status IN ?", batch.ID, []string{"pending", "failed"}).Order("created_at ASC").Find(&items).Error; err != nil {
 		return asyncjob.Result{}, err
@@ -516,11 +529,43 @@ func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 	if err := store.DB().WithContext(ctx).Model(&batch).Updates(map[string]any{"status": status, "completed_items": totalCompleted, "failed_items": totalFailed, "skipped_items": totalSkipped, "updated_at": time.Now().UTC()}).Error; err != nil {
 		return asyncjob.Result{ErrorCode: "import_status_failed"}, err
 	}
-	result, _ := json.Marshal(map[string]any{"batch_id": batch.ID, "status": status, "completed": totalCompleted, "failed": totalFailed, "skipped": totalSkipped})
+	finished = true
+	encodedResult, _ := json.Marshal(map[string]any{"batch_id": batch.ID, "status": status, "completed": totalCompleted, "failed": totalFailed, "skipped": totalSkipped})
 	if totalFailed > 0 {
-		return asyncjob.Result{ResultJSON: result, Permanent: true, ErrorCode: "import_failed"}, fmt.Errorf("%d paper import items failed; inspect item errors before retrying", totalFailed)
+		return asyncjob.Result{ResultJSON: encodedResult, Permanent: true, ErrorCode: "import_failed"}, fmt.Errorf("%d paper import items failed; inspect item errors before retrying", totalFailed)
 	}
-	return asyncjob.Result{ResultJSON: result}, nil
+	return asyncjob.Result{ResultJSON: encodedResult}, nil
+}
+
+func failInterruptedPaperImport(ctx context.Context, batchID, code string, cause error) error {
+	details, _ := json.Marshal(map[string]string{"message": cause.Error()})
+	return store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now().UTC()
+		if err := tx.Model(&orm.PaperImportItem{}).Where("batch_id = ? AND status IN ?", batchID, []string{"pending", "running"}).Updates(map[string]any{
+			"status": "failed", "error_code": firstNonEmpty(code, "import_interrupted"), "error_details_json": details, "updated_at": now,
+		}).Error; err != nil {
+			return err
+		}
+		var counts []struct {
+			Status string
+			Total  int64
+		}
+		if err := tx.Model(&orm.PaperImportItem{}).Select("status, COUNT(*) AS total").Where("batch_id = ?", batchID).Group("status").Scan(&counts).Error; err != nil {
+			return err
+		}
+		totals := map[string]int64{}
+		for _, count := range counts {
+			totals[count.Status] = count.Total
+		}
+		status := "failed"
+		if totals["succeeded"] > 0 {
+			status = "completed_with_errors"
+		}
+		return tx.Model(&orm.PaperImportBatch{}).Where("id = ?", batchID).Updates(map[string]any{
+			"status":          gorm.Expr("CASE WHEN status = 'canceled' THEN status ELSE ? END", status),
+			"completed_items": totals["succeeded"], "failed_items": totals["failed"], "skipped_items": totals["skipped"], "updated_at": now,
+		}).Error
+	})
 }
 func validatePaperImportResult(imported doc.LocalFileImportResult, importErr error) error {
 	if importErr != nil {

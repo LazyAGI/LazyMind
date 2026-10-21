@@ -47,7 +47,7 @@ import ImportTaskManage, {
 import TreeUtils from "@/modules/knowledge/utils/tree";
 import { IMPORT_TASK_POLL_INTERVAL } from "@/modules/knowledge/constants/common";
 import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
-import { inspectFinishedImportTasks, mergeTrackedImportTasks, type ImportTaskFailure, type ImportTaskState } from "./importTaskFailures";
+import { inspectFinishedImportTasks, mergeTrackedImportTasks, reconcileImportTaskFailures, type ImportTaskFailure, type ImportTaskState } from "./importTaskFailures";
 import { TaskTab } from "./components/ImportTaskList";
 import { KnowledgeBaseServiceApi } from "@/modules/knowledge/utils/request";
 import { buildUploadTaskItems } from "@/modules/knowledge/utils/uploadByHash";
@@ -128,7 +128,7 @@ const Detail = () => {
   const importTaskRef = useRef<IImportTaskManageRef>();
   const pollingRef = useRef(new Polling());
   const importingTaskListRef = useRef<ImportTaskState[]>([]);
-  const inspectedTaskIdsRef = useRef(new Set<string>());
+  const taskInspectionTokensRef = useRef(new Map<string, symbol>());
 
   const [detail, setDetail] = useState<DatasetWithProcessingLevel>();
   const [runningTotal, setRunningTotal] = useState(0);
@@ -166,7 +166,7 @@ const Detail = () => {
 
   useEffect(() => {
     importingTaskListRef.current = [];
-    inspectedTaskIdsRef.current.clear();
+    taskInspectionTokensRef.current.clear();
     setTaskPollingError("");
     setImportTaskFailures([]);
     getDetail();
@@ -292,6 +292,9 @@ const Detail = () => {
       onSuccess: ({ data = {} }) => {
         setTaskPollingError("");
         const newTaskList = data.tasks || [];
+        newTaskList.forEach((task: ImportTaskState) => {
+          if (task.task_id) taskInspectionTokensRef.current.delete(task.task_id);
+        });
         // Tasks in WORKING state are actively being parsed by the algorithm service.
         // Tasks in WAITING state are still uploading / queued before parsing starts.
         const uploadingTasks = newTaskList.filter(
@@ -363,16 +366,22 @@ const Detail = () => {
   }
 
   async function notifyImportTaskFailures(tasks: any[]) {
-    const pending = tasks.filter((task) => task?.task_id && !inspectedTaskIdsRef.current.has(String(task.task_id)));
-    pending.forEach((task) => inspectedTaskIdsRef.current.add(String(task.task_id)));
+    const pending = mergeTrackedImportTasks([], tasks);
+    const inspection = Symbol();
+    pending.forEach((task) => taskInspectionTokensRef.current.set(String(task.task_id), inspection));
     const requestedDatasetId = id;
     const failures = await inspectFinishedImportTasks(pending, async (taskId) => {
       const response = await TaskServiceApi().getTask(id, taskId, { silentError: true } as never);
       return response.data;
     });
-    if (activeDatasetIdRef.current !== requestedDatasetId || !failures.length) return;
-    setImportTaskFailures((previous) => [...previous.filter((failure) => !failures.some((next) => next.taskId === failure.taskId)), ...failures]);
-    if (failures.some((failure) => failure.needsFFmpeg)) {
+    if (activeDatasetIdRef.current !== requestedDatasetId) return;
+    // A retry can reuse the task ID while an earlier inspection is in flight.
+    const currentTasks = pending.filter((task) => taskInspectionTokensRef.current.get(String(task.task_id)) === inspection);
+    const currentIds = new Set(currentTasks.map((task) => String(task.task_id)));
+    currentIds.forEach((taskId) => taskInspectionTokensRef.current.delete(taskId));
+    const currentFailures = failures.filter((failure) => currentIds.has(failure.taskId));
+    setImportTaskFailures((previous) => reconcileImportTaskFailures(previous, currentTasks, currentFailures));
+    if (currentFailures.some((failure) => failure.needsFFmpeg)) {
       Modal.confirm({
         title: t("knowledge.ffmpegRequiredTitle"),
         content: t("knowledge.ffmpegRequiredDesc"),
@@ -857,6 +866,11 @@ const Detail = () => {
 
       <ImportTaskManage
         ref={importTaskRef}
+        onRetrySuccess={(task) => {
+          if (task.task_id) taskInspectionTokensRef.current.delete(task.task_id);
+          importingTaskListRef.current = mergeTrackedImportTasks(importingTaskListRef.current, [task]);
+          getImportingTotal();
+        }}
         onClose={(hasSuspended) => {
           if (hasSuspended) {
             getImportingTotal();

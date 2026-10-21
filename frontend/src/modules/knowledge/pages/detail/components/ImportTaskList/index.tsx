@@ -15,12 +15,14 @@ import { localizeErrorCode } from "@/components/request";
 import { IMPORT_TASK_POLL_INTERVAL } from "@/modules/knowledge/constants/common";
 import { isFFmpegDependencyError } from "@/modules/knowledge/utils/taskError";
 import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
+import type { ImportTaskState } from "../../importTaskFailures";
 
 interface IProps {
   datasetId: string;
   initialTab?: TaskTab;
   onClose: () => void;
   onSuspendSuccess?: () => void;
+  onRetrySuccess?: (task: ImportTaskState) => void;
 }
 
 export enum TaskTab {
@@ -186,6 +188,7 @@ const ImportTaskList = (props: IProps) => {
       .resumeTask(datasetId, cvm?.task_id)
       .then(() => {
         message.success(t("knowledge.taskRetrySuccess"));
+        props.onRetrySuccess?.(cvm);
         getTableData({ currentTab: tab });
       })
       .catch((err) => {

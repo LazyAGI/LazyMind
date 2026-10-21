@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { inspectFinishedImportTasks, mergeTrackedImportTasks } from "./importTaskFailures";
+import { inspectFinishedImportTasks, mergeTrackedImportTasks, reconcileImportTaskFailures } from "./importTaskFailures";
 
 vi.mock("@/components/request", () => ({ localizeErrorCode: (_code: string, fallback: string) => fallback }));
 
@@ -25,6 +25,17 @@ describe("finished import task failure inspection", () => {
     expect(failures[0]?.message).toContain("部分页面处理失败");
   });
 
+  it.each(["SUCCESS", "SUCCEEDED"])("does not report the parser success acknowledgement for a %s task", async (task_state) => {
+    const failures = await inspectFinishedImportTasks([{ task_id: "ok", display_name: "paper.pdf" }], async () => ({ task_state, err_msg: "  Success  " }));
+    expect(failures).toEqual([]);
+  });
+
+  it("does not let a success acknowledgement hide a failed state", async () => {
+    const failures = await inspectFinishedImportTasks([{ task_id: "failed" }], async () => ({ task_state: "FAILED", err_msg: "success" }));
+    expect(failures).toHaveLength(1);
+    expect(failures[0].taskId).toBe("failed");
+  });
+
   it("keeps FFmpeg guidance and gives failed tasks without an error a useful fallback", async () => {
     const failures = await inspectFinishedImportTasks([{ task_id: "video" }, { task_id: "blank" }], async (id) => id === "video" ? { task_state: "FAILED", err_msg: "ffmpeg not found" } : { task_state: "FAILED" });
     expect(failures[0]).toMatchObject({ taskId: "video", needsFFmpeg: true });
@@ -41,5 +52,32 @@ describe("finished import task failure inspection", () => {
     expect(await inspectFinishedImportTasks([{ task_id: "ok" }, {}], load)).toEqual([]);
     expect(load).toHaveBeenCalledTimes(1);
     expect(load).toHaveBeenCalledWith("ok");
+  });
+
+  it("clears an earlier failure after the same task succeeds on retry", async () => {
+    const tasks = [{ task_id: "retry", display_name: "paper.pdf" }];
+    const previous = await inspectFinishedImportTasks(tasks, async () => ({ task_state: "FAILED", err_msg: "parser unavailable" }));
+    const unrelated = { taskId: "other", message: "other file failed", needsFFmpeg: false };
+    const finished = await inspectFinishedImportTasks(tasks, async () => ({ task_state: "SUCCESS", err_msg: "success" }));
+
+    expect(reconcileImportTaskFailures([...previous, unrelated], tasks, finished)).toEqual([unrelated]);
+  });
+
+  it("replaces an earlier failure with the retry's latest failure", async () => {
+    const tasks = [{ task_id: "retry", display_name: "paper.pdf" }];
+    const previous = [{ taskId: "retry", message: "previous failure", needsFFmpeg: false }];
+    const finished = await inspectFinishedImportTasks(tasks, async () => ({ task_state: "FAILED", err_msg: "file corrupted" }));
+
+    expect(reconcileImportTaskFailures(previous, tasks, finished)).toEqual([{ taskId: "retry", message: "paper.pdf：file corrupted", needsFFmpeg: false }]);
+  });
+
+  it("keeps a visible uncertainty error when the retry result cannot be queried", async () => {
+    const tasks = [{ task_id: "retry", display_name: "paper.pdf" }];
+    const previous = [{ taskId: "retry", message: "previous failure", needsFFmpeg: false }];
+    const finished = await inspectFinishedImportTasks(tasks, async () => { throw new Error("task service unavailable"); });
+
+    const failures = reconcileImportTaskFailures(previous, tasks, finished);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].message).toContain("无法确认导入结果：task service unavailable");
   });
 });

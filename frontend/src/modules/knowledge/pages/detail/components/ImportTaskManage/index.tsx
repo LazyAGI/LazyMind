@@ -2,6 +2,7 @@ import { Drawer } from "antd";
 import { forwardRef, Ref, useImperativeHandle, useRef, useState } from "react";
 
 import ImportTaskList, { TaskTab } from "../ImportTaskList";
+import type { ImportTaskState } from "../../importTaskFailures";
 
 interface OpenData { dataset_id?: string; initialTab?: TaskTab }
 
@@ -11,6 +12,7 @@ export interface IImportTaskManageRef {
 
 interface IProps {
   onClose: (hasSuspended?: boolean) => void;
+  onRetrySuccess?: (task: ImportTaskState) => void;
 }
 
 const ImportTaskManage = (props: IProps, ref: Ref<unknown> | undefined) => {
@@ -50,6 +52,7 @@ const ImportTaskManage = (props: IProps, ref: Ref<unknown> | undefined) => {
         datasetId={data.dataset_id ?? ""}
         initialTab={data.initialTab}
         onClose={handleClose}
+        onRetrySuccess={props.onRetrySuccess}
         onSuspendSuccess={() => {
           hasSuspendedRef.current = true;
         }}

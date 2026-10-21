@@ -603,13 +603,17 @@ func resolveReferenceWithExternal(ctx context.Context, tx *gorm.DB, ref *orm.Aca
 		if pdfURL, _ := openAlex.Provenance["pdf_url"].(string); strings.TrimSpace(pdfURL) != "" {
 			openAlexHasFulltext = true
 		}
-		// Prefer an arXiv copy over publisher-hosted PDFs. Publisher URLs
-		// frequently return 403 to server-side clients despite being marked OA.
-		candidate, arxivOK, err := resolveWithArxiv(ctx, ref.RawText)
-		if err != nil {
-			return orm.AcademicWork{}, "", "", err
+		// A usable fulltext result completes resolution. Only query the next
+		// provider when needed; failures from any attempted lookup still surface.
+		var candidate WorkInput
+		var arxivOK bool
+		if !openAlexOK || !openAlexHasFulltext {
+			candidate, arxivOK, err = resolveWithArxiv(ctx, ref.RawText)
+			if err != nil {
+				return orm.AcademicWork{}, "", "", err
+			}
 		}
-		if openAlexOK && openAlex.ArxivID != "" {
+		if openAlexOK && openAlexHasFulltext {
 			if input.DOI != "" {
 				openAlex.DOI = input.DOI
 			}
@@ -617,11 +621,6 @@ func resolveReferenceWithExternal(ctx context.Context, tx *gorm.DB, ref *orm.Aca
 		} else if arxivOK {
 			candidate.DOI = input.DOI
 			input = candidate
-		} else if openAlexOK && openAlexHasFulltext {
-			if input.DOI != "" {
-				openAlex.DOI = input.DOI
-			}
-			input = openAlex
 		} else if openAlexOK {
 			if input.DOI != "" {
 				openAlex.DOI = input.DOI

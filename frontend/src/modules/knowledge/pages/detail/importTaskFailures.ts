@@ -21,6 +21,11 @@ export function mergeTrackedImportTasks(previous: ImportTaskState[], created: Im
   return [...tracked.values()];
 }
 
+export function reconcileImportTaskFailures(previous: ImportTaskFailure[], tasks: ImportTaskState[], failures: ImportTaskFailure[]): ImportTaskFailure[] {
+  const inspectedIds = new Set(tasks.map((task) => task.task_id).filter(Boolean));
+  return [...previous.filter((failure) => !inspectedIds.has(failure.taskId)), ...failures];
+}
+
 export async function inspectFinishedImportTasks(
   tasks: ImportTaskState[],
   loadTask: (id: string) => Promise<ImportTaskState>,
@@ -33,7 +38,12 @@ export async function inspectFinishedImportTasks(
     try {
       const finished = await loadTask(taskId);
       const error = String(finished.err_msg || "").trim();
-      if (finished.task_state?.toUpperCase() !== "FAILED" && finished.status?.toUpperCase() !== "FAILED" && !error) continue;
+      const states = [finished.task_state, finished.status].map((state) => state?.trim().toUpperCase());
+      const failed = states.includes("FAILED");
+      const succeeded = states.some((state) => state === "SUCCESS" || state === "SUCCEEDED");
+      // Parser tasks retain error_msg="success" on successful completion.
+      const successAcknowledgement = succeeded && error.toLowerCase() === "success";
+      if (!failed && (!error || successAcknowledgement)) continue;
       failures.push({
         taskId,
         message: `${finished.display_name || name}：${getImportErrorMessage(error, "任务处理失败，服务未返回具体原因")}`,

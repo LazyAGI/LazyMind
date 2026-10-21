@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ChangeEvent, type DragEvent, type DragEventHandler } from "react";
-import { Alert, Button, Dropdown, Input, Modal, Popover, Radio, Select, Tooltip, Upload, message } from "antd";
+import { Alert, Button, Dropdown, Input, Modal, Popover, Radio, Select, Tooltip, Upload, message, type RadioChangeEvent } from "antd";
 import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent, type DragOverEvent } from "@dnd-kit/core";
 import { ArrowLeftOutlined, DownOutlined, FileTextOutlined, FolderOutlined, InfoCircleOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, StarOutlined, StarFilled, CloseOutlined, UploadOutlined, FilterOutlined, ExportOutlined, HolderOutlined, EllipsisOutlined } from "@ant-design/icons";
 import {
@@ -717,7 +717,10 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
           {importMethod === "bibliography" && <>
             <p>上传 BibTeX、RIS 或 CSV 文件，也可以直接粘贴题录内容。</p>
             <div className="paper-library-bibliography-toolbar">
-              <Radio.Group value={format} disabled={searching} onChange={(event: { target: { value: "bib" | "ris" | "csv" } }) => { setFormat(event.target.value); clearImportResult(); }} optionType="button" buttonStyle="solid" options={[{ label: "BibTeX", value: "bib" }, { label: "RIS", value: "ris" }, { label: "CSV", value: "csv" }]} />
+              <Radio.Group value={format} disabled={searching} onChange={(event: RadioChangeEvent) => {
+                const nextFormat = event.target.value;
+                if (nextFormat === "bib" || nextFormat === "ris" || nextFormat === "csv") { setFormat(nextFormat); clearImportResult(); }
+              }} optionType="button" buttonStyle="solid" options={[{ label: "BibTeX", value: "bib" }, { label: "RIS", value: "ris" }, { label: "CSV", value: "csv" }]} />
               <Button icon={<UploadOutlined />} disabled={searching} onClick={() => fileRef.current?.click()}>选择文件</Button>
               <input ref={fileRef} hidden type="file" accept=".bib,.ris,.csv" onChange={(event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importFile(file); }} />
             </div>
