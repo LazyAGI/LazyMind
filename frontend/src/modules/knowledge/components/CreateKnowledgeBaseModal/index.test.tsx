@@ -34,6 +34,7 @@ const catalog: LearningCatalog = {
   profiles: [
     { key: "general", name_i18n_key: "General reading", description_i18n_key: "", capabilities: generalKeys },
     { key: "english_learning", name_i18n_key: "English learning", description_i18n_key: "", capabilities: englishKeys },
+    { key: "academic_papers", name_i18n_key: "Academic papers", description_i18n_key: "", capabilities: generalKeys },
   ],
   capabilities: generalKeys.map((key) => ({
     key, version: 1, name_i18n_key: key, description_i18n_key: "", local_only: true,
@@ -45,6 +46,7 @@ const catalog: LearningCatalog = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
   vi.mocked(isDeveloperModeActive).mockReturnValue(false);
   vi.mocked(getLearningCatalog).mockResolvedValue(catalog);
   vi.mocked(saveKnowledgeBaseCapabilities).mockResolvedValue({});
@@ -92,7 +94,16 @@ describe("knowledge creation capability submission", () => {
     await waitFor(() => expect(saveKnowledgeBaseCapabilities).toHaveBeenCalledWith("test-dataset",
       generalKeys.map((key, index) => ({ key, version: 1, enabled: true, display_order: index + 1, settings: {} })),
     ));
-    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ processing_level: "stored" }));
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ processing_level: "stored", library_kind: "document" }));
+  });
+
+  it("persists the explicit paper kind independently of the capability preset", async () => {
+    const { onCreate } = await mountModal();
+    await fillRequiredFields();
+    fireEvent.click(screen.getByRole("radio", { name: "论文集" }));
+    fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ library_kind: "paper" })));
+    expect(onCreate.mock.calls[0][0]).not.toHaveProperty("learning_profile_key");
   });
 
   it.each([false, true])("submits a changed scenario's preset without opening advanced settings (developer=%s)", async (developer) => {

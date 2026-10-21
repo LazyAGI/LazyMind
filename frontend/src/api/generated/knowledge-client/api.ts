@@ -690,6 +690,8 @@ export interface CreateDatabaseResponse {
  * @interface Dataset
  */
 export interface Dataset {
+  /** Library presentation type; omitted for legacy datasets. */
+  library_kind?: "paper" | "document";
   /**
    * The resource name of the dataset. Full resource path in the format: datasets/{dataset} This is the canonical identifier used in API calls and resource references.
    * @type {string}

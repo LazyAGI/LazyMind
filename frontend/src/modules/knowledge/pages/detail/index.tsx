@@ -10,7 +10,6 @@ import {
 } from "antd";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { AgentAppsAuth } from "@/components/auth";
-import { runtimeFeatures } from "@/runtime/features";
 import {
   fetchModelFeatures,
   isImageEmbedRequired,
@@ -20,9 +19,6 @@ import type { MenuProps } from "antd";
 import { useEffect, useRef, useState, useCallback, MouseEvent } from "react";
 import { useParams } from "react-router-dom";
 import {
-  EditOutlined,
-  SettingOutlined,
-  DeleteOutlined,
   CopyOutlined,
   DownOutlined,
 } from "@ant-design/icons";
@@ -30,7 +26,6 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   Dataset,
-  DatasetAclEnum,
   DocTypeEnum,
 } from "@/api/generated/knowledge-client";
 
@@ -51,14 +46,12 @@ import ImportTaskManage, {
 } from "./components/ImportTaskManage";
 import TreeUtils from "@/modules/knowledge/utils/tree";
 import { IMPORT_TASK_POLL_INTERVAL } from "@/modules/knowledge/constants/common";
-import { isFFmpegDependencyError } from "@/modules/knowledge/utils/taskError";
-import TypedConfirmModal, {
-  type TypedConfirmModalRef,
-} from "@/components/ui/TypedConfirmModal";
-import CreateUpdateModal, {
-  UpdateImperativeProps,
-} from "@/modules/knowledge/components/UpdateModal";
+import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
+import { inspectFinishedImportTasks, mergeTrackedImportTasks, type ImportTaskFailure, type ImportTaskState } from "./importTaskFailures";
+import { TaskTab } from "./components/ImportTaskList";
 import { KnowledgeBaseServiceApi } from "@/modules/knowledge/utils/request";
+import { buildUploadTaskItems } from "@/modules/knowledge/utils/uploadByHash";
+import { RuntimeReadinessError, waitForRuntimeCapability } from "@/runtime/readiness";
 import { DocumentServiceApi, TaskServiceApi } from "../../utils/request";
 import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
 import {
@@ -79,7 +72,7 @@ import {
 
 import "./index.scss";
 import PaperLibrary from "@/modules/knowledge/paper/PaperLibrary";
-import { isPaperLibrary, markPaperLibrary, unmarkPaperLibrary } from "@/modules/knowledge/paper/store";
+import { isPaperLibrary } from "@/modules/knowledge/paper/store";
 
 type DatasetWithDataSourceFlag = Dataset & {
   created_by_data_source?: boolean;
@@ -134,10 +127,8 @@ const Detail = () => {
   const importKnowledgeRef = useRef<IImportKnowledgeModalRef>();
   const importTaskRef = useRef<IImportTaskManageRef>();
   const pollingRef = useRef(new Polling());
-  const importingTaskListRef = useRef([]);
-  const promptedDependencyTaskIdsRef = useRef(new Set<string>());
-  const confirmRef = useRef<TypedConfirmModalRef>(null);
-  const createUpdateRef = useRef<UpdateImperativeProps>(null);
+  const importingTaskListRef = useRef<ImportTaskState[]>([]);
+  const inspectedTaskIdsRef = useRef(new Set<string>());
 
   const [detail, setDetail] = useState<DatasetWithProcessingLevel>();
   const [runningTotal, setRunningTotal] = useState(0);
@@ -148,10 +139,14 @@ const Detail = () => {
   >(null);
   const [documentParsingEnabled, setDocumentParsingEnabled] = useState<boolean | null>(null);
   const [uploadingNoticeVisible, setUploadingNoticeVisible] = useState(false);
+  const [taskPollingError, setTaskPollingError] = useState("");
+  const [importTaskFailures, setImportTaskFailures] = useState<ImportTaskFailure[]>([]);
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
 
   const { id = "" } = useParams();
-  const [paperLibrary, setPaperLibrary] = useState(() => isPaperLibrary(id));
+  const activeDatasetIdRef = useRef(id);
+  activeDatasetIdRef.current = id;
+  const paperLibrary = isPaperLibrary(id, detail?.dataset_id === id ? detail.library_kind : undefined);
 
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -162,6 +157,7 @@ const Detail = () => {
     KnowledgeBaseServiceApi()
       .datasetServiceGetDataset({ dataset: id })
       .then((res) => {
+        if (activeDatasetIdRef.current !== id) return;
         const dataset = res.data as unknown as DatasetWithProcessingLevel;
         setDetail(dataset);
         setCurrentDataset(dataset);
@@ -169,6 +165,10 @@ const Detail = () => {
   }, [id, setCurrentDataset]);
 
   useEffect(() => {
+    importingTaskListRef.current = [];
+    inspectedTaskIdsRef.current.clear();
+    setTaskPollingError("");
+    setImportTaskFailures([]);
     getDetail();
     getImportingTotal();
     const unwrap = (
@@ -290,6 +290,7 @@ const Detail = () => {
           pageSize: 1000,
         }, { silentError: true } as never),
       onSuccess: ({ data = {} }) => {
+        setTaskPollingError("");
         const newTaskList = data.tasks || [];
         // Tasks in WORKING state are actively being parsed by the algorithm service.
         // Tasks in WAITING state are still uploading / queued before parsing starts.
@@ -308,6 +309,9 @@ const Detail = () => {
         setUploadingNoticeVisible(uploadingTasks.length > 0);
         importingTaskListRef.current = newTaskList;
       },
+      onError: (error) => {
+        setTaskPollingError(getImportErrorMessage(error, "无法查询导入任务状态，请重试"));
+      },
     });
   }
 
@@ -323,7 +327,7 @@ const Detail = () => {
     if (completeTasks.length > 0) {
       getDetail();
     }
-    void notifyDependencyFailures(completeTasks);
+    void notifyImportTaskFailures(completeTasks);
 
     // There are multiple tasks to complete or the root node needs to be updated.
     if (
@@ -358,33 +362,24 @@ const Detail = () => {
     });
   }
 
-  async function notifyDependencyFailures(tasks: any[]) {
-    for (const task of tasks) {
-      const taskId = String(task?.task_id || "");
-      if (!taskId || promptedDependencyTaskIdsRef.current.has(taskId)) {
-        continue;
-      }
-      try {
-        const response = await TaskServiceApi().getTask(
-          id,
-          taskId,
-          { silentError: true } as never,
-        );
-        const finishedTask = response.data as any;
-        if (!isFFmpegDependencyError(finishedTask?.err_msg)) {
-          continue;
-        }
-        promptedDependencyTaskIdsRef.current.add(taskId);
-        Modal.confirm({
-          title: t("knowledge.ffmpegRequiredTitle"),
-          content: t("knowledge.ffmpegRequiredDesc"),
-          okText: t("knowledge.configureFfmpeg"),
-          cancelText: t("common.close"),
-          onOk: () => navigate("/settings?section=system_tools#ffmpeg-dependency"),
-        });
-      } catch (error) {
-        console.error("Failed to inspect completed task:", error);
-      }
+  async function notifyImportTaskFailures(tasks: any[]) {
+    const pending = tasks.filter((task) => task?.task_id && !inspectedTaskIdsRef.current.has(String(task.task_id)));
+    pending.forEach((task) => inspectedTaskIdsRef.current.add(String(task.task_id)));
+    const requestedDatasetId = id;
+    const failures = await inspectFinishedImportTasks(pending, async (taskId) => {
+      const response = await TaskServiceApi().getTask(id, taskId, { silentError: true } as never);
+      return response.data;
+    });
+    if (activeDatasetIdRef.current !== requestedDatasetId || !failures.length) return;
+    setImportTaskFailures((previous) => [...previous.filter((failure) => !failures.some((next) => next.taskId === failure.taskId)), ...failures]);
+    if (failures.some((failure) => failure.needsFFmpeg)) {
+      Modal.confirm({
+        title: t("knowledge.ffmpegRequiredTitle"),
+        content: t("knowledge.ffmpegRequiredDesc"),
+        okText: t("knowledge.configureFfmpeg"),
+        cancelText: t("common.close"),
+        onOk: () => navigate("/settings?section=system_tools#ffmpeg-dependency"),
+      });
     }
   }
 
@@ -409,39 +404,6 @@ const Detail = () => {
       });
   }
 
-  async function onUpdate(
-    data: Dataset & { processing_level?: ProcessingLevel },
-  ): Promise<void> {
-    const { processing_level: nextLevel, ...dataset } = data;
-    const currentLevel = effectiveProcessingLevel(detail?.processing_level);
-    if (nextLevel && nextLevel !== currentLevel) {
-      await axiosInstance.patch(
-        `${BASE_URL}/api/core/datasets/${encodeURIComponent(id)}/processing-level`,
-        { processing_level: nextLevel },
-      );
-    }
-    return KnowledgeBaseServiceApi()
-      .datasetServiceUpdateDataset({
-        dataset: data.dataset_id || "",
-        dataset2: dataset,
-      })
-      .then(() => {
-        message.success(t("knowledge.editSuccess"));
-        getDetail();
-      });
-  }
-
-  function onDelete(knowledgeBaseId: string) {
-    KnowledgeBaseServiceApi()
-      .datasetServiceDeleteDataset({ dataset: knowledgeBaseId })
-      .then(() => {
-        message.success(t("knowledge.deleteSuccess"));
-        navigate({
-          pathname: "/lib/knowledge/list",
-        });
-      });
-  }
-
   function onSearch(value: string) {
     knowledgeListRef.current?.refresh(value);
   }
@@ -454,6 +416,46 @@ const Detail = () => {
     state.hasUploadPermission(),
   );
   const canImport = hasUploadPermission || hasWritePermission;
+
+  async function uploadPaperPdf(file: File): Promise<string | void> {
+    if (!canImport) throw new Error("没有向此论文库上传文件的权限");
+    if (!file.name.toLowerCase().endsWith(".pdf")) throw new Error("请选择 PDF 文件");
+    if (file.size > 500 * 1024 * 1024) throw new Error("单个 PDF 文件不能超过 500 MB");
+
+    try {
+      if (effectiveProcessingLevel(detail?.processing_level) !== "stored") {
+        await waitForRuntimeCapability("parser");
+      }
+    } catch (error) {
+      if (error instanceof RuntimeReadinessError) throw new Error(t("runtime.initializationFailed"));
+      throw error;
+    }
+
+    const items = await buildUploadTaskItems({
+      datasetId: id,
+      fileItems: [{ originFile: file, path: file.name }],
+    });
+    if (!items.length) throw new Error(t("knowledge.uploadResultMissing"));
+
+    const created = await TaskServiceApi().createTasks(id, { items });
+    const taskIds = (created.data.tasks || []).map((task) => task.task_id).filter((taskId): taskId is string => Boolean(taskId));
+    if (!taskIds.length) throw new Error("文件已上传，但未能建立导入任务，请重试");
+
+    const started = await TaskServiceApi().startTasks(id, {
+      task_ids: taskIds,
+      start_mode: hasWritePermission ? "DEFAULT" : "UPLOAD",
+    });
+    const result = started.data.tasks?.[0];
+    if (started.data.failed_count > 0 || result?.status === "FAILED" || result?.submit_status === "REJECTED" || result?.submit_status === "FAILED") {
+      throw new Error(result?.message || "文件导入任务未能启动，请重试");
+    }
+
+    importingTaskListRef.current = mergeTrackedImportTasks(importingTaskListRef.current, created.data.tasks || []);
+    getImportingTotal();
+    getDetail();
+    return result?.document_id || created.data.tasks?.[0]?.document_id;
+  }
+
   const isDocumentParsingUnavailable = documentParsingEnabled !== true;
   const importDisabled =
     isDocumentParsingUnavailable ||
@@ -485,7 +487,7 @@ const Detail = () => {
         paddingBottom: "24px",
       }}
     >
-      <DetailPageHeader
+      {!paperLibrary && <DetailPageHeader
         className="knowledge-detail-header"
         title={
           <span className="knowledge-detail-title-copy">
@@ -518,64 +520,6 @@ const Detail = () => {
             </>
           ) : null
         }
-        settingsMenu={
-          detail?.acl?.includes(DatasetAclEnum.DatasetWrite) && (
-            <div>
-              <Button
-                icon={<EditOutlined />}
-                onClick={() => {
-                  createUpdateRef.current?.onOpen(detail);
-                }}
-              >
-                {t("common.edit")}
-              </Button>
-              {!runtimeFeatures.hideUserGroupSurfaces && (
-                <Button
-                  icon={<SettingOutlined />}
-                  onClick={() =>
-                    navigate({
-                      pathname: `/lib/knowledge/auth/${id}`,
-                    })
-                  }
-                >
-                  {t("knowledge.authorize")}
-                </Button>
-              )}
-              <Button
-                onClick={() => {
-                  if (paperLibrary) {
-                    unmarkPaperLibrary(id);
-                    setPaperLibrary(false);
-                  } else {
-                    markPaperLibrary(id);
-                    setPaperLibrary(true);
-                  }
-                }}
-              >
-                {paperLibrary ? "恢复为常规知识库" : "作为论文集查看"}
-              </Button>
-              <Button
-                danger
-                icon={<DeleteOutlined />}
-                onClick={() => {
-                  const knowledgeName = detail?.display_name || id;
-                  confirmRef.current?.onOpen({
-                    id,
-                    title: t("knowledge.deleteTitle", {
-                      name: knowledgeName,
-                    }),
-                    content: t("knowledge.deleteContent"),
-                    confirmText: t("knowledge.deleteConfirmText", {
-                      name: knowledgeName,
-                    }),
-                  });
-                }}
-              >
-                {t("common.delete")}
-              </Button>
-            </div>
-          )
-        }
         breadcrumbs={[
           { title: t("layout.knowledgeBase"), href: "/lib/knowledge/list" },
           { title: detail?.display_name },
@@ -590,8 +534,27 @@ const Detail = () => {
             navigate(-1);
           }
         }}
-      />
-      {uploadingNoticeVisible && (
+      />}
+      {(taskPollingError || importTaskFailures.length > 0) && (
+        <Alert
+          className="knowledge-parsing-notice"
+          type="error"
+          showIcon
+          message={importTaskFailures.length ? "文献导入出现错误" : "无法获取导入进度"}
+          description={
+            <div style={{ maxHeight: 180, overflowY: "auto", whiteSpace: "pre-wrap" }}>
+              {taskPollingError && <div>{taskPollingError}</div>}
+              {importTaskFailures.map((failure) => <div key={failure.taskId}>{failure.message}</div>)}
+            </div>
+          }
+          action={
+            <Button size="small" onClick={() => importTaskRef.current?.handleOpen({ dataset_id: id, initialTab: TaskTab.Failed })}>
+              查看失败任务
+            </Button>
+          }
+        />
+      )}
+      {!paperLibrary && uploadingNoticeVisible && (
         <Alert
           className="knowledge-parsing-notice"
           message={t("knowledge.documentUploadingKeepTabOpen")}
@@ -600,8 +563,14 @@ const Detail = () => {
         />
       )}
       {paperLibrary && detail ? (
-        <div className="my-4 mt-6">
-          <PaperLibrary datasetId={id} onUploadPdf={() => openImportModal({ importMode: "file" })} />
+        <div className="paper-library-page">
+          <PaperLibrary
+            key={id}
+            datasetId={id}
+            title={detail.display_name || "论文库"}
+            onBack={() => navigate("/lib/knowledge/list")}
+            onUploadPdf={uploadPaperPdf}
+          />
         </div>
       ) : null}
       {!paperLibrary && <div className="toolbar my-4 mt-6 w-full">
@@ -745,7 +714,7 @@ const Detail = () => {
                         ),
                       },
                     ],
-                    onClick: ({ key }) => {
+                    onClick: ({ key }: { key: string }) => {
                       if (key === "importFile") {
                         openImportModal({ importMode: "file" });
                         return;
@@ -852,14 +821,6 @@ const Detail = () => {
         />
       )}
 
-      <TypedConfirmModal ref={confirmRef} onClick={onDelete} />
-
-      <CreateUpdateModal
-        ref={createUpdateRef}
-        onUpdate={onUpdate}
-        embeddingReady={embeddingReady}
-      />
-
       <RenameModel
         ref={createFolderRef}
         onSubmit={async (data) => onCreateFolder(data)}
@@ -869,8 +830,8 @@ const Detail = () => {
         ref={importKnowledgeRef}
         onParsingStart={() => setUploadingNoticeVisible(true)}
         onParsingSettled={() => setUploadingNoticeVisible(false)}
-        onOk={({ pId } = {}) => {
-          importingTaskListRef.current = [];
+        onOk={({ pId, tasks = [] } = {}) => {
+          importingTaskListRef.current = mergeTrackedImportTasks(importingTaskListRef.current, tasks);
           getImportingTotal();
           getDetail();
 
@@ -898,7 +859,6 @@ const Detail = () => {
         ref={importTaskRef}
         onClose={(hasSuspended) => {
           if (hasSuspended) {
-            importingTaskListRef.current = [];
             getImportingTotal();
             knowledgeListRef.current?.getTableData({ pId: "", level: 0 });
           } else {

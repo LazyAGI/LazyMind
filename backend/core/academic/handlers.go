@@ -508,12 +508,16 @@ func findOrCreateWork(ctx context.Context, tx *gorm.DB, in WorkInput) (orm.Acade
 			updates["metadata_provenance_json"] = provenance
 			row.ProvenanceJSON = provenance
 		}
-		_ = tx.WithContext(ctx).Model(&row).Updates(updates).Error
+		if err := tx.WithContext(ctx).Model(&row).Updates(updates).Error; err != nil {
+			return row, "", err
+		}
 		return row, "doi", nil
 	}
 	if arxiv != "" && tx.WithContext(ctx).Where("arxiv_id_base = ?", arxiv).Take(&row).Error == nil {
 		if doi != "" && row.DOINormalized == "" {
-			_ = tx.WithContext(ctx).Model(&row).Updates(map[string]any{"doi_normalized": doi, "updated_at": time.Now().UTC()}).Error
+			if err := tx.WithContext(ctx).Model(&row).Updates(map[string]any{"doi_normalized": doi, "updated_at": time.Now().UTC()}).Error; err != nil {
+				return row, "", err
+			}
 			row.DOINormalized = doi
 		}
 		return row, "arxiv", nil
@@ -554,10 +558,14 @@ func findOrCreateWork(ctx context.Context, tx *gorm.DB, in WorkInput) (orm.Acade
 		return row, "", err
 	}
 	if doi != "" {
-		_ = tx.WithContext(ctx).Where("doi_normalized = ?", doi).Take(&row).Error
+		if err := tx.WithContext(ctx).Where("doi_normalized = ?", doi).Take(&row).Error; err != nil {
+			return row, "", err
+		}
 	}
 	if arxiv != "" {
-		_ = tx.WithContext(ctx).Where("arxiv_id_base = ?", arxiv).Take(&row).Error
+		if err := tx.WithContext(ctx).Where("arxiv_id_base = ?", arxiv).Take(&row).Error; err != nil {
+			return row, "", err
+		}
 	}
 	return row, firstNonEmpty(map[bool]string{true: "doi", false: ""}[doi != ""], map[bool]string{true: "arxiv", false: ""}[arxiv != ""], "metadata"), nil
 }
@@ -587,14 +595,20 @@ func resolveReferenceWithExternal(ctx context.Context, tx *gorm.DB, ref *orm.Aca
 		input.Title = ref.RawText
 	}
 	if allowExternal && input.ArxivID == "" {
-		openAlex, openAlexOK := resolveWithOpenAlex(ctx, ref.RawText)
+		openAlex, openAlexOK, err := resolveWithOpenAlex(ctx, ref.RawText)
+		if err != nil {
+			return orm.AcademicWork{}, "", "", err
+		}
 		openAlexHasFulltext := openAlex.ArxivID != ""
 		if pdfURL, _ := openAlex.Provenance["pdf_url"].(string); strings.TrimSpace(pdfURL) != "" {
 			openAlexHasFulltext = true
 		}
 		// Prefer an arXiv copy over publisher-hosted PDFs. Publisher URLs
 		// frequently return 403 to server-side clients despite being marked OA.
-		candidate, arxivOK := resolveWithArxiv(ctx, ref.RawText)
+		candidate, arxivOK, err := resolveWithArxiv(ctx, ref.RawText)
+		if err != nil {
+			return orm.AcademicWork{}, "", "", err
+		}
 		if openAlexOK && openAlex.ArxivID != "" {
 			if input.DOI != "" {
 				openAlex.DOI = input.DOI

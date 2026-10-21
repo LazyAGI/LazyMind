@@ -224,7 +224,7 @@ const CreateKnowledgeBaseModal = forwardRef<
       setLoading(true);
       try {
         const libraryKind = params.library_kind === "paper" ? "paper" : "document";
-        delete params.library_kind;
+        params.library_kind = libraryKind;
         if (libraryKind === "paper") {
           params.learning_profile_key = "academic_papers";
           const paperProfile = learningCatalog?.profiles.find((item) => item.key === "academic_papers");

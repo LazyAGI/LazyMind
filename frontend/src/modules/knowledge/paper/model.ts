@@ -1,4 +1,5 @@
 export type ReadingStatus = "unread" | "reading" | "read";
+export type LibraryView = "all" | "important" | "incomplete";
 export type ImportSource = "local" | "zotero" | "google_scholar" | "semantic_scholar" | "doi" | "arxiv";
 export type ParseState = "ready" | "parsing" | "failed";
 export type MatchMode = "all" | "any";
@@ -15,6 +16,7 @@ export interface PaperItem {
   authors: string;
   venue: string;
   year: number;
+  citationCount?: number;
   folderId: string | null;
   status: ReadingStatus;
   important: boolean;
@@ -23,6 +25,11 @@ export interface PaperItem {
   parse: ParseState;
   doi?: string;
   arxiv?: string;
+  arxivVersion?: string;
+  abstract?: string;
+  sourceUrl?: string;
+  academicWorkId?: string;
+  processingError?: string;
   incomplete?: boolean;
 }
 
@@ -123,6 +130,12 @@ export function normalizeLibrary(raw: Partial<PaperLibraryData> & { folders?: St
 export function papersInView(data: PaperLibraryData, folderId: string | null) {
   if (!folderId) return data.papers;
   return data.papers.filter((item) => item.folderId === folderId);
+}
+
+export function filterLibraryView(items: PaperItem[], view: LibraryView) {
+  if (view === "important") return items.filter((item) => item.important);
+  if (view === "incomplete") return items.filter((item) => item.incomplete || item.parse === "failed");
+  return items;
 }
 
 export function normalizeTitle(value: string) {
@@ -289,9 +302,77 @@ export function applyPaperEdits(item: PaperItem, edits: PaperEdits): PaperItem {
   };
 }
 
-function bibField(block: string, name: string) {
-  const match = block.match(new RegExp(`${name}\\s*=\\s*[{\"]([\\s\\S]*?)[}\"]\\s*,?`, "i"));
-  return match?.[1]?.replace(/\s+/g, " ").trim() ?? "";
+function bibRecords(text: string): Map<string, string>[] {
+  const records: Map<string, string>[] = [];
+  let cursor = 0;
+  const fail = () => new Error(`BibTeX 第 ${records.length + 1} 条格式错误，请检查括号、引号和字段`);
+  const whitespace = () => {
+    while (cursor < text.length) {
+      if (/\s/.test(text[cursor])) cursor += 1;
+      else if (text[cursor] === "%") { while (cursor < text.length && text[cursor] !== "\n") cursor += 1; }
+      else break;
+    }
+  };
+  while (cursor < text.length) {
+    whitespace();
+    if (cursor === text.length) break;
+    const start = text.slice(cursor).match(/^@(\w+)\s*([({])/);
+    if (!start) throw fail();
+    cursor += start[0].length;
+    const close = start[2] === "{" ? "}" : ")";
+    if (start[1].toLowerCase() === "comment") {
+      let depth = 1;
+      while (cursor < text.length && depth) {
+        const char = text[cursor++];
+        if (char === "\\") { cursor += 1; continue; }
+        if (char === start[2]) depth += 1;
+        if (char === close) depth -= 1;
+      }
+      if (depth) throw fail();
+      continue;
+    }
+    if (/^(string|preamble)$/i.test(start[1])) {
+      throw new Error(`BibTeX 暂不支持 @${start[1]} 声明，请导出完整的文献题录`);
+    }
+    const key = text.slice(cursor).match(/^[^\s,{}()]+\s*,/);
+    if (!key) throw fail();
+    cursor += key[0].length;
+    const fields = new Map<string, string>();
+    while (true) {
+      whitespace();
+      if (text[cursor] === close) { cursor += 1; break; }
+      const field = text.slice(cursor).match(/^([\w-]+)\s*=\s*/);
+      if (!field) throw fail();
+      cursor += field[0].length;
+      let value = "";
+      const delimiter = text[cursor];
+      if (delimiter === "{" || delimiter === '"') {
+        cursor += 1;
+        let depth = 1;
+        while (cursor < text.length && depth) {
+          const char = text[cursor++];
+          if (char === "\\") { value += char + (text[cursor++] || ""); continue; }
+          if (delimiter === "{" && char === "{") depth += 1;
+          if ((delimiter === "{" && char === "}") || (delimiter === '"' && char === '"')) depth -= 1;
+          if (depth) value += char;
+        }
+        if (depth) throw fail();
+      } else {
+        const token = text.slice(cursor).match(/^(?:\d+|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i);
+        if (!token) throw fail();
+        value = token[0];
+        cursor += value.length;
+      }
+      fields.set(field[1].toLowerCase(), value.replace(/\s+/g, " ").trim());
+      whitespace();
+      if (text[cursor] === ",") cursor += 1;
+      else if (text[cursor] !== close) throw fail();
+    }
+    if (!fields.get("title")) throw new Error(`BibTeX 第 ${records.length + 1} 条缺少标题，导入已停止`);
+    records.push(fields);
+  }
+  if (!records.length) throw new Error("BibTeX 中没有有效文献");
+  return records;
 }
 
 function draftPaper(partial: Partial<PaperItem> & { title: string }, source: ImportSource, index: number): PaperItem {
@@ -314,19 +395,18 @@ function draftPaper(partial: Partial<PaperItem> & { title: string }, source: Imp
 }
 
 export function parseBibTeX(text: string, source: ImportSource): PaperItem[] {
-  const blocks = text.match(/@\w+\s*\{[\s\S]*?\n\}/g) ?? [];
-  return blocks.map((block, index) => {
-    const year = Number(bibField(block, "year")) || new Date().getFullYear();
-    const arxiv = normalizeArxiv(bibField(block, "eprint") || bibField(block, "arxiv") || "");
+  return bibRecords(text).map((fields, index) => {
+    const year = Number(fields.get("year")) || new Date().getFullYear();
+    const arxiv = normalizeArxiv(fields.get("eprint") || fields.get("arxiv") || "");
     return draftPaper({
-      title: bibField(block, "title") || "未命名论文",
-      authors: bibField(block, "author").replace(/ and /g, "、") || "佚名",
-      venue: bibField(block, "journal") || bibField(block, "booktitle") || "未标注",
+      title: fields.get("title")!,
+      authors: fields.get("author")?.replace(/ and /g, "、") || "佚名",
+      venue: fields.get("journal") || fields.get("booktitle") || "未标注",
       year,
-      doi: bibField(block, "doi") || undefined,
+      doi: fields.get("doi") || undefined,
       arxiv: arxiv || undefined,
     }, source, index);
-  }).filter((item) => item.title !== "未命名论文" || item.authors !== "佚名");
+  });
 }
 
 function bibEscape(value: string) {
@@ -342,18 +422,35 @@ export function toBibTeX(items: PaperItem[]) {
 }
 
 export function parseRIS(text: string, source: ImportSource): PaperItem[] {
-  const records = text.split(/\nER\s+-\s*/i).map((record) => record.trim()).filter(Boolean);
-  return records.map((record, index) => {
-    const fields = new Map<string, string[]>();
-    record.split(/\r?\n/).forEach((line) => {
-      const match = line.match(/^([A-Z0-9]{2})\s+-\s+(.*)$/);
-      if (!match) return;
-      const list = fields.get(match[1]) || [];
-      list.push(match[2].trim());
-      fields.set(match[1], list);
-    });
+  const records: Map<string, string[]>[] = [];
+  let fields: Map<string, string[]> | null = null;
+  let lastTag = "";
+  text.replace(/^\uFEFF/, "").split(/\r?\n/).forEach((line, lineIndex) => {
+    if (!line.trim()) return;
+    const field = line.match(/^([A-Z0-9]{2})\s+-\s*(.*)$/);
+    if (!field) {
+      if (fields && lastTag && /^\s+/.test(line)) {
+        const values = fields.get(lastTag)!;
+        values[values.length - 1] += ` ${line.trim()}`;
+        return;
+      }
+      throw new Error(`RIS 第 ${lineIndex + 1} 行格式错误`);
+    }
+    const [, tag, value] = field;
+    if (tag === "TY") {
+      if (fields || !value.trim()) throw new Error(`RIS 第 ${lineIndex + 1} 行记录未闭合或类型为空`);
+      fields = new Map();
+    }
+    if (!fields) throw new Error(`RIS 第 ${lineIndex + 1} 行缺少 TY 记录起始标记`);
+    if (tag === "ER") { records.push(fields); fields = null; lastTag = ""; return; }
+    fields.set(tag, [...(fields.get(tag) || []), value.trim()]);
+    lastTag = tag;
+  });
+  if (fields) throw new Error("RIS 记录缺少 ER 结束标记");
+  if (!records.length) throw new Error("RIS 中没有有效文献");
+  return records.map((fields, index) => {
     const title = fields.get("TI")?.[0] || fields.get("T1")?.[0] || "";
-    if (!title) return null;
+    if (!title) throw new Error(`RIS 第 ${index + 1} 条缺少标题，导入已停止`);
     const arxiv = normalizeArxiv((fields.get("UR") || []).join(" ") || fields.get("AN")?.[0] || "");
     return draftPaper({
       title,
@@ -364,7 +461,7 @@ export function parseRIS(text: string, source: ImportSource): PaperItem[] {
       arxiv: arxiv || undefined,
       tags: (fields.get("KW") || []).flatMap((value) => value.split(/[;；]/)).map((tag) => tag.trim()).filter(Boolean),
     }, source, index);
-  }).filter((item): item is PaperItem => Boolean(item));
+  });
 }
 
 export function toRIS(items: PaperItem[]) {
@@ -383,24 +480,38 @@ export function toRIS(items: PaperItem[]) {
 
 const csvHeaders = ["题名", "作者", "出处", "年份", "DOI", "arXiv", "标签", "文件夹"];
 
-function splitCsvLine(line: string) {
-  const cells: string[] = [];
+function csvRows(text: string) {
+  const rows: string[][] = [];
+  let cells: string[] = [];
   let current = "";
   let quoted = false;
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
+  let closedQuote = false;
+  const pushCell = () => { cells.push(current.trim()); current = ""; closedQuote = false; };
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
     if (char === '"') {
-      if (quoted && line[index + 1] === '"') {
+      if (quoted && text[index + 1] === '"') {
         current += '"';
         index += 1;
-      } else quoted = !quoted;
+      } else if (quoted) { quoted = false; closedQuote = true; }
+      else if (!current.trim() && !closedQuote) quoted = true;
+      else throw new Error(`CSV 第 ${rows.length + 1} 行引号格式错误`);
     } else if (char === "," && !quoted) {
-      cells.push(current.trim());
-      current = "";
-    } else current += char;
+      pushCell();
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && text[index + 1] === "\n") index += 1;
+      pushCell();
+      if (cells.some(Boolean) || cells.length > 1) rows.push(cells);
+      cells = [];
+    } else {
+      if (closedQuote && char.trim()) throw new Error(`CSV 第 ${rows.length + 1} 行引号后有无效内容`);
+      current += char;
+    }
   }
-  cells.push(current.trim());
-  return cells;
+  if (quoted) throw new Error(`CSV 第 ${rows.length + 1} 行引号未闭合`);
+  pushCell();
+  if (cells.some(Boolean) || cells.length > 1) rows.push(cells);
+  return rows;
 }
 
 function csvCell(value: string) {
@@ -408,17 +519,18 @@ function csvCell(value: string) {
 }
 
 export function parseCSV(text: string, source: ImportSource = "local"): { papers: PaperItem[]; folderNames: Array<string | null> } {
-  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim());
-  if (lines.length < 2) return { papers: [], folderNames: [] };
-  const header = splitCsvLine(lines[0]).map((cell) => cell.toLowerCase());
+  const rows = csvRows(text.replace(/^\uFEFF/, ""));
+  if (rows.length < 2) throw new Error("CSV 中没有文献记录");
+  const header = rows[0].map((cell) => cell.toLowerCase());
   const indexOf = (...names: string[]) => header.findIndex((cell) => names.includes(cell));
   const titleIndex = indexOf("题名", "title");
+  if (titleIndex < 0) throw new Error("CSV 缺少 title 或题名列");
   const papers: PaperItem[] = [];
   const folderNames: Array<string | null> = [];
-  lines.slice(1).forEach((line, index) => {
-    const cells = splitCsvLine(line);
+  rows.slice(1).forEach((cells, index) => {
+    if (cells.length !== header.length) throw new Error(`CSV 第 ${index + 2} 行列数与表头不一致`);
     const title = cells[titleIndex] || "";
-    if (!title) return;
+    if (!title) throw new Error(`CSV 第 ${index + 2} 行缺少标题，导入已停止`);
     const folder = cells[indexOf("文件夹", "folder")] || "";
     papers.push(draftPaper({
       title,

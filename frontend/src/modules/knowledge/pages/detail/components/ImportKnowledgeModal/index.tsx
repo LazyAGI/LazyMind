@@ -13,6 +13,7 @@ import { DataSourceType } from "@/modules/knowledge/constants/common";
 import DragUpload, { ALLOWED_FILE_TYPES } from "../DragUpload";
 import { DocumentServiceApi, TaskServiceApi } from "@/modules/knowledge/utils/request";
 import { buildUploadTaskItems } from "@/modules/knowledge/utils/uploadByHash";
+import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 import TagSelect from "@/modules/knowledge/components/TagSelect";
 import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
 import { localizeErrorCode } from "@/components/request";
@@ -40,8 +41,14 @@ export interface IImportKnowledgeModalRef {
   handleOpen: (data: IData) => void;
 }
 
+export interface ImportTaskRef {
+  task_id?: string;
+  target_pid?: string;
+  display_name?: string;
+}
+
 interface IProps {
-  onOk: (payload?: { pId?: string }) => void;
+  onOk: (payload?: { pId?: string; tasks?: ImportTaskRef[] }) => void;
   onParsingStart?: () => void;
   onParsingSettled?: () => void;
 }
@@ -61,6 +68,7 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [runtimeWaiting, setRuntimeWaiting] = useState(false);
+  const [importError, setImportError] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [hasZipError, setHasZipError] = useState(false);
   const runtimeWaitAbortRef = useRef<AbortController | null>(null);
@@ -119,10 +127,12 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
     setLoading(false);
     setRuntimeWaiting(false);
     setHasZipError(false);
+    setImportError("");
   }
 
   async function submit(values: any) {
     setLoading(true);
+    setImportError("");
     // Each item from DragUpload carries { originFile: File, path: string }
     // path = webkitRelativePath (folder select) or entry.fullPath.slice(1) (drag)
     const fileItems: { originFile: File; path: string }[] = (
@@ -147,20 +157,20 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
       });
       setRuntimeWaiting(false);
 
-      await submitWithHashReuse(fileItems, values.tags, startMode);
+      const tasks = await submitWithHashReuse(fileItems, values.tags, startMode);
       message.success(t("knowledge.uploadCompleteParsingStarted"));
       handleClose();
-      onOk({ pId: data.p_id });
+      onOk({ pId: data.p_id, tasks });
     } catch (err) {
       if ((err as Error)?.name === "AbortError") {
         return;
       }
       console.error(err);
-      message.error(
-        err instanceof RuntimeReadinessError
-          ? t("runtime.initializationFailed")
-          : localizeErrorCode("2000509"),
-      );
+      const errorMessage = getImportErrorMessage(err, err instanceof RuntimeReadinessError
+        ? t("runtime.initializationFailed")
+        : localizeErrorCode("2000509"));
+      setImportError(errorMessage);
+      message.error(errorMessage);
     } finally {
       runtimeWaitAbortRef.current = null;
       setRuntimeWaiting(false);
@@ -174,7 +184,7 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
   ) {
     onParsingStart?.();
     try {
-      await TaskServiceApi().startTasks(data.dataset_id, {
+      return await TaskServiceApi().startTasks(data.dataset_id, {
         task_ids: taskIds,
         ...(startMode ? { start_mode: startMode } : {}),
       });
@@ -216,7 +226,15 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
       throw new Error(localizeErrorCode("2000509"));
     }
 
-    await startTasksAfterUpload(taskIds, startMode);
+    const started = await startTasksAfterUpload(taskIds, startMode);
+    return (started.data.tasks || []).map((task): ImportTaskRef => {
+      const created = createRes.data.tasks?.find((item) => item.task_id === task.task_id || (task.document_id && item.document_id === task.document_id));
+      return {
+        task_id: task.task_id,
+        target_pid: created?.target_pid || data.p_id,
+        display_name: task.display_name || created?.display_name,
+      };
+    });
   }
 
   return (
@@ -246,6 +264,7 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
         </div>
       }
     >
+      {importError && <Alert type="error" showIcon message={importError} style={{ marginBottom: 16, whiteSpace: "pre-wrap" }} />}
       {loading && (
         <Alert
           message={

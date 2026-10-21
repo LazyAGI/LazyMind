@@ -285,6 +285,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/datasets/{dataset}/processing-status", []string{"document.read"}, doc.GetProcessingStatus)
 
 	// ----- Academic references and paper imports -----
+	handleAPI(r, "POST", "/academic/arxiv:lookup", []string{"document.read"}, academic.LookupArxiv)
+	handleAPI(r, "POST", "/academic/arxiv:import", []string{"document.write"}, academic.ImportArxiv)
+	handleAPI(r, "GET", "/academic/arxiv/library", []string{"document.read"}, academic.ListArxivLibrary)
 	handleAPI(r, "GET", "/academic/documents/{document_id}/references", []string{"document.read"}, academic.ListReferences)
 	handleAPI(r, "POST", "/academic/documents/{document_id}/references:extract", []string{"document.write"}, academic.ExtractReferences)
 	handleAPI(r, "POST", "/academic/references:resolve", []string{"document.write"}, academic.ResolveReferences)

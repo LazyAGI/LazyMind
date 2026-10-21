@@ -14,18 +14,16 @@ function readIds(): string[] {
   }
 }
 
-export function isPaperLibrary(datasetId?: string) {
-  return Boolean(datasetId && readIds().includes(datasetId));
+export function isPaperLibrary(datasetId?: string, libraryKind?: "paper" | "document") {
+  if (!datasetId) return false;
+  if (libraryKind !== undefined) return libraryKind === "paper";
+  return readIds().includes(datasetId);
 }
 
 export function markPaperLibrary(datasetId: string) {
   const ids = new Set(readIds());
   ids.add(datasetId);
   localStorage.setItem(kindKey, JSON.stringify([...ids]));
-}
-
-export function unmarkPaperLibrary(datasetId: string) {
-  localStorage.setItem(kindKey, JSON.stringify(readIds().filter((id) => id !== datasetId)));
 }
 
 export function loadPaperLibrary(datasetId: string, preview = false): PaperLibraryData {
@@ -38,7 +36,7 @@ export function loadPaperLibraryV3(datasetId: string, preview = false): PaperLib
   if (modernRaw) {
     try {
       const parsed = migratePaperLibrary(JSON.parse(modernRaw));
-      return parsed.attachments.length || !parsed.papers.length ? parsed : migratePaperLibrary(asLegacyLibrary(parsed));
+      return parsed;
     } catch { /* fall through */ }
   }
   const raw = localStorage.getItem(dataKey(datasetId));
@@ -53,11 +51,32 @@ export function loadPaperLibraryV3(datasetId: string, preview = false): PaperLib
 }
 
 export function savePaperLibrary(datasetId: string, data: PaperLibraryData) {
-  localStorage.setItem(dataKey(datasetId), JSON.stringify(data));
-  localStorage.setItem(dataKeyV3(datasetId), JSON.stringify(migratePaperLibrary(data)));
+  saveLibraryRecords(datasetId, JSON.stringify(migratePaperLibrary(data)), JSON.stringify(data));
 }
 
 export function savePaperLibraryV3(datasetId: string, data: PaperLibraryDataV3) {
-  localStorage.setItem(dataKeyV3(datasetId), JSON.stringify(data));
-  localStorage.setItem(dataKey(datasetId), JSON.stringify(asLegacyLibrary(data)));
+  saveLibraryRecords(datasetId, JSON.stringify(data), JSON.stringify(asLegacyLibrary(data)));
+}
+
+function saveLibraryRecords(datasetId: string, modern: string, legacy: string) {
+  const records = [[dataKeyV3(datasetId), modern], [dataKey(datasetId), legacy]];
+  const previous = records.map(([key]) => localStorage.getItem(key));
+  const written: number[] = [];
+  try {
+    records.forEach(([key, value], index) => {
+      localStorage.setItem(key, value);
+      written.push(index);
+    });
+  } catch (error) {
+    const failures: unknown[] = [error];
+    written.reverse().forEach((index) => {
+      try {
+        const old = previous[index];
+        if (old === null) localStorage.removeItem(records[index][0]);
+        else localStorage.setItem(records[index][0], old);
+      } catch (rollbackError) { failures.push(rollbackError); }
+    });
+    if (failures.length > 1) throw Object.assign(new Error("文献保存失败，恢复原数据也失败，请检查浏览器存储空间"), { errors: failures });
+    throw error;
+  }
 }

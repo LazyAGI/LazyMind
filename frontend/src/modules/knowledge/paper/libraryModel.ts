@@ -21,6 +21,9 @@ export interface Attachment {
   addedAt: string;
   isPrimary?: boolean;
   contentRef?: string;
+  sourceVersion?: string;
+  sourceUrl?: string;
+  contentHash?: string;
 }
 
 export interface Note {
@@ -84,6 +87,8 @@ export interface PaperLibraryDataV3 {
   annotations: Annotation[];
   relations: PaperRelation[];
   mergeSnapshots: MergeSnapshot[];
+  hiddenArxivWorkIds?: string[];
+  hiddenArxivPapers?: PaperRecord[];
 }
 
 const now = () => new Date().toISOString();

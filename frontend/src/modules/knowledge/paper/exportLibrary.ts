@@ -1,5 +1,19 @@
 import type { PaperLibraryDataV3 } from './libraryModel';
-import type { PaperItem } from './model';
+import { toBibTeX, toCSV, toRIS, type PaperItem, type PaperLibraryData } from './model';
+
+export type PaperCitationFormat = 'bib' | 'ris' | 'csv';
+
+export function downloadPaperCitations(library: PaperLibraryData, format: PaperCitationFormat, name = 'papers') {
+  const content = format === 'bib' ? toBibTeX(library.papers) : format === 'ris' ? toRIS(library.papers) : toCSV(library.papers, library.folders);
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'papers'}.${format}`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
 
 export function toCslJson(items: PaperItem[]) {
   return JSON.stringify(items.map((item) => ({ id: item.id, type: 'article-journal', title: item.title, author: item.authors.split('、').filter(Boolean).map((literal) => ({ literal })), issued: { 'date-parts': [[item.year]] }, 'container-title': item.venue, DOI: item.doi, URL: item.arxiv ? `https://arxiv.org/abs/${item.arxiv}` : undefined })), null, 2);

@@ -80,15 +80,21 @@ func CreateImport(w http.ResponseWriter, r *http.Request) {
 		if input.WorkID == "" && len(input.ReferenceIDs) > 0 {
 			var ref orm.AcademicReference
 			if err := store.DB().WithContext(r.Context()).Where("id = ?", input.ReferenceIDs[0]).Take(&ref).Error; err != nil {
-				continue
+				replyError(w, http.StatusUnprocessableEntity, "REFERENCE_NOT_FOUND", err.Error())
+				return
 			}
 			work, _, _, err := resolveReferenceWithExternal(r.Context(), store.DB().WithContext(r.Context()), &ref, false)
 			if err != nil {
-				continue
+				replyError(w, http.StatusUnprocessableEntity, "RESOLUTION_FAILED", err.Error())
+				return
 			}
 			input.WorkID = work.ID
 		}
-		if input.WorkID == "" || seen[input.WorkID] {
+		if input.WorkID == "" {
+			replyError(w, http.StatusUnprocessableEntity, "WORK_NOT_FOUND", "one or more works are unresolved")
+			return
+		}
+		if seen[input.WorkID] {
 			continue
 		}
 		seen[input.WorkID] = true
@@ -98,10 +104,13 @@ func CreateImport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var active int64
-		_ = store.DB().WithContext(r.Context()).Table("paper_import_items pi").
+		if err := store.DB().WithContext(r.Context()).Table("paper_import_items pi").
 			Joins("JOIN paper_import_batches pb ON pb.id = pi.batch_id").
 			Where("pi.academic_work_id = ? AND pb.target_dataset_id = ? AND pb.created_by = ? AND pi.status IN ?", input.WorkID, req.TargetDatasetID, userID, []string{"pending", "running"}).
-			Count(&active).Error
+			Count(&active).Error; err != nil {
+			replyError(w, http.StatusInternalServerError, "IMPORT_QUERY_FAILED", err.Error())
+			return
+		}
 		if active > 0 {
 			alreadyQueued++
 			continue
@@ -149,7 +158,7 @@ func CreateImport(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 500, "IMPORT_CREATE_FAILED", err.Error())
 		return
 	}
-	common.ReplyJSON(w, map[string]any{"batch_id": batch.ID, "job_id": job.ID, "status": batch.Status, "total_items": batch.TotalItems})
+	common.ReplyJSON(w, map[string]any{"batch_id": batch.ID, "job_id": batch.AsyncJobID, "status": batch.Status, "total_items": batch.TotalItems})
 }
 
 func ListImports(w http.ResponseWriter, r *http.Request) {
@@ -161,31 +170,7 @@ func ListImports(w http.ResponseWriter, r *http.Request) {
 	sourceDocumentID := strings.TrimSpace(r.URL.Query().Get("source_document_id"))
 	query := store.DB().WithContext(r.Context()).Table("paper_import_items pi").
 		Select(`pi.id AS item_id, pi.batch_id, pi.academic_work_id AS work_id, aw.canonical_title AS title,
-			CASE WHEN pi.status = 'failed' AND EXISTS (
-				SELECT 1 FROM academic_works aw2 JOIN academic_work_documents awd2 ON awd2.academic_work_id = aw2.id
-				WHERE awd2.dataset_id = pb.target_dataset_id AND (
-					(aw.doi_normalized <> '' AND aw2.doi_normalized = aw.doi_normalized) OR
-					(aw.arxiv_id_base <> '' AND aw2.arxiv_id_base = aw.arxiv_id_base) OR
-					(aw.normalized_title <> '' AND aw2.normalized_title = aw.normalized_title AND aw2.publication_year = aw.publication_year)
-				)
-			) THEN 'skipped' ELSE pi.status END AS status,
-			pi.stage, pi.document_id,
-			CASE WHEN pi.status = 'failed' AND EXISTS (
-				SELECT 1 FROM academic_works aw2 JOIN academic_work_documents awd2 ON awd2.academic_work_id = aw2.id
-				WHERE awd2.dataset_id = pb.target_dataset_id AND (
-					(aw.doi_normalized <> '' AND aw2.doi_normalized = aw.doi_normalized) OR
-					(aw.arxiv_id_base <> '' AND aw2.arxiv_id_base = aw.arxiv_id_base) OR
-					(aw.normalized_title <> '' AND aw2.normalized_title = aw.normalized_title AND aw2.publication_year = aw.publication_year)
-				)
-			) THEN 'already_present' ELSE pi.error_code END AS error_code,
-			CASE WHEN pi.status = 'failed' AND EXISTS (
-				SELECT 1 FROM academic_works aw2 JOIN academic_work_documents awd2 ON awd2.academic_work_id = aw2.id
-				WHERE awd2.dataset_id = pb.target_dataset_id AND (
-					(aw.doi_normalized <> '' AND aw2.doi_normalized = aw.doi_normalized) OR
-					(aw.arxiv_id_base <> '' AND aw2.arxiv_id_base = aw.arxiv_id_base) OR
-					(aw.normalized_title <> '' AND aw2.normalized_title = aw.normalized_title AND aw2.publication_year = aw.publication_year)
-				)
-			) THEN '已由后续任务下载并关联' ELSE COALESCE(pi.error_details_json::jsonb->>'message', '') END AS error_message,
+			pi.status, pi.stage, pi.document_id, pi.error_code, pi.error_details_json,
 			pi.created_at, pi.updated_at`).
 		Joins("JOIN paper_import_batches pb ON pb.id = pi.batch_id").
 		Joins("JOIN academic_works aw ON aw.id = pi.academic_work_id").
@@ -197,10 +182,27 @@ func ListImports(w http.ResponseWriter, r *http.Request) {
 		sourceIDs, _ := json.Marshal([]string{sourceDocumentID})
 		query = query.Where("pb.source_document_ids_json::jsonb @> ?::jsonb", string(sourceIDs))
 	}
-	var rows []ImportQueueItem
-	if err := query.Order("pi.created_at DESC").Limit(200).Scan(&rows).Error; err != nil {
+	var records []struct {
+		ImportQueueItem
+		ErrorDetailsJSON json.RawMessage
+	}
+	if err := query.Order("pi.created_at DESC").Limit(200).Scan(&records).Error; err != nil {
 		replyError(w, http.StatusInternalServerError, "IMPORT_QUERY_FAILED", err.Error())
 		return
+	}
+	rows := make([]ImportQueueItem, 0, len(records))
+	for _, record := range records {
+		var details struct {
+			Message string `json:"message"`
+		}
+		if len(record.ErrorDetailsJSON) > 0 {
+			if err := json.Unmarshal(record.ErrorDetailsJSON, &details); err != nil {
+				replyError(w, http.StatusInternalServerError, "IMPORT_QUERY_FAILED", "invalid import error details")
+				return
+			}
+		}
+		record.ErrorMessage = details.Message
+		rows = append(rows, record.ImportQueueItem)
 	}
 	common.ReplyJSON(w, map[string]any{"items": rows, "total": len(rows)})
 }
@@ -236,9 +238,15 @@ func CancelImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if batch.AsyncJobID != "" {
-		_, _ = asyncjob.CancelResourceJobs(r.Context(), store.DB(), paperImportJobType, "paper_import_batch", batch.ID, "user canceled paper import")
+		if _, err := asyncjob.CancelResourceJobs(r.Context(), store.DB(), paperImportJobType, "paper_import_batch", batch.ID, "user canceled paper import"); err != nil {
+			replyError(w, http.StatusInternalServerError, "IMPORT_CANCEL_FAILED", err.Error())
+			return
+		}
 	}
-	_ = store.DB().WithContext(r.Context()).Model(&batch).Updates(map[string]any{"status": "canceled", "updated_at": time.Now().UTC()}).Error
+	if err := store.DB().WithContext(r.Context()).Model(&batch).Updates(map[string]any{"status": "canceled", "updated_at": time.Now().UTC()}).Error; err != nil {
+		replyError(w, http.StatusInternalServerError, "IMPORT_CANCEL_FAILED", err.Error())
+		return
+	}
 	common.ReplyJSON(w, map[string]any{"batch_id": batch.ID, "status": "canceled"})
 }
 
@@ -254,7 +262,10 @@ func RetryImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var failed int64
-	_ = store.DB().WithContext(r.Context()).Model(&orm.PaperImportItem{}).Where("batch_id = ? AND status = 'failed'", batchID).Count(&failed).Error
+	if err := store.DB().WithContext(r.Context()).Model(&orm.PaperImportItem{}).Where("batch_id = ? AND status = 'failed'", batchID).Count(&failed).Error; err != nil {
+		replyError(w, http.StatusInternalServerError, "IMPORT_QUERY_FAILED", err.Error())
+		return
+	}
 	if failed == 0 {
 		replyError(w, http.StatusConflict, "NO_FAILED_ITEMS", "there are no failed items to retry")
 		return
@@ -266,7 +277,10 @@ func RetryImport(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 500, "IMPORT_RETRY_FAILED", err.Error())
 		return
 	}
-	_ = store.DB().WithContext(r.Context()).Model(&batch).Updates(map[string]any{"status": "pending", "async_job_id": queued.ID, "updated_at": time.Now().UTC()}).Error
+	if err := store.DB().WithContext(r.Context()).Model(&batch).Updates(map[string]any{"status": "pending", "async_job_id": queued.ID, "updated_at": time.Now().UTC()}).Error; err != nil {
+		replyError(w, http.StatusInternalServerError, "IMPORT_RETRY_FAILED", err.Error())
+		return
+	}
 	common.ReplyJSON(w, map[string]any{"batch_id": batch.ID, "job_id": queued.ID, "status": "pending", "retry_items": failed})
 }
 
@@ -283,35 +297,57 @@ func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 	if err := store.DB().WithContext(ctx).Where("batch_id = ? AND status IN ?", batch.ID, []string{"pending", "failed"}).Order("created_at ASC").Find(&items).Error; err != nil {
 		return asyncjob.Result{}, err
 	}
-	_ = store.DB().WithContext(ctx).Model(&batch).Updates(map[string]any{"status": "running", "updated_at": time.Now().UTC()}).Error
+	if err := store.DB().WithContext(ctx).Model(&batch).Updates(map[string]any{"status": "running", "updated_at": time.Now().UTC()}).Error; err != nil {
+		return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+	}
 	completed, failed, skipped := 0, 0, 0
 	for index := range items {
 		item := &items[index]
-		_ = reporter.Heartbeat(ctx)
-		_ = store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"status": "running", "attempt_count": item.AttemptCount + 1, "error_code": "", "updated_at": time.Now().UTC()}).Error
+		if err := reporter.Heartbeat(ctx); err != nil {
+			return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+		}
+		if err := store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"status": "running", "attempt_count": item.AttemptCount + 1, "error_code": "", "updated_at": time.Now().UTC()}).Error; err != nil {
+			return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+		}
 		var candidate FulltextCandidate
-		_ = json.Unmarshal(item.SelectedCandidateJSON, &candidate)
+		if err := json.Unmarshal(item.SelectedCandidateJSON, &candidate); err != nil {
+			return asyncjob.Result{Permanent: true, ErrorCode: "invalid_import_data"}, err
+		}
 		if presentWork, presentDocument, ok := findEquivalentPresentWork(ctx, item.AcademicWorkID, batch.TargetDatasetID); ok {
-			associateReferencesWithWork(ctx, item.ReferenceIDsJSON, presentWork.ID, "presence")
+			if err := associateReferencesWithWork(ctx, item.ReferenceIDsJSON, presentWork.ID, "presence"); err != nil {
+				return asyncjob.Result{ErrorCode: "reference_update_failed"}, err
+			}
 			item.AcademicWorkID = presentWork.ID
 			skipped++
-			_ = store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"academic_work_id": presentWork.ID, "document_id": presentDocument.DocumentID, "status": "skipped", "stage": "done", "error_code": "already_present", "updated_at": time.Now().UTC()}).Error
-			_ = reporter.SetProgress(ctx, int64(index+1), int64(len(items)))
+			if err := store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"academic_work_id": presentWork.ID, "document_id": presentDocument.DocumentID, "status": "skipped", "stage": "done", "error_code": "already_present", "updated_at": time.Now().UTC()}).Error; err != nil {
+				return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+			}
+			if err := reporter.SetProgress(ctx, int64(index+1), int64(len(items))); err != nil {
+				return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+			}
 			continue
 		}
 		if candidate.URL == "" {
-			_ = store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"stage": "resolve", "updated_at": time.Now().UTC()}).Error
+			if err := store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"stage": "resolve", "updated_at": time.Now().UTC()}).Error; err != nil {
+				return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+			}
 			var referenceIDs []string
-			_ = json.Unmarshal(item.ReferenceIDsJSON, &referenceIDs)
+			if err := json.Unmarshal(item.ReferenceIDsJSON, &referenceIDs); err != nil {
+				return asyncjob.Result{Permanent: true, ErrorCode: "invalid_import_data"}, err
+			}
 			if len(referenceIDs) == 0 {
 				failed++
-				markItemFailed(ctx, item, "reference_not_found", errors.New("reference metadata is missing"))
+				if err := markItemFailed(ctx, item, "reference_not_found", errors.New("reference metadata is missing")); err != nil {
+					return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+				}
 				continue
 			}
 			var ref orm.AcademicReference
 			if err := store.DB().WithContext(ctx).Where("id = ?", referenceIDs[0]).Take(&ref).Error; err != nil {
 				failed++
-				markItemFailed(ctx, item, "reference_not_found", err)
+				if err := markItemFailed(ctx, item, "reference_not_found", err); err != nil {
+					return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+				}
 				continue
 			}
 			// Re-resolve in the worker so external lookup never blocks the request.
@@ -319,20 +355,26 @@ func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 			if ref.DOINormalized != "" && !strings.Contains(strings.ToLower(ref.RawText), "arxiv") {
 				ref.ArxivIDBase = ""
 				if ref.ResolvedWorkID != "" {
-					_ = store.DB().WithContext(ctx).Model(&orm.AcademicWork{}).Where("id = ?", ref.ResolvedWorkID).
-						Updates(map[string]any{"arxiv_id_base": "", "updated_at": time.Now().UTC()}).Error
+					if err := store.DB().WithContext(ctx).Model(&orm.AcademicWork{}).Where("id = ?", ref.ResolvedWorkID).
+						Updates(map[string]any{"arxiv_id_base": "", "updated_at": time.Now().UTC()}).Error; err != nil {
+						return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+					}
 				}
 			}
 			work, _, _, err := resolveReferenceWithExternal(ctx, store.DB().WithContext(ctx), &ref, true)
 			if err != nil {
 				failed++
-				markItemFailed(ctx, item, "resolution_failed", err)
+				if err := markItemFailed(ctx, item, "resolution_failed", err); err != nil {
+					return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+				}
 				continue
 			}
 			item.AcademicWorkID = work.ID
 			if err := store.DB().WithContext(ctx).Model(item).Update("academic_work_id", work.ID).Error; err != nil {
 				failed++
-				markItemFailed(ctx, item, "resolution_failed", err)
+				if err := markItemFailed(ctx, item, "resolution_failed", err); err != nil {
+					return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+				}
 				continue
 			}
 			candidates := candidatesForWork(work)
@@ -340,30 +382,46 @@ func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 				if pageURL := extractReferenceURL(ref.RawText); pageURL != "" {
 					if isGitHubReferenceURL(pageURL) {
 						skipped++
-						_ = store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"status": "skipped", "stage": "done", "error_code": "external_link", "error_details_json": json.RawMessage(`{"message":"GitHub code reference is available as an external link"}`), "updated_at": time.Now().UTC()}).Error
-						_ = reporter.SetProgress(ctx, int64(index+1), int64(len(items)))
+						if err := store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"status": "skipped", "stage": "done", "error_code": "external_link", "error_details_json": json.RawMessage(`{"message":"GitHub code reference is available as an external link"}`), "updated_at": time.Now().UTC()}).Error; err != nil {
+							return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+						}
+						if err := reporter.SetProgress(ctx, int64(index+1), int64(len(items))); err != nil {
+							return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+						}
 						continue
 					}
 					candidates = []FulltextCandidate{{URL: pageURL, SourceType: "reference_page", SourceProvider: "web", ExpectedMIME: "text/html"}}
 				} else {
 					failed++
-					markItemFailed(ctx, item, "resource_not_found", errors.New("no downloadable reference resource was found"))
+					if err := markItemFailed(ctx, item, "resource_not_found", errors.New("no downloadable reference resource was found")); err != nil {
+						return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+					}
 					continue
 				}
 			}
 			candidate = candidates[0]
 			encoded, _ := json.Marshal(candidate)
-			_ = store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"selected_candidate_json": encoded, "stage": "acquire", "updated_at": time.Now().UTC()}).Error
+			if err := store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"selected_candidate_json": encoded, "stage": "acquire", "updated_at": time.Now().UTC()}).Error; err != nil {
+				return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+			}
 		}
 		if presentWork, presentDocument, ok := findEquivalentPresentWork(ctx, item.AcademicWorkID, batch.TargetDatasetID); ok {
-			associateReferencesWithWork(ctx, item.ReferenceIDsJSON, presentWork.ID, "presence")
+			if err := associateReferencesWithWork(ctx, item.ReferenceIDsJSON, presentWork.ID, "presence"); err != nil {
+				return asyncjob.Result{ErrorCode: "reference_update_failed"}, err
+			}
 			item.AcademicWorkID = presentWork.ID
 			skipped++
-			_ = store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"academic_work_id": presentWork.ID, "document_id": presentDocument.DocumentID, "status": "skipped", "stage": "done", "error_code": "already_present", "updated_at": time.Now().UTC()}).Error
-			_ = reporter.SetProgress(ctx, int64(index+1), int64(len(items)))
+			if err := store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"academic_work_id": presentWork.ID, "document_id": presentDocument.DocumentID, "status": "skipped", "stage": "done", "error_code": "already_present", "updated_at": time.Now().UTC()}).Error; err != nil {
+				return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+			}
+			if err := reporter.SetProgress(ctx, int64(index+1), int64(len(items))); err != nil {
+				return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+			}
 			continue
 		}
-		_ = store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"stage": "acquire", "updated_at": time.Now().UTC()}).Error
+		if err := store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"stage": "acquire", "updated_at": time.Now().UTC()}).Error; err != nil {
+			return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+		}
 		contentType, extension, sourceURL := "application/pdf", ".pdf", candidate.URL
 		var path string
 		var err error
@@ -374,16 +432,24 @@ func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 		}
 		if err != nil {
 			failed++
-			markItemFailed(ctx, item, "download_failed", err)
-			_ = reporter.SetProgress(ctx, int64(index+1), int64(len(items)))
+			if err := markItemFailed(ctx, item, "download_failed", err); err != nil {
+				return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+			}
+			if err := reporter.SetProgress(ctx, int64(index+1), int64(len(items))); err != nil {
+				return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+			}
 			continue
 		}
-		_ = store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"stage": "import", "updated_at": time.Now().UTC()}).Error
+		if err := store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"stage": "import", "updated_at": time.Now().UTC()}).Error; err != nil {
+			return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+		}
 		var work orm.AcademicWork
 		if err = store.DB().WithContext(ctx).Where("id = ?", item.AcademicWorkID).Take(&work).Error; err != nil {
 			_ = os.Remove(path)
 			failed++
-			markItemFailed(ctx, item, "work_not_found", err)
+			if err := markItemFailed(ctx, item, "work_not_found", err); err != nil {
+				return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+			}
 			continue
 		}
 		filename := strings.TrimSpace(work.CanonicalTitle)
@@ -397,10 +463,17 @@ func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 		}
 		imported, importErr := doc.ImportLocalFile(ctx, doc.LocalFileImportRequest{DatasetID: batch.TargetDatasetID, ParentID: batch.TargetPID, SourcePath: path, DisplayName: filename, ContentType: contentType, DataSourceType: "ACADEMIC_PROVIDER", Tags: tags, UserID: payload.UserID, UserName: payload.UserName})
 		_ = os.Remove(path)
-		if importErr != nil && imported.DocumentID == "" {
+		if importErr = validatePaperImportResult(imported, importErr); importErr != nil {
 			failed++
-			markItemFailed(ctx, item, "import_failed", importErr)
-			_ = reporter.SetProgress(ctx, int64(index+1), int64(len(items)))
+			if err := markItemFailed(ctx, item, "import_failed", importErr); err != nil {
+				return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+			}
+			if err := store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"document_id": imported.DocumentID, "document_task_id": imported.TaskID, "content_sha256": imported.ContentSHA256}).Error; err != nil {
+				return asyncjob.Result{ErrorCode: "import_status_failed"}, errors.Join(importErr, err)
+			}
+			if err := reporter.SetProgress(ctx, int64(index+1), int64(len(items))); err != nil {
+				return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+			}
 			continue
 		}
 		_, version := NormalizeArxivID(candidate.URL)
@@ -408,33 +481,55 @@ func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 		link := orm.AcademicWorkDocument{AcademicWorkID: item.AcademicWorkID, DatasetID: batch.TargetDatasetID, DocumentID: imported.DocumentID, VersionKind: map[bool]string{true: "preprint", false: "unknown"}[candidate.SourceProvider == "arxiv"], SourceProvider: candidate.SourceProvider, SourceLocator: sourceURL, SourceVersion: version, ContentSHA256: imported.ContentSHA256, MatchMethod: "import", MatchConfidence: 1, IsPreferredVersion: true, CreatedAt: now, UpdatedAt: now}
 		if err := store.DB().WithContext(ctx).Create(&link).Error; err != nil {
 			failed++
-			markItemFailed(ctx, item, "link_failed", err)
+			if err := markItemFailed(ctx, item, "link_failed", err); err != nil {
+				return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+			}
 			continue
 		}
 		completed++
 		updates := map[string]any{"status": "succeeded", "stage": "done", "document_id": imported.DocumentID, "document_task_id": imported.TaskID, "content_sha256": imported.ContentSHA256, "updated_at": now}
-		if importErr != nil {
-			updates["error_code"] = "processing_start_failed"
-			details, _ := json.Marshal(map[string]string{"message": importErr.Error()})
-			updates["error_details_json"] = details
+
+		if err := store.DB().WithContext(ctx).Model(item).Updates(updates).Error; err != nil {
+			return asyncjob.Result{ErrorCode: "import_status_failed"}, err
 		}
-		_ = store.DB().WithContext(ctx).Model(item).Updates(updates).Error
-		_ = reporter.SetProgress(ctx, int64(index+1), int64(len(items)))
+		if err := reporter.SetProgress(ctx, int64(index+1), int64(len(items))); err != nil {
+			return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+		}
 	}
 	status := "succeeded"
 	var totalCompleted, totalFailed, totalSkipped int64
-	_ = store.DB().WithContext(ctx).Model(&orm.PaperImportItem{}).Where("batch_id = ? AND status = 'succeeded'", batch.ID).Count(&totalCompleted).Error
-	_ = store.DB().WithContext(ctx).Model(&orm.PaperImportItem{}).Where("batch_id = ? AND status = 'failed'", batch.ID).Count(&totalFailed).Error
-	_ = store.DB().WithContext(ctx).Model(&orm.PaperImportItem{}).Where("batch_id = ? AND status = 'skipped'", batch.ID).Count(&totalSkipped).Error
+	if err := store.DB().WithContext(ctx).Model(&orm.PaperImportItem{}).Where("batch_id = ? AND status = 'succeeded'", batch.ID).Count(&totalCompleted).Error; err != nil {
+		return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+	}
+	if err := store.DB().WithContext(ctx).Model(&orm.PaperImportItem{}).Where("batch_id = ? AND status = 'failed'", batch.ID).Count(&totalFailed).Error; err != nil {
+		return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+	}
+	if err := store.DB().WithContext(ctx).Model(&orm.PaperImportItem{}).Where("batch_id = ? AND status = 'skipped'", batch.ID).Count(&totalSkipped).Error; err != nil {
+		return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+	}
 	if totalFailed > 0 {
 		status = "completed_with_errors"
 	}
 	if totalCompleted == 0 && totalFailed > 0 {
 		status = "failed"
 	}
-	_ = store.DB().WithContext(ctx).Model(&batch).Updates(map[string]any{"status": status, "completed_items": totalCompleted, "failed_items": totalFailed, "skipped_items": totalSkipped, "updated_at": time.Now().UTC()}).Error
+	if err := store.DB().WithContext(ctx).Model(&batch).Updates(map[string]any{"status": status, "completed_items": totalCompleted, "failed_items": totalFailed, "skipped_items": totalSkipped, "updated_at": time.Now().UTC()}).Error; err != nil {
+		return asyncjob.Result{ErrorCode: "import_status_failed"}, err
+	}
 	result, _ := json.Marshal(map[string]any{"batch_id": batch.ID, "status": status, "completed": totalCompleted, "failed": totalFailed, "skipped": totalSkipped})
-	return asyncjob.Result{ResultJSON: result, Permanent: false, ErrorCode: map[bool]string{true: "partial_failure", false: ""}[failed > 0]}, nil
+	if totalFailed > 0 {
+		return asyncjob.Result{ResultJSON: result, Permanent: true, ErrorCode: "import_failed"}, fmt.Errorf("%d paper import items failed; inspect item errors before retrying", totalFailed)
+	}
+	return asyncjob.Result{ResultJSON: result}, nil
+}
+func validatePaperImportResult(imported doc.LocalFileImportResult, importErr error) error {
+	if importErr != nil {
+		return importErr
+	}
+	if imported.DocumentID == "" {
+		return errors.New("paper import did not return a document")
+	}
+	return nil
 }
 
 func findEquivalentPresentWork(ctx context.Context, workID, datasetID string) (orm.AcademicWork, orm.AcademicWorkDocument, bool) {
@@ -476,21 +571,23 @@ func findEquivalentPresentWork(ctx context.Context, workID, datasetID string) (o
 	return work, document, true
 }
 
-func associateReferencesWithWork(ctx context.Context, encoded json.RawMessage, workID, method string) {
+func associateReferencesWithWork(ctx context.Context, encoded json.RawMessage, workID, method string) error {
 	var referenceIDs []string
-	_ = json.Unmarshal(encoded, &referenceIDs)
-	if len(referenceIDs) == 0 || workID == "" {
-		return
+	if err := json.Unmarshal(encoded, &referenceIDs); err != nil {
+		return err
 	}
-	_ = store.DB().WithContext(ctx).Model(&orm.AcademicReference{}).Where("id IN ?", referenceIDs).Updates(map[string]any{
+	if len(referenceIDs) == 0 || workID == "" {
+		return nil
+	}
+	return store.DB().WithContext(ctx).Model(&orm.AcademicReference{}).Where("id IN ?", referenceIDs).Updates(map[string]any{
 		"resolved_work_id": workID, "resolution_status": "exact", "resolution_method": method,
 		"resolution_confidence": 1, "updated_at": time.Now().UTC(),
 	}).Error
 }
 
-func markItemFailed(ctx context.Context, item *orm.PaperImportItem, code string, err error) {
+func markItemFailed(ctx context.Context, item *orm.PaperImportItem, code string, err error) error {
 	details, _ := json.Marshal(map[string]string{"message": err.Error()})
-	_ = store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"status": "failed", "error_code": code, "error_details_json": details, "updated_at": time.Now().UTC()}).Error
+	return store.DB().WithContext(ctx).Model(item).Updates(map[string]any{"status": "failed", "error_code": code, "error_details_json": details, "updated_at": time.Now().UTC()}).Error
 }
 
 func safePaperFilename(value string) string {

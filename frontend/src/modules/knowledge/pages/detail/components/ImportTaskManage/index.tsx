@@ -1,10 +1,12 @@
 import { Drawer } from "antd";
 import { forwardRef, Ref, useImperativeHandle, useRef, useState } from "react";
 
-import ImportTaskList from "../ImportTaskList";
+import ImportTaskList, { TaskTab } from "../ImportTaskList";
+
+interface OpenData { dataset_id?: string; initialTab?: TaskTab }
 
 export interface IImportTaskManageRef {
-  handleOpen: (data?: { dataset_id?: string }) => void;
+  handleOpen: (data?: OpenData) => void;
 }
 
 interface IProps {
@@ -12,12 +14,12 @@ interface IProps {
 }
 
 const ImportTaskManage = (props: IProps, ref: Ref<unknown> | undefined) => {
-  const [data, setData] = useState<{ dataset_id?: string }>({});
+  const [data, setData] = useState<OpenData>({});
   const [visible, setVisible] = useState(false);
   const hasSuspendedRef = useRef(false);
   const { onClose } = props;
 
-  const handleOpen = (data: { dataset_id?: string } = {}) => {
+  const handleOpen = (data: OpenData = {}) => {
     setData(data);
     setVisible(true);
     hasSuspendedRef.current = false;
@@ -44,7 +46,9 @@ const ImportTaskManage = (props: IProps, ref: Ref<unknown> | undefined) => {
       onClose={handleClose}
     >
       <ImportTaskList
+        key={`${data.dataset_id}:${data.initialTab ?? TaskTab.Running}`}
         datasetId={data.dataset_id ?? ""}
+        initialTab={data.initialTab}
         onClose={handleClose}
         onSuspendSuccess={() => {
           hasSuspendedRef.current = true;

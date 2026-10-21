@@ -78,6 +78,8 @@ import {
 } from "@/runtime/desktopBridge";
 import { useConversationOpening } from "@/modules/chat/hooks/useConversationOpening";
 import ConversationGroups from "@/modules/chat/conversationOrganizer/ConversationGroups";
+import { isPaperLibrary } from "@/modules/knowledge/paper/store";
+import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
 import SidebarResizeHandle, { normalizeSidebarWidth, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "./SidebarResizeHandle";
 import "./index.scss";
 
@@ -166,16 +168,33 @@ export default function MainLayout() {
     matchPath("/memory-management/workflows/published/:workflowRef", pathname) ||
     matchPath("/memory-management/workflows/cloud/:resourceId", pathname),
   );
-  const defaultSidebarWidth = isWorkflowDetail ? SIDEBAR_MIN_WIDTH : SIDEBAR_MAX_WIDTH;
+  const knowledgeDatasetId = matchPath("/lib/knowledge/detail/:id", pathname)?.params.id;
+  const currentKnowledgeDataset = useDatasetPermissionStore((state) => state.currentDataset);
+  const libraryKind = currentKnowledgeDataset?.dataset_id === knowledgeDatasetId
+    ? currentKnowledgeDataset?.library_kind : undefined;
+  const isPaperLibraryDetail = Boolean(
+    matchPath("/lib/knowledge/paper-preview", pathname) || isPaperLibrary(knowledgeDatasetId, libraryKind),
+  );
+  const startsWithCompactSidebar = isWorkflowDetail || isPaperLibraryDetail;
+  const defaultSidebarWidth = startsWithCompactSidebar ? SIDEBAR_MIN_WIDTH : SIDEBAR_MAX_WIDTH;
   const [sidebarSize, setSidebarSize] = useState({
     pathname,
+    startsCompact: startsWithCompactSidebar,
+    manuallyResized: false,
     width: defaultSidebarWidth,
     normalWidth: SIDEBAR_MAX_WIDTH,
   });
-  // Workflow details start narrow without overwriting the width chosen for other pages.
-  const routeSidebarWidth = isWorkflowDetail ? SIDEBAR_MIN_WIDTH : sidebarSize.normalWidth;
-  if (sidebarSize.pathname !== pathname) {
-    setSidebarSize({ ...sidebarSize, pathname, width: routeSidebarWidth });
+  // Reading and workflow pages start narrow while preserving the user's width elsewhere.
+  const routeSidebarWidth = startsWithCompactSidebar ? SIDEBAR_MIN_WIDTH : sidebarSize.normalWidth;
+  const sidebarRouteChanged = sidebarSize.pathname !== pathname;
+  if (sidebarRouteChanged || sidebarSize.startsCompact !== startsWithCompactSidebar) {
+    setSidebarSize({
+      ...sidebarSize,
+      pathname,
+      startsCompact: startsWithCompactSidebar,
+      manuallyResized: sidebarRouteChanged ? false : sidebarSize.manuallyResized,
+      width: sidebarRouteChanged || !sidebarSize.manuallyResized ? routeSidebarWidth : sidebarSize.width,
+    });
   }
   const sidebarWidth = normalizeSidebarWidth(
     sidebarSize.pathname === pathname ? sidebarSize.width : routeSidebarWidth,
@@ -183,8 +202,10 @@ export default function MainLayout() {
   const isMenuCollapsed = sidebarWidth === SIDEBAR_MIN_WIDTH;
   const resizeSidebar = (width: number) => setSidebarSize({
     pathname,
+    startsCompact: startsWithCompactSidebar,
+    manuallyResized: true,
     width,
-    normalWidth: isWorkflowDetail ? sidebarSize.normalWidth : width,
+    normalWidth: startsWithCompactSidebar ? sidebarSize.normalWidth : width,
   });
   const sidebarSearchRef = useRef<InputRef>(null);
   const sidebarHistoryRef = useRef<HTMLDivElement>(null);

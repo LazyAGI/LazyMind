@@ -34,20 +34,16 @@ export async function paperFromPdf(file: File): Promise<PaperItem> {
     incomplete: !title,
   };
   if (found.doi) {
-    try {
-      const looked = await lookupDoi(found.doi);
-      paper = {
-        ...paper,
-        title: title || looked.title,
-        authors: info.Author?.trim() ? paper.authors : looked.authors,
-        venue: looked.venue || paper.venue,
-        year: looked.year || paper.year,
-        doi: looked.doi || paper.doi,
-        incomplete: !title && !looked.title,
-      };
-    } catch {
-      paper.incomplete = true;
-    }
+    const looked = await lookupDoi(found.doi);
+    paper = {
+      ...paper,
+      title: title || looked.title,
+      authors: info.Author?.trim() ? paper.authors : looked.authors,
+      venue: looked.venue || paper.venue,
+      year: looked.year || paper.year,
+      doi: looked.doi || paper.doi,
+      incomplete: !title && !looked.title,
+    };
   }
   return paper;
 }

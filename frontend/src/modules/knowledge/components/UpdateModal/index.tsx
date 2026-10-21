@@ -23,6 +23,7 @@ import {
 } from "@/modules/knowledge/utils/processingLevel";
 import { getKnowledgeBaseCapabilities, getLearningCatalog, saveKnowledgeBaseCapabilities, type LearningCapability } from "@/modules/learning/api";
 import CapabilitySettings, { capabilityRefsFromForm, parseCapabilitySettings } from "@/modules/learning/CapabilitySettings";
+import { isPaperLibrary } from "@/modules/knowledge/paper/store";
 
 const { TextArea } = Input;
 const KNOWLEDGE_TAG_MAX_LENGTH = 20;
@@ -152,6 +153,9 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
         const learningCapabilitySettings = params.learning_capability_settings || {};
         delete params.learning_capability_keys;
         delete params.learning_capability_settings;
+        if (data?.library_kind === undefined && isPaperLibrary(data?.dataset_id)) {
+          params.library_kind = "paper";
+        }
         const selectedAlgoId =
           params.algo_id ||
           (algorithm.length === 1 ? algorithm[0]?.algo_id : undefined);
