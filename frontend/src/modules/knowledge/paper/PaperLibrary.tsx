@@ -624,7 +624,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
               <PaperDragHandle item={item} folders={folderOptions} onMove={(folder) => placePapers(selected.includes(item.id) ? selected : [item.id], folder)} onDragStart={(event) => startPaperDrag(event, item)} onDragEnd={endPaperDrag} />
               </div></td>
               <td className="paper-library-main">
-                  <div className="paper-library-title-line"><h2 className="paper-library-title"><a className="paper-library-title-button" href={paperReadingUrl(item.id) || `#paper-${item.id}`} target={paperReadingUrl(item.id) ? "_blank" : undefined} rel="noopener" onClick={(event) => { if (!paperReadingUrl(item.id)) { event.preventDefault(); setDetailPaperId(item.id); } }}>{item.title}</a></h2>
+                  <div className="paper-library-title-line"><h2 className="paper-library-title"><a className="paper-library-title-button" href={paperReadingUrl(item.id) || `#paper-${item.id}`} onClick={(event) => { if (!paperReadingUrl(item.id)) { event.preventDefault(); setDetailPaperId(item.id); } }}>{item.title}</a></h2>
                     <button
                       type="button"
                       className={`paper-library-star ${item.important ? "on" : ""}`}

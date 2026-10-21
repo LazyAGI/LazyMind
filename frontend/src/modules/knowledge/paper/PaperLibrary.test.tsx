@@ -143,7 +143,7 @@ afterEach(async () => {
 });
 
 describe("paper library navigation and import", () => {
-  it("opens the primary readable PDF directly from the paper title", () => {
+  it("opens the primary readable PDF in the current tab from the paper title", () => {
     const data = loadPaperLibraryV3(datasetId);
     const primary = { ...data.attachments[0], id: "primary-pdf", contentRef: "primary-doc", isPrimary: true };
     data.attachments[0].isPrimary = false;
@@ -153,7 +153,7 @@ describe("paper library navigation and import", () => {
     renderLibrary();
     const link = screen.getByRole("link", { name: "Folder paper" });
     expect(link).toHaveAttribute("href", `/lib/knowledge/knowledge/${datasetId}/primary-doc`);
-    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).not.toHaveAttribute("target");
     expect(screen.queryByRole("dialog", { name: "文献详情" })).not.toBeInTheDocument();
   });
 
