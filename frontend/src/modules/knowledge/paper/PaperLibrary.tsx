@@ -29,8 +29,8 @@ import {
   type PaperLibraryData,
   type ReadingStatus,
 } from "./model";
-import { loadPaperLibrary, loadPaperLibraryV3, savePaperLibraryV3 } from "./store";
-import { createAttachment, type Attachment, type PaperLibraryDataV3 } from "./libraryModel";
+import { loadPaperLibraryV3, savePaperLibraryV3, loadPersistedPaperLibrary, savePersistedPaperLibrary } from "./store";
+import { asLegacyLibrary, emptyLibraryV3, createAttachment, type Attachment, type PaperLibraryDataV3 } from "./libraryModel";
 import PaperDetailDrawer from "./PaperDetailDrawer";
 import { lookupIdentifier } from "./scholar";
 import { paperFromPdf } from "./pdfMeta";
@@ -74,14 +74,29 @@ async function copyText(value: string, label: string) {
 
 export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = "论文库", onBack }: Props) {
   const dragSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-  const [data, setData] = useState<PaperLibraryData>(() => loadPaperLibrary(datasetId, preview));
-  const [modernData, setModernData] = useState<PaperLibraryDataV3>(() => loadPaperLibraryV3(datasetId, preview));
+  const isDemo = !!preview || datasetId === "paper-preview";
+  const datasetScopeRef = useRef({ datasetId, isDemo, active: true });
+  if (datasetScopeRef.current.datasetId !== datasetId || datasetScopeRef.current.isDemo !== isDemo) datasetScopeRef.current = { datasetId, isDemo, active: true };
+  const datasetScope = datasetScopeRef.current;
+  const isCurrentScope = () => datasetScopeRef.current === datasetScope && datasetScope.active;
+  const [modernData, setModernData] = useState<PaperLibraryDataV3>(() => isDemo ? loadPaperLibraryV3(datasetId, true) : emptyLibraryV3());
+  const [data, setData] = useState<PaperLibraryData>(() => asLegacyLibrary(modernData));
+  const [loading, setLoading] = useState(!isDemo);
+  const [saving, setSaving] = useState(false);
+  const [canWrite, setCanWrite] = useState(isDemo);
+  const [persistenceError, setPersistenceError] = useState<string | null>(null);
+  const revisionRef = useRef(0);
+  const loadedRef = useRef(isDemo);
+  const canWriteRef = useRef(isDemo);
+  const busyRef = useRef(false);
+  const activeDatasetRef = useRef(datasetId);
+  activeDatasetRef.current = datasetId;
+  const disabled = loading || saving || !canWrite;
   const modernDataRef = useRef(modernData);
   const syncGeneration = useRef(0);
   const [syncRevision, setSyncRevision] = useState(0);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [pendingArxiv, setPendingArxiv] = useState<PaperItem | null>(null);
-  const isDemo = !!preview || datasetId === "paper-preview";
   const [detailPaperId, setDetailPaperId] = useState<string | null>(null);
   const [folderId, setFolderId] = useState<string | null>(null);
   const [libraryView, setLibraryView] = useState<LibraryView>("all");
@@ -97,20 +112,123 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
   const [importMethod, setImportMethod] = useState<ImportMethod | null>(null);
   const [folderDialogOpen, setFolderDialogOpen] = useState(false);
   const [editing, setEditing] = useState<PaperItem | null>(null);
+  const editingRevisionRef = useRef<number | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
   const [folderName, setFolderName] = useState("");
   const [identifier, setIdentifier] = useState("");
   const [bibliography, setBibliography] = useState("");
   const bibliographyKind = "local";
   const [format, setFormat] = useState<"bib" | "ris" | "csv">("bib");
   const [searching, setSearching] = useState(false);
-  const [pending, setPending] = useState<{ fresh: PaperItem[]; skipped: PaperItem[]; folders: PaperLibraryData["folders"] } | null>(null);
+  const [pending, setPending] = useState<{ fresh: PaperItem[]; skipped: PaperItem[]; folders: PaperLibraryData["folders"]; baseFolderIds?: string[] } | null>(null);
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
   const [importError, setImportError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const persist = (next: PaperLibraryData, attachments: Attachment[] = []) => {
+  const applySnapshot = useCallback((next: PaperLibraryDataV3) => {
+    modernDataRef.current = next;
+    setModernData(next);
+    setData(asLegacyLibrary(next));
+  }, []);
+
+  const reload = useCallback(async () => {
+    if (isDemo || busyRef.current || datasetScopeRef.current !== datasetScope || !datasetScope.active) return;
+    busyRef.current = true;
+    const generation = ++syncGeneration.current;
+    setLoading(true);
+    setPersistenceError(null);
+    try {
+      const saved = await loadPersistedPaperLibrary(datasetId);
+      if (generation !== syncGeneration.current || activeDatasetRef.current !== datasetId) return;
+      revisionRef.current = saved.revision;
+      loadedRef.current = true;
+      canWriteRef.current = saved.canWrite;
+      setCanWrite(saved.canWrite);
+      applySnapshot(saved.data);
+      setSyncRevision((value) => value + 1);
+    } catch (error) {
+      if (generation === syncGeneration.current && activeDatasetRef.current === datasetId) {
+        loadedRef.current = false;
+        canWriteRef.current = false;
+        setCanWrite(false);
+        setPersistenceError(error instanceof Error ? error.message : "无法加载已保存的文献，请重试");
+      }
+    } finally {
+      if (generation === syncGeneration.current && activeDatasetRef.current === datasetId) {
+        busyRef.current = false;
+        setLoading(false);
+      }
+    }
+  }, [datasetId, isDemo, datasetScope, applySnapshot]);
+
+  useEffect(() => {
+    datasetScope.active = true;
+    syncGeneration.current += 1;
+    busyRef.current = false;
+    loadedRef.current = isDemo;
+    canWriteRef.current = isDemo;
+    setCanWrite(isDemo);
+    setSaving(false);
+    setPersistenceError(null);
+    setSyncError(null);
+    setSelected([]);
+    setDetailPaperId(null);
+    setFolderId(null);
+    setSheet(null);
+    setImportMethod(null);
+    setSearching(false);
+    setPending(null);
+    setPendingArxiv(null);
+    setPendingAttachments([]);
+    if (isDemo) {
+      applySnapshot(loadPaperLibraryV3(datasetId, true));
+      setLoading(false);
+    } else {
+      applySnapshot(emptyLibraryV3());
+      void reload();
+    }
+    const onFocus = () => { void reload(); };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      datasetScope.active = false;
+      syncGeneration.current += 1;
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [datasetId, isDemo, datasetScope, reload, applySnapshot]);
+
+  const persistModern = useCallback(async (next: PaperLibraryDataV3) => {
+    if (datasetScopeRef.current !== datasetScope || !datasetScope.active) throw new Error("文献库已切换，请重新打开后重试");
+    if (busyRef.current || !loadedRef.current || !canWriteRef.current) throw new Error("文献库尚未就绪、正在保存或没有编辑权限，请稍后重试");
+    busyRef.current = true;
+    const generation = ++syncGeneration.current;
+    setSaving(true);
+    setPersistenceError(null);
+    try {
+      if (isDemo) {
+        savePaperLibraryV3(datasetId, next);
+        applySnapshot(next);
+      } else {
+        const saved = await savePersistedPaperLibrary(datasetId, next, revisionRef.current);
+        if (generation !== syncGeneration.current || activeDatasetRef.current !== datasetId) throw new Error("文献库已切换，请重新加载查看保存结果");
+        revisionRef.current = saved.revision;
+        canWriteRef.current = saved.canWrite;
+        setCanWrite(saved.canWrite);
+        applySnapshot(saved.data);
+      }
+    } catch (error) {
+      if (generation === syncGeneration.current && activeDatasetRef.current === datasetId) setPersistenceError(error instanceof Error ? error.message : "文献保存失败，请重试");
+      throw error;
+    } finally {
+      if (generation === syncGeneration.current && activeDatasetRef.current === datasetId) {
+        busyRef.current = false;
+        setSaving(false);
+      }
+    }
+  }, [datasetId, isDemo, datasetScope, applySnapshot]);
+
+  const persist = async (next: PaperLibraryData, attachments: Attachment[] = []) => {
     const current = modernDataRef.current;
-    const modern: PaperLibraryDataV3 = {
+    await persistModern({
       ...current,
       folders: next.folders,
       attachments: [...current.attachments, ...attachments],
@@ -118,44 +236,46 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
         const previous = current.papers.find((paper) => paper.id === item.id);
         return previous ? { ...previous, ...item, metadata: { ...previous.metadata, identifiers: { ...previous.metadata.identifiers, doi: item.doi, arxiv: item.arxiv } } } : { ...item, metadata: { identifiers: { doi: item.doi, arxiv: item.arxiv }, confidence: {} }, attachmentIds: attachments.filter((attachment) => attachment.paperId === item.id).map((attachment) => attachment.id), noteIds: [], annotationIds: [], collectionIds: [], relatedPaperIds: [] };
       }),
-    };
-    savePaperLibraryV3(datasetId, modern);
-    setData(next);
-    modernDataRef.current = modern;
-    setModernData(modern);
+    });
   };
-  const persistModern = (next: PaperLibraryDataV3) => {
-    savePaperLibraryV3(datasetId, next);
-    modernDataRef.current = next;
-    setModernData(next);
-    setData({ folders: next.folders, papers: next.papers.map(({ metadata, attachmentIds, noteIds, annotationIds, collectionIds, relatedPaperIds, ...item }) => item) });
+
+  const updatePaper = async (id: string, changes: Partial<PaperItem>) => {
+    try {
+      const current = asLegacyLibrary(modernDataRef.current);
+      await persist({ ...current, papers: current.papers.map((paper) => paper.id === id ? { ...paper, ...changes } : paper) });
+    } catch { /* persistModern keeps the error visible and retains the last saved snapshot. */ }
   };
 
   useEffect(() => {
-    if (isDemo) return;
+    if (isDemo || !loadedRef.current) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const retry = () => { if (!cancelled) timer = setTimeout(sync, 12000); };
     const sync = async () => {
+      if (busyRef.current) { retry(); return; }
       const generation = syncGeneration.current;
       try {
         const imported = await listImportedArxivPapers(datasetId);
-        if (cancelled || generation !== syncGeneration.current) return;
+        if (cancelled) return;
+        if (generation !== syncGeneration.current || busyRef.current) { retry(); return; }
         if (imported.length) {
-          const next = mergeArxivImports(modernDataRef.current, imported);
-          savePaperLibraryV3(datasetId, next);
-          modernDataRef.current = next;
-          setModernData(next);
-          setData({ folders: next.folders, papers: next.papers });
+          const current = modernDataRef.current;
+          const next = mergeArxivImports(current, imported);
+          if (JSON.stringify(next) !== JSON.stringify(current)) {
+            if (canWriteRef.current) await persistModern(next);
+            else applySnapshot(next);
+          }
         }
+        if (cancelled) return;
         setSyncError(null);
-        if (imported.some((item) => item.processing_status === "parsing")) timer = setTimeout(sync, 12000);
+        if (imported.some((item) => item.processing_status === "parsing")) retry();
       } catch (error) {
-        if (!cancelled && generation === syncGeneration.current) setSyncError(error instanceof Error ? error.message : "无法同步已保存的 arXiv 文献");
+        if (!cancelled) setSyncError(error instanceof Error ? error.message : "无法同步已保存的 arXiv 文献");
       }
     };
     void sync();
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [datasetId, isDemo, syncRevision]);
+  }, [datasetId, isDemo, syncRevision, persistModern, applySnapshot]);
 
   const scoped = useMemo(() => papersInView(data, folderId), [data, folderId]);
   const viewed = useMemo(() => filterLibraryView(scoped, libraryView), [scoped, libraryView]);
@@ -194,18 +314,32 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
       setPending(null);
       throw new Error("没有识别到文献，请检查文件内容或题录格式");
     }
-    const placed = assignFolders(data, items, folderNames || items.map(() => null), folderId);
-    const planned = planImport(data.papers, placed.papers);
-    setPending({ ...planned, folders: placed.folders });
+    const current = asLegacyLibrary(modernDataRef.current);
+    const targetFolder = current.folders.some((folder) => folder.id === folderId) ? folderId : null;
+    const placed = assignFolders(current, items, folderNames || items.map(() => null), targetFolder);
+    const planned = planImport(current.papers, placed.papers);
+    setPending({ ...planned, folders: placed.folders, baseFolderIds: current.folders.map((folder) => folder.id) });
     if (!planned.fresh.length) message.info(`库中已有，跳过 ${planned.skipped.length} 篇`);
   };
 
-  const commit = () => {
-    if (!pending?.fresh.length) return;
+  const commit = async () => {
+    if (disabled || busyRef.current || !pending?.fresh.length) return;
     setImportError(null);
     try {
-      persist({ folders: pending.folders, papers: [...pending.fresh, ...data.papers] }, pendingAttachments.filter((attachment) => pending.fresh.some((paper) => paper.id === attachment.paperId)));
-      message.success(`已加入 ${pending.fresh.length} 篇，跳过 ${pending.skipped.length} 篇`);
+      const current = asLegacyLibrary(modernDataRef.current);
+      const folders = [...current.folders];
+      const folderIds = new Map(current.folders.map((folder) => [folder.id, folder.id]));
+      for (const folder of pending.folders) {
+        if (folderIds.has(folder.id) || pending.baseFolderIds?.includes(folder.id)) continue;
+        const existing = folders.find((item) => item.name === folder.name);
+        if (!existing) folders.push(folder);
+        folderIds.set(folder.id, existing?.id || folder.id);
+      }
+      const planned = planImport(current.papers, pending.fresh.map((paper) => ({ ...paper, folderId: paper.folderId ? folderIds.get(paper.folderId) || null : null })));
+      if (planned.fresh.length) {
+        await persist({ folders, papers: [...planned.fresh, ...current.papers] }, pendingAttachments.filter((attachment) => planned.fresh.some((paper) => paper.id === attachment.paperId)));
+        message.success(`已加入 ${planned.fresh.length} 篇，跳过 ${pending.skipped.length + planned.skipped.length} 篇`);
+      } else message.info(`库中已有，跳过 ${planned.skipped.length} 篇`);
       clearImportResult();
       setImportMethod(null);
     } catch (error) {
@@ -213,7 +347,8 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
     }
   };
 
-  const addFolder = () => {
+  const addFolder = async () => {
+    if (disabled || busyRef.current) return;
     const name = folderName.trim();
     if (!name) return;
     if (data.folders.some((folder) => folder.name === name)) {
@@ -221,10 +356,12 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
       return;
     }
     const folder = { id: `folder-${crypto.randomUUID()}`, name };
-    persist({ ...data, folders: [...data.folders, folder] });
-    setFolderName("");
-    setFolderDialogOpen(false);
-    selectView(folder.id);
+    try {
+      await persist({ ...data, folders: [...data.folders, folder] });
+      setFolderName("");
+      setFolderDialogOpen(false);
+      selectView(folder.id);
+    } catch { /* Keep the folder draft and the persistence error visible. */ }
   };
 
   const selectView = (id: string | null, view: LibraryView = "all") => {
@@ -235,14 +372,14 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
 
   const currentFolder = data.folders.find((folder) => folder.id === folderId);
   const deleteFolder = () => {
-    if (!currentFolder) return;
+    if (disabled || busyRef.current || !currentFolder) return;
     Modal.confirm({
       title: `删除文件夹「${currentFolder.name}」？`,
       content: "仅删除文件夹，其中文献、附件和笔记仍保留在“全部”中。",
       okText: "删除文件夹", cancelText: "取消", okButtonProps: { danger: true },
-      onOk: () => {
+      onOk: async () => {
         const latest = modernDataRef.current;
-        persistModern({
+        await persistModern({
           ...latest,
           folders: latest.folders.filter((folder) => folder.id !== currentFolder.id),
           collections: latest.collections.filter((collection) => collection.id !== currentFolder.id),
@@ -255,16 +392,18 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
   };
 
   const openImport = (method: ImportMethod) => {
+    if (disabled || busyRef.current) return;
     clearImportResult();
     setImportMethod(method);
   };
 
-  const dropPapers = (ids: string[]) => {
+  const dropPapers = async (ids: string[]) => {
+    if (disabled || busyRef.current) return;
     const current = modernDataRef.current;
     const removed = current.papers.filter((paper) => ids.includes(paper.id) && paper.academicWorkId);
     const workIds = new Set(removed.map((paper) => paper.academicWorkId!));
     try {
-      persistModern({
+      await persistModern({
         ...current,
         papers: current.papers.filter((paper) => !ids.includes(paper.id)),
         hiddenArxivWorkIds: [...new Set([...(current.hiddenArxivWorkIds || []), ...workIds])],
@@ -281,7 +420,8 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
     }
   };
 
-  const placePapers = (ids: string[], folder: string) => {
+  const placePapers = async (ids: string[], folder: string) => {
+    if (disabled || busyRef.current) return false;
     const target = folder === "none" ? null : folder;
     if (target && !data.folders.some((item) => item.id === target)) {
       message.error("目标文件夹已不存在，请重新选择");
@@ -290,7 +430,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
     const moving = data.papers.filter((item) => ids.includes(item.id) && item.folderId !== target).map((item) => item.id);
     if (!moving.length) return false;
     try {
-      persist({ ...data, papers: movePapers(data.papers, moving, target) });
+      await persist({ ...data, papers: movePapers(data.papers, moving, target) });
       setSelected((current) => current.filter((id) => !moving.includes(id)));
       message.success(`已将 ${moving.length} 篇文献移至${target ? `「${data.folders.find((item) => item.id === target)?.name}」` : "未分组"}`);
       return true;
@@ -306,6 +446,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
     setDropFolderId(null);
   };
   const startPaperDrag = (event: DragEvent<HTMLButtonElement>, item: PaperItem) => {
+    if (disabled || busyRef.current) { event.preventDefault(); return; }
     const ids = selected.includes(item.id) ? selectedPapers.map((paper) => paper.id) : [item.id];
     paperDrag.current = { datasetId, ids };
     event.dataTransfer.setData(PAPER_DRAG_TYPE, JSON.stringify(paperDrag.current));
@@ -316,7 +457,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
   };
   const canDropPapers = (event: DragEvent<HTMLButtonElement>, folder: string) => {
     const drag = paperDrag.current;
-    return drag?.datasetId === datasetId && Array.from(event.dataTransfer.types).includes(PAPER_DRAG_TYPE)
+    return !disabled && !busyRef.current && drag?.datasetId === datasetId && Array.from(event.dataTransfer.types).includes(PAPER_DRAG_TYPE)
       && data.folders.some((item) => item.id === folder)
       && data.papers.some((item) => drag.ids.includes(item.id) && item.folderId !== folder);
   };
@@ -336,23 +477,33 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
     }
   };
 
-  const saveEdits = (edits: PaperEdits) => {
-    if (!editing) return;
-    const next = applyPaperEdits(editing, edits);
+  const saveEdits = async (edits: PaperEdits) => {
+    if (disabled || busyRef.current || !editing) return;
+    if (editingRevisionRef.current !== revisionRef.current) {
+      setEditError("文献库已更新。为避免覆盖其他修改，请保留当前草稿并重新打开编辑。");
+      return;
+    }
+    setEditError(null);
+    const latest = modernDataRef.current.papers.find((paper) => paper.id === editing.id);
+    if (!latest) { setEditError("文献已被移除，请重新加载后编辑"); return; }
+    const next = applyPaperEdits(latest, edits);
     const clash = duplicateOf(data.papers.filter((item) => item.id !== editing.id), next);
     if (clash) {
       message.info(`库中已有：${clash.title}`);
       return;
     }
-    persist({ ...data, papers: data.papers.map((item) => item.id === editing.id ? next : item) });
-    message.success(next.incomplete ? "题录仍待补全" : "题录已保存");
-    setEditing(next);
-    setSheet(null);
+    try {
+      await persist({ ...data, papers: data.papers.map((item) => item.id === editing.id ? next : item) });
+      message.success(next.incomplete ? "题录仍待补全" : "题录已保存");
+      setEditing(next);
+      setSheet(null);
+    } catch (error) { setEditError(error instanceof Error ? error.message : "文献保存失败，请重试"); }
   };
 
   const folderOptions = [{ value: "none", label: "未分组" }, ...data.folders.map((folder) => ({ value: folder.id, label: folder.name }))];
 
   const importBibliography = () => {
+    if (disabled || busyRef.current) return;
     clearImportResult();
     try {
       const parsed = format === "ris"
@@ -369,7 +520,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
   };
 
   const importIdentifier = async () => {
-    if (searching) return;
+    if (disabled || busyRef.current || searching) return;
     clearImportResult();
     const kind = classifyIdentifier(identifier);
     const arxivInput = isArxivInput(identifier);
@@ -402,48 +553,56 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
     setSearching(true);
     try {
       const item = await lookupIdentifier(identifier);
+      if (!isCurrentScope()) return;
       if (item.source === "arxiv") setPendingArxiv(item);
       else stage([item]);
     } catch (error) {
-      showImportError(error, "没有查到这篇论文");
+      if (isCurrentScope()) showImportError(error, "没有查到这篇论文");
     } finally {
-      setSearching(false);
+      if (isCurrentScope()) setSearching(false);
     }
   };
 
   const commitArxiv = async () => {
-    if (!pendingArxiv || searching || isDemo) return;
+    if (disabled || busyRef.current || !pendingArxiv || searching || isDemo) return;
     setImportError(null);
     setSearching(true);
     try {
       const imported = await importArxivPaper(`arXiv:${pendingArxiv.arxiv}${pendingArxiv.arxivVersion || ""}`, datasetId);
-      persistModern(mergeArxivImports(modernDataRef.current, [imported], folderId, true));
+      if (!isCurrentScope()) return;
+      const current = modernDataRef.current;
+      const targetFolder = current.folders.some((folder) => folder.id === folderId) ? folderId : null;
+      await persistModern(mergeArxivImports(current, [imported], targetFolder, true));
+      if (!isCurrentScope()) return;
       if (imported.processing_status === "failed") throw new Error(imported.processing_error || "PDF 已保存，但正文解析失败");
       message.success(imported.status === "already_present" ? "已复用该版本 PDF" : imported.processing_status === "parsing" ? "文献与 PDF 已保存，正文解析中" : "文献与 PDF 已保存");
       clearImportResult();
       setImportMethod(null);
     } catch (error) {
-      showImportError(error, "arXiv 导入失败，请重试");
+      if (isCurrentScope()) showImportError(error, "arXiv 导入失败，请重试");
     } finally {
-      syncGeneration.current += 1;
-      setSyncRevision((value) => value + 1);
-      setSearching(false);
+      if (isCurrentScope()) {
+        setSyncRevision((value) => value + 1);
+        setSearching(false);
+      }
     }
   };
 
   const importFile = async (file: File) => {
-    if (searching) return;
+    if (disabled || busyRef.current || searching) return;
     clearImportResult();
     const name = file.name.toLowerCase();
     setSearching(true);
     try {
       if (name.endsWith(".pdf")) {
         const item = await paperFromPdf(file);
+        if (!isCurrentScope()) return;
         const duplicate = duplicateOf(data.papers, item);
         let documentId: string | undefined;
         if (!duplicate && !preview) {
           if (!onUploadPdf) throw new Error("当前论文库无法上传 PDF，请刷新页面后重试");
           const uploadedId = await onUploadPdf(file);
+          if (!isCurrentScope()) return;
           if (typeof uploadedId !== "string" || !uploadedId.trim()) throw new Error("PDF 上传未返回有效文档 ID，请重试");
           documentId = uploadedId.trim();
         }
@@ -453,6 +612,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
         return;
       }
       const text = await file.text();
+      if (!isCurrentScope()) return;
       if (name.endsWith(".ris")) stage(parseRIS(text, "local"));
       else if (name.endsWith(".csv")) {
         const parsed = parseCSV(text);
@@ -460,11 +620,13 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
       } else if (name.endsWith(".bib")) stage(parseBibTeX(text, "local"));
       else throw new Error("请选择 PDF、BibTeX、RIS 或 CSV 文件");
     } catch (error) {
-      setPending(null);
-      setPendingAttachments([]);
-      showImportError(error, "文件没有读出来");
+      if (isCurrentScope()) {
+        setPending(null);
+        setPendingAttachments([]);
+        showImportError(error, "文件没有读出来");
+      }
     } finally {
-      setSearching(false);
+      if (isCurrentScope()) setSearching(false);
     }
   };
 
@@ -489,6 +651,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
         },
       }}
       onDragStart={({ active }: DragStartEvent) => {
+        if (disabled || busyRef.current) return;
         const item = data.papers.find((paper) => paper.id === active.id);
         if (!item) return;
         const ids = selected.includes(item.id) ? selectedPapers.map((paper) => paper.id) : [item.id];
@@ -527,7 +690,10 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
           </Dropdown>
         </div>
       </header>
-      {syncError && <Alert className="paper-library-sync-error" type="error" showIcon message="文献同步失败" description={syncError} action={<Button size="small" onClick={() => setSyncRevision((value) => value + 1)}>重新同步</Button>} />}
+      {loading && <p role="status">正在加载已保存的文献…</p>}
+      {persistenceError && <Alert className="paper-library-sync-error" type="error" showIcon message="文献保存或加载失败" description={persistenceError} action={<Button size="small" disabled={loading || saving} onClick={() => void reload()}>重新加载</Button>} />}
+      {!loading && !canWrite && !persistenceError && <Alert type="info" showIcon message="当前文献库为只读，无法编辑" />}
+      {syncError && <Alert className="paper-library-sync-error" type="error" showIcon message="文献同步失败" description={syncError} action={<Button size="small" disabled={loading || saving} onClick={() => setSyncRevision((value) => value + 1)}>重新同步</Button>} />}
       <div className="paper-library-layout">
         <nav className="paper-library-rail" aria-label="文献浏览">
           <Dropdown trigger={["click"]} placement="bottomLeft" menu={{ items: [
@@ -535,13 +701,13 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
             { key: "identifier", icon: <LinkOutlined />, label: "arXiv / DOI 链接", onClick: () => openImport("identifier") },
             { key: "bibliography", icon: <FileTextOutlined />, label: "BibTeX / RIS / CSV", onClick: () => openImport("bibliography") },
           ] }}>
-            <Button className="paper-library-import-button" type="primary" icon={<PlusOutlined />}>导入<DownOutlined /></Button>
+            <Button className="paper-library-import-button" disabled={disabled} type="primary" icon={<PlusOutlined />}>导入<DownOutlined /></Button>
           </Dropdown>
           <div className="paper-library-browse-head">
             <span className="paper-library-rail-label">浏览</span>
             <div className="paper-library-folder-tools">
-              <Tooltip title="新建文件夹"><Button type="text" size="small" icon={<PlusOutlined />} aria-label="新建文件夹" onClick={() => { setFolderName(""); setFolderDialogOpen(true); }} /></Tooltip>
-              <Tooltip title={currentFolder ? "删除当前文件夹" : "选择文件夹后删除"}><span><Button type="text" size="small" icon={<DeleteOutlined />} aria-label="删除文件夹" disabled={!currentFolder} onClick={deleteFolder} /></span></Tooltip>
+              <Tooltip title="新建文件夹"><Button type="text" size="small" icon={<PlusOutlined />} aria-label="新建文件夹" disabled={disabled} onClick={() => { setFolderName(""); setFolderDialogOpen(true); }} /></Tooltip>
+              <Tooltip title={currentFolder ? "删除当前文件夹" : "选择文件夹后删除"}><span><Button type="text" size="small" icon={<DeleteOutlined />} aria-label="删除文件夹" disabled={disabled || !currentFolder} onClick={deleteFolder} /></span></Tooltip>
             </div>
           </div>
           <FolderButton icon={<FileTextOutlined />} name="全部" count={data.papers.length} current={!folderId && libraryView === "all"} onClick={() => selectView(null)} />
@@ -557,7 +723,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
                 current={folderId === folder.id}
                 onClick={() => selectView(folder.id)}
                 dropId={folder.id}
-                acceptsDrop={data.papers.some((item) => draggedIds.includes(item.id) && item.folderId !== folder.id)}
+                acceptsDrop={!disabled && data.papers.some((item) => draggedIds.includes(item.id) && item.folderId !== folder.id)}
                 dropTarget={dropFolderId === folder.id}
                 onDragOver={(event) => {
                   if (!canDropPapers(event, folder.id)) return;
@@ -579,8 +745,8 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
           {selectedPapers.length > 0 && (
         <div className="paper-library-selection-bar" role="region" aria-label="已选论文">
           <div className="paper-library-selection-summary"><Button type="text" size="small" aria-label="取消选择" icon={<CloseOutlined />} onClick={() => setSelected([])} /><span>已选 <strong>{selectedPapers.length}</strong> 篇</span></div>
-          <Dropdown trigger={["click"]} menu={{ items: folderOptions.map((folder) => ({ key: folder.value, label: folder.label, onClick: () => placePapers(selected, folder.value) })) }}><Button type="text" size="small" icon={<FolderOutlined />}>移动到<DownOutlined /></Button></Dropdown>
-          <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({ title: `移除已选的 ${selectedPapers.length} 篇题录？`, okText: "移除", cancelText: "取消", onOk: () => dropPapers(selected) })}>移除</Button>
+          <Dropdown trigger={["click"]} menu={{ items: folderOptions.map((folder) => ({ key: folder.value, label: folder.label, onClick: () => placePapers(selected, folder.value) })) }}><Button type="text" size="small" disabled={disabled} icon={<FolderOutlined />}>移动到<DownOutlined /></Button></Dropdown>
+          <Button type="text" size="small" disabled={disabled} danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({ title: `移除已选的 ${selectedPapers.length} 篇题录？`, okText: "移除", cancelText: "取消", onOk: () => dropPapers(selected) })}>移除</Button>
           <Dropdown menu={{ items: [
             { key: "export-selected", label: "导出已选", children: (["bib", "ris", "csv"] as const).map((exportFormat) => ({
               key: `export-selected-${exportFormat}`,
@@ -621,16 +787,17 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
                 checked={selected.includes(item.id)}
                 onChange={(event: ChangeEvent<HTMLInputElement>) => setSelected(event.target.checked ? [...selected, item.id] : selected.filter((id) => id !== item.id))}
               />
-              <PaperDragHandle item={item} folders={folderOptions} onMove={(folder) => placePapers(selected.includes(item.id) ? selected : [item.id], folder)} onDragStart={(event) => startPaperDrag(event, item)} onDragEnd={endPaperDrag} />
+              <PaperDragHandle disabled={disabled} item={item} folders={folderOptions} onMove={(folder) => placePapers(selected.includes(item.id) ? selected : [item.id], folder)} onDragStart={(event) => startPaperDrag(event, item)} onDragEnd={endPaperDrag} />
               </div></td>
               <td className="paper-library-main">
                   <div className="paper-library-title-line"><h2 className="paper-library-title"><a className="paper-library-title-button" href={paperReadingUrl(item.id) || `#paper-${item.id}`} onClick={(event) => { if (!paperReadingUrl(item.id)) { event.preventDefault(); setDetailPaperId(item.id); } }}>{item.title}</a></h2>
                     <button
                       type="button"
                       className={`paper-library-star ${item.important ? "on" : ""}`}
+                      disabled={disabled}
                       aria-pressed={item.important}
                       aria-label={item.important ? "取消收藏" : "收藏文献"}
-                      onClick={() => persist({ ...data, papers: data.papers.map((paper) => paper.id === item.id ? { ...paper, important: !paper.important } : paper) })}
+                      onClick={() => void updatePaper(item.id, { important: !item.important })}
                     >{item.important ? <StarFilled /> : <StarOutlined />}</button>
                   </div>
                 <p className="paper-library-cite">{item.authors || "作者待补全"}</p>
@@ -654,9 +821,10 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
                       className="paper-library-status"
                       size="small"
                       value={item.status}
+                      disabled={disabled}
                       aria-label={`${item.title} 的阅读状态`}
                       options={(Object.keys(statusLabel) as ReadingStatus[]).map((key) => ({ value: key, label: statusLabel[key] }))}
-                      onChange={(value: ReadingStatus) => persist({ ...data, papers: data.papers.map((paper) => paper.id === item.id ? { ...paper, status: value } : paper) })}
+                      onChange={(value: ReadingStatus) => void updatePaper(item.id, { status: value })}
                     />
                     <Tooltip title="文献详情"><button type="button" className="paper-library-info-action" aria-label={`${item.title} 的文献详情`} onClick={() => setDetailPaperId(item.id)}><InfoCircleOutlined /></button></Tooltip>
                   <Dropdown menu={{ items: [
@@ -666,10 +834,10 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
                       onClick: () => copyText(formatCitation(item, style), citationLabel[style]),
                     })),
                     { key: "link", label: "原文", disabled: !paperLink(item), onClick: () => { const href = paperLink(item); if (href) window.open(href, "_blank", "noopener"); } },
-                    { key: "edit", label: "编辑", onClick: () => { setEditing(item); setSheet("edit"); } },
+                    { key: "edit", label: "编辑", disabled, onClick: () => { editingRevisionRef.current = revisionRef.current; setEditError(null); setEditing(item); setSheet("edit"); } },
                     { type: "divider" },
-                    { key: "move", label: "移动到", children: folderOptions.map((option) => ({ key: option.value, label: option.label, onClick: () => placePapers([item.id], option.value) })) },
-                    { key: "remove", label: "移除", danger: true, onClick: () => Modal.confirm({ title: "从论文集移除这篇题录？", okText: "移除", cancelText: "取消", onOk: () => dropPapers([item.id]) }) },
+                    { key: "move", label: "移动到", disabled, children: folderOptions.map((option) => ({ key: option.value, label: option.label, onClick: () => placePapers([item.id], option.value) })) },
+                    { key: "remove", label: "移除", disabled, danger: true, onClick: () => Modal.confirm({ title: "从论文集移除这篇题录？", okText: "移除", cancelText: "取消", onOk: () => dropPapers([item.id]) }) },
                   ] }}>
                     <button type="button" className="paper-library-more" aria-label={`${item.title} 的更多操作`}><EllipsisOutlined /></button>
                   </Dropdown>
@@ -681,7 +849,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
           </div>
         </div>
       </div>
-      <Modal title="新建文件夹" open={folderDialogOpen} onCancel={() => setFolderDialogOpen(false)} onOk={addFolder} okText="创建" cancelText="取消" okButtonProps={{ disabled: !folderName.trim() }} width={400} centered destroyOnHidden>
+      <Modal title="新建文件夹" open={folderDialogOpen} onCancel={() => { if (!saving) setFolderDialogOpen(false); }} onOk={addFolder} okText="创建" cancelText="取消" confirmLoading={saving} okButtonProps={{ disabled: disabled || !folderName.trim() }} width={400} centered destroyOnHidden>
         <label className="paper-library-folder-form">文件夹名称
           <Input autoFocus maxLength={80} value={folderName} placeholder="例如：长上下文研究" onChange={(event: ChangeEvent<HTMLInputElement>) => setFolderName(event.target.value)} onPressEnter={addFolder} />
         </label>
@@ -689,16 +857,16 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
       <Modal
         title={importMethod ? importTitles[importMethod] : "导入文献"}
         open={!!importMethod}
-        onCancel={() => { if (!searching) { setImportMethod(null); clearImportResult(); } }}
+        onCancel={() => { if (!searching && !saving) { setImportMethod(null); clearImportResult(); } }}
         footer={null} width={560} centered destroyOnHidden
         className="paper-library-import-modal"
-        closable={!searching} maskClosable={!searching} keyboard={!searching}
+        closable={!searching && !saving} maskClosable={!searching && !saving} keyboard={!searching && !saving}
       >
         <div className="paper-library-import-content">
           {importError && <Alert type="error" showIcon message="导入未完成" description={importError} />}
           {importMethod === "upload" && <>
             <p>上传 PDF 或文献文件，识别题录后确认加入论文库。</p>
-            <Upload.Dragger accept=".pdf,.bib,.ris,.csv" showUploadList={false} disabled={searching} beforeUpload={async (file: File) => { await importFile(file); return false; }}>
+            <Upload.Dragger accept=".pdf,.bib,.ris,.csv" showUploadList={false} disabled={disabled || searching} beforeUpload={async (file: File) => { await importFile(file); return false; }}>
               <UploadOutlined className="paper-library-drop-icon" />
               <strong>{searching ? "正在识别文献…" : "点击选择，或拖拽文件到这里"}</strong>
               <span>PDF、BibTeX、RIS、CSV</span>
@@ -711,21 +879,21 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
                 <button type="button" className="paper-library-info" aria-label="支持的 DOI 与 arXiv 格式说明"><InfoCircleOutlined /></button>
               </Tooltip>
             </label>
-            <Input id="paper-import-identifier" autoFocus size="large" value={identifier} placeholder="https://arxiv.org/abs/2404.06654" disabled={searching} onChange={(event: ChangeEvent<HTMLInputElement>) => { setIdentifier(event.target.value); clearImportResult(); }} onPressEnter={() => { if (!searching) void importIdentifier(); }} />
-            <div className="paper-library-modal-actions"><Button type="primary" loading={searching} disabled={!identifier.trim()} onClick={importIdentifier}>查找文献</Button></div>
+            <Input id="paper-import-identifier" autoFocus size="large" value={identifier} placeholder="https://arxiv.org/abs/2404.06654" disabled={disabled || searching} onChange={(event: ChangeEvent<HTMLInputElement>) => { setIdentifier(event.target.value); clearImportResult(); }} onPressEnter={() => { if (!searching) void importIdentifier(); }} />
+            <div className="paper-library-modal-actions"><Button type="primary" loading={searching} disabled={disabled || !identifier.trim()} onClick={importIdentifier}>查找文献</Button></div>
           </>}
           {importMethod === "bibliography" && <>
             <p>上传 BibTeX、RIS 或 CSV 文件，也可以直接粘贴题录内容。</p>
             <div className="paper-library-bibliography-toolbar">
-              <Radio.Group value={format} disabled={searching} onChange={(event: RadioChangeEvent) => {
+              <Radio.Group value={format} disabled={disabled || searching} onChange={(event: RadioChangeEvent) => {
                 const nextFormat = event.target.value;
                 if (nextFormat === "bib" || nextFormat === "ris" || nextFormat === "csv") { setFormat(nextFormat); clearImportResult(); }
               }} optionType="button" buttonStyle="solid" options={[{ label: "BibTeX", value: "bib" }, { label: "RIS", value: "ris" }, { label: "CSV", value: "csv" }]} />
-              <Button icon={<UploadOutlined />} disabled={searching} onClick={() => fileRef.current?.click()}>选择文件</Button>
+              <Button icon={<UploadOutlined />} disabled={disabled || searching} onClick={() => fileRef.current?.click()}>选择文件</Button>
               <input ref={fileRef} hidden type="file" accept=".bib,.ris,.csv" onChange={(event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importFile(file); }} />
             </div>
-            <Input.TextArea aria-label="文献题录内容" rows={7} value={bibliography} disabled={searching} placeholder={format === "csv" ? "题名,作者,出处,年份,DOI,arXiv,标签,文件夹" : format === "bib" ? "@article{...}\n\n在这里粘贴 BibTeX 题录" : "TY  - JOUR\nTI  - ...\nER  -"} onChange={(event: ChangeEvent<HTMLTextAreaElement>) => { setBibliography(event.target.value); clearImportResult(); }} />
-            <div className="paper-library-modal-actions"><Button type="primary" disabled={searching || !bibliography.trim()} onClick={importBibliography}>识别题录</Button></div>
+            <Input.TextArea aria-label="文献题录内容" rows={7} value={bibliography} disabled={disabled || searching} placeholder={format === "csv" ? "题名,作者,出处,年份,DOI,arXiv,标签,文件夹" : format === "bib" ? "@article{...}\n\n在这里粘贴 BibTeX 题录" : "TY  - JOUR\nTI  - ...\nER  -"} onChange={(event: ChangeEvent<HTMLTextAreaElement>) => { setBibliography(event.target.value); clearImportResult(); }} />
+            <div className="paper-library-modal-actions"><Button type="primary" disabled={disabled || searching || !bibliography.trim()} onClick={importBibliography}>识别题录</Button></div>
           </>}
           {pendingArxiv && <section className="paper-library-import-confirm" aria-label="arXiv 导入确认">
             <div className="paper-library-arxiv-source"><span>ARXIV</span><code>{pendingArxiv.arxiv}{pendingArxiv.arxivVersion}</code></div>
@@ -733,7 +901,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
             <p className="paper-library-arxiv-authors">{pendingArxiv.authors} · {pendingArxiv.year}</p>
             {pendingArxiv.abstract && <p className="paper-library-arxiv-abstract">{pendingArxiv.abstract}</p>}
             <p className="paper-library-arxiv-hint">保存文献信息并下载该版本 PDF。同一篇文献的不同版本会保留为独立附件。</p>
-            {isDemo ? <Alert type="info" showIcon message="当前为演示页面，请进入论文知识库保存文献和 PDF" /> : <div className="paper-library-modal-actions"><Button type="primary" loading={searching} onClick={commitArxiv}>{searching ? "正在下载并保存…" : "导入文献与 PDF"}</Button></div>}
+            {isDemo ? <Alert type="info" showIcon message="当前为演示页面，请进入论文知识库保存文献和 PDF" /> : <div className="paper-library-modal-actions"><Button type="primary" loading={searching || saving} disabled={disabled} onClick={commitArxiv}>{searching ? "正在下载并保存…" : "导入文献与 PDF"}</Button></div>}
           </section>}
           {pending && <section className="paper-library-import-confirm" aria-label="导入确认">
             <h3>{pending.fresh.length ? `可导入 ${pending.fresh.length} 篇文献` : "文献已在库中"}</h3>
@@ -741,7 +909,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
               {pending.fresh.map((item) => <p key={item.id}>{item.title}{item.incomplete && <small>题录待补全</small>}</p>)}
               {pending.skipped.map((item, index) => <p key={`${item.id}-${index}`} className="paper-library-import-skipped">已跳过重复：{item.title}</p>)}
             </div>
-            {!!pending.fresh.length && <div className="paper-library-modal-actions"><Button type="primary" onClick={commit}>加入论文库</Button></div>}
+            {!!pending.fresh.length && <div className="paper-library-modal-actions"><Button type="primary" loading={saving} disabled={disabled} onClick={commit}>加入论文库</Button></div>}
           </section>}
         </div>
       </Modal>
@@ -752,7 +920,8 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
               <h2>{sheet === "edit" ? "编辑题录" : "生成综述"}</h2>
               <Button type="text" onClick={() => setSheet(null)}>关闭</Button>
             </header>
-            {sheet === "edit" && editing && <EditForm key={editing.id} paper={editing} onSave={saveEdits} />}
+            {sheet === "edit" && editError && <Alert type="error" showIcon message="题录尚未保存" description={editError} />}
+            {sheet === "edit" && editing && <EditForm key={editing.id} paper={editing} disabled={disabled} onSave={saveEdits} />}
             {sheet === "review" && (
               <div>
                 <p>将把 {readyCount} 篇可阅读论文交给学术研究与论文写作。标为重要的论文会加重参考。</p>
@@ -768,6 +937,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
           data={modernData}
           onClose={() => setDetailPaperId(null)}
           onChange={persistModern}
+          disabled={disabled}
           onOpenAttachment={openDocument}
         />
       )}
@@ -777,10 +947,10 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
   );
 }
 
-function PaperDragHandle({ item, folders, onMove, onDragStart, onDragEnd }: { item: PaperItem; folders: Array<{ value: string; label: string }>; onMove: (folder: string) => void; onDragStart: DragEventHandler<HTMLButtonElement>; onDragEnd: DragEventHandler<HTMLButtonElement> }) {
-  const { attributes, listeners, setNodeRef } = useDraggable({ id: item.id });
+function PaperDragHandle({ item, folders, onMove, onDragStart, onDragEnd, disabled }: { disabled: boolean; item: PaperItem; folders: Array<{ value: string; label: string }>; onMove: (folder: string) => void; onDragStart: DragEventHandler<HTMLButtonElement>; onDragEnd: DragEventHandler<HTMLButtonElement> }) {
+  const { attributes, listeners, setNodeRef } = useDraggable({ id: item.id, disabled });
   return <Dropdown trigger={["click"]} menu={{ items: folders.map((folder) => ({ key: folder.value, label: folder.label, onClick: () => onMove(folder.value) })) }}>
-    <button {...attributes} {...listeners} ref={setNodeRef} type="button" className="paper-library-drag-handle" draggable aria-label={`拖动 ${item.title}`} title="拖到左侧文件夹；点击选择目标文件夹" onDragStart={onDragStart} onDragEnd={onDragEnd}><HolderOutlined /></button>
+    <button {...attributes} {...listeners} ref={setNodeRef} type="button" className="paper-library-drag-handle" disabled={disabled} draggable={!disabled} aria-label={`拖动 ${item.title}`} title="拖到左侧文件夹；点击选择目标文件夹" onDragStart={onDragStart} onDragEnd={onDragEnd}><HolderOutlined /></button>
   </Dropdown>;
 }
 
@@ -795,7 +965,7 @@ function FolderButton({ name, icon, count, current, onClick, dropTarget, dropId,
   );
 }
 
-function EditForm({ paper, onSave }: { paper: PaperItem; onSave: (edits: PaperEdits) => void }) {
+function EditForm({ paper, onSave, disabled }: { disabled: boolean; paper: PaperItem; onSave: (edits: PaperEdits) => void }) {
   const [title, setTitle] = useState(paper.title);
   const [authors, setAuthors] = useState(paper.authors);
   const [venue, setVenue] = useState(paper.venue);
@@ -812,7 +982,7 @@ function EditForm({ paper, onSave }: { paper: PaperItem; onSave: (edits: PaperEd
       <label>DOI<Input value={doi} onChange={(event: ChangeEvent<HTMLInputElement>) => setDoi(event.target.value)} /></label>
       <label>arXiv<Input value={arxiv} onChange={(event: ChangeEvent<HTMLInputElement>) => setArxiv(event.target.value)} /></label>
       <label>标签<Input value={tags} placeholder="用分号分开" onChange={(event: ChangeEvent<HTMLInputElement>) => setTags(event.target.value)} /></label>
-      <Button type="primary" onClick={() => onSave({
+      <Button type="primary" disabled={disabled} onClick={() => onSave({
         title,
         authors,
         venue,

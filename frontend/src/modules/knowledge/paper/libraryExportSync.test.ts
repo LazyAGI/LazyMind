@@ -3,10 +3,12 @@ import type { ArxivImportResult } from "./arxivImport";
 import { loadPaperLibraryForExport } from "./exportLibrary";
 import { emptyLibraryV3 } from "./libraryModel";
 import { mergeArxivImports } from "./arxivLibrary";
-import { loadPaperLibraryV3, savePaperLibraryV3 } from "./store";
+import { loadPersistedPaperLibrary } from "./store";
+import { beforeEach } from "vitest";
 
 const api = vi.hoisted(() => ({ get: vi.fn() }));
 vi.mock("@/components/request", () => ({ BASE_URL: "", axiosInstance: api }));
+vi.mock("./store", () => ({ loadPersistedPaperLibrary: vi.fn() }));
 
 const imported = (baseId = "2404.06654"): ArxivImportResult => ({
   paper: {
@@ -19,6 +21,7 @@ const imported = (baseId = "2404.06654"): ArxivImportResult => ({
 });
 
 afterEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+beforeEach(() => { vi.mocked(loadPersistedPaperLibrary).mockReset().mockResolvedValue({ data: emptyLibraryV3(), revision: 1, canWrite: true }); });
 
 describe("server synchronization before library export", () => {
   it("includes server papers in a fresh browser with no cached library", async () => {
@@ -31,11 +34,11 @@ describe("server synchronization before library export", () => {
     expect(api.get).toHaveBeenCalledWith("/api/core/academic/arxiv/library", expect.objectContaining({ params: { target_dataset_id: "server-library" } }));
   });
 
-  it("adds newly saved server papers while preserving local edits and organization", async () => {
+  it("adds newly saved arXiv papers while preserving server edits and organization", async () => {
     const cached = mergeArxivImports(emptyLibraryV3(), [imported()]);
     cached.folders = [{ id: "reading", name: "My Reading" }];
     Object.assign(cached.papers[0], { title: "My edited title", folderId: "reading", tags: ["RAG"], important: true });
-    savePaperLibraryV3("library", cached);
+    vi.mocked(loadPersistedPaperLibrary).mockResolvedValue({ data: cached, revision: 2, canWrite: true });
     api.get.mockResolvedValue({ data: { items: [imported(), imported("2404.06655")] } });
 
     const library = await loadPaperLibraryForExport("library");
@@ -46,10 +49,10 @@ describe("server synchronization before library export", () => {
     expect(library.folders).toEqual([{ id: "reading", name: "My Reading" }]);
   });
 
-  it("keeps locally removed server papers out of the export", async () => {
+  it("keeps server removal markers out of the export", async () => {
     const cached = emptyLibraryV3();
     cached.hiddenArxivWorkIds = ["work-2404.06654"];
-    savePaperLibraryV3("library", cached);
+    vi.mocked(loadPersistedPaperLibrary).mockResolvedValue({ data: cached, revision: 2, canWrite: true });
     api.get.mockResolvedValue({ data: { items: [imported()] } });
 
     expect((await loadPaperLibraryForExport("library")).papers).toEqual([]);
@@ -57,15 +60,34 @@ describe("server synchronization before library export", () => {
 
   it("rejects server query failures instead of exporting a stale cached library", async () => {
     const cached = mergeArxivImports(emptyLibraryV3(), [imported()]);
-    savePaperLibraryV3("library", cached);
+    vi.mocked(loadPersistedPaperLibrary).mockResolvedValue({ data: cached, revision: 2, canWrite: true });
     api.get.mockRejectedValue({ response: { status: 503, data: { message: "论文库同步服务不可用" } } });
 
     await expect(loadPaperLibraryForExport("library")).rejects.toThrow("论文库同步服务不可用");
-    expect(loadPaperLibraryV3("library")).toEqual(cached);
+    expect(cached.papers).toHaveLength(1);
   });
 
   it("rejects malformed server data instead of treating it as an empty library", async () => {
     api.get.mockResolvedValue({ data: {} });
     await expect(loadPaperLibraryForExport("library")).rejects.toThrow("arXiv 服务返回的数据不完整或格式无效");
+  });
+
+  it("rejects library storage failures before querying arXiv or exporting", async () => {
+    vi.mocked(loadPersistedPaperLibrary).mockRejectedValue(new Error("文献数据库读取失败"));
+    await expect(loadPaperLibraryForExport("library")).rejects.toThrow("文献数据库读取失败");
+    expect(api.get).not.toHaveBeenCalled();
+  });
+
+  it("exports metadata-only records from the server in a clean browser", async () => {
+    const data = mergeArxivImports(emptyLibraryV3(), [imported()]);
+    data.papers[0].source = "doi";
+    data.papers[0].arxiv = undefined;
+    data.papers[0].doi = "10.1000/example";
+    data.papers[0].title = "Imported BibTeX record";
+    data.papers[0].attachmentIds = [];
+    data.attachments = [];
+    vi.mocked(loadPersistedPaperLibrary).mockResolvedValue({ data, revision: 3, canWrite: false });
+    api.get.mockResolvedValue({ data: { items: [] } });
+    expect((await loadPaperLibraryForExport("library")).papers[0].title).toBe("Imported BibTeX record");
   });
 });
