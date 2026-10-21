@@ -3839,6 +3839,11 @@ components:
                     type: boolean
                 is_owner:
                     type: boolean
+                library_kind:
+                    enum:
+                        - paper
+                        - document
+                    type: string
                 name:
                     type: string
                 parsers:

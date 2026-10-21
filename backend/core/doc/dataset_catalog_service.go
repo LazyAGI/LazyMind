@@ -131,7 +131,7 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 		if order.usageJoin {
 			query = query.Select("datasets.*")
 		} else {
-			query = query.Select(`id, kb_id, create_user_id, create_user_name, display_name, "desc", cover_image, created_at, updated_at, ext, type, share_type, dataset_state`)
+			query = query.Select(`id, kb_id, create_user_id, create_user_name, display_name, "desc", cover_image, created_at, updated_at, ext, type, share_type, dataset_state, processing_level, processing_revision, transition_status, reader_fallback_accepted`)
 		}
 		query = query.
 			Order(order.clause).
@@ -282,6 +282,7 @@ func (s *DatasetCatalogService) datasetFromRow(ctx context.Context, ds orm.Datas
 		Acl:                    datasetACL,
 		ShareType:              shareTypeToPB(ds.ShareType),
 		Type:                   datasetTypeToPB(ds.Type),
+		LibraryKind:            parseDatasetLibraryKind(ds.Ext),
 		Tags:                   parseDatasetTags(ds.Ext),
 		DefaultDataset:         isDefaultDatasetForUserWithDB(ctx, s.db, userID, ds.ID),
 		CreatedByDataSource:    &createdByDataSource,

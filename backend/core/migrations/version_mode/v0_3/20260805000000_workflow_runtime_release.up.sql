@@ -3224,3 +3224,13 @@ CREATE TABLE task_attempt_timings (
     finished_at DATETIME
 );
 CREATE INDEX idx_task_attempt_execution ON task_attempt_timings(execution_id);
+
+-- Complete editable paper-library state and optimistic concurrency revision.
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE paper_libraries (
+    dataset_id VARCHAR(255) NOT NULL PRIMARY KEY,
+    data_json JSON NOT NULL,
+    revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);

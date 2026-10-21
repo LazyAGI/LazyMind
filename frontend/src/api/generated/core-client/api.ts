@@ -2583,6 +2583,7 @@ export interface Dataset {
     'document_size': number;
     'is_empty': boolean;
     'is_owner': boolean;
+    'library_kind'?: DatasetLibraryKindEnum;
     'name': string;
     'parsers'?: Array<ParserConfig>;
     'processing_level'?: string;
@@ -2598,6 +2599,14 @@ export interface Dataset {
     'type': string;
     'update_time': string;
 }
+
+export const DatasetLibraryKindEnum = {
+    Paper: 'paper',
+    Document: 'document'
+} as const;
+
+export type DatasetLibraryKindEnum = typeof DatasetLibraryKindEnum[keyof typeof DatasetLibraryKindEnum];
+
 export interface DatasetCapabilities {
     'list': boolean;
     'read': boolean;

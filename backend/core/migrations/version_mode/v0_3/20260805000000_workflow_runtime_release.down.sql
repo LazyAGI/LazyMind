@@ -6,6 +6,7 @@ DROP TABLE IF EXISTS task_attempt_timings;
 DROP TABLE IF EXISTS task_execution_timings;
 
 -- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS paper_libraries;
 DROP INDEX IF EXISTS idx_user_environment_variables_deleted_at;
 DROP INDEX IF EXISTS idx_user_env_user_enabled;
 DROP INDEX IF EXISTS idx_user_env_user_name_active;

@@ -34,6 +34,7 @@ const catalog: LearningCatalog = {
   profiles: [
     { key: "general", name_i18n_key: "General reading", description_i18n_key: "", capabilities: generalKeys },
     { key: "english_learning", name_i18n_key: "English learning", description_i18n_key: "", capabilities: englishKeys },
+    { key: "academic_papers", name_i18n_key: "Academic papers", description_i18n_key: "", capabilities: generalKeys },
   ],
   capabilities: generalKeys.map((key) => ({
     key, version: 1, name_i18n_key: key, description_i18n_key: "", local_only: true,
@@ -45,6 +46,7 @@ const catalog: LearningCatalog = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
   vi.mocked(isDeveloperModeActive).mockReturnValue(false);
   vi.mocked(getLearningCatalog).mockResolvedValue(catalog);
   vi.mocked(saveKnowledgeBaseCapabilities).mockResolvedValue({});
@@ -82,6 +84,11 @@ async function selectEnglishProfile() {
   fireEvent.keyDown(profiles, { key: "Enter", keyCode: 13 });
 }
 
+async function selectProfile(label: string) {
+  fireEvent.mouseDown(screen.getByRole("combobox", { name: "learning.capabilityProfile" }));
+  fireEvent.click(await screen.findByText(label, { selector: ".ant-select-item-option-content" }));
+}
+
 describe("knowledge creation capability submission", () => {
   it.each([false, true])("submits the general preset without opening advanced settings (developer=%s)", async (developer) => {
     vi.mocked(isDeveloperModeActive).mockReturnValue(developer);
@@ -92,7 +99,32 @@ describe("knowledge creation capability submission", () => {
     await waitFor(() => expect(saveKnowledgeBaseCapabilities).toHaveBeenCalledWith("test-dataset",
       generalKeys.map((key, index) => ({ key, version: 1, enabled: true, display_order: index + 1, settings: {} })),
     ));
-    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ processing_level: "stored" }));
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ processing_level: "stored", library_kind: "document" }));
+  });
+
+  it.each([false, true])("derives the paper kind only from the academic scenario (developer=%s)", async (developer) => {
+    vi.mocked(isDeveloperModeActive).mockReturnValue(developer);
+    const { onCreate } = await mountModal();
+    await fillRequiredFields();
+    expect(screen.queryByText("资料库类型")).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: "论文集" })).not.toBeInTheDocument();
+    await selectProfile("Academic papers");
+    fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ library_kind: "paper" })));
+    expect(onCreate.mock.calls[0][0]).not.toHaveProperty("learning_profile_key");
+  });
+
+  it.each(["General reading", "English learning"])("creates a document library when switching from academic papers to %s", async (scenario) => {
+    const { onCreate } = await mountModal();
+    await fillRequiredFields();
+    await selectProfile("Academic papers");
+    await selectProfile(scenario);
+    fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ library_kind: "document" })));
+    const keys = scenario === "English learning" ? englishKeys : generalKeys;
+    await waitFor(() => expect(saveKnowledgeBaseCapabilities).toHaveBeenCalledWith("test-dataset",
+      keys.map((key, index) => ({ key, version: 1, enabled: true, display_order: index + 1, settings: {} })),
+    ));
   });
 
   it.each([false, true])("submits a changed scenario's preset without opening advanced settings (developer=%s)", async (developer) => {
