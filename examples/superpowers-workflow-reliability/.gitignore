@@ -1,0 +1,13 @@
+# Local execution/configuration data and retired development tools.
+/private/
+/runs/
+/trial/
+/config.json
+/session.json
+*.jsonl
+*.log
+/model-setup.json
+/verification.json
+/release-drafts.md
+/export_evidence.py
+/probe_runtime.py

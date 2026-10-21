@@ -1,0 +1,117 @@
+{
+  "classification": "historical native Skill normal run; not a matched performance comparison",
+  "records": {
+    "launch": {
+      "source": "evidence/native-audited/native/launch.json",
+      "sha256": "8067cb0d671d06c1d20ced74543e4202aefc529b6f8fa799dcabbe63b138c809",
+      "format": "json",
+      "values": {
+        "/kind": "native-skill",
+        "/started_at": "2026-10-19T16:34:03.532156+00:00",
+        "/completed_at": "2026-10-19T16:37:31.935382+00:00",
+        "/returncode": 0,
+        "/requested_model": "gpt-6-astra",
+        "/actual_backend_model": "N/A",
+        "/trace_sha256": "7d3d700652a3ae9f4833a66450b993a36e157590350135e3c282495ce583216c",
+        "/limitation": "This CLI JSON stream may omit collaboration spawn payloads; inspect evidence before claiming dispatch/model attestation."
+      }
+    },
+    "acceptance": {
+      "source": "evidence/native-audited/native/independent-checks.json",
+      "sha256": "5e910c4e01d42ad0abd366379dcf5cb2585fa5e1116bc76de2a28f1273135da1",
+      "format": "json",
+      "values": {
+        "": {
+          "started_at": "2026-10-19T16:39:54.347491+00:00",
+          "completed_at": "2026-10-19T16:39:54.398857+00:00",
+          "returncode": 0,
+          "stdout": "",
+          "stderr": "test_empty (test_slug.SlugTests) ... ok\ntest_punctuation (test_slug.SlugTests) ... ok\ntest_spaces (test_slug.SlugTests) ... ok\n\n----------------------------------------------------------------------\nRan 3 tests in 0.000s\n\nOK\n",
+          "coverage": [
+            {
+              "id": "spaces",
+              "status": "DONE",
+              "evidence": "test_spaces"
+            },
+            {
+              "id": "punctuation",
+              "status": "DONE",
+              "evidence": "test_punctuation"
+            },
+            {
+              "id": "empty",
+              "status": "DONE",
+              "evidence": "test_empty"
+            }
+          ],
+          "test_sha256": "a76731b2cff72f34ce12f400d3c4c40429e5ff36e5c9073723dd0c3f998a9b35",
+          "changed_files": [
+            "slug.py"
+          ],
+          "independent_acceptance": {
+            "returncode": 0,
+            "stdout": "9 independent acceptance checks passed\n",
+            "stderr": ""
+          }
+        }
+      }
+    },
+    "selected_tools": {
+      "source": "evidence/native-audited/native/tool-trace.jsonl",
+      "sha256": "605ab568af265a3f54af44c50d78392edff579dc959020d230d417070bcae0df",
+      "format": "jsonl",
+      "values": {
+        "/4": {
+          "at": "2026-10-19T16:34:20.081Z",
+          "type": "custom_tool_call",
+          "name": "exec",
+          "input": "text(await tools.exec_command({cmd:\"cat $SUPERPOWERS_ROOT/skills/subagent-driven-development/scripts/task-brief; cat $SUPERPOWERS_ROOT/skills/subagent-driven-development/re-review-prompt.md; cat $SUPERPOWERS_ROOT/skills/using-git-worktrees/SKILL.md; git worktree list; ls -a; bash $SUPERPOWERS_ROOT/skills/subagent-driven-development/scripts/sdd-workspace docs/plans/slug-plan.md; bash $SUPERPOWERS_ROOT/skills/subagent-driven-development/scripts/task-brief docs/plans/slug-plan.md 1\",\"max_output_tokens\":6500}));\n",
+          "call_id": "call_94a0360a34a6409aa13d3f7a8bf06b82",
+          "status": "completed"
+        },
+        "/8": {
+          "at": "2026-10-19T16:34:42.789Z",
+          "type": "function_call",
+          "name": "spawn_agent",
+          "arguments": {
+            "task_name": "implement_slug",
+            "fork_turns": "none",
+            "message": {
+              "encrypted_payload": "[OMITTED]",
+              "sha256": "913aeee71dd8ba4d2ed77fcbcb8189f14e9579fe22d23043d5fec7844b2e61fd"
+            }
+          },
+          "call_id": "call_8a735dcbe9aa423bbd8d3311c67e9d85"
+        },
+        "/18": {
+          "at": "2026-10-19T16:36:02.297Z",
+          "type": "function_call",
+          "name": "spawn_agent",
+          "arguments": {
+            "task_name": "review_slug",
+            "fork_turns": "none",
+            "message": {
+              "encrypted_payload": "[OMITTED]",
+              "sha256": "ea40ac1976363568ed5ec74a8ac9bf5062f06d1ad3053eeece5bbb34c5126f3f"
+            }
+          },
+          "call_id": "call_c721096cb2ca48db9f735ff796473cc0"
+        },
+        "/26": {
+          "at": "2026-10-19T16:36:38.359Z",
+          "type": "function_call",
+          "name": "spawn_agent",
+          "arguments": {
+            "task_name": "final_review_slug",
+            "fork_turns": "none",
+            "message": {
+              "encrypted_payload": "[OMITTED]",
+              "sha256": "105ba9664f8d47d32ac35d8ff353fc6c148688ffa65b17c649e7f88dab31cd5f"
+            }
+          },
+          "call_id": "call_ba13c377ede24032a59c431909308768"
+        }
+      }
+    }
+  }
+}

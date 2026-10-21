@@ -1,75 +1,44 @@
-# Issue 2245: base, coverage, model and isolation
+# #2245: Actual base, coverage and observability
 
-## Reusable RC
+[Upstream issue](https://github.com/obra/superpowers/issues/2245) spans base selection,
+model identity, task coverage and parallel isolation. This single-task integration
+covers actual Git base and declared finite coverage; the broader issue remains
+**partially covered**.
 
-Coverage is no longer hardcoded in the supported entry point. A committed caller
-Plan, exact file scope, protected tests and coverage-to-check mapping are frozen at
-start. [Task 7 labels](../evidence/rc/custom-labels/result.json) and a
-[Unicode implementation filename](../evidence/rc/custom-unicode/result.json) passed
-actual Codex execution and independent behavior checks. [Wrong HEAD](../evidence/rc/wrong-base/result.json)
-blocked launch; [removed coverage](../evidence/rc/missing-coverage/result.json) blocked
-success after a real child. These are deliberately injected faults. Model attestation
-and hostile-process isolation remain uncovered. RC runs one declared task; the older
-parallel experiment below is historical, not a new RC parallel scheduler claim.
+[Task validation](../task.py) binds the full expected SHA, committed Plan, protected
+acceptance files and dynamic coverage IDs. [Guard](../gates.py) checks actual HEAD
+and linked worktree/index identity before launch. Completion reruns declared tests,
+checks permitted changes and rejects incomplete/duplicate/skipped coverage.
+Caller-provided tests are trusted inputs: mapping an ID to a command alone does
+not prove arbitrary prose requirements.
 
-## Historical evidence
+| Scenario | Recorded result | Evidence |
+| --- | --- | --- |
+| Actual wrong HEAD | BASE_MISMATCH in Prepare; zero children, downstream unexecuted | [Wrong base](../evidence/public/wrong-base.json) |
+| Missing coverage row after real child | Child exits 0; Validate completion fails, no result Artifact | [Missing coverage](../evidence/public/missing-coverage.json) |
+| Caller Task 7 / Unicode filename | Changed only declared file; custom coverage, protected tests pass | [Custom summaries](../evidence/public/reuse-custom.json) |
 
-[Upstream issue](https://github.com/obra/superpowers/issues/2245) distinguishes
-actual worktree base, launched model identity, enumerable scope, and shared-index
-hazards. The pinned worktree skill detects existing isolation and tests the
-baseline, but does not enforce comparison with the intended full base SHA.
+After the [Quick Start](../README.md#quick-start-a-csv-task), run each negative in a
+**fresh disposable** demo:
 
-## Observed and implemented
+```bash
+.venv/bin/python demo.py "$TRIAL/wrong-base"
+git -C "$TRIAL/wrong-base/worktree" commit --allow-empty -m 'Injected wrong HEAD'
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" run \
+  --task "$TRIAL/wrong-base/task.json" --repo "$TRIAL/wrong-base/worktree" --state "$TRIAL/wrong-base/run"
+# Expected exit 1: BASE_MISMATCH, launch_count 0.
+.venv/bin/python demo.py "$TRIAL/missing-coverage"
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" run --fault missing-coverage \
+  --task "$TRIAL/missing-coverage/task.json" --repo "$TRIAL/missing-coverage/worktree" --state "$TRIAL/missing-coverage/run"
+# Expected exit 1 after a real Codex child: COVERAGE_MISMATCH.
+```
 
-The approved fixture starts at
-`332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd`. All native and normal Workflow runs started there.
-Neither normal native sample reproduced the wrong-base failure; both produced
-all three coverage rows.
+Both are explicit fault injection, not spontaneous Skill failures. The wrong-base
+record includes actual and expected full SHA values from independent Git readback.
+The coverage record includes the remaining rows and rejected completion state.
 
-The executor uses `git rev-parse HEAD` on the actual worktree before dispatch,
-compares it with the captured full SHA, and records absolute Git directory/index
-identity. The final fault case creates a real empty commit in the disposable
-worktree while retaining the original expected SHA: BASE_MISMATCH, zero child
-launches. [Actual wrong-head evidence](../evidence/wrong-base-actual/run/result.json).
-An earlier synthetic case changed the expected SHA instead; it is preserved
-separately under evidence/wrong-base and is not the actual wrong-head test.
-
-The historical fixture coverage requires exactly spaces, punctuation, empty, with unique DONE entries
-and evidence text. SKIPPED can describe partial work but cannot satisfy complete
-success. Three immutable tests plus nine independent acceptance checks verify
-behavior. A report's existence is insufficient. Removing one row after a real
-child completed produced COVERAGE_MISMATCH and prevented final success.
-[Coverage failure](../evidence/missing-coverage/run/result.json);
-[independent native checks](../evidence/native-independent-checks.json).
-
-## Real bounded parallel execution
-
-[parallel.py](../parallel.py) creates one new disposable repository and two linked
-worktrees, both at the fixed base. Before starting either Workflow it checks the
-actual worktree, Git directory and Index paths for collisions. Each worker runs
-the same six-step package, with its own state directory and Runtime session.
-
-The two real Codex children overlapped **57.548 seconds**. Both completed all six
-steps, committed their own slug.py implementation, and passed the fixed and
-independent checks. The parent main HEAD, file hash and Git Index hash remained
-unchanged. Exact identities, times, usage, result states and Artifacts are in the
-[parallel result](../evidence/parallel-workflows/result.json) and per-worker traces.
-No business repository or shared Index was used for the experiment.
-
-## Limits
-
-- Model: all coding runs request gpt-6-astra. The API does not attest the backend child
-  model; actual identity is N/A. No model-identity hard gate is claimed.
-- Isolation: tests create real linked worktrees and verify distinct worktree,
-  git_dir and index paths; duplicate paths fail. Shared common Git metadata remains.
-  The additional real experiment used two concurrent workers with distinct indexes.
-  No dangerous shared-index write race or hostile-process test was run.
-- The lock coordinates cooperating executor instances. It does not contain arbitrary
-  shell access or prevent another process from changing files after inspection.
-- Historical coverage is a finite fixture; RC coverage is caller-declared and test-bound. Neither proves arbitrary program correctness.
-- Native SDD's reviewer count differs from the minimal Workflow; cost comparisons
-  would confound orchestration and verification effort.
-
-中文结论：真实 HEAD 不匹配与 Coverage 缺项均已验证。补充实验让两个真实 Agent
-在独立 worktree/Index 中并行写入并提交，两会话均完成，父仓库未改变。该有界实验
-不等于任意进程隔离或服务端模型身份认证。两个 Issue 继续复用同一六步骤 Workflow。
+Backend model identity cannot be reliably attested here (N/A). Cooperating locks,
+worktree/index checks and [parallel regression tests](../test_parallel.py) do not
+prove isolation against arbitrary processes or replace OS containment. The CLI runs
+one declared task; full parallel SDD scheduling and reviewer loops are unsupported.
+[Public evidence](../evidence/public/README.md) does not claim a new parallel E2E.

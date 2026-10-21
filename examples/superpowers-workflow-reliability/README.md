@@ -1,6 +1,6 @@
 # Superpowers Dispatch Reliability Workflow Integration
 
-[中文](README.CN.md) · [RC acceptance](../../RELEASE_CANDIDATE.md) · [PR validation](PR_VALIDATION.md) · [Comparison](comparison.md)
+[中文](README.CN.md) · [Public evidence](evidence/public/README.md) · [PR validation](PR_VALIDATION.md) · [Comparison](comparison.md)
 
 A reusable Superpowers Dispatch Reliability Workflow integration built with LazyMind.
 
@@ -13,6 +13,9 @@ changes, passing checks and six Runtime Artifacts.
 This is a manually authored integration of Superpowers dispatch practices, not an
 automatic Skill converter or a complete SDD implementation. The hard gate applies
 to the process this executor launches; YAML alone does not intercept other agents.
+
+[Workflow definition](../../workflows/superpowers-reliability/workflow.yaml) ·
+[Executor](project.py) · [Hard gates](gates.py)
 
 ## Quick start: a CSV task
 
@@ -54,6 +57,7 @@ git -C "$TRIAL/superpowers" checkout bb92a77741419a4ab5f06e711a283343f1ada0c3
 .venv/bin/python cli.py --config "$TRIAL/private/config.json" configure \
   --url "$LAZYMIND_URL" --local-login --superpowers "$TRIAL/superpowers" --model "$MODEL"
 .venv/bin/python cli.py --config "$TRIAL/private/config.json" install
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" preflight
 .venv/bin/python demo.py "$TRIAL/csv-a"
 .venv/bin/python cli.py --config "$TRIAL/private/config.json" run \
   --task "$TRIAL/csv-a/task.json" --repo "$TRIAL/csv-a/worktree" --state "$TRIAL/csv-a/run"
@@ -116,7 +120,13 @@ BASE=$(git -C /path/to/repository rev-parse HEAD)
 git -C /path/to/repository worktree add -b my-reviewed-task /path/to/new-worktree "$BASE"
 ```
 
-Use the generated `task.json` as the schema example. All fields are required:
+Use the generated `task.json` as the schema example. Runnable input seeds are in
+[tasks/custom-labels](tasks/custom-labels/docs/plan.md) and the
+[Unicode variant](tasks/custom-unicode/docs/plan.md). Copy a seed (including
+`.gitignore`, but keep `task.json` outside the target repository), commit the inputs
+and create a linked worktree. Replace `expected_base` in its task JSON with your
+new full SHA, then use the same `run` command. These seeds select Plan Task 7 and
+use different coverage IDs from the CSV demo. All manifest fields are required:
 
 | Field | Contract |
 | --- | --- |
@@ -174,45 +184,37 @@ kills its owned process group; SIGKILL, machine failure, detached grandchildren 
 durable distributed recovery are not guaranteed. Never delete run state to conceal
 an unresolved dispatch. Check commands have a 120-second limit; Codex has 600 seconds.
 
-## A real run
+## Evidence and tests
 
-On 2026-10-20 UTC, the [user Task 7 with a Unicode filename](evidence/rc/custom-unicode/trace.jsonl)
-ran Prepare 08:02:21.953–22.097 → Validate 22.127–22.222 → Dispatch
-08:02:22.286–08:03:09.419 → Collect 09.465–09.572 → completion checks
-09.607–09.856 → Record 09.901–09.921. Its real child changed only `标签.py`,
-committed it and passed four protected tests plus independent checks.
-[Result and six selected Artifacts](evidence/rc/custom-unicode/result.json).
-The [next missing-brief injection](evidence/rc/missing-current/trace.jsonl) failed
-validation at 08:03:10.760: zero launch receipts and no Dispatch attempt.
-[Evidence guide, hashes and reproduction](evidence/rc/README.md).
-
-## Evidence, tests and limits
+The [public evidence guide](evidence/public/README.md) contains selected historical
+records for normal E2E, three deliberate faults, same-session UI Retry and reusable
+custom tasks. Each excerpt records source paths, hashes and JSON pointers. These
+are **selected events, not complete traces**. Full development archives are not
+needed to install, run or test the example.
 
 ```bash
 .venv/bin/python -m unittest discover -s . -p 'test_*.py' -v
-.venv/bin/python cli.py --config "$TRIAL/private/config.json" preflight
+.venv/bin/python verify_rc_evidence.py
 ```
 
-Preflight checks dependencies/flags, Codex login, pinned clean upstream source,
-Runtime authorization and package compatibility. It cannot attest backend model
-identity or prove model availability without a model call; the accepted dispatch
-records that outcome. The requested model/reasoning are configurable. No model call
-is hidden in installation or preflight.
+The second command checks recorded evidence offline; it does not execute a new E2E.
+[PR validation](PR_VALIDATION.md) separates historical acceptance from the latest
+fresh-checkout checks. For live behavior, use `run` and `status` above.
 
-See [RC acceptance and real traces](../../RELEASE_CANDIDATE.md),
-[#2282](cases/issue-2282.md), [#2245](cases/issue-2245.md) and
-[comparison](comparison.md). Before: native SDD asks the model to follow dispatch
-prerequisites. After: this executor makes the selected prerequisites executable and
-blocks its launch when they fail. **Both historical normal native samples passed**;
-no natural missing-brief failure or comparative reliability/efficiency gain is claimed.
+Preflight checks dependencies, CLI flags/login, pinned clean Superpowers source,
+Runtime authorization and package compatibility. Model availability is tested only
+by actual dispatch; backend identity remains N/A. There is no hidden model call in
+installation or preflight.
 
+See [#2282](cases/issue-2282.md), [#2245](cases/issue-2245.md) and the
+[comparison](comparison.md). The published native normal sample passed; no natural
+missing-brief failure or measured reliability, speed or token-efficiency gain is claimed.
 Core enforces graph admission, Attempt leases and required output slots. This
-executor verifies brief/state/base and task semantics. Its cooperating worktree
-lock is not OS containment. Codex Todo UI synchronization, actual backend model
-attestation, arbitrary-process isolation and full SDD parity are not implemented.
+executor checks brief/state/base and task semantics. Its cooperating worktree lock
+is not OS containment. Codex Todo UI synchronization, backend model attestation,
+arbitrary-process isolation and full SDD parity are not implemented.
 
-Historical `run.py`, `native.py`, `parallel.py` and their 89-file evidence manifest
-retain the fixed-fixture comparison; `cli.py` is the user-task RC entry point.
-The prior release audit remains a dated snapshot, not certification of later code.
-Upstream text/scripts are MIT licensed: [notice](UPSTREAM-LICENSE). New example code
-uses the repository's [Apache-2.0 license](../../LICENSE).
+`cli.py` is the reusable entry point. `native.py`, `run.py`, `parallel.py` and
+`fixture/` retain the small fixed-task reproduction harness and its regression tests.
+They do not depend on archived logs. Upstream text/scripts are MIT licensed:
+[notice](UPSTREAM-LICENSE). New code uses the repository's [Apache-2.0](../../LICENSE).

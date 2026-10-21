@@ -1,7 +1,0 @@
-Implemented and committed only `slug.py` in `6d457dd`.
-
-- `python3 -m unittest -v`: before—3 expected errors; after—3 passed.
-- Self-review and 7 edge checks passed; tests unchanged.
-- All coverage IDs marked DONE in `.eval/coverage.json`.
-- Report written to `.eval/implementer-report.md`.
-- No concerns, no push; working tree clean.

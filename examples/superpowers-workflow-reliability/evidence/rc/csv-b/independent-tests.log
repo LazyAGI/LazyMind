@@ -1,9 +1,0 @@
-test_empty (test_csv_records.CSVRecordsTests) ... ok
-test_headers (test_csv_records.CSVRecordsTests) ... ok
-test_quoted (test_csv_records.CSVRecordsTests) ... ok
-test_ragged (test_csv_records.CSVRecordsTests) ... ok
-
-----------------------------------------------------------------------
-Ran 4 tests in 0.000s
-
-OK

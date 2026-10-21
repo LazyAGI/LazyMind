@@ -1,5 +1,0 @@
-2026-10-19T16:08:37.372740Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
-2026-10-19T16:08:37.375353Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
-2026-10-19T16:10:05.700808Z  WARN codex_core::hook_runtime: failed to resolve parent transcript path for subagent hook parent_thread_id=01a154ec-08e7-7ba2-94a2-e47e0d44df34 error=invalid thread-store request: no rollout found for thread id 01a154ec-08e7-7ba2-94a2-e47e0d44df34
-2026-10-19T16:10:39.581551Z  WARN codex_core::hook_runtime: failed to resolve parent transcript path for subagent hook parent_thread_id=01a154ec-08e7-7ba2-94a2-e47e0d44df34 error=invalid thread-store request: no rollout found for thread id 01a154ec-08e7-7ba2-94a2-e47e0d44df34
-2026-10-19T16:11:18.757614Z  WARN codex_core::hook_runtime: failed to resolve parent transcript path for subagent hook parent_thread_id=01a154ec-08e7-7ba2-94a2-e47e0d44df34 error=invalid thread-store request: no rollout found for thread id 01a154ec-08e7-7ba2-94a2-e47e0d44df34

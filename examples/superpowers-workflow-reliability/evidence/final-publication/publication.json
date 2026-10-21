@@ -1,8 +1,0 @@
-{
-  "enabled": false,
-  "remote_root": "remote://workflows/u_7b84f069147e/superpowers-reliability",
-  "revision_id": "1410bea3-ed40-4af0-909f-72dc084695dc",
-  "revision_no": 2,
-  "warnings": null,
-  "workflow_ref": "user:7ea37626-c7d6-4e8b-b988-d0d11bb41917:superpowers-reliability"
-}

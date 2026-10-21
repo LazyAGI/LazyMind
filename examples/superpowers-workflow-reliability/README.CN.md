@@ -1,6 +1,6 @@
 # Superpowers 派发可靠性 Workflow 集成
 
-[English](README.md) · [RC 验收](../../RELEASE_CANDIDATE.md) · [PR 验证](PR_VALIDATION.md) · [对照](comparison.md)
+[English](README.md) · [公开证据](evidence/public/README.md) · [PR 验证](PR_VALIDATION.md) · [对照](comparison.md)
 
 本例在隔离 Git worktree 中执行**一项明确声明的开发任务**。六步骤 Workflow 与外部
 Python 执行器在启动 Codex 前检查非空 Brief、可观察的 in_progress 状态和真实 Base SHA；
@@ -9,10 +9,13 @@ Python 执行器在启动 Codex 前检查非空 Brief、可观察的 in_progress
 这是手工编写的派发可靠性集成，不是自动 Skill 转换器，也不等同于完整 Superpowers SDD。
 硬检查只约束本执行器启动的子进程，单独加载 YAML 不会拦截其他 Agent。
 
+[Workflow 定义](../../workflows/superpowers-reliability/workflow.yaml) ·
+[执行器](project.py) · [硬检查](gates.py)
+
 ## 快速开始
 
 需要 macOS/Linux、Python 3.9+、支持 `--path-format=absolute` 的 Git、Bash、已登录的
-Codex CLI 和运行中的 LazyMind。[安装/启动服务](../../docs/quick_start.md)。本轮实测
+Codex CLI 和运行中的 LazyMind。[安装/启动服务](../../docs/quick_start.md)。历史 RC 实测
 Python 3.9.6、Git 2.50.1、Codex CLI 0.155.0-alpha.9；CLI 必须支持
 `exec --ignore-user-config --ephemeral --json`。CLI 不在 PATH 时，配置命令可加
 `--codex /path/to/codex`。MODEL 必须替换为自己账号实际可用的模型。
@@ -46,6 +49,7 @@ git -C "$TRIAL/superpowers" checkout bb92a77741419a4ab5f06e711a283343f1ada0c3
 .venv/bin/python cli.py --config "$TRIAL/private/config.json" configure \
   --url "$LAZYMIND_URL" --local-login --superpowers "$TRIAL/superpowers" --model "$MODEL"
 .venv/bin/python cli.py --config "$TRIAL/private/config.json" install
+.venv/bin/python cli.py --config "$TRIAL/private/config.json" preflight
 .venv/bin/python demo.py "$TRIAL/csv-a"
 .venv/bin/python cli.py --config "$TRIAL/private/config.json" run \
   --task "$TRIAL/csv-a/task.json" --repo "$TRIAL/csv-a/worktree" --state "$TRIAL/csv-a/run"
@@ -85,7 +89,10 @@ Plan 和验收命令必须可信，命令使用本地用户权限执行。
 先提交 Plan、测试及忽略 `.eval/` 的规则，记录完整 SHA，再执行
 `git worktree add -b my-reviewed-task /path/to/new-worktree "$BASE"`。
 必须是新的干净 linked worktree；主工作区会被拒绝。Manifest、config 和 state 放在其外。
-以 demo 生成的 task.json 为模板，所有字段必须提供：
+以 demo 生成的 task.json 为模板。也可以使用 [Task 7 样例](tasks/custom-labels/docs/plan.md)
+或[中文文件名变体](tasks/custom-unicode/docs/plan.md)：复制输入（包含 .gitignore，task.json
+放在仓库外），提交 Plan/测试/实现占位文件，创建 linked worktree，再将 task.json 中的
+expected_base 替换为新的完整 SHA。所有字段必须提供：
 
 | 字段 | 要求 |
 | --- | --- |
@@ -132,33 +139,28 @@ restore 从同一个已提交任务重新生成 Brief。随后在已登录的 Wo
 已处理的超时/SIGINT/SIGTERM 会终止本执行器拥有的进程组，无法保证 SIGKILL、断电或
 脱离进程组的孙进程。不要删除 state 隐藏未解决派发。子任务限时 600 秒，验收命令 120 秒。
 
-## 一条真实轨迹
+## 证据、验证与边界
 
-2026-10-20 UTC，[中文文件自定义任务](evidence/rc/custom-unicode/trace.jsonl) 实际执行：
-Prepare 08:02:21.953–22.097 → Validate 22.127–22.222 → Dispatch
-08:02:22.286–08:03:09.419 → Collect 09.465–09.572 → 验收 09.607–09.856 →
-Record 09.901–09.921。真实子进程只修改并提交 `标签.py`，四项受保护测试及独立断言通过，
-[六份 Artifact 和状态](evidence/rc/custom-unicode/result.json) 可回读。
-紧接着的 [Brief 删除负例](evidence/rc/missing-current/trace.jsonl) 于 08:03:10.760 阻断，
-启动回执为 0，Dispatch 未执行。[证据目录及复现方法](evidence/rc/README.md)。
-
-## 验证与边界
+[精简公开证据](evidence/public/README.md) 保留正常 E2E、Brief/Base/Coverage 故障注入、
+同 Session 页面 Retry 恢复，以及首次安装、重复运行和自定义任务摘要。
+每份摘录带有历史文件路径、哈希和 JSON Pointer，**是选取的事件，不是完整 Trace**。
+完整研发档案保留本地，不参与安装或测试。
 
 ```bash
 .venv/bin/python -m unittest discover -s . -p 'test_*.py' -v
-.venv/bin/python cli.py --config "$TRIAL/private/config.json" preflight
+.venv/bin/python verify_rc_evidence.py
 ```
 
-预检依赖、CLI 参数与登录、固定上游版本、Runtime 授权和 Workflow 兼容性，不隐藏调用模型。
-模型可用性由实际被 Runtime 接受的派发验证；实际后端身份仍为 N/A。
-Core 控制步骤准入、租约和必需产物，Python 执行器控制 Brief/状态/Base 与任务验收。
-协作锁不等于 OS 隔离；Codex Todo UI 同步、模型认证、任意进程隔离和完整 SDD 对等仍未实现。
+证据校验是离线完整性检查，不等于重新运行 E2E。[PR 验证](PR_VALIDATION.md) 区分历史
+验收与本轮干净 checkout 检查。实时验证使用 run/status。
+预检依赖、CLI 参数及登录、上游版本、Runtime 授权和 Workflow 兼容性，不隐藏调用模型。
+实际后端模型身份仍为 N/A。
 
-Before：原生 Skill 依赖模型遵循派发前约定。After：本执行器把选定前置条件变成可阻断
-自己的派发检查。历史两个正常 Native 样本均成功，没有自然复现缺 Brief；不声称故障率、
-速度或成本提升。详见 [RC 结果](../../RELEASE_CANDIDATE.md)、[#2282](cases/issue-2282.md)、
-[#2245](cases/issue-2245.md)、[对照](comparison.md)。
+Core 控制步骤准入、租约和必需 Artifact，Python 执行器控制 Brief/状态/Base 与任务验收。
+协作锁不等于 OS 隔离；Codex Todo UI 同步、模型认证、任意进程隔离及完整 SDD 尚未实现。
+公开的原生正常样本通过了验收，没有自然复现缺 Brief；不声称成功率、速度或 Token 效率提升。
+详见 [#2282](cases/issue-2282.md)、[#2245](cases/issue-2245.md)、[对照](comparison.md)。
 
-cli.py 是当前用户任务入口；run.py/native.py/parallel.py 和旧证据保留固定 fixture 对照。
-旧发布审计是有日期的历史快照，不能代替本轮代码验收。上游内容附有 [MIT 许可](UPSTREAM-LICENSE)，
-新增代码使用仓库 [Apache-2.0](../../LICENSE)。
+cli.py 是当前入口；native.py/run.py/parallel.py 和 fixture 保留小型固定任务复现及回归，
+不依赖历史日志。上游内容附有 [MIT 许可](UPSTREAM-LICENSE)，新增代码使用
+[Apache-2.0](../../LICENSE)。

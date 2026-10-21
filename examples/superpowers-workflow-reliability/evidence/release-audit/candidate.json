@@ -1,9 +1,0 @@
-{
-  "created_at": "2026-10-20T03:01:34.602954+00:00",
-  "baseline": "17b5e716cffe754f95eac28f2626971a0fc095f4",
-  "candidate_commit": "143641fec9dc826fd611e0e88f6075bcbd0ae896",
-  "candidate_tree": "37992cb5980a44d0bd2212945134efb97d2b0ef7",
-  "candidate_patch_sha256": "5d54d5b0ff907633d07ac8d9f17f8b8f59533c4d0f1969be4f67b25d3c8828b8",
-  "clean_checkout": true,
-  "note": "Temporary local snapshot of uncommitted branch changes; original branch not committed or pushed."
-}

@@ -1,8 +1,0 @@
-{
-  "created_at": "2026-10-19T16:08:15.961357+00:00",
-  "base_sha": "332bf19bb249ccdee2c9b0cb96c1a85113b4b0dd",
-  "superpowers_sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
-  "model_requested": "gpt-6-astra",
-  "host": "Codex CLI 0.155.0-alpha.9",
-  "task": "docs/plans/slug-plan.md"
-}

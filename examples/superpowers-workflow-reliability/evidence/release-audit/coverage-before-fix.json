@@ -1,6 +1,0 @@
-{
-  "observed_at": "2026-10-20T03:01:31.838634+00:00",
-  "finding": "COVERAGE_NULL_EVIDENCE_ACCEPTED",
-  "accepted": true,
-  "kind": "deterministic regression reproduction; not model E2E"
-}

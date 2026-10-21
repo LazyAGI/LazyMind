@@ -1,6 +1,0 @@
-Collecting PyYAML==6.0.3
-  Using cached pyyaml-6.0.3-cp39-cp39-macosx_11_0_arm64.whl (174 kB)
-Installing collected packages: PyYAML
-Successfully installed PyYAML-6.0.3
-WARNING: You are using pip version 21.2.4; however, version 26.0.1 is available.
-You should consider upgrading via the '<CANDIDATE_CHECKOUT>/examples/superpowers-workflow-reliability/.venv/bin/python3 -m pip install --upgrade pip' command.
