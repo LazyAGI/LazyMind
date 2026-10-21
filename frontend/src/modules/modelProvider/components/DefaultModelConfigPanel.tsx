@@ -296,11 +296,12 @@ export default function DefaultModelConfigPanel({
           <label
             className="model-provider-default-title"
             htmlFor={`model-provider-${module.key.toLowerCase()}`}
+            title={moduleTitle}
           >
             {module.required ? (
               <span className="is-required">*</span>
             ) : null}
-            <span>{moduleTitle}</span>
+            <span className="model-provider-default-title-text">{moduleTitle}</span>
           </label>
           {configured && shouldShowMaxInputTokens ? (
             <span className="model-provider-max-input-tokens">
@@ -309,7 +310,7 @@ export default function DefaultModelConfigPanel({
               })}
             </span>
           ) : null}
-          <Tooltip placement="top" title={moduleSubtitle}>
+          <Tooltip placement="top" title={moduleSubtitle} trigger={["hover", "focus"]}>
             <button
               aria-label={t("modelProvider.moduleHelpAria", {
                 title: moduleTitle,
@@ -531,10 +532,11 @@ export default function DefaultModelConfigPanel({
           <label
             className="model-provider-default-title"
             htmlFor={`model-provider-cloud-${service.key}`}
+            title={serviceTitle}
           >
-            <span>{serviceTitle}</span>
+            <span className="model-provider-default-title-text">{serviceTitle}</span>
           </label>
-          <Tooltip placement="top" title={serviceSubtitle}>
+          <Tooltip placement="top" title={serviceSubtitle} trigger={["hover", "focus"]}>
             <button
               aria-label={t("modelProvider.moduleHelpAria", {
                 title: serviceTitle,
@@ -738,7 +740,7 @@ export default function DefaultModelConfigPanel({
               <div className="model-provider-default-list">{configuredCards.map((card) => card.node)}</div>
             ) : <p className="model-provider-capability-empty">{t("modelProvider.configuredCapabilitiesEmpty")}</p>}
           </section>
-          <section className="model-provider-capability-section" aria-label={t("modelProvider.pendingCapabilities")}>
+          <section className="model-provider-capability-section model-provider-pending-section" aria-label={t("modelProvider.pendingCapabilities")}>
             <div className="model-provider-capability-heading">
               <h3>{t("modelProvider.pendingCapabilities")} <span>{pendingCards.length}</span></h3>
 

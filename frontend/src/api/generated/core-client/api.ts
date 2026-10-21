@@ -1463,6 +1463,12 @@ export interface ConversationArchiveFolderRequest {
 }
 export interface ConversationArchiveRequest {
     'folder_id'?: string | null;
+    'only_if_active'?: boolean;
+}
+export interface ConversationArchiveResponse {
+    'archived_at': string;
+    'conversation_id': string;
+    'newly_archived': boolean;
 }
 export interface ConversationBatchDeleteRequest {
     'conversation_ids': Array<string>;
@@ -2122,6 +2128,9 @@ export interface ConversationTrailListResponse {
     'name'?: string;
     'next_page_token'?: string;
     'total_size'?: number;
+}
+export interface ConversationUnarchiveRequest {
+    'expected_archived_at'?: string;
 }
 export interface CoreEmptyResponse {
     'code': number;
@@ -4256,6 +4265,10 @@ export interface KnowledgeMarketTaskListOpenAPIResponse {
     'page': number;
     'page_size': number;
     'total': number;
+    /**
+     * Current user\'s unfinished knowledge market tasks across all pages and filters, including ongoing file parsing.
+     */
+    'unfinished_count': number;
 }
 export interface KnowledgeMarketTaskParseOpenAPIResponse {
     'canceled'?: number;
@@ -4972,10 +4985,13 @@ export interface OrdinaryDisplayErrorData {
     'request_id': string;
 }
 export interface OrdinaryRunView {
+    'execution_id'?: string;
     'final_artifacts'?: Array<PublicArtifact>;
     'final_output_refs'?: Array<string>;
     'revision': number;
     'run_id': string;
+    'status'?: string;
+    'timing'?: RunTiming;
 }
 export interface OrdinaryTaskDetailData {
     'task': OrdinaryTaskView;
@@ -5607,6 +5623,14 @@ export const RunTerminalTransportDiagnosticCodeEnum = {
 
 export type RunTerminalTransportDiagnosticCodeEnum = typeof RunTerminalTransportDiagnosticCodeEnum[keyof typeof RunTerminalTransportDiagnosticCodeEnum];
 
+export interface RunTiming {
+    'cumulative_execution_ms': number | null;
+    'elapsed_ms': number | null;
+    'finished_at': string | null;
+    'measured_at': string;
+    'requested_at': string;
+    'running_attempt_count': number;
+}
 export interface ScheduleMoveRequest {
     'group_id'?: string | null;
     'position'?: number;
@@ -6785,6 +6809,21 @@ export interface TaskPayload {
     'target_path'?: string;
     'target_pid'?: string;
     'task_type'?: string;
+}
+export interface TaskRemovalPreview {
+    'active_task_count': number;
+    'conversation_count': number;
+    'impact_version': string;
+    'task_count': number;
+    'task_id': string;
+}
+export interface TaskRemovalRequest {
+    'impact_version'?: string;
+}
+export interface TaskRemovalResult {
+    'cancellation_pending': boolean;
+    'removed_task_ids': Array<string>;
+    'trashed_conversation_ids': Array<string>;
 }
 export interface TaskResponse {
     'convert_error'?: string;
@@ -16185,12 +16224,13 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Unarchive a conversation
+         * @summary Unarchive a conversation. A stale expected_archived_at returns business code 2004815; an already active conversation satisfies a conditional retry.
          * @param {string} conversationId
+         * @param {ConversationUnarchiveRequest} [conversationUnarchiveRequest]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsConversationIdUnarchivePost: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreConversationsConversationIdUnarchivePost: async (conversationId: string, conversationUnarchiveRequest?: ConversationUnarchiveRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdUnarchivePost', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}:unarchive`
@@ -16206,11 +16246,13 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Content-Type'] = 'application/json';
             localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationUnarchiveRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -23577,12 +23619,47 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary POST /task-center/tasks/{task_id}:remove
+         * @summary Preview removal of a task and related conversations
          * @param {string} taskId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTaskCenterTasksTaskIdRemovePost: async (taskId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreTaskCenterTasksTaskIdRemovalPreviewGet: async (taskId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'taskId' is not null or undefined
+            assertParamExists('apiCoreTaskCenterTasksTaskIdRemovalPreviewGet', 'taskId', taskId)
+            const localVarPath = `/api/core/task-center/tasks/{task_id}/removal-preview`
+                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Move task and related conversations to Trash
+         * @param {string} taskId
+         * @param {TaskRemovalRequest} [taskRemovalRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterTasksTaskIdRemovePost: async (taskId: string, taskRemovalRequest?: TaskRemovalRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'taskId' is not null or undefined
             assertParamExists('apiCoreTaskCenterTasksTaskIdRemovePost', 'taskId', taskId)
             const localVarPath = `/api/core/task-center/tasks/{task_id}:remove`
@@ -23598,10 +23675,13 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(taskRemovalRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -26971,7 +27051,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationsConversationIdArchivePost(conversationId: string, conversationArchiveRequest: ConversationArchiveRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
+        async apiCoreConversationsConversationIdArchivePost(conversationId: string, conversationArchiveRequest: ConversationArchiveRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationArchiveResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdArchivePost(conversationId, conversationArchiveRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdArchivePost']?.[localVarOperationServerIndex]?.url;
@@ -27193,13 +27273,14 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Unarchive a conversation
+         * @summary Unarchive a conversation. A stale expected_archived_at returns business code 2004815; an already active conversation satisfies a conditional retry.
          * @param {string} conversationId
+         * @param {ConversationUnarchiveRequest} [conversationUnarchiveRequest]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationsConversationIdUnarchivePost(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdUnarchivePost(conversationId, options);
+        async apiCoreConversationsConversationIdUnarchivePost(conversationId: string, conversationUnarchiveRequest?: ConversationUnarchiveRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdUnarchivePost(conversationId, conversationUnarchiveRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdUnarchivePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -30004,13 +30085,27 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary POST /task-center/tasks/{task_id}:remove
+         * @summary Preview removal of a task and related conversations
          * @param {string} taskId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreTaskCenterTasksTaskIdRemovePost(taskId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksTaskIdRemovePost(taskId, options);
+        async apiCoreTaskCenterTasksTaskIdRemovalPreviewGet(taskId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskRemovalPreview>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksTaskIdRemovalPreviewGet(taskId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterTasksTaskIdRemovalPreviewGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Move task and related conversations to Trash
+         * @param {string} taskId
+         * @param {TaskRemovalRequest} [taskRemovalRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreTaskCenterTasksTaskIdRemovePost(taskId: string, taskRemovalRequest?: TaskRemovalRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskRemovalResult>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksTaskIdRemovePost(taskId, taskRemovalRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterTasksTaskIdRemovePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -31573,7 +31668,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsConversationIdArchivePost(requestParameters: DefaultApiApiCoreConversationsConversationIdArchivePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
+        apiCoreConversationsConversationIdArchivePost(requestParameters: DefaultApiApiCoreConversationsConversationIdArchivePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationArchiveResponse> {
             return localVarFp.apiCoreConversationsConversationIdArchivePost(requestParameters.conversationId, requestParameters.conversationArchiveRequest, options).then((request) => request(axios, basePath));
         },
         /**
@@ -31738,13 +31833,13 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary Unarchive a conversation
+         * @summary Unarchive a conversation. A stale expected_archived_at returns business code 2004815; an already active conversation satisfies a conditional retry.
          * @param {DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreConversationsConversationIdUnarchivePost(requestParameters: DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
-            return localVarFp.apiCoreConversationsConversationIdUnarchivePost(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreConversationsConversationIdUnarchivePost(requestParameters.conversationId, requestParameters.conversationUnarchiveRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -33811,13 +33906,23 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary POST /task-center/tasks/{task_id}:remove
+         * @summary Preview removal of a task and related conversations
+         * @param {DefaultApiApiCoreTaskCenterTasksTaskIdRemovalPreviewGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterTasksTaskIdRemovalPreviewGet(requestParameters: DefaultApiApiCoreTaskCenterTasksTaskIdRemovalPreviewGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<TaskRemovalPreview> {
+            return localVarFp.apiCoreTaskCenterTasksTaskIdRemovalPreviewGet(requestParameters.taskId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Move task and related conversations to Trash
          * @param {DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters: DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters.taskId, options).then((request) => request(axios, basePath));
+        apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters: DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<TaskRemovalResult> {
+            return localVarFp.apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters.taskId, requestParameters.taskRemovalRequest, options).then((request) => request(axios, basePath));
         },
         /**
          * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
@@ -34943,6 +35048,8 @@ export interface DefaultApiApiCoreConversationsConversationIdToolLimitDecisionPo
  */
 export interface DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest {
     readonly conversationId: string
+
+    readonly conversationUnarchiveRequest?: ConversationUnarchiveRequest
 }
 
 /**
@@ -36160,10 +36267,19 @@ export interface DefaultApiApiCoreTaskCenterTasksTaskIdGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreTaskCenterTasksTaskIdRemovalPreviewGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreTaskCenterTasksTaskIdRemovalPreviewGetRequest {
+    readonly taskId: string
+}
+
+/**
  * Request parameters for apiCoreTaskCenterTasksTaskIdRemovePost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest {
     readonly taskId: string
+
+    readonly taskRemovalRequest?: TaskRemovalRequest
 }
 
 /**
@@ -37410,13 +37526,13 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary Unarchive a conversation
+     * @summary Unarchive a conversation. A stale expected_archived_at returns business code 2004815; an already active conversation satisfies a conditional retry.
      * @param {DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreConversationsConversationIdUnarchivePost(requestParameters: DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdUnarchivePost(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdUnarchivePost(requestParameters.conversationId, requestParameters.conversationUnarchiveRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -39697,13 +39813,24 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary POST /task-center/tasks/{task_id}:remove
+     * @summary Preview removal of a task and related conversations
+     * @param {DefaultApiApiCoreTaskCenterTasksTaskIdRemovalPreviewGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreTaskCenterTasksTaskIdRemovalPreviewGet(requestParameters: DefaultApiApiCoreTaskCenterTasksTaskIdRemovalPreviewGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreTaskCenterTasksTaskIdRemovalPreviewGet(requestParameters.taskId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Move task and related conversations to Trash
      * @param {DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters: DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters.taskId, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters.taskId, requestParameters.taskRemovalRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

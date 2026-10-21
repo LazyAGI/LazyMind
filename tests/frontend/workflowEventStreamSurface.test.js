@@ -57,11 +57,11 @@ describe('Workflow Panel live update surface', () => {
     );
     expect(taskStore).toContain('get().upsertTask(conversationId');
     expect(taskPanel).toContain('if (filter === "all") return tasks;');
-    expect(taskPanel).toContain('const [now, setNow] = useState(Date.now())');
-    expect(taskPanel).toContain('if (!document.hidden) setNow(Date.now())');
-    expect(taskPanel).toMatch(
-      /buildOrdinaryTaskTimeline\(\s*tasks,\s*workflowSteps,\s*now,\s*plannedCount,\s*\)/,
-    );
+    expect(taskPanel).toContain('const runTiming = useRunTiming(currentRun)');
+    expect(taskPanel).toContain('...buildOrdinaryTaskTimeline(');
+    expect(taskPanel).toContain('...runTiming,');
+    expect(taskPanel).toContain('formatDuration(runTiming.elapsedSeconds)');
+    expect(taskPanel).toContain('formatDuration(runTiming.cumulativeExecutionSeconds)');
     expect(chatLayout).toContain('taskCenterDisplayCount(');
   });
 });

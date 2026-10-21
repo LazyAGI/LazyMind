@@ -7,14 +7,14 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import RecordList from "./index";
 import SidebarGroups from "../../conversationOrganizer/SidebarGroups";
 import { assignConversation, emitConversationGroupsChanged, getConversationGroup, type ConversationGroup } from "../../conversationOrganizer/api";
-vi.mock("../../conversationOrganizer/api", () => ({ assignConversation: vi.fn(), getConversationGroup: vi.fn(), listConversationGroups: vi.fn().mockResolvedValue([]), removeConversation: vi.fn(), emitConversationGroupsChanged: vi.fn(), CONVERSATION_GROUPS_CHANGED_EVENT: "groups-changed" }));
+vi.mock("../../conversationOrganizer/api", () => ({ assignConversation: vi.fn(), getConversationGroup: vi.fn(), listConversationGroups: vi.fn().mockResolvedValue([]), removeConversation: vi.fn(), emitConversationGroupsChanged: vi.fn(), renameGroupConversation: (...args: unknown[]) => mocks.renameConversation(...args), CONVERSATION_GROUPS_CHANGED_EVENT: "groups-changed" }));
 import { emitConversationActivity } from "@/modules/chat/utils/conversationActivity";
-import { CHAT_CONVERSATION_FILTER_KEY, CHAT_CONVERSATION_MODE_KEY, CHAT_CONVERSATION_SOURCES_KEY, selectChatConversationFilter } from "@/modules/chat/constants/chat";
+import { CHAT_CONVERSATION_FILTER_KEY, CHAT_CONVERSATION_LIST_REFRESH_EVENT, CHAT_CONVERSATION_MODE_KEY, CHAT_CONVERSATION_SOURCES_KEY, selectChatConversationFilter } from "@/modules/chat/constants/chat";
 import { useConversationRunningStore } from "@/modules/chat/store/conversationRunning";
 import { CONVERSATION_DRAG } from "../../conversationOrganizer/drag";
 vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getUserInfo: () => ({ userId: "record-owner" }) }, AUTH_USER_CHANGE_EVENT: "record-user-change" }));
 
-vi.mock("../ConversationTitleEditor", () => ({ default: ({ initialTitle, onClose }: { initialTitle: string; onClose: () => void }) => <input aria-label="会话名称" defaultValue={initialTitle} onKeyDown={event => { if (event.key === "Escape") onClose(); }} /> }));
+vi.mock("../BatchArchiveFeedback", () => ({ showBatchArchiveFeedback: (...args: unknown[]) => mocks.showBatchArchiveFeedback(...args) }));
 
 const drag = vi.hoisted(() => ({ end: (_event: DragEndEvent): Promise<void> | void => {} }));
 vi.mock("@dnd-kit/core", async () => {
@@ -34,12 +34,16 @@ const mocks = vi.hoisted(() => ({
   reorder: vi.fn(),
   deleteConversation: vi.fn(),
   getConversationDetail: vi.fn(),
+  renameConversation: vi.fn(),
   listChatExecutors: vi.fn(),
   messageSuccess: vi.fn(),
   messageError: vi.fn(),
+  messageOpen: vi.fn(),
   localizedError: vi.fn(() => "请求失败"),
   batchDelete: vi.fn(),
   archiveConversation: vi.fn(),
+  unarchiveConversation: vi.fn(),
+  showBatchArchiveFeedback: vi.fn(),
   listArchiveFolders: vi.fn(),
 }));
 
@@ -58,7 +62,8 @@ vi.mock("react-i18next", () => ({
         "chat.reorderConversationFailed": "顺序保存失败，请重试",
         "settingsPage.recovery.moreActions": "更多操作",
         "settingsPage.recovery.archiveAction": "归档",
-        "settingsPage.recovery.moveToTrashTitle": "删除会话",
+        "conversationRename.name": "会话名称",
+        "settingsPage.recovery.moveToTrashTitle": "将对话移入回收站？",
         "settingsPage.recovery.moveToTrash": "移入回收站",
         "chat.batch": "批量",
         "chat.selectAll": "全选",
@@ -87,7 +92,7 @@ vi.mock("antd", async () => {
       success: mocks.messageSuccess,
       error: mocks.messageError,
       warning: vi.fn(),
-      open: vi.fn(),
+      open: mocks.messageOpen,
       destroy: vi.fn(),
     },
   };
@@ -120,7 +125,7 @@ vi.mock("@/modules/chat/store/chatNewMessage", () => ({
   useChatNewMessageStore: () => ({ setNewMessage: vi.fn() }),
 }));
 vi.mock("@/modules/settings/recoveryApi", () => ({
-  unarchiveConversation: vi.fn(),
+  unarchiveConversation: mocks.unarchiveConversation,
   archiveConversation: mocks.archiveConversation,
   listArchiveFolders: mocks.listArchiveFolders,
   createArchiveFolder: vi.fn(),
@@ -204,24 +209,96 @@ describe("RecordList conversation pinning", () => {
     expect(screen.getByTestId("archive-location")).toHaveTextContent(`kind=${filter === "task" ? "task" : "dialog"}`);
   });
 
-  it.each([false, true])("renames Chat/Work from the pinned list without changing ordering (work=%s)", async (work) => {
+  it.each(["normal", "task"])("refreshes archives when a single %s archive is undone after navigation", async filter => {
+    sessionStorage.setItem(CHAT_CONVERSATION_FILTER_KEY, filter);
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [{ ...newerConversation, is_task_conv: filter === "task" }] } });
+    const source = render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter>
+      <RecordList compact onSelected={vi.fn()} onRemove={vi.fn()} /><ArchiveLocation />
+    </MemoryRouter></ConfigProvider>);
+    await screen.findByText(newerConversation.display_name);
+    fireEvent.click(moreActionsFor(newerConversation.display_name));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /归档/ }));
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByRole("radio");
+    fireEvent.click(within(dialog).getByRole("button", { name: "归档" }));
+    await waitFor(() => expect(mocks.messageOpen).toHaveBeenCalled());
+    const notice = render(mocks.messageOpen.mock.calls[0][0].content);
+    fireEvent.click(within(notice.container).getByRole("button", { name: "settingsPage.recovery.viewArchived" }));
+    expect(screen.getByTestId("archive-location")).toHaveTextContent(`view=archive&kind=${filter === "task" ? "task" : "dialog"}`);
+    source.unmount();
+
+    const refresh = vi.fn();
+    window.addEventListener(CHAT_CONVERSATION_LIST_REFRESH_EVENT, refresh);
+    try {
+      let finishUndo!: () => void;
+      mocks.unarchiveConversation.mockReturnValue(new Promise<void>(resolve => { finishUndo = resolve; }));
+      fireEvent.click(within(notice.container).getByRole("button", { name: "settingsPage.recovery.undo" }));
+      expect(mocks.unarchiveConversation).toHaveBeenCalledWith("newer");
+      expect(refresh).not.toHaveBeenCalled();
+      await act(async () => finishUndo());
+      expect(refresh).toHaveBeenCalledOnce();
+      expect(mocks.messageSuccess).toHaveBeenCalledWith("settingsPage.recovery.unarchived");
+    } finally {
+      window.removeEventListener(CHAT_CONVERSATION_LIST_REFRESH_EVENT, refresh);
+    }
+  });
+
+  it.each(["recent", "pinned", "search", "task"].flatMap(scope => ["click", "hover", "contextMenu"].map(trigger => [scope, trigger])))("opens the rename dialog from %s using %s without selecting a conversation", async (scope, trigger) => {
+    const onSelected = vi.fn();
+    sessionStorage.setItem(CHAT_CONVERSATION_FILTER_KEY, scope === "task" ? "task" : "normal");
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [{ ...newerConversation, is_pinned: scope === "pinned", is_task_conv: scope === "task" }] } });
+    mocks.getConversationDetail.mockResolvedValue({ data: { conversation: { display_name: newerConversation.display_name, title_revision: 2 } } });
+    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><RecordList compact hideHeader searchText={scope === "search" ? "会话" : undefined} onSelected={onSelected} onRemove={vi.fn()} /></MemoryRouter></ConfigProvider>);
+    const title = await screen.findByText(newerConversation.display_name);
+    if (trigger === "contextMenu") fireEvent.contextMenu(title.closest(".record")!);
+    else if (trigger === "hover") fireEvent.mouseEnter(moreActionsFor(newerConversation.display_name));
+    else fireEvent.click(moreActionsFor(newerConversation.display_name));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "conversationOrganizer.renameConversation" }));
+    const dialog = await screen.findByRole("dialog", { name: "conversationOrganizer.renameConversation" });
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    expect(within(dialog).getByRole("textbox", { name: "会话名称" })).toHaveValue(newerConversation.display_name);
+    expect(within(dialog).getByRole("textbox").closest(".record")).toBeNull();
+    expect(screen.getByText(newerConversation.display_name)).toBeInTheDocument();
+    expect(onSelected).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "common.cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mocks.renameConversation).not.toHaveBeenCalled();
+  });
+
+  it("keeps a delayed hover from reopening actions behind the rename dialog", async () => {
+    renderRecordList();
+    await screen.findByText(newerConversation.display_name);
+    const more = moreActionsFor(newerConversation.display_name);
+    fireEvent.click(more);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "conversationOrganizer.renameConversation" }));
+    await screen.findByRole("dialog");
+    vi.useFakeTimers();
+    fireEvent.mouseEnter(more);
+    await act(async () => vi.advanceTimersByTimeAsync(300));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it.each([false, true])("renames Chat/Work from a dialog without changing ordering (work=%s)", async (work) => {
     sessionStorage.setItem(CHAT_CONVERSATION_FILTER_KEY, JSON.stringify([work ? "task" : "normal"]));
     mocks.listConversations.mockResolvedValue({ data: { conversations: [
       { ...olderConversation, is_task_conv: work, is_pinned: true, pinned_at: olderConversation.update_time },
       { ...newerConversation, is_task_conv: work },
     ] } });
+    mocks.getConversationDetail.mockResolvedValue({ data: { conversation: { display_name: olderConversation.display_name, title_revision: 0 } } });
+    mocks.renameConversation.mockResolvedValue({ display_name: "自定义会话", title_revision: 1 });
     renderRecordList();
     await screen.findByText("较早的会话");
     fireEvent.click(moreActionsFor("较早的会话"));
     fireEvent.click(await screen.findByText("conversationOrganizer.renameConversation"));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "会话名称" }).closest(".record")).toHaveClass("record-renaming");
-    expect(screen.getByRole("textbox", { name: "会话名称" }).closest("[draggable]")).toHaveAttribute("draggable", "false");
-    fireEvent.keyDown(screen.getByRole("textbox", { name: "会话名称" }), { key: "Escape" });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    const input = screen.getByRole("textbox", { name: "会话名称" });
+    expect(input.closest(".record")).toBeNull();
+    await waitFor(() => expect(input).not.toHaveAttribute("readonly"));
     const before = Array.from(document.querySelectorAll(".record .update-time"), el => el.textContent);
-    act(() => window.dispatchEvent(new CustomEvent("lazymind:conversation-title-changed", {
-      detail: { conversationId: "older", displayName: "自定义会话", titleRevision: 1 },
-    })));
+    fireEvent.change(input, { target: { value: "自定义会话" } });
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mocks.renameConversation).toHaveBeenCalledWith("older", "自定义会话", 0);
     expect(screen.getByText("自定义会话")).toBeInTheDocument();
     expect(Array.from(document.querySelectorAll(".record .title"), el => el.textContent)).toEqual(["自定义会话", "较新的会话"]);
     expect(Array.from(document.querySelectorAll(".record .update-time"), el => el.textContent)).toEqual(before);
@@ -285,8 +362,8 @@ describe("RecordList conversation pinning", () => {
     expect(menuItem).toHaveClass("ant-dropdown-menu-item-danger");
     fireEvent.click(menuItem);
     const dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveAccessibleName("删除会话");
-    expect(within(dialog).queryByText(newerConversation.display_name)).not.toBeInTheDocument();
+    expect(dialog).toHaveAccessibleName("将对话移入回收站？");
+    expect(within(dialog).getByText(newerConversation.display_name)).toHaveClass("conversation-trash-confirm-name");
     expect(within(dialog).getByText("settingsPage.recovery.moveToTrashDescription")).toBeInTheDocument();
     expect(mocks.deleteConversation).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "common.cancel" }));
@@ -306,7 +383,7 @@ describe("RecordList conversation pinning", () => {
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "common.delete" }));
     await waitFor(() => expect(mocks.messageError).toHaveBeenCalledWith("settingsPage.recovery.operationFailed"));
-    expect(screen.getByText(newerConversation.display_name)).toBeInTheDocument();
+    expect(within(document.querySelector(".record-list") as HTMLElement).getByText(newerConversation.display_name)).toBeInTheDocument();
     expect(onRemove).not.toHaveBeenCalled();
     mocks.listConversations.mockResolvedValue({ data: { conversations: [olderConversation] } });
     fireEvent.click(await within(dialog).findByRole("button", { name: "common.delete" }));
@@ -314,6 +391,40 @@ describe("RecordList conversation pinning", () => {
     expect(mocks.deleteConversation).toHaveBeenCalledTimes(2);
     expect(mocks.messageSuccess).toHaveBeenCalledWith("chat.deleteConversationSuccess");
     await waitFor(() => expect(screen.queryByText(newerConversation.display_name)).not.toBeInTheDocument());
+  });
+
+  it.each(["recent", "pinned", "search"])("shows the shared confirmation and fork notice from %s", async source => {
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [{ ...newerConversation, is_pinned: source === "pinned" }] } });
+    mocks.getConversationDetail.mockResolvedValue({ data: { conversation: { has_fork_descendants: true } } });
+    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><RecordList compact hideHeader
+      searchText={source === "search" ? "会话" : undefined} onSelected={vi.fn()} onRemove={vi.fn()} /></MemoryRouter></ConfigProvider>);
+    await screen.findByText(newerConversation.display_name);
+    fireEvent.click(moreActionsFor(newerConversation.display_name));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /common.delete/ }));
+    const dialog = await screen.findByRole("dialog", { name: "将对话移入回收站？" });
+    expect(within(dialog).getByText(newerConversation.display_name)).toBeInTheDocument();
+    expect(within(dialog).getByText("chat.fork.deleteNotice")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "common.cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mocks.deleteConversation).not.toHaveBeenCalled();
+  });
+
+  it("shows loading and blocks repeated deletion while the request is pending", async () => {
+    let resolveDelete!: (value: object) => void;
+    mocks.deleteConversation.mockImplementation(() => new Promise(resolve => { resolveDelete = resolve; }));
+    renderRecordList();
+    await screen.findByText(newerConversation.display_name);
+    fireEvent.click(moreActionsFor(newerConversation.display_name));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /common.delete/ }));
+    const dialog = await screen.findByRole("dialog");
+    const submit = within(dialog).getByRole("button", { name: "common.delete" });
+    fireEvent.click(submit);
+    await waitFor(() => expect(submit).toHaveClass("ant-btn-loading"));
+    fireEvent.click(submit);
+    expect(mocks.deleteConversation).toHaveBeenCalledTimes(1);
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [olderConversation] } });
+    await act(async () => resolveDelete({}));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
   it("keeps unsuccessful batch deletions selected and does not close their active conversation", async () => {
@@ -354,8 +465,9 @@ describe("RecordList conversation pinning", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(screen.queryByText(newerConversation.display_name)).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: new RegExp(olderConversation.display_name) })).toBeChecked();
-    expect(mocks.archiveConversation.mock.calls).toEqual([["newer", null], ["older", null]]);
+    expect(mocks.archiveConversation.mock.calls).toEqual([["newer", null, true], ["older", null, true]]);
     expect(mocks.batchDelete).not.toHaveBeenCalled();
+    expect(mocks.showBatchArchiveFeedback).toHaveBeenCalledWith({ count: 1, receipts: [], onViewArchived: expect.any(Function) });
     mocks.archiveConversation.mockResolvedValue(undefined);
     mocks.listConversations.mockResolvedValue({ data: { conversations: [] } });
     fireEvent.click(screen.getByRole("button", { name: /common.actions/ }));
@@ -364,7 +476,7 @@ describe("RecordList conversation pinning", () => {
     await within(retry).findByRole("radio");
     fireEvent.click(within(retry).getByRole("button", { name: "归档" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "批量" })).toBeInTheDocument());
-    expect(mocks.archiveConversation.mock.calls).toEqual([["newer", null], ["older", null], ["older", null]]);
+    expect(mocks.archiveConversation.mock.calls).toEqual([["newer", null, true], ["older", null, true], ["older", null, true]]);
     expect(screen.queryByText(olderConversation.display_name)).not.toBeInTheDocument();
   });
 

@@ -1,3 +1,4 @@
+import { TASKS_REMOVED_EVENT } from '@/modules/taskCenter/events';
 import { getLocalizedErrorMessage } from "@/components/request";
 import {
   DndContext, PointerSensor, KeyboardSensor, closestCenter, pointerWithin, useSensor, useSensors,
@@ -72,6 +73,7 @@ import {
 } from "@/modules/chat/utils/request";
 import {
   bumpConversationToTop,
+  emitConversationListRefresh,
 } from "@/modules/chat/utils/conversationActivity";
 import {
   CHAT_CONVERSATION_ACTIVITY_EVENT,
@@ -86,6 +88,8 @@ import {
 import "./index.scss";
 import { downloadStream } from "@/modules/chat/utils/download";
 import ArchiveConversationModal from "../ArchiveConversationModal";
+import { showBatchArchiveFeedback } from "../BatchArchiveFeedback";
+import ConversationTrashConfirmContent from "../ConversationTrashConfirmContent";
 import { unarchiveConversation } from "@/modules/settings/recoveryApi";
 import {
   CONVERSATION_GROUPS_CHANGED_EVENT,
@@ -181,6 +185,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     } = props;
     const [historyList, setHistoryList] = useState<SidebarConversation[]>([]);
     const [renamingId, setRenamingId] = useState<string | null>(null);
+    const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const [movingConversation, setMovingConversation] = useState<SidebarConversation | null>(null);
     const statusWatcherId = useId();
     useEffect(() => {
@@ -339,7 +344,8 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     useEffect(() => {
       const refresh = () => getHistory({ isFirst: true, searchText: keyword });
       window.addEventListener(CONVERSATION_GROUPS_CHANGED_EVENT, refresh);
-      return () => window.removeEventListener(CONVERSATION_GROUPS_CHANGED_EVENT, refresh);
+      window.addEventListener(TASKS_REMOVED_EVENT, refresh);
+      return () => { window.removeEventListener(CONVERSATION_GROUPS_CHANGED_EVENT, refresh); window.removeEventListener(TASKS_REMOVED_EVENT, refresh); };
     }, [keyword, conversationFilters]);
 
     useEffect(() => {
@@ -739,8 +745,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         hasForks = Boolean((response.data.conversation as { has_fork_descendants?: boolean })?.has_fork_descendants);
       } catch { message.error(t("chat.fork.historyLoadFailed")); return; }
       await modal.confirm({
+        className: "conversation-trash-confirm",
+        width: 420,
         title: t("settingsPage.recovery.moveToTrashTitle"),
-        content: t("settingsPage.recovery.moveToTrashDescription") + (hasForks ? " " + t("chat.fork.deleteNotice") : ""),
+        content: <ConversationTrashConfirmContent name={data.display_name} showForkNotice={hasForks} />,
         okText: t("common.delete"),
         cancelText: t("common.cancel"),
         okButtonProps: { danger: true },
@@ -763,6 +771,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                 .then(() => {
                   message.destroy(messageKey);
                   message.success(t("settingsPage.recovery.unarchived"));
+                  emitConversationListRefresh();
                   emitConversationGroupsChanged();
                   getHistory({ isFirst: true });
                 })
@@ -949,19 +958,24 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         setNewMessage(false);
       };
       return (
-        <ConversationPreview conversationId={conversationId} title={conversationTitle} summary={item.summary} updateTime={item.update_time} isTask={Boolean(item.is_task_conv)} relation={relationDescription} disabled={showBatchExport || renamingId === conversationId}>
+        <ConversationPreview conversationId={conversationId} title={conversationTitle} summary={item.summary} updateTime={item.update_time} isTask={Boolean(item.is_task_conv)} relation={relationDescription} disabled={showBatchExport || renamingId === conversationId || openMenuId === conversationId}>
         <div
           aria-busy={item.metadata_pending || undefined}
           data-title-revision={item.title_revision}
           className={classnames("record", {
             selected,
             "record-child": isChild,
-            "record-renaming": renamingId === conversationId,
           })}
           key={item.conversation_id}
           role={showBatchExport || renamingId === conversationId ? undefined : "button"}
           tabIndex={showBatchExport ? undefined : 0}
           aria-current={selected ? "page" : undefined}
+          onContextMenu={(event) => {
+            if (showBatchExport || hideActions || renamingId) return;
+            event.preventDefault();
+            event.stopPropagation();
+            setOpenMenuId(conversationId);
+          }}
           onClick={(e) => {
             e.preventDefault();
             activateConversation();
@@ -1016,7 +1030,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               </button>
             </Tooltip>
           ) : null}
-          {renamingId === conversationId ? <ConversationTitleEditor key={conversationId} conversationId={conversationId} initialTitle={conversationTitle} onClose={() => setRenamingId(null)} /> : <span className="title">{conversationTitle}</span>}
+          <span className="title">{conversationTitle}</span>
           <ConversationRunningIndicator conversationId={conversationId} />
           {source.source_type === "pdf_preview" ? (
             <Tooltip title={source.source_display_name || t("knowledge.pdfChatSavedSource")}>
@@ -1029,9 +1043,11 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           {!showBatchExport && !hideActions ? (
             <Dropdown
               destroyPopupOnHide
-              trigger={["click"]}
+              trigger={["hover", "click", "contextMenu"]}
+              open={!renamingId && openMenuId === conversationId}
+              onOpenChange={open => setOpenMenuId(current => open && !renamingId ? conversationId : current === conversationId ? null : current)}
               menu={{
-                onClick: ({ domEvent }) => domEvent.stopPropagation(),
+                onClick: ({ domEvent }) => { domEvent.stopPropagation(); setOpenMenuId(null); },
                 items: [
                   { key: "rename", label: t("conversationOrganizer.renameConversation"), onClick: () => setRenamingId(conversationId) },
                   ...ownershipActionItems,
@@ -1178,6 +1194,9 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         }}>
       <div id={compact && groupSection ? scrollableTargetId : undefined} className={classnames("record-container", { compact, "grouped-sidebar": compact && groupSection })} onDragOver={e => { if (!showBatchExport && !keyword && e.dataTransfer.types.includes(CONVERSATION_DRAG)) e.preventDefault(); }} onDrop={async e => { const item = readConversationDrag(e); if (!item || keyword || showBatchExport) return; e.preventDefault(); if (item.groupId) { await removeConversation(item.groupId, item.id); emitConversationGroupsChanged(); } }}>
         {modalContextHolder}
+        {renamingId && <ConversationTitleEditor key={renamingId} conversationId={renamingId}
+          initialTitle={historyList.find(item => item.conversation_id === renamingId)?.display_name}
+          onClose={() => { setOpenMenuId(null); setRenamingId(null); }} />}
         <ArchiveConversationModal
           open={Boolean(archiveItem)}
           conversationId={archiveItem?.conversation_id}
@@ -1196,19 +1215,18 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           open={batchArchiveIds !== null}
           conversationIds={batchArchiveIds || []}
           onCancel={() => setBatchArchiveIds(null)}
-          onArchived={(archivedIds, failedIds) => {
+          onArchived={(archivedIds, failedIds, batch) => {
             setBatchArchiveIds(null);
-            removeHistoryItems(archivedIds);
+            removeHistoryItems([...archivedIds, ...(batch?.skippedIds || [])]);
             setCheckedList(failedIds);
             if (!failedIds.length) setShowBatchExport(false);
-            message.open({
-              type: "success",
-              duration: 8,
-              content: <span className="archive-feedback">
-                {t("chat.batchArchiveSuccess", { count: archivedIds.length })}
-                <Button type="link" size="small" onClick={() => navigate(getRecoveryArchivePath(conversationFilters.filter === "task" ? "task" : "dialog"))}>{t("settingsPage.recovery.viewArchived")}</Button>
-              </span>,
-            });
+            if (archivedIds.length) {
+              showBatchArchiveFeedback({
+                count: archivedIds.length,
+                receipts: batch?.receipts || [],
+                onViewArchived: () => navigate(getRecoveryArchivePath(conversationFilters.filter === "task" ? "task" : "dialog")),
+              });
+            } else message.info(t("chat.batchArchiveStateChanged"));
           }}
         />
         <ConversationMembershipModal conversation={movingConversation?.conversation_id ? { conversationId: movingConversation.conversation_id, groupId: movingConversation.group_id, title: movingConversation.display_name, isTaskConv: Boolean(movingConversation.is_task_conv) } : null} onClose={() => setMovingConversation(null)} />

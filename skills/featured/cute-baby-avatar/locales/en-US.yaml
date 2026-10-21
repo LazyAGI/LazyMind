@@ -1,0 +1,89 @@
+locale: en-US
+classification:
+  category: Creative design
+  tags:
+  - baby avatar
+  - image generation
+  - photo editing
+  - style selection
+presentation:
+  card:
+    title: Cute baby avatar
+    description: Create an avatar from a child photo, reimagine an adult as a child, or make a nine-style set
+    output_type: images
+    output_label: Avatar and prompt
+    cover_asset: cover
+    result_summary: Explore input and output examples for child photos, adult photos, and nine-style sets
+  detail:
+    title: Cute baby avatar
+    description: Choose a child-photo, adult-photo, or nine-style task. Preserve a child’s visible age and features, creatively reimagine an adult at a chosen age, or generate nine separate avatars. Each task includes reusable prompts. Source https://skillhub.cn/skills/org-ni2p9rei/cute-baby-avatar.
+    attachment_hint: Upload a clear single-person photo and choose a style; for an adult photo, specify the intended child age
+tasks:
+- id: create-avatar
+  selector:
+    title: Child photo
+    description: Preserve the child’s age and features, then choose a style for one avatar
+    output_label: Avatar and prompt
+  launch:
+    prompt_short: Turn my child photo into one cute baby avatar. First ask for the photo and let me choose a style.
+    prompt: Use the cute baby avatar Skill to create one avatar from a child photo with a reusable prompt. Receive a clear single-child photo, show available styles and wait for my choice. Reuse information I have already provided. Preserve the visible age, face shape, facial proportions, skin tone, hair color and distinguishing features. Use the original photo as the identity reference. Unless I specify otherwise, create one separate square head-only avatar on white, with complete hair, ears and accessories and balanced margins. If no photo is attached, ask for it and wait. If reference-image editing is unavailable, explain the limitation and provide the prompt; do not present an example as a newly generated result.
+  replay:
+    steps:
+    - title: Receive photo and style
+      description: View the child photo, identify the subject, and wait for the style choice
+    - title: Generate one avatar
+      description: Preserve visible age and features in a square head-only avatar on white
+    - title: Deliver image and prompt
+      description: Show the avatar for saving and include its reusable prompt
+  result:
+    template: html_preview_v1
+    eyebrow: Photo-to-avatar example
+    title: Teddy-bear hat · Input and output
+    summary: A child photo with its original background and upper body, alongside a head-only teddy-bear hat avatar and prompt.
+    html_asset: avatar_preview
+- id: adult-photo
+  selector:
+    title: Adult photo
+    description: Choose a child age and style to creatively reimagine an adult photo
+    output_label: Reimagined avatar and prompt
+  launch:
+    prompt_short: Create one cute child avatar from my adult photo. First confirm the intended age and style.
+    prompt: Use the cute baby avatar Skill to creatively reimagine my adult photo as one child avatar with a reusable prompt. Receive a clear single-adult photo and confirm the intended child age and style; combine missing questions and wait, reusing information already supplied. Explain briefly that this is a creative transformation, not a reconstruction of my real childhood. Use the original adult photo as the identity reference, preserving major distinguishing features, skin tone and hair color while applying the chosen child-age proportions. Unless I specify otherwise, create one separate square head-only avatar on white, with complete hair, ears, accessories and balanced margins. Ask for the photo and wait if missing. If reference-image editing is unavailable, explain the limitation and provide the prompt; do not claim a true childhood reconstruction or present an example as a new result.
+  replay:
+    steps:
+    - title: Receive adult photo
+      description: View the adult reference and identify visible distinguishing features
+    - title: Confirm age and style
+      description: Confirm the child age and style and explain the creative transformation
+    - title: Generate and deliver
+      description: Create one separate avatar, check features, and provide the image and prompt
+  result:
+    template: html_preview_v1
+    eyebrow: Creative age-transformation example
+    title: Adult photo → Teddy-bear hat child avatar
+    summary: A fictional adult reference reimagined as an approximately five-year-old child in a bear hat, with input, output and prompt.
+    html_asset: adult_preview
+- id: nine-avatar-set
+  selector:
+    title: Nine-style set
+    description: Nine styles of the same person, delivered as separate avatars with prompts
+    output_label: 9 avatars and prompts
+  launch:
+    prompt_short: 'Make a nine-style set from my photo: one avatar per style, nine separate images and prompts, plus a contact sheet preview.'
+    prompt: 'Use the cute baby avatar Skill to create a nine-style set from my single-person photo. I have selected the set: natural playful, apple head, sweet accessories, fruit and candy, birthday, Y2K headphones, retro streetwear, beret, and animal hat, one per style in that order. First receive the photo. Preserve a child’s visible age and features; for an adult, confirm the intended child age and explain the creative transformation. Reuse information already supplied and do not ask me to select styles again. Deliver nine separate square head-only avatars on white numbered 01–09, each with a reusable prompt. After completing the nine files, also provide one 3×3 contact sheet preview; it must not replace the separate images. Every generation must use the same original photo as its identity reference. Keep identity, age, skin tone and margins consistent while varying accessories and expressions by style. If I explicitly specify a custom nine-image combination, follow it. If reference-image editing is unavailable, explain the limitation. If any images are missing, report the actual count and outstanding items; do not substitute examples.'
+  replay:
+    steps:
+    - title: Confirm the reference
+      description: View the photo, confirm a child age for adult references, and use the selected set
+    - title: Generate nine styles
+      description: Use the same original reference for every avatar and keep identity consistent
+    - title: Check count and consistency
+      description: Check identity, accessories and framing, then number files 01–09
+    - title: Deliver files and preview
+      description: Provide nine separate images, per-image prompts and an additional 3×3 preview
+  result:
+    template: html_preview_v1
+    eyebrow: Nine-style preview
+    title: One child · Nine avatar styles
+    summary: A contact sheet illustrates nine styles from the same child photo. The task delivers nine separate avatars plus an additional preview.
+    html_asset: nine_preview

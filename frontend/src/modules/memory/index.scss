@@ -836,6 +836,20 @@
   border-radius: 14px;
 }
 
+.memory-identity-field-item + .memory-identity-field-item {
+  border-top: 1px solid #edf0f4;
+}
+
+.memory-identity-section-title {
+  margin: 0;
+  padding: 12px 15px;
+  background: #f8faff;
+  color: #38475f;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
 .memory-identity-field {
   background: #ffffff;
 
@@ -851,10 +865,17 @@
 .memory-identity-field-row {
   min-height: 62px;
   display: grid;
-  grid-template-columns: minmax(190px, 0.65fr) minmax(0, 1.35fr) 32px;
+  grid-template-columns: 128px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   padding: 10px 12px 10px 15px;
+}
+
+.memory-identity-field-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
 }
 
 .memory-identity-field-key {
@@ -5448,14 +5469,14 @@
   }
 
   .memory-identity-field-row {
-    grid-template-columns: 1fr 32px;
+    grid-template-columns: minmax(0, 1fr) auto;
 
     .memory-identity-field-value {
       grid-column: 1;
       grid-row: 2;
     }
 
-    .ant-btn {
+    .memory-identity-field-controls {
       grid-column: 2;
       grid-row: 1 / span 2;
     }

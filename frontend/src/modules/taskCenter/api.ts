@@ -1,6 +1,7 @@
+import { TASKS_REMOVED_EVENT, type TasksRemovedDetail } from './events';
 import type { AxiosRequestConfig } from 'axios';
 import type { NotificationUpdate } from '@/modules/notifications/api';
-import { Configuration, DefaultApi, TaskNotificationsApi } from '@/api/generated/core-client';
+import { Configuration, DefaultApi, TaskNotificationsApi, type TaskRemovalPreview } from '@/api/generated/core-client';
 import { axiosInstance, BASE_URL } from '@/components/request';
 
 const defaultClient = new DefaultApi(new Configuration({ basePath: BASE_URL }), BASE_URL, axiosInstance);
@@ -166,8 +167,15 @@ export async function getTaskGoal(task: Pick<Task, 'conversation_id' | 'title' |
   return candidate?.text;
 }
 
-export async function removeTask(id: string): Promise<void> {
-  await defaultClient.apiCoreTaskCenterTasksTaskIdRemovePost({ taskId: id });
+export type { TaskRemovalPreview } from '@/api/generated/core-client';
+export async function getTaskRemovalPreview(id: string, signal?: AbortSignal): Promise<TaskRemovalPreview> {
+  return (await defaultClient.apiCoreTaskCenterTasksTaskIdRemovalPreviewGet({ taskId: id }, { signal })).data;
+}
+export async function removeTask(id: string, impactVersion?: string): Promise<TasksRemovedDetail> {
+  const { data } = await defaultClient.apiCoreTaskCenterTasksTaskIdRemovePost({ taskId: id, taskRemovalRequest: impactVersion ? { impact_version: impactVersion } : undefined });
+  const result = { removed_task_ids: data?.removed_task_ids ?? [id], trashed_conversation_ids: data?.trashed_conversation_ids ?? [], cancellation_pending: Boolean(data?.cancellation_pending) };
+  window.dispatchEvent(new CustomEvent(TASKS_REMOVED_EVENT, { detail: result }));
+  return result;
 }
 
 export async function listSchedules(includeDisabled = false): Promise<ScheduleListResponse> {

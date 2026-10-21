@@ -1,0 +1,40 @@
+.knowledge-update-modal {
+  .ant-modal-content {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 32px);
+    max-height: calc(100dvh - 32px);
+  }
+
+  .ant-modal-header,
+  .ant-modal-footer {
+    flex-shrink: 0;
+  }
+
+  .ant-modal-body {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .knowledge-update-form .ant-form-item {
+    margin-bottom: 16px;
+  }
+
+  .knowledge-update-form > .ant-form-item:last-child {
+    margin-bottom: 0;
+  }
+
+  .capability-settings-panel {
+    .ant-form-item-label {
+      // The shared horizontal-form label width must not become a vertical height.
+      flex: none !important;
+      max-width: none;
+      padding-inline-end: 0;
+    }
+
+    .ant-form-item-control {
+      max-width: none;
+    }
+  }
+}

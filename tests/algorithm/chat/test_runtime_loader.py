@@ -131,6 +131,7 @@ cpu_elapsed = time.process_time() - cpu_started
 result = {
     "elapsed": elapsed,
     "rag_loaded": "lazyllm.tools.rag" in sys.modules,
+    "sql_runtime_loaded": "lazyllm.tools.sql" in sys.modules,
     "runtime_docs_loaded": any(name.startswith("lazyllm.docs.tools") for name in sys.modules),
     "phase_seconds": {
         "runtime_loader_import": loader_elapsed,
@@ -171,7 +172,43 @@ print(json.dumps(result))
     diagnostics = 'Chat startup diagnostics:\n' + json.dumps(result, indent=2, sort_keys=True)
     assert result['elapsed'] < 3.0, diagnostics
     assert result['rag_loaded'] is False, diagnostics
+    assert result['sql_runtime_loaded'] is False, diagnostics
     assert result['runtime_docs_loaded'] is False, diagnostics
+
+
+def test_external_database_runtime_loads_on_first_query():
+    result = _run_probe('''
+import json
+import sys
+from lazymind.chat.engine.tools.external_db import ExternalDatabaseToolkit
+loaded_before = "lazyllm.tools.sql" in sys.modules
+toolkit = ExternalDatabaseToolkit()
+toolkit._connection = lambda _: {"db_type": "sqlite", "database_name": ":memory:"}
+manager = toolkit._manager("test-connection")
+try:
+    rows = manager.execute_readonly_query("SELECT 1 AS value")
+    try:
+        manager.execute_readonly_query("DELETE FROM example")
+    except ValueError:
+        write_rejected = True
+    else:
+        write_rejected = False
+finally:
+    manager.dispose()
+print(json.dumps({
+    "loaded_before": loaded_before,
+    "loaded_after": "lazyllm.tools.sql" in sys.modules,
+    "rows": rows,
+    "write_rejected": write_rejected,
+}))
+''')
+
+    assert result == {
+        'loaded_before': False,
+        'loaded_after': True,
+        'rows': [{'value': 1}],
+        'write_rejected': True,
+    }
 
 
 def test_slow_chat_startup_reports_diagnostics_without_environment_secrets(monkeypatch, capsys):

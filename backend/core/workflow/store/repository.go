@@ -21,6 +21,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/taskcenter"
+	"lazymind/core/tasktiming"
 	"lazymind/core/workflow/artifactgraph"
 	"lazymind/core/workflow/controlpolicy"
 	"lazymind/core/workflow/controlstore"
@@ -731,6 +732,9 @@ func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, co
 			if err := tx.Create(&created).Error; err != nil {
 				return err
 			}
+			if err := tasktiming.BindWorkflow(ctx, tx, created, now); err != nil {
+				return err
+			}
 			createdNow = true
 		}
 		if intentContext != "" {
@@ -1105,7 +1109,7 @@ func (r *Repository) commandTransactional(ctx context.Context, owner, sessionID,
 			_ = json.Unmarshal(response, &responseObject)
 			stateVersion, _ := responseObject["state_version"].(float64)
 			event := &Event{SessionID: sessionID, OwnerUserID: owner, ContractVersion: version, EventType: "workflow.patch", EntityID: sessionID, StateVersion: int64(stateVersion), CommandID: commandID, PayloadJSON: response, CreatedAt: time.Now().UTC()}
-			if err := tx.Create(event).Error; err != nil {
+			if err := tasktiming.PersistWorkflowEvent(tx, event); err != nil {
 				return err
 			}
 			committedEvent = event
@@ -1159,7 +1163,7 @@ func (r *Repository) commandSQLite(ctx context.Context, owner, sessionID, comman
 			ContractVersion: version, EventType: "workflow.patch", EntityID: sessionID,
 			StateVersion: int64(stateVersion), CommandID: commandID,
 			PayloadJSON: response, CreatedAt: time.Now().UTC()}
-		return tx.Create(committedEvent).Error
+		return tasktiming.PersistWorkflowEvent(tx, committedEvent)
 	})
 	if err != nil {
 		return Command{}, false, err
@@ -1187,11 +1191,11 @@ func (r *Repository) AppendEvent(ctx context.Context, event *Event) error {
 			if _, err := controlstore.LockSession(tx, event.SessionID); err != nil {
 				return err
 			}
-			return tx.Create(event).Error
+			return tasktiming.PersistWorkflowEvent(tx, event)
 		}); err != nil {
 			return err
 		}
-	} else if err := db.Create(event).Error; err != nil {
+	} else if err := tasktiming.PersistWorkflowEvent(db, event); err != nil {
 		return err
 	}
 	r.publish(*event)

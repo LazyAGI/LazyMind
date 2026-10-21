@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { StrictMode, useState } from "react";
+import { StrictMode } from "react";
 import ConversationTitleEditor from "./ConversationTitleEditor";
 import { renameGroupConversation, emitConversationGroupsChanged } from "../conversationOrganizer/api";
 
@@ -17,15 +17,16 @@ beforeEach(() => {
 });
 
 describe("conversation renaming", () => {
-  it("edits inline, selects the name, and cancels with Escape without activating its row", async () => {
+  it("opens a dialog, selects the current name, and cancels with Escape without activating its row", async () => {
     const close = vi.fn();
     const activate = vi.fn();
     render(<div onClick={activate} onKeyDown={activate}>
       <ConversationTitleEditor conversationId="chat" onClose={close} />
     </div>);
     const input = await screen.findByDisplayValue("Original") as HTMLInputElement;
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "conversationOrganizer.renameConversation" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "common.save" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "common.cancel" })).toBeInTheDocument();
     expect(input).toHaveFocus();
     expect(input.selectionStart).toBe(0);
     expect(input.selectionEnd).toBe("Original".length);
@@ -49,58 +50,60 @@ describe("conversation renaming", () => {
     await waitFor(() => expect(renameGroupConversation).toHaveBeenCalledWith("chat", "中文名称", 4));
   });
 
-  it("saves on blur, keeps focus on the clicked target, and removes the editor", async () => {
-    function Example() {
-      const [editing, setEditing] = useState(true);
-      return <><button>Outside</button>{editing
-        ? <ConversationTitleEditor conversationId="chat" onClose={() => setEditing(false)} />
-        : <span>Saved</span>}</>;
-    }
-    render(<Example />);
-    const input = await screen.findByDisplayValue("Original");
-    fireEvent.change(input, { target: { value: "  Custom  " } });
-    act(() => screen.getByRole("button", { name: "Outside" }).focus());
-    await screen.findByText("Saved");
-    expect(renameGroupConversation).toHaveBeenCalledWith("chat", "Custom", 4);
-    expect(screen.getByRole("button", { name: "Outside" })).toHaveFocus();
-  });
-
-  it("closes an unchanged name on blur without updating its revision", async () => {
+  it("keeps a draft when focus leaves the input and cancels without saving", async () => {
     const close = vi.fn();
     render(<ConversationTitleEditor conversationId="chat" onClose={close} />);
-    fireEvent.blur(await screen.findByDisplayValue("Original"));
+    const input = await screen.findByDisplayValue("Original");
+    fireEvent.change(input, { target: { value: "  Custom  " } });
+    fireEvent.blur(input);
+    expect(renameGroupConversation).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+    expect(input).toHaveValue("  Custom  ");
+    fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
     expect(close).toHaveBeenCalledOnce();
     expect(renameGroupConversation).not.toHaveBeenCalled();
   });
 
-  it("cancels an untouched loading name when focus leaves and ignores the late response", async () => {
+  it("closes an unchanged name on Save without updating its revision", async () => {
+    const close = vi.fn();
+    render(<ConversationTitleEditor conversationId="chat" onClose={close} />);
+    await screen.findByDisplayValue("Original");
+    await waitFor(() => expect(screen.getByRole("button", { name: "common.save" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    expect(close).toHaveBeenCalledOnce();
+    expect(renameGroupConversation).not.toHaveBeenCalled();
+  });
+
+  it("allows cancel while loading and ignores the late response", async () => {
     let finish!: (value: unknown) => void;
     mocks.detail.mockReturnValue(new Promise(resolve => { finish = resolve; }));
     const close = vi.fn();
     const view = render(<ConversationTitleEditor conversationId="chat" initialTitle="Original" onClose={close} />);
     const input = screen.getByRole("textbox");
-    expect(input).toHaveFocus();
     expect(input).toHaveAttribute("readonly");
+    expect(screen.getByRole("button", { name: "common.save" })).toBeDisabled();
     fireEvent.blur(input);
+    expect(close).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
     expect(close).toHaveBeenCalledOnce();
     view.unmount();
     await act(async () => finish({ data: { conversation: { display_name: "Late", title_revision: 5 } } }));
     expect(renameGroupConversation).not.toHaveBeenCalled();
   });
 
-  it("retains a failed blur draft and retries only after an explicit edit or Enter", async () => {
+  it("retains a failed draft and retries only after an explicit Save", async () => {
     const close = vi.fn();
     vi.mocked(renameGroupConversation).mockRejectedValueOnce(new Error("private failure"));
     render(<ConversationTitleEditor conversationId="chat" onClose={close} />);
     const input = await screen.findByDisplayValue("Original");
     fireEvent.change(input, { target: { value: "Custom" } });
-    fireEvent.blur(input);
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
     await screen.findByText("conversationRename.saveFailed");
     expect(input).toHaveValue("Custom");
     fireEvent.blur(input);
     expect(renameGroupConversation).toHaveBeenCalledTimes(1);
     expect(close).not.toHaveBeenCalled();
-    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
     await waitFor(() => expect(close).toHaveBeenCalledOnce());
   });
 
@@ -137,8 +140,10 @@ describe("conversation renaming", () => {
     const input = await screen.findByDisplayValue("Original");
     fireEvent.change(input, { target: { value: "  Custom  " } });
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
     fireEvent.blur(input);
     fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    expect(screen.getByRole("button", { name: "common.cancel" })).toBeDisabled();
     expect(renameGroupConversation).toHaveBeenCalledOnce();
     expect(renameGroupConversation).toHaveBeenCalledWith("work", "Custom", 4);
     expect(close).not.toHaveBeenCalled();
@@ -155,6 +160,7 @@ describe("conversation renaming", () => {
     for (const value of ["   ", "字".repeat(256)]) {
       fireEvent.change(input, { target: { value } });
       expect(input).toHaveAttribute("aria-invalid", "true");
+      expect(screen.getByRole("button", { name: "common.save" })).toBeDisabled();
       fireEvent.blur(input);
       fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
     }

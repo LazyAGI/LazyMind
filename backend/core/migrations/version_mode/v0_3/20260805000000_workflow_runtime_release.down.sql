@@ -1,6 +1,10 @@
 DROP TABLE IF EXISTS document_folder_nodes;
 DROP TABLE IF EXISTS document_folder_inventories;
 
+-- +migrate Dialect *
+DROP TABLE IF EXISTS task_attempt_timings;
+DROP TABLE IF EXISTS task_execution_timings;
+
 -- +migrate Dialect postgres,sqlite
 DROP INDEX IF EXISTS idx_user_environment_variables_deleted_at;
 DROP INDEX IF EXISTS idx_user_env_user_enabled;

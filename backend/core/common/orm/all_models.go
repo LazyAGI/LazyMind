@@ -92,6 +92,8 @@ func AllModelsForDDL() []interface{} {
 		&TaskNotification{},
 		&DesktopNotificationReceipt{},
 		&TaskCenterTask{},
+		&TaskExecutionTiming{},
+		&TaskAttemptTiming{},
 		&UserSchedule{},
 		&AutomationGroup{},
 		&ScheduleDependency{},

@@ -14,6 +14,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/taskdisplay"
+	"lazymind/core/tasktiming"
 )
 
 var errDisplayCursor = errors.New("display cursor expired")
@@ -139,8 +140,15 @@ func replyOrdinaryList(w http.ResponseWriter, r *http.Request, db *gorm.DB, task
 	started := time.Now()
 	taskdisplay.PrepareRequest(w, r)
 	out := make([]taskdisplay.OrdinaryTaskView, 0, len(tasks))
-	runs := []taskdisplay.OrdinaryRunView{}
+	runs, timingErr := tasktiming.List(r.Context(), db, requestUserID(r), common.PathVar(r, "conversation_id"), time.Now().UTC())
+	if timingErr != nil {
+		taskdisplay.ReplyError(w, r, "query task display failed", http.StatusInternalServerError)
+		return
+	}
 	seen := map[string]bool{}
+	for _, run := range runs {
+		seen[run.RunID] = true
+	}
 	for _, task := range tasks {
 		view, err := ordinarySnapshot(r.Context(), db, task.ID)
 		if err != nil {

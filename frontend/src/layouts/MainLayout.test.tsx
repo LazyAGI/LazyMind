@@ -6,6 +6,7 @@ import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import MainLayout from "./MainLayout";
+import { TASKS_REMOVED_EVENT } from '@/modules/taskCenter/events';
 import {
   CHAT_CONVERSATION_LIST_REFRESH_EVENT,
   CHAT_SELECT_CONVERSATION_EVENT,
@@ -118,6 +119,11 @@ function LocationProbe() {
 }
 
 describe("MainLayout conversation removal", () => {
+  it.each(['/agent/chat/home/removed', '/task-center'])("only leaves a deleted conversation that is currently open: %s", async path => {
+    render(<MemoryRouter initialEntries={[path]}><MainLayout /><LocationProbe /></MemoryRouter>);
+    act(() => window.dispatchEvent(new CustomEvent(TASKS_REMOVED_EVENT, { detail: { removed_task_ids: ['task'], trashed_conversation_ids: ['removed'], cancellation_pending: true } })));
+    await waitFor(() => expect(screen.getByTestId('location-path')).toHaveTextContent(path === '/task-center' ? path : '/agent/chat/home'));
+  });
   beforeEach(() => {
     sessionStorage.clear();
     localStorage.clear();

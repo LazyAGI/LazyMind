@@ -88,6 +88,16 @@ export interface OrdinaryTaskView {
 }
 
 export interface OrdinaryRunView {
+  execution_id?: string;
+  status?: string;
+  timing?: {
+    requested_at: string;
+    finished_at: string | null;
+    measured_at: string;
+    elapsed_ms: number | null;
+    cumulative_execution_ms: number | null;
+    running_attempt_count: number;
+  };
   run_id: string;
   revision: number;
   final_output_refs: string[];

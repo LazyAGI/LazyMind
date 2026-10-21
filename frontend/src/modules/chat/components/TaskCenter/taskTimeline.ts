@@ -223,36 +223,21 @@ export function buildOrdinaryTaskTimeline(
     item.ordinal = index + 1;
   });
 
-  const timedItems = items.filter(
-    (item): item is OrdinaryTaskItem & { startedAt: number; endedAt: number } =>
-      item.startedAt !== undefined && item.endedAt !== undefined,
-  );
-  const elapsedSeconds = timedItems.length > 0
-    ? Math.max(0, Math.round((
-        Math.max(...timedItems.map((item) => item.endedAt)) -
-        Math.min(...timedItems.map((item) => item.startedAt))
-      ) / 1000))
-    : undefined;
-  const durationItems = items.filter(item => ordinaryTaskDurationSeconds(item) !== undefined);
-  const cumulativeExecutionSeconds = durationItems.length > 0
-    ? durationItems.reduce(
-        (total, item) => total + (ordinaryTaskDurationSeconds(item) ?? 0),
-        0,
-      )
-    : undefined;
+
+  const effectiveItems = items.filter(item => item.state !== "outdated"
+    && !["pruned", "bypassed", "stale"].includes(item.ordinary?.status ?? ""));
 
   return {
     items,
     groups: groupConcurrentItems(items),
     // Future workflow milestones do not have task records yet. Count them in
     // the summary after execution starts without fabricating task cards.
-    totalCount: items.length > 0
-      ? Math.max(items.length, plannedCount ?? 0)
+    totalCount: effectiveItems.length > 0
+      ? Math.max(effectiveItems.length, plannedCount ?? 0)
       : 0,
-    completedCount: items.filter((item) => item.state === "complete").length,
-    failedCount: items.filter((item) => ["failed", "canceled", "interrupted"].includes(item.state)).length,
-    elapsedSeconds,
-    cumulativeExecutionSeconds,
+    completedCount: effectiveItems.filter((item) => item.state === "complete").length,
+    failedCount: effectiveItems.filter((item) => ["failed", "canceled", "interrupted"].includes(item.state)).length,
+
   };
 }
 
