@@ -71,6 +71,10 @@ func (s *ResourceService) authorizationRequests(ctx context.Context, c DatasetCa
 	add := func(id, action string) { out = append(out, ResourceAuthorizationRequest{id, action}) }
 	names := []string{}
 	switch req := input.(type) {
+	case LocalUploadRequest:
+		add(req.KnowledgeBaseID, acl.PermissionDatasetUpload)
+	case ReparseDocumentsRequest:
+		add(req.KnowledgeBaseID, acl.PermissionDatasetWrite)
 	case []ImportOriginalRequest:
 		for _, item := range req {
 			add(item.DatasetID, acl.PermissionDatasetUpload)

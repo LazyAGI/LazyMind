@@ -725,6 +725,13 @@ def _build_subagent_plan(
         tool_prompt_appendices=tool_prompt_appendices,
         include_editable_writing=False,
     )
+    if knowledge_management is not None:
+        from lazymind.chat.engine.prompts.guidance import KNOWLEDGE_OPERATIONS_GUIDANCE
+        builder.runtime(
+            'knowledge_operations', 'Knowledge operation results',
+            KNOWLEDGE_OPERATIONS_GUIDANCE,
+            'chat.protocol', priority=39, content_kind='instruction',
+        )
     parent_context = (ctx.params.get('parent_agentic_config') or {}).get('model_context')
     pin_task_goals_into_builder(
         builder,

@@ -6,21 +6,26 @@ import (
 	"lazymind/core/capability"
 )
 
-var KnowledgeManagementTools = []string{"knowledge.list", "knowledge.document.list", "knowledge.document.aggregate", "knowledge.create", "knowledge.folder.create", "knowledge.resource.update_metadata", "knowledge.resource.move", "knowledge.resource.delete", "knowledge.document.upload"}
+var KnowledgeManagementTools = []string{"knowledge.list", "knowledge.document.list", "knowledge.document.aggregate", "knowledge.create", "knowledge.folder.create", "knowledge.resource.update_metadata", "knowledge.resource.move", "knowledge.resource.delete", "knowledge.document.upload", "knowledge.document.reparse"}
 
 func addKnowledgeManagementTools(server *mcp.Server, s *capability.Service) {
 	if !s.SupportsKnowledgeManagement() {
 		return
 	}
+	addCloudTool(server, &mcp.Tool{Name: "knowledge.document.reparse", Title: "Retry document processing", Description: "Explicitly retry failed documents in place. Requires write permission and exact document IDs; never retry automatically. Existing running tasks are reused; successful documents are skipped. Return task IDs and submission states, not a claim of parsing success. Query document.list/get for current status and failure diagnostics.", Annotations: writeAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.ReparseKnowledgeDocumentsInput) (*mcp.CallToolResult, capability.ResourceOperationResult, error) {
+		v, e := s.ReparseKnowledgeDocuments(ctx, invocation(ctx, r), in)
+		return nil, v, e
+	})
+
 	addCloudTool(server, &mcp.Tool{Name: "knowledge.document.aggregate", Title: "Aggregate knowledge metadata", Description: "Count documents and sum stored sizes. Filters combine with AND. file_types/document_stages/data_source_types/creators/tags: trim, case-insensitive; omitted/[] means unrestricted. Scan limit 10000 before these metadata filters; max 1000 groups. Oversized scans/tag expansion fail with QUERY_TOO_LARGE, never partial totals.", Annotations: readOnlyAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.AggregateKnowledgeDocumentsInput) (*mcp.CallToolResult, capability.AggregateKnowledgeDocumentsResult, error) {
 		v, e := s.AggregateKnowledgeDocuments(ctx, invocation(ctx, r), in)
 		return nil, v, e
 	})
-	addCloudTool(server, &mcp.Tool{Name: "knowledge.create", Title: "Create knowledge base", Description: "Create a library with name and tags. Configuration defaults are in parameter descriptions. Report resource/processing states immediately; do not sleep or poll.", Annotations: writeAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.CreateKnowledgeRequest) (*mcp.CallToolResult, capability.ResourceOperationResult, error) {
+	addCloudTool(server, &mcp.Tool{Name: "knowledge.create", Title: "Create knowledge base", Description: "Create a library with name and tags. The built-in Chat/Work runtime requires explicit user confirmation before creation. Configuration defaults are in parameter descriptions. Report resource/processing states immediately; do not sleep or poll.", Annotations: writeAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.CreateKnowledgeRequest) (*mcp.CallToolResult, capability.ResourceOperationResult, error) {
 		v, e := s.CreateKnowledge(ctx, invocation(ctx, r), in)
 		return nil, v, e
 	})
-	addCloudTool(server, &mcp.Tool{Name: "knowledge.folder.create", Title: "Create logical folders", Description: "Create logical folders transactionally. Existing name conflicts fail; shared prefixes created in this batch are reused. Report results immediately; do not sleep or poll.", Annotations: writeAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.CreateFoldersRequest) (*mcp.CallToolResult, capability.ResourceOperationResult, error) {
+	addCloudTool(server, &mcp.Tool{Name: "knowledge.folder.create", Title: "Create logical folders", Description: "Create logical folders transactionally after explicit user confirmation in Chat/Work. Existing name conflicts fail; shared prefixes created in this batch are reused. Report results immediately; do not sleep or poll.", Annotations: writeAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.CreateFoldersRequest) (*mcp.CallToolResult, capability.ResourceOperationResult, error) {
 		v, e := s.CreateFolders(ctx, invocation(ctx, r), in)
 		return nil, v, e
 	})

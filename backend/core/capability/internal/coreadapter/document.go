@@ -128,10 +128,15 @@ func (r *KnowledgeDocumentReader) GetKnowledgeDocument(ctx context.Context, call
 }
 
 func mapDocumentSummary(item doc.DocumentMetadata) capability.KnowledgeDocumentSummary {
+	var diagnostic *capability.ProcessingDiagnostic
+	if d := item.ProcessingError; d != nil {
+		diagnostic = &capability.ProcessingDiagnostic{Stage: d.Stage, Code: d.Code, Message: d.Message, TaskID: d.TaskID, Recovery: d.Recovery}
+	}
 	return capability.KnowledgeDocumentSummary{
 		ID: item.ID, KnowledgeID: item.DatasetID, Name: item.Name,
 		ResourceType: "document", ResourceRef: capability.ResourceRef{Kind: "document", KnowledgeBaseID: item.DatasetID, DocumentID: item.ID},
 		RelativePath:     item.RelativePath,
+		ProcessingError:  diagnostic,
 		ProcessingStatus: documentProcessingStatus(item.ProcessingLevel, item.ProcessingState),
 		Tags:             append([]string(nil), item.Tags...), ParseStatus: item.ParseStatus,
 		MIMEType: item.MIMEType, SizeBytes: item.SizeBytes,
@@ -176,22 +181,5 @@ func mapDocumentError(operation string, err error) error {
 }
 
 func documentProcessingStatus(level string, state orm.DocumentProcessingState) string {
-	if level == "stored" {
-		return "not_requested"
-	}
-	status := state.IndexStatus
-	switch level {
-	case "parsed":
-		status = state.ParseStatus
-	case "chunked":
-		status = state.ChunkStatus
-	}
-	switch status {
-	case "pending", "running", "failed":
-		return status
-	case "succeeded":
-		return "ready"
-	default:
-		return "unknown"
-	}
+	return doc.DocumentProcessingStatus(level, state)
 }

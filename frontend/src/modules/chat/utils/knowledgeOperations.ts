@@ -2,7 +2,12 @@ export interface KnowledgeOperation {
   call_id: string;
   action: string;
   status: string;
+  summary?: { total: number; succeeded: number; failed: number; skipped: number; unconfirmed: number };
+  processing_summary?: Record<string, number>;
   items: Array<{
+    input_index?: number;
+    task_id?: string;
+    processing_error?: { stage: string; code: string; message: string; task_id?: string; recovery: string };
     name: string;
     resource_ref: {
       kind: "knowledge_base" | "document" | "folder";

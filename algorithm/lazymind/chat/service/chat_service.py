@@ -1867,17 +1867,10 @@ async def _handle_chat_impl(
         task_goal=language_query,
     )
     if knowledge_management is not None:
+        from lazymind.chat.engine.prompts.guidance import KNOWLEDGE_OPERATIONS_GUIDANCE
         prompt_builder.runtime(
             'knowledge_operations', 'Knowledge operation results',
-            'After knowledge create, upload, update, move or delete returns, report its actual resource, '
-            'processing and cleanup states immediately. Never run a fixed sleep or loop over status '
-            'queries to wait for background work. Query progress only when the user asks. Saved does '
-            'not mean parsed or searchable. Do not retry a mutation after timeout or disconnect '
-            'without reconciling its result. The UI renders trusted resource entry cards; do not '
-            'construct page URLs or infer the Host. Upload uses absolute local file paths on the '
-            'shared filesystem. Resolve attachments to original paths, and download or export other '
-            'sources first; reading file_ref values are not upload paths. An optional paper overview '
-            'can use already available attachment text and must not delay the upload report.',
+            KNOWLEDGE_OPERATIONS_GUIDANCE,
             'chat.protocol', priority=39, content_kind='instruction',
         )
     if enable_chat_exports:

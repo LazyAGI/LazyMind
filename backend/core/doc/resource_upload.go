@@ -57,6 +57,7 @@ func (s *ResourceService) Upload(ctx context.Context, op ResourceOperationContex
 			}
 			bindings = append(bindings, bound)
 			item := resourceItem(bound.Document, "created")
+			item.TaskID = bound.Task.ID
 			item.ProcessingStatus = "not_submitted"
 			if bound.Skipped {
 				item.ResourceStatus = "skipped"
@@ -93,17 +94,11 @@ func (s *ResourceService) Upload(ctx context.Context, op ResourceOperationContex
 		submitted := s.originals.SubmitOriginalProcessing(ctx, op.Caller, bound)
 		result.Items[i].ProcessingStatus = submitted.SubmissionStatus
 		if submitted.SubmissionError != "" {
-			result.Items[i].Error = resourceErr("PROCESSING_FAILED", submitted.SubmissionError)
+			result.Items[i].Error = resourceErr("PROCESSING_FAILED", SafeProcessingMessage(submitted.SubmissionError))
 		}
 	}
 	prepared = nil
-	result.Summary.Skipped = 0
-	for _, item := range result.Items {
-		if item.ResourceStatus == "skipped" {
-			result.Summary.Skipped++
-		}
-	}
-	result.Summary.Succeeded -= result.Summary.Skipped
+	summarizeResourceResult(&result)
 	if op.OperationKey != "" {
 		raw, _ := json.Marshal(result)
 		_ = s.db.WithContext(ctx).Model(&orm.ResourceOperationReceipt{}).Where("tenant_id = ? AND user_id = ? AND operation_key = ?", resourceTenant(op.Caller.TenantID), op.Caller.UserID, op.OperationKey).Update("result", raw).Error

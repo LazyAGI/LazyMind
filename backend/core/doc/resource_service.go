@@ -18,11 +18,13 @@ import (
 )
 
 type ResourceService struct {
-	db           *gorm.DB
-	budget       ResourceBudget
-	sourceAccess func(context.Context, DatasetCatalogCaller, string, string) error
-	provision    func(context.Context, DatasetCatalogCaller, *orm.Dataset) error
-	originals    *OriginalService
+	lazyDB        *gorm.DB
+	submitReparse func(context.Context, DatasetCatalogCaller, string, string) (StartTaskResult, error)
+	db            *gorm.DB
+	budget        ResourceBudget
+	sourceAccess  func(context.Context, DatasetCatalogCaller, string, string) error
+	provision     func(context.Context, DatasetCatalogCaller, *orm.Dataset) error
+	originals     *OriginalService
 }
 
 func NewResourceService(d ResourceServiceDeps) (*ResourceService, error) {
@@ -47,7 +49,10 @@ func NewResourceService(d ResourceServiceDeps) (*ResourceService, error) {
 	if d.ProvisionKnowledge == nil {
 		d.ProvisionKnowledge = provisionResourceKnowledge
 	}
-	return &ResourceService{d.DB, d.Budget, d.SourceAccess, d.ProvisionKnowledge, d.Originals}, nil
+	if d.SubmitReparse == nil {
+		d.SubmitReparse = SubmitReparseTask
+	}
+	return &ResourceService{db: d.DB, budget: d.Budget, sourceAccess: d.SourceAccess, provision: d.ProvisionKnowledge, originals: d.Originals, lazyDB: d.LazyDB, submitReparse: d.SubmitReparse}, nil
 }
 func resourceErr(code, message string) *ResourceError {
 	return &ResourceError{Code: code, Message: message}
@@ -115,7 +120,7 @@ func resolveResourceDatasetACL(ctx context.Context, tx *gorm.DB, c DatasetCatalo
 	permissions, _ := acl.PermissionsForWithDB(tx, acl.ResourceTypeDB, ds.ID, c.UserID, resourceTransactionGroups(tx))
 	allowed := containsAll(permissions, []string{action}) || ((action == acl.PermissionDatasetRead || action == acl.PermissionDatasetUpload) && containsAll(permissions, []string{acl.PermissionDatasetWrite})) || (action == acl.PermissionDatasetRead && containsAll(permissions, []string{acl.PermissionDatasetUpload}))
 	if !allowed {
-		return ds, resourceErr("FORBIDDEN", "knowledge base permission denied")
+		return ds, resourceErr("FORBIDDEN", fmt.Sprintf("knowledge base %s requires %s permission", ds.ID, action))
 	}
 	return ds, nil
 }
@@ -199,8 +204,7 @@ func (s *ResourceService) mutate(ctx context.Context, op ResourceOperationContex
 			return err
 		}
 		out.Action = action
-		out.Status = "succeeded"
-		out.Summary = ResourceOperationSummary{Total: len(out.Items), Succeeded: len(out.Items)}
+		summarizeResourceResult(&out)
 		if op.OperationKey != "" {
 			b, err := json.Marshal(out)
 			if err != nil {

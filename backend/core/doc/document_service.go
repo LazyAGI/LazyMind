@@ -124,6 +124,7 @@ type DocumentReadResult struct {
 }
 
 type DocumentMetadata struct {
+	ProcessingError *ProcessingDiagnostic
 	ID              string
 	DatasetID       string
 	Name            string
@@ -173,6 +174,7 @@ type DocumentChunksResult struct {
 }
 
 type documentServiceRecord struct {
+	diagnostic *ProcessingDiagnostic
 	dataset    orm.Dataset
 	row        orm.Document
 	ext        documentExt
@@ -446,7 +448,7 @@ func (s *DocumentService) loadRecord(ctx context.Context, userID, datasetID, doc
 		rec.taskData = s.latestTaskDataSource(ctx, row.ID)
 
 	}
-	rec.processing, rec.taskStat, err = observeDocumentProcessing(ctx, s.db, s.lazyDB, row)
+	rec.processing, rec.taskStat, rec.diagnostic, err = observeDocumentProcessingDetails(ctx, s.db, s.lazyDB, row)
 	if err != nil {
 		return documentServiceRecord{}, &DocumentServiceError{Code: DocumentServiceUnavailable, Message: "query document failed", Err: err}
 	}
@@ -543,6 +545,7 @@ func (r documentServiceRecord) metadata() DocumentMetadata {
 		ParseStatus:     parseStatus,
 		ProcessingLevel: r.dataset.ProcessingLevel,
 		ProcessingState: r.processing,
+		ProcessingError: r.diagnostic,
 		MIMEType:        mimeType,
 		SizeBytes:       size,
 		CreatedAt:       row.CreatedAt,

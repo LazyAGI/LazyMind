@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestConfirmationBindsExecutionArgumentsAndSnapshot(t *testing.T) {
@@ -72,25 +73,70 @@ func TestConfirmationBindsExecutionArgumentsAndSnapshot(t *testing.T) {
 		t.Fatal("inactive run accepted")
 	}
 }
-func TestCreateNeedsNoConfirmationAndEmptyToolsDeny(t *testing.T) {
+func TestCreateNeedsConfirmationAndEmptyToolsDeny(t *testing.T) {
 	st, _ := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
 	defer st.Close()
 	tools := []string{"knowledge.create"}
 	rt, _ := New(st, func(context.Context, Execution) (Identity, error) {
 		return Identity{Principal: capability.Principal{UserID: "u"}, AllowedTools: tools}, nil
 	}, func(context.Context, Identity, string, json.RawMessage) (doc.ResourceSnapshot, error) {
-		t.Fatal("create snapshot unnecessary")
-		return doc.ResourceSnapshot{}, nil
+		return doc.ResourceSnapshot{Digest: "create-v1"}, nil
 	})
 	req := PrepareRequest{Execution: Execution{UserID: "u"}, CallID: "1", WireName: "knowledge.create", Arguments: json.RawMessage(`{"name":"A"}`)}
 	p, e := rt.Prepare(context.Background(), req)
-	if e != nil || p.RequiresConfirmation || p.Status != "allowed" {
+	if e != nil || !p.RequiresConfirmation || p.Status != "pending" {
 		t.Fatalf("%+v %v", p, e)
 	}
 	tools = []string{}
 	req.CallID = "2"
 	if _, e = rt.Prepare(context.Background(), req); e == nil {
 		t.Fatal("empty tools accepted")
+	}
+}
+
+func TestCreateConfirmationReplayCancellationAndExpiry(t *testing.T) {
+	for _, action := range []string{"knowledge.create", "knowledge.folder.create"} {
+		t.Run(action, func(t *testing.T) {
+			st, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer st.Close()
+			rt, err := New(st, func(context.Context, Execution) (Identity, error) {
+				return Identity{Principal: capability.Principal{UserID: "u"}, AllowedTools: []string{action}}, nil
+			}, func(context.Context, Identity, string, json.RawMessage) (doc.ResourceSnapshot, error) {
+				return doc.ResourceSnapshot{Digest: "unchanged"}, nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			req := PrepareRequest{Execution: Execution{UserID: "u"}, CallID: "create", WireName: action, Arguments: json.RawMessage(`{"name":"A","knowledge_base_id":"kb","paths":["A"]}`)}
+			p, err := rt.Prepare(ctx, req)
+			if err != nil || !p.RequiresConfirmation {
+				t.Fatalf("prepare: %+v %v", p, err)
+			}
+			again, err := rt.Prepare(ctx, req)
+			if err != nil || again.ConfirmationID != p.ConfirmationID {
+				t.Fatalf("duplicate prepare: %+v %v", again, err)
+			}
+			req.OperationKey, req.ConfirmationID, req.ArgumentsDigest, req.Snapshot = p.OperationKey, p.ConfirmationID, p.ArgumentsDigest, p.Snapshot
+			if err := rt.Decide(ctx, "u", "", p.ConfirmationID, "rejected", p.ArgumentsDigest, p.Snapshot); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := rt.Claim(ctx, req); err == nil {
+				t.Fatal("canceled creation was claimable")
+			}
+			req.CallID, req.ConfirmationID, req.OperationKey = "new-create", "", ""
+			p, err = rt.Prepare(ctx, req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rt.now = func() time.Time { return time.Now().Add(ttl + time.Second) }
+			if err := rt.Decide(ctx, "u", "", p.ConfirmationID, "approved", p.ArgumentsDigest, p.Snapshot); err == nil {
+				t.Fatal("expired creation confirmation was accepted")
+			}
+		})
 	}
 }
 
@@ -175,6 +221,9 @@ func TestGuardCommitRejectsCancelledExecutionInsideTransaction(t *testing.T) {
 	req.OperationKey = p.OperationKey
 	req.ArgumentsDigest = p.ArgumentsDigest
 	req.Snapshot = p.Snapshot
+	if err = rt.Decide(ctx, "u", "", p.ConfirmationID, "approved", p.ArgumentsDigest, p.Snapshot); err != nil {
+		t.Fatal(err)
+	}
 	meta, err := rt.Claim(ctx, req)
 	if err != nil {
 		t.Fatal(err)

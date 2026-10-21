@@ -42,9 +42,9 @@ def runtime(monkeypatch, responses, events=None, allowed_tools=None):
 
 
 @pytest.mark.parametrize('name,args,want', [
-    ('knowledge.create', {'name': 'Papers'}, False),
+    ('knowledge.create', {'name': 'Papers'}, True),
     ('knowledge.document.upload', {}, False),
-    ('knowledge.folder.create', {}, False),
+    ('knowledge.folder.create', {}, True),
     ('knowledge.resource.update_metadata', {}, False),
     ('knowledge.resource.delete', {}, True),
     ('knowledge.resource.move', {'sources': [{'knowledge_base_id': 'a'}],
@@ -52,7 +52,7 @@ def runtime(monkeypatch, responses, events=None, allowed_tools=None):
     ('knowledge.resource.move', {'sources': [{'knowledge_base_id': 'a'}, {'knowledge_base_id': 'b'}],
                                  'destination': {'knowledge_base_id': 'a'}}, True),
 ])
-def test_only_delete_and_cross_library_move_need_confirmation(name, args, want):
+def test_prd_creation_deletion_and_cross_library_move_require_confirmation(name, args, want):
     assert requires_confirmation(name, args) is want
 
 
@@ -66,7 +66,7 @@ def test_server_factory_intersects_positive_whitelist_and_keeps_empty(monkeypatc
     assert set(host.server_config({})['allowed_tools']) == set(MANAGEMENT_TOOLS)
     assert 'knowledge.document.get' not in MANAGEMENT_TOOLS
     assert 'knowledge.options' not in MANAGEMENT_TOOLS
-    assert len(MANAGEMENT_TOOLS) == 9
+    assert len(MANAGEMENT_TOOLS) == 10
     assert host.server_config({'allowed_tools': ['knowledge.options']})['allowed_tools'] == []
 
 
@@ -141,13 +141,13 @@ def test_claim_and_metadata_must_match_prepared_parameters(monkeypatch):
             asyncio.run(host.request_metadata('knowledge.create', call.validated_arguments))
 
 
-def test_allowed_low_risk_write_does_not_emit_confirmation(monkeypatch):
+def test_already_confirmed_creation_does_not_emit_second_confirmation(monkeypatch):
     from lazymind.chat.engine.agent_runtime.workspace_authorization import digest
     call = prepared(arguments={'name': 'Papers'})
     events = []
     host, requests = runtime(monkeypatch, {'prepare': {
         'operation_key': 'op', 'arguments_digest': digest(call.validated_arguments), 'snapshot': 'version-1',
-        'requires_confirmation': False, 'status': 'allowed'},
+        'requires_confirmation': True, 'confirmation_id': 'confirm', 'status': 'allowed'},
         'claim': {'status': 'allowed', 'metadata': {'operation_key': 'op'}}}, events)
     host._tools['identity'] = 'knowledge.create'
     with host.execution_context(call):
@@ -267,7 +267,7 @@ def test_real_manager_dispatch_attaches_claimed_metadata_and_keeps_structured_er
     arguments = {'name': 'Papers'}
     host, requests = runtime(monkeypatch, {'prepare': {
         'operation_key': 'stable', 'arguments_digest': digest(arguments), 'snapshot': 'v',
-        'requires_confirmation': False, 'status': 'allowed'},
+        'requires_confirmation': True, 'confirmation_id': 'confirm', 'status': 'allowed'},
         'claim': {'status': 'allowed', 'metadata': {'operation_key': 'stable'}}})
     client = MCPClient('https://core/mcp', server_id='lazymind-knowledge', result_mode='structured',
                        request_metadata_provider=host.request_metadata)
@@ -426,7 +426,7 @@ def test_agent_receives_private_errors_through_real_manager_and_mcp_adapter(monk
             raise CoreAPIError('POST', 'http://private?token=must-not-leak', 403, {'error': error})
         if path.endswith(':prepare'):
             return {'operation_key': 'op', 'arguments_digest': digest(arguments), 'snapshot': 'v',
-                    'requires_confirmation': False, 'status': 'allowed'}
+                    'requires_confirmation': True, 'confirmation_id': 'confirm', 'status': 'allowed'}
         return {'status': 'allowed', 'metadata': {'operation_key': 'op'}}
     monkeypatch.setattr(module, 'post_core_api', post)
     host = KnowledgeManagementRuntime(EXECUTION, 'http://core')

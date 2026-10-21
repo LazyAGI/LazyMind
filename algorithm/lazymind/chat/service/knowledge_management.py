@@ -25,7 +25,7 @@ BUILTIN_ID = 'lazymind-knowledge'
 MANAGEMENT_TOOLS = (
     'knowledge.list', 'knowledge.document.list', 'knowledge.document.aggregate',
     'knowledge.create', 'knowledge.folder.create', 'knowledge.resource.update_metadata',
-    'knowledge.resource.move', 'knowledge.resource.delete', 'knowledge.document.upload',
+    'knowledge.resource.move', 'knowledge.resource.delete', 'knowledge.document.upload', 'knowledge.document.reparse',
 )
 _REQUEST = ContextVar('knowledge_management_request', default=None)
 
@@ -52,7 +52,7 @@ def _resolve_upload_files(arguments):
 
 
 def requires_confirmation(wire_name, arguments):
-    if wire_name == 'knowledge.resource.delete':
+    if wire_name in ('knowledge.create', 'knowledge.folder.create', 'knowledge.resource.delete'):
         return True
     if wire_name != 'knowledge.resource.move':
         return False
@@ -229,10 +229,14 @@ class KnowledgeManagementRuntime:
             operation = envelope.get('structuredContent', envelope)
             if isinstance(operation, dict) and operation.get('action') == wire_name and isinstance(operation.get('items'), list):
                 items = [{key: copy.deepcopy(item[key]) for key in (
-                    'resource_ref', 'name', 'resource_status', 'processing_status', 'cleanup_status', 'error'
+                    'resource_ref', 'previous_ref', 'name', 'parent_id', 'resource_status', 'processing_status',
+                    'processing_error', 'cleanup_status', 'error', 'input_index', 'task_id',
+                    'document_count', 'folder_count', 'before', 'after', 'id_mapping'
                 ) if key in item} for item in operation['items'] if isinstance(item, dict)]
                 _write_agent_data('knowledge_operation_result', call_id=prepared.call_id,
-                                  action=wire_name, status=operation.get('status'), items=items)
+                                  action=wire_name, status=operation.get('status'),
+                                  summary=copy.deepcopy(operation.get('summary')),
+                                  processing_summary=copy.deepcopy(operation.get('processing_summary')), items=items)
             return result
         details = envelope.get('structuredContent') or {}
         if (isinstance(details, dict) and details.get('code') == 'MCP_CALL_FAILED'

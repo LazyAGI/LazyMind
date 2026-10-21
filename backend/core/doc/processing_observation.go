@@ -12,18 +12,19 @@ import (
 )
 
 type processingSnapshot struct {
-	dataset   orm.Dataset
-	documents []orm.Document
-	states    map[string]orm.DocumentProcessingState
-	tasks     map[string]orm.Task
-	external  map[[2]string]string // exact external task ID and document ID
+	dataset     orm.Dataset
+	documents   []orm.Document
+	states      map[string]orm.DocumentProcessingState
+	tasks       map[string]orm.Task
+	diagnostics map[[2]string][2]string
+	external    map[[2]string]string // exact external task ID and document ID
 }
 
 // Core ownership, latest tasks and processing revision are loaded together.
 // External observations are bounded batches after the read-only Core snapshot;
 // none of these results is published back into mutable stage state.
 func loadProcessingSnapshot(ctx context.Context, db, lazyDB *gorm.DB, datasetID, documentID string) (processingSnapshot, error) {
-	snapshot := processingSnapshot{states: map[string]orm.DocumentProcessingState{}, tasks: map[string]orm.Task{}, external: map[[2]string]string{}}
+	snapshot := processingSnapshot{diagnostics: map[[2]string][2]string{}, states: map[string]orm.DocumentProcessingState{}, tasks: map[string]orm.Task{}, external: map[[2]string]string{}}
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("id = ? AND deleted_at IS NULL", datasetID).Take(&snapshot.dataset).Error; err != nil {
 			return err
@@ -93,6 +94,17 @@ func loadProcessingSnapshot(ctx context.Context, db, lazyDB *gorm.DB, datasetID,
 			key := [2]string{row.TaskID, row.DocID}
 			if _, exists := snapshot.external[key]; !exists {
 				snapshot.external[key] = strings.TrimSpace(row.Status)
+				code, message := "", ""
+				if row.ErrorCode != nil {
+					code = *row.ErrorCode
+				}
+				if row.ErrorMsg != nil {
+					message = *row.ErrorMsg
+				}
+				if message == "" && row.Message != nil {
+					message = *row.Message
+				}
+				snapshot.diagnostics[key] = [2]string{code, message}
 			}
 		}
 	}
@@ -146,6 +158,15 @@ func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentP
 	if status == "" {
 		return state, raw
 	}
+	// A newer task must not inherit an older attempt's failure details.
+	if !task.CreatedAt.Before(state.UpdatedAt) || status != "failed" {
+		state.ParseErrorCode = ""
+		state.ParseErrorMessage = ""
+		state.ChunkErrorCode = ""
+		state.ChunkErrorMessage = ""
+		state.IndexErrorCode = ""
+		state.IndexErrorMessage = ""
+	}
 	state.ParseStatus = status
 	// Historical tasks prove parsing only. Other stages require the level and
 	// revision actually submitted, not today's library default.
@@ -162,19 +183,31 @@ func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentP
 }
 
 func observeDocumentProcessing(ctx context.Context, db, lazyDB *gorm.DB, document orm.Document) (orm.DocumentProcessingState, string, error) {
+	state, raw, _, err := observeDocumentProcessingDetails(ctx, db, lazyDB, document)
+	return state, raw, err
+}
+
+func observeDocumentProcessingDetails(ctx context.Context, db, lazyDB *gorm.DB, document orm.Document) (orm.DocumentProcessingState, string, *ProcessingDiagnostic, error) {
 	snapshot, err := loadProcessingSnapshot(ctx, db, lazyDB, document.DatasetID, document.ID)
 	if err != nil {
-		return unknownProcessingState(document), "UNKNOWN", err
+		return unknownProcessingState(document), "UNKNOWN", nil, err
 	}
 	if len(snapshot.documents) == 0 {
-		return unknownProcessingState(document), "UNKNOWN", gorm.ErrRecordNotFound
+		return unknownProcessingState(document), "UNKNOWN", nil, gorm.ErrRecordNotFound
 	}
 	current := snapshot.documents[0]
 	if current.ResourceVersion != document.ResourceVersion || current.LazyllmDocID != document.LazyllmDocID {
-		return unknownProcessingState(document), "UNKNOWN", nil
+		return unknownProcessingState(document), "UNKNOWN", nil, nil
 	}
 	state, raw := snapshot.observe(current)
-	return state, raw, nil
+	task := snapshot.tasks[current.ID]
+	detail := snapshot.diagnostics[[2]string{task.LazyllmTaskID, current.LazyllmDocID}]
+	if task.LazyllmTaskID == "" {
+		var ext taskExt
+		_ = json.Unmarshal(task.Ext, &ext)
+		detail[1] = ext.ErrorMessage
+	}
+	return state, raw, processingDiagnostic(state, task, raw, detail[0], detail[1]), nil
 }
 
 func datasetProcessingCoverage(ctx context.Context, db, lazyDB *gorm.DB, dataset orm.Dataset) (ProcessingCoverage, error) {

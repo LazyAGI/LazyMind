@@ -852,6 +852,25 @@ func GetDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	doc := docFromRow(rr)
+	if !strings.EqualFold(doc.Type, "FOLDER") {
+		service, e := NewDocumentService(DocumentServiceDeps{DB: store.DB(), LazyDB: store.LazyLLMDB()})
+		if e != nil {
+			common.ReplyErr(w, "document status unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		caller, e := resolveDatasetCatalogCallerFromRequest(r)
+		if e != nil {
+			common.ReplyErr(w, "permission denied", http.StatusForbidden)
+			return
+		}
+		metadata, e := service.GetDocumentMetadata(r.Context(), DocumentGetRequest{UserID: caller.UserID, DatasetID: datasetID, DocumentID: docID, Caller: caller})
+		if e != nil {
+			common.ReplyErr(w, "document status unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		doc.ProcessingStatus = DocumentProcessingStatus(metadata.ProcessingLevel, metadata.ProcessingState)
+		doc.ProcessingError = metadata.ProcessingError
+	}
 	setDocumentURI(&doc)
 	common.ReplyJSON(w, doc)
 }
@@ -1521,6 +1540,8 @@ type DocumentTableColumn struct {
 }
 
 type Doc struct {
+	ProcessingStatus       string                `json:"processing_status,omitempty"`
+	ProcessingError        *ProcessingDiagnostic `json:"processing_error,omitempty"`
 	Name                   string                `json:"name"`
 	DocumentID             string                `json:"document_id"`
 	DisplayName            string                `json:"display_name"`

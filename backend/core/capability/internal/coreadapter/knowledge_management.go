@@ -7,7 +7,6 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/capability"
 	"lazymind/core/doc"
-	"strings"
 )
 
 type KnowledgeManagement struct {
@@ -113,45 +112,19 @@ func (m *KnowledgeManagement) Aggregate(ctx context.Context, c capability.Invoca
 	return capability.AggregateKnowledgeDocumentsResult{TotalCount: v.TotalCount, TotalSize: v.TotalSize, Groups: groups}, nil
 }
 func (m *KnowledgeManagement) Upload(ctx context.Context, c capability.InvocationContext, r capability.UploadKnowledgeDocumentInput) (capability.ResourceOperationResult, error) {
-	const op = "knowledge.document.upload"
-	if len(r.Files) == 0 || len(r.Files) > 20 || strings.TrimSpace(r.KnowledgeBaseID) == "" {
-		return capability.ResourceOperationResult{}, capability.NewError(capability.InvalidArgument, op, "select a target library and one to twenty files", false, nil)
-	}
-	operation := m.operation(c)
-	operation.InputDigest = doc.ResourceInputDigest(r)
-	if saved, found, e := m.resources.ReplayOperation(ctx, operation, op, r); e != nil || found {
-		return mapOperation(op, saved, e)
-	}
-	caller := managementCaller(c)
-	if c.AllowedDatasetIDs != nil {
-		allowed := false
-		for _, id := range c.AllowedDatasetIDs {
-			if id == r.KnowledgeBaseID {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return capability.ResourceOperationResult{}, capability.NewError(capability.PermissionDenied, op, "knowledge base is outside the allowed scope", false, nil)
-		}
-	}
-	if _, e := doc.ResolveResourceDataset(ctx, m.db, caller, r.KnowledgeBaseID, "UPLOAD"); e != nil {
-		return capability.ResourceOperationResult{}, mapResourceError(op, e)
-	}
-	requests := make([]doc.ImportOriginalRequest, 0, len(r.Files))
-	var total int64
+	files := make([]doc.LocalUploadItem, len(r.Files))
 	for i, f := range r.Files {
-		ref, err := m.originals.AcquireLocalOriginal(ctx, caller, f.Path, doc.OriginalBatchMaxBytes-total)
-		if err != nil {
-			return capability.ResourceOperationResult{}, mapResourceError(op, fmt.Errorf("file %d: %w", i, err))
-		}
-		total += ref.Size
-		requests = append(requests, doc.ImportOriginalRequest{FileRef: ref.FileRef, DatasetID: r.KnowledgeBaseID, ParentID: r.ParentID, DisplayName: f.DisplayName, Tags: f.Tags})
+		files[i] = doc.LocalUploadItem{Path: f.Path, DisplayName: f.DisplayName, Tags: f.Tags}
 	}
-	v, e := m.resources.Upload(ctx, operation, requests)
-	return mapOperation(op, v, e)
+	v, e := m.resources.UploadLocalBatch(ctx, m.operation(c), doc.LocalUploadRequest{KnowledgeBaseID: r.KnowledgeBaseID, ParentID: r.ParentID, Files: files})
+	return mapOperation("knowledge.document.upload", v, e)
 }
 
 func (m *KnowledgeManagement) SetBeforeCommit(fn func(context.Context, capability.InvocationContext) error) {
 	m.beforeCommit = fn
+}
+
+func (m *KnowledgeManagement) Reparse(ctx context.Context, c capability.InvocationContext, r capability.ReparseKnowledgeDocumentsInput) (capability.ResourceOperationResult, error) {
+	v, e := m.resources.Reparse(ctx, m.operation(c), doc.ReparseDocumentsRequest{KnowledgeBaseID: r.KnowledgeBaseID, DocumentIDs: r.DocumentIDs})
+	return mapOperation("knowledge.document.reparse", v, e)
 }

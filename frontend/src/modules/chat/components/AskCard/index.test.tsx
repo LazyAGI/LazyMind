@@ -150,6 +150,14 @@ describe("Knowledge management confirmation", () => {
     questions: [{ text: "Delete Papers?", type: "boolean", choices: ["__ask_user_yes__", "__ask_user_no__"] }],
   };
 
+  it("shows create parameters and highlights irreversible deletion", () => {
+    const { rerender } = render(<AskCard askPending={{ ...pending, knowledge_management_preview: { creation: { name: "Papers", description: "Reading", scene: "academic_papers", paths: ["Papers/Archive"] }, folder_count: 1 } }} onSubmit={vi.fn()} />);
+    expect(screen.getByLabelText("chat.askCardAria")).toHaveTextContent("academic_papers");
+    expect(screen.getByLabelText("chat.askCardAria")).toHaveTextContent("Papers/Archive");
+    rerender(<AskCard askPending={{ ...pending, knowledge_management_preview: { impact: "删除后不可恢复。历史任务记录保留。" } }} onSubmit={vi.fn()} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("删除后不可恢复");
+  });
+
   it.each([true, false])("shows preview scope and impact with top-level labels %s", (hasLabels) => {
     render(<AskCard askPending={{ ...pending,
       title: hasLabels ? "Delete archive" : undefined,

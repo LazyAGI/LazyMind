@@ -154,6 +154,8 @@ func toolAllowed(id Identity, name string) bool {
 }
 func operationRefs(name string, args json.RawMessage) ([]doc.ResourceRef, bool, error) {
 	switch name {
+	case "knowledge.create", "knowledge.folder.create":
+		return nil, true, nil
 	case "knowledge.resource.delete":
 		var in doc.DeleteResourcesRequest
 		if e := json.Unmarshal(args, &in); e != nil {
@@ -227,7 +229,7 @@ func (r *Runtime) Prepare(ctx context.Context, req PrepareRequest) (Prepared, er
 		return Prepared{}, err
 	}
 	snapshot := doc.ResourceSnapshot{Digest: argsDigest}
-	if len(refs) > 0 {
+	if len(refs) > 0 || risk {
 		snapshot, err = r.snapshot(ctx, id, req.WireName, args)
 		if err != nil {
 			return Prepared{}, err
@@ -239,14 +241,21 @@ func (r *Runtime) Prepare(ctx context.Context, req PrepareRequest) (Prepared, er
 	}
 	title, description, impact := req.WireName, "请核对选定资源、完整路径和数量。", ""
 	switch req.WireName {
+	case "knowledge.create":
+		title = "确认创建知识库"
+	case "knowledge.folder.create":
+		title = "确认创建文件夹"
 	case "knowledge.resource.delete":
 		title = "确认删除知识库资源"
-		impact = "所选知识库、文件夹及其全部后代或文档将立即不可见，原件和索引随后回收。本操作不能通过重试恢复，请确认删除范围。"
+		impact = "删除后不可恢复。所选资源及其全部后代文档将立即不可见，文档处理状态和文档标签关联被清除；原件、解析数据、切片和索引随后清理，不影响其他资源上的同名标签。历史任务记录保留，被删资源不能继续读取，活动解析不得重新发布该资源；整库删除还会移除默认库及评测集绑定。当前部署没有撤销或恢复入口。"
 	case "knowledge.resource.move":
 		title = "确认跨知识库移动"
 		impact = "每个独立根目录分别提交。成功项的源资源将不可见，目标获得新 ID 并按目标策略处理；未成功项保留源资源。"
 	}
 	out := Prepared{OperationKey: key, ArgumentsDigest: argsDigest, Snapshot: snapshot.Digest, RequiresConfirmation: risk, ConfirmationID: key, Status: status, Preview: map[string]any{"title": title, "description": description, "impact": impact, "resources": snapshot.PreviewResources, "destination": snapshot.Destination, "document_count": snapshot.DocumentCount, "folder_count": snapshot.FolderCount, "total_bytes": snapshot.TotalBytes}}
+	if snapshot.Creation != nil {
+		out.Preview["creation"] = snapshot.Creation
+	}
 	saved := pending{Request: req, Prepared: out, Expires: r.now().Add(ttl).Unix(), UserID: id.Principal.UserID, TenantID: id.Principal.TenantID}
 	raw, _ := json.Marshal(saved)
 	created, err := r.state.SetNX(ctx, "knowledge/prepare/"+key, raw, ttl)
@@ -366,7 +375,7 @@ func (r *Runtime) Claim(ctx context.Context, req PrepareRequest) (map[string]any
 	if err != nil {
 		return nil, err
 	}
-	refs, _, err := operationRefs(req.WireName, args)
+	refs, risk, err := operationRefs(req.WireName, args)
 	if err != nil {
 		return nil, err
 	}
@@ -377,7 +386,7 @@ func (r *Runtime) Claim(ctx context.Context, req PrepareRequest) (map[string]any
 			return nil, err
 		}
 	}
-	if len(refs) > 0 && !committed {
+	if (len(refs) > 0 || risk) && !committed {
 		snapshot, e := r.snapshot(ctx, identity, req.WireName, args)
 		if e != nil {
 			return nil, e

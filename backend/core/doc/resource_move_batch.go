@@ -209,7 +209,7 @@ func (s *ResourceService) Move(ctx context.Context, op ResourceOperationContext,
 				item.Error = resourceErr("INTERNAL", rootErr.Error())
 			}
 			outcome = ResourceOperationResult{Action: "knowledge.resource.move", Status: item.ResourceStatus, Items: []ResourceOperationItem{item}}
-			saved, e := s.storeMoveOutcome(child, request, outcome)
+			saved, e := s.storeResourceOutcome(child, request, outcome)
 			if e == nil {
 				outcome = saved
 			}
@@ -238,24 +238,24 @@ func (s *ResourceService) Move(ctx context.Context, op ResourceOperationContext,
 			result.Status = "failed"
 		}
 	}
-	saved, err := s.storeMoveOutcome(parentOp, req, result)
+	saved, err := s.storeResourceOutcome(parentOp, req, result)
 	if err != nil {
 		return result, nil
 	}
 	return saved, nil
 }
-func (s *ResourceService) storeMoveOutcome(op ResourceOperationContext, input any, result ResourceOperationResult) (ResourceOperationResult, error) {
+func (s *ResourceService) storeResourceOutcome(op ResourceOperationContext, input any, result ResourceOperationResult) (ResourceOperationResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	raw, err := json.Marshal(result)
 	if err != nil {
 		return result, err
 	}
-	record := orm.ResourceOperationReceipt{TenantID: resourceTenant(op.Caller.TenantID), UserID: op.Caller.UserID, OperationKey: op.OperationKey, Action: "knowledge.resource.move", ParameterHash: resourceOperationHash(op, input), Result: raw, CreatedAt: time.Now().UTC()}
+	record := orm.ResourceOperationReceipt{TenantID: resourceTenant(op.Caller.TenantID), UserID: op.Caller.UserID, OperationKey: op.OperationKey, Action: result.Action, ParameterHash: resourceOperationHash(op, input), Result: raw, CreatedAt: time.Now().UTC()}
 	if err = s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&record).Error; err != nil {
 		return result, err
 	}
-	saved, _, err := s.replay(ctx, op, "knowledge.resource.move", input)
+	saved, _, err := s.replay(ctx, op, result.Action, input)
 	return saved, err
 }
 

@@ -2741,30 +2741,9 @@ func createTaskFromExistingDocument(r *http.Request, datasetID, userID, userName
 		}
 	}
 
-	displayName := strings.TrimSpace(item.Task.DisplayName)
-	if displayName == "" {
-		displayName = strings.TrimSpace(baseDoc.DisplayName)
-	}
-	if displayName == "" {
-		displayName = documentID
-	}
+	taskRow := existingDocumentTask(baseDoc, datasetID, datasetKbIDByID(datasetID), datasetAlgoIDByID(datasetID), userID, userName, taskID, item, tType)
+	now := taskRow.CreatedAt
 
-	documentPID := firstNonEmpty(strings.TrimSpace(item.Task.DocumentPID), strings.TrimSpace(baseDoc.PID))
-	var tags []string
-	_ = json.Unmarshal(baseDoc.Tags, &tags)
-	if len(item.Task.DocumentTags) > 0 {
-		tags = append([]string(nil), item.Task.DocumentTags...)
-	}
-
-	var dExt documentExt
-	_ = json.Unmarshal(baseDoc.Ext, &dExt)
-	tFiles := item.Task.Files
-	if len(tFiles) == 0 && (strings.TrimSpace(dExt.StoredPath) != "" || strings.TrimSpace(dExt.ParseStoredPath) != "") {
-		tFiles = []TaskFile{{DisplayName: displayName, StoredName: dExt.StoredName, StoredPath: dExt.StoredPath, ParseStoredPath: dExt.ParseStoredPath, FileSize: dExt.FileSize, RelativePath: dExt.RelativePath, ContentType: dExt.ContentType}}
-	}
-	tExt := taskExt{TaskType: tType, DocumentPID: documentPID, DisplayName: displayName, TargetDatasetID: strings.TrimSpace(item.Task.TargetDatasetID), TargetPID: strings.TrimSpace(item.Task.TargetPID), TargetPath: strings.TrimSpace(item.Task.TargetPath), DataSourceType: firstNonEmpty(strings.TrimSpace(item.Task.DataSourceType), "LOCAL_FILE"), Files: tFiles, DocumentTags: tags, ReparseGroups: item.Task.ReparseGroups, ReparseMode: strings.TrimSpace(item.Task.ReparseMode)}
-	now := time.Now().UTC()
-	taskRow := orm.Task{ID: taskID, LazyllmTaskID: "", DocID: baseDoc.ID, KbID: datasetKbIDByID(datasetID), AlgoID: datasetAlgoIDByID(datasetID), DatasetID: datasetID, TaskType: tType, DocumentPID: documentPID, TargetPID: strings.TrimSpace(item.Task.TargetPID), TargetDatasetID: strings.TrimSpace(item.Task.TargetDatasetID), DisplayName: displayName, Ext: mustJSON(tExt), BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now}}
 	if err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&taskRow).Error; err != nil {
 			return err
@@ -2782,12 +2761,19 @@ func createTaskFromExistingDocument(r *http.Request, datasetID, userID, userName
 }
 
 func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]StartTaskResult, error) {
+	return startReparseTasksInternalAtLevel(r, datasetID, taskIDs, "")
+}
+
+func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs []string, requestedLevel string) ([]StartTaskResult, error) {
 	kbID := datasetKbIDByID(datasetID)
 	var dataset orm.Dataset
 	if err := store.DB().WithContext(r.Context()).Where("id = ? AND deleted_at IS NULL", datasetID).Take(&dataset).Error; err != nil {
 		return nil, fmt.Errorf("dataset not found")
 	}
 	processingLevel := effectiveProcessingLevel(dataset.ProcessingLevel)
+	if requestedLevel != "" {
+		processingLevel = requestedLevel
+	}
 	results := make([]StartTaskResult, 0, len(taskIDs))
 	userID := common.UserID(r)
 	applog.Logger.Info().
@@ -3692,4 +3678,32 @@ func ensureTopLevelFolder(ctx context.Context, datasetID, userID, userName strin
 		return ""
 	}
 	return folderID
+}
+
+func existingDocumentTask(baseDoc orm.Document, datasetID, kbID, algoID, userID, userName, taskID string, item CreateTaskItem, tType string) orm.Task {
+	displayName := strings.TrimSpace(item.Task.DisplayName)
+	if displayName == "" {
+		displayName = strings.TrimSpace(baseDoc.DisplayName)
+	}
+	if displayName == "" {
+		displayName = baseDoc.ID
+	}
+
+	documentPID := firstNonEmpty(strings.TrimSpace(item.Task.DocumentPID), strings.TrimSpace(baseDoc.PID))
+	var tags []string
+	_ = json.Unmarshal(baseDoc.Tags, &tags)
+	if len(item.Task.DocumentTags) > 0 {
+		tags = append([]string(nil), item.Task.DocumentTags...)
+	}
+
+	var dExt documentExt
+	_ = json.Unmarshal(baseDoc.Ext, &dExt)
+	tFiles := item.Task.Files
+	if len(tFiles) == 0 && (strings.TrimSpace(dExt.StoredPath) != "" || strings.TrimSpace(dExt.ParseStoredPath) != "") {
+		tFiles = []TaskFile{{DisplayName: displayName, StoredName: dExt.StoredName, StoredPath: dExt.StoredPath, ParseStoredPath: dExt.ParseStoredPath, FileSize: dExt.FileSize, RelativePath: dExt.RelativePath, ContentType: dExt.ContentType}}
+	}
+	tExt := taskExt{TaskType: tType, DocumentPID: documentPID, DisplayName: displayName, TargetDatasetID: strings.TrimSpace(item.Task.TargetDatasetID), TargetPID: strings.TrimSpace(item.Task.TargetPID), TargetPath: strings.TrimSpace(item.Task.TargetPath), DataSourceType: firstNonEmpty(strings.TrimSpace(item.Task.DataSourceType), "LOCAL_FILE"), Files: tFiles, DocumentTags: tags, ReparseGroups: item.Task.ReparseGroups, ReparseMode: strings.TrimSpace(item.Task.ReparseMode)}
+	now := time.Now().UTC()
+	taskRow := orm.Task{ID: taskID, LazyllmTaskID: "", DocID: baseDoc.ID, KbID: kbID, AlgoID: algoID, DatasetID: datasetID, TaskType: tType, DocumentPID: documentPID, TargetPID: strings.TrimSpace(item.Task.TargetPID), TargetDatasetID: strings.TrimSpace(item.Task.TargetDatasetID), DisplayName: displayName, Ext: mustJSON(tExt), BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now}}
+	return taskRow
 }

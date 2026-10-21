@@ -95,26 +95,30 @@ type ResourceOperationSummary struct {
 	Skipped     int `json:"skipped"`
 }
 type ResourceOperationItem struct {
-	ResourceRef      ResourceRef       `json:"resource_ref"`
-	PreviousRef      *ResourceRef      `json:"previous_ref,omitempty"`
-	Name             string            `json:"name"`
-	ParentID         string            `json:"parent_id"`
-	ResourceStatus   string            `json:"resource_status"`
-	ProcessingStatus string            `json:"processing_status,omitempty"`
-	CleanupStatus    string            `json:"cleanup_status,omitempty"`
-	DocumentCount    int               `json:"document_count,omitempty"`
-	FolderCount      int               `json:"folder_count,omitempty"`
-	IDMapping        map[string]string `json:"id_mapping,omitempty"`
-	Before           map[string]any    `json:"before,omitempty"`
-	After            map[string]any    `json:"after,omitempty"`
-	EntryURL         string            `json:"-"`
-	Error            *ResourceError    `json:"error,omitempty"`
+	InputIndex       *int                  `json:"input_index,omitempty"`
+	TaskID           string                `json:"task_id,omitempty"`
+	ProcessingError  *ProcessingDiagnostic `json:"processing_error,omitempty"`
+	ResourceRef      ResourceRef           `json:"resource_ref"`
+	PreviousRef      *ResourceRef          `json:"previous_ref,omitempty"`
+	Name             string                `json:"name"`
+	ParentID         string                `json:"parent_id"`
+	ResourceStatus   string                `json:"resource_status"`
+	ProcessingStatus string                `json:"processing_status,omitempty"`
+	CleanupStatus    string                `json:"cleanup_status,omitempty"`
+	DocumentCount    int                   `json:"document_count,omitempty"`
+	FolderCount      int                   `json:"folder_count,omitempty"`
+	IDMapping        map[string]string     `json:"id_mapping,omitempty"`
+	Before           map[string]any        `json:"before,omitempty"`
+	After            map[string]any        `json:"after,omitempty"`
+	EntryURL         string                `json:"-"`
+	Error            *ResourceError        `json:"error,omitempty"`
 }
 type ResourceOperationResult struct {
-	Action  string                   `json:"action"`
-	Status  string                   `json:"status"`
-	Summary ResourceOperationSummary `json:"summary"`
-	Items   []ResourceOperationItem  `json:"items"`
+	ProcessingSummary map[string]int           `json:"processing_summary,omitempty"`
+	Action            string                   `json:"action"`
+	Status            string                   `json:"status"`
+	Summary           ResourceOperationSummary `json:"summary"`
+	Items             []ResourceOperationItem  `json:"items"`
 }
 type ResourceError struct {
 	Code    string         `json:"code"`
@@ -137,6 +141,7 @@ type ResourcePreview struct {
 	Path string      `json:"path"`
 }
 type ResourceSnapshot struct {
+	Creation         map[string]any    `json:"creation,omitempty"`
 	PreviewResources []ResourcePreview `json:"preview_resources"`
 	Destination      *ResourcePreview  `json:"destination,omitempty"`
 	Digest           string            `json:"digest"`
@@ -146,8 +151,10 @@ type ResourceSnapshot struct {
 	TotalBytes       int64             `json:"total_bytes"`
 }
 type ResourceServiceDeps struct {
-	DB     *gorm.DB
-	Budget ResourceBudget
+	LazyDB        *gorm.DB
+	SubmitReparse func(context.Context, DatasetCatalogCaller, string, string) (StartTaskResult, error)
+	DB            *gorm.DB
+	Budget        ResourceBudget
 	// SourceAccess validates live source policy. Default uses Scan's strict batch endpoint.
 	SourceAccess func(context.Context, DatasetCatalogCaller, string, string) error
 	// ProvisionKnowledge creates the existing algorithm KB before the Core transaction.
@@ -157,3 +164,8 @@ type ResourceServiceDeps struct {
 
 // Hash input is encoded before mutation; receipt response is committed with resource rows.
 type resourceReceiptPayload = json.RawMessage
+
+type ReparseDocumentsRequest struct {
+	KnowledgeBaseID string   `json:"knowledge_base_id"`
+	DocumentIDs     []string `json:"document_ids"`
+}

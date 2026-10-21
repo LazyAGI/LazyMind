@@ -57,7 +57,7 @@ func TestManagementRegistryAndDispatchGuard(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(list.Tools) != 9 {
+	if len(list.Tools) != 10 {
 		t.Fatalf("tools=%d", len(list.Tools))
 	}
 	for _, tool := range list.Tools {
@@ -137,7 +137,7 @@ func TestPublicKnowledgeRegistryAndLocalPathContract(t *testing.T) {
 			count++
 		}
 	}
-	if count != 11 {
+	if count != 12 {
 		t.Fatalf("public knowledge tools=%d", count)
 	}
 	schema, err := knowledgeInputSchema[capability.UploadKnowledgeDocumentInput]()

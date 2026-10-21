@@ -321,6 +321,7 @@ func (s *ResourceService) moveAtomic(ctx context.Context, op ResourceOperationCo
 				out.Items[i].Error = resourceErr("CLEANUP_FAILED", cleanupErr.Error())
 			}
 		}
+		summarizeResourceResult(&out)
 		if op.OperationKey != "" {
 			raw, _ := json.Marshal(out)
 			_ = s.db.WithContext(ctx).Model(&orm.ResourceOperationReceipt{}).Where("tenant_id = ? AND user_id = ? AND operation_key = ?", resourceTenant(op.Caller.TenantID), op.Caller.UserID, op.OperationKey).Update("result", raw).Error

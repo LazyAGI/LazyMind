@@ -311,25 +311,34 @@ type ListKnowledgeDocumentsInput struct {
 	Page         PageRequest `json:"page,omitempty" jsonschema:"Default 20 results (also page_size=0); otherwise 1-100. Reuse next_page_token with unchanged filters, sorting and page size."`
 }
 
+type ProcessingDiagnostic struct {
+	Stage    string `json:"stage"`
+	Code     string `json:"code"`
+	Message  string `json:"message"`
+	TaskID   string `json:"task_id,omitempty"`
+	Recovery string `json:"recovery"`
+}
+
 type KnowledgeDocumentSummary struct {
-	ResourceRef      ResourceRef `json:"resource_ref"`
-	ResourceType     string      `json:"resource_type"`
-	ParentID         string      `json:"parent_id"`
-	LogicalPath      string      `json:"logical_path"`
-	AllowedActions   []string    `json:"allowed_actions"`
-	EntryURL         string      `json:"-"`
-	ProcessingStatus string      `json:"processing_status,omitempty"`
-	ID               string      `json:"id"`
-	KnowledgeID      string      `json:"knowledge_id"`
-	Name             string      `json:"name"`
-	RelativePath     string      `json:"relative_path,omitempty"`
-	Tags             []string    `json:"tags,omitempty"`
-	ParseStatus      string      `json:"parse_status,omitempty"`
-	MIMEType         string      `json:"mime_type,omitempty"`
-	SizeBytes        int64       `json:"size_bytes"`
-	CreatedAt        time.Time   `json:"created_at"`
-	UpdatedAt        time.Time   `json:"updated_at"`
-	CreatedBy        string      `json:"created_by,omitempty"`
+	ProcessingError  *ProcessingDiagnostic `json:"processing_error,omitempty"`
+	ResourceRef      ResourceRef           `json:"resource_ref"`
+	ResourceType     string                `json:"resource_type"`
+	ParentID         string                `json:"parent_id"`
+	LogicalPath      string                `json:"logical_path"`
+	AllowedActions   []string              `json:"allowed_actions"`
+	EntryURL         string                `json:"-"`
+	ProcessingStatus string                `json:"processing_status,omitempty"`
+	ID               string                `json:"id"`
+	KnowledgeID      string                `json:"knowledge_id"`
+	Name             string                `json:"name"`
+	RelativePath     string                `json:"relative_path,omitempty"`
+	Tags             []string              `json:"tags,omitempty"`
+	ParseStatus      string                `json:"parse_status,omitempty"`
+	MIMEType         string                `json:"mime_type,omitempty"`
+	SizeBytes        int64                 `json:"size_bytes"`
+	CreatedAt        time.Time             `json:"created_at"`
+	UpdatedAt        time.Time             `json:"updated_at"`
+	CreatedBy        string                `json:"created_by,omitempty"`
 }
 
 type ListKnowledgeDocumentsResult struct {

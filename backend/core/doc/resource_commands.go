@@ -11,27 +11,23 @@ import (
 	"time"
 )
 
-func (s *ResourceService) CreateKnowledge(ctx context.Context, op ResourceOperationContext, req CreateKnowledgeRequest) (ResourceOperationResult, error) {
+func (s *ResourceService) prepareKnowledgeCreate(ctx context.Context, op ResourceOperationContext, req CreateKnowledgeRequest) (orm.Dataset, []learning.CapabilityRef, error) {
 	if err := resourceAccount(op.Caller); err != nil {
-		return ResourceOperationResult{}, err
+		return orm.Dataset{}, nil, err
 	}
 	if err := validateDatasetDisplayName(req.Name); err != nil {
-		return ResourceOperationResult{}, resourceErr("INVALID_ARGUMENT", err.Error())
+		return orm.Dataset{}, nil, resourceErr("INVALID_ARGUMENT", err.Error())
 	}
 	if hasReservedDatasetDisplayNamePrefix(req.Name) {
-		return ResourceOperationResult{}, resourceErr("INVALID_ARGUMENT", "reserved name")
-	}
-	// Resolve replay before external provisioning. The transaction checks again below.
-	if out, found, err := s.replay(ctx, op, "knowledge.create", req); found || err != nil {
-		return out, err
+		return orm.Dataset{}, nil, resourceErr("INVALID_ARGUMENT", "reserved name")
 	}
 	scene, err := resourceScene(req.Scene)
 	if err != nil {
-		return ResourceOperationResult{}, err
+		return orm.Dataset{}, nil, err
 	}
 	level, err := knowledgeProcessingLevel(ctx, s.db, op.Caller.UserID, req.ProcessingLevel)
 	if err != nil {
-		return ResourceOperationResult{}, err
+		return orm.Dataset{}, nil, err
 	}
 	now := time.Now().UTC()
 	id := newDatasetID()
@@ -51,13 +47,13 @@ func (s *ResourceService) CreateKnowledge(ctx context.Context, op ResourceOperat
 	}
 	tags, err := normalizeAndValidateDatasetTags(options.Tags)
 	if err != nil {
-		return ResourceOperationResult{}, err
+		return orm.Dataset{}, nil, err
 	}
 	if len(tags) == 0 {
-		return ResourceOperationResult{}, resourceErr("INVALID_ARGUMENT", "at least one knowledge base tag is required")
+		return orm.Dataset{}, nil, resourceErr("INVALID_ARGUMENT", "at least one knowledge base tag is required")
 	}
 	if err := validateKnowledgeDescription(req.Description); err != nil {
-		return ResourceOperationResult{}, err
+		return orm.Dataset{}, nil, err
 	}
 	algoID := req.AlgoID
 	if algoID == "" {
@@ -65,19 +61,44 @@ func (s *ResourceService) CreateKnowledge(ctx context.Context, op ResourceOperat
 	}
 	options.Algo, err = knowledgeAlgorithm(ctx, algoID)
 	if err != nil {
-		return ResourceOperationResult{}, err
+		return orm.Dataset{}, nil, err
 	}
 	refs, err := knowledgeCapabilities(ctx, s.db, op.Caller.UserID, scene, req.ProfileID, req.Capabilities)
 	if err != nil {
-		return ResourceOperationResult{}, err
+		return orm.Dataset{}, nil, err
 	}
 	if err := s.knowledgeNameConflict(ctx, s.db, op, req.Name, ""); err != nil {
-		return ResourceOperationResult{}, err
+		return orm.Dataset{}, nil, err
 	}
 	parsers := fetchParsersByAlgoID(ctx, options.Algo.AlgoID)
 	ds.CoverImage = strings.TrimSpace(options.CoverImage)
 	ds.ReaderFallbackAccepted = options.ReaderFallbackAccepted
 	ds.Ext, _ = json.Marshal(map[string]any{"tags": tags, "algo_id": options.Algo.AlgoID, "algo_name": options.Algo.DisplayName, "parsers": parsers, "profile_id": req.ProfileID})
+
+	return ds, refs, nil
+}
+
+func (s *ResourceService) CreateKnowledge(ctx context.Context, op ResourceOperationContext, req CreateKnowledgeRequest) (ResourceOperationResult, error) {
+	if err := resourceAccount(op.Caller); err != nil {
+		return ResourceOperationResult{}, err
+	}
+	if err := validateDatasetDisplayName(req.Name); err != nil {
+		return ResourceOperationResult{}, resourceErr("INVALID_ARGUMENT", err.Error())
+	}
+	if hasReservedDatasetDisplayNamePrefix(req.Name) {
+		return ResourceOperationResult{}, resourceErr("INVALID_ARGUMENT", "reserved name")
+	}
+	// Resolve replay before external provisioning. The transaction checks again below.
+	if out, found, err := s.replay(ctx, op, "knowledge.create", req); found || err != nil {
+		return out, err
+	}
+	ds, refs, err := s.prepareKnowledgeCreate(ctx, op, req)
+	if err != nil {
+		return ResourceOperationResult{}, err
+	}
+	if op.ExpectedSnapshot != "" && op.ExpectedSnapshot != knowledgeCreateDigest(ds, refs) {
+		return ResourceOperationResult{}, resourceErr("CONFLICT", "creation configuration changed; confirm again")
+	}
 
 	if err := s.provision(ctx, op.Caller, &ds); err != nil {
 		return ResourceOperationResult{}, err
@@ -96,12 +117,12 @@ func (s *ResourceService) CreateKnowledge(ctx context.Context, op ResourceOperat
 			return ResourceOperationResult{}, err
 		}
 		for _, permission := range roleToPermissions("dataset_maintainer") {
-			grant := orm.ACLModel{ResourceType: acl.ResourceTypeDB, ResourceID: ds.ID, GranteeType: acl.GranteeUser, TargetID: op.Caller.UserID, Permission: permission, CreatedBy: op.Caller.UserID, CreatedAt: now}
+			grant := orm.ACLModel{ResourceType: acl.ResourceTypeDB, ResourceID: ds.ID, GranteeType: acl.GranteeUser, TargetID: op.Caller.UserID, Permission: permission, CreatedBy: op.Caller.UserID, CreatedAt: ds.CreatedAt}
 			if err := tx.Create(&grant).Error; err != nil {
 				return ResourceOperationResult{}, err
 			}
 		}
-		return ResourceOperationResult{Items: []ResourceOperationItem{{ResourceRef: ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: ds.ID}, Name: ds.DisplayName, ResourceStatus: "created", EntryURL: "/lib/knowledge/detail/" + ds.ID, After: map[string]any{"description": ds.Desc, "scene": ds.Scene, "processing_level": ds.ProcessingLevel, "tags": tags, "algo_id": options.Algo.AlgoID, "profile_id": req.ProfileID, "capabilities": refs}}}}, nil
+		return ResourceOperationResult{Items: []ResourceOperationItem{{ResourceRef: ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: ds.ID}, Name: ds.DisplayName, ResourceStatus: "created", EntryURL: "/lib/knowledge/detail/" + ds.ID, After: map[string]any{"description": ds.Desc, "scene": ds.Scene, "processing_level": ds.ProcessingLevel, "tags": parseDatasetTags(ds.Ext), "algo_id": parseDatasetAlgo(ds.Ext).AlgoID, "profile_id": req.ProfileID, "capabilities": refs}}}}, nil
 	})
 }
 func (s *ResourceService) knowledgeNameConflict(ctx context.Context, tx *gorm.DB, op ResourceOperationContext, name, exclude string) error {
@@ -132,17 +153,17 @@ func (s *ResourceService) knowledgeNameConflict(ctx context.Context, tx *gorm.DB
 	return nil
 }
 func (s *ResourceService) CreateFolders(ctx context.Context, op ResourceOperationContext, req CreateFoldersRequest) (ResourceOperationResult, error) {
-	if len(req.Folders) == 0 {
-		return ResourceOperationResult{}, resourceErr("INVALID_ARGUMENT", "folders required")
-	}
-	if len(req.Folders) > s.budget.MaxResources {
-		return ResourceOperationResult{}, resourceErr("OPERATION_TOO_LARGE", "too many folders")
+	if _, err := expandedFolderPaths(req, s.budget.MaxResources); err != nil {
+		return ResourceOperationResult{}, err
 	}
 	return s.mutate(ctx, op, "knowledge.folder.create", req, func(tx *gorm.DB) (ResourceOperationResult, error) {
 		var out ResourceOperationResult
 		ds, err := s.dataset(ctx, tx, op, req.KnowledgeBaseID, acl.PermissionDatasetUpload)
 		if err != nil {
 			return out, err
+		}
+		if op.ExpectedSnapshot != "" && folderCreateDigest(ds, req) != op.ExpectedSnapshot {
+			return out, resourceErr("CONFLICT", "creation destination changed; confirm again")
 		}
 		if err = lockResourceDataset(tx, ds); err != nil {
 			return out, err

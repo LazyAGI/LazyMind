@@ -524,18 +524,18 @@ func validateOriginalBytes(f *os.File, size int64, name, expectedMIME string) (s
 	switch ext {
 	case ".pdf":
 		if !bytes.HasPrefix(header, []byte("%PDF-")) {
-			return "", errors.New("original is not a PDF")
+			return "", originalError(DatasetServiceInvalidArgument, "original is not a PDF")
 		}
 		tail := make([]byte, min(size, int64(4096)))
 		_, _ = f.ReadAt(tail, size-int64(len(tail)))
 		if !bytes.Contains(tail, []byte("%%EOF")) {
-			return "", errors.New("PDF is incomplete")
+			return "", originalError(DatasetServiceInvalidArgument, "PDF is incomplete")
 		}
 		mime = "application/pdf"
 	case ".docx", ".xlsx", ".pptx", ".pptm", ".epub", ".zip":
 		zr, err := zip.NewReader(f, size)
 		if err != nil {
-			return "", errors.New("original is not a valid ZIP container")
+			return "", originalError(DatasetServiceInvalidArgument, "original is not a valid ZIP container")
 		}
 		if ext != ".zip" && ext != ".epub" {
 			prefix := map[string]string{".docx": "word/", ".xlsx": "xl/", ".pptx": "ppt/", ".pptm": "ppt/"}[ext]
@@ -545,7 +545,7 @@ func validateOriginalBytes(f *os.File, size int64, name, expectedMIME string) (s
 				content = content || strings.HasPrefix(entry.Name, prefix)
 			}
 			if !types || !content {
-				return "", errors.New("Office container does not match filename")
+				return "", originalError(DatasetServiceInvalidArgument, "Office container does not match filename")
 			}
 		}
 		mime = map[string]string{".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", ".zip": "application/zip", ".pptm": "application/vnd.ms-powerpoint.presentation.macroEnabled.12", ".epub": "application/epub+zip"}[ext]
@@ -558,10 +558,10 @@ func validateOriginalBytes(f *os.File, size int64, name, expectedMIME string) (s
 		if ext == ".json" || ext == ".ipynb" {
 			var v any
 			if err := decoder.Decode(&v); err != nil {
-				return "", errors.New("invalid JSON original")
+				return "", originalError(DatasetServiceInvalidArgument, "invalid JSON original")
 			}
 			if err := decoder.Decode(&v); err != io.EOF {
-				return "", errors.New("invalid trailing JSON content")
+				return "", originalError(DatasetServiceInvalidArgument, "invalid trailing JSON content")
 			}
 		} else {
 			if _, err := f.Seek(0, io.SeekStart); err != nil {
@@ -580,13 +580,13 @@ func validateOriginalBytes(f *os.File, size int64, name, expectedMIME string) (s
 					}
 					r, k := utf8.DecodeRune(data)
 					if r == utf8.RuneError && k == 1 || r == 0 {
-						return "", errors.New("invalid text original")
+						return "", originalError(DatasetServiceInvalidArgument, "invalid text original")
 					}
 					data = data[k:]
 				}
 				if e == io.EOF {
 					if len(pending) > 0 {
-						return "", errors.New("invalid text original")
+						return "", originalError(DatasetServiceInvalidArgument, "invalid text original")
 					}
 					break
 				}
@@ -602,7 +602,7 @@ func validateOriginalBytes(f *os.File, size int64, name, expectedMIME string) (s
 		}
 		_, format, err := image.DecodeConfig(f)
 		if err != nil {
-			return "", errors.New("invalid image original")
+			return "", originalError(DatasetServiceInvalidArgument, "invalid image original")
 		}
 		expected := strings.TrimPrefix(ext, ".")
 		if expected == "jpg" {
@@ -612,23 +612,23 @@ func validateOriginalBytes(f *os.File, size int64, name, expectedMIME string) (s
 			expected = "tiff"
 		}
 		if format != expected {
-			return "", errors.New("image format does not match filename")
+			return "", originalError(DatasetServiceInvalidArgument, "image format does not match filename")
 		}
 		mime = "image/" + format
 	case ".mp3":
 		if !bytes.HasPrefix(header, []byte("ID3")) && !(len(header) > 1 && header[0] == 0xff && header[1]&0xe0 == 0xe0) {
-			return "", errors.New("invalid MP3 original")
+			return "", originalError(DatasetServiceInvalidArgument, "invalid MP3 original")
 		}
 		mime = "audio/mpeg"
 	case ".mp4":
 		if len(header) < 12 || !bytes.Equal(header[4:8], []byte("ftyp")) {
-			return "", errors.New("invalid MP4 original")
+			return "", originalError(DatasetServiceInvalidArgument, "invalid MP4 original")
 		}
 		mime = "video/mp4"
 	case ".doc", ".xls", ".ppt":
 		mime = map[string]string{".doc": "application/msword", ".xls": "application/vnd.ms-excel", ".ppt": "application/vnd.ms-powerpoint"}[ext]
 		if !bytes.HasPrefix(header, []byte{0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1}) {
-			return "", errors.New("invalid Office original")
+			return "", originalError(DatasetServiceInvalidArgument, "invalid Office original")
 		}
 	default:
 		return "", originalError("UNSUPPORTED_FORMAT", "unsupported original file format")
@@ -638,7 +638,7 @@ func validateOriginalBytes(f *os.File, size int64, name, expectedMIME string) (s
 	}
 	expectedMIME = strings.TrimSpace(strings.Split(expectedMIME, ";")[0])
 	if expectedMIME != "" && expectedMIME != "application/octet-stream" && expectedMIME != mime && !(strings.HasPrefix(expectedMIME, "text/") && strings.HasPrefix(mime, "text/")) {
-		return "", fmt.Errorf("original MIME mismatch: expected %s, got %s", expectedMIME, mime)
+		return "", originalError(DatasetServiceInvalidArgument, fmt.Sprintf("original MIME mismatch: expected %s, got %s", expectedMIME, mime))
 	}
 	return mime, nil
 }

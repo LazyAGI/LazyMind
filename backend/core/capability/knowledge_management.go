@@ -56,6 +56,9 @@ type ResourceOperationSummary struct {
 	Skipped     int `json:"skipped"`
 }
 type ResourceOperationItem struct {
+	InputIndex       *int                     `json:"input_index,omitempty"`
+	TaskID           string                   `json:"task_id,omitempty"`
+	ProcessingError  *ProcessingDiagnostic    `json:"processing_error,omitempty"`
 	ResourceRef      ResourceRef              `json:"resource_ref"`
 	PreviousRef      *ResourceRef             `json:"previous_ref,omitempty"`
 	Name             string                   `json:"name"`
@@ -72,10 +75,11 @@ type ResourceOperationItem struct {
 	Error            *KnowledgeOperationError `json:"error,omitempty"`
 }
 type ResourceOperationResult struct {
-	Action  string                   `json:"action"`
-	Status  string                   `json:"status"`
-	Summary ResourceOperationSummary `json:"summary"`
-	Items   []ResourceOperationItem  `json:"items"`
+	ProcessingSummary map[string]int           `json:"processing_summary,omitempty"`
+	Action            string                   `json:"action"`
+	Status            string                   `json:"status"`
+	Summary           ResourceOperationSummary `json:"summary"`
+	Items             []ResourceOperationItem  `json:"items"`
 }
 type KnowledgeOperationError struct {
 	Code    string         `json:"code"`
@@ -121,6 +125,7 @@ type AggregateKnowledgeDocumentsResult struct {
 	Groups     []KnowledgeAggregateGroup `json:"groups"`
 }
 type KnowledgeManager interface {
+	Reparse(context.Context, InvocationContext, ReparseKnowledgeDocumentsInput) (ResourceOperationResult, error)
 	CreateKnowledge(context.Context, InvocationContext, CreateKnowledgeRequest) (ResourceOperationResult, error)
 	CreateFolders(context.Context, InvocationContext, CreateFoldersRequest) (ResourceOperationResult, error)
 	UpdateMetadata(context.Context, InvocationContext, UpdateMetadataRequest) (ResourceOperationResult, error)
@@ -203,4 +208,16 @@ func (s *Service) AggregateKnowledgeDocuments(ctx context.Context, call Invocati
 	}
 	input.KnowledgeIDs = ids
 	return s.management.Aggregate(ctx, call, input)
+}
+
+type ReparseKnowledgeDocumentsInput struct {
+	KnowledgeBaseID string   `json:"knowledge_base_id" jsonschema:"Readable library with write permission."`
+	DocumentIDs     []string `json:"document_ids" jsonschema:"One to twenty exact document IDs. Retry failed processing in place; active tasks are reused and successful documents skipped."`
+}
+
+func (s *Service) ReparseKnowledgeDocuments(ctx context.Context, call InvocationContext, input ReparseKnowledgeDocumentsInput) (ResourceOperationResult, error) {
+	if err := s.validateManagement(call, "knowledge.document.reparse"); err != nil {
+		return ResourceOperationResult{}, err
+	}
+	return s.management.Reparse(ctx, call, input)
 }

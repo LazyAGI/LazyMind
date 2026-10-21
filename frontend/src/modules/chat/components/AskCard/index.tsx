@@ -213,6 +213,7 @@ export default function AskCard({
   const preview = askPending.knowledge_management_preview;
   const displayTitle = title || (titleI18nKey ? t(titleI18nKey) : "") || previewText(preview?.title);
   const displayDescription = description || previewText(preview?.description);
+  const irreversible = previewText(preview?.impact).includes("删除后不可恢复");
   const previewEntries = Object.entries(preview ?? {}).flatMap(([key, value]) => {
     if (key === "title" || key === "description") return [];
     const text = previewText(value);
@@ -343,6 +344,7 @@ export default function AskCard({
             {displayDescription && (
               <p className="ask-wizard__description">{displayDescription}</p>
             )}
+            {irreversible && <p role="alert"><strong>删除后不可恢复</strong></p>}
             {previewEntries.length > 0 && (
               <dl className="ask-wizard__knowledge-preview">
                 {previewEntries.map(([key, text]) => <div key={key}>

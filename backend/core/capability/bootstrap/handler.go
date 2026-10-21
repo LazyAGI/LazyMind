@@ -111,7 +111,7 @@ func NewRuntime(config Config) (*Runtime, error) {
 		if e != nil {
 			return nil, e
 		}
-		resources, e = doc.NewResourceService(doc.ResourceServiceDeps{DB: config.DB, Originals: originals, Budget: config.MoveBudget})
+		resources, e = doc.NewResourceService(doc.ResourceServiceDeps{LazyDB: config.LazyDB, DB: config.DB, Originals: originals, Budget: config.MoveBudget})
 		if e != nil {
 			return nil, e
 		}
@@ -143,6 +143,20 @@ func NewRuntime(config Config) (*Runtime, error) {
 				permissions = append(permissions, p)
 			}
 			op := doc.ResourceOperationContext{Caller: doc.DatasetCatalogCaller{UserID: id.Principal.UserID, TenantID: id.Principal.TenantID, Permissions: permissions}, AllowedDatasetIDs: id.AllowedDatasetIDs}
+			if name == "knowledge.create" {
+				var req doc.CreateKnowledgeRequest
+				if e := json.Unmarshal(args, &req); e != nil {
+					return doc.ResourceSnapshot{}, e
+				}
+				return resources.SnapshotCreateKnowledge(ctx, op, req)
+			}
+			if name == "knowledge.folder.create" {
+				var req doc.CreateFoldersRequest
+				if e := json.Unmarshal(args, &req); e != nil {
+					return doc.ResourceSnapshot{}, e
+				}
+				return resources.SnapshotCreateFolders(ctx, op, req)
+			}
 			if name == "knowledge.resource.move" {
 				var req doc.MoveResourcesRequest
 				if e := json.Unmarshal(args, &req); e != nil {
@@ -168,6 +182,21 @@ func NewRuntime(config Config) (*Runtime, error) {
 			}
 			op := doc.ResourceOperationContext{Caller: doc.DatasetCatalogCaller{UserID: id.Principal.UserID, TenantID: id.Principal.TenantID, Permissions: permissions}, OperationKey: req.OperationKey}
 			switch req.WireName {
+			case "knowledge.create":
+				var input doc.CreateKnowledgeRequest
+				if e := json.Unmarshal(req.Arguments, &input); e != nil {
+					return false, e
+				}
+				_, found, e := resources.ReplayOperation(ctx, op, req.WireName, input)
+				return found, e
+			case "knowledge.folder.create":
+				var input doc.CreateFoldersRequest
+				if e := json.Unmarshal(req.Arguments, &input); e != nil {
+					return false, e
+				}
+				_, found, e := resources.ReplayOperation(ctx, op, req.WireName, input)
+				return found, e
+
 			case "knowledge.resource.delete":
 				var input doc.DeleteResourcesRequest
 				if err := json.Unmarshal(req.Arguments, &input); err != nil {
