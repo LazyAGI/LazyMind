@@ -1,3 +1,4 @@
+import { submitKnowledgeDecision } from "../SourceImports/api";
 import { ExecutionResults, SourceImportProvider } from "../SourceImports";
 import { ReferenceSourcesButton } from "../SourceImports/ReferenceSources";
 export { ChatSourcePanel } from "../SourceImports/ReferenceSources";
@@ -1364,20 +1365,20 @@ const AssistantMessage = (props: any) => {
               );
             }
           }}
-          onDecisionSubmitted={(payload) => {
-            const current = currentItemRef.current;
-            if (current.ask_pending?.ask_id !== payload.structured.ask_id) return;
-            persistAskAnswersRef.current.cancel();
-            updateMessage({
-              ...current,
-              ask_answered: true,
-              ask_saved_answers: Object.fromEntries(
-                payload.structured.questions.map((question, idx) => [idx, question.answer]),
-              ),
-            });
-          }}
           onSubmit={async (payload) => {
             persistAskAnswersRef.current.cancel();
+            if (askPending.knowledge_management) {
+              const answer = payload.structured.questions[0]?.answer;
+              await submitKnowledgeDecision(askPending.knowledge_management,
+                answer?.type === "boolean" && answer.value === "__ask_user_yes__");
+              const current = currentItemRef.current;
+              if (current.ask_pending?.ask_id === payload.structured.ask_id) {
+                updateMessage({ ...current, ask_answered: true,
+                  ask_saved_answers: Object.fromEntries(payload.structured.questions.map((question, idx) => [idx, question.answer])),
+                });
+              }
+              return true;
+            }
             const started = await props.sendMessage?.(payload.text, undefined, {
               ask_answers_structured: payload.structured,
             });

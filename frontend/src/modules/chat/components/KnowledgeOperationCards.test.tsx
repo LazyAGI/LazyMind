@@ -8,7 +8,7 @@ const get = vi.hoisted(() => vi.fn());
 vi.mock("@/components/request", () => ({ BASE_URL: "", axiosInstance: { get } }));
 
 describe("knowledge operation receipts", () => {
-  beforeEach(() => get.mockReset());
+  beforeEach(() => { localStorage.setItem("lazymind:developer-active", "1"); get.mockReset(); });
   it("keeps immutable receipts separate from current failures and retains status on query errors", async () => {
     get.mockResolvedValueOnce({ data: { processing_status: "failed", processing_error: { message: "解析失败" } } });
     render(<MemoryRouter><KnowledgeOperationCards operations={[{ call_id: "call", action: "knowledge.document.upload", status: "partial", items: [

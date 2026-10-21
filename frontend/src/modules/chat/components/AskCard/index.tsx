@@ -3,7 +3,6 @@ import { Button, Checkbox, Input, Progress, Radio } from "antd";
 import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "./index.scss";
-import { axiosInstance, BASE_URL } from "@/components/request";
 
 export interface AskQuestion {
   text: string;
@@ -55,8 +54,6 @@ interface AskCardProps {
   askPending: AskPending;
   /** Called with a payload containing the formatted text and full structured answers. */
   onSubmit: (payload: AskSubmitPayload) => void | boolean | Promise<void | boolean>;
-  /** A business decision has already been persisted; update the parent without a chat turn. */
-  onDecisionSubmitted?: (payload: AskSubmitPayload) => void;
   disabled?: boolean;
   /** Cached answers to pre-populate (index → serialized answer) */
   savedAnswers?: Record<number, AnswerState>;
@@ -192,7 +189,6 @@ export default function AskCard({
   disabled = false,
   savedAnswers,
   onAnswerChange,
-  onDecisionSubmitted,
 }: AskCardProps) {
   const { t } = useTranslation();
   const otherOption = OTHER_OPTION;
@@ -298,20 +294,9 @@ export default function AskCard({
     setSubmitting(true);
     setDecisionFailed(false);
     try {
-      if (askPending.knowledge_management) {
-        const confirmation = askPending.knowledge_management;
-        const decision = answers[0]?.type === "boolean" && answers[0].value === "__ask_user_yes__"
-          ? "approved" : "rejected";
-        await axiosInstance.post(
-          `${BASE_URL}/api/core/knowledge-management/confirmations/${encodeURIComponent(confirmation.confirmation_id)}/decision`,
-          { decision, arguments_digest: confirmation.arguments_digest, snapshot: confirmation.snapshot },
-        );
-        setSubmitted(true);
-        onDecisionSubmitted?.({ text: lines.join("\n"), structured });
-        return;
-      }
       const accepted = await onSubmit({ text: lines.join("\n"), structured });
       if (accepted !== false && !askPending.user_env_delete) setSubmitted(true);
+      if (accepted === false && askPending.knowledge_management) setDecisionFailed(true);
     } catch {
       if (askPending.knowledge_management) setDecisionFailed(true);
       // Ordinary callers report their own request errors; keep the answer for retry.

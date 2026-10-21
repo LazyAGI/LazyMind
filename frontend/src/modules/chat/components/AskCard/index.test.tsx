@@ -185,33 +185,29 @@ describe("Knowledge management confirmation", () => {
     expect(card).toHaveTextContent("Remove original documents and search entries");
   });
 
-  it.each(["yes", "no"])("submits explicit %s to the bound decision endpoint without a chat message", async (choice) => {
+  it.each(["yes", "no"])("submits explicit %s through the common callback", async (choice) => {
     vi.mocked(axiosInstance.post).mockResolvedValueOnce({ data: { data: { status: "allowed" } } });
     const onSubmit = vi.fn();
-    const onDecisionSubmitted = vi.fn();
-    render(<AskCard askPending={pending} onSubmit={onSubmit} onDecisionSubmitted={onDecisionSubmitted} />);
+    render(<AskCard askPending={pending} onSubmit={onSubmit} />);
     const submit = screen.getByRole("button", { name: "chat.askCardSubmit" });
     expect(submit).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: `common.${choice}` }));
     fireEvent.click(submit);
-    await waitFor(() => expect(axiosInstance.post).toHaveBeenLastCalledWith(
-      "/api/core/knowledge-management/confirmations/kb-confirm/decision",
-      { decision: choice === "yes" ? "approved" : "rejected", arguments_digest: "args-digest", snapshot: "version-1" },
-    ));
-    expect(onSubmit).not.toHaveBeenCalled();
-    expect(onDecisionSubmitted).toHaveBeenCalledWith(expect.objectContaining({ structured: expect.objectContaining({ ask_id: "kb-confirm" }) }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      structured: expect.objectContaining({ ask_id: "kb-confirm" }),
+    })));
+    expect(axiosInstance.post).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByRole("button", { name: "chat.askCardSubmit" })).toBeNull());
   });
 
   it("retains the decision for retry when the business endpoint rejects the request", async () => {
-    vi.mocked(axiosInstance.post).mockRejectedValueOnce(new Error("snapshot changed"));
-    const onSubmit = vi.fn();
+    const onSubmit = vi.fn().mockRejectedValueOnce(new Error("snapshot changed"));
     render(<AskCard askPending={pending} onSubmit={onSubmit} />);
     fireEvent.click(screen.getByRole("button", { name: "common.yes" }));
     const submit = screen.getByRole("button", { name: "chat.askCardSubmit" });
     fireEvent.click(submit);
     await waitFor(() => expect(submit).toBeEnabled());
     expect(screen.getByRole("alert")).toHaveTextContent("chat.knowledgeConfirmationFailed");
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 });

@@ -24,12 +24,24 @@ describe("ordinary stage artifacts", () => {
     vi.mocked(sourceAPI.listSourceImports).mockResolvedValue([]);
     render(<MemoryRouter><TaskArtifactList artifacts={[file({ inline_content: "ReAct [1](#source-1.1)" })]} sourceContexts={{ "task-1": { context: { task_id: "task-1" }, sources: [source] } }} /></MemoryRouter>);
     fireEvent.click(screen.getByRole("button", { name: "Report.md" }));
-    await waitFor(() => expect(sourceAPI.inspectSources).toHaveBeenCalledWith({ task_id: "task-1" }));
+    expect(sourceAPI.inspectSources).not.toHaveBeenCalled();
     const citation = document.querySelector(".md-source-chip")!;
     expect(citation).toBeTruthy();
     fireEvent.focus(citation);
-    expect(await screen.findByRole("button", { name: "加入知识库" })).toBeInTheDocument();
+    await waitFor(() => expect(sourceAPI.inspectSources).toHaveBeenCalledWith({ task_id: "task-1" }));
+    expect(await screen.findByRole("button", { name: /加入(?:知识库|资料库)/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "打开原文" })).toBeInTheDocument();
+  });
+  it("passes durable operation receipts into the Work preview", async () => {
+    render(<MemoryRouter><TaskArtifactList artifacts={[file()]} sourceContexts={{ "task-1": {
+      context: { task_id: "task-1" }, sources: [], operations: [{ call_id: "operation", action: "knowledge.create", status: "success", items: [
+        { name: "Created library", resource_ref: { kind: "knowledge_base", knowledge_base_id: "created" }, resource_status: "created" },
+      ] }],
+    } }} /></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: "Report.md" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Agent 执行结果" }));
+    expect(await screen.findByRole("link", { name: "Created library" })).toHaveAttribute("href", "/lib/knowledge/detail/created");
+    expect(sourceAPI.inspectSources).not.toHaveBeenCalled();
   });
   it("hides an empty collection and deduplicates repeated IDs", () => {
     const { rerender } = render(<TaskArtifactList artifacts={[]} />);

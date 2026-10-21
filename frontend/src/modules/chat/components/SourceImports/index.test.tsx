@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, cleanup, within, act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
-import { SourceImportProvider, SourceImportActions, ExecutionResults, uniquePapers } from "./index";
+import { SourceImportProvider, ExecutionResults, uniquePapers } from "./index";
 import { ChatSourcePanel, ReferenceSourcesButton } from "./ReferenceSources";
 import * as api from "./api";
 import type { ChatSource } from "../../utils/sourceAdapter";
@@ -16,6 +16,7 @@ const sources: ChatSource[] = [
 const inspected = sources.map((source, index) => ({ source_id: source.citation_id!, title: source.title!, url: source.url!, eligible: index < 2, paper_key: index < 2 ? "arxiv:2210.03629" : undefined }));
 function view(children: React.ReactNode, rows = sources) { return render(<MemoryRouter><SourceImportProvider context={{ conversation_id: "chat", history_id: "answer" }} sources={rows}>{children}</SourceImportProvider></MemoryRouter>); }
 beforeEach(() => {
+  localStorage.setItem("lazymind:developer-active", "1");
   vi.clearAllMocks(); vi.mocked(api.inspectSources).mockResolvedValue(inspected); vi.mocked(api.listSourceImports).mockResolvedValue([]); vi.mocked(api.sourceTargets).mockResolvedValue([{ dataset_id: "kb", display_name: "My papers" }]);
 });
 afterEach(cleanup);
@@ -67,7 +68,9 @@ describe("source imports", () => {
     const rows = [sources[0], { ...sources[1], url: "https://publisher.example/paper" }, sources[2]];
     vi.mocked(api.inspectSources).mockResolvedValue(rows.map((row, i) => ({ source_id: row.citation_id!, title: row.title!, url: row.url!, eligible: i < 2, paper_key: i < 2 ? "doi:10.1234/react" : undefined })));
     view(<ReferenceSourcesButton sources={rows} />, rows);
-    fireEvent.click(await screen.findByRole("button", { name: "参考来源 (2)" }));
+    expect(api.inspectSources).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "参考来源 (3)" }));
+    await screen.findByRole("button", { name: "参考来源 (2)" });
     fireEvent.click(await screen.findByRole("button", { name: /展开 2 个来源/ }));
     expect(screen.getByRole("link", { name: rows[1].url })).toHaveAttribute("href", rows[1].url);
   });
@@ -96,16 +99,33 @@ describe("source imports", () => {
     expect(screen.getByText("已选择 20 篇")).toBeInTheDocument();
   });
   it("keeps draft creation and cancellation free of writes", async () => {
-    view(<SourceImportActions source={sources[0]} />);
-    fireEvent.click(await screen.findByRole("button", { name: "加入知识库" }));
+    view(<ChatSourcePanel sources={[sources[0]]} onClose={() => {}} embedded />);
+    fireEvent.click(screen.getByRole("button", { name: "多选" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "选择 Paper abstract" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量加入知识库" }));
     await screen.findByText("已有知识库");
     fireEvent.click(screen.getByRole("radio", { name: "新建知识库" }));
     fireEvent.change(screen.getByLabelText("名称"), { target: { value: "Draft_papers" } });
-    fireEvent.click(screen.getByRole("button", { name: /取\s*消/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^取\s*消$/ }));
     expect(api.submitSourceImport).not.toHaveBeenCalled();
   });
+  it("submits the shared creation defaults and enforces the description limit", async () => {
+    vi.mocked(api.submitSourceImport).mockResolvedValue({ batch_id: "created", target_dataset_id: "new-library" });
+    view(<ChatSourcePanel sources={[sources[0]]} onClose={() => {}} embedded />);
+    fireEvent.click(screen.getByRole("button", { name: "多选" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "选择 Paper abstract" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量加入知识库" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "新建知识库" }));
+    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "Shared_papers" } });
+    expect(screen.getByLabelText("描述")).toHaveAttribute("maxlength", "300");
+    fireEvent.click(screen.getByRole("button", { name: "确认加入" }));
+    await waitFor(() => expect(api.submitSourceImport).toHaveBeenCalledWith(expect.objectContaining({
+      new_knowledge_base: { name: "Shared_papers", description: "", tags: ["论文"], scene: "academic_papers", processing_level: "stored", algo_id: "test" },
+    })));
+  });
   it("does not offer an import action for a normal webpage", async () => {
-    view(<SourceImportActions source={sources[2]} />);
+    view(<ChatSourcePanel sources={[sources[2]]} onClose={() => {}} embedded />);
+    fireEvent.click(await screen.findByRole("button", { name: /Website/ }));
     await waitFor(() => expect(api.inspectSources).toHaveBeenCalled());
     expect(screen.getByRole("button", { name: "打开原文" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "加入知识库" })).not.toBeInTheDocument();
@@ -113,7 +133,7 @@ describe("source imports", () => {
   it("shows only agent tool receipts in the execution result panel", async () => {
     vi.mocked(api.listSourceImports).mockResolvedValue([{ item_id: "manual", batch_id: "batch", paper_key: "manual", title: "Manual import", target_dataset_id: "manual-kb", target_name: "Manual library", created_library: true, status: "added", stage: "done", retryable: false }]);
     view(<ExecutionResults operations={[{ call_id: "a", action: "knowledge.create", status: "succeeded", items: [{ name: "Library", resource_ref: { kind: "knowledge_base", knowledge_base_id: "kb" }, resource_status: "created" }] }]} />);
-    await waitFor(() => expect(api.listSourceImports).toHaveBeenCalled());
+    expect(api.listSourceImports).not.toHaveBeenCalled();
     expect(screen.getAllByRole("button", { name: "Agent 执行结果" })).toHaveLength(1);
     expect(screen.queryByText("Library")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Agent 执行结果" }));
@@ -151,4 +171,23 @@ describe("source imports", () => {
     await waitFor(() => expect(api.retrySourceImport).toHaveBeenCalledWith("batch", ["bad"], expect.any(String)));
   });
 
+});
+
+
+it("does not fetch during history mounting and shares the first panel load", async () => {
+  view(<><ReferenceSourcesButton sources={sources} /><span>Historical answer</span></>);
+  expect(api.inspectSources).not.toHaveBeenCalled();
+  expect(api.listSourceImports).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "参考来源 (3)" }));
+  await waitFor(() => expect(api.inspectSources).toHaveBeenCalledTimes(1));
+  expect(api.listSourceImports).toHaveBeenCalledTimes(1);
+});
+
+it("shares concurrent loads for the same owner and source context", async () => {
+  render(<MemoryRouter>
+    <SourceImportProvider context={{ conversation_id: "chat", history_id: "answer" }} sources={sources}><ChatSourcePanel sources={sources} embedded onClose={() => {}} /></SourceImportProvider>
+    <SourceImportProvider context={{ history_id: "answer", conversation_id: "chat" }} sources={sources}><ChatSourcePanel sources={sources} embedded onClose={() => {}} /></SourceImportProvider>
+  </MemoryRouter>);
+  await waitFor(() => expect(api.inspectSources).toHaveBeenCalledTimes(1));
+  expect(api.listSourceImports).toHaveBeenCalledTimes(1);
 });

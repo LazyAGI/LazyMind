@@ -29,3 +29,13 @@ export async function submitSourceImport(request: SourceImportRequest) {
 export async function retrySourceImport(batch: string, items: string[], key: string) {
   await axiosInstance.post(`${root}/imports/${encodeURIComponent(batch)}:retry`, { item_ids: items, idempotency_key: key }, options);
 }
+
+export async function submitKnowledgeDecision(
+  confirmation: { confirmation_id: string; arguments_digest: string; snapshot: string },
+  approved: boolean,
+) {
+  await axiosInstance.post(
+    `${BASE_URL}/api/core/knowledge-management/confirmations/${encodeURIComponent(confirmation.confirmation_id)}/decision`,
+    { decision: approved ? "approved" : "rejected", arguments_digest: confirmation.arguments_digest, snapshot: confirmation.snapshot },
+  );
+}

@@ -1,3 +1,4 @@
+import { knowledgeCreationDefaults, knowledgeCreationMetadata } from "../../utils/creation";
 import {
   forwardRef,
   useCallback,
@@ -14,6 +15,9 @@ import type { Dataset as CoreDataset } from "@/api/generated/core-client";
 import { KnowledgeBaseServiceApi, getKnowledgeOptions } from "@/modules/knowledge/utils/request";
 import {
   KNOWLEDGE_BASE_NAME_MAX_LENGTH,
+  KNOWLEDGE_BASE_DESCRIPTION_MAX_LENGTH,
+  KNOWLEDGE_BASE_TAG_MAX_LENGTH,
+  KNOWLEDGE_BASE_TAG_MAX_COUNT,
   KNOWLEDGE_BASE_NAME_PATTERN,
 } from "@/modules/knowledge/constants/validation";
 import DataSourceProviderPicker from "@/modules/dataSource/components/management/DataSourceProviderPicker";
@@ -30,7 +34,6 @@ import CapabilitySettings, { capabilityRefsFromForm } from "@/modules/learning/C
 
 const { TextArea } = Input;
 const { Paragraph } = Typography;
-const KNOWLEDGE_TAG_MAX_LENGTH = 20;
 const CREATE_MODAL_WIDTH = 720;
 
 type CreateTab = "direct" | "cloud";
@@ -125,11 +128,12 @@ const CreateKnowledgeBaseModal = forwardRef<
       setCustomProfiles(options.profiles);
       setAlgorithm(options.algorithms);
       setProcessingLevels(options.processing_levels);
+      const defaults = knowledgeCreationDefaults(options);
       form.setFieldsValue({
-        learning_profile_key: options.default_scene,
+        learning_profile_key: defaults.scene,
         learning_capability_keys: options.scenes.find(item => item.key === options.default_scene)?.capabilities || [],
-        processing_level: options.default_processing_level,
-        algo_id: options.default_algo_id,
+        processing_level: defaults.processing_level,
+        algo_id: defaults.algo_id,
       });
     });
     const tagsRequest = KnowledgeBaseServiceApi().datasetServiceAllDatasetTags().then(res => setTags(res.data.tags || []));
@@ -240,6 +244,8 @@ const CreateKnowledgeBaseModal = forwardRef<
         params.scene = learningCatalog?.profiles.some(item => item.key === profileKey) ? profileKey : "custom";
         if (customProfiles.some(item => item.id === profileKey)) params.profile_id = profileKey;
         params.reading_capabilities = capabilityRefsFromForm(capabilityKeys, capabilitySettings, learningCatalog?.capabilities);
+        const metadata = knowledgeCreationMetadata(params.display_name || "", params.desc, params.tags);
+        Object.assign(params, { display_name: metadata.name, desc: metadata.description, tags: metadata.tags });
         await onCreate(params);
         message.success(t("knowledge.createSuccess"));
         onCancel();
@@ -322,7 +328,7 @@ const CreateKnowledgeBaseModal = forwardRef<
                   <TextArea
                     placeholder={t("knowledge.maxLength300Chars")}
                     showCount
-                    maxLength={300}
+                    maxLength={KNOWLEDGE_BASE_DESCRIPTION_MAX_LENGTH}
                     autoSize={{ minRows: 2, maxRows: 3 }}
                   />
                 </Form.Item>
@@ -332,13 +338,16 @@ const CreateKnowledgeBaseModal = forwardRef<
                   rules={[
                     {
                       required: true,
+                      type: "array",
+                      min: 1,
+                      max: KNOWLEDGE_BASE_TAG_MAX_COUNT,
                       message: t("knowledge.selectKnowledgeTags"),
                     },
                     {
                       validator: (_, value?: string[]) => {
                         const hasOverLengthTag = (value || []).some(
                           (tag) =>
-                            Array.from(tag).length > KNOWLEDGE_TAG_MAX_LENGTH,
+                            Array.from(tag).length > KNOWLEDGE_BASE_TAG_MAX_LENGTH,
                         );
                         return hasOverLengthTag
                           ? Promise.reject(
@@ -357,7 +366,7 @@ const CreateKnowledgeBaseModal = forwardRef<
                 >
                   <TagSelect
                     tags={tags}
-                    maxTagLength={KNOWLEDGE_TAG_MAX_LENGTH}
+                    maxTagLength={KNOWLEDGE_BASE_TAG_MAX_LENGTH}
                     maxTagLengthMessage={t("knowledge.knowledgeTagMaxLength")}
                     showOverLengthInputError
                     onLengthErrorChange={handleTagLengthErrorChange}
