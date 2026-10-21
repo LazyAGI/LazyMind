@@ -12,10 +12,11 @@ describe("paper library model", () => {
     const matched = filterPapers(library.papers, "unread", [{ field: "tag", value: "RAG", label: "标签包含 RAG" }, { field: "source", value: "semantic_scholar", label: "来源 Semantic Scholar" }], "all", "self-rag");
     expect(matched.map((item) => item.id)).toEqual(["p4"]);
   });
-  it("flattens nested folders back to one level", () => {
+  it("preserves nested folder hierarchy", () => {
     const flat = normalizeLibrary({ folders: [{ id: "llm", name: "大模型", parentId: null }, { id: "rag", name: "检索增强", parentId: "llm" }], papers: [sampleLibrary().papers[2]] });
     expect(flat.folders.map((folder) => folder.name)).toEqual(["大模型", "检索增强"]);
     expect(flat.papers[0].folderId).toBe("rag");
+    expect(flat.folders[1].parentId).toBe("llm");
   });
   it("round-trips BibTeX, RIS and CSV", () => {
     const parsed = parseBibTeX(`@article{lewis2020,

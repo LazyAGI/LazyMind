@@ -68,7 +68,7 @@ async function renderLibrary(props: Partial<React.ComponentProps<typeof PaperLib
 }
 
 async function openImportDialog(method: string, title: string) {
-  fireEvent.click(browse().getByRole("button", { name: /导入/ }));
+  fireEvent.click(browse().getByRole("button", { name: "新建文献或文件夹" }));
   fireEvent.click(await screen.findByRole("menuitem", { name: new RegExp(method) }));
   return screen.findByRole("dialog", { name: title });
 }
@@ -229,7 +229,7 @@ describe("paper library navigation and import", () => {
     const bulkActions = within(screen.getByRole("region", { name: "已选论文" }));
     fireEvent.mouseEnter(bulkActions.getByRole("button", { name: /更\s*多/ }));
     fireEvent.mouseEnter(await screen.findByRole("menuitem", { name: /导出已选/ }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: format === "bib" ? "BibTeX" : format.toUpperCase() }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: format === "bib" ? "BibTeX" : format.toUpperCase() }, { timeout: 5000 }));
 
     const content = await readDownload();
     expect(content).toContain("Folder paper");
@@ -356,13 +356,14 @@ describe("paper library navigation and import", () => {
     ["直接上传", "上传文献"],
     ["arXiv / DOI 链接", "通过链接导入"],
     ["BibTeX / RIS / CSV", "导入文献题录"],
+    ["从 Zotero 导入", "从 Zotero 导入"],
   ])("opens a dedicated %s dialog only after selecting the import method", async (method, title) => {
     await renderLibrary();
-    fireEvent.click(browse().getByRole("button", { name: /导入/ }));
+    fireEvent.click(browse().getByRole("button", { name: "新建文献或文件夹" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole("menuitem", { name: new RegExp(method) }));
     expect(await screen.findByRole("dialog", { name: title })).toBeInTheDocument();
-    for (const other of ["上传文献", "通过链接导入", "导入文献题录"].filter((value) => value !== title)) {
+    for (const other of ["上传文献", "通过链接导入", "导入文献题录", "从 Zotero 导入"].filter((value) => value !== title)) {
       expect(screen.queryByRole("dialog", { name: other })).not.toBeInTheDocument();
     }
   });
@@ -377,6 +378,63 @@ describe("paper library navigation and import", () => {
     await waitFor(() => expect(browse().getByRole("button", { name: /新主题/ })).toHaveAttribute("aria-current", "true"));
     expect(loadPreviewPaperLibrary(datasetId).folders.some((folder) => folder.name === "新主题")).toBe(true);
     expect(browse().getByRole("button", { name: "删除文件夹" })).toBeEnabled();
+  });
+
+  it("creates a nested folder under the selection and toggles its branch", async () => {
+    await renderLibrary();
+    fireEvent.click(browse().getByRole("button", { name: /第一个文件夹/ }));
+    fireEvent.click(browse().getByRole("button", { name: "新建文件夹" }));
+    const dialog = await screen.findByRole("dialog", { name: "新建文件夹" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "文件夹名称" }), { target: { value: "子课题" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /创\s*建/ }));
+    await waitFor(() => expect(loadPreviewPaperLibrary(datasetId).folders.find((folder) => folder.name === "子课题")).toMatchObject({ parentId: "first" }));
+    expect(browse().getByRole("button", { name: /子课题/ })).toHaveAttribute("aria-current", "true");
+    fireEvent.click(browse().getByRole("button", { name: "折叠子文件夹" }));
+    expect(browse().queryByRole("button", { name: /子课题/ })).not.toBeInTheDocument();
+    fireEvent.click(browse().getByRole("button", { name: "展开子文件夹" }));
+    expect(browse().getByRole("button", { name: /子课题/ })).toBeInTheDocument();
+  });
+
+  it("browses and deletes a parent subtree without removing papers or notes", async () => {
+    const before = loadPreviewPaperLibrary(datasetId);
+    before.folders.push({ id: "child", name: "子课题", parentId: "first" });
+    before.papers[0].folderId = "child";
+    before.papers[1].collectionIds = ["child", "second"];
+    before.collections = before.folders.map((folder) => ({ ...folder }));
+    savePreviewPaperLibrary(datasetId, before);
+    await renderLibrary();
+    fireEvent.click(browse().getByRole("button", { name: /第一个文件夹/ }));
+    expect(screen.getByRole("heading", { name: "Folder paper" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Other favorite" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Unfiled paper" })).not.toBeInTheDocument();
+    fireEvent.click(browse().getByRole("button", { name: "删除文件夹" }));
+    const dialog = await screen.findByRole("dialog", { name: "删除文件夹「第一个文件夹」？" });
+    expect(dialog).toHaveTextContent("子文件夹");
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除文件夹" }));
+    await waitFor(() => expect(loadPreviewPaperLibrary(datasetId).folders).toHaveLength(1));
+    const saved = loadPreviewPaperLibrary(datasetId);
+    expect(saved.papers).toHaveLength(before.papers.length);
+    expect(saved.papers[0].folderId).toBeNull();
+    expect(saved.papers[1].collectionIds).toEqual(["second"]);
+    expect(saved.notes).toEqual(before.notes);
+    expect(saved.attachments).toEqual(before.attachments);
+  });
+
+  it("renames and reparents a folder through its settings without moving its papers", async () => {
+    await renderLibrary();
+    const row = browse().getByRole("button", { name: /第一个文件夹/ }).parentElement!;
+    fireEvent.click(within(row).getByRole("button", { name: "文件夹操作" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /重命名/ }));
+    const dialog = await screen.findByRole("dialog", { name: "编辑文件夹" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "文件夹名称" }), { target: { value: "新主题" } });
+    fireEvent.mouseDown(within(dialog).getByRole("combobox", { name: "上级文件夹" }));
+    fireEvent.click(await screen.findByText("第二个文件夹", { selector: ".ant-select-item-option-content" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /保\s*存/ }));
+    await waitFor(() => expect(loadPreviewPaperLibrary(datasetId).folders.find((folder) => folder.id === "first")).toMatchObject({ name: "新主题", parentId: "second" }));
+    const saved = loadPreviewPaperLibrary(datasetId);
+    expect(saved.papers[0].folderId).toBe("first");
+    expect(saved.collections.find((folder) => folder.id === "first")).toMatchObject({ name: "新主题", parentId: "second" });
+    expect(browse().getByRole("button", { name: /新主题/ })).toHaveAttribute("aria-current", "true");
   });
 
   it("creates a folder when HTTP origins do not expose crypto.randomUUID", async () => {
@@ -443,7 +501,7 @@ describe("paper library navigation and import", () => {
     let finishUpload!: (documentId: string) => void;
     const onUploadPdf = vi.fn(() => new Promise<string>((resolve) => { finishUpload = resolve; }));
     await renderLibrary({ onUploadPdf });
-    fireEvent.click(browse().getByRole("button", { name: /导入/ }));
+    fireEvent.click(browse().getByRole("button", { name: "新建文献或文件夹" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: /直接上传/ }));
     const dialog = await screen.findByRole("dialog", { name: "上传文献" });
     const fileInput = dialog.querySelector<HTMLInputElement>('input[type="file"]');
@@ -608,12 +666,15 @@ describe("paper library navigation and import", () => {
     expect(loadPreviewPaperLibrary(datasetId).papers).toHaveLength(3);
   });
 
-  it("only exposes file, identifier and bibliography imports", async () => {
+  it("groups document imports and folder creation in the new menu", async () => {
     await renderLibrary();
-    fireEvent.click(browse().getByRole("button", { name: /导入/ }));
+    fireEvent.click(browse().getByRole("button", { name: "新建文献或文件夹" }));
     const menu = await screen.findByRole("menu");
-    expect(within(menu).getAllByRole("menuitem")).toHaveLength(3);
-    expect(within(menu).queryByText(/Semantic Scholar|Zotero/)).not.toBeInTheDocument();
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(5);
+    for (const name of [/直接上传/, /arXiv \/ DOI/, /BibTeX \/ RIS \/ CSV/, /Zotero/, /新建文件夹/]) {
+      expect(within(menu).getByRole("menuitem", { name })).toBeInTheDocument();
+    }
+    expect(within(menu).queryByText(/Semantic Scholar/)).not.toBeInTheDocument();
   });
 
   it("shows synchronous bibliography parse errors without leaving a candidate to save", async () => {
@@ -741,7 +802,8 @@ describe("paper library table and drag to folders", () => {
 
     const saved = loadPreviewPaperLibrary(datasetId);
     expect(saved.papers.find((paper) => paper.id === "a")?.folderId).toBe("second");
-    expect(saved.papers.find((paper) => paper.id === "a")).toEqual({ ...before.papers[0], folderId: "second" });
+    expect(saved.papers.find((paper) => paper.id === "a")).toEqual({ ...before.papers[0], folderId: "second", collectionIds: ["second"] });
+    expect(saved.collections.find((collection) => collection.id === "second")).toMatchObject({ name: "第二个文件夹" });
     expect(saved.notes).toEqual(before.notes);
     expect(saved.annotations).toEqual(before.annotations);
     expect(saved.attachments).toEqual(before.attachments);
@@ -1111,7 +1173,7 @@ describe("paper library backend arXiv import", () => {
     const dialog = await screen.findByRole("dialog", { name: "删除文件夹「第一个文件夹」？" });
     await act(async () => finishSync([{ ...result, processing_status: "ready" }]));
     expect(loadPreviewPaperLibrary(datasetId).papers).toHaveLength(4);
-    fireEvent.click(within(dialog).getByRole("button", { name: "删除文件夹" }));
+    await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "删除文件夹" })); });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     const saved = loadPreviewPaperLibrary(datasetId);
     expect(saved.papers).toHaveLength(4);
@@ -1160,7 +1222,7 @@ describe("paper library backend arXiv import", () => {
     expect(await screen.findByRole("heading", { name: result.paper.title })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: result.paper.title })).toHaveAttribute("href", `/lib/knowledge/knowledge/${datasetId}/${result.document_id}`);
     expect(savePersistedPaperLibrary).not.toHaveBeenCalled();
-    expect(browse().getByRole("button", { name: /导入/ })).toBeDisabled();
+    expect(browse().getByRole("button", { name: "新建文献或文件夹" })).toBeDisabled();
   });
 
   it("does not let a delayed arXiv poll overwrite an in-flight user save", async () => {
@@ -1233,7 +1295,7 @@ describe("backend durable paper library", () => {
     vi.mocked(loadPersistedPaperLibrary).mockResolvedValueOnce({ data: loadPreviewPaperLibrary(datasetId), revision: 3, canWrite: false });
     await renderLibrary();
     expect(screen.getByRole("heading", { name: "Folder paper" })).toBeInTheDocument();
-    expect(browse().getByRole("button", { name: /导入/ })).toBeDisabled();
+    expect(browse().getByRole("button", { name: "新建文献或文件夹" })).toBeDisabled();
     expect(browse().getByRole("button", { name: "新建文件夹" })).toBeDisabled();
     expect(within(screen.getByRole("heading", { name: "Folder paper" }).parentElement!).getByRole("button", { name: "取消收藏" })).toBeDisabled();
     expect(screen.getByRole("alert")).toHaveTextContent("只读");
@@ -1260,15 +1322,15 @@ describe("backend durable paper library", () => {
     let fail!: (error: Error) => void;
     vi.mocked(loadPersistedPaperLibrary).mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
     await renderLibrary();
-    expect(browse().getByRole("button", { name: /导入/ })).toBeDisabled();
+    expect(browse().getByRole("button", { name: "新建文献或文件夹" })).toBeDisabled();
     expect(browse().getByRole("button", { name: "新建文件夹" })).toBeDisabled();
     expect(screen.queryByRole("heading", { name: "Folder paper" })).not.toBeInTheDocument();
     await act(async () => fail(new Error("服务器不可用")));
     expect(screen.getByRole("alert")).toHaveTextContent("服务器不可用");
-    expect(browse().getByRole("button", { name: /导入/ })).toBeDisabled();
+    expect(browse().getByRole("button", { name: "新建文献或文件夹" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "重新加载" }));
     expect(await screen.findByRole("heading", { name: "Folder paper" })).toBeInTheDocument();
-    expect(browse().getByRole("button", { name: /导入/ })).toBeEnabled();
+    expect(browse().getByRole("button", { name: "新建文献或文件夹" })).toBeEnabled();
   });
 
   it("keeps the import pending until its complete backend snapshot is acknowledged", async () => {

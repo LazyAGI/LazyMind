@@ -103,7 +103,7 @@ function validateLibrary(value: unknown): asserts value is PaperLibraryDataV3 {
   }
 }
 
-function decodePersistedLibrary(value: unknown): PersistedPaperLibrary {
+export function decodePersistedLibrary(value: unknown): PersistedPaperLibrary {
   if (!object(value) || !Number.isSafeInteger(value.revision) || (value.revision as number) < 0 || typeof value.can_write !== 'boolean') {
     throw new Error('服务器文献库响应格式无效，请重试');
   }

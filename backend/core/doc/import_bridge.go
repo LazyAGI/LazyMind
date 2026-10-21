@@ -24,7 +24,10 @@ import (
 // It lets trusted Core workers import an already validated local file while
 // retaining the same document/task/processing-level behavior as normal upload.
 type LocalFileImportRequest struct {
-	DatasetID      string
+	DatasetID string
+	// DocumentID is optional and only used by trusted importers that coordinate
+	// retries with a database lock and resume this identity after interruption.
+	DocumentID     string
 	ParentID       string
 	SourcePath     string
 	DisplayName    string
@@ -185,7 +188,7 @@ func ImportLocalFile(ctx context.Context, input LocalFileImportRequest) (LocalFi
 	req.Header.Set("X-User-Id", input.UserID)
 	req.Header.Set("X-User-Name", userName)
 	tasks, err := createTaskFromUploadedFile(req, dataset.ID, input.UserID, userName, CreateTaskItem{UploadFileID: uploadID,
-		Task: TaskPayload{TaskType: TaskTypeParseUploaded, DocumentPID: input.ParentID, DisplayName: displayName,
+		Task: TaskPayload{TaskType: TaskTypeParseUploaded, DocumentID: input.DocumentID, DocumentPID: input.ParentID, DisplayName: displayName,
 			DataSourceType: firstNonEmpty(strings.TrimSpace(input.DataSourceType), "ACADEMIC_PROVIDER"), DocumentTags: input.Tags}}, string(TaskTypeParseUploaded))
 	if err != nil || len(tasks) == 0 {
 		return LocalFileImportResult{}, fmt.Errorf("create import task failed: %w", err)

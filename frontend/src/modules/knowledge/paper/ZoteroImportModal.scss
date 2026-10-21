@@ -1,0 +1,56 @@
+.zotero-import-modal {
+  .ant-modal-content { padding: 26px 28px 22px; border-radius: 16px; }
+  .ant-modal-title { font-size: 20px; font-weight: 650; color: #172b4d; }
+  .ant-modal-header { margin-bottom: 5px; }
+  .zotero-import-description { margin: 0 0 21px; font-size: 13px; color: #748096; line-height: 1.65; }
+  .zotero-source-picker { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 100%; margin-bottom: 22px; }
+  .zotero-source-picker .ant-radio-button-wrapper {
+    height: auto; min-height: 76px; padding: 13px 12px; border: 1px solid #e3e8f0; border-radius: 10px;
+    line-height: 1.4; background: #fff; color: #5d6a7f; box-shadow: none;
+    &::before { display: none; }
+    &.ant-radio-button-wrapper-checked { color: #245fe7; background: #f3f7ff; border-color: #98b7ff; box-shadow: 0 0 0 1px rgba(64, 122, 240, .04); }
+    &:focus-within { outline: 2px solid #759eff; outline-offset: 2px; }
+  }
+  .zotero-source-name { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
+  .zotero-source-subtitle { display: block; margin-top: 7px; padding-left: 23px; color: #8893a5; font-size: 11px; }
+  .zotero-form { display: grid; gap: 15px; }
+  .zotero-form-row { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 12px; }
+  .zotero-field { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+  .zotero-field > label, .zotero-field-label-row > label { color: #394b63; font-size: 12px; font-weight: 600; }
+  .zotero-field-label-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .zotero-field-label-row .ant-radio-button-wrapper { font-size: 11px; }
+  .zotero-field .ant-input, .zotero-field .ant-input-affix-wrapper, .zotero-field .ant-select-selector { border-radius: 7px; }
+  .zotero-field-hint, .zotero-connection-hint { margin: 0; color: #8390a3; font-size: 11px; line-height: 1.7; }
+  .zotero-field-hint a { color: #3975e8; }
+  .zotero-connection-hint { padding: 10px 12px; border-radius: 8px; background: #f6f8fb; }
+  .zotero-section-label { margin: 3px 0 -2px; color: #65758e; font-size: 11px; letter-spacing: .05em; }
+  .zotero-file-picker { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; padding: 13px; border: 1px dashed #cbd7e9; border-radius: 9px; background: #fafcff; }
+  .zotero-file-picker > span { color: #8290a5; font-size: 12px; overflow-wrap: anywhere; }
+  .zotero-options { margin-top: 17px; padding-top: 15px; border-top: 1px solid #edf0f5; display: grid; gap: 10px; }
+  .zotero-options .ant-checkbox-wrapper { font-size: 12px; color: #56657b; }
+  .zotero-preview { margin-top: 19px; border: 1px solid #dce7f6; border-radius: 10px; overflow: hidden; background: #fff; }
+  .zotero-preview-heading { display: flex; align-items: center; gap: 7px; color: #245fe7; padding: 12px 15px 0; font-weight: 600; font-size: 12px; }
+  .zotero-preview-counts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 14px 15px; }
+  .zotero-preview-count { border-left: 1px solid #edf0f5; padding-left: 13px; &:first-child { border-left: 0; padding-left: 0; } }
+  .zotero-preview-count strong { display: block; font-size: 21px; line-height: 1.1; font-weight: 600; color: #263c5d; }
+  .zotero-preview-count span { display: block; margin-top: 5px; font-size: 11px; color: #8a96a7; }
+  .zotero-preview-titles { margin: 0; padding: 10px 15px 11px; background: #f8fafc; list-style: none; color: #617089; font-size: 11px; line-height: 1.9; }
+  .zotero-preview-titles li { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+  .zotero-import-alert { margin-top: 14px; }
+  .zotero-import-alert .ant-alert-message, .zotero-import-alert .ant-alert-description { font-size: 12px; white-space: pre-line; overflow-wrap: anywhere; }
+  .zotero-import-footer { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin-top: 21px; }
+  .zotero-import-footer .ant-btn { border-radius: 7px; min-width: 78px; }
+  .zotero-private-hint { margin-right: auto; color: #9aa4b3; font-size: 11px; }
+  .zotero-private-hint .anticon { margin-right: 5px; }
+}
+@media (max-width: 560px) {
+  .zotero-import-modal {
+    .ant-modal-content { padding: 22px 18px 18px; }
+    .zotero-source-picker { gap: 6px; }
+    .zotero-source-picker .ant-radio-button-wrapper { padding: 10px 7px; min-height: 68px; }
+    .zotero-source-subtitle { padding-left: 0; font-size: 10px; }
+    .zotero-source-name { gap: 5px; font-size: 12px; }
+    .zotero-form-row { grid-template-columns: 110px minmax(0, 1fr); gap: 9px; }
+    .zotero-private-hint { display: none; }
+  }
+}

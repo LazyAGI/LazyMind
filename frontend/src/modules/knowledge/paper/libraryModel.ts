@@ -51,6 +51,7 @@ export interface Collection {
   id: string;
   name: string;
   description?: string;
+  parentId?: string | null;
 }
 
 export interface PaperRecord extends PaperItem {

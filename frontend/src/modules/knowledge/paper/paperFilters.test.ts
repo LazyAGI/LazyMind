@@ -64,6 +64,16 @@ describe("paper filters", () => {
     expect(ids(filterPaperRecords(papers, [], { ...DEFAULT_PAPER_FILTERS, star: "unstarred", folder: "unfiled", status: "read" }))).toEqual(["match"]);
   });
 
+  it("counts collection memberships when filtering papers without a primary folder", () => {
+    const papers = [
+      { ...paper("collection-only"), collectionIds: ["child"] },
+      { ...paper("folder", { folderId: "first" }), collectionIds: [] },
+      { ...paper("unfiled"), collectionIds: [] },
+    ];
+    expect(ids(filterPaperRecords(papers, [], { ...DEFAULT_PAPER_FILTERS, folder: "filed" }))).toEqual(["collection-only", "folder"]);
+    expect(ids(filterPaperRecords(papers, [], { ...DEFAULT_PAPER_FILTERS, folder: "unfiled" }))).toEqual(["unfiled"]);
+  });
+
   it("derives only known bounds and handles empty or single-year libraries", () => {
     expect(getFilterBounds([])).toEqual({ years: null, maxCitations: 0 });
     expect(getFilterBounds([paper("one")])).toEqual({ years: [2024, 2024], maxCitations: 0 });

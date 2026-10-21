@@ -1,3 +1,5 @@
+import { descendantFolderIds, paperBelongsToFolders } from './folderTree';
+
 export type ReadingStatus = "unread" | "reading" | "read";
 export type LibraryView = "all" | "important" | "incomplete";
 export type ImportSource = "local" | "zotero" | "google_scholar" | "semantic_scholar" | "doi" | "arxiv";
@@ -8,6 +10,7 @@ export type CitationStyle = "gbt" | "apa" | "mla";
 export interface PaperFolder {
   id: string;
   name: string;
+  parentId?: string | null;
 }
 
 export interface PaperItem {
@@ -115,10 +118,8 @@ function paper(
   return { id, title, authors, venue, year, folderId, status, important, tags, source, parse, doi, arxiv };
 }
 
-type StoredFolder = PaperFolder & { parentId?: string | null };
-
-export function normalizeLibrary(raw: Partial<PaperLibraryData> & { folders?: StoredFolder[] }): PaperLibraryData {
-  const folders = (raw.folders || []).map((folder) => ({ id: folder.id, name: folder.name }));
+export function normalizeLibrary(raw: Partial<PaperLibraryData>): PaperLibraryData {
+  const folders = (raw.folders || []).map((folder) => ({ ...folder }));
   const known = new Set(folders.map((folder) => folder.id));
   const papers = (raw.papers || []).map((item) => ({
     ...item,
@@ -129,7 +130,8 @@ export function normalizeLibrary(raw: Partial<PaperLibraryData> & { folders?: St
 
 export function papersInView(data: PaperLibraryData, folderId: string | null) {
   if (!folderId) return data.papers;
-  return data.papers.filter((item) => item.folderId === folderId);
+  const ids = descendantFolderIds(data.folders, folderId);
+  return data.papers.filter((item) => paperBelongsToFolders(item, ids));
 }
 
 export function filterLibraryView(items: PaperItem[], view: LibraryView) {
@@ -566,9 +568,9 @@ export function assignFolders(data: PaperLibraryData, papers: PaperItem[], folde
   const next = papers.map((item, index) => {
     const name = folderNames[index]?.trim();
     if (!name) return { ...item, folderId: item.folderId ?? fallbackFolderId };
-    let folder = folders.find((entry) => entry.name === name);
+    let folder = folders.find((entry) => entry.name === name && (entry.parentId || null) === fallbackFolderId);
     if (!folder) {
-      folder = { id: `folder-${name}-${folders.length}`, name };
+      folder = { id: `folder-${name}-${folders.length}`, name, parentId: fallbackFolderId };
       folders.push(folder);
     }
     return { ...item, folderId: folder.id };

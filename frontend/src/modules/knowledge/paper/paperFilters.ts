@@ -27,7 +27,7 @@ export function isReadablePdfAttachment(attachment: Attachment): boolean {
   }
 }
 
-export function filterPaperRecords<T extends PaperItem>(papers: T[], attachments: Attachment[], filters: PaperFilters): T[] {
+export function filterPaperRecords<T extends PaperItem & { collectionIds?: string[] }>(papers: T[], attachments: Attachment[], filters: PaperFilters): T[] {
   const withPdf = new Set<string>();
   const uploaded = new Set<string>();
   for (const attachment of attachments) {
@@ -41,8 +41,9 @@ export function filterPaperRecords<T extends PaperItem>(papers: T[], attachments
     if (filters.pdf === "has-pdf" && !withPdf.has(paper.id)) return false;
     if (filters.pdf === "needs-pdf" && withPdf.has(paper.id)) return false;
     if (filters.pdf === "uploaded" && !uploaded.has(paper.id)) return false;
-    if (filters.folder === "filed" && !paper.folderId) return false;
-    if (filters.folder === "unfiled" && paper.folderId) return false;
+    const filed = !!paper.folderId || !!paper.collectionIds?.length;
+    if (filters.folder === "filed" && !filed) return false;
+    if (filters.folder === "unfiled" && filed) return false;
     if (filters.status !== "all" && paper.status !== filters.status) return false;
     if (filters.yearRange && (!Number.isFinite(paper.year) || paper.year < filters.yearRange[0] || paper.year > filters.yearRange[1])) return false;
     if (filters.minCitations > 0 && (!Number.isSafeInteger(paper.citationCount) || (paper.citationCount ?? -1) < filters.minCitations)) return false;

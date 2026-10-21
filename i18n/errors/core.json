@@ -1952,5 +1952,11 @@
   "2004925": { "en-US": "Invalid paper library data", "zh-CN": "论文库数据无效" },
   "2004926": { "en-US": "Failed to read the imported document file", "zh-CN": "读取已导入的文档文件失败" },
   "2004927": { "en-US": "Failed to recover the imported document task", "zh-CN": "恢复已导入的文档任务失败" },
-  "2004928": { "en-US": "Failed to read the imported document task metadata", "zh-CN": "读取已导入文档的任务元数据失败" }
+  "2004928": { "en-US": "Failed to read the imported document task metadata", "zh-CN": "读取已导入文档的任务元数据失败" },
+  "2004930": { "en-US": "Invalid paper folder hierarchy", "zh-CN": "论文文件夹层级无效" },
+  "2004931": { "en-US": "The Zotero paper or attachment changed; reload the library", "zh-CN": "Zotero 文献或附件已变更，请重新读取论文库" },
+  "2004932": { "en-US": "Invalid Zotero PDF upload; files must be valid PDFs up to 128 MiB", "zh-CN": "Zotero 上传无效，请选择不超过 128 MiB 的 PDF 文件" },
+  "2004933": { "en-US": "Failed to store the Zotero attachment", "zh-CN": "Zotero 附件保存失败" },
+  "2004934": { "en-US": "The library changed; the PDF is saved, retry linking it", "zh-CN": "论文库已发生变更，PDF 已保存，请重试关联" },
+  "2004935": { "en-US": "The attachment checksum changed; reload Zotero metadata and select the matching file", "zh-CN": "附件校验值已变更，请重新读取 Zotero 题录并选择对应文件" }
 }

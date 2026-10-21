@@ -352,7 +352,45 @@ func validatePaperLibraryObject(value any, documents map[string]bool) error {
 			}
 		}
 	}
+	for _, key := range []string{"folders", "collections"} {
+		if err := validatePaperFolderTree(root[key].([]any)); err != nil {
+			return err
+		}
+	}
 	return paperStringArray(root, "hiddenArxivWorkIds", false)
+}
+
+func validatePaperFolderTree(items []any) error {
+	parents := make(map[string]string, len(items))
+	for _, raw := range items {
+		item := raw.(map[string]any)
+		id := item["id"].(string)
+		parent := ""
+		if value, present := item["parentId"]; present && value != nil {
+			var ok bool
+			parent, ok = value.(string)
+			if !ok || len(parent) > 255 {
+				return errors.New("论文文件夹 parentId 无效")
+			}
+		}
+		parents[id] = parent
+	}
+	for id := range parents {
+		seen := map[string]bool{}
+		for cursor := id; cursor != ""; cursor = parents[cursor] {
+			if _, exists := parents[cursor]; !exists {
+				return errors.New("论文文件夹的父文件夹不存在")
+			}
+			if seen[cursor] {
+				return errors.New("论文文件夹不能包含循环层级")
+			}
+			seen[cursor] = true
+			if len(seen) > 32 {
+				return errors.New("论文文件夹最多支持 32 层")
+			}
+		}
+	}
+	return nil
 }
 
 func paperStringArray(object map[string]any, key string, required bool) error {

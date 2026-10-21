@@ -93,7 +93,7 @@
   margin-bottom: 3px;
 }
 
-.paper-library-folder > button:first-child {
+.paper-library-folder > .paper-library-folder-select {
   width: 100%;
   display: flex;
   justify-content: space-between;
@@ -122,6 +122,19 @@
 }
 .paper-library-folder > button[aria-current="true"] .paper-library-folder-count { color: var(--blue); }
 .paper-library-folder > button.is-drop-target { background: #e5edff; color: var(--blue); box-shadow: inset 0 0 0 1.5px var(--blue); }
+.paper-library-folder-tree { overflow-x: auto; scrollbar-width: thin; margin-top: 5px; }
+.paper-library-folder.is-tree { min-width: calc(180px + var(--folder-depth) * 14px); padding-left: calc(var(--folder-depth) * 14px); }
+.paper-library-folder.is-tree > .paper-library-folder-select { flex: 1; min-width: 0; width: auto; padding-left: 4px; padding-right: 6px; gap: 6px; }
+.paper-library-folder-toggle,
+.paper-library-folder-toggle-spacer { flex: 0 0 18px; width: 18px; height: 28px; }
+.paper-library-folder-toggle,
+.paper-library-folder-menu { border: 0; border-radius: 4px; background: transparent; color: var(--faint); padding: 0; cursor: pointer; }
+.paper-library-folder-toggle { font-size: 9px; }
+.paper-library-folder-menu { flex: 0 0 22px; width: 22px; height: 28px; margin-left: 1px; opacity: 0; font-size: 16px; }
+.paper-library-folder:hover .paper-library-folder-menu,
+.paper-library-folder:focus-within .paper-library-folder-menu { opacity: 1; }
+.paper-library-folder button:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+@media (hover: none) { .paper-library-folder-menu { opacity: 1; } }
 .paper-library-drag-hint { margin: 14px 10px; color: var(--blue); font-size: 12px; line-height: 1.7; }
 
 .paper-library-seg { display: flex; gap: 4px; flex-wrap: wrap; }
