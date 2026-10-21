@@ -39,6 +39,16 @@ func TestDeletedPaperReachesDownloadThroughSharedWorker(t *testing.T) {
 	if _, e := sourcePresentDocument(db, "target", work.ID, ""); e != nil {
 		t.Fatal("control active-document query failed", e)
 	}
+	if err := db.Model(&orm.Document{}).Where("id = ?", d.ID).Update("dataset_id", "other").Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := findEquivalentPresentWork(context.Background(), work.ID, "target"); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("association to document in another library counted as present: %v", err)
+	}
+	if err := db.Model(&orm.Document{}).Where("id = ?", d.ID).Update("dataset_id", "target").Error; err != nil {
+		t.Fatal(err)
+	}
+
 	t.Logf("control before deletion: presence_error=%v document=%s", presenceErr, p.DocumentID)
 	if e := db.Model(&orm.Document{}).Where("id = ?", d.ID).Update("deleted_at", time.Now().UTC()).Error; e != nil {
 		t.Fatal(e)

@@ -257,6 +257,26 @@ describe("knowledge operation receipts", () => {
     });
     expect(get).toHaveBeenCalledTimes(20);
     get.mockClear();
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      value: true,
+    });
+    fireEvent(document, new Event("visibilitychange"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+    expect(get).not.toHaveBeenCalled();
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      value: false,
+    });
+    fireEvent(document, new Event("visibilitychange"));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(get).toHaveBeenCalledTimes(20);
+    get.mockClear();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
@@ -279,5 +299,9 @@ describe("knowledge operation receipts", () => {
     });
     expect(get).not.toHaveBeenCalled();
     unmount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+    expect(get).not.toHaveBeenCalled();
   });
 });

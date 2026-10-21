@@ -35,7 +35,8 @@ func uploadItemError(err error) *ResourceError {
 }
 
 // UploadLocalBatch preserves per-file receipts so an interrupted batch never
-// repeats a committed import. The legacy page upload transaction is unchanged.
+// repeats a committed import. Each file and its folder statistics commit together;
+// deferring statistics until the end would leave stale counts after cancellation.
 func (s *ResourceService) UploadLocalBatch(ctx context.Context, op ResourceOperationContext, req LocalUploadRequest) (ResourceOperationResult, error) {
 	const action = "knowledge.document.upload"
 	if err := resourceAccount(op.Caller); err != nil {
