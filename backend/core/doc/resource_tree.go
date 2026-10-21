@@ -201,6 +201,7 @@ func (s *ResourceService) Delete(ctx context.Context, op ResourceOperationContex
 			return out, err
 		}
 		locked := map[string]bool{}
+		affected := map[string][]string{}
 		for _, tree := range trees {
 			ds := tree.dataset
 			if ds.CreateUserID != op.Caller.UserID && tree.root.Kind == "knowledge_base" {
@@ -242,11 +243,12 @@ func (s *ResourceService) Delete(ctx context.Context, op ResourceOperationContex
 				}
 			}
 			if tree.root.Kind != "knowledge_base" {
-				if err = s.refreshAncestorStats(tx, ds.ID, tree.rows[0].PID); err != nil {
-					return out, err
-				}
+				affected[ds.ID] = append(affected[ds.ID], tree.rows[0].PID)
 			}
 			out.Items = append(out.Items, item)
+		}
+		if err = refreshFolderStats(tx, affected); err != nil {
+			return out, err
 		}
 		committedTrees = trees
 		return out, nil

@@ -64,10 +64,12 @@ func (s *ResourceService) Upload(ctx context.Context, op ResourceOperationContex
 			}
 			result.Items = append(result.Items, item)
 		}
+		affected := map[string][]string{}
 		for _, req := range requests {
-			if err := s.refreshAncestorStats(tx, req.DatasetID, req.ParentID); err != nil {
-				return result, err
-			}
+			affected[req.DatasetID] = append(affected[req.DatasetID], req.ParentID)
+		}
+		if err := refreshFolderStats(tx, affected); err != nil {
+			return result, err
 		}
 		committed = true
 		return result, nil

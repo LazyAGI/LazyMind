@@ -214,7 +214,7 @@ func (s *ResourceService) CreateFolders(ctx context.Context, op ResourceOperatio
 		for _, item := range out.Items {
 			parents = append(parents, item.ResourceRef.ID())
 		}
-		if err = s.refreshAncestorStats(tx, ds.ID, parents...); err != nil {
+		if err = refreshFolderStats(tx, map[string][]string{ds.ID: parents}); err != nil {
 			return out, err
 		}
 		return out, nil

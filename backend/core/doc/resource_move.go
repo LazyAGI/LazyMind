@@ -157,6 +157,7 @@ func (s *ResourceService) moveAtomic(ctx context.Context, op ResourceOperationCo
 				locked[ds.ID] = true
 			}
 		}
+		affected := map[string][]string{}
 		for _, tree := range current {
 			root := tree.rows[0]
 			name := root.DisplayName
@@ -253,13 +254,12 @@ func (s *ResourceService) moveAtomic(ctx context.Context, op ResourceOperationCo
 				item.CleanupStatus = "not_submitted"
 				item.EntryURL = "/lib/knowledge/detail/" + target.ID + "?document=" + ids[root.ID]
 			}
-			if e = s.refreshAncestorStats(tx, tree.dataset.ID, root.PID); e != nil {
-				return out, e
-			}
-			if e = s.refreshAncestorStats(tx, target.ID, pid); e != nil {
-				return out, e
-			}
+			affected[tree.dataset.ID] = append(affected[tree.dataset.ID], root.PID)
+			affected[target.ID] = append(affected[target.ID], pid)
 			out.Items = append(out.Items, item)
+		}
+		if e := refreshFolderStats(tx, affected); e != nil {
+			return out, e
 		}
 		committed = true
 		return out, nil

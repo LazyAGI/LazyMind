@@ -41,9 +41,13 @@ func sourceItemUpdate(ctx context.Context, job asyncjob.Job, b orm.PaperImportBa
 		return tx.Model(&orm.PaperImportItem{}).Where("id = ? AND batch_id = ?", itemID, b.ID).Updates(updates).Error
 	})
 }
+func activeSourceDocuments(tx *gorm.DB, dataset string) *gorm.DB {
+	return tx.Table("documents d").Where("d.dataset_id = ? AND d.deleted_at IS NULL", dataset)
+}
+
 func sourcePresentDocument(tx *gorm.DB, dataset, workID, hash string) (orm.Document, error) {
 	var d orm.Document
-	q := tx.Table("documents d").Select("d.*").Where("d.dataset_id = ? AND d.deleted_at IS NULL", dataset)
+	q := activeSourceDocuments(tx, dataset).Select("d.*")
 	if hash != "" {
 		q = q.Joins("JOIN uploaded_files uf ON uf.document_id = d.id AND uf.dataset_id = d.dataset_id").Where("uf.content_hash = ? AND uf.deleted_at IS NULL", hash)
 	} else {
@@ -154,7 +158,7 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 		}
 		for _, receipt := range result.Items {
 			if receipt.Error != nil {
-				return errors.New(receipt.Error.Message)
+				return fmt.Errorf("document reparse failed: %s", receipt.Error.Message)
 			}
 			code := ""
 			if item.ErrorCode == "already_present" {
@@ -168,7 +172,11 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 		if err := resolveImportCandidate(ctx, job, b, &item); err != nil {
 			return err
 		}
-		if presentWork, presentDocument, ok := findEquivalentPresentWork(ctx, item.AcademicWorkID, b.TargetDatasetID); ok {
+		presentWork, presentDocument, err := findEquivalentPresentWork(ctx, item.AcademicWorkID, b.TargetDatasetID)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err == nil {
 			associateReferencesWithWork(ctx, item.ReferenceIDsJSON, presentWork.ID, "presence")
 			return sourceItemUpdate(ctx, job, b, item.ID, map[string]any{"academic_work_id": presentWork.ID, "document_id": presentDocument.DocumentID, "status": presentImportStatus(b), "stage": "done", "error_code": "already_present"})
 		}
@@ -292,7 +300,7 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 	}
 	bound = originals.SubmitOriginalProcessing(ctx, caller, bound)
 	if bound.SubmissionStatus == "failed" {
-		return errors.New(bound.SubmissionError)
+		return fmt.Errorf("document processing submission failed: %s", bound.SubmissionError)
 	}
 	return sourceItemUpdate(ctx, job, b, item.ID, map[string]any{"status": "succeeded", "stage": "processing", "error_code": "", "error_details_json": json.RawMessage("{}")})
 }

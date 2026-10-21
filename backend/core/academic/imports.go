@@ -331,10 +331,13 @@ func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 	return handleImportBatchJob(ctx, job, reporter, batch)
 }
 
-func findEquivalentPresentWork(ctx context.Context, workID, datasetID string) (orm.AcademicWork, orm.AcademicWorkDocument, bool) {
+func findEquivalentPresentWork(ctx context.Context, workID, datasetID string) (orm.AcademicWork, orm.AcademicWorkDocument, error) {
 	var source orm.AcademicWork
-	if workID == "" || store.DB().WithContext(ctx).Where("id = ?", workID).Take(&source).Error != nil {
-		return orm.AcademicWork{}, orm.AcademicWorkDocument{}, false
+	if workID == "" {
+		return orm.AcademicWork{}, orm.AcademicWorkDocument{}, gorm.ErrRecordNotFound
+	}
+	if err := store.DB().WithContext(ctx).Where("id = ?", workID).Take(&source).Error; err != nil {
+		return orm.AcademicWork{}, orm.AcademicWorkDocument{}, err
 	}
 	conditions := []string{"aw.id = ?"}
 	args := []any{source.ID}
@@ -351,23 +354,29 @@ func findEquivalentPresentWork(ctx context.Context, workID, datasetID string) (o
 		WorkID     string
 		DocumentID string
 	}
-	query := store.DB().WithContext(ctx).Table("academic_works aw").
+	query := activeSourceDocuments(store.DB().WithContext(ctx), datasetID).
 		Select("aw.id AS work_id, awd.document_id").
-		Joins("JOIN academic_work_documents awd ON awd.academic_work_id = aw.id").
+		Joins("JOIN academic_work_documents awd ON awd.document_id = d.id AND awd.dataset_id = d.dataset_id").
+		Joins("JOIN academic_works aw ON aw.id = awd.academic_work_id").
 		Where("awd.dataset_id = ?", datasetID).
 		Where("("+strings.Join(conditions, " OR ")+")", args...).
 		Order("CASE WHEN aw.id = '" + strings.ReplaceAll(source.ID, "'", "''") + "' THEN 0 ELSE 1 END, awd.is_preferred_version DESC, awd.updated_at DESC").
 		Limit(1).Scan(&row)
-	if query.Error != nil || row.WorkID == "" || row.DocumentID == "" {
-		return orm.AcademicWork{}, orm.AcademicWorkDocument{}, false
+	if query.Error != nil {
+		return orm.AcademicWork{}, orm.AcademicWorkDocument{}, query.Error
+	}
+	if row.WorkID == "" || row.DocumentID == "" {
+		return orm.AcademicWork{}, orm.AcademicWorkDocument{}, gorm.ErrRecordNotFound
 	}
 	var work orm.AcademicWork
 	var document orm.AcademicWorkDocument
-	if store.DB().WithContext(ctx).Where("id = ?", row.WorkID).Take(&work).Error != nil ||
-		store.DB().WithContext(ctx).Where("academic_work_id = ? AND dataset_id = ? AND document_id = ?", row.WorkID, datasetID, row.DocumentID).Take(&document).Error != nil {
-		return orm.AcademicWork{}, orm.AcademicWorkDocument{}, false
+	if err := store.DB().WithContext(ctx).Where("id = ?", row.WorkID).Take(&work).Error; err != nil {
+		return orm.AcademicWork{}, orm.AcademicWorkDocument{}, err
 	}
-	return work, document, true
+	if err := store.DB().WithContext(ctx).Where("academic_work_id = ? AND dataset_id = ? AND document_id = ?", row.WorkID, datasetID, row.DocumentID).Take(&document).Error; err != nil {
+		return orm.AcademicWork{}, orm.AcademicWorkDocument{}, err
+	}
+	return work, document, nil
 }
 
 func associateReferencesWithWork(ctx context.Context, encoded json.RawMessage, workID, method string) {

@@ -2674,6 +2674,11 @@ func createTasksFromZipUpload(r *http.Request, datasetID, userID, userName, uplo
 
 	now := time.Now().UTC()
 	tasks := make([]orm.Task, 0)
+	defer func() {
+		if len(tasks) > 0 {
+			recalcAffectedFolderStats(r.Context(), datasetID, documentPID)
+		}
+	}()
 
 	for _, e := range entries {
 		name := e.name
@@ -2713,7 +2718,6 @@ func createTasksFromZipUpload(r *http.Request, datasetID, userID, userName, uplo
 		if err != nil {
 			return tasks, err
 		}
-		recalcAffectedFolderStats(r.Context(), datasetID, documentPID)
 		tasks = append(tasks, bound.Task)
 	}
 
@@ -3045,6 +3049,12 @@ func startMoveTasksInternal(r *http.Request, datasetID string, taskIDs []string)
 
 func startTransferTasksInternal(r *http.Request, datasetID string, taskIDs []string, mode string) ([]StartTaskResult, error) {
 	results := make([]StartTaskResult, 0, len(taskIDs))
+	var movedParents []string
+	defer func() {
+		if len(movedParents) > 0 {
+			recalcAffectedFolderStats(r.Context(), datasetID, movedParents...)
+		}
+	}()
 	validTaskRows := make([]orm.Task, 0, len(taskIDs))
 	validDocRows := make([]orm.Document, 0, len(taskIDs))
 	preparedExts := make([]taskExt, 0, len(taskIDs))
@@ -3086,7 +3096,7 @@ func startTransferTasksInternal(r *http.Request, datasetID string, taskIDs []str
 			_ = json.Unmarshal(taskRow.Ext, &ext)
 			ext.TaskState = string(TaskStateSucceeded)
 			_ = store.DB().WithContext(r.Context()).Model(&orm.Task{}).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", taskRow.ID, datasetID).Updates(map[string]any{"ext": mustJSON(ext), "updated_at": now}).Error
-			recalcAffectedFolderStats(r.Context(), datasetID, oldPID, newPID)
+			movedParents = append(movedParents, oldPID, newPID)
 			results = append(results, StartTaskResult{TaskID: taskID, DocumentID: docRow.ID, DisplayName: docRow.DisplayName, Status: "STARTED", SubmitStatus: "SUBMITTED", Message: "moved locally"})
 			continue
 		}
@@ -3493,33 +3503,25 @@ func recalcTransferFolderStats(ctx context.Context, sourceDatasetID string, task
 		appendAncestors(strings.TrimSpace(taskRow.TargetDatasetID), parentPIDForDocument(ctx, strings.TrimSpace(taskRow.TargetDatasetID), binding.TargetDocumentID))
 		appendFolderSelf(strings.TrimSpace(taskRow.TargetDatasetID), binding.TargetDocumentID)
 	}
+	affected := map[string][]string{}
 	for key := range touched {
 		parts := strings.SplitN(key, ":", 2)
-		if len(parts) != 2 {
-			continue
+		if len(parts) == 2 {
+			affected[parts[0]] = append(affected[parts[0]], parts[1])
 		}
-		recalcSingleFolderStats(ctx, parts[0], parts[1])
+	}
+	for datasetID, ids := range affected {
+		recalcAffectedFolderStats(ctx, datasetID, ids...)
 	}
 }
 
+// Legacy jobs have already committed their resource changes. A derived-statistics
+// failure must be observable without reporting that the committed upload failed.
 func recalcAffectedFolderStats(ctx context.Context, datasetID string, pids ...string) {
-	touched := map[string]struct{}{}
-	for _, pid := range pids {
-		current := strings.TrimSpace(pid)
-		for current != "" {
-			if _, ok := touched[current]; ok {
-				break
-			}
-			touched[current] = struct{}{}
-			var row orm.Document
-			if err := store.DB().WithContext(ctx).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", current, datasetID).Take(&row).Error; err != nil {
-				break
-			}
-			current = strings.TrimSpace(row.PID)
-		}
-	}
-	for folderID := range touched {
-		recalcSingleFolderStats(ctx, datasetID, folderID)
+	if err := store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return refreshFolderStats(tx, map[string][]string{datasetID: pids})
+	}); err != nil {
+		log.Printf("refresh folder statistics failed after resource commit dataset=%s: %v", datasetID, err)
 	}
 }
 
@@ -3532,60 +3534,6 @@ func parentPIDForDocument(ctx context.Context, datasetID, documentID string) str
 		return ""
 	}
 	return strings.TrimSpace(row.PID)
-}
-
-func recalcSingleFolderStats(ctx context.Context, datasetID, folderID string) {
-	var folder orm.Document
-	if err := store.DB().WithContext(ctx).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", folderID, datasetID).Take(&folder).Error; err != nil {
-		return
-	}
-	var all []orm.Document
-	if err := store.DB().WithContext(ctx).Where("dataset_id = ? AND deleted_at IS NULL", datasetID).Find(&all).Error; err != nil {
-		return
-	}
-	childrenByPID := make(map[string][]orm.Document)
-	for _, row := range all {
-		childrenByPID[strings.TrimSpace(row.PID)] = append(childrenByPID[strings.TrimSpace(row.PID)], row)
-	}
-	directChildren := childrenByPID[folderID]
-	directFileCount := 0
-	directFolderCount := 0
-	recursiveFileCount := 0
-	recursiveFolderCount := 0
-	recursiveTotalSize := int64(0)
-	queue := append([]orm.Document(nil), directChildren...)
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		var ext documentExt
-		_ = json.Unmarshal(current.Ext, &ext)
-		if isFolderLikeDocument(current) {
-			recursiveFolderCount++
-			queue = append(queue, childrenByPID[current.ID]...)
-		} else {
-			recursiveFileCount++
-			recursiveTotalSize += ext.FileSize
-		}
-	}
-	for _, child := range directChildren {
-		if isFolderLikeDocument(child) {
-			directFolderCount++
-		} else {
-			directFileCount++
-		}
-	}
-	var extMap map[string]any
-	_ = json.Unmarshal(folder.Ext, &extMap)
-	if extMap == nil {
-		extMap = map[string]any{}
-	}
-	extMap["file_size"] = recursiveTotalSize
-	extMap["child_document_count"] = directFileCount
-	extMap["child_folder_count"] = directFolderCount
-	extMap["recursive_document_count"] = recursiveFileCount
-	extMap["recursive_folder_count"] = recursiveFolderCount
-	extMap["recursive_file_size"] = recursiveTotalSize
-	_ = store.DB().WithContext(ctx).Model(&orm.Document{}).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", folderID, datasetID).Updates(map[string]any{"ext": mustJSON(extMap), "updated_at": time.Now().UTC()}).Error
 }
 
 func datasetKbIDByID(datasetID string) string {
