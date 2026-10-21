@@ -795,3 +795,32 @@ func validateDocumentChunkSuccess(value any) error {
 	}
 	return errors.New("chunk backend business success failed")
 }
+
+// GetProcessingMetadata batches a scoped status observation without reading originals.
+func (s *DocumentService) GetProcessingMetadata(ctx context.Context, caller DatasetCatalogCaller, datasetID string, ids []string) (map[string]DocumentMetadata, error) {
+	out := map[string]DocumentMetadata{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	ds, err := s.requireDatasetRead(ctx, caller.UserID, datasetID, caller)
+	if err != nil {
+		return nil, err
+	}
+	snapshot, err := loadProcessingSnapshot(ctx, s.db, s.lazyDB, datasetID, "", ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range snapshot.documents {
+		state, raw := snapshot.observe(row)
+		task := snapshot.tasks[row.ID]
+		detail := snapshot.diagnostics[[2]string{task.LazyllmTaskID, row.LazyllmDocID}]
+		if task.LazyllmTaskID == "" {
+			var ext taskExt
+			_ = json.Unmarshal(task.Ext, &ext)
+			detail[1] = ext.ErrorMessage
+		}
+		out[row.ID] = DocumentMetadata{ID: row.ID, DatasetID: datasetID, ProcessingLevel: ds.ProcessingLevel, ProcessingState: state,
+			ProcessingError: processingDiagnostic(state, task, raw, detail[0], detail[1])}
+	}
+	return out, nil
+}

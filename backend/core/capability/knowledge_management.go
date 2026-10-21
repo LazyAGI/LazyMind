@@ -43,7 +43,7 @@ type UpdateMetadataRequest struct {
 }
 type MoveResourcesRequest struct {
 	Sources     []ResourceRef `json:"sources" jsonschema:"Nonempty folder/document references with source write permission. Includes descendants; overlapping roots are normalized. Deployment resource limits apply."`
-	Destination ResourceRef   `json:"destination" jsonschema:"Folder or knowledge_base (root) with upload permission. No self/descendant destination or name conflicts. Cross-library moves require calibrated byte/resource/time budgets."`
+	Destination ResourceRef   `json:"destination" jsonschema:"Folder or knowledge_base (root) with upload permission. No self/descendant destination or name conflicts. Cross-library moves obey configured byte/resource/time limits."`
 }
 type DeleteResourcesRequest struct {
 	Targets []ResourceRef `json:"targets" jsonschema:"Nonempty resource references with write permission. Libraries/folders include descendants; overlaps are normalized. Deployment resource limits apply."`

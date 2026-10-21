@@ -318,3 +318,52 @@ func TestDecisionPersistenceRetryDoesNotChangeApprovedDecision(t *testing.T) {
 		t.Fatal("changed a completed decision")
 	}
 }
+
+func TestReadOnlyDispatchValidatesIdentityWithoutOperationState(t *testing.T) {
+	st, _ := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
+	defer st.Close()
+	tools := []string{"knowledge.list", "knowledge.document.list", "knowledge.document.aggregate"}
+	validations, snapshots := 0, 0
+	rt, _ := New(st, func(context.Context, Execution) (Identity, error) {
+		validations++
+		return Identity{Principal: capability.Principal{UserID: "alice", TenantID: "tenant"}, AllowedTools: tools, AllowedDatasetIDs: []string{"kb"}}, nil
+	}, func(context.Context, Identity, string, json.RawMessage) (doc.ResourceSnapshot, error) {
+		snapshots++
+		return doc.ResourceSnapshot{}, nil
+	})
+	for _, name := range tools {
+		before := validations
+		call, err := rt.AuthorizeDispatch(t.Context(), Execution{UserID: "alice"}, name, json.RawMessage(`{}`), nil)
+		if err != nil || validations != before+1 || call.OperationKey != "" || call.ExecutionKey != "" || len(call.AllowedDatasetIDs) != 1 {
+			t.Fatalf("query=%s call=%+v error=%v validations=%d", name, call, err, validations)
+		}
+		if _, err := rt.Prepare(t.Context(), PrepareRequest{WireName: name}); err == nil {
+			t.Fatal("query created operation state")
+		}
+	}
+	if snapshots != 0 {
+		t.Fatal("query took a mutation snapshot")
+	}
+	tools = nil
+	if _, err := rt.AuthorizeDispatch(t.Context(), Execution{UserID: "alice"}, "knowledge.list", json.RawMessage(`{}`), nil); err == nil {
+		t.Fatal("query bypassed its tool scope")
+	}
+}
+
+func TestCoreOwnsConfirmationPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name, args string
+		confirm    bool
+	}{
+		{"knowledge.create", `{}`, true}, {"knowledge.folder.create", `{}`, true},
+		{"knowledge.document.upload", `{}`, false}, {"knowledge.resource.update_metadata", `{}`, false},
+		{"knowledge.resource.delete", `{"targets":[{"knowledge_base_id":"a","document_id":"doc","kind":"document"}]}`, true},
+		{"knowledge.resource.move", `{"sources":[{"knowledge_base_id":"a","document_id":"doc","kind":"document"}],"destination":{"knowledge_base_id":"a","kind":"knowledge_base"}}`, false},
+		{"knowledge.resource.move", `{"sources":[{"knowledge_base_id":"a","document_id":"doc","kind":"document"}],"destination":{"knowledge_base_id":"b","kind":"knowledge_base"}}`, true},
+	} {
+		_, confirm, err := operationRefs(tc.name, json.RawMessage(tc.args))
+		if err != nil || confirm != tc.confirm {
+			t.Fatalf("%s confirmation=%v error=%v", tc.name, confirm, err)
+		}
+	}
+}

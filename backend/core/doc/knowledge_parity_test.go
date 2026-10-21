@@ -1,9 +1,12 @@
 package doc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gorilla/mux"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -137,5 +140,42 @@ func TestKnowledgeParityLocalOriginalIndependentAndValidated(t *testing.T) {
 	}
 	if _, err := svc.AcquireLocalOriginal(context.Background(), caller, directory, 100); err == nil {
 		t.Fatal("directory accepted")
+	}
+}
+
+func TestPageAndResourceUpdatesPreserveUnsubmittedKnowledgeConfiguration(t *testing.T) {
+	service, db, op := resourceFixture(t)
+	originalExt := json.RawMessage(`{"tags":["keep"],"algo_id":"original","algo_name":"Original","profile_id":"custom-preset","parsers":[{"type":"pdf","name":"original-parser","params":{}}],"other":"kept"}`)
+	if err := db.Model(&orm.Dataset{}).Where("id = ?", "source").Updates(map[string]any{"cover_image": "old-cover", "ext": originalExt}).Error; err != nil {
+		t.Fatal(err)
+	}
+	req := mux.SetURLVars(httptest.NewRequest("POST", "/datasets/source", bytes.NewBufferString(`{"cover_image":"new-cover","parsers":[{"type":"txt","name":"text-parser","params":{}}]}`)), map[string]string{"dataset": "source"})
+	req.Header.Set("X-User-Id", op.Caller.UserID)
+	rec := httptest.NewRecorder()
+	UpdateDataset(rec, req)
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	var saved orm.Dataset
+	if err := db.Where("id = ?", "source").Take(&saved).Error; err != nil {
+		t.Fatal(err)
+	}
+	ext := knowledgeExt(saved.Ext)
+	if saved.CoverImage != "new-cover" || ext["algo_id"] != "original" || ext["profile_id"] != "custom-preset" || ext["other"] != "kept" || !reflect.DeepEqual(parseDatasetTags(saved.Ext), []string{"keep"}) {
+		t.Fatalf("page discarded configuration: %+v %s", saved, saved.Ext)
+	}
+	parsers := parseDatasetParsers(saved.Ext)
+	if len(parsers) != 1 || parsers[0].Name != "text-parser" {
+		t.Fatalf("parsers not updated: %+v", parsers)
+	}
+	description := "changed through the resource command"
+	if _, err := service.UpdateMetadata(t.Context(), op, UpdateMetadataRequest{Items: []ResourceMetadataItem{{Target: ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: "source"}, Changes: ResourceMetadataChanges{Description: &description}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Where("id = ?", "source").Take(&saved).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.Desc != description || saved.CoverImage != "new-cover" || !reflect.DeepEqual(parseDatasetParsers(saved.Ext), parsers) || knowledgeExt(saved.Ext)["profile_id"] != "custom-preset" {
+		t.Fatalf("resource command discarded configuration: %+v %s", saved, saved.Ext)
 	}
 }

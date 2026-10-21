@@ -10,7 +10,7 @@ from lazyllm.tools.agent import PreparedToolCall, ToolManager, ToolExecutionErro
 from lazyllm.tools import get_tool_runtime_metadata
 
 from lazymind.chat.service.knowledge_management import (
-    KnowledgeManagementRuntime, MANAGEMENT_TOOLS, requires_confirmation,
+    KnowledgeManagementRuntime, MANAGEMENT_TOOLS,
 )
 
 
@@ -43,19 +43,13 @@ def runtime(monkeypatch, responses, events=None, allowed_tools=None):
     return host, requests
 
 
-@pytest.mark.parametrize('name,args,want', [
-    ('knowledge.create', {'name': 'Papers'}, True),
-    ('knowledge.document.upload', {}, False),
-    ('knowledge.folder.create', {}, True),
-    ('knowledge.resource.update_metadata', {}, False),
-    ('knowledge.resource.delete', {}, True),
-    ('knowledge.resource.move', {'sources': [{'knowledge_base_id': 'a'}],
-                                 'destination': {'knowledge_base_id': 'a'}}, False),
-    ('knowledge.resource.move', {'sources': [{'knowledge_base_id': 'a'}, {'knowledge_base_id': 'b'}],
-                                 'destination': {'knowledge_base_id': 'a'}}, True),
-])
-def test_prd_creation_deletion_and_cross_library_move_require_confirmation(name, args, want):
-    assert requires_confirmation(name, args) is want
+@pytest.mark.parametrize('name', MANAGEMENT_TOOLS[:3])
+def test_readonly_queries_skip_operation_state(monkeypatch, name):
+    host, requests = runtime(monkeypatch, {})
+    host._tools['identity'] = name
+    with host.execution_context(prepared(name, {'query': 'metadata'})):
+        assert asyncio.run(host.request_metadata(name, {'query': 'metadata'})) == {}
+    assert requests == []
 
 
 def test_server_factory_intersects_positive_whitelist_and_keeps_empty(monkeypatch):

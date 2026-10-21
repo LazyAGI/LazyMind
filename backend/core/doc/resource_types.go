@@ -58,7 +58,9 @@ type CreateFoldersRequest struct {
 	ParentID        string   `json:"parent_id,omitempty"`
 }
 type ResourceMetadataChanges struct {
-	ReaderFallbackAccepted *bool `json:"reader_fallback_accepted,omitempty"`
+	CoverImage             *string         `json:"cover_image,omitempty"`
+	PageParsers            *[]ParserConfig `json:"parsers,omitempty"`
+	ReaderFallbackAccepted *bool           `json:"reader_fallback_accepted,omitempty"`
 	algorithm              *Algo
 	parsers                []ParserConfig
 	Name                   *string                   `json:"name,omitempty"`

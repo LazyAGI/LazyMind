@@ -198,6 +198,9 @@ func canonicalArgs(raw json.RawMessage) (json.RawMessage, error) {
 	return bytes.TrimSpace(out.Bytes()), nil
 }
 func (r *Runtime) Prepare(ctx context.Context, req PrepareRequest) (Prepared, error) {
+	if readOnlyTool(req.WireName) {
+		return Prepared{}, errors.New("read-only tools do not create operations")
+	}
 	id, err := r.validate(ctx, req.Execution)
 	if err != nil {
 		return Prepared{}, err
@@ -284,6 +287,10 @@ func (r *Runtime) Status(ctx context.Context, e Execution, id string) (Prepared,
 	if err != nil {
 		return Prepared{}, err
 	}
+	return r.statusForIdentity(ctx, e, id, identity)
+}
+
+func (r *Runtime) statusForIdentity(ctx context.Context, e Execution, id string, identity Identity) (Prepared, error) {
 	p, err := r.load(ctx, id)
 	if err != nil {
 		return Prepared{}, err
@@ -355,45 +362,58 @@ func (r *Runtime) Decide(ctx context.Context, user, tenant, id, decision, argsDi
 	}
 	return nil
 }
-func (r *Runtime) Claim(ctx context.Context, req PrepareRequest) (map[string]any, error) {
+func readOnlyTool(name string) bool {
+	return name == "knowledge.list" || name == "knowledge.document.list" || name == "knowledge.document.aggregate"
+}
+
+// authorizeOperation checks a write without issuing another credential.
+func (r *Runtime) authorizeOperation(ctx context.Context, req PrepareRequest, identity Identity) (pending, Prepared, error) {
 	p, err := r.load(ctx, req.ConfirmationID)
 	if err != nil {
-		return nil, err
+		return pending{}, Prepared{}, err
 	}
-	out, err := r.Status(ctx, req.Execution, req.ConfirmationID)
+	out, err := r.statusForIdentity(ctx, req.Execution, req.ConfirmationID, identity)
 	if err != nil {
-		return nil, err
+		return pending{}, Prepared{}, err
 	}
 	args, err := canonicalArgs(req.Arguments)
 	if err != nil {
-		return nil, err
+		return pending{}, Prepared{}, err
 	}
 	if out.Status != "allowed" || req.OperationKey != out.OperationKey || req.ArgumentsDigest != out.ArgumentsDigest || argumentsDigest(args) != out.ArgumentsDigest || req.Snapshot != out.Snapshot || req.CallID != p.Request.CallID || req.WireName != p.Request.WireName {
-		return nil, errors.New("operation is not authorized")
-	}
-	identity, err := r.validate(ctx, req.Execution)
-	if err != nil {
-		return nil, err
+		return pending{}, Prepared{}, errors.New("operation is not authorized")
 	}
 	refs, risk, err := operationRefs(req.WireName, args)
 	if err != nil {
-		return nil, err
+		return pending{}, Prepared{}, err
 	}
 	committed := false
 	if r.receipt != nil {
 		committed, err = r.receipt(ctx, identity, req)
 		if err != nil {
-			return nil, err
+			return pending{}, Prepared{}, err
 		}
 	}
 	if (len(refs) > 0 || risk) && !committed {
 		snapshot, e := r.snapshot(ctx, identity, req.WireName, args)
 		if e != nil {
-			return nil, e
+			return pending{}, Prepared{}, e
 		}
 		if snapshot.Digest != out.Snapshot {
-			return nil, errors.New("resources changed; prepare and confirm again")
+			return pending{}, Prepared{}, errors.New("resources changed; prepare and confirm again")
 		}
+	}
+	return p, out, nil
+}
+
+func (r *Runtime) Claim(ctx context.Context, req PrepareRequest) (map[string]any, error) {
+	identity, err := r.validate(ctx, req.Execution)
+	if err != nil {
+		return nil, err
+	}
+	p, out, err := r.authorizeOperation(ctx, req, identity)
+	if err != nil {
+		return nil, err
 	}
 	token, err := r.sign(tokenClaims{Execution: req.Execution, Expires: p.Expires, Scope: "knowledge-dispatch", UserID: p.UserID, TenantID: p.TenantID, ConfirmationID: req.ConfirmationID})
 	if err != nil {
@@ -401,13 +421,30 @@ func (r *Runtime) Claim(ctx context.Context, req PrepareRequest) (map[string]any
 	}
 	return map[string]any{"operation_key": out.OperationKey, "arguments_digest": out.ArgumentsDigest, "snapshot": out.Snapshot, "dispatch_token": token}, nil
 }
-func (r *Runtime) AuthorizeDispatch(ctx context.Context, execution Execution, name string, args json.RawMessage, metadata map[string]any) (capability.InvocationContext, error) {
+
+func (r *Runtime) AuthorizeDispatch(ctx context.Context, execution Execution, name string, args json.RawMessage, metadata map[string]any, verified ...Identity) (capability.InvocationContext, error) {
+	var id Identity
+	var err error
+	if len(verified) == 1 {
+		id = verified[0]
+	} else {
+		id, err = r.validate(ctx, execution)
+	}
+	if err != nil {
+		return capability.InvocationContext{}, err
+	}
+	if !toolAllowed(id, name) {
+		return capability.InvocationContext{}, errors.New("tool not allowed")
+	}
+	if readOnlyTool(name) {
+		return capability.InvocationContext{Principal: id.Principal, AllowedDatasetIDs: id.AllowedDatasetIDs}, nil
+	}
 	token, _ := metadata["dispatch_token"].(string)
 	claims, err := r.verify(token, "knowledge-dispatch")
 	if err != nil {
 		return capability.InvocationContext{}, err
 	}
-	if digest(execution) != digest(claims.Execution) {
+	if digest(execution) != digest(claims.Execution) || claims.UserID != id.Principal.UserID || claims.TenantID != id.Principal.TenantID {
 		return capability.InvocationContext{}, errors.New("dispatch execution mismatch")
 	}
 	p, err := r.load(ctx, claims.ConfirmationID)
@@ -416,16 +453,9 @@ func (r *Runtime) AuthorizeDispatch(ctx context.Context, execution Execution, na
 	}
 	req := p.Request
 	req.ConfirmationID = claims.ConfirmationID
-	req.OperationKey = p.Prepared.OperationKey
-	req.ArgumentsDigest = p.Prepared.ArgumentsDigest
-	req.Snapshot = p.Prepared.Snapshot
-	req.Arguments = args
-	req.WireName = name
-	if _, err = r.Claim(ctx, req); err != nil {
-		return capability.InvocationContext{}, err
-	}
-	id, err := r.validate(ctx, execution)
-	if err != nil {
+	req.OperationKey, req.ArgumentsDigest, req.Snapshot = p.Prepared.OperationKey, p.Prepared.ArgumentsDigest, p.Prepared.Snapshot
+	req.Arguments, req.WireName = args, name
+	if _, _, err = r.authorizeOperation(ctx, req, id); err != nil {
 		return capability.InvocationContext{}, err
 	}
 	return capability.InvocationContext{ExecutionKey: claims.ConfirmationID, Principal: id.Principal, OperationKey: p.Prepared.OperationKey, ExpectedSnapshot: p.Prepared.Snapshot, AllowedDatasetIDs: id.AllowedDatasetIDs}, nil

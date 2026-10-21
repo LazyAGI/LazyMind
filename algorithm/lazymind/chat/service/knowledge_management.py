@@ -5,6 +5,7 @@ import asyncio
 import copy
 import json
 from functools import wraps
+from dataclasses import dataclass, field
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -21,8 +22,8 @@ from lazymind.chat.engine.tools.workspace_context import thaw
 
 
 BUILTIN_ID = 'lazymind-knowledge'
-MANAGEMENT_TOOLS = (
-    'knowledge.list', 'knowledge.document.list', 'knowledge.document.aggregate',
+READ_ONLY_TOOLS = ('knowledge.list', 'knowledge.document.list', 'knowledge.document.aggregate')
+MANAGEMENT_TOOLS = READ_ONLY_TOOLS + (
     'knowledge.create', 'knowledge.folder.create', 'knowledge.resource.update_metadata',
     'knowledge.resource.move', 'knowledge.resource.delete', 'knowledge.document.upload', 'knowledge.document.reparse',
 )
@@ -53,16 +54,15 @@ def _resolve_upload_files(arguments):
     return resolution.finish(arguments)
 
 
-def requires_confirmation(wire_name, arguments):
-    if wire_name in ('knowledge.create', 'knowledge.folder.create', 'knowledge.resource.delete'):
-        return True
-    if wire_name != 'knowledge.resource.move':
-        return False
-    destination = (arguments.get('destination') or {}).get('knowledge_base_id')
-    sources = arguments.get('sources') or []
-    # Malformed move requests must not be classified as harmless by omission.
-    return not destination or not sources or any(
-        source.get('knowledge_base_id') != destination for source in sources)
+@dataclass
+class _DispatchContext:
+    runtime: object
+    wire_name: str
+    arguments_digest: str
+    metadata: dict
+    original_digest: str
+    arguments: dict
+    errors: dict = field(default_factory=dict)
 
 
 class KnowledgeManagementRuntime:
@@ -109,8 +109,8 @@ class KnowledgeManagementRuntime:
             result = await asyncio.to_thread(self._post, 'credential', {'execution': dict(self.execution)})
         except _CoreManagementError as error:
             current = _REQUEST.get()
-            if current and current[0] is self:
-                current[6]['error'] = error.envelope
+            if current and current.runtime is self:
+                current.errors['error'] = error.envelope
             raise
         token = result.get('token')
         if not isinstance(token, str) or not token:
@@ -138,18 +138,18 @@ class KnowledgeManagementRuntime:
         @wraps(tool)
         def dispatch(**arguments):
             current = _REQUEST.get()
-            if not current or current[0] is not self or current[4] != digest(arguments):
+            if not current or current.runtime is not self or current.original_digest != digest(arguments):
                 raise ToolExecutionError('Knowledge management has no matching trusted dispatch')
-            result = tool(**copy.deepcopy(current[5]))
-            error = current[6].get('error')
+            result = tool(**copy.deepcopy(current.arguments))
+            error = current.errors.get('error')
             return json.dumps(error, ensure_ascii=False) if error is not None else result
         return dispatch
 
     async def request_metadata(self, wire_name, arguments):
         current = _REQUEST.get()
-        if not current or current[0] is not self or current[1] != wire_name or current[2] != digest(arguments):
+        if not current or current.runtime is not self or current.wire_name != wire_name or current.arguments_digest != digest(arguments):
             raise ToolExecutionError('Knowledge management call has no matching trusted dispatch')
-        return dict(current[3])
+        return dict(current.metadata)
 
     @contextmanager
     def execution_context(self, prepared):
@@ -165,14 +165,22 @@ class KnowledgeManagementRuntime:
             raise ToolExecutionError(
                 'Previous knowledge mutation outcome is uncertain; reconcile its receipt before retrying')
         arguments_digest = digest(arguments)
+        if wire_name in READ_ONLY_TOOLS:
+            token = _REQUEST.set(_DispatchContext(self, wire_name, arguments_digest, {}, original_digest, arguments))
+            try:
+                self._check_cancel()
+                yield
+            finally:
+                _REQUEST.reset(token)
+            return
         payload = {'execution': dict(self.execution), 'wire_name': wire_name,
                    'arguments': arguments, 'call_id': prepared.call_id}
         self._check_cancel()
         prepared_state = self._post('prepare', payload)
-        needs_confirmation = requires_confirmation(wire_name, arguments)
+        needs_confirmation = prepared_state.get('requires_confirmation')
         if (prepared_state.get('arguments_digest') != arguments_digest or not prepared_state.get('operation_key')
                 or not prepared_state.get('snapshot')
-                or prepared_state.get('requires_confirmation') is not needs_confirmation):
+                or not isinstance(needs_confirmation, bool)):
             raise ToolExecutionError('Knowledge management preflight mismatch')
         status = prepared_state.get('status')
         confirmation_id = prepared_state.get('confirmation_id')
@@ -214,8 +222,8 @@ class KnowledgeManagementRuntime:
         if (claim.get('status') != 'allowed' or not isinstance(metadata, dict)
                 or metadata.get('operation_key') != prepared_state['operation_key']):
             raise ToolExecutionError('Knowledge management claim unavailable')
-        token = _REQUEST.set((
-            self, wire_name, arguments_digest, copy.deepcopy(metadata), original_digest, arguments, {},
+        token = _REQUEST.set(_DispatchContext(
+            self, wire_name, arguments_digest, copy.deepcopy(metadata), original_digest, arguments,
         ))
         try:
             yield
@@ -249,7 +257,7 @@ class KnowledgeManagementRuntime:
             return result
         details = envelope.get('structuredContent') or {}
         if (isinstance(details, dict) and details.get('code') == 'MCP_CALL_FAILED'
-                and wire_name not in MANAGEMENT_TOOLS[:3]):
+                and wire_name not in READ_ONLY_TOOLS):
             self._uncertain_calls.add((wire_name, digest(thaw(prepared.validated_arguments))))
         return {**result, 'ok': False}
 
@@ -263,7 +271,7 @@ def build_knowledge_runtime(agentic_config, *, cancel_check=None):
     from lazymind.config import config
     server = next((item for item in agentic_config.get('system_mcp_config') or []
                    if item.get('id') == BUILTIN_ID), None)
-    if server is None:
+    if server is None or 'knowledge_management' in (agentic_config.get('disabled_tools') or []):
         return None
     execution = {**(agentic_config.get('_workspace_execution') or {}),
                  'user_id': agentic_config.get('user_id'),

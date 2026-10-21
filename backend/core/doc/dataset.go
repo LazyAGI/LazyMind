@@ -1250,7 +1250,6 @@ func removeDatasetIDFromEvalSet(raw json.RawMessage, datasetID string) ([]string
 
 func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 	userID := corestore.UserID(r)
-	userName := corestore.UserName(r)
 	if userID == "" {
 		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
 		return
@@ -1274,214 +1273,53 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 
 	var fields map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &fields)
-	metadataOnly := len(fields) > 0
-	for key := range fields {
-		if key != "display_name" && key != "desc" && key != "scene" && key != "tags" && key != "algo_id" && key != "algo" && key != "profile_id" && key != "reading_capabilities" && key != "processing_level" && key != "dataset_id" {
-			metadataOnly = false
-		}
+	changes := ResourceMetadataChanges{}
+	if _, ok := fields["display_name"]; ok {
+		changes.Name = &body.DisplayName
 	}
-	if metadataOnly {
-		changes := ResourceMetadataChanges{}
-		if _, ok := fields["display_name"]; ok {
-			changes.Name = &body.DisplayName
-		}
-		if _, ok := fields["desc"]; ok {
-			changes.Description = &body.Desc
-		}
-		if _, ok := fields["scene"]; ok {
-			changes.Scene = &body.Scene
-		}
-		if _, ok := fields["tags"]; ok {
-			changes.Tags = &body.Tags
-		}
-		if _, ok := fields["profile_id"]; ok {
-			changes.ProfileID = &body.ProfileID
-		}
-		if _, ok := fields["reading_capabilities"]; ok {
-			changes.Capabilities = &body.ReadingCapabilities
-		}
-		if _, ok := fields["processing_level"]; ok {
-			changes.ProcessingLevel = &body.ProcessingLevel
-		}
-		if _, ok := fields["algo_id"]; ok {
-			changes.AlgoID = &body.AlgoID
-		} else if _, ok := fields["algo"]; ok {
-			changes.AlgoID = &body.Algo.AlgoID
-		}
-		service, op, err := resourcePageService(r)
-		if err != nil {
-			replyResourceError(w, err)
-			return
-		}
-		result, err := service.UpdateMetadata(r.Context(), op, UpdateMetadataRequest{Items: []ResourceMetadataItem{{Target: ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: datasetID}, Changes: changes}}})
-		if err != nil {
-			replyResourceError(w, err)
-			return
-		}
-		replyDataset(w, r, &result)
-		return
+	if _, ok := fields["desc"]; ok {
+		changes.Description = &body.Desc
 	}
-
-	var ds orm.Dataset
-	if err := corestore.DB().
-		Where("id = ? AND deleted_at IS NULL", datasetID).
-		First(&ds).Error; err != nil {
-		common.ReplyErr(w, "dataset not found", http.StatusNotFound)
-		return
+	if _, ok := fields["scene"]; ok {
+		changes.Scene = &body.Scene
 	}
-	if !canAccessDataset(&ds, userID, acl.PermWrite) || !datasetAllowedByScanSource(r, ds.ID, acl.PermissionDatasetWrite) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(common.ForbiddenBody))
-		return
+	if _, ok := fields["tags"]; ok {
+		changes.Tags = &body.Tags
 	}
-
-	newDisplay := strings.TrimSpace(body.DisplayName)
-	newDesc := strings.TrimSpace(body.Desc)
-	newCover := strings.TrimSpace(body.CoverImage)
-	if newDisplay == "" {
-		newDisplay = ds.DisplayName
-	} else if err := validateDatasetDisplayName(body.DisplayName); err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
-		return
+	if _, ok := fields["profile_id"]; ok {
+		changes.ProfileID = &body.ProfileID
 	}
-	if hasReservedDatasetDisplayNamePrefix(newDisplay) {
-		common.ReplyErr(w, "dataset name uses reserved prefix", http.StatusBadRequest)
-		return
+	if _, ok := fields["reading_capabilities"]; ok {
+		changes.Capabilities = &body.ReadingCapabilities
 	}
-	if newDesc == "" {
-		newDesc = ds.Desc
+	if _, ok := fields["processing_level"]; ok {
+		changes.ProcessingLevel = &body.ProcessingLevel
 	}
-	if newCover == "" {
-		newCover = ds.CoverImage
+	if _, ok := fields["algo_id"]; ok {
+		changes.AlgoID = &body.AlgoID
+	} else if _, ok := fields["algo"]; ok {
+		changes.AlgoID = &body.Algo.AlgoID
 	}
-	normalizedTags, err := normalizeAndValidateDatasetTags(body.Tags)
+	if _, ok := fields["cover_image"]; ok {
+		changes.CoverImage = &body.CoverImage
+	}
+	if _, ok := fields["parsers"]; ok {
+		changes.PageParsers = &body.Parsers
+	}
+	service, op, err := resourcePageService(r)
 	if err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		replyResourceError(w, err)
 		return
 	}
-	body.Tags = normalizedTags
-
-	// Update ext: tags / algo
-	algo := parseDatasetAlgo(ds.Ext)
-	// newAlgoID is only non-empty when the caller explicitly requests an algo change.
-	newAlgoID := strings.TrimSpace(body.Algo.AlgoID)
-	algoID := firstNonEmpty(newAlgoID, algo.AlgoID)
-	algoName := strings.TrimSpace(body.Algo.DisplayName)
-	if algoName == "" {
-		algoName = algo.DisplayName
-	}
-	parsers := body.Parsers
-	if len(parsers) == 0 {
-		parsers = fetchParsersByAlgoID(r.Context(), algoID)
-	}
-	extBytes, _ := json.Marshal(map[string]any{
-		"tags":      body.Tags,
-		"algo_id":   algoID,
-		"algo_name": algoName,
-		"parsers":   parsers,
-	})
-
-	// 1) text POST /v1/kbs/{kb_id}
-	kbID := ds.KbID
-	if strings.TrimSpace(kbID) == "" {
-		kbID = ds.ID
-	}
-	kbURL := common.JoinURL(common.AlgoServiceEndpoint(), "/v1/kbs/"+kbID)
-	extMeta := map[string]any{"tags": body.Tags}
-	algoDisplayName := algoDatasetDisplayName(userID, newDisplay)
-	req := kbUpdateRequest{
-		DisplayName: &algoDisplayName,
-		Description: &newDesc,
-		OwnerID:     &userID,
-		Meta:        extMeta,
-	}
-	// Only forward algo_id to DocServer when the caller explicitly changes it;
-	// this avoids re-binding an algo that was already bound.
-	if newAlgoID != "" {
-		req.AlgoID = &newAlgoID
-	}
-	kbTimeout := 10 * time.Second
-	kbStart := time.Now()
-	if err := common.ApiPost(r.Context(), kbURL, req, nil, nil, kbTimeout); err != nil {
-		log.Logger.Error().
-			Err(err).
-			Str("kb_url", kbURL).
-			Str("kb_id", kbID).
-			Str("dataset_id", datasetID).
-			Str("user_id", userID).
-			Str("algo_id", algoID).
-			Dur("timeout", kbTimeout).
-			Dur("elapsed", time.Since(kbStart)).
-			Msg("kb service update failed")
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "kb service update failed", err), http.StatusBadGateway)
+	result, err := service.UpdateMetadata(r.Context(), op, UpdateMetadataRequest{Items: []ResourceMetadataItem{{Target: ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: datasetID}, Changes: changes}}})
+	if err != nil {
+		replyResourceError(w, err)
 		return
 	}
-	log.Logger.Info().
-		Str("kb_url", kbURL).
-		Str("kb_id", kbID).
-		Str("dataset_id", datasetID).
-		Str("user_id", userID).
-		Str("algo_id", algoID).
-		Dur("elapsed", time.Since(kbStart)).
-		Msg("kb service update ok")
-
-	now := time.Now().UTC()
-	ds.DisplayName = newDisplay
-	ds.Desc = newDesc
-	ds.CoverImage = newCover
-	ds.Ext = extBytes
-	ds.UpdatedAt = now
-	ds.CreateUserName = userName
-	ds.ResourceVersion++
-	if body.Scene != "" {
-		scene, err := resourceScene(body.Scene)
-		if err != nil {
-			replyResourceError(w, err)
-			return
-		}
-		ds.Scene = scene
-	}
-
-	updateResult := corestore.DB().WithContext(r.Context()).Model(&orm.Dataset{}).Where("id = ? AND resource_version = ? AND deleted_at IS NULL", ds.ID, ds.ResourceVersion-1).Updates(map[string]any{"display_name": ds.DisplayName, "desc": ds.Desc, "cover_image": ds.CoverImage, "ext": ds.Ext, "updated_at": ds.UpdatedAt, "resource_version": ds.ResourceVersion, "scene": ds.Scene})
-	if updateResult.Error == nil && updateResult.RowsAffected != 1 {
-		replyResourceError(w, resourceErr("CONFLICT", "knowledge base changed during update"))
-		return
-	}
-	if err := updateResult.Error; err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "update dataset failed", err), http.StatusInternalServerError)
-		return
-	}
-
-	datasetACL := datasetACLForUser(&ds, userID)
-	stats := calcDatasetStats(r.Context(), ds.ID)
-	createdByDataSource := isDatasetCreatedByDataSource(r.Context(), ds.ID)
-
-	common.ReplyJSON(w, Dataset{
-		Name:                "datasets/" + ds.ID,
-		DatasetID:           ds.ID,
-		DisplayName:         ds.DisplayName,
-		Desc:                ds.Desc,
-		CoverImage:          ds.CoverImage,
-		State:               stateToPB(ds.DatasetState),
-		IsEmpty:             stats.DocumentCount == 0,
-		DocumentCount:       stats.DocumentCount,
-		DocumentSize:        stats.DocumentSize,
-		SegmentCount:        0,
-		TokenCount:          0,
-		Parsers:             parseDatasetParsers(ds.Ext),
-		Algo:                parseDatasetAlgo(ds.Ext),
-		Creator:             ds.CreateUserName,
-		CreateTime:          ds.CreatedAt,
-		UpdateTime:          ds.UpdatedAt,
-		Acl:                 datasetACL,
-		ShareType:           shareTypeToPB(ds.ShareType),
-		Type:                datasetTypeToPB(ds.Type),
-		Tags:                parseDatasetTags(ds.Ext),
-		DefaultDataset:      isDefaultDatasetForUser(r.Context(), userID, ds.ID),
-		CreatedByDataSource: &createdByDataSource,
-	})
+	replyDataset(w, r, &result)
+	return
 }
+
 func SetDefault(w http.ResponseWriter, r *http.Request) {
 	userID := corestore.UserID(r)
 	userName := corestore.UserName(r)

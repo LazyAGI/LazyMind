@@ -271,7 +271,7 @@ func (s *ResourceService) UpdateMetadata(ctx context.Context, op ResourceOperati
 		var out ResourceOperationResult
 		for index, item := range req.Items {
 			c := prepared[index]
-			if c.Name == nil && c.Description == nil && c.Scene == nil && c.Tags == nil && c.ProfileID == nil && c.AlgoID == nil && c.ProcessingLevel == nil && c.Capabilities == nil && c.ReaderFallbackAccepted == nil {
+			if c.Name == nil && c.Description == nil && c.Scene == nil && c.Tags == nil && c.ProfileID == nil && c.AlgoID == nil && c.ProcessingLevel == nil && c.Capabilities == nil && c.ReaderFallbackAccepted == nil && c.CoverImage == nil && c.PageParsers == nil {
 				return out, resourceErr("INVALID_ARGUMENT", "changes cannot be empty")
 			}
 			if c.Name != nil && strings.TrimSpace(*c.Name) == "" {

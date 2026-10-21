@@ -131,6 +131,11 @@ func knowledgeExt(raw json.RawMessage) map[string]any {
 func updateKnowledgeConfiguration(ctx context.Context, tx *gorm.DB, user string, ds *orm.Dataset, c ResourceMetadataChanges, updates, before, after map[string]any) error {
 	ext := knowledgeExt(ds.Ext)
 	extChanged := false
+	if c.CoverImage != nil {
+		cover := strings.TrimSpace(*c.CoverImage)
+		updates["cover_image"] = cover
+		before["cover_image"], after["cover_image"] = ds.CoverImage, cover
+	}
 	if c.Tags != nil {
 		tags := *c.Tags
 		if c.TagMode == "append" {
@@ -157,6 +162,11 @@ func updateKnowledgeConfiguration(ctx context.Context, tx *gorm.DB, user string,
 			ext["algo_name"] = c.algorithm.DisplayName
 			ext["parsers"] = c.parsers
 		}
+		extChanged = true
+	}
+	if c.PageParsers != nil {
+		before["parsers"], after["parsers"] = ext["parsers"], *c.PageParsers
+		ext["parsers"] = *c.PageParsers
 		extChanged = true
 	}
 	if c.ReaderFallbackAccepted != nil {

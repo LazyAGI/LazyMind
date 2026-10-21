@@ -227,7 +227,7 @@ type SourceImportView struct {
 	RetryItemID      string `json:"retry_item_id,omitempty"`
 }
 
-func sourceItemView(ctx context.Context, b orm.PaperImportBatch, item orm.PaperImportItem, c doc.DatasetCatalogCaller) (SourceImportView, error) {
+func sourceItemView(ctx context.Context, b orm.PaperImportBatch, item orm.PaperImportItem, c doc.DatasetCatalogCaller, cached ...map[string]map[string]doc.DocumentMetadata) (SourceImportView, error) {
 	v := SourceImportView{ItemID: item.ID, BatchID: b.ID, TargetDatasetID: b.TargetDatasetID, CreatedLibrary: sourcePolicy(b).CreatedLibrary, Status: item.Status, Stage: item.Stage, DocumentID: item.DocumentID}
 	var ds orm.Dataset
 	if e := store.DB().Where("id = ?", b.TargetDatasetID).Take(&ds).Error; e != nil {
@@ -251,7 +251,7 @@ func sourceItemView(ctx context.Context, b orm.PaperImportBatch, item orm.PaperI
 		if e := store.DB().Where("id = ? AND target_dataset_id = ?", original.BatchID, b.TargetDatasetID).Take(&originalBatch).Error; e != nil {
 			return v, e
 		}
-		originalView, e := sourceItemView(ctx, originalBatch, original, c)
+		originalView, e := sourceItemView(ctx, originalBatch, original, c, cached...)
 		if e != nil {
 			return v, e
 		}
@@ -270,13 +270,22 @@ func sourceItemView(ctx context.Context, b orm.PaperImportBatch, item orm.PaperI
 	_ = json.Unmarshal(item.ErrorDetailsJSON, &detail)
 	v.ErrorMessage = detail["message"]
 	if item.DocumentID != "" {
-		svc, e := doc.NewDocumentService(doc.DocumentServiceDeps{DB: store.DB(), LazyDB: store.LazyLLMDB()})
-		if e != nil {
-			return v, e
-		}
-		m, e := svc.GetDocumentMetadata(ctx, doc.DocumentGetRequest{UserID: c.UserID, DatasetID: b.TargetDatasetID, DocumentID: item.DocumentID, Caller: c})
-		if e != nil {
-			return v, e
+		var m doc.DocumentMetadata
+		if len(cached) > 0 {
+			var ok bool
+			m, ok = cached[0][b.TargetDatasetID][item.DocumentID]
+			if !ok {
+				return v, errors.New("document status unavailable")
+			}
+		} else {
+			svc, e := doc.NewDocumentService(doc.DocumentServiceDeps{DB: store.DB(), LazyDB: store.LazyLLMDB()})
+			if e != nil {
+				return v, e
+			}
+			m, e = svc.GetDocumentMetadata(ctx, doc.DocumentGetRequest{UserID: c.UserID, DatasetID: b.TargetDatasetID, DocumentID: item.DocumentID, Caller: c})
+			if e != nil {
+				return v, e
+			}
 		}
 		v.ProcessingStatus = doc.DocumentProcessingStatus(m.ProcessingLevel, m.ProcessingState)
 		if m.ProcessingError != nil {
@@ -338,20 +347,84 @@ func ListSourceImports(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	views := []SourceImportView{}
+	batchIDs := make([]string, 0, len(batches))
+	byBatch := map[string]orm.PaperImportBatch{}
 	for _, b := range batches {
-		var items []orm.PaperImportItem
-		if e := store.DB().Where("batch_id = ?", b.ID).Order("created_at ASC, id ASC").Find(&items).Error; e != nil {
+		batchIDs = append(batchIDs, b.ID)
+		byBatch[b.ID] = b
+	}
+	var items []orm.PaperImportItem
+	if len(batchIDs) > 0 {
+		if e := store.DB().WithContext(r.Context()).Where("batch_id IN ?", batchIDs).Order("created_at ASC, id ASC").Find(&items).Error; e != nil {
 			replyError(w, 500, "IMPORT_QUERY_FAILED", e.Error())
 			return
 		}
-		for _, item := range items {
-			v, e := sourceItemView(r.Context(), b, item, sourceCaller(r))
-			if e != nil {
-				v.Status = "unknown"
-				v.ErrorMessage = "状态暂时无法获取"
-			}
-			views = append(views, v)
+	}
+	byTarget := map[string][]string{}
+	seen := map[string]bool{}
+	for _, item := range items {
+		b := byBatch[item.BatchID]
+		key := b.TargetDatasetID + "/" + item.DocumentID
+		if item.DocumentID != "" && !seen[key] {
+			byTarget[b.TargetDatasetID] = append(byTarget[b.TargetDatasetID], item.DocumentID)
+			seen[key] = true
 		}
+	}
+	// Follow-items refer to a previously committed item, not another processing job.
+	followIDs := []string{}
+	for _, item := range items {
+		var presence map[string]string
+		_ = json.Unmarshal(item.PresenceSnapshotJSON, &presence)
+		if id := presence["follows_item_id"]; id != "" {
+			followIDs = append(followIDs, id)
+		}
+	}
+	if len(followIDs) > 0 {
+		var followed []orm.PaperImportItem
+		if e := store.DB().Where("id IN ? AND stage <> ?", followIDs, "follow").Find(&followed).Error; e != nil {
+			replyError(w, 500, "IMPORT_QUERY_FAILED", e.Error())
+			return
+		}
+		var prior []orm.PaperImportBatch
+		ids := []string{}
+		for _, item := range followed {
+			ids = append(ids, item.BatchID)
+		}
+		if len(ids) > 0 {
+			if e := store.DB().Where("id IN ?", ids).Find(&prior).Error; e != nil {
+				replyError(w, 500, "IMPORT_QUERY_FAILED", e.Error())
+				return
+			}
+		}
+		for _, b := range prior {
+			byBatch[b.ID] = b
+		}
+		for _, item := range followed {
+			if item.DocumentID != "" {
+				b := byBatch[item.BatchID]
+				byTarget[b.TargetDatasetID] = append(byTarget[b.TargetDatasetID], item.DocumentID)
+			}
+		}
+	}
+	metadata := map[string]map[string]doc.DocumentMetadata{}
+	svc, e := doc.NewDocumentService(doc.DocumentServiceDeps{DB: store.DB(), LazyDB: store.LazyLLMDB()})
+	if e != nil {
+		replyError(w, 503, "IMPORT_QUERY_FAILED", e.Error())
+		return
+	}
+	for target, ids := range byTarget {
+		rows, err := svc.GetProcessingMetadata(r.Context(), sourceCaller(r), target, ids)
+		if err == nil {
+			metadata[target] = rows
+		}
+	}
+	for _, item := range items {
+		v, err := sourceItemView(r.Context(), byBatch[item.BatchID], item, sourceCaller(r), metadata)
+		if err != nil {
+			v.Status = "unknown"
+			v.ErrorMessage = "状态暂时无法获取"
+		}
+		views = append(views, v)
 	}
 	common.ReplyJSON(w, map[string]any{"items": views})
 }

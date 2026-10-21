@@ -226,7 +226,7 @@ func NewRuntime(config Config) (*Runtime, error) {
 			for p := range id.Principal.Permissions {
 				scopes = append(scopes, p)
 			}
-			return &auth.TokenInfo{UserID: id.Principal.UserID, Scopes: scopes, Extra: map[string]any{"tenant_id": id.Principal.TenantID, "execution": execution}}, nil
+			return &auth.TokenInfo{UserID: id.Principal.UserID, Scopes: scopes, Extra: map[string]any{"tenant_id": id.Principal.TenantID, "execution": execution, "knowledge_identity": id}}, nil
 		}
 		runtime.KnowledgeMCP, e = mcpadapter.NewHandler(service, mcpadapter.HandlerConfig{Verifier: internalVerifier, ManagementOnly: true, AuthorizeCall: func(ctx context.Context, req *mcp.CallToolRequest) (capability.InvocationContext, error) {
 			if req.Extra == nil || req.Extra.TokenInfo == nil || req.Params == nil {
@@ -236,7 +236,11 @@ func NewRuntime(config Config) (*Runtime, error) {
 			if !ok {
 				return capability.InvocationContext{}, errors.New("execution missing")
 			}
-			return kr.AuthorizeDispatch(ctx, execution, req.Params.Name, req.Params.Arguments, req.Params.GetMeta())
+			identity, ok := req.Extra.TokenInfo.Extra["knowledge_identity"].(knowledgeruntime.Identity)
+			if !ok {
+				return capability.InvocationContext{}, errors.New("verified identity missing")
+			}
+			return kr.AuthorizeDispatch(ctx, execution, req.Params.Name, req.Params.Arguments, req.Params.GetMeta(), identity)
 		}})
 		if e != nil {
 			return nil, e

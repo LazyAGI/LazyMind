@@ -23,7 +23,7 @@ type processingSnapshot struct {
 // Core ownership, latest tasks and processing revision are loaded together.
 // External observations are bounded batches after the read-only Core snapshot;
 // none of these results is published back into mutable stage state.
-func loadProcessingSnapshot(ctx context.Context, db, lazyDB *gorm.DB, datasetID, documentID string) (processingSnapshot, error) {
+func loadProcessingSnapshot(ctx context.Context, db, lazyDB *gorm.DB, datasetID, documentID string, documentIDs ...[]string) (processingSnapshot, error) {
 	snapshot := processingSnapshot{diagnostics: map[[2]string][2]string{}, states: map[string]orm.DocumentProcessingState{}, tasks: map[string]orm.Task{}, external: map[[2]string]string{}}
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("id = ? AND deleted_at IS NULL", datasetID).Take(&snapshot.dataset).Error; err != nil {
@@ -32,6 +32,8 @@ func loadProcessingSnapshot(ctx context.Context, db, lazyDB *gorm.DB, datasetID,
 		docs := tx.Where("dataset_id = ? AND deleted_at IS NULL", datasetID)
 		if documentID != "" {
 			docs = docs.Where("id = ?", documentID)
+		} else if len(documentIDs) > 0 {
+			docs = docs.Where("id IN ?", documentIDs[0])
 		} else {
 			docs = docs.Where("document_type <> ?", "FOLDER")
 		}
@@ -45,6 +47,8 @@ func loadProcessingSnapshot(ctx context.Context, db, lazyDB *gorm.DB, datasetID,
 		q := tx.Where("dataset_id = ?", datasetID)
 		if documentID != "" {
 			q = q.Where("document_id = ?", documentID)
+		} else if len(documentIDs) > 0 {
+			q = q.Where("document_id IN ?", documentIDs[0])
 		}
 		if err := q.Find(&states).Error; err != nil {
 			return err
@@ -57,6 +61,8 @@ func loadProcessingSnapshot(ctx context.Context, db, lazyDB *gorm.DB, datasetID,
 			Where("EXISTS (SELECT 1 FROM documents owned WHERE owned.id = tasks.doc_id AND owned.dataset_id = tasks.dataset_id AND owned.deleted_at IS NULL)")
 		if documentID != "" {
 			q = q.Where("tasks.doc_id = ?", documentID)
+		} else if len(documentIDs) > 0 {
+			q = q.Where("tasks.doc_id IN ?", documentIDs[0])
 		}
 		// Creation order, not update order: an older task finishing late cannot win.
 		q = q.Where(`NOT EXISTS (SELECT 1 FROM tasks newer WHERE newer.dataset_id = tasks.dataset_id AND newer.doc_id = tasks.doc_id AND newer.deleted_at IS NULL AND (newer.created_at > tasks.created_at OR (newer.created_at = tasks.created_at AND newer.id > tasks.id)))`)

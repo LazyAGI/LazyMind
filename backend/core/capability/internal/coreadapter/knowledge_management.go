@@ -2,7 +2,6 @@ package coreadapter
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"gorm.io/gorm"
 	"lazymind/core/capability"
@@ -68,13 +67,30 @@ func mapOperation(op string, r doc.ResourceOperationResult, e error) (capability
 	if e != nil {
 		return capability.ResourceOperationResult{}, mapResourceError(op, e)
 	}
-	raw, e := json.Marshal(r)
-	if e != nil {
-		return capability.ResourceOperationResult{}, e
+	out := capability.ResourceOperationResult{
+		Action: r.Action, Status: r.Status, ProcessingSummary: r.ProcessingSummary,
+		Summary: capability.ResourceOperationSummary{Total: r.Summary.Total, Succeeded: r.Summary.Succeeded, Failed: r.Summary.Failed, Skipped: r.Summary.Skipped, Unconfirmed: r.Summary.Unconfirmed},
+		Items:   make([]capability.ResourceOperationItem, len(r.Items)),
 	}
-	var out capability.ResourceOperationResult
-	e = json.Unmarshal(raw, &out)
-	return out, e
+	for i, item := range r.Items {
+		mapped := capability.ResourceOperationItem{InputIndex: item.InputIndex, TaskID: item.TaskID,
+			ResourceRef: fromCoreRef(item.ResourceRef), Name: item.Name, ParentID: item.ParentID,
+			ResourceStatus: item.ResourceStatus, ProcessingStatus: item.ProcessingStatus, CleanupStatus: item.CleanupStatus,
+			DocumentCount: item.DocumentCount, FolderCount: item.FolderCount, IDMapping: item.IDMapping, Before: item.Before, After: item.After,
+		}
+		if item.PreviousRef != nil {
+			previous := fromCoreRef(*item.PreviousRef)
+			mapped.PreviousRef = &previous
+		}
+		if item.Error != nil {
+			mapped.Error = &capability.KnowledgeOperationError{Code: item.Error.Code, Message: item.Error.Message, Details: item.Error.Details}
+		}
+		if d := item.ProcessingError; d != nil {
+			mapped.ProcessingError = &capability.ProcessingDiagnostic{Stage: d.Stage, Code: d.Code, Message: d.Message, TaskID: d.TaskID, Recovery: d.Recovery}
+		}
+		out.Items[i] = mapped
+	}
+	return out, nil
 }
 func (m *KnowledgeManagement) CreateKnowledge(ctx context.Context, c capability.InvocationContext, r capability.CreateKnowledgeRequest) (capability.ResourceOperationResult, error) {
 	v, e := m.resources.CreateKnowledge(ctx, m.operation(c), doc.CreateKnowledgeRequest{Name: r.Name, Description: r.Description, Scene: r.Scene, ProcessingLevel: r.ProcessingLevel, Tags: r.Tags, ProfileID: r.ProfileID, AlgoID: r.AlgoID, Capabilities: r.Capabilities})
@@ -127,4 +143,8 @@ func (m *KnowledgeManagement) SetBeforeCommit(fn func(context.Context, capabilit
 func (m *KnowledgeManagement) Reparse(ctx context.Context, c capability.InvocationContext, r capability.ReparseKnowledgeDocumentsInput) (capability.ResourceOperationResult, error) {
 	v, e := m.resources.Reparse(ctx, m.operation(c), doc.ReparseDocumentsRequest{KnowledgeBaseID: r.KnowledgeBaseID, DocumentIDs: r.DocumentIDs})
 	return mapOperation("knowledge.document.reparse", v, e)
+}
+
+func fromCoreRef(r doc.ResourceRef) capability.ResourceRef {
+	return capability.ResourceRef{Kind: r.Kind, KnowledgeBaseID: r.KnowledgeBaseID, FolderID: r.FolderID, DocumentID: r.DocumentID}
 }

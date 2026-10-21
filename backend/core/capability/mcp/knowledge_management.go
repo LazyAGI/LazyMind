@@ -54,7 +54,7 @@ func newManagementServer(service *capability.Service) *mcp.Server {
 		v, e := service.ListKnowledge(ctx, invocation(ctx, r), in)
 		return nil, v, e
 	})
-	addCloudTool(server, &mcp.Tool{Name: "knowledge.document.list", Description: "List document/folder metadata across libraries with global pagination; filters combine with AND. logical_path is current folder placement. Use knowledge.search for parsed content.", Annotations: readOnlyAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.ListKnowledgeDocumentsInput) (*mcp.CallToolResult, capability.ListKnowledgeDocumentsResult, error) {
+	addCloudTool(server, &mcp.Tool{Name: "knowledge.document.list", Description: "List document/folder metadata across libraries with global pagination; filters combine with AND. logical_path is current folder placement. Use the native kb_search tool for parsed content.", Annotations: readOnlyAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.ListKnowledgeDocumentsInput) (*mcp.CallToolResult, capability.ListKnowledgeDocumentsResult, error) {
 		v, e := service.ListKnowledgeDocuments(ctx, invocation(ctx, r), in)
 		return nil, v, e
 	})

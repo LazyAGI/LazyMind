@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"lazymind/core/acl"
@@ -11,6 +12,8 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
 	"lazymind/core/store"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -49,12 +52,31 @@ func sourcePresentDocument(tx *gorm.DB, dataset, workID, hash string) (orm.Docum
 	err := q.Take(&d).Error
 	return d, err
 }
-func handleSourceImportJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter, b orm.PaperImportBatch) (asyncjob.Result, error) {
+
+var errExternalCodeReference = errors.New("external code reference")
+
+func handleImportBatchJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter, b orm.PaperImportBatch) (asyncjob.Result, error) {
 	var items []orm.PaperImportItem
 	if e := store.DB().WithContext(ctx).Where("batch_id = ? AND status IN ?", b.ID, []string{"pending", "running"}).Order("created_at ASC").Find(&items).Error; e != nil {
 		return asyncjob.Result{}, e
 	}
 	caller := sourceImportCaller(b)
+	if b.EntryType != "conversation_sources" {
+		var target orm.Dataset
+		if err := store.DB().WithContext(ctx).Where("id = ? AND deleted_at IS NULL", b.TargetDatasetID).Take(&target).Error; err != nil {
+			return asyncjob.Result{}, err
+		}
+		caller.TenantID = target.TenantID
+	}
+	if err := store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := sourceJobFence(tx, job, b.ID); err != nil {
+			return err
+		}
+		return tx.Model(&b).Updates(map[string]any{"status": "running", "updated_at": time.Now().UTC()}).Error
+	}); err != nil {
+		return asyncjob.Result{}, err
+	}
+
 	originals, err := doc.NewOriginalService(doc.OriginalServiceDeps{DB: store.DB()})
 	if err != nil {
 		return asyncjob.Result{}, err
@@ -66,9 +88,15 @@ func handleSourceImportJob(ctx context.Context, job asyncjob.Job, reporter async
 		if err = sourceItemUpdate(ctx, job, b, item.ID, map[string]any{"status": "running", "attempt_count": gorm.Expr("attempt_count + 1")}); err != nil {
 			return asyncjob.Result{}, err
 		}
-		err = processSourceItem(ctx, job, b, item, caller, originals)
+		err = processImportItem(ctx, job, b, item, caller, originals)
 		if ctx.Err() != nil {
 			return asyncjob.Result{}, ctx.Err()
+		}
+		if errors.Is(err, errExternalCodeReference) {
+			if e := sourceItemUpdate(ctx, job, b, item.ID, map[string]any{"status": "skipped", "stage": "done", "error_code": "external_link"}); e != nil {
+				return asyncjob.Result{}, e
+			}
+			err = nil
 		}
 		if err != nil {
 			code := "import_failed"
@@ -83,26 +111,34 @@ func handleSourceImportJob(ctx context.Context, job asyncjob.Job, reporter async
 			return asyncjob.Result{}, err
 		}
 	}
+	summary := map[string]any{"batch_id": b.ID}
 	err = store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if e := sourceJobFence(tx, job, b.ID); e != nil {
 			return e
 		}
-		var failed, completed int64
+		var failed, completed, skipped int64
 		if e := tx.Model(&orm.PaperImportItem{}).Where("batch_id = ? AND status = ?", b.ID, "failed").Count(&failed).Error; e != nil {
 			return e
 		}
 		if e := tx.Model(&orm.PaperImportItem{}).Where("batch_id = ? AND status = ?", b.ID, "succeeded").Count(&completed).Error; e != nil {
 			return e
 		}
+		if e := tx.Model(&orm.PaperImportItem{}).Where("batch_id = ? AND status = ?", b.ID, "skipped").Count(&skipped).Error; e != nil {
+			return e
+		}
 		status := "succeeded"
 		if failed > 0 {
 			status = "completed_with_errors"
 		}
-		return tx.Model(&b).Updates(map[string]any{"status": status, "completed_items": completed, "failed_items": failed, "updated_at": time.Now().UTC()}).Error
+		if completed == 0 && failed > 0 && b.EntryType != "conversation_sources" {
+			status = "failed"
+		}
+		summary["status"], summary["completed"], summary["failed"], summary["skipped"] = status, completed, failed, skipped
+		return tx.Model(&b).Updates(map[string]any{"skipped_items": skipped, "status": status, "completed_items": completed, "failed_items": failed, "updated_at": time.Now().UTC()}).Error
 	})
-	return asyncjob.Result{ResultJSON: mustSourceJSON(map[string]string{"batch_id": b.ID})}, err
+	return asyncjob.Result{ResultJSON: mustSourceJSON(summary)}, err
 }
-func processSourceItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportBatch, item orm.PaperImportItem, caller doc.DatasetCatalogCaller, originals *doc.OriginalService) error {
+func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportBatch, item orm.PaperImportItem, caller doc.DatasetCatalogCaller, originals *doc.OriginalService) error {
 	ctx, err := prepareSourceTarget(ctx, caller, b.TargetDatasetID)
 	if err != nil {
 		return err
@@ -128,6 +164,15 @@ func processSourceItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 		}
 		return errors.New("missing reparse receipt")
 	}
+	if item.DocumentID == "" && item.Stage != "reparse" {
+		if err := resolveImportCandidate(ctx, job, b, &item); err != nil {
+			return err
+		}
+		if presentWork, presentDocument, ok := findEquivalentPresentWork(ctx, item.AcademicWorkID, b.TargetDatasetID); ok {
+			associateReferencesWithWork(ctx, item.ReferenceIDsJSON, presentWork.ID, "presence")
+			return sourceItemUpdate(ctx, job, b, item.ID, map[string]any{"academic_work_id": presentWork.ID, "document_id": presentDocument.DocumentID, "status": presentImportStatus(b), "stage": "done", "error_code": "already_present"})
+		}
+	}
 	var bound doc.OriginalImportResult
 	// Resume a committed document after interruption, never acquire a second copy.
 	if item.DocumentID != "" {
@@ -140,7 +185,7 @@ func processSourceItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 	} else {
 		existing, e := sourcePresentDocument(store.DB().WithContext(ctx), b.TargetDatasetID, item.AcademicWorkID, "")
 		if e == nil {
-			return sourceItemUpdate(ctx, job, b, item.ID, map[string]any{"status": "succeeded", "stage": "done", "document_id": existing.ID, "error_code": "already_present"})
+			return sourceItemUpdate(ctx, job, b, item.ID, map[string]any{"status": presentImportStatus(b), "stage": "done", "document_id": existing.ID, "error_code": "already_present"})
 		}
 		if !errors.Is(e, gorm.ErrRecordNotFound) {
 			return e
@@ -160,7 +205,15 @@ func processSourceItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 		if e = store.DB().WithContext(ctx).Where("id = ?", item.AcademicWorkID).Take(&work).Error; e != nil {
 			return e
 		}
-		prepared, e := originals.PrepareOriginalBinding(ctx, caller, doc.ImportOriginalRequest{FileRef: original.FileRef, DatasetID: b.TargetDatasetID, DisplayName: safePaperFilename(work.CanonicalTitle) + ".pdf", DataSourceType: "ACADEMIC_PROVIDER", Tags: []string{"paper"}, ConflictPolicy: "skip_same_content"})
+		title := strings.TrimSpace(work.CanonicalTitle)
+		if title == "" {
+			title = work.ArxivIDBase
+		}
+		tags := []string{"paper"}
+		if candidate.SourceProvider == "web" {
+			tags = []string{"reference", "web"}
+		}
+		prepared, e := originals.PrepareOriginalBinding(ctx, caller, doc.ImportOriginalRequest{FileRef: original.FileRef, DatasetID: b.TargetDatasetID, ParentID: b.TargetPID, DisplayName: safePaperFilename(title) + filepath.Ext(original.Filename), DataSourceType: "ACADEMIC_PROVIDER", Tags: tags, ConflictPolicy: "skip_same_content"})
 		if e != nil {
 			return e
 		}
@@ -203,14 +256,27 @@ func processSourceItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 				return e
 			}
 			now := time.Now().UTC()
-			link := orm.AcademicWorkDocument{AcademicWorkID: item.AcademicWorkID, DatasetID: b.TargetDatasetID, DocumentID: bound.Document.ID, SourceProvider: candidate.SourceProvider, SourceLocator: candidate.URL, ContentSHA256: original.ContentSHA256, MatchMethod: "import", MatchConfidence: 1, IsPreferredVersion: true, CreatedAt: now, UpdatedAt: now}
+			_, version := NormalizeArxivID(original.FinalURL)
+			if version == "" {
+				_, version = NormalizeArxivID(candidate.URL)
+			}
+			versionKind := "unknown"
+			if candidate.SourceProvider == "arxiv" {
+				versionKind = "preprint"
+			}
+			link := orm.AcademicWorkDocument{
+				AcademicWorkID: item.AcademicWorkID, DatasetID: b.TargetDatasetID, DocumentID: bound.Document.ID,
+				VersionKind: versionKind, SourceVersion: version, SourceProvider: candidate.SourceProvider,
+				SourceLocator: original.FinalURL, ContentSHA256: original.ContentSHA256,
+				MatchMethod: "import", MatchConfidence: 1, IsPreferredVersion: true, CreatedAt: now, UpdatedAt: now,
+			}
 			if e = tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&link).Error; e != nil {
 				return e
 			}
 			updates := map[string]any{"document_id": bound.Document.ID, "document_task_id": bound.Task.ID, "content_sha256": original.ContentSHA256, "stage": "processing", "updated_at": now}
 			if bound.Skipped {
 				updates["error_code"] = "already_present"
-				updates["status"] = "succeeded"
+				updates["status"] = presentImportStatus(b)
 				updates["stage"] = "done"
 			}
 			return tx.Model(&orm.PaperImportItem{}).Where("id = ?", item.ID).Updates(updates).Error
@@ -219,6 +285,7 @@ func processSourceItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 			return e
 		}
 		committed = true
+		associateReferencesWithWork(ctx, item.ReferenceIDsJSON, item.AcademicWorkID, "import")
 		if bound.Skipped {
 			return nil
 		}
@@ -228,4 +295,59 @@ func processSourceItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 		return errors.New(bound.SubmissionError)
 	}
 	return sourceItemUpdate(ctx, job, b, item.ID, map[string]any{"status": "succeeded", "stage": "processing", "error_code": "", "error_details_json": json.RawMessage("{}")})
+}
+
+func presentImportStatus(b orm.PaperImportBatch) string {
+	if b.EntryType == "conversation_sources" {
+		return "succeeded"
+	}
+	return "skipped"
+}
+
+// Both entrypoints normalize missing reference candidates before the shared worker.
+func resolveImportCandidate(ctx context.Context, job asyncjob.Job, b orm.PaperImportBatch, item *orm.PaperImportItem) error {
+	var candidate FulltextCandidate
+	if err := json.Unmarshal(item.SelectedCandidateJSON, &candidate); err != nil {
+		return err
+	}
+	if candidate.URL != "" {
+		return nil
+	}
+	var ids []string
+	if json.Unmarshal(item.ReferenceIDsJSON, &ids) != nil || len(ids) == 0 {
+		return errors.New("reference metadata is missing")
+	}
+	var ref orm.AcademicReference
+	if err := store.DB().WithContext(ctx).Where("id = ?", ids[0]).Take(&ref).Error; err != nil {
+		return err
+	}
+	if ref.DOINormalized != "" && !strings.Contains(strings.ToLower(ref.RawText), "arxiv") {
+		ref.ArxivIDBase = ""
+		if ref.ResolvedWorkID != "" {
+			if err := store.DB().WithContext(ctx).Model(&orm.AcademicWork{}).Where("id = ?", ref.ResolvedWorkID).Updates(map[string]any{"arxiv_id_base": "", "updated_at": time.Now().UTC()}).Error; err != nil {
+				return err
+			}
+		}
+	}
+	work, _, _, err := resolveReferenceWithExternal(ctx, store.DB().WithContext(ctx), &ref, true)
+	if err != nil {
+		return err
+	}
+	candidates := candidatesForWork(work)
+	if len(candidates) == 0 {
+		pageURL := extractReferenceURL(ref.RawText)
+		if pageURL == "" {
+			return errors.New("no downloadable reference resource was found")
+		}
+		if isGitHubReferenceURL(pageURL) {
+			return fmt.Errorf("%w: %s", errExternalCodeReference, pageURL)
+		}
+		candidates = []FulltextCandidate{{URL: pageURL, SourceType: "reference_page", SourceProvider: "web", ExpectedMIME: "text/html"}}
+	}
+	item.AcademicWorkID = work.ID
+	item.SelectedCandidateJSON, err = json.Marshal(candidates[0])
+	if err != nil {
+		return err
+	}
+	return sourceItemUpdate(ctx, job, b, item.ID, map[string]any{"academic_work_id": item.AcademicWorkID, "selected_candidate_json": item.SelectedCandidateJSON, "stage": "acquire"})
 }
