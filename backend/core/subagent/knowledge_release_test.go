@@ -63,15 +63,23 @@ func TestTaskVisibilityChangesOnlyOnNextExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	originalParams := string(task.Params)
 	disabled, err := captureTaskVisibility(t.Context(), db.DB, task)
-	if err != nil || len(disabled) != 0 {
+	if err != nil || len(disabled.Disabled) != 0 {
 		t.Fatalf("initial visibility: %v %v", disabled, err)
 	}
+	if string(task.Params) != originalParams {
+		t.Fatal("visibility capture mutated caller parameters")
+	}
+	if disabled.ExecutionID != task.ExecutionID {
+		t.Fatal("visibility returned wrong execution")
+	}
+
 	if err := db.Create(&orm.UserDisabledTool{CreateUserID: "alice", ToolName: "calculator"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	disabled, err = captureTaskVisibility(t.Context(), db.DB, task)
-	if err != nil || len(disabled) != 0 {
+	if err != nil || len(disabled.Disabled) != 0 {
 		t.Fatalf("running execution changed visibility: %v %v", disabled, err)
 	}
 	if err := db.Model(task).Update("execution_id", "resumed").Error; err != nil {
@@ -79,7 +87,7 @@ func TestTaskVisibilityChangesOnlyOnNextExecution(t *testing.T) {
 	}
 	task, _ = GetTask(t.Context(), db.DB, task.ID)
 	disabled, err = captureTaskVisibility(t.Context(), db.DB, task)
-	if err != nil || len(disabled) != 1 || disabled[0] != "calculator" {
+	if err != nil || len(disabled.Disabled) != 1 || disabled.Disabled[0] != "calculator" {
 		t.Fatalf("resume missed visibility update: %v %v", disabled, err)
 	}
 }

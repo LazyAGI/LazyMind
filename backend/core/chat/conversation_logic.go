@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"lazymind/core/toolpolicy"
 	"net/http"
 	"regexp"
 	"slices"
@@ -1601,7 +1602,7 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		body["workflow_context"] = mergedPC
 	}
 	if resourceContext != nil {
-		body["disabled_tools"] = mergeDisabledToolNames(
+		body["disabled_tools"] = toolpolicy.Merge(
 			requestDisabledTools, resourceContext.DisabledTools,
 		)
 		body["available_skills"] = resourceContext.AvailableSkills

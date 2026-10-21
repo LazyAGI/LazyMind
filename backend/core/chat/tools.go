@@ -466,26 +466,3 @@ func enableToolForUser(ctx context.Context, db *gorm.DB, userID, toolName string
 	}
 	return err
 }
-
-func mergeDisabledToolNames(left, right []string) []string {
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(left)+len(right))
-	add := func(name string) {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			return
-		}
-		if _, ok := seen[name]; ok {
-			return
-		}
-		seen[name] = struct{}{}
-		out = append(out, name)
-	}
-	for _, name := range left {
-		add(name)
-	}
-	for _, name := range right {
-		add(name)
-	}
-	return out
-}

@@ -22,7 +22,7 @@ func ordinaryConversationEvent(event *ConvEvent) *ConvEvent {
 		return nil
 	}
 	public := map[string]any{}
-	for _, key := range []string{"task_id", "session_id", "conversation_id", "history_id", "trigger_history_id", "step_id", "artifact_id", "agent_type", "status"} {
+	for _, key := range []string{"task_id", "session_id", "conversation_id", "history_id", "trigger_history_id", "confirmation_id", "step_id", "artifact_id", "agent_type", "status"} {
 		if value, ok := payload[key].(string); ok {
 			public[key] = value
 		}

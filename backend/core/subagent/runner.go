@@ -278,17 +278,35 @@ func hydrateRunRequest(ctx context.Context, db *gorm.DB, req *RunRequest) error 
 	if err != nil {
 		return err
 	}
-	req.DisabledTools, err = captureTaskVisibility(ctx, db, task)
+	visibility, err := captureTaskVisibility(ctx, db, task)
 	if err != nil {
 		return fmt.Errorf("tool visibility unavailable: %w", err)
 	}
+	req.DisabledTools = visibility.Disabled
+	params := map[string]any{}
+	if err := json.Unmarshal(normalizeJSON(task.Params, "{}"), &params); err != nil {
+		return fmt.Errorf("invalid task parameters: %w", err)
+	}
+	params["_tool_visibility"] = visibility
 	req.SystemMCPConfig = visibleKnowledgeConfig(req.Tools, req.DisabledTools)
 	req.UserEnvVars, err = userenv.LoadEnabled(ctx, db, task.CreateUserID)
 	if err != nil {
 		return fmt.Errorf("user environment configuration unavailable")
 	}
 	if req.TaskSpec != nil {
-		req.TaskSpec["execution_id"] = task.ExecutionID
+		req.TaskSpec["execution_id"] = visibility.ExecutionID
+		// Existing task specs may contain rebuilt workspace bindings. Keep them.
+		if existing, ok := req.TaskSpec["params"].(map[string]any); ok {
+			existing["_tool_visibility"] = visibility
+		} else {
+			if raw, ok := req.TaskSpec["params"].(json.RawMessage); ok {
+				if err := json.Unmarshal(raw, &params); err != nil {
+					return err
+				}
+				params["_tool_visibility"] = visibility
+			}
+			req.TaskSpec["params"] = params
+		}
 		return nil
 	}
 	steps, err := LoadSteps(ctx, db, req.TaskID)
@@ -309,7 +327,7 @@ func hydrateRunRequest(ctx context.Context, db *gorm.DB, req *RunRequest) error 
 		"agent_type":          task.AgentType,
 		"title":               task.Title,
 		"objective":           task.Objective,
-		"params":              normalizeJSON(task.Params, "{}"),
+		"params":              params,
 		"mode":                task.Mode,
 		"status":              task.Status,
 		"progress_pct":        task.ProgressPct,
@@ -499,7 +517,12 @@ func PublishConversationTaskEvent(
 		argumentsDigest, _ := confirmation["arguments_digest"].(string)
 		snapshot, _ := confirmation["snapshot"].(string)
 		if ok && confirmationID != "" && argumentsDigest != "" && snapshot != "" {
-			EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, task.TriggerHistoryID, "ask_pending", ev.AskPending)
+			payload := make(map[string]any, len(ev.AskPending)+1)
+			for key, value := range ev.AskPending {
+				payload[key] = value
+			}
+			payload["confirmation_id"] = confirmationID
+			EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, task.TriggerHistoryID, "ask_pending", payload)
 		}
 		return
 	}

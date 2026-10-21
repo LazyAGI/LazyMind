@@ -1756,4 +1756,50 @@ describe("useChatConversation regeneration recovery", () => {
     expect(result.current.messageList.at(-1)?.delta).toBe("partial");
     unmount();
   });
+
+  it.each([false, true])("hydrates Work confirmation without replacing streamed text (active=%s)", async (active) => {
+    const conv = `work-confirm-${active}`;
+    const { stream } = createMockStream();
+    const onResume = vi.fn(() => stream);
+    const { result, unmount } = renderConversation({ onOpenResumeSSE: onResume });
+    const history = { id: "work-history", seq: 1, query: "Manage", result: "live text" };
+    const pending = { ask_id: "confirmation", questions: [{ text: "Delete?", type: "boolean" }],
+      knowledge_management: { confirmation_id: "confirmation", arguments_digest: "digest", snapshot: "snapshot" } };
+    getHistoryMock.mockResolvedValue({ data: { history: [{ ...history, result: "stale persisted text", ask_pending: pending }] } });
+    act(() => result.current.replaceMessageList(conv, buildChatMessageListFromHistory([history])));
+    if (active) {
+      Object.assign(stream, { readyState: 1 });
+      streamManager.registerStream(conv, stream as never, {});
+    }
+    const notify = () => window.dispatchEvent(new CustomEvent("lazymind:chat-knowledge-confirmation", {
+      detail: { conversationId: conv, historyId: history.id, confirmationId: "confirmation" },
+    }));
+    await act(async () => { notify(); });
+    await waitFor(() => expect(result.current.messageList[result.current.messageList.length - 1]?.ask_pending?.ask_id).toBe("confirmation"));
+    expect(getHistoryMock).toHaveBeenCalledWith({ name: conv, anchorHistoryId: history.id });
+    expect(result.current.messageList[result.current.messageList.length - 1]?.delta).toBe("live text");
+    expect(onResume).not.toHaveBeenCalled();
+    act(() => result.current.updateAssistantMessage({ ask_answered: true }, undefined, result.current.messageList.length - 1));
+    await act(async () => { notify(); });
+    expect(result.current.messageList[result.current.messageList.length - 1]?.ask_answered).toBe(true);
+    expect(result.current.messageList).toHaveLength(2);
+    unmount();
+    streamManager.removeStreamEntry(conv);
+  });
+
+  it("loads an older Work confirmation without replacing the currently loaded turn", async () => {
+    const { result, unmount } = renderConversation();
+    const pending = { ask_id: "old-confirm", questions: [{ text: "Create?", type: "boolean" }],
+      knowledge_management: { confirmation_id: "old-confirm", arguments_digest: "digest", snapshot: "snapshot" } };
+    act(() => result.current.replaceMessageList("old-work", buildChatMessageListFromHistory([
+      { id: "latest", seq: 8, query: "Latest", result: "latest live text" },
+    ])));
+    getHistoryMock.mockResolvedValue({ data: { history: [{ id: "older", seq: 1, query: "Earlier", result: "earlier text", ask_pending: pending }] } });
+    await act(async () => window.dispatchEvent(new CustomEvent("lazymind:chat-knowledge-confirmation", {
+      detail: { conversationId: "old-work", historyId: "older", confirmationId: "old-confirm" },
+    })));
+    expect(result.current.messageList.filter(row => row.role === RoleTypes.ASSISTANT).map(row => row.history_id)).toEqual(["older", "latest"]);
+    expect(result.current.messageList[result.current.messageList.length - 1]?.delta).toBe("latest live text");
+    unmount();
+  });
 });

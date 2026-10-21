@@ -84,9 +84,14 @@ func visibleKnowledgeConfig(selection, disabled []string) []any {
 	return KnowledgeSystemConfig(selection)
 }
 
+type taskVisibilitySnapshot struct {
+	ExecutionID string   `json:"execution_id"`
+	Disabled    []string `json:"disabled_tools"`
+}
+
 // Capture once per execution. Resume creates a new execution ID and reads settings again.
-func captureTaskVisibility(ctx context.Context, db *gorm.DB, task *orm.SubAgentTask) ([]string, error) {
-	var disabled []string
+func captureTaskVisibility(ctx context.Context, db *gorm.DB, task *orm.SubAgentTask) (taskVisibilitySnapshot, error) {
+	var snapshot taskVisibilitySnapshot
 	err := taskTransaction(ctx, db, func(tx *gorm.DB) error {
 		if err := tx.Model(&orm.SubAgentTask{}).Where("id = ?", task.ID).UpdateColumn("updated_at", gorm.Expr("updated_at")).Error; err != nil {
 			return err
@@ -104,17 +109,13 @@ func captureTaskVisibility(ctx context.Context, db *gorm.DB, task *orm.SubAgentT
 				return err
 			}
 		}
-		var snapshot struct {
-			ExecutionID string   `json:"execution_id"`
-			Disabled    []string `json:"disabled_tools"`
-		}
 		if raw := params["_tool_visibility"]; len(raw) > 0 {
 			if err := json.Unmarshal(raw, &snapshot); err != nil {
 				return err
 			}
 		}
 		if snapshot.ExecutionID != current.ExecutionID || current.ExecutionID == "" {
-			disabled, err = taskDisabledTools(ctx, tx, current)
+			disabled, err := taskDisabledTools(ctx, tx, current)
 			if err != nil {
 				return err
 			}
@@ -130,11 +131,8 @@ func captureTaskVisibility(ctx context.Context, db *gorm.DB, task *orm.SubAgentT
 			if err = tx.Model(current).UpdateColumn("params", current.Params).Error; err != nil {
 				return err
 			}
-		} else {
-			disabled = snapshot.Disabled
 		}
-		task.Params = current.Params
 		return nil
 	})
-	return disabled, err
+	return snapshot, err
 }

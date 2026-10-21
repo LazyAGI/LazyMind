@@ -466,6 +466,21 @@ type ConvEvent struct {
 	Replayed bool `json:"replayed,omitempty"`
 }
 
+// PublishConversationEvent is the production SubAgent hook. History identity
+// survives the public lifecycle projection so clients can hydrate that record.
+func PublishConversationEvent(ctx context.Context, st state.Store, conversationID, historyID, eventType string, payload map[string]any) error {
+	enriched := make(map[string]any, len(payload)+3)
+	for key, value := range payload {
+		enriched[key] = value
+	}
+	enriched["event_type"] = eventType
+	enriched["conversation_id"] = conversationID
+	if historyID != "" {
+		enriched["history_id"] = historyID
+	}
+	return AppendConvEvent(ctx, st, conversationID, &ConvEvent{Type: eventType, Payload: enriched})
+}
+
 // AppendConvEvent appends a ConvEvent to the conversation-level event LIST.
 // It is safe to call concurrently and expires after convEventsExpireTime.
 // Do not trim this LIST while WatchConvEvents uses a positional cursor: removing

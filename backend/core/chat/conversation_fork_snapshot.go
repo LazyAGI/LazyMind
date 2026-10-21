@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"lazymind/core/toolpolicy"
 	"strings"
 	"time"
 
@@ -69,7 +70,7 @@ func mergeConversationConfigSnapshot(raw json.RawMessage, body map[string]any) j
 		ext = map[string]any{}
 	}
 	ext["conversation_config_snapshot"] = s
-	ext["disabled_tools"] = mergeDisabledToolNames(nil, stringSliceFromAny(body["disabled_tools"]))
+	ext["disabled_tools"] = toolpolicy.Merge(nil, stringSliceFromAny(body["disabled_tools"]))
 	delete(ext, "knowledge_management_policy")
 	if configs, ok := body["system_mcp_config"].([]any); ok {
 		for _, entry := range configs {
