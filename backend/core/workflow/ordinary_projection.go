@@ -490,11 +490,16 @@ func paginateOrdinaryProjection(out *ordinaryProjection, r *http.Request) error 
 			return err
 		}
 		view.StageArtifacts, view.Pages.StageArtifacts = view.StageArtifacts[start:end], metadata
+		start, end, metadata, err = page("knowledge_operations", len(view.KnowledgeOperations))
+		if err != nil {
+			return err
+		}
+		view.KnowledgeOperations, view.Pages.KnowledgeOperations = view.KnowledgeOperations[start:end], metadata
 	}
 	if !found {
 		return errOrdinaryCursor
 	}
-	if collection := q.Get("collection"); collection != "" && collection != "process_steps" && collection != "sources" && collection != "stage_artifacts" {
+	if collection := q.Get("collection"); collection != "" && collection != "process_steps" && collection != "sources" && collection != "stage_artifacts" && collection != "knowledge_operations" {
 		return errOrdinaryCursor
 	}
 	return nil

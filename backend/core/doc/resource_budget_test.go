@@ -14,16 +14,16 @@ func TestPageResourceServiceUsesDeploymentMoveDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !service.budget.Calibrated || service.budget.MaxResources != 10 || service.originals == nil || op.Caller.UserID != "user-1" {
+	if service.budget.MaxResources != 10 || service.originals == nil || op.Caller.UserID != "user-1" {
 		t.Fatalf("page dependencies differ from MCP: budget=%+v originals=%v user=%s", service.budget, service.originals != nil, op.Caller.UserID)
 	}
 }
 
-func TestKnowledgeMoveBudgetRequiresExplicitValidLimits(t *testing.T) {
+func TestKnowledgeMoveBudgetDefaultsAndExplicitLimits(t *testing.T) {
 	t.Setenv("LAZYMIND_KNOWLEDGE_MOVE_BUDGET_JSON", "")
 	value, err := KnowledgeMoveBudget()
-	if err != nil || value.Calibrated {
-		t.Fatalf("default opened cross moves: %+v %v", value, err)
+	if err != nil || value != defaultResourceBudget() {
+		t.Fatalf("invalid defaults: %+v %v", value, err)
 	}
 	for _, raw := range []string{`{}`, `{"max_resources":10,"max_bytes":1000,"prepare_seconds":2,"copy_bytes_per_second":100}`, `{"max_resources":10,"max_bytes":1000,"prepare_seconds":10,"copy_bytes_per_second":100,"unknown":true}`} {
 		t.Setenv("LAZYMIND_KNOWLEDGE_MOVE_BUDGET_JSON", raw)
@@ -33,7 +33,7 @@ func TestKnowledgeMoveBudgetRequiresExplicitValidLimits(t *testing.T) {
 	}
 	t.Setenv("LAZYMIND_KNOWLEDGE_MOVE_BUDGET_JSON", `{"max_resources":10,"max_bytes":1000,"prepare_seconds":10,"copy_bytes_per_second":100}`)
 	value, err = KnowledgeMoveBudget()
-	if err != nil || !value.Calibrated || value.MaxResources != 10 {
+	if err != nil || value.MaxResources != 10 {
 		t.Fatalf("valid budget rejected: %+v %v", value, err)
 	}
 }

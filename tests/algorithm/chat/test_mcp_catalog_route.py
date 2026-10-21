@@ -28,7 +28,12 @@ def test_catalog_uses_request_system_mcp_policy_and_does_not_inherit_previous_sc
                 group = next(item for item in response.json()['tool_groups']
                              if item['name'] == 'knowledge_management')
                 assert group['active'] is expected
-                assert len(group['methods']) == 9
+                assert {method['name'] for method in group['methods']} == {
+                    'knowledge.list', 'knowledge.document.list', 'knowledge.document.aggregate',
+                    'knowledge.create', 'knowledge.folder.create', 'knowledge.resource.update_metadata',
+                    'knowledge.resource.move', 'knowledge.resource.delete', 'knowledge.document.upload',
+                    'knowledge.document.reparse',
+                }
     try:
         asyncio.run(exercise())
     finally:

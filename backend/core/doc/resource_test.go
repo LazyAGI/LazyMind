@@ -168,7 +168,6 @@ func TestResourceTreeBudgetLeavesSourceUntouched(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.budget.MaxResources = 2
-	s.budget.Calibrated = true
 	_, err = s.Move(ctx, op, MoveResourcesRequest{Sources: []ResourceRef{created.Items[0].ResourceRef}, Destination: ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: "target"}})
 	var typed *ResourceError
 	if !errors.As(err, &typed) || typed.Code != "OPERATION_TOO_LARGE" {
@@ -191,7 +190,6 @@ func TestResourceCrossMovePreservesTreeOriginalAndReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.originals = originals
-	s.budget.Calibrated = true
 	created, err := s.CreateFolders(ctx, op, CreateFoldersRequest{KnowledgeBaseID: "source", Folders: []string{"root/empty"}})
 	if err != nil {
 		t.Fatal(err)
@@ -280,7 +278,6 @@ func TestResourceSourcePolicyRunsBeforeTransaction(t *testing.T) {
 func TestResourceCrossMovePreparationFailureKeepsWholeTree(t *testing.T) {
 	s, db, op := resourceFixture(t)
 	ctx := context.Background()
-	s.budget.Calibrated = true
 	t.Setenv("LAZYMIND_UPLOAD_ROOT", t.TempDir())
 	originals, err := NewOriginalService(OriginalServiceDeps{DB: db.DB})
 	if err != nil {

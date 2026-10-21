@@ -8,12 +8,15 @@ import (
 	"time"
 )
 
-// A deployment may enable cross-library moves only with measured limits. The
-// absence of this configuration keeps the cross-library operation closed.
+// Defaults bound ordinary moves; deployments may override the same limits.
+func defaultResourceBudget() ResourceBudget {
+	return ResourceBudget{MaxResources: 1000, MaxBytes: 256 << 20, MaxPrepareDuration: 30 * time.Second, CopyBytesPerSecond: 16 << 20}
+}
+
 func KnowledgeMoveBudget() (ResourceBudget, error) {
 	raw := strings.TrimSpace(os.Getenv("LAZYMIND_KNOWLEDGE_MOVE_BUDGET_JSON"))
 	if raw == "" {
-		return ResourceBudget{}, nil
+		return defaultResourceBudget(), nil
 	}
 	var config struct {
 		MaxResources       int   `json:"max_resources"`
@@ -29,5 +32,5 @@ func KnowledgeMoveBudget() (ResourceBudget, error) {
 	if config.MaxResources < 1 || config.MaxBytes < 1 || config.PrepareSeconds < 4 || config.PrepareSeconds > 300 || config.CopyBytesPerSecond < 1 {
 		return ResourceBudget{}, fmt.Errorf("invalid knowledge move budget limits")
 	}
-	return ResourceBudget{Calibrated: true, MaxResources: config.MaxResources, MaxBytes: config.MaxBytes, MaxPrepareDuration: time.Duration(config.PrepareSeconds) * time.Second, CopyBytesPerSecond: config.CopyBytesPerSecond}, nil
+	return ResourceBudget{MaxResources: config.MaxResources, MaxBytes: config.MaxBytes, MaxPrepareDuration: time.Duration(config.PrepareSeconds) * time.Second, CopyBytesPerSecond: config.CopyBytesPerSecond}, nil
 }

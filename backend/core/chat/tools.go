@@ -23,6 +23,7 @@ import (
 	"lazymind/core/modelconfig"
 	"lazymind/core/settings"
 	"lazymind/core/store"
+	"lazymind/core/toolpolicy"
 )
 
 const (
@@ -421,25 +422,7 @@ func toolGroupDisabled(group chatToolGroup) bool {
 }
 
 func listDisabledToolNames(ctx context.Context, db *gorm.DB, userID string) ([]string, error) {
-	userID = strings.TrimSpace(userID)
-	if db == nil || userID == "" {
-		return nil, nil
-	}
-	var rows []orm.UserDisabledTool
-	if err := db.WithContext(ctx).
-		Where("create_user_id = ? AND deleted_at IS NULL", userID).
-		Order("tool_name ASC").
-		Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make([]string, 0, len(rows))
-	for _, row := range rows {
-		name := strings.TrimSpace(row.ToolName)
-		if name != "" {
-			out = append(out, name)
-		}
-	}
-	return out, nil
+	return toolpolicy.Disabled(ctx, db, userID)
 }
 
 func disableToolForUser(ctx context.Context, db *gorm.DB, userID, userName, toolName string) error {

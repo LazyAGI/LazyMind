@@ -91,7 +91,6 @@ func TestResourceBudgetCalibration(t *testing.T) {
 				t.Fatal(err)
 			}
 			s.originals = originals
-			s.budget.Calibrated = true // This isolated fixture is not a deployment configuration.
 			folders := []string{}
 			for i := 0; i < 20; i++ {
 				folders = append(folders, fmt.Sprintf("root/empty-%02d", i))

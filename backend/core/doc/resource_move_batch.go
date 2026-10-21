@@ -81,9 +81,6 @@ func (s *ResourceService) Move(ctx context.Context, op ResourceOperationContext,
 		if ref.Kind != "folder" && ref.Kind != "document" {
 			return ResourceOperationResult{}, resourceErr("INVALID_ARGUMENT", "only folders and documents can move")
 		}
-		if ref.KnowledgeBaseID != req.Destination.KnowledgeBaseID && !s.budget.Calibrated {
-			return ResourceOperationResult{}, resourceErr("UNAVAILABLE", "cross-library move budget has not been calibrated for this deployment")
-		}
 	}
 	parentOp := op
 	if parentOp.OperationKey == "" {

@@ -46,12 +46,13 @@ func CancelRuns(taskIDs []string) {
 // snapshot and never receives a database DSN. Runtime events are streamed back
 // to Core, which is the only component that persists steps and artifacts.
 type RunRequest struct {
+	DisabledTools      []string          `json:"disabled_tools"`
 	SystemMCPConfig    []any             `json:"system_mcp_config"`
 	TaskID             string            `json:"task_id"`
 	AgentType          string            `json:"agent_type"`
 	Params             map[string]any    `json:"params,omitempty"`
 	WorkspacePath      string            `json:"workspace_path"`
-	Tools              []string          `json:"tools,omitempty"`
+	Tools              []string          `json:"tools"`
 	Resume             bool              `json:"resume"`
 	LLMConfig          map[string]any    `json:"llm_config,omitempty"`
 	ToolConfig         map[string]any    `json:"tool_config,omitempty"`
@@ -63,27 +64,28 @@ type RunRequest struct {
 
 // TaskEvent is one event emitted by the SubAgent SSE stream.
 type TaskEvent struct {
-	AskPending   map[string]any                 `json:"ask_pending,omitempty"`
-	Type         string                         `json:"type"`
-	V2ArtifactID string                         `json:"v2_artifact_id,omitempty"`
-	V2RevisionID string                         `json:"v2_revision_id,omitempty"`
-	ExecutionID  string                         `json:"execution_id,omitempty"`
-	EventID      string                         `json:"event_id,omitempty"`
-	ProcessStep  *taskdisplay.PublicProcessStep `json:"process_step,omitempty"`
-	Steps        []string                       `json:"steps,omitempty"`
-	ScopeVersion int                            `json:"scope_version,omitempty"`
-	TaskID       string                         `json:"task_id,omitempty"`
-	Progress     int                            `json:"progress,omitempty"`
-	CurrentPhase string                         `json:"current_phase,omitempty"`
-	EstimatedSec int                            `json:"estimated_sec,omitempty"`
-	ArtifactKey  string                         `json:"slot,omitempty"`
-	ContentType  string                         `json:"content_type,omitempty"`
-	Seq          int                            `json:"seq,omitempty"`
-	Value        json.RawMessage                `json:"value,omitempty"`
-	Sources      json.RawMessage                `json:"sources,omitempty"`
-	Status       string                         `json:"status,omitempty"`
-	Summary      string                         `json:"summary,omitempty"`
-	Message      string                         `json:"message,omitempty"`
+	KnowledgeOperation json.RawMessage                `json:"knowledge_operation,omitempty"`
+	AskPending         map[string]any                 `json:"ask_pending,omitempty"`
+	Type               string                         `json:"type"`
+	V2ArtifactID       string                         `json:"v2_artifact_id,omitempty"`
+	V2RevisionID       string                         `json:"v2_revision_id,omitempty"`
+	ExecutionID        string                         `json:"execution_id,omitempty"`
+	EventID            string                         `json:"event_id,omitempty"`
+	ProcessStep        *taskdisplay.PublicProcessStep `json:"process_step,omitempty"`
+	Steps              []string                       `json:"steps,omitempty"`
+	ScopeVersion       int                            `json:"scope_version,omitempty"`
+	TaskID             string                         `json:"task_id,omitempty"`
+	Progress           int                            `json:"progress,omitempty"`
+	CurrentPhase       string                         `json:"current_phase,omitempty"`
+	EstimatedSec       int                            `json:"estimated_sec,omitempty"`
+	ArtifactKey        string                         `json:"slot,omitempty"`
+	ContentType        string                         `json:"content_type,omitempty"`
+	Seq                int                            `json:"seq,omitempty"`
+	Value              json.RawMessage                `json:"value,omitempty"`
+	Sources            json.RawMessage                `json:"sources,omitempty"`
+	Status             string                         `json:"status,omitempty"`
+	Summary            string                         `json:"summary,omitempty"`
+	Message            string                         `json:"message,omitempty"`
 	// Tool step events forwarded from SubAgent runner for frontend display.
 	ToolCalls   json.RawMessage `json:"tool_calls,omitempty"`
 	ToolResults json.RawMessage `json:"tool_results,omitempty"`
@@ -270,18 +272,23 @@ func hydrateRunRequest(ctx context.Context, db *gorm.DB, req *RunRequest) error 
 	if req == nil || strings.TrimSpace(req.TaskID) == "" {
 		return fmt.Errorf("task_id is required")
 	}
-	req.SystemMCPConfig = KnowledgeSystemConfig(req.Tools)
 	// Runtime credentials come from the task owner, never a caller's snapshot.
 	req.UserEnvVars = nil
 	task, err := GetTask(ctx, db, req.TaskID)
 	if err != nil {
 		return err
 	}
+	req.DisabledTools, err = captureTaskVisibility(ctx, db, task)
+	if err != nil {
+		return fmt.Errorf("tool visibility unavailable: %w", err)
+	}
+	req.SystemMCPConfig = visibleKnowledgeConfig(req.Tools, req.DisabledTools)
 	req.UserEnvVars, err = userenv.LoadEnabled(ctx, db, task.CreateUserID)
 	if err != nil {
 		return fmt.Errorf("user environment configuration unavailable")
 	}
 	if req.TaskSpec != nil {
+		req.TaskSpec["execution_id"] = task.ExecutionID
 		return nil
 	}
 	steps, err := LoadSteps(ctx, db, req.TaskID)
@@ -295,6 +302,7 @@ func hydrateRunRequest(ctx context.Context, db *gorm.DB, req *RunRequest) error 
 
 	req.TaskSpec = map[string]any{
 		"id":                  task.ID,
+		"execution_id":        task.ExecutionID,
 		"conversation_id":     task.ConversationID,
 		"trigger_history_id":  task.TriggerHistoryID,
 		"seq_in_conversation": task.SeqInConversation,
@@ -370,6 +378,8 @@ func persistTaskEvent(ctx context.Context, db *gorm.DB, ev TaskEvent) (bool, err
 func persistTaskEventWithRecord(ctx context.Context, db *gorm.DB, ev *TaskEvent) (bool, error) {
 	var err error
 	switch ev.Type {
+	case "knowledge_operation_result":
+		return persistKnowledgeOperation(ctx, db, *ev)
 	case "process_step":
 		if ev.ProcessStep == nil {
 			return false, taskdisplay.ErrInvalidProcessStep
@@ -445,7 +455,7 @@ func publishTaskEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 			routeWorkflowStepStatus(ctx, db, stateStore, ev.TaskID, status, summary)
 		}
 	}
-	if isArtifactStreamEvent(ev.Type) || ev.Type == "plan" || ev.Type == "progress" || ev.Type == "done" || ev.Type == "error" {
+	if isArtifactStreamEvent(ev.Type) || ev.Type == "plan" || ev.Type == "progress" || ev.Type == "knowledge_operation_result" || ev.Type == "done" || ev.Type == "error" {
 		taskLiveEvents.publish(ev.TaskID, ev)
 	}
 	_ = AppendStreamEvent(ctx, stateStore, ev.TaskID, ev)
@@ -500,7 +510,7 @@ func PublishConversationTaskEvent(
 			// stream even though workflow tasks stay hidden from TaskCenter.
 			EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, "", "task_updated",
 				map[string]any{"task_id": ev.TaskID, "event": ev})
-		case "task_start", "plan", "process_step", "sources", "progress", "artifact", "done", "error":
+		case "task_start", "plan", "process_step", "sources", "progress", "artifact", "knowledge_operation_result", "done", "error":
 			EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, "",
 				"workflow_runtime_updated", map[string]any{"task_id": ev.TaskID, "change": ev.Type})
 		default:
@@ -509,7 +519,7 @@ func PublishConversationTaskEvent(
 		}
 	}
 	switch ev.Type {
-	case "task_start", "plan", "process_step", "progress", "sources", "done", "error":
+	case "task_start", "plan", "process_step", "progress", "sources", "knowledge_operation_result", "done", "error":
 	default:
 		return
 	}

@@ -20,7 +20,6 @@ import (
 func TestResourceMoveIndependentRootsPartialReplay(t *testing.T) {
 	s, db, op := resourceFixture(t)
 	ctx := context.Background()
-	s.budget.Calibrated = true
 	t.Setenv("LAZYMIND_UPLOAD_ROOT", t.TempDir())
 	var err error
 	s.originals, err = NewOriginalService(OriginalServiceDeps{DB: db.DB})
@@ -251,7 +250,6 @@ func TestResourceBatchMoveRechecksConfirmedHeaderInsideRootTransaction(t *testin
 		t.Run(change, func(t *testing.T) {
 			s, db, op := resourceFixture(t)
 			ctx := context.Background()
-			s.budget.Calibrated = true
 			var err error
 			s.originals, err = NewOriginalService(OriginalServiceDeps{DB: db.DB})
 			if err != nil {
@@ -324,7 +322,6 @@ func TestResourceBatchMoveRechecksConfirmedHeaderInsideRootTransaction(t *testin
 
 func TestResourceCrossMoveReservesCommitReceiptDeadline(t *testing.T) {
 	s, db, op := resourceFixture(t)
-	s.budget.Calibrated = true
 	var err error
 	s.originals, err = NewOriginalService(OriginalServiceDeps{DB: db.DB})
 	if err != nil {
@@ -354,7 +351,6 @@ func TestResourceMoveDoesNotReplaceConfirmedDestinationDuringPreflight(t *testin
 		t.Run(fmt.Sprint(roots), func(t *testing.T) {
 			s, db, op := resourceFixture(t)
 			ctx := context.Background()
-			s.budget.Calibrated = true
 			var err error
 			s.originals, err = NewOriginalService(OriginalServiceDeps{DB: db.DB})
 			if err != nil {

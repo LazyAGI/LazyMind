@@ -2097,3 +2097,43 @@ def test_new_ppt_revision_uses_shared_management_discovery():
         assert {'kb', 'knowledge_management'} <= set(step['tools'])
         assert 'result.items' in step['prompt']
         assert 'KBToolkit_list_knowledge_bases' not in step['prompt']
+
+
+def test_explicit_empty_tools_never_fall_back_to_defaults():
+    from lazymind.chat.engine.subagent import runner
+    assert runner._resolve_runtime_tools([], {}) == []
+
+
+def test_disabled_native_group_is_not_available_to_subagents(monkeypatch):
+    import lazyllm
+    from lazymind.chat.engine.subagent import runner
+    previous = lazyllm.globals.get('agentic_config')
+    lazyllm.globals['agentic_config'] = {'disabled_tools': ['calculator', 'knowledge_management']}
+    monkeypatch.setattr(runner, 'load_workflow_tools', lambda *_: {})
+    try:
+        assert runner._resolve_runtime_tools(['calculator', 'knowledge_management'], {}) == []
+    finally:
+        lazyllm.globals['agentic_config'] = previous or {}
+
+
+@pytest.mark.asyncio
+async def test_subagent_forwards_execution_scoped_operation_receipts(monkeypatch):
+    task = {**_DEFAULT_TASK, 'execution_id': 'execution-1'}
+    _install_fake_db(monkeypatch, task)
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_build(monkeypatch)
+    _install_fake_translator(monkeypatch)
+    receipt = {'call_id': 'call-1', 'action': 'knowledge.create', 'status': 'success', 'items': []}
+
+    class Executor:
+        async def stream(self, *_):
+            yield 'event', {'tag': 'knowledge_operation_result', **receipt}
+            yield 'final', 'done'
+
+    monkeypatch.setattr(runner_mod, 'AgentExecutor', Executor)
+    task = {**_DEFAULT_TASK, 'execution_id': 'execution-1'}
+    raw = ''.join([line async for line in runner_mod.run_subagent_stream(
+        task_id=_DEFAULT_TASK_ID, task_spec=task)])
+    result = next(event for event in _sse_to_events(raw) if event.get('type') == 'knowledge_operation_result')
+    assert result['execution_id'] == 'execution-1'
+    assert result['knowledge_operation'] == receipt

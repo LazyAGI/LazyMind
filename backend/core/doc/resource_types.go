@@ -129,7 +129,6 @@ type ResourceError struct {
 func (e *ResourceError) Error() string { return e.Message }
 
 type ResourceBudget struct {
-	Calibrated         bool // Cross-library moves remain disabled until deployment budgets are measured.
 	MaxResources       int
 	MaxBytes           int64
 	MaxPrepareDuration time.Duration

@@ -392,18 +392,19 @@ def _resolve_runtime_tools(
       1. DEFAULT_TOOLS registry (framework / global tools).
     If a name is not found in either source it is silently skipped and a warning is logged.
 
-    When explicit is None/empty, fall back to all DEFAULT_TOOLS.
+    When explicit is None, fall back to DEFAULT_TOOLS. An empty list grants no domain tools.
 
     Note: artifact infrastructure tools are managed separately by _build_subagent_tools.
     Generic artifact writes are intentionally omitted for package-declared
     publisher-owned output slots.
     Names of base tools in the explicit list are silently ignored.
     """
-    if explicit:
+    disabled = set((lazyllm.globals.get('agentic_config') or {}).get('disabled_tools') or [])
+    if explicit is not None:
         core_tool_names = set(SUBAGENT_CORE_TOOL_NAMES)
         name_list = [
             name for item in explicit
-            if (name := str(item).strip()) and name not in core_tool_names
+            if (name := str(item).strip()) and name not in core_tool_names and name not in disabled
         ]
         # Published Workflow script functions are resolved from the exact
         # revision before falling back to framework/global tools.
@@ -432,7 +433,8 @@ def _resolve_runtime_tools(
                 result.append(file_tools[name])
             elif name in default_by_name:
                 if (name == 'kb' and (params or {}).get('workflow_id')
-                        and (params or {}).get('revision_id') and 'knowledge_management' not in name_list):
+                        and (params or {}).get('revision_id') and 'knowledge_management' not in name_list
+                        and 'knowledge_management' not in disabled):
                     # load_workflow_tools above validated the exact Core-owned pin.
                     # Old revisions declared kb before management became a separate group.
                     from lazymind.chat.engine.tools.lazy_kb import KBToolkit
@@ -442,7 +444,7 @@ def _resolve_runtime_tools(
             else:
                 LOG.warning(f'[SubAgent] public Attempt tool {name!r} is unavailable on LazyMind Host')
         return result
-    return [cfg.tool for cfg in filter_tools(DEFAULT_TOOLS)]
+    return [cfg.tool for cfg in filter_tools(DEFAULT_TOOLS) if cfg.name not in disabled]
 
 
 def _build_subagent_tools(
@@ -1180,6 +1182,7 @@ async def run_subagent_stream(
     initial_steps: Optional[List[Dict[str, Any]]] = None,
     workspace_execution: Optional[Dict[str, Any]] = None,
     system_mcp_config: Optional[List[Dict[str, Any]]] = None,
+    disabled_tools: Optional[List[str]] = None,
     user_env_vars: Optional[Dict[str, str]] = None,
 ):
     """Async generator yielding Task SSE lines.
@@ -1328,7 +1331,7 @@ async def run_subagent_stream(
         if effective_agent_type == 'workflow_step':
             # Strip any remaining {{slot}} placeholders so they don't confuse the LLM.
             ctx.objective = re.sub(r'\{\{[^}]+\}\}', '', ctx.objective).strip()
-            if not tools:
+            if tools is None:
                 tools = _resolve_workflow_step_tools(params)
 
         sid = task_id
@@ -1361,6 +1364,7 @@ async def run_subagent_stream(
         agentic_config = _build_agentic_config(task, params, effective_agent_type)
         agentic_config['_workspace_execution'] = execution_identity
         # Only the current Core launch can grant this task management capabilities.
+        agentic_config['disabled_tools'] = list(disabled_tools or [])
         agentic_config['system_mcp_config'] = copy.deepcopy(system_mcp_config or [])
         agentic_config['_subagent_workspace'] = ctx.workspace_path
         agentic_config['citation_state'] = source_state
@@ -1521,6 +1525,11 @@ async def run_subagent_stream(
                 if kind == 'event':
                     item = payload
                     tag = item.get('tag')
+                    if tag == 'knowledge_operation_result':
+                        yield _sse({'type': 'knowledge_operation_result', 'task_id': task_id,
+                                    'execution_id': task.get('execution_id') or execution_identity.get('execution_id', ''),
+                                    'knowledge_operation': {key: value for key, value in item.items() if key != 'tag'}})
+                        continue
                     if tag == 'ask_pending' and isinstance(item.get('knowledge_management'), dict):
                         yield _sse({'type': 'ask_pending', 'task_id': task_id,
                                     'ask_pending': {key: value for key, value in item.items() if key != 'tag'}})

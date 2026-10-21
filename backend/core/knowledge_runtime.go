@@ -73,6 +73,12 @@ func validateKnowledgeExecutionDB(ctx context.Context, db *gorm.DB, e knowledger
 	if err != nil {
 		return knowledgeruntime.Identity{}, err
 	}
+	if e.TaskID != "" {
+		visibility, _ := metadata["_tool_visibility"].(map[string]any)
+		if slices.Contains(knowledgeStringList(visibility["disabled_tools"]), "knowledge_management") {
+			allowed = []string{}
+		}
+	}
 	selected := []string{}
 	for _, t := range mcpadapter.KnowledgeManagementTools {
 		if slices.Contains(allowed, t) {

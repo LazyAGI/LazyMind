@@ -31,17 +31,18 @@ func NewResourceService(d ResourceServiceDeps) (*ResourceService, error) {
 	if d.DB == nil {
 		return nil, resourceErr("INTERNAL", "database required")
 	}
+	defaults := defaultResourceBudget()
 	if d.Budget.MaxResources <= 0 {
-		d.Budget.MaxResources = 1000
+		d.Budget.MaxResources = defaults.MaxResources
 	}
 	if d.Budget.MaxBytes <= 0 {
-		d.Budget.MaxBytes = 256 << 20
+		d.Budget.MaxBytes = defaults.MaxBytes
 	}
 	if d.Budget.MaxPrepareDuration <= 0 {
-		d.Budget.MaxPrepareDuration = 30 * time.Second
+		d.Budget.MaxPrepareDuration = defaults.MaxPrepareDuration
 	}
 	if d.Budget.CopyBytesPerSecond <= 0 {
-		d.Budget.CopyBytesPerSecond = 16 << 20
+		d.Budget.CopyBytesPerSecond = defaults.CopyBytesPerSecond
 	}
 	if d.SourceAccess == nil {
 		d.SourceAccess = strictResourceSourceAccess

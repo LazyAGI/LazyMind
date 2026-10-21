@@ -115,11 +115,19 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 		common.ReplyAppErr(w, common.NewAppError(http.StatusServiceUnavailable, common.ErrCodeInternal, "User environment configuration unavailable"))
 		return
 	}
+	disabled, err := captureTaskVisibility(r.Context(), store.DB(), task)
+	if err != nil {
+		common.ReplyErr(w, "tool visibility unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	steps, _ := LoadSteps(r.Context(), store.DB(), taskID)
 	stepDTOs := make([]stepDTO, 0, len(steps))
 	for i := range steps {
 		stepDTOs = append(stepDTOs, toStepDTO(&steps[i]))
 	}
+ var captured map[string]json.RawMessage
+ _ = json.Unmarshal(task.Params, &captured)
+ if raw := captured["_tool_visibility"]; len(raw) > 0 { var visibility any; _ = json.Unmarshal(raw, &visibility); params["_tool_visibility"] = visibility }
 	privateTaskBody, _ := json.Marshal(toTaskDTO(task))
 	privateTask := map[string]any{}
 	_ = json.Unmarshal(privateTaskBody, &privateTask)
@@ -127,7 +135,7 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 	privateTask["execution_id"] = task.ExecutionID
 	common.ReplyOK(w, map[string]any{"task": privateTask, "params": params,
 		"steps": stepDTOs, "create_user_id": task.CreateUserID, "llm_config": config,
-		"system_mcp_config": KnowledgeSystemConfig(append([]string{}, runtimeParams.LegacyTools...)), "tool_config": toolConfig, "user_env_vars": userEnvVars, "workspace_path": task.WorkspacePath})
+		"disabled_tools": disabled, "system_mcp_config": visibleKnowledgeConfig(append([]string{}, runtimeParams.LegacyTools...), disabled), "tool_config": toolConfig, "user_env_vars": userEnvVars, "workspace_path": task.WorkspacePath})
 }
 
 func workflowToolConfigCapabilities(capabilities, legacyTools []string) []string {

@@ -6614,6 +6614,45 @@ components:
                 visibility:
                     type: string
             type: object
+        KnowledgeOperation:
+            properties:
+                action:
+                    type: string
+                call_id:
+                    type: string
+                items:
+                    items:
+                        $ref: '#/components/schemas/ResourceOperationItem'
+                    type: array
+                processing_summary:
+                    additionalProperties:
+                        type: integer
+                    type: object
+                status:
+                    type: string
+                summary:
+                    $ref: '#/components/schemas/ResourceOperationSummary'
+            required:
+                - action
+                - call_id
+                - status
+                - summary
+            type: object
+        KnowledgeOperationError:
+            properties:
+                code:
+                    type: string
+                details:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+            type: object
         LearningBookRequest:
             properties:
                 capability_key:
@@ -7577,6 +7616,10 @@ components:
                     type: string
                 execution_id:
                     type: string
+                knowledge_operations:
+                    items:
+                        $ref: '#/components/schemas/KnowledgeOperation'
+                    type: array
                 order:
                     type: integer
                 pages:
@@ -7659,6 +7702,8 @@ components:
             type: object
         Pages:
             properties:
+                knowledge_operations:
+                    $ref: '#/components/schemas/CollectionPage'
                 process_steps:
                     $ref: '#/components/schemas/CollectionPage'
                 sources:
@@ -7666,6 +7711,7 @@ components:
                 stage_artifacts:
                     $ref: '#/components/schemas/CollectionPage'
             required:
+                - knowledge_operations
                 - process_steps
                 - sources
                 - stage_artifacts

@@ -1823,6 +1823,12 @@ func datasetIDsFromSearchConfig(sc map[string]any) []string {
 
 func stringSliceFromAny(v any) []string {
 	raw, _ := v.([]any)
+	if values, ok := v.([]string); ok {
+		raw = make([]any, len(values))
+		for i, value := range values {
+			raw[i] = value
+		}
+	}
 	if len(raw) == 0 {
 		return nil
 	}

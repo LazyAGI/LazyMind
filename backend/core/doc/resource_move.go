@@ -30,11 +30,6 @@ func (s *ResourceService) moveAtomic(ctx context.Context, op ResourceOperationCo
 		return ResourceOperationResult{}, resourceErr("INVALID_ARGUMENT", "destination must be knowledge base or folder")
 	}
 	for _, ref := range req.Sources {
-		if ref.KnowledgeBaseID != req.Destination.KnowledgeBaseID && !s.budget.Calibrated {
-			return ResourceOperationResult{}, resourceErr("UNAVAILABLE", "cross-library move budget has not been calibrated for this deployment")
-		}
-	}
-	for _, ref := range req.Sources {
 		if ref.Kind != "folder" && ref.Kind != "document" {
 			return ResourceOperationResult{}, resourceErr("INVALID_ARGUMENT", "knowledge bases cannot be moved")
 		}
@@ -82,9 +77,6 @@ func (s *ResourceService) moveAtomic(ctx context.Context, op ResourceOperationCo
 	}
 	prepareDuration := s.budget.MaxPrepareDuration
 	if cross {
-		if !s.budget.Calibrated {
-			return ResourceOperationResult{}, resourceErr("UNAVAILABLE", "cross-library move budget has not been calibrated for this deployment")
-		}
 		bytes := treeSnapshot(trees).TotalBytes
 		if bytes > s.budget.MaxBytes {
 			return ResourceOperationResult{}, s.tooLarge("bytes", bytes, s.budget.MaxBytes)

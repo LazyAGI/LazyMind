@@ -57,7 +57,7 @@ func pageOrdinaryTask(view taskdisplay.OrdinaryTaskView, r *http.Request, summar
 		}
 		offset = cursor.Offset
 	}
-	if selected != "" && selected != "process_steps" && selected != "sources" && selected != "stage_artifacts" {
+	if selected != "" && selected != "process_steps" && selected != "sources" && selected != "stage_artifacts" && selected != "knowledge_operations" {
 		return view, errDisplayCursor
 	}
 	bounds := func(collection string, total int) (int, int, *string, error) {
@@ -96,6 +96,12 @@ func pageOrdinaryTask(view taskdisplay.OrdinaryTaskView, r *http.Request, summar
 	}
 	view.Pages.StageArtifacts.NextCursor = next
 	view.StageArtifacts = view.StageArtifacts[a:b]
+	a, b, next, err = bounds("knowledge_operations", len(view.KnowledgeOperations))
+	if err != nil {
+		return view, err
+	}
+	view.Pages.KnowledgeOperations.NextCursor = next
+	view.KnowledgeOperations = view.KnowledgeOperations[a:b]
 	return view, nil
 }
 func ordinarySnapshot(ctx context.Context, db *gorm.DB, taskID string) (taskdisplay.OrdinaryTaskView, error) {

@@ -1,3 +1,4 @@
+import type { KnowledgeOperation } from "../../utils/knowledgeOperations";
 import { ReferenceSourcesButton } from "../SourceImports/ReferenceSources";
 import { SourceImportProvider, ExecutionResults } from "../SourceImports";
 import MarkdownViewer from '../MarkdownViewer';
@@ -479,8 +480,8 @@ function ArtifactGrid({ artifacts, sources }: { artifacts: TaskArtifact[]; sourc
   );
 }
 
-function ReferenceSources({ sources }: { sources: ChatSource[] }) {
-  return <div className="chat-assistant-msg-tool-actions"><ReferenceSourcesButton sources={sources} /><ExecutionResults /></div>;
+function ReferenceSources({ sources, operations }: { sources: ChatSource[]; operations?: KnowledgeOperation[] }) {
+  return <div className="chat-assistant-msg-tool-actions"><ReferenceSourcesButton sources={sources} /><ExecutionResults operations={operations} /></div>;
 }
 
 function StatusBadge({ status }: { status: TaskStatus }) {
@@ -650,8 +651,8 @@ function publicTaskTitle(item: OrdinaryTaskItem, t: TFunction): string {
     ? title : t("taskCenter.ordinaryTaskLabel", { index: item.ordinal });
 }
 
-function OrdinaryReferenceSources({ sources }: { sources: ChatSource[] }) {
-  return <ReferenceSources sources={sources} />;
+function OrdinaryReferenceSources({ sources, operations }: { sources: ChatSource[]; operations?: KnowledgeOperation[] }) {
+  return <ReferenceSources sources={sources} operations={operations} />;
 }
 
 function artifactSourceContext(item: OrdinaryTaskItem): ArtifactSourceContext {
@@ -659,6 +660,7 @@ function artifactSourceContext(item: OrdinaryTaskItem): ArtifactSourceContext {
   return {
     context: view?.session_id ? { workflow_session_id: view.session_id, work_display_key: view.display_key } : { task_id: view?.task_id ?? item.task?.task_id },
     sources: view ? publicSourcesToChatSources(view.sources) : item.task?.sources ?? [],
+    operations: view?.knowledge_operations,
   };
 }
 
@@ -683,7 +685,7 @@ function OrdinaryTaskDetails({ item }: { item: OrdinaryTaskItem }) {
   };
   const more = (collection: OrdinaryCollection) => view?.pages[collection]?.next_cursor
     ? <button className="ordinary-load-more" type="button" disabled={loadingCollection !== null}
-        onClick={() => void reload(collection, view.pages[collection].next_cursor ?? undefined).catch(() => undefined)}>
+        onClick={() => void reload(collection, view.pages[collection]?.next_cursor ?? undefined).catch(() => undefined)}>
         {t("taskCenter.ordinaryLoadMore")}
       </button> : null;
   const sourceContext = artifactSourceContext(item);
@@ -700,8 +702,9 @@ function OrdinaryTaskDetails({ item }: { item: OrdinaryTaskItem }) {
         {view?.timing.thinking_elapsed_ms != null && <span>{t("taskCenter.ordinaryMeasuredThinkingDuration", { duration: formatDuration(Math.round(view.timing.thinking_elapsed_ms / 1000)) })}</span>}
       </span>
     </div>
-    <OrdinaryReferenceSources sources={view ? publicSourcesToChatSources(view.sources) : item.task?.sources ?? []} />
+    <OrdinaryReferenceSources operations={view?.knowledge_operations} sources={view ? publicSourcesToChatSources(view.sources) : item.task?.sources ?? []} />
     {more("sources")}
+    {more("knowledge_operations")}
     <TaskArtifactList artifacts={view?.stage_artifacts ?? []} sourceContexts={view ? { [view.display_key]: sourceContext } : undefined} onReload={() => reload()} />
     {more("stage_artifacts")}
     {loadError && <div role="alert" className="ordinary-stale-warning">{t("taskCenter.ordinaryLoadError")}<button type="button" onClick={() => void reload().catch(() => undefined)}>{t("taskCenter.ordinaryReload")}</button></div>}

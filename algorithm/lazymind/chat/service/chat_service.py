@@ -1251,6 +1251,7 @@ async def _handle_chat_impl(
         'ocr_config': runtime.ocr_config or {},
         'mcp_config': runtime.mcp_config or [],
         'system_mcp_config': runtime.system_mcp_config or [],
+        'disabled_tools': list(agent.disabled_tools or []),
         'environment_context': runtime.environment_context or {},
         'user_id': user_id or '',
         'use_memory': personalization.use_memory,

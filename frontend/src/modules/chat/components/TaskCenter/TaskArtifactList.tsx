@@ -1,3 +1,4 @@
+import type { KnowledgeOperation } from "../../utils/knowledgeOperations";
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Tooltip } from "antd";
@@ -9,7 +10,7 @@ import { resolveCoreAssetUrl } from "@/modules/knowledge/utils/imageUrl";
 import type { SourceContext } from '../SourceImports/api';
 import type { ChatSource } from '../../utils/sourceAdapter';
 
-export type ArtifactSourceContext = { context: SourceContext; sources: ChatSource[] };
+export type ArtifactSourceContext = { context: SourceContext; sources: ChatSource[]; operations?: KnowledgeOperation[] };
 
 function usableURL(raw?: string) {
   if (!raw) return "";
@@ -79,7 +80,7 @@ function ArtifactRow({ artifact, onReload, sourceContext }: { artifact: PublicAr
     </div>
     {error && <span className="ordinary-artifact-error" role="alert">{t("taskCenter.ordinaryArtifactActionFailed")}</span>}
     {(error || artifact.state === "unavailable" || artifact.state === "failed") && onReload && <button type="button" disabled={busy} onClick={() => void execute(onReload)}>{t("taskCenter.ordinaryReload")}</button>}
-    {preview && <FilePreviewDrawer open filename={artifact.name} url={previewUrl} content={artifact.inline_content} sourceContext={sourceContext?.context} sources={sourceContext?.sources} onClose={() => setPreview(false)} />}
+    {preview && <FilePreviewDrawer open filename={artifact.name} url={previewUrl} content={artifact.inline_content} sourceContext={sourceContext?.context} sources={sourceContext?.sources} operations={sourceContext?.operations} onClose={() => setPreview(false)} />}
   </li>;
 }
 

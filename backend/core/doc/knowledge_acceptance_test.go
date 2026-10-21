@@ -132,7 +132,6 @@ func TestKnowledgeMoveProcessingSummaryMatchesSubmittedReceipt(t *testing.T) {
 	s.originals, _ = NewOriginalService(OriginalServiceDeps{DB: db.DB, SubmitProcessing: func(context.Context, DatasetCatalogCaller, string, string) (StartTaskResult, error) {
 		return StartTaskResult{Status: "STARTED"}, nil
 	}})
-	s.budget.Calibrated = true
 	file, err := s.originals.AcquireOriginal(ctx, op.Caller, AcquireOriginalRequest{Filename: "move.txt", ContentType: "text/plain", Reader: strings.NewReader("move receipt")})
 	if err != nil {
 		t.Fatal(err)

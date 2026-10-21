@@ -4323,6 +4323,19 @@ export interface KnowledgeMarketTaskResultOpenAPIResponse {
     'task_ids'?: Array<string>;
     'updated_items'?: Array<string>;
 }
+export interface KnowledgeOperation {
+    'action': string;
+    'call_id': string;
+    'items'?: Array<ResourceOperationItem>;
+    'processing_summary'?: { [key: string]: number; };
+    'status': string;
+    'summary': ResourceOperationSummary;
+}
+export interface KnowledgeOperationError {
+    'code': string;
+    'details'?: { [key: string]: object; };
+    'message': string;
+}
 export interface LatestVersionChangeOpenAPIResponse {
     'change_source': string;
     'changed_at': string;
@@ -5038,6 +5051,7 @@ export interface OrdinaryTaskView {
     'conversation_id': string;
     'display_key': string;
     'execution_id': string;
+    'knowledge_operations'?: Array<KnowledgeOperation>;
     'order': number;
     'pages': Pages;
     'parallel_group_id': string | null;
@@ -5086,6 +5100,7 @@ export interface OrdinaryWorkflowResponse {
     'message': string;
 }
 export interface Pages {
+    'knowledge_operations': CollectionPage;
     'process_steps': CollectionPage;
     'sources': CollectionPage;
     'stage_artifacts': CollectionPage;

@@ -194,6 +194,7 @@ class RemoteWorkflowExecutor:
                         'lease_token': lease,
                     }
                     agentic_config['system_mcp_config'] = spec.get('system_mcp_config') or []
+                    agentic_config['disabled_tools'] = spec.get('disabled_tools') or []
                     agentic_config['_subagent_workspace'] = workspace
                     lazyllm.globals['agentic_config'] = agentic_config
                     artifacts = list(checkpoint['artifacts'])
@@ -217,6 +218,7 @@ class RemoteWorkflowExecutor:
                         tool_config=spec.get('tool_config'),
                         user_env_vars=spec.get('user_env_vars'),
                         system_mcp_config=spec.get('system_mcp_config') or [],
+                        disabled_tools=spec.get('disabled_tools') or [],
                         agent_type='workflow_step',
                         task_spec=task,
                         initial_steps=initial_steps,

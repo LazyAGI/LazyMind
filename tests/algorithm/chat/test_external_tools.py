@@ -33,11 +33,10 @@ def test_new_registry_tool_is_discovered_and_executed(registry):
     assert result['result'] == {'text': 'hello'}
 
 
-def test_disabled_tool_is_listed_but_cannot_execute(registry):
+def test_internal_visibility_does_not_revoke_external_tools(registry):
     payload = {'disabled_tools': [registry.name], 'tool_name': registry.name, 'arguments': {'text': 'hello'}}
-    assert not external_tools.run_external_tools(payload)['items'][0]['available']
-    with pytest.raises(ValueError):
-        external_tools.run_external_tools(payload, execute=True)
+    assert external_tools.run_external_tools(payload)['items'][0]['available']
+    assert external_tools.run_external_tools(payload, execute=True)['result'] == {'text': 'hello'}
 
 
 def test_context_tool_cannot_be_enabled_by_caller(registry):
