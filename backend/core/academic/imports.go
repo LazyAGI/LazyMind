@@ -30,12 +30,15 @@ type selectedImportItem struct {
 }
 
 type createImportRequest struct {
-	EntryType         string               `json:"entry_type"`
-	TargetDatasetID   string               `json:"target_dataset_id"`
-	TargetPID         string               `json:"target_pid,omitempty"`
-	SourceDocumentIDs []string             `json:"source_document_ids,omitempty"`
-	Items             []selectedImportItem `json:"items"`
-	IdempotencyKey    string               `json:"idempotency_key,omitempty"`
+	SourceContext     *SourceContext              `json:"source_context,omitempty"`
+	SourceIDs         []string                    `json:"source_ids,omitempty"`
+	NewKnowledgeBase  *doc.CreateKnowledgeRequest `json:"new_knowledge_base,omitempty"`
+	EntryType         string                      `json:"entry_type"`
+	TargetDatasetID   string                      `json:"target_dataset_id"`
+	TargetPID         string                      `json:"target_pid,omitempty"`
+	SourceDocumentIDs []string                    `json:"source_document_ids,omitempty"`
+	Items             []selectedImportItem        `json:"items"`
+	IdempotencyKey    string                      `json:"idempotency_key,omitempty"`
 }
 
 type paperImportPayload struct {
@@ -52,7 +55,15 @@ func CreateImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req createImportRequest
-	if !parseJSON(r, &req) || req.TargetDatasetID == "" || len(req.Items) == 0 || len(req.Items) > 500 {
+	if !parseJSON(r, &req) {
+		replyError(w, 400, "INVALID_REQUEST", "invalid import request")
+		return
+	}
+	if req.SourceContext != nil {
+		createSourceImport(w, r, userID, req)
+		return
+	}
+	if req.TargetDatasetID == "" || len(req.Items) == 0 || len(req.Items) > 500 {
 		replyError(w, http.StatusBadRequest, "INVALID_REQUEST", "target_dataset_id and 1 to 500 items are required")
 		return
 	}
@@ -153,6 +164,10 @@ func CreateImport(w http.ResponseWriter, r *http.Request) {
 }
 
 func ListImports(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("history_id") != "" || r.URL.Query().Get("task_id") != "" || r.URL.Query().Get("workflow_session_id") != "" {
+		ListSourceImports(w, r)
+		return
+	}
 	userID, ok := requireUser(w, r)
 	if !ok {
 		return
@@ -253,6 +268,10 @@ func RetryImport(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusNotFound, "IMPORT_NOT_FOUND", "import batch not found")
 		return
 	}
+	if batch.EntryType == "conversation_sources" {
+		retrySourceImport(w, r, batch)
+		return
+	}
 	var failed int64
 	_ = store.DB().WithContext(r.Context()).Model(&orm.PaperImportItem{}).Where("batch_id = ? AND status = 'failed'", batchID).Count(&failed).Error
 	if failed == 0 {
@@ -278,6 +297,9 @@ func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 	var batch orm.PaperImportBatch
 	if err := store.DB().WithContext(ctx).Where("id = ?", payload.BatchID).Take(&batch).Error; err != nil {
 		return asyncjob.Result{Permanent: true, ErrorCode: "batch_not_found"}, err
+	}
+	if batch.EntryType == "conversation_sources" {
+		return handleSourceImportJob(ctx, job, reporter, batch)
 	}
 	var items []orm.PaperImportItem
 	if err := store.DB().WithContext(ctx).Where("batch_id = ? AND status IN ?", batch.ID, []string{"pending", "failed"}).Order("created_at ASC").Find(&items).Error; err != nil {

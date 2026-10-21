@@ -6,6 +6,10 @@ import type { PublicArtifact } from "@/modules/chat/types/ordinaryTask";
 import { FilePreviewDrawer } from "../WorkflowPanel/FilePreviewDrawer";
 import { downloadArtifactFile } from "@/modules/chat/utils/artifactFileActions";
 import { resolveCoreAssetUrl } from "@/modules/knowledge/utils/imageUrl";
+import type { SourceContext } from '../SourceImports/api';
+import type { ChatSource } from '../../utils/sourceAdapter';
+
+export type ArtifactSourceContext = { context: SourceContext; sources: ChatSource[] };
 
 function usableURL(raw?: string) {
   if (!raw) return "";
@@ -25,7 +29,7 @@ function fileSize(size: number | null) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function ArtifactRow({ artifact, onReload }: { artifact: PublicArtifact; onReload?: () => Promise<unknown> }) {
+function ArtifactRow({ artifact, onReload, sourceContext }: { artifact: PublicArtifact; onReload?: () => Promise<unknown>; sourceContext?: ArtifactSourceContext }) {
   const { t } = useTranslation();
   const [preview, setPreview] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -75,12 +79,12 @@ function ArtifactRow({ artifact, onReload }: { artifact: PublicArtifact; onReloa
     </div>
     {error && <span className="ordinary-artifact-error" role="alert">{t("taskCenter.ordinaryArtifactActionFailed")}</span>}
     {(error || artifact.state === "unavailable" || artifact.state === "failed") && onReload && <button type="button" disabled={busy} onClick={() => void execute(onReload)}>{t("taskCenter.ordinaryReload")}</button>}
-    {preview && <FilePreviewDrawer open filename={artifact.name} url={previewUrl} content={artifact.inline_content} onClose={() => setPreview(false)} />}
+    {preview && <FilePreviewDrawer open filename={artifact.name} url={previewUrl} content={artifact.inline_content} sourceContext={sourceContext?.context} sources={sourceContext?.sources} onClose={() => setPreview(false)} />}
   </li>;
 }
 
-export function TaskArtifactList({ artifacts, final = false, onReload }: {
-  artifacts: PublicArtifact[]; final?: boolean; onReload?: () => Promise<unknown>;
+export function TaskArtifactList({ artifacts, final = false, onReload, sourceContexts }: {
+  artifacts: PublicArtifact[]; final?: boolean; onReload?: () => Promise<unknown>; sourceContexts?: Record<string, ArtifactSourceContext>;
 }) {
   const { t } = useTranslation();
   const headingId = useId();
@@ -101,6 +105,6 @@ export function TaskArtifactList({ artifacts, final = false, onReload }: {
           : <RightOutlined className="ordinary-artifact-chevron" aria-hidden="true" />}
       </button> : heading}
     </h3>
-    <ul className="ordinary-artifact-list" id={listId} hidden={final && !expanded}>{unique.map(artifact => <ArtifactRow key={artifact.artifact_id} artifact={artifact} onReload={onReload} />)}</ul>
+    <ul className="ordinary-artifact-list" id={listId} hidden={final && !expanded}>{unique.map(artifact => <ArtifactRow key={artifact.artifact_id} artifact={artifact} onReload={onReload} sourceContext={sourceContexts?.[artifact.producer_display_key]} />)}</ul>
   </section>;
 }

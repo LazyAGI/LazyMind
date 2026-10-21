@@ -69,6 +69,9 @@ func DocumentProcessingStatus(level string, state orm.DocumentProcessingState) s
 	if level == "stored" {
 		return "not_requested"
 	}
+	if state.ParseStatus == "failed" || (level != "parsed" && state.ChunkStatus == "failed") {
+		return "failed"
+	}
 	status := state.IndexStatus
 	switch level {
 	case "parsed":

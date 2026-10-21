@@ -4257,6 +4257,10 @@ components:
                     type: string
                 pdf_convert_result:
                     type: string
+                processing_error:
+                    $ref: '#/components/schemas/ProcessingDiagnostic'
+                processing_status:
+                    type: string
                 recursive_document_count:
                     format: int64
                     type: integer
@@ -7932,6 +7936,24 @@ components:
                 - message
                 - data
             type: object
+        ProcessingDiagnostic:
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                recovery:
+                    type: string
+                stage:
+                    type: string
+                task_id:
+                    type: string
+            required:
+                - code
+                - message
+                - recovery
+                - stage
+            type: object
         ProjectionError:
             properties:
                 code:
@@ -8404,17 +8426,23 @@ components:
                     additionalProperties:
                         type: string
                     type: object
+                input_index:
+                    type: integer
                 name:
                     type: string
                 parent_id:
                     type: string
                 previous_ref:
                     $ref: '#/components/schemas/ResourceRef'
+                processing_error:
+                    $ref: '#/components/schemas/ProcessingDiagnostic'
                 processing_status:
                     type: string
                 resource_ref:
                     $ref: '#/components/schemas/ResourceRef'
                 resource_status:
+                    type: string
+                task_id:
                     type: string
             required:
                 - name
@@ -8430,6 +8458,10 @@ components:
                     items:
                         $ref: '#/components/schemas/ResourceOperationItem'
                     type: array
+                processing_summary:
+                    additionalProperties:
+                        type: integer
+                    type: object
                 status:
                     type: string
                 summary:
@@ -15515,6 +15547,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /academic/references:resolve
+    /api/core/academic/source-targets:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /academic/source-targets
+    /api/core/academic/sources:inspect:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/sources:inspect
     /api/core/academic/works:presence:
         post:
             responses:
@@ -21186,6 +21230,23 @@ paths:
                 "200":
                     description: OK
             summary: GET /datasets/{dataset}/documents/{document}:read
+    /api/core/datasets/{dataset}/documents/{document}:reparse:
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /datasets/{dataset}/documents/{document}:reparse
     /api/core/datasets/{dataset}/documents:batchUpdateTags:
         post:
             parameters:

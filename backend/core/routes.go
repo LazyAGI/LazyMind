@@ -293,6 +293,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/academic/documents/{document_id}/references:extract", []string{"document.write"}, academic.ExtractReferences)
 	handleAPI(r, "POST", "/academic/references:resolve", []string{"document.write"}, academic.ResolveReferences)
 	handleAPI(r, "POST", "/academic/works:presence", []string{"document.read"}, academic.CheckPresence)
+	handleAPI(r, "POST", "/academic/sources:inspect", []string{"document.read"}, academic.InspectSources)
+	handleAPI(r, "GET", "/academic/source-targets", []string{"document.read"}, academic.ListSourceTargets)
 	handleAPI(r, "POST", "/academic/imports:preview", []string{"document.read"}, academic.PreviewImport)
 	handleAPI(r, "POST", "/academic/imports", []string{"document.write"}, academic.CreateImport)
 	handleAPI(r, "GET", "/academic/imports", []string{"document.read"}, academic.ListImports)

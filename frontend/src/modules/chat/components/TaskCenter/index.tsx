@@ -1,10 +1,13 @@
+import { ReferenceSourcesButton } from "../SourceImports/ReferenceSources";
+import { SourceImportProvider, ExecutionResults } from "../SourceImports";
+import MarkdownViewer from '../MarkdownViewer';
 import { mergeRun } from "../../utils/ordinaryTaskState";
 import i18n from "i18next";
 import { formatTaskDuration, useRunTiming } from "./runTiming";
 import { WorkflowTaskProgress } from "../WorkflowPanel/WorkflowTaskProgress";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import { reconcileWorkflowTasks } from "@/modules/chat/utils/workflowTaskStatus";
-import { useMemo, useState, useRef, useCallback, useEffect, useId } from "react";
+import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Image, Progress, Tooltip } from "antd";
@@ -18,7 +21,6 @@ import {
   ApiOutlined,
   CheckOutlined,
   DownloadOutlined,
-  GlobalOutlined,
 } from "@ant-design/icons";
 
 import {
@@ -38,13 +40,6 @@ import {
 import { downloadStream } from "@/modules/chat/utils/download";
 import {
   type ChatSource,
-  getReferenceSources,
-  getSourceDedupKey,
-  getSourceEvidenceText,
-  getSourceFaviconUrl,
-  getSourceHref,
-  getSourceLabel,
-  getSourceSubtitle,
   publicSourcesToChatSources,
 } from "@/modules/chat/utils/sourceAdapter";
 import type { WorkflowSessionStep } from "@/modules/chat/store/workflowPanel";
@@ -57,7 +52,7 @@ import {
   type OrdinaryTaskTimeline,
 } from "./taskTimeline";
 import { TaskProcessTimeline } from "./TaskProcessTimeline";
-import { TaskArtifactList } from "./TaskArtifactList";
+import { TaskArtifactList, type ArtifactSourceContext } from "./TaskArtifactList";
 import type { OrdinaryCollection, OrdinaryRunView } from "@/modules/chat/types/ordinaryTask";
 import "./index.scss";
 
@@ -326,7 +321,7 @@ function WritingSubtaskList({ subtasks }: { subtasks?: WritingSubtask[] }) {
   );
 }
 
-function ArtifactGrid({ artifacts }: { artifacts: TaskArtifact[] }) {
+function ArtifactGrid({ artifacts, sources }: { artifacts: TaskArtifact[]; sources?: ChatSource[] }) {
   const { t } = useTranslation();
   if (!artifacts || artifacts.length === 0) {
     return null;
@@ -474,7 +469,7 @@ function ArtifactGrid({ artifacts }: { artifacts: TaskArtifact[] }) {
               <div className="task-artifact-text-body">
                 {a.content_type === "json"
                   ? JSON.stringify(a.value?.data ?? a.value)
-                  : a.value?.text}
+                  : <MarkdownViewer sources={sources}>{a.value?.text || ""}</MarkdownViewer>}
               </div>
             </div>
           );
@@ -484,68 +479,8 @@ function ArtifactGrid({ artifacts }: { artifacts: TaskArtifact[] }) {
   );
 }
 
-function TaskSourceIcon({ source }: { source: ChatSource }) {
-  const [failed, setFailed] = useState(false);
-  const favicon = getSourceFaviconUrl(source);
-  return (
-    <span className="task-source-icon" aria-hidden="true">
-      {favicon && !failed ? (
-        <img
-          src={favicon}
-          alt=""
-          loading="lazy"
-          referrerPolicy="no-referrer"
-          onError={() => setFailed(true)}
-        />
-      ) : (
-        <FileTextOutlined />
-      )}
-    </span>
-  );
-}
-
-function ReferenceSources({
-  sources,
-  defaultOpen = false,
-}: {
-  sources: ChatSource[];
-  defaultOpen?: boolean;
-}) {
-  const { t } = useTranslation();
-  const displaySources = getReferenceSources(sources);
-  if (displaySources.length === 0) return null;
-
-  return (
-    <CollapsibleSection
-      title={`${t("taskCenter.references")} (${displaySources.length})`}
-      defaultOpen={defaultOpen}
-    >
-      <div className="task-source-list">
-        {displaySources.map((source, index) => (
-          <a
-            className="task-source-item"
-            key={getSourceDedupKey(source, index)}
-            href={getSourceHref(source)}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={getSourceLabel(source)}
-          >
-            <TaskSourceIcon source={source} />
-            <span className="task-source-copy">
-              <span className="task-source-heading">
-                {getSourceSubtitle(source) || t("taskCenter.references")}
-              </span>
-              <strong className="task-source-title">{getSourceLabel(source)}</strong>
-              {getSourceEvidenceText(source) && (
-                <span className="task-source-content">{getSourceEvidenceText(source)}</span>
-              )}
-            </span>
-            <RightOutlined className="task-source-arrow" aria-hidden="true" />
-          </a>
-        ))}
-      </div>
-    </CollapsibleSection>
-  );
+function ReferenceSources({ sources }: { sources: ChatSource[] }) {
+  return <div className="chat-assistant-msg-tool-actions"><ReferenceSourcesButton sources={sources} /><ExecutionResults /></div>;
 }
 
 function StatusBadge({ status }: { status: TaskStatus }) {
@@ -607,7 +542,7 @@ function TaskCard({ task }: { task: SubAgentTask }) {
   }, []);
 
   return (
-    <div
+    <SourceImportProvider context={{ task_id: task.task_id }} sources={task.sources}><div
       className={`task-card ${collapsed ? "task-card-collapsed" : ""}`}
       style={cardHeight && !collapsed ? { maxHeight: cardHeight, overflow: 'hidden', display: 'flex', flexDirection: 'column' } : undefined}
     >
@@ -667,14 +602,14 @@ function TaskCard({ task }: { task: SubAgentTask }) {
           )}
           <ExecutionLog log={task.execution_log} isRunning={isRunning} />
           <WritingSubtaskList subtasks={task.writing_subtasks} />
-          <ArtifactGrid artifacts={task.artifacts} />
+          <ArtifactGrid artifacts={task.artifacts} sources={task.sources} />
           <ReferenceSources sources={task.sources} />
         </>
       )}
       {!collapsed && (
         <div className="task-card-resize-handle" onMouseDown={onCardResizeStart} />
       )}
-    </div>
+    </div></SourceImportProvider>
   );
 }
 
@@ -716,65 +651,15 @@ function publicTaskTitle(item: OrdinaryTaskItem, t: TFunction): string {
 }
 
 function OrdinaryReferenceSources({ sources }: { sources: ChatSource[] }) {
-  const { t } = useTranslation();
-  const headingId = useId();
-  const displaySources = getReferenceSources(sources);
-  if (displaySources.length === 0) return null;
+  return <ReferenceSources sources={sources} />;
+}
 
-  return (
-    <section
-      className="ordinary-activity-section ordinary-source-section"
-      aria-labelledby={headingId}
-    >
-      <h3 className="ordinary-section-heading" id={headingId}>
-        <GlobalOutlined aria-hidden="true" />
-        <span>{t("taskCenter.ordinarySources")}</span>
-        <span className="ordinary-section-count">· {displaySources.length}</span>
-      </h3>
-      <ul className="ordinary-source-list">
-        {displaySources.map((source, index) => {
-          const href = getSourceHref(source);
-          const label = getSourceLabel(source);
-          const subtitle = getSourceSubtitle(source) || t("taskCenter.references");
-          const rawEvidence = getSourceEvidenceText(source)
-            ?.replace(/\s+/g, " ")
-            .trim();
-          const evidence = rawEvidence && rawEvidence.length > 160
-            ? `${rawEvidence.slice(0, 160).trimEnd()}…`
-            : rawEvidence;
-          const body = (
-            <>
-              <span className="ordinary-source-publisher">
-                <TaskSourceIcon source={source} />
-                <span>{subtitle}</span>
-              </span>
-              <strong className="ordinary-source-title">{label}</strong>
-              {evidence && (
-                <span className="ordinary-source-excerpt">{evidence}</span>
-              )}
-            </>
-          );
-          return (
-            <li key={getSourceDedupKey(source, index)}>
-              {href.startsWith("#source-") ? (
-                <div className="ordinary-source-card">{body}</div>
-              ) : (
-                <a
-                  className="ordinary-source-card"
-                  href={href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={`${label}, ${t("taskCenter.ordinaryOpenNewWindow")}`}
-                >
-                  {body}
-                </a>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    </section>
-  );
+function artifactSourceContext(item: OrdinaryTaskItem): ArtifactSourceContext {
+  const view = item.ordinary;
+  return {
+    context: view?.session_id ? { workflow_session_id: view.session_id, work_display_key: view.display_key } : { task_id: view?.task_id ?? item.task?.task_id },
+    sources: view ? publicSourcesToChatSources(view.sources) : item.task?.sources ?? [],
+  };
 }
 
 function OrdinaryTaskDetails({ item }: { item: OrdinaryTaskItem }) {
@@ -801,7 +686,9 @@ function OrdinaryTaskDetails({ item }: { item: OrdinaryTaskItem }) {
         onClick={() => void reload(collection, view.pages[collection].next_cursor ?? undefined).catch(() => undefined)}>
         {t("taskCenter.ordinaryLoadMore")}
       </button> : null;
-  return <div className="ordinary-task-details" aria-busy={loadingCollection !== null}>
+  const sourceContext = artifactSourceContext(item);
+  const { sources, context } = sourceContext;
+  return <SourceImportProvider context={context} sources={sources}><div className="ordinary-task-details" aria-busy={loadingCollection !== null}>
     <TaskProcessTimeline steps={view?.process_steps ?? []} legacyPlan={view ? view.plan_steps : item.task?.plan_steps}
       state={item.state} progress={view ? view.progress_pct : item.task?.progress_pct} />
     {more("process_steps")}
@@ -815,10 +702,10 @@ function OrdinaryTaskDetails({ item }: { item: OrdinaryTaskItem }) {
     </div>
     <OrdinaryReferenceSources sources={view ? publicSourcesToChatSources(view.sources) : item.task?.sources ?? []} />
     {more("sources")}
-    <TaskArtifactList artifacts={view?.stage_artifacts ?? []} onReload={() => reload()} />
+    <TaskArtifactList artifacts={view?.stage_artifacts ?? []} sourceContexts={view ? { [view.display_key]: sourceContext } : undefined} onReload={() => reload()} />
     {more("stage_artifacts")}
     {loadError && <div role="alert" className="ordinary-stale-warning">{t("taskCenter.ordinaryLoadError")}<button type="button" onClick={() => void reload().catch(() => undefined)}>{t("taskCenter.ordinaryReload")}</button></div>}
-  </div>;
+  </div></SourceImportProvider>;
 }
 
 function OrdinaryTaskCard({
@@ -1045,6 +932,7 @@ function OrdinaryTaskCenter({
   const finalRefs = new Set(visibleRuns.flatMap(run => run.final_output_refs));
   const finalArtifacts = [...timeline.items.flatMap(item => item.ordinary?.stage_artifacts ?? []), ...visibleRuns.flatMap(run => run.final_artifacts ?? [])]
     .filter(artifact => finalRefs.has(artifact.artifact_id));
+  const sourceContexts = Object.fromEntries(timeline.items.filter(item => item.ordinary).map(item => [item.ordinary!.display_key, artifactSourceContext(item)]));
   const initialExpanded = defaultOrdinaryExpandedId(timeline.items);
   const [expandedId, setExpandedId] = useState<string | null>(initialExpanded);
   const hadItemsRef = useRef(timeline.items.length > 0);
@@ -1200,7 +1088,7 @@ function OrdinaryTaskCenter({
             })}
           </ol>}
           {/* A declared extension may own final deliverable presentation. */}
-          {!hideFinalArtifacts && !hideGroupedArtifacts && <TaskArtifactList artifacts={finalArtifacts} final onReload={onReloadArtifacts} />}
+          {!hideFinalArtifacts && !hideGroupedArtifacts && <TaskArtifactList artifacts={finalArtifacts} final sourceContexts={sourceContexts} onReload={onReloadArtifacts} />}
         </>
       )}
     </div>

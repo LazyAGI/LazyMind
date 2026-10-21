@@ -2801,6 +2801,8 @@ export interface Doc {
     'name': string;
     'p_id': string;
     'pdf_convert_result'?: string;
+    'processing_error'?: ProcessingDiagnostic;
+    'processing_status'?: string;
     'recursive_document_count'?: number;
     'recursive_file_size'?: number;
     'recursive_folder_count'?: number;
@@ -5259,6 +5261,13 @@ export interface PreferenceOrganizerTaskResponse {
     'data': PreferenceOrganizerTaskData | null;
     'message': string;
 }
+export interface ProcessingDiagnostic {
+    'code': string;
+    'message': string;
+    'recovery': string;
+    'stage': string;
+    'task_id'?: string;
+}
 export interface ProjectionError {
     'code': string;
     'retryable': boolean;
@@ -5511,16 +5520,20 @@ export interface ResourceOperationItem {
     'error'?: ResourceError;
     'folder_count'?: number;
     'id_mapping'?: { [key: string]: string; };
+    'input_index'?: number;
     'name': string;
     'parent_id': string;
     'previous_ref'?: ResourceRef;
+    'processing_error'?: ProcessingDiagnostic;
     'processing_status'?: string;
     'resource_ref': ResourceRef;
     'resource_status': string;
+    'task_id'?: string;
 }
 export interface ResourceOperationResult {
     'action': string;
     'items'?: Array<ResourceOperationItem>;
+    'processing_summary'?: { [key: string]: number; };
     'status': string;
     'summary': ResourceOperationSummary;
 }
@@ -14304,6 +14317,64 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary GET /academic/source-targets
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicSourceTargetsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/academic/source-targets`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /academic/sources:inspect
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicSourcesInspectPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/academic/sources:inspect`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary POST /academic/works:presence
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -18403,6 +18474,43 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             }
 
             const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/documents/{document}:reparse
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentReparsePost: async (dataset: string, document: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentReparsePost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentReparsePost', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}:reparse`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -26774,6 +26882,30 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary GET /academic/source-targets
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicSourceTargetsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicSourceTargetsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicSourceTargetsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /academic/sources:inspect
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicSourcesInspectPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicSourcesInspectPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicSourcesInspectPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary POST /academic/works:presence
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -28330,6 +28462,20 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentReadGet(dataset, document, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentReadGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/documents/{document}:reparse
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentReparsePost(dataset: string, document: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentReparsePost(dataset, document, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentReparsePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -31590,6 +31736,24 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary GET /academic/source-targets
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicSourceTargetsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreAcademicSourceTargetsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /academic/sources:inspect
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicSourcesInspectPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreAcademicSourcesInspectPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary POST /academic/works:presence
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -32736,6 +32900,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/documents/{document}:reparse
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReparsePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentReparsePost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReparsePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentReparsePost(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -35844,6 +36018,15 @@ export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest
 }
 
 /**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentReparsePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReparsePostRequest {
+    readonly dataset: string
+
+    readonly document: string
+}
+
+/**
  * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentSegmentsGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentSegmentsGetRequest {
@@ -37293,6 +37476,26 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary GET /academic/source-targets
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicSourceTargetsGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreAcademicSourceTargetsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /academic/sources:inspect
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicSourcesInspectPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreAcademicSourcesInspectPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary POST /academic/works:presence
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -38556,6 +38759,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /datasets/{dataset}/documents/{document}:reparse
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReparsePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentReparsePost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReparsePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentReparsePost(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

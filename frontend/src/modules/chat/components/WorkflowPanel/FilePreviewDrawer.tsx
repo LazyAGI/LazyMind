@@ -3,6 +3,11 @@ import ReactDOM from 'react-dom';
 import FileViewer from '@/modules/knowledge/components/FileViewer';
 import { resolveCoreAssetUrl } from '@/modules/knowledge/utils/imageUrl';
 import { useTranslation } from 'react-i18next';
+import MarkdownViewer from '../MarkdownViewer';
+import { SourceImportProvider, ExecutionResults } from '../SourceImports';
+import { ReferenceSourcesButton } from '../SourceImports/ReferenceSources';
+import type { SourceContext } from '../SourceImports/api';
+import type { ChatSource } from '../../utils/sourceAdapter';
 
 interface FilePreviewDrawerProps {
   open: boolean;
@@ -10,9 +15,11 @@ interface FilePreviewDrawerProps {
   url: string;
   onClose: () => void;
   content?: string;
+  sourceContext?: SourceContext;
+  sources?: ChatSource[];
 }
 
-export function FilePreviewDrawer({ open, filename, url, onClose, content }: FilePreviewDrawerProps) {
+export function FilePreviewDrawer({ open, filename, url, onClose, content, sourceContext, sources }: FilePreviewDrawerProps) {
   const { t } = useTranslation();
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
@@ -31,6 +38,8 @@ export function FilePreviewDrawer({ open, filename, url, onClose, content }: Fil
     const dialog = dialogRef.current;
     dialog?.querySelector<HTMLButtonElement>("button")?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
+      // Nested citation popovers and the target modal own their focus and Escape.
+      if (!dialog?.contains(event.target as Node)) return;
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeRef.current(); }
       if (event.key !== "Tab" || !dialog) return;
       const focusable = [...dialog.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]')];
@@ -44,10 +53,18 @@ export function FilePreviewDrawer({ open, filename, url, onClose, content }: Fil
   }, [open]);
 
   if (!open) return null;
+  const renderMarkdown = sourceContext ? (markdown: string) => <MarkdownViewer sources={sources}>{markdown}</MarkdownViewer> : undefined;
+  const body = <>
+    {content !== undefined ? renderMarkdown ? renderMarkdown(content) : <pre className="ordinary-inline-preview">{content}</pre> : resolvedUrl ? (
+      <FileViewer file={resolvedUrl} fileName={filename} renderMarkdown={renderMarkdown} />
+    ) : <div className='file-preview-drawer__loading'>{t('common.loading')}</div>}
+    {sourceContext && <div className="chat-assistant-msg-tool-actions"><ReferenceSourcesButton sources={sources} /><ExecutionResults /></div>}
+  </>;
 
   return ReactDOM.createPortal(
     <div
       className='file-preview-drawer__overlay'
+      style={sourceContext ? { zIndex: 900 } : undefined}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       role='presentation'
     >
@@ -62,11 +79,7 @@ export function FilePreviewDrawer({ open, filename, url, onClose, content }: Fil
           >×</button>
         </div>
         <div className='file-preview-drawer__body'>
-          {content !== undefined ? <pre className="ordinary-inline-preview">{content}</pre> : resolvedUrl ? (
-            <FileViewer file={resolvedUrl} fileName={filename} />
-          ) : (
-            <div className='file-preview-drawer__loading'>{t('common.loading')}</div>
-          )}
+          {sourceContext ? <SourceImportProvider context={sourceContext} sources={sources}>{body}</SourceImportProvider> : body}
         </div>
       </div>
     </div>,

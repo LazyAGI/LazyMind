@@ -1533,6 +1533,17 @@ func startParseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs [
 	return startParseTasksAtLevel(r.Context(), common.UserID(r), datasetID, taskIDs, requestedLevel)
 }
 
+// Task IDs are durable across lost responses and worker recovery. New reparse
+// attempts create new task IDs and therefore a new submission identity.
+func parseSubmissionKey(datasetID string, tasks []orm.Task) string {
+	ids := make([]string, 0, len(tasks))
+	for _, t := range tasks {
+		ids = append(ids, t.ID)
+	}
+	sort.Strings(ids)
+	return fmt.Sprintf("parse-%x", sha256.Sum256([]byte(datasetID+":"+strings.Join(ids, ","))))
+}
+
 func startParseTasksAtLevel(ctx context.Context, userID, datasetID string, taskIDs []string, requestedLevel string) ([]StartTaskResult, error) {
 	kbID := datasetKbIDByID(datasetID)
 	if kbID == "" {
@@ -1637,7 +1648,7 @@ func startParseTasksAtLevel(ctx context.Context, userID, datasetID string, taskI
 			items = append(items, buildAddFileItem(datasetID, candidate.task, candidate.doc, candidate.docExt, parsePath))
 		}
 		if len(baseTasks) > 0 {
-			extResults, err := callExternalAddDocsContext(ctx, addRequest{Items: items, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: processingLevel})
+			extResults, err := callExternalAddDocsContext(ctx, addRequest{Items: items, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: parseSubmissionKey(datasetID, baseTasks), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: processingLevel})
 			if err != nil {
 				for i, taskRow := range baseTasks {
 					resolved := common.ResolveAppError(err.Error(), http.StatusBadGateway)
@@ -2880,7 +2891,7 @@ func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs
 		Str("reparse_mode", reparseMode).
 		Str("strategy", strategy).
 		Msg("submitting reparse batch to doc service")
-	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, Strategy: strategy, IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: processingLevel})
+	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, Strategy: strategy, IdempotencyKey: parseSubmissionKey(datasetID, taskRows), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: processingLevel})
 	if err != nil {
 		errMsg := common.ResolveAppError(err.Error(), http.StatusBadGateway).Message
 		applog.Logger.Error().

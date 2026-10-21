@@ -109,11 +109,14 @@ func (s *ResourceService) Reparse(ctx context.Context, op ResourceOperationConte
 	if len(req.DocumentIDs) == 0 || len(req.DocumentIDs) > 20 || req.KnowledgeBaseID == "" {
 		return ResourceOperationResult{}, resourceErr("INVALID_ARGUMENT", "select a library and one to twenty documents")
 	}
-	if saved, found, err := s.ReplayOperation(ctx, op, action, req); found || err != nil {
-		return saved, err
-	}
 	if _, err := s.dataset(ctx, s.db, op, req.KnowledgeBaseID, acl.PermissionDatasetWrite); err != nil {
 		return ResourceOperationResult{}, err
+	}
+	if saved, found, err := s.ReplayOperation(ctx, op, action, req); found || err != nil {
+		if err != nil {
+			return saved, err
+		}
+		return s.submitReparseReceipt(ctx, op, req, saved)
 	}
 	snapshots := map[string]processingSnapshot{}
 	for _, id := range req.DocumentIDs {
@@ -126,7 +129,6 @@ func (s *ResourceService) Reparse(ctx context.Context, op ResourceOperationConte
 		}
 		snapshots[id] = snap
 	}
-	created := map[string]orm.Task{}
 	result, err := s.mutate(ctx, op, action, req, func(tx *gorm.DB) (ResourceOperationResult, error) {
 		var out ResourceOperationResult
 		ds, err := s.dataset(ctx, tx, op, req.KnowledgeBaseID, acl.PermissionDatasetWrite)
@@ -220,7 +222,6 @@ func (s *ResourceService) Reparse(ctx context.Context, op ResourceOperationConte
 			if e = tx.Model(&orm.DocumentProcessingState{}).Where("dataset_id = ? AND document_id = ?", ds.ID, id).Updates(map[string]any{"parse_status": "running", "chunk_status": "pending", "index_status": "pending", "parse_error_code": "", "parse_error_message": "", "chunk_error_code": "", "chunk_error_message": "", "index_error_code": "", "index_error_message": "", "updated_at": time.Now().UTC()}).Error; e != nil {
 				return out, e
 			}
-			created[id] = task
 			item.ResourceStatus = "updated"
 			item.ProcessingStatus = "pending"
 			item.TaskID = task.ID
@@ -232,10 +233,32 @@ func (s *ResourceService) Reparse(ctx context.Context, op ResourceOperationConte
 	if err != nil {
 		return result, err
 	}
+	return s.submitReparseReceipt(ctx, op, req, result)
+}
+
+// A durable pending receipt can resume submission after a process interruption.
+// The external request is keyed by the same task ID, including concurrent replay.
+func (s *ResourceService) submitReparseReceipt(ctx context.Context, op ResourceOperationContext, req ReparseDocumentsRequest, result ResourceOperationResult) (ResourceOperationResult, error) {
+	changed := false
 	for i := range result.Items {
 		item := &result.Items[i]
-		task, ok := created[item.ResourceRef.DocumentID]
-		if !ok || item.ResourceStatus != "updated" {
+		if item.ResourceStatus != "updated" || item.ProcessingStatus != "pending" || item.TaskID == "" {
+			continue
+		}
+		var task orm.Task
+		if err := s.db.WithContext(ctx).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", item.TaskID, req.KnowledgeBaseID).Take(&task).Error; err != nil {
+			return result, err
+		}
+		var latest orm.Task
+		if err := s.db.WithContext(ctx).Where("doc_id = ? AND dataset_id = ? AND deleted_at IS NULL", task.DocID, req.KnowledgeBaseID).Order("created_at DESC, id DESC").Take(&latest).Error; err != nil {
+			return result, err
+		}
+		if latest.ID != task.ID {
+			continue
+		}
+		changed = true
+		if task.LazyllmTaskID != "" {
+			item.ProcessingStatus = "submitted"
 			continue
 		}
 		submitted, e := s.submitReparse(ctx, op.Caller, req.KnowledgeBaseID, task.ID)
@@ -261,7 +284,9 @@ func (s *ResourceService) Reparse(ctx context.Context, op ResourceOperationConte
 			}
 		}
 	}
-	summarizeResourceResult(&result)
-	s.updateReceiptResult(ctx, op, result)
+	if changed {
+		summarizeResourceResult(&result)
+		s.updateReceiptResult(ctx, op, result)
+	}
 	return result, nil
 }
