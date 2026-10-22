@@ -27,7 +27,7 @@ function pendingPage() {
 function BatchGroups() {
   const [checkedIds, setCheckedIds] = useState(['b-0']);
   const onToggleMany: GroupBatchSelection['onToggleMany'] = (ids, checked) => setCheckedIds(old => checked ? [...new Set([...old, ...ids])] : old.filter(id => !ids.includes(id)));
-  return <SidebarGroups groups={groups} onEdit={vi.fn()} onRemove={vi.fn()} batchSelection={{ checkedIds, onToggle: (id, checked) => onToggleMany([id], checked), onToggleMany, onMembersChange: vi.fn() }} />;
+  return <SidebarGroups groups={groups} onEdit={vi.fn()} onRemove={vi.fn()} batchSelection={{ checkedIds, onToggle: (id, checked) => onToggleMany([id], checked), onToggleMany }} />;
 }
 beforeEach(() => {
   vi.clearAllMocks();
@@ -51,7 +51,7 @@ describe("group sidebar", () => {
       nextPageToken: "",
       total: 3,
     });
-    render(<MemoryRouter><SidebarGroups groups={[groups[0]]} onEdit={vi.fn()} onRemove={vi.fn()} batchSelection={batch ? { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn(), onMembersChange: vi.fn() } : undefined} /></MemoryRouter>);
+    render(<MemoryRouter><SidebarGroups groups={[groups[0]]} onEdit={vi.fn()} onRemove={vi.fn()} batchSelection={batch ? { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn() } : undefined} /></MemoryRouter>);
     const dated = (await screen.findByText("有时间")).closest(".conversation-group-member")!;
     expect(dated.querySelector("time")).toHaveTextContent("09/29");
     expect(dated.querySelector("time")).toHaveAttribute("datetime", "2026-09-29T03:13:00Z");
@@ -199,7 +199,7 @@ describe("group sidebar", () => {
         <output data-testid="selected-ids">{JSON.stringify(checkedIds)}</output>
         <button onClick={() => setCheckedIds(ids => ids.filter(id => id !== 'recent'))}>Uncheck recent</button>
         <button onClick={() => setCheckedIds(ids => ids.filter(id => id !== 'group-51'))}>Uncheck unloaded member</button>
-        <SidebarGroups groups={stableGroups} onEdit={vi.fn()} onRemove={vi.fn()} batchSelection={{ checkedIds, matchingGroupMemberIds, onMembersChange: vi.fn(), onToggle: vi.fn(), onToggleMany: (ids, checked) => {
+        <SidebarGroups groups={stableGroups} onEdit={vi.fn()} onRemove={vi.fn()} batchSelection={{ checkedIds, matchingGroupMemberIds, onToggle: vi.fn(), onToggleMany: (ids, checked) => {
           toggleMany(ids, checked);
           setCheckedIds(previous => checked ? [...new Set([...previous, ...ids])] : previous.filter(id => !ids.includes(id)));
         } }} />
@@ -229,7 +229,7 @@ describe("group sidebar", () => {
   });
   it('treats a missing group in the complete matching map as empty', async () => {
     vi.mocked(api.getConversationGroup).mockResolvedValue({ group: groups[0], conversations: [member('first')], nextPageToken: 'next' });
-    const batchSelection = { checkedIds: ['first'], matchingGroupMemberIds: {}, onToggle: vi.fn(), onToggleMany: vi.fn(), onMembersChange: vi.fn() };
+    const batchSelection = { checkedIds: ['first'], matchingGroupMemberIds: {}, onToggle: vi.fn(), onToggleMany: vi.fn() };
     render(<MemoryRouter><SidebarGroups groups={[groups[0]]} batchSelection={batchSelection} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
     await screen.findByRole('checkbox', { name: 'first' });
     const select = screen.getByRole('checkbox', { name: 'conversationOrganizer.selectAllInGroup 旅行' });
@@ -251,7 +251,7 @@ describe("group sidebar", () => {
           setMatchingGroupMemberIds({ a: ['first'] });
           setCheckedIds(['first', 'pinned', 'recent']);
         }}>Apply global snapshot</button>
-        <SidebarGroups groups={stableGroups} onEdit={vi.fn()} onRemove={vi.fn()} batchSelection={{ checkedIds, matchingGroupMemberIds, onToggle: vi.fn(), onMembersChange: vi.fn(), onToggleMany: (ids, checked) => {
+        <SidebarGroups groups={stableGroups} onEdit={vi.fn()} onRemove={vi.fn()} batchSelection={{ checkedIds, matchingGroupMemberIds, onToggle: vi.fn(), onToggleMany: (ids, checked) => {
           toggleMany(ids, checked);
           setCheckedIds(previous => checked ? [...new Set([...previous, ...ids])] : previous.filter(id => !ids.includes(id)));
         } }} />
@@ -280,7 +280,7 @@ describe("group sidebar", () => {
       const [checkedIds, setCheckedIds] = useState<string[]>([]);
       return <>
         <button onClick={() => setCheckedIds(ids => ids.filter(id => id !== 'second'))}>Uncheck new member</button>
-        <SidebarGroups groups={stableGroups} onEdit={vi.fn()} onRemove={vi.fn()} batchSelection={{ checkedIds, matchingGroupMemberIds, onToggle: vi.fn(), onMembersChange: vi.fn(), onInvalidate: invalidate, onToggleMany: ids => setCheckedIds(ids) }} />
+        <SidebarGroups groups={stableGroups} onEdit={vi.fn()} onRemove={vi.fn()} batchSelection={{ checkedIds, matchingGroupMemberIds, onToggle: vi.fn(), onInvalidate: invalidate, onToggleMany: ids => setCheckedIds(ids) }} />
       </>;
     }
     render(<MemoryRouter><Batch /></MemoryRouter>);
@@ -298,7 +298,7 @@ describe("group sidebar", () => {
     const beginSelection = vi.fn(() => () => current);
     selectionSnapshot.mockImplementationOnce(() => page.promise.then(result => ({ data: { selection_complete: true, conversations: result.conversations } })));
     vi.mocked(api.getConversationGroup).mockResolvedValue({ group: groups[0], conversations: [member('first')], nextPageToken: 'next' });
-    const selection = { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn(), onMembersChange: vi.fn(), beginSelection };
+    const selection = { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn(), beginSelection };
     render(<MemoryRouter><SidebarGroups groups={[groups[0]]} batchSelection={selection} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
     const select = screen.getByRole('checkbox', { name: 'conversationOrganizer.selectAllInGroup 旅行' });
     await waitFor(() => expect(select).toBeEnabled());
@@ -321,7 +321,7 @@ describe("group sidebar", () => {
       group: groups[0], conversations: [member('first')], nextPageToken: 'next',
     });
     const stableGroups = [groups[0]];
-    const batchSelection = { checkedIds: ['first'], onToggle: vi.fn(), onToggleMany: vi.fn(), onMembersChange: vi.fn() };
+    const batchSelection = { checkedIds: ['first'], onToggle: vi.fn(), onToggleMany: vi.fn() };
     const view = (matchingGroupMemberIds?: GroupBatchSelection['matchingGroupMemberIds']) => <MemoryRouter><SidebarGroups groups={stableGroups} batchSelection={{ ...batchSelection, matchingGroupMemberIds }} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>;
     const { rerender } = render(view());
     await screen.findByRole('checkbox', { name: 'first' });
@@ -340,7 +340,7 @@ describe("group sidebar", () => {
     vi.mocked(api.getConversationGroup).mockImplementation(async (_id, token) => token ? page.promise : {
       group: groups[0], conversations: [member('first'), member('first')], nextPageToken: 'next',
     });
-    const batchSelection = { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn(), onMembersChange: vi.fn() };
+    const batchSelection = { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn() };
     render(<MemoryRouter><SidebarGroups groups={[groups[0]]} searchText=" 旅行 " assistants="codex" batchSelection={batchSelection} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
     await screen.findByRole('checkbox', { name: 'first' });
     const more = screen.getByRole('button', { name: 'conversationOrganizer.showMore' });
@@ -353,7 +353,6 @@ describe("group sidebar", () => {
     expect(screen.getAllByRole('checkbox', { name: 'first' })).toHaveLength(1);
     expect(screen.getAllByRole('checkbox', { name: 'second' })).toHaveLength(1);
     expect(api.getConversationGroup).toHaveBeenCalledWith('a', '', '旅行', 'codex');
-    expect(batchSelection.onMembersChange).toHaveBeenLastCalledWith([member('first'), member('second')], 'false');
   });
   it('loads the next search page on the first click and hides more when all results are shown', async () => {
     vi.mocked(api.listConversationGroups).mockResolvedValue([groups[0]]);
@@ -375,7 +374,7 @@ describe("group sidebar", () => {
       group: groups[0], conversations: [member(changed ? 'fresh-first' : 'old-first')], nextPageToken: changed ? '' : 'old-next',
     });
     const stableGroups = [groups[0]];
-    const batchSelection = { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn(), onMembersChange: vi.fn() };
+    const batchSelection = { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn() };
     const view = () => <MemoryRouter><SidebarGroups groups={stableGroups} searchText={changed && change === 'keyword' ? 'new' : 'old'} assistants={changed && change === 'source' ? 'workbuddy' : 'codex'} isTaskConv={changed && change === 'mode'} batchSelection={batchSelection} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>;
     const { rerender } = render(view());
     await screen.findByRole('checkbox', { name: 'old-first' });
@@ -386,7 +385,6 @@ describe("group sidebar", () => {
     await act(async () => page.resolve({ group: groups[0], conversations: [member('stale-next')], nextPageToken: 'stale-token' }));
     expect(screen.queryByRole('checkbox', { name: 'stale-next' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'conversationOrganizer.showMore' })).not.toBeInTheDocument();
-    expect(batchSelection.onMembersChange).toHaveBeenLastCalledWith([member('fresh-first')], change === 'mode' ? 'true' : 'false');
   });
   it.each(['cancel', 'unmount'] as const)('ignores pending load-more results after batch %s', async action => {
     const page = pendingPage();
@@ -394,17 +392,15 @@ describe("group sidebar", () => {
       group: groups[0], conversations: [member('first')], nextPageToken: 'next',
     });
     const stableGroups = [groups[0]];
-    const batchSelection = { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn(), onMembersChange: vi.fn() };
+    const batchSelection = { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn() };
     const view = (batch: boolean) => <MemoryRouter><SidebarGroups groups={stableGroups} batchSelection={batch ? batchSelection : undefined} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>;
     const { rerender, unmount } = render(view(true));
     await screen.findByRole('checkbox', { name: 'first' });
     fireEvent.click(screen.getByRole('button', { name: 'conversationOrganizer.showMore' }));
     if (action === 'unmount') unmount();
     else rerender(view(false));
-    const updates = batchSelection.onMembersChange.mock.calls.length;
     await act(async () => page.resolve({ group: groups[0], conversations: [member('stale-next')], nextPageToken: '' }));
     expect(screen.queryByText('stale-next')).not.toBeInTheDocument();
-    expect(batchSelection.onMembersChange).toHaveBeenCalledTimes(updates);
   });
   it.each(['keyword', 'source', 'mode'] as const)('clears old members immediately when the %s changes and the new query fails', async change => {
     const page = pendingPage();
@@ -414,7 +410,7 @@ describe("group sidebar", () => {
       group: groups[0], conversations: [member('old-first')], nextPageToken: 'old-next',
     });
     const stableGroups = [groups[0]];
-    const batchSelection = { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn(), onMembersChange: vi.fn() };
+    const batchSelection = { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn() };
     const view = () => <MemoryRouter><SidebarGroups groups={stableGroups} searchText={changed && change === 'keyword' ? 'new' : 'old'} assistants={changed && change === 'source' ? 'workbuddy' : 'codex'} isTaskConv={changed && change === 'mode'} batchSelection={batchSelection} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>;
     const { rerender } = render(view());
     await screen.findByRole('checkbox', { name: 'old-first' });
@@ -426,12 +422,11 @@ describe("group sidebar", () => {
     await act(async () => page.reject(new Error('new query unavailable')));
     expect(screen.queryByRole('checkbox', { name: 'old-first' })).not.toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: 'conversationOrganizer.selectAllInGroup 旅行' })).toBeDisabled();
-    expect(batchSelection.onMembersChange).toHaveBeenLastCalledWith([], change === 'mode' ? 'true' : 'false');
     expect(batchSelection.onToggleMany).not.toHaveBeenCalled();
   });
   it('retains the load-more cursor after failure and permits retry', async () => {
     vi.mocked(api.getConversationGroup).mockImplementation(async () => ({ group: groups[0], conversations: [member('first')], nextPageToken: 'next' }));
-    const batchSelection = { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn(), onMembersChange: vi.fn() };
+    const batchSelection = { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn() };
     render(<MemoryRouter><SidebarGroups groups={[groups[0]]} batchSelection={batchSelection} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
     await screen.findByRole('checkbox', { name: 'first' });
     vi.mocked(api.getConversationGroup).mockRejectedValueOnce(new Error('page unavailable'));
@@ -449,7 +444,7 @@ describe("group sidebar", () => {
       group: groups[0], conversations: token ? [member('first'), member('second'), member('second'), { ...member('pinned'), pinned_at: '2026-10-20T00:00:00Z' }] : [member('first')], nextPageToken: token ? '' : 'next',
     }));
     selectionSnapshot.mockResolvedValue({ data: { selection_complete: true, conversations: [member('first'), member('second'), member('second'), { ...member('pinned'), pinned_at: '2026-10-20T00:00:00Z' }] } });
-    const batchSelection = { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn(), onMembersChange: vi.fn() };
+    const batchSelection = { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn() };
     render(<MemoryRouter><SidebarGroups groups={[groups[0]]} searchText=" 旅行 " assistants="codex" batchSelection={batchSelection} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
     await screen.findByRole('checkbox', { name: 'first' });
     fireEvent.click(screen.getByRole('checkbox', { name: 'conversationOrganizer.selectAllInGroup 旅行' }));
@@ -462,7 +457,7 @@ describe("group sidebar", () => {
       group: groups[0], conversations: [member(token ? 'second' : 'first')], nextPageToken: 'next',
     }));
     selectionSnapshot.mockResolvedValue({ data: { selection_complete: true, conversations: [member('second')], next_page_token: 'next' } });
-    const batchSelection = { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn(), onMembersChange: vi.fn() };
+    const batchSelection = { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn() };
     render(<MemoryRouter><SidebarGroups groups={[groups[0]]} batchSelection={batchSelection} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
     await screen.findByRole('checkbox', { name: 'first' });
     const select = screen.getByRole('checkbox', { name: 'conversationOrganizer.selectAllInGroup 旅行' });
@@ -483,7 +478,7 @@ describe("group sidebar", () => {
       group: groups[0], conversations: [member(changed ? 'fresh' : 'first')], nextPageToken: changed ? '' : 'next',
     });
     const stableGroups = [groups[0]];
-    const batchSelection = { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn(), onMembersChange: vi.fn() };
+    const batchSelection = { checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn() };
     const view = () => <MemoryRouter><SidebarGroups groups={stableGroups} searchText={changed && change === 'keyword' ? 'new' : 'old'} assistants={changed && change === 'source' ? 'workbuddy' : 'codex'} batchSelection={batchSelection} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>;
     const { rerender } = render(view());
     await screen.findByRole('checkbox', { name: 'first' });
@@ -521,7 +516,7 @@ describe("group sidebar", () => {
       return { group: groups.find(g => g.id === id)!, conversations: id === 'a' ? [{ conversation_id: 'a-0', display_name: 'a-0', pinned_at: '', membership_revision: 1 }] : [], nextPageToken: id === 'a' ? 'next' : '' };
     });
     selectionSnapshot.mockImplementation(() => new Promise<Awaited<ReturnType<typeof api.getConversationGroup>>>(resolve => { resolvePage = resolve; }).then(result => ({ data: { selection_complete: true, conversations: result.conversations } })));
-    const selection = { checkedIds: ['outside'], onToggle: vi.fn(), onToggleMany: vi.fn(), onMembersChange: vi.fn() };
+    const selection = { checkedIds: ['outside'], onToggle: vi.fn(), onToggleMany: vi.fn() };
     const view = (checkedIds: string[]) => <MemoryRouter><SidebarGroups groups={groups} onEdit={vi.fn()} onRemove={vi.fn()} batchSelection={{ ...selection, checkedIds }} /></MemoryRouter>;
     const { rerender } = render(view(selection.checkedIds));
     await screen.findByRole('checkbox', { name: 'a-0' });
@@ -536,13 +531,12 @@ describe("group sidebar", () => {
     expect(local).toBeEnabled();
   });
   it("shows loaded members beyond the preview limit and blocks drag changes in batch mode", async () => {
-    const batchSelection = { checkedIds: ['a-5'], onToggle: vi.fn(), onToggleMany: vi.fn(), onMembersChange: vi.fn() };
+    const batchSelection = { checkedIds: ['a-5'], onToggle: vi.fn(), onToggleMany: vi.fn() };
     render(<MemoryRouter><SidebarGroups groups={groups} batchSelection={batchSelection} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
     const sixth = await screen.findByRole('checkbox', { name: 'a对话5' });
     expect(sixth).toBeChecked();
     fireEvent.click(sixth);
     expect(batchSelection.onToggle).toHaveBeenCalledWith('a-5', false);
-    expect(batchSelection.onMembersChange).toHaveBeenLastCalledWith(expect.arrayContaining([expect.objectContaining({ conversation_id: 'a-5' })]), 'false');
     const group = screen.getByTitle('旅行');
     fireEvent.drop(group.closest('.conversation-group')!, { dataTransfer: transfer(CONVERSATION_DRAG, JSON.stringify({ id: 'free-chat' })) });
     expect(api.assignConversation).not.toHaveBeenCalled();
@@ -607,7 +601,7 @@ describe("group sidebar", () => {
     await waitFor(() => expect(row).toHaveAttribute('draggable', 'true'));
     expect(api.emitConversationGroupsChanged).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'b对话0', exact: true })).toBeInTheDocument();
-    rerender(<MemoryRouter><SidebarGroups groups={groups} batchSelection={{ checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn(), onMembersChange: vi.fn() }} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
+    rerender(<MemoryRouter><SidebarGroups groups={groups} batchSelection={{ checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn() }} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
     fireEvent.drop(await screen.findByRole('checkbox', { name: 'a对话1' }), { dataTransfer });
     expect(api.assignConversation).toHaveBeenCalledTimes(1);
     expect(document.querySelector('.record-drag-handle')).toBeNull();

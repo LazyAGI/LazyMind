@@ -45,7 +45,6 @@ import {
   Configuration as CoreConfiguration,
   ConversationsApiFactory,
   DefaultApiFactory,
-  type ConversationGroupMember,
 } from "@/api/generated/core-client";
 import {
   useCallback,
@@ -206,18 +205,12 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       setCheckedListState(ids);
     }, []);
     const restoringSelectionRef = useRef<string[] | null>(null);
-    const [batchGroupMembers, setBatchGroupMembers] = useState<ConversationGroupMember[]>([]);
     const [showBatchExport, setShowBatchExport] = useState(false);
     const [allBatchConversations, setAllBatchConversations] = useState<SidebarConversation[] | null>(null);
     const [isSelectingAll, setIsSelectingAll] = useState(false);
     const [selectionNeedsRefresh, setSelectionNeedsRefresh] = useState(false);
     const batchSelectionRequestRef = useRef(0);
     const selectingAllRef = useRef(false);
-    const batchMembersByScope = useRef<Record<string, ConversationGroupMember[]>>({});
-    const updateBatchGroupMembers = useCallback((members: ConversationGroupMember[], scope = "all") => {
-      batchMembersByScope.current[scope] = members;
-      setBatchGroupMembers(Object.values(batchMembersByScope.current).flat());
-    }, []);
     const [isHistoryLoading, setIsHistoryLoading] = useState(true);
     const [batchArchiveIds, setBatchArchiveIds] = useState<string[] | null>(null);
     const [isBatchArchiving, setIsBatchArchiving] = useState(false);
@@ -735,11 +728,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       }
       ++historyRequestRef.current;
       setHistoryList((previous) => previous.filter((item) => !removedIds.has(item.conversation_id || "")));
-      setBatchGroupMembers((previous) => previous.filter((item) => !removedIds.has(item.conversation_id)));
       setAllBatchConversations(previous => previous?.filter(item => !removedIds.has(item.conversation_id || "")) ?? null);
       setCheckedList((previous) => previous.filter((id) => !removedIds.has(id)));
       if (removedIds.has(currentSessionId)) {
-        onRemove([...historyList, ...batchGroupMembers].find((item) => item.conversation_id === currentSessionId)
+        onRemove(historyList.find((item) => item.conversation_id === currentSessionId)
           || { conversation_id: currentSessionId });
       }
       emitConversationGroupsChanged();
@@ -950,8 +942,6 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       closeBatchArchive();
       setShowBatchExport(false);
       setCheckedList([]);
-      setBatchGroupMembers([]);
-      batchMembersByScope.current = {};
       setAllBatchConversations(null);
       setSelectionNeedsRefresh(false);
     }
@@ -1475,7 +1465,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         {hasGlobalToolbar && batchSelectRow}
         {splitSections && <div className={showBatchExport ? "export-checkbox-group" : undefined}>
           {renderItem(true)}
-          {groupSection?.(showBatchExport ? { checkedIds: checkedList, matchingGroupMemberIds, onToggle: toggleBatchConversation, onToggleMany: toggleBatchConversations, onMembersChange: updateBatchGroupMembers, onInvalidate: invalidateBatchSelection, beginSelection: beginGroupSelection } : undefined, [conversationFilters.filter], conversationFilters.sources?.join(","))}
+          {groupSection?.(showBatchExport ? { checkedIds: checkedList, matchingGroupMemberIds, onToggle: toggleBatchConversation, onToggleMany: toggleBatchConversations, onInvalidate: invalidateBatchSelection, beginSelection: beginGroupSelection } : undefined, [conversationFilters.filter], conversationFilters.sources?.join(","))}
         </div>}
         {!hideHeader && (
           <div className="record-header">

@@ -71,10 +71,10 @@ func TestConversationSelectionSnapshotIsCompleteAndScoped(t *testing.T) {
 	if err := db.Create(&orm.ConversationOrganizerSnapshotItem{RunID: "run", ConversationID: "root-02", UserID: "u1"}).Error; err != nil {
 		t.Fatal(err)
 	}
-	fetch := func(query string) []map[string]any {
+	fetch := func(userID, query string) []map[string]any {
 		t.Helper()
 		r := httptest.NewRequest(http.MethodGet, "/?selection_snapshot=true&is_task_conv=false&page_size=1&page_token=50&"+query, nil)
-		r.Header.Set("X-User-Id", "u1")
+		r.Header.Set("X-User-Id", userID)
 		w := httptest.NewRecorder()
 		ListConversations(w, r)
 		var data struct {
@@ -95,7 +95,7 @@ func TestConversationSelectionSnapshotIsCompleteAndScoped(t *testing.T) {
 	if err := db.Model(&orm.Conversation{}).Where("id=?", "root-50").UpdateColumn("updated_at", now.Add(time.Minute)).Error; err != nil {
 		t.Fatal(err)
 	}
-	rows := fetch("keyword=report")
+	rows := fetch("u1", "keyword=report")
 	ids := map[string]bool{}
 	for _, row := range rows {
 		id := row["conversation_id"].(string)
@@ -116,14 +116,26 @@ func TestConversationSelectionSnapshotIsCompleteAndScoped(t *testing.T) {
 	if len(ids) != 52 || !ids["root-50"] || !ids["fork"] {
 		t.Fatalf("snapshot scope: %v", ids)
 	}
-	if rows := fetch("keyword=ProjectNeedle&selection_group_id=g&assistants=lazymind"); len(rows) != 2 {
+	if rows := fetch("u1", "keyword=ProjectNeedle&selection_group_id=g&assistants=lazymind"); len(rows) != 2 {
 		t.Fatalf("group keyword scope: %v", rows)
 	}
-	if rows := fetch("keyword=ProjectNeedle&selection_group_id=g&assistants=codex"); len(rows) != 0 {
+	if rows := fetch("u1", "keyword=ProjectNeedle&selection_group_id=g&assistants=codex"); len(rows) != 0 {
 		t.Fatalf("source intersection: %v", rows)
 	}
-	if rows := fetch("selection_group_id=foreign-group"); len(rows) != 0 {
+	if err := db.Create(&orm.ConversationGroup{ID: "foreign-group", UserID: "u2", Name: "Foreign", NormalizedName: "foreign"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.ConversationGroupMember{ConversationID: "foreign", GroupID: "foreign-group", UserID: "u2"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if rows := fetch("u1", "selection_group_id=foreign-group"); len(rows) != 0 {
 		t.Fatalf("foreign group: %v", rows)
+	}
+	if rows := fetch("u2", "selection_group_id=foreign-group"); len(rows) != 1 || rows[0]["conversation_id"] != "foreign" {
+		t.Fatalf("owner's group: %v", rows)
+	}
+	if rows := fetch("u1", "selection_group_id=unknown-group"); len(rows) != 0 {
+		t.Fatalf("unknown group: %v", rows)
 	}
 }
 

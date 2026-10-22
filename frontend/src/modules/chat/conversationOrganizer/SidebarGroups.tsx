@@ -26,7 +26,6 @@ export type GroupBatchSelection = {
   matchingGroupMemberIds?: Readonly<Record<string, readonly string[]>>;
   onToggle: (id: string, checked: boolean) => void;
   onToggleMany: (ids: string[], checked: boolean) => void;
-  onMembersChange: (members: ConversationGroupMember[], scope?: string) => void;
   onInvalidate?: () => void;
   beginSelection?: () => (() => boolean);
 };
@@ -61,6 +60,7 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
   membersRef.current = members;
   const batchSelectionRef = useRef(batchSelection);
   batchSelectionRef.current = batchSelection;
+  const checkedIds = useMemo(() => new Set(batchSelection?.checkedIds), [batchSelection?.checkedIds]);
   const pageCounts = useRef<Record<string, number>>({});
   const [tokens, setTokens] = useState<Record<string, string>>({});
   const [matches, setMatches] = useState<Set<string> | null>(null);
@@ -97,12 +97,6 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
     setPageRequest(null);
   };
   const selectionVersion = useRef(0);
-  const onMembersChange = batchSelection?.onMembersChange;
-  useEffect(() => {
-    onMembersChange?.(groups.filter(g => !matches || matches.has(g.id)).flatMap(g =>
-      (members[g.id] || []).filter(c => !c.pinned_at),
-    ), String(isTaskConv));
-  }, [groups, matches, members, onMembersChange, isTaskConv]);
   const load = useCallback(async () => {
     const matched = keyword ? (await listConversationGroups(keyword, isTaskConv, assistants)).filter(g => projectsOnly ? g.kind === "project" : includeProjects || g.kind !== "project") : groups;
     const details = await Promise.all(matched.map(async g => {
@@ -218,11 +212,12 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
       const conversations = await readConversationSelection(keyword, isTaskConv, assistants, g.id);
       if (!isCurrent()) return;
       const ids = conversations.filter(c => !c.pinned_at).map(c => c.conversation_id!);
+      const idSet = new Set(ids);
       setSelectedGroupSnapshots(previous => ({ ...previous, [g.id]: { version: groupSnapshotVersion, ids } }));
       batchSelection.onToggleMany(ids, checked);
       const cached = localGroupIds(g.id) ?? batchSelection.matchingGroupMemberIds?.[g.id];
       const knownIds = cached ?? (members[g.id] || []).filter(c => !c.pinned_at).map(c => c.conversation_id);
-      if ((cached && cached.length !== ids.length) || knownIds.some(id => !ids.includes(id))) batchSelection.onInvalidate?.();
+      if ((cached && cached.length !== ids.length) || knownIds.some(id => !idSet.has(id))) batchSelection.onInvalidate?.();
     } catch { if (isCurrent()) message.error(t('chat.fork.historyLoadFailed')); }
     finally { finishPageRequest(request); }
   };
@@ -231,7 +226,7 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
     const completeIds = localGroupIds(g.id) ?? (batchSelection?.matchingGroupMemberIds === undefined
       ? undefined : batchSelection.matchingGroupMemberIds[g.id] || []);
     const selectableIds = completeIds ?? all.map(c => c.conversation_id);
-    const selectedCount = selectableIds.filter(id => batchSelection?.checkedIds.includes(id)).length;
+    const selectedCount = selectableIds.filter(id => checkedIds.has(id)).length;
     const allSelected = selectableIds.length > 0 && selectedCount === selectableIds.length && (completeIds !== undefined || !tokens[g.id]);
     const canSelectGroup = completeIds === undefined ? Boolean(members[g.id]) && (all.length > 0 || Boolean(tokens[g.id])) : selectableIds.length > 0;
     const open = Boolean(keyword) || !collapsed.has(g.id);
@@ -257,7 +252,7 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
             const row = e.currentTarget.getBoundingClientRect();
             void moveMember(g.id, source.id, { target_conversation_id: c.conversation_id, position: e.clientY > row.top + row.height / 2 ? 'after' : 'before' }, source.groupId === g.id);
           }}>
-          {batchSelection ? <Checkbox className="conversation-group-batch-checkbox" disabled={refreshing} checked={batchSelection.checkedIds.includes(c.conversation_id)} onChange={event => batchSelection.onToggle(c.conversation_id, event.target.checked)}><span title={c.display_name}>{c.display_name || c.conversation_id}</span></Checkbox> : <button data-conversation-title onClick={() => navigate(getChatConversationPath(c.conversation_id))}>{c.display_name || c.conversation_id}</button>}
+          {batchSelection ? <Checkbox className="conversation-group-batch-checkbox" disabled={refreshing} checked={checkedIds.has(c.conversation_id)} onChange={event => batchSelection.onToggle(c.conversation_id, event.target.checked)}><span title={c.display_name}>{c.display_name || c.conversation_id}</span></Checkbox> : <button data-conversation-title onClick={() => navigate(getChatConversationPath(c.conversation_id))}>{c.display_name || c.conversation_id}</button>}
           {c.updated_at && dayjs(c.updated_at).isValid() && <time className="conversation-group-member-time" dateTime={c.updated_at}>{dayjs(c.updated_at).format("MM/DD")}</time>}
           {!batchSelection && <ConversationMembership onRename={() => setRenamingId(c.conversation_id)} pinned={Boolean(c.pinned_at)} isTaskConv={Boolean(c.is_task_conv)} conversationId={c.conversation_id} groupId={g.id} groupKind={g.kind} title={c.display_name}
             menuOpen={!renamingId && openMenuId === c.conversation_id} onMenuOpenChange={open => setOpenMenuId(current => open && !renamingId ? c.conversation_id : current === c.conversation_id ? null : current)} />}
