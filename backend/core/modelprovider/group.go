@@ -53,6 +53,7 @@ type groupListItem struct {
 	Name                string         `json:"name"`
 	BaseURL             string         `json:"base_url"`
 	HasAPIKey           bool           `json:"has_api_key"`
+	ModelCount          int            `json:"model_count"`
 	Keys                []groupKeyItem `json:"keys"`
 	IsVerified          bool           `json:"is_verified"`
 }
@@ -134,6 +135,29 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	modelCounts := make(map[string]int, len(rows))
+	// Some isolated credential tests intentionally omit the model table.
+	// Production lists count metadata in one aggregate, without loading models.
+	if len(rows) > 0 && db.Migrator().HasTable(&orm.UserModelProviderGroupModel{}) {
+		groupIDs := make([]string, 0, len(rows))
+		for _, group := range rows {
+			groupIDs = append(groupIDs, group.ID)
+		}
+		var counts []struct {
+			UserModelProviderGroupID string
+			ModelCount               int
+		}
+		if err := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroupModel{}).
+			Select("user_model_provider_group_id, COUNT(*) AS model_count").
+			Where("user_model_provider_id = ? AND create_user_id = ? AND user_model_provider_group_id IN ? AND deleted_at IS NULL", parent.ID, userID, groupIDs).
+			Group("user_model_provider_group_id").Scan(&counts).Error; err != nil {
+			common.ReplyErr(w, "list groups failed", http.StatusInternalServerError)
+			return
+		}
+		for _, count := range counts {
+			modelCounts[count.UserModelProviderGroupID] = count.ModelCount
+		}
+	}
 	out := make([]groupListItem, 0, len(rows))
 	for i := range rows {
 		g := rows[i]
@@ -152,6 +176,7 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 			Name:                g.Name,
 			BaseURL:             connectionBaseURL(parent, g.BaseURL),
 			HasAPIKey:           strings.TrimSpace(g.APIKey) != "" || strings.TrimSpace(g.APIKeyCiphertext) != "",
+			ModelCount:          modelCounts[g.ID],
 			Keys:                keys,
 			IsVerified:          g.IsVerified,
 		})

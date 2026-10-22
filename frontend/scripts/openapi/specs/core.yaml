@@ -12289,6 +12289,8 @@ components:
                     items:
                         $ref: '#/components/schemas/modelProviderGroupKeyOpenAPIItem'
                     type: array
+                model_count:
+                    type: integer
                 name:
                     type: string
                 user_model_provider_id:
@@ -12298,6 +12300,7 @@ components:
                 - has_api_key
                 - id
                 - is_verified
+                - model_count
                 - name
                 - user_model_provider_id
             type: object
@@ -12992,6 +12995,9 @@ components:
                     type: string
                 model_key:
                     type: string
+                model_type:
+                    description: Actual stored technical model type, independent of the default model role; omitted for cloud models without local metadata
+                    type: string
                 name:
                     type: string
                 provider_group_id:
@@ -13013,6 +13019,9 @@ components:
                     type: string
                 user_model_provider_id:
                     type: string
+                vision:
+                    description: Actual configured vision support, including explicit false; omitted when unknown for cloud models
+                    type: boolean
             required:
                 - availability
                 - is_default
@@ -14842,11 +14851,21 @@ components:
             type: object
         updateModelProviderGroupModelOpenAPIRequest:
             properties:
+                customize:
+                    description: Explicitly convert a changed catalog model to a user override. Required when editing catalog metadata; no-op requests do not convert it.
+                    type: boolean
                 max_input_tokens:
-                    description: LLM input context window, for example 512, 128K, or 1M
+                    description: Optional LLM/VLM input context window, for example 512, 128K, or 1M. Omitted fields remain unchanged.
                     type: string
-            required:
-                - max_input_tokens
+                model_type:
+                    description: Optional supported technical model type. Must be compatible with the supplier runtime protocol and existing references.
+                    type: string
+                name:
+                    description: Optional API model identifier; 1 to 512 UTF-8 bytes. Preserves the local model UUID.
+                    type: string
+                vision:
+                    description: Optional image-input support for chat models.
+                    type: boolean
             type: object
         updateModelProviderGroupOpenAPIRequest:
             properties:
@@ -26238,7 +26257,7 @@ paths:
             tags:
                 - model_providers
         patch:
-            description: Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+            description: Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and LLM/VLM context window. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
             parameters:
                 - in: path
                   name: model_provider_id

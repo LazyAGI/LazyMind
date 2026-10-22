@@ -14,12 +14,13 @@ const mocks = vi.hoisted(() => ({
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ i18n: { language: "zh-CN" }, t: mocks.translate }),
 }));
-vi.mock("@/components/request", () => ({ localizeErrorCode: (code: string) => code }));
+vi.mock("@/components/request", () => ({ localizeErrorCode: (code: string) => code, getLocalizedErrorMessage: (error: unknown) => error instanceof Error ? error.message : String(error) }));
 vi.mock("../api", () => ({
   modelProvidersApi: {
     apiCoreModelProvidersGet: mocks.getProviders,
     apiCoreModelProvidersWithGroupsGet: mocks.getProvidersWithGroups,
     apiCoreModelProvidersModelProviderIdGroupsGet: mocks.getGroups,
+    apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGet: vi.fn().mockResolvedValue({ data: { models: [] } }),
   },
   modelProvidersDefaultApi: {},
   unwrapModelProviderData: (data: unknown) => data,

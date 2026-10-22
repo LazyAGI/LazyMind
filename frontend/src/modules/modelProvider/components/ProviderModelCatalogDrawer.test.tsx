@@ -87,6 +87,71 @@ beforeEach(() => {
 });
 
 describe("provider model catalog drawer", () => {
+  it("blocks incompatible remote types and bulk imports for the current protocol", async () => {
+    const props = { ...fixture([]), protocolName: "Claude" };
+    draw(props);
+    await screen.findByText("BAAI/bge-large");
+    expect(screen.getByRole("button", { name: "modelProvider.catalog.addModel:BAAI/bge-large" })).toBeDisabled();
+    expect(screen.getByText("modelProvider.catalog.unsupportedType")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.addAll" }));
+    await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(1));
+    expect(props.onAdd).toHaveBeenCalledWith(expect.objectContaining({ name: "deepseek-v3", model_type: "llm" }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "modelProvider.catalog.modelType:custom/unknown" }));
+    expect(screen.queryByRole("option", { name: "modelProvider.capability.embedding" })).not.toBeInTheDocument();
+  });
+  it("shows only populated task tabs, retains their counts while searching, and names custom sections", async () => {
+    const { baseElement } = draw(fixture());
+    await screen.findByText("deepseek-v3");
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs).toHaveLength(5);
+    expect(screen.queryByRole("tab", { name: /modelProvider.taskType.rerank/ })).not.toBeInTheDocument();
+    const embedding = screen.getByRole("tab", { name: /modelProvider.taskType.embedding/ });
+    expect(embedding).toHaveTextContent("1");
+    expect(screen.getByRole("region", { name: "modelProvider.catalog.customGroup · modelProvider.taskType.chat" })).toHaveTextContent("qwen-private");
+    expect(baseElement.querySelector(".provider-model-catalog-group-kind")).toHaveTextContent("modelProvider.catalog.customGroup");
+    fireEvent.change(screen.getByRole("textbox", { name: "modelProvider.catalog.search" }), { target: { value: "deepseek" } });
+    expect(screen.getAllByRole("tab")).toHaveLength(5);
+    expect(embedding).toHaveTextContent("1");
+    expect(screen.queryByText("BAAI/bge-large")).not.toBeInTheDocument();
+  });
+  it("supports arrow, Home and End navigation with one tab stop for task filters", async () => {
+    draw(fixture());
+    await screen.findByText("deepseek-v3");
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs[0]).toHaveAttribute("tabindex", "0");
+    expect(tabs.slice(1).every((tab) => tab.getAttribute("tabindex") === "-1")).toBe(true);
+    fireEvent.keyDown(tabs[0], { key: "ArrowRight" });
+    expect(tabs[1]).toHaveFocus();
+    expect(tabs[1]).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(tabs[1], { key: "End" });
+    expect(tabs[tabs.length - 1]).toHaveFocus();
+    fireEvent.keyDown(tabs[tabs.length - 1], { key: "Home" });
+    expect(tabs[0]).toHaveFocus();
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", tabs[0].id);
+  });
+  it("discloses the complete model ID on a tap without adding that model", async () => {
+    const props = fixture([]);
+    draw(props);
+    const name = await screen.findByRole("button", { name: "deepseek-v3" });
+    fireEvent.click(name);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("deepseek-v3");
+    expect(props.onAdd).not.toHaveBeenCalled();
+  });
+  it("returns to all models when classifying the last unknown model removes its task tab", async () => {
+    mocks.remote.mockResolvedValueOnce({ models: [remote[2]] });
+    const props = fixture([]);
+    draw(props);
+    fireEvent.click(await screen.findByRole("tab", { name: /modelProvider.taskType.unknown/ }));
+    const select = screen.getByRole("combobox", { name: "modelProvider.catalog.modelType:custom/unknown" });
+    fireEvent.mouseDown(select);
+    await screen.findByRole("listbox");
+    fireEvent.click(screen.getByText("modelProvider.capability.embedding", { selector: ".ant-select-item-option-content" }));
+    await waitFor(() => expect(screen.queryByRole("tab", { name: /modelProvider.taskType.unknown/ })).not.toBeInTheDocument());
+    expect(screen.getByRole("tab", { name: /modelProvider.catalog.all/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /modelProvider.taskType.embedding/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "modelProvider.catalog.addModel:custom/unknown" })).toBeEnabled();
+    expect(props.onAdd).not.toHaveBeenCalled();
+  });
   it("uses model identities for mixed-brand models without borrowing the supplier protocol logo", async () => {
     mocks.remote.mockResolvedValueOnce({
       models: [

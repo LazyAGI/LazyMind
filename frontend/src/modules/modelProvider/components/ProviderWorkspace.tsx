@@ -11,6 +11,7 @@ import {
   SettingOutlined,
 } from "@ant-design/icons";
 import {
+  Alert,
   Button,
   Drawer,
   Empty,
@@ -40,6 +41,7 @@ import {
   withModelProviderJsonOptions,
 } from "../api";
 import { getProviderLogoUrl } from "../providerBranding";
+import { getProviderDisplayName, getProviderSearchText } from "../providerDisplayNames";
 import { getModelTaskLabelKey, getModelTaskType } from "../modelTaskTypes";
 import { ModelTypeIcon } from "./ModelTypeBadge";
 import { SavedProviderModels } from "./SavedProviderModels";
@@ -67,6 +69,7 @@ interface Props {
     group: ProviderConnectionGroup,
   ) => void;
   modelsLoading: Record<string, boolean>;
+  modelsError?: Record<string, string>;
   onAddModel: (provider: AddedProvider, group: ProviderConnectionGroup) => void;
   onSyncModels: (
     provider: AddedProvider,
@@ -90,7 +93,7 @@ interface Props {
 
 function Logo({ provider }: { provider: ProviderOption }) {
   const logo = getProviderLogoUrl(
-    provider.protocolName || provider.source || provider.name,
+    provider.name || provider.protocolName || provider.source,
     provider.isCustom,
   );
   return (
@@ -100,8 +103,15 @@ function Logo({ provider }: { provider: ProviderOption }) {
   );
 }
 
+function hasProviderConfiguration(provider: AddedProvider): boolean {
+  return provider.groups.some(
+    (group) => group.apiKeyConfigured || group.keys.length > 0 || (group.modelCount || 0) > 0 || group.models.length > 0,
+  );
+}
+
 export function ProviderWorkspace(props: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const language = i18n?.resolvedLanguage || i18n?.language;
   const label = (key: string, options?: Record<string, unknown>) =>
     t(`modelProvider.workspace.${key}`, options);
   const [selectedId, setSelectedId] = useState(props.highlightProviderId || "");
@@ -139,6 +149,7 @@ export function ProviderWorkspace(props: Props) {
   const [keyForm] = Form.useForm<{ apiKey: string }>();
   const keyDraft = useSettingsFormDraft(keyForm, keyOpen, keySaving);
   const endpointValue = Form.useWatch("baseUrl", endpointForm);
+  const sourceTemplateId = Form.useWatch("sourceProviderId", providerForm);
   const loadedGroups = useRef(new Set<string>());
   const providers = useMemo(
     () =>
@@ -160,9 +171,17 @@ export function ProviderWorkspace(props: Props) {
   );
   const provider =
     providers.find((item) => item.id === selectedId) || providers[0];
+  const providerDisplayName = provider
+    ? getProviderDisplayName(provider, language)
+    : "";
   // One private compatibility record belongs to each supplier.
   const group = provider?.groups[0];
   const groupKey = provider && group ? `${provider.id}:${group.id}` : "";
+  const hasSavedKeys = Boolean(group?.keys.length || group?.apiKeyConfigured);
+  const hasEnabledKey = group?.keys.length ? group.keys.some((key) => key.enabled) : Boolean(group?.apiKeyConfigured);
+  const verifiedSelection = hasEnabledKey && group?.verified === true;
+  const supplierStatus = !hasSavedKeys ? "notConfigured" : !hasEnabledKey ? "disabled" : verifiedSelection ? "connected" : "notConnected";
+  const modelsError = groupKey ? props.modelsError?.[groupKey] : undefined;
   const endpointDirty =
     Boolean(provider) &&
     (endpointValue ?? provider.baseUrl).trim() !== provider.baseUrl;
@@ -432,8 +451,8 @@ export function ProviderWorkspace(props: Props) {
   };
   const visibleProviders = providers.filter(
     (item) =>
-      (!configuredOnly || item.groups.length > 0) &&
-      item.name.toLowerCase().includes(search.toLowerCase().trim()),
+      (!configuredOnly || hasProviderConfiguration(item)) &&
+      getProviderSearchText(item, language).includes(search.toLowerCase().trim()),
   );
   const models = (group?.models || []).filter(
     (model) =>
@@ -524,10 +543,11 @@ export function ProviderWorkspace(props: Props) {
                 aria-current={provider?.id === item.id ? "page" : undefined}
                 disabled={initializing || providerSaving || providerDeleting}
                 onClick={() => changeProvider(item.id)}
+                title={getProviderDisplayName(item, language)}
               >
                 <Logo provider={item} />
-                <span>{item.name}</span>
-                {item.groups.length > 0 ? (
+                <span>{getProviderDisplayName(item, language)}</span>
+                {hasProviderConfiguration(item) ? (
                   <i
                     className={
                       item.groups.some((candidate) => candidate.verified)
@@ -572,11 +592,11 @@ export function ProviderWorkspace(props: Props) {
                     className="provider-workspace-mobile-back"
                     aria-label={label("suppliers")}
                     icon={<ArrowLeftOutlined aria-hidden="true" />}
-                    onClick={() => setMobileDetail(false)}
+                    onClick={() => confirmEndpointLeave(() => setMobileDetail(false))}
                   />
                   <Logo provider={provider} />
                   <div>
-                    <h2>{provider.name}</h2>
+                    <h2 title={providerDisplayName}>{providerDisplayName}</h2>
                   </div>
                 </div>
                 <div className="provider-workspace-supplier-actions">
@@ -603,16 +623,14 @@ export function ProviderWorkspace(props: Props) {
                     </>
                   ) : null}
                   <span
-                    className={`provider-workspace-status${provider.groups.some((candidate) => candidate.verified) ? " is-ready" : ""}`}
+                    className={`provider-workspace-status${verifiedSelection ? " is-ready" : ""}`}
                   >
-                    {provider.groups.some((candidate) => candidate.verified) ? (
+                    {verifiedSelection ? (
                       <CheckCircleFilled aria-hidden="true" />
                     ) : (
                       <span className="provider-workspace-status-dot" />
                     )}
-                    {provider.groups.some((candidate) => candidate.verified)
-                      ? label("connected")
-                      : label("notConnected")}
+                    {label(supplierStatus)}
                   </span>
                 </div>
               </header>
@@ -623,7 +641,7 @@ export function ProviderWorkspace(props: Props) {
                 >
                   <ProviderKeyManager
                     providerId={provider.id}
-                    providerName={provider.name}
+                    providerName={providerDisplayName}
                     groupId={group?.id || ""}
                     keys={group?.keys || []}
                     disabled={endpointDirty || endpointSaving || keySaving}
@@ -746,7 +764,7 @@ export function ProviderWorkspace(props: Props) {
                     <h3>
                       {label("models")}{" "}
                       <span className="provider-workspace-count">
-                        {group?.models.length || 0}
+                        {group?.modelCount ?? group?.models.length ?? 0}
                       </span>
                     </h3>
                     <div>
@@ -764,7 +782,7 @@ export function ProviderWorkspace(props: Props) {
                       </Tooltip>
                       <Button
                         icon={<ReloadOutlined aria-hidden="true" />}
-                        disabled={initializing || endpointDirty}
+                        disabled={initializing || endpointDirty || props.modelsLoading[groupKey]}
                         onClick={() =>
                           void withProviderModels(props.onSyncModels)
                         }
@@ -773,7 +791,7 @@ export function ProviderWorkspace(props: Props) {
                       </Button>
                       <Button
                         icon={<PlusOutlined aria-hidden="true" />}
-                        disabled={initializing || endpointDirty}
+                        disabled={initializing || endpointDirty || props.modelsLoading[groupKey]}
                         onClick={() =>
                           void withProviderModels(props.onAddModel)
                         }
@@ -809,21 +827,43 @@ export function ProviderWorkspace(props: Props) {
                       ]}
                     />
                   </div>
-                  <SavedProviderModels
-                    models={models}
-                    loading={Boolean(props.modelsLoading[groupKey])}
-                    providerName={
-                      provider.protocolName || provider.source || provider.name
-                    }
-                    supplierName={provider.name}
-                    capabilityLabel={props.capabilityLabel}
-                    onEdit={(model) => {
-                      if (group) props.onEditModel(provider, group, model);
-                    }}
-                    onRemove={(model) => {
-                      if (group) props.onDeleteModel(provider, group, model);
-                    }}
-                  />
+                  {modelsError ? (
+                    <Alert
+                      className="provider-workspace-models-error"
+                      type="error"
+                      showIcon
+                      message={label("modelsLoadFailed")}
+                      description={modelsError}
+                      action={
+                        <Button
+                          size="small"
+                          loading={props.modelsLoading[groupKey]}
+                          onClick={() => {
+                            if (group) props.onLoadModels(provider, group);
+                          }}
+                        >
+                          {label("retry")}
+                        </Button>
+                      }
+                    />
+                  ) : null}
+                  {!modelsError || Boolean(group?.models.length) ? (
+                    <SavedProviderModels
+                      models={models}
+                      loading={Boolean(props.modelsLoading[groupKey])}
+                      providerName={
+                        provider.protocolName || provider.source || provider.name
+                      }
+                      supplierName={provider.name}
+                      capabilityLabel={props.capabilityLabel}
+                      onEdit={(model) => {
+                        if (group) props.onEditModel(provider, group, model);
+                      }}
+                      onRemove={(model) => {
+                        if (group) props.onDeleteModel(provider, group, model);
+                      }}
+                    />
+                  ) : null}
                 </section>
               </div>
             </>
@@ -841,7 +881,7 @@ export function ProviderWorkspace(props: Props) {
       {provider ? (
         <ProviderRequestConfigDrawer
           providerId={provider.id}
-          providerName={provider.name}
+          providerName={providerDisplayName}
           open={requestConfigOpen}
           onClose={() => setRequestConfigOpen(false)}
           onSaved={props.onReload}
@@ -886,7 +926,12 @@ export function ProviderWorkspace(props: Props) {
                 whitespace: true,
                 message: label("supplierNameRequired"),
               },
-              { max: 255, message: label("supplierNameMax") },
+              {
+                validator: (_, value?: string) =>
+                  new TextEncoder().encode(value?.trim() || "").length <= 255
+                    ? Promise.resolve()
+                    : Promise.reject(new Error(label("supplierNameBytes"))),
+              },
             ]}
           >
             <Input maxLength={255} autoComplete="off" />
@@ -906,13 +951,20 @@ export function ProviderWorkspace(props: Props) {
                 <Select
                   options={providers
                     .filter((item) => !item.isCustom)
-                    .map((item) => ({ value: item.id, label: item.name }))}
-                  onChange={(id) =>
-                    providerForm.setFieldValue(
-                      "baseUrl",
-                      providers.find((item) => item.id === id)?.baseUrl || "",
-                    )
-                  }
+                    .map((item) => ({
+                      value: item.id,
+                      label: getProviderDisplayName(item, language),
+                    }))}
+                  onChange={(id) => {
+                    const currentUrl = (providerForm.getFieldValue("baseUrl") || "").trim();
+                    const previousUrl = providers.find((item) => item.id === sourceTemplateId)?.baseUrl.trim();
+                    if (!currentUrl || currentUrl === previousUrl) {
+                      providerForm.setFieldValue(
+                        "baseUrl",
+                        providers.find((item) => item.id === id)?.baseUrl || "",
+                      );
+                    }
+                  }}
                 />
               </Form.Item>
               <Form.Item

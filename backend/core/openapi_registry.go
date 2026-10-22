@@ -1360,7 +1360,11 @@ type addModelProviderGroupModelOpenAPIResponse struct {
 }
 
 type updateModelProviderGroupModelOpenAPIRequest struct {
-	MaxInputTokens string `json:"max_input_tokens" desc:"LLM input context window, for example 512, 128K, or 1M"`
+	Name           *string `json:"name,omitempty" desc:"Optional API model identifier; 1 to 512 UTF-8 bytes. Preserves the local model UUID."`
+	ModelType      *string `json:"model_type,omitempty" desc:"Optional supported technical model type. Must be compatible with the supplier runtime protocol and existing references."`
+	Vision         *bool   `json:"vision,omitempty" desc:"Optional image-input support for chat models."`
+	MaxInputTokens *string `json:"max_input_tokens,omitempty" desc:"Optional LLM/VLM input context window, for example 512, 128K, or 1M. Omitted fields remain unchanged."`
+	Customize      bool    `json:"customize,omitempty" desc:"Explicitly convert a changed catalog model to a user override. Required when editing catalog metadata; no-op requests do not convert it."`
 }
 
 type listModelProviderGroupModelsOpenAPIItem struct {
@@ -1395,6 +1399,8 @@ type listUserModelsByModelTypeQueryParams struct {
 
 type selectedModelOpenAPIItem struct {
 	ModelKey                 string  `json:"model_key"`
+	ModelType                string  `json:"model_type,omitempty" desc:"Actual stored technical model type, independent of the default model role; omitted for cloud models without local metadata"`
+	Vision                   *bool   `json:"vision,omitempty" desc:"Actual configured vision support, including explicit false; omitted when unknown for cloud models"`
 	ModelID                  string  `json:"model_id"`
 	Source                   string  `json:"source" enum:"own,cloud"`
 	ProviderID               string  `json:"provider_id"`
@@ -1530,6 +1536,7 @@ type listModelProviderGroupsOpenAPIItem struct {
 	BaseURL             string                             `json:"base_url"`
 	Keys                []modelProviderGroupKeyOpenAPIItem `json:"keys"`
 	HasAPIKey           bool                               `json:"has_api_key"`
+	ModelCount          int                                `json:"model_count" description:"Number of undeleted models owned by the current user in this supplier group; returned without loading model contents"`
 	IsVerified          bool                               `json:"is_verified"`
 }
 
@@ -4641,7 +4648,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "PATCH",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}",
 			Summary:     "Update a connection group model",
-			Description: "Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.",
+			Description: "Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and LLM/VLM context window. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupModelPathParams{},
 			RequestBody: jsonBodyOf(updateModelProviderGroupModelOpenAPIRequest{}, true),

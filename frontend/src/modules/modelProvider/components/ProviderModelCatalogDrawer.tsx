@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -21,11 +21,17 @@ import {
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
+import { isModelTypeSupportedByProtocol, normalizeRuntimeModelType } from "../modelCapabilities";
 import { listRemoteGroupModels, type RemoteGroupModel } from "../api";
 import type { ProviderModel } from "../pages/ModelProvidersPage";
 import { getModelIdentity } from "../modelIdentity";
 import { lookupUpstreamModel } from "../upstreamCatalog";
-import { availableModelTaskTypes, getModelTaskType, getModelTaskLabelKey, type ModelTaskType } from "../modelTaskTypes";
+import {
+  availableModelTaskTypes,
+  getModelTaskType,
+  getModelTaskLabelKey,
+  type ModelTaskType,
+} from "../modelTaskTypes";
 import { ModelTypeBadge, ModelTypeIcon } from "./ModelTypeBadge";
 import { ModelIdentityIcon } from "./ModelIdentityIcon";
 import "./ProviderModelCatalogDrawer.scss";
@@ -55,7 +61,6 @@ interface Props {
 }
 
 type Category = "all" | "unavailable" | ModelTaskType;
-const categories: Category[] = ["all", "unavailable", ...availableModelTaskTypes, "unknown"];
 const normalizedName = (name: string) => name.trim().toLowerCase();
 
 function savedModelType(model: ProviderModel) {
@@ -81,6 +86,7 @@ interface Candidate extends CatalogModelChoice {
   vendor: string;
   unknownType: boolean;
   requiresTypeSelection: boolean;
+  unsupportedType: boolean;
 }
 
 export function ProviderModelCatalogDrawer(props: Props) {
@@ -103,6 +109,8 @@ export function ProviderModelCatalogDrawer(props: Props) {
   const [modal, modalContext] = Modal.useModal();
   const [messageApi, messageContext] = message.useMessage();
   const sequence = useRef(0);
+  const filterId = useId();
+  const tabRefs = useRef(new Map<Category, HTMLButtonElement>());
 
   useEffect(() => {
     if (!props.open) return;
@@ -155,7 +163,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
       if (!key || unique.has(key)) continue;
       const existing = saved.get(key);
       const upstream = lookupUpstreamModel(props.protocolName, model.name);
-      const declaredType = model.model_type?.trim() || upstream?.model_type?.trim() || "";
+      const declaredType = normalizeRuntimeModelType(model.model_type?.trim() || upstream?.model_type?.trim() || "");
       const modelType = existing
         ? savedModelType(existing)
         : typeOverrides[key] || declaredType;
@@ -168,6 +176,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
         missing: false,
         vendor: getModelIdentity(model.name, props.providerName).vendor,
         unknownType: getModelTaskType(modelType) === "unknown",
+        unsupportedType: getModelTaskType(modelType) !== "unknown" && !isModelTypeSupportedByProtocol(modelType, props.protocolName),
         requiresTypeSelection: !existing && getModelTaskType(declaredType) === "unknown",
       });
     }
@@ -183,6 +192,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
           missing: loaded,
           vendor: getModelIdentity(model.name, props.providerName).vendor,
           unknownType: getModelTaskType(savedModelType(model)) === "unknown",
+          unsupportedType: !isModelTypeSupportedByProtocol(savedModelType(model), props.protocolName),
           requiresTypeSelection: false,
         });
     }
@@ -205,6 +215,29 @@ export function ProviderModelCatalogDrawer(props: Props) {
     (target === "unavailable"
       ? model.missing
       : getModelTaskType(model.model_type) === target);
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<Category, number>([
+      ["all", candidates.length],
+      ["unavailable", candidates.filter((model) => model.missing).length],
+    ]);
+    for (const model of candidates) {
+      const type = getModelTaskType(model.model_type);
+      counts.set(type, (counts.get(type) || 0) + 1);
+    }
+    return counts;
+  }, [candidates]);
+  const categories = useMemo<Category[]>(
+    () => [
+      "all",
+      "unavailable",
+      ...availableModelTaskTypes.filter((type) => categoryCounts.get(type)),
+      ...(categoryCounts.get("unknown") ? ["unknown" as const] : []),
+    ],
+    [categoryCounts],
+  );
+  useEffect(() => {
+    if (!categories.includes(category)) setCategory("all");
+  }, [categories, category]);
   const visible = candidates.filter(
     (model) =>
       matchesCategory(model, category) &&
@@ -212,11 +245,15 @@ export function ProviderModelCatalogDrawer(props: Props) {
         .toLowerCase()
         .includes(search.trim().toLowerCase()),
   );
-  const byTask = new Map<string, { key: string; task: ModelTaskType; models: Candidate[] }>();
+  const byTask = new Map<
+    string,
+    { key: string; task: ModelTaskType; custom: boolean; models: Candidate[] }
+  >();
   for (const model of visible) {
     const task = getModelTaskType(model.model_type);
-    const key = JSON.stringify([model.existing && !model.existing.builtIn ? "custom" : "catalog", task]);
-    const group = byTask.get(key) || { key, task, models: [] };
+    const custom = Boolean(model.existing && !model.existing.builtIn);
+    const key = JSON.stringify([custom ? "custom" : "catalog", task]);
+    const group = byTask.get(key) || { key, task, custom, models: [] };
     group.models.push(model);
     byTask.set(key, group);
   }
@@ -225,11 +262,11 @@ export function ProviderModelCatalogDrawer(props: Props) {
     (model) => model.missing && model.existing,
   );
   const addable = candidates.filter(
-    (model) => !model.existing && !model.missing && !model.unknownType,
+    (model) => !model.existing && !model.missing && !model.unknownType && !model.unsupportedType,
   );
 
   const runChanges = async (requested: Candidate[], remove: boolean) => {
-    const items = remove ? requested : requested.filter((model) => !model.unknownType);
+    const items = remove ? requested : requested.filter((model) => !model.unknownType && !model.unsupportedType);
     if (busy || props.modelsLoading || !items.length) return;
     setBusy(true);
     let index = 0;
@@ -313,7 +350,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
     ["text2video", "textToVideo"],
     ["stt", "asr"],
     ["tts", "tts"],
-  ].map(([value, key]) => ({
+  ].filter(([value]) => isModelTypeSupportedByProtocol(value, props.protocolName)).map(([value, key]) => ({
     value,
     label: t(`modelProvider.capability.${key}`),
   }));
@@ -399,18 +436,34 @@ export function ProviderModelCatalogDrawer(props: Props) {
             key={item}
             type="button"
             role="tab"
+            id={`${filterId}-${item}`}
+            aria-controls={`${filterId}-results`}
             aria-selected={item === category}
+            tabIndex={item === category ? 0 : -1}
+            ref={(element) => {
+              if (element) tabRefs.current.set(item, element);
+              else tabRefs.current.delete(item);
+            }}
             className={item === category ? "is-active" : ""}
             onClick={() => setCategory(item)}
+            onKeyDown={(event) => {
+              const current = categories.indexOf(item);
+              let next: number;
+              if (event.key === "ArrowRight")
+                next = (current + 1) % categories.length;
+              else if (event.key === "ArrowLeft")
+                next = (current + categories.length - 1) % categories.length;
+              else if (event.key === "Home") next = 0;
+              else if (event.key === "End") next = categories.length - 1;
+              else return;
+              event.preventDefault();
+              setCategory(categories[next]);
+              tabRefs.current.get(categories[next])?.focus();
+            }}
           >
             {item !== "all" && item !== "unavailable" ? <ModelTypeIcon type={item} size={16} /> : null}
             {item === "all" || item === "unavailable" ? copy(item) : t(getModelTaskLabelKey(item))}
-            <small>
-              {
-                candidates.filter((model) => matchesCategory(model, item))
-                  .length
-              }
-            </small>
+            <small>{categoryCounts.get(item) || 0}</small>
           </button>
         ))}
       </div>
@@ -447,30 +500,40 @@ export function ProviderModelCatalogDrawer(props: Props) {
         />
       ) : null}
       <Spin spinning={loading || props.modelsLoading === true}>
-        <div className="provider-model-catalog-list" aria-busy={working}>
+        <div
+          className="provider-model-catalog-list"
+          id={`${filterId}-results`}
+          role="tabpanel"
+          aria-labelledby={`${filterId}-${category}`}
+          aria-busy={working}
+          tabIndex={0}
+        >
           {!loading && !visible.length ? (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
               description={copy("empty")}
             />
           ) : null}
-          {groups.map(({ key: groupKey, task, models }) => {
+          {groups.map(({ key: groupKey, task, custom, models }) => {
             const taskLabel = t(getModelTaskLabelKey(task));
+            const groupLabel = custom
+              ? `${copy("customGroup")} · ${taskLabel}`
+              : taskLabel;
             const missing = models.filter(
-              (model) => !model.existing && !model.missing && !model.unknownType,
+              (model) => !model.existing && !model.missing && !model.unknownType && !model.unsupportedType,
             );
             const selected = models.filter((model) => model.existing);
             const removing = !missing.length && selected.length > 0;
             return (
               <section
                 className="provider-model-catalog-group"
-                aria-label={taskLabel}
+                aria-label={groupLabel}
                 key={groupKey}
               >
                 <div className="provider-model-catalog-group-header">
                   <button
                     type="button"
-                    aria-label={taskLabel}
+                    aria-label={groupLabel}
                     aria-expanded={!collapsed.has(groupKey)}
                     onClick={() =>
                       setCollapsed((current) => {
@@ -488,12 +551,17 @@ export function ProviderModelCatalogDrawer(props: Props) {
                     <ModelTypeIcon type={task} size={18} />
                     <strong>{taskLabel}</strong>
                     <small>{models.length}</small>
+                    {custom ? (
+                      <span className="provider-model-catalog-group-kind">
+                        {copy("customGroup")}
+                      </span>
+                    ) : null}
                   </button>
                   <Button
                     type="text"
                     size="small"
                     aria-label={copy(removing ? "removeGroup" : "addGroup", {
-                      name: taskLabel,
+                      name: groupLabel,
                     })}
                     icon={
                       removing ? (
@@ -525,11 +593,17 @@ export function ProviderModelCatalogDrawer(props: Props) {
                             className="provider-model-catalog-logo"
                           />
                           <div className="provider-model-catalog-model-name">
-                            <Tooltip title={model.name} placement="topLeft">
-                              <span>{model.name}</span>
+                            <Tooltip
+                              title={model.name}
+                              placement="topLeft"
+                              trigger={["hover", "focus", "click"]}
+                            >
+                              <button type="button">{model.name}</button>
                             </Tooltip>
                             {model.missing ? (
                               <small>{copy("missingRemote")}</small>
+                            ) : !model.existing && model.unsupportedType ? (
+                              <small>{copy("unsupportedType")}</small>
                             ) : null}
                           </div>
                           {model.requiresTypeSelection ? (
@@ -553,7 +627,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
                               { name: model.name },
                             )}
                             loading={pending.has(key)}
-                            disabled={working || (!model.existing && model.unknownType)}
+                            disabled={working || (!model.existing && (model.unknownType || model.unsupportedType))}
                             icon={
                               model.existing ? (
                                 <MinusOutlined aria-hidden="true" />

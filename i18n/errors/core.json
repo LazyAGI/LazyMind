@@ -2000,5 +2000,12 @@
   "2005032": {"en-US": "The upstream model catalog has no providers", "zh-CN": "上游模型目录中没有供应商"},
   "2005033": {"en-US": "Failed to load an upstream model provider", "zh-CN": "读取上游模型供应商失败"},
   "2004936": {"en-US": "Local Zotero access requires the authenticated owner of a local desktop runtime", "zh-CN": "仅本地桌面运行时的已认证所有者可以访问本地 Zotero"},
-  "2004937": {"en-US": "Local Zotero owner authentication is unavailable", "zh-CN": "本地 Zotero 所有者认证暂不可用"}
+  "2004937": {"en-US": "Local Zotero owner authentication is unavailable", "zh-CN": "本地 Zotero 所有者认证暂不可用"},
+  "2005034": {"en-US": "Unsupported model type", "zh-CN": "不支持此模型类型"},
+  "2005035": {"en-US": "The supplier protocol does not support this model type", "zh-CN": "供应商接口协议不支持此模型类型"},
+  "2005036": {"en-US": "Model ID must contain 1 to 512 bytes", "zh-CN": "模型 ID 须为 1 至 512 字节"},
+  "2005037": {"en-US": "Change the incompatible default model selection before editing this model", "zh-CN": "此更改会使默认模型选择失效，请先切换默认模型"},
+  "2005038": {"en-US": "Change the fixed conversation model before editing this model", "zh-CN": "此更改会使会话固定模型失效，请先切换会话模型"},
+  "2005039": {"en-US": "This embedding model is in use; change default selections and downgrade indexed knowledge bases before editing its identity", "zh-CN": "此向量模型正在使用中；修改模型 ID 或类型前，请先切换默认模型并将相关已索引知识库降级"},
+  "2005040": {"en-US": "The selected model does not support this default role", "zh-CN": "所选模型不支持此默认模型用途"}
 }

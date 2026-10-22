@@ -70,3 +70,12 @@
     margin-left: auto;
   }
 }
+
+@media (pointer: coarse) {
+  .provider-key-row .provider-key-row-actions .ant-btn {
+    min-width: 44px;
+    width: 44px;
+    min-height: 44px;
+    height: 44px;
+  }
+}

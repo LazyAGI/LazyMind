@@ -61,17 +61,31 @@ function ModalityGlyph({ modality }: { modality: ModelModality }) {
 export function ModelModalityMarks({
   providerName,
   modelName,
+  modelType,
+  vision,
   compact = false,
 }: {
   providerName: string;
   modelName: string;
+  modelType?: string;
+  vision?: boolean;
   compact?: boolean;
 }) {
   const { t } = useTranslation();
   const model = lookupUpstreamModel(providerName, modelName);
-  if (!model) {
+  const normalizedType = modelType?.trim().toLowerCase();
+  // VLM is intrinsically visual. For LLMs a saved false is an explicit
+  // configuration decision, while absent metadata leaves the catalog intact.
+  const imageInput = normalizedType === "vlm" || vision === true
+    ? true
+    : normalizedType === "llm" && vision === false ? false : undefined;
+  if (!model && imageInput !== true) {
     return null;
   }
+  let input: ModelModality[] = model ? [...model.input] : ["text"];
+  if (imageInput === true && !input.includes("image")) input.push("image");
+  else if (imageInput === false) input = input.filter((modality) => modality !== "image");
+  const output: ModelModality[] = model?.output || ["text"];
 
   const renderGroup = (direction: "input" | "output", modalities: ModelModality[]) => (
     <span className="model-modality-group" aria-label={t(`modelProvider.modality.${direction}Aria`)}>
@@ -91,8 +105,8 @@ export function ModelModalityMarks({
 
   return (
     <span className={`model-modality-marks${compact ? " is-compact" : ""}`}>
-      {renderGroup("input", model.input)}
-      {renderGroup("output", model.output)}
+      {renderGroup("input", input)}
+      {renderGroup("output", output)}
     </span>
   );
 }

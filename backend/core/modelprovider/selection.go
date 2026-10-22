@@ -61,6 +61,7 @@ type selectedModelItem struct {
 	UserModelProviderID      string  `json:"user_model_provider_id,omitempty" gorm:"column:user_model_provider_id"`
 	UserModelProviderGroupID string  `json:"user_model_provider_group_id,omitempty" gorm:"column:user_model_provider_group_id"`
 	Name                     string  `json:"name" gorm:"column:name"`
+	Vision                   *bool   `json:"vision,omitempty" gorm:"column:vision"`
 	ProviderName             string  `json:"provider_name" gorm:"column:provider_name"`
 	GroupName                string  `json:"group_name,omitempty" gorm:"column:group_name"`
 	BaseURL                  string  `json:"base_url,omitempty" gorm:"column:base_url"`
@@ -70,7 +71,7 @@ type selectedModelItem struct {
 	Availability             string  `json:"availability" gorm:"-"`
 	UnavailableReason        string  `json:"unavailable_reason,omitempty" gorm:"-"`
 	ReadOnly                 bool    `json:"read_only" gorm:"-"`
-	TechnicalModelType       string  `json:"-" gorm:"column:technical_model_type"`
+	TechnicalModelType       string  `json:"model_type,omitempty" gorm:"column:technical_model_type"`
 	IsDefault                bool    `json:"is_default" gorm:"column:is_default"`
 }
 
@@ -351,6 +352,49 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		// Model edit and role selection use the same provider lock order. The
+		// earlier inventory may be stale by the time this transaction commits.
+		providerIDs := make(map[string]struct{})
+		for _, model := range models {
+			providerIDs[model.UserModelProviderID] = struct{}{}
+		}
+		orderedProviders := make([]string, 0, len(providerIDs))
+		for id := range providerIDs {
+			orderedProviders = append(orderedProviders, id)
+		}
+		sort.Strings(orderedProviders)
+		for _, id := range orderedProviders {
+			parent := orm.UserModelProvider{ID: id, BaseModel: orm.BaseModel{CreateUserID: userID}}
+			if err := lockProvider(tx, &parent); err != nil {
+				return errConnectionChanged
+			}
+		}
+		currentModels := make(map[string]orm.UserModelProviderGroupModel, len(modelIDs))
+		if len(modelIDs) > 0 {
+			var current []orm.UserModelProviderGroupModel
+			if err := tx.Where("id IN ? AND create_user_id = ? AND deleted_at IS NULL", modelIDs, userID).Find(&current).Error; err != nil {
+				return err
+			}
+			for _, model := range current {
+				currentModels[model.ID] = model
+			}
+		}
+		for slot, id := range selectionByType {
+			if id == "" || sourceByType[slot] != "own" {
+				continue
+			}
+			model, ok := currentModels[id]
+			if !ok {
+				return errConnectionChanged
+			}
+			var group orm.UserModelProviderGroup
+			if err := tx.Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", model.UserModelProviderGroupID, userID).Take(&group).Error; err != nil {
+				return errConnectionChanged
+			}
+			if !modelSupportsSelection(model, slot, group.BaseURL) {
+				return errSelectionModelType
+			}
+		}
 		for modelType, modelID := range selectionByType {
 			if modelID == "" {
 				if err := tx.Where("user_id = ? AND model_type = ?", userID, modelType).
@@ -441,7 +485,13 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	}); err != nil {
-		common.ReplyErr(w, "save selected models failed", http.StatusInternalServerError)
+		if errors.Is(err, errSelectionModelType) {
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		} else if errors.Is(err, errConnectionChanged) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+		} else {
+			common.ReplyErr(w, "save selected models failed", http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -471,6 +521,7 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 				"m.user_model_provider_id, "+
 				"m.user_model_provider_group_id, "+
 				"m.name, "+
+				"m.vision, "+
 				"m.provider_name, "+
 				"m.model_type AS technical_model_type, "+
 				"m.is_default, "+

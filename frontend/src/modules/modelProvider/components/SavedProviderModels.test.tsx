@@ -6,12 +6,16 @@ import {
   within,
 } from "@testing-library/react";
 import { ConfigProvider } from "antd";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderModel } from "../pages/ModelProvidersPage";
 import {
   SavedProviderModels,
   type SavedProviderModelsProps,
 } from "./SavedProviderModels";
+
+const upstream = vi.hoisted(() => ({ lookup: vi.fn() }));
+vi.mock("../upstreamCatalog", () => ({ lookupUpstreamModel: upstream.lookup }));
+beforeEach(() => upstream.lookup.mockReturnValue(undefined));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -69,7 +73,14 @@ function groupLabels(container: HTMLElement) {
 }
 
 describe("saved supplier models", () => {
-  it("shows a saved visual dialogue context window without changing its edit permissions", async () => {
+  it("honors disabled visual input instead of reviving the catalog default", async () => {
+    upstream.lookup.mockReturnValue({ input: ["text", "image"], output: ["text"] });
+    setup({ providerName: "OpenAI", models: [{ ...models[1], vision: false }] });
+    fireEvent.click(screen.getByRole("button", { name: "gpt-4o" }));
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).not.toHaveTextContent("modelProvider.visionSupported");
+  });
+  it("shows a saved visual dialogue context window and exposes its model settings", async () => {
     setup({
       models: [
         {
@@ -89,9 +100,9 @@ describe("saved supplier models", () => {
     await waitFor(() => expect(context).toBeVisible());
     expect(
       screen.queryByRole("button", {
-        name: "modelProvider.editModelWindowAria:private-vlm",
+        name: "modelProvider.editModelAria:private-vlm",
       }),
-    ).not.toBeInTheDocument();
+    ).toBeInTheDocument();
   });
   it("keeps all custom task groups above built-ins and collapses repeated task groups independently", () => {
     const customChat = { ...models[1], name: "gpt-4o-custom" };
@@ -105,14 +116,15 @@ describe("saved supplier models", () => {
         .map((row) => row.getAttribute("aria-label")),
     ).toEqual(["gpt-4o-custom", "BAAI/bge-large", "gpt-4o-builtin"]);
     expect(groupLabels(container)).toEqual([
-      "modelProvider.taskType.chat",
-      "modelProvider.taskType.embedding",
+      "modelProvider.workspace.customGroup · modelProvider.taskType.chat",
+      "modelProvider.workspace.customGroup · modelProvider.taskType.embedding",
       "modelProvider.taskType.chat",
     ]);
-    const chatGroups = screen.getAllByRole("region", {
-      name: "modelProvider.taskType.chat",
+    const customGroup = screen.getByRole("region", {
+      name: "modelProvider.workspace.customGroup · modelProvider.taskType.chat",
     });
-    const toggle = within(chatGroups[0]).getByRole("button", {
+    expect(within(customGroup).getByText("modelProvider.workspace.customGroup")).toBeVisible();
+    const toggle = within(customGroup).getByRole("button", {
       name: /modelProvider.taskType.chat/,
     });
     fireEvent.click(toggle);
@@ -151,13 +163,13 @@ describe("saved supplier models", () => {
       models: [models[1], vlm, evolution, models[2], rerank],
     });
     expect(groupLabels(container)).toEqual([
-      "modelProvider.taskType.chat",
-      "modelProvider.taskType.embedding",
-      "modelProvider.taskType.rerank",
+      "modelProvider.workspace.customGroup · modelProvider.taskType.chat",
+      "modelProvider.workspace.customGroup · modelProvider.taskType.embedding",
+      "modelProvider.workspace.customGroup · modelProvider.taskType.rerank",
     ]);
     expect(
       within(
-        screen.getByRole("region", { name: "modelProvider.taskType.chat" }),
+        screen.getByRole("region", { name: "modelProvider.workspace.customGroup · modelProvider.taskType.chat" }),
       ).getAllByRole("listitem"),
     ).toHaveLength(3);
     const gpt = screen.getByRole("listitem", { name: "gpt-4o" });
@@ -173,10 +185,24 @@ describe("saved supplier models", () => {
     );
     expect(
       within(vlmRow).queryByRole("button", {
-        name: `modelProvider.editModelWindowAria:${vlm.name}`,
+        name: `modelProvider.editModelAria:${vlm.name}`,
       }),
-    ).not.toBeInTheDocument();
+    ).toBeInTheDocument();
     expect(container.querySelector("[role=table]")).toBeNull();
+  });
+  it("opens model settings for every task and built-in model without rewriting its capability", () => {
+    const editable: ProviderModel[] = [
+      { ...models[0], id: "builtin-chat", name: "builtin-chat" },
+      ...(["VLM", "EMBEDDING", "MULTIMODAL_EMBEDDING", "RERANK", "ASR", "TTS", "TEXT_TO_IMAGE", "IMAGE_EDITING", "TEXT_TO_VIDEO"] as const).map((capability) => ({
+        id: capability, name: capability, capability, builtIn: false, enabled: true,
+      })),
+    ];
+    const { props } = setup({ models: editable });
+    for (const model of editable) {
+      fireEvent.click(screen.getByRole("button", { name: `modelProvider.editModelAria:${model.name}` }));
+      expect(props.onEdit).toHaveBeenLastCalledWith(model);
+    }
+    expect(props.onEdit).toHaveBeenCalledTimes(editable.length);
   });
   it("uses the shared colored task image badge for every saved task category", () => {
     const taskModels: ProviderModel[] = [
@@ -279,7 +305,7 @@ describe("saved supplier models", () => {
     };
     const { props } = setup({ models: [vlm] });
     expect(
-      screen.getByRole("region", { name: "modelProvider.taskType.chat" }),
+      screen.getByRole("region", { name: "modelProvider.workspace.customGroup · modelProvider.taskType.chat" }),
     ).toBeVisible();
     fireEvent.click(
       screen.getByRole("button", {
@@ -311,7 +337,7 @@ describe("saved supplier models", () => {
     );
     fireEvent.click(
       within(row).getByRole("button", {
-        name: `modelProvider.editModelWindowAria:${unknown.name}`,
+        name: `modelProvider.editModelAria:${unknown.name}`,
       }),
     );
     expect(props.onEdit).toHaveBeenCalledWith(unknown);

@@ -4534,6 +4534,7 @@ export interface ListModelProviderGroupsOpenAPIItem {
     'id': string;
     'is_verified': boolean;
     'keys'?: Array<ModelProviderGroupKeyOpenAPIItem>;
+    'model_count': number;
     'name': string;
     'user_model_provider_id': string;
 }
@@ -5778,6 +5779,10 @@ export interface SelectedModelOpenAPIItem {
     'max_input_tokens'?: string | null;
     'model_id': string;
     'model_key': string;
+    /**
+     * Actual stored technical model type, independent of the default model role; omitted for cloud models without local metadata
+     */
+    'model_type'?: string;
     'name': string;
     'provider_group_id'?: string;
     'provider_id': string;
@@ -5787,6 +5792,10 @@ export interface SelectedModelOpenAPIItem {
     'unavailable_reason'?: string;
     'user_model_provider_group_id'?: string;
     'user_model_provider_id'?: string;
+    /**
+     * Actual configured vision support, including explicit false; omitted when unknown for cloud models
+     */
+    'vision'?: boolean;
 }
 
 export const SelectedModelOpenAPIItemAvailabilityEnum = {
@@ -7139,9 +7148,25 @@ export interface UpdateModelProviderEndpointOpenAPIResponse {
 }
 export interface UpdateModelProviderGroupModelOpenAPIRequest {
     /**
-     * LLM input context window, for example 512, 128K, or 1M
+     * Explicitly convert a changed catalog model to a user override. Required when editing catalog metadata; no-op requests do not convert it.
      */
-    'max_input_tokens': string;
+    'customize'?: boolean;
+    /**
+     * Optional LLM/VLM input context window, for example 512, 128K, or 1M. Omitted fields remain unchanged.
+     */
+    'max_input_tokens'?: string;
+    /**
+     * Optional supported technical model type. Must be compatible with the supplier runtime protocol and existing references.
+     */
+    'model_type'?: string;
+    /**
+     * Optional API model identifier; 1 to 512 UTF-8 bytes. Preserves the local model UUID.
+     */
+    'name'?: string;
+    /**
+     * Optional image-input support for chat models.
+     */
+    'vision'?: boolean;
 }
 export interface UpdateModelProviderGroupOpenAPIRequest {
     'api_key'?: string;
@@ -48108,7 +48133,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+         * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and LLM/VLM context window. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
          * @summary Update a connection group model
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48975,7 +49000,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+         * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and LLM/VLM context window. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
          * @summary Update a connection group model
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -49350,7 +49375,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+         * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and LLM/VLM context window. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
          * @summary Update a connection group model
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -49919,7 +49944,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+     * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and LLM/VLM context window. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
      * @summary Update a connection group model
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.

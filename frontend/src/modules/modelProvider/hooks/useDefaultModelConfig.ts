@@ -42,6 +42,8 @@ export type ModelCapability =
 interface ProviderModel {
   id: string;
   name: string;
+  modelType?: string;
+  vision?: boolean;
   capability: ModelCapability;
   builtIn: boolean;
   enabled: boolean;
@@ -98,6 +100,7 @@ interface ApiModel {
   is_editable?: boolean;
   name: string;
   model_type?: string;
+  vision?: boolean;
   is_default?: boolean;
   max_input_tokens?: string;
   source?: "own" | "cloud";
@@ -121,6 +124,8 @@ interface SelectedModelApiItem {
   is_editable?: boolean;
   model_id: string;
   model_key: string;
+  model_type?: string;
+  vision?: boolean;
   name: string;
   provider_name: string;
   share?: boolean;
@@ -459,8 +464,8 @@ function mapApiProvider(
     name: provider.name,
     isCustom: provider.is_custom === true,
     protocolName: provider.protocol_name || provider.name,
-    brand: provider.is_custom ? "API" : getProviderBrand(provider.protocol_name || provider.name),
-    logoUrl: getProviderLogoUrl(provider.protocol_name || provider.name, provider.is_custom),
+    brand: provider.is_custom ? "API" : getProviderBrand(provider.name || provider.protocol_name || ""),
+    logoUrl: getProviderLogoUrl(provider.name || provider.protocol_name || "", provider.is_custom),
     headline: getLocalizedProviderDescription(
       provider.name,
       backendDescription,
@@ -672,6 +677,8 @@ export function useDefaultModelConfig({
         const model: ProviderModel = {
           id: selection.model_id,
           name: selection.name,
+          modelType: selection.model_type,
+          vision: selection.vision,
           capability,
           builtIn: Boolean(selection.is_default),
           enabled: true,
@@ -879,6 +886,8 @@ export function useDefaultModelConfig({
             const providerModel: ProviderModel = {
               id: model.id,
               name: model.name,
+              modelType: model.model_type,
+              vision: model.vision,
               capability,
               builtIn: Boolean(model.is_default),
               enabled: true,

@@ -46,6 +46,13 @@ func init() {
 		{2005031, http.StatusBadRequest, "The default request API address is empty", []string{"default request endpoint is empty"}},
 		{2005032, http.StatusInternalServerError, "The upstream model catalog has no providers", []string{"upstream catalog %s has no providers"}},
 		{2005033, http.StatusInternalServerError, "Failed to load an upstream model provider", []string{"upstream provider %q"}},
+		{2005034, http.StatusBadRequest, "Unsupported model type", []string{"unsupported model_type"}},
+		{2005035, http.StatusBadRequest, "The supplier protocol does not support this model type", []string{"model type is not supported by the supplier protocol"}},
+		{2005036, http.StatusBadRequest, "Model ID must contain 1 to 512 bytes", []string{"model name must contain 1 to 512 bytes"}},
+		{2005037, http.StatusConflict, "Change the incompatible default model selection before editing this model", []string{"model update would invalidate a default selection; change the selection first"}},
+		{2005038, http.StatusConflict, "Change the fixed conversation model before editing this model", []string{"model update would invalidate a conversation selection; change the conversation model first"}},
+		{2005039, http.StatusConflict, "This embedding model is in use; change default selections and downgrade indexed knowledge bases before editing its identity", []string{"embedding model identity is in use; change the default model and downgrade indexed knowledge bases before editing"}},
+		{2005040, http.StatusBadRequest, "The selected model does not support this default role", []string{"selected model does not support this default model role"}},
 	} {
 		for _, source := range group.sources {
 			if strings.Contains(source, "%") {

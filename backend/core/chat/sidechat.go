@@ -520,6 +520,19 @@ func createSidechatConversation(
 		} else if *parent.ChatModelMode == chatModelModeAuto {
 			child.ChatModelSnapshot = nil
 		}
+		if child.ChatModelMode != nil && *child.ChatModelMode == chatModelModeFixed && child.ChatModelID != nil {
+			models, err := loadAvailableChatModels(ctx, tx, userID)
+			if err != nil {
+				return err
+			}
+			model := findAvailableChatModelBySource(models, *child.ChatModelID, conversationChatModelSource(&child))
+			model, err = lockAndReloadSelectableChatModel(ctx, tx, userID, model)
+			if err != nil {
+				return err
+			}
+			child.ChatModelID = &model.ID
+			child.ChatModelSource = &model.Source
+		}
 		if source != nil {
 			sourceID := source.ID
 			sourceSeq := source.Seq
@@ -646,6 +659,8 @@ func CreateSidechat(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusConflict)
 	case errors.Is(err, errSidechatNestingLimit):
 		common.ReplyErr(w, err.Error(), http.StatusConflict)
+	case errors.Is(err, errChatModelUnavailable):
+		common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
 	case errors.Is(err, doc.ErrChatSourceAttachmentUnavailable):
 		common.ReplyErr(w, doc.ErrChatSourceAttachmentUnavailable.Error(), http.StatusConflict)
 	case errors.Is(err, doc.ErrChatSourceAttachmentForbidden):

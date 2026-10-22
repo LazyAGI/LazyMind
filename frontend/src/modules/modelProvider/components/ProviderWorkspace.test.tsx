@@ -173,6 +173,113 @@ beforeEach(() => {
 });
 
 describe("compact provider workspace", () => {
+  it("keeps a supplier logo when its request protocol changes", () => {
+    const supplier = { ...provider, name: "DeepSeek", protocolName: "Claude", source: "Claude" };
+    setup({ providers: [supplier], configuredProviders: [supplier] });
+    expect(document.querySelector(".provider-workspace-supplier-title img")).toHaveAttribute("src", "/provider-icons/deepseek.svg");
+  });
+  it("shows a retryable model-load failure while retaining the last saved models", () => {
+    const onLoadModels = vi.fn();
+    setup({
+      onLoadModels,
+      modelsError: { "openai:primary": "Temporary model service error" },
+    });
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("modelProvider.workspace.modelsLoadFailed");
+    expect(alert).toHaveTextContent("Temporary model service error");
+    expect(screen.getByRole("listitem", { name: "fixture-model" })).toBeInTheDocument();
+    onLoadModels.mockClear();
+    fireEvent.click(within(alert).getByRole("button", { name: "modelProvider.workspace.retry" }));
+    expect(onLoadModels).toHaveBeenCalledWith(provider, provider.groups[0]);
+  });
+
+  it("does not present a failed initial model request as an empty supplier", () => {
+    const empty = { ...provider, groups: [{ ...provider.groups[0], models: [] }] };
+    setup({
+      providers: [empty],
+      configuredProviders: [empty],
+      modelsError: { "openai:primary": "Service unavailable" },
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("modelProvider.workspace.modelsLoadFailed");
+    expect(screen.queryByText("modelProvider.noModels")).not.toBeInTheDocument();
+  });
+
+  it("protects endpoint edits when returning to the mobile supplier list", async () => {
+    setup({}, true);
+    fireEvent.click(document.querySelector(".provider-workspace-provider")!);
+    const workspace = document.querySelector(".provider-workspace");
+    expect(workspace).toHaveClass("is-mobile-detail");
+    const endpoint = screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" });
+    fireEvent.change(endpoint, { target: { value: "https://unsaved.example.test/v1" } });
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.suppliers" }));
+    expect(await screen.findByText("settingsPage.unsaved.title")).toBeInTheDocument();
+    expect(workspace).toHaveClass("is-mobile-detail");
+    fireEvent.click(screen.getByText("settingsPage.unsaved.stay"));
+    expect(endpoint).toHaveValue("https://unsaved.example.test/v1");
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.suppliers" }));
+    fireEvent.click(await screen.findByText("settingsPage.unsaved.discard"));
+    await waitFor(() => expect(workspace).not.toHaveClass("is-mobile-detail"));
+    expect(endpoint).toHaveValue(provider.baseUrl);
+  });
+
+  it("counts keys, models or configured credentials rather than empty compatibility groups", () => {
+    const variants = [
+      { id: "empty", name: "Empty supplier", keys: [], models: [], apiKeyConfigured: false },
+      { id: "keys", name: "Keys supplier", keys: provider.groups[0].keys, models: [], apiKeyConfigured: false },
+      { id: "models", name: "Models supplier", keys: [], models: provider.groups[0].models, apiKeyConfigured: false },
+      { id: "stored-models", name: "Stored-only supplier", keys: [], models: [], modelCount: 2, apiKeyConfigured: false },
+      { id: "credentials", name: "Credentials supplier", keys: [], models: [], apiKeyConfigured: true },
+    ].map(({ id, name, ...state }) => ({
+      ...provider,
+      id,
+      name,
+      groups: [{ ...provider.groups[0], ...state, id: `${id}-group`, verified: false }],
+    }));
+    setup({ providers: variants, configuredProviders: variants });
+    const emptyButton = screen.getByRole("button", { name: /Empty supplier/ });
+    expect(emptyButton.querySelector("i")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.configured" }));
+    expect(screen.queryByRole("button", { name: /Empty supplier/ })).not.toBeInTheDocument();
+    for (const name of ["Keys supplier", "Models supplier", "Stored-only supplier", "Credentials supplier"]) {
+      expect(screen.getByRole("button", { name: new RegExp(name) })).toBeInTheDocument();
+    }
+  });
+
+  it("validates custom supplier names against the backend UTF-8 byte limit", async () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.addSupplier" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    const name = dialog.getByLabelText("modelProvider.workspace.supplierName");
+    fireEvent.change(name, { target: { value: "中".repeat(86) } });
+    fireEvent.click(dialog.getByRole("button", { name: "common.save" }));
+    expect(await screen.findByText("modelProvider.workspace.supplierNameBytes")).toBeInTheDocument();
+    expect(mocks.createProvider).not.toHaveBeenCalled();
+    fireEvent.change(name, { target: { value: ` ${"中".repeat(85)} ` } });
+    fireEvent.click(dialog.getByRole("button", { name: "common.save" }));
+    await waitFor(() => expect(mocks.createProvider).toHaveBeenCalledWith({
+      name: "中".repeat(85),
+      source_provider_id: "openai",
+      base_url: provider.baseUrl,
+    }));
+  });
+
+  it.each(["custom", "default", "empty"] as const)(
+    "keeps or updates a %s API address when changing supplier templates",
+    async (mode) => {
+      const deepseek = { ...provider, id: "deepseek", name: "DeepSeek", source: "DeepSeek", baseUrl: "https://api.deepseek.example/v1", groups: [] };
+      setup({ providers: [provider, deepseek], configuredProviders: [provider] });
+      fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.addSupplier" }));
+      const dialog = within(await screen.findByRole("dialog"));
+      const endpoint = dialog.getByRole("textbox", { name: "modelProvider.apiAddressLabel" });
+      if (mode !== "default") {
+        fireEvent.change(endpoint, { target: { value: mode === "custom" ? "https://private.example.test/v1" : "" } });
+      }
+      fireEvent.mouseDown(dialog.getByRole("combobox"));
+      fireEvent.click(await screen.findByText("DeepSeek", { selector: ".ant-select-item-option-content" }));
+      expect(endpoint).toHaveValue(mode === "custom" ? "https://private.example.test/v1" : deepseek.baseUrl);
+    },
+  );
+
   it("filters task types without splitting dialogue or vector models by modality", async () => {
     const capabilities = [
       "LLM_CHAT",

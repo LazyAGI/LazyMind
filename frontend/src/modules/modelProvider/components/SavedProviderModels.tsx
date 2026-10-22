@@ -80,15 +80,21 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
       {groups.map(({ key, type, entries }, index) => {
         const listId = `${groupPrefix}-${index}`;
         const expanded = !collapsed.has(key);
+        const custom = !entries[0].builtIn;
+        const taskLabel = t(getModelTaskLabelKey(type));
+        const groupLabel = custom
+          ? `${t("modelProvider.workspace.customGroup")} · ${taskLabel}`
+          : taskLabel;
         return (
           <section
             className="saved-provider-model-group"
-            aria-label={t(getModelTaskLabelKey(type))}
+            aria-label={groupLabel}
             key={key}
           >
             <button
               type="button"
               className="saved-provider-model-group-toggle"
+              aria-label={groupLabel}
               aria-expanded={expanded}
               aria-controls={listId}
               onClick={() =>
@@ -104,8 +110,13 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
                 aria-hidden="true"
                 className={expanded ? "" : "is-collapsed"}
               />
-              <span>{t(getModelTaskLabelKey(type))}</span>
+              <span>{taskLabel}</span>
               <small>{entries.length}</small>
+              {custom ? (
+                <span className="saved-provider-model-group-kind">
+                  {t("modelProvider.workspace.customGroup")}
+                </span>
+              ) : null}
             </button>
             {expanded ? (
               <ul id={listId} className="saved-provider-model-list">
@@ -114,13 +125,10 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
                   const showContext =
                     chat ||
                     (type === "chat" && Boolean(model.maxInputTokens?.trim()));
-                  const vision =
-                    model.vision ||
-                    model.capability === "VLM" ||
-                    lookupUpstreamModel(
-                      props.providerName,
-                      model.name,
-                    )?.input.includes("image");
+                  const vision = model.capability === "VLM" || (
+                    model.vision !== undefined ? model.vision :
+                      lookupUpstreamModel(props.providerName, model.name)?.input.includes("image")
+                  );
                   return (
                     <li
                       key={model.id}
@@ -164,23 +172,20 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
                         <ModelTypeBadge type={type} compact />
                       </span>
                       <span className="saved-provider-model-actions">
-                        {!model.builtIn && chat ? (
-                          <Tooltip
-                            title={t("modelProvider.editModelWindowAria", {
+                        <Tooltip
+                          title={t("modelProvider.editModelAria", {
+                            name: model.name,
+                          })}
+                        >
+                          <Button
+                            type="text"
+                            aria-label={t("modelProvider.editModelAria", {
                               name: model.name,
                             })}
-                          >
-                            <Button
-                              type="text"
-                              aria-label={t(
-                                "modelProvider.editModelWindowAria",
-                                { name: model.name },
-                              )}
-                              icon={<SettingOutlined aria-hidden="true" />}
-                              onClick={() => props.onEdit(model)}
-                            />
-                          </Tooltip>
-                        ) : null}
+                            icon={<SettingOutlined aria-hidden="true" />}
+                            onClick={() => props.onEdit(model)}
+                          />
+                        </Tooltip>
                         <Popconfirm
                           title={t("modelProvider.confirmDeleteModel", {
                             name: model.name,

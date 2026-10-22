@@ -596,6 +596,30 @@ func snapshotForChatModel(model *availableChatModel) (json.RawMessage, error) {
 	return json.Marshal(chatModelSnapshotForModel(model))
 }
 
+// lockAndReloadSelectableChatModel keeps every durable fixed binding in the
+// same supplier lock order as metadata edits. The caller owns the transaction
+// and must hold it until the conversation reference has been persisted.
+func lockAndReloadSelectableChatModel(ctx context.Context, db *gorm.DB, userID string, model *availableChatModel) (*availableChatModel, error) {
+	if !chatModelSelectable(model) {
+		return nil, errChatModelUnavailable
+	}
+	if model.Source == "cloud" {
+		return model, nil
+	}
+	if err := modelprovider.LockModelSupplierForConfiguration(db, model.ID); err != nil {
+		return nil, errChatModelUnavailable
+	}
+	models, err := loadAvailableChatModels(ctx, db, userID)
+	if err != nil {
+		return nil, err
+	}
+	current := findAvailableChatModelBySource(models, model.ID, model.Source)
+	if !chatModelSelectable(current) {
+		return nil, errChatModelUnavailable
+	}
+	return current, nil
+}
+
 func resolveInitialChatModelBinding(ctx context.Context, db *gorm.DB, userID string, requested *initialChatModelSelection) (*resolvedChatModelBinding, error) {
 	models, err := loadAvailableChatModels(ctx, db, userID)
 	if err != nil {
@@ -622,6 +646,10 @@ func resolveInitialChatModelBinding(ctx context.Context, db *gorm.DB, userID str
 		return &resolvedChatModelBinding{
 			Mode: chatModelModeFixed, ModelID: &modelID, Source: &source, Version: 1,
 		}, nil
+	}
+	model, err = lockAndReloadSelectableChatModel(ctx, db, userID, model)
+	if err != nil {
+		return nil, err
 	}
 	snapshot, err := snapshotForChatModel(model)
 	if err != nil {
@@ -1006,8 +1034,9 @@ func PatchConversationModel(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			model := findAvailableChatModelBySource(models, request.ModelID, request.Source)
-			if !chatModelSelectable(model) {
-				return errChatModelUnavailable
+			model, err = lockAndReloadSelectableChatModel(r.Context(), tx, userID, model)
+			if err != nil {
+				return err
 			}
 			snapshot, err := snapshotForChatModel(model)
 			if err != nil {

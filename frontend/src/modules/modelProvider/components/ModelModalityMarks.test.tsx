@@ -57,4 +57,20 @@ describe("ModelModalityMarks", () => {
 
     expect(container).toBeEmptyDOMElement();
   });
+
+  it("honors explicit LLM vision false without changing output or other catalog modalities", () => {
+    render(<ModelModalityMarks providerName="Fixture Provider" modelName="all-modalities" modelType="llm" vision={false} />);
+    const input = screen.getByLabelText("modelProvider.modality.inputAria");
+    expect(within(input).queryByLabelText("modelProvider.modality.image")).not.toBeInTheDocument();
+    expect(within(input).getByLabelText("modelProvider.modality.audio")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("modelProvider.modality.outputAria")).getByLabelText("modelProvider.modality.image")).toBeInTheDocument();
+  });
+
+  it.each([
+    { modelType: "llm", vision: true },
+    { modelType: "vlm", vision: false },
+  ])("shows configured $modelType image input for a model absent from the catalog", ({ modelType, vision }) => {
+    render(<ModelModalityMarks providerName="Fixture Provider" modelName="custom-model" modelType={modelType} vision={vision} />);
+    expect(within(screen.getByLabelText("modelProvider.modality.inputAria")).getByLabelText("modelProvider.modality.image")).toBeInTheDocument();
+  });
 });

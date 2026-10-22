@@ -18,6 +18,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { runtimeFeatures } from "@/runtime/features";
 import { ModelModalityMarks } from "./ModelModalityMarks";
+import { getProviderDisplayName, getProviderSearchText } from "../providerDisplayNames";
 import {
   cloudServiceConfigs,
   normalizeProviderKey,
@@ -201,7 +202,8 @@ export default function DefaultModelConfigPanel({
   highlightTarget,
   onHighlightResolved,
 }: DefaultModelConfigPanelProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const language = i18n?.resolvedLanguage || i18n?.language;
   const {
     visibleModuleConfigs,
     isAdmin,
@@ -302,7 +304,7 @@ export default function DefaultModelConfigPanel({
     );
     const keyword = (moduleModelSearchKeywords[module.key] || "").trim().toLowerCase();
     const visibleOptions = options.filter((option) =>
-      !keyword || `${option.model.name} ${option.provider.name}`.toLowerCase().includes(keyword),
+      !keyword || `${option.model.name} ${getProviderSearchText(option.provider, language)}`.toLowerCase().includes(keyword),
     );
     const moduleTitle = t(module.titleKey);
     const moduleSubtitle = t(module.subtitleKey);
@@ -482,6 +484,7 @@ export default function DefaultModelConfigPanel({
         >
           {visibleOptions.map((option) => {
             const { provider, model, value } = option;
+            const supplierDisplayName = getProviderDisplayName(provider, language);
             const displayName =
               module.key === "image_generator"
                 ? formatUnifiedImageDisplayName(
@@ -492,7 +495,7 @@ export default function DefaultModelConfigPanel({
             return (
               <Select.Option
                 key={value}
-                title={`${displayName} · ${provider.name}`}
+                title={`${displayName} · ${supplierDisplayName}`}
                 disabled={
                   model.availability === "unavailable" ||
                   model.lifecycle === "deprecated" ||
@@ -502,14 +505,14 @@ export default function DefaultModelConfigPanel({
                   <span className="model-provider-select-value">
                     <ProviderLogo provider={provider} compact />
                     <span className="model-provider-select-value-text">
-                      {displayName} · {provider.name}
+                      {displayName} · {supplierDisplayName}
                     </span>
                   </span>
                 }
                 value={value}
               >
                 <Tooltip
-                  title={`${displayName} · ${provider.name}`}
+                  title={`${displayName} · ${supplierDisplayName}`}
                   placement="right"
                   overlayClassName="model-provider-option-tooltip"
                 >
@@ -517,11 +520,17 @@ export default function DefaultModelConfigPanel({
                     <ProviderLogo provider={provider} compact />
                     <span className="model-provider-select-copy">
                       <strong>{displayName}</strong>
-                      <ModelModalityMarks compact providerName={provider.source || provider.name} modelName={model.name} />
+                      <ModelModalityMarks
+                        compact
+                        providerName={provider.source || provider.name}
+                        modelName={model.name}
+                        modelType={model.modelType}
+                        vision={model.vision}
+                      />
                       <small>
                         {option.source === "cloud"
                           ? t("modelProvider.cloudSystemReadOnly")
-                          : provider.name}
+                          : supplierDisplayName}
                         {option.source === "cloud"
                           ? ""
                           : model.builtIn

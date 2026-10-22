@@ -4062,6 +4062,8 @@
 }
 .provider-workspace-supplier-title {
   display: flex;
+  flex: 1;
+  min-width: 0;
   align-items: center;
   gap: 12px;
   .provider-workspace-logo {
@@ -4069,6 +4071,9 @@
     height: 32px;
   }
   h2 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 18px;
     font-weight: 600;
     line-height: 24px;
@@ -4077,6 +4082,12 @@
     color: var(--provider-muted);
     font-size: 11px;
   }
+  > div {
+    min-width: 0;
+  }
+}
+.provider-workspace-supplier-actions {
+  flex-shrink: 0;
 }
 .provider-workspace .provider-workspace-mobile-back {
   display: none;
@@ -4255,6 +4266,9 @@
     width: 142px;
     flex-shrink: 0;
   }
+}
+.provider-workspace-models-error {
+  margin-bottom: 12px;
 }
 .provider-workspace-empty {
   display: flex;

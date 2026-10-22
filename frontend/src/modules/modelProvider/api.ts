@@ -307,24 +307,34 @@ export async function listRemoteGroupModels(
   );
 }
 
-export async function updateGroupModelMaxInputTokens(
+export interface UpdateGroupModelInput {
+  name: string;
+  model_type: string;
+  vision?: boolean;
+  max_input_tokens?: string;
+  customize?: boolean;
+}
+
+export async function updateGroupModel(
   providerId: string,
   groupId: string,
   modelId: string,
-  maxInputTokens: string,
+  input: UpdateGroupModelInput,
 ) {
-  const response =
-    await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch(
-      {
-        modelProviderId: providerId,
-        groupId,
-        modelId,
-        updateModelProviderGroupModelOpenAPIRequest: {
-          max_input_tokens: maxInputTokens,
-        },
-      },
-    );
-  return unwrapModelProviderData<{ max_input_tokens?: string }>(response.data);
+  const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch({
+    modelProviderId: providerId,
+    groupId,
+    modelId,
+    updateModelProviderGroupModelOpenAPIRequest: input,
+  });
+  return unwrapModelProviderData<{
+    id: string;
+    name: string;
+    model_type: string;
+    vision?: boolean;
+    is_default?: boolean;
+    max_input_tokens?: string;
+  }>(response.data);
 }
 
 export interface StoredProviderKey {
