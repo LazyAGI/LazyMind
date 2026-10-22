@@ -543,6 +543,9 @@ func (service *RestoreService) decryptBatch(task *restoreTask, operation cloudcl
 }
 
 func decodeRestoredProvider(plaintext []byte) (ProviderCredential, error) {
+	if len(plaintext) > MaximumPlaintextLength {
+		return ProviderCredential{}, ErrInvalidContract
+	}
 	decoder := json.NewDecoder(bytes.NewReader(plaintext))
 	decoder.DisallowUnknownFields()
 	var payload struct {
@@ -568,7 +571,7 @@ func decodeRestoredProvider(plaintext []byte) (ProviderCredential, error) {
 	parsedURL, urlErr := url.Parse(baseURL)
 	if payload.SchemaVersion != 1 || providerKey == "" || len(providerKey) > 128 || displayName == "" || len(displayName) > 255 ||
 		len(baseURL) > 1024 || urlErr != nil || parsedURL.Host == "" || parsedURL.Scheme != "https" && parsedURL.Scheme != "http" ||
-		payload.CredentialType != "api_key" || apiKey == "" || len(apiKey) > 512 || len(payload.ProviderSpecificFields) != 0 {
+		payload.CredentialType != "api_key" || !ValidAPIKeyPool([]byte(apiKey)) || len(payload.ProviderSpecificFields) != 0 {
 		payload.APIKey = ""
 		return ProviderCredential{}, ErrInvalidContract
 	}

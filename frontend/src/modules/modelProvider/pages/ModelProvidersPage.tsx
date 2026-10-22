@@ -112,7 +112,7 @@ export interface ProviderConnectionGroup {
   apiKeyConfigured: boolean;
   verified: boolean;
   models: ProviderModel[];
-  keys: Array<{ id: string; masked: string }>;
+  keys: Array<{ id: string; masked: string; enabled?: boolean }>;
 }
 
 export interface AddedProvider extends ProviderOption {
@@ -381,7 +381,7 @@ interface ApiGroup {
   has_api_key?: boolean;
   is_verified?: boolean;
   user_model_provider_id: string;
-  keys?: Array<{ id: string; masked: string }>;
+  keys?: Array<{ id: string; masked: string; enabled?: boolean }>;
 }
 
 interface SavedProviderGroup extends ApiGroup {

@@ -18,7 +18,10 @@ const mocks = vi.hoisted(() => ({
   configureProviders: vi.fn(),
   configureService: vi.fn(),
   changed: vi.fn(),
-  translate: (key: string) => key,
+  translate: (key: string, options?: { configured?: number; total?: number }) =>
+    key === "modelProvider.defaults.configuredCount"
+      ? `${options?.configured}/${options?.total}`
+      : key,
 }));
 
 vi.mock("react-i18next", () => ({
@@ -65,7 +68,11 @@ const selectedParsing = {
   category: "ocr", group_id: "parsing", group_name: "Parser", provider_name: "MinerU", share: false,
 };
 
-function renderPanel(modelState: "ready" | "empty" | "error" = "ready") {
+function renderPanel(
+  modelState: "ready" | "empty" | "error" = "ready",
+  highlightTarget?: "image_generator" | "evo_llm",
+  onHighlightResolved = vi.fn(),
+) {
   return render(<DefaultModelConfigPanel
     cloudServiceSetupStates={{ cloudParsing: "ready", searchEngine: "empty" }}
     modelProviderSetupState={modelState}
@@ -73,12 +80,40 @@ function renderPanel(modelState: "ready" | "empty" | "error" = "ready") {
     onConfigureProviders={mocks.configureProviders}
     onModelSelectionChanged={mocks.changed}
     onRetrySetup={vi.fn()}
+    highlightTarget={highlightTarget}
+    onHighlightResolved={onHighlightResolved}
   />);
 }
 
-const configured = () => screen.getByRole("region", { name: "modelProvider.configuredCapabilities" });
-const pending = () => screen.getByRole("region", { name: "modelProvider.pendingCapabilities" });
-const group = (name: string) => screen.getByRole("group", { name });
+const basic = () => screen.getByRole("region", { name: "modelProvider.defaults.basicTitle" });
+const categoryNames = ["visual", "voice", "retrieval", "evolution"] as const;
+type CategoryName = typeof categoryNames[number];
+const categoryButton = (category: CategoryName) => screen.getByRole("button", {
+  name: new RegExp(`modelProvider.defaults.${category}Title`),
+});
+const expandCategory = (category: CategoryName) => {
+  const button = categoryButton(category);
+  if (button.getAttribute("aria-expanded") !== "true") fireEvent.click(button);
+  return screen.getByRole("region", { name: `modelProvider.defaults.${category}Title` });
+};
+const categoryByTitle: Record<string, CategoryName> = {
+  "modelProvider.module.vlmTitle": "visual",
+  "modelProvider.module.textToImageTitle": "visual",
+  "modelProvider.module.textToVideoTitle": "visual",
+  "modelProvider.module.asrTitle": "voice",
+  "modelProvider.module.ttsTitle": "voice",
+  "modelProvider.module.multimodalEmbeddingTitle": "retrieval",
+  "modelProvider.module.rerankTitle": "retrieval",
+  "modelProvider.module.cloudParsingServiceTitle": "retrieval",
+  "modelProvider.module.searchEngineServiceTitle": "retrieval",
+  "modelProvider.module.selfEvolutionTitle": "evolution",
+};
+const group = (name: string) => {
+  const category = categoryByTitle[name];
+  if (category) expandCategory(category);
+  return screen.getByRole("group", { name });
+};
+const revealAllCategories = () => categoryNames.forEach(expandCategory);
 const readyToSelect = async (name: string) => {
   const select = await within(group(name)).findByRole("combobox");
   await waitFor(() => expect(select).toBeEnabled());
@@ -104,16 +139,60 @@ describe("default capability configuration groups", () => {
     Element.prototype.scrollIntoView = vi.fn();
   });
 
-  it("groups configured models and services above all remaining capabilities and preserves sharing", async () => {
+  it("shows two basic selectors on entry and keeps optional categories collapsed", async () => {
     renderPanel();
-    await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
-    expect(within(configured()).getAllByRole("group")).toHaveLength(2);
-    expect(within(pending()).getAllByRole("group")).toHaveLength(10);
-    expect(within(configured()).getByRole("group", { name: "modelProvider.module.llmChatTitle" })).toBeInTheDocument();
-    expect(within(configured()).getByRole("group", { name: "modelProvider.module.cloudParsingServiceTitle" })).toBeInTheDocument();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    await waitFor(() => expect(screen.getAllByRole("combobox")).toHaveLength(2));
+    const basic = screen.getByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    expect(within(basic).getAllByRole("group")).toHaveLength(2);
+    expect(within(basic).getByRole("group", { name: "modelProvider.module.llmChatTitle" })).toBeInTheDocument();
+    expect(within(basic).getByRole("group", { name: "modelProvider.module.embeddingTitle" })).toBeInTheDocument();
+    for (const category of ["visual", "voice", "retrieval", "evolution"]) {
+      expect(screen.getByRole("button", { name: new RegExp(`modelProvider.defaults.${category}Title`) })).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByRole("region", { name: `modelProvider.defaults.${category}Title` })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByRole("group", { name: "modelProvider.module.ttsTitle" })).not.toBeInTheDocument();
+  });
+
+  it("reveals optional models only for the selected category and supports collapsing it", async () => {
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    const voice = expandCategory("voice");
+    expect(categoryButton("voice")).toHaveAttribute("aria-expanded", "true");
+    expect(within(voice).getAllByRole("group")).toHaveLength(2);
+    expect(within(voice).getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "modelProvider.module.textToImageTitle" })).not.toBeInTheDocument();
+    fireEvent.click(categoryButton("voice"));
+    expect(categoryButton("voice")).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: "modelProvider.defaults.voiceTitle" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("group")).toHaveLength(2);
+  });
+
+  it("automatically reveals and focuses a deep-linked capability in a collapsed category", async () => {
+    const resolved = vi.fn();
+    renderPanel("ready", "image_generator", resolved);
+    const visual = await screen.findByRole("region", { name: "modelProvider.defaults.visualTitle" });
+    const target = within(visual).getByRole("group", { name: "modelProvider.module.textToImageTitle" });
+    expect(categoryButton("visual")).toHaveAttribute("aria-expanded", "true");
+    expect(categoryButton("voice")).toHaveAttribute("aria-expanded", "false");
+    expect(target).toHaveClass("is-config-highlighted");
+    await waitFor(() => expect(target).toHaveFocus());
+    expect(target.scrollIntoView).toHaveBeenCalled();
+    expect(resolved).not.toHaveBeenCalled();
+  });
+
+  it("keeps configured and pending models in stable categories and preserves sharing", async () => {
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    expect(within(basic()).getByRole("group", { name: "modelProvider.module.llmChatTitle" })).not.toHaveClass("is-pending");
+    expect(within(basic()).getByRole("group", { name: "modelProvider.module.embeddingTitle" })).toHaveClass("is-pending");
+    const retrieval = expandCategory("retrieval");
+    expect(within(retrieval).getByRole("group", { name: "modelProvider.module.cloudParsingServiceTitle" })).not.toHaveClass("is-pending");
+    expect(within(retrieval).getByRole("group", { name: "modelProvider.module.rerankTitle" })).toHaveClass("is-pending");
     expect(within(group("modelProvider.module.llmChatTitle")).getByRole("switch")).toBeChecked();
-    await waitFor(() => expect(within(pending()).getAllByRole("combobox")).toHaveLength(9));
-    expect(screen.getByRole("heading", { name: "modelProvider.pendingCapabilities 10" })).toBeInTheDocument();
+    revealAllCategories();
+    await waitFor(() => expect(screen.getAllByRole("combobox")).toHaveLength(11));
+    expect(screen.getAllByRole("group")).toHaveLength(12);
   });
 
   it("shows selectors directly and only links capabilities without usable models to setup", async () => {
@@ -124,7 +203,7 @@ describe("default capability configuration groups", () => {
       }] },
     }));
     renderPanel();
-    await screen.findByRole("region", { name: "modelProvider.pendingCapabilities" });
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
     expect(await readyToSelect("modelProvider.module.ttsTitle")).toBeInTheDocument();
     expect(within(group("modelProvider.module.ttsTitle")).queryByRole("button", { name: "modelProvider.configureCapability" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "modelProvider.configureAllCapabilities" })).not.toBeInTheDocument();
@@ -143,7 +222,7 @@ describe("default capability configuration groups", () => {
     const modelName = "tongyi-embedding-vision-plus-2026-03-06";
     mocks.models.mockResolvedValue({ data: { models: [{ ...availableModel, name: modelName }] } });
     renderPanel();
-    await screen.findByRole("region", { name: "modelProvider.pendingCapabilities" });
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
     fireEvent.mouseDown(await readyToSelect("modelProvider.module.ttsTitle"));
     const optionName = await screen.findByText(modelName);
     fireEvent.mouseEnter(optionName);
@@ -156,7 +235,7 @@ describe("default capability configuration groups", () => {
 
   it("keeps the selector visible when a search has no matches", async () => {
     renderPanel();
-    await screen.findByRole("region", { name: "modelProvider.pendingCapabilities" });
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
     const select = await readyToSelect("modelProvider.module.ttsTitle");
     fireEvent.mouseDown(select);
     fireEvent.change(select, { target: { value: "no matching model" } });
@@ -167,7 +246,7 @@ describe("default capability configuration groups", () => {
   it("shows retry on a model list failure and does not treat it as an empty capability", async () => {
     mocks.models.mockRejectedValue(new Error("catalog unavailable"));
     renderPanel();
-    await screen.findByRole("region", { name: "modelProvider.pendingCapabilities" });
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
     const card = group("modelProvider.module.ttsTitle");
     expect(await within(card).findByRole("alert")).toBeInTheDocument();
     expect(within(card).queryByRole("button", { name: "modelProvider.configureCapability" })).not.toBeInTheDocument();
@@ -176,22 +255,28 @@ describe("default capability configuration groups", () => {
     expect(await readyToSelect("modelProvider.module.ttsTitle")).toBeInTheDocument();
   });
 
-  it("moves a capability only after a successful save, and clearing it returns it to pending", async () => {
+  it("updates configuration after a successful save and keeps the capability in its category", async () => {
     mocks.selections.mockResolvedValue({ data: { selections: [] } });
     let resolveSave!: (value: unknown) => void;
     mocks.saveModel.mockImplementation(() => new Promise(resolve => { resolveSave = resolve; }));
     renderPanel();
-    await screen.findByRole("region", { name: "modelProvider.pendingCapabilities" });
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
     await readyToSelect("modelProvider.module.ttsTitle");
     fireEvent.mouseDown(within(group("modelProvider.module.ttsTitle")).getByRole("combobox"));
     fireEvent.click(await screen.findByText("Demo model"));
     await waitFor(() => expect(mocks.saveModel).toHaveBeenCalled());
-    expect(within(pending()).getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument();
+    expect(group("modelProvider.module.ttsTitle")).toHaveClass("is-pending");
+    expect(categoryButton("voice")).toHaveTextContent("0/2");
+    const voice = screen.getByRole("region", { name: "modelProvider.defaults.voiceTitle" });
     await act(async () => { resolveSave({ data: { selections: [{ ...selectedLlm, model_key: "tts" }] } }); });
-    expect(within(configured()).getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument();
+    expect(group("modelProvider.module.ttsTitle")).not.toHaveClass("is-pending");
+    expect(categoryButton("voice")).toHaveTextContent("1/2");
+    expect(group("modelProvider.module.ttsTitle").closest("section")).toBe(voice);
     mocks.saveModel.mockResolvedValue({ data: { selections: [] } });
     fireEvent.mouseDown(within(group("modelProvider.module.ttsTitle")).getByLabelText("close-circle"));
-    await waitFor(() => expect(within(pending()).getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument());
+    await waitFor(() => expect(group("modelProvider.module.ttsTitle")).toHaveClass("is-pending"));
+    expect(categoryButton("voice")).toHaveTextContent("0/2");
+    expect(group("modelProvider.module.ttsTitle").closest("section")).toBe(voice);
   });
 
   describe.each(["model", "service"] as const)("ordinary user %s selection readiness", (kind) => {
@@ -216,8 +301,8 @@ describe("default capability configuration groups", () => {
 
     it.each([false, true])("rechecks readiness after clearing, with shared fallback=%s", async (hasFallback) => {
       renderPanel();
-      await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
-      expect(within(configured()).getAllByRole("group")).toHaveLength(1);
+      await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+      expect(group(title)).not.toHaveClass("is-pending");
       expect(within(group(title)).getByLabelText("check-circle")).toBeInTheDocument();
       const calls = readiness().mock.calls.length;
       let resolveReadiness!: (value: unknown) => void;
@@ -232,9 +317,9 @@ describe("default capability configuration groups", () => {
           model_name: hasFallback ? "Shared fallback" : undefined, group_name: hasFallback ? "Shared fallback" : undefined } });
       });
       await readyToSelect(title);
-      expect(within(hasFallback ? configured() : pending()).getByRole("group", { name: title })).toBeInTheDocument();
-      expect(screen.getByRole("heading", { name: `modelProvider.configuredCapabilities ${hasFallback ? 1 : 0}` })).toBeInTheDocument();
-      expect(screen.getByRole("heading", { name: `modelProvider.pendingCapabilities ${hasFallback ? 11 : 12}` })).toBeInTheDocument();
+      expect(group(title).classList.contains("is-pending")).toBe(!hasFallback);
+      expect(group(title).closest("section")).toHaveAttribute("aria-label", `modelProvider.defaults.${kind === "model" ? "voice" : "retrieval"}Title`);
+      expect(categoryButton(kind === "model" ? "voice" : "retrieval")).toHaveTextContent(`${hasFallback ? 1 : 0}/${kind === "model" ? 2 : 4}`);
       expect(within(group(title)).getByLabelText(hasFallback ? "check-circle" : "minus-circle")).toBeInTheDocument();
       expect(within(group(title)).queryByText(oldName)).not.toBeInTheDocument();
       if (hasFallback) expect(within(group(title)).getByText("Shared fallback")).toBeInTheDocument();
@@ -244,7 +329,7 @@ describe("default capability configuration groups", () => {
 
     it("shows a recoverable error when the post-save readiness check fails", async () => {
       renderPanel();
-      await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
+      await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
       readiness().mockRejectedValueOnce(new Error("readiness unavailable"));
       fireEvent.mouseDown(within(group(title)).getByLabelText("close-circle"));
       await waitFor(() => expect(within(group(title)).getByRole("alert")).toHaveTextContent("modelProvider.capabilityStatusLoadFailed"));
@@ -253,26 +338,26 @@ describe("default capability configuration groups", () => {
       await readyToSelect(title);
       readiness().mockResolvedValueOnce({ data: { ready: true, source: "shared", model_name: "Recovered fallback", group_name: "Recovered fallback" } });
       fireEvent.click(within(group(title)).getByRole("button", { name: "common.retry" }));
-      await waitFor(() => expect(within(configured()).getByRole("group", { name: title })).toHaveTextContent("Recovered fallback"));
+      await waitFor(() => expect(group(title)).toHaveTextContent("Recovered fallback"));
       expect(save()).toHaveBeenCalledOnce();
     });
 
     it("preserves the current readiness when clearing fails to save", async () => {
       renderPanel();
-      await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
+      await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
       const calls = readiness().mock.calls.length;
       save().mockRejectedValueOnce(new Error("save unavailable"));
       fireEvent.mouseDown(within(group(title)).getByLabelText("close-circle"));
       await waitFor(() => expect(save()).toHaveBeenCalledOnce());
       await readyToSelect(title);
       expect(readiness()).toHaveBeenCalledTimes(calls);
-      expect(within(configured()).getByRole("group", { name: title })).toBeInTheDocument();
+      expect(group(title)).not.toHaveClass("is-pending");
       expect(within(group(title)).getByLabelText("check-circle")).toBeInTheDocument();
     });
 
     it("ignores a pre-save readiness retry that finishes after the saved configuration is checked", async () => {
       renderPanel();
-      await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
+      await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
       readiness().mockRejectedValue(new Error("refresh unavailable"));
       act(() => window.dispatchEvent(new Event("focus")));
       await waitFor(() => expect(within(group(title)).getByRole("alert")).toBeInTheDocument());
@@ -281,12 +366,12 @@ describe("default capability configuration groups", () => {
       fireEvent.click(within(group(title)).getByRole("button", { name: "common.retry" }));
       readiness().mockResolvedValueOnce({ data: { ready: false } });
       fireEvent.mouseDown(within(group(title)).getByLabelText("close-circle"));
-      await waitFor(() => expect(within(pending()).getByRole("group", { name: title })).toBeInTheDocument());
+      await waitFor(() => expect(group(title)).toHaveClass("is-pending"));
       await readyToSelect(title);
       await act(async () => {
         resolveOldRetry({ data: { ready: true, source: "own", model_name: oldName, group_name: oldName } });
       });
-      expect(within(pending()).getByRole("group", { name: title })).toBeInTheDocument();
+      expect(group(title)).toHaveClass("is-pending");
       expect(within(group(title)).getByLabelText("minus-circle")).toBeInTheDocument();
       expect(within(group(title)).queryByText(oldName)).not.toBeInTheDocument();
     });
@@ -296,12 +381,12 @@ describe("default capability configuration groups", () => {
     mocks.selections.mockResolvedValue({ data: { selections: [] } });
     mocks.saveModel.mockRejectedValue(new Error("save failed"));
     renderPanel();
-    await screen.findByRole("region", { name: "modelProvider.pendingCapabilities" });
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
     await readyToSelect("modelProvider.module.llmChatTitle");
     fireEvent.mouseDown(within(group("modelProvider.module.llmChatTitle")).getByRole("combobox"));
     fireEvent.click(await screen.findByText("Demo model"));
     await waitFor(() => expect(mocks.saveModel).toHaveBeenCalled());
-    expect(within(pending()).getByRole("group", { name: "modelProvider.module.llmChatTitle" })).toBeInTheDocument();
+    expect(group("modelProvider.module.llmChatTitle")).toHaveClass("is-pending");
     expect(mocks.changed).not.toHaveBeenCalled();
   });
 
@@ -309,38 +394,38 @@ describe("default capability configuration groups", () => {
     mocks.selections.mockResolvedValue({ data: { selections: [] } });
     mocks.saveModel.mockResolvedValue({ data: { selections: [] } });
     renderPanel();
-    await screen.findByRole("region", { name: "modelProvider.pendingCapabilities" });
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
     await readyToSelect("modelProvider.module.ttsTitle");
     fireEvent.mouseDown(within(group("modelProvider.module.ttsTitle")).getByRole("combobox"));
     fireEvent.click(await screen.findByText("Demo model"));
     await waitFor(() => expect(mocks.changed).toHaveBeenCalled());
-    expect(within(pending()).getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument();
+    expect(group("modelProvider.module.ttsTitle")).toHaveClass("is-pending");
   });
 
-  it("retains a service on failed removal and moves it after successful removal and configuration", async () => {
+  it("retains service configuration on failed removal and updates it within the same category", async () => {
     mocks.saveService.mockRejectedValueOnce(new Error("save failed"));
     mocks.groups.mockResolvedValue({ data: { groups: [{ ...selectedParsing, base_url: "", user_model_provider_id: "parser-provider" }] } });
     renderPanel();
-    await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
     const title = "modelProvider.module.cloudParsingServiceTitle";
     fireEvent.mouseDown(within(group(title)).getByLabelText("close-circle"));
     await waitFor(() => expect(mocks.saveService).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(within(group(title)).getByRole("combobox")).toBeEnabled());
-    expect(within(configured()).getByRole("group", { name: title })).toBeInTheDocument();
+    expect(group(title)).not.toHaveClass("is-pending");
     fireEvent.mouseDown(within(group(title)).getByLabelText("close-circle"));
-    await waitFor(() => expect(within(pending()).getByRole("group", { name: title })).toBeInTheDocument());
+    await waitFor(() => expect(group(title)).toHaveClass("is-pending"));
     mocks.saveService.mockResolvedValue({ data: { selections: [selectedParsing] } });
     await readyToSelect(title);
     fireEvent.mouseDown(within(group(title)).getByRole("combobox"));
     fireEvent.click(await screen.findByText("MinerU"));
-    await waitFor(() => expect(within(configured()).getByRole("group", { name: title })).toBeInTheDocument());
+    await waitFor(() => expect(group(title)).not.toHaveClass("is-pending"));
     expect(within(group(title)).getByRole("combobox")).toBeInTheDocument();
   });
 
   it("does not let an older refresh revert a newly saved selection", async () => {
     mocks.selections.mockResolvedValue({ data: { selections: [] } });
     renderPanel();
-    await screen.findByRole("region", { name: "modelProvider.pendingCapabilities" });
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
     let resolveRefresh!: (value: unknown) => void;
     mocks.selections.mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve; }));
     act(() => window.dispatchEvent(new Event("focus")));
@@ -349,9 +434,9 @@ describe("default capability configuration groups", () => {
     await readyToSelect("modelProvider.module.ttsTitle");
     fireEvent.mouseDown(within(group("modelProvider.module.ttsTitle")).getByRole("combobox"));
     fireEvent.click(await screen.findByText("Demo model"));
-    await waitFor(() => expect(within(configured()).getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument());
+    await waitFor(() => expect(group("modelProvider.module.ttsTitle")).not.toHaveClass("is-pending"));
     await act(async () => { resolveRefresh({ data: { selections: [] } }); });
-    expect(within(configured()).getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument();
+    expect(group("modelProvider.module.ttsTitle")).not.toHaveClass("is-pending");
   });
 
   it("ignores a stale model catalog after refreshed configuration has no usable models", async () => {
@@ -360,7 +445,7 @@ describe("default capability configuration groups", () => {
       ? new Promise(resolve => { resolveCatalog = resolve; })
       : Promise.resolve({ data: { models: [availableModel] } }));
     renderPanel();
-    await screen.findByRole("region", { name: "modelProvider.pendingCapabilities" });
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
     await waitFor(() => expect(mocks.models).toHaveBeenCalledWith({ modelType: "tts" }));
     const card = group("modelProvider.module.ttsTitle");
     expect(within(card).getByRole("status")).toBeInTheDocument();
@@ -376,13 +461,15 @@ describe("default capability configuration groups", () => {
   it("refreshes deleted and unavailable selections when returning to the page", async () => {
     mocks.cloudAvailable = true;
     renderPanel();
-    await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
     mocks.selections.mockResolvedValue({ data: { selections: [{ ...selectedLlm, availability: "unavailable" }] } });
     mocks.models.mockResolvedValue({ data: { models: [{ ...availableModel, availability: "unavailable" }] } });
     mocks.services.mockResolvedValue({ data: { selections: [] } });
     act(() => window.dispatchEvent(new Event("focus")));
-    await waitFor(() => expect(within(configured()).queryByRole("group")).not.toBeInTheDocument());
-    expect(within(pending()).getAllByRole("group")).toHaveLength(12);
+    await waitFor(() => expect(group("modelProvider.module.llmChatTitle")).toHaveClass("is-pending"));
+    revealAllCategories();
+    expect(screen.getAllByRole("group")).toHaveLength(12);
+    expect(screen.getAllByRole("group").every((row) => row.classList.contains("is-pending"))).toBe(true);
   });
 
   it("preserves shared capability readiness and administrator-only configuration", async () => {
@@ -392,8 +479,8 @@ describe("default capability configuration groups", () => {
       data: { ready: params.model_type === "embed_main", source: "shared", provider_name: "Shared provider", model_name: "Shared embedding", shared_by_name: "Admin" },
     }));
     renderPanel();
-    await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
-    expect(within(configured()).getByRole("group", { name: "modelProvider.module.embeddingTitle" })).toBeInTheDocument();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    expect(group("modelProvider.module.embeddingTitle")).not.toHaveClass("is-pending");
     expect(await within(group("modelProvider.module.multimodalEmbeddingTitle")).findByRole("combobox")).toBeDisabled();
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   });
@@ -403,8 +490,10 @@ describe("default capability configuration groups", () => {
     mocks.selections.mockResolvedValue({ data: { selections: [] } });
     mocks.services.mockResolvedValue({ data: { selections: [] } });
     renderPanel("empty");
-    await screen.findByRole("region", { name: "modelProvider.pendingCapabilities" });
-    expect(within(pending()).getAllByRole("group")).toHaveLength(11);
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    revealAllCategories();
+    expect(screen.getAllByRole("group")).toHaveLength(11);
+    expect(categoryButton("retrieval")).toHaveTextContent("0/3");
     configure("modelProvider.module.llmChatTitle");
     expect(mocks.configureProviders).toHaveBeenCalledOnce();
     configure("modelProvider.module.searchEngineServiceTitle");
@@ -417,11 +506,11 @@ describe("default capability configuration groups", () => {
     mocks.selections.mockRejectedValue(new Error("load failed"));
     renderPanel();
     expect(await screen.findByRole("alert")).toHaveTextContent("modelProvider.defaultConfigLoadFailed");
-    expect(screen.queryByRole("region", { name: "modelProvider.pendingCapabilities" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "modelProvider.defaults.basicTitle" })).not.toBeInTheDocument();
     mocks.selections.mockResolvedValue({ data: { selections: [selectedLlm] } });
     fireEvent.click(screen.getByRole("button", { name: "common.retry" }));
-    expect(await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" })).toBeInTheDocument();
-    expect(within(configured()).getAllByRole("group")).toHaveLength(2);
+    expect(await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" })).toBeInTheDocument();
+    expect(within(basic()).getAllByRole("group")).toHaveLength(2);
   });
 
   it("isolates failed model readiness and retries only that capability without losing selections", async () => {
@@ -429,8 +518,8 @@ describe("default capability configuration groups", () => {
     mocks.ready.mockImplementation(({ params }: { params: { model_type: string } }) =>
       params.model_type === "tts" ? Promise.reject(new Error("upstream unavailable")) : Promise.resolve({ data: { ready: false } }));
     renderPanel();
-    await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
-    expect(within(configured()).getByRole("group", { name: "modelProvider.module.llmChatTitle" })).toHaveTextContent("Demo model");
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    expect(group("modelProvider.module.llmChatTitle")).toHaveTextContent("Demo model");
     const card = group("modelProvider.module.ttsTitle");
     expect(await within(card).findByRole("alert")).toHaveTextContent("modelProvider.capabilityStatusLoadFailed");
     expect(screen.queryByText("modelProvider.defaultConfigLoadFailed")).not.toBeInTheDocument();
@@ -446,7 +535,7 @@ describe("default capability configuration groups", () => {
     expect(mocks.ready).toHaveBeenLastCalledWith(expect.objectContaining({ params: { model_type: "tts" } }));
     await act(async () => { resolveRetry({ data: { ready: true, source: "shared", model_name: "Shared speech" } }); });
     await waitFor(() => expect(within(group("modelProvider.module.ttsTitle")).queryByRole("alert")).not.toBeInTheDocument());
-    expect(within(configured()).getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument();
+    expect(group("modelProvider.module.ttsTitle")).not.toHaveClass("is-pending");
     expect(mocks.selections).toHaveBeenCalledOnce();
     expect(mocks.verified).toHaveBeenCalledTimes(verifiedCalls);
     expect(mocks.saveModel).not.toHaveBeenCalled();
@@ -457,7 +546,7 @@ describe("default capability configuration groups", () => {
     mocks.verified.mockImplementation(({ category }: { category: string }) =>
       category === "ocr" ? Promise.reject(new Error("unavailable")) : Promise.resolve({ data: { ready: false } }));
     renderPanel();
-    await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
     const card = group("modelProvider.module.cloudParsingServiceTitle");
     expect(await within(card).findByRole("alert")).toHaveTextContent("modelProvider.capabilityStatusLoadFailed");
     fireEvent.click(within(card).getByRole("button", { name: "common.retry" }));
@@ -475,7 +564,7 @@ describe("default capability configuration groups", () => {
     mocks.ready.mockImplementation(({ params }: { params: { model_type: string } }) =>
       params.model_type === "tts" ? Promise.reject(new Error("unavailable")) : Promise.resolve({ data: { ready: false } }));
     renderPanel();
-    await screen.findByRole("region", { name: "modelProvider.pendingCapabilities" });
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
     const card = group("modelProvider.module.ttsTitle");
     let resolveRetry!: (value: unknown) => void;
     mocks.ready.mockImplementationOnce(() => new Promise(resolve => { resolveRetry = resolve; }));
@@ -484,17 +573,17 @@ describe("default capability configuration groups", () => {
     act(() => window.dispatchEvent(new Event("focus")));
     await waitFor(() => expect(within(card).queryByRole("alert")).not.toBeInTheDocument());
     await act(async () => { resolveRetry({ data: { ready: true, source: "shared" } }); });
-    expect(within(pending()).getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument();
+    expect(group("modelProvider.module.ttsTitle")).toHaveClass("is-pending");
   });
 
   it("preserves the last shared configuration while reporting a failed refresh as unknown", async () => {
     mocks.role = "user";
     mocks.ready.mockResolvedValue({ data: { ready: true, source: "shared", model_name: "Shared speech" } });
     renderPanel();
-    await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
     mocks.ready.mockRejectedValue(new Error("unavailable"));
     act(() => window.dispatchEvent(new Event("focus")));
-    const card = within(configured()).getByRole("group", { name: "modelProvider.module.ttsTitle" });
+    const card = group("modelProvider.module.ttsTitle");
     expect(await within(card).findByRole("alert")).toHaveTextContent("modelProvider.capabilityStatusLoadFailed");
     expect(within(card).queryByLabelText("modelProvider.readyStatusAria")).not.toBeInTheDocument();
     expect(within(card).getByText("Shared speech")).toBeInTheDocument();
@@ -504,24 +593,24 @@ describe("default capability configuration groups", () => {
     mocks.role = "user";
     mocks.ready.mockRejectedValue(new Error("unavailable"));
     renderPanel();
-    await screen.findByRole("region", { name: "modelProvider.pendingCapabilities" });
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
     let resolveRefresh!: (value: unknown) => void;
     mocks.selections.mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve; }));
     act(() => window.dispatchEvent(new Event("focus")));
     await waitFor(() => expect(mocks.selections).toHaveBeenCalledTimes(2));
     mocks.ready.mockResolvedValueOnce({ data: { ready: true, source: "shared" } });
     fireEvent.click(within(group("modelProvider.module.ttsTitle")).getByRole("button", { name: "common.retry" }));
-    await waitFor(() => expect(within(configured()).getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument());
+    await waitFor(() => expect(group("modelProvider.module.ttsTitle")).not.toHaveClass("is-pending"));
     mocks.ready.mockResolvedValue({ data: { ready: false } });
     await act(async () => { resolveRefresh({ data: { selections: [selectedLlm] } }); });
-    expect(within(configured()).getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument();
+    expect(group("modelProvider.module.ttsTitle")).not.toHaveClass("is-pending");
   });
 
   it("does not request readiness for a disabled feature", async () => {
     mocks.role = "user";
     mocks.imageEmbedEnabled = false;
     renderPanel();
-    await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
     expect(mocks.ready.mock.calls.some(([options]) => options.params.model_type === "embed_image")).toBe(false);
     expect(screen.queryByRole("group", { name: "modelProvider.module.multimodalEmbeddingTitle" })).not.toBeInTheDocument();
   });

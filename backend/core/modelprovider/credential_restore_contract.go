@@ -167,6 +167,9 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 		if err := lockProvider(tx, &provider); err != nil {
 			return err
 		}
+		if err := initializeProviderActiveKey(tx, &provider); err != nil {
+			return err
+		}
 		if groupFound {
 			if err := tx.Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", group.ID, provider.ID, sink.localUserID).Take(&group).Error; err != nil {
 				return err
@@ -192,6 +195,9 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 		currentURL := connectionBaseURL(provider, restored.Provider.BaseURL)
 		verified = normalizeBaseURLForCompare(currentURL) == normalizeBaseURLForCompare(restored.Provider.BaseURL)
 		restored.Provider.BaseURL = currentURL
+	}
+	if err := validateSavedKeyPool(provider, restored.Provider.DisplayName, restored.Provider.BaseURL, string(restored.Provider.APIKey)); err != nil {
+		return credentialvault.ErrInvalidContract
 	}
 	localRevision := int64(1)
 	groupID := uuid.NewString()
@@ -235,6 +241,9 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 	binding.VaultID, binding.CloudRecordID, binding.LocalProviderGroupID = restored.VaultID, restored.RecordID, groupID
 	binding.LastCloudRevision, binding.LastLocalCredentialRevision = restored.Revision, localRevision
 	binding.LastETag, binding.BackupState, binding.UpdatedAt = restored.ETag, string(credentialvault.BackupSucceeded), now
+	if err := reconcileProviderActiveKey(tx, &provider); err != nil {
+		return err
+	}
 	if err := tx.Save(&binding).Error; err != nil {
 		return err
 	}
@@ -349,10 +358,16 @@ func (sink *CredentialRestoreSink) TemporaryCredential(recordID string) (credent
 }
 
 func validRestoredCredential(restored credentialvault.RestoredCredential) bool {
-	return restoreSinkUUID.MatchString(restored.RecordID) && restored.Revision > 0 && restoreSinkUUID.MatchString(restored.VaultID) &&
+	valid := restoreSinkUUID.MatchString(restored.RecordID) && restored.Revision > 0 && restoreSinkUUID.MatchString(restored.VaultID) &&
 		regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(restored.ETag) && strings.TrimSpace(restored.Provider.ProviderCatalogKey) != "" &&
 		len(restored.Provider.ProviderCatalogKey) <= 128 && strings.TrimSpace(restored.Provider.DisplayName) != "" && len(restored.Provider.DisplayName) <= 255 &&
-		strings.TrimSpace(restored.Provider.BaseURL) != "" && len(restored.Provider.BaseURL) <= 1024 && len(restored.Provider.APIKey) > 0 && len(restored.Provider.APIKey) <= 512
+		strings.TrimSpace(restored.Provider.BaseURL) != "" && len(restored.Provider.BaseURL) <= 1024 && credentialvault.ValidAPIKeyPool(restored.Provider.APIKey)
+	if !valid {
+		return false
+	}
+	payload, err := credentialvault.EncodeProviderCredentialPayload(restored.Provider)
+	clear(payload)
+	return err == nil
 }
 
 func clearTemporaryValues(values map[string]temporaryCredential) {

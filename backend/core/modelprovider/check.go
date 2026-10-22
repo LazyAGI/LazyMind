@@ -628,6 +628,10 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "group not found", http.StatusNotFound)
 		return
 	}
+	if hasSharedProviderEndpoint(parent) {
+		checkSharedProviderGroup(w, r, db, parent, group, req, payload.APIKey != nil)
+		return
+	}
 	urlStr = connectionBaseURL(parent, urlStr)
 	if urlStr == "" {
 		urlStr = connectionBaseURL(parent, group.BaseURL)

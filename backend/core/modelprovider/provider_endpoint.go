@@ -96,6 +96,9 @@ func setProviderEndpoint(ctx context.Context, db *gorm.DB, parent *orm.UserModel
 		if err := lockProvider(tx, parent); err != nil {
 			return err
 		}
+		if err := initializeProviderActiveKey(tx, parent); err != nil {
+			return err
+		}
 		changed := normalizeBaseURLForCompare(parent.BaseURL) != normalizeBaseURLForCompare(baseURL)
 		var groups []orm.UserModelProviderGroup
 		if err := tx.Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, parent.CreateUserID).
@@ -110,6 +113,9 @@ func setProviderEndpoint(ctx context.Context, db *gorm.DB, parent *orm.UserModel
 			}
 			key, err := apiKeyForGroup(tx, group)
 			if err != nil {
+				return err
+			}
+			if err := validateSavedKeyPool(*parent, group.Name, baseURL, key); err != nil {
 				return err
 			}
 			revision := max(group.CredentialRevision, 1) + 1

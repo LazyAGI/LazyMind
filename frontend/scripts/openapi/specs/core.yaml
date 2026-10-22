@@ -11142,7 +11142,7 @@ components:
         checkModelProviderOpenAPIRequest:
             properties:
                 api_key:
-                    description: Omit to check the first stored key. An explicit empty string tests a keyless connection.
+                    description: Omit to check the supplier's enabled key. An explicit empty string tests a keyless connection.
                     type: string
                 base_url:
                     type: string
@@ -12232,21 +12232,25 @@ components:
             type: object
         listModelProviderGroupsOpenAPIItem:
             properties:
-                api_key:
-                    type: string
                 base_url:
                     type: string
+                has_api_key:
+                    type: boolean
                 id:
                     type: string
                 is_verified:
                     type: boolean
+                keys:
+                    items:
+                        $ref: '#/components/schemas/modelProviderGroupKeyOpenAPIItem'
+                    type: array
                 name:
                     type: string
                 user_model_provider_id:
                     type: string
             required:
-                - api_key
                 - base_url
+                - has_api_key
                 - id
                 - is_verified
                 - name
@@ -12460,6 +12464,19 @@ components:
             required:
                 - key
                 - value
+            type: object
+        modelProviderGroupKeyOpenAPIItem:
+            properties:
+                enabled:
+                    type: boolean
+                id:
+                    type: string
+                masked:
+                    type: string
+            required:
+                - enabled
+                - id
+                - masked
             type: object
         okOpenAPIResponse:
             properties:
@@ -12976,6 +12993,28 @@ components:
                 - updated_at
                 - workflow_id
                 - workflow_mode
+            type: object
+        setActiveModelProviderKeyOpenAPIRequest:
+            properties:
+                group_id:
+                    description: Connection containing the saved key; empty with key_id disables the supplier's active key.
+                    type: string
+                key_id:
+                    description: Opaque saved key ID. At most one key can be enabled across all connections to a supplier.
+                    type: string
+            required:
+                - group_id
+                - key_id
+            type: object
+        setActiveModelProviderKeyOpenAPIResponse:
+            properties:
+                group_id:
+                    type: string
+                key_id:
+                    type: string
+            required:
+                - group_id
+                - key_id
             type: object
         setSelectedModelOpenAPIItem:
             properties:
@@ -26016,6 +26055,31 @@ paths:
                                 $ref: '#/components/schemas/CheckModelProviderData'
                     description: 'data: success and message from provider check'
             summary: Check model provider connectivity
+            tags:
+                - model_providers
+    /api/core/model_providers/{model_provider_id}/keys/active:
+        put:
+            description: Verifies a saved key before atomically enabling it for every connection to the supplier. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/setActiveModelProviderKeyOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/setActiveModelProviderKeyOpenAPIResponse'
+                    description: Supplier active key
+            summary: Set the single enabled key for a model supplier
             tags:
                 - model_providers
     /api/core/model_providers/features:

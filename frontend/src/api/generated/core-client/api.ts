@@ -1066,7 +1066,7 @@ export interface CheckModelProviderData {
 }
 export interface CheckModelProviderOpenAPIRequest {
     /**
-     * Omit to check the first stored key. An explicit empty string tests a keyless connection.
+     * Omit to check the supplier\'s enabled key. An explicit empty string tests a keyless connection.
      */
     'api_key'?: string;
     'base_url'?: string;
@@ -4506,10 +4506,11 @@ export interface ListModelProviderGroupModelsOpenAPIResponse {
     'models'?: Array<ListModelProviderGroupModelsOpenAPIItem>;
 }
 export interface ListModelProviderGroupsOpenAPIItem {
-    'api_key': string;
     'base_url': string;
+    'has_api_key': boolean;
     'id': string;
     'is_verified': boolean;
+    'keys'?: Array<ModelProviderGroupKeyOpenAPIItem>;
     'name': string;
     'user_model_provider_id': string;
 }
@@ -4879,6 +4880,11 @@ export interface ModelProviderBaseURLPresetItem {
     'key': string;
     'label'?: string;
     'value': string;
+}
+export interface ModelProviderGroupKeyOpenAPIItem {
+    'enabled': boolean;
+    'id': string;
+    'masked': string;
 }
 export interface NotificationClaim {
     'outbox_id': string;
@@ -5774,6 +5780,20 @@ export interface SessionDTO {
     'updated_at': string;
     'workflow_id': string;
     'workflow_mode': string;
+}
+export interface SetActiveModelProviderKeyOpenAPIRequest {
+    /**
+     * Connection containing the saved key; empty with key_id disables the supplier\'s active key.
+     */
+    'group_id': string;
+    /**
+     * Opaque saved key ID. At most one key can be enabled across all connections to a supplier.
+     */
+    'key_id': string;
+}
+export interface SetActiveModelProviderKeyOpenAPIResponse {
+    'group_id': string;
+    'key_id': string;
 }
 export interface SetChatHistoryResponse {
     'history_id'?: string;
@@ -48082,6 +48102,45 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
+         * Verifies a saved key before atomically enabling it for every connection to the supplier. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
+         * @summary Set the single enabled key for a model supplier
+         * @param {string} modelProviderId
+         * @param {SetActiveModelProviderKeyOpenAPIRequest} setActiveModelProviderKeyOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdKeysActivePut: async (modelProviderId: string, setActiveModelProviderKeyOpenAPIRequest: SetActiveModelProviderKeyOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdKeysActivePut', 'modelProviderId', modelProviderId)
+            // verify required parameter 'setActiveModelProviderKeyOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdKeysActivePut', 'setActiveModelProviderKeyOpenAPIRequest', setActiveModelProviderKeyOpenAPIRequest)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/keys/active`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(setActiveModelProviderKeyOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Merges non-deleted models from the current user\'s verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
          * @summary List current user\'s selectable models
          * @param {string} [modelType]
@@ -48582,6 +48641,20 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Verifies a saved key before atomically enabling it for every connection to the supplier. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
+         * @summary Set the single enabled key for a model supplier
+         * @param {string} modelProviderId
+         * @param {SetActiveModelProviderKeyOpenAPIRequest} setActiveModelProviderKeyOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdKeysActivePut(modelProviderId: string, setActiveModelProviderKeyOpenAPIRequest: SetActiveModelProviderKeyOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SetActiveModelProviderKeyOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdKeysActivePut(modelProviderId, setActiveModelProviderKeyOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdKeysActivePut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Merges non-deleted models from the current user\'s verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
          * @summary List current user\'s selectable models
          * @param {string} [modelType]
@@ -48835,6 +48908,16 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsPost(requestParameters.modelProviderId, requestParameters.createModelProviderGroupOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
+         * Verifies a saved key before atomically enabling it for every connection to the supplier. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
+         * @summary Set the single enabled key for a model supplier
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdKeysActivePutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdKeysActivePut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdKeysActivePutRequest, options?: RawAxiosRequestConfig): AxiosPromise<SetActiveModelProviderKeyOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdKeysActivePut(requestParameters.modelProviderId, requestParameters.setActiveModelProviderKeyOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Merges non-deleted models from the current user\'s verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
          * @summary List current user\'s selectable models
          * @param {ModelProvidersApiApiCoreModelProvidersModelsGetRequest} requestParameters Request parameters.
@@ -49051,6 +49134,15 @@ export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsPost
 }
 
 /**
+ * Request parameters for apiCoreModelProvidersModelProviderIdKeysActivePut operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdKeysActivePutRequest {
+    readonly modelProviderId: string
+
+    readonly setActiveModelProviderKeyOpenAPIRequest: SetActiveModelProviderKeyOpenAPIRequest
+}
+
+/**
  * Request parameters for apiCoreModelProvidersModelsGet operation in ModelProvidersApi.
  */
 export interface ModelProvidersApiApiCoreModelProvidersModelsGetRequest {
@@ -49246,6 +49338,17 @@ export class ModelProvidersApi extends BaseAPI {
      */
     public apiCoreModelProvidersModelProviderIdGroupsPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsPostRequest, options?: RawAxiosRequestConfig) {
         return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsPost(requestParameters.modelProviderId, requestParameters.createModelProviderGroupOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Verifies a saved key before atomically enabling it for every connection to the supplier. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
+     * @summary Set the single enabled key for a model supplier
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdKeysActivePutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdKeysActivePut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdKeysActivePutRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdKeysActivePut(requestParameters.modelProviderId, requestParameters.setActiveModelProviderKeyOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

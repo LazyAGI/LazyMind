@@ -20,6 +20,7 @@ import {
   Popconfirm,
   Select,
   Spin,
+  Switch,
   Tag,
   Tooltip,
   message,
@@ -33,6 +34,7 @@ import {
 import {
   modelProvidersDefaultApi,
   updateProviderEndpoint,
+  setProviderActiveKey,
   withModelProviderJsonOptions,
 } from "../api";
 import { getProviderLogoUrl } from "../providerBranding";
@@ -120,6 +122,8 @@ export function ProviderWorkspace(props: Props) {
   const [keyOpen, setKeyOpen] = useState(false);
   const [keySaving, setKeySaving] = useState(false);
   const [removingKey, setRemovingKey] = useState("");
+  const [changingActiveKey, setChangingActiveKey] = useState("");
+  const activeKeyRequestPending = useRef(false);
   const [endpointForm] = Form.useForm<{ baseUrl: string }>();
   const [keyForm] = Form.useForm<{ apiKey: string }>();
   const keyDraft = useSettingsFormDraft(keyForm, keyOpen, keySaving);
@@ -141,6 +145,11 @@ export function ProviderWorkspace(props: Props) {
   const group =
     provider?.groups.find((item) => item.id === selectedGroupId) ||
     provider?.groups[0];
+  const activeKey = provider?.groups.flatMap((connection) =>
+    connection.keys
+      .filter((key) => key.enabled)
+      .map((key) => ({ connectionName: connection.name, key })),
+  )[0];
   const groupKey = provider && group ? `${provider.id}:${group.id}` : "";
   const endpointDirty =
     Boolean(provider) &&
@@ -232,6 +241,25 @@ export function ProviderWorkspace(props: Props) {
       message.error(getLocalizedErrorMessage(error));
     } finally {
       setRemovingKey("");
+    }
+  };
+  const changeActiveKey = async (keyId: string, enabled: boolean) => {
+    if (!provider || !group || activeKeyRequestPending.current) return;
+    activeKeyRequestPending.current = true;
+    setChangingActiveKey(keyId);
+    try {
+      await setProviderActiveKey(
+        provider.id,
+        enabled ? group.id : "",
+        enabled ? keyId : "",
+      );
+      await props.onReload();
+      message.success(label(enabled ? "keyActivated" : "keysDisabled"));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
+    } finally {
+      activeKeyRequestPending.current = false;
+      setChangingActiveKey("");
     }
   };
   const visibleProviders = providers.filter(
@@ -462,6 +490,7 @@ export function ProviderWorkspace(props: Props) {
                     >
                       <Input
                         aria-label="API Host"
+                        disabled={Boolean(changingActiveKey)}
                         maxLength={512}
                         spellCheck={false}
                         autoComplete="off"
@@ -470,7 +499,7 @@ export function ProviderWorkspace(props: Props) {
                     <Button
                       htmlType="submit"
                       loading={endpointSaving}
-                      disabled={!endpointDirty}
+                      disabled={!endpointDirty || Boolean(changingActiveKey)}
                     >
                       {label("saveEndpoint")}
                     </Button>
@@ -486,7 +515,11 @@ export function ProviderWorkspace(props: Props) {
                     <Button
                       type="text"
                       icon={<PlusOutlined aria-hidden="true" />}
-                      disabled={endpointDirty || endpointSaving}
+                      disabled={
+                        endpointDirty ||
+                        endpointSaving ||
+                        Boolean(changingActiveKey)
+                      }
                       onClick={() => props.onAddConnection(provider)}
                     >
                       {label("addConnection")}
@@ -545,16 +578,27 @@ export function ProviderWorkspace(props: Props) {
                         <strong>
                           API Key <span>{group?.keys.length || 0}</span>
                         </strong>
-                        <span>{label("roundRobin")}</span>
+                        <span>{label("singleActiveKey")}</span>
                         <Button
                           type="link"
                           icon={<PlusOutlined aria-hidden="true" />}
-                          disabled={endpointDirty}
+                          disabled={endpointDirty || Boolean(changingActiveKey)}
                           onClick={openAddKey}
                         >
                           {label("addKey")}
                         </Button>
                       </div>
+                      <p
+                        className={`provider-workspace-active-key-note${activeKey ? " is-active" : ""}`}
+                        role="status"
+                      >
+                        {activeKey
+                          ? label("activeKeyConnection", {
+                              connection: activeKey.connectionName,
+                              masked: activeKey.key.masked,
+                            })
+                          : label("noActiveKey")}
+                      </p>
                       <div className="provider-workspace-keys">
                         {group?.keys.length ? (
                           group.keys.map((key, index) => (
@@ -566,6 +610,31 @@ export function ProviderWorkspace(props: Props) {
                                 {label("keyNumber", { number: index + 1 })}
                               </span>
                               <code>{key.masked}</code>
+                              <span
+                                className={`provider-workspace-key-state${key.enabled ? " is-enabled" : ""}`}
+                              >
+                                {label(
+                                  key.enabled ? "keyEnabled" : "keyDisabled",
+                                )}
+                              </span>
+                              <Switch
+                                size="small"
+                                aria-label={label("useKeyNumber", {
+                                  number: index + 1,
+                                })}
+                                checked={key.enabled === true}
+                                loading={changingActiveKey === key.id}
+                                disabled={
+                                  endpointDirty ||
+                                  endpointSaving ||
+                                  Boolean(changingActiveKey) ||
+                                  Boolean(removingKey) ||
+                                  keySaving
+                                }
+                                onChange={(enabled) =>
+                                  void changeActiveKey(key.id, enabled)
+                                }
+                              />
                               <Popconfirm
                                 title={label("deleteKey")}
                                 description={label("deleteKeyHint")}
@@ -581,6 +650,7 @@ export function ProviderWorkspace(props: Props) {
                                   })}
                                   icon={<DeleteOutlined aria-hidden="true" />}
                                   loading={removingKey === key.id}
+                                  disabled={Boolean(changingActiveKey)}
                                 />
                               </Popconfirm>
                             </div>
@@ -796,7 +866,11 @@ export function ProviderWorkspace(props: Props) {
                 </span>
                 {group ? (
                   <Button
-                    disabled={endpointDirty || endpointSaving}
+                    disabled={
+                      endpointDirty ||
+                      endpointSaving ||
+                      Boolean(changingActiveKey)
+                    }
                     loading={props.checking[groupKey]}
                     onClick={() => props.onCheck(provider, group)}
                   >

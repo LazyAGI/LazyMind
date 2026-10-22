@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -17,9 +18,15 @@ const mocks = vi.hoisted(() => ({
   addKey: vi.fn(),
   deleteKey: vi.fn(),
   updateEndpoint: vi.fn(),
+  setActiveKey: vi.fn(),
 }));
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string, options?: Record<string, unknown>) =>
+      key === "modelProvider.workspace.activeKeyConnection"
+        ? `${key}:${options?.connection}:${options?.masked}`
+        : key,
+  }),
 }));
 vi.mock("@/components/request", () => ({
   getLocalizedErrorMessage: (error: Error) => error.message,
@@ -31,6 +38,7 @@ vi.mock("../api", () => ({
       mocks.deleteKey,
   },
   updateProviderEndpoint: mocks.updateEndpoint,
+  setProviderActiveKey: mocks.setActiveKey,
   withModelProviderJsonOptions: (value: unknown) => value,
 }));
 vi.mock("./ModelModalityMarks", () => ({
@@ -54,7 +62,7 @@ const provider: AddedProvider = {
       baseUrl: "https://api.example.test/v1",
       apiKeyConfigured: true,
       verified: true,
-      keys: [{ id: "opaque-primary", masked: "********1234" }],
+      keys: [{ id: "opaque-primary", masked: "********1234", enabled: true }],
       models: [
         {
           id: "model-id",
@@ -73,7 +81,7 @@ const provider: AddedProvider = {
       baseUrl: "https://api.example.test/v1",
       apiKeyConfigured: true,
       verified: false,
-      keys: [{ id: "opaque-backup", masked: "********5678" }],
+      keys: [{ id: "opaque-backup", masked: "********5678", enabled: false }],
       models: [],
     },
   ],
@@ -82,18 +90,24 @@ function setup(
   overrides: Partial<React.ComponentProps<typeof ProviderWorkspace>> = {},
   guarded = false,
 ) {
+  let updateConfiguredProviders: (
+    providers: AddedProvider[],
+  ) => void = () => {};
   const callbacks = {
+    setProvider: (next: AddedProvider) => updateConfiguredProviders([next]),
     onReload: vi.fn().mockResolvedValue(undefined),
     onDeleteModel: vi.fn(),
     onRetry: vi.fn(),
   };
   function Harness() {
     const [drawer, setDrawer] = useState(false);
+    const [configuredProviders, setConfiguredProviders] = useState([provider]);
+    updateConfiguredProviders = setConfiguredProviders;
     return (
       <>
         <ProviderWorkspace
           providers={[provider]}
-          configuredProviders={[provider]}
+          configuredProviders={configuredProviders}
           loading={false}
           loadError={false}
           onRetry={callbacks.onRetry}
@@ -150,6 +164,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.addKey.mockResolvedValue({ data: { success: true } });
   mocks.deleteKey.mockResolvedValue({ data: { success: true } });
+  mocks.setActiveKey.mockResolvedValue({
+    group_id: "backup",
+    key_id: "opaque-backup",
+  });
 });
 
 describe("compact provider workspace", () => {
@@ -169,6 +187,154 @@ describe("compact provider workspace", () => {
     expect(screen.getByText("********5678")).toBeInTheDocument();
     expect(screen.queryByText("********1234")).not.toBeInTheDocument();
   });
+  it("switches the supplier's active key across instances and retains the other saved key", async () => {
+    const callbacks = setup();
+    expect(
+      screen.getByRole("switch", {
+        name: "modelProvider.workspace.useKeyNumber",
+      }),
+    ).toBeChecked();
+    fireEvent.mouseDown(
+      screen.getByRole("combobox", {
+        name: "modelProvider.workspace.selectConnection",
+      }),
+    );
+    fireEvent.click(
+      await screen.findByText("Backup", {
+        selector: ".ant-select-item-option-content",
+      }),
+    );
+    expect(
+      screen.getByText(
+        "modelProvider.workspace.activeKeyConnection:Primary:********1234",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", {
+        name: "modelProvider.workspace.useKeyNumber",
+      }),
+    ).not.toBeChecked();
+    fireEvent.click(
+      screen.getByRole("switch", {
+        name: "modelProvider.workspace.useKeyNumber",
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.setActiveKey).toHaveBeenCalledWith(
+        "openai",
+        "backup",
+        "opaque-backup",
+      ),
+    );
+    await waitFor(() => expect(callbacks.onReload).toHaveBeenCalled());
+    const next = {
+      ...provider,
+      groups: provider.groups.map((connection) => ({
+        ...connection,
+        keys: connection.keys.map((key) => ({
+          ...key,
+          enabled: connection.id === "backup",
+        })),
+      })),
+    };
+    await act(async () => callbacks.setProvider(next));
+    expect(
+      screen.getByRole("switch", {
+        name: "modelProvider.workspace.useKeyNumber",
+      }),
+    ).toBeChecked();
+    fireEvent.mouseDown(
+      screen.getByRole("combobox", {
+        name: "modelProvider.workspace.selectConnection",
+      }),
+    );
+    fireEvent.click(
+      await screen.findByText("Primary", {
+        selector: ".ant-select-item-option-content",
+      }),
+    );
+    expect(screen.getByText("********1234")).toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", {
+        name: "modelProvider.workspace.useKeyNumber",
+      }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByText(
+        "modelProvider.workspace.activeKeyConnection:Backup:********5678",
+      ),
+    ).toBeInTheDocument();
+    expect(mocks.deleteKey).not.toHaveBeenCalled();
+  });
+
+  it("allows disabling the only active key while retaining all saved keys", async () => {
+    const callbacks = setup();
+    fireEvent.click(
+      screen.getByRole("switch", {
+        name: "modelProvider.workspace.useKeyNumber",
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.setActiveKey).toHaveBeenCalledWith("openai", "", ""),
+    );
+    await waitFor(() => expect(callbacks.onReload).toHaveBeenCalled());
+    await act(async () =>
+      callbacks.setProvider({
+        ...provider,
+        groups: provider.groups.map((connection) => ({
+          ...connection,
+          keys: connection.keys.map((key) => ({ ...key, enabled: false })),
+        })),
+      }),
+    );
+    expect(
+      screen.getByRole("switch", {
+        name: "modelProvider.workspace.useKeyNumber",
+      }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByText("modelProvider.workspace.noActiveKey"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("********1234")).toBeInTheDocument();
+    expect(mocks.deleteKey).not.toHaveBeenCalled();
+  });
+
+  it("retains the previous selection when enabling another key fails verification", async () => {
+    const callbacks = setup();
+    mocks.setActiveKey.mockRejectedValueOnce(
+      new Error("key verification failed"),
+    );
+    fireEvent.mouseDown(
+      screen.getByRole("combobox", {
+        name: "modelProvider.workspace.selectConnection",
+      }),
+    );
+    fireEvent.click(
+      await screen.findByText("Backup", {
+        selector: ".ant-select-item-option-content",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("switch", {
+        name: "modelProvider.workspace.useKeyNumber",
+      }),
+    );
+    expect(
+      await screen.findByText("key verification failed"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "modelProvider.workspace.activeKeyConnection:Primary:********1234",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", {
+        name: "modelProvider.workspace.useKeyNumber",
+      }),
+    ).not.toBeChecked();
+    expect(callbacks.onReload).not.toHaveBeenCalled();
+  });
+
   it("adds a key only to the selected instance and clears the secret after success", async () => {
     const callbacks = setup();
     fireEvent.click(
@@ -193,6 +359,7 @@ describe("compact provider workspace", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
     expect(callbacks.onReload).toHaveBeenCalled();
+    expect(mocks.setActiveKey).not.toHaveBeenCalled();
     expect(
       screen.queryByDisplayValue("secret-new-5678"),
     ).not.toBeInTheDocument();

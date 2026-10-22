@@ -1168,7 +1168,7 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 	if model == nil {
 		return errChatModelUnavailable
 	}
-	fixedLLM, err := buildChatLLMConfig(ctx, model)
+	fixedLLM, err := buildChatLLMConfig(ctx, db, model)
 	if err != nil {
 		return err
 	}
@@ -1264,7 +1264,7 @@ func LoadDefaultChatLLMConfig(ctx context.Context, db *gorm.DB, userID string) (
 	if !chatModelUsable(model) {
 		return nil, errChatModelUnavailable
 	}
-	fixed, err := buildChatLLMConfig(ctx, model)
+	fixed, err := buildChatLLMConfig(ctx, db, model)
 	if err != nil {
 		return nil, err
 	}
@@ -1275,7 +1275,7 @@ func LoadDefaultChatLLMConfig(ctx context.Context, db *gorm.DB, userID string) (
 	return cfg, nil
 }
 
-func buildChatLLMConfig(ctx context.Context, model *availableChatModel) (any, error) {
+func buildChatLLMConfig(ctx context.Context, db *gorm.DB, model *availableChatModel) (any, error) {
 	if model == nil {
 		return nil, errChatModelUnavailable
 	}
@@ -1291,13 +1291,19 @@ func buildChatLLMConfig(ctx context.Context, model *availableChatModel) (any, er
 		}
 		return fixedLLM, nil
 	}
-	apiKey, err := modelprovider.ResolveAPIKey(model.APIKey, model.APIKeyCiphertext)
+	baseURL, apiKey := model.BaseURL, model.APIKey
+	var err error
+	if model.ProviderGroupID != "" {
+		baseURL, apiKey, err = modelprovider.ResolveProviderRuntimeCredential(ctx, db, model.ProviderGroupID)
+	} else {
+		apiKey, err = modelprovider.ResolveAPIKey(model.APIKey, model.APIKeyCiphertext)
+	}
 	if err != nil {
 		return nil, errChatModelUnavailable
 	}
 	fixed := modelconfig.BuildLLMConfig([]modelconfig.SelectedRuntimeModel{{
 		ModelType: "llm", TechnicalModelType: model.ModelType, Vision: model.Vision, ProviderName: model.ProviderName, ModelName: model.ModelName,
-		BaseURL: model.BaseURL, APIKey: apiKey, MaxInputTokens: model.MaxInputTokens,
+		BaseURL: baseURL, APIKey: apiKey, MaxInputTokens: model.MaxInputTokens,
 	}})
 	fixedLLM, _ := fixed["llm"]
 	if fixedLLM == nil {

@@ -95,7 +95,7 @@ func TestEvolutionSelectionDoesNotRequireEvidenceAndRevalidates(t *testing.T) {
 	if _, _, err := ResolveEvolutionModel(ctx, db.DB, "other", ref); err == nil {
 		t.Fatal("revoked sharing still authorized")
 	}
-	if err := db.DB.Model(&g).Update("credential_version", 2).Error; err != nil {
+	if err := db.DB.Model(&g).Update("credential_revision", 2).Error; err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := ResolveEvolutionModel(ctx, db.DB, "owner", ref); err == nil {
@@ -111,7 +111,7 @@ func TestEvolutionSelectionDoesNotRequireEvidenceAndRevalidates(t *testing.T) {
 	}{
 		{map[string]any{"is_verified": false}, "connection_unverified"},
 		{map[string]any{"base_url": ""}, "configuration_incomplete"},
-		{map[string]any{"api_key": ""}, "configuration_incomplete"},
+		{map[string]any{"api_key": "", "api_key_ciphertext": ""}, "credentials_unavailable"},
 		{map[string]any{"api_key_ciphertext": "invalid-test-ciphertext"}, "credentials_unavailable"},
 	} {
 		if err := db.DB.Model(&g).Updates(invalid.update).Error; err != nil {

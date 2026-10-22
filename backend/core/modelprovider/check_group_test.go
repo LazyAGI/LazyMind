@@ -341,8 +341,10 @@ func TestCheckGroupRequiresAPIKeyOnlyForDefaultBaseURL(t *testing.T) {
 			if err := db.Take(&stored, "id = ?", group.ID).Error; err != nil {
 				t.Fatalf("reload group: %v", err)
 			}
-			if !stored.IsVerified {
-				t.Fatal("expected group to be marked verified")
+			// Probing a different unsaved/inactive key cannot verify the selected credential.
+			wantVerified := tc.wantAPIKey == "stored-key"
+			if stored.IsVerified != wantVerified {
+				t.Fatalf("verified=%v want %v for selected credential", stored.IsVerified, wantVerified)
 			}
 			if tc.wantStoredURL != "" && stored.BaseURL != tc.wantStoredURL {
 				t.Fatalf("stored base URL = %q, want %q", stored.BaseURL, tc.wantStoredURL)
@@ -484,8 +486,8 @@ func TestCreateGroupVerifiesSubmittedAPIKeyBeforeSaving(t *testing.T) {
 	if updateResponse.Data.Check == nil || !updateResponse.Data.Check.Success {
 		t.Fatalf("expected successful verification data, got %+v", updateResponse.Data.Check)
 	}
-	if updateResponse.Data.IsVerified == nil || !*updateResponse.Data.IsVerified {
-		t.Fatalf("expected update response is_verified=true, got %v", updateResponse.Data.IsVerified)
+	if updateResponse.Data.IsVerified == nil || *updateResponse.Data.IsVerified {
+		t.Fatal("replacing the enabled key must leave its successor inactive")
 	}
 
 	failedReq := httptest.NewRequest(

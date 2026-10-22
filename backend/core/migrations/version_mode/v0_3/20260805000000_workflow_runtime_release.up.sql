@@ -3291,3 +3291,11 @@ ON CONFLICT (cloud_issuer, cloud_account_id, local_provider_group_id) DO UPDATE 
     local_credential_revision = excluded.local_credential_revision,
     operation = 'upsert', backup_state = 'pending', attempt_count = 0,
     next_attempt_at = CURRENT_TIMESTAMP, last_error_code = 0, updated_at = CURRENT_TIMESTAMP;
+
+-- Supplier-wide selection references opaque key IDs; saved credential pools
+-- and ciphertext are preserved. Go initializes legacy pools after decryption.
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE user_model_providers ADD COLUMN active_key_group_id VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE user_model_providers ADD COLUMN active_key_id VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE user_model_providers ADD COLUMN active_key_initialized BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_model_providers ADD COLUMN active_key_revision BIGINT NOT NULL DEFAULT 0;

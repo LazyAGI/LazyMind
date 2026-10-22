@@ -4870,3 +4870,25 @@
   border-bottom: 1px solid #ead8bc;
   font-size: 12px;
 }
+
+.provider-workspace-active-key-note {
+  margin: 0 0 8px !important;
+  color: var(--provider-muted);
+  font-size: 11px;
+  line-height: 1.6;
+  &.is-active { color: var(--provider-green); }
+}
+.provider-workspace-key > .provider-workspace-key-state {
+  min-width: auto;
+  flex-shrink: 0;
+  font-size: 10px;
+  &.is-enabled { color: var(--provider-green); }
+}
+.provider-workspace-key .ant-switch {
+  flex-shrink: 0;
+  min-width: 28px;
+}
+@media (max-width: 800px) {
+  .provider-workspace-key { gap: 8px; }
+  .provider-workspace-key-heading > span { max-width: 48%; line-height: 1.5; }
+}

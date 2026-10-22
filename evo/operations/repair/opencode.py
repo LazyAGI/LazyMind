@@ -250,6 +250,13 @@ def _opencode_json(settings: dict[str, str]) -> dict[str, Any]:
         'snapshot': False,
     }
     if provider and model and npm and base_url:
+        # Keep durable canonical configuration unchanged. Normalize legacy pools
+        # only when building the actual private OpenCode request configuration.
+        from lazymind.model_config import resolve_request_api_keys
+        api_key = resolve_request_api_keys({'evo_llm': {
+            'source': provider, 'base_url': base_url, 'api_key': api_key,
+            'skip_auth': settings.get('skip_auth'),
+        }})['evo_llm']['api_key']
         options = {'baseURL': base_url}
         if api_key:
             options['apiKey'] = api_key
@@ -416,8 +423,11 @@ def _clean(value: Any, secrets: list[str]) -> Any:
 
 
 def _secrets(env: dict[str, str]) -> list[str]:
-    return [
+    values = [
         str(value)
         for key, value in env.items()
         if value and any(token in key.lower() for token in ('key', 'token', 'secret'))
     ]
+    # Provider errors can repeat only the selected key from a stored pool.
+    return list(dict.fromkeys([*values, *(line.strip() for value in values
+                                       for line in value.splitlines() if line.strip())]))

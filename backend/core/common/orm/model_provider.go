@@ -82,6 +82,10 @@ type UserModelProvider struct {
 	Name                   string `gorm:"column:name;type:varchar(255);not null"`
 	Description            string `gorm:"column:description;type:text;not null"`
 	BaseURL                string `gorm:"column:base_url;type:varchar(1024);not null;default:''"`
+	ActiveKeyGroupID       string `gorm:"column:active_key_group_id;type:varchar(64);not null;default:''"`
+	ActiveKeyID            string `gorm:"column:active_key_id;type:varchar(64);not null;default:''"`
+	ActiveKeyInitialized   bool   `gorm:"column:active_key_initialized;type:boolean;not null;default:false"`
+	ActiveKeyRevision      int64  `gorm:"column:active_key_revision;type:bigint;not null;default:0"`
 	Category               string `gorm:"column:category;type:varchar(64);not null;default:'model'"`
 	Capabilities           string `gorm:"column:capabilities;type:varchar(512);not null;default:'multi_group,custom_base_url,has_models'"`
 	BaseModel

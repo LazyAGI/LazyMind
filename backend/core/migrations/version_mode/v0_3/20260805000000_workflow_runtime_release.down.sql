@@ -1,3 +1,10 @@
+-- Saved pools are retained when reverting the selection preference.
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE user_model_providers DROP COLUMN active_key_revision;
+ALTER TABLE user_model_providers DROP COLUMN active_key_initialized;
+ALTER TABLE user_model_providers DROP COLUMN active_key_id;
+ALTER TABLE user_model_providers DROP COLUMN active_key_group_id;
+
 -- +migrate Dialect postgres,sqlite
 UPDATE user_model_providers SET base_url = (
     SELECT b.base_url FROM model_provider_endpoint_backups b WHERE b.row_kind = 'provider' AND b.row_id = user_model_providers.id

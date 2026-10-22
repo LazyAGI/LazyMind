@@ -54,6 +54,14 @@ export async function updateProviderEndpoint(providerId: string, baseUrl: string
   return unwrapModelProviderData(response.data);
 }
 
+export async function setProviderActiveKey(providerId: string, groupId: string, keyId: string): Promise<{group_id: string; key_id: string}> {
+  const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdKeysActivePut({
+    modelProviderId: providerId,
+    setActiveModelProviderKeyOpenAPIRequest: { group_id: groupId, key_id: keyId },
+  }, { timeout: 180000 });
+  return unwrapModelProviderData(response.data);
+}
+
 export async function getCredentialBackupStatus(): Promise<CredentialBackupStatus & { available: boolean; reasonCode?: string }> {
   const response = await modelProvidersDefaultApi.apiCoreCredentialVaultBackupGet(silentCloudRequest);
   const data = unwrapModelProviderData<Record<string, unknown>>(response.data);

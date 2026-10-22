@@ -23,6 +23,27 @@ _TYPE_TO_SLOT: Dict[str, str] = {
     'text2video': 'multimodal',
 }
 
+def resolve_request_api_keys(model_config: Dict[str, Any]) -> Dict[str, Any]:
+    '''Preserve the backend-selected key; legacy pools use their first key.
+
+    Supplier activation is authoritative in Core. This compatibility boundary
+    never rotates keys or changes the caller's durable model configuration.
+    '''
+    resolved: Dict[str, Any] = {}
+    for role, role_cfg in model_config.items():
+        if not isinstance(role_cfg, dict) or 'api_key' not in role_cfg:
+            resolved[role] = role_cfg
+            continue
+        config = dict(role_cfg)
+        raw = config.get('api_key')
+        values = [raw] if isinstance(raw, str) else raw or []
+        if not isinstance(values, (list, tuple)) or any(not isinstance(value, str) for value in values):
+            raise TypeError('api_key must be text or a sequence of text values')
+        lines = (line.strip() for value in values for line in value.splitlines())
+        config['api_key'] = next((line for line in lines if line), '')
+        resolved[role] = config
+    return resolved
+
 
 def _role_entry(entries: Any) -> Optional[Dict[str, Any]]:
     '''Normalize a role block from runtime_models yaml (dict or single-item list).'''
@@ -301,6 +322,7 @@ def inject_model_config(model_config: Optional[Dict[str, Any]]) -> None:
     normalized = _normalize_model_config(model_config)
     if isinstance(normalized, dict):
         normalized = _enrich_role_types(normalized)
+        normalized = resolve_request_api_keys(normalized)
     _lazyllm_inject(normalized)
     if isinstance(normalized, dict):
         import lazyllm

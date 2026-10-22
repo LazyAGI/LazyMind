@@ -6,7 +6,6 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -237,13 +236,8 @@ func (service *BackupService) upload(ctx context.Context, scope AccountScope, to
 	if err != nil {
 		return service.retry(ctx, item, 3080006, err)
 	}
-	payload, err := json.Marshal(map[string]any{
-		"schema_version": 1, "provider_catalog_key": credential.ProviderCatalogKey,
-		"display_name": credential.DisplayName, "base_url": credential.BaseURL,
-		"credential_type": "api_key", "api_key": string(credential.APIKey),
-		"provider_specific_fields": map[string]any{},
-	})
-	if err != nil || len(payload) > MaximumPlaintextLength {
+	payload, err := EncodeProviderCredentialPayload(credential)
+	if err != nil {
 		return service.retry(ctx, item, 3080006, ErrInvalidContract)
 	}
 	defer clear(payload)

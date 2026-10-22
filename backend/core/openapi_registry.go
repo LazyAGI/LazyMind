@@ -1199,7 +1199,7 @@ type listUserModelProvidersQueryParams struct {
 type checkModelProviderOpenAPIRequest struct {
 	ProviderName string  `json:"provider_name,omitempty"`
 	BaseURL      string  `json:"base_url,omitempty"`
-	APIKey       *string `json:"api_key,omitempty" desc:"Omit to check the first stored key. An explicit empty string tests a keyless connection."`
+	APIKey       *string `json:"api_key,omitempty" desc:"Omit to check the supplier's enabled key. An explicit empty string tests a keyless connection."`
 	Model        string  `json:"model,omitempty"`
 	DryRun       bool    `json:"dry_run,omitempty"`
 }
@@ -1227,6 +1227,16 @@ type updateModelProviderEndpointOpenAPIRequest struct {
 type updateModelProviderEndpointOpenAPIResponse struct {
 	ID      string `json:"id"`
 	BaseURL string `json:"base_url"`
+}
+
+type setActiveModelProviderKeyOpenAPIRequest struct {
+	GroupID string `json:"group_id" desc:"Connection containing the saved key; empty with key_id disables the supplier's active key."`
+	KeyID   string `json:"key_id" desc:"Opaque saved key ID. At most one key can be enabled across all connections to a supplier."`
+}
+
+type setActiveModelProviderKeyOpenAPIResponse struct {
+	GroupID string `json:"group_id"`
+	KeyID   string `json:"key_id"`
 }
 
 type createModelProviderGroupOpenAPIRequest struct {
@@ -1439,13 +1449,20 @@ type listUserModelProvidersOpenAPIResponse struct {
 	Providers []userModelProviderOpenAPIItem `json:"providers"`
 }
 
+type modelProviderGroupKeyOpenAPIItem struct {
+	ID      string `json:"id"`
+	Masked  string `json:"masked"`
+	Enabled bool   `json:"enabled"`
+}
+
 type listModelProviderGroupsOpenAPIItem struct {
-	ID                  string `json:"id"`
-	UserModelProviderID string `json:"user_model_provider_id"`
-	Name                string `json:"name"`
-	BaseURL             string `json:"base_url"`
-	APIKey              string `json:"api_key"`
-	IsVerified          bool   `json:"is_verified"`
+	ID                  string                             `json:"id"`
+	UserModelProviderID string                             `json:"user_model_provider_id"`
+	Name                string                             `json:"name"`
+	BaseURL             string                             `json:"base_url"`
+	Keys                []modelProviderGroupKeyOpenAPIItem `json:"keys"`
+	HasAPIKey           bool                               `json:"has_api_key"`
+	IsVerified          bool                               `json:"is_verified"`
 }
 
 type listModelProviderGroupsOpenAPIResponse struct {
@@ -4416,6 +4433,16 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  modelProviderGroupPathParams{},
 			RequestBody: jsonBodyOf(updateModelProviderEndpointOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Updated supplier endpoint", updateModelProviderEndpointOpenAPIResponse{})},
+		},
+		{
+			Method:      "PUT",
+			Path:        "/model_providers/{model_provider_id}/keys/active",
+			Summary:     "Set the single enabled key for a model supplier",
+			Description: "Verifies a saved key before atomically enabling it for every connection to the supplier. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupPathParams{},
+			RequestBody: jsonBodyOf(setActiveModelProviderKeyOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Supplier active key", setActiveModelProviderKeyOpenAPIResponse{})},
 		},
 		{
 			Method:      "GET",
