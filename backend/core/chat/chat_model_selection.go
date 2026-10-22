@@ -68,24 +68,26 @@ type chatModelSnapshot struct {
 }
 
 type availableChatModel struct {
-	Vision           bool     `gorm:"column:vision"`
-	ID               string   `gorm:"column:model_id"`
-	ProviderID       string   `gorm:"column:provider_id"`
-	ProviderGroupID  string   `gorm:"column:provider_group_id"`
-	OwnerUserID      string   `gorm:"column:owner_user_id"`
-	ProviderName     string   `gorm:"column:provider_name"`
-	GroupName        string   `gorm:"column:group_name"`
-	ModelName        string   `gorm:"column:model_name"`
-	ModelType        string   `gorm:"column:model_type"`
-	BaseURL          string   `gorm:"column:base_url"`
-	APIKey           string   `gorm:"column:api_key"`
-	APIKeyCiphertext string   `gorm:"column:api_key_ciphertext"`
-	MaxInputTokens   *string  `gorm:"column:max_input_tokens"`
-	Source           string   `gorm:"-"`
-	Availability     string   `gorm:"-"`
-	Lifecycle        string   `gorm:"-"`
-	Capabilities     []string `gorm:"-"`
-	DefaultForType   bool     `gorm:"-"`
+	Vision              bool     `gorm:"column:vision"`
+	ID                  string   `gorm:"column:model_id"`
+	ProviderID          string   `gorm:"column:provider_id"`
+	ProviderGroupID     string   `gorm:"column:provider_group_id"`
+	OwnerUserID         string   `gorm:"column:owner_user_id"`
+	ProviderName        string   `gorm:"column:provider_name"`
+	ProviderDisplayName string   `gorm:"column:provider_display_name"`
+	ProviderIsCustom    bool     `gorm:"column:provider_is_custom"`
+	GroupName           string   `gorm:"column:group_name"`
+	ModelName           string   `gorm:"column:model_name"`
+	ModelType           string   `gorm:"column:model_type"`
+	BaseURL             string   `gorm:"column:base_url"`
+	APIKey              string   `gorm:"column:api_key"`
+	APIKeyCiphertext    string   `gorm:"column:api_key_ciphertext"`
+	MaxInputTokens      *string  `gorm:"column:max_input_tokens"`
+	Source              string   `gorm:"-"`
+	Availability        string   `gorm:"-"`
+	Lifecycle           string   `gorm:"-"`
+	Capabilities        []string `gorm:"-"`
+	DefaultForType      bool     `gorm:"-"`
 }
 
 type chatModelRoute struct {
@@ -131,10 +133,11 @@ type chatModelListItem struct {
 }
 
 type chatModelProviderItem struct {
-	ID     string              `json:"id"`
-	Name   string              `json:"name"`
-	Source string              `json:"source"`
-	Models []chatModelListItem `json:"models"`
+	ID       string              `json:"id"`
+	Name     string              `json:"name"`
+	IsCustom bool                `json:"is_custom"`
+	Source   string              `json:"source"`
+	Models   []chatModelListItem `json:"models"`
 }
 
 type chatModelsResponse struct {
@@ -216,6 +219,7 @@ func loadAvailableChatModels(ctx context.Context, db *gorm.DB, userID string) ([
 			"m.id AS model_id, m.user_model_provider_id AS provider_id, "+
 				"m.user_model_provider_group_id AS provider_group_id, "+
 				"m.create_user_id AS owner_user_id, m.provider_name, m.name AS model_name, "+
+				"p.name AS provider_display_name, p.is_custom AS provider_is_custom, "+
 				"m.model_type, m.vision, m.max_input_tokens, g.name AS group_name, g.base_url, "+
 				"g.api_key, g.api_key_ciphertext",
 		).
@@ -815,8 +819,12 @@ func buildChatModelsResponse(ctx context.Context, db *gorm.DB, userID string, co
 		key := model.ProviderID + "\x00" + model.Source
 		provider := providerByKey[key]
 		if provider == nil {
+			displayName := strings.TrimSpace(model.ProviderDisplayName)
+			if displayName == "" {
+				displayName = model.ProviderName
+			}
 			provider = &chatModelProviderItem{
-				ID: model.ProviderID, Name: model.ProviderName, Source: model.Source, Models: []chatModelListItem{},
+				ID: model.ProviderID, Name: displayName, IsCustom: model.ProviderIsCustom, Source: model.Source, Models: []chatModelListItem{},
 			}
 			providerByKey[key] = provider
 			providerKeys = append(providerKeys, key)

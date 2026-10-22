@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
   getProvidersWithGroups: vi.fn(),
   getGroups: vi.fn(),
   getModels: vi.fn(),
-  deleteGroup: vi.fn(),
+  deleteSupplier: vi.fn(),
   translate: (key: string, options?: { name?: string }) =>
     options?.name ? `${key}:${options.name}` : key,
 }));
@@ -26,6 +26,7 @@ vi.mock("react-i18next", () => ({
 }));
 vi.mock("@/components/request", () => ({
   localizeErrorCode: (code: string) => code,
+  getLocalizedErrorMessage: (error: unknown) => error instanceof Error ? error.message : String(error),
 }));
 vi.mock("../api", () => ({
   modelProvidersApi: {
@@ -33,9 +34,13 @@ vi.mock("../api", () => ({
     apiCoreModelProvidersWithGroupsGet: mocks.getProvidersWithGroups,
     apiCoreModelProvidersModelProviderIdGroupsGet: mocks.getGroups,
     apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGet: mocks.getModels,
-    apiCoreModelProvidersModelProviderIdGroupsGroupIdDelete: mocks.deleteGroup,
   },
   modelProvidersDefaultApi: {},
+  createCustomProvider: vi.fn(),
+  updateCustomProviderName: vi.fn(),
+  deleteCustomProvider: mocks.deleteSupplier,
+  updateProviderEndpoint: vi.fn(),
+  setProviderActiveKey: vi.fn(),
   unwrapModelProviderData: (data: unknown) => data,
   withModelProviderJsonOptions: (options: unknown) => options,
   getCredentialBackupStatus: vi.fn(),
@@ -72,6 +77,8 @@ vi.mock("../components/CloudSystemProviderCard", () => ({
 const provider = {
   id: "fixture-provider",
   name: "OpenAI",
+  is_custom: true,
+  protocol_name: "OpenAI",
   base_url: "https://api.example.test/v1",
 };
 const group = {
@@ -86,17 +93,13 @@ const embedding = {
   model_type: "embed",
 };
 
-async function requestDeletion(scope: "group" | "provider") {
+async function requestDeletion() {
   render(
     <ConfigProvider theme={{ token: { motion: false } }}>
       <ModelProviderPage />
     </ConfigProvider>,
   );
-  const name =
-    scope === "group"
-      ? "modelProvider.deleteGroupAria:Fixture"
-      : "modelProvider.removeProviderAria:OpenAI";
-  fireEvent.click(await screen.findByRole("button", { name }));
+  fireEvent.click(await screen.findByRole("button", { name: "modelProvider.workspace.deleteSupplier" }));
 }
 
 beforeEach(() => {
@@ -107,14 +110,12 @@ beforeEach(() => {
   });
   mocks.getGroups.mockResolvedValue({ data: { groups: [group] } });
   mocks.getModels.mockResolvedValue({ data: { models: [embedding] } });
-  mocks.deleteGroup.mockResolvedValue({ data: {} });
+  mocks.deleteSupplier.mockResolvedValue({ id: provider.id, downgraded_knowledge_bases: 0 });
 });
 
-describe("provider deletion before expanding models", () => {
-  it.each(["group"] as const)(
-    "loads models and confirms embedding downgrade for %s",
-    async (scope) => {
-      await requestDeletion(scope);
+describe("custom supplier deletion", () => {
+  it("loads models and confirms embedding downgrade", async () => {
+      await requestDeletion();
       expect(
         await screen.findByText("modelProvider.confirmDeleteEmbeddingDesc"),
       ).toBeInTheDocument();
@@ -122,16 +123,15 @@ describe("provider deletion before expanding models", () => {
         modelProviderId: provider.id,
         groupId: group.id,
       });
-      expect(mocks.deleteGroup).not.toHaveBeenCalled();
+      expect(mocks.deleteSupplier).not.toHaveBeenCalled();
       fireEvent.click(
         screen.getByRole("button", {
-          name: scope === "group" ? "common.delete" : "modelProvider.remove",
+          name: "common.delete",
         }),
       );
       await waitFor(() =>
-        expect(mocks.deleteGroup).toHaveBeenCalledWith(
-          { modelProviderId: provider.id, groupId: group.id },
-          { params: { confirm_indexed_downgrade: true } },
+        expect(mocks.deleteSupplier).toHaveBeenCalledWith(
+          provider.id, true,
         ),
       );
     },
@@ -144,23 +144,22 @@ describe("provider deletion before expanding models", () => {
     "keeps normal confirmation for non-embedding models $models",
     async ({ models }) => {
       mocks.getModels.mockResolvedValue({ data: { models } });
-      await requestDeletion("group");
+      await requestDeletion();
       expect(
-        await screen.findByText("modelProvider.confirmDeleteGroupDesc"),
+        await screen.findByText("modelProvider.workspace.deleteSupplierHint"),
       ).toBeInTheDocument();
       expect(mocks.getModels).toHaveBeenCalled();
       fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
       await waitFor(() =>
-        expect(mocks.deleteGroup).toHaveBeenCalledWith(
-          { modelProviderId: provider.id, groupId: group.id },
-          undefined,
+        expect(mocks.deleteSupplier).toHaveBeenCalledWith(
+          provider.id, false,
         ),
       );
     },
   );
 
   it("does not delete when the user cancels the downgrade warning", async () => {
-    await requestDeletion("group");
+    await requestDeletion();
     expect(
       await screen.findByText("modelProvider.confirmDeleteEmbeddingDesc"),
     ).toBeInTheDocument();
@@ -170,25 +169,23 @@ describe("provider deletion before expanding models", () => {
         screen.queryByText("modelProvider.confirmDeleteEmbeddingDesc"),
       ).not.toBeInTheDocument(),
     );
-    expect(mocks.deleteGroup).not.toHaveBeenCalled();
+    expect(mocks.deleteSupplier).not.toHaveBeenCalled();
   });
 
-  it.each(["group"] as const)(
-    "does not offer deletion while model lookup is pending or failed for %s",
-    async (scope) => {
+  it("does not offer deletion while model lookup is pending or failed", async () => {
       let rejectLookup!: (error: Error) => void;
       mocks.getModels.mockReturnValue(
         new Promise((_, reject) => {
           rejectLookup = reject;
         }),
       );
-      await requestDeletion(scope);
+      await requestDeletion();
       await waitFor(() => expect(mocks.getModels).toHaveBeenCalled());
       expect(
         screen.queryByText("modelProvider.confirmDeleteEmbeddingDesc"),
       ).not.toBeInTheDocument();
       expect(
-        screen.queryByText("modelProvider.confirmDeleteGroupDesc"),
+        screen.queryByText("modelProvider.workspace.deleteSupplierHint"),
       ).not.toBeInTheDocument();
       expect(
         screen.queryByText("modelProvider.confirmRemoveProviderDesc"),
@@ -196,23 +193,25 @@ describe("provider deletion before expanding models", () => {
       await act(async () => {
         rejectLookup(new Error("fixture lookup failure"));
       });
-      expect(mocks.deleteGroup).not.toHaveBeenCalled();
+      expect(mocks.deleteSupplier).not.toHaveBeenCalled();
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     },
   );
 
-  it("does not offer removing a supplier from the fixed supplier list", async () => {
+  it("does not offer deleting a built-in supplier", async () => {
+    mocks.getProviders.mockResolvedValue({ data: { providers: [{ ...provider, is_custom: false }] } });
+    mocks.getProvidersWithGroups.mockResolvedValue({ data: { providers: [{ ...provider, is_custom: false }] } });
     render(
       <ConfigProvider theme={{ token: { motion: false } }}>
         <ModelProviderPage />
       </ConfigProvider>,
     );
     await screen.findByRole("button", {
-      name: "modelProvider.deleteGroupAria:Fixture",
+      name: "OpenAI",
     });
     expect(
       screen.queryByRole("button", {
-        name: "modelProvider.removeProviderAria:OpenAI",
+        name: "modelProvider.workspace.deleteSupplier",
       }),
     ).not.toBeInTheDocument();
   });
@@ -223,15 +222,14 @@ describe("provider deletion before expanding models", () => {
       mocks.getModels.mockResolvedValue({
         data: { models: [{ ...embedding, model_type }] },
       });
-      await requestDeletion("group");
+      await requestDeletion();
       expect(
         await screen.findByText("modelProvider.confirmDeleteEmbeddingDesc"),
       ).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
       await waitFor(() =>
-        expect(mocks.deleteGroup).toHaveBeenCalledWith(
-          { modelProviderId: provider.id, groupId: group.id },
-          { params: { confirm_indexed_downgrade: true } },
+        expect(mocks.deleteSupplier).toHaveBeenCalledWith(
+          provider.id, true,
         ),
       );
     },
@@ -249,7 +247,7 @@ describe("provider deletion before expanding models", () => {
     expect(await screen.findByText("Old chat")).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole("button", {
-        name: "modelProvider.deleteGroupAria:Fixture",
+        name: "modelProvider.workspace.deleteSupplier",
       }),
     );
     expect(
@@ -261,6 +259,6 @@ describe("provider deletion before expanding models", () => {
         name: "common.cancel",
       }),
     );
-    expect(mocks.deleteGroup).not.toHaveBeenCalled();
+    expect(mocks.deleteSupplier).not.toHaveBeenCalled();
   });
 });

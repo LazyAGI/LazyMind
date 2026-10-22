@@ -13,7 +13,6 @@ import {
   Select,
   message,
 } from "antd";
-import type { InputRef } from "antd";
 import { useTranslation } from "react-i18next";
 import {
   getLocalizedErrorMessage,
@@ -94,6 +93,8 @@ export interface ProviderModel {
 export interface ProviderOption {
   id: string;
   name: string;
+  isCustom?: boolean;
+  protocolName?: string;
   brand: string;
   logoUrl?: string;
   headline: string;
@@ -117,25 +118,6 @@ export interface ProviderConnectionGroup {
 
 export interface AddedProvider extends ProviderOption {
   groups: ProviderConnectionGroup[];
-}
-
-interface AddedProviderSection {
-  key: string;
-  provider: AddedProvider;
-  displayName: string;
-  groups: ProviderConnectionGroup[];
-  defaultBaseUrl: string;
-}
-
-interface ProviderConfigModalState {
-  provider: ProviderOption | AddedProvider;
-  group?: ProviderConnectionGroup;
-}
-
-interface ProviderConfigFormValues {
-  name?: string;
-  apiKey?: string;
-  baseUrl?: string;
 }
 
 interface CustomModelModalState {
@@ -370,6 +352,8 @@ function getLocalizedProviderDescription(
 interface ApiProvider {
   id: string;
   name: string;
+  is_custom?: boolean;
+  protocol_name?: string;
   description?: string;
   base_url?: string;
 }
@@ -382,17 +366,6 @@ interface ApiGroup {
   is_verified?: boolean;
   user_model_provider_id: string;
   keys?: Array<{ id: string; masked: string; enabled?: boolean }>;
-}
-
-interface SavedProviderGroup extends ApiGroup {
-  check?: CheckModelProviderResult;
-  auto_selection?: AutoModelSelection;
-}
-
-interface AutoModelSelection {
-  provider_name: string;
-  configured: Array<{ model_key: string; name: string }>;
-  missing: string[];
 }
 
 interface CheckModelProviderResult {
@@ -428,15 +401,17 @@ function mapApiProvider(
   return {
     id: provider.id,
     name: provider.name,
-    brand: getProviderBrand(provider.name),
-    logoUrl: getProviderLogoUrl(provider.name),
+    isCustom: provider.is_custom === true,
+    protocolName: provider.protocol_name || provider.name,
+    brand: provider.is_custom ? "API" : getProviderBrand(provider.protocol_name || provider.name),
+    logoUrl: getProviderLogoUrl(provider.protocol_name || provider.name, provider.is_custom),
     headline: getLocalizedProviderDescription(
       provider.name,
       backendDescription,
       fallbacks,
     ),
     backendDescription,
-    source: provider.name,
+    source: provider.protocol_name || provider.name,
     baseUrl: provider.base_url || "",
     capabilities: [
       "LLM_CHAT",
@@ -545,36 +520,26 @@ export function shouldRedirectCustomBaseUrlToOpenAI(
 interface ModelProviderPageProps {
   onConfigurationChanged?: () => void | Promise<void>;
   highlightProviderId?: string;
-  onConfigureDefaults?: () => void;
   onBack?: () => void;
 }
 
 type CloudSystemProviderState =
-  | "loading"
-  | "ready"
-  | "signed_out"
-  | "plan_required"
-  | "error";
+  "loading" | "ready" | "signed_out" | "plan_required" | "error";
 
 export default function ModelProviderPage({
   onConfigurationChanged,
   highlightProviderId,
-  onConfigureDefaults,
   onBack,
 }: ModelProviderPageProps) {
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
-  const [providerConfigForm] = Form.useForm<ProviderConfigFormValues>();
   const [customModelForm] = Form.useForm<CustomModelFormValues>();
   const [editModelWindowForm] = Form.useForm<EditModelWindowFormValues>();
-  const [deletionModal, deletionModalContext] = Modal.useModal();
 
   const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([]);
   const [addedProviderList, setAddedProviderList] = useState<AddedProvider[]>(
     [],
   );
-  const [configModal, setConfigModal] =
-    useState<ProviderConfigModalState | null>(null);
   const [customModelModal, setCustomModelModal] =
     useState<CustomModelModalState | null>(null);
   const [editModelWindowModal, setEditModelWindowModal] =
@@ -586,7 +551,6 @@ export default function ModelProviderPage({
   );
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
-  const [providerConfigSaving, setProviderConfigSaving] = useState(false);
   const [verifyingGroupIds, setVerifyingGroupIds] = useState<
     Record<string, boolean>
   >({});
@@ -623,10 +587,7 @@ export default function ModelProviderPage({
   const [cloudRuntimeAvailable, setCloudRuntimeAvailable] = useState(false);
   const [cloudPlanURL, setCloudPlanURL] = useState("");
   const [contextWindowExpanded, setContextWindowExpanded] = useState(false);
-  const watchedProviderBaseUrl = Form.useWatch("baseUrl", providerConfigForm);
-  const watchedProviderApiKey = Form.useWatch("apiKey", providerConfigForm);
   const watchedCustomCapability = Form.useWatch("capability", customModelForm);
-  const providerApiKeyInputRef = useRef<InputRef>(null);
   const cloudCatalogRequestIdRef = useRef(0);
   const initialProvidersLoadedRef = useRef(false);
   const addedProviderListRef = useRef<AddedProvider[]>([]);
@@ -639,14 +600,7 @@ export default function ModelProviderPage({
     (capability: ModelCapability) => t(capabilityLabelKeys[capability]),
     [t],
   );
-  const configProvider = configModal?.provider || null;
-  const configLocation = useSettingsEditor("provider");
-  const pendingBaseUrl = useRef<{ id: string; value?: string } | null>(null);
-  const providerFormDraft = useSettingsFormDraft(
-    providerConfigForm,
-    Boolean(configModal),
-    providerConfigSaving,
-  );
+  const legacyProviderLocation = useSettingsEditor("provider");
   const customModelDraft = useSettingsFormDraft(
     customModelForm,
     Boolean(customModelModal),
@@ -655,16 +609,6 @@ export default function ModelProviderPage({
     editModelWindowForm,
     Boolean(editModelWindowModal),
   );
-  const baseUrlChanged = configProvider
-    ? !isDefaultProviderBaseUrl(
-        configProvider,
-        watchedProviderBaseUrl ??
-          providerConfigForm.getFieldValue("baseUrl") ??
-          configProvider.baseUrl,
-      )
-    : false;
-  // Official endpoints enforce credentials on the server; custom endpoints may be keyless.
-  const apiKeyRequired = false;
   const loadCloudSystemProvider = useCallback(async () => {
     const requestId = ++cloudCatalogRequestIdRef.current;
     setCloudSystemState("loading");
@@ -698,22 +642,20 @@ export default function ModelProviderPage({
       }>(response.data);
       const models = (data.models || [])
         .filter((model) => model.source === "cloud")
-        .map(
-          (model): CloudSystemProviderModel => ({
-            id: model.id,
-            name: model.name,
-            modelType: model.model_type,
-            availability:
-              model.availability === "degraded" ||
-              model.availability === "unavailable"
-                ? model.availability
-                : "available",
-            lifecycle:
-              model.lifecycle === "deprecated" || model.lifecycle === "retired"
-                ? model.lifecycle
-                : "active",
-          }),
-        );
+        .map((model): CloudSystemProviderModel => ({
+          id: model.id,
+          name: model.name,
+          modelType: model.model_type,
+          availability:
+            model.availability === "degraded" ||
+            model.availability === "unavailable"
+              ? model.availability
+              : "available",
+          lifecycle:
+            model.lifecycle === "deprecated" || model.lifecycle === "retired"
+              ? model.lifecycle
+              : "active",
+        }));
       setCloudSystemModels(models);
       if (models.length) {
         setCloudSystemState("ready");
@@ -1104,269 +1046,13 @@ export default function ModelProviderPage({
     };
   }, [credentialRestoreStatus.status, loadModelProviders]);
 
-  const openProviderConfig = (
-    provider: AddedProvider | ProviderOption,
-    group?: ProviderConnectionGroup,
-    baseUrlOverride?: string,
-  ) => {
-    if (
-      configLocation.managed &&
-      (configLocation.item !== provider.id ||
-        configLocation.group !== (group?.id || null))
-    ) {
-      pendingBaseUrl.current = { id: provider.id, value: baseUrlOverride };
-      configLocation.select(provider.id, group?.id);
-      return;
-    }
-    const configuredProvider = addedProviderList.find(
-      (item) => item.id === provider.id,
-    );
-    const providerDraft = configuredProvider || provider;
-    const groupDraft = group || createConnectionGroup(providerDraft);
-
-    setConfigModal({ provider: providerDraft, group });
-    const currentBaseUrl =
-      normalizeFormText(baseUrlOverride) ||
-      groupDraft.baseUrl ||
-      providerDraft.baseUrl;
-    providerConfigForm.setFieldsValue({
-      name: groupDraft.name,
-      apiKey: "",
-      baseUrl:
-        isSensenovaProvider(providerDraft) &&
-        isSensenovaNewBaseUrl(currentBaseUrl)
-          ? SENSENOVA_NEW_BASE_URL
-          : currentBaseUrl,
-    });
-
-    providerFormDraft.captureSavedValues();
-  };
-
-  useEffect(() => {
-    if (!configLocation.managed) return;
-    if (!configLocation.item) {
-      setConfigModal(null);
-      return;
-    }
-    if (loading) return;
-    const configured = addedProviderList.find(
-      (item) => item.id === configLocation.item,
-    );
-    const provider =
-      configured ||
-      providerOptions.find((item) => item.id === configLocation.item);
-    if (!provider) return;
-    const group = configured?.groups.find(
-      (item) => item.id === configLocation.group,
-    );
-    if (configLocation.group && !group) return;
-    if (
-      configModal?.provider.id === provider.id &&
-      configModal.group?.id === group?.id
-    )
-      return;
-    openProviderConfig(
-      provider,
-      group,
-      pendingBaseUrl.current?.id === provider.id
-        ? pendingBaseUrl.current.value
-        : undefined,
-    );
-    pendingBaseUrl.current = null;
-  }, [
-    configLocation.item,
-    configLocation.group,
-    loading,
-    addedProviderList,
-    providerOptions,
-  ]);
-
-  const closeProviderConfig = () => {
-    if (providerConfigSaving) {
-      return;
-    }
-    configLocation.select();
-    setConfigModal(null);
-    providerConfigForm.resetFields();
-  };
-
-  const saveProviderConfig = async (
-    values: ProviderConfigFormValues,
-    _skipCustomBaseUrlRedirect = false,
-  ): Promise<void> => {
-    const activeConfigModal = configModal;
-
-    if (!configProvider || !activeConfigModal || providerConfigSaving) {
-      return;
-    }
-
-    const groupName = normalizeFormText(values.name);
-    const baseUrl = configProvider.baseUrl;
-    const apiKey =
-      normalizeFormText(values.apiKey) ||
-      normalizeFormText(providerApiKeyInputRef.current?.input?.value);
-    const existingProvider = addedProviderList.find(
-      (provider) => provider.id === configProvider.id,
-    );
-    const existingGroup = activeConfigModal.group
-      ? existingProvider?.groups.find(
-          (group) => group.id === activeConfigModal.group?.id,
-        )
-      : undefined;
-
-    setProviderConfigSaving(true);
-    const closeVerificationNotice = apiKey
-      ? message.loading(t("modelProvider.message.verifyingApiKey"), 0)
-      : undefined;
-    try {
-      const payload = {
-        name: groupName || configProvider.name,
-        base_url: baseUrl,
-        verify: Boolean(apiKey),
-        ...(apiKey ? { api_key: apiKey } : {}),
-      };
-      const requestOptions = apiKey ? { timeout: 3 * 60 * 1000 } : undefined;
-      const savedGroup = activeConfigModal.group
-        ? unwrapModelProviderData<SavedProviderGroup>(
-            (
-              await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch(
-                {
-                  modelProviderId: configProvider.id,
-                  groupId: activeConfigModal.group.id,
-                  updateModelProviderGroupOpenAPIRequest: payload,
-                },
-                requestOptions,
-              )
-            ).data,
-          )
-        : unwrapModelProviderData<SavedProviderGroup>(
-            (
-              await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsPost(
-                {
-                  modelProviderId: configProvider.id,
-                  createModelProviderGroupOpenAPIRequest: payload,
-                },
-                requestOptions,
-              )
-            ).data,
-          );
-      const nextGroup = mapApiGroup(
-        configProvider,
-        {
-          ...savedGroup,
-          has_api_key: Boolean(
-            apiKey || existingGroup?.apiKeyConfigured || savedGroup.has_api_key,
-          ),
-          is_verified: resolveSavedProviderGroupVerified(savedGroup),
-        },
-        existingGroup?.models || [],
-      );
-
-      setAddedProviderList((current) =>
-        current.some((provider) => provider.id === configProvider.id)
-          ? current.map((provider) =>
-              provider.id === configProvider.id
-                ? {
-                    ...provider,
-                    groups: existingGroup
-                      ? provider.groups.map((group) =>
-                          group.id === nextGroup.id ? nextGroup : group,
-                        )
-                      : [...provider.groups, nextGroup],
-                  }
-                : provider,
-            )
-          : [
-              ...current,
-              {
-                ...configProvider,
-                groups: [nextGroup],
-              },
-            ],
-      );
-      message.success(
-        apiKey
-          ? t("modelProvider.message.groupVerifiedAndSaved", {
-              name: nextGroup.name,
-            })
-          : t("modelProvider.message.groupSaved", { name: nextGroup.name }),
-      );
-      if (
-        !activeConfigModal.group &&
-        savedGroup.auto_selection &&
-        (savedGroup.auto_selection.configured.length > 0 ||
-          savedGroup.auto_selection.missing.length > 0)
-      ) {
-        const autoSelection = savedGroup.auto_selection;
-        const missingLabels = autoSelection.missing.map((modelKey) =>
-          t(`modelProvider.autoSelection.modelType.${modelKey}`),
-        );
-        Modal.info({
-          centered: true,
-          title: t("modelProvider.autoSelection.title"),
-          content: (
-            <div className="model-provider-auto-selection-result">
-              <p className="model-provider-auto-selection-warning">
-                {t("modelProvider.autoSelection.freeModelWarning")}
-              </p>
-              {autoSelection.configured.length > 0 ? (
-                <div className="model-provider-auto-selection-configured">
-                  <p>{t("modelProvider.autoSelection.configured")}</p>
-                  <ul>
-                    {autoSelection.configured.map((model) => (
-                      <li key={`${model.model_key}:${model.name}`}>
-                        <span>
-                          {t(
-                            `modelProvider.autoSelection.modelType.${model.model_key}`,
-                            {
-                              defaultValue: model.model_key,
-                            },
-                          )}
-                          {t("modelProvider.autoSelection.modelTypeSeparator")}
-                        </span>
-                        <span>{model.name}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-              {missingLabels.length > 0 ? (
-                <p>
-                  {t("modelProvider.autoSelection.missing", {
-                    provider: autoSelection.provider_name,
-                    types: missingLabels.join("、"),
-                  })}
-                </p>
-              ) : null}
-            </div>
-          ),
-        });
-      }
-      void onConfigurationChanged?.();
-
-      providerFormDraft.acceptSaved();
-      configLocation.select();
-      setConfigModal(null);
-      providerConfigForm.resetFields();
-    } catch (error) {
-      message.error(getLocalizedErrorMessage(error));
-    } finally {
-      closeVerificationNotice?.();
-      setProviderConfigSaving(false);
-    }
-  };
-
   const verifyProviderGroup = async (
-    providerId: string,
-    groupId: string,
+    provider: AddedProvider,
+    group: ProviderConnectionGroup,
     apiKey: string,
   ) => {
-    const provider = addedProviderList.find((item) => item.id === providerId);
-    const group = provider?.groups.find((item) => item.id === groupId);
-    if (!provider || !group) {
-      return false;
-    }
-
+    const providerId = provider.id;
+    const groupId = group.id;
     const requestApiKey = normalizeFormText(apiKey);
     const verifyKey = `${providerId}:${groupId}`;
     if (verifyingGroupIds[verifyKey]) {
@@ -1376,7 +1062,8 @@ export default function ModelProviderPage({
     setVerifyingGroupIds((current) => ({ ...current, [verifyKey]: true }));
     try {
       const payload: Record<string, unknown> = {
-        provider_name: provider.name,
+        provider_name:
+          provider.protocolName || provider.source || provider.name,
         base_url: group.baseUrl,
         ...(requestApiKey ? { api_key: requestApiKey } : {}),
         dry_run: false,
@@ -1444,84 +1131,6 @@ export default function ModelProviderPage({
         delete next[verifyKey];
         return next;
       });
-    }
-  };
-
-  const deleteProviderGroup = async (
-    providerId: string,
-    group: ProviderConnectionGroup,
-  ) => {
-    const provider = addedProviderList.find((item) => item.id === providerId);
-    if (!provider) {
-      return;
-    }
-
-    try {
-      await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdDelete(
-        {
-          modelProviderId: providerId,
-          groupId: group.id,
-        },
-        group.models.some((model) => model.capability === "EMBEDDING")
-          ? { params: { confirm_indexed_downgrade: true } }
-          : undefined,
-      );
-      setAddedProviderList((current) =>
-        current
-          .map((item) =>
-            item.id === providerId
-              ? {
-                  ...item,
-                  groups: item.groups.filter(
-                    (candidate) => candidate.id !== group.id,
-                  ),
-                }
-              : item,
-          )
-          .filter((item) => item.groups.length > 0),
-      );
-      message.success(
-        t("modelProvider.message.groupRemoved", { name: group.name }),
-      );
-      void onConfigurationChanged?.();
-    } catch (error) {}
-  };
-
-  const confirmProviderDeletion = async (
-    section: AddedProviderSection,
-    group?: ProviderConnectionGroup,
-  ) => {
-    if (!group) return;
-    try {
-      const response =
-        await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGet(
-          { modelProviderId: section.provider.id, groupId: group.id },
-        );
-      const data = unwrapModelProviderData<{ models?: ApiModel[] }>(
-        response.data,
-      );
-      const freshGroup = mapApiGroup(
-        section.provider,
-        group,
-        data.models || [],
-      );
-      const hasEmbedding = freshGroup.models.some(
-        (model) => model.capability === "EMBEDDING",
-      );
-      deletionModal.confirm({
-        title: t("modelProvider.confirmDeleteGroup", { name: group.name }),
-        content: t(
-          hasEmbedding
-            ? "modelProvider.confirmDeleteEmbeddingDesc"
-            : "modelProvider.confirmDeleteGroupDesc",
-        ),
-        okText: t("common.delete"),
-        cancelText: t("common.cancel"),
-        okButtonProps: { danger: true },
-        onOk: () => deleteProviderGroup(section.provider.id, freshGroup),
-      });
-    } catch {
-      /* Keep the connection if the model impact cannot be checked. */
     }
   };
 
@@ -1843,31 +1452,17 @@ export default function ModelProviderPage({
 
   return (
     <div className="model-provider-page-content">
-      {deletionModalContext}
       <ProviderWorkspace
         providers={providerOptions}
         configuredProviders={addedProviderList}
         loading={loading}
         loadError={loadError}
         onRetry={() => void loadModelProviders()}
-        highlightProviderId={highlightProviderId}
-        onBack={onBack}
-        onConfigureDefaults={onConfigureDefaults}
-        capabilityLabel={getCapabilityLabel}
-        onAddConnection={(provider) => openProviderConfig(provider)}
-        onEditConnection={openProviderConfig}
-        onDeleteConnection={(provider, group) =>
-          void confirmProviderDeletion(
-            {
-              key: provider.id,
-              provider,
-              displayName: provider.name,
-              groups: provider.groups,
-              defaultBaseUrl: provider.baseUrl,
-            },
-            group,
-          )
+        highlightProviderId={
+          highlightProviderId || legacyProviderLocation.item || undefined
         }
+        onBack={onBack}
+        capabilityLabel={getCapabilityLabel}
         onLoadModels={(provider, group) =>
           void loadGroupModels(provider.id, group.id)
         }
@@ -1881,7 +1476,7 @@ export default function ModelProviderPage({
           void deleteCustomModel(provider.id, group.id, model)
         }
         onCheck={(provider, group) =>
-          void verifyProviderGroup(provider.id, group.id, "")
+          void verifyProviderGroup(provider, group, "")
         }
         checking={verifyingGroupIds}
         onReload={async () => {
@@ -1919,110 +1514,6 @@ export default function ModelProviderPage({
           </>
         }
       />
-
-      <Modal
-        centered
-        confirmLoading={providerConfigSaving}
-        destroyOnHidden
-        maskClosable={!providerConfigSaving}
-        okText={
-          normalizeFormText(watchedProviderApiKey)
-            ? t("modelProvider.verifyAndSaveConfig")
-            : t("modelProvider.saveConfig")
-        }
-        open={!!configModal}
-        title={t("modelProvider.groupConfigTitle", {
-          name: configProvider?.name || "",
-        })}
-        width={520}
-        onCancel={() => providerFormDraft.confirmClose(closeProviderConfig)}
-        onOk={() => providerConfigForm.submit()}
-      >
-        <Form<ProviderConfigFormValues>
-          className="model-provider-form"
-          form={providerConfigForm}
-          layout="vertical"
-          onFinish={saveProviderConfig}
-        >
-          <Form.Item
-            extra={t("modelProvider.groupNameExtra")}
-            label={t("modelProvider.groupName")}
-            name="name"
-            normalize={(value: string | undefined) => value?.trim()}
-            rules={[
-              {
-                required: true,
-                message: t("modelProvider.validation.groupNameRequired"),
-              },
-              { max: 80, message: t("modelProvider.validation.groupNameMax") },
-            ]}
-          >
-            <Input
-              maxLength={80}
-              placeholder={
-                configProvider?.name || t("modelProvider.groupNamePlaceholder")
-              }
-            />
-          </Form.Item>
-
-          <div className="provider-workspace-instance-endpoint">
-            <span>{t("modelProvider.workspace.sharedEndpoint")}</span>
-            <code>{configProvider?.baseUrl}</code>
-          </div>
-
-          <Form.Item
-            dependencies={["baseUrl"]}
-            extra={
-              baseUrlChanged
-                ? t("modelProvider.apiKeyCustomExtra")
-                : t("modelProvider.apiKeyDefaultExtra")
-            }
-            label="API Key"
-            name="apiKey"
-            normalize={(value: string | undefined) => value?.trim()}
-            required={apiKeyRequired}
-            rules={[
-              {
-                validator: (_, value?: string) => {
-                  const apiKey = normalizeFormText(value);
-
-                  if (apiKeyRequired && !apiKey) {
-                    return Promise.reject(
-                      new Error(t("modelProvider.validation.apiKeyRequired")),
-                    );
-                  }
-
-                  if (apiKey.length > 512) {
-                    return Promise.reject(
-                      new Error(t("modelProvider.validation.apiKeyMax")),
-                    );
-                  }
-
-                  if (/\s/.test(apiKey)) {
-                    return Promise.reject(
-                      new Error(t("modelProvider.validation.apiKeyNoSpaces")),
-                    );
-                  }
-
-                  return Promise.resolve();
-                },
-              },
-            ]}
-          >
-            <Input.Password
-              autoComplete="off"
-              maxLength={512}
-              placeholder={
-                apiKeyRequired
-                  ? t("modelProvider.apiKeyPlaceholder")
-                  : t("modelProvider.apiKeyOptionalPlaceholder")
-              }
-              ref={providerApiKeyInputRef}
-              visibilityToggle={false}
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
 
       <Modal
         centered
@@ -2081,7 +1572,7 @@ export default function ModelProviderPage({
         okText={t("modelProvider.add")}
         open={!!customModelModal}
         title={t("modelProvider.addCustomModelTitle", {
-          name: customModelModal?.group.name || "",
+          name: customModelModal?.provider.name || "",
         })}
         width={520}
         onCancel={() => customModelDraft.confirmClose(closeCustomModelModal)}
@@ -2113,25 +1604,9 @@ export default function ModelProviderPage({
             </Select>
           </Form.Item>
 
-          <Form.Item
-            label={t("modelProvider.group")}
-            name="groupId"
-            rules={[
-              {
-                required: true,
-                message: t("modelProvider.validation.groupRequired"),
-              },
-            ]}
-          >
-            <Select disabled>
-              {customModelModal ? (
-                <Select.Option value={customModelModal.group.id}>
-                  {customModelModal.group.name}
-                </Select.Option>
-              ) : null}
-            </Select>
+          <Form.Item name="groupId" hidden>
+            <Input />
           </Form.Item>
-
           <Form.Item
             extra={t("modelProvider.modelNameExtra")}
             label={t("modelProvider.modelName")}

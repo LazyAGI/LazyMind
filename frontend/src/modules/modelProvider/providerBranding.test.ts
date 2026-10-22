@@ -21,4 +21,11 @@ describe("model provider branding", () => {
   it("does not invent an icon for unknown providers", () => {
     expect(getProviderLogoUrl("Custom Provider")).toBeUndefined();
   });
+
+  it.each(["OpenAI", "AIhubmix", "Doubao"])(
+    "uses the same neutral icon for custom supplier %s",
+    (name) => {
+      expect(getProviderLogoUrl(name, true)).toBe("/provider-icons/custom.svg");
+    },
+  );
 });

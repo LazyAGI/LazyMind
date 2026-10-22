@@ -174,7 +174,7 @@ function ProviderLogo({
   return (
     <span
       aria-hidden="true"
-      className={`model-provider-logo is-${normalizeProviderKey(provider.name)}${compact ? " is-compact" : ""}`}
+      className={`model-provider-logo is-${provider.isCustom ? "custom" : normalizeProviderKey(provider.source || provider.name)}${compact ? " is-compact" : ""}`}
     >
       <span className="model-provider-logo-fallback">{provider.brand}</span>
       {provider.logoUrl ? (
@@ -302,7 +302,7 @@ export default function DefaultModelConfigPanel({
     );
     const keyword = (moduleModelSearchKeywords[module.key] || "").trim().toLowerCase();
     const visibleOptions = options.filter((option) =>
-      !keyword || `${option.model.name} ${option.provider.name} ${option.group.name}`.toLowerCase().includes(keyword),
+      !keyword || `${option.model.name} ${option.provider.name}`.toLowerCase().includes(keyword),
     );
     const moduleTitle = t(module.titleKey);
     const moduleSubtitle = t(module.subtitleKey);
@@ -481,7 +481,7 @@ export default function DefaultModelConfigPanel({
           }
         >
           {visibleOptions.map((option) => {
-            const { provider, group, model, value } = option;
+            const { provider, model, value } = option;
             const displayName =
               module.key === "image_generator"
                 ? formatUnifiedImageDisplayName(
@@ -492,7 +492,7 @@ export default function DefaultModelConfigPanel({
             return (
               <Select.Option
                 key={value}
-                title={`${displayName} · ${group.name || provider.name}`}
+                title={`${displayName} · ${provider.name}`}
                 disabled={
                   model.availability === "unavailable" ||
                   model.lifecycle === "deprecated" ||
@@ -502,14 +502,14 @@ export default function DefaultModelConfigPanel({
                   <span className="model-provider-select-value">
                     <ProviderLogo provider={provider} compact />
                     <span className="model-provider-select-value-text">
-                      {displayName} · {group.name || provider.name}
+                      {displayName} · {provider.name}
                     </span>
                   </span>
                 }
                 value={value}
               >
                 <Tooltip
-                  title={`${displayName} · ${group.name || provider.name}`}
+                  title={`${displayName} · ${provider.name}`}
                   placement="right"
                   overlayClassName="model-provider-option-tooltip"
                 >
@@ -517,11 +517,11 @@ export default function DefaultModelConfigPanel({
                     <ProviderLogo provider={provider} compact />
                     <span className="model-provider-select-copy">
                       <strong>{displayName}</strong>
-                      <ModelModalityMarks compact providerName={provider.name} modelName={model.name} />
+                      <ModelModalityMarks compact providerName={provider.source || provider.name} modelName={model.name} />
                       <small>
                         {option.source === "cloud"
                           ? t("modelProvider.cloudSystemReadOnly")
-                          : `${provider.name} / ${group.name}`}
+                          : provider.name}
                         {option.source === "cloud"
                           ? ""
                           : model.builtIn

@@ -148,6 +148,22 @@ describe("ChatModelSelector", () => {
     expect(openaiIcon).toHaveAttribute('alt', '');
     expect(document.querySelector('.chat-model-provider-heading img')).toBeNull();
   });
+
+  it('uses the default supplier logo for a custom supplier with a protocol brand in its name', async () => {
+    const customCatalog = catalog();
+    customCatalog.providers[1] = {
+      ...customCatalog.providers[1],
+      name: 'OpenAI compatible gateway',
+      is_custom: true,
+    };
+    fetchCatalogMock.mockResolvedValue(customCatalog);
+    render(<ChatModelSelector />);
+    fireEvent.click(await screen.findByRole('button', { name: '当前模型：DeepSeek · DeepSeek-V3' }));
+    const dialog = within(await screen.findByRole('dialog'));
+    const customSupplier = dialog.getByRole('region', { name: 'OpenAI compatible gateway' });
+    const customModel = within(customSupplier).getByRole('button', { name: /GPT-4o/ });
+    expect(customModel.querySelector('img')).toHaveAttribute('src', '/provider-icons/custom.svg');
+  });
   afterEach(() => {
     useModelSelectionStore.setState({ selections: {} });
     vi.clearAllMocks();

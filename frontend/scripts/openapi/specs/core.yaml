@@ -11058,6 +11058,8 @@ components:
             properties:
                 id:
                     type: string
+                is_custom:
+                    type: boolean
                 models:
                     items:
                         $ref: '#/components/schemas/chatModelListOpenAPIItem'
@@ -11072,6 +11074,7 @@ components:
                     type: string
             required:
                 - id
+                - is_custom
                 - name
                 - source
             type: object

@@ -19,19 +19,29 @@ const mocks = vi.hoisted(() => ({
   deleteKey: vi.fn(),
   updateEndpoint: vi.fn(),
   setActiveKey: vi.fn(),
+  createGroup: vi.fn(),
+  createProvider: vi.fn(),
+  updateProvider: vi.fn(),
+  deleteProvider: vi.fn(),
+  getModels: vi.fn(),
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, options?: Record<string, unknown>) =>
-      key === "modelProvider.workspace.activeKeyConnection"
-        ? `${key}:${options?.connection}:${options?.masked}`
-        : key,
+    t: (key: string) => key,
   }),
 }));
 vi.mock("@/components/request", () => ({
   getLocalizedErrorMessage: (error: Error) => error.message,
 }));
 vi.mock("../api", () => ({
+  modelProvidersApi: {
+    apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGet: mocks.getModels,
+    apiCoreModelProvidersModelProviderIdGroupsPost: mocks.createGroup,
+  },
+  createCustomProvider: mocks.createProvider,
+  updateCustomProviderName: mocks.updateProvider,
+  deleteCustomProvider: mocks.deleteProvider,
+  unwrapModelProviderData: (data: unknown) => data,
   modelProvidersDefaultApi: {
     apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysPost: mocks.addKey,
     apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysDelete:
@@ -74,16 +84,6 @@ const provider: AddedProvider = {
         },
       ],
     },
-    {
-      id: "backup",
-      name: "Backup",
-      source: "OpenAI",
-      baseUrl: "https://api.example.test/v1",
-      apiKeyConfigured: true,
-      verified: false,
-      keys: [{ id: "opaque-backup", masked: "********5678", enabled: false }],
-      models: [],
-    },
   ],
 };
 function setup(
@@ -112,9 +112,6 @@ function setup(
           loadError={false}
           onRetry={callbacks.onRetry}
           capabilityLabel={(type) => type}
-          onAddConnection={vi.fn()}
-          onEditConnection={vi.fn()}
-          onDeleteConnection={vi.fn()}
           onLoadModels={vi.fn()}
           modelsLoading={{}}
           onAddModel={vi.fn()}
@@ -126,10 +123,10 @@ function setup(
           onReload={callbacks.onReload}
           cloudAvailable={false}
           cloudContent={<p>Cloud login</p>}
-          onConfigureDefaults={() => setDrawer(true)}
+          onBack={() => setDrawer(true)}
           {...overrides}
         />
-        {drawer ? <p>Default drawer open</p> : null}
+        {drawer ? <p>Settings overview open</p> : null}
       </>
     );
   }
@@ -164,6 +161,16 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.addKey.mockResolvedValue({ data: { success: true } });
   mocks.deleteKey.mockResolvedValue({ data: { success: true } });
+  mocks.createGroup.mockResolvedValue({
+    data: { id: "new-private-record", is_verified: true },
+  });
+  mocks.createProvider.mockResolvedValue({
+    id: "created-supplier",
+    group_id: "created-private-record",
+  });
+  mocks.updateProvider.mockResolvedValue({ id: "custom" });
+  mocks.deleteProvider.mockResolvedValue({ id: "custom" });
+  mocks.getModels.mockResolvedValue({ data: { models: [] } });
   mocks.setActiveKey.mockResolvedValue({
     group_id: "backup",
     key_id: "opaque-backup",
@@ -171,102 +178,79 @@ beforeEach(() => {
 });
 
 describe("compact provider workspace", () => {
-  it("keeps each connection's masked keys separate", async () => {
+  it("shows supplier settings directly without instance controls or explanatory clutter", () => {
     setup();
     expect(screen.getByText("********1234")).toBeInTheDocument();
-    fireEvent.mouseDown(
-      screen.getByRole("combobox", {
-        name: "modelProvider.workspace.selectConnection",
-      }),
-    );
-    fireEvent.click(
-      await screen.findByText("Backup", {
-        selector: ".ant-select-item-option-content",
-      }),
-    );
-    expect(screen.getByText("********5678")).toBeInTheDocument();
-    expect(screen.queryByText("********1234")).not.toBeInTheDocument();
-  });
-  it("switches the supplier's active key across instances and retains the other saved key", async () => {
-    const callbacks = setup();
+    for (const key of [
+      "selectConnection",
+      "addConnection",
+      "connections",
+      "supplierNote",
+      "endpointShared",
+      "activeKeyConnection",
+      "saved",
+    ]) {
+      expect(
+        screen.queryByText(`modelProvider.workspace.${key}`),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", {
+          name: `modelProvider.workspace.${key}`,
+        }),
+      ).not.toBeInTheDocument();
+    }
     expect(
-      screen.getByRole("switch", {
-        name: "modelProvider.workspace.useKeyNumber",
+      screen.getByRole("button", {
+        name: "modelProvider.workspace.addSupplier",
       }),
-    ).toBeChecked();
-    fireEvent.mouseDown(
-      screen.getByRole("combobox", {
-        name: "modelProvider.workspace.selectConnection",
-      }),
-    );
-    fireEvent.click(
-      await screen.findByText("Backup", {
-        selector: ".ant-select-item-option-content",
-      }),
-    );
-    expect(
-      screen.getByText(
-        "modelProvider.workspace.activeKeyConnection:Primary:********1234",
-      ),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("switch", {
-        name: "modelProvider.workspace.useKeyNumber",
-      }),
-    ).not.toBeChecked();
-    fireEvent.click(
-      screen.getByRole("switch", {
-        name: "modelProvider.workspace.useKeyNumber",
-      }),
-    );
+  });
+  it("switches the single enabled key while retaining other saved keys", async () => {
+    const callbacks = setup();
+    const next = {
+      ...provider,
+      groups: [
+        {
+          ...provider.groups[0],
+          keys: [
+            ...provider.groups[0].keys,
+            { id: "opaque-backup", masked: "********5678", enabled: false },
+          ],
+        },
+      ],
+    };
+    await act(async () => callbacks.setProvider(next));
+    const switches = screen.getAllByRole("switch");
+    expect(switches[0]).toBeChecked();
+    expect(switches[1]).not.toBeChecked();
+    fireEvent.click(switches[1]);
     await waitFor(() =>
       expect(mocks.setActiveKey).toHaveBeenCalledWith(
         "openai",
-        "backup",
+        "primary",
         "opaque-backup",
       ),
     );
     await waitFor(() => expect(callbacks.onReload).toHaveBeenCalled());
-    const next = {
-      ...provider,
-      groups: provider.groups.map((connection) => ({
-        ...connection,
-        keys: connection.keys.map((key) => ({
-          ...key,
-          enabled: connection.id === "backup",
-        })),
-      })),
-    };
-    await act(async () => callbacks.setProvider(next));
-    expect(
-      screen.getByRole("switch", {
-        name: "modelProvider.workspace.useKeyNumber",
-      }),
-    ).toBeChecked();
-    fireEvent.mouseDown(
-      screen.getByRole("combobox", {
-        name: "modelProvider.workspace.selectConnection",
+    await act(async () =>
+      callbacks.setProvider({
+        ...next,
+        groups: [
+          {
+            ...next.groups[0],
+            keys: next.groups[0].keys.map((key) => ({
+              ...key,
+              enabled: key.id === "opaque-backup",
+            })),
+          },
+        ],
       }),
     );
-    fireEvent.click(
-      await screen.findByText("Primary", {
-        selector: ".ant-select-item-option-content",
-      }),
-    );
+    expect(screen.getAllByRole("switch")[0]).not.toBeChecked();
+    expect(screen.getAllByRole("switch")[1]).toBeChecked();
     expect(screen.getByText("********1234")).toBeInTheDocument();
-    expect(
-      screen.getByRole("switch", {
-        name: "modelProvider.workspace.useKeyNumber",
-      }),
-    ).not.toBeChecked();
-    expect(
-      screen.getByText(
-        "modelProvider.workspace.activeKeyConnection:Backup:********5678",
-      ),
-    ).toBeInTheDocument();
-    expect(mocks.deleteKey).not.toHaveBeenCalled();
+    expect(screen.getByText("********5678")).toBeInTheDocument();
   });
-
   it("allows disabling the only active key while retaining all saved keys", async () => {
     const callbacks = setup();
     fireEvent.click(
@@ -292,50 +276,38 @@ describe("compact provider workspace", () => {
         name: "modelProvider.workspace.useKeyNumber",
       }),
     ).not.toBeChecked();
-    expect(
-      screen.getByText("modelProvider.workspace.noActiveKey"),
-    ).toBeInTheDocument();
     expect(screen.getByText("********1234")).toBeInTheDocument();
     expect(mocks.deleteKey).not.toHaveBeenCalled();
   });
 
-  it("retains the previous selection when enabling another key fails verification", async () => {
+  it("retains the previous selection when a new key fails verification", async () => {
     const callbacks = setup();
+    await act(async () =>
+      callbacks.setProvider({
+        ...provider,
+        groups: [
+          {
+            ...provider.groups[0],
+            keys: [
+              ...provider.groups[0].keys,
+              { id: "opaque-backup", masked: "********5678", enabled: false },
+            ],
+          },
+        ],
+      }),
+    );
     mocks.setActiveKey.mockRejectedValueOnce(
       new Error("key verification failed"),
     );
-    fireEvent.mouseDown(
-      screen.getByRole("combobox", {
-        name: "modelProvider.workspace.selectConnection",
-      }),
-    );
-    fireEvent.click(
-      await screen.findByText("Backup", {
-        selector: ".ant-select-item-option-content",
-      }),
-    );
-    fireEvent.click(
-      screen.getByRole("switch", {
-        name: "modelProvider.workspace.useKeyNumber",
-      }),
-    );
+    fireEvent.click(screen.getAllByRole("switch")[1]);
     expect(
       await screen.findByText("key verification failed"),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "modelProvider.workspace.activeKeyConnection:Primary:********1234",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("switch", {
-        name: "modelProvider.workspace.useKeyNumber",
-      }),
-    ).not.toBeChecked();
+    expect(screen.getAllByRole("switch")[0]).toBeChecked();
+    expect(screen.getAllByRole("switch")[1]).not.toBeChecked();
     expect(callbacks.onReload).not.toHaveBeenCalled();
   });
-
-  it("adds a key only to the selected instance and clears the secret after success", async () => {
+  it("adds a supplier key and clears the secret after success", async () => {
     const callbacks = setup();
     fireEvent.click(
       screen.getByRole("button", { name: "modelProvider.workspace.addKey" }),
@@ -381,29 +353,33 @@ describe("compact provider workspace", () => {
       ),
     );
   });
-  it("resets a discarded endpoint even when the defaults drawer leaves this page mounted", async () => {
+  it("resets a discarded endpoint before leaving supplier settings", async () => {
     setup({}, true);
     const endpoint = screen.getByRole("textbox", { name: "API Host" });
     fireEvent.change(endpoint, {
       target: { value: "https://unsaved.example.test/v1" },
     });
     fireEvent.click(
-      screen.getByRole("button", { name: "modelProvider.workspace.defaults" }),
+      screen.getByRole("button", { name: "modelProvider.workspace.back" }),
     );
     fireEvent.click(await screen.findByText("settingsPage.unsaved.stay"));
     expect(endpoint).toHaveValue("https://unsaved.example.test/v1");
-    expect(screen.queryByText("Default drawer open")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Settings overview open"),
+    ).not.toBeInTheDocument();
     fireEvent.click(
-      screen.getByRole("button", { name: "modelProvider.workspace.defaults" }),
+      screen.getByRole("button", { name: "modelProvider.workspace.back" }),
     );
     fireEvent.click(await screen.findByText("settingsPage.unsaved.discard"));
-    expect(await screen.findByText("Default drawer open")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Settings overview open"),
+    ).toBeInTheDocument();
     expect(endpoint).toHaveValue(provider.baseUrl);
     fireEvent.change(endpoint, {
       target: { value: "https://second-unsaved.example.test" },
     });
     fireEvent.click(
-      screen.getByRole("button", { name: "modelProvider.workspace.defaults" }),
+      screen.getByRole("button", { name: "modelProvider.workspace.back" }),
     );
     expect(
       await screen.findByText("settingsPage.unsaved.title"),
@@ -436,5 +412,138 @@ describe("compact provider workspace", () => {
       provider.groups[0],
       provider.groups[0].models[0],
     );
+  });
+  it("creates a custom supplier using a built-in API protocol", async () => {
+    setup({
+      providers: [
+        provider,
+        { ...provider, id: "custom", name: "Private proxy", isCustom: true },
+      ],
+      configuredProviders: [provider],
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "modelProvider.workspace.addSupplier",
+      }),
+    );
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.change(
+      dialog.getByLabelText("modelProvider.workspace.supplierName"),
+      { target: { value: "My gateway" } },
+    );
+    fireEvent.change(dialog.getByRole("textbox", { name: "API Host" }), {
+      target: { value: "https://custom.example.test/v1" },
+    });
+    fireEvent.mouseDown(dialog.getByRole("combobox"));
+    expect(
+      screen.queryByText("Private proxy", {
+        selector: ".ant-select-item-option-content",
+      }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      await screen.findByText("OpenAI", {
+        selector: ".ant-select-item-option-content",
+      }),
+    );
+    fireEvent.change(dialog.getByRole("textbox", { name: "API Host" }), {
+      target: { value: "https://custom.example.test/v1" },
+    });
+    fireEvent.click(dialog.getByRole("button", { name: "common.save" }));
+    await waitFor(() =>
+      expect(mocks.createProvider).toHaveBeenCalledWith({
+        name: "My gateway",
+        source_provider_id: "openai",
+        base_url: "https://custom.example.test/v1",
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+  });
+  it("edits a custom supplier's name without changing its protocol", async () => {
+    const custom = {
+      ...provider,
+      id: "custom",
+      name: "Private proxy",
+      isCustom: true,
+      protocolName: "OpenAI",
+    };
+    setup({ providers: [custom], configuredProviders: [custom] });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "modelProvider.workspace.editSupplier",
+      }),
+    );
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(dialog.queryByRole("combobox")).not.toBeInTheDocument();
+    fireEvent.change(
+      dialog.getByLabelText("modelProvider.workspace.supplierName"),
+      { target: { value: "Renamed gateway" } },
+    );
+    fireEvent.click(dialog.getByRole("button", { name: "common.save" }));
+    await waitFor(() =>
+      expect(mocks.updateProvider).toHaveBeenCalledWith(
+        "custom",
+        "Renamed gateway",
+      ),
+    );
+  });
+  it("checks fresh embedding impact before confirming custom supplier deletion", async () => {
+    const custom = {
+      ...provider,
+      id: "custom",
+      name: "Private proxy",
+      isCustom: true,
+    };
+    setup({ providers: [custom], configuredProviders: [custom] });
+    mocks.getModels.mockResolvedValue({
+      data: { models: [{ model_type: "embed" }] },
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "modelProvider.workspace.deleteSupplier",
+      }),
+    );
+    expect(
+      await screen.findByText("modelProvider.confirmDeleteEmbeddingDesc"),
+    ).toBeInTheDocument();
+    expect(mocks.deleteProvider).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
+    await waitFor(() =>
+      expect(mocks.deleteProvider).toHaveBeenCalledWith("custom", true),
+    );
+  });
+  it("configures the first key directly for an unconfigured supplier", async () => {
+    const callbacks = setup({ configuredProviders: [] });
+    fireEvent.click(
+      screen.getByRole("button", { name: "modelProvider.workspace.addKey" }),
+    );
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(
+      dialog.queryByLabelText("modelProvider.groupName"),
+    ).not.toBeInTheDocument();
+    fireEvent.change(dialog.getByLabelText("API Key"), {
+      target: { value: "first-key" },
+    });
+    fireEvent.click(
+      dialog.getByRole("button", {
+        name: "modelProvider.workspace.addAndCheckKey",
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.createGroup).toHaveBeenCalledWith(
+        {
+          modelProviderId: "openai",
+          createModelProviderGroupOpenAPIRequest: {
+            name: "OpenAI",
+            api_key: "first-key",
+            verify: true,
+          },
+        },
+        { timeout: 180000 },
+      ),
+    );
+    await waitFor(() => expect(callbacks.onReload).toHaveBeenCalled());
+    expect(mocks.addKey).not.toHaveBeenCalled();
   });
 });

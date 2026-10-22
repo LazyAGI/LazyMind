@@ -128,7 +128,7 @@ describe("Model Provider service list", () => {
     });
   });
 
-  it("restores a provider editor from its URL and allows leaving an untouched form", async () => {
+  it("resolves a legacy provider editor URL into direct settings without opening a connection editor", async () => {
     mocks.getProviders.mockResolvedValue({
       data: {
         providers: [
@@ -161,7 +161,8 @@ describe("Model Provider service list", () => {
       },
     );
     render(<RouterProvider router={router} />);
-    await screen.findByRole("dialog");
+    await screen.findByRole("heading", { name: "OpenAI", level: 2 });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await act(async () => {
       await router.navigate(-1);
     });
@@ -172,7 +173,10 @@ describe("Model Provider service list", () => {
     await act(async () => {
       await router.navigate(1);
     });
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "OpenAI", level: 2 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("places the read-only LazyMind Cloud card in the existing Provider service list", async () => {
@@ -241,16 +245,16 @@ describe("Model Provider service list", () => {
       );
 
       expect(
-        await screen.findByText("modelProvider.pendingVerify"),
+        await screen.findByText("modelProvider.workspace.notConnected"),
       ).toBeInTheDocument();
       expect(onConfigurationChanged).toHaveBeenCalled();
       page.unmount();
       render(<ModelProviderPage />);
       expect(
-        await screen.findByText("modelProvider.pendingVerify"),
+        await screen.findByText("modelProvider.workspace.notConnected"),
       ).toBeInTheDocument();
       expect(
-        screen.queryByText("modelProvider.verified"),
+        screen.queryByText("modelProvider.workspace.connected"),
       ).not.toBeInTheDocument();
     },
   );

@@ -54,6 +54,8 @@ interface ProviderModel {
 export interface ProviderOption {
   id: string;
   name: string;
+  isCustom?: boolean;
+  protocolName?: string;
   brand: string;
   logoUrl?: string;
   headline: string;
@@ -85,6 +87,8 @@ interface ModuleConfig {
 interface ApiProvider {
   id: string;
   name: string;
+  is_custom?: boolean;
+  protocol_name?: string;
   description?: string;
   base_url?: string;
 }
@@ -453,15 +457,17 @@ function mapApiProvider(
   return {
     id: provider.id,
     name: provider.name,
-    brand: getProviderBrand(provider.name),
-    logoUrl: getProviderLogoUrl(provider.name),
+    isCustom: provider.is_custom === true,
+    protocolName: provider.protocol_name || provider.name,
+    brand: provider.is_custom ? "API" : getProviderBrand(provider.protocol_name || provider.name),
+    logoUrl: getProviderLogoUrl(provider.protocol_name || provider.name, provider.is_custom),
     headline: getLocalizedProviderDescription(
       provider.name,
       backendDescription,
       fallbacks,
     ),
     backendDescription,
-    source: provider.name,
+    source: provider.protocol_name || provider.name,
     baseUrl: provider.base_url || "",
     capabilities: [],
     models: [],
@@ -649,7 +655,9 @@ export function useDefaultModelConfig({
           mapApiProvider(
             {
               id: providerId,
-              name: selection.provider_name,
+              name: source === "cloud" ? selection.provider_name : selection.group_name || selection.provider_name,
+              protocol_name: selection.provider_name,
+              is_custom: source !== "cloud" && !!selection.group_name && selection.group_name !== selection.provider_name,
               base_url: selection.base_url,
             },
             localizedFallbacks,
@@ -855,7 +863,9 @@ export function useDefaultModelConfig({
               mapApiProvider(
                 {
                   id: providerId,
-                  name: model.provider_name || "LazyMind Cloud",
+                  name: source === "cloud" ? model.provider_name || "LazyMind Cloud" : model.group_name || model.provider_name || "",
+                  protocol_name: model.provider_name,
+                  is_custom: source !== "cloud" && !!model.group_name && model.group_name !== model.provider_name,
                   base_url: model.base_url,
                 },
                 localizedFallbacks,

@@ -1,7 +1,7 @@
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
-import { Alert, Button, Empty, Drawer, Input, Skeleton, Space, Switch, Tabs, Tag, message } from "antd";
+import { Alert, Button, Empty, Input, Skeleton, Space, Switch, Tabs, Tag, message } from "antd";
 import {
   ApiOutlined,
   ApartmentOutlined,
@@ -90,6 +90,7 @@ import NotificationSettings from "@/modules/notifications/NotificationSettings";
 type SectionID =
   | "overview"
   | "models"
+  | "model_defaults"
   | "tasks"
   | "knowledge"
   | "memory"
@@ -152,6 +153,7 @@ function baseNavigation(isAdmin: boolean, t: Translate, cloudRuntimeAvailable = 
       title: t("settingsPage.navGroups.gettingStarted"),
       items: [
         { id: "models", label: t("settingsPage.sections.models"), keywords: t("settingsPage.sectionKeywords.models"), icon: <ApiOutlined /> },
+        { id: "model_defaults", label: t("settingsPage.sections.defaultModels"), keywords: t("settingsPage.sectionKeywords.defaultModels"), icon: <RobotOutlined /> },
         { id: "overview", label: t("settingsPage.sections.overview"), keywords: t("settingsPage.sectionKeywords.overview"), icon: <SettingOutlined />, status: t("settingsPage.sectionStatus.synced") },
       ],
     },
@@ -232,8 +234,10 @@ function SettingsPageContent() {
   const navigationItems = useMemo(() => navigationGroups.flatMap((group) => group.items), [navigationGroups]);
   const controls = useMemo(() => controlCopy(t), [t, i18n.language]);
   const candidate = searchParams.get("section");
+  const legacyModelDefaults = candidate === "models" && (searchParams.get("view") === "defaults" || (searchParams.has("target") && searchParams.get("view") !== "providers"));
   const section: SectionID = candidate === "defaults"
     ? "tasks"
+    : legacyModelDefaults ? "model_defaults"
     : navigationItems.some((item) => item.id === candidate)
       ? candidate as SectionID
       : "overview";
@@ -262,7 +266,6 @@ function SettingsPageContent() {
     dependencyMessage: hasLocalDependencies ? t("settingsPage.diagnostics.readingDeps") : t("settingsPage.diagnostics.cloudDeps"),
   });
   const [keyword, setKeyword] = useState("");
-  const modelView = searchParams.get("view") === "defaults" || (searchParams.has("target") && searchParams.get("view") !== "providers") ? "defaults" : "providers";
   const modelTarget = settingsModelTarget(searchParams.get("target"));
   const modelProviderTarget = searchParams.get("provider_id") || undefined;
   const returnTo = settingsReturnTo(searchParams.get("return_to"));
@@ -343,16 +346,8 @@ function SettingsPageContent() {
   }, [keyword, navigationGroupsWithStatus]);
 
   const selectSection = (next: SectionID) => setSearchParams(
-    settingsRouteParams(searchParams, { section: next }),
+    settingsRouteParams(searchParams, { section: next, ...(next === "models" ? {view: "providers"} : {}) }),
   );
-  const selectModelView = (next: "defaults" | "providers") => {
-    setSearchParams(settingsRouteParams(
-      searchParams,
-      next === "providers"
-        ? { section: "models", view: "providers" }
-        : { section: "models", view: "defaults" },
-    ));
-  };
   const selectTaskView = (next: "conversation" | "tasks") => {
     setSearchParams(settingsRouteParams(searchParams, next === "tasks"
       ? { section: "tasks", view: "tasks" }
@@ -482,6 +477,7 @@ function SettingsPageContent() {
   const renderDashboard = () => {
     const sections = overview?.sections || [];
     const get = (id: string) => sections.find((item) => item.id === id) || sectionFallback(id as SectionID, t);
+    const models = get("models");
     const tasks = get("tasks");
     const skills = get("skills");
     const mcp = get("mcp");
@@ -495,7 +491,10 @@ function SettingsPageContent() {
       </div>
       {overview?.issues.length ? <div className="settings-ref-issues" role="status" aria-live="polite">{overview.issues.map((issue) => <Alert key={issue.id} type={issue.severity === "warning" ? "warning" : "info"} showIcon message={issue.message} action={<Button type="link" size="small" onClick={() => selectSection(issue.section as SectionID)}>{t("settingsPage.view")}</Button>} />)}</div> : null}
       <div className="settings-dashboard-grid">
-        {dashboardCard("models", <ApiOutlined />, t("settingsPage.sections.models"), t("settingsPage.overview.modelsDesc"), [
+        {dashboardCard("models", <ApiOutlined />, t("settingsPage.sections.models"), t("settingsPage.overview.modelServicesDesc"), [
+          dashboardRow(t("settingsPage.sections.models"), t("modelProvider.workspace.suppliers"), formatCount(models, t), <Button size="small" onClick={() => selectSection("models")}>{t("settingsPage.quickConfig")}</Button>),
+        ])}
+        {dashboardCard("model_defaults", <RobotOutlined />, t("settingsPage.sections.defaultModels"), t("settingsPage.overview.modelsDesc"), [
           <QuickModelSettings canConfigureEmbedding={isAdmin} key="quick-models" onSaved={syncOverview} />,
         ])}
         {dashboardCard("knowledge", <DatabaseOutlined />, t("settingsPage.sections.knowledge"), t("settingsPage.overview.knowledgeDesc"), [
@@ -721,38 +720,23 @@ function SettingsPageContent() {
         )}
       </>;
     } else if (section === "models") {
+      content = integratedSurface(<ModelProvidersPage onConfigurationChanged={syncOverview} highlightProviderId={modelProviderTarget} onBack={() => selectSection("overview")} />, "is-models");
+    } else if (section === "model_defaults") {
       content = <>
-        {integratedSurface(
-          <ModelProvidersPage
-            onConfigurationChanged={syncOverview}
-            highlightProviderId={modelProviderTarget}
-            onConfigureDefaults={() => selectModelView("defaults")}
-            onBack={() => selectSection("overview")}
-          />,
-          "is-models",
-        )}
-        <Drawer
-          className="settings-model-defaults-drawer"
-          title={t("modelProvider.workspace.defaults")}
-          width={560}
-          open={modelView === "defaults"}
-          onClose={() => selectModelView("providers")}
-          destroyOnClose
-        >
-          <DefaultServicesPage
-            onModelSelectionChanged={syncOverview}
-            highlightTarget={modelTarget}
-            onHighlightResolved={() => setSearchParams((current) => {
-              const next = new URLSearchParams(current);
-              next.delete("target");
-              return next;
-            }, { replace: true })}
-            onConfigureCloudService={(service) => setSearchParams(settingsRouteParams(searchParams, {
-              section: "knowledge", tool: service === "cloudParsing" ? "document-parsing" : "web-search",
-            }))}
-            onConfigureProviders={() => selectModelView("providers")}
-          />
-        </Drawer>
+        <header className="settings-detail-header"><h1 ref={headingRef} tabIndex={-1}>{t("settingsPage.sections.defaultModels")}</h1></header>
+        {integratedSurface(<DefaultServicesPage
+          onModelSelectionChanged={syncOverview}
+          highlightTarget={modelTarget}
+          onHighlightResolved={() => setSearchParams((current) => {
+            const next = new URLSearchParams(current);
+            next.set("section", "model_defaults");
+            next.delete("view");
+            next.delete("target");
+            return next;
+          }, {replace: true})}
+          onConfigureCloudService={(service) => setSearchParams(settingsRouteParams(searchParams, {section: "knowledge", tool: service === "cloudParsing" ? "document-parsing" : "web-search"}))}
+          onConfigureProviders={() => selectSection("models")}
+        />, "is-default-models")}
       </>;
     } else if (section === "tasks") {
       const schedulesEnabled = Boolean(overview?.controls.schedules_enabled);
@@ -959,7 +943,7 @@ function SettingsPageContent() {
       </>;
     }
 
-    return <section className={`settings-detail-page settings-integrated-page${section === "models" ? " is-models-page" : section === "system_tools" ? " is-system-tools-page" : section === "mcp" ? " is-mcp-page" : ""}`}>
+    return <section className={`settings-detail-page settings-integrated-page${section === "models" ? " is-models-page" : section === "model_defaults" ? " settings-model-defaults-page" : section === "system_tools" ? " is-system-tools-page" : section === "mcp" ? " is-mcp-page" : ""}`}>
       {content}
       <div className="settings-screenreader-status" role="status" aria-live="polite">
         {saving ? t("settingsPage.savingStatus") : checking ? t("settingsPage.checkingStatus") : ""}

@@ -23,4 +23,9 @@ func TestOpenAPICustomSupplierContract(t *testing.T) {
 	if provider["is_custom"] == nil || provider["protocol_name"] == nil {
 		t.Fatal("supplier list must expose custom identity and technical protocol")
 	}
+	chatProvider := schemas["chatModelProviderOpenAPIItem"].(map[string]any)["properties"].(map[string]any)
+	if chatProvider["is_custom"].(map[string]any)["type"] != "boolean" {
+		t.Fatal("chat supplier list must expose custom identity for generic branding")
+	}
+
 }

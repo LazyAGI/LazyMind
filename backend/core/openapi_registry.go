@@ -718,10 +718,11 @@ type chatModelListOpenAPIItem struct {
 }
 
 type chatModelProviderOpenAPIItem struct {
-	ID     string                     `json:"id"`
-	Name   string                     `json:"name"`
-	Source string                     `json:"source" enum:"own,shared,cloud"`
-	Models []chatModelListOpenAPIItem `json:"models"`
+	ID       string                     `json:"id"`
+	Name     string                     `json:"name"`
+	IsCustom bool                       `json:"is_custom"`
+	Source   string                     `json:"source" enum:"own,shared,cloud"`
+	Models   []chatModelListOpenAPIItem `json:"models"`
 }
 
 type chatModelsOpenAPIResponse struct {

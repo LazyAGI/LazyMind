@@ -928,6 +928,7 @@ export type ChatModelListOpenAPIItemSourceEnum = typeof ChatModelListOpenAPIItem
 
 export interface ChatModelProviderOpenAPIItem {
     'id': string;
+    'is_custom': boolean;
     'models'?: Array<ChatModelListOpenAPIItem>;
     'name': string;
     'source': ChatModelProviderOpenAPIItemSourceEnum;

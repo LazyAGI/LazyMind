@@ -743,7 +743,7 @@ const ChatModelSelector = ({
                       ) : null}
                     </div>
                     {provider.models.map((model) => {
-                      const logoUrl = getProviderLogoUrl(provider.name);
+                      const logoUrl = getProviderLogoUrl(provider.name, provider.is_custom);
                       const isCurrent =
                         currentSelection?.mode === "fixed" &&
                         (currentSelection.model_id

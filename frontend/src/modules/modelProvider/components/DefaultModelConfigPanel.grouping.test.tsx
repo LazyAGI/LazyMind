@@ -154,6 +154,33 @@ describe("default capability configuration groups", () => {
     expect(screen.queryByRole("group", { name: "modelProvider.module.ttsTitle" })).not.toBeInTheDocument();
   });
 
+  it("shows custom supplier identity without its private storage group", async () => {
+    mocks.providers.mockResolvedValue({data:{providers:[{id:"provider",name:"My gateway",protocol_name:"OpenAI",is_custom:true}]}});
+    mocks.selections.mockResolvedValue({data:{selections:[{...selectedLlm,provider_name:"OpenAI",group_name:"Legacy connection"}]}});
+    mocks.models.mockResolvedValue({data:{models:[{...availableModel,provider_name:"OpenAI",group_name:"Legacy connection"}]}});
+    renderPanel();
+    await screen.findByRole("region", {name:"modelProvider.defaults.basicTitle"});
+    const select = await readyToSelect("modelProvider.module.llmChatTitle");
+    expect(await screen.findByText("Demo model · My gateway")).toBeInTheDocument();
+    expect(within(group("modelProvider.module.llmChatTitle")).getByText("Demo model · My gateway").closest(".ant-select-selection-item")?.querySelector("img")).toHaveAttribute("src", "/provider-icons/custom.svg");
+    fireEvent.mouseDown(select);
+    await waitFor(()=>expect(document.querySelector(".model-provider-select-option small")).toHaveTextContent("My gateway"));
+    expect(screen.queryByText(/Legacy connection/)).not.toBeInTheDocument();
+    expect(screen.queryByText("My gateway / My gateway")).not.toBeInTheDocument();
+  });
+
+  it("uses the canonical supplier identity for a shared model outside the personal catalog", async () => {
+    mocks.providers.mockResolvedValue({data:{providers:[]}});
+    mocks.selections.mockResolvedValue({data:{selections:[{...selectedLlm,provider_name:"OpenAI",group_name:"Team gateway"}]}});
+    mocks.models.mockResolvedValue({data:{models:[{...availableModel,provider_name:"OpenAI",group_name:"Team gateway"}]}});
+    renderPanel();
+    await screen.findByRole("region", {name:"modelProvider.defaults.basicTitle"});
+    await readyToSelect("modelProvider.module.llmChatTitle");
+    expect(await screen.findByText("Demo model · Team gateway")).toBeInTheDocument();
+    expect(within(group("modelProvider.module.llmChatTitle")).getByText("Demo model · Team gateway").closest(".ant-select-selection-item")?.querySelector("img")).toHaveAttribute("src", "/provider-icons/custom.svg");
+    expect(screen.queryByText("Demo model · OpenAI")).not.toBeInTheDocument();
+  });
+
   it("reveals optional models only for the selected category and supports collapsing it", async () => {
     renderPanel();
     await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
@@ -227,7 +254,7 @@ describe("default capability configuration groups", () => {
     const optionName = await screen.findByText(modelName);
     fireEvent.mouseEnter(optionName);
     const tooltip = await screen.findByRole("tooltip");
-    expect(tooltip).toHaveTextContent(`${modelName} · Demo group`);
+    expect(tooltip).toHaveTextContent(`${modelName} · Demo`);
     expect(mocks.saveModel).not.toHaveBeenCalled();
     fireEvent.mouseLeave(optionName);
     await waitFor(() => expect(tooltip.closest(".ant-tooltip")).toHaveClass("ant-tooltip-hidden"), { timeout: 2500 });

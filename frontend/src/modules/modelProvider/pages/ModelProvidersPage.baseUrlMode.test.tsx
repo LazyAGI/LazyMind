@@ -88,7 +88,10 @@ const group = {
   keys: [{ id: "opaque-key", masked: "********1234" }],
 };
 
-async function renderPage(groups: unknown[] = [group], provider = openAI) {
+async function renderPage(
+  groups: unknown[] = [group],
+  provider: typeof openAI & { is_custom?: boolean; protocol_name?: string } = openAI,
+) {
   mocks.getProviders.mockResolvedValue({ data: { providers: [provider] } });
   mocks.getProvidersWithGroups.mockResolvedValue({
     data: { providers: groups.length ? [provider] : [] },
@@ -120,42 +123,45 @@ beforeEach(() => {
   mocks.checkGroup.mockResolvedValue({ data: { success: true } });
 });
 
-describe("supplier-level endpoints and connection instances", () => {
-  it("keeps one supplier and shared endpoint for multiple instances, without adding suppliers", async () => {
-    await renderPage([
-      group,
-      {
-        ...group,
-        id: "backup",
-        name: "Backup",
-        base_url: "https://obsolete.example.test",
-      },
-    ]);
+describe("supplier endpoints and direct setup", () => {
+  it.each([
+    ["AIhubmix", "OpenAI"],
+    ["Doubao", "Doubao"],
+  ])("uses a neutral logo for migrated %s with %s protocol", async (name, protocol) => {
+    await renderPage([group], {
+      ...openAI,
+      name,
+      is_custom: true,
+      protocol_name: protocol,
+    });
+    const logos = document.querySelectorAll(".provider-workspace-logo img");
+    expect(logos.length).toBeGreaterThan(0);
+    logos.forEach((logo) => expect(logo).toHaveAttribute("src", "/provider-icons/custom.svg"));
+  });
+
+  it("shows supplier settings directly without an instance selector", async () => {
+    await renderPage();
     expect(screen.getAllByRole("textbox", { name: "API Host" })).toHaveLength(
       1,
     );
-    expect(
-      screen.queryByRole("button", {
-        name: /configureAndAdd|removeProviderAria/,
-      }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("https://obsolete.example.test"),
-    ).not.toBeInTheDocument();
     expect(screen.getByText("********1234")).toBeInTheDocument();
-    fireEvent.mouseDown(
-      screen.getByRole("combobox", {
+    expect(
+      screen.queryByRole("combobox", {
         name: "modelProvider.workspace.selectConnection",
       }),
-    );
+    ).not.toBeInTheDocument();
     expect(
-      await screen.findByText("Backup", {
-        selector: ".ant-select-item-option-content",
+      screen.queryByRole("button", {
+        name: "modelProvider.workspace.addConnection",
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "modelProvider.workspace.addSupplier",
       }),
     ).toBeInTheDocument();
   });
-
-  it("saves the endpoint through the supplier API and blocks connection actions until saved", async () => {
+  it("saves the endpoint through the supplier API and blocks key actions until saved", async () => {
     await renderPage();
     const endpoint = screen.getByRole("textbox", { name: "API Host" });
     fireEvent.change(endpoint, { target: { value: customUrl } });
@@ -166,7 +172,7 @@ describe("supplier-level endpoints and connection instances", () => {
     ).toBeDisabled();
     expect(
       screen.getByRole("button", {
-        name: "modelProvider.workspace.addConnection",
+        name: "modelProvider.workspace.addKey",
       }),
     ).toBeDisabled();
     fireEvent.click(
@@ -197,34 +203,36 @@ describe("supplier-level endpoints and connection instances", () => {
     expect(mocks.updateEndpoint).not.toHaveBeenCalled();
   });
 
-  it("has no instance endpoint field and keeps the provider endpoint in the create contract", async () => {
+  it("starts a custom model directly for an unconfigured supplier", async () => {
     await renderPage([], { ...openAI, base_url: customUrl });
     fireEvent.click(
-      screen.getByRole("button", {
-        name: "modelProvider.workspace.configureConnection",
-      }),
+      screen.getByRole("button", { name: "modelProvider.customModel" }),
     );
     const dialog = within(await screen.findByRole("dialog"));
     expect(
-      dialog.queryByRole("textbox", { name: /Base URL|API Host/ }),
+      dialog.queryByLabelText("modelProvider.groupName"),
     ).not.toBeInTheDocument();
-    expect(dialog.getByText(customUrl)).toBeInTheDocument();
+    expect(
+      dialog.queryByRole("combobox", { name: "modelProvider.group" }),
+    ).not.toBeInTheDocument();
+    expect(mocks.createGroup).toHaveBeenCalledWith({
+      modelProviderId: openAI.id,
+      createModelProviderGroupOpenAPIRequest: {
+        name: "OpenAI",
+        api_key: "",
+        verify: false,
+      },
+    });
+  });
+  it("checks a newly initialized supplier without using stale page state", async () => {
+    await renderPage([]);
     fireEvent.click(
-      dialog.getByRole("button", { name: "modelProvider.saveConfig" }),
+      screen.getByRole("button", {
+        name: "modelProvider.workspace.checkConnection",
+      }),
     );
-    await waitFor(() =>
-      expect(mocks.createGroup).toHaveBeenCalledWith(
-        {
-          modelProviderId: openAI.id,
-          createModelProviderGroupOpenAPIRequest: {
-            name: "OpenAI",
-            base_url: customUrl,
-            verify: false,
-          },
-        },
-        undefined,
-      ),
-    );
+    await waitFor(() => expect(mocks.checkGroup).toHaveBeenCalled());
+    expect(mocks.checkGroup.mock.calls[0][0].groupId).toBe("saved-fixture");
   });
 
   it("checks the stored key without sending an empty or masked secret", async () => {

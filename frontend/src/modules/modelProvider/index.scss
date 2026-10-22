@@ -4374,13 +4374,20 @@
     object-fit: contain;
   }
 }
-.provider-workspace-sidebar-note {
-  padding: 12px 8px 0;
-  border-top: 1px solid var(--provider-line);
-  color: var(--provider-muted);
-  font-size: 11px;
-  line-height: 1.6;
+.provider-workspace-add-supplier.ant-btn {
+  flex-shrink: 0;
+  margin-top: 12px;
+  width: 100%;
 }
+.provider-workspace-supplier-actions,
+.provider-workspace-key-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.provider-workspace-key-actions { margin-left: auto; }
+.provider-workspace-api-keys { padding-block: 14px 20px; border-bottom: 1px solid var(--provider-line); }
+.provider-workspace-key-heading > h3 { margin: 0; color: var(--provider-text); font-size: 12px; font-weight: 600; }
 .provider-workspace-detail {
   display: flex;
   flex-direction: column;
