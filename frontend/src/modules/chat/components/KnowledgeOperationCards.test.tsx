@@ -13,9 +13,10 @@ import KnowledgeOperationCards, {
 import type { ImportItem } from "./SourceImports/api";
 import type { KnowledgeOperation } from "../utils/knowledgeOperations";
 const get = vi.hoisted(() => vi.fn());
+const post = vi.hoisted(() => vi.fn());
 vi.mock("@/components/request", () => ({
   BASE_URL: "",
-  axiosInstance: { get },
+  axiosInstance: { get, post },
 }));
 
 describe("knowledge operation receipts", () => {
@@ -23,6 +24,7 @@ describe("knowledge operation receipts", () => {
   beforeEach(() => {
     localStorage.setItem("lazymind:developer-active", "1");
     get.mockReset();
+    post.mockReset();
   });
   it("keeps immutable receipts separate from current failures and retains status on query errors", async () => {
     get.mockResolvedValueOnce({
@@ -210,6 +212,55 @@ describe("knowledge operation receipts", () => {
       );
       expect(refreshImports).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("resumes polling after a failed document is reparsed", async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      value: false,
+    });
+    get.mockResolvedValueOnce({ data: { processing_status: "failed" } })
+      .mockResolvedValueOnce({ data: { processing_status: "running" } })
+      .mockResolvedValue({ data: { processing_status: "ready" } });
+    post.mockResolvedValue({ data: {} });
+    render(
+      <MemoryRouter>
+        <KnowledgeOperationCards operations={[{
+          call_id: "upload",
+          action: "knowledge.document.upload",
+          status: "success",
+          items: [{
+            name: "Paper",
+            resource_ref: {
+              kind: "document",
+              knowledge_base_id: "kb",
+              document_id: "doc",
+            },
+            resource_status: "created",
+          }],
+        }]} />
+      </MemoryRouter>,
+    );
+    await act(async () => {});
+    expect(screen.getByText(/当前处理状态：加入失败/)).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    expect(get).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "重试解析" }));
+    await act(async () => {});
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith(
+      "/api/core/datasets/kb/documents/doc:reparse",
+      {},
+      { headers: { "Idempotency-Key": expect.any(String) } },
+    );
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("当前处理状态：处理中")).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(get).toHaveBeenCalledTimes(3);
+    expect(screen.getByText("当前处理状态：已加入")).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
+    expect(get).toHaveBeenCalledTimes(3);
   });
 
   it("deduplicates receipt documents and polls only the remaining active document", async () => {

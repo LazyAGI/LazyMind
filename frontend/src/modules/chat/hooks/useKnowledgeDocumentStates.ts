@@ -43,22 +43,45 @@ export function useKnowledgeDocumentStates(operations: KnowledgeOperation[]) {
   >({});
   const [refreshing, setRefreshing] = useState(false);
   const currentRef = useRef(current);
-  currentRef.current = current;
-  const scope = useRef(signature);
-  scope.current = signature;
-  const mounted = useRef(true);
-  const inFlight = useRef<{ signature: string; promise: Promise<boolean> }>();
+  const refreshRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const refresh = useCallback(() => refreshRef.current(), []);
 
-  const refresh = useCallback(
-    (pendingOnly = false): Promise<boolean> => {
-      if (inFlight.current?.signature === signature)
-        return inFlight.current.promise;
+  useEffect(() => {
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let inFlight: Promise<void> | undefined;
+    let queuedRefresh: Promise<void> | undefined;
+
+    function schedule() {
+      clearTimeout(timer);
+      if (
+        !disposed &&
+        !document.hidden &&
+        documents.some(([key]) => needsRefresh(currentRef.current[key]))
+      ) {
+        timer = setTimeout(() => void query(true), 3000);
+      }
+    }
+
+    function query(pendingOnly = false): Promise<void> {
+      if (disposed || (pendingOnly && document.hidden)) return Promise.resolve();
+      if (inFlight) {
+        if (pendingOnly) return inFlight;
+        // A mutation may have happened after this request began. All explicit
+        // refreshes during that request share one subsequent full query.
+        queuedRefresh ??= inFlight.then(() => {
+          queuedRefresh = undefined;
+          return query();
+        });
+        return queuedRefresh;
+      }
       const targets = pendingOnly
         ? documents.filter(([key]) => needsRefresh(currentRef.current[key]))
         : documents;
-      if (!targets.length) return Promise.resolve(false);
+      if (!targets.length) return Promise.resolve();
+      clearTimeout(timer);
       setRefreshing(true);
-      const promise: Promise<boolean> = Promise.all(
+      inFlight = Promise.all(
         targets.map(async ([key, ref]) => {
           try {
             const response = await axiosInstance.get(
@@ -89,51 +112,39 @@ export function useKnowledgeDocumentStates(operations: KnowledgeOperation[]) {
         }),
       )
         .then((entries) => {
-          if (!mounted.current || scope.current !== signature) return false;
+          if (disposed) return;
           const next = {
             ...currentRef.current,
             ...Object.fromEntries(entries),
           };
           currentRef.current = next;
-          inFlight.current = undefined;
-          setRefreshing(false);
           setCurrent(next);
-          return documents.some(([key]) => needsRefresh(next[key]));
         })
         .finally(() => {
-          if (inFlight.current?.promise === promise)
-            inFlight.current = undefined;
-          if (mounted.current && scope.current === signature)
+          inFlight = undefined;
+          if (!disposed && !queuedRefresh) {
             setRefreshing(false);
+            schedule();
+          }
         });
-      inFlight.current = { signature, promise };
-      return promise;
-    },
-    [documents, signature],
-  );
+      return inFlight;
+    }
 
-  useEffect(() => {
-    mounted.current = true;
-    let disposed = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const poll = async (pendingOnly: boolean) => {
-      if (disposed || document.hidden) return;
-      const active = await refresh(pendingOnly);
-      if (active && !disposed) timer = setTimeout(() => void poll(true), 3000);
-    };
+    refreshRef.current = () => query();
     const visible = () => {
       clearTimeout(timer);
-      if (!document.hidden) void poll(false);
+      if (!document.hidden) void query();
     };
-    void poll(false);
+    setRefreshing(false);
+    if (!document.hidden) void query();
     document.addEventListener("visibilitychange", visible);
     return () => {
       disposed = true;
-      mounted.current = false;
       clearTimeout(timer);
+      refreshRef.current = () => Promise.resolve();
       document.removeEventListener("visibilitychange", visible);
     };
-  }, [refresh]);
+  }, [documents]);
 
   return { current, refreshing, refresh };
 }

@@ -1216,14 +1216,20 @@ const AssistantMessage = (props: any) => {
       );
       const hasMailDrafts = Boolean(askPending.mail_draft || askPending.mail_drafts?.length);
       const independentQuestion = hasMailDrafts && askPending.mail_draft_only === false;
-      // A mail confirmation is a later user turn, but does not answer this question.
-      const isReadOnly = independentQuestion
-        ? Boolean(item.ask_answered || props.supersededAskPending)
-        : isAskPendingReadOnly(
-            item.ask_answered,
-            index === length - 1,
-            !!hasLaterUserMessage,
-          );
+      let isReadOnly: boolean;
+      if (askPending.knowledge_management) {
+        // Work confirmations remain pending independently of later chat turns.
+        isReadOnly = Boolean(item.ask_answered);
+      } else if (independentQuestion) {
+        // A mail confirmation is a later user turn, but does not answer this question.
+        isReadOnly = Boolean(item.ask_answered || props.supersededAskPending);
+      } else {
+        isReadOnly = isAskPendingReadOnly(
+          item.ask_answered,
+          index === length - 1,
+          !!hasLaterUserMessage,
+        );
+      }
       let mailCards: ReactNode = null;
       if (askPending.mail_draft || (askPending.mail_drafts && askPending.mail_drafts.length)) {
         const drafts: MailDraftPreview[] =
