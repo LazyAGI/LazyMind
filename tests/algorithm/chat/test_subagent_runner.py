@@ -2090,7 +2090,7 @@ def test_old_pinned_workflow_kb_retains_query_shims_but_new_group_uses_five_read
 def test_new_ppt_revision_uses_shared_management_discovery():
     import yaml
     state = yaml.safe_load((Path(__file__).resolve().parents[3] /
-                            'workflows/ppt-workflow/scenario/state.yml').read_text())
+                            'workflows/ppt-workflow/scenario/state.yml').read_text(encoding='utf-8'))
     discovery = [step for step in state['steps'].values() if 'knowledge.list(' in step.get('prompt', '')]
     assert discovery
     for step in discovery:
