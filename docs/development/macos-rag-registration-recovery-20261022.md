@@ -226,7 +226,7 @@ lazyllm_waiting_task_queue    lazyllm_finished_task_queue
 6. **Compose**：将新开关传给 `lazyllm-algo`，默认 false，不强制改变所有服务端部署。算法构建入口在创建 Document 前更新 LazyLLM 配置和子进程环境，并记录 effective policy。即使容器原始旧 policy 仍为 none，新开关为 true 时最终业务注册使用 force。
 7. **CI Bash**：保留此前 `00a34711` 的非空验证参数数组修复，覆盖 ad-hoc 与正式签名两条路径。
 
-两仓库使用同名分支。LazyMind 的 gitlink 固定到本次 LazyLLM 修复提交；在 SDK 修复尚未进入官方上游时，`.gitmodules` 指向 CarlosShaoting fork 和同名分支，保证 CI 能取到提交。SDK 上游合并后应切回官方 URL 并更新 gitlink，不长期依赖浮动分支。
+两仓库使用同名分支。LazyMind 的 gitlink 固定到本次 LazyLLM 修复提交；`.gitmodules` 保持官方 URL 和 main。合并本 PR 前，需先将 SDK 修复合入官方仓库，并将 gitlink 更新到官方可获取且包含修复的提交，确保 CI 能正常初始化子模块。
 
 ### 10.3 配置方式与生效检查
 
