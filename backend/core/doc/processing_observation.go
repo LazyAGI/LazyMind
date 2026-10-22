@@ -142,6 +142,10 @@ func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentP
 	if ext.ProcessingLevel == ProcessingLevelStored {
 		return state, ""
 	}
+	nativeIndexing := state.ParseArtifactRef != "" && ext.ProcessingLevel == ProcessingLevelIndexed
+	if nativeIndexing && (state.IndexArtifactRef != "core-task:"+task.ID || ext.ProcessingRevision != snapshot.dataset.ProcessingRevision) {
+		return state, ""
+	}
 	raw := strings.TrimSpace(ext.TaskState)
 	if task.LazyllmTaskID != "" {
 		// Submission alone is not evidence that the external task is running.
@@ -162,6 +166,16 @@ func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentP
 		status = "unknown"
 	}
 	if status == "" {
+		return state, raw
+	}
+	// Native parsing and chunks remain usable independently of vector indexing.
+	// Only the task bound to this artifact and revision can overlay its index stage.
+	if nativeIndexing {
+		if !task.CreatedAt.Before(state.UpdatedAt) || status != "failed" {
+			state.IndexErrorCode = ""
+			state.IndexErrorMessage = ""
+		}
+		state.IndexStatus = status
 		return state, raw
 	}
 	// A newer task must not inherit an older attempt's failure details.
