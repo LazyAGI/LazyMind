@@ -105,6 +105,9 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 	if len(v03.Dev) != 115 {
 		t.Fatalf("v0_3 dev migration count=%d, want 115", len(v03.Dev))
 	}
+	if !containsMigrationFileVersion(v03.Dev, 20261021105921) {
+		t.Fatal("v0_3 dev migrations are missing paper library persistence")
+	}
 	if !containsMigrationFileVersion(v03.Dev, 20261016034717) {
 		t.Fatal("v0_3 dev migrations are missing task execution timing")
 	}

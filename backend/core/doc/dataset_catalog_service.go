@@ -282,6 +282,7 @@ func (s *DatasetCatalogService) datasetFromRow(ctx context.Context, ds orm.Datas
 		Acl:                    datasetACL,
 		ShareType:              shareTypeToPB(ds.ShareType),
 		Type:                   datasetTypeToPB(ds.Type),
+		LibraryKind:            parseDatasetLibraryKind(ds.Ext),
 		Tags:                   parseDatasetTags(ds.Ext),
 		DefaultDataset:         isDefaultDatasetForUserWithDB(ctx, s.db, userID, ds.ID),
 		CreatedByDataSource:    &createdByDataSource,

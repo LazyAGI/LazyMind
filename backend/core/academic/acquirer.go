@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"lazymind/core/academic/arxivsource"
 	"net"
 	"net/http"
 	"net/url"
@@ -39,16 +40,9 @@ func validateRemoteURL(ctx context.Context, raw string) (*url.URL, error) {
 }
 
 func acquirePDF(ctx context.Context, candidate FulltextCandidate) (path string, size int64, err error) {
-	urls := []string{candidate.URL}
-	if candidate.SourceProvider == "arxiv" {
-		base, _ := NormalizeArxivID(candidate.URL)
-		if base != "" {
-			urls = []string{
-				"https://arxiv.org/pdf/" + base,
-				"https://arxiv.org/pdf/" + base + ".pdf",
-				"https://export.arxiv.org/pdf/" + base,
-			}
-		}
+	urls, err := canonicalPaperURLs(candidate)
+	if err != nil {
+		return "", 0, err
 	}
 	var lastErr error
 	for _, rawURL := range urls {
@@ -59,6 +53,58 @@ func acquirePDF(ctx context.Context, candidate FulltextCandidate) (path string, 
 		}
 	}
 	return "", 0, lastErr
+}
+
+// arXiv candidates are identifiers, never arbitrary download locations. Keep
+// the requested revision through PDF acquisition instead of resolving vN to
+// the current latest version by dropping the suffix.
+func canonicalPaperURLs(candidate FulltextCandidate) ([]string, error) {
+	if !strings.EqualFold(strings.TrimSpace(candidate.SourceProvider), "arxiv") {
+		return []string{candidate.URL}, nil
+	}
+	identifier, err := arxivsource.Parse(candidate.URL)
+	if err != nil {
+		return nil, err
+	}
+	if version := strings.TrimSpace(candidate.Version); version != "" {
+		versioned, parseErr := arxivsource.Parse(identifier.BaseID + version)
+		if parseErr != nil || versioned.Version == "" || versioned.Version != strings.ToLower(version) {
+			return nil, fmt.Errorf("arXiv candidate has invalid version %q", version)
+		}
+		if identifier.Version != "" && identifier.Version != versioned.Version {
+			return nil, fmt.Errorf("arXiv version conflict: URL specifies %s, candidate specifies %s", identifier.Version, versioned.Version)
+		}
+		identifier.Version = versioned.Version
+	}
+	return []string{identifier.PDFURL()}, nil
+}
+
+func validateArxivPDFRedirect(candidate FulltextCandidate, target string) error {
+	urls, err := canonicalPaperURLs(candidate)
+	if err != nil {
+		return err
+	}
+	expected, err := arxivsource.Parse(urls[0])
+	if err != nil {
+		return err
+	}
+	targetURL, err := url.Parse(target)
+	if err != nil || targetURL.Scheme != "https" || !strings.HasPrefix(targetURL.Path, "/pdf/") {
+		return errors.New("arXiv PDF redirect must use an official HTTPS PDF URL")
+	}
+	switch strings.ToLower(targetURL.Hostname()) {
+	case "arxiv.org", "www.arxiv.org", "export.arxiv.org":
+	default:
+		return errors.New("arXiv PDF redirect points outside the official arXiv hosts")
+	}
+	actual, err := arxivsource.Parse(target)
+	if err != nil {
+		return err
+	}
+	if actual.BaseID != expected.BaseID || (expected.Version != "" && actual.Version != expected.Version) {
+		return fmt.Errorf("arXiv PDF redirect changed the paper or version: expected %s, received %s", expected.ID(), actual.ID())
+	}
+	return nil
 }
 
 func acquirePDFOnce(ctx context.Context, candidate FulltextCandidate) (path string, size int64, err error) {
@@ -87,6 +133,11 @@ func acquirePDFOnce(ctx context.Context, candidate FulltextCandidate) (path stri
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {
 			return errors.New("too many redirects")
+		}
+		if strings.EqualFold(strings.TrimSpace(candidate.SourceProvider), "arxiv") {
+			if err := validateArxivPDFRedirect(candidate, req.URL.String()); err != nil {
+				return err
+			}
 		}
 		_, err := validateRemoteURL(req.Context(), req.URL.String())
 		return err

@@ -69,6 +69,11 @@ export default defineConfig(({ mode }) => {
           target: devProxyTarget,
           changeOrigin: true,
         },
+        "/arxiv": {
+          target: "https://export.arxiv.org",
+          changeOrigin: true,
+          rewrite: (requestPath) => requestPath.replace(/^\/arxiv/, ""),
+        },
       },
     },
     build: {

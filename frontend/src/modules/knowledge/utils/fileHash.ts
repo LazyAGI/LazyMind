@@ -161,4 +161,11 @@ export async function computeFileSha256(file: File): Promise<string> {
   return bytesToHex(hasher.digest());
 }
 
+/** Stable text fingerprint, also available on HTTP origins without Web Crypto. */
+export function computeTextSha256(text: string): string {
+  const hasher = new Sha256Hasher();
+  hasher.update(new TextEncoder().encode(text));
+  return bytesToHex(hasher.digest());
+}
+
 export const CHECK_HASHES_BATCH_SIZE = 500;

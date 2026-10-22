@@ -57,7 +57,6 @@ import {
 import { ALL_TAGS } from "@/modules/knowledge/constants/common";
 import {
   Dataset,
-  DatasetAclEnum,
 } from "@/api/generated/knowledge-client";
 import type { Dataset as CoreDataset } from "@/api/generated/core-client";
 import KnowledgeTag from "@/modules/knowledge/components/KnowledgeTag";
@@ -66,6 +65,10 @@ import {
   effectiveProcessingLevel,
   type ProcessingLevel,
 } from "@/modules/knowledge/utils/processingLevel";
+import { isPaperLibrary } from "@/modules/knowledge/paper/store";
+import { downloadPaperCitations, loadPaperLibraryForExport } from "@/modules/knowledge/paper/exportLibrary";
+import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
+import KnowledgeLibraryActions from "./KnowledgeLibraryActions";
 
 import { ListPageTable } from "@/components/ui";
 import { useTranslation } from "react-i18next";
@@ -1310,7 +1313,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                   if (data.dataset_id) openDetail(data.dataset_id);
                 }}
               >
-                <Tooltip title={name}><span>{name}</span></Tooltip>
+                <Tooltip title={name}><span>{name}{isPaperLibrary(data.dataset_id, data.library_kind) ? " · 论文集" : ""}</span></Tooltip>
               </Button>
               <Tooltip title={data.desc} placement="topLeft">
                 <span className="knowledge-list-description">{data.desc || "-"}</span>
@@ -1358,61 +1361,34 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     {
       title: t("common.actions"),
       key: "action",
-      width: 190,
+      width: 72,
       fixed: "right",
-      render: (data: Dataset) => {
-        if (!data.acl?.includes(DatasetAclEnum.DatasetWrite)) {
-          return null;
-        }
-        return (
-          <Flex gap={10} wrap align="center">
-            <Button
-              className="link-btn"
-              type="link"
-              onClick={(event: MouseEvent<HTMLElement>) => {
-                event.stopPropagation();
-                createUpdateRef.current?.onOpen(data);
-              }}
-            >
-              {t("common.edit")}
-            </Button>
-            {!runtimeFeatures.hideUserGroupSurfaces && (
-                <Button
-                  className="link-btn"
-                  type="link"
-                  onClick={(event: MouseEvent<HTMLElement>) => {
-                    event.stopPropagation();
-                    navigate({
-                      pathname: `/lib/knowledge/auth/${data.dataset_id}`,
-                    });
-                  }}
-                >
-                {t("knowledge.authorize")}
-              </Button>
-            )}
-            <Button
-              className="link-btn"
-              type="link"
-              danger
-              onClick={(event: MouseEvent<HTMLElement>) => {
-                event.stopPropagation();
-                const knowledgeName =
-                  data.display_name || data.dataset_id || "";
-                confirmRef.current?.onOpen({
-                  id: data.dataset_id || "",
-                  title: t("knowledge.deleteTitle", { name: knowledgeName }),
-                  content: t("knowledge.deleteContent"),
-                  confirmText: t("knowledge.deleteConfirmText", {
-                    name: knowledgeName,
-                  }),
-                });
-              }}
-            >
-              {t("common.delete")}
-            </Button>
-          </Flex>
-        );
-      },
+      align: "center",
+      render: (data: Dataset) => (
+        <KnowledgeLibraryActions
+          dataset={data}
+          onEdit={() => createUpdateRef.current?.onOpen(data)}
+          onAuthorize={runtimeFeatures.hideUserGroupSurfaces ? undefined : () => navigate(`/lib/knowledge/auth/${data.dataset_id}`)}
+          onExport={isPaperLibrary(data.dataset_id, data.library_kind) ? async (format) => {
+            try {
+              const library = await loadPaperLibraryForExport(data.dataset_id || "");
+              if (!library.papers.length) { message.info("这个论文库还没有可导出的文献"); return; }
+              downloadPaperCitations(library, format, data.display_name || "papers");
+            } catch (error) {
+              message.error(getImportErrorMessage(error, "导出失败，请重试"));
+            }
+          } : undefined}
+          onDelete={() => {
+            const knowledgeName = data.display_name || data.dataset_id || "";
+            confirmRef.current?.onOpen({
+              id: data.dataset_id || "",
+              title: t("knowledge.deleteTitle", { name: knowledgeName }),
+              content: t("knowledge.deleteContent"),
+              confirmText: t("knowledge.deleteConfirmText", { name: knowledgeName }),
+            });
+          }}
+        />
+      ),
     },
   ];
 
