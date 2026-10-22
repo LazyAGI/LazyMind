@@ -469,11 +469,14 @@ func (s *arxivImportService) library(ctx context.Context, datasetID string) ([]A
 		} else if err != nil {
 			return nil, err
 		}
-		_, _, exists, fileErr := readArxivDocument(document)
+		ext, _, exists, fileErr := readArxivDocument(document)
 		if fileErr != nil {
 			return nil, fileErr
 		}
-		if !exists {
+		// General Workflow imports are synchronized through the document list.
+		// Only direct arXiv imports have the complete versioned source snapshot
+		// required by this endpoint's metadata contract.
+		if !exists || ext.Marker == nil {
 			continue
 		}
 		item, resultErr := s.makeResult(ctx, work, link, document, "already_present")

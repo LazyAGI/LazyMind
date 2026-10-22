@@ -242,6 +242,36 @@ func TestArxivImportLibraryExcludesMissingAndDeletedFiles(t *testing.T) {
 	}
 }
 
+func TestArxivLibraryLeavesGeneralWorkflowAttachmentsToDocumentSync(t *testing.T) {
+	svc, _ := arxivImportTestService(t)
+	result, err := svc.importPaper(context.Background(), "2404.06654", "dataset", "user", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var original orm.Document
+	if err = svc.db.Take(&original, "id=?", result.DocumentID).Error; err != nil {
+		t.Fatal(err)
+	}
+	var ext arxivDocumentExt
+	json.Unmarshal(original.Ext, &ext)
+	ext.Marker = nil
+	generic := orm.Document{ID: "workflow-pdf", DatasetID: "dataset", DisplayName: "workflow.pdf", Ext: marshal(ext)}
+	if err = svc.db.Create(&generic).Error; err != nil {
+		t.Fatal(err)
+	}
+	link := orm.AcademicWorkDocument{AcademicWorkID: result.WorkID, DatasetID: "dataset", DocumentID: generic.ID, SourceProvider: "arxiv"}
+	if err = svc.db.Create(&link).Error; err != nil {
+		t.Fatal(err)
+	}
+	items, err := svc.library(context.Background(), "dataset")
+	if err != nil || len(items) != 1 || items[0].DocumentID != result.DocumentID {
+		t.Fatalf("general attachment polluted versioned arXiv sync: %#v, %v", items, err)
+	}
+	if err = svc.db.Take(&generic, "id=?", generic.ID).Error; err != nil {
+		t.Fatal("general attachment was removed: ", err)
+	}
+}
+
 func TestArxivImportHandlersRejectMissingUserInvalidBodyAndForeignDataset(t *testing.T) {
 	arxivImportTestService(t)
 	cases := []struct {
