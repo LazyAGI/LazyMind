@@ -660,3 +660,27 @@ func TestExternalTaskRecoveryRestoresMissingJobAndReportsFailure(t *testing.T) {
 		t.Fatalf("worker failure was hidden: %#v", task)
 	}
 }
+
+func TestExternalWorkflowSkillRequestAcceptsZIPOverOldJSONLimit(t *testing.T) {
+	newHandlerTestDB(t)
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	entry, err := writer.CreateHeader(&zip.FileHeader{Name: "SKILL.md", Method: zip.Store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = entry.Write(bytes.Repeat([]byte("a"), 25<<20)); err != nil {
+		t.Fatal(err)
+	}
+	if err = writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{"agent_type": "codex", "task_description": "Run the skill.", "skill": map[string]string{"name": "large", "zip_base64": base64.StdEncoding.EncodeToString(archive.Bytes())}})
+	request := httptest.NewRequest(http.MethodPost, "/external-agent/workflow-tasks", bytes.NewReader(body))
+	request.Header.Set("X-User-Id", "user-1")
+	recorder := httptest.NewRecorder()
+	CreateExternalAgentWorkflowTask(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}

@@ -9,6 +9,16 @@ vi.mock("@/components/request", () => ({ axiosInstance: http, BASE_URL: "", loca
 import { buildSkillUpdatePayload, cancelSkillOrganizeTask, createSkillAsset, getSkillOrganizeTask, listSkillOrganizeApprovals, listSkillOrganizeTasks, getSkillAssetDetail, listSkillAssetsPage, normalizeSkillCallMode, organizeSkills, publishSkillToMarket, resolveSkillOrganizeApprovals } from "./skillApi";
 
 describe("skill import request lifetime", () => {
+  it("forwards cancellation for personal and admin source imports", async () => {
+    const signal = new AbortController().signal;
+    api.apiCoreSkillsPost.mockResolvedValue({ data: { data: { skill_id: "imported" } } });
+    api.apiCoreSkillMarketAdminItemsPost.mockResolvedValue({ data: { data: { market_item_id: "market", source_skill_id: "imported" } } });
+    await createSkillAsset({ name: "writer", description: "", category: "external", tags: [], source: { type: "url", url: "https://github.com/example/skill" } }, { signal });
+    await publishSkillToMarket({ source: { type: "url", url: "https://github.com/example/skill" } }, { signal });
+    expect(api.apiCoreSkillsPost.mock.lastCall?.[1].signal).toBe(signal);
+    expect(api.apiCoreSkillMarketAdminItemsPost.mock.lastCall?.[1].signal).toBe(signal);
+  });
+
   it("allows personal URL imports enough time to download a large skill package", async () => {
     api.apiCoreSkillsPost.mockResolvedValue({ data: { data: { skill_id: "imported" } } });
     expect(await createSkillAsset({

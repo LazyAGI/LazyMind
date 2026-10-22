@@ -90,7 +90,9 @@ import {
   type SkillDraftPreviewRecord,
 } from "./skillApi";
 import { buildSkillZipBlob } from "./skillPackage";
-import { isInvalidSkillPackageError, uploadSkillTempFile } from "./skillUpload";
+import { getSkillPackageValidationError, isInvalidSkillPackageError, uploadSkillTempFile } from "./skillUpload";
+import { useSkillImportTask } from "./hooks/useSkillImportTask";
+import SkillImportProgress from "./components/SkillManagementSection/SkillImportProgress";
 import { uploadCloudSkill, downloadCloudResource } from "./cloudResourceApi";
 import {
   isSkillAlreadyExistsError,
@@ -295,6 +297,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   const [skillCategoriesLoading, setSkillCategoriesLoading] = useState(false);
   const [skillTags, setSkillTags] = useState<string[]>([]);
   const [skillTagsLoaded, setSkillTagsLoaded] = useState(false);
+  const [skillTagsRefreshKey, setSkillTagsRefreshKey] = useState(0);
   const [skillTagsLoading, setSkillTagsLoading] = useState(false);
   const [skillEnableLoading, setSkillEnableLoading] = useState<Set<string>>(
     new Set(),
@@ -354,7 +357,27 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   const [glossaryInitialized, setGlossaryInitialized] = useState(false);
   const [glossaryLoadError, setGlossaryLoadError] = useState("");
   const [glossarySaving, setGlossarySaving] = useState(false);
-  const [skillSaving, setSkillSaving] = useState(false);
+  const [skillDraftSaving, setSkillSaving] = useState(false);
+  const [skillImportName, setSkillImportName] = useState("");
+  const {
+    pending: skillImportPending,
+    uploadProgress: skillUploadProgress,
+    start: startSkillImport,
+    cancel: cancelSkillImport,
+  } = useSkillImportTask<string>({
+    onSuccess: (name) => {
+      setSkillUrlImportOpen(false);
+      message.success(t("admin.memorySkillUploadSuccess", { name }));
+      refreshSkillMetadata();
+      // Read the current callback after upload, including any changed filters.
+      void refreshSkillAssets({ background: true });
+    },
+    onError: (error) => {
+      if (skillUrlImportOpen) setSkillUrlImportError(error);
+      else showSkillUploadError(error, skillImportName.replace(/\.zip$/i, ""));
+    },
+  });
+  const skillSaving = skillDraftSaving || skillImportPending;
   const [glossaryListPage, setGlossaryListPage] = useState(1);
   const [glossaryListPageSize, setGlossaryListPageSize] = useState(
     defaultGlossaryListPageSize,
@@ -710,6 +733,11 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       setSkillCategoriesLoading(false);
     }
   }, []);
+
+  const refreshSkillMetadata = useCallback(() => {
+    setSkillTagsRefreshKey((value) => value + 1);
+    void refreshSkillCategories();
+  }, [refreshSkillCategories]);
 
   const clearManualSkillReviewPollTimer = useCallback(() => {
     if (manualSkillReviewPollTimerRef.current !== null) {
@@ -1387,7 +1415,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     return () => {
       ignore = true;
     };
-  }, [reviewRouteTab, routeMemoryTab, skillRouteItemId]);
+  }, [reviewRouteTab, routeMemoryTab, skillRouteItemId, skillTagsRefreshKey]);
 
   useEffect(() => {
     const shouldLoadSkillCategories =
@@ -2486,33 +2514,17 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     }
 
     setSkillUrlImportError(null);
-    setSkillSaving(true);
-
-    try {
+    await startSkillImport(async ({ signal }) => {
       await createSkillAsset(
         {
-          name: t("admin.memorySkillUploadDefaultName"),
-          description: t("admin.memorySkillUploadPersonalDesc"),
           category: "external",
-          tags: [],
           isEnabled: true,
           source: { type: "url", url: trimmedUrl },
         },
-        { silentError: true },
+        { silentError: true, signal },
       );
-      setSkillUrlImportOpen(false);
-      await Promise.all([refreshSkillAssets(), refreshSkillCategories()]);
-      message.success(
-        t("admin.memorySkillUploadSuccess", {
-          name: t("admin.memorySkillUploadDefaultName"),
-        }),
-      );
-    } catch (error) {
-      console.error("Import skill from URL failed:", error);
-      setSkillUrlImportError(error);
-    } finally {
-      setSkillSaving(false);
-    }
+      return t("admin.memorySkillUploadDefaultName");
+    });
   };
 
   const handleSkillZipFileSelected = async (
@@ -2520,48 +2532,32 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   ) => {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file || skillSaving) {
+    if (!file || skillSaving) return;
+    const validationError = getSkillPackageValidationError(file);
+    if (validationError) {
+      message.warning(t(validationError === "type"
+        ? "admin.memorySkillUploadPackageTypeError"
+        : "admin.memorySkillUploadPackageSizeError"));
       return;
     }
-    const name = file.name.toLowerCase();
-    const valid =
-      name.endsWith(".zip") ||
-      name.endsWith(".tgz") ||
-      name.endsWith(".tar") ||
-      name.endsWith(".gz");
-    if (!valid) {
-      message.warning(t("admin.memorySkillUploadPackageTypeError"));
-      return;
-    }
-
-    const inferredName =
-      file.name.replace(/\.(zip|tgz|tar|gz)$/i, "").trim() ||
-      t("admin.memorySkillUploadDefaultName");
-
-    try {
-      setSkillSaving(true);
-      const upload = await uploadSkillTempFile(file, { silentError: true });
+    const inferredName = file.name.replace(/\.zip$/i, "").trim() || t("admin.memorySkillUploadDefaultName");
+    setSkillImportName(file.name);
+    await startSkillImport(async ({ signal, setUploadProgress }) => {
+      const upload = await uploadSkillTempFile(file, { silentError: true, signal, onProgress: setUploadProgress });
+      signal.throwIfAborted();
+      setUploadProgress(null);
       await createSkillAsset(
         {
           name: inferredName,
           description: t("admin.memorySkillUploadPersonalDesc"),
           category: "external",
-          tags: [],
           isEnabled: true,
           source: { type: "uploaded_zip", uploadId: upload.uploadId },
         },
-        { silentError: true },
+        { silentError: true, signal },
       );
-      await Promise.all([refreshSkillAssets(), refreshSkillCategories()]);
-      message.success(
-        t("admin.memorySkillUploadSuccess", { name: inferredName }),
-      );
-    } catch (error) {
-      console.error("Upload skill package failed:", error);
-      showSkillUploadError(error, inferredName);
-    } finally {
-      setSkillSaving(false);
-    }
+      return inferredName;
+    });
   };
 
   const closeModal = () => {
@@ -4957,6 +4953,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     setGlossaryDetailTarget,
     setGlossaryInboxOpen,
     refreshSkillAssets,
+    refreshSkillMetadata,
     refreshAllSkillAssets,
     searchInput,
     setSearchInput,
@@ -5092,6 +5089,9 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     <div
       className={`admin-page memory-page ${isReviewMode ? "is-review-mode" : ""}${embeddedTab ? " is-embedded" : ""}`}
     >
+      {skillImportPending && !skillUrlImportOpen ? (
+        <SkillImportProgress t={t} uploadProgress={skillUploadProgress} fileName={skillImportName} onCancel={cancelSkillImport} />
+      ) : null}
       <MemoryManagementContext.Provider
         value={{ ...outletContext, embedded: Boolean(embeddedTab) }}
       >
@@ -5155,13 +5155,10 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         cancelText={t("common.cancel")}
         destroyOnClose
         confirmLoading={skillSaving}
-        cancelButtonProps={{ disabled: skillSaving }}
-        closable={!skillSaving}
-        maskClosable={!skillSaving}
-        keyboard={!skillSaving}
         onOk={handleConfirmSkillUrlImport}
         onCancel={() => {
-          if (!skillSaving) setSkillUrlImportOpen(false);
+          cancelSkillImport();
+          setSkillUrlImportOpen(false);
         }}
       >
         <p id="skill-url-import-help">{t("admin.memorySkillImportUrlHelp")}</p>
@@ -5180,6 +5177,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
           }}
           onPressEnter={handleConfirmSkillUrlImport}
         />
+        {skillImportPending ? <SkillImportProgress t={t} uploadProgress={skillUploadProgress} /> : null}
         {Boolean(skillUrlImportError) && (
           <Alert
             id="skill-url-import-error"

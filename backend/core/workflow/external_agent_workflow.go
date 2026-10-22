@@ -102,7 +102,7 @@ func CreateExternalAgentWorkflowTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body externalAgentWorkflowTaskRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<20))
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExternalAgentSkillRequestBytes))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&body); err != nil {
 		common.ReplyErrWithData(w, "invalid body", externalTaskError("INVALID_REQUEST", err.Error(), "Provide agent_type, skill{name,url or zip_base64}, task_description, and only documented optional fields."), http.StatusBadRequest)

@@ -6585,6 +6585,9 @@ const zhCN = {
     memorySkillCreateImportTitle: "从网络上导入",
     memorySkillCreateImportDesc: "支持 GitHub、skills.sh、SkillsMP、ClawHub、SkillHub 或 ZIP 包链接",
     memorySkillCreateImportPlaceholder: "请输入 GitHub、skills.sh、SkillsMP、ClawHub、SkillHub 技能页或 ZIP 包链接",
+    memorySkillImportPending: "正在导入技能…",
+    memorySkillUploadProgress: "正在上传技能包：{{percent}}%",
+    memorySkillImportPendingHint: "导入可能需要几分钟。取消将停止当前请求；若已完成，请刷新列表查看。",
     memorySkillImportUrlHelp: "支持 skills.sh、SkillsMP、ClawHub、SkillHub 的技能详情页，以及 GitHub 仓库、技能目录、SKILL.md 和 HTTP(S) ZIP 包直链。仓库中只有一个技能时会自动识别；包含多个技能时，请提供具体技能目录或 SKILL.md 链接。远程下载上限为 100 MiB。",
     memorySkillImportTooLarge: "技能包过大，超过导入大小限制。请提供更小的技能目录链接，或去对话中尝试安装。",
     memorySkillImportMultipleSkills: "链接中包含多个技能，请提供具体技能目录或 SKILL.md 链接。",
@@ -6757,7 +6760,7 @@ const zhCN = {
     memorySkillImportMdFileTypeError: "仅支持 .md / .markdown 文件",
     memorySkillImportMdFileSizeError: "文件超过 512 KiB 限制，请选择更小的文件",
     memorySkillUploadPackageTypeError: "仅支持 .zip 压缩包",
-    memorySkillUploadPackageSizeError: "压缩包超过 512 MiB 限制，请选择更小的文件",
+    memorySkillUploadPackageSizeError: "压缩包超过 100 MiB 限制，请选择更小的文件",
     memorySkillEditMetadataHint:
       "此处仅修改名称与描述。技能内容请在详情页编辑并提交。",
     memorySkillImportMethodLink: "链接导入",
@@ -6767,7 +6770,7 @@ const zhCN = {
     memorySkillUploadRepoPlaceholder:
       "GitHub、skills.sh、SkillsMP、ClawHub、SkillHub 或 ZIP 包链接",
     memorySkillUploadFileTitle: "从本地包安装",
-    memorySkillUploadFileHint: "支持 .zip、.tgz 或包含技能说明文件的压缩包，单文件不超过 512 MiB",
+    memorySkillUploadFileHint: "支持包含 SKILL.md 的 .zip 压缩包，单文件不超过 100 MiB",
     memorySkillUploadFileReady: "{{size}} KB，准备上传",
     memorySkillUploadClear: "清空",
     memorySkillUploadSubmit: "上传技能",

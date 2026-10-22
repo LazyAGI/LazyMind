@@ -2128,6 +2128,21 @@ type remoteFSDeleteQueryParams struct {
 	Confirm   bool   `query:"confirm,omitempty" desc:"Required true for package root physical purge."`
 }
 
+type remoteFSSkillInstallOpenAPIRequest struct {
+	URL              string `json:"url,omitempty" desc:"Skill source page or direct HTTP(S) ZIP URL. Mutually exclusive with package_zip_base64."`
+	PackageZIPBase64 string `json:"package_zip_base64,omitempty" desc:"Complete ZIP package, base64 encoded; maximum decoded size 100 MiB."`
+	ExpectedName     string `json:"expected_name,omitempty" desc:"Optional expected package frontmatter name for byte imports."`
+}
+
+type remoteFSSkillInstallOpenAPIResponse struct {
+	Status    string                                     `json:"status" enum:"installed,already_installed"`
+	SkillID   string                                     `json:"skill_id"`
+	SkillKey  string                                     `json:"skill_key"`
+	SourceURL string                                     `json:"source_url,omitempty"`
+	Enabled   bool                                       `json:"enabled"`
+	Warnings  []skillNormalizationWarningOpenAPIResponse `json:"warnings,omitempty"`
+}
+
 type remoteFSDirOpenAPIRequest struct {
 	Path      string `json:"path"`
 	Recursive bool   `json:"recursive"`
@@ -4298,6 +4313,16 @@ func registeredCoreOperations() []openAPIOperation {
 			QueryParams: remoteFSQueryParams{},
 			RequestBody: &openAPIBody{Required: true, ContentType: "application/octet-stream", Schema: schemaSource{Inline: map[string]any{"type": "string", "format": "binary"}}},
 			Responses:   map[int]openAPIResponse{200: resp("Remote filesystem write result", okOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/remote-fs/skills:install",
+			Summary:     "Atomically install a linked or uploaded skill",
+			Description: "Uses the same source adapters, package limits, and metadata validation as personal imports. New skills are disabled. An already installed source is returned unchanged, including its current enabled state. Requires internal service authentication and user_id/task_id.",
+			Tags:        []string{"remote-fs"},
+			QueryParams: remoteFSTaskQueryParams{},
+			RequestBody: jsonBodyOf(remoteFSSkillInstallOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Complete skill installation", remoteFSSkillInstallOpenAPIResponse{})},
 		},
 		{
 			Method:      "POST",

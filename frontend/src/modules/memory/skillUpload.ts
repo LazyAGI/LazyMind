@@ -9,6 +9,13 @@ import type {
 } from "@/api/generated/core-client";
 
 const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024;
+export const MAX_SKILL_PACKAGE_SIZE = 100 * 1024 * 1024;
+
+export function getSkillPackageValidationError(file: File): "type" | "size" | null {
+  if (!file.name.toLowerCase().endsWith(".zip")) return "type";
+  if (file.size > MAX_SKILL_PACKAGE_SIZE) return "size";
+  return null;
+}
 
 export interface SkillTempUploadResult {
   uploadId: string;
@@ -33,8 +40,25 @@ export function isInvalidSkillPackageError(error: unknown): boolean {
 
 export async function uploadSkillTempFile(
   file: File,
-  options?: { chunkSize?: number; timeout?: number; silentError?: boolean },
+  options?: {
+    chunkSize?: number;
+    timeout?: number;
+    silentError?: boolean;
+    signal?: AbortSignal;
+    onProgress?: (percent: number) => void;
+  },
 ): Promise<SkillTempUploadResult> {
+  options?.signal?.throwIfAborted();
+  const validationError = getSkillPackageValidationError(file);
+  if (validationError) {
+    throw Object.assign(new Error("Invalid skill package"), {
+      code: validationError === "size" ? "payload_too_large" : "invalid_skill_package",
+    });
+  }
+  const reportProgress = (loaded: number) => options?.onProgress?.(
+    file.size ? Math.min(100, Math.round((loaded / file.size) * 100)) : 100,
+  );
+  reportProgress(0);
   const chunkSize = options?.chunkSize ?? DEFAULT_CHUNK_SIZE;
   const timeout = options?.timeout ?? 60 * 1000;
 
@@ -48,9 +72,10 @@ export async function uploadSkillTempFile(
   const initResponse = await axiosInstance.post<InitUploadResponse>(
     coreApiUrl("temp/uploads:initUpload"),
     initRequest,
-    { timeout, silentError: options?.silentError } as never,
+    { timeout, silentError: options?.silentError, signal: options?.signal } as never,
   );
 
+  options?.signal?.throwIfAborted();
   const { upload_id: uploadId, part_size: partSize, total_parts: totalParts } = initResponse.data;
   if (!uploadId) {
     throw new Error("Missing upload_id from temp upload init");
@@ -60,6 +85,7 @@ export async function uploadSkillTempFile(
   const actualTotalParts = totalParts || Math.ceil(file.size / actualPartSize);
 
   for (let partNumber = 1; partNumber <= actualTotalParts; partNumber += 1) {
+    options?.signal?.throwIfAborted();
     const start = (partNumber - 1) * actualPartSize;
     const end = Math.min(start + actualPartSize, file.size);
     const chunk = file.slice(start, end);
@@ -71,17 +97,24 @@ export async function uploadSkillTempFile(
         headers: { "Content-Type": "application/octet-stream" },
         timeout,
         silentError: options?.silentError,
+        signal: options?.signal,
+        onUploadProgress: (event: { loaded: number }) => {
+          if (!options?.signal?.aborted) reportProgress(Math.min(start + event.loaded, end));
+        },
       } as never,
     );
+    options?.signal?.throwIfAborted();
+    reportProgress(end);
   }
 
   const completeRequest: CompleteUploadRequest = { auto_start: false };
   const completeResponse = await axiosInstance.post<CompleteUploadResponse>(
     coreApiUrl(`temp/uploads/${encodeURIComponent(uploadId)}:complete`),
     completeRequest,
-    { timeout, silentError: options?.silentError } as never,
+    { timeout, silentError: options?.silentError, signal: options?.signal } as never,
   );
 
+  options?.signal?.throwIfAborted();
   const storedPath = completeResponse.data.stored_path;
   if (!storedPath) {
     throw new Error("Missing stored_path from temp upload complete");

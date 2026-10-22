@@ -29,12 +29,15 @@ func (d HTTPZipDownloader) downloadClawHubSource(ctx context.Context, source Sou
 	if err := ctx.Err(); err != nil {
 		return DownloadedZip{}, err
 	}
-	client := *d.httpClient()
+	originalClient := d.httpClient()
+	client := *originalClient
 	transport := client.Transport
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-	client.Transport = &githubTransferTransport{base: transport}
+	transfer := &githubTransferTransport{base: transport, cacheClient: originalClient}
+	transfer.received.Store(source.ResolutionTransferBytes)
+	client.Transport = transfer
 	d.client = &client
 	initial, err := d.Download(ctx, source.URL)
 	if err != nil {

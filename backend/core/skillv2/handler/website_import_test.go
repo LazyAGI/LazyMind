@@ -6,10 +6,36 @@ import (
 	"strings"
 	"testing"
 
+	skillmarket "lazymind/core/skillv2/market"
 	skillservice "lazymind/core/skillv2/service"
 	skillpackage "lazymind/core/skillv2/skillpackage"
 	"lazymind/core/skillv2/testutil"
 )
+
+func TestAdminPublishRetainsVerifiedWebsiteMetadata(t *testing.T) {
+	for _, document := range []string{
+		"---\nname: Persona / Crowd Insight\ndescription: Authorized fixture.\n---\n# Original body\n",
+		"# Original body\n\nAuthorized fixture.\n",
+	} {
+		archive := marketGitHubArchive(t, map[string]string{"SKILL.md": document})
+		withMarketGitHubHTTPFixture(t, map[string]any{"api.skillhub.cn/api/v1/download?slug=%40owner%2Fpersona&version=1.0.0": archive})
+		db := testutil.NewTestDB(t)
+		svc := skillmarket.NewService(skillmarket.ServiceDeps{DB: db.DB, BlobStore: skillmarket.NewBlobStore(db.DB, skillmarket.NewLocalObjectStore(t.TempDir())), Downloader: marketHTTPZipDownloader{}})
+		const sourceURL = "https://skillhub.cn/skills/owner/persona?version=1.0.0#install"
+		published, err := svc.Publish(context.Background(), skillmarket.PublishRequest{AdminUserID: "admin", Source: skillmarket.SourceInput{Type: "url", URL: sourceURL}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var row testutil.SkillRow
+		if err := db.Where("id = ?", published.SourceSkillID).Take(&row).Error; err != nil || row.SkillName != "persona" {
+			t.Fatalf("admin published identity=%q err=%v", row.SkillName, err)
+		}
+		var revision testutil.SkillRevisionRow
+		if err := db.Where("skill_id = ?", published.SourceSkillID).Take(&revision).Error; err != nil || revision.SourceRefID != sourceURL {
+			t.Fatalf("admin lost original source: %#v, %v", revision, err)
+		}
+	}
+}
 
 func TestWebsiteAdaptersWorkForPersonalImportAndAdminPublish(t *testing.T) {
 	const document = "---\nname: demo\ndescription: Website adapter fixture.\n---\n# Demo\n"

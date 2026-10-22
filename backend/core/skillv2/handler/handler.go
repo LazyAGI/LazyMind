@@ -2217,11 +2217,21 @@ const maxSkillDownloadBytes = skillservice.MaxSkillDownloadBytes
 type marketHTTPZipDownloader struct{}
 
 func (marketHTTPZipDownloader) Download(ctx context.Context, rawURL string) (string, error) {
+	downloaded, err := (marketHTTPZipDownloader{}).DownloadPackage(ctx, rawURL)
+	return downloaded.Path, err
+}
+
+func (marketHTTPZipDownloader) DownloadPackage(ctx context.Context, rawURL string) (skillmarket.DownloadedPackage, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	source, err := skillservice.ResolveURLSource(ctx, rawURL)
 	if err != nil {
-		return "", err
+		return skillmarket.DownloadedPackage{}, err
 	}
+	packagePath, err := downloadMarketSource(ctx, source, rawURL)
+	return skillmarket.DownloadedPackage{Path: packagePath, CanonicalName: source.CanonicalName}, err
+}
+
+func downloadMarketSource(ctx context.Context, source skillservice.SourceInput, rawURL string) (string, error) {
 	downloaded, err := (httpZipDownloader{}).DownloadSource(ctx, source)
 	if err != nil {
 		return "", err

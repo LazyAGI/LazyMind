@@ -285,3 +285,4 @@ func (s externalAgentZipUploadStore) Get(_ context.Context, uploadID string) (sk
 }
 
 const maxExternalAgentSkillDownloadBytes = skillservice.MaxSkillDownloadBytes
+const maxExternalAgentSkillRequestBytes = skillservice.MaxSkillInstallRequestBytes

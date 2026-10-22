@@ -65,7 +65,7 @@ class RemoteFS(LazyLLMFSBase):
             method,
             f'{self.base_url}/remote-fs/{endpoint}',
             params=params,
-            timeout=self.timeout,
+            timeout=kwargs.pop('timeout', self.timeout),
             **kwargs,
         )
         check_response(response)
@@ -213,6 +213,16 @@ class RemoteFS(LazyLLMFSBase):
                 'to': self._normalize_path(path2),
             },
         )
+
+    def install_skill(self, *, url: str = '', package_zip: bytes = b'', expected_name: str = '') -> dict:
+        """Import one complete skill through Core's shared transactional importer."""
+        if bool(url) == bool(package_zip):
+            raise ValueError('Provide exactly one skill URL or ZIP package.')
+        payload = {'url': url} if url else {
+            'package_zip_base64': base64.b64encode(package_zip).decode('ascii'),
+            'expected_name': expected_name,
+        }
+        return self._request('POST', 'skills:install', json=payload, timeout=360)
 
     def trash(self, path: str) -> None:
         self._request(

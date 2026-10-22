@@ -67,6 +67,17 @@ type ZipDownloader interface {
 	Download(ctx context.Context, url string) (string, error)
 }
 
+// DownloadedPackage retains verified source metadata with the standalone ZIP.
+// The caller owns Path and removes it once the package has been read.
+type DownloadedPackage struct {
+	Path          string
+	CanonicalName string
+}
+
+type packageDownloader interface {
+	DownloadPackage(ctx context.Context, url string) (DownloadedPackage, error)
+}
+
 type PublishRequest struct {
 	AdminUserID string
 	Tags        []string
@@ -654,7 +665,13 @@ func (s *BlobStore) put(ctx context.Context, tx *gorm.DB, filePath string, data 
 		row.StorageBackend = "postgres"
 		row.Content = data
 	}
-	if err := tx.Create(&row).Error; err != nil {
+	insert := tx
+	if binary {
+		// Some SQL drivers bind a nil []byte as an empty BLOB. Binary content
+		// belongs in object storage, so omit the column to persist SQL NULL.
+		insert = insert.Omit("Content")
+	}
+	if err := insert.Create(&row).Error; err != nil {
 		return blobInfo{}, err
 	}
 	return info, nil
@@ -856,6 +873,7 @@ func hashEntries(entries []skillRevisionEntryRow) string {
 func (s *Service) filesFromSource(ctx context.Context, source SourceInput) (map[string][]byte, error) {
 	sourceType := strings.ToLower(strings.TrimSpace(source.Type))
 	zipPath := strings.TrimSpace(source.StoredPath)
+	canonicalName := ""
 	if sourceType == "url" {
 		if strings.TrimSpace(source.URL) == "" {
 			return nil, fmt.Errorf("url required")
@@ -863,7 +881,15 @@ func (s *Service) filesFromSource(ctx context.Context, source SourceInput) (map[
 		if s.downloader == nil {
 			return nil, fmt.Errorf("zip downloader is not configured")
 		}
-		downloadedPath, err := s.downloader.Download(ctx, source.URL)
+		var downloadedPath string
+		var err error
+		if downloader, ok := s.downloader.(packageDownloader); ok {
+			var downloaded DownloadedPackage
+			downloaded, err = downloader.DownloadPackage(ctx, source.URL)
+			downloadedPath, canonicalName = downloaded.Path, downloaded.CanonicalName
+		} else {
+			downloadedPath, err = s.downloader.Download(ctx, source.URL)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -888,6 +914,24 @@ func (s *Service) filesFromSource(ctx context.Context, source SourceInput) (map[
 	if _, ok := files["SKILL.md"]; !ok {
 		return nil, fmt.Errorf("skill package must contain SKILL.md")
 	}
+	var content []byte
+	if sourceType == "url" {
+		content, _, err = skillmetadata.NormalizeExternalDocument(files["SKILL.md"], canonicalName)
+	} else {
+		content, _, err = skillmetadata.NormalizeExternalDescription(files["SKILL.md"])
+	}
+	if err != nil {
+		return nil, err
+	}
+	if canonicalName != "" {
+		// Only a verified adapter identity may supply missing URL metadata.
+		resolved, resolveErr := skillmetadata.Resolve(content, canonicalName)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		content = resolved.Content
+	}
+	files["SKILL.md"] = content
 	return files, nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -46,7 +47,8 @@ type githubAPICacheKey struct {
 	tokenHash [32]byte
 	// Custom clients may route the same URL to different origins. Holding the
 	// client keeps its identity stable for the lifetime of a cached result.
-	client *http.Client
+	client           *http.Client
+	defaultTransport *http.Transport
 }
 
 var githubAPIMetadata = struct {
@@ -78,8 +80,31 @@ func GitHubAPIGet(ctx context.Context, client *http.Client, endpoint string, out
 	// Authentication affects metadata visibility. Keep responses from different
 	// credentials isolated without storing the token itself as a cache key.
 	key := githubAPICacheKey{endpoint: endpoint, tokenHash: sha256.Sum256([]byte(token))}
-	if client != nil && client.Transport != nil {
-		key.client = client
+	identity := client
+	// Request-scoped accounting wrappers retain the underlying client identity,
+	// so immutable metadata can be shared without sharing transfer counters.
+	for range 8 {
+		if identity == nil {
+			break
+		}
+		provider, ok := identity.Transport.(interface{ GitHubAPICacheClient() *http.Client })
+		if !ok {
+			break
+		}
+		next := provider.GitHubAPICacheClient()
+		if next == identity {
+			break
+		}
+		identity = next
+	}
+	if identity != nil && identity.Transport != nil {
+		key.client = identity
+	} else if transport, ok := http.DefaultTransport.(*http.Transport); ok {
+		key.defaultTransport = transport
+	} else {
+		// A custom default transport can route identical URLs to another
+		// origin, and a function-valued transport has no safe cache identity.
+		key.client = &http.Client{Transport: http.DefaultTransport}
 	}
 	githubAPIMetadata.Lock()
 	if entry, ok := githubAPIMetadata.cache[key]; ok && time.Now().Before(entry.expires) {
@@ -217,6 +242,10 @@ func fetchGitHubAPI(ctx context.Context, client *http.Client, endpoint, token st
 		}
 		response, err := safeClient.Do(request)
 		if err != nil {
+			var transfer interface{ GitHubTransferLimit() bool }
+			if errors.Is(err, ErrImportTransferLimit) || (errors.As(err, &transfer) && transfer.GitHubTransferLimit()) {
+				return githubAPIResult{err: err}
+			}
 			if ctx.Err() != nil {
 				return githubAPIResult{err: ctx.Err()}
 			}

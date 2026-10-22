@@ -3,6 +3,7 @@ package service
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha1"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+
+	"golang.org/x/sync/errgroup"
 
 	"lazymind/core/skillv2/httperr"
 	"lazymind/core/skillv2/skillpackage"
@@ -48,6 +51,22 @@ func (d HTTPZipDownloader) DownloadSource(ctx context.Context, source SourceInpu
 	if err := ctx.Err(); err != nil {
 		return DownloadedZip{}, err
 	}
+	if source.ResolutionTransferBytes > MaxSkillDownloadBytes {
+		return DownloadedZip{}, githubPackageTooLarge("skill package download exceeds transfer limit")
+	}
+	if prepared := source.PreparedPackage; prepared != nil {
+		archive, err := skillpackage.WriteZip(prepared.Files, "")
+		if err != nil {
+			return DownloadedZip{}, err
+		}
+		cleanup := func() { _ = os.Remove(archive) }
+		if err := ctx.Err(); err != nil {
+			cleanup()
+			return DownloadedZip{}, err
+		}
+		empty := ""
+		return DownloadedZip{Path: archive, Cleanup: cleanup, PathPrefix: &empty, PackageRoot: prepared.PackageRoot}, nil
+	}
 	if download, err := url.Parse(source.URL); err == nil && strings.EqualFold(strings.TrimPrefix(strings.ToLower(download.Hostname()), "www."), "clawhub.ai") && download.Path == "/api/v1/download" {
 		return d.downloadClawHubSource(ctx, source)
 	}
@@ -69,12 +88,15 @@ func (d HTTPZipDownloader) DownloadSource(ctx context.Context, source SourceInpu
 	if !matched {
 		return d.Download(ctx, source.URL)
 	}
-	client := *d.httpClient()
+	originalClient := d.httpClient()
+	client := *originalClient
 	base := client.Transport
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	client.Transport = &githubTransferTransport{base: base}
+	transfer := &githubTransferTransport{base: base, cacheClient: originalClient}
+	transfer.received.Store(source.ResolutionTransferBytes)
+	client.Transport = transfer
 	downloaded, err := d.downloadGitHubDirectory(ctx, &client, source, resolution)
 	if err == nil {
 		return downloaded, nil
@@ -407,40 +429,101 @@ func (d HTTPZipDownloader) writeGitHubPackage(ctx context.Context, client *http.
 			cleanup()
 		}
 	}()
-	var unpacked int64
+	directory, err := os.MkdirTemp("", "lazymind-skill-files-*")
+	if err != nil {
+		return DownloadedZip{}, err
+	}
+	defer os.RemoveAll(directory)
 	rawBase := strings.TrimRight(d.githubRawBaseURL, "/")
 	if rawBase == "" {
 		rawBase = githubRawBaseURL
 	}
-	for _, file := range files {
-		filename := file.Path
-		if selected != "" {
-			filename = selected + "/" + filename
-		}
-		segments := []string{owner, repo, revision}
-		segments = append(segments, strings.Split(filename, "/")...)
-		for i := range segments {
-			segments[i] = url.PathEscape(segments[i])
-		}
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawBase+"/"+strings.Join(segments, "/"), nil)
-		if err != nil {
-			return DownloadedZip{}, err
-		}
-		response, err := client.Do(request)
-		if err != nil {
-			var transfer *githubTransferLimitError
-			if errors.As(err, &transfer) {
-				return DownloadedZip{}, githubPackageTooLarge("skill package download exceeds transfer limit")
+	paths := make([]string, len(files))
+	sizes := make([]int64, len(files))
+	digests := make([]string, len(files))
+	var unpacked atomic.Int64
+	group, fetchCtx := errgroup.WithContext(ctx)
+	group.SetLimit(6)
+	for index, file := range files {
+		group.Go(func() error {
+			if err := fetchCtx.Err(); err != nil {
+				return err
 			}
-			return DownloadedZip{}, &githubRetrievalError{err: err}
+			filename := file.Path
+			if selected != "" {
+				filename = selected + "/" + filename
+			}
+			segments := append([]string{owner, repo, revision}, strings.Split(filename, "/")...)
+			for i := range segments {
+				segments[i] = url.PathEscape(segments[i])
+			}
+			request, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, rawBase+"/"+strings.Join(segments, "/"), nil)
+			if err != nil {
+				return err
+			}
+			response, err := client.Do(request)
+			if err != nil {
+				return githubRawReadError(err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode < 200 || response.StatusCode >= 300 {
+				return githubRetrieve(fmt.Sprintf("GitHub file download failed with HTTP status %d", response.StatusCode))
+			}
+			if response.ContentLength > skillpackage.MaxFileBytes {
+				return githubPackageTooLarge(fmt.Sprintf("skill package file %q exceeds %d bytes", file.Path, skillpackage.MaxFileBytes))
+			}
+			part, err := os.CreateTemp(directory, "part-*")
+			if err != nil {
+				return err
+			}
+			paths[index] = part.Name()
+			// Git object IDs hash the blob header and bytes, not the bytes alone.
+			// Verify real Git SHAs while retaining opaque IDs used by custom
+			// providers and fixtures that do not expose content-addressed blobs.
+			blobHash := sha1.New()
+			destination := io.Writer(part)
+			verifySHA := isGitHubCommit(file.SHA)
+			if verifySHA {
+				_, _ = fmt.Fprintf(blobHash, "blob %d\x00", file.Size)
+				destination = io.MultiWriter(part, blobHash)
+			}
+			written, copyErr := io.Copy(destination, io.LimitReader(response.Body, skillpackage.MaxFileBytes+1))
+			if verifySHA {
+				digests[index] = hex.EncodeToString(blobHash.Sum(nil))
+			}
+			closeErr := part.Close()
+			sizes[index] = written
+			if written > skillpackage.MaxFileBytes {
+				return githubPackageTooLarge(fmt.Sprintf("skill package file %q exceeds %d bytes", file.Path, skillpackage.MaxFileBytes))
+			}
+			if unpacked.Add(written) > skillpackage.MaxTotalBytes {
+				return githubPackageTooLarge("skill package exceeds unpacked size limit")
+			}
+			if copyErr != nil {
+				return githubRawReadError(copyErr)
+			}
+			return closeErr
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return DownloadedZip{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return DownloadedZip{}, err
+	}
+	// Validate complete responses before writing anything into the final ZIP.
+	// Checking after all workers preserves the combined streaming size bound.
+	for index, file := range files {
+		if sizes[index] != file.Size {
+			return DownloadedZip{}, githubRetrieve(fmt.Sprintf("GitHub file %q length does not match its tree entry: received %d, expected %d", file.Path, sizes[index], file.Size))
 		}
-		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			_ = response.Body.Close()
-			return DownloadedZip{}, githubRetrieve(fmt.Sprintf("GitHub file download failed with HTTP status %d", response.StatusCode))
+		if digests[index] != "" && !strings.EqualFold(digests[index], file.SHA) {
+			return DownloadedZip{}, githubRetrieve(fmt.Sprintf("GitHub file %q content does not match its tree blob SHA", file.Path))
 		}
-		if response.ContentLength > skillpackage.MaxFileBytes {
-			_ = response.Body.Close()
-			return DownloadedZip{}, githubPackageTooLarge(fmt.Sprintf("skill package file %q exceeds %d bytes", file.Path, skillpackage.MaxFileBytes))
+	}
+	for index, file := range files {
+		if err := ctx.Err(); err != nil {
+			return DownloadedZip{}, err
 		}
 		header := &zip.FileHeader{Name: file.Path, Method: zip.Deflate}
 		mode := os.FileMode(0644)
@@ -450,24 +533,19 @@ func (d HTTPZipDownloader) writeGitHubPackage(ctx context.Context, client *http.
 		header.SetMode(mode)
 		entry, err := writer.CreateHeader(header)
 		if err != nil {
-			_ = response.Body.Close()
 			return DownloadedZip{}, err
 		}
-		written, copyErr := io.Copy(entry, io.LimitReader(response.Body, skillpackage.MaxFileBytes+1))
-		_ = response.Body.Close()
-		unpacked += written
-		if written > skillpackage.MaxFileBytes {
-			return DownloadedZip{}, githubPackageTooLarge(fmt.Sprintf("skill package file %q exceeds %d bytes", file.Path, skillpackage.MaxFileBytes))
+		part, err := os.Open(paths[index])
+		if err != nil {
+			return DownloadedZip{}, err
 		}
-		if unpacked > skillpackage.MaxTotalBytes {
-			return DownloadedZip{}, githubPackageTooLarge("skill package exceeds unpacked size limit")
-		}
+		_, copyErr := io.Copy(entry, part)
+		closeErr := part.Close()
 		if copyErr != nil {
-			var transfer *githubTransferLimitError
-			if errors.As(copyErr, &transfer) {
-				return DownloadedZip{}, githubPackageTooLarge("skill package download exceeds transfer limit")
-			}
-			return DownloadedZip{}, &githubRetrievalError{err: copyErr}
+			return DownloadedZip{}, copyErr
+		}
+		if closeErr != nil {
+			return DownloadedZip{}, closeErr
 		}
 	}
 	if err := writer.Close(); err != nil {
@@ -481,15 +559,28 @@ func (d HTTPZipDownloader) writeGitHubPackage(ctx context.Context, client *http.
 	return DownloadedZip{Path: output.Name(), Cleanup: cleanup, PathPrefix: &empty, PackageRoot: rootName}, nil
 }
 
+func githubRawReadError(err error) error {
+	var transfer *githubTransferLimitError
+	if errors.As(err, &transfer) {
+		return githubPackageTooLarge("skill package download exceeds transfer limit")
+	}
+	return &githubRetrievalError{err: err}
+}
+
 // Count bytes across API metadata and all raw responses, even when a server
 // omits Content-Length or understates a file's size in its tree response.
 type githubTransferTransport struct {
-	base     http.RoundTripper
-	received atomic.Int64
+	base        http.RoundTripper
+	cacheClient *http.Client
+	received    atomic.Int64
 }
+
+func (t *githubTransferTransport) GitHubAPICacheClient() *http.Client { return t.cacheClient }
+
 type githubTransferLimitError struct{}
 
-func (*githubTransferLimitError) Error() string { return "GitHub package transfer limit exceeded" }
+func (*githubTransferLimitError) Error() string             { return "GitHub package transfer limit exceeded" }
+func (*githubTransferLimitError) GitHubTransferLimit() bool { return true }
 func (t *githubTransferTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	response, err := t.base.RoundTrip(request)
 	if err != nil {

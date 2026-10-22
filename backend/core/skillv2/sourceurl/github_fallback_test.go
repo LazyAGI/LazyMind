@@ -41,6 +41,10 @@ func TestResolveGitHubRateLimitFallsBackToValidatedArchiveRefs(t *testing.T) {
 				if r.URL.Hostname() == "api.github.com" {
 					status = 403
 					headers.Set("X-RateLimit-Remaining", "0")
+				} else if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, ".git/info/refs") {
+					if r.Header.Get("Authorization") != "" {
+						t.Error("reference discovery leaked credentials")
+					}
 				} else {
 					if r.Method != http.MethodHead || r.Header.Get("Authorization") != "" {
 						t.Errorf("archive validation must be unauthenticated HEAD: %s %s", r.Method, r.URL)

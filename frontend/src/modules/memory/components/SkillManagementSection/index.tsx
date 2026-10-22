@@ -129,6 +129,7 @@ export default function SkillManagementSection() {
     skillLoading,
     skillListError,
     refreshSkillAssets,
+    refreshSkillMetadata,
     genericColumns,
     cloudSkillLoading,
     cloudSkillError,
@@ -1204,8 +1205,8 @@ export default function SkillManagementSection() {
         t={t}
         onClose={() => setAdminPublishOpen(false)}
         onPublished={async () => {
-          await refreshSkillAssets({ page: skillListPage });
-          await Promise.all([loadMarketCatalog(), loadMarketTags()]);
+          refreshSkillMetadata?.();
+          await Promise.all([refreshSkillAssets({ page: skillListPage }), loadMarketCatalog(), loadMarketTags()]);
         }}
       />
 

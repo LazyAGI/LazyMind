@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"strings"
-	"time"
 
 	"lazymind/core/skillv2/sourceurl"
 )
@@ -13,7 +12,7 @@ import (
 // workflow installs so every entry point supports the same website adapters.
 func ResolveURLSource(ctx context.Context, rawURL string) (SourceInput, error) {
 	rawURL = strings.TrimSpace(rawURL)
-	resolved, err := sourceurl.ResolveImportURL(ctx, rawURL, &http.Client{Timeout: 15 * time.Second}, sourceurl.GitHubAPIBaseURL)
+	resolved, err := sourceurl.ResolveImportURL(ctx, rawURL, &http.Client{Timeout: skillArchiveDownloadTimeout}, sourceurl.GitHubAPIBaseURL)
 	if err != nil {
 		return SourceInput{}, err
 	}
@@ -21,5 +20,6 @@ func ResolveURLSource(ctx context.Context, rawURL string) (SourceInput, error) {
 		Type: "url", URL: resolved.DownloadURL, SourceURL: rawURL,
 		ResolvedSourceURL: resolved.ResolvedSourceURL, CanonicalName: resolved.CanonicalName,
 		PathPrefix: resolved.PathPrefix, PathPrefixResolved: true,
+		PreparedPackage: resolved.PreparedPackage, ResolutionTransferBytes: resolved.TransferBytes,
 	}, nil
 }

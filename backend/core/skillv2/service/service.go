@@ -63,7 +63,7 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 	externalImport := isExternalImportSource(req.Source.Type)
 	var normalizationWarnings []skillmetadata.NormalizationWarning
 	if externalImport {
-		normalizationWarnings, err = normalizeExternalImportPackage(&pkg)
+		normalizationWarnings, err = normalizeExternalImportPackage(&pkg, req.Source.Type)
 		if err != nil {
 			return CreateSkillResponse{}, err
 		}
@@ -76,7 +76,11 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 		return CreateSkillResponse{}, err
 	}
 	if externalImport {
-		meta, err := resolveExternalMetadata(pkg, skillID)
+		fallback := skillmetadata.Metadata{}
+		if strings.EqualFold(strings.TrimSpace(req.Source.Type), "url") {
+			fallback.Name, fallback.Description = req.Name, req.Description
+		}
+		meta, err := resolveExternalMetadata(pkg, skillID, fallback)
 		if err != nil {
 			return CreateSkillResponse{}, err
 		}
@@ -252,24 +256,23 @@ func isExternalImportSource(sourceType string) bool {
 	}
 }
 
-func normalizeExternalImportPackage(pkg *sourcePackage) ([]skillmetadata.NormalizationWarning, error) {
+func normalizeExternalImportPackage(pkg *sourcePackage, sourceType string) ([]skillmetadata.NormalizationWarning, error) {
 	if err := skillpackage.NormalizeSkillDocument(pkg.Files); err != nil {
 		return nil, err
+	}
+	if strings.EqualFold(strings.TrimSpace(sourceType), "url") || pkg.CanonicalName != "" {
+		content, warnings, err := skillmetadata.NormalizeExternalDocument(pkg.Files["SKILL.md"], pkg.CanonicalName)
+		if err == nil {
+			pkg.Files["SKILL.md"] = content
+		}
+		return warnings, err
 	}
 	content, _, err := skillmetadata.NormalizeExternalDescription(pkg.Files["SKILL.md"])
 	if err != nil {
 		return nil, err
 	}
 	pkg.Files["SKILL.md"] = content
-	if pkg.CanonicalName == "" {
-		return nil, nil
-	}
-	content, warnings, err := skillmetadata.NormalizeExternalMetadata(pkg.Files["SKILL.md"], pkg.CanonicalName)
-	if err != nil {
-		return nil, err
-	}
-	pkg.Files["SKILL.md"] = content
-	return warnings, nil
+	return nil, nil
 }
 
 func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (PatchSkillResponse, error) {
@@ -458,7 +461,7 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		externalImport := isExternalImportSource(req.Source.Type)
 		var normalizationWarnings []skillmetadata.NormalizationWarning
 		if externalImport {
-			normalizationWarnings, err = normalizeExternalImportPackage(&pkg)
+			normalizationWarnings, err = normalizeExternalImportPackage(&pkg, req.Source.Type)
 			if err != nil {
 				return err
 			}
@@ -1259,7 +1262,6 @@ func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, 
 		if downloaded.PackageRoot != "" {
 			pkg.PackageRoot = downloaded.PackageRoot
 		}
-		ensureURLImportDefaults(pkg.Files)
 		sourceRef := source.SourceURL
 		if sourceRef == "" {
 			sourceRef = source.URL
@@ -1276,16 +1278,7 @@ func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, 
 	}
 }
 
-func ensureURLImportDefaults(files map[string][]byte) {
-	if files == nil {
-		return
-	}
-	if _, ok := files["scripts/run.py"]; !ok {
-		files["scripts/run.py"] = []byte("print(\"hello skill\")\n")
-	}
-}
-
-func resolveExternalMetadata(pkg sourcePackage, skillID string) (skillmetadata.Metadata, error) {
+func resolveExternalMetadata(pkg sourcePackage, skillID string, fallbacks ...skillmetadata.Metadata) (skillmetadata.Metadata, error) {
 	content, ok := pkg.Files["SKILL.md"]
 	if !ok {
 		return skillmetadata.Metadata{}, fmt.Errorf("skill package must contain SKILL.md")
@@ -1306,7 +1299,11 @@ func resolveExternalMetadata(pkg sourcePackage, skillID string) (skillmetadata.M
 			}
 		}
 	}
-	resolved, err := skillmetadata.Resolve(content, pkg.CanonicalName, pkg.PackageRoot, archiveStem(pkg.ArchiveFilename), "lazymind-skill-"+skillID)
+	fallback := skillmetadata.Metadata{}
+	if len(fallbacks) > 0 {
+		fallback = fallbacks[0]
+	}
+	resolved, err := skillmetadata.ResolveWithFallback(content, fallback, pkg.CanonicalName, pkg.PackageRoot, archiveStem(pkg.ArchiveFilename), "lazymind-skill-"+skillID)
 	if err != nil {
 		return skillmetadata.Metadata{}, err
 	}

@@ -13,11 +13,15 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 
 	"golang.org/x/net/html"
+	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
+
+	"lazymind/core/skillv2/skillpackage"
 )
 
 const (
@@ -36,6 +40,7 @@ const (
 type SkillsSHResolution struct {
 	GitHubSourceURL string
 	CanonicalName   string
+	PreparedPackage *PreparedPackage
 }
 
 // ResolveSkillsSHPageURL resolves skills.sh/{owner}/{repo}/{skill}. Catalog
@@ -167,12 +172,25 @@ func ResolveSkillsSHPageURL(ctx context.Context, parsed *url.URL, client *http.C
 		return resolveSkillsSHArchive(ctx, client, owner, repository, slug, revision, fmt.Errorf("skills.sh skill discovery exceeds %d HTTP documents", skillsSHDiscoveryFiles))
 	}
 	sort.Strings(documents)
+	names := make([]string, len(documents))
+	group, fetchCtx := errgroup.WithContext(ctx)
+	group.SetLimit(6)
+	for index, document := range documents {
+		group.Go(func() error {
+			name, readErr := reader.skillName(fetchCtx, owner, repository, revision, document)
+			if readErr != nil {
+				return fmt.Errorf("skills.sh skill discovery failed: %w", readErr)
+			}
+			names[index] = name
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return SkillsSHResolution{}, true, err
+	}
 	var selected SkillsSHResolution
-	for _, document := range documents {
-		name, readErr := reader.skillName(ctx, owner, repository, revision, document)
-		if readErr != nil {
-			return SkillsSHResolution{}, true, fmt.Errorf("skills.sh skill discovery failed: %w", readErr)
-		}
+	for index, document := range documents {
+		name := names[index]
 		if skillsSHSlug(name) != slug {
 			continue
 		}
@@ -301,11 +319,11 @@ func skillsSHPageSources(page []byte, owner, repository string) []*url.URL {
 
 type skillsSHReader struct {
 	client *http.Client
-	bytes  int
+	bytes  atomic.Int64
 }
 
 func (r *skillsSHReader) skillName(ctx context.Context, owner, repository, revision, document string) (string, error) {
-	if r.bytes >= skillsSHDiscoveryBytes {
+	if r.bytes.Load() >= skillsSHDiscoveryBytes {
 		return "", fmt.Errorf("skills.sh discovery exceeds its byte limit")
 	}
 	parts := []string{owner, repository, revision}
@@ -314,11 +332,11 @@ func (r *skillsSHReader) skillName(ctx context.Context, owner, repository, revis
 		parts[i] = url.PathEscape(parts[i])
 	}
 	body, err := r.get(ctx, "https://raw.githubusercontent.com/"+strings.Join(parts, "/"), skillsSHDocumentLimit, false)
-	r.bytes += len(body)
+	received := r.bytes.Add(int64(len(body)))
 	if err != nil {
 		return "", err
 	}
-	if r.bytes > skillsSHDiscoveryBytes {
+	if received > skillsSHDiscoveryBytes {
 		return "", fmt.Errorf("skills.sh discovery exceeds its byte limit")
 	}
 	name, complete := skillsSHFrontmatterName(body)
@@ -565,6 +583,7 @@ func resolveSkillsSHArchive(ctx context.Context, client *http.Client, owner, rep
 	sort.Strings(paths)
 	total := 0
 	var selected SkillsSHResolution
+	selectedDirectory := ""
 	for _, document := range paths {
 		if err := ctx.Err(); err != nil {
 			return failed(err)
@@ -598,10 +617,30 @@ func resolveSkillsSHArchive(ctx context.Context, client *http.Client, owner, rep
 		if selected.GitHubSourceURL != "" {
 			return failed(fmt.Errorf("skills.sh skill name is ambiguous; use an exact GitHub skill directory URL"))
 		}
-		selected = skillsSHSelected(owner, repository, revision, skillsSHDirectory(document), name)
+		selectedDirectory = skillsSHDirectory(document)
+		selected = skillsSHSelected(owner, repository, revision, selectedDirectory, name)
 	}
 	if selected.GitHubSourceURL == "" {
 		return failed(fmt.Errorf("skills.sh skill %q was not found in %s/%s", slug, owner, repository))
 	}
+	if err := ctx.Err(); err != nil {
+		return failed(err)
+	}
+	var pkg skillpackage.Package
+	if selectedDirectory == "" {
+		pkg, err = skillpackage.ReadZip(file.Name())
+	} else {
+		pkg, err = skillpackage.ReadZipSubdirectory(file.Name(), selectedDirectory)
+	}
+	if err != nil {
+		return failed(err)
+	}
+	if err := ctx.Err(); err != nil {
+		return failed(err)
+	}
+	if selectedDirectory == "" {
+		pkg.PackageRoot = repository
+	}
+	selected.PreparedPackage = &PreparedPackage{Files: pkg.Files, PackageRoot: pkg.PackageRoot}
 	return selected, true, nil
 }

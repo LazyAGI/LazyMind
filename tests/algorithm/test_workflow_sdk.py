@@ -557,3 +557,21 @@ def test_advance_inherits_retrieval_snapshot_only_when_host_provides_it():
         else:
             restored = _build_agentic_config({'conversation_id': 'c'}, payload, 'workflow_step')
             assert restored['enable_tool_retrieval'] is enabled
+
+
+def test_external_sdk_accepts_zip_path_over_twenty_mib(tmp_path):
+    from lazymind.workflow_sdk import WorkflowClient
+    archive = tmp_path / 'larger.zip'
+    with archive.open('wb') as handle:
+        handle.truncate(21 << 20)
+    source = WorkflowClient._external_skill_source({'name': 'large', 'zip_path': str(archive)})
+    assert len(base64.b64decode(source['zip_base64'])) == 21 << 20
+
+
+def test_external_sdk_rejects_zip_path_over_hundred_mib(tmp_path):
+    from lazymind.workflow_sdk import WorkflowClient, WorkflowClientError
+    archive = tmp_path / 'too-large.zip'
+    with archive.open('wb') as handle:
+        handle.truncate((100 << 20) + 1)
+    with pytest.raises(WorkflowClientError, match='100 MiB'):
+        WorkflowClient._external_skill_source({'name': 'large', 'zip_path': str(archive)})

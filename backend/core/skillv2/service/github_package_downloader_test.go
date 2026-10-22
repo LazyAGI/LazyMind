@@ -315,6 +315,7 @@ func TestGitHubDirectoryDownloadIsDeterministic(t *testing.T) {
 }
 
 func TestGitHubDownloadFallbackSharesTransferBudget(t *testing.T) {
+	rawComplete := make(chan struct{})
 	stream := func(size int64) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Length", fmt.Sprint(size))
@@ -323,12 +324,12 @@ func TestGitHubDownloadFallbackSharesTransferBudget(t *testing.T) {
 	}
 	fixture := newPackageHTTPFixture(t, map[string]any{
 		"/api/repos/acme/repo/git/trees/" + packageCommit + "?recursive=1": packageTree(packageEntry("SKILL.md", "100644", "blob", "skill", 32<<20), packageEntry("z.txt", "100644", "blob", "missing", 1)),
-		"/raw/acme/repo/" + packageCommit + "/SKILL.md":                    stream(32 << 20),
-		"/raw/acme/repo/" + packageCommit + "/z.txt":                       http.StatusNotFound,
+		"/raw/acme/repo/" + packageCommit + "/SKILL.md":                    http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { stream(32<<20)(w, r) }),
+		"/raw/acme/repo/" + packageCommit + "/z.txt":                       http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-rawComplete; w.WriteHeader(http.StatusNotFound) }),
 		"/archive.zip": stream(70 << 20),
 	}, nil)
 	downloader := fixture.downloader()
-	downloader.client = &http.Client{Transport: packageRewriteTransport{base: fixture.server.Client().Transport, baseURL: fixture.server.URL}}
+	downloader.client = &http.Client{Transport: packageCompletionTransport{base: packageRewriteTransport{base: fixture.server.Client().Transport, baseURL: fixture.server.URL}, complete: rawComplete}}
 	downloaded, err := downloader.DownloadSource(context.Background(), packageSource(""))
 	if downloaded.Cleanup != nil {
 		defer downloaded.Cleanup()
@@ -465,4 +466,33 @@ func TestGitHubExplicitRootSkillIncludesNestedSkillResources(t *testing.T) {
 	if got := packageZipContents(t, downloaded); !reflect.DeepEqual(got, map[string]string{"SKILL.md": "s", "examples/SKILL.md": "e"}) {
 		t.Fatalf("zip contents=%v", got)
 	}
+}
+
+// Wait for the client to consume the initial raw stream before exposing its
+// sibling's failure, so this transfer-budget test is independent of scheduling.
+type packageCompletionTransport struct {
+	base     http.RoundTripper
+	complete chan struct{}
+}
+
+func (t packageCompletionTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	response, err := t.base.RoundTrip(r)
+	if err == nil && strings.HasSuffix(r.URL.Path, "/SKILL.md") {
+		response.Body = &packageCompletionBody{ReadCloser: response.Body, complete: t.complete}
+	}
+	return response, err
+}
+
+type packageCompletionBody struct {
+	io.ReadCloser
+	complete chan struct{}
+	once     sync.Once
+}
+
+func (b *packageCompletionBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err == io.EOF {
+		b.once.Do(func() { close(b.complete) })
+	}
+	return n, err
 }

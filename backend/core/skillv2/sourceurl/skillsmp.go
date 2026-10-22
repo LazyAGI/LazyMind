@@ -37,7 +37,7 @@ func ResolveSkillsMPPageURL(ctx context.Context, parsed *url.URL, client *http.C
 	}
 	pageClient := *client
 	pageClient.Jar = nil
-	if pageClient.Timeout == 0 {
+	if pageClient.Timeout == 0 || pageClient.Timeout > 15*time.Second {
 		pageClient.Timeout = 15 * time.Second
 	}
 	pageClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {

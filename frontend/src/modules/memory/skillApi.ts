@@ -461,7 +461,7 @@ export interface SkillTreeNodeRecord {
 }
 
 export interface CreateSkillPayload {
-  name: string;
+  name?: string;
   description?: string;
   category: string;
   tags?: string[];
@@ -1301,7 +1301,7 @@ export async function getSkillAssetDetail(
 
 export async function createSkillAsset(
   payload: CreateSkillPayload,
-  options?: { silentError?: boolean },
+  options?: { silentError?: boolean; signal?: AbortSignal },
 ): Promise<string> {
   const request: SkillCreateManagedOpenAPIRequest = {
     name: payload.name,
@@ -1318,7 +1318,7 @@ export async function createSkillAsset(
 
   const response = await skillsApi.apiCoreSkillsPost(
     { skillCreateManagedOpenAPIRequest: request },
-    { timeout: 300_000, silentError: options?.silentError } as never,
+    { timeout: 300_000, silentError: options?.silentError, ...(options?.signal ? { signal: options.signal } : {}) } as never,
   );
   const body = unwrapEnvelope<{ skill_id?: string }>(response.data);
   return body.skill_id || "";
@@ -2149,7 +2149,7 @@ export async function getSkillMarketItem(
 
 export async function publishSkillToMarket(
   payload: PublishSkillToMarketPayload,
-  options?: { silentError?: boolean },
+  options?: { silentError?: boolean; signal?: AbortSignal },
 ): Promise<{ marketItemId: string; sourceSkillId: string }> {
   const response = await skillMarketApi.apiCoreSkillMarketAdminItemsPost({
     marketPublishOpenAPIRequest: {
@@ -2161,6 +2161,7 @@ export async function publishSkillToMarket(
     },
   }, {
     timeout: 300_000,
+    ...(options?.signal ? { signal: options.signal } : {}),
     ...(options?.silentError ? { silentError: true } : {}),
   } as never);
   const body = unwrapEnvelope<{ market_item_id?: string; source_skill_id?: string }>(

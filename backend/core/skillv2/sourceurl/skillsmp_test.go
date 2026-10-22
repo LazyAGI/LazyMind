@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 // This fixture preserves the live site's JSON-LD source contract, including a
@@ -177,4 +178,20 @@ func skillsMPTestClient(t *testing.T, handler http.Handler) *http.Client {
 	client.Transport = transport
 	t.Cleanup(transport.CloseIdleConnections)
 	return client
+}
+
+func TestSkillsMPPageHasBoundedDeadlineWithArchiveClient(t *testing.T) {
+	client := &http.Client{Timeout: 5 * time.Minute, Transport: skillsSHTestRoundTripper(func(r *http.Request) (*http.Response, error) {
+		deadline, ok := r.Context().Deadline()
+		if !ok || time.Until(deadline) > 16*time.Second {
+			t.Errorf("catalog page inherited archive timeout: deadline=%v present=%v", deadline, ok)
+		}
+		body := `<script type="application/ld+json">{"@type":"SoftwareSourceCode","codeRepository":"https://github.com/acme/repo/tree/main/target"}</script>`
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	})}
+	parsed, _ := url.Parse("https://skillsmp.com/skills/opaque")
+	_, _, err := ResolveSkillsMPPageURL(context.Background(), parsed, client)
+	if err != nil {
+		t.Fatal(err)
+	}
 }

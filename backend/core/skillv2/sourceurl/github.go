@@ -41,6 +41,17 @@ func resolveGitHubPageURL(ctx context.Context, parsed *url.URL, client *http.Cli
 	if err != nil || !matched {
 		return GitHubResolution{}, matched, err
 	}
+	// Exact commit URLs need no discovery. Other deep interactive URLs can
+	// establish the longest branch/tag boundary in one request.
+	if allowArchiveFallback && apiBaseURL == GitHubAPIBaseURL && len(source.treeParts) > 1 && !(len(source.treeParts[0]) == 40 && isHex(source.treeParts[0])) {
+		source.refDiscoveryAttempted = true
+		if advertised, discoverErr := resolveGitHubAdvertisedRef(ctx, client, source); discoverErr == nil {
+			return advertised, true, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return GitHubResolution{}, true, err
+		}
+	}
 	owner, repository := source.owner, source.repository
 	if source.archiveRef != "" {
 		return GitHubResolution{DownloadURL: githubArchiveURL(owner, repository, source.archiveRef), Owner: owner, Repository: repository, Revision: source.archiveRef}, true, nil
@@ -114,10 +125,11 @@ func ResolveGitHubPageURLFromResolvedArchive(parsed *url.URL, resolvedArchiveURL
 }
 
 type githubSourceURL struct {
-	owner, repository string
-	archiveRef        string
-	treeParts         []string
-	explicitDirectory bool
+	owner, repository     string
+	archiveRef            string
+	treeParts             []string
+	explicitDirectory     bool
+	refDiscoveryAttempted bool
 }
 
 func parseGitHubSourceURL(parsed *url.URL) (githubSourceURL, bool, error) {

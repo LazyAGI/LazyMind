@@ -208,3 +208,12 @@ func TestRouterKeepsSkillWritesInTaskOwnedDrafts(t *testing.T) {
 		t.Fatalf("routed skill revision count=%d, want 0 before approval", got)
 	}
 }
+
+func TestAtomicSkillInstallRouteRequiresInternalServiceToken(t *testing.T) {
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "internal-secret")
+	recorder := httptest.NewRecorder()
+	InstallSkill(recorder, httptest.NewRequest(http.MethodPost, "/remote-fs/skills:install?user_id=user&task_id=chat", strings.NewReader(`{"url":"https://example.test/a.zip"}`)))
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}

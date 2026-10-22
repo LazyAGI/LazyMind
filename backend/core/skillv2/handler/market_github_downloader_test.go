@@ -50,7 +50,7 @@ func withMarketGitHubHTTPFixture(t *testing.T, routes map[string]any) {
 		key := r.Host + r.URL.RequestURI()
 		value, ok := routes[key]
 		if !ok {
-			if strings.Contains(r.URL.Path, "/commits/") {
+			if strings.Contains(r.URL.Path, "/commits/") || strings.HasSuffix(r.URL.Path, ".git/info/refs") {
 				http.NotFound(w, r)
 				return
 			}

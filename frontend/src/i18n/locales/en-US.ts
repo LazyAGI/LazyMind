@@ -6793,6 +6793,9 @@ const enUS = {
     memorySkillCreateImportDesc: "Import a GitHub, skills.sh, SkillsMP, ClawHub, SkillHub, or ZIP URL",
     memorySkillCreateImportPlaceholder:
       "Enter a GitHub, skills.sh, SkillsMP, ClawHub, SkillHub, or ZIP URL",
+    memorySkillImportPending: "Importing skill…",
+    memorySkillUploadProgress: "Uploading skill package: {{percent}}%",
+    memorySkillImportPendingHint: "Importing may take a few minutes. Cancel stops this request; if it has already completed, refresh the list to check.",
     memorySkillImportUrlHelp: "Use a skill detail page from skills.sh, SkillsMP, ClawHub, or SkillHub, a GitHub repository, directory, or SKILL.md link, or a direct HTTP(S) ZIP URL. Repositories with one skill are detected automatically. For repositories with multiple skills, provide a specific skill directory or SKILL.md link. Remote downloads support up to 100 MiB.",
     memorySkillImportTooLarge: "The skill package exceeds the import size limit. Provide a smaller skill directory link, or try installing it in chat.",
     memorySkillImportMultipleSkills: "This link contains multiple skills. Provide a specific skill directory or SKILL.md link.",
@@ -6969,7 +6972,7 @@ const enUS = {
     memorySkillImportMdFileTypeError: "Only .md / .markdown files are supported",
     memorySkillImportMdFileSizeError: "File exceeds 512 KiB limit. Please choose a smaller file.",
     memorySkillUploadPackageTypeError: "Only .zip archives are supported",
-    memorySkillUploadPackageSizeError: "The archive exceeds the 512 MiB limit. Choose a smaller file.",
+    memorySkillUploadPackageSizeError: "The archive exceeds the 100 MiB limit. Choose a smaller file.",
     memorySkillEditMetadataHint:
       "Only the name and description can be edited here. Edit skill content on the detail page.",
     memorySkillImportMethodLink: "Import from link",
@@ -6980,7 +6983,7 @@ const enUS = {
       "A GitHub, skills.sh, SkillsMP, ClawHub, SkillHub, or ZIP URL",
     memorySkillUploadFileTitle: "Install from local package",
     memorySkillUploadFileHint:
-      "Supports .zip, .tgz, or archives containing skill instruction files. Max 512 MiB per file.",
+      "Supports .zip archives containing SKILL.md. Max 100 MiB per file.",
     memorySkillUploadFileReady: "{{size}} KB, ready to upload",
     memorySkillUploadClear: "Clear",
     memorySkillUploadSubmit: "Upload skill",

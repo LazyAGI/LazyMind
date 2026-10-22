@@ -17,6 +17,8 @@ type ImportResolution struct {
 	ResolvedSourceURL string
 	CanonicalName     string
 	Adapter           string
+	PreparedPackage   *PreparedPackage
+	TransferBytes     int64
 }
 
 type importAdapter func(context.Context, *url.URL, *http.Client, string) (ImportResolution, bool, error)
@@ -24,7 +26,7 @@ type importAdapter func(context.Context, *url.URL, *http.Client, string) (Import
 // ResolveImportURL runs the built-in website adapters before the generic HTTP
 // package path. New websites have one explicit resolver rather than adding URL
 // rewriting to handlers or UI components.
-func ResolveImportURL(ctx context.Context, rawURL string, client *http.Client, apiBaseURL string) (ImportResolution, error) {
+func ResolveImportURL(ctx context.Context, rawURL string, client *http.Client, apiBaseURL string) (result ImportResolution, resultErr error) {
 	if err := ctx.Err(); err != nil {
 		return ImportResolution{}, err
 	}
@@ -39,6 +41,18 @@ func ResolveImportURL(ctx context.Context, rawURL string, client *http.Client, a
 	if parsed.User != nil {
 		return ImportResolution{}, fmt.Errorf("skill import URL must not contain credentials")
 	}
+	if client == nil {
+		client = http.DefaultClient
+	}
+	countedClient := *client
+	base := countedClient.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	transfer := &importTransferTransport{base: base, cacheClient: client}
+	countedClient.Transport = transfer
+	client = &countedClient
+	defer func() { result.TransferBytes = transfer.received.Load() }()
 	for _, adapter := range []importAdapter{resolveSkillHubImport, resolveClawHubImport, resolveSkillsSHImport, resolveSkillsMPImport, resolveGitHubImport} {
 		resolution, matched, err := adapter(ctx, parsed, client, apiBaseURL)
 		if err != nil || matched {
@@ -63,7 +77,9 @@ func resolveSkillsSHImport(ctx context.Context, parsed *url.URL, client *http.Cl
 	if !matched || err != nil {
 		return ImportResolution{}, matched, err
 	}
-	return resolveWebsiteGitHub(ctx, resolution.GitHubSourceURL, resolution.CanonicalName, "skills_sh", client, apiBaseURL)
+	result, matched, err := resolveWebsiteGitHub(ctx, resolution.GitHubSourceURL, resolution.CanonicalName, "skills_sh", client, apiBaseURL)
+	result.PreparedPackage = resolution.PreparedPackage
+	return result, matched, err
 }
 
 func resolveSkillsMPImport(ctx context.Context, parsed *url.URL, client *http.Client, apiBaseURL string) (ImportResolution, bool, error) {

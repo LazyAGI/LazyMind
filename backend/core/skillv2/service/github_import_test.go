@@ -25,8 +25,7 @@ func TestGitHubArchiveFallbackSelectsUniqueSkillBeforePackageLimits(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	// URL imports retain the existing default scripts/run.py compatibility file.
-	if pkg.PackageRoot != "demo" || len(pkg.Files) != 3 || sourceType != "url" || sourceRef != "https://github.com/example/repo?tab=readme-ov-file" {
+	if pkg.PackageRoot != "demo" || len(pkg.Files) != 2 || sourceType != "url" || sourceRef != "https://github.com/example/repo?tab=readme-ov-file" {
 		t.Fatalf("unexpected imported package/source: %#v, %q, %q", pkg, sourceType, sourceRef)
 	}
 }
@@ -67,7 +66,7 @@ func TestSourceAwareDownloadOverridesRepositoryPrefixAndRetainsDirectoryName(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pkg.PackageRoot != "selected-skill" || len(pkg.Files) != 3 || !d.cleaned {
+	if pkg.PackageRoot != "selected-skill" || len(pkg.Files) != 2 || !d.cleaned {
 		t.Fatalf("unexpected package or cleanup: %#v, cleaned=%v", pkg, d.cleaned)
 	}
 }

@@ -1,5 +1,6 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { message } from "antd";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
 import { desktopTestTranslation } from "@/test/desktopResourceFixtures";
@@ -8,9 +9,11 @@ import SkillAdminPublishModal from "./SkillAdminPublishModal";
 
 const skillApiMocks = vi.hoisted(() => ({
   publishSkillToMarket: vi.fn(),
+  uploadSkillTempFile: vi.fn(),
 }));
 
 vi.mock("../../skillApi", () => skillApiMocks);
+vi.mock("../../skillUpload", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../skillUpload")>()), uploadSkillTempFile: skillApiMocks.uploadSkillTempFile }));
 
 const labels: Record<string, string> = {
   "admin.memorySkillAdminPublishTitle": "管理员上架技能",
@@ -64,6 +67,79 @@ describe("SkillAdminPublishModal", () => {
     });
   });
 
+
+  it("clears a source error when corrected and publishes on retry", async () => {
+    skillApiMocks.publishSkillToMarket.mockRejectedValueOnce({ response: { status: 400, data: { data: { code: "github_multiple_skills" } } } });
+    const onClose = vi.fn();
+    render(<MemoryRouter><SkillAdminPublishModal open t={t} onClose={onClose} onPublished={vi.fn().mockResolvedValue(undefined)} /></MemoryRouter>);
+    const input = screen.getByRole("textbox");
+    fireEvent.change(input, { target: { value: "https://github.com/example/skills" } });
+    fireEvent.click(screen.getByRole("button", { name: "上架技能" }));
+    await screen.findByRole("alert");
+    fireEvent.change(input, { target: { value: "https://github.com/example/skills/tree/main/writer" } });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(input).toHaveAttribute("aria-invalid", "false");
+    fireEvent.click(screen.getByRole("button", { name: /上架技能$/ }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("can cancel a pending URL request and ignores its late success", async () => {
+    let finish!: (value: unknown) => void;
+    skillApiMocks.publishSkillToMarket.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const onPublished = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+    render(<MemoryRouter><SkillAdminPublishModal open t={t} onClose={onClose} onPublished={onPublished} /></MemoryRouter>);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "https://github.com/example/skill" } });
+    fireEvent.click(screen.getByRole("button", { name: "上架技能" }));
+    const signal = skillApiMocks.publishSkillToMarket.mock.calls[0]?.[1]?.signal as AbortSignal;
+    expect(screen.getByRole("status")).toHaveTextContent("导入");
+    expect(screen.getByRole("button", { name: /取\s*消/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /取\s*消/ }));
+    expect(signal.aborted).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await act(async () => { finish({ marketItemId: "late", sourceSkillId: "late" }); });
+    expect(onPublished).not.toHaveBeenCalled();
+  });
+
+  it("freezes selected files and shows progress while uploading", async () => {
+    skillApiMocks.uploadSkillTempFile.mockImplementationOnce((_file, options) => {
+      options.onProgress(40);
+      return new Promise(() => {});
+    });
+    mount();
+    fireEvent.click(screen.getByRole("tab", { name: "本地上传" }));
+    fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [new File(["zip"], "writer.zip")] } });
+    await screen.findByText("writer.zip");
+    fireEvent.click(screen.getByRole("button", { name: "上架技能" }));
+    await waitFor(() => expect(within(screen.getByRole("dialog")).getByRole("status")).toHaveTextContent("40"));
+    expect(document.querySelector('input[type="file"]')).toBeDisabled();
+    expect(screen.getByRole("button", { name: t("common.delete") })).toBeDisabled();
+  });
+
+  it("rejects non-ZIP or oversized packages before publishing", async () => {
+    mount();
+    fireEvent.click(screen.getByRole("tab", { name: "本地上传" }));
+    const tooLarge = new File([], "large.zip");
+    Object.defineProperty(tooLarge, "size", { value: 104857601 });
+    for (const file of [new File(["tar"], "writer.tgz"), tooLarge]) {
+      fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [file] } });
+      await act(async () => {});
+      expect(screen.queryByText(file.name)).not.toBeInTheDocument();
+    }
+    expect(skillApiMocks.uploadSkillTempFile).not.toHaveBeenCalled();
+  });
+
+  it("reports a completed publish as success even when refreshing the catalog fails", async () => {
+    const onClose = vi.fn();
+    const errorToast = vi.spyOn(message, "error");
+    render(<MemoryRouter><SkillAdminPublishModal open t={t} onClose={onClose} onPublished={vi.fn().mockRejectedValue(new Error("refresh failed"))} /></MemoryRouter>);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "https://github.com/example/skill" } });
+    fireEvent.click(screen.getByRole("button", { name: "上架技能" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(errorToast).not.toHaveBeenCalled();
+    errorToast.mockRestore();
+  });
+
   it.each([
     "https://github.com/example/skill",
     "https://github.com/example/skills/tree/main/packages/writer",
@@ -96,7 +172,7 @@ describe("SkillAdminPublishModal", () => {
           type: "url",
           url,
         },
-      }, { silentError: true });
+      }, expect.objectContaining({ silentError: true, signal: expect.anything() }));
     });
     expect(onPublished).toHaveBeenCalledTimes(1);
   });

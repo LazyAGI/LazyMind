@@ -14,6 +14,7 @@ from urllib.parse import quote, urlencode, urlsplit, urljoin
 import httpx
 
 CONTRACT_VERSION = 'workflow.v1'
+MAX_SKILL_ZIP_BYTES = 100 << 20
 
 
 class WorkflowClientError(RuntimeError):
@@ -587,11 +588,11 @@ class WorkflowClient:
         path = Path(source.pop('zip_path')).expanduser()
         try:
             with path.open('rb') as archive:
-                content = archive.read((20 << 20) + 1)
+                content = archive.read(MAX_SKILL_ZIP_BYTES + 1)
         except OSError as exc:
             raise WorkflowClientError('SKILL_ZIP_UNREADABLE', f'Cannot read Skill ZIP: {exc}') from exc
-        if not content or len(content) > 20 << 20:
-            raise WorkflowClientError('SKILL_ZIP_INVALID', 'Skill ZIP must be non-empty and no larger than 20 MiB.')
+        if not content or len(content) > MAX_SKILL_ZIP_BYTES:
+            raise WorkflowClientError('SKILL_ZIP_INVALID', 'Skill ZIP must be non-empty and no larger than 100 MiB.')
         source['zip_base64'] = base64.b64encode(content).decode('ascii')
         return source
 

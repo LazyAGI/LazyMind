@@ -15,6 +15,14 @@ func githubArchiveFallbackAllowed(err error) bool {
 // so a rate-limited import can reach archive fallback without guessing where a
 // slash-containing branch name ends, or downloading archives for invalid refs.
 func resolveGitHubArchiveFallback(ctx context.Context, client *http.Client, source githubSourceURL, original error) (GitHubResolution, bool, error) {
+	if !source.refDiscoveryAttempted {
+		if advertised, err := resolveGitHubAdvertisedRef(ctx, client, source); err == nil {
+			return advertised, true, nil
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return GitHubResolution{}, true, err
+	}
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
 	}

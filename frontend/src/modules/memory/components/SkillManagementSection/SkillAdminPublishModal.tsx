@@ -1,11 +1,13 @@
 import { getLocalizedErrorMessage } from "@/components/request";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Alert, Button, Input, Modal, Tabs, Upload, message } from "antd";
 import { DeleteOutlined, InboxOutlined, PaperClipOutlined } from "@ant-design/icons";
 import { publishSkillToMarket } from "../../skillApi";
-import { uploadSkillTempFile } from "../../skillUpload";
-import { isSkillPackageTooLargeError, isSkillSourceAmbiguousError } from "../../skillUploadError";
+import { getSkillPackageValidationError, uploadSkillTempFile } from "../../skillUpload";
+import { useSkillImportTask } from "../../hooks/useSkillImportTask";
+import SkillImportProgress from "./SkillImportProgress";
+import { isSkillAlreadyExistsError, isSkillPackageTooLargeError, isSkillSourceAmbiguousError } from "../../skillUploadError";
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
 import { CHAT_HOME_PATH } from "@/modules/chat/constants/chat";
 
@@ -18,8 +20,6 @@ interface SkillAdminPublishModalProps {
 
 type PublishMethod = "url" | "file";
 
-const MAX_SKILL_PACKAGE_SIZE = 512 * 1024 * 1024;
-
 export default function SkillAdminPublishModal({
   open,
   t,
@@ -30,8 +30,33 @@ export default function SkillAdminPublishModal({
   const [publishMethod, setPublishMethod] = useState<PublishMethod>("url");
   const [repoUrl, setRepoUrl] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [submitting, setSubmitting] = useState(false);
   const [urlImportError, setUrlImportError] = useState<unknown>(null);
+  const getImportErrorMessage = (error: unknown) => isSkillPackageTooLargeError(error)
+    ? t("admin.memorySkillImportTooLarge")
+    : isSkillSourceAmbiguousError(error)
+      ? t("admin.memorySkillImportMultipleSkills")
+      : isSkillAlreadyExistsError(error)
+        ? t("admin.memorySkillAdminPublishDuplicate")
+        : getLocalizedErrorMessage(error);
+  const { pending: submitting, uploadProgress, start, cancel } = useSkillImportTask({
+    onSuccess: () => {
+      message.success(t("admin.memorySkillAdminPublishSuccessAuto"));
+      handleClose();
+      // Catalog refresh is independent of the completed publish operation.
+      void Promise.resolve().then(onPublished).catch((error) => {
+        console.error("Refresh published skills failed:", error);
+      });
+    },
+    onError: (error) => {
+      console.error("Admin publish skill failed:", error);
+      if (publishMethod === "url") setUrlImportError(error);
+      else message.error(getImportErrorMessage(error));
+    },
+  });
+  useEffect(() => {
+    if (!open) cancel();
+  }, [open, cancel]);
+
 
   const resetForm = () => {
     setPublishMethod("url");
@@ -41,6 +66,7 @@ export default function SkillAdminPublishModal({
   };
 
   const handleClose = () => {
+    cancel();
     resetForm();
     onClose();
   };
@@ -74,51 +100,32 @@ export default function SkillAdminPublishModal({
       return;
     }
     setUrlImportError(null);
-    setSubmitting(true);
-    try {
+    await start(async ({ signal, setUploadProgress }) => {
       if (publishMethod === "file" && selectedFile) {
-        const upload = await uploadSkillTempFile(selectedFile);
+        const upload = await uploadSkillTempFile(selectedFile, { signal, onProgress: setUploadProgress, silentError: true });
+        signal.throwIfAborted();
+        setUploadProgress(null);
         await publishSkillToMarket({
           source: { type: "uploaded_zip", uploadId: upload.uploadId },
-        });
+        }, { signal, silentError: true });
       } else {
         await publishSkillToMarket({
           source: { type: "url", url: normalizedRepoUrl },
-        }, { silentError: true });
+        }, { signal, silentError: true });
       }
-
-      await onPublished();
-      message.success(t("admin.memorySkillAdminPublishSuccessAuto"));
-      handleClose();
-    } catch (error) {
-      console.error("Admin publish skill failed:", error);
-      if (publishMethod === "url" && (isSkillPackageTooLargeError(error) || isSkillSourceAmbiguousError(error))) {
-        setUrlImportError(error);
-      } else if ((error as { response?: { status?: number } })?.response?.status === 409) {
-        message.error(t("admin.memorySkillAdminPublishDuplicate"));
-      } else {
-        message.error(getLocalizedErrorMessage(error));
-      }
-    } finally {
-      setSubmitting(false);
-    }
+    });
   };
 
   return (
     <Modal
       open={open}
       title={t("admin.memorySkillAdminPublishTitle")}
-      onCancel={() => {
-        if (!submitting) handleClose();
-      }}
-      closable={!submitting}
-      keyboard={!submitting}
-      maskClosable={!submitting}
+      onCancel={handleClose}
       footer={[
-        <Button key="cancel" disabled={submitting} onClick={handleClose}>
+        <Button key="cancel" onClick={handleClose}>
           {t("common.cancel")}
         </Button>,
-        <Button key="submit" type="primary" loading={submitting} onClick={() => void handleSubmit()}>
+        <Button key="submit" type="primary" disabled={submitting} loading={submitting} onClick={() => void handleSubmit()}>
           {t("admin.memorySkillAdminPublishSubmit")}
         </Button>,
       ]}
@@ -161,9 +168,7 @@ export default function SkillAdminPublishModal({
                       id="admin-skill-url-error"
                       type="error"
                       showIcon
-                      message={t(isSkillPackageTooLargeError(urlImportError)
-                        ? "admin.memorySkillImportTooLarge"
-                        : "admin.memorySkillImportMultipleSkills")}
+                      message={getImportErrorMessage(urlImportError)}
                       action={isSkillPackageTooLargeError(urlImportError) ? (
                         <Button onClick={installUrlInChat}>
                           {t("admin.memorySkillImportGoToChat")}
@@ -181,22 +186,16 @@ export default function SkillAdminPublishModal({
               children: (
                 <div className="memory-skill-admin-package-panel">
                   <Upload.Dragger
-                    accept=".zip,.tgz,.tar,.gz"
+                    accept=".zip"
+                    disabled={submitting}
                     multiple={false}
                     showUploadList={false}
                     beforeUpload={(file) => {
-                      const name = file.name.toLowerCase();
-                      const valid =
-                        name.endsWith(".zip") ||
-                        name.endsWith(".tgz") ||
-                        name.endsWith(".tar") ||
-                        name.endsWith(".gz");
-                      if (!valid) {
-                        message.warning(t("admin.memorySkillUploadPackageTypeError"));
-                        return false;
-                      }
-                      if (file.size > MAX_SKILL_PACKAGE_SIZE) {
-                        message.warning(t("admin.memorySkillUploadPackageSizeError"));
+                      const validationError = getSkillPackageValidationError(file);
+                      if (validationError) {
+                        message.warning(t(validationError === "type"
+                          ? "admin.memorySkillUploadPackageTypeError"
+                          : "admin.memorySkillUploadPackageSizeError"));
                         return false;
                       }
                       setSelectedFile(file);
@@ -224,6 +223,7 @@ export default function SkillAdminPublishModal({
                         danger
                         icon={<DeleteOutlined />}
                         aria-label={t("common.delete")}
+                        disabled={submitting}
                         onClick={handleClearFile}
                       />
                     </div>
@@ -234,6 +234,7 @@ export default function SkillAdminPublishModal({
           ]}
         />
       </div>
+      {submitting ? <SkillImportProgress t={t} uploadProgress={uploadProgress} fileName={selectedFile?.name} /> : null}
     </Modal>
   );
 }

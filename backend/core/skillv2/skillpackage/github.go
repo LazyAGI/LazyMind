@@ -1,7 +1,6 @@
 package skillpackage
 
 import (
-	"archive/zip"
 	"fmt"
 	"path"
 	"strings"
@@ -14,7 +13,7 @@ func ReadGitHubZip(zipPath, prefix string) (Package, error) {
 	if prefix != "" {
 		return ReadZipSubdirectory(zipPath, prefix)
 	}
-	reader, err := zip.OpenReader(zipPath)
+	reader, err := openZip(zipPath)
 	if err != nil {
 		return Package{}, err
 	}

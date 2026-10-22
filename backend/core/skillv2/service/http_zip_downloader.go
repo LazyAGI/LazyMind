@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"lazymind/core/skillv2/httperr"
+	"lazymind/core/skillv2/skillpackage"
 )
 
 type HTTPZipDownloader struct {
@@ -19,13 +21,23 @@ type HTTPZipDownloader struct {
 	githubRawBaseURL string
 }
 
-const MaxSkillDownloadBytes int64 = 100 << 20
+const MaxSkillDownloadBytes int64 = skillpackage.MaxArchiveBytes
 
 const skillArchiveDownloadTimeout = 5 * time.Minute
 
+var skillArchiveHTTPClients struct {
+	sync.Mutex
+	transport *http.Transport
+	client    *http.Client
+}
+
 func newSkillArchiveHTTPClient() *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.ResponseHeaderTimeout = 30 * time.Second
+	transport := http.DefaultTransport
+	if base, ok := transport.(*http.Transport); ok {
+		cloned := base.Clone()
+		cloned.ResponseHeaderTimeout = 30 * time.Second
+		transport = cloned
+	}
 	return &http.Client{
 		Transport: transport,
 		Timeout:   skillArchiveDownloadTimeout,
@@ -81,7 +93,17 @@ func (d HTTPZipDownloader) httpClient() *http.Client {
 	if d.client != nil {
 		return d.client
 	}
-	return newSkillArchiveHTTPClient()
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return newSkillArchiveHTTPClient()
+	}
+	skillArchiveHTTPClients.Lock()
+	defer skillArchiveHTTPClients.Unlock()
+	if skillArchiveHTTPClients.transport != base || skillArchiveHTTPClients.client == nil {
+		skillArchiveHTTPClients.transport = base
+		skillArchiveHTTPClients.client = newSkillArchiveHTTPClient()
+	}
+	return skillArchiveHTTPClients.client
 }
 
 func skillDownloadError(err error) error {

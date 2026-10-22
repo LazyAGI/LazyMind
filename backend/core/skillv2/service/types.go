@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	skillmetadata "lazymind/core/skillv2/metadata"
+	"lazymind/core/skillv2/sourceurl"
 )
 
 type Clock interface {
@@ -68,8 +69,10 @@ type SourceInput struct {
 	PathPrefix string
 	// Website adapters retain SourceURL as provenance while routing downloads
 	// through the concrete upstream GitHub directory.
-	ResolvedSourceURL string
-	CanonicalName     string
+	ResolvedSourceURL       string
+	CanonicalName           string
+	PreparedPackage         *sourceurl.PreparedPackage
+	ResolutionTransferBytes int64
 	// True when URL resolution established the ref/path boundary, including
 	// repository roots on branches whose names contain slashes.
 	PathPrefixResolved bool
