@@ -256,7 +256,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
     </div>
     {props.requiresVerification ? <Alert type="info" showIcon message={copy("verifyBeforeSync")} action={<Button size="small" disabled={!props.onCheckConnection} onClick={props.onCheckConnection}>{t("modelProvider.workspace.checkConnection")}</Button>} /> : null}
     {error ? <Alert type="error" showIcon message={t("modelProvider.error.loadRemoteModelsFailed")} description={error} action={<Button size="small" onClick={() => setRefresh((current) => current + 1)}>{t("common.retry")}</Button>} /> : null}
-    <Spin spinning={loading || props.modelsLoading}>
+    <Spin spinning={loading || props.modelsLoading === true}>
       <div className="provider-model-catalog-list" aria-busy={loading || busy}>
         {!loading && !visible.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={copy("empty")} /> : null}
         {groups.map(([vendor, models]) => {

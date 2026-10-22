@@ -34,6 +34,7 @@
 - 部署前备份 `data/backups/provider-workspace-20261022/core-before-request-config.dump`。业务库升级 `320261022092432` 后 dirty=false，未处于恢复状态。部署前后的模型、密文及验证版本、默认选择摘要一致（全库有效 73 个模型、10 个存储组、3 个默认选择）。四个新增请求配置/Key 路由经 Kong 的未登录访问均为 401。
 - 真实浏览器验证了 1440/900/390px 设置导航内嵌、三个自定义供应商置顶、Key 管理及显隐；新建临时供应商后保存 Anthropic 默认协议和地址，重新打开仍正确，随后删除临时供应商。DeepSeek 远端模型目录返回 200；迁移后待验证的 AIhubmix 不再发出失败的目录请求，改为明确的检查连接入口，点击后复用已有验证流程。该提示新增回归与目录测试 2 文件、11 项通过。
 - 截图位于本聊天视觉产物目录：`cherry-embedded-settings.png`、`cherry-embedded-900.png`、`cherry-embedded-390.png`、`cherry-request-drawer.png`、`cherry-key-manager.png`、`cherry-model-catalog-deepseek.png`。
+- 浏览器实测发现本地加载标记移除后为 undefined，Ant Design Spin 会启用默认加载态，造成远端返回后遮罩仍在。改为显式布尔判断，新增“缺省本地加载标记也应清除遮罩”的回归；最后目录及排序 2 文件、12 项测试通过。
 
 ## 上一轮实现（历史）
 

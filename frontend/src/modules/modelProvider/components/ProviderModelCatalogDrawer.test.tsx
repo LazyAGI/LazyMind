@@ -33,6 +33,11 @@ beforeEach(() => {
 });
 
 describe("provider model catalog drawer", () => {
+  it("clears the loading overlay when the optional local loading flag is absent", async () => {
+    draw(fixture());
+    await screen.findByText("deepseek-v3");
+    await waitFor(() => expect(document.querySelector(".provider-model-catalog-drawer .ant-spin-spinning")).not.toBeInTheDocument());
+  });
   it("asks for an explicit connection check before discovery when the saved key is unverified", async () => {
     const props = fixture(selected, true);
     draw(props);
