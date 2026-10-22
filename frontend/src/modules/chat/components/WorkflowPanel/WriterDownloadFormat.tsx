@@ -8,6 +8,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { axiosInstance } from '@/components/request';
 import { coreApiUrl } from '@/runtime/apiBase';
+import { downloadWorkflowFile, getWorkflowDownloadHost } from '@/modules/chat/utils/workflowDownload';
 import './WriterDownloadFormat.scss';
 
 export type WriterDownloadFormat = 'markdown' | 'lmd' | 'latex' | 'text';
@@ -271,15 +272,15 @@ export async function prepareWriterDownloadBlob(
   }
 }
 
-function triggerDownload(source: WriterDownloadSource, blob?: Blob): void {
+function triggerDownload(source: WriterDownloadSource, blob?: Blob): void | Promise<void> {
+  if (getWorkflowDownloadHost()) return downloadWorkflowFile({ ...source, blob });
+  // Preserve the existing download behavior outside an explicitly bridged host.
   const anchor = document.createElement('a');
   anchor.href = source.href ?? URL.createObjectURL(blob!);
   anchor.download = source.filename;
   anchor.rel = 'noopener';
   anchor.click();
-  if (blob) {
-    window.setTimeout(() => URL.revokeObjectURL(anchor.href), 0);
-  }
+  if (blob) window.setTimeout(() => URL.revokeObjectURL(anchor.href), 0);
 }
 
 export async function downloadSource(
@@ -287,10 +288,10 @@ export async function downloadSource(
   format: WriterDownloadFormat,
 ): Promise<void> {
   if (source.href) {
-    triggerDownload(source);
+    await triggerDownload(source);
     return;
   }
-  triggerDownload(source, await prepareWriterDownloadBlob(source, format));
+  await triggerDownload(source, await prepareWriterDownloadBlob(source, format));
 }
 
 function formatLabel(format: WriterDownloadFormat): string {

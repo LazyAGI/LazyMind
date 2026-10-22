@@ -1,3 +1,4 @@
+import { workbuddyErrorMessage } from "./workbuddyErrors";
 import { useSettingsDraft } from "@/modules/settings/SettingsNavigationGuard";
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { Alert, Button, Card, Input, Modal, Popover, Space, Spin, Switch, Tag, Tooltip, Typography, message } from "antd";
@@ -39,6 +40,7 @@ import {
 } from "@/modules/chat/utils/request";
 import "./index.scss";
 import ExternalCapabilityAccess from "./ExternalCapabilityAccess";
+import WorkBuddyInstallationGuide from "./WorkBuddyInstallationGuide";
 
 interface AgentDefinition {
   id: DesktopAgent;
@@ -142,6 +144,7 @@ export default function AgentIntegrationPage() {
   const [bridgePlatformMismatch, setBridgePlatformMismatch] = useState(false);
   const [manualBindingTarget, setManualBindingTarget] = useState<DesktopAgentBindingTarget | null>(null);
   const [manualBindingPath, setManualBindingPath] = useState("");
+  const [workBuddyGuideOpen, setWorkBuddyGuideOpen] = useState(false);
   const confirmBindingClose = useSettingsDraft({
     dirty: manualBindingTarget !== null && manualBindingPath !== "",
     saving: Boolean(manualBindingTarget && action === `binding:${manualBindingTarget}`),
@@ -292,7 +295,11 @@ export default function AgentIntegrationPage() {
     setRefreshing(false);
   };
 
-  const runAction = async (agent: DesktopAgent, nextAction: DesktopAgentIntegrationAction) => {
+  const runAction = async (agent: DesktopAgent, nextAction: DesktopAgentIntegrationAction, restartConfirmed = false) => {
+    if (agent === "workbuddy" && nextAction === "connect" && !restartConfirmed) {
+      setWorkBuddyGuideOpen(true);
+      return;
+    }
     if (pendingAgentActions.current.has(agent)) return;
     pendingAgentActions.current.add(agent);
     const key = `${agent}:${nextAction}`;
@@ -317,9 +324,12 @@ export default function AgentIntegrationPage() {
             : "agentIntegration.loginStarted", { agent: executorName }));
           setPendingLoginAgent(agent);
         }
-      } else if (result.data.state === "enabled") {
+      } else if (result.data.state === "enabled" && agent !== "workbuddy") {
         message.success(t("agentIntegration.enableSuccess", { agent: result.data.display_name }));
       }
+      return result.data;
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       pendingAgentActions.current.delete(agent);
       setAction((current) => current === key ? "" : current);
@@ -441,7 +451,8 @@ export default function AgentIntegrationPage() {
                       else next.add(agent.id);
                       return next;
                     })}
-                    onMCPAction={runAction}
+                    onMCPAction={async (agent, operation) => { await runAction(agent, operation); }}
+                    onOpenInstallationGuide={() => setWorkBuddyGuideOpen(true)}
                     onExecutorAction={runExecutorAction}
                     onBindingAction={runBindingAction}
                     onExternalConfigurationStarted={(target) => {
@@ -458,6 +469,12 @@ export default function AgentIntegrationPage() {
         </section>
       </Spin>
       <ExternalCapabilityAccess />
+      {workBuddyGuideOpen && <WorkBuddyInstallationGuide
+        status={statuses.workbuddy}
+        onConnect={() => runAction("workbuddy", "connect", true)}
+        onStatus={(status) => setStatuses(current => ({ ...current, workbuddy: status }))}
+        onClose={() => setWorkBuddyGuideOpen(false)}
+      />}
       <Modal
         open={manualBindingTarget !== null}
         title={t("agentIntegration.executablePathTitle")}
@@ -508,6 +525,7 @@ function executablePathPlaceholderKey(target: DesktopAgentBindingTarget | null):
 }
 
 function integrationErrorMessage(agent: DesktopAgent, status: DesktopAgentIntegrationStatus, t: TFunction): string {
+  if (agent === "workbuddy" && status.state !== "conflict") return workbuddyErrorMessage(status, t);
   if (agent !== "deepseek-harness") return status.message || "";
   const code = status.issue?.code;
   const key = code === "unsupported_version" || code === "dependency_environment" ? code : "operation_failed";
@@ -534,6 +552,7 @@ function AgentCard({
   bindings,
   onToggle,
   onMCPAction,
+  onOpenInstallationGuide,
   onExecutorAction,
   onBindingAction,
   onExternalConfigurationStarted,
@@ -550,6 +569,7 @@ function AgentCard({
   bindings: BindingMap;
   onToggle: () => void;
   onMCPAction: (agent: DesktopAgent, action: DesktopAgentIntegrationAction) => Promise<void>;
+  onOpenInstallationGuide: () => void;
   onExecutorAction: (provider: DesktopExecutorProvider, action: DesktopExecutorPolicyAction) => Promise<void>;
   onBindingAction: (target: DesktopAgentBindingTarget, clear: boolean) => Promise<void>;
   onExternalConfigurationStarted: (agent: DesktopAgent) => void;
@@ -654,6 +674,7 @@ function AgentCard({
             busyAction={busyAction}
             bindings={bindings}
             onMCPAction={onMCPAction}
+            onOpenInstallationGuide={onOpenInstallationGuide}
             onExecutorAction={onExecutorAction}
             onBindingAction={onBindingAction}
             onExternalConfigurationStarted={onExternalConfigurationStarted}
@@ -732,7 +753,7 @@ function CollapsedDetectionSummary({
       });
     }
   }
-  if (mcpStatus?.message && ["error", "conflict"].includes(mcpStatus.state)) {
+  if (mcpStatus?.message && (["error", "conflict"].includes(mcpStatus.state) || agent.id === "workbuddy" && mcpStatus.issue)) {
     items.push({ id: "mcp-error", label: integrationErrorMessage(agent.id, mcpStatus, t), ready: false });
   }
   if (!items.length) {
@@ -775,8 +796,8 @@ function CompactIntegrationControls({
 }) {
   const methods = [{
     id: "mcp",
-    title: t("agentIntegration.mcpModeTitle", { agent: mcpClientName }),
-    description: t("agentIntegration.mcpModeDescription", { agent: mcpClientName }),
+    title: t(agent.id === "workbuddy" ? "agentIntegration.workbuddyModeTitle" : "agentIntegration.mcpModeTitle", { agent: mcpClientName }),
+    description: t(agent.id === "workbuddy" ? "agentIntegration.workbuddyModeDescription" : "agentIntegration.mcpModeDescription", { agent: mcpClientName }),
     checked: mcpChecked,
     disabled: !mcpChecked && !mcpCanToggle,
     loading: busyAction === `${agent.id}:connect` || busyAction === `${agent.id}:disconnect`,
@@ -829,6 +850,7 @@ function AgentConfigurationFlow({
   busyAction,
   bindings,
   onMCPAction,
+  onOpenInstallationGuide,
   onExecutorAction,
   onBindingAction,
   onExternalConfigurationStarted,
@@ -841,6 +863,7 @@ function AgentConfigurationFlow({
   busyAction: string;
   bindings: BindingMap;
   onMCPAction: (agent: DesktopAgent, action: DesktopAgentIntegrationAction) => Promise<void>;
+  onOpenInstallationGuide: () => void;
   onExecutorAction: (provider: DesktopExecutorProvider, action: DesktopExecutorPolicyAction) => Promise<void>;
   onBindingAction: (target: DesktopAgentBindingTarget, clear: boolean) => Promise<void>;
   onExternalConfigurationStarted: (agent: DesktopAgent) => void;
@@ -989,8 +1012,8 @@ function AgentConfigurationFlow({
     </Space>
   ) : null;
 
-  return (
-    <div className="agent-integration-flow">
+  const preparation = (
+    <>
       <ConfigurationStage
         step={1}
         title={t("agentIntegration.clientStageTitle", { agent: mcpClientName })}
@@ -1016,6 +1039,7 @@ function AgentConfigurationFlow({
           emptyLabel={t("agentIntegration.waitingForDetection")}
         />
         {mcpActions}
+
       </ConfigurationStage>
 
       {executorSupported && (
@@ -1099,6 +1123,12 @@ function AgentConfigurationFlow({
         </ConfigurationStage>
       )}
 
+    </>
+  );
+  return (
+    <div className="agent-integration-flow">
+      {preparation}
+
       <ConfigurationStage
         step={executorSupported ? 3 : 2}
         title={t("agentIntegration.integrationStageTitle")}
@@ -1107,8 +1137,19 @@ function AgentConfigurationFlow({
       >
         <div className="agent-integration-methods">
           <IntegrationMethod
-            title={t("agentIntegration.mcpModeTitle", { agent: mcpClientName })}
-            description={t("agentIntegration.mcpModeDescription", { agent: mcpClientName })}
+            title={t(agent.id === "workbuddy" ? "agentIntegration.workbuddyModeTitle" : "agentIntegration.mcpModeTitle", { agent: mcpClientName })}
+            description={t(agent.id === "workbuddy" ? "agentIntegration.workbuddyModeDescription" : "agentIntegration.mcpModeDescription", { agent: mcpClientName })}
+            help={agent.id === "workbuddy" ? (
+              <Button
+                type="text"
+                size="small"
+                className="agent-integration-installation-help"
+                icon={<QuestionCircleOutlined />}
+                onClick={onOpenInstallationGuide}
+              >
+                {t("agentIntegration.workbuddyInstallGuide.entry")}
+              </Button>
+            ) : undefined}
             status={mcpCapabilityStatus(mcpState, t)}
             ready={mcpEnabled}
             disabled={!mcpCanToggle}
@@ -1136,7 +1177,7 @@ function AgentConfigurationFlow({
             />
           )}
         </div>
-        {mcpStatus?.message && ["error", "conflict"].includes(mcpState) && (
+        {mcpStatus?.message && (["error", "conflict"].includes(mcpState) || agent.id === "workbuddy" && mcpStatus.issue) && (
           <div className="agent-integration-stage-hint is-error" role="alert">
             <WarningOutlined />
             {integrationErrorMessage(agent.id, mcpStatus, t)}
@@ -1186,7 +1227,7 @@ function ConfigurationStage({
         <div className="agent-integration-stage-heading">
           <div>
             <strong>{title}</strong>
-            <span>{status}</span>
+            {status && <span>{status}</span>}
           </div>
           {help}
         </div>
@@ -1221,6 +1262,7 @@ function RequirementList({
 function IntegrationMethod({
   title,
   description,
+  help,
   status,
   ready,
   disabled,
@@ -1230,6 +1272,7 @@ function IntegrationMethod({
 }: {
   title: string;
   description: string;
+  help?: ReactNode;
   status: string;
   ready: boolean;
   disabled: boolean;
@@ -1239,20 +1282,21 @@ function IntegrationMethod({
 }) {
   return (
     <div className={`agent-integration-method${ready ? " is-ready" : ""}`}>
-      <div>
-        <div className="agent-integration-method-title">
-          <strong>{title}</strong>
-          <span>{status}</span>
-        </div>
-        <p>{description}</p>
+      <div className="agent-integration-method-title">
+        <strong>{title}</strong>
       </div>
-      <Switch
-        aria-label={title}
-        checked={checked}
-        disabled={disabled || loading}
-        loading={loading}
-        onChange={onChange}
-      />
+      <p role={loading ? "status" : undefined}>{description}</p>
+      <div className="agent-integration-method-controls">
+        <span className="agent-integration-method-status">{status}</span>
+        {help && <div className="agent-integration-method-help">{help}</div>}
+        <Switch
+          aria-label={title}
+          checked={checked}
+          disabled={disabled || loading}
+          loading={loading}
+          onChange={onChange}
+        />
+      </div>
     </div>
   );
 }

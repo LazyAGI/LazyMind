@@ -14,6 +14,7 @@ import (
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/codexplugin"
+	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/mcpbridge"
 	"lazymind/agentconnector/internal/workflowhost"
@@ -260,7 +261,7 @@ func (a *Adapter) isOwned(config mcpConfig) bool {
 }
 
 func codexHome() (string, error) {
-	if configured := strings.TrimSpace(os.Getenv("CODEX_HOME")); configured != "" {
+	if configured := strings.TrimSpace(connectorconfig.Value("CODEX_HOME")); configured != "" {
 		return filepath.Abs(configured)
 	}
 	home, err := os.UserHomeDir()

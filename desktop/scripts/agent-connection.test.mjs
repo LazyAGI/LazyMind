@@ -13,6 +13,7 @@ const timeoutDeclarations = [
   'agentConnectorStatusTimeoutMs',
   'agentConnectorDisconnectTimeoutMs',
   'agentConnectorInstallTimeoutMs',
+  'agentConnectorWorkBuddyInstallTimeoutMs',
 ].map((name) => {
   const declaration = source.match(new RegExp(`^const ${name} = .+;$`, 'm'));
   assert.ok(declaration, `missing Desktop timeout declaration: ${name}`);
@@ -24,21 +25,24 @@ for (const platform of ['darwin', 'win32']) {
     const commands = [];
     const run = vm.runInNewContext(`${timeoutDeclarations}\n${source.slice(start, end)}\nrunAgentConnector`, {
       agentLogins: new Map(),
-      URL, process: { platform, env: {} },
+      URL, process: { platform, env: { LAZYMIND_ASSISTANT_BRIDGE_URL: 'file:///stale-invalid' } },
       runConnectorJSON: async (args, timeout) => {
         commands.push([Array.from(args), timeout]);
         return { state: 'enabled' };
       },
     });
     assert.equal((await run('deepseek-harness', 'connect')).state, 'enabled');
+    await run('workbuddy', 'connect');
     await run('all', 'status');
     await run('deepseek-harness', 'status');
     await run('deepseek-harness', 'disconnect');
     await run('cursor', 'connect');
     await run('cursor', 'disconnect');
     assert.deepEqual(commands, [
-      [['assistant', 'start', '--listen', '127.0.0.1:19091'], 15000],
+      [['assistant', 'start'], 15000],
       [['internal', 'agent', 'deepseek-harness', 'connect'], 660000],
+      [['assistant', 'start'], 15000],
+      [['internal', 'agent', 'workbuddy', 'connect'], 120000],
       [['internal', 'agent', 'all', 'status'], 30000],
       [['internal', 'agent', 'deepseek-harness', 'status'], 30000],
       [['internal', 'agent', 'deepseek-harness', 'disconnect'], 60000],
