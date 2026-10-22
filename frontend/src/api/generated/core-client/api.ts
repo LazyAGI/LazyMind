@@ -229,11 +229,25 @@ export interface AcademicPresenceDocument {
     'source_provider'?: string;
     'source_version'?: string;
 }
+export interface AcademicResolvedPapers {
+    'contents': Array<AcademicResolvedPapersContentsInner>;
+    'papers': Array<AcademicWorkflowPaper>;
+}
+export interface AcademicResolvedPapersContentsInner {
+    'error'?: string;
+    'paper_id': string;
+    'source_kind'?: string;
+    'source_version': string;
+    'status': string;
+}
 export interface AcademicReviewInput {
     'candidate_directions': Array<string>;
     'papers': Array<AcademicWorkflowPaper>;
     'selected_directions': Array<string>;
     'user_instruction': string;
+}
+export interface AcademicServiceResolveExpansionPapersRequest {
+    'paper_ids': Array<string>;
 }
 export interface AcademicTaskLaunch {
     'dataset_id'?: string;
@@ -7918,6 +7932,122 @@ export interface WriterDocumentWriteBackOpenAPIRequest {
     'source_document'?: any;
     'template'?: string;
 }
+
+/**
+ * AcademicServiceApi - axios parameter creator
+ */
+export const AcademicServiceApiAxiosParamCreator = function (configuration?: Configuration) {
+    return {
+        /**
+         *
+         * @summary Resolve registered expansion papers and version-scoped content metadata without full bodies
+         * @param {string} expansionId
+         * @param {AcademicServiceResolveExpansionPapersRequest} academicServiceResolveExpansionPapersRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        academicServiceResolveExpansionPapers: async (expansionId: string, academicServiceResolveExpansionPapersRequest: AcademicServiceResolveExpansionPapersRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'expansionId' is not null or undefined
+            assertParamExists('academicServiceResolveExpansionPapers', 'expansionId', expansionId)
+            // verify required parameter 'academicServiceResolveExpansionPapersRequest' is not null or undefined
+            assertParamExists('academicServiceResolveExpansionPapers', 'academicServiceResolveExpansionPapersRequest', academicServiceResolveExpansionPapersRequest)
+            const localVarPath = `/api/core/academic/expansions/{expansion_id}/papers:resolve`
+                .replace(`{${"expansion_id"}}`, encodeURIComponent(String(expansionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(academicServiceResolveExpansionPapersRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+    }
+};
+
+/**
+ * AcademicServiceApi - functional programming interface
+ */
+export const AcademicServiceApiFp = function(configuration?: Configuration) {
+    const localVarAxiosParamCreator = AcademicServiceApiAxiosParamCreator(configuration)
+    return {
+        /**
+         *
+         * @summary Resolve registered expansion papers and version-scoped content metadata without full bodies
+         * @param {string} expansionId
+         * @param {AcademicServiceResolveExpansionPapersRequest} academicServiceResolveExpansionPapersRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async academicServiceResolveExpansionPapers(expansionId: string, academicServiceResolveExpansionPapersRequest: AcademicServiceResolveExpansionPapersRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AcademicResolvedPapers>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.academicServiceResolveExpansionPapers(expansionId, academicServiceResolveExpansionPapersRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicServiceApi.academicServiceResolveExpansionPapers']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+    }
+};
+
+/**
+ * AcademicServiceApi - factory interface
+ */
+export const AcademicServiceApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
+    const localVarFp = AcademicServiceApiFp(configuration)
+    return {
+        /**
+         *
+         * @summary Resolve registered expansion papers and version-scoped content metadata without full bodies
+         * @param {AcademicServiceApiAcademicServiceResolveExpansionPapersRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        academicServiceResolveExpansionPapers(requestParameters: AcademicServiceApiAcademicServiceResolveExpansionPapersRequest, options?: RawAxiosRequestConfig): AxiosPromise<AcademicResolvedPapers> {
+            return localVarFp.academicServiceResolveExpansionPapers(requestParameters.expansionId, requestParameters.academicServiceResolveExpansionPapersRequest, options).then((request) => request(axios, basePath));
+        },
+    };
+};
+
+/**
+ * Request parameters for academicServiceResolveExpansionPapers operation in AcademicServiceApi.
+ */
+export interface AcademicServiceApiAcademicServiceResolveExpansionPapersRequest {
+    readonly expansionId: string
+
+    readonly academicServiceResolveExpansionPapersRequest: AcademicServiceResolveExpansionPapersRequest
+}
+
+/**
+ * AcademicServiceApi - object-oriented interface
+ */
+export class AcademicServiceApi extends BaseAPI {
+    /**
+     *
+     * @summary Resolve registered expansion papers and version-scoped content metadata without full bodies
+     * @param {AcademicServiceApiAcademicServiceResolveExpansionPapersRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public academicServiceResolveExpansionPapers(requestParameters: AcademicServiceApiAcademicServiceResolveExpansionPapersRequest, options?: RawAxiosRequestConfig) {
+        return AcademicServiceApiFp(this.configuration).academicServiceResolveExpansionPapers(requestParameters.expansionId, requestParameters.academicServiceResolveExpansionPapersRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+}
+
+
 
 /**
  * AcademicWorkflowsApi - axios parameter creator

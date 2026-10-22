@@ -299,6 +299,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/academic/paper-contents:retry", []string{"document.read"}, academic.RetryPaperContent)
 	handleAPI(r, "GET", "/academic/expansions", []string{"qa.read"}, academic.ListExpansions)
 	handleAPI(r, "GET", "/academic/expansions/{expansion_id}", []string{"qa.read"}, academic.GetExpansion)
+	handleAPI(r, "POST", "/academic/expansions/{expansion_id}/papers:resolve", []string{"qa.read"}, academic.ResolveExpansionPapers)
 	handleAPI(r, "DELETE", "/academic/expansions/{expansion_id}", []string{"qa.write"}, academic.DeleteExpansion)
 	handleAPI(r, "GET", "/academic/demo-papers", []string{"document.read"}, academic.DemoPapers)
 

@@ -354,6 +354,35 @@ components:
                 source_version:
                     type: string
             type: object
+        AcademicResolvedPapers:
+            properties:
+                contents:
+                    items:
+                        properties:
+                            error:
+                                type: string
+                            paper_id:
+                                type: string
+                            source_kind:
+                                type: string
+                            source_version:
+                                type: string
+                            status:
+                                type: string
+                        required:
+                        - paper_id
+                        - status
+                        - source_version
+                        type: object
+                    type: array
+                papers:
+                    items:
+                        $ref: '#/components/schemas/AcademicWorkflowPaper'
+                    type: array
+            required:
+            - papers
+            - contents
+            type: object
         AcademicReviewInput:
             properties:
                 candidate_directions:
@@ -15944,6 +15973,41 @@ paths:
             summary: Read saved rounds, cumulative papers, content states and Chat availability
             tags:
                 - AcademicWorkflows
+    /api/core/academic/expansions/{expansion_id}/papers:resolve:
+        post:
+            parameters:
+            -   in: path
+                name: expansion_id
+                required: true
+                schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                paper_ids:
+                                    items:
+                                        type: string
+                                    maxItems: 500
+                                    type: array
+                            required:
+                            - paper_ids
+                            type: object
+                required: true
+            responses:
+                '200':
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/AcademicResolvedPapers'
+                    description: Resolve registered expansion papers and version-scoped
+                        content metadata without full bodies
+            summary: Resolve registered expansion papers and version-scoped content metadata
+                without full bodies
+            tags:
+            - AcademicService
+            operationId: academicServiceResolveExpansionPapers
     /api/core/academic/imports:
         get:
             responses:

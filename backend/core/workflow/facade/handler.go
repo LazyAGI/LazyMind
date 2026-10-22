@@ -1024,8 +1024,13 @@ func (h Handler) Command(delegate http.Handler) http.HandlerFunc {
 					value["step_id"] = status.StepID
 					value["attempt"] = status.Attempt
 					value["automatic_attempts"] = automaticAttempts
-					value["max_automatic_attempts"] = workflowstore.MaxAutomaticWorkflowStepAttempts
-					value["automatic_retry_remaining"] = max(0, workflowstore.MaxAutomaticWorkflowStepAttempts-int(automaticAttempts))
+					automaticLimit, limitErr := h.Store.AutomaticAttemptLimit(r.Context(), sessionID, status.StepID)
+					if limitErr != nil {
+						fail(w, http.StatusInternalServerError, "RETRY_BUDGET_READ_FAILED", limitErr.Error(), true)
+						return
+					}
+					value["max_automatic_attempts"] = automaticLimit
+					value["automatic_retry_remaining"] = max(0, automaticLimit-int(automaticAttempts))
 					value["user_retry_available"] = true
 				}
 			}

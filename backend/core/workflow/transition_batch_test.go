@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -569,6 +570,48 @@ func TestRetryPreservesOnlyBlockedConfigurationCheckpoint(t *testing.T) {
 				if !bytes.Equal(restored, expected) {
 					t.Fatalf("checkpoint changed: %s", restored)
 				}
+			}
+		})
+	}
+}
+
+func TestParameterFailureAllowsOneAutomaticRerunAndExplicitManualRetry(t *testing.T) {
+	for _, tc := range []struct {
+		name, origin, operation string
+		count, want             int
+	}{
+		{"first_rerun", "automatic", "retry", 1, 200},
+		{"exhausted", "automatic", "retry", 2, 409},
+		{"manual", "user", "retry", 2, 200},
+		{"rewind_cannot_reset_budget", "automatic", "rewind", 2, 409},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, hash := setupBatchTransitionSession(t)
+			old, err := CreateSessionStep(t.Context(), db.DB, "batch-session", "branch_b", "old-task", 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = db.Model(&old).Updates(map[string]any{"status": StepStatusFailed, "result_json": `{"error":"TOOL_ARGUMENT_RETRY_EXHAUSTED: save_artifacts: expected value"}`}).Error; err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < tc.count; i++ {
+				if err = db.Create(&orm.WorkflowTransitionCommand{CommandID: fmt.Sprintf("prior-%d", i), SessionID: "batch-session", TargetStepID: "branch_b", Operation: "retry", RetryOrigin: "automatic", Status: "accepted", ResponseJSON: json.RawMessage(`{}`)}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			oldDB, oldState := store.DB(), store.State()
+			store.Init(db.DB, db.DB, nil)
+			t.Cleanup(func() { store.Init(oldDB, oldDB, oldState) })
+			body, _ := json.Marshal(map[string]any{"command_id": "new-retry", "operation": tc.operation, "retry_origin": tc.origin,
+				"expected_state_version": 4, "graph_hash": hash, "target_step_id": "branch_b", "task_id": "new-task"})
+			req := mux.SetURLVars(httptest.NewRequest("POST", "/", bytes.NewReader(body)), map[string]string{"session_id": "batch-session"})
+			w := httptest.NewRecorder()
+			TransitionWorkflowSession(w, req)
+			if w.Code != tc.want {
+				t.Fatalf("%d %s", w.Code, w.Body.String())
+			}
+			if tc.want == 409 && !strings.Contains(w.Body.String(), `"max_automatic_attempts":2`) {
+				t.Fatal(w.Body.String())
 			}
 		})
 	}

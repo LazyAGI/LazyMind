@@ -3,7 +3,18 @@ name: 论文自动拓展
 description: 在独立 Chat 中分五步拓展论文，保存当前用户的成果。候选只通过 arXiv 外部搜索发现，版本由服务端锁定；全文复用限定发起论文集，关系分析依据实际材料。
 when_to_use: 用户从知识库启动论文拓展、先拓展后综述，或继续同一论文拓展 Chat。保留原拓展记录 ID。
 runtime:
+  transactional_outputs: true
+  publisher_owned_slots: [paper_relations, expansion_result]
   post_step_checks:
+  - step_id: explore_directions
+    tool: academic_validate_stage
+    arguments: {result: direction_research}
+  - step_id: prepare_seed_set
+    tool: academic_validate_stage
+    arguments: {result: seed_set}
+  - step_id: expand_and_screen
+    tool: academic_validate_stage
+    arguments: {result: expanded_papers}
   - step_id: compose_result
     tool: academic_validate_result
     arguments:
@@ -22,6 +33,9 @@ tool_scripts:
   - academic_search_papers
   - academic_read_paper
   - academic_validate_result
+  - academic_validate_stage
+  - academic_submit_relations
+  - academic_publish_expansion_result
 steps:
 - id: explore_directions
   label: 调研与方向

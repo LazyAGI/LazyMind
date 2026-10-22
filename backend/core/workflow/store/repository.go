@@ -51,6 +51,25 @@ func normalizeWorkflowMode(value string) string {
 // deliberately not constrained by this budget.
 const MaxAutomaticWorkflowStepAttempts = 3
 
+// Format failures may restart once. Persisted attempts keep this budget across
+// agent recreation and service restarts; explicit user retries remain separate.
+func AutomaticWorkflowStepAttemptLimit(ctx context.Context, db *gorm.DB, sessionID, stepID string) (int, error) {
+	var count int64
+	err := db.WithContext(ctx).Model(&orm.WorkflowSessionStep{}).
+		Where("session_id=? AND step_id=? AND status=? AND CAST(result_json AS TEXT) LIKE ?", sessionID, stepID, "failed", "%TOOL_ARGUMENT_RETRY_EXHAUSTED:%").Count(&count).Error
+	if err != nil {
+		return 0, err
+	}
+	if count > 0 {
+		return 2, nil
+	}
+	return MaxAutomaticWorkflowStepAttempts, nil
+}
+
+func (r *Repository) AutomaticAttemptLimit(ctx context.Context, sessionID, stepID string) (int, error) {
+	return AutomaticWorkflowStepAttemptLimit(ctx, r.db, sessionID, stepID)
+}
+
 type repositoryError string
 
 func (e repositoryError) Error() string { return string(e) }
@@ -939,10 +958,18 @@ func attemptFailureReason(
 }
 
 func (r *Repository) AutomaticAttemptCount(ctx context.Context, sessionID, stepID string) (int64, error) {
+	limit, err := r.AutomaticAttemptLimit(ctx, sessionID, stepID)
+	if err != nil {
+		return 0, err
+	}
+	operations := []string{"execute", "retry"}
+	if limit < MaxAutomaticWorkflowStepAttempts {
+		operations = append(operations, "rewind")
+	}
 	var count int64
-	err := r.db.WithContext(ctx).Model(&orm.WorkflowTransitionCommand{}).
+	err = r.db.WithContext(ctx).Model(&orm.WorkflowTransitionCommand{}).
 		Where("session_id = ? AND target_step_id = ? AND operation IN ? AND retry_origin = ? AND status = ?",
-			sessionID, stepID, []string{"execute", "retry"}, "automatic", "accepted").Count(&count).Error
+			sessionID, stepID, operations, "automatic", "accepted").Count(&count).Error
 	return count, err
 }
 
