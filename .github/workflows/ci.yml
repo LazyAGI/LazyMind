@@ -405,15 +405,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            algorithm/lazyllm/pyproject.toml
+            evo/requirements.txt
 
       - name: Install deps + coverage tools
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq cmake
-          pip install scikit-build-core pybind11 coverage diff-cover
-          CMAKE_POLICY_VERSION_MINIMUM=3.5 pip install --no-cache-dir algorithm/lazyllm
+          CMAKE_POLICY_VERSION_MINIMUM=3.5 python -m pip install algorithm/lazyllm -r evo/requirements.txt scikit-build-core pybind11 coverage diff-cover pytest httpx
           cp algorithm/lazyllm/pyproject.toml "$(python -c 'import lazyllm; print(lazyllm.__path__[0])')/"
-          pip install -r evo/requirements.txt
-          pip install pytest httpx
 
       - name: Test with coverage
         run: |
@@ -454,8 +455,25 @@ jobs:
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
+        id: python
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            algorithm/lazyllm/pyproject.toml
+            algorithm/requirements.txt
+            tests/algorithm/requirements-test.txt
+
+      - name: Read LazyLLM revision
+        id: lazyllm
+        run: echo "revision=$(git rev-parse HEAD:algorithm/lazyllm)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache LazyLLM wheel
+        uses: actions/cache@v4
+        id: lazyllm-wheel
+        with:
+          path: ${{ runner.temp }}/lazyllm-wheels
+          key: lazyllm-wheel-v1-${{ runner.os }}-${{ runner.arch }}-py${{ steps.python.outputs.python-version }}-${{ steps.lazyllm.outputs.revision }}
 
       - uses: pandoc/actions/setup@v1
         with:
@@ -482,15 +500,32 @@ jobs:
           fi
           rg --version
 
-      - name: Install deps + coverage tools
+      - name: Build LazyLLM wheel
+        if: steps.lazyllm-wheel.outputs.cache-hit != 'true'
         env:
           CMAKE_POLICY_VERSION_MINIMUM: '3.5'
+        run: python -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/lazyllm-wheels" algorithm/lazyllm
+
+      - name: Install deps + coverage tools
+        shell: python
         run: |
-          pip install scikit-build-core pybind11 coverage diff-cover
-          pip install --no-cache-dir algorithm/lazyllm
-          python -c "import lazyllm, pathlib, shutil; shutil.copy2('algorithm/lazyllm/pyproject.toml', pathlib.Path(lazyllm.__path__[0]) / 'pyproject.toml')"
-          pip install -r algorithm/requirements.txt
-          pip install -r tests/algorithm/requirements-test.txt
+          import importlib.util
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import sys
+
+          wheels = list((Path(os.environ['RUNNER_TEMP']) / 'lazyllm-wheels').glob('lazyllm-*.whl'))
+          if len(wheels) != 1:
+              raise RuntimeError(f'Expected one LazyLLM wheel, found {len(wheels)}')
+          subprocess.run([
+              sys.executable, '-m', 'pip', 'install', str(wheels[0]),
+              '-r', 'algorithm/requirements.txt', '-r', 'tests/algorithm/requirements-test.txt',
+              'scikit-build-core', 'pybind11', 'coverage', 'diff-cover',
+          ], check=True)
+          package = Path(importlib.util.find_spec('lazyllm').origin).parent
+          shutil.copy2('algorithm/lazyllm/pyproject.toml', package / 'pyproject.toml')
 
       - name: Verify lazyllm install
         run: |
