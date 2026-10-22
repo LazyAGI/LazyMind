@@ -36,6 +36,10 @@ type ZipDownloader interface {
 type DownloadedZip struct {
 	Path    string
 	Cleanup func()
+	// A source-aware downloader can return a standalone Skill archive instead
+	// of a repository archive. Nil keeps the source's original selection.
+	PathPrefix  *string
+	PackageRoot string
 }
 
 type SkillServiceDeps struct {
@@ -62,6 +66,9 @@ type SourceInput struct {
 	URL        string
 	SourceURL  string
 	PathPrefix string
+	// True when URL resolution established the ref/path boundary, including
+	// repository roots on branches whose names contain slashes.
+	PathPrefixResolved bool
 }
 
 type CreateSkillRequest struct {

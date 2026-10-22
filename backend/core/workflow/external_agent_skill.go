@@ -87,7 +87,7 @@ func normalizeExternalAgentWorkflowSkillSource(ctx context.Context, in externalA
 		return externalAgentWorkflowSkillSource{}, externalSkillSourceError{Code: "SKILL_ZIP_INVALID", Message: "skill.zip_base64 is empty", Suggestion: "Provide a non-empty Skill zip package."}
 	}
 	if int64(len(content)) > maxExternalAgentSkillDownloadBytes {
-		return externalAgentWorkflowSkillSource{}, externalSkillSourceError{Code: "SKILL_ZIP_TOO_LARGE", Message: "Skill ZIP must not exceed 20 MiB", Suggestion: "Remove unnecessary files from the Skill package."}
+		return externalAgentWorkflowSkillSource{}, externalSkillSourceError{Code: "SKILL_ZIP_TOO_LARGE", Message: fmt.Sprintf("Skill ZIP must not exceed %d MiB", maxExternalAgentSkillDownloadBytes>>20), Suggestion: "Remove unnecessary files from the Skill package."}
 	}
 	hash := "sha256:" + sha256Hex(content)
 	if providedHash != "" && providedHash != hash {
@@ -165,7 +165,7 @@ func installExternalAgentSkillSource(ctx context.Context, db *gorm.DB, ownerUser
 		if err != nil {
 			return "", err
 		}
-		serviceSource = skillservice.SourceInput{Type: "url", URL: downloadURL, SourceURL: source.SourceURL, PathPrefix: prefix}
+		serviceSource = skillservice.SourceInput{Type: "url", URL: downloadURL, SourceURL: source.SourceURL, PathPrefix: prefix, PathPrefixResolved: true}
 	case "zip":
 		zipPath, err := writeExternalAgentSkillZip(source.ZipContent)
 		if err != nil {
@@ -230,7 +230,7 @@ func normalizeExternalSkillImportURL(ctx context.Context, rawURL string) (string
 	if matched {
 		return resolution.DownloadURL, "", nil
 	}
-	githubResolution, matched, resolveErr := skillurl.ResolveGitHubPageURL(ctx, parsed, &http.Client{Timeout: 10 * time.Second}, skillurl.GitHubAPIBaseURL)
+	githubResolution, matched, resolveErr := skillurl.ResolveGitHubImportURL(ctx, parsed, &http.Client{Timeout: 10 * time.Second}, skillurl.GitHubAPIBaseURL)
 	if resolveErr != nil {
 		return "", "", resolveErr
 	}

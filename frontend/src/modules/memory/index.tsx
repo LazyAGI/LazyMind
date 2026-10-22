@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
 import {
+  Alert,
   Button,
   Input,
   Modal,
@@ -91,7 +92,13 @@ import {
 import { buildSkillZipBlob } from "./skillPackage";
 import { isInvalidSkillPackageError, uploadSkillTempFile } from "./skillUpload";
 import { uploadCloudSkill, downloadCloudResource } from "./cloudResourceApi";
-import { isSkillAlreadyExistsError } from "./skillUploadError";
+import {
+  isSkillAlreadyExistsError,
+  isSkillPackageTooLargeError,
+  isSkillSourceAmbiguousError,
+} from "./skillUploadError";
+import { useChatInputStore } from "@/modules/chat/store/chatInput";
+import { CHAT_HOME_PATH } from "@/modules/chat/constants/chat";
 import {
   approveEvolutionSuggestion,
   batchApproveEvolutionSuggestions,
@@ -280,6 +287,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   const [pendingSkillSourceUrl, setPendingSkillSourceUrl] = useState("");
   const [skillUrlImportOpen, setSkillUrlImportOpen] = useState(false);
   const [skillUrlImportDraft, setSkillUrlImportDraft] = useState("");
+  const [skillUrlImportError, setSkillUrlImportError] = useState<unknown>(null);
   const [skillLoading, setSkillLoading] = useState(false);
   const [skillListError, setSkillListError] = useState(false);
   const [skillCategories, setSkillCategories] = useState<string[]>([]);
@@ -2421,17 +2429,22 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     setPendingSkillPackageFile(null);
     setPendingSkillSourceUrl("");
     setSkillUrlImportDraft("");
+    setSkillUrlImportError(null);
     setSkillUrlImportOpen(true);
   };
 
-  const showSkillUploadError = (error: unknown, candidateName?: string) => {
+  const getSkillUploadErrorMessage = (error: unknown, candidateName?: string) => {
+    if (isSkillPackageTooLargeError(error)) {
+      return t("admin.memorySkillImportTooLarge");
+    }
+    if (isSkillSourceAmbiguousError(error)) {
+      return t("admin.memorySkillImportMultipleSkills");
+    }
     if (isInvalidSkillPackageError(error)) {
-      message.error(t("admin.memorySkillUploadInvalidPackage"));
-      return;
+      return t("admin.memorySkillUploadInvalidPackage");
     }
     if (!isSkillAlreadyExistsError(error)) {
-      message.error(t("admin.memorySkillUploadFailed"));
-      return;
+      return t("admin.memorySkillUploadFailed");
     }
 
     const normalizedCandidate = candidateName?.trim().toLocaleLowerCase();
@@ -2440,13 +2453,25 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
           (skill) => skill.name.trim().toLocaleLowerCase() === normalizedCandidate,
         )
       : undefined;
-    message.error(
-      existingSkill
-        ? t("admin.memorySkillUploadAlreadyExistsNamed", {
-            name: existingSkill.name,
-          })
-        : t("admin.memorySkillUploadAlreadyExists"),
-    );
+    return existingSkill
+      ? t("admin.memorySkillUploadAlreadyExistsNamed", {
+          name: existingSkill.name,
+        })
+      : t("admin.memorySkillUploadAlreadyExists");
+  };
+
+  const showSkillUploadError = (error: unknown, candidateName?: string) => {
+    message.error(getSkillUploadErrorMessage(error, candidateName));
+  };
+
+  const installSkillUrlInChat = () => {
+    useChatInputStore.getState().setModeDraft({
+      text: t("admin.memorySkillImportChatPrompt", { url: skillUrlImportDraft.trim() }),
+      mentions: [],
+      files: [],
+    });
+    setSkillUrlImportOpen(false);
+    navigate(CHAT_HOME_PATH);
   };
 
   const handleConfirmSkillUrlImport = async () => {
@@ -2460,7 +2485,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       return;
     }
 
-    setSkillUrlImportOpen(false);
+    setSkillUrlImportError(null);
     setSkillSaving(true);
 
     try {
@@ -2475,6 +2500,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         },
         { silentError: true },
       );
+      setSkillUrlImportOpen(false);
       await Promise.all([refreshSkillAssets(), refreshSkillCategories()]);
       message.success(
         t("admin.memorySkillUploadSuccess", {
@@ -2483,7 +2509,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       );
     } catch (error) {
       console.error("Import skill from URL failed:", error);
-      showSkillUploadError(error);
+      setSkillUrlImportError(error);
     } finally {
       setSkillSaving(false);
     }
@@ -5128,15 +5154,46 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         okText={t("admin.memorySkillImportApply")}
         cancelText={t("common.cancel")}
         destroyOnClose
+        confirmLoading={skillSaving}
+        cancelButtonProps={{ disabled: skillSaving }}
+        closable={!skillSaving}
+        maskClosable={!skillSaving}
+        keyboard={!skillSaving}
         onOk={handleConfirmSkillUrlImport}
-        onCancel={() => setSkillUrlImportOpen(false)}
+        onCancel={() => {
+          if (!skillSaving) setSkillUrlImportOpen(false);
+        }}
       >
+        <p id="skill-url-import-help">{t("admin.memorySkillImportUrlHelp")}</p>
+        <label htmlFor="skill-url-import-input">{t("admin.memorySkillUploadRepoLabel")}</label>
         <Input
+          id="skill-url-import-input"
+          aria-describedby={skillUrlImportError ? "skill-url-import-help skill-url-import-error" : "skill-url-import-help"}
+          aria-invalid={Boolean(skillUrlImportError)}
+          disabled={skillSaving}
+          status={skillUrlImportError ? "error" : undefined}
           value={skillUrlImportDraft}
           placeholder={t("admin.memorySkillCreateImportPlaceholder")}
-          onChange={(event) => setSkillUrlImportDraft(event.target.value)}
+          onChange={(event) => {
+            setSkillUrlImportDraft(event.target.value);
+            setSkillUrlImportError(null);
+          }}
           onPressEnter={handleConfirmSkillUrlImport}
         />
+        {Boolean(skillUrlImportError) && (
+          <Alert
+            id="skill-url-import-error"
+            style={{ marginTop: 16 }}
+            type="error"
+            showIcon
+            message={getSkillUploadErrorMessage(skillUrlImportError)}
+            action={isSkillPackageTooLargeError(skillUrlImportError) ? (
+              <Button onClick={installSkillUrlInChat}>
+                {t("admin.memorySkillImportGoToChat")}
+              </Button>
+            ) : undefined}
+          />
+        )}
       </Modal>
 
       <SkillShareCenterModal

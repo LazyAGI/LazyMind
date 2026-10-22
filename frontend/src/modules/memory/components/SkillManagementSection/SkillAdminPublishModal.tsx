@@ -1,9 +1,13 @@
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useState } from "react";
-import { Button, Input, Modal, Tabs, Upload, message } from "antd";
+import { useNavigate } from "react-router-dom";
+import { Alert, Button, Input, Modal, Tabs, Upload, message } from "antd";
 import { DeleteOutlined, InboxOutlined, PaperClipOutlined } from "@ant-design/icons";
 import { publishSkillToMarket } from "../../skillApi";
 import { uploadSkillTempFile } from "../../skillUpload";
+import { isSkillPackageTooLargeError, isSkillSourceAmbiguousError } from "../../skillUploadError";
+import { useChatInputStore } from "@/modules/chat/store/chatInput";
+import { CHAT_HOME_PATH } from "@/modules/chat/constants/chat";
 
 interface SkillAdminPublishModalProps {
   open: boolean;
@@ -16,43 +20,24 @@ type PublishMethod = "url" | "file";
 
 const MAX_SKILL_PACKAGE_SIZE = 512 * 1024 * 1024;
 
-const normalizeRepositoryArchiveUrl = (rawUrl: string) => {
-  const value = rawUrl.trim();
-  try {
-    const url = new URL(value);
-    if (url.hostname.toLowerCase() !== "github.com") {
-      return value;
-    }
-    const pathParts = url.pathname.split("/").filter(Boolean);
-    if (pathParts.length !== 2) {
-      return value;
-    }
-    const [owner, rawRepository] = pathParts;
-    const repository = rawRepository.replace(/\.git$/i, "");
-    if (!owner || !repository) {
-      return value;
-    }
-    return `https://github.com/${owner}/${repository}/archive/HEAD.zip`;
-  } catch {
-    return value;
-  }
-};
-
 export default function SkillAdminPublishModal({
   open,
   t,
   onClose,
   onPublished,
 }: SkillAdminPublishModalProps) {
+  const navigate = useNavigate();
   const [publishMethod, setPublishMethod] = useState<PublishMethod>("url");
   const [repoUrl, setRepoUrl] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [urlImportError, setUrlImportError] = useState<unknown>(null);
 
   const resetForm = () => {
     setPublishMethod("url");
     setRepoUrl("");
     setSelectedFile(null);
+    setUrlImportError(null);
   };
 
   const handleClose = () => {
@@ -64,12 +49,22 @@ export default function SkillAdminPublishModal({
     setSelectedFile(null);
   };
 
+  const installUrlInChat = () => {
+    useChatInputStore.getState().setModeDraft({
+      text: t("admin.memorySkillImportChatPrompt", { url: repoUrl.trim() }),
+      mentions: [],
+      files: [],
+    });
+    handleClose();
+    navigate(CHAT_HOME_PATH);
+  };
+
   const handleSubmit = async () => {
     if (submitting) {
       return;
     }
 
-    const normalizedRepoUrl = normalizeRepositoryArchiveUrl(repoUrl);
+    const normalizedRepoUrl = repoUrl.trim();
     if (publishMethod === "url" && !normalizedRepoUrl) {
       message.warning(t("admin.memorySkillAdminPublishUrlMissing"));
       return;
@@ -78,6 +73,7 @@ export default function SkillAdminPublishModal({
       message.warning(t("admin.memorySkillAdminPublishFileMissing"));
       return;
     }
+    setUrlImportError(null);
     setSubmitting(true);
     try {
       if (publishMethod === "file" && selectedFile) {
@@ -88,7 +84,7 @@ export default function SkillAdminPublishModal({
       } else {
         await publishSkillToMarket({
           source: { type: "url", url: normalizedRepoUrl },
-        });
+        }, { silentError: true });
       }
 
       await onPublished();
@@ -96,7 +92,9 @@ export default function SkillAdminPublishModal({
       handleClose();
     } catch (error) {
       console.error("Admin publish skill failed:", error);
-      if ((error as { response?: { status?: number } })?.response?.status === 409) {
+      if (publishMethod === "url" && (isSkillPackageTooLargeError(error) || isSkillSourceAmbiguousError(error))) {
+        setUrlImportError(error);
+      } else if ((error as { response?: { status?: number } })?.response?.status === 409) {
         message.error(t("admin.memorySkillAdminPublishDuplicate"));
       } else {
         message.error(getLocalizedErrorMessage(error));
@@ -110,9 +108,14 @@ export default function SkillAdminPublishModal({
     <Modal
       open={open}
       title={t("admin.memorySkillAdminPublishTitle")}
-      onCancel={handleClose}
+      onCancel={() => {
+        if (!submitting) handleClose();
+      }}
+      closable={!submitting}
+      keyboard={!submitting}
+      maskClosable={!submitting}
       footer={[
-        <Button key="cancel" onClick={handleClose}>
+        <Button key="cancel" disabled={submitting} onClick={handleClose}>
           {t("common.cancel")}
         </Button>,
         <Button key="submit" type="primary" loading={submitting} onClick={() => void handleSubmit()}>
@@ -126,26 +129,54 @@ export default function SkillAdminPublishModal({
       <div className="memory-skill-admin-publish-form">
         <Tabs
           activeKey={publishMethod}
-          onChange={(key) => setPublishMethod(key as PublishMethod)}
+          onChange={(key) => {
+            setPublishMethod(key as PublishMethod);
+            setUrlImportError(null);
+          }}
           items={[
             {
               key: "url",
+              disabled: submitting,
               label: t("admin.memorySkillAdminPublishMethodLink"),
               children: (
                 <div className="memory-skill-field">
                   <label htmlFor="adminSkillUrlInput">{t("admin.memorySkillUploadRepoLabel")}</label>
                   <Input
                     id="adminSkillUrlInput"
+                    aria-describedby={urlImportError ? "admin-skill-url-help admin-skill-url-error" : "admin-skill-url-help"}
+                    aria-invalid={Boolean(urlImportError)}
+                    disabled={submitting}
+                    status={urlImportError ? "error" : undefined}
                     value={repoUrl}
                     maxLength={2048}
-                    onChange={(event) => setRepoUrl(event.target.value)}
+                    onChange={(event) => {
+                      setRepoUrl(event.target.value);
+                      setUrlImportError(null);
+                    }}
                     placeholder={t("admin.memorySkillUploadRepoPlaceholder")}
                   />
+                  <p id="admin-skill-url-help">{t("admin.memorySkillImportUrlHelp")}</p>
+                  {Boolean(urlImportError) && (
+                    <Alert
+                      id="admin-skill-url-error"
+                      type="error"
+                      showIcon
+                      message={t(isSkillPackageTooLargeError(urlImportError)
+                        ? "admin.memorySkillImportTooLarge"
+                        : "admin.memorySkillImportMultipleSkills")}
+                      action={isSkillPackageTooLargeError(urlImportError) ? (
+                        <Button onClick={installUrlInChat}>
+                          {t("admin.memorySkillImportGoToChat")}
+                        </Button>
+                      ) : undefined}
+                    />
+                  )}
                 </div>
               ),
             },
             {
               key: "file",
+              disabled: submitting,
               label: t("admin.memorySkillAdminPublishMethodPackage"),
               children: (
                 <div className="memory-skill-admin-package-panel">

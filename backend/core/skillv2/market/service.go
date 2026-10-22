@@ -880,6 +880,11 @@ func (s *Service) filesFromSource(ctx context.Context, source SourceInput) (map[
 		return nil, err
 	}
 	files := pkg.Files
+	if sourceType == "url" {
+		if err := skillpackage.NormalizeSkillDocument(files); err != nil {
+			return nil, err
+		}
+	}
 	if _, ok := files["SKILL.md"]; !ok {
 		return nil, fmt.Errorf("skill package must contain SKILL.md")
 	}

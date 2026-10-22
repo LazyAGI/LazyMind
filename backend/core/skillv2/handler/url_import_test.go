@@ -125,14 +125,26 @@ func TestNormalizeSkillImportURL(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "GitHub tree missing path",
+			name:    "GitHub tree branch root",
 			rawURL:  "https://github.com/example/skills/tree/main",
-			wantErr: true,
+			wantURL: "https://github.com/example/skills/archive/" + mainCommit + ".zip",
 		},
 		{
 			name:    "GitHub URL with query",
 			rawURL:  "https://github.com/example/skills?download=1",
-			wantErr: true,
+			wantURL: "https://github.com/example/skills/archive/" + mainCommit + ".zip",
+		},
+		{
+			name:       "GitHub document page with query and fragment",
+			rawURL:     "https://github.com/example/skills/blob/main/skills/target/SKILL.md?plain=1#usage",
+			wantURL:    "https://github.com/example/skills/archive/" + mainCommit + ".zip",
+			wantPrefix: "skills/target",
+		},
+		{
+			name:       "GitHub raw document",
+			rawURL:     "https://raw.githubusercontent.com/example/skills/main/skills/target/SKILL.md",
+			wantURL:    "https://github.com/example/skills/archive/" + mainCommit + ".zip",
+			wantPrefix: "skills/target",
 		},
 		{
 			name:    "SkillHub URL missing slug",

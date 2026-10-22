@@ -1217,7 +1217,15 @@ func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, 
 		if s.downloader == nil {
 			return sourcePackage{}, "", "", fmt.Errorf("downloader is not configured")
 		}
-		downloaded, err := s.downloader.Download(ctx, source.URL)
+		var downloaded DownloadedZip
+		var err error
+		if downloader, ok := s.downloader.(interface {
+			DownloadSource(context.Context, SourceInput) (DownloadedZip, error)
+		}); ok {
+			downloaded, err = downloader.DownloadSource(ctx, source)
+		} else {
+			downloaded, err = s.downloader.Download(ctx, source.URL)
+		}
 		if err != nil {
 			return sourcePackage{}, "", "", err
 		}
@@ -1225,13 +1233,28 @@ func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, 
 			defer downloaded.Cleanup()
 		}
 		var pkg skillpackage.Package
-		if source.PathPrefix != "" {
-			pkg, err = skillpackage.ReadZipSubdirectory(downloaded.Path, source.PathPrefix)
+		prefix := source.PathPrefix
+		if downloaded.PathPrefix != nil {
+			prefix = *downloaded.PathPrefix
+		}
+		originalURL := source.SourceURL
+		if originalURL == "" {
+			originalURL = source.URL
+		}
+		parsedSource, _ := url.Parse(originalURL)
+		githubSource, githubRepository, _ := skillsourceurl.ResolveGitHubPageURLFromResolvedArchive(parsedSource, source.URL)
+		if githubRepository && downloaded.PathPrefix == nil && !(githubSource.ExplicitDirectory && prefix == "") {
+			pkg, err = skillpackage.ReadGitHubZip(downloaded.Path, prefix)
+		} else if prefix != "" {
+			pkg, err = skillpackage.ReadZipSubdirectory(downloaded.Path, prefix)
 		} else {
 			pkg, err = skillpackage.ReadZip(downloaded.Path)
 		}
 		if err != nil {
 			return sourcePackage{}, "", "", err
+		}
+		if downloaded.PackageRoot != "" {
+			pkg.PackageRoot = downloaded.PackageRoot
 		}
 		ensureURLImportDefaults(pkg.Files)
 		sourceRef := source.SourceURL

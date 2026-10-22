@@ -33,12 +33,19 @@ const (
 	CodeFrontmatterYAMLInvalid = "frontmatter_yaml_invalid"
 	CodeInvalidSkillName       = "invalid_skill_name"
 	CodeDescriptionTooLong     = "description_too_long"
+	CodeGitHubMultipleSkills   = "github_multiple_skills"
 )
 
 type Semantic struct {
 	Status  int
 	Code    string
 	Message string
+}
+
+func (s Semantic) Error() string { return s.Message }
+
+func New(status int, code, message string) error {
+	return Semantic{Status: status, Code: code, Message: message}
 }
 
 func Reply(w http.ResponseWriter, message string, status int) {
@@ -67,6 +74,11 @@ func ReplySemantic(w http.ResponseWriter, sem Semantic) {
 }
 
 func ForError(err error) Semantic {
+	var semantic Semantic
+	if errors.As(err, &semantic) {
+		semantic.Message = err.Error()
+		return semantic
+	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return Semantic{Status: http.StatusNotFound, Code: CodeNotFound, Message: err.Error()}
 	}
@@ -91,6 +103,8 @@ func statusForMessage(message string) int {
 		return http.StatusBadRequest
 	}
 	switch {
+	case strings.Contains(msg, "skill package") && (strings.Contains(msg, "exceeds") || strings.Contains(msg, "too many entries")):
+		return http.StatusRequestEntityTooLarge
 	case strings.Contains(msg, "not found"):
 		return http.StatusNotFound
 	case strings.Contains(msg, "another user"), strings.Contains(msg, "not for target user"),
@@ -130,6 +144,8 @@ func codeForMessage(message string, status int) string {
 		return CodeInternal
 	case importCode != "":
 		return importCode
+	case strings.Contains(msg, "github repository contains multiple skills"):
+		return CodeGitHubMultipleSkills
 	case strings.Contains(msg, "unsafe path"), strings.Contains(msg, "invalid path"),
 		strings.Contains(msg, "path is required"):
 		return CodeInvalidPath

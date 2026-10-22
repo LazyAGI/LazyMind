@@ -1318,7 +1318,7 @@ export async function createSkillAsset(
 
   const response = await skillsApi.apiCoreSkillsPost(
     { skillCreateManagedOpenAPIRequest: request },
-    options?.silentError ? ({ silentError: true } as never) : undefined,
+    { timeout: 300_000, silentError: options?.silentError } as never,
   );
   const body = unwrapEnvelope<{ skill_id?: string }>(response.data);
   return body.skill_id || "";
@@ -2149,6 +2149,7 @@ export async function getSkillMarketItem(
 
 export async function publishSkillToMarket(
   payload: PublishSkillToMarketPayload,
+  options?: { silentError?: boolean },
 ): Promise<{ marketItemId: string; sourceSkillId: string }> {
   const response = await skillMarketApi.apiCoreSkillMarketAdminItemsPost({
     marketPublishOpenAPIRequest: {
@@ -2158,7 +2159,10 @@ export async function publishSkillToMarket(
           ? { type: "uploaded_zip", upload_id: payload.source.uploadId }
           : { type: "url", url: payload.source.url },
     },
-  });
+  }, {
+    timeout: 300_000,
+    ...(options?.silentError ? { silentError: true } : {}),
+  } as never);
   const body = unwrapEnvelope<{ market_item_id?: string; source_skill_id?: string }>(
     response.data,
   );

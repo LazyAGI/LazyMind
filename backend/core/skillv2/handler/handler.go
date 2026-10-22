@@ -35,6 +35,7 @@ import (
 	skillsearch "lazymind/core/skillv2/search"
 	skillservice "lazymind/core/skillv2/service"
 	skillshare "lazymind/core/skillv2/share"
+	skillpackage "lazymind/core/skillv2/skillpackage"
 	skillurl "lazymind/core/skillv2/sourceurl"
 	"lazymind/core/skillv2/taskguard"
 	"lazymind/core/store"
@@ -1709,7 +1710,7 @@ func (s skillSourceRequest) toServiceSource(ctx context.Context) (skillservice.S
 		if err != nil {
 			return skillservice.SourceInput{}, err
 		}
-		return skillservice.SourceInput{Type: "url", URL: downloadURL, SourceURL: strings.TrimSpace(s.URL), PathPrefix: pathPrefix}, nil
+		return skillservice.SourceInput{Type: "url", URL: downloadURL, SourceURL: strings.TrimSpace(s.URL), PathPrefix: pathPrefix, PathPrefixResolved: true}, nil
 	default:
 		return skillservice.SourceInput{}, fmt.Errorf("unsupported source type %q", sourceType)
 	}
@@ -1734,7 +1735,7 @@ func normalizeSkillImportURLWithResolver(ctx context.Context, rawURL string, cli
 	if matched {
 		return resolution.DownloadURL, "", nil
 	}
-	githubResolution, matched, resolveErr := skillurl.ResolveGitHubPageURL(ctx, parsed, client, apiBaseURL)
+	githubResolution, matched, resolveErr := skillurl.ResolveGitHubImportURL(ctx, parsed, client, apiBaseURL)
 	if resolveErr != nil {
 		return "", "", skillImportURLValidationError(resolveErr.Error())
 	}
@@ -2255,11 +2256,57 @@ const maxSkillDownloadBytes = skillservice.MaxSkillDownloadBytes
 type marketHTTPZipDownloader struct{}
 
 func (marketHTTPZipDownloader) Download(ctx context.Context, rawURL string) (string, error) {
-	downloaded, err := (httpZipDownloader{}).Download(ctx, rawURL)
+	rawURL = strings.TrimSpace(rawURL)
+	downloadURL, prefix, err := normalizeSkillImportURL(ctx, rawURL)
 	if err != nil {
 		return "", err
 	}
-	return downloaded.Path, nil
+	downloaded, err := (httpZipDownloader{}).DownloadSource(ctx, skillservice.SourceInput{
+		Type: "url", URL: downloadURL, SourceURL: rawURL, PathPrefix: prefix, PathPrefixResolved: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	// Directory downloads already contain a standalone Skill. The market service
+	// takes ownership of their temporary ZIP and removes it after reading.
+	if downloaded.PathPrefix != nil {
+		return downloaded.Path, nil
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		if downloaded.Cleanup != nil {
+			downloaded.Cleanup()
+		}
+		return "", err
+	}
+	resolution, github, err := skillurl.ResolveGitHubPageURLFromResolvedArchive(parsed, downloadURL)
+	if err != nil {
+		if downloaded.Cleanup != nil {
+			downloaded.Cleanup()
+		}
+		return "", err
+	}
+	if !github {
+		return downloaded.Path, nil
+	}
+	if downloaded.Cleanup != nil {
+		defer downloaded.Cleanup()
+	}
+	var pkg skillpackage.Package
+	if prefix == "" && resolution.ExplicitDirectory {
+		pkg, err = skillpackage.ReadZip(downloaded.Path)
+		if err == nil {
+			err = skillpackage.NormalizeSkillDocument(pkg.Files)
+		}
+	} else {
+		pkg, err = skillpackage.ReadGitHubZip(downloaded.Path, prefix)
+	}
+	if err != nil {
+		return "", err
+	}
+	// Archive fallback may contain many Skills; repack only the selected one so
+	// market.filesFromSource receives the same standalone layout as directory mode.
+	return skillpackage.WriteZip(pkg.Files, "")
 }
 
 func writeInlineSkillZip(content string) (string, error) {
