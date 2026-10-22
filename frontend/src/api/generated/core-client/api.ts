@@ -708,10 +708,25 @@ export interface BuiltinSkillOpenAPIResponse {
     'category': string;
     'content': string;
     'description': string;
+    /**
+     * Localized marketplace introduction, independent of SKILL.md.
+     */
+    'display_description'?: string;
+    'display_locale'?: string;
+    /**
+     * Localized marketplace title; canonical name remains unchanged.
+     */
+    'display_name'?: string;
     'installed': boolean;
     'installed_skill_id'?: string;
     'name': string;
     'provider'?: string;
+    /**
+     * Marketplace search text across all localized names and introductions, independent of display locale.
+     */
+    'search_text'?: string;
+    'tag_labels'?: { [key: string]: string; };
+    'tags'?: Array<string>;
 }
 export interface BulkUpdateServerEnabledRequest {
     'enabled'?: boolean;
@@ -4773,8 +4788,11 @@ export interface MarketEditOpenAPIRequest {
      */
     'category'?: string;
     'description'?: string;
+    'display_description'?: string;
+    'display_name'?: string;
     'name'?: string;
     'source'?: SkillSourceOpenAPIRequest;
+    'tag_labels'?: { [key: string]: string; };
     /**
      * Marketplace discovery tags.
      */
@@ -4789,6 +4807,9 @@ export interface MarketInstallOpenAPIResponse {
 }
 export interface MarketItemOpenAPIResponse {
     'created_at'?: string;
+    'display_description'?: string;
+    'display_locale'?: string;
+    'display_name'?: string;
     'icon'?: string;
     'id'?: string;
     'installed'?: boolean;
@@ -4799,6 +4820,7 @@ export interface MarketItemOpenAPIResponse {
     'source'?: SkillDetailOpenAPIResponse;
     'source_skill_id'?: string;
     'status'?: string;
+    'tag_labels'?: { [key: string]: string; };
     'tags'?: Array<string>;
     'updated_at'?: string;
     'version_note'?: string;
@@ -4815,10 +4837,22 @@ export interface MarketPublishOpenAPIRequest {
      */
     'category'?: string;
     /**
+     * Chinese marketplace introduction; does not modify the source package.
+     */
+    'display_description'?: string;
+    /**
+     * Chinese marketplace title; does not rename the source skill.
+     */
+    'display_name'?: string;
+    /**
      * Deprecated and ignored; the skill name is read from SKILL.md.
      */
     'name'?: string;
     'source': SkillSourceOpenAPIRequest;
+    /**
+     * Chinese labels keyed by canonical marketplace tag value.
+     */
+    'tag_labels'?: { [key: string]: string; };
     /**
      * Marketplace discovery tags.
      */
@@ -4827,6 +4861,10 @@ export interface MarketPublishOpenAPIRequest {
 export interface MarketPublishOpenAPIResponse {
     'market_item_id': string;
     'source_skill_id': string;
+}
+export interface MarketTagsOpenAPIResponse {
+    'tag_labels'?: { [key: string]: string; };
+    'tags'?: Array<string>;
 }
 export interface McpDeleteServerOpenAPIResponse {
     'id': string;
@@ -53262,7 +53300,7 @@ export const SkillMarketApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreSkillMarketTagsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillTagsOpenAPIResponse>> {
+        async apiCoreSkillMarketTagsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<MarketTagsOpenAPIResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillMarketTagsGet(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['SkillMarketApi.apiCoreSkillMarketTagsGet']?.[localVarOperationServerIndex]?.url;
@@ -53403,7 +53441,7 @@ export const SkillMarketApiFactory = function (configuration?: Configuration, ba
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSkillMarketTagsGet(options?: RawAxiosRequestConfig): AxiosPromise<SkillTagsOpenAPIResponse> {
+        apiCoreSkillMarketTagsGet(options?: RawAxiosRequestConfig): AxiosPromise<MarketTagsOpenAPIResponse> {
             return localVarFp.apiCoreSkillMarketTagsGet(options).then((request) => request(axios, basePath));
         },
     };

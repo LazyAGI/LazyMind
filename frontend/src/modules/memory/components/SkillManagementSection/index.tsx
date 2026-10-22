@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Input, message, Modal, Popover, Select, Tooltip } from "antd";
@@ -18,7 +19,7 @@ import {
   installSkillFromMarket,
   listBuiltinSkills,
   listSkillMarketPage,
-  listSkillMarketTags,
+  listSkillMarketTagCatalog,
   organizeSkills,
   type SkillOrganizeDepth,
   type SkillOrganizeTaskStatus,
@@ -65,6 +66,7 @@ function describeSkillOrganizeError(
 }
 
 export default function SkillManagementSection() {
+  const { i18n } = useTranslation();
   const listContentRef = useRef<HTMLDivElement>(null);
   const marketRequestIdRef = useRef(0);
   const organizePollingControllerRef = useRef<AbortController | null>(null);
@@ -109,6 +111,9 @@ export default function SkillManagementSection() {
   const [marketCatalogAssets, setMarketCatalogAssets] = useState<MarketSkillAsset[]>([]);
   const [marketTags, setMarketTags] = useState<string[]>([]);
   // Use a ref for the builtin cache so updating it never triggers useCallback/useEffect rebuilds.
+  const marketLocale = i18n.resolvedLanguage || i18n.language;
+  const marketBuiltinLocaleRef = useRef(marketLocale);
+  const [marketTagLabels, setMarketTagLabels] = useState<Record<string, string>>({});
   const marketBuiltinCacheRef = useRef<MarketSkillAsset[]>([]);
   // Keep a state copy only for rendering (installedSkills comparison in SkillMarketView).
   const [marketBuiltinAssets, setMarketBuiltinAssets] = useState<MarketSkillAsset[]>([]);
@@ -239,16 +244,22 @@ export default function SkillManagementSection() {
   }, [debouncedMarketKeyword, marketCategory, marketSkillSource, marketListPageSize]);
 
   const ensureMarketBuiltins = useCallback(async (forceRefresh = false) => {
+    if (marketBuiltinLocaleRef.current !== marketLocale) {
+      marketBuiltinCacheRef.current = [];
+      marketBuiltinLocaleRef.current = marketLocale;
+    }
     if (!forceRefresh && marketBuiltinCacheRef.current.length) {
       return marketBuiltinCacheRef.current;
     }
     const records = await listBuiltinSkills();
     const assets = records.map(mapMarketSkillRecordToAsset);
-    marketBuiltinCacheRef.current = assets;
-    setMarketBuiltinAssets(assets);
+    if (marketBuiltinLocaleRef.current === marketLocale) {
+      marketBuiltinCacheRef.current = assets;
+      setMarketBuiltinAssets(assets);
+    }
     return assets;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [marketLocale]);
 
   const loadMarketCatalog = useCallback(async (forceRefreshBuiltins = false) => {
     const requestId = ++marketRequestIdRef.current;
@@ -358,12 +369,16 @@ export default function SkillManagementSection() {
 
   const loadMarketTags = useCallback(async () => {
     try {
-      setMarketTags(await listSkillMarketTags());
+      const catalog = await listSkillMarketTagCatalog();
+      if (marketBuiltinLocaleRef.current !== marketLocale) return;
+      setMarketTags(catalog.tags);
+      setMarketTagLabels(catalog.tagLabels);
     } catch (error) {
       console.error("Load skill plaza tags failed:", error);
       setMarketTags([]);
+      setMarketTagLabels({});
     }
-  }, []);
+  }, [marketLocale]);
 
   useEffect(() => {
     if (skillView !== "market") {
@@ -967,7 +982,7 @@ export default function SkillManagementSection() {
                 }}
               >
                 {renderSkillCategoryIcon(item)}
-                {item}
+                {marketTagLabels[item] || marketBuiltinAssets.find((asset) => asset.tag_labels?.[item])?.tag_labels?.[item] || item}
               </button>
             ))}
           </div>

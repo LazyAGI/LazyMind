@@ -15,6 +15,19 @@ function Editor({ onSave }: { onSave: (draft: unknown) => void }) {
 }
 
 describe("Skill metadata editor", () => {
+  it("shows full market presentation in read-only detail while preserving source metadata", () => {
+    const description = "用于分析网页和提取内容的完整中文说明".repeat(20);
+    const draft = createStructuredDraft({...asset, display_name: "网页助手", display_description: description, tag_labels: {academic: "学术"}});
+    render(<MemoryDraftModal t={(key: string) => key} modalOpen modalTitle="detail" closeModal={vi.fn()}
+      saveDraft={vi.fn()} activeTab="skills" glossarySaving={false} skillSaving={false}
+      isReadOnly draft={draft} setDraft={vi.fn()} pendingGlossaryMergeSourceIds={[]} modalMode="view"
+      tagOptions={[]} normalizeTagValues={normalizeTagValues} handleImportSkillPackage={vi.fn()} />);
+    expect(screen.getByDisplayValue("网页助手")).toBeInTheDocument();
+    expect(screen.getByDisplayValue(description)).toBeInTheDocument();
+    expect(screen.getByText("学术")).toBeInTheDocument();
+    expect(draft.name).toBe("writer");
+    expect(draft.content).toBe("# Steps");
+  });
   it("edits the field while preserving search lists, category and execution content", async () => {
     const onSave = vi.fn();
     render(<Editor onSave={onSave} />);

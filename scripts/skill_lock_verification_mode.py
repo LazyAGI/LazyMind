@@ -1,5 +1,6 @@
 """Select the existing Skill lock verification mode for a pull request."""
 import json
+import re
 import subprocess
 import sys
 
@@ -20,7 +21,11 @@ def remote_source_sections(text):
         end += 1
     if any(char in ''.join(lines[start:end]) for char in '&*!'):
         return None
-    return ''.join(lines[:start] + lines[end:])
+    # Stable presentation bindings do not affect remote archives. Only ignore
+    # simple scalar fields; unfamiliar YAML stays conservative.
+    remaining = lines[:start] + lines[end:]
+    return ''.join(line for line in remaining if not re.fullmatch(
+        r'    presentation_id: [A-Za-z0-9_.-]+\s*', line))
 
 
 def remote_lock(text):

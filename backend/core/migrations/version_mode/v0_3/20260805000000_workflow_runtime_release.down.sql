@@ -1,3 +1,6 @@
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE skill_market_items DROP COLUMN display_i18n;
+
 -- Restore only migration-owned associations. New custom suppliers remain as
 -- independent legacy providers; their technical name is restored for old code,
 -- with their display name retained on the private credential/model store.

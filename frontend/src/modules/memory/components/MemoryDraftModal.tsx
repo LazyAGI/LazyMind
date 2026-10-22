@@ -1,3 +1,4 @@
+import { getMarketDisplayName, getMarketDisplayDescription } from "./SkillManagementSection/skillMarketMockData";
 import { useState } from "react";
 import {
   Alert,
@@ -260,7 +261,7 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
           <div className="memory-form-field memory-form-field-full memory-char-count">
             <label>{t("admin.memoryName")}</label>
             <Input
-              value={draft.name}
+              value={isReadOnly ? getMarketDisplayName(draft) : draft.name}
               readOnly={isReadOnly}
               status={skillNameTooLong ? "error" : undefined}
               styles={{ count: SKILL_CHAR_COUNT_STYLE }}
@@ -282,7 +283,7 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
                 minRows: isSkillCreateModal ? 2 : 3,
                 maxRows: isSkillCreateModal ? 4 : 6,
               }}
-              value={draft.description}
+              value={isReadOnly ? getMarketDisplayDescription(draft) : draft.description}
               readOnly={isReadOnly}
               status={skillDescriptionTooLong ? "error" : undefined}
               styles={{ count: SKILL_CHAR_COUNT_STYLE }}
@@ -343,7 +344,7 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
                       tags: normalizedTags.slice(0, SKILL_TAG_MAX_COUNT),
                     }));
                   }}
-                  options={tagOptions}
+                  options={isReadOnly && draft.tag_labels ? draft.tags.map((value: string) => ({ value, label: draft.tag_labels?.[value] || value })) : tagOptions}
                 />
                 {!isSkillCreateModal ? (
                   <span className="memory-form-hint">
@@ -379,7 +380,7 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
                     style={{ width: "100%" }}
                     value={draft[field] || []}
                     disabled={isReadOnly}
-                    options={field === "tags" ? tagOptions : []}
+                    options={field === "tags" ? isReadOnly && draft.tag_labels ? draft.tags.map((value: string) => ({ value, label: draft.tag_labels?.[value] || value })) : tagOptions : []}
                     onChange={(value: string[]) =>
                       setDraft((previous: any) => ({ ...previous, [field]: normalizeTagValues(value) }))
                     }

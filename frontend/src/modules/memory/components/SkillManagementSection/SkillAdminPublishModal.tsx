@@ -45,6 +45,8 @@ export default function SkillAdminPublishModal({
   onPublished,
 }: SkillAdminPublishModalProps) {
   const [publishMethod, setPublishMethod] = useState<PublishMethod>("url");
+  const [displayName, setDisplayName] = useState("");
+  const [displayDescription, setDisplayDescription] = useState("");
   const [repoUrl, setRepoUrl] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -52,6 +54,8 @@ export default function SkillAdminPublishModal({
   const resetForm = () => {
     setPublishMethod("url");
     setRepoUrl("");
+    setDisplayName("");
+    setDisplayDescription("");
     setSelectedFile(null);
   };
 
@@ -78,15 +82,22 @@ export default function SkillAdminPublishModal({
       message.warning(t("admin.memorySkillAdminPublishFileMissing"));
       return;
     }
+    if (!displayName.trim() || !displayDescription.trim()) {
+      message.warning(t("admin.memorySkillMarketDisplayRequired"));
+      return;
+    }
+    const presentation = { display_name: displayName.trim(), display_description: displayDescription.trim(), display_locale: "zh-CN" };
     setSubmitting(true);
     try {
       if (publishMethod === "file" && selectedFile) {
         const upload = await uploadSkillTempFile(selectedFile);
         await publishSkillToMarket({
+          ...presentation,
           source: { type: "uploaded_zip", uploadId: upload.uploadId },
         });
       } else {
         await publishSkillToMarket({
+          ...presentation,
           source: { type: "url", url: normalizedRepoUrl },
         });
       }
@@ -124,6 +135,14 @@ export default function SkillAdminPublishModal({
     >
       <p className="memory-skill-admin-publish-desc">{t("admin.memorySkillAdminPublishDesc")}</p>
       <div className="memory-skill-admin-publish-form">
+        <div className="memory-skill-field">
+          <label htmlFor="marketDisplayName">{t("admin.memorySkillMarketDisplayName")}</label>
+          <Input id="marketDisplayName" value={displayName} maxLength={200} onChange={(event) => setDisplayName(event.target.value)} aria-required="true" />
+        </div>
+        <div className="memory-skill-field">
+          <label htmlFor="marketDisplayDescription">{t("admin.memorySkillMarketDisplayDescription")}</label>
+          <Input.TextArea id="marketDisplayDescription" value={displayDescription} maxLength={2000} onChange={(event) => setDisplayDescription(event.target.value)} aria-required="true" autoSize={{ minRows: 2, maxRows: 6 }} />
+        </div>
         <Tabs
           activeKey={publishMethod}
           onChange={(key) => setPublishMethod(key as PublishMethod)}

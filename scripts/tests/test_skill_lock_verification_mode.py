@@ -66,6 +66,11 @@ class SkillLockVerificationModeTests(unittest.TestCase):
         self.write('skills/search/demo/SKILL.md', 'updated local skill')
         self.assertEqual(self.mode(), 'local')
 
+    def test_presentation_only_change_stays_local(self):
+        self.write('skills/marketplace/locales.yaml', 'schema_version: 1')
+        self.write('skills/builtin-sources.yaml', SOURCES.replace('    category: search', '    category: search\n    presentation_id: stable'))
+        self.assertEqual(self.mode(), 'local')
+
     def test_remote_lock_change_requires_full_verification(self):
         self.lock['skills'][1]['tree_sha256'] = 'changed'
         self.write_lock()

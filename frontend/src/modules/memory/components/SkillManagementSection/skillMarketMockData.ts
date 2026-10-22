@@ -23,6 +23,11 @@ export const getMarketSource = (item: StructuredAsset): "builtin" | "admin" | "p
 export const mapMarketSkillRecordToAsset = (
   item: MarketSkillRecord,
 ): MarketSkillAsset => ({
+  search_text: item.search_text,
+  display_name: item.display_name,
+  display_description: item.display_description,
+  display_locale: item.display_locale,
+  tag_labels: item.tag_labels,
   id: item.id,
   name: item.name,
   description: item.description,
@@ -41,3 +46,6 @@ export const mapMarketSkillRecordToAsset = (
   installedSkillId: item.installedSkillId,
   provider: item.provider,
 });
+
+export const getMarketDisplayName = (item: { name: string; display_name?: string }) => item.display_name?.trim() || item.name;
+export const getMarketDisplayDescription = (item: { description: string; display_description?: string }) => item.display_description?.trim() || item.description;

@@ -3444,3 +3444,7 @@ ON CONFLICT (cloud_issuer, cloud_account_id, local_provider_group_id) DO UPDATE 
     local_credential_revision = excluded.local_credential_revision,
     operation = 'upsert', backup_state = 'pending', attempt_count = 0,
     next_attempt_at = CURRENT_TIMESTAMP, last_error_code = 0, updated_at = CURRENT_TIMESTAMP;
+
+-- Marketplace presentation is independent from executable skill metadata.
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE skill_market_items ADD COLUMN display_i18n JSON NOT NULL DEFAULT '{}';

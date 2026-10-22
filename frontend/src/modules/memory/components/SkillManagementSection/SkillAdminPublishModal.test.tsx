@@ -5,9 +5,11 @@ import SkillAdminPublishModal from "./SkillAdminPublishModal";
 
 const skillApiMocks = vi.hoisted(() => ({
   publishSkillToMarket: vi.fn(),
+  uploadSkillTempFile: vi.fn(),
 }));
 
 vi.mock("../../skillApi", () => skillApiMocks);
+vi.mock("../../skillUpload", () => skillApiMocks);
 
 const labels: Record<string, string> = {
   "admin.memorySkillAdminPublishTitle": "管理员上架技能",
@@ -69,9 +71,16 @@ describe("SkillAdminPublishModal", () => {
       target: { value: " https://github.com/example/skill " },
     });
     fireEvent.click(screen.getByRole("button", { name: "上架技能" }));
+    expect(skillApiMocks.publishSkillToMarket).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("admin.memorySkillMarketDisplayName"), { target: { value: "网页助手" } });
+    fireEvent.change(screen.getByLabelText("admin.memorySkillMarketDisplayDescription"), { target: { value: "协助操作网页" } });
+    fireEvent.click(screen.getByRole("button", { name: "上架技能" }));
 
     await waitFor(() => {
       expect(skillApiMocks.publishSkillToMarket).toHaveBeenCalledWith({
+        display_name: "网页助手",
+        display_description: "协助操作网页",
+        display_locale: "zh-CN",
         source: {
           type: "url",
           url: "https://github.com/example/skill/archive/HEAD.zip",
@@ -80,4 +89,19 @@ describe("SkillAdminPublishModal", () => {
     });
     expect(onPublished).toHaveBeenCalledTimes(1);
   });
+  it("publishes Chinese presentation with a ZIP upload", async () => {
+    skillApiMocks.uploadSkillTempFile.mockResolvedValue({ uploadId: "upload-1" });
+    render(<SkillAdminPublishModal open t={t} onClose={vi.fn()} onPublished={vi.fn().mockResolvedValue(undefined)} />);
+    fireEvent.change(screen.getByLabelText("admin.memorySkillMarketDisplayName"), { target: { value: "GitHub 助手" } });
+    fireEvent.change(screen.getByLabelText("admin.memorySkillMarketDisplayDescription"), { target: { value: "协助管理代码仓库" } });
+    fireEvent.click(screen.getByRole("tab", { name: "本地上传" }));
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(["zip"], "skill.zip", { type: "application/zip" });
+    fireEvent.change(input, { target: { files: [file] } });
+    await waitFor(() => expect(screen.getByText("skill.zip")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "上架技能" }));
+    await waitFor(() => expect(skillApiMocks.publishSkillToMarket).toHaveBeenCalledWith({ display_name: "GitHub 助手", display_description: "协助管理代码仓库", display_locale: "zh-CN", source: { type: "uploaded_zip", uploadId: "upload-1" } }));
+    expect(skillApiMocks.uploadSkillTempFile).toHaveBeenCalledWith(file);
+  });
+
 });

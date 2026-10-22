@@ -2,286 +2,375 @@ schema_version: 1
 patch_catalog: patches/catalog.yaml
 bundled_skills:
   - uid: bsk_01KPERSONALDOCSEARCH20260923
+    presentation_id: personal-document-search
     path: search/personal-document-search
     category: search
     version: 1.0.8
     provider: LazyMind
 skills:
   - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=deep-research.zip'
+    presentation_id: deep-research
     category: research
     required_version: 1.0.0
     provider: LazyMind
   - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=single-document-review.zip'
+    presentation_id: single-document-review
     category: review
     required_version: 1.0.0
     provider: LazyMind
   - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=systematic-document-and-literature-review.zip'
+    presentation_id: systematic-document-and-literature-review
     category: review
     required_version: 1.0.0
     provider: LazyMind
   - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=paper-search.zip'
+    presentation_id: paper-search
     category: search
     required_version: 1.0.0
     provider: LazyMind
   - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=sciverse-paper-search.zip'
+    presentation_id: sciverse-paper-search
     category: search
     required_version: 1.0.0
     provider: LazyMind
   - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=humanizer.zip'
+    presentation_id: humanizer
     category: chat
     required_version: 1.0.0
     provider: 千问办公
   - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=structured-longform-writing.zip'
+    presentation_id: structured-longform-writing
     category: writing
     required_version: 1.0.0
     provider: 千问办公
   - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=feishu.zip'
+    presentation_id: feishu
     category: productivity
     required_version: 1.2.1
     provider: GitHub
   - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=vocabulary-learning.zip'
+    presentation_id: vocabulary-learning
     category: learning
     required_version: 1.5.0
     provider: LazyMind
   - source_url: https://skillhub.cn/skills/user_290ac21c/find-skill-skillhub
+    presentation_id: find-skill-skillhub
     category: search
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/beatra-ai/beatra-ai-video-studio
+    presentation_id: beatra-ai-video-studio
     category: design
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/user_14606527/superpowers-skill
+    presentation_id: superpowers-skill
     category: design
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/beatra-ai/wechat-channels-cover-maker
+    presentation_id: wechat-channels-cover-maker
     category: design
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_whtoo/self-evolving-skill
+    presentation_id: self-evolving-skill
     category: automation
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_kennyzir/capability-evolver-pro
+    presentation_id: capability-evolver-pro
     category: automation
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/user_3ca21916/video-clip-assistant
+    presentation_id: video-clip-assistant
     category: design
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_aatmaan1/agent-orchestrator
+    presentation_id: agent-orchestrator
     category: automation
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/user_2c0f1e77/seo-content-writer
+    presentation_id: seo-content-writer
     category: marketing
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/user_5953718f/self-evolution-v2
+    presentation_id: self-evolution-v2
     category: automation
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_ivangdavila/translate
+    presentation_id: translate
     category: writing
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/user_e4c892b4/govwriter-pro
+    presentation_id: govwriter-pro
     category: writing
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_fhbillwer/ws-agent-browser
+    presentation_id: ws-agent-browser
     category: data
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_1kalin/social-media-scheduler
+    presentation_id: social-media-scheduler
     category: marketing
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_enzoricciulli/adaptive-reasoning
+    presentation_id: adaptive-reasoning
     category: automation
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/laoxi/brandgeo
+    presentation_id: brandgeo
     category: research
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_jacobzwj/bilibili-hot-monitor
+    presentation_id: bilibili-hot-monitor
     category: search
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_totaleasy/crypto-self-learning
+    presentation_id: crypto-self-learning
     category: finance
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_michaelhoughtondebox/product-marketing-context
+    presentation_id: product-marketing-context
     category: marketing
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_ramensushi2026/openclaw-cli
+    presentation_id: openclaw-cli
     category: development
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_psmamm/social-media-agent
+    presentation_id: social-media-agent
     category: marketing
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_arnarsson/ssh-essentials
+    presentation_id: ssh-essentials
     category: security
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_ivangdavila/pdf-generator
+    presentation_id: pdf-generator
     category: data
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_guohongbin-git/xlsx-cn
+    presentation_id: xlsx-cn
     category: data
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_itsflow/thinking-partner
+    presentation_id: thinking-partner
     category: learning
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_xejrax/system-info
+    presentation_id: system-info
     category: data
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_chipagosfinest/language-learning
+    presentation_id: language-learning
     category: education
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/user_fcba917f/one-person-company-plus
+    presentation_id: one-person-company-plus
     category: productivity
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_tarigha/financial-calculator
+    presentation_id: financial-calculator
     category: finance
     provider: SkillHub
   # Pin the original publisher; SkillHub serves another publisher's package for this slug.
   - source_url: https://clawhub.ai/api/v1/download?slug=file-organizer-zh&ownerHandle=huangjingzhi07&version=1.0.0
+    presentation_id: file-organizer-zh
     uid: bsk_E0D17ED0B1839E52A7891792856B
     category: data
     provider: ClawHub
   - source_url: https://skillhub.cn/skills/user_0bead322/paperdown
+    presentation_id: paperdown
     category: writing
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_yejinlei/web-search-ex-skill
+    presentation_id: web-search-ex-skill
     category: search
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_gumadeiras/browsh
+    presentation_id: browsh
     category: search
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/user_b3d06a4a/duplicate-file-cleaner
+    presentation_id: duplicate-file-cleaner
     category: data
     provider: SkillHub
   # Pin the original publisher; SkillHub serves another publisher's package for this slug.
   - source_url: https://clawhub.ai/api/v1/download?slug=competitive-intelligence-market-research&ownerHandle=shashwatgtm&version=1.0.0
+    presentation_id: competitive-intelligence-market-research
     uid: bsk_E5BC6DABA0FAAD8289162068B3FB
     category: research
     provider: ClawHub
   - source_url: https://skillhub.cn/skills/clawhub_skipzhang/task-decomposer
+    presentation_id: task-decomposer
     category: project-management
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_wanng-ide/api-tester
+    presentation_id: api-tester
     category: development
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_ziad-hsn/critical-code-reviewer
+    presentation_id: critical-code-reviewer
     category: development
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_ivangdavila/devops
+    presentation_id: devops
     category: development
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_chenleiyanquan/receiving-code-review
+    presentation_id: receiving-code-review
     category: development
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_ottttto/safe-exec
+    presentation_id: safe-exec
     category: development
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_yang1002378395-cmyk/data-analyst-cn
+    presentation_id: data-analyst-cn
     category: data
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_ivangdavila/scrape
+    presentation_id: scrape
     category: search
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_dingwenbin1978/academic-paper-assistant
+    presentation_id: academic-paper-assistant
     category: writing
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_tomstools11/blog-writer
+    presentation_id: blog-writer
     category: writing
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/user_a75e6679/novel-evaluator
+    presentation_id: novel-evaluator
     category: writing
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_ivangdavila/learning
+    presentation_id: learning
     category: education
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/beatra-ai/creator-account-teardown
+    presentation_id: creator-account-teardown
     category: writing
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_aa-on-ai/web-animation-design
+    presentation_id: web-animation-design
     category: design
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_mpociot/superdesign
+    presentation_id: superdesign
     category: design
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_ide-rea/baidu-search
+    presentation_id: baidu-search
     category: search
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/org-whlskj/lskj-recommend
+    presentation_id: lskj-recommend
     category: research
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/org-mbvufw6y/bid-query-analysis-workbench
+    presentation_id: bid-query-analysis-workbench
     category: data
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_ivangdavila/code
+    presentation_id: code
     category: development
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_jk-0001/copywriting
+    presentation_id: copywriting
     category: writing
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_michaelmonetized/frontend-design-3
+    presentation_id: frontend-design-3
     category: design
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/user_2ecc1bb2/gongwenformat-pro
+    presentation_id: gongwenformat-pro
     category: writing
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/beatra-ai/hot-topic-content-maker
+    presentation_id: hot-topic-content-maker
     category: writing
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/indiv-ebandao/luban-skill-pro
+    presentation_id: luban-skill-pro
     uid: bsk_C9F5AF4B5B3845FC6F1EB196EAB5
     category: development
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_ivangdavila/market-research
+    presentation_id: market-research
     category: research
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_hopyky/self-reflection
+    presentation_id: self-reflection
     category: external
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_zlc000190/using-superpowers
+    presentation_id: using-superpowers
     category: external
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/user_5f9c21aa/gzh-explosive-content-detector
+    presentation_id: gzh-explosive-content-detector
     category: search
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/sbkj-bid/official-project
+    presentation_id: official-project
     category: search
     provider: SkillHub
   - source_url: https://github.com/AvdLee/Swift-Testing-Agent-Skill/tree/798e9b1a2bcac164d4f0c781908199e754f0bab6/swift-testing-expert
+    presentation_id: swift-testing-expert
     category: development
     provider: GitHub
   - source_url: https://github.com/Yuzzyuk/marketing-os/tree/bb67dff5f04b390e861ee11433166e4519e7f4c0/skills/marketing-os
+    presentation_id: marketing-os
     category: writing
     provider: GitHub
   - source_url: https://github.com/liyupi/yupi-skill/archive/b6157f3ca72a0c4dee0f873ad974cb61e4610c8f.zip
+    presentation_id: yupi-skill
     category: career
     provider: GitHub
   - source_url: https://github.com/mixelpixx/Konnect/tree/f58b222a196883793a5e2b237ac40f09096a3819/crates/konnect/assets/skills/konnect
+    presentation_id: konnect
     category: development
     provider: GitHub
   - source_url: https://github.com/tt-a1i/simplify-codebase/archive/5da55efcb52db690e7406f06f827a23b15da2706.zip
+    presentation_id: simplify-codebase
     category: development
     provider: GitHub
   - source_url: https://github.com/limingrui679-design/high-stakes-analytics-decision-lab/tree/af98eecf347f0d15182fc68a2349d0dabaec1de4/skills/high-stakes-analytics-decision-lab
+    presentation_id: high-stakes-analytics-decision-lab
     category: data
     provider: GitHub
   - source_url: https://github.com/Meet-Miyani/compose-skill/archive/982c240e47718b3b0525c5bbe85bf19ff0bb7bec.zip
+    presentation_id: compose-skill
     category: development
     provider: GitHub
   - source_url: https://github.com/ckelsoe/prompt-architect/tree/6c7a2c7b5a15cbb918828c7878c226a592985702/skills/prompt-architect
+    presentation_id: prompt-architect
     category: writing
     provider: GitHub
   - source_url: https://github.com/bevibing/socrates-skill/archive/becb2e51fe7ed063f5f3304cccf8da03aacef6cf.zip
+    presentation_id: socrates-skill
     category: education
     provider: GitHub
   - source_url: https://github.com/CosmoBlk/email-marketing-bible/archive/b6dd8b49c7d09ea3ca57db84b1de803c07783876.zip
+    presentation_id: email-marketing-bible
     category: writing
     provider: GitHub
   - source_url: https://github.com/leopiney/linus-torvalds-skills/tree/792d1625c776d4ebbd223fdb13e562973ab7d0bb/skills/torvalds-doctrine
+    presentation_id: torvalds-doctrine
     category: development
     provider: GitHub
   - source_url: https://github.com/tigerless-labs/design-harness/tree/9aca84e8c4721d4e7623df5f4d67153477ec40a5/plugins/design-harness/skills/design-harness
+    presentation_id: design-harness
     category: research
     provider: GitHub
   - source_url: https://github.com/arvindrk/extract-design-system/tree/1873741ba8dea755e35e6e15134f7918cd58e036/skills/extract-design-system
+    presentation_id: extract-design-system
     category: design
     provider: GitHub
   - source_url: https://github.com/PabloNAX/ultracode-skill/tree/bfa2d92488171651c6c9379a8b98f8a07d996d3c/ultracode
+    presentation_id: ultracode
     category: development
     provider: GitHub
   - source_url: https://github.com/smixs/skill-conductor/tree/3c21d2f19c336d3a3333bfe4f45eee041bd13beb/skills/skill-conductor
+    presentation_id: skill-conductor
     category: development
     provider: GitHub

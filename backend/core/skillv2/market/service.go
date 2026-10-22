@@ -68,9 +68,12 @@ type ZipDownloader interface {
 }
 
 type PublishRequest struct {
-	AdminUserID string
-	Tags        []string
-	Source      SourceInput
+	AdminUserID        string
+	Tags               []string
+	Source             SourceInput
+	DisplayName        string
+	DisplayDescription string
+	TagLabels          map[string]string
 }
 
 type SourceInput struct {
@@ -87,10 +90,13 @@ type PublishResponse struct {
 }
 
 type EditRequest struct {
-	AdminUserID  string
-	MarketItemID string
-	VersionNote  *string
-	Tags         *[]string
+	AdminUserID        string
+	MarketItemID       string
+	VersionNote        *string
+	Tags               *[]string
+	DisplayName        *string
+	DisplayDescription *string
+	TagLabels          *map[string]string
 }
 
 type EditResponse struct {
@@ -398,6 +404,7 @@ func (s *Service) Publish(ctx context.Context, req PublishRequest) (PublishRespo
 			SourceSkillID: sourceSkillID,
 			Status:        "published",
 			Tags:          tags,
+			DisplayI18n:   updateChinesePresentation(nil, &req.DisplayName, &req.DisplayDescription, &req.TagLabels),
 			CreatedBy:     &adminID,
 			UpdatedBy:     &adminID,
 			PublishedAt:   &now,
@@ -425,7 +432,16 @@ func (s *Service) Edit(ctx context.Context, req EditRequest) (EditResponse, erro
 		tags, _ := json.Marshal(normalizeMarketTags(*req.Tags))
 		updates["tags"] = tags
 	}
-	err := s.db.WithContext(ctx).Model(&skillMarketItemRow{}).Where("id = ?", req.MarketItemID).Updates(updates).Error
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var item skillMarketItemRow
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", req.MarketItemID).Take(&item).Error; err != nil {
+			return err
+		}
+		if req.DisplayName != nil || req.DisplayDescription != nil || req.TagLabels != nil {
+			updates["display_i18n"] = updateChinesePresentation(item.DisplayI18n, req.DisplayName, req.DisplayDescription, req.TagLabels)
+		}
+		return tx.Model(&skillMarketItemRow{}).Where("id = ?", req.MarketItemID).Updates(updates).Error
+	})
 	return EditResponse{MarketItemID: req.MarketItemID}, err
 }
 
@@ -1049,6 +1065,7 @@ type skillMarketItemRow struct {
 	SourceSkillID string     `gorm:"column:source_skill_id;type:varchar(36);not null"`
 	Status        string     `gorm:"column:status;type:text;not null;default:'draft'"`
 	Tags          []byte     `gorm:"column:tags;type:json;not null;default:'[]'"`
+	DisplayI18n   []byte     `gorm:"column:display_i18n;type:json;not null;default:'{}'"`
 	Icon          string     `gorm:"column:icon;type:text;not null;default:''"`
 	SortOrder     int        `gorm:"column:sort_order;not null;default:0"`
 	VersionNote   string     `gorm:"column:version_note;type:text;not null;default:''"`

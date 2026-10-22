@@ -473,12 +473,23 @@ export interface CreateSkillPayload {
 }
 
 export interface PublishSkillToMarketPayload {
+  display_name?: string;
+  display_description?: string;
+  display_locale?: string;
+  tag_labels?: Record<string, string>;
+
   source:
     | { type: "uploaded_zip"; uploadId: string }
     | { type: "url"; url: string };
 }
 
 export interface MarketSkillRecord extends SkillAssetRecord {
+  search_text?: string;
+  display_name?: string;
+  display_description?: string;
+  display_locale?: string;
+  tag_labels?: Record<string, string>;
+
   marketItemId: string;
   sourceSkillId: string;
   marketSource: "builtin" | "admin";
@@ -496,6 +507,12 @@ export interface MarketSkillListResult {
 }
 
 interface BuiltinSkillListItem {
+  search_text?: string;
+  display_name?: string;
+  display_description?: string;
+  display_locale?: string;
+  tag_labels?: Record<string, string>;
+
   builtin_skill_uid: string;
   name: string;
   description: string;
@@ -537,6 +554,10 @@ const normalizeMarketItem = (item: MarketItemOpenAPIResponse): MarketSkillRecord
 
   return {
     ...base,
+    display_name: item.display_name,
+    display_description: item.display_description,
+    display_locale: item.display_locale,
+    tag_labels: item.tag_labels,
     tags: toStringArray(item.tags),
     id: item.market_item_id || item.id || base.id,
     marketItemId: item.market_item_id || item.id || "",
@@ -1232,9 +1253,7 @@ export async function resolveSkillOrganizeApprovals(
 export async function listSkillTags(): Promise<string[]> {
   const response = await skillsApi.apiCoreSkillsTagsGet();
   const payload = unwrapEnvelope<{ tags?: string[] }>(response.data);
-  return [...new Set(toStringArray(payload.tags))].sort((left, right) =>
-    left.localeCompare(right),
-  );
+  return [...new Set(toStringArray(payload.tags))].sort((left, right) => left.localeCompare(right));
 }
 
 export async function listSkillCategories(): Promise<string[]> {
@@ -2100,18 +2119,25 @@ export async function listSkillMarketPage(options?: {
   };
 }
 
-export async function listSkillMarketTags(): Promise<string[]> {
+export async function listSkillMarketTagCatalog(): Promise<{ tags: string[]; tagLabels: Record<string, string> }> {
   const response = await skillMarketApi.apiCoreSkillMarketTagsGet();
-  const payload = unwrapEnvelope<{ tags?: string[] }>(response.data);
-  return [...new Set(toStringArray(payload.tags))].sort((left, right) =>
-    left.localeCompare(right),
-  );
+  const payload = unwrapEnvelope<{ tags?: string[]; tag_labels?: Record<string, string> }>(response.data);
+  return { tags: [...new Set(toStringArray(payload.tags))].sort((left, right) => left.localeCompare(right)), tagLabels: payload.tag_labels || {} };
+}
+
+export async function listSkillMarketTags(): Promise<string[]> {
+  return (await listSkillMarketTagCatalog()).tags;
 }
 
 export async function listBuiltinSkills(): Promise<MarketSkillRecord[]> {
   const response = await axiosInstance.get(`${coreBasePath}/builtin-skills`);
   const payload = unwrapEnvelope<{ items?: BuiltinSkillListItem[] }>(response.data);
   return (payload.items || []).map((item) => ({
+    search_text: item.search_text,
+    display_name: item.display_name,
+    display_description: item.display_description,
+    display_locale: item.display_locale,
+    tag_labels: item.tag_labels,
     id: item.builtin_skill_uid,
     skillId: item.builtin_skill_uid,
     name: item.name,
@@ -2153,6 +2179,9 @@ export async function publishSkillToMarket(
   const response = await skillMarketApi.apiCoreSkillMarketAdminItemsPost({
     marketPublishOpenAPIRequest: {
       name: "",
+      display_name: payload.display_name,
+      display_description: payload.display_description,
+      tag_labels: payload.tag_labels,
       source:
         payload.source.type === "uploaded_zip"
           ? { type: "uploaded_zip", upload_id: payload.source.uploadId }

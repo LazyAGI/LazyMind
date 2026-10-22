@@ -11,7 +11,7 @@ const skillApiMocks = vi.hoisted(() => ({
     ["completed", "done", "failed", "skipped"].includes(status),
   listBuiltinSkills: vi.fn(),
   listSkillMarketPage: vi.fn(),
-  listSkillMarketTags: vi.fn(),
+  listSkillMarketTagCatalog: vi.fn(),
   organizeSkills: vi.fn(),
   cancelSkillOrganizeTask: vi.fn(),
   listSkillOrganizeTasks: vi.fn(),
@@ -76,6 +76,7 @@ vi.mock("@/modules/workflow/components/NewWorkflowModal", () => ({
 }));
 
 import SkillManagementSection from ".";
+import i18n from "@/i18n";
 
 const refreshSkillAssets = vi.fn();
 
@@ -122,6 +123,23 @@ describe("SkillManagementSection organize task recovery", () => {
       manualSkillReviewRunning: false,
       handleRunManualSkillReview: vi.fn(),
     });
+  });
+
+  it("reloads cached builtin presentation when the locale changes", async () => {
+    skillApiMocks.listBuiltinSkills.mockResolvedValue([{id: "builtin", tags: [], name: "browser"}]);
+    skillApiMocks.listSkillMarketTagCatalog.mockResolvedValue({tags: [], tagLabels: {}});
+    skillApiMocks.listSkillMarketPage.mockResolvedValue({records: [], total: 0});
+    const context = contextMocks.useMemoryManagementOutletContext();
+    contextMocks.useMemoryManagementOutletContext.mockReturnValue({...context, skillView: "market", marketSkillSource: "builtin"});
+    await i18n.changeLanguage("en-US");
+    const view = render(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    await waitFor(() => expect(skillApiMocks.listBuiltinSkills).toHaveBeenCalledTimes(1));
+    view.rerender(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    expect(skillApiMocks.listBuiltinSkills).toHaveBeenCalledTimes(1);
+    await act(async () => { await i18n.changeLanguage("zh-CN"); });
+    view.rerender(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    await waitFor(() => expect(skillApiMocks.listBuiltinSkills).toHaveBeenCalledTimes(2));
+    await act(async () => { await i18n.changeLanguage("en-US"); });
   });
 
   it("shows blocking skills from a 409 and opens existing draft review with refresh after acceptance", async () => {

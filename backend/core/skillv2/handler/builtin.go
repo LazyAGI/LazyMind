@@ -31,6 +31,13 @@ func ListBuiltinSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	packages = visibleBuiltinPackages(packages)
+	locale := common.NormalizeLocale(r.Header.Get("Accept-Language"))
+	presentation, err := skillbuiltin.LoadPresentation(skillbuiltin.CatalogPath())
+	if err != nil {
+		replyServiceError(w, err)
+		return
+	}
+	common.SetLanguageResponseHeaders(w, locale)
 
 	userID := strings.TrimSpace(common.UserID(r))
 	installed := map[string]string{}
@@ -69,6 +76,14 @@ func ListBuiltinSkills(w http.ResponseWriter, r *http.Request) {
 			"content":            string(pkg.Files["SKILL.md"]),
 			"installed":          installedSkillID != "",
 			"installed_skill_id": installedSkillID,
+		}
+		displayName, displayDescription, displayLocale := presentation.Display(pkg.UID, locale, pkg.Name, pkg.Description)
+		item["display_name"] = displayName
+		item["display_description"] = displayDescription
+		item["display_locale"] = displayLocale
+		item["search_text"] = presentation.SearchText(pkg.UID)
+		if labels := presentation.TagLabels[locale]; len(labels) > 0 {
+			item["tag_labels"] = labels
 		}
 		if pkg.Provider != "" {
 			item["provider"] = pkg.Provider

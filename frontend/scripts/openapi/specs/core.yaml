@@ -10914,6 +10914,14 @@ components:
                     type: string
                 description:
                     type: string
+                display_description:
+                    description: Localized marketplace introduction, independent of SKILL.md.
+                    type: string
+                display_locale:
+                    type: string
+                display_name:
+                    description: Localized marketplace title; canonical name remains unchanged.
+                    type: string
                 installed:
                     type: boolean
                 installed_skill_id:
@@ -10922,6 +10930,17 @@ components:
                     type: string
                 provider:
                     type: string
+                search_text:
+                    description: Marketplace search text across all localized names and introductions, independent of display locale.
+                    type: string
+                tag_labels:
+                    additionalProperties:
+                        type: string
+                    type: object
+                tags:
+                    items:
+                        type: string
+                    type: array
             required:
                 - builtin_skill_uid
                 - category
@@ -12385,10 +12404,18 @@ components:
                     type: string
                 description:
                     type: string
+                display_description:
+                    type: string
+                display_name:
+                    type: string
                 name:
                     type: string
                 source:
                     $ref: '#/components/schemas/skillSourceOpenAPIRequest'
+                tag_labels:
+                    additionalProperties:
+                        type: string
+                    type: object
                 tags:
                     description: Marketplace discovery tags.
                     items:
@@ -12413,6 +12440,12 @@ components:
             properties:
                 created_at:
                     type: string
+                display_description:
+                    type: string
+                display_locale:
+                    type: string
+                display_name:
+                    type: string
                 icon:
                     type: string
                 id:
@@ -12433,6 +12466,10 @@ components:
                     type: string
                 status:
                     type: string
+                tag_labels:
+                    additionalProperties:
+                        type: string
+                    type: object
                 tags:
                     items:
                         type: string
@@ -12466,11 +12503,22 @@ components:
                 category:
                     description: Deprecated compatibility field; converted to one marketplace tag when tags is empty.
                     type: string
+                display_description:
+                    description: Chinese marketplace introduction; does not modify the source package.
+                    type: string
+                display_name:
+                    description: Chinese marketplace title; does not rename the source skill.
+                    type: string
                 name:
                     description: Deprecated and ignored; the skill name is read from SKILL.md.
                     type: string
                 source:
                     $ref: '#/components/schemas/skillSourceOpenAPIRequest'
+                tag_labels:
+                    additionalProperties:
+                        type: string
+                    description: Chinese labels keyed by canonical marketplace tag value.
+                    type: object
                 tags:
                     description: Marketplace discovery tags.
                     items:
@@ -12488,6 +12536,17 @@ components:
             required:
                 - market_item_id
                 - source_skill_id
+            type: object
+        marketTagsOpenAPIResponse:
+            properties:
+                tag_labels:
+                    additionalProperties:
+                        type: string
+                    type: object
+                tags:
+                    items:
+                        type: string
+                    type: array
             type: object
         mcpDeleteServerOpenAPIResponse:
             properties:
@@ -27721,7 +27780,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/skillTagsOpenAPIResponse'
+                                $ref: '#/components/schemas/marketTagsOpenAPIResponse'
                     description: Market skill tag list
             summary: List published market skill tags
             tags:

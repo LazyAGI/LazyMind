@@ -10,30 +10,40 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	skillmarket "lazymind/core/skillv2/market"
 	skillservice "lazymind/core/skillv2/service"
 )
 
 func MarketTags(w http.ResponseWriter, r *http.Request) {
+	locale := common.NormalizeLocale(r.Header.Get("Accept-Language"))
+	common.SetLanguageResponseHeaders(w, locale)
 	db, ok := requireDB(w)
 	if !ok {
 		return
 	}
 	var rows []struct {
-		Tags []byte `gorm:"column:tags"`
+		Tags        []byte `gorm:"column:tags"`
+		DisplayI18n []byte `gorm:"column:display_i18n"`
 	}
 	if err := db.WithContext(r.Context()).
 		Table("skill_market_items AS market_items").
-		Select("market_items.tags AS tags").
+		Select("market_items.tags AS tags, market_items.display_i18n AS display_i18n").
 		Joins("JOIN skills AS skills ON skills.id = market_items.source_skill_id AND skills.deleted_at IS NULL").
 		Where("market_items.status = ?", "published").
+		Order("market_items.sort_order ASC, market_items.updated_at DESC, market_items.id ASC").
 		Scan(&rows).Error; err != nil {
 		replyServiceError(w, err)
 		return
 	}
 	set := make(map[string]struct{}, len(rows))
+	labels := make(map[string]string)
 	for _, row := range rows {
+		presentation := skillmarket.ResolvePresentation(row.DisplayI18n, locale, "", "")
 		for _, tag := range decodeTags(row.Tags) {
 			set[tag] = struct{}{}
+			if label := presentation.TagLabels[tag]; label != "" && labels[tag] == "" {
+				labels[tag] = label
+			}
 		}
 	}
 	tags := make([]string, 0, len(set))
@@ -41,10 +51,12 @@ func MarketTags(w http.ResponseWriter, r *http.Request) {
 		tags = append(tags, tag)
 	}
 	sort.Strings(tags)
-	common.ReplyOK(w, map[string]any{"tags": tags})
+	common.ReplyOK(w, map[string]any{"tags": tags, "tag_labels": labels})
 }
 
 func MarketList(w http.ResponseWriter, r *http.Request) {
+	locale := common.NormalizeLocale(r.Header.Get("Accept-Language"))
+	common.SetLanguageResponseHeaders(w, locale)
 	db, ok := requireDB(w)
 	if !ok {
 		return
@@ -82,10 +94,11 @@ func MarketList(w http.ResponseWriter, r *http.Request) {
 		if len(tags) > 0 && !hasAllTags(decodeTags(row.Tags), tags) {
 			continue
 		}
-		if keyword != "" && !strings.Contains(strings.ToLower(source.Name+" "+source.SkillName+" "+source.Description), keyword) {
+		searchText := source.Name + " " + source.SkillName + " " + source.Description + " " + skillmarket.PresentationSearchText(row.DisplayI18n)
+		if keyword != "" && !strings.Contains(strings.ToLower(searchText), keyword) {
 			continue
 		}
-		items = append(items, marketItemDTO(row, source, installedByMarketID[row.ID]))
+		items = append(items, marketItemDTO(row, source, installedByMarketID[row.ID], locale))
 	}
 	total := len(items)
 	page := positiveQueryInt(r, "page", 1)
@@ -117,6 +130,8 @@ func marketQueryTags(r *http.Request) []string {
 }
 
 func MarketGet(w http.ResponseWriter, r *http.Request) {
+	locale := common.NormalizeLocale(r.Header.Get("Accept-Language"))
+	common.SetLanguageResponseHeaders(w, locale)
 	db, ok := requireDB(w)
 	if !ok {
 		return
@@ -141,7 +156,7 @@ func MarketGet(w http.ResponseWriter, r *http.Request) {
 		replyServiceError(w, err)
 		return
 	}
-	common.ReplyOK(w, marketItemDTO(item, source, installedByMarketID[item.ID]))
+	common.ReplyOK(w, marketItemDTO(item, source, installedByMarketID[item.ID], locale))
 }
 
 func loadInstalledMarketSkills(ctx context.Context, db *gorm.DB, userID string) (map[string]string, error) {
@@ -170,21 +185,26 @@ func loadInstalledMarketSkills(ctx context.Context, db *gorm.DB, userID string) 
 	return installed, nil
 }
 
-func marketItemDTO(item orm.SkillMarketItem, source skillservice.SkillDetail, installedSkillID string) map[string]any {
+func marketItemDTO(item orm.SkillMarketItem, source skillservice.SkillDetail, installedSkillID, locale string) map[string]any {
+	presentation := skillmarket.ResolvePresentation(item.DisplayI18n, locale, source.Name, source.Description)
 	return map[string]any{
-		"id":                 item.ID,
-		"market_item_id":     item.ID,
-		"source_skill_id":    item.SourceSkillID,
-		"status":             item.Status,
-		"tags":               decodeTags(item.Tags),
-		"installed":          installedSkillID != "",
-		"installed_skill_id": installedSkillID,
-		"icon":               item.Icon,
-		"sort_order":         item.SortOrder,
-		"version_note":       item.VersionNote,
-		"published_at":       item.PublishedAt,
-		"created_at":         item.CreatedAt,
-		"updated_at":         item.UpdatedAt,
-		"source":             skillDetailDTO(source),
+		"id":                  item.ID,
+		"market_item_id":      item.ID,
+		"source_skill_id":     item.SourceSkillID,
+		"status":              item.Status,
+		"tags":                decodeTags(item.Tags),
+		"installed":           installedSkillID != "",
+		"installed_skill_id":  installedSkillID,
+		"icon":                item.Icon,
+		"sort_order":          item.SortOrder,
+		"version_note":        item.VersionNote,
+		"published_at":        item.PublishedAt,
+		"created_at":          item.CreatedAt,
+		"updated_at":          item.UpdatedAt,
+		"source":              skillDetailDTO(source),
+		"display_name":        presentation.Name,
+		"display_description": presentation.Description,
+		"display_locale":      locale,
+		"tag_labels":          presentation.TagLabels,
 	}
 }
