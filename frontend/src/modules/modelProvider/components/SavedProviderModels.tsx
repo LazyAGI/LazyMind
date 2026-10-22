@@ -1,7 +1,6 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import {
   DownOutlined,
-  EyeOutlined,
   MinusOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
@@ -11,15 +10,20 @@ import type {
   ModelCapability,
   ProviderModel,
 } from "../pages/ModelProvidersPage";
-import { getModelIdentity } from "../modelIdentity";
 import { sortCustomModelsFirst } from "../modelOrdering";
 import { lookupUpstreamModel } from "../upstreamCatalog";
+import {
+  getModelTaskType,
+  getModelTaskLabelKey,
+  getModelTaskDescriptionKey,
+  type ModelTaskType,
+} from "../modelTaskTypes";
 import {
   isLlmChatCapability,
   resolveLlmMaxInputTokens,
 } from "../maxInputTokens";
 import { ModelIdentityIcon } from "./ModelIdentityIcon";
-import { ModelModalityMarks } from "./ModelModalityMarks";
+import { ModelTypeBadge } from "./ModelTypeBadge";
 import "./SavedProviderModels.scss";
 
 export interface SavedProviderModelsProps {
@@ -32,24 +36,6 @@ export interface SavedProviderModelsProps {
   onRemove: (model: ProviderModel) => void | Promise<void>;
 }
 
-function capabilityClass(capability: ModelCapability) {
-  if (
-    capability === "EMBEDDING" ||
-    capability === "MULTIMODAL_EMBEDDING" ||
-    capability === "RERANK"
-  )
-    return "embedding";
-  if (capability === "ASR" || capability === "TTS") return "audio";
-  if (
-    capability === "TEXT_TO_IMAGE" ||
-    capability === "IMAGE_EDITING" ||
-    capability === "VLM"
-  )
-    return "image";
-  if (capability === "TEXT_TO_VIDEO") return "video";
-  return "other";
-}
-
 export function SavedProviderModels(props: SavedProviderModelsProps) {
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -60,17 +46,17 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
   const groups = useMemo(() => {
     const result = new Map<
       string,
-      { key: string; vendor: string; entries: ProviderModel[] }
+      { key: string; type: ModelTaskType; entries: ProviderModel[] }
     >();
     for (const model of sortCustomModelsFirst(props.models)) {
-      const vendor = getModelIdentity(model.name, props.supplierName).vendor;
-      const key = JSON.stringify([model.builtIn, vendor]);
-      const group = result.get(key) || { key, vendor, entries: [] };
+      const type = getModelTaskType(model.capability);
+      const key = JSON.stringify([model.builtIn, type]);
+      const group = result.get(key) || { key, type, entries: [] };
       group.entries.push(model);
       result.set(key, group);
     }
     return [...result.values()];
-  }, [props.models, props.supplierName]);
+  }, [props.models]);
 
   if (props.loading)
     return (
@@ -91,13 +77,13 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
 
   return (
     <div className="saved-provider-models">
-      {groups.map(({ key, vendor, entries }, index) => {
+      {groups.map(({ key, type, entries }, index) => {
         const listId = `${groupPrefix}-${index}`;
         const expanded = !collapsed.has(key);
         return (
           <section
             className="saved-provider-model-group"
-            aria-label={vendor}
+            aria-label={t(getModelTaskLabelKey(type))}
             key={key}
           >
             <button
@@ -118,17 +104,20 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
                 aria-hidden="true"
                 className={expanded ? "" : "is-collapsed"}
               />
-              <span>{vendor}</span>
+              <span>{t(getModelTaskLabelKey(type))}</span>
               <small>{entries.length}</small>
             </button>
             {expanded ? (
               <ul id={listId} className="saved-provider-model-list">
                 {entries.map((model) => {
                   const chat = isLlmChatCapability(model.capability);
+                  const showContext =
+                    chat ||
+                    (type === "chat" && Boolean(model.maxInputTokens?.trim()));
                   const vision =
-                    model.vision &&
-                    chat &&
-                    !lookupUpstreamModel(
+                    model.vision ||
+                    model.capability === "VLM" ||
+                    lookupUpstreamModel(
                       props.providerName,
                       model.name,
                     )?.input.includes("image");
@@ -143,42 +132,36 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
                         fallbackVendor={props.supplierName}
                         size={24}
                       />
-                      <Tooltip title={model.name}>
-                        <span className="saved-provider-model-name">
-                          {model.name}
-                        </span>
-                      </Tooltip>
-                      <span className="saved-provider-model-meta">
-                        {!chat ? (
-                          <span
-                            className={`saved-provider-model-type is-${capabilityClass(model.capability)}`}
-                          >
-                            {props.capabilityLabel(model.capability)}
-                          </span>
-                        ) : null}
-                        <ModelModalityMarks
-                          providerName={props.providerName}
-                          modelName={model.name}
-                          compact
-                        />
-                        {vision ? (
-                          <Tooltip title={t("modelProvider.visionSupported")}>
-                            <span
-                              className="saved-provider-model-vision"
-                              aria-label={t("modelProvider.visionSupported")}
-                            >
-                              <EyeOutlined aria-hidden="true" />
+                      <Tooltip
+                        trigger={["hover", "focus", "click"]}
+                        title={
+                          <div className="saved-provider-model-detail">
+                            <strong>{model.name}</strong>
+                            <span>
+                              {props.capabilityLabel(model.capability)}
                             </span>
-                          </Tooltip>
-                        ) : null}
-                        {chat ? (
-                          <span
-                            className="saved-provider-model-context"
-                            title={`${t("modelProvider.workspace.context")}: ${resolveLlmMaxInputTokens(model.maxInputTokens)}`}
-                          >
-                            {resolveLlmMaxInputTokens(model.maxInputTokens)}
-                          </span>
-                        ) : null}
+                            <span>{t(getModelTaskDescriptionKey(type))}</span>
+                            {vision ? (
+                              <span>{t("modelProvider.visionSupported")}</span>
+                            ) : null}
+                            {showContext ? (
+                              <span>
+                                {t("modelProvider.workspace.context")}:{" "}
+                                {resolveLlmMaxInputTokens(model.maxInputTokens)}
+                              </span>
+                            ) : null}
+                          </div>
+                        }
+                      >
+                        <button
+                          type="button"
+                          className="saved-provider-model-name"
+                        >
+                          {model.name}
+                        </button>
+                      </Tooltip>
+                      <span className="saved-provider-model-task">
+                        <ModelTypeBadge type={type} compact />
                       </span>
                       <span className="saved-provider-model-actions">
                         {!model.builtIn && chat ? (

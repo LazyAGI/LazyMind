@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { ConfigProvider } from "antd";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import ModelProviderPage from "./ModelProvidersPage";
+import ModelProviderPage, { getSelectableModelCapabilities } from "./ModelProvidersPage";
 
 const mocks = vi.hoisted(() => ({
   getProviders: vi.fn(),
@@ -68,6 +68,11 @@ beforeEach(() => {
 });
 
 describe("custom model name controls", () => {
+  it("offers evolution as a dialogue role while retaining distinct runtime subtypes", () => {
+    expect(getSelectableModelCapabilities([
+      "LLM_SELF_EVOLUTION", "LLM_CHAT", "VLM", "EMBEDDING", "MULTIMODAL_EMBEDDING",
+    ])).toEqual(["LLM_CHAT", "VLM", "EMBEDDING", "MULTIMODAL_EMBEDDING"]);
+  });
   it("keeps the clear control inside the input and the remote search as a separate button", async () => {
     render(
       <ConfigProvider theme={{ token: { motion: false } }}>

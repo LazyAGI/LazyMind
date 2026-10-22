@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderModelCatalogDrawer } from "./ProviderModelCatalogDrawer";
 import type { ProviderModel } from "../pages/ModelProvidersPage";
 
-const mocks = vi.hoisted(() => ({ remote: vi.fn() }));
+const mocks = vi.hoisted(() => ({ remote: vi.fn(), lookup: vi.fn() }));
 vi.mock("../api", () => ({ listRemoteGroupModels: mocks.remote }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -23,7 +23,7 @@ vi.mock("@/components/request", () => ({
   getLocalizedErrorMessage: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
 }));
-vi.mock("../upstreamCatalog", () => ({ lookupUpstreamModel: () => undefined }));
+vi.mock("../upstreamCatalog", () => ({ lookupUpstreamModel: mocks.lookup }));
 
 const selected: ProviderModel[] = [
   {
@@ -83,6 +83,7 @@ function draw(props: ReturnType<typeof fixture>) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.remote.mockResolvedValue({ models: remote });
+  mocks.lookup.mockReturnValue(undefined);
 });
 
 describe("provider model catalog drawer", () => {
@@ -108,17 +109,21 @@ describe("provider model catalog drawer", () => {
     expect(
       known.closest(".provider-model-catalog-row")?.querySelector("img"),
     ).toHaveAttribute("src", "/provider-icons/hunyuan.svg");
-    expect(screen.getByRole("region", { name: "Hunyuan" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "modelProvider.taskType.chat" }),
+    ).toBeInTheDocument();
     const unknown = screen.getByText("unknown-model");
     expect(
       unknown.closest(".provider-model-catalog-row")?.querySelector("img"),
     ).toHaveAttribute("src", "/provider-icons/custom.svg");
   });
 
-  it("provides named collapsible brand controls without announcing their decorative icons", async () => {
+  it("provides named collapsible task controls without announcing their decorative icons", async () => {
     draw(fixture([]));
     await screen.findByText("deepseek-v3");
-    const toggle = screen.getByRole("button", { name: "DeepSeek" });
+    const toggle = screen.getByRole("button", {
+      name: "modelProvider.taskType.chat",
+    });
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -132,7 +137,9 @@ describe("provider model catalog drawer", () => {
     const name = await screen.findByText("BAAI/bge-large");
     const row = name.closest(".provider-model-catalog-row") as HTMLElement;
     expect(
-      within(row).getByText("modelProvider.catalog.embedding", { exact: true }),
+      within(row).getByText("modelProvider.taskType.embedding", {
+        exact: true,
+      }),
     ).toBeInTheDocument();
   });
   it("clears the loading overlay when the optional local loading flag is absent", async () => {
@@ -203,7 +210,7 @@ describe("provider model catalog drawer", () => {
     draw(fixture());
     await screen.findByText("deepseek-v3");
     fireEvent.click(
-      screen.getByRole("tab", { name: /modelProvider.catalog.embedding/ }),
+      screen.getByRole("tab", { name: /modelProvider.taskType.embedding/ }),
     );
     expect(screen.getByText("BAAI/bge-large")).toBeInTheDocument();
     expect(screen.queryByText("deepseek-v3")).not.toBeInTheDocument();
@@ -216,6 +223,31 @@ describe("provider model catalog drawer", () => {
     );
     expect(screen.getByText("deepseek-v3")).toBeInTheDocument();
     expect(screen.queryByText("BAAI/bge-large")).not.toBeInTheDocument();
+  });
+
+  it("confirms a multimodal vector removal without claiming a text-index downgrade", async () => {
+    const props = fixture([
+      {
+        id: "multimodal",
+        name: "multi-vector",
+        capability: "MULTIMODAL_EMBEDDING",
+        builtIn: false,
+        enabled: true,
+      },
+    ]);
+    draw(props);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "modelProvider.catalog.removeModel:multi-vector",
+      }),
+    );
+    expect(
+      await screen.findByText("modelProvider.catalog.removeDescription"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("modelProvider.confirmDeleteEmbeddingDesc"),
+    ).not.toBeInTheDocument();
+    expect(props.onRemove).not.toHaveBeenCalled();
   });
 
   it("asks before removing an embedding model and preserves it when canceled", async () => {
@@ -269,7 +301,7 @@ describe("provider model catalog drawer", () => {
     ).toBeDisabled();
   });
 
-  it("adds all missing models but leaves already configured models alone", async () => {
+  it("adds only explicitly typed missing models and leaves unknown models unselected", async () => {
     const props = fixture([
       {
         id: "deepseek",
@@ -284,10 +316,9 @@ describe("provider model catalog drawer", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "modelProvider.catalog.addAll" }),
     );
-    await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(1));
     expect(props.onAdd.mock.calls.map(([model]) => model.name)).toEqual([
       "BAAI/bge-large",
-      "custom/unknown",
     ]);
     expect(props.onRemove).not.toHaveBeenCalled();
   });
@@ -298,6 +329,11 @@ describe("provider model catalog drawer", () => {
     const type = await screen.findByRole("combobox", {
       name: "modelProvider.catalog.modelType:custom/unknown",
     });
+    expect(
+      screen.getByRole("button", {
+        name: "modelProvider.catalog.addModel:custom/unknown",
+      }),
+    ).toBeDisabled();
     fireEvent.mouseDown(type);
     await screen.findByRole("listbox");
     fireEvent.click(
@@ -318,6 +354,112 @@ describe("provider model catalog drawer", () => {
         }),
       ),
     );
+  });
+
+  it("keeps distinct task groups for rerank, embedding, speech recognition and speech synthesis", async () => {
+    mocks.remote.mockResolvedValueOnce({
+      models: [
+        { id: "embedding", name: "embedding", model_type: "embed" },
+        { id: "reranker", name: "reranker", model_type: "rerank" },
+        { id: "recognize", name: "recognize", model_type: "stt" },
+        { id: "synthesize", name: "synthesize", model_type: "tts" },
+        { id: "vision-chat", name: "vision-chat", model_type: "vlm" },
+      ],
+    });
+    draw(fixture([]));
+    await screen.findByText("reranker");
+    for (const type of ["embedding", "rerank", "asr", "tts", "chat"]) {
+      expect(
+        screen.getByRole("region", { name: `modelProvider.taskType.${type}` }),
+      ).toBeInTheDocument();
+    }
+    fireEvent.click(
+      screen.getByRole("tab", { name: /modelProvider.taskType.rerank/ }),
+    );
+    expect(screen.getByText("reranker")).toBeInTheDocument();
+    expect(screen.queryByText("embedding")).not.toBeInTheDocument();
+    expect(screen.queryByText("vision-chat")).not.toBeInTheDocument();
+  });
+
+  it("uses saved task types ahead of remote metadata and keeps all custom models above built-ins", async () => {
+    const models: ProviderModel[] = [
+      {
+        id: "built",
+        name: "gpt-built",
+        capability: "LLM_CHAT",
+        builtIn: true,
+        enabled: true,
+      },
+      {
+        id: "custom",
+        name: "gpt-custom",
+        capability: "LLM_CHAT",
+        builtIn: false,
+        enabled: true,
+      },
+      {
+        id: "rerank",
+        name: "custom-rerank",
+        capability: "RERANK",
+        builtIn: false,
+        enabled: true,
+      },
+    ];
+    mocks.remote.mockResolvedValueOnce({
+      models: [
+        { id: "built", name: "gpt-built", model_type: "llm" },
+        { id: "custom", name: "gpt-custom", model_type: "text2image" },
+        { id: "rerank", name: "custom-rerank", model_type: "embed" },
+      ],
+    });
+    draw(fixture(models));
+    await screen.findByText("gpt-custom");
+    const rows = [...document.querySelectorAll(".provider-model-catalog-row")];
+    expect(
+      rows.map(
+        (row) =>
+          row.querySelector(".provider-model-catalog-model-name")?.textContent,
+      ),
+    ).toEqual(["gpt-custom", "custom-rerank", "gpt-built"]);
+    expect(
+      within(rows[0] as HTMLElement).getByText("modelProvider.taskType.chat"),
+    ).toBeInTheDocument();
+    expect(
+      within(rows[1] as HTMLElement).getByText("modelProvider.taskType.rerank"),
+    ).toBeInTheDocument();
+  });
+
+  it("does not infer a runnable task only from input and output modalities", async () => {
+    mocks.remote.mockResolvedValueOnce({
+      models: [
+        { id: "omni", name: "omni", model_type: "" },
+        { id: "unsupported", name: "unsupported", model_type: "audio" },
+      ],
+    });
+    mocks.lookup.mockReturnValue({
+      name: "omni",
+      input: ["image", "audio"],
+      output: ["text", "audio"],
+      context: 128000,
+      max_output: 4096,
+    });
+    const props = fixture([]);
+    draw(props);
+    await screen.findByText("omni");
+    expect(
+      screen.getByRole("button", {
+        name: "modelProvider.catalog.addModel:omni",
+      }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", {
+        name: "modelProvider.catalog.addModel:unsupported",
+      }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "modelProvider.catalog.addAll" }),
+    ).toBeDisabled();
+    expect(props.onAdd).not.toHaveBeenCalled();
   });
 
   it("ignores a stale discovery response after switching suppliers", async () => {

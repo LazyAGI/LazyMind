@@ -40,6 +40,8 @@ import {
   withModelProviderJsonOptions,
 } from "../api";
 import { getProviderLogoUrl } from "../providerBranding";
+import { getModelTaskLabelKey, getModelTaskType } from "../modelTaskTypes";
+import { ModelTypeIcon } from "./ModelTypeBadge";
 import { SavedProviderModels } from "./SavedProviderModels";
 import { ProviderKeyManager } from "./ProviderKeyManager";
 import { ProviderRequestConfigDrawer } from "./ProviderRequestConfigDrawer";
@@ -83,7 +85,6 @@ interface Props {
   onCheck: (provider: AddedProvider, group: ProviderConnectionGroup) => void;
   checking: Record<string, boolean>;
   onReload: () => Promise<void>;
-  cloudAvailable: boolean;
   cloudContent: ReactNode;
 }
 
@@ -437,10 +438,12 @@ export function ProviderWorkspace(props: Props) {
   const models = (group?.models || []).filter(
     (model) =>
       model.name.toLowerCase().includes(modelSearch.toLowerCase().trim()) &&
-      (modelType === "all" || model.capability === modelType),
+      (modelType === "all" || getModelTaskType(model.capability) === modelType),
   );
   const modelTypes = Array.from(
-    new Set((group?.models || []).map((model) => model.capability)),
+    new Set(
+      (group?.models || []).map((model) => getModelTaskType(model.capability)),
+    ),
   );
 
   return (
@@ -794,9 +797,14 @@ export function ProviderWorkspace(props: Props) {
                       onChange={setModelType}
                       options={[
                         { value: "all", label: label("allTypes") },
-                        ...modelTypes.map((capability) => ({
-                          value: capability,
-                          label: props.capabilityLabel(capability),
+                        ...modelTypes.map((type) => ({
+                          value: type,
+                          label: (
+                            <span className="provider-model-task-option">
+                              <ModelTypeIcon type={type} size={16} />
+                              {t(getModelTaskLabelKey(type))}
+                            </span>
+                          ),
                         })),
                       ]}
                     />

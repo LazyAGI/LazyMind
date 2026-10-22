@@ -67,6 +67,8 @@ import {
 import { ProviderWorkspace } from "../components/ProviderWorkspace";
 import { ProviderModelCatalogDrawer, type CatalogModelChoice } from "../components/ProviderModelCatalogDrawer";
 import { sortCustomModelsFirst } from "../modelOrdering";
+import { getModelTaskType } from "../modelTaskTypes";
+import { ModelTypeIcon } from "../components/ModelTypeBadge";
 import "../index.scss";
 
 export type ModelCapability =
@@ -81,6 +83,16 @@ export type ModelCapability =
   | "MULTIMODAL_EMBEDDING"
   | "IMAGE_EDITING"
   | "LLM_SELF_EVOLUTION";
+
+export function getSelectableModelCapabilities(
+  capabilities: readonly ModelCapability[],
+): ModelCapability[] {
+  return [
+    ...new Set(capabilities.map((capability) =>
+      capability === "LLM_SELF_EVOLUTION" ? "LLM_CHAT" : capability,
+    )),
+  ];
+}
 
 export interface ProviderModel {
   vision?: boolean;
@@ -175,30 +187,6 @@ function isSensenovaProvider(
   );
 }
 
-export function isOpenAIProvider(
-  provider?: Pick<ProviderOption, "source" | "name"> | null,
-): boolean {
-  if (!provider) return false;
-  return normalizeProviderKey(provider.source || provider.name) === "openai";
-}
-
-export function hasOpenAIRequestPath(
-  provider: Pick<ProviderOption, "source" | "name"> | null | undefined,
-  baseUrl?: string,
-): boolean {
-  if (!isOpenAIProvider(provider) || !baseUrl) return false;
-
-  try {
-    const segments = new URL(baseUrl).pathname.split("/").filter(Boolean);
-    const v1Index = segments.findIndex(
-      (segment) => segment.toLowerCase() === "v1",
-    );
-    return v1Index >= 0 && v1Index < segments.length - 1;
-  } catch {
-    return false;
-  }
-}
-
 function isSensenovaNewBaseUrl(url?: string): boolean {
   return (
     normalizeBaseUrlForCompare(url) ===
@@ -276,7 +264,11 @@ function getProviderBrand(name: string) {
 
 export function mapModelTypeToCapability(modelType?: string): ModelCapability {
   const normalized = (modelType || "").trim().toLowerCase();
-  if (normalized === ModelProviderModelType.MultimodalEmbedding)
+  if (
+    normalized === ModelProviderModelType.MultimodalEmbedding ||
+    normalized === "cross_modal_embed" ||
+    normalized === "embed_image"
+  )
     return "MULTIMODAL_EMBEDDING";
   if (
     normalized === ModelProviderModelType.Embedding ||
@@ -479,16 +471,6 @@ function normalizeBaseUrlForCompare(value?: string) {
     : normalized;
 }
 
-function isDefaultProviderBaseUrl(
-  provider: Pick<ProviderOption, "baseUrl">,
-  baseUrl?: string,
-) {
-  return (
-    normalizeBaseUrlForCompare(baseUrl) ===
-    normalizeBaseUrlForCompare(provider.baseUrl)
-  );
-}
-
 function getCredentialRestoreFailureCode(error: unknown) {
   if (!error || typeof error !== "object" || !("response" in error))
     return undefined;
@@ -500,23 +482,6 @@ function getCredentialRestoreFailureCode(error: unknown) {
   if (!data || typeof data !== "object" || !("reason_code" in data))
     return undefined;
   return String((data as { reason_code?: unknown }).reason_code || "");
-}
-
-export function shouldRedirectCustomBaseUrlToOpenAI(
-  provider: Pick<ProviderOption, "source" | "name" | "baseUrl">,
-  previousBaseUrl: string | undefined,
-  nextBaseUrl: string | undefined,
-) {
-  if (
-    isOpenAIProvider(provider) ||
-    normalizeBaseUrlForCompare(previousBaseUrl) ===
-      normalizeBaseUrlForCompare(nextBaseUrl) ||
-    isDefaultProviderBaseUrl(provider, nextBaseUrl)
-  ) {
-    return false;
-  }
-  // SenseNova's Token Plan endpoint is an official preset, not a private deployment.
-  return !isSensenovaProvider(provider) || !isSensenovaNewBaseUrl(nextBaseUrl);
 }
 
 interface ModelProviderPageProps {
@@ -772,14 +737,6 @@ export default function ModelProviderPage({
       const addedIds = new Set(
         (withGroupsData.providers || []).map((provider) => provider.id),
       );
-      const previousModelsByGroupId = new Map<string, ProviderModel[]>();
-      for (const item of addedProviderListRef.current) {
-        for (const group of item.groups) {
-          if (group.models.length) {
-            previousModelsByGroupId.set(group.id, group.models);
-          }
-        }
-      }
       const addedProviders = await Promise.all(
         providers
           .filter((provider) => addedIds.has(provider.id))
@@ -794,17 +751,26 @@ export default function ModelProviderPage({
               groupResponse.data,
             );
             const groups = (groupData.groups || []).map((group) =>
-              mapApiGroup(
-                provider,
-                group,
-                previousModelsByGroupId.get(group.id) || [],
-              ),
+              mapApiGroup(provider, group, []),
             );
             return { ...provider, groups };
           }),
       );
 
-      setAddedProviderList(addedProviders);
+      setAddedProviderList((current) => {
+        const cachedModels = new Map(
+          current.flatMap((item) =>
+            item.groups.map((group) => [group.id, group.models] as const),
+          ),
+        );
+        return addedProviders.map((item) => ({
+          ...item,
+          groups: item.groups.map((group) => ({
+            ...group,
+            models: cachedModels.get(group.id) || [],
+          })),
+        }));
+      });
       setLoadError(false);
       return true;
     } catch (error) {
@@ -1164,7 +1130,9 @@ export default function ModelProviderPage({
             ? {
                 ...item,
                 groups: item.groups.map((candidate) =>
-                  candidate.id === groupId ? nextGroup : candidate,
+                  candidate.id === groupId
+                    ? { ...candidate, models: nextGroup.models }
+                    : candidate,
                 ),
               }
             : item,
@@ -1238,7 +1206,7 @@ export default function ModelProviderPage({
     customModelForm.setFieldsValue({
       providerId: provider.id,
       groupId: group.id,
-      capability: provider.capabilities[0] || "LLM_CHAT",
+      capability: getSelectableModelCapabilities(provider.capabilities)[0] || "LLM_CHAT",
       name: "",
       maxInputTokens: undefined,
     });
@@ -1517,7 +1485,6 @@ export default function ModelProviderPage({
           if (!refreshed)
             throw new Error(t("modelProvider.workspace.savedRefreshFailed"));
         }}
-        cloudAvailable={cloudRuntimeAvailable}
         cloudContent={
           <>
             <CloudSystemProviderCard
@@ -1720,9 +1687,12 @@ export default function ModelProviderPage({
                 }
               }}
             >
-              {customModelModal?.provider.capabilities.map((capability) => (
+              {getSelectableModelCapabilities(customModelModal?.provider.capabilities || []).map((capability) => (
                 <Select.Option key={capability} value={capability}>
-                  {getCapabilityLabel(capability)}
+                  <span className="provider-model-task-option">
+                    <ModelTypeIcon type={getModelTaskType(capability)} size={16} />
+                    {getCapabilityLabel(capability)}
+                  </span>
                 </Select.Option>
               ))}
             </Select>

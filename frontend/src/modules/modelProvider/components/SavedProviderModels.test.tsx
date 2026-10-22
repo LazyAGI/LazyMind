@@ -6,18 +6,12 @@ import {
   within,
 } from "@testing-library/react";
 import { ConfigProvider } from "antd";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ProviderModel } from "../pages/ModelProvidersPage";
 import {
   SavedProviderModels,
   type SavedProviderModelsProps,
 } from "./SavedProviderModels";
-
-const mocks = vi.hoisted(() => ({ lookup: vi.fn() }));
-vi.mock("../upstreamCatalog", () => ({ lookupUpstreamModel: mocks.lookup }));
-beforeEach(() => {
-  mocks.lookup.mockReset();
-});
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -25,10 +19,6 @@ vi.mock("react-i18next", () => ({
       values?.name ? `${key}:${values.name}` : key,
   }),
 }));
-vi.mock("./ModelModalityMarks", () => ({
-  ModelModalityMarks: () => <span data-testid="modalities" />,
-}));
-
 const models: ProviderModel[] = [
   {
     id: "catalog",
@@ -54,7 +44,6 @@ const models: ProviderModel[] = [
     enabled: true,
   },
 ];
-
 function setup(overrides: Partial<SavedProviderModelsProps> = {}) {
   const props: SavedProviderModelsProps = {
     models,
@@ -73,118 +62,246 @@ function setup(overrides: Partial<SavedProviderModelsProps> = {}) {
   );
   return { ...view, props };
 }
+function groupLabels(container: HTMLElement) {
+  return [...container.querySelectorAll(".saved-provider-model-group")].map(
+    (group) => group.getAttribute("aria-label"),
+  );
+}
 
 describe("saved supplier models", () => {
-  it("keeps custom models globally above built-ins even when they share a brand", () => {
-    const customGpt = { ...models[1], name: "gpt-4o-custom" };
-    const builtInGpt = {
-      ...models[1],
-      id: "builtin-gpt",
-      name: "gpt-4o-builtin",
-      builtIn: true,
-    };
-    const { container } = setup({ models: [builtInGpt, customGpt, models[2]] });
+  it("shows a saved visual dialogue context window without changing its edit permissions", async () => {
+    setup({
+      models: [
+        {
+          ...models[1],
+          capability: "VLM",
+          name: "private-vlm",
+          maxInputTokens: "200000",
+        },
+      ],
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "private-vlm", exact: true }),
+    );
+    const context = await screen.findByText(
+      "modelProvider.workspace.context: 200000",
+    );
+    await waitFor(() => expect(context).toBeVisible());
+    expect(
+      screen.queryByRole("button", {
+        name: "modelProvider.editModelWindowAria:private-vlm",
+      }),
+    ).not.toBeInTheDocument();
+  });
+  it("keeps all custom task groups above built-ins and collapses repeated task groups independently", () => {
+    const customChat = { ...models[1], name: "gpt-4o-custom" };
+    const builtInChat = { ...models[0], name: "gpt-4o-builtin" };
+    const { container } = setup({
+      models: [builtInChat, customChat, models[2]],
+    });
     expect(
       screen
         .getAllByRole("listitem")
         .map((row) => row.getAttribute("aria-label")),
     ).toEqual(["gpt-4o-custom", "BAAI/bge-large", "gpt-4o-builtin"]);
-    expect(
-      [...container.querySelectorAll(".saved-provider-model-group")].map(
-        (group) => group.getAttribute("aria-label"),
-      ),
-    ).toEqual(["OpenAI", "BAAI", "OpenAI"]);
-  });
-  it("keeps explicitly configured vision support visible for models outside the catalog", () => {
-    setup({
-      models: [
-        {
-          id: "vision",
-          name: "private-vision-model",
-          capability: "LLM_CHAT",
-          builtIn: false,
-          enabled: true,
-          vision: true,
-        },
-      ],
+    expect(groupLabels(container)).toEqual([
+      "modelProvider.taskType.chat",
+      "modelProvider.taskType.embedding",
+      "modelProvider.taskType.chat",
+    ]);
+    const chatGroups = screen.getAllByRole("region", {
+      name: "modelProvider.taskType.chat",
     });
+    const toggle = within(chatGroups[0]).getByRole("button", {
+      name: /modelProvider.taskType.chat/,
+    });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(
-      screen.getByLabelText("modelProvider.visionSupported"),
+      screen.queryByRole("listitem", { name: customChat.name }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("listitem", { name: builtInChat.name }),
+    ).toBeVisible();
+    fireEvent.click(toggle);
+    expect(
+      screen.getByRole("listitem", { name: customChat.name }),
     ).toBeVisible();
   });
-  it("does not duplicate a vision marker when catalog modalities already include image input", () => {
-    mocks.lookup.mockReturnValue({ input: ["text", "image"] });
-    setup({ models: [{ ...models[1], vision: true }] });
+  it("groups LLM, VLM, and self-evolution together while keeping embedding and rerank separate", () => {
+    const vlm: ProviderModel = {
+      ...models[1],
+      id: "vlm",
+      name: "private-vlm",
+      capability: "VLM",
+    };
+    const evolution: ProviderModel = {
+      ...models[1],
+      id: "evolution",
+      name: "private-evolution",
+      capability: "LLM_SELF_EVOLUTION",
+    };
+    const rerank: ProviderModel = {
+      ...models[2],
+      id: "rerank",
+      name: "BAAI/reranker",
+      capability: "RERANK",
+    };
+    const { container } = setup({
+      models: [models[1], vlm, evolution, models[2], rerank],
+    });
+    expect(groupLabels(container)).toEqual([
+      "modelProvider.taskType.chat",
+      "modelProvider.taskType.embedding",
+      "modelProvider.taskType.rerank",
+    ]);
     expect(
-      screen.queryByLabelText("modelProvider.visionSupported"),
-    ).not.toBeInTheDocument();
-    expect(screen.getByTestId("modalities")).toBeInTheDocument();
-  });
-  it("groups by model brand and gives saved rows their own logos while retaining custom-first order", () => {
-    const { container } = setup();
-    const groups = container.querySelectorAll(".saved-provider-model-group");
-    expect(groups[0]).toHaveAttribute("aria-label", "OpenAI");
-    expect(groups[1]).toHaveAttribute("aria-label", "BAAI");
-    expect(groups[2]).toHaveAttribute("aria-label", "DeepSeek");
+      within(
+        screen.getByRole("region", { name: "modelProvider.taskType.chat" }),
+      ).getAllByRole("listitem"),
+    ).toHaveLength(3);
     const gpt = screen.getByRole("listitem", { name: "gpt-4o" });
     expect(gpt.querySelector("img")).toHaveAttribute(
       "src",
       "/provider-icons/openai.svg",
     );
     expect(gpt.querySelector("img")).toHaveAttribute("alt", "");
-    expect(gpt).toHaveTextContent("1M");
+    const vlmRow = screen.getByRole("listitem", { name: vlm.name });
+    expect(vlmRow.querySelector("img")).toHaveAttribute(
+      "src",
+      "/provider-icons/custom.svg",
+    );
+    expect(
+      within(vlmRow).queryByRole("button", {
+        name: `modelProvider.editModelWindowAria:${vlm.name}`,
+      }),
+    ).not.toBeInTheDocument();
     expect(container.querySelector("[role=table]")).toBeNull();
   });
-  it("collapses only the selected brand and keeps a stable model count", () => {
-    setup();
-    const group = screen.getByRole("region", { name: "OpenAI" });
-    const toggle = within(group).getByRole("button", { name: /OpenAI/ });
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(
-      screen.queryByRole("listitem", { name: "gpt-4o" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("listitem", { name: "deepseek-catalog" }),
-    ).toBeInTheDocument();
-    fireEvent.click(toggle);
-    expect(
-      screen.getByRole("listitem", { name: "gpt-4o" }),
-    ).toBeInTheDocument();
+  it("uses the shared colored task image badge for every saved task category", () => {
+    const taskModels: ProviderModel[] = [
+      ["LLM_CHAT", "chat"],
+      ["EMBEDDING", "embedding"],
+      ["RERANK", "rerank"],
+      ["ASR", "asr"],
+      ["TTS", "tts"],
+      ["TEXT_TO_IMAGE", "image-generation"],
+      ["IMAGE_EDITING", "image-edit"],
+      ["TEXT_TO_VIDEO", "video-generation"],
+    ].map(([capability, name]) => ({
+      id: name,
+      name,
+      capability: capability as ProviderModel["capability"],
+      builtIn: false,
+      enabled: true,
+    }));
+    setup({ models: taskModels });
+    for (const model of taskModels) {
+      expect(
+        screen
+          .getByRole("listitem", { name: model.name })
+          .querySelector(".model-type-badge img"),
+      ).toHaveAttribute("src", `/model-type-icons/${model.name}.svg`);
+    }
   });
-  it("keeps embedding removal behind its existing impact confirmation", async () => {
-    const { props } = setup();
+  it("makes configured vision and context discoverable through model details without extra row badges", async () => {
+    const vision: ProviderModel = {
+      ...models[1],
+      name: "private-vision-model",
+      vision: true,
+    };
+    const { container } = setup({ models: [vision] });
+    const row = screen.getByRole("listitem", { name: vision.name });
+    expect(row).not.toHaveTextContent("1M");
+    expect(
+      container.querySelector(
+        ".model-modality-marks, .saved-provider-model-vision, .saved-provider-model-context",
+      ),
+    ).toBeNull();
+    fireEvent.click(within(row).getByRole("button", { name: vision.name }));
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent(vision.name);
+    expect(tooltip).toHaveTextContent("LLM_CHAT");
+    expect(tooltip).toHaveTextContent("modelProvider.visionSupported");
+    expect(tooltip).toHaveTextContent("modelProvider.workspace.context: 1M");
+  });
+  it("explains a task badge's actual purpose on hover", async () => {
+    setup({ models: [models[2]] });
+    fireEvent.mouseEnter(
+      screen
+        .getByRole("listitem", { name: models[2].name })
+        .querySelector(".model-type-badge")!,
+    );
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "modelProvider.taskTypeDescription.embedding",
+    );
+  });
+  it.each(["EMBEDDING", "MULTIMODAL_EMBEDDING"] as const)(
+    "keeps %s removal behind its impact confirmation",
+    async (capability) => {
+      const embedding: ProviderModel = { ...models[2], capability };
+      const { props } = setup({ models: [embedding] });
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: `modelProvider.deleteModelAria:${embedding.name}`,
+        }),
+      );
+      const warning = await screen.findByText(
+        capability === "EMBEDDING"
+          ? "modelProvider.confirmDeleteEmbeddingDesc"
+          : "modelProvider.confirmDeleteModelDesc",
+      );
+      await waitFor(() => expect(warning).toBeVisible());
+      expect(props.onRemove).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
+      await waitFor(() => expect(warning).not.toBeVisible());
+      expect(props.onRemove).not.toHaveBeenCalled();
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: `modelProvider.deleteModelAria:${embedding.name}`,
+        }),
+      );
+      fireEvent.click(
+        await screen.findByRole("button", { name: "common.delete" }),
+      );
+      await waitFor(() =>
+        expect(props.onRemove).toHaveBeenCalledWith(embedding),
+      );
+      expect(props.onRemove).toHaveBeenCalledTimes(1);
+    },
+  );
+  it("retains VLM's underlying capability when confirming removal from the chat group", async () => {
+    const vlm: ProviderModel = {
+      ...models[1],
+      id: "vlm",
+      name: "private-vlm",
+      capability: "VLM",
+    };
+    const { props } = setup({ models: [vlm] });
+    expect(
+      screen.getByRole("region", { name: "modelProvider.taskType.chat" }),
+    ).toBeVisible();
     fireEvent.click(
       screen.getByRole("button", {
-        name: "modelProvider.deleteModelAria:BAAI/bge-large",
+        name: `modelProvider.deleteModelAria:${vlm.name}`,
       }),
     );
-    const warning = await screen.findByText(
-      "modelProvider.confirmDeleteEmbeddingDesc",
+    const description = await screen.findByText(
+      "modelProvider.confirmDeleteModelDesc",
     );
-    await waitFor(() => expect(warning).toBeVisible());
-    expect(props.onRemove).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
-    await waitFor(() => expect(warning).not.toBeVisible());
-    expect(props.onRemove).not.toHaveBeenCalled();
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "modelProvider.deleteModelAria:BAAI/bge-large",
-      }),
-    );
+    await waitFor(() => expect(description).toBeVisible());
     fireEvent.click(
       await screen.findByRole("button", { name: "common.delete" }),
     );
-    await waitFor(() => expect(props.onRemove).toHaveBeenCalledWith(models[2]));
+    await waitFor(() => expect(props.onRemove).toHaveBeenCalledWith(vlm));
+    expect(props.onRemove).toHaveBeenCalledTimes(1);
+    expect(vlm.capability).toBe("VLM");
   });
-  it("edits only editable chat models and keeps unknown logos neutral", () => {
+  it("edits existing chat models with their original capability and keeps unknown logos neutral", () => {
     const unknown: ProviderModel = {
+      ...models[1],
       id: "unknown",
       name: "private-lab-model",
-      capability: "LLM_CHAT",
-      builtIn: false,
-      enabled: true,
     };
     const { props } = setup({ models: [unknown] });
     const row = screen.getByRole("listitem", { name: unknown.name });
@@ -198,6 +315,7 @@ describe("saved supplier models", () => {
       }),
     );
     expect(props.onEdit).toHaveBeenCalledWith(unknown);
+    expect(props.onEdit).toHaveBeenCalledTimes(1);
     expect(props.onRemove).not.toHaveBeenCalled();
   });
 });

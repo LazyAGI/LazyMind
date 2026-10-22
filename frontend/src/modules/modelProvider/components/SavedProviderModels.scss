@@ -75,71 +75,29 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
   color: var(--provider-ink, #202735);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
   font-size: 13px;
   line-height: 20px;
 }
-.saved-provider-model-meta {
+.saved-provider-model-task {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 8px;
-  .model-modality-label {
-    display: none;
-  }
-  .model-modality-group {
-    gap: 3px;
-  }
-  .model-modality-logo {
-    width: 17px;
-    height: 17px;
-    padding: 2px;
-    border-radius: 5px;
-  }
+  max-width: 130px;
 }
-.saved-provider-model-type {
-  padding: 3px 7px;
-  border-radius: 6px;
-  color: var(--provider-muted, #697586);
-  background: var(--ant-color-fill-quaternary, #f3f5f8);
-  white-space: nowrap;
-  font-size: 10px;
-  line-height: 14px;
-  &.is-embedding {
-    color: #986600;
-    background: #fff5db;
-  }
-  &.is-audio {
-    color: #7754ad;
-    background: #f4efff;
-  }
-  &.is-image {
-    color: #19805d;
-    background: #eaf8f0;
-  }
-  &.is-video {
-    color: #4070b3;
-    background: #edf4ff;
-  }
-}
-.saved-provider-model-vision {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: 23px;
-  height: 20px;
-  border-radius: 6px;
-  color: #19805d;
-  background: #eaf8f0;
+.saved-provider-model-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  overflow-wrap: anywhere;
   font-size: 12px;
-}
-.saved-provider-model-context {
-  min-width: 34px;
-  color: var(--provider-muted, #697586);
-  text-align: right;
-  white-space: nowrap;
-  font-size: 10px;
+  line-height: 1.5;
 }
 .saved-provider-model-actions {
   display: inline-flex;
@@ -167,16 +125,8 @@
   outline: 2px solid var(--provider-blue, #2f6df6);
   outline-offset: -2px;
 }
-@container (max-width: 580px) {
-  .saved-provider-model-context {
-    display: none;
-  }
-  .saved-provider-model-meta {
-    gap: 5px;
-  }
-}
 @container (max-width: 440px) {
-  .saved-provider-model-meta .model-modality-marks {
+  .saved-provider-model-task .model-type-badge-label {
     display: none;
   }
   .saved-provider-model-row {
@@ -189,11 +139,6 @@
       min-width: 26px;
       flex-basis: 26px;
     }
-  }
-  .saved-provider-model-type {
-    max-width: 72px;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 }
 @media (max-width: 600px) {

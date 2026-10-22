@@ -4,6 +4,7 @@ export type ModelModality = (typeof modelModalities)[number];
 
 export interface UpstreamModelRecord {
   name: string;
+  model_type?: string;
   input: ModelModality[];
   output: ModelModality[];
   context: number;

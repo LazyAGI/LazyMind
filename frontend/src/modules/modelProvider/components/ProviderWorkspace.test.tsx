@@ -51,10 +51,6 @@ vi.mock("../api", () => ({
   setProviderActiveKey: mocks.setActiveKey,
   withModelProviderJsonOptions: (value: unknown) => value,
 }));
-vi.mock("./ModelModalityMarks", () => ({
-  ModelModalityMarks: () => <span>modalities</span>,
-}));
-
 const provider: AddedProvider = {
   id: "openai",
   name: "OpenAI",
@@ -121,7 +117,6 @@ function setup(
           onCheck={vi.fn()}
           checking={{}}
           onReload={callbacks.onReload}
-          cloudAvailable={false}
           cloudContent={<p>Cloud login</p>}
           onBack={() => setDrawer(true)}
           {...overrides}
@@ -178,6 +173,59 @@ beforeEach(() => {
 });
 
 describe("compact provider workspace", () => {
+  it("filters task types without splitting dialogue or vector models by modality", async () => {
+    const capabilities = [
+      "LLM_CHAT",
+      "VLM",
+      "EMBEDDING",
+      "MULTIMODAL_EMBEDDING",
+      "RERANK",
+    ] as const;
+    const models = capabilities.map((capability) => ({
+      ...provider.groups[0].models[0],
+      id: capability,
+      name: `fixture-${capability}`,
+      capability,
+      builtIn: false,
+    }));
+    const mixed = {
+      ...provider,
+      groups: [{ ...provider.groups[0], models }],
+    };
+    setup({ providers: [mixed], configuredProviders: [mixed] });
+    fireEvent.mouseDown(
+      screen.getByRole("combobox", {
+        name: "modelProvider.workspace.modelType",
+      }),
+    );
+    const options = [
+      ...document.querySelectorAll(".ant-select-item-option-content"),
+    ];
+    expect(
+      options.filter(
+        (option) => option.textContent === "modelProvider.taskType.chat",
+      ),
+    ).toHaveLength(1);
+    const vectors = options.find(
+      (option) => option.textContent === "modelProvider.taskType.embedding",
+    );
+    expect(vectors).toBeDefined();
+    fireEvent.click(vectors!);
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll(".saved-provider-model-row"),
+      ).toHaveLength(2),
+    );
+    expect(
+      screen.getByRole("listitem", { name: "fixture-EMBEDDING" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("listitem", { name: "fixture-MULTIMODAL_EMBEDDING" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("listitem", { name: "fixture-RERANK" }),
+    ).not.toBeInTheDocument();
+  });
   it("places key controls before the API address and only shows save for an address draft", () => {
     setup();
     const keys = document.querySelector(".provider-workspace-api-keys")!;
@@ -190,9 +238,12 @@ describe("compact provider workspace", () => {
         name: "modelProvider.workspace.saveEndpoint",
       }),
     ).not.toBeInTheDocument();
-    fireEvent.change(screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" }), {
-      target: { value: "https://api.example.test/v2" },
-    });
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" }),
+      {
+        target: { value: "https://api.example.test/v2" },
+      },
+    );
     expect(
       screen.getByRole("button", {
         name: "modelProvider.workspace.saveEndpoint",
@@ -388,6 +439,31 @@ describe("compact provider workspace", () => {
       screen.queryByDisplayValue("secret-new-5678"),
     ).not.toBeInTheDocument();
   });
+  it.each([
+    ["", "apiKeyRequired"],
+    ["   ", "apiKeyRequired"],
+    ["secret with spaces", "apiKeyNoSpaces"],
+    ["x".repeat(513), "apiKeyMax"],
+  ])("blocks an invalid supplier key before submitting: %s", async (apiKey, error) => {
+    setup();
+    fireEvent.click(
+      screen.getByRole("button", { name: "modelProvider.workspace.addKey" }),
+    );
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.change(dialog.getByLabelText("modelProvider.apiKeyLabel"), {
+      target: { value: apiKey },
+    });
+    fireEvent.click(
+      dialog.getByRole("button", {
+        name: "modelProvider.workspace.addAndCheckKey",
+      }),
+    );
+    expect(
+      (await dialog.findAllByText(`modelProvider.validation.${error}`)).length,
+    ).toBeGreaterThan(0);
+    expect(mocks.addKey).not.toHaveBeenCalled();
+    expect(mocks.createGroup).not.toHaveBeenCalled();
+  });
   it("deletes a saved key by opaque ID without submitting masked text", async () => {
     setup();
     fireEvent.click(
@@ -407,7 +483,9 @@ describe("compact provider workspace", () => {
   });
   it("resets a discarded endpoint before leaving supplier settings", async () => {
     setup({}, true);
-    const endpoint = screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" });
+    const endpoint = screen.getByRole("textbox", {
+      name: "modelProvider.apiAddressLabel",
+    });
     fireEvent.change(endpoint, {
       target: { value: "https://unsaved.example.test/v1" },
     });
@@ -483,9 +561,12 @@ describe("compact provider workspace", () => {
       dialog.getByLabelText("modelProvider.workspace.supplierName"),
       { target: { value: "My gateway" } },
     );
-    fireEvent.change(dialog.getByRole("textbox", { name: "modelProvider.apiAddressLabel" }), {
-      target: { value: "https://custom.example.test/v1" },
-    });
+    fireEvent.change(
+      dialog.getByRole("textbox", { name: "modelProvider.apiAddressLabel" }),
+      {
+        target: { value: "https://custom.example.test/v1" },
+      },
+    );
     fireEvent.mouseDown(dialog.getByRole("combobox"));
     expect(
       screen.queryByText("Private proxy", {
@@ -497,9 +578,12 @@ describe("compact provider workspace", () => {
         selector: ".ant-select-item-option-content",
       }),
     );
-    fireEvent.change(dialog.getByRole("textbox", { name: "modelProvider.apiAddressLabel" }), {
-      target: { value: "https://custom.example.test/v1" },
-    });
+    fireEvent.change(
+      dialog.getByRole("textbox", { name: "modelProvider.apiAddressLabel" }),
+      {
+        target: { value: "https://custom.example.test/v1" },
+      },
+    );
     fireEvent.click(dialog.getByRole("button", { name: "common.save" }));
     await waitFor(() =>
       expect(mocks.createProvider).toHaveBeenCalledWith({

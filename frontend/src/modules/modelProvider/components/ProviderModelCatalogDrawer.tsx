@@ -18,22 +18,15 @@ import {
   ReloadOutlined,
   SearchOutlined,
   DeleteOutlined,
-  FontSizeOutlined,
-  PictureOutlined,
-  ClusterOutlined,
-  AudioOutlined,
-  VideoCameraOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { listRemoteGroupModels, type RemoteGroupModel } from "../api";
 import type { ProviderModel } from "../pages/ModelProvidersPage";
 import { getModelIdentity } from "../modelIdentity";
-import {
-  lookupUpstreamModel,
-  type UpstreamModelRecord,
-} from "../upstreamCatalog";
-import { ModelModalityMarks } from "./ModelModalityMarks";
+import { lookupUpstreamModel } from "../upstreamCatalog";
+import { availableModelTaskTypes, getModelTaskType, getModelTaskLabelKey, type ModelTaskType } from "../modelTaskTypes";
+import { ModelTypeBadge, ModelTypeIcon } from "./ModelTypeBadge";
 import { ModelIdentityIcon } from "./ModelIdentityIcon";
 import "./ProviderModelCatalogDrawer.scss";
 
@@ -61,23 +54,8 @@ interface Props {
   onChanged?: () => void;
 }
 
-type Category =
-  | "all"
-  | "unavailable"
-  | "text"
-  | "image"
-  | "embedding"
-  | "audio"
-  | "video";
-const categories: Category[] = [
-  "all",
-  "unavailable",
-  "text",
-  "image",
-  "embedding",
-  "audio",
-  "video",
-];
+type Category = "all" | "unavailable" | ModelTaskType;
+const categories: Category[] = ["all", "unavailable", ...availableModelTaskTypes, "unknown"];
 const normalizedName = (name: string) => name.trim().toLowerCase();
 
 function savedModelType(model: ProviderModel) {
@@ -97,32 +75,12 @@ function savedModelType(model: ProviderModel) {
   return types[model.capability];
 }
 
-function modelCategory(
-  modelType: string,
-): Exclude<Category, "all" | "unavailable"> {
-  const value = modelType.toLowerCase();
-  if (/embed|rerank/.test(value)) return "embedding";
-  if (/video/.test(value)) return "video";
-  if (/image|vlm|vision/.test(value)) return "image";
-  if (/tts|stt|asr|audio/.test(value)) return "audio";
-  return "text";
-}
-
-function catalogModelType(model?: UpstreamModelRecord) {
-  if (model?.output.includes("video")) return "text2video";
-  if (model?.output.includes("image")) return "text2image";
-  if (model?.output.includes("audio")) return "tts";
-  if (model?.input.includes("audio") && model.output.includes("text"))
-    return "stt";
-  if (model?.output.includes("text")) return "llm";
-  return "";
-}
-
 interface Candidate extends CatalogModelChoice {
   existing?: ProviderModel;
   missing: boolean;
   vendor: string;
   unknownType: boolean;
+  requiresTypeSelection: boolean;
 }
 
 export function ProviderModelCatalogDrawer(props: Props) {
@@ -197,19 +155,20 @@ export function ProviderModelCatalogDrawer(props: Props) {
       if (!key || unique.has(key)) continue;
       const existing = saved.get(key);
       const upstream = lookupUpstreamModel(props.protocolName, model.name);
-      const inferredType = catalogModelType(upstream);
+      const declaredType = model.model_type?.trim() || upstream?.model_type?.trim() || "";
+      const modelType = existing
+        ? savedModelType(existing)
+        : typeOverrides[key] || declaredType;
       unique.set(key, {
-        name: model.name,
-        model_type:
-          typeOverrides[key] ||
-          model.model_type ||
-          (existing ? savedModelType(existing) : inferredType || "llm"),
-        max_input_tokens: model.max_input_tokens,
-        vision: upstream?.input.includes("image"),
+        name: existing?.name || model.name,
+        model_type: modelType,
+        max_input_tokens: existing?.maxInputTokens || model.max_input_tokens,
+        vision: existing ? existing.vision : upstream?.input.includes("image"),
         existing,
         missing: false,
         vendor: getModelIdentity(model.name, props.providerName).vendor,
-        unknownType: !model.model_type && !existing && !inferredType,
+        unknownType: getModelTaskType(modelType) === "unknown",
+        requiresTypeSelection: !existing && getModelTaskType(declaredType) === "unknown",
       });
     }
     for (const model of props.models) {
@@ -223,7 +182,8 @@ export function ProviderModelCatalogDrawer(props: Props) {
           existing: model,
           missing: loaded,
           vendor: getModelIdentity(model.name, props.providerName).vendor,
-          unknownType: false,
+          unknownType: getModelTaskType(savedModelType(model)) === "unknown",
+          requiresTypeSelection: false,
         });
     }
     return [...unique.values()].sort(
@@ -244,7 +204,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
     target === "all" ||
     (target === "unavailable"
       ? model.missing
-      : modelCategory(model.model_type) === target);
+      : getModelTaskType(model.model_type) === target);
   const visible = candidates.filter(
     (model) =>
       matchesCategory(model, category) &&
@@ -252,21 +212,24 @@ export function ProviderModelCatalogDrawer(props: Props) {
         .toLowerCase()
         .includes(search.trim().toLowerCase()),
   );
-  const byVendor = new Map<string, Candidate[]>();
+  const byTask = new Map<string, { key: string; task: ModelTaskType; models: Candidate[] }>();
   for (const model of visible) {
-    const group = byVendor.get(model.vendor) || [];
-    group.push(model);
-    byVendor.set(model.vendor, group);
+    const task = getModelTaskType(model.model_type);
+    const key = JSON.stringify([model.existing && !model.existing.builtIn ? "custom" : "catalog", task]);
+    const group = byTask.get(key) || { key, task, models: [] };
+    group.models.push(model);
+    byTask.set(key, group);
   }
-  const groups = [...byVendor];
+  const groups = [...byTask.values()];
   const unavailable = candidates.filter(
     (model) => model.missing && model.existing,
   );
   const addable = candidates.filter(
-    (model) => !model.existing && !model.missing,
+    (model) => !model.existing && !model.missing && !model.unknownType,
   );
 
-  const runChanges = async (items: Candidate[], remove: boolean) => {
+  const runChanges = async (requested: Candidate[], remove: boolean) => {
+    const items = remove ? requested : requested.filter((model) => !model.unknownType);
     if (busy || props.modelsLoading || !items.length) return;
     setBusy(true);
     let index = 0;
@@ -343,6 +306,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
     ["llm", "llmChat"],
     ["embed", "embedding"],
     ["vlm", "vlm"],
+    ["multimodal_embedding", "multimodalEmbedding"],
     ["rerank", "rerank"],
     ["text2image", "textToImage"],
     ["image_editing", "imageEditing"],
@@ -353,13 +317,6 @@ export function ProviderModelCatalogDrawer(props: Props) {
     value,
     label: t(`modelProvider.capability.${key}`),
   }));
-  const categoryIcons = {
-    text: <FontSizeOutlined aria-hidden="true" />,
-    image: <PictureOutlined aria-hidden="true" />,
-    embedding: <ClusterOutlined aria-hidden="true" />,
-    audio: <AudioOutlined aria-hidden="true" />,
-    video: <VideoCameraOutlined aria-hidden="true" />,
-  };
   const working = busy || loading || props.modelsLoading === true;
 
   return (
@@ -446,10 +403,8 @@ export function ProviderModelCatalogDrawer(props: Props) {
             className={item === category ? "is-active" : ""}
             onClick={() => setCategory(item)}
           >
-            {item !== "all" && item !== "unavailable"
-              ? categoryIcons[item]
-              : null}
-            {copy(item)}
+            {item !== "all" && item !== "unavailable" ? <ModelTypeIcon type={item} size={16} /> : null}
+            {item === "all" || item === "unavailable" ? copy(item) : t(getModelTaskLabelKey(item))}
             <small>
               {
                 candidates.filter((model) => matchesCategory(model, item))
@@ -499,44 +454,46 @@ export function ProviderModelCatalogDrawer(props: Props) {
               description={copy("empty")}
             />
           ) : null}
-          {groups.map(([vendor, models]) => {
+          {groups.map(({ key: groupKey, task, models }) => {
+            const taskLabel = t(getModelTaskLabelKey(task));
             const missing = models.filter(
-              (model) => !model.existing && !model.missing,
+              (model) => !model.existing && !model.missing && !model.unknownType,
             );
             const selected = models.filter((model) => model.existing);
             const removing = !missing.length && selected.length > 0;
             return (
               <section
                 className="provider-model-catalog-group"
-                aria-label={vendor}
-                key={vendor}
+                aria-label={taskLabel}
+                key={groupKey}
               >
                 <div className="provider-model-catalog-group-header">
                   <button
                     type="button"
-                    aria-label={vendor}
-                    aria-expanded={!collapsed.has(vendor)}
+                    aria-label={taskLabel}
+                    aria-expanded={!collapsed.has(groupKey)}
                     onClick={() =>
                       setCollapsed((current) => {
                         const next = new Set(current);
-                        if (next.has(vendor)) next.delete(vendor);
-                        else next.add(vendor);
+                        if (next.has(groupKey)) next.delete(groupKey);
+                        else next.add(groupKey);
                         return next;
                       })
                     }
                   >
                     <DownOutlined
                       aria-hidden="true"
-                      className={collapsed.has(vendor) ? "is-collapsed" : ""}
+                      className={collapsed.has(groupKey) ? "is-collapsed" : ""}
                     />
-                    <strong>{vendor}</strong>
+                    <ModelTypeIcon type={task} size={18} />
+                    <strong>{taskLabel}</strong>
                     <small>{models.length}</small>
                   </button>
                   <Button
                     type="text"
                     size="small"
                     aria-label={copy(removing ? "removeGroup" : "addGroup", {
-                      name: vendor,
+                      name: taskLabel,
                     })}
                     icon={
                       removing ? (
@@ -553,10 +510,9 @@ export function ProviderModelCatalogDrawer(props: Props) {
                     }
                   />
                 </div>
-                {!collapsed.has(vendor)
+                {!collapsed.has(groupKey)
                   ? models.map((model) => {
                       const key = normalizedName(model.name);
-                      const category = modelCategory(model.model_type);
                       return (
                         <div
                           className={`provider-model-catalog-row${model.existing ? " is-added" : ""}`}
@@ -570,42 +526,25 @@ export function ProviderModelCatalogDrawer(props: Props) {
                           />
                           <div className="provider-model-catalog-model-name">
                             <Tooltip title={model.name} placement="topLeft">
-                              <span title={model.name}>{model.name}</span>
+                              <span>{model.name}</span>
                             </Tooltip>
                             {model.missing ? (
                               <small>{copy("missingRemote")}</small>
                             ) : null}
                           </div>
-                          {category !== "text" && !model.unknownType ? (
-                            <span
-                              className={`provider-model-catalog-type-badge is-${category}`}
-                            >
-                              {copy(category)}
-                            </span>
-                          ) : null}
-                          {model.unknownType ? (
+                          {model.requiresTypeSelection ? (
                             <Select
                               size="small"
                               className="provider-model-catalog-type"
-                              aria-label={copy("modelType", {
-                                name: model.name,
-                              })}
-                              value={model.model_type}
+                              aria-label={copy("modelType", { name: model.name })}
+                              placeholder={t(getModelTaskLabelKey("unknown"))}
+                              value={model.unknownType ? undefined : model.model_type}
                               options={typeOptions}
                               disabled={busy}
-                              onChange={(value) =>
-                                setTypeOverrides((current) => ({
-                                  ...current,
-                                  [key]: value,
-                                }))
-                              }
+                              onChange={(value) => setTypeOverrides((current) => ({ ...current, [key]: value }))}
                             />
                           ) : (
-                            <ModelModalityMarks
-                              providerName={props.protocolName}
-                              modelName={model.name}
-                              compact
-                            />
+                            <ModelTypeBadge type={getModelTaskType(model.model_type)} compact />
                           )}
                           <Button
                             type="text"
@@ -614,7 +553,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
                               { name: model.name },
                             )}
                             loading={pending.has(key)}
-                            disabled={working}
+                            disabled={working || (!model.existing && model.unknownType)}
                             icon={
                               model.existing ? (
                                 <MinusOutlined aria-hidden="true" />

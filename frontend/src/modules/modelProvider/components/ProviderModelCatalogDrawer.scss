@@ -248,39 +248,7 @@
     font-size: 11px;
     line-height: 15px;
   }
-  .provider-model-catalog-type-badge {
-    flex-shrink: 0;
-    padding: 2px 7px;
-    border-radius: 10px;
-    font-size: 11px;
-    line-height: 16px;
-  }
-  .provider-model-catalog-type-badge.is-embedding {
-    background: #fff5db;
-    color: #986600;
-  }
-  .provider-model-catalog-type-badge.is-audio {
-    background: #f4efff;
-    color: #7754ad;
-  }
-  .provider-model-catalog-type-badge.is-image {
-    background: #eaf8f0;
-    color: #19805d;
-  }
-  .provider-model-catalog-type-badge.is-video {
-    background: #edf4ff;
-    color: #4070b3;
-  }
-  .provider-model-catalog-row .model-modality-label {
-    display: none;
-  }
-  .provider-model-catalog-row .model-modality-marks {
-    flex-shrink: 0;
-  }
-  .provider-model-catalog-row .model-modality-logo {
-    width: 17px;
-    height: 17px;
-  }
+  .provider-model-catalog-row .model-type-badge { flex-shrink: 0; }
   .provider-model-catalog-row > .ant-btn {
     flex-shrink: 0;
     height: 30px;
@@ -294,7 +262,7 @@
     background: var(--ant-color-bg-container, #fff);
   }
   .provider-model-catalog-type {
-    width: 88px;
+    width: 140px;
     flex-shrink: 0;
     font-size: 11px;
   }
@@ -331,11 +299,8 @@
       gap: 8px;
       padding-inline: 6px;
     }
-    .provider-model-catalog-row .model-modality-marks {
-      display: none;
-    }
     .provider-model-catalog-type {
-      width: 78px;
+      width: 112px;
     }
   }
   @media (pointer: coarse) {

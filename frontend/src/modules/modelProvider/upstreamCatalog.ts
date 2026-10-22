@@ -12,7 +12,3 @@ const snapshots = import.meta.glob<UpstreamCatalogFile>("./upstreamModelCatalog.
 const index = createUpstreamCatalogIndex(snapshots["./upstreamModelCatalog.json"]);
 
 export const lookupUpstreamModel = index.lookupModel;
-
-export function upstreamCatalogGeneratedAt() {
-  return index.generatedAt;
-}
