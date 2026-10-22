@@ -471,7 +471,7 @@ config.add('startup_timeout', str, '0', 'STARTUP_TIMEOUT',
 config.add('reset_algo_on_startup', bool, False, 'RESET_ALGO_ON_STARTUP',
            description='Drop all vector/segment data and algorithm registration on startup, then rebuild from scratch.')
 config.add('force_algo_register', bool, False, 'FORCE_ALGO_REGISTER',
-           description='Override algorithm registration policy with force without resetting stored documents or vectors.')
+           description='Use force registration without resetting stored documents or vectors.')
 config.add('rag_image_path_prefix', str, '/mnt/lustre/share_data/mineru/images/', 'RAG_IMAGE_PATH_PREFIX',
            description='Image path prefix for RAG documents.')
 
