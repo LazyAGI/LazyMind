@@ -117,7 +117,7 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 	var rows []orm.UserModelProviderGroup
 	if err := db.WithContext(r.Context()).
 		Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, userID).
-		Order("name ASC").
+		Order("created_at ASC, id ASC").
 		Find(&rows).Error; err != nil {
 		common.ReplyErr(w, "list groups failed", http.StatusInternalServerError)
 		return
@@ -135,7 +135,7 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 			ID:                  g.ID,
 			UserModelProviderID: g.UserModelProviderID,
 			Name:                g.Name,
-			BaseURL:             g.BaseURL,
+			BaseURL:             connectionBaseURL(parent, g.BaseURL),
 			HasAPIKey:           strings.TrimSpace(g.APIKey) != "" || strings.TrimSpace(g.APIKeyCiphertext) != "",
 			Keys:                groupKeyItems(g.ID, apiKey),
 			IsVerified:          g.IsVerified,
@@ -179,8 +179,8 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(req.Name)
 	baseURL := strings.TrimSpace(req.BaseURL)
 	apiKey := strings.TrimSpace(req.APIKey)
-	if name == "" || baseURL == "" {
-		common.ReplyErr(w, "name and base_url are required", http.StatusBadRequest)
+	if name == "" {
+		common.ReplyErr(w, "name is required", http.StatusBadRequest)
 		return
 	}
 
@@ -200,10 +200,19 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "base_url must be an API root without a request path", http.StatusBadRequest)
 		return
 	}
+	baseURL = connectionBaseURL(parent, baseURL)
+	if baseURL == "" {
+		common.ReplyErr(w, "base_url is required", http.StatusBadRequest)
+		return
+	}
+	if hasOpenAIRequestPath(parent.Name, baseURL) {
+		common.ReplyErr(w, "base_url must be an API root without a request path", http.StatusBadRequest)
+		return
+	}
 	baseURL = LazyLLMBaseURL(parent.Name, baseURL)
 
 	// Capability: single-group providers only allow one group per user.
-	if !parent.HasCapability("multi_group") {
+	if !hasSharedProviderEndpoint(parent) && !parent.HasCapability("multi_group") {
 		var count int64
 		if err := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroup{}).
 			Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, userID).
@@ -286,6 +295,23 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	var autoSelection *autoModelSelection
 	err = db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if hasSharedProviderEndpoint(parent) {
+			if err := lockProvider(tx, &parent); err != nil {
+				return err
+			}
+			if strings.TrimSpace(parent.BaseURL) == "" {
+				if err := tx.Model(&parent).Update("base_url", baseURL).Error; err != nil {
+					return err
+				}
+				parent.BaseURL = baseURL
+			}
+			latestURL := connectionBaseURL(parent, baseURL)
+			if normalizeBaseURLForCompare(latestURL) != normalizeBaseURLForCompare(baseURL) {
+				checkData = nil
+				row.IsVerified = false
+			}
+			row.BaseURL, baseURL = latestURL, latestURL
+		}
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
@@ -402,11 +428,6 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(req.Name)
 	baseURL := strings.TrimSpace(req.BaseURL)
 	apiKey := strings.TrimSpace(req.APIKey)
-	if baseURL == "" {
-		common.ReplyErr(w, "base_url is required", http.StatusBadRequest)
-		return
-	}
-
 	var parent orm.UserModelProvider
 	err := db.WithContext(r.Context()).
 		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", parentID, userID).
@@ -417,6 +438,15 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		common.ReplyErr(w, "query model provider failed", http.StatusInternalServerError)
+		return
+	}
+	if hasOpenAIRequestPath(parent.Name, baseURL) {
+		common.ReplyErr(w, "base_url must be an API root without a request path", http.StatusBadRequest)
+		return
+	}
+	baseURL = connectionBaseURL(parent, baseURL)
+	if baseURL == "" {
+		common.ReplyErr(w, "base_url is required", http.StatusBadRequest)
 		return
 	}
 	if hasOpenAIRequestPath(parent.Name, baseURL) {
@@ -455,7 +485,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Capability: providers without custom_base_url must keep the original base_url.
-	if !parent.HasCapability("custom_base_url") {
+	if !hasSharedProviderEndpoint(parent) && !parent.HasCapability("custom_base_url") {
 		baseURL = row.BaseURL
 		updates["base_url"] = row.BaseURL
 	}
@@ -474,9 +504,20 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	skipVerify := false
 	if baseURLChanged {
 		updates["is_verified"] = false
-		updates["api_key"] = ""
-		updates["api_key_ciphertext"] = ""
-		updates["credential_version"] = max(row.CredentialVersion, legacyModelProviderCredentialVersion)
+		if hasSharedProviderEndpoint(parent) {
+			preserved, err := encryptedAPIKeyUpdates(userID, row.ID, nextCredentialRevision, storedAPIKey, row.CredentialVersion)
+			if err != nil {
+				common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
+				return
+			}
+			for key, value := range preserved {
+				updates[key] = value
+			}
+		} else {
+			updates["api_key"] = ""
+			updates["api_key_ciphertext"] = ""
+			updates["credential_version"] = max(row.CredentialVersion, legacyModelProviderCredentialVersion)
+		}
 		skipVerify = true
 	}
 	if apiKey != "" {
@@ -547,7 +588,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		updates["is_verified"] = true
 	}
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&row).Updates(updates).Error; err != nil {
+		if err := updateConnectionSafely(tx, &parent, &row, baseURL, updates); err != nil {
 			return err
 		}
 		if credentialChanged {
@@ -555,6 +596,10 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	}); err != nil {
+		if errors.Is(err, errConnectionChanged) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, "update group failed", http.StatusInternalServerError)
 		return
 	}
@@ -658,6 +703,11 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	var downgradedKnowledgeBases int64
 	err = db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if hasSharedProviderEndpoint(parent) {
+			if err := lockProvider(tx, &parent); err != nil {
+				return err
+			}
+		}
 		if hasTextEmbedding {
 			count, err := downgradeIndexedDatasets(tx, userID, now)
 			if err != nil {
@@ -933,7 +983,7 @@ func AddKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify the key before storing.
-	checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, row.BaseURL, newKey, "")
+	checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, connectionBaseURL(parent, row.BaseURL), newKey, "")
 	if checkErr != nil || checkResult == nil || !checkResult.Success {
 		msg := "verification failed"
 		if checkResult != nil && strings.TrimSpace(checkResult.Message) != "" {
@@ -956,11 +1006,15 @@ func AddKey(w http.ResponseWriter, r *http.Request) {
 	encryptedUpdates["is_verified"] = true
 	encryptedUpdates["updated_at"] = now
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&row).Updates(encryptedUpdates).Error; err != nil {
+		if err := updateConnectionSafely(tx, &parent, &row, connectionBaseURL(parent, row.BaseURL), encryptedUpdates); err != nil {
 			return err
 		}
 		return enqueueCredentialBackup(tx, row.ID, nextCredentialRevision, credentialvault.BackupUpsert, now)
 	}); err != nil {
+		if errors.Is(err, errConnectionChanged) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, "update api_key failed", http.StatusInternalServerError)
 		return
 	}
@@ -1059,14 +1113,18 @@ func RemoveKey(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
 		return
 	}
-	encryptedUpdates["is_verified"] = len(filtered) > 0
+	encryptedUpdates["is_verified"] = row.IsVerified && len(filtered) > 0
 	encryptedUpdates["updated_at"] = now
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&row).Updates(encryptedUpdates).Error; err != nil {
+		if err := updateConnectionSafely(tx, &parent, &row, connectionBaseURL(parent, row.BaseURL), encryptedUpdates); err != nil {
 			return err
 		}
 		return enqueueCredentialBackup(tx, row.ID, nextCredentialRevision, credentialvault.BackupUpsert, now)
 	}); err != nil {
+		if errors.Is(err, errConnectionChanged) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, "update api_key failed", http.StatusInternalServerError)
 		return
 	}

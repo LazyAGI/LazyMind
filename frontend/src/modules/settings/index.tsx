@@ -1,7 +1,7 @@
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
-import { Alert, Button, Empty, Input, Skeleton, Space, Switch, Tabs, Tag, message } from "antd";
+import { Alert, Button, Empty, Drawer, Input, Skeleton, Space, Switch, Tabs, Tag, message } from "antd";
 import {
   ApiOutlined,
   ApartmentOutlined,
@@ -242,7 +242,6 @@ function SettingsPageContent() {
     ? knowledgeToolCandidate
     : null;
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const modelProviderTabRef = useRef<HTMLButtonElement>(null);
   const latestRequest = useRef(0);
   const latestOverviewRequest = useRef(0);
   const [overview, setOverview] = useState<SettingsOverview | null>(null);
@@ -263,7 +262,7 @@ function SettingsPageContent() {
     dependencyMessage: hasLocalDependencies ? t("settingsPage.diagnostics.readingDeps") : t("settingsPage.diagnostics.cloudDeps"),
   });
   const [keyword, setKeyword] = useState("");
-  const modelView = searchParams.get("view") === "providers" ? "providers" : "defaults";
+  const modelView = searchParams.get("view") === "defaults" || (searchParams.has("target") && searchParams.get("view") !== "providers") ? "defaults" : "providers";
   const modelTarget = settingsModelTarget(searchParams.get("target"));
   const modelProviderTarget = searchParams.get("provider_id") || undefined;
   const returnTo = settingsReturnTo(searchParams.get("return_to"));
@@ -351,7 +350,7 @@ function SettingsPageContent() {
       searchParams,
       next === "providers"
         ? { section: "models", view: "providers" }
-        : { section: "models" },
+        : { section: "models", view: "defaults" },
     ));
   };
   const selectTaskView = (next: "conversation" | "tasks") => {
@@ -723,12 +722,23 @@ function SettingsPageContent() {
       </>;
     } else if (section === "models") {
       content = <>
-        {integratedHeader(t("settingsPage.models.title"), selectedSection.detail)}
-        <nav className="settings-model-tabs" aria-label={t("settingsPage.models.tabsAria")} role="tablist">
-          <button className={modelView === "defaults" ? "is-active" : ""} type="button" role="tab" aria-selected={modelView === "defaults"} onClick={() => selectModelView("defaults")}>{t("settingsPage.models.defaultSettings")}</button>
-          <button ref={modelProviderTabRef} className={modelView === "providers" ? "is-active" : ""} type="button" role="tab" aria-selected={modelView === "providers"} onClick={() => selectModelView("providers")}>{t("settingsPage.models.providers")}</button>
-        </nav>
-        {integratedSurface(modelView === "defaults" ? (
+        {integratedSurface(
+          <ModelProvidersPage
+            onConfigurationChanged={syncOverview}
+            highlightProviderId={modelProviderTarget}
+            onConfigureDefaults={() => selectModelView("defaults")}
+            onBack={() => selectSection("overview")}
+          />,
+          "is-models",
+        )}
+        <Drawer
+          className="settings-model-defaults-drawer"
+          title={t("modelProvider.workspace.defaults")}
+          width={560}
+          open={modelView === "defaults"}
+          onClose={() => selectModelView("providers")}
+          destroyOnClose
+        >
           <DefaultServicesPage
             onModelSelectionChanged={syncOverview}
             highlightTarget={modelTarget}
@@ -740,17 +750,9 @@ function SettingsPageContent() {
             onConfigureCloudService={(service) => setSearchParams(settingsRouteParams(searchParams, {
               section: "knowledge", tool: service === "cloudParsing" ? "document-parsing" : "web-search",
             }))}
-            onConfigureProviders={() => {
-              selectModelView("providers");
-              requestAnimationFrame(() => modelProviderTabRef.current?.focus());
-            }}
+            onConfigureProviders={() => selectModelView("providers")}
           />
-        ) : (
-          <ModelProvidersPage
-            onConfigurationChanged={syncOverview}
-            highlightProviderId={modelProviderTarget}
-          />
-        ), "is-models")}
+        </Drawer>
       </>;
     } else if (section === "tasks") {
       const schedulesEnabled = Boolean(overview?.controls.schedules_enabled);
@@ -965,9 +967,9 @@ function SettingsPageContent() {
     </section>;
   };
 
-  return <main className="settings-reference" aria-label={t("settingsPage.title")}>
+  return <main className={`settings-reference${section === "models" ? " is-provider-workspace" : ""}`} aria-label={t("settingsPage.title")}>
     {settingsChange.dialog}
-    <aside className="settings-reference-sidebar">
+    {section !== "models" ? <aside className="settings-reference-sidebar">
       <button className="settings-back-button" type="button" onClick={() => navigate(returnTo || CHAT_HOME_PATH)}>
         <ArrowLeftOutlined />{t(returnTo ? "settingsPage.backToConversation" : "settingsPage.backToHome")}
       </button>
@@ -1004,7 +1006,7 @@ function SettingsPageContent() {
         {filteredGroups.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("settingsPage.noMatch")} /> : null}
       </nav>
       <div className="settings-reference-sidebar-foot">LazyAGI/LazyMind<br />{t("settingsPage.sidebarFoot")}</div>
-    </aside>
+    </aside> : null}
     <section className="settings-reference-content" aria-busy={loading}>
       <div className="settings-reference-scroll">
         {loading ? (

@@ -46,6 +46,14 @@ export function unwrapModelProviderData<T>(payload: unknown): T {
   return payload as T;
 }
 
+export async function updateProviderEndpoint(providerId: string, baseUrl: string): Promise<{ id: string; base_url: string }> {
+  const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdEndpointPut({
+    modelProviderId: providerId,
+    updateModelProviderEndpointOpenAPIRequest: { base_url: baseUrl },
+  });
+  return unwrapModelProviderData(response.data);
+}
+
 export async function getCredentialBackupStatus(): Promise<CredentialBackupStatus & { available: boolean; reasonCode?: string }> {
   const response = await modelProvidersDefaultApi.apiCoreCredentialVaultBackupGet(silentCloudRequest);
   const data = unwrapModelProviderData<Record<string, unknown>>(response.data);

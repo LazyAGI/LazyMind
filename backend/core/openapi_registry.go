@@ -1197,10 +1197,11 @@ type listUserModelProvidersQueryParams struct {
 }
 
 type checkModelProviderOpenAPIRequest struct {
-	ProviderName string `json:"provider_name"`
-	BaseURL      string `json:"base_url"`
-	APIKey       string `json:"api_key"`
-	DryRun       bool   `json:"dry_run"`
+	ProviderName string  `json:"provider_name,omitempty"`
+	BaseURL      string  `json:"base_url,omitempty"`
+	APIKey       *string `json:"api_key,omitempty" desc:"Omit to check the first stored key. An explicit empty string tests a keyless connection."`
+	Model        string  `json:"model,omitempty"`
+	DryRun       bool    `json:"dry_run,omitempty"`
 }
 
 type modelProviderGroupPathParams struct {
@@ -1214,14 +1215,23 @@ type modelProviderGroupByIDPathParams struct {
 
 type updateModelProviderGroupOpenAPIRequest struct {
 	Name    string `json:"name"`
-	BaseURL string `json:"base_url"`
+	BaseURL string `json:"base_url,omitempty"`
 	APIKey  string `json:"api_key,omitempty"`
 	Verify  bool   `json:"verify"`
 }
 
+type updateModelProviderEndpointOpenAPIRequest struct {
+	BaseURL string `json:"base_url"`
+}
+
+type updateModelProviderEndpointOpenAPIResponse struct {
+	ID      string `json:"id"`
+	BaseURL string `json:"base_url"`
+}
+
 type createModelProviderGroupOpenAPIRequest struct {
 	Name    string `json:"name"`
-	BaseURL string `json:"base_url"`
+	BaseURL string `json:"base_url,omitempty"`
 	APIKey  string `json:"api_key,omitempty"`
 	Verify  bool   `json:"verify"`
 }
@@ -4357,7 +4367,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}:check",
 			Summary:     "Check model provider connectivity",
-			Description: "Validates credentials. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.",
+			Description: "Validates credentials. Model suppliers use their shared endpoint and the first stored key when api_key is omitted. Explicit empty api_key tests a keyless connection. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.",
 			Tags:        []string{"model_providers"},
 			RequestBody: jsonBodyOf(checkModelProviderOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("data: success and message from provider check", modelprovider.CheckModelProviderData{})},
@@ -4396,11 +4406,22 @@ func registeredCoreOperations() []openAPIOperation {
 			RequestBody: jsonBodyOf(setSelectedModelsOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Saved selected models", listSelectedModelsOpenAPIResponse{})},
 		},
+
+		{
+			Method:      "PUT",
+			Path:        "/model_providers/{model_provider_id}/endpoint",
+			Summary:     "Update a model supplier's shared endpoint",
+			Description: "Updates the current user's model supplier endpoint and all its connection instances atomically. Keys and model IDs are retained; changing the endpoint invalidates connection verification. Other provider categories are not supported.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupPathParams{},
+			RequestBody: jsonBodyOf(updateModelProviderEndpointOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Updated supplier endpoint", updateModelProviderEndpointOpenAPIResponse{})},
+		},
 		{
 			Method:      "GET",
 			Path:        "/model_providers/{model_provider_id}/groups",
 			Summary:     "List model provider connection groups",
-			Description: "Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Each item includes api_key.",
+			Description: "Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Keys are returned only as opaque IDs and masked values; plaintext credentials are never returned.",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupPathParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Group list", listModelProviderGroupsOpenAPIResponse{})},
@@ -4409,7 +4430,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/model_providers/{model_provider_id}/groups",
 			Summary:     "Create model provider connection group",
-			Description: "Creates a group (name, base_url, optional api_key) under the given user model provider. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.",
+			Description: "Creates a connection instance (name, optional api_key) under the given user model provider. Model suppliers always use their shared endpoint; base_url is optional and ignored for model suppliers. Other categories require base_url. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupPathParams{},
 			RequestBody: jsonBodyOf(createModelProviderGroupOpenAPIRequest{}, true),
@@ -4419,7 +4440,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "PATCH",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}",
 			Summary:     "Update model provider connection group",
-			Description: "Updates name, base_url, and optionally api_key for a group. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.",
+			Description: "Updates name and optionally api_key for a connection instance. Model suppliers always use their shared endpoint; base_url is ignored for model suppliers. Other categories may update base_url. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupByIDPathParams{},
 			RequestBody: jsonBodyOf(updateModelProviderGroupOpenAPIRequest{}, true),

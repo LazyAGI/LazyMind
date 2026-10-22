@@ -304,7 +304,8 @@ func syncDefaultModelToUserGroups(
 		}
 		var count int64
 		if err := tx.Model(&orm.UserModelProviderGroupModel{}).
-			Where("user_model_provider_group_id = ? AND name = ? AND deleted_at IS NULL", group.GroupID, modelName).
+			// A deleted model is a user decision, not a missing catalog entry.
+			Where("user_model_provider_group_id = ? AND name = ?", group.GroupID, modelName).
 			Count(&count).Error; err != nil {
 			return err
 		}
@@ -492,6 +493,10 @@ func MustSeedDatasourceCatalog(ctx context.Context, db *gorm.DB, yamlPath string
 
 // upgradeLegacyTokenPlanURL updates only the former official Token Plan preset.
 func upgradeLegacyTokenPlanURL(tx *gorm.DB, defaultProviderID string) error {
+	legacyURLs := []string{"https://token.sensenova.cn/v1/chat/completions/", "https://token.sensenova.cn/v1/chat/completions"}
+	if err := tx.Model(&orm.UserModelProvider{}).Where("default_model_provider_id = ? AND base_url IN ?", defaultProviderID, legacyURLs).Update("base_url", sensenovaNewPlatformBaseURL).Error; err != nil {
+		return err
+	}
 	providerIDs := tx.Model(&orm.UserModelProvider{}).Select("id").Where("default_model_provider_id = ?", defaultProviderID)
 	return tx.Model(&orm.UserModelProviderGroup{}).
 		Where("user_model_provider_id IN (?) AND base_url IN ?", providerIDs, []string{

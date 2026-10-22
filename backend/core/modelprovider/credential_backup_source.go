@@ -36,6 +36,8 @@ func (source CredentialBackupSource) LoadCredential(ctx context.Context, groupID
 	if catalogKey == "" {
 		catalogKey = strings.TrimSpace(provider.Name)
 	}
+	// The compatibility mirror is updated atomically with the key revision.
+	// Export that same row snapshot rather than pair it with a later supplier URL.
 	return credentialvault.ProviderCredential{
 		LocalProviderGroupID: group.ID, CredentialRevision: group.CredentialRevision,
 		ProviderCatalogKey: catalogKey, DisplayName: group.Name, BaseURL: group.BaseURL, APIKey: []byte(apiKey),

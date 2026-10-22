@@ -137,9 +137,12 @@ func TestCheckGroupRequiresAPIKeyOnlyForDefaultBaseURL(t *testing.T) {
 		wantSkipAuth   bool
 	}{
 		{
-			name:        "omitted key is rejected",
+			name:        "omitted key uses saved credential",
 			requestBody: `{"provider_name":"Qwen","base_url":"https://dashscope.aliyuncs.com/","dry_run":false}`,
-			wantStatus:  http.StatusBadRequest,
+			wantStatus:  http.StatusOK,
+			wantAPIKey:  "stored-key",
+			wantSource:  "qwen",
+			wantURL:     "https://dashscope.aliyuncs.com/",
 		},
 		{
 			name:        "empty key is rejected",
@@ -147,13 +150,13 @@ func TestCheckGroupRequiresAPIKeyOnlyForDefaultBaseURL(t *testing.T) {
 			wantStatus:  http.StatusBadRequest,
 		},
 		{
-			name:          "omitted key is accepted for custom base url",
+			name:          "omitted key uses saved credential for custom base url",
 			storedBaseURL: "https://models.example.com/v1",
 			requestBody:   `{"provider_name":"Qwen","base_url":"https://models.example.com/v1","dry_run":false}`,
 			wantStatus:    http.StatusOK,
 			wantSource:    "qwen",
 			wantURL:       "https://models.example.com/v1",
-			wantSkipAuth:  true,
+			wantAPIKey:    "stored-key",
 		},
 		{
 			name:          "empty key is accepted for custom base url",
@@ -173,25 +176,27 @@ func TestCheckGroupRequiresAPIKeyOnlyForDefaultBaseURL(t *testing.T) {
 			wantURL:     "https://dashscope.aliyuncs.com/",
 		},
 		{
-			name:         "official provider proxy keeps official source",
-			providerName: "Qwen",
-			requestBody:  `{"provider_name":"OpenAI","base_url":"http://12.34.56.78:8000/v1","api_key":"proxy-request-key","dry_run":false}`,
-			wantStatus:   http.StatusOK,
-			wantAPIKey:   "proxy-request-key",
-			wantSource:   "qwen",
-			wantURL:      "http://12.34.56.78:8000/v1",
+			name:          "official provider proxy keeps official source",
+			providerName:  "Qwen",
+			storedBaseURL: "http://12.34.56.78:8000/v1",
+			requestBody:   `{"provider_name":"OpenAI","base_url":"http://12.34.56.78:8000/v1","api_key":"proxy-request-key","dry_run":false}`,
+			wantStatus:    http.StatusOK,
+			wantAPIKey:    "proxy-request-key",
+			wantSource:    "qwen",
+			wantURL:       "http://12.34.56.78:8000/v1",
 		},
 		{
-			name:         "request provider fragment is replaced by canonical parent",
-			providerName: "OpenRouter",
-			requestBody:  `{"provider_name":"port!!!garbage","base_url":"https://proxy.example.com/v1/","api_key":"fragment-key","dry_run":false}`,
-			wantStatus:   http.StatusOK,
-			wantAPIKey:   "fragment-key",
-			wantSource:   "openrouter",
-			wantURL:      "https://proxy.example.com/v1/",
+			name:          "request provider fragment is replaced by canonical parent",
+			providerName:  "OpenRouter",
+			storedBaseURL: "https://proxy.example.com/v1/",
+			requestBody:   `{"provider_name":"port!!!garbage","base_url":"https://proxy.example.com/v1/","api_key":"fragment-key","dry_run":false}`,
+			wantStatus:    http.StatusOK,
+			wantAPIKey:    "fragment-key",
+			wantSource:    "openrouter",
+			wantURL:       "https://proxy.example.com/v1/",
 		},
 		{
-			name:           "official openrouter suffix is removed after verification",
+			name:           "official openrouter suffix is canonicalized for check without mutating a connection endpoint",
 			providerName:   "OpenRouter",
 			defaultBaseURL: "https://openrouter.ai/api/v1/",
 			storedBaseURL:  "https://openrouter.ai/api/v1/invalid_suffix",
@@ -200,7 +205,7 @@ func TestCheckGroupRequiresAPIKeyOnlyForDefaultBaseURL(t *testing.T) {
 			wantAPIKey:     "openrouter-key",
 			wantSource:     "openrouter",
 			wantURL:        "https://openrouter.ai/api/v1/",
-			wantStoredURL:  "https://openrouter.ai/api/v1/",
+			wantStoredURL:  "https://openrouter.ai/api/v1/invalid_suffix",
 		},
 	}
 
@@ -261,6 +266,7 @@ func TestCheckGroupRequiresAPIKeyOnlyForDefaultBaseURL(t *testing.T) {
 			if storedBaseURL == "" {
 				storedBaseURL = defaultProvider.BaseURL
 			}
+			userProvider.BaseURL = storedBaseURL
 			group := orm.UserModelProviderGroup{
 				ID:                  "qwen-group",
 				UserModelProviderID: userProvider.ID,
@@ -529,7 +535,7 @@ func TestCustomBaseURLWithoutKeyVerificationStateTransitions(t *testing.T) {
 		DefaultModelProviderID: defaultProvider.ID,
 		Name:                   defaultProvider.Name,
 		Description:            defaultProvider.Description,
-		BaseURL:                defaultProvider.BaseURL,
+		BaseURL:                "http://host.docker.internal:23/v1/",
 		Category:               defaultProvider.Category,
 		Capabilities:           "multi_group,custom_base_url",
 		BaseModel: orm.BaseModel{
@@ -661,6 +667,9 @@ func TestCustomBaseURLWithoutKeyVerificationStateTransitions(t *testing.T) {
 		t.Fatalf("rename triggered %d verification calls, want 0", checkCalls)
 	}
 
+	if err := setProviderEndpoint(t.Context(), db, &userProvider, "http://host.docker.internal:24/v1/", time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	baseURLChangeResponse := updateGroup(
 		`{"name":"Renamed Local OpenAI","base_url":"http://host.docker.internal:24/v1/","verify":false}`,
 	)

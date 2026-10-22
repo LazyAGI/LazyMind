@@ -1,4 +1,10 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { SettingsNavigationGuard } from "@/modules/settings/SettingsNavigationGuard";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -34,7 +40,8 @@ vi.mock("../api", () => ({
     apiCoreModelProvidersGet: mocks.getProviders,
     apiCoreModelProvidersWithGroupsGet: mocks.getProvidersWithGroups,
     apiCoreModelProvidersModelProviderIdGroupsGet: mocks.getGroups,
-    apiCoreModelProvidersModelProviderIdGroupsGroupIdCheckPost: mocks.checkGroup,
+    apiCoreModelProvidersModelProviderIdGroupsGroupIdCheckPost:
+      mocks.checkGroup,
     apiCoreModelProvidersModelsGet: mocks.listModels,
   },
   modelProvidersDefaultApi: {
@@ -53,7 +60,10 @@ vi.mock("../api", () => ({
 vi.mock("@/runtime/cloud/session", () => ({
   LAZYMIND_CLOUD_SESSION_CHANGED_EVENT: "lazymind:cloud-session-changed",
   getCloudSession: mocks.getCloudSession,
-	isCloudBusinessAvailable: (session: any) => session?.state === "signed_in" && session?.configured !== false && session?.reachability !== "unreachable",
+  isCloudBusinessAvailable: (session: any) =>
+    session?.state === "signed_in" &&
+    session?.configured !== false &&
+    session?.reachability !== "unreachable",
   beginCloudLogin: vi.fn(),
 }));
 
@@ -73,7 +83,9 @@ vi.mock("../components/CredentialRestorePanel", () => ({
 }));
 
 vi.mock("../components/CloudSystemProviderCard", () => ({
-  default: () => <div data-testid="cloud-system-provider-card">LazyMind Cloud</div>,
+  default: () => (
+    <div data-testid="cloud-system-provider-card">LazyMind Cloud</div>
+  ),
 }));
 
 describe("Model Provider service list", () => {
@@ -83,16 +95,18 @@ describe("Model Provider service list", () => {
     mocks.getProvidersWithGroups.mockResolvedValue({ data: { providers: [] } });
     mocks.listModels.mockResolvedValue({
       data: {
-        models: [{
-          id: "lazymind-text-default",
-          source: "cloud",
-          provider_id: "lazymind-cloud",
-          provider_name: "LazyMind Cloud",
-          model_type: "llm",
-          name: "LazyMind Text",
-          availability: "available",
-          read_only: true,
-        }],
+        models: [
+          {
+            id: "lazymind-text-default",
+            source: "cloud",
+            provider_id: "lazymind-cloud",
+            provider_name: "LazyMind Cloud",
+            model_type: "llm",
+            name: "LazyMind Text",
+            availability: "available",
+            read_only: true,
+          },
+        ],
       },
     });
     mocks.getCloudSession.mockResolvedValue({
@@ -101,31 +115,77 @@ describe("Model Provider service list", () => {
       state: "signed_in",
     });
     mocks.getCredentialBackupStatus.mockResolvedValue({
-      available: false, enabled: false, backedUp: 0, pending: 0, failed: 0,
+      available: false,
+      enabled: false,
+      backedUp: 0,
+      pending: 0,
+      failed: 0,
     });
     mocks.getCredentialRestoreDiscovery.mockResolvedValue({
-      available: false, requiresExplicitAction: true, records: [],
+      available: false,
+      requiresExplicitAction: true,
+      records: [],
     });
   });
 
   it("restores a provider editor from its URL and allows leaving an untouched form", async () => {
-    mocks.getProviders.mockResolvedValue({ data: { providers: [{ id: "openai", name: "OpenAI", base_url: "https://api.openai.com/v1", category: "llm" }] } });
-    const router = createMemoryRouter([{ path: "/settings", element: <SettingsNavigationGuard><ModelProviderPage /></SettingsNavigationGuard> }], {
-      initialEntries: ["/settings?section=models&view=providers", "/settings?section=models&view=providers&editor=provider&item=openai"], initialIndex: 1,
+    mocks.getProviders.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: "openai",
+            name: "OpenAI",
+            base_url: "https://api.openai.com/v1",
+            category: "llm",
+          },
+        ],
+      },
     });
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/settings",
+          element: (
+            <SettingsNavigationGuard>
+              <ModelProviderPage />
+            </SettingsNavigationGuard>
+          ),
+        },
+      ],
+      {
+        initialEntries: [
+          "/settings?section=models&view=providers",
+          "/settings?section=models&view=providers&editor=provider&item=openai",
+        ],
+        initialIndex: 1,
+      },
+    );
     render(<RouterProvider router={router} />);
     await screen.findByRole("dialog");
-    await act(async () => { await router.navigate(-1); });
+    await act(async () => {
+      await router.navigate(-1);
+    });
     expect(router.state.location.search).toBe("?section=models&view=providers");
-    expect(screen.queryByText("settingsPage.unsaved.title")).not.toBeInTheDocument();
-    await act(async () => { await router.navigate(1); });
+    expect(
+      screen.queryByText("settingsPage.unsaved.title"),
+    ).not.toBeInTheDocument();
+    await act(async () => {
+      await router.navigate(1);
+    });
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 
   it("places the read-only LazyMind Cloud card in the existing Provider service list", async () => {
     render(<ModelProviderPage />);
 
-    expect(await screen.findByTestId("cloud-system-provider-card")).toBeInTheDocument();
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "modelProvider.workspace.cloud",
+      }),
+    );
+    expect(
+      await screen.findByTestId("cloud-system-provider-card"),
+    ).toBeInTheDocument();
     await waitFor(() => expect(mocks.listModels).toHaveBeenCalled());
     expect(screen.getByText("LazyMind Cloud")).toBeInTheDocument();
   });
@@ -133,48 +193,92 @@ describe("Model Provider service list", () => {
   it.each(["business failure", "upstream error"])(
     "keeps a failed verification pending after remount for %s",
     async (failure) => {
-      const provider = { id: "fixture-provider", name: "OpenAI", base_url: "https://api.example.test/v1" };
+      const provider = {
+        id: "fixture-provider",
+        name: "OpenAI",
+        base_url: "https://api.example.test/v1",
+      };
       let verified = true;
       mocks.getProviders.mockResolvedValue({ data: { providers: [provider] } });
-      mocks.getProvidersWithGroups.mockResolvedValue({ data: { providers: [provider] } });
-      mocks.getGroups.mockImplementation(async () => ({ data: { groups: [{
-        id: "fixture-group", name: "Fixture Model", user_model_provider_id: provider.id,
-        base_url: "https://custom.example.test/v1", has_api_key: false, is_verified: verified,
-      }] } }));
-      mocks.getCloudSession.mockResolvedValue({ configured: false, state: "signed_out" });
+      mocks.getProvidersWithGroups.mockResolvedValue({
+        data: { providers: [provider] },
+      });
+      mocks.getGroups.mockImplementation(async () => ({
+        data: {
+          groups: [
+            {
+              id: "fixture-group",
+              name: "Fixture Model",
+              user_model_provider_id: provider.id,
+              base_url: "https://custom.example.test/v1",
+              has_api_key: false,
+              is_verified: verified,
+            },
+          ],
+        },
+      }));
+      mocks.getCloudSession.mockResolvedValue({
+        configured: false,
+        state: "signed_out",
+      });
       mocks.checkGroup.mockImplementation(async () => {
         verified = false;
         if (failure === "upstream error") {
-          throw { response: { status: 502, data: { data: { success: false } } } };
+          throw {
+            response: { status: 502, data: { data: { success: false } } },
+          };
         }
         return { data: { success: false } };
       });
       const onConfigurationChanged = vi.fn();
-      const page = render(<ModelProviderPage onConfigurationChanged={onConfigurationChanged} />);
-      fireEvent.click(await screen.findByRole("button", { name: /modelProvider.reverify/ }));
-      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "modelProvider.verify" }));
+      const page = render(
+        <ModelProviderPage onConfigurationChanged={onConfigurationChanged} />,
+      );
+      fireEvent.click(
+        await screen.findByRole("button", {
+          name: "modelProvider.workspace.checkConnection",
+        }),
+      );
 
-      expect(await screen.findByText("modelProvider.pendingVerify")).toBeInTheDocument();
+      expect(
+        await screen.findByText("modelProvider.pendingVerify"),
+      ).toBeInTheDocument();
       expect(onConfigurationChanged).toHaveBeenCalled();
       page.unmount();
       render(<ModelProviderPage />);
-      expect(await screen.findByText("modelProvider.pendingVerify")).toBeInTheDocument();
-      expect(screen.queryByText("modelProvider.verified")).not.toBeInTheDocument();
+      expect(
+        await screen.findByText("modelProvider.pendingVerify"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText("modelProvider.verified"),
+      ).not.toBeInTheDocument();
     },
   );
 
   it.each([
     {
       name: "Cloud is not configured",
-      session: { configured: false, reachability: "unknown", state: "signed_out" },
+      session: {
+        configured: false,
+        reachability: "unknown",
+        state: "signed_out",
+      },
     },
     {
       name: "Cloud is configured but unreachable",
-      session: { configured: true, reachability: "unreachable", state: "signed_in" },
+      session: {
+        configured: true,
+        reachability: "unreachable",
+        state: "signed_in",
+      },
     },
     {
       name: "Cloud is reachable but signed out",
-      session: { configured: true, reachability: "reachable", state: "signed_out" },
+      session: {
+        configured: true,
+        reachability: "reachable",
+        state: "signed_out",
+      },
     },
   ])("keeps the Provider page local when $name", async ({ session }) => {
     mocks.getCloudSession.mockResolvedValue(session);
@@ -184,6 +288,8 @@ describe("Model Provider service list", () => {
     await waitFor(() => expect(mocks.getCloudSession).toHaveBeenCalled());
     expect(mocks.listModels).not.toHaveBeenCalled();
     expect(mocks.getCredentialRestoreDiscovery).not.toHaveBeenCalled();
-	expect(screen.queryByTestId("cloud-system-provider-card")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("cloud-system-provider-card"),
+    ).not.toBeInTheDocument();
   });
 });

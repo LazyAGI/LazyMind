@@ -163,6 +163,36 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 			return err
 		}
 	}
+	if hasSharedProviderEndpoint(provider) {
+		if err := lockProvider(tx, &provider); err != nil {
+			return err
+		}
+		if groupFound {
+			if err := tx.Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", group.ID, provider.ID, sink.localUserID).Take(&group).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("id = ?", binding.ID).Take(&binding).Error; err != nil {
+				return err
+			}
+			if group.CredentialRevision != binding.LastLocalCredentialRevision && resolution == credentialvault.ConflictFail {
+				return credentialvault.ErrLocalConflict
+			}
+		}
+		if strings.TrimSpace(provider.BaseURL) == "" {
+			if err := tx.Model(&provider).Update("base_url", restored.Provider.BaseURL).Error; err != nil {
+				return err
+			}
+			provider.BaseURL = restored.Provider.BaseURL
+		}
+	}
+	// Restoring a connection never changes a model supplier's shared endpoint.
+	// A credential checked against a different old endpoint needs a new check.
+	verified := true
+	if hasSharedProviderEndpoint(provider) {
+		currentURL := connectionBaseURL(provider, restored.Provider.BaseURL)
+		verified = normalizeBaseURLForCompare(currentURL) == normalizeBaseURLForCompare(restored.Provider.BaseURL)
+		restored.Provider.BaseURL = currentURL
+	}
 	localRevision := int64(1)
 	groupID := uuid.NewString()
 	if groupFound {
@@ -176,7 +206,7 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 	if groupFound {
 		if err := tx.Model(&orm.UserModelProviderGroup{}).Where("id = ? AND create_user_id = ?", group.ID, sink.localUserID).Updates(map[string]any{
 			"name": restored.Provider.DisplayName, "base_url": restored.Provider.BaseURL, "api_key": "", "api_key_ciphertext": ciphertext,
-			"credential_version": modelProviderCredentialVersion, "credential_revision": localRevision, "is_verified": true, "updated_at": now,
+			"credential_version": modelProviderCredentialVersion, "credential_revision": localRevision, "is_verified": verified, "updated_at": now,
 		}).Error; err != nil {
 			return err
 		}
@@ -184,7 +214,7 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 		group = orm.UserModelProviderGroup{
 			ID: groupID, UserModelProviderID: provider.ID, Name: restored.Provider.DisplayName, BaseURL: restored.Provider.BaseURL,
 			APIKey: "", APIKeyCiphertext: ciphertext, CredentialVersion: modelProviderCredentialVersion,
-			CredentialRevision: localRevision, IsVerified: true,
+			CredentialRevision: localRevision, IsVerified: verified,
 			BaseModel: orm.BaseModel{CreateUserID: sink.localUserID, CreatedAt: now, UpdatedAt: now},
 		}
 		if err := tx.Create(&group).Error; err != nil {
@@ -205,7 +235,13 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 	binding.VaultID, binding.CloudRecordID, binding.LocalProviderGroupID = restored.VaultID, restored.RecordID, groupID
 	binding.LastCloudRevision, binding.LastLocalCredentialRevision = restored.Revision, localRevision
 	binding.LastETag, binding.BackupState, binding.UpdatedAt = restored.ETag, string(credentialvault.BackupSucceeded), now
-	return tx.Save(&binding).Error
+	if err := tx.Save(&binding).Error; err != nil {
+		return err
+	}
+	if !verified {
+		return enqueueCredentialBackup(tx, groupID, localRevision, credentialvault.BackupUpsert, now)
+	}
+	return nil
 }
 
 func (sink *CredentialRestoreSink) ActivateTemporary(ctx context.Context, scope credentialvault.AccountScope, credentials []credentialvault.RestoredCredential, expiresAt time.Time) error {
@@ -219,18 +255,16 @@ func (sink *CredentialRestoreSink) ActivateTemporary(ctx context.Context, scope 
 	}
 	values := make(map[string]temporaryCredential, len(credentials))
 	for _, restored := range credentials {
-		if strings.TrimSpace(restored.Provider.DisplayName) == "" || strings.TrimSpace(restored.Provider.BaseURL) == "" {
-			var provider orm.UserModelProvider
-			if err := sink.db.WithContext(ctx).Where("create_user_id = ? AND deleted_at IS NULL AND (default_model_provider_id = ? OR LOWER(name) = LOWER(?))", sink.localUserID, restored.Provider.ProviderCatalogKey, restored.Provider.ProviderCatalogKey).Take(&provider).Error; err != nil {
-				clearTemporaryValues(values)
-				return credentialvault.ErrLocalConflict
-			}
-			if strings.TrimSpace(restored.Provider.DisplayName) == "" {
-				restored.Provider.DisplayName = provider.Name
-			}
-			if strings.TrimSpace(restored.Provider.BaseURL) == "" {
-				restored.Provider.BaseURL = provider.BaseURL
-			}
+		var catalogProvider orm.UserModelProvider
+		if err := sink.db.WithContext(ctx).Where("create_user_id = ? AND deleted_at IS NULL AND (default_model_provider_id = ? OR LOWER(name) = LOWER(?))", sink.localUserID, restored.Provider.ProviderCatalogKey, restored.Provider.ProviderCatalogKey).Take(&catalogProvider).Error; err != nil {
+			clearTemporaryValues(values)
+			return credentialvault.ErrLocalConflict
+		}
+		if strings.TrimSpace(restored.Provider.DisplayName) == "" {
+			restored.Provider.DisplayName = catalogProvider.Name
+		}
+		if hasSharedProviderEndpoint(catalogProvider) || strings.TrimSpace(restored.Provider.BaseURL) == "" {
+			restored.Provider.BaseURL = connectionBaseURL(catalogProvider, restored.Provider.BaseURL)
 		}
 		if !validRestoredCredential(restored) {
 			clearTemporaryValues(values)
@@ -303,6 +337,11 @@ func (sink *CredentialRestoreSink) TemporaryCredential(recordID string) (credent
 			return credentialvault.ProviderCredential{}, false
 		}
 		result = value.provider
+		var provider orm.UserModelProvider
+		if err := sink.db.Where("create_user_id = ? AND deleted_at IS NULL AND (default_model_provider_id = ? OR LOWER(name) = LOWER(?))", sink.localUserID, result.ProviderCatalogKey, result.ProviderCatalogKey).Take(&provider).Error; err != nil {
+			return credentialvault.ProviderCredential{}, false
+		}
+		result.BaseURL = connectionBaseURL(provider, result.BaseURL)
 		result.APIKey = append([]byte(nil), value.provider.APIKey...)
 		found = true
 	}
