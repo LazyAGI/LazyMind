@@ -1618,6 +1618,7 @@ type Doc struct {
 	ConvertFileURI         string                `json:"convert_file_uri"`
 	RelPath                string                `json:"rel_path"`
 	DocumentStage          string                `json:"document_stage"`
+	RetainedOnly           bool                  `json:"retained_only"`
 	PDFConvertResult       string                `json:"pdf_convert_result,omitempty"`
 	ChildDocumentCount     int64                 `json:"child_document_count,omitempty"`
 	ChildFolderCount       int64                 `json:"child_folder_count,omitempty"`
@@ -1826,6 +1827,7 @@ type mergedDocRow struct {
 	Type             string
 	RelPath          string
 	DocumentStage    string
+	RetainedOnly     bool
 	PDFConvertResult string
 }
 
@@ -1920,6 +1922,7 @@ func mergedDocRowFromCoreOnlyWithDatasetDisplay(row orm.Document, datasetDisplay
 		Type:             docType,
 		RelPath:          relPath,
 		DocumentStage:    "",
+		RetainedOnly:     strings.TrimSpace(row.LazyllmDocID) == "" && !isFolderLikeDocument(row),
 		PDFConvertResult: strings.TrimSpace(row.PDFConvertResult),
 	}
 }
@@ -2947,6 +2950,7 @@ func docFromRow(row mergedDocRow) Doc {
 		ConvertFileURI:         "",
 		RelPath:                row.RelPath,
 		DocumentStage:          row.DocumentStage,
+		RetainedOnly:           row.RetainedOnly,
 		PDFConvertResult:       pdfConvertResult,
 		ChildDocumentCount:     stats.ChildDocumentCount,
 		ChildFolderCount:       stats.ChildFolderCount,

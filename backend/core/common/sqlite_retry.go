@@ -85,7 +85,7 @@ func transactionWithSQLiteBusyRetry(
 
 	for attempt := 0; attempt < sqliteTransactionAttempts; attempt++ {
 		var err error
-		if immediate && !usesSQLiteProxy(db) {
+		if immediate && !IsSQLiteProxy(db) {
 			err = sqliteImmediateTransaction(ctx, db, fn)
 		} else {
 			// Proxy transactions must begin via database/sql so the driver obtains
@@ -112,7 +112,8 @@ func transactionWithSQLiteBusyRetry(
 	return nil
 }
 
-func usesSQLiteProxy(db *gorm.DB) bool {
+// IsSQLiteProxy reports whether transactions must use the HTTP driver protocol.
+func IsSQLiteProxy(db *gorm.DB) bool {
 	type proxyDialector interface {
 		IsSQLiteProxy() bool
 	}

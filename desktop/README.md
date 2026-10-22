@@ -22,6 +22,10 @@ Release history samples remain separate ModelScope ZIP assets, described by `des
 
 To verify a slim Python environment and its downloaded RAG bundle without building an installer, run `scripts/verify-python-components.py` with the staged algorithm Python. It checks base imports, ZIP integrity, overlay imports, and Milvus persistence across a restart using temporary data. Commands, current platform results and coverage limits are in [the package-size development notes](../docs/development/desktop-package-size-reduction.md#不打安装包先在本机复测).
 
+Release RAG publication uses ModelScope tag catalogs: Mac Developer ID builds sign native components with the bundled Python's Team ID before creating the ZIP. CI requires `MODELSCOPE_API_TOKEN` (dataset write access); `LAZYMIND_MS_COMPONENT_REPO` defaults to `CarlosShaoting/lazymind-cst`. ZIP and checksums upload before the online JSON, followed by a real download verification. Clients resolve the tag catalog at installation time and retain SHA/size/compatibility checks and offline restart receipts. See [current Mac RAG release instructions](../docs/development/macos-published-rag.md#当前正式发布流程2026-10-21), including official-release gating and migration limits for old clients.
+
+Installer GitHub Artifacts become downloadable before independent MS/HF mirror jobs. Only installers go into `Realease/` (intentional spelling); existing RAG paths are unchanged. Configure `HF_TOKEN` and optionally `LAZYMIND_HF_COMPONENT_REPO` (default `LazyAGI/LazyMind`) for the HF installer mirror. Installation tests use paired build artifacts, not pending cloud uploads; first-time online RAG installation still requires successful RAG publication.
+
 Use the source Electron shell for browser/UI development instead of rebuilding an installer:
 
 ```bash

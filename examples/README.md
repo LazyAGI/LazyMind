@@ -20,3 +20,7 @@ See LazyMind in action through published demos. All videos and articles below ar
 
 - [LazyMind v0.2: from answers to deliverables](https://mp.weixin.qq.com/s/yoU7DZKkq_jw05695e36Qw) (2026-08-04, release introduction)
 - [Why are you still working overtime after AI finishes?](https://mp.weixin.qq.com/s/uj15cKnPNZpdrHWPuua2Tg) (2026-09-01, product introduction)
+
+### Runnable experiments
+
+- [Superpowers dispatch reliability](superpowers-workflow-reliability/README.md): try a native Brief gate from Codex and inspect Panel Artifacts; Advanced Git/Coverage checks, verified CLI recovery and explicit native recovery limits.

@@ -19,6 +19,141 @@ def test_unknown_candidate_has_independent_default_budget(provider, previous_win
     assert model.state.budget == build_context_budget(None)
 
 
+def test_fallback_sorts_effective_budgets_before_applying_candidate_limit(provider):
+    from lazyllm.module.llms.onlinemodule.base import ModelCallError
+
+    current = candidate(provider, 'model-a')
+    alternatives = [candidate(provider, name, window=window) for name, window in (
+        ('same', 32768), ('small', 16384), ('unknown', None), ('largest', 262144), ('medium', 65536),
+    )]
+    for item in [current, *alternatives]:
+        fail(provider, item.model_id)
+    model = wrapper(current, alternatives)
+    with pytest.raises(ModelCallError):
+        model('continue')
+    assert [item['model'] for item in provider.requests] == ['model-a', 'largest', 'unknown', 'medium']
+    assert alternatives[2].max_input_tokens is None
+
+
+def test_unavailable_and_text_only_candidates_do_not_consume_the_limit(provider):
+    a = candidate(provider, 'model-a')
+    a.llm_config['llm']['vision'] = True
+    alternatives = [candidate(provider, name, window=262144) for name in ('failed', 'bad-key', 'text-only')]
+    visual = candidate(provider, 'visual-unknown', window=None)
+    visual.llm_config['llm']['vision'] = True
+    fail(provider, 'model-a')
+    succeed(provider, 'visual-unknown')
+    model = wrapper(a, [*alternatives, visual])
+    model.state.failed_candidates.add(alternatives[0].candidate_id)
+    model.state.failed_credentials.add((alternatives[1].provider_group_id, alternatives[1].credential_revision))
+    with config.temp('model_fallback_max_candidates', 2):
+        assert model('continue', llm_chat_history=[{'role': 'user', 'content': [
+            {'type': 'image_url', 'image_url': {'url': 'https://images.example/fixture.png'}},
+        ]}]) == 'done:visual-unknown'
+    assert [item['model'] for item in provider.requests] == ['model-a', 'visual-unknown']
+
+
+@pytest.mark.parametrize('text_only_backups', [0, 3])
+def test_image_request_deadline_excludes_incompatible_backups(provider, text_only_backups):
+    a = candidate(provider, 'model-a')
+    a.llm_config['llm']['vision'] = True
+    succeed(provider, 'model-a')
+    provider.on_request = lambda _: time.sleep(0.3)
+    model = wrapper(a, [candidate(provider, f'text-{index}') for index in range(text_only_backups)])
+    with config.temp('model_fallback_timeout_seconds', 0.8):
+        assert model('continue', llm_chat_history=[{'role': 'user', 'content': [
+            {'type': 'image_url', 'image_url': {'url': 'https://images.example/fixture.png'}},
+        ]}]) == 'done:model-a'
+    assert [item['model'] for item in provider.requests] == ['model-a']
+
+
+def test_slow_initial_model_leaves_time_for_a_healthy_fallback(provider):
+    import threading
+
+    release = threading.Event()
+    succeed(provider, 'model-a')
+    succeed(provider, 'model-b')
+
+    def slow_initial(request):
+        if request['model'] == 'model-a':
+            release.wait(2)
+
+    provider.on_request = slow_initial
+    model = wrapper(candidate(provider, 'model-a'), [candidate(provider, 'model-b')])
+    events = []
+    try:
+        with config.temp('model_fallback_timeout_seconds', 0.6):
+            started = time.monotonic()
+            assert model('continue', stream={'_stream_sink': events.append}) == 'done:model-b'
+            assert time.monotonic() - started < 0.8
+    finally:
+        release.set()
+    assert [item['model'] for item in provider.requests] == ['model-a', 'model-b']
+    switches = [item['runtime_event']['data'] for item in events
+                if (item.get('runtime_event') or {}).get('type') == 'model_switched']
+    assert switches[0]['reason_code'] == 'request_timeout'
+    assert model.state.current.model_id == 'model-b'
+
+
+def test_sse_cancel_closes_the_socket_and_never_starts_fallback(provider):
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from lazymind.chat.engine.agent_runtime.cancellation import UserCancelledError
+
+    cancelled, disconnected = threading.Event(), threading.Event()
+    requests = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+
+        def do_POST(self):
+            requests.append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.end_headers()
+            frame = {'choices': [{'index': 0, 'delta': {'content': 'uncommitted'}, 'finish_reason': None}]}
+            self.wfile.write(('data: ' + json.dumps(frame) + '\n\n:' + 'x' * 2048 + '\n\n').encode())
+            self.wfile.flush()
+            self.connection.settimeout(2)
+            try:
+                closed = self.connection.recv(1) == b''
+            except ConnectionResetError:
+                closed = True
+            if closed:
+                disconnected.set()
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01), daemon=True)
+    thread.start()
+    a, b = [candidate(provider, name) for name in ('model-a', 'model-b')]
+    a.llm_config['llm']['base_url'] = f'http://127.0.0.1:{server.server_port}/v1/'
+    model = wrapper(a, [b])
+    model._cancel_check = lambda _: cancelled.is_set()
+    events = []
+
+    def sink(event):
+        events.append(event)
+        if event.get('tag') == 'text':
+            cancelled.set()
+
+    try:
+        with pytest.raises(UserCancelledError):
+            model('continue', stream={'_stream_sink': sink})
+        assert disconnected.wait(1)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(2)
+    assert [item['model'] for item in requests] == ['model-a']
+    assert provider.requests == []
+    assert [item['model_output']['phase'] for item in events
+            if item.get('tag') == 'model_output'] == ['begin', 'rollback']
+    assert model.state.call_control is None
+    assert model.state.call_started_at is None
+
+
 @pytest.mark.parametrize('limit', [1, 4])
 def test_candidate_limit_includes_initial_model(provider, limit):
     candidates = [candidate(provider, 'model-' + str(i)) for i in range(6)]
@@ -32,8 +167,18 @@ def test_candidate_limit_includes_initial_model(provider, limit):
     assert failure.value.fallback_code == 'model_fallback_exhausted'
 
 
-def test_all_candidates_share_one_deadline(provider):
+def test_candidate_deadlines_remain_within_the_total_request_limit(provider, monkeypatch):
+    from lazyllm.module.llms.onlinemodule.base import PreparedModelRequest
+
     candidates = [candidate(provider, 'model-' + str(i)) for i in range(5)]
+    deadlines = []
+    execute = PreparedModelRequest.execute
+
+    def observe(request, *, control=None):
+        deadlines.append(control.deadline)
+        return execute(request, control=control)
+
+    monkeypatch.setattr(PreparedModelRequest, 'execute', observe)
 
     def slow_failure(request):
         time.sleep(0.08)
@@ -47,8 +192,30 @@ def test_all_candidates_share_one_deadline(provider):
             model('continue')
         elapsed = time.monotonic() - started
     assert elapsed < 1.5
-    assert 1 <= len(provider.requests) <= 2
+    assert 1 <= len(provider.requests) <= 5
+    assert all(deadline <= started + 0.15 for deadline in deadlines)
     assert failure.value.fallback_code == 'model_fallback_exhausted'
+
+
+def test_ordinary_summary_and_initial_generation_keep_one_candidate_deadline(provider, monkeypatch):
+    from lazyllm.module.llms.onlinemodule.base import PreparedModelRequest
+
+    model = wrapper(candidate(provider, 'model-a'), [candidate(provider, 'model-b')])
+    succeed(provider, 'model-a')
+    deadlines = []
+    execute = PreparedModelRequest.execute
+
+    def observe(request, *, control=None):
+        deadlines.append(control.deadline)
+        return execute(request, control=control)
+
+    monkeypatch.setattr(PreparedModelRequest, 'execute', observe)
+    total = model.begin_request()
+    model.auxiliary_call('summary system', 'summary input')
+    assert model('continue') == 'done:model-a'
+    assert len(deadlines) == 2
+    assert deadlines[0] == deadlines[1] < total.deadline
+    assert [item['model'] for item in provider.requests] == ['model-a', 'model-a']
 
 
 def test_local_cancellation_check_failure_does_not_try_another_model(provider):

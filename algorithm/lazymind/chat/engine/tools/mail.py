@@ -1717,15 +1717,8 @@ class _IMAPBackend:
             body = self._fetch_raw(message_id, '(BODY.PEEK[TEXT]<0.20001>)', client)
             raw = header.rstrip(b'\r\n') + b'\r\n\r\n' + body[:20000]
             result = self._read_parsed_message(message_id, raw, retry_full=False,
-                                               client=client, plain_only=True)
-            # A clipped HTML alternative or attachment does not truncate an earlier,
-            # complete plain-text body. Only the final MIME leaf can be clipped.
-            parts = [part for _, part in _mime_section_parts(email.message_from_bytes(raw))]
-            text_parts = [part for part in parts if not part.get_filename()
-                          and part.get_content_type() in {'text/plain', 'text/html'}]
-            shown = [part for part in text_parts if part.get_content_type() == 'text/plain'] or text_parts
-            clipped_body = len(body) > 20000 and (not shown or parts[-1] in shown)
-            result['truncated'] = clipped_body or result.get('truncated', False)
+                                               client=client, plain_only=True,
+                                               body_truncated=len(body) > 20000)
             result['attachments'] = self._list_structure_attachments(message_id, client)
             result['mailbox'] = self.email
             return result
@@ -1741,15 +1734,18 @@ class _IMAPBackend:
             client = self._connect()
         try:
             attachments = self._list_structure_attachments(message_id, client)
-            raw = self._fetch_raw(
-                message_id,
-                '(BODY.PEEK[HEADER] BODY.PEEK[TEXT]<0.20000>)',
-                client,
-                required=False,
-            )
-            if not raw:
+            # FETCH sections may arrive in a different order than requested.
+            # Read them separately, as the preview does, before assembling MIME.
+            header = self._fetch_raw(message_id, '(BODY.PEEK[HEADER])', client, required=False)
+            body = self._fetch_raw(message_id, '(BODY.PEEK[TEXT]<0.20001>)', client, required=False)
+            body_truncated = False
+            if header and body:
+                raw = header.rstrip(b'\r\n') + b'\r\n\r\n' + body[:20000]
+                body_truncated = len(body) > 20000
+            else:
                 raw = self._fetch_raw(message_id, '(RFC822)', client)
-            parsed = self._read_parsed_message(message_id, raw, client=client)
+            parsed = self._read_parsed_message(message_id, raw, client=client,
+                                               body_truncated=body_truncated)
             if attachments:
                 parsed['attachments'] = attachments
             return parsed
@@ -1768,6 +1764,7 @@ class _IMAPBackend:
         retry_full: bool = True,
         client=None,
         plain_only: bool = False,
+        body_truncated: bool = False,
     ) -> dict[str, Any]:
         msg = email.message_from_bytes(raw)
         attachments = []
@@ -1813,7 +1810,16 @@ class _IMAPBackend:
             full = self._fetch_raw(message_id, '(RFC822)', client, required=False)
             if full and full != raw:
                 return self._read_parsed_message(message_id, full, retry_full=False)
-        return self._message_payload(message_id, msg, body_parts, attachments, transfer_links)
+        result = self._message_payload(message_id, msg, body_parts, attachments, transfer_links)
+        if body_truncated:
+            # A clipped HTML alternative or attachment does not truncate an earlier,
+            # complete plain-text body. Only the final MIME leaf can be clipped.
+            parts = [part for _, part in _mime_section_parts(msg)]
+            text_parts = [part for part in parts if not part.get_filename()
+                          and part.get_content_type() in {'text/plain', 'text/html'}]
+            shown = [part for part in text_parts if part.get_content_type() == 'text/plain'] or text_parts
+            result['truncated'] = result['truncated'] or not shown or parts[-1] in shown
+        return result
 
     def _message_payload(
         self,

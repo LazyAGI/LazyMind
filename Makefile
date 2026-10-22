@@ -4,7 +4,7 @@
 
 LOCAL_CONFIG_ENV ?= local/config.env
 LOCAL_CONFIG_ENV_EXAMPLE ?= local/config.env.example
-_LOCAL_CONFIG_TARGETS := local-runtime-manager-build local-up local-up-lan local-down local-clean local-reset reset-kb reset-all fresh-start
+_LOCAL_CONFIG_TARGETS := local-runtime-manager-build localup local-up local-up-lan local-down local-clean local-reset reset-kb reset-all fresh-start
 _NEEDS_LOCAL_CONFIG := $(filter $(_LOCAL_CONFIG_TARGETS),$(MAKECMDGOALS))
 ifneq (,$(_NEEDS_LOCAL_CONFIG))
 _LOCAL_CONFIG_BOOTSTRAP := $(shell if [ ! -f "$(LOCAL_CONFIG_ENV)" ]; then mkdir -p "$(dir $(LOCAL_CONFIG_ENV))"; cp "$(LOCAL_CONFIG_ENV_EXAMPLE)" "$(LOCAL_CONFIG_ENV)"; fi)
@@ -161,6 +161,21 @@ export LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD ?= admin
 export LAZYMIND_RESET_ALGO_ON_STARTUP ?= false
 export LAZYMIND_RESET_ALL_ON_STARTUP ?= false
 export LAZYLLM_ALGO_REGISTER_POLICY ?= none
+# Local source runtime includes RAG by default. Override with
+# `make local-up LAZYMIND_RAG_ENABLED=false` to skip initial RAG dependencies.
+# Users can install RAG later from Settings; completed manual installs stay enabled.
+export LAZYMIND_RAG_ENABLED ?= true
+export LAZYMIND_DYNAMIC_PROMPT_MODULES ?= true
+# Short flags for local development (also accept the full environment names).
+# Explicit short flags take precedence when both forms are supplied.
+ifneq ($(strip $(ENABLE_RAG)),)
+override LAZYMIND_RAG_ENABLED := $(ENABLE_RAG)
+export LAZYMIND_RAG_ENABLED
+endif
+ifneq ($(strip $(DYNAMIC_PROMPT)),)
+override LAZYMIND_DYNAMIC_PROMPT_MODULES := $(DYNAMIC_PROMPT)
+export LAZYMIND_DYNAMIC_PROMPT_MODULES
+endif
 
 # Core database
 export LAZYMIND_CORE_DATABASE_URL ?= postgresql+psycopg://root:123456@db:5432/core
@@ -238,6 +253,8 @@ help:
 	@echo "  make kong-refresh - Restart Kong only (fixes 上游服务错误 / Kong 502 after a partial compose rebuild)"
 	@echo "                    Use SERVICES=svc1,svc2 to target specific services"
 	@echo "  make local-up - Build/start local LazyMind without containers"
+	@echo "                    Test deployment: make localup DYNAMIC_PROMPT=false ENABLE_RAG=false"
+	@echo "                    Defaults: DYNAMIC_PROMPT=true ENABLE_RAG=true; installed RAG stays enabled"
 	@echo "  make local-up-lan - Build/start local LazyMind for LAN access with local admin auto-login enabled"
 	@echo "  make desktop-dev - Start source Electron + Desktop Vite HMR against a running make local-up"
 	@echo "  make desktop-dev-down - Stop Desktop dev processes without stopping Local Runtime"
@@ -662,6 +679,9 @@ ifeq ($(HOST_GOOS)-$(HOST_GOARCH),darwin-arm64)
 else
 	@:
 endif
+
+.PHONY: localup
+localup: local-up
 
 local-up: skills-materialize local-pandoc local-runtime-manager-build lazymind-cli-build
 	@$(LOCAL_PANDOC_ENV) "$(LOCAL_RUNTIME_MANAGER_BIN)" up

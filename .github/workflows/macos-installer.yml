@@ -7,6 +7,23 @@ on:
         description: "Branch, tag, or commit SHA to build"
         required: false
         type: string
+    secrets:
+      HF_TOKEN:
+        description: "Hugging Face dataset write token for installer mirrors"
+        required: false
+      MODELSCOPE_API_TOKEN:
+        description: "ModelScope dataset write token for RAG publication"
+        required: false
+      MAC_CSC_LINK:
+        required: false
+      MAC_CSC_KEY_PASSWORD:
+        required: false
+      APPLE_ID:
+        required: false
+      APPLE_APP_SPECIFIC_PASSWORD:
+        required: false
+      APPLE_TEAM_ID:
+        required: false
     outputs:
       installer_artifact_name:
         value: ${{ jobs.build-macos-installer.outputs.installer_artifact_name }}
@@ -36,7 +53,9 @@ env:
   UV_DEFAULT_INDEX: https://pypi.org/simple
   LAZYMIND_DESKTOP_DEFER_HISTORY: "true"
   LAZYMIND_DESKTOP_DEFER_PYTHON: "true"
-  LAZYMIND_PYTHON_COMPONENT_BASE_URL: ${{ vars.LAZYMIND_PYTHON_COMPONENT_BASE_URL }}
+  LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS: "true"
+  LAZYMIND_PYTHON_COMPONENT_BASE_URL: ${{ format('https://modelscope.cn/datasets/{0}/resolve/master/RAG/', vars.LAZYMIND_MS_COMPONENT_REPO || 'CarlosShaoting/lazymind-cst') }}
+  LAZYMIND_MS_COMPONENT_REPO: ${{ vars.LAZYMIND_MS_COMPONENT_REPO || 'CarlosShaoting/lazymind-cst' }}
   LAZYMIND_DESKTOP_SHARE_PYTHON: "false"
   LAZYMIND_DESKTOP_PRUNE_PYTHON: "true"
 
@@ -620,7 +639,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v7
         with:
-          name: macos-python-components
+          name: macos-rag-components-${{ github.run_id }}
           path: desktop/dist/python-components/
           if-no-files-found: ignore
           retention-days: 14
@@ -769,6 +788,114 @@ jobs:
         if: always()
         run: df -h /
 
+
+  mirror-macos-installer:
+    name: Mirror macos installer to ${{ matrix.host }} (non-blocking)
+    needs: build-macos-installer
+    if: needs.build-macos-installer.outputs.installer_available == 'true'
+    environment: mac_dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [ms, hf]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.git_ref || github.ref }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build-macos-installer.outputs.installer_artifact_name }}
+          path: installer-mirror
+      - uses: astral-sh/setup-uv@v6
+      - name: Upload installer to Realease
+        env:
+          UPLOAD_TOKEN: ${{ secrets[matrix.host == 'ms' && 'MODELSCOPE_API_TOKEN' || 'HF_TOKEN'] }}
+          MIRROR_HOST: ${{ matrix.host }}
+          MS_REPO: ${{ vars.LAZYMIND_MS_COMPONENT_REPO || 'CarlosShaoting/lazymind-cst' }}
+          HF_REPO: ${{ vars.LAZYMIND_HF_COMPONENT_REPO || 'LazyAGI/LazyMind' }}
+          INSTALLER_NAME: ${{ needs.build-macos-installer.outputs.installer_artifact_name }}
+          HF_HUB_DISABLE_XET: "1"
+        run: |
+          set -euo pipefail
+          if [[ -z "${UPLOAD_TOKEN:-}" ]]; then
+            echo "::warning::${MIRROR_HOST} token missing; installer remains available in GitHub Artifacts."
+            exit 0
+          fi
+          if [[ "${MIRROR_HOST}" == "ms" ]]; then
+            repo="${MS_REPO}"
+            sdk="modelscope-hub==0.4.6"
+          else
+            repo="${HF_REPO}"
+            sdk="huggingface-hub"
+          fi
+          uv run --no-project --python 3.11 --with "${sdk}" python desktop/scripts/publish-installer-mirror.py \
+            --host "${MIRROR_HOST}" --repo "${repo}" \
+            --file "installer-mirror/${INSTALLER_NAME}"
+
+  publish-macos-rag:
+    name: Publish verified macos RAG (independent of installation tests)
+    needs: build-macos-installer
+    if: needs.build-macos-installer.outputs.installer_available == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [ms, hf]
+    environment: mac_dev
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.git_ref || github.ref }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: macos-rag-components-${{ github.run_id }}
+          path: desktop/dist/python-components/
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build-macos-installer.outputs.installer_artifact_name }}
+          path: installer-for-signatures
+      - uses: astral-sh/setup-uv@v6
+      - name: Publish labelled macOS RAG and tag catalog
+        env:
+          UPLOAD_TOKEN: ${{ secrets[matrix.host == 'ms' && 'MODELSCOPE_API_TOKEN' || 'HF_TOKEN'] }}
+          MIRROR_HOST: ${{ matrix.host }}
+          HF_REPO: ${{ vars.LAZYMIND_HF_COMPONENT_REPO || 'LazyAGI/LazyMind' }}
+          HF_HUB_DISABLE_XET: "1"
+          OFFICIAL_RELEASE: ${{ needs.build-macos-installer.outputs.official_release }}
+          INSTALLER_NAME: ${{ needs.build-macos-installer.outputs.installer_artifact_name }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${UPLOAD_TOKEN:-}" ]]; then
+            if [[ "${OFFICIAL_RELEASE}" == "true" && "${MIRROR_HOST}" == "ms" ]]; then
+              echo "::error::MODELSCOPE_API_TOKEN is required for signed RAG publication."
+              exit 1
+            fi
+            echo "::warning::No token for ${MIRROR_HOST}; skipping RAG upload."
+            exit 0
+          fi
+          signing_mode=adhoc
+          if [[ "${OFFICIAL_RELEASE}" == "true" ]]; then signing_mode=developer-id; fi
+          repo="${LAZYMIND_MS_COMPONENT_REPO}"
+          if [[ "${MIRROR_HOST}" == "ms" ]]; then
+            export MODELSCOPE_API_TOKEN="${UPLOAD_TOKEN}"
+          else
+            repo="${HF_REPO}"
+            export HF_TOKEN="${UPLOAD_TOKEN}"
+          fi
+          mount_dir="$(mktemp -d "${RUNNER_TEMP}/rag-signatures.XXXXXX")"
+          hdiutil attach "installer-for-signatures/${INSTALLER_NAME}" -readonly -nobrowse -mountpoint "${mount_dir}"
+          trap 'hdiutil detach "${mount_dir}" >/dev/null 2>&1 || true' EXIT
+          uv run --no-project --python 3.11 --with modelscope-hub==0.4.6 --with huggingface-hub python desktop/scripts/publish-python-components.py \
+            --directory desktop/dist/python-components/darwin-arm64 \
+            --host "${MIRROR_HOST}" --repo "${repo}" --signing-mode "${signing_mode}" \
+            --python "${mount_dir}/LazyMind.app/Contents/Resources/runtime/deps/python/algorithm/bin/python"
+          echo 'RAG uploaded to its existing path; public download SHA-256 verified.' >> "${GITHUB_STEP_SUMMARY}"
+
   test-macos-installer:
     name: Test macOS installer
     if: needs.build-macos-installer.outputs.installer_available == 'true'
@@ -817,6 +944,37 @@ jobs:
           if [[ "${{ needs.build-macos-installer.outputs.official_release }}" == "true" ]]; then
             spctl --assess --type execute --verbose=4 "${INSTALLED_APP}"
           fi
+
+      - name: Download paired RAG for installation testing
+        uses: actions/download-artifact@v8
+        with:
+          name: macos-rag-components-${{ github.run_id }}
+          path: rag-under-test
+
+      - name: Verify paired RAG with installed signed Python
+        env:
+          INSTALLED_APP: ${{ steps.install.outputs.app }}
+        run: |
+          set -euo pipefail
+          runtime="${INSTALLED_APP}/Contents/Resources/runtime"
+          signature_args=()
+          if [[ "${{ needs.build-macos-installer.outputs.official_release }}" == "true" ]]; then
+            signature_args+=(--require-macos-team-id)
+          fi
+          "${runtime}/deps/python/algorithm/bin/python" -I -B desktop/scripts/verify-python-components.py \
+            --runtime "${runtime}" \
+            --bundle-dir rag-under-test/darwin-arm64 \
+            "${signature_args[@]}" \
+            --report "${RUNNER_TEMP}/installed-rag-verification/report.json"
+
+      - name: Upload installed RAG verification reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-installed-rag-verification
+          path: ${{ runner.temp }}/installed-rag-verification/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Run installed application smoke
         env:

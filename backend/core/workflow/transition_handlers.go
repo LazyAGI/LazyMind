@@ -760,6 +760,19 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				if err := queueHostAttempt(ctx, tx, session, target, nodeDef, now); err != nil {
 					return err
 				}
+				if err := tx.Model(&orm.WorkflowSession{}).Where("id = ?", session.ID).Update("status", SessionStatusActive).Error; err != nil {
+					return err
+				}
+				session.Status = SessionStatusActive
+				// Hosted retries bypass the native launcher's TaskCenter reset.
+				// Reopen only this owner's completed run; removed or canceled tasks stay closed.
+				if req.Operation == "retry" || req.Operation == "rewind" {
+					if err := tx.Model(&orm.TaskCenterTask{}).
+						Where("user_id = ? AND plugin_session_id = ? AND archived_at IS NULL AND status IN ?", session.CreateUserID, session.ID, []string{"failed", "succeeded"}). // workflow-naming: persistence
+						Updates(map[string]any{"status": "running", "finished_at": nil, "updated_at": now}).Error; err != nil {
+						return err
+					}
+				}
 			} else {
 				inputKeys := graphengine.Materials(nodeDef.Input)
 				for _, optional := range nodeDef.OptionalInputs {

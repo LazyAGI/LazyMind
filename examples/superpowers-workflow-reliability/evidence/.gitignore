@@ -1,0 +1,21 @@
+# Historical exports remain local. Only reviewed public excerpts are versioned.
+/*
+!/.gitignore
+!/public/
+/public/*
+!/public/README.md
+!/public/manifest.json
+!/public/normal.json
+!/public/brief-missing.json
+!/public/wrong-base.json
+!/public/missing-coverage.json
+!/public/recovery.json
+!/public/reuse-custom.json
+!/public/native.json
+
+# Small review-round native showcase evidence.
+!/showcase/
+/showcase/*
+!/showcase/receipt.json
+!/showcase/blocked.jpg
+!/showcase/review.jpg

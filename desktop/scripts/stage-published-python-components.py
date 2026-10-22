@@ -105,7 +105,8 @@ def stage(runtime, output, catalog_path, lock_path, cache):
     protected -= set.union(*components.SEEDS.values())
     selected = components.dependency_groups(distributions, protected)['rag']
     if selected != set(entry['packages']):
-        raise RuntimeError('RAG dependency boundary changed; publish a deliberately validated component release')
+        raise RuntimeError('RAG dependency boundary changed; rebuild with '
+                           'LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS=true and publish the matching bundle/catalog')
     owners = {}
     for name, dist in distributions.items():
         for path in components.distribution_files(dist, site):
@@ -134,8 +135,9 @@ def stage(runtime, output, catalog_path, lock_path, cache):
                 path.replace(backup)
                 moved.append((path, backup))
             remove_empty_dirs(site)
-            verification.run_child('base', ['--without-grpc'] if slim else [], logs)
-            verification.run_child('overlay', ['--overlay', str(overlay)], logs)
+            base_args = ['--runtime', str(runtime)] + (['--without-grpc'] if slim else [])
+            verification.run_child('base', base_args, logs)
+            verification.run_child('overlay', ['--runtime', str(runtime), '--overlay', str(overlay)], logs)
         except BaseException:
             for path, backup in reversed(moved):
                 path.parent.mkdir(parents=True, exist_ok=True)

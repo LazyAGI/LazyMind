@@ -916,6 +916,9 @@ func run(ctx context.Context) error {
 		backgroundDone = append(backgroundDone, workflow.StartExternalWorkflowTaskRecovery(runtimeCtx, store.DB()))
 		backgroundDone = append(backgroundDone, conversationgroup.StartTerminalJobReconciler(runtimeCtx, store.DB(), 2*time.Second))
 		backgroundDone = append(backgroundDone, chat.StartConversationTitle(runtimeCtx, store.DB())...)
+		if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")), "local") {
+			backgroundDone = append(backgroundDone, doc.StartDeferredIndexing(runtimeCtx))
+		}
 
 		importConfig := evalset.LoadImportRuntimeConfigFromEnv()
 		backgroundDone = append(backgroundDone,

@@ -1,0 +1,45 @@
+initial: __start__
+transitions:
+  __start__: [{to: prepare}]
+  prepare: [{to: validate_dispatch}]
+  validate_dispatch: [{to: dispatch}]
+  dispatch: [{to: collect}]
+  collect: [{to: validate_completion}]
+  validate_completion: [{to: record}]
+  record: [{to: __end__}]
+steps:
+  prepare:
+    label: Prepare task
+    prompt: Prepare the approved declared task using the guarded example executor. Save the actual brief-generation receipt, base SHA and Todo event as preparation.
+    outputs: [{material: preparation, required: true}]
+    acceptance_criteria: Receipt contains the observed nonempty brief hash, task id, expected base SHA and recorded in_progress event.
+  validate_dispatch:
+    label: Validate dispatch preconditions
+    prompt: Use the deterministic executor to inspect the prepared files and actual Git HEAD. Save admission only when every dispatch check passes.
+    inputs: [{material: preparation, required: true}]
+    outputs: [{material: admission, required: true}]
+    acceptance_criteria: All actual prerequisites pass; absent evidence must fail the attempt.
+  dispatch:
+    label: Dispatch SubAgent
+    prompt: The guarded executor must revalidate admission immediately before starting one real Codex implementer. Save execution only after successful process completion.
+    inputs: [{material: admission, required: true}]
+    outputs: [{material: execution, required: true}]
+    acceptance_criteria: A real child was started after revalidation and returned zero with a terminal turn completion.
+  collect:
+    label: Collect execution evidence
+    prompt: Collect real trace hashes, Git diff, child report and coverage checklist without substituting a model summary for raw evidence.
+    inputs: [{material: execution, required: true}]
+    outputs: [{material: evidence, required: true}]
+    acceptance_criteria: Evidence links the actual execution to the resulting files.
+  validate_completion:
+    label: Validate completion
+    prompt: Check every declared coverage id and run the unchanged declared acceptance tests using the deterministic executor. Reject missing, duplicate or skipped coverage for complete success.
+    inputs: [{material: evidence, required: true}]
+    outputs: [{material: completion, required: true}]
+    acceptance_criteria: The exact coverage set is DONE, fixed tests are unchanged and all pass.
+  record:
+    label: Record result
+    prompt: Record final success and completed Todo only after all completion checks have succeeded.
+    inputs: [{material: completion, required: true}]
+    outputs: [{material: result, required: true}]
+    acceptance_criteria: Final status and observable Todo both agree with validated execution.

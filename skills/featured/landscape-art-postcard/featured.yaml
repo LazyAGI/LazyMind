@@ -1,0 +1,205 @@
+schema_version: 2
+id: landscape-art-postcard
+type: chat
+version: 1.1.2
+status: published
+default_locale: zh-CN
+provider: SkillHub
+skill:
+  source_url: https://skillhub.cn/skills/user_141d55f7/landscape-art-postcard
+  category: design
+  required_version: 2.0.0
+placement:
+  home: true
+  gallery: true
+  order: 120
+classification:
+  category: 设计创意
+  tags: [风景转绘, 水墨画, 明信片, 自由组合]
+assets:
+  cover:
+    file: assets/cover-cloud-dawn.png
+    role: cover
+  original_cloud:
+    file: assets/original-cloud.jpg
+    role: result
+  original_alpine:
+    file: assets/original-alpine.jpg
+    role: result
+  original_coast:
+    file: assets/original-coast.jpg
+    role: result
+  original_autumn:
+    file: assets/original-autumn.jpg
+    role: result
+  ink_artwork:
+    file: assets/ink-cloud-dawn-landscape.png
+    role: result
+  ink_artwork_portrait:
+    file: assets/ink-autumn-portrait.png
+    role: result
+  ink_postcard:
+    file: assets/postcard-alpine-portrait.png
+    role: result
+  ink_postcard_landscape:
+    file: assets/postcard-crimson-coast-landscape.png
+    role: result
+  photo_ink_postcard:
+    file: assets/photo-ink-cloud-dawn-portrait.png
+    role: result
+  torn_postcard:
+    file: assets/torn-crimson-coast-landscape.png
+    role: result
+  surreal_ink_landscape:
+    file: assets/surreal-autumn-lake-landscape.png
+    role: result
+  surreal_ink_portrait:
+    file: assets/surreal-alpine-pine-portrait.png
+    role: result
+  ink_artwork_preview:
+    file: assets/ink-artwork.html
+    role: result
+  ink_postcard_preview:
+    file: assets/ink-postcard.html
+    role: result
+  torn_postcard_preview:
+    file: assets/torn-postcard.html
+    role: result
+  surreal_ink_artwork_preview:
+    file: assets/surreal-ink-artwork.html
+    role: result
+presentation:
+  card:
+    title: 风景水墨画-明信片生成
+    description: 将整幅风景画转绘成水墨风景的画或明信片。具体风格、表达形式，画面比例由你定。
+    output_type: images
+    output_label: 水墨画与明信片
+    cover_asset: cover
+    result_summary: 四张原图对照八张成品，展示纯画、原图加画、撕口和横竖画幅
+  detail:
+    title: 风景水墨画-明信片生成
+    description: 将整幅风景画转绘成水墨风景的画或明信片。具体风格、表达形式，画面比例由你定。
+    attachment_hint: 上传一张风景照片，即按所选案例生成；也可主动提出修改
+tasks:
+  - id: ink-artwork
+    selector:
+      title: 生成无字水墨画
+      description: 横版 3:2 · 完整纯画 · 无字无符号
+      output_label: 无字水墨画
+    launch:
+      prompt_short: 使用图片编辑，将我上传的风景照片转绘成一张完整的无字水墨风景画。
+      prompt: >-
+        【案例直接试用】用户只需上传一张风景照片，其他内容直接使用本案例预设：横版 3:2、纯画、淡彩水墨、无文字无符号。不询问横竖、比例、形式、风格、文案或符号，不要求确认方案；需要文案或巨物时由你按照片自行设计，无字案例不额外加字或符号。只有用户主动要求修改时才覆盖对应项。
+
+        请使用图片编辑，将我上传的风景照片转绘成一张完整的无字水墨风景画。保留主要构图、地标轮廓、空间层次和光色关系，整幅以淡彩水墨笔触、自然晕染、柔和边缘和少量纸张质感重新绘制。本案例默认纯画，不保留摄影区域，不含文字、题字、编号、印章、符号或明信片排版。若我明确提出其它风格或组合，按我的新要求调整，不把案例默认值作为限制。
+
+        本案例固定默认横版 3:2，整幅水墨纯画，推荐请求 1536x1024；不随上传照片方向改变案例版式。用户主动指定的新要求优先；请求尺寸以实际模型支持范围为准。默认交付一张完整画作图片；预览中的多张样图是可选组合，不表示需要全部生成。先检查本轮及本对话已有附件；已有照片就复用，不要求重复上传。仅在确实没有照片时提示“上传一张风景照片，我会按这个案例直接生成。”不要附带偏好表、选择题或方案确认。收到照片后在当前任务中直接调用 image_editor，默认一张图无需转交子任务；精选样张只作样式参考，不可代替我的输入。
+    replay:
+      steps:
+        - title: 读取上传照片
+          description: 读取本轮或已有照片；仅缺图时提示上传
+        - title: 沿用案例预设
+          description: 直接使用横版 3:2、纯画无字的案例预设
+        - title: 转绘水墨风景
+          description: 以淡彩晕染、柔边和纸感重新描绘完整场景
+        - title: 交付完整画作
+          description: 直接生成一张横版 3:2 画作；用户主动修改时覆盖预设
+    result:
+      template: html_preview_v1
+      eyebrow: 无字水墨画 · 原图与结果
+      title: 云海晨光与秋日雪线
+      summary: 日出云海与秋林雪山，分别展示横版和竖版的完整无字水墨转绘。
+      html_asset: ink_artwork_preview
+  - id: ink-postcard
+    selector:
+      title: 生成水墨明信片
+      description: 竖版 2:3 · 水墨纯画 · 标题、短句与小编号
+      output_label: 水墨明信片
+    launch:
+      prompt_short: 将我上传的照片制成竖版 2:3 水墨明信片，使用案例的纯画、标题、短句与小编号。
+      prompt: >-
+        【案例直接试用】用户只需上传一张风景照片，其他内容直接使用本案例预设：竖版 2:3、纯画、淡彩水墨、底部英文标题与短句、一个小编号。不询问横竖、比例、形式、风格、文案或符号，不要求确认方案；需要文案或巨物时由你按照片自行设计，无字案例不额外加字或符号。只有用户主动要求修改时才覆盖对应项。
+
+        请使用图片编辑，将我上传的风景照片制作成一张水墨风景明信片。本案例默认整幅纯水墨画，保留主要构图、地标轮廓、空间层次和原图光色关系，以淡彩水墨笔触、自然晕染、柔边和温暖米白纸感重绘。如我要求“原图加画”或“上原图下风景画”，改为上方保留同景摄影、下方同景水墨的版式，画区与留白根据横竖画幅重新安排；不要误把该版式当成纯画。若我指定撕口或其它风格与组合，按我的新要求调整。
+
+        默认依据实际上传的风景拟定简短英文标题、一句短句和一个小编号或字母符号，文字清晰克制，画面仍以风景为主；可采用衬线标题和小号无衬线短句，不堆砌邮票或装饰。如我给出逐字文案则优先准确使用；若我要求无字或无符号，分别遵守，不沿用样张的 Blue Stillness 文案。
+
+        本案例固定默认竖版 2:3，完整水墨画配底部英文标题、短句与小编号，推荐请求 1024x1536；不随上传照片方向改变案例版式。用户主动指定的新要求优先；请求尺寸以实际模型支持范围为准。横版采用舒展构图和适量底部或侧边留白；竖版采用纵向留白，保证风景与文字完整。默认交付一张完整明信片图片；预览中的多张样图是可选组合，不表示需要全部生成。先检查本轮及本对话已有附件；已有照片就复用，不要求重复上传。仅在确实没有照片时提示“上传一张风景照片，我会按这个案例直接生成。”不要附带偏好表、选择题或方案确认。收到照片后在当前任务中直接调用 image_editor，默认一张图无需转交子任务；精选样张只作样式参考，不可代替我的输入。
+    replay:
+      steps:
+        - title: 读取上传照片
+          description: 读取已有照片，缺图时仅提示上传，不询问文案或方向
+        - title: 选择版式
+          description: 直接使用竖版 2:3、纯画加底部文字的预设
+        - title: 安排标题与符号
+          description: 根据实际风景拟定短文案，用户逐字文案和无字要求优先
+        - title: 适配画幅并交付
+          description: 横竖分别安排留白与文字，具体比例优先，默认交付一张
+    result:
+      template: html_preview_v1
+      eyebrow: 水墨明信片 · 三种原图对照
+      title: 给不同的风景，一张纪念卡
+      summary: 三张不同原图，分别制作竖版纯画、横版纯画和上摄影下水墨明信片。
+      html_asset: ink_postcard_preview
+  - id: torn-postcard
+    selector:
+      title: 生成撕口明信片
+      description: 横版 3:2 · 同景摄影与水墨 · 不规则撕口
+      output_label: 撕口明信片
+    launch:
+      prompt_short: 使用图片编辑，将我上传的风景照片制作成一张摄影与淡彩水墨自然衔接的撕口明信片。
+      prompt: >-
+        【案例直接试用】用户只需上传一张风景照片，其他内容直接使用本案例预设：横版 3:2、同景摄影与淡彩水墨撕口融合、英文标题与短句、一个小编号。不询问横竖、比例、形式、风格、文案或符号，不要求确认方案；需要文案或巨物时由你按照片自行设计，无字案例不额外加字或符号。只有用户主动要求修改时才覆盖对应项。
+
+        请使用图片编辑，将我上传的风景照片制作成一张撕口明信片。先识别本图的叙事焦点，保留同一场景的一处摄影锚点；摄影面积按主体需要决定，不固定为 35% 或 50%。撕口沿原有水线、海岸、树冠、山脊或建筑结构自然发展，不规则地连接照片与同景淡彩水墨插画。撕口附近延续原图色彩，再逐渐转为柔和水墨晕染和少量干刷，用一条源于本景的连续水流、岸线或色彩轨迹穿过两区。摄影区域外必须重构同一风景，保留可辨认的地标和光色关系；禁止矩形贴片、均匀白边、数码蒙版感或无关景物拼接。
+
+        米白哑光纸感和适量留白，以风景为主。默认依据本图拟定短英文标题、短句及一个小编号或字母符号，装饰少量且克制；用户逐字文案、无字或无符号要求优先。若我明确提出纯画、原图加画或其它风格组合，按我的新要求调整。
+
+        本案例固定默认横版 3:2，摄影与水墨沿同景撕口融合，推荐请求 1536x1024；不随上传照片方向改变案例版式。用户主动指定的新要求优先；请求尺寸以实际模型支持范围为准。横版安排舒展的撕口走势，竖版安排纵向层次与文字留白，避免直接裁切另一方向版式。默认交付一张完整明信片图片。先检查本轮及本对话已有附件；已有照片就复用，不要求重复上传。仅在确实没有照片时提示“上传一张风景照片，我会按这个案例直接生成。”不要附带偏好表、选择题或方案确认。收到照片后在当前任务中直接调用 image_editor，默认一张图无需转交子任务；精选样张只作样式参考，不可代替我的输入。
+    replay:
+      steps:
+        - title: 确认叙事焦点
+          description: 从上传照片中选择摄影锚点；缺少照片时先请用户上传
+        - title: 沿景物设计撕口
+          description: 沿水线、树冠或结构发展，避免矩形贴片与均匀白边
+        - title: 衔接同景水墨
+          description: 延续原色和同景轨迹，在撕口附近自然过渡至淡彩水墨
+        - title: 完成明信片
+          description: 直接按横版 3:2 排标题与小编号，交付一张
+    result:
+      template: html_preview_v1
+      eyebrow: 撕口明信片 · 原图与结果
+      title: 沿着海岸，让照片走进画里
+      summary: 红霞海岸原图与撕口明信片对照，展示摄影锚点、连续海岸和同景水墨的融合。
+      html_asset: torn_postcard_preview
+  - id: surreal-ink-artwork
+    selector:
+      title: 生成超现实水墨画
+      description: 横版 3:2 · 水墨纯画 · 一个同源巨物 · 无字
+      output_label: 超现实水墨画
+    launch:
+      prompt_short: 使用图片编辑，将我上传的风景照片转绘成一张以水墨为主、无字纯画的超现实风景画。
+      prompt: >-
+        【案例直接试用】用户只需上传一张风景照片，其他内容直接使用本案例预设：横版 3:2、完整水墨纯画、一个源自照片的超现实巨物、无文字无符号。不询问横竖、比例、形式、风格、文案或符号，不要求确认方案；需要文案或巨物时由你按照片自行设计，无字案例不额外加字或符号。只有用户主动要求修改时才覆盖对应项。
+
+        请使用图片编辑，将我上传的风景照片转绘成一张超现实水墨风景画。组合为“主画风：淡彩水墨；表达：超现实空间；结构：完整纯画；文字与符号：无”。所有摄影内容均重新绘成水墨，不保留实景贴片。保留本景可辨认的主要地标、原配色和光色关系，以米白纸感、柔和边缘、透明淡彩、自然晕染和大面积留白为主。
+
+        超现实只作为尺度、悬浮和空间关系的辅助表达：从原图真实存在的一个景物元素中，选择且只选择一个作为不可能的巨物；默认只保留原景本有对象与这个唯一巨物；只有我明确允许装饰符号时，才添加递变小元素或弧线点缀。不添加与本景无关的冰淇淋、行星或装饰，也不把多个景物同时巨化。水墨主画风优先，不套用波普硬边平涂、禁渐变或禁晕染的规则；不使用照片拼贴、塑料立体感、浓黑描边或强烈投影。无文字、编号、字母、印章、签名或水印。若我明确提出明信片、文字或其它结构与风格组合，按我的新要求调整。
+
+        本案例固定默认横版 3:2，无字超现实水墨纯画，推荐请求 1536x1024；不随上传照片方向改变案例版式。用户主动指定的新要求优先；请求尺寸以实际模型支持范围为准。默认交付一张完整画作图片；预览中的多张样图是可选组合，不表示需要全部生成。先检查本轮及本对话已有附件；已有照片就复用，不要求重复上传。仅在确实没有照片时提示“上传一张风景照片，我会按这个案例直接生成。”不要附带偏好表、选择题或方案确认。收到照片后在当前任务中直接调用 image_editor，默认一张图无需转交子任务；精选样张只作样式参考，不可代替我的输入。
+    replay:
+      steps:
+        - title: 读取原景符号
+          description: 识别本图地标、色彩与可用元素；缺少照片时先请用户上传
+        - title: 设计一处超现实关系
+          description: 只将一个原图元素巨化，保留原景关系，默认不加装饰小元素
+        - title: 统一为水墨纯画
+          description: 全景重绘，保留柔边、淡彩和晕染，无摄影贴片或文字
+        - title: 适配画幅并交付
+          description: 直接按横版 3:2 安排留白，默认交付一张
+    result:
+      template: html_preview_v1
+      eyebrow: 超现实水墨画 · 两种原图对照
+      title: 让熟悉的风景，长出一点想象
+      summary: 秋林中的金色树与湖岸冷杉分别成为唯一巨物，展示横竖不同画幅的超现实水墨。
+      html_asset: surreal_ink_artwork_preview

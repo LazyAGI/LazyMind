@@ -6,8 +6,13 @@ import CreateKnowledgeBaseModal, { type CreateKnowledgeBaseModalRef } from "./in
 import type { SyncKnowledgeBaseCreationVm } from "@/modules/knowledge/hooks/useSyncKnowledgeBaseCreation";
 import { getLearningCatalog, saveKnowledgeBaseCapabilities, type LearningCatalog } from "@/modules/learning/api";
 import { isDeveloperModeActive } from "@/utils/developerMode";
+import { fetchUserUiPreferences } from "@/modules/user/uiPreferencesApi";
 
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+const rag = vi.hoisted(() => ({ availability: "ready" }));
+vi.mock("@/modules/modelProvider/contexts/RAGComponentContext", () => ({
+  useRAGComponent: () => ({ availability: rag.availability }),
+}));
 vi.mock("@/modules/dataSource/components/management/DataSourceProviderPicker", () => ({ default: () => null }));
 vi.mock("@/utils/developerMode", () => ({ isDeveloperModeActive: vi.fn() }));
 vi.mock("@/modules/user/uiPreferencesApi", () => ({
@@ -45,6 +50,8 @@ const catalog: LearningCatalog = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  rag.availability = "ready";
+  vi.mocked(fetchUserUiPreferences).mockResolvedValue({ document_parsing_enabled: false } as Awaited<ReturnType<typeof fetchUserUiPreferences>>);
   vi.mocked(isDeveloperModeActive).mockReturnValue(false);
   vi.mocked(getLearningCatalog).mockResolvedValue(catalog);
   vi.mocked(saveKnowledgeBaseCapabilities).mockResolvedValue({});
@@ -83,6 +90,16 @@ async function selectEnglishProfile() {
 }
 
 describe("knowledge creation capability submission", () => {
+  it("preserves the indexing target for deferred ingestion without RAG", async () => {
+    rag.availability = "missing";
+    vi.mocked(fetchUserUiPreferences).mockResolvedValue({ document_parsing_enabled: true } as Awaited<ReturnType<typeof fetchUserUiPreferences>>);
+    const { onCreate } = await mountModal();
+    await fillRequiredFields();
+    expect(screen.getByRole("tab", { name: "knowledge.createFromCloudDisk" })).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ processing_level: "indexed" })));
+  });
+
   it.each([false, true])("submits the general preset without opening advanced settings (developer=%s)", async (developer) => {
     vi.mocked(isDeveloperModeActive).mockReturnValue(developer);
     const { onCreate } = await mountModal();

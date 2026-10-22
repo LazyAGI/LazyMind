@@ -451,7 +451,17 @@ jobs:
             case "$RUNNER_OS" in
               Linux) sudo apt-get update && sudo apt-get install -y ripgrep ;;
               macOS) brew install ripgrep ;;
-              Windows) choco install ripgrep -y --no-progress ;;
+              Windows)
+                # Chocolatey can return success after a transient feed error
+                # without installing anything. Verify the executable before
+                # accepting the result, and retry temporary download failures.
+                for attempt in 1 2 3; do
+                  if choco install ripgrep -y --no-progress && command -v rg >/dev/null 2>&1; then
+                    break
+                  fi
+                  if [ "$attempt" -lt 3 ]; then sleep "$((attempt * 5))"; fi
+                done
+                ;;
             esac
           fi
           rg --version

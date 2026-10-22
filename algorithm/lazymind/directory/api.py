@@ -16,6 +16,15 @@ Do not search, read source documents, execute commands, or invent facts or resou
 Assess evidence for the specific membership and placement decision. Unread does not mean
 unsupported, and reading is not proof that a classification is correct.
 Use the user's language for names and explanations. Return only the requested JSON object.
+Decide task relevance BEFORE document type. A generic title such as "工作周报" or "团队日报"
+identifies a type, not the user's work, project or requested time period. Admit a candidate only
+when supplied metadata or body evidence connects it to the task's object and purpose and any
+relevant user-specified constraints. Omit unrelated templates/examples and candidates with only
+a generic type/title; unconfirmed is not a way to admit unsupported topical membership.
+A filled-in template with relevant actual work is eligible. A template is also eligible when
+the user's task explicitly requests templates. Do not blacklist a provider or the word template.
+Relevant material with uncertain placement may remain unconfirmed. Clear, task-specific metadata
+can establish membership without a body read; do not require full reads of every candidate.
 '''
 ROUTE = '''Decide which directories to maintain from the supplied task observations.
 Each observation retains its id, question and resource_keys. Resources hold metadata and evidence windows;
@@ -33,6 +42,10 @@ For each new directory, use the user's explicitly requested DIRECTORY organizati
 Otherwise set organization to exactly "按资料类型组织". An answer outline is not a directory instruction.
 Directory boundaries follow task objects/purposes;
 do not create separate directories merely for different document types.
+Derive a new directory Intent from the user's task, including its object, purpose and explicit
+scope, not just the providers or document types found so far. Unless the user restricted sources,
+do not narrow membership to Notion/Feishu or other currently successful providers: relevant
+local files and mail remain eligible under the same task relevance criteria.
 The organizer will derive internal document-type groups from actual materials, independently of storage providers.
 Do not require all candidates to have been read. Do not invent minimum counts.
 Return {"targets":[{"directory_id":"existing ID or empty for new", "name":"name for new",
@@ -54,7 +67,8 @@ or name type groups by provider, system or subject. This does not override an ex
 organization or change existing groups and pinned positions.
 Assignments are incremental upserts, never a replacement of all members. Every selected resource
 gets one assignment when relevant; group_id="" means visible unclassified material. Unsupported
-classification must stay unconfirmed. Confirm when supplied evidence supports both directory
+placement of a relevant resource must stay unconfirmed. Omit resources lacking task relevance
+from assignments; omission does not remove an existing member. Confirm when supplied evidence supports both directory
 membership and placement. confirmed means supported directory membership and placement, not full reading,
 factual verification, implementation completion, or successful acceptance tests.
 Distinguish search snippets from excerpts returned by an actual source read. An actual read excerpt
@@ -74,13 +88,21 @@ titled "alice invited you to alice/ProjectX" supports a repository-invitation gr
 whose scope includes ProjectX repository invitations. This does not prove development progress.
 Generic titles, keyword overlap, storage location or a recognizable source alone are insufficient.
 If relying on an actual read excerpt, use evidence_basis="read"; never relabel body evidence as metadata.
-Ambiguous objects or unsupported placement remain unconfirmed. Give the specific title/source or
-body evidence supporting BOTH membership and placement, or the concrete missing evidence, in reason.
+When the task object is established but placement is unsupported, keep the assignment unconfirmed.
+If the object itself is ambiguous, omit the candidate. Give the specific title/source or body evidence
+supporting membership and placement, or the concrete missing placement evidence, in reason.
 Never use "unread" or "not fully read" alone as a reason. Existing confirmed entries without new evidence
 or changed placement/version retain their confirmation and evidence.
 Return {"groups":[{"id":"new_1","name":"...","parent_id":"existing/new ID or empty",
 "position":0}],"assignments":[{"resource_key":"exact resources key", "group_id":"ID or empty",
 "confirmed":false,"evidence_basis":"metadata or read","reason":"brief evidence-grounded reason"}]}.
+Every assignment is persisted as a directory member, INCLUDING confirmed=false and group_id="".
+Before returning JSON, remove any assignment whose reason says the resource is an unrelated
+template/example, has only a generic title, or lacks evidence linking it to the task object/purpose.
+Do not create a template group to accommodate unrelated templates in an actual-work directory.
+For example, a blank "工作周报" with placeholder department/person/date fields is OMITTED from
+an actual-work report directory, not assigned with confirmed=false. Keep it for a template-finding
+task, and keep a filled-in report whose evidence establishes the requested work.
 Do not return targets, new resource IDs, removals, or updates to existing groups.
 '''
 

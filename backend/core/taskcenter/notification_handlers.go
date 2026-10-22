@@ -166,18 +166,21 @@ func NotificationPreferences(w http.ResponseWriter, r *http.Request) {
 					Updates(map[string]any{"status": "skipped", "reason": "NOTIFICATION_CHANNEL_DISABLED", "updated_at": now}).Error; err != nil {
 					return err
 				}
+				if err := tx.Model(&orm.TaskNotification{}).
+					Where("user_id = ? AND channel IN ? AND status = 'sending'", owner, disabled).
+					Update("reason", gorm.Expr("CASE WHEN reason = ? THEN reason ELSE ? END", "NOTIFICATIONS_DISABLED", "NOTIFICATION_CHANNEL_DISABLED")).Error; err != nil {
+					return err
+				}
 			}
 		}
-		updates := map[string]any{"revision": current.Revision + 1, "updated_at": time.Now().UTC()}
+		now := time.Now().UTC()
+		defaults, err := updatedNotificationDefaults(current, req.Enabled, req.Defaults, now)
+		if err != nil {
+			return err
+		}
+		updates := map[string]any{"revision": current.Revision + 1, "updated_at": now, "defaults": string(defaults)}
 		if req.Enabled != nil {
 			updates["enabled"] = *req.Enabled
-		}
-		if req.Defaults != nil {
-			raw, err := json.Marshal(req.Defaults)
-			if err != nil {
-				return err
-			}
-			updates["defaults"] = string(raw)
 		}
 		update := tx.Model(&orm.UserNotificationPreferences{}).Where("user_id = ? AND revision = ?", owner, req.Revision).Updates(updates)
 		if update.Error != nil {
@@ -279,9 +282,17 @@ func ScheduleNotifications(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			converted := taskNotificationDefaults(*req.Config)
+			// Reset has no recipient-selection step. Keep its existing valid,
+			// untargeted policy; new schedules inherit the channel selections.
+			for provider, channel := range converted.Channels {
+				if provider != "desktop" {
+					channel.Enabled = false
+					converted.Channels[provider] = channel
+				}
+			}
 			req.Config = &converted
 		}
-		prepared, err := PrepareScheduleNotificationUpdate(r.Context(), owner, req)
+		prepared, err := PrepareScheduleNotificationUpdateForSchedule(r.Context(), db, owner, id, req)
 		if err != nil {
 			replyNotificationError(w, r, err)
 			return
@@ -306,6 +317,11 @@ func ScheduleNotifications(w http.ResponseWriter, r *http.Request) {
 	}
 	availability := map[string]any{}
 	if config != nil {
+		prefs, err := ReadNotificationPreferences(r.Context(), db, owner)
+		if err != nil {
+			replyNotificationError(w, r, err)
+			return
+		}
 		for provider, channel := range config.Channels {
 			state, reason := "disabled", ""
 			if channel.Enabled {
@@ -313,7 +329,9 @@ func ScheduleNotifications(w http.ResponseWriter, r *http.Request) {
 				// Native and browser consumers share the system-notification channel.
 				// Permission/capability is determined by the receiving client.
 				if provider != "desktop" {
-					if err := validateNotificationTarget(r.Context(), owner, provider, channel); err != nil {
+					if blocked := notificationBlockReason(prefs, provider); blocked != "" {
+						state, reason = "disabled", blocked
+					} else if err := validateNotificationTarget(r.Context(), owner, provider, channel); err != nil {
 						state, reason = "unavailable", notificationTargetUnavailableReason(provider)
 					}
 				}

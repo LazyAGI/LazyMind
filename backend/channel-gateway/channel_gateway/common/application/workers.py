@@ -410,8 +410,21 @@ class DeliveryWorker:
                         outbound.outbox_id,
                         outbound.attempt_count,
                     )
+                    if outbound.provider == 'wechat' and isinstance(exc, ProviderRejectedError):
+                        operation = getattr(exc, 'operation', 'unknown')
+                        if type(operation) is not str or operation not in {'sendmessage', 'getuploadurl'}:
+                            operation = 'unknown'
+                        codes = {}
+                        for key in ('http_status', 'ret', 'errcode'):
+                            value = getattr(exc, key, None)
+                            codes[key] = value if type(value) is int and -(2 ** 31) <= value < 2 ** 31 else None
+                        _logger.warning(
+                            'wechat_outbound_rejected outbox_id=%s operation=%s http_status=%s ret=%s errcode=%s',
+                            outbound.outbox_id, operation, codes['http_status'], codes['ret'], codes['errcode'],
+                        )
                     if outbound.purpose == 'notification':
-                        self._notification_failed(outbound, claim_owner, exc, attempt_state['send_started'])
+                        failed_outbound = attempt_state.get('outbound') or outbound
+                        self._notification_failed(failed_outbound, claim_owner, exc, attempt_state['send_started'])
                     else:
                         self._store.record_outbound_failure(
                             outbound.outbox_id, claim_owner, error=exc.__class__.__name__,
@@ -468,6 +481,9 @@ class DeliveryWorker:
                     )
                 )
             attempt_state['send_started'] = True
+            # Notification prepare refreshes the context for each part. Keep
+            # the exact version used by this send for conditional invalidation.
+            attempt_state['outbound'] = outbound
             delivered_state = provider.send_part(
                 outbound,
                 part,
@@ -503,6 +519,11 @@ class DeliveryWorker:
     def _notification_failed(self, outbound, owner, error, send_started):
         if isinstance(error, ProviderRejectedError):
             if not error.retryable:
+                http_status = getattr(error, 'http_status', None)
+                if (outbound.provider == 'wechat' and send_started
+                        and getattr(error, 'operation', None) == 'sendmessage'
+                        and type(http_status) is int and 200 <= http_status < 300):
+                    self._store.invalidate_wechat_notification_context(outbound, owner)
                 reason = ('WECOM_CAPABILITY_REAUTH_REQUIRED'
                           if str(error) == 'WECOM_CAPABILITY_REAUTH_REQUIRED'
                           else 'NOTIFICATION_DELIVERY_FAILED')

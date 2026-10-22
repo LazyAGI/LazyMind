@@ -1,0 +1,315 @@
+{
+  "classification": "normal real Runtime/Codex E2E",
+  "execution_source": "113585a430e5b5f8f2d97b8963d7d1431329a1a0",
+  "records": {
+    "result": {
+      "source": "evidence/pr-validation/normal/result.json",
+      "sha256": "c11bf2d124ad838620a2d88f92e62832c4aa5e3411010ca10305d3679088cdc6",
+      "format": "json",
+      "values": {
+        "/result": "PASS",
+        "/failure": null,
+        "/session_id": "ea0bf0c839dc47ebaff1b442c92209da",
+        "/launch_count": 1,
+        "/completed_at": "2026-10-20T09:48:28.857865+00:00",
+        "/control/session/status": "completed",
+        "/control/session/pinned_revision_id": "80cebe93-5bc3-4f46-b311-2868e77834c1",
+        "/control/projection/completed": true,
+        "/control/projection/nodes/collect/execution": "succeeded",
+        "/control/projection/nodes/dispatch/execution": "succeeded",
+        "/control/projection/nodes/prepare/execution": "succeeded",
+        "/control/projection/nodes/record/execution": "succeeded",
+        "/control/projection/nodes/validate_completion/execution": "succeeded",
+        "/control/projection/nodes/validate_dispatch/execution": "succeeded",
+        "/control/session/steps/0/step_id": "prepare",
+        "/control/session/steps/0/attempt": 1,
+        "/control/session/steps/0/status": "succeeded",
+        "/control/session/steps/1/step_id": "validate_dispatch",
+        "/control/session/steps/1/attempt": 1,
+        "/control/session/steps/1/status": "succeeded",
+        "/control/session/steps/2/step_id": "dispatch",
+        "/control/session/steps/2/attempt": 1,
+        "/control/session/steps/2/status": "succeeded",
+        "/control/session/steps/3/step_id": "collect",
+        "/control/session/steps/3/attempt": 1,
+        "/control/session/steps/3/status": "succeeded",
+        "/control/session/steps/4/step_id": "validate_completion",
+        "/control/session/steps/4/attempt": 1,
+        "/control/session/steps/4/status": "succeeded",
+        "/control/session/steps/5/step_id": "record",
+        "/control/session/steps/5/attempt": 1,
+        "/control/session/steps/5/status": "succeeded",
+        "/artifacts/artifacts/0/slot_id": "admission",
+        "/artifacts/artifacts/0/selected": true,
+        "/artifacts/artifacts/0/step_id": "validate_dispatch",
+        "/artifacts/artifacts/1/slot_id": "completion",
+        "/artifacts/artifacts/1/selected": true,
+        "/artifacts/artifacts/1/step_id": "validate_completion",
+        "/artifacts/artifacts/1/value/coverage": [
+          {
+            "id": "quoted",
+            "status": "DONE",
+            "evidence": "python3 -m unittest -v test_csv_records: test_quoted passed, covering quoted commas and embedded newlines."
+          },
+          {
+            "id": "headers",
+            "status": "DONE",
+            "evidence": "python3 -m unittest -v test_csv_records: test_headers passed, covering header/cell trimming and rejection of empty and duplicate normalized headers."
+          },
+          {
+            "id": "ragged",
+            "status": "DONE",
+            "evidence": "python3 -m unittest -v test_csv_records: test_ragged passed, verifying ValueError for too few and too many cells."
+          },
+          {
+            "id": "empty",
+            "status": "DONE",
+            "evidence": "python3 -m unittest -v test_csv_records: test_empty passed for empty, whitespace-only, and header-only input."
+          }
+        ],
+        "/artifacts/artifacts/1/value/checks": [
+          {
+            "id": "csv-tests",
+            "argv": [
+              "python3",
+              "-m",
+              "unittest",
+              "-v",
+              "test_csv_records"
+            ],
+            "started_at": "2026-10-20T09:48:28.539136+00:00",
+            "completed_at": "2026-10-20T09:48:28.575597+00:00",
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "test_empty (test_csv_records.CSVRecordsTests) ... ok\ntest_headers (test_csv_records.CSVRecordsTests) ... ok\ntest_quoted (test_csv_records.CSVRecordsTests) ... ok\ntest_ragged (test_csv_records.CSVRecordsTests) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n"
+          }
+        ],
+        "/artifacts/artifacts/1/value/changed_files": [
+          "csv_records.py"
+        ],
+        "/artifacts/artifacts/1/value/head": "1598cc710f9c98a5e2436e93251afa781fd6c1f9",
+        "/artifacts/artifacts/1/value/diff": "diff --git a/csv_records.py b/csv_records.py\nindex 557e92c..49942fa 100644\n--- a/csv_records.py\n+++ b/csv_records.py\n@@ -1,2 +1,25 @@\n-def read_records(text):\n-    raise NotImplementedError\n+import csv\n+import io\n+\n+\n+def read_records(text: str) -> list[dict[str, str]]:\n+    \"\"\"Read CSV records, normalizing whitespace and validating their shape.\"\"\"\n+    if not text.strip():\n+        return []\n+\n+    reader = csv.reader(io.StringIO(text, newline=\"\"))\n+    headers = [cell.strip() for cell in next(reader)]\n+    if not headers or any(not header for header in headers):\n+        raise ValueError(\"CSV header names must not be empty\")\n+    if len(set(headers)) != len(headers):\n+        raise ValueError(\"CSV header names must be unique\")\n+\n+    records = []\n+    for row in reader:\n+        if len(row) != len(headers):\n+            raise ValueError(\n+                f\"CSV row ending at line {reader.line_num} has {len(row)} cells; \"\n+                f\"expected {len(headers)}\"\n+            )\n+        records.append(dict(zip(headers, (cell.strip() for cell in row))))\n+    return records",
+        "/artifacts/artifacts/2/slot_id": "evidence",
+        "/artifacts/artifacts/2/selected": true,
+        "/artifacts/artifacts/2/step_id": "collect",
+        "/artifacts/artifacts/2/value/coverage": [
+          {
+            "id": "quoted",
+            "status": "DONE",
+            "evidence": "python3 -m unittest -v test_csv_records: test_quoted passed, covering quoted commas and embedded newlines."
+          },
+          {
+            "id": "headers",
+            "status": "DONE",
+            "evidence": "python3 -m unittest -v test_csv_records: test_headers passed, covering header/cell trimming and rejection of empty and duplicate normalized headers."
+          },
+          {
+            "id": "ragged",
+            "status": "DONE",
+            "evidence": "python3 -m unittest -v test_csv_records: test_ragged passed, verifying ValueError for too few and too many cells."
+          },
+          {
+            "id": "empty",
+            "status": "DONE",
+            "evidence": "python3 -m unittest -v test_csv_records: test_empty passed for empty, whitespace-only, and header-only input."
+          }
+        ],
+        "/artifacts/artifacts/3/slot_id": "execution",
+        "/artifacts/artifacts/3/selected": true,
+        "/artifacts/artifacts/3/step_id": "dispatch",
+        "/artifacts/artifacts/4/slot_id": "preparation",
+        "/artifacts/artifacts/4/selected": true,
+        "/artifacts/artifacts/4/step_id": "prepare",
+        "/artifacts/artifacts/5/slot_id": "result",
+        "/artifacts/artifacts/5/selected": true,
+        "/artifacts/artifacts/5/step_id": "record"
+      }
+    },
+    "events": {
+      "source": "evidence/pr-validation/normal/trace.jsonl",
+      "sha256": "2e84b076cf0ecb271508dfef27270e0a88425eb6c6b41d36f5616836aba7d9ac",
+      "format": "jsonl",
+      "values": {
+        "/7/at": "2026-10-20T09:47:37.471414+00:00",
+        "/7/event": "project_run_started",
+        "/7/task_id": "csv-records",
+        "/7/resume": false,
+        "/7/fault": null,
+        "/7/requested_model": "gpt-6-astra",
+        "/7/actual_backend_model": "N/A",
+        "/11/at": "2026-10-20T09:47:37.498410+00:00",
+        "/11/event": "step_started",
+        "/11/step": "prepare",
+        "/11/attempt_id": "38f7e48b-4ac8-4784-b4ad-1e4473d72075",
+        "/12/at": "2026-10-20T09:47:37.561995+00:00",
+        "/12/event": "brief_generated",
+        "/12/started_at": "2026-10-20T09:47:37.554427+00:00",
+        "/12/returncode": 0,
+        "/12/task_id": "csv-records",
+        "/12/plan_sha256": "ee198b37c9084fc2592e0f4a9628326cceb60d99b0fbefe70658900eace89cac",
+        "/13/at": "2026-10-20T09:47:37.562794+00:00",
+        "/13/event": "todo_updated",
+        "/13/task_id": "csv-records",
+        "/13/status": "in_progress",
+        "/16/at": "2026-10-20T09:47:37.690334+00:00",
+        "/16/event": "step_completed",
+        "/16/step": "prepare",
+        "/16/attempt_id": "38f7e48b-4ac8-4784-b4ad-1e4473d72075",
+        "/20/at": "2026-10-20T09:47:37.724758+00:00",
+        "/20/event": "step_started",
+        "/20/step": "validate_dispatch",
+        "/20/attempt_id": "b1d3a6ee-6f26-47aa-b154-4aaefa1acd4f",
+        "/21/at": "2026-10-20T09:47:37.824690+00:00",
+        "/21/event": "dispatch_preconditions_passed",
+        "/21/binding": {
+          "task_id": "csv-records",
+          "manifest_sha256": "565dea261b51a04342945c3fa5faf5a1caa59f9179872d58c16d11095304e1f3",
+          "plan": "docs/plans/csv.md",
+          "plan_task": 1,
+          "protected_sha256": {
+            "docs/plans/csv.md": "ee198b37c9084fc2592e0f4a9628326cceb60d99b0fbefe70658900eace89cac",
+            "test_csv_records.py": "456a875cd18a2ef87f3d08ca27046a8ffafc3246566bc5f259e3685b953cbd01"
+          },
+          "coverage_ids": [
+            "quoted",
+            "headers",
+            "ragged",
+            "empty"
+          ]
+        },
+        "/21/brief_sha256": "2bd9d2f526a2f9b0069616fd610b10fbc0a26a1c4ae11fab86602cd27b478c84",
+        "/21/brief_bytes": 1929,
+        "/21/todo": {
+          "at": "2026-10-20T09:47:37.562794+00:00",
+          "event": "todo_updated",
+          "task_id": "csv-records",
+          "status": "in_progress"
+        },
+        "/21/git": {
+          "worktree": "$PR_TRIAL/normal/worktree",
+          "head": "5c0d31d5a4fdc40bde14ec5f36112864f6ec3467",
+          "git_dir": "$PR_TRIAL/normal/repository/.git/worktrees/worktree",
+          "index": "$PR_TRIAL/normal/repository/.git/worktrees/worktree/index",
+          "common_dir": "$PR_TRIAL/normal/repository/.git"
+        },
+        "/21/expected_base": "5c0d31d5a4fdc40bde14ec5f36112864f6ec3467",
+        "/24/at": "2026-10-20T09:47:37.847118+00:00",
+        "/24/event": "step_completed",
+        "/24/step": "validate_dispatch",
+        "/24/attempt_id": "b1d3a6ee-6f26-47aa-b154-4aaefa1acd4f",
+        "/28/at": "2026-10-20T09:47:37.876489+00:00",
+        "/28/event": "step_started",
+        "/28/step": "dispatch",
+        "/28/attempt_id": "649226cd-a0cc-473f-ad66-e6ec3f6794b5",
+        "/29/at": "2026-10-20T09:47:38.037231+00:00",
+        "/29/event": "dispatch_started",
+        "/29/brief_sha256": "2bd9d2f526a2f9b0069616fd610b10fbc0a26a1c4ae11fab86602cd27b478c84",
+        "/30/at": "2026-10-20T09:47:38.039231+00:00",
+        "/30/event": "child_process_started",
+        "/30/pid": 83231,
+        "/30/requested_model": "gpt-6-astra",
+        "/31/at": "2026-10-20T09:48:28.153784+00:00",
+        "/31/event": "dispatch_completed",
+        "/31/result/started_at": "2026-10-20T09:47:38.037752+00:00",
+        "/31/result/completed_at": "2026-10-20T09:48:28.153414+00:00",
+        "/31/result/duration_seconds": 50.116,
+        "/31/result/returncode": 0,
+        "/31/result/turn_completed": true,
+        "/31/result/requested_model": "gpt-6-astra",
+        "/31/result/actual_backend_model": "N/A",
+        "/31/result/trace_sha256": "07ac416a7315b9bbc5aa5654cc5d93b2c0b893841cea6f9dcc5989adfaf99bf5",
+        "/34/at": "2026-10-20T09:48:28.203924+00:00",
+        "/34/event": "step_completed",
+        "/34/step": "dispatch",
+        "/34/attempt_id": "649226cd-a0cc-473f-ad66-e6ec3f6794b5",
+        "/38/at": "2026-10-20T09:48:28.245528+00:00",
+        "/38/event": "step_started",
+        "/38/step": "collect",
+        "/38/attempt_id": "76a4e3f7-62d8-4735-9a30-adcdeb601ad7",
+        "/41/at": "2026-10-20T09:48:28.397564+00:00",
+        "/41/event": "step_completed",
+        "/41/step": "collect",
+        "/41/attempt_id": "76a4e3f7-62d8-4735-9a30-adcdeb601ad7",
+        "/45/at": "2026-10-20T09:48:28.443243+00:00",
+        "/45/event": "step_started",
+        "/45/step": "validate_completion",
+        "/45/attempt_id": "fd2a2d59-c8ee-4dc8-a7f7-a88d51650e2f",
+        "/46/at": "2026-10-20T09:48:28.575621+00:00",
+        "/46/event": "acceptance_check",
+        "/46/id": "csv-tests",
+        "/46/argv": [
+          "python3",
+          "-m",
+          "unittest",
+          "-v",
+          "test_csv_records"
+        ],
+        "/46/started_at": "2026-10-20T09:48:28.539136+00:00",
+        "/46/completed_at": "2026-10-20T09:48:28.575597+00:00",
+        "/46/returncode": 0,
+        "/46/stdout": "",
+        "/46/stderr": "test_empty (test_csv_records.CSVRecordsTests) ... ok\ntest_headers (test_csv_records.CSVRecordsTests) ... ok\ntest_quoted (test_csv_records.CSVRecordsTests) ... ok\ntest_ragged (test_csv_records.CSVRecordsTests) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+        "/49/at": "2026-10-20T09:48:28.774885+00:00",
+        "/49/event": "step_completed",
+        "/49/step": "validate_completion",
+        "/49/attempt_id": "fd2a2d59-c8ee-4dc8-a7f7-a88d51650e2f",
+        "/53/at": "2026-10-20T09:48:28.811428+00:00",
+        "/53/event": "step_started",
+        "/53/step": "record",
+        "/53/attempt_id": "893d5af9-8d33-47b1-8b8d-db293737ff3c",
+        "/54/at": "2026-10-20T09:48:28.811543+00:00",
+        "/54/event": "todo_updated",
+        "/54/task_id": "csv-records",
+        "/54/status": "completed",
+        "/57/at": "2026-10-20T09:48:28.833439+00:00",
+        "/57/event": "step_completed",
+        "/57/step": "record",
+        "/57/attempt_id": "893d5af9-8d33-47b1-8b8d-db293737ff3c",
+        "/60/at": "2026-10-20T09:48:28.858698+00:00",
+        "/60/event": "project_run_completed",
+        "/60/result": "PASS",
+        "/60/failure": null
+      }
+    },
+    "child": {
+      "source": "evidence/pr-validation/normal/child-trace.jsonl",
+      "sha256": "c284564dd4b15dad83a8934a64c76248bf9422af5556af8930e675c35cc4cb11",
+      "format": "jsonl",
+      "values": {
+        "/1/type": "turn.started",
+        "/15/type": "turn.completed"
+      }
+    },
+    "child_hashes": {
+      "source": "evidence/pr-validation/manifest.json",
+      "sha256": "0214f28d2a05a81bcf2b7b6455bc6848314a771fc22f2dc4798d1db9a5504ba2",
+      "format": "json",
+      "values": {
+        "/files/2/path": "normal/child-trace.jsonl",
+        "/files/2/raw_sha256": "07ac416a7315b9bbc5aa5654cc5d93b2c0b893841cea6f9dcc5989adfaf99bf5",
+        "/files/2/export_sha256": "c284564dd4b15dad83a8934a64c76248bf9422af5556af8930e675c35cc4cb11"
+      }
+    },
+    "independent_readback": {
+      "source": "evidence/pr-validation/verification-live.json",
+      "sha256": "a34dc8a6d7c04e9d6cbc93edaba8dd3d3a18084441e08a5d2231cbaab012ce84",
+      "format": "json",
+      "values": {
+        "/cases/normal/session_id": "ea0bf0c839dc47ebaff1b442c92209da",
+        "/cases/normal/changed_files": [
+          "csv_records.py"
+        ],
+        "/cases/normal/parent_unchanged": true,
+        "/cases/normal/protected_inputs_unchanged": true,
+        "/cases/normal/selected_slots": [
+          "admission",
+          "completion",
+          "evidence",
+          "execution",
+          "preparation",
+          "result"
+        ]
+      }
+    }
+  }
+}

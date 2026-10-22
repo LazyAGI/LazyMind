@@ -134,7 +134,7 @@ async function writeTextToClipboard(text: string) {
   }
 }
 
-const Detail = () => {
+const KnowledgeDocumentContent = () => {
   const { t } = useTranslation();
   const [knowledgeDetail, setKnowledgeDetail] = useState<KnowledgeDetail>();
 
@@ -1407,6 +1407,10 @@ const Detail = () => {
       <AddLearningContentModal value={learningSelection} datasetId={knowledgeBaseId} documentId={knowledgeId} segmentId={segmentDetail?.segment_id} context={learningSelection?.selection.context||segmentDetail?.content} onClose={()=>setLearningSelection(null)} onAdded={()=>{setVocabularyRefreshToken(v=>v+1);setPreviewSideCollapsed(false)}} />
     </div>
   );
+};
+
+const Detail = () => {
+  return <KnowledgeDocumentContent />;
 };
 
 export default Detail;

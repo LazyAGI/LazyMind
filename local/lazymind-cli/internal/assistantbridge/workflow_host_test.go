@@ -14,7 +14,7 @@ import (
 )
 
 func TestWorkflowBindUsesPairedProviderNotRequestBody(t *testing.T) {
-	for _, provider := range []string{workflowhost.DSHProvider, "fake-agent"} {
+	for _, provider := range []string{workflowhost.DSHProvider, "fake-agent", "workbuddy", "codex"} {
 		t.Run(provider, func(t *testing.T) {
 			var received map[string]string
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +53,13 @@ func TestWorkflowBindUsesPairedProviderNotRequestBody(t *testing.T) {
 			}
 			if received["provider"] != provider || received["connector_id"] != pair.ConnectorID || received["driver_session_id"] != "native-1" {
 				t.Fatal("binding did not use trusted pairing identity")
+			}
+			wantCancellation := "none"
+			if provider == workflowhost.DSHProvider || provider == "workbuddy" {
+				wantCancellation = "session"
+			}
+			if received["cancellation"] != wantCancellation {
+				t.Fatalf("unverified cancellation capability: %v", received)
 			}
 		})
 	}

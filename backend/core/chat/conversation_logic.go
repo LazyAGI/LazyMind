@@ -27,6 +27,7 @@ import (
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/systemdeps"
 	"lazymind/core/taskcenter"
 	"lazymind/core/tasktiming"
 	"lazymind/core/vocabulary"
@@ -849,10 +850,11 @@ const (
 )
 
 type chatPersistTarget struct {
-	HistoryID      string
-	Seq            int
-	Existing       *orm.ChatHistory
-	IsRegeneration bool
+	BackgroundTaskID string // Internal admission only; never populated from request JSON.
+	HistoryID        string
+	Seq              int
+	Existing         *orm.ChatHistory
+	IsRegeneration   bool
 }
 
 func parseChatAction(raw map[string]any) string {
@@ -1611,6 +1613,11 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		body["excluded_skills"] = resourceContext.ExcludedSkills
 		body["loaded_skills"] = resourceContext.LoadedSkills
 	}
+	if !systemdeps.PythonComponentActive("rag") {
+		body["filters"] = nil
+		delete(body, "document_context")
+		return body
+	}
 	if body["filters"] == nil {
 		conv, _ := raw["conversation"].(map[string]any)
 		if conv != nil {
@@ -2174,7 +2181,7 @@ func handleStreamChat(
 		}
 	}
 	if primaryRunID == "" {
-		primaryRunID = newID("run_")
+		primaryRunID = common.GeneratePrefixedID("run_", 36)
 	}
 	reqBody["run_id"], reqBody["history_id"] = primaryRunID, historyID
 	if !dualReply {
@@ -2183,12 +2190,23 @@ func handleStreamChat(
 	secondaryRunID := ""
 	if dualReply {
 		secondaryHistoryID = newID("h_")
-		secondaryRunID = newID("run_")
+		secondaryRunID = common.GeneratePrefixedID("run_", 36)
 		reqBody["secondary_run_id"] = secondaryRunID
 	}
 	chatCtx, chatCancel := context.WithCancel(context.Background())
 	defer chatCancel()
 	chatCtx = tasktiming.WithRequestTime(chatCtx, tasktiming.RequestedAt(reqCtx))
+	if target.BackgroundTaskID != "" {
+		parts := []taskcenter.BackgroundExecutionPart{{HistoryID: historyID, RunID: primaryRunID}}
+		if dualReply {
+			parts = append(parts, taskcenter.BackgroundExecutionPart{HistoryID: secondaryHistoryID, RunID: secondaryRunID})
+		}
+		if err := taskcenter.BindBackgroundExecution(chatCtx, db, target.BackgroundTaskID, convID, parts); err != nil {
+			log.Logger.Warn().Err(err).Str("conversation_id", convID).Msg("failed to bind background execution")
+			common.ReplyErr(w, "failed to bind background execution", http.StatusServiceUnavailable)
+			return
+		}
+	}
 	if err := beginChatTiming(chatCtx, db, convID, historyID, primaryRunID); err != nil {
 		writeSSEChunk(w, flusher, &ChatChunkResponse{ConversationID: convID, HistoryID: historyID, RuntimeEvent: failedRunEvent(primaryRunID, "history_run_claim_failed", false)})
 		return
@@ -2209,6 +2227,13 @@ func handleStreamChat(
 	if dualReply {
 		if err := conversationCheckpoint(chatCtx, db, convID, func(tx *gorm.DB) error {
 			if target.IsRegeneration && target.Existing != nil {
+				var previous orm.ChatHistory
+				if err := tx.Where("id = ? AND conversation_id = ?", target.Existing.ID, convID).Take(&previous).Error; err != nil {
+					return err
+				}
+				if err := taskcenter.CaptureBackgroundExecution(chatCtx, tx, convID, previous.ID, previous.RunID); err != nil {
+					return err
+				}
 				if err := tx.Model(&orm.ChatHistory{}).Where("id = ?", target.Existing.ID).Updates(map[string]any{"run_id": primaryRunID, "run_status": "generating", "run_terminal": nil}).Error; err != nil {
 					return err
 				}
@@ -3052,6 +3077,7 @@ func streamSingleAnswer(
 	if pendingConversationIntent != nil {
 		historyExt = mergeIntentUpdatedIntoExt(historyExt, pendingConversationIntent)
 	}
+	historyExt = taskcenter.WithNotificationCompletionTimeForRun(historyExt, now, runID)
 	persistCtx, persistCancel := terminalWriteContext(chatCtx)
 	defer persistCancel()
 	persisted := false
@@ -3062,7 +3088,7 @@ func streamSingleAnswer(
 			Take(&persistedHistory).Error == nil
 	}
 	if !externalFinalized && target.IsRegeneration && target.Existing != nil {
-		updated, err := updateOwnedChatHistory(persistCtx, db, historyID, runID, map[string]any{
+		values := map[string]any{
 			"algorithm_id":        algorithmID,
 			"seq":                 seq,
 			"raw_content":         query,
@@ -3080,26 +3106,30 @@ func streamSingleAnswer(
 			"run_terminal":        terminalJSON(runTerminal),
 			"create_time":         now,
 			"update_time":         now,
-		})
+		}
+		updated, err := updateOwnedChatHistory(persistCtx, db, historyID, runID, values)
 		if err != nil {
 			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("failed to update stream chat history")
 		} else if updated {
 			persisted = true
+			historyExt, _ = values["ext"].(json.RawMessage)
 		}
 	} else if !externalFinalized && progressRowCreated {
-		updated, err := updateOwnedChatHistory(persistCtx, db, historyID, runID, map[string]any{
+		values := map[string]any{
 			"algorithm_id": algorithmID, "seq": seq, "raw_content": query, "content": query, "result": output.result,
 			"tool_call_turns": toolCallTurns, "thinking_duration_s": thinkingDurationS,
 			"retrieval_result": retrievalResult, "ext": historyExt, "update_time": now,
 			"run_id": runID, "run_status": runTerminal.Status, "run_terminal": terminalJSON(runTerminal),
-		})
+		}
+		updated, err := updateOwnedChatHistory(persistCtx, db, historyID, runID, values)
 		if err != nil {
 			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("failed to finalize stream chat history")
 		} else if updated {
 			persisted = true
+			historyExt, _ = values["ext"].(json.RawMessage)
 		}
 	} else if !externalFinalized {
-		if err := db.Create(&orm.ChatHistory{
+		if err := createTerminalChatHistory(persistCtx, db, &orm.ChatHistory{
 			ID:                historyID,
 			Seq:               seq,
 			ConversationID:    convID,
@@ -3115,7 +3145,7 @@ func streamSingleAnswer(
 			RunTerminal:       terminalJSON(runTerminal),
 			Ext:               historyExt,
 			TimeMixin:         orm.TimeMixin{CreateTime: now, UpdateTime: now},
-		}).Error; err != nil {
+		}); err != nil {
 			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("failed to save stream chat history")
 		} else {
 			persisted = true
@@ -3161,16 +3191,7 @@ func streamSingleAnswer(
 		// Reaching this point means the upstream SSE channel has closed and the
 		// final history payload was persisted. Intermediate thinking persistence
 		// never reaches this update.
-		taskStatus := "succeeded"
-		if finalStatus == "failed" || finalStatus == "interrupted" {
-			taskStatus = "failed"
-		} else if finalStatus == "cancelled" {
-			taskStatus = "canceled"
-		}
-		if err := db.Model(&orm.TaskCenterTask{}).
-			Where("conversation_id = ? AND task_type = ? AND archived_at IS NULL AND status NOT IN ('succeeded','failed','canceled')", convID, "background_chat").
-			Where("plugin_session_id IS NULL OR plugin_session_id = ''"). // workflow-naming: persistence
-			Updates(map[string]any{"status": taskStatus, "finished_at": now, "updated_at": now}).Error; err != nil {
+		if err := taskcenter.FinalizeBackgroundExecution(persistCtx, db, convID, historyID, runID); err != nil {
 			log.Logger.Warn().Err(err).Str("conversation_id", convID).Msg("failed to finish background task after SSE close")
 		}
 	}
@@ -3210,6 +3231,12 @@ func persistImmediateRunTerminal(
 	ctx, cancel := terminalWriteContext(ctx)
 	defer cancel()
 	now := time.Now()
+	historyExt = taskcenter.WithNotificationCompletionTimeForRun(historyExt, now, runID)
+	finalizeBackground := func(ext json.RawMessage) {
+		if err := taskcenter.FinalizeBackgroundExecution(ctx, db, convID, historyID, runID); err != nil {
+			log.Logger.Warn().Err(err).Str("conversation_id", convID).Msg("failed to finish background task after immediate terminal")
+		}
+	}
 	values := map[string]any{
 		"seq": target.Seq, "raw_content": query, "content": query, "result": "",
 		"run_id": runID, "run_status": terminal.Status, "run_terminal": terminalJSON(terminal),
@@ -3224,6 +3251,8 @@ func persistImmediateRunTerminal(
 		updated, err := updateOwnedChatHistory(ctx, db, historyID, runID, values)
 		if err != nil {
 			log.Logger.Warn().Err(err).Str("history_id", historyID).Msg("failed to persist immediate run terminal")
+		} else if updated {
+			finalizeBackground(values["ext"].(json.RawMessage))
 		}
 		return updated
 	}
@@ -3232,10 +3261,11 @@ func persistImmediateRunTerminal(
 		RunID: runID, RunStatus: terminal.Status, RunTerminal: terminalJSON(terminal), Ext: historyExt,
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
-	if err := db.Create(&history).Error; err != nil {
+	if err := createTerminalChatHistory(ctx, db, &history); err != nil {
 		log.Logger.Warn().Err(err).Str("history_id", historyID).Msg("failed to persist immediate run terminal")
 		return false
 	}
+	finalizeBackground(history.Ext)
 	return true
 }
 
@@ -3819,6 +3849,8 @@ dualPersist:
 	}
 	primaryExt := finalizeExport(historyID, primaryRunID, &primaryResult, &primaryText, primaryTerminal)
 	secondaryExt := finalizeExport(secondaryHistoryID, secondaryRunID, &secondaryResult, &secondaryText, secondaryTerminal)
+	primaryExt = taskcenter.WithNotificationCompletionTimeForRun(primaryExt, now, primaryRunID)
+	secondaryExt = taskcenter.WithNotificationCompletionTimeForRun(secondaryExt, now, secondaryRunID)
 	primaryHistory := &orm.MultiAnswersChatHistory{
 		ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: primaryResult,
 		ToolCallTurns: primaryToolCallTurns, ThinkingDurationS: primaryThinkingDurationS,
@@ -3830,7 +3862,7 @@ dualPersist:
 	if primaryProgressCreated {
 		primaryPersisted, _ = updateOwnedMultiAnswerHistory(chatCtx, db, historyID, primaryRunID, primaryHistory)
 	} else {
-		primaryPersisted = db.Create(primaryHistory).Error == nil
+		primaryPersisted = createTerminalMultiAnswerHistory(chatCtx, db, primaryHistory) == nil
 	}
 	secondaryHistory := &orm.MultiAnswersChatHistory{
 		ID: secondaryHistoryID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: secondaryResult,
@@ -3843,8 +3875,16 @@ dualPersist:
 	if secondaryProgressCreated {
 		secondaryPersisted, _ = updateOwnedMultiAnswerHistory(chatCtx, db, secondaryHistoryID, secondaryRunID, secondaryHistory)
 	} else {
-		secondaryPersisted = db.Create(secondaryHistory).Error == nil
+		secondaryPersisted = createTerminalMultiAnswerHistory(chatCtx, db, secondaryHistory) == nil
 	}
+	if primaryPersisted && secondaryPersisted {
+		persistCtx, cancel := terminalWriteContext(chatCtx)
+		if err := taskcenter.FinalizeBackgroundExecution(persistCtx, db, convID, historyID, primaryRunID); err != nil {
+			log.Logger.Warn().Err(err).Str("conversation_id", convID).Msg("failed to finish background task after dual answer")
+		}
+		cancel()
+	}
+
 	if primaryPersisted {
 		persistSuccessfulChatModel(chatCtx, db, userIDFromChatRequestBody(reqBody), convID, primaryRunID, reqBody, primaryTerminal)
 		if primaryPerformance != nil {

@@ -54,7 +54,7 @@ function fixture() {
     operation, agent, arguments: args, callId: 'call-1', signal: lifetime.signal,
   })
   const start = async () => coordinator.afterResult({ structuredContent: { session_id: 'run-1',
-    interaction_url: 'http://localhost:8090/workflow-runs/run-1', control } }, call('start'))
+    state: { control } } }, call('start'))
   const turn = (agent = root) => coordinator.beforeTurn({ agent, turn: 1, messages: [], signal: lifetime.signal })
   return { turn, root, other, child, runtime, bridge, coordinator, dispatcher, lifetime, call, start, receipts,
     action: () => ({ ...action }), control: () => control,

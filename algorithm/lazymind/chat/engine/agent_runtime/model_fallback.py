@@ -84,28 +84,13 @@ def create_fallback_state(llm: Any, options: Any) -> FallbackRunState:
     return state
 
 
-def _comparison_window(state: FallbackRunState):
-    if state.initial_model_switch is not None:
-        return parse_token_limit(state.initial_model_switch.get('from_max_input_tokens'))
-    return state.current.max_input_tokens
-
-
-def _ordered_candidates(state: FallbackRunState) -> list[ModelCandidate]:
-    window = _comparison_window(state)
-
-    def key(candidate):
-        size = candidate.max_input_tokens
-        if size is None:
-            return 3, 0
-        if window is None:
-            return 0, -size
-        if size == window:
-            return 0, 0
-        return (1, size) if size > window else (2, -size)
-
+def _ordered_candidates(state: FallbackRunState, *, requires_vision=False) -> list[ModelCandidate]:
     return sorted((item for item in state.candidates
                    if item.candidate_id not in state.failed_candidates
-                   and (item.provider_group_id, item.credential_revision) not in state.failed_credentials), key=key)
+                   and (item.provider_group_id, item.credential_revision) not in state.failed_credentials
+                   and (not requires_vision or (item.llm_config.get('llm') or {}).get('vision') is True
+                        or str((item.llm_config.get('llm') or {}).get('type') or '').lower() == 'vlm')),
+                  key=lambda item: -build_context_budget(item.max_input_tokens).effective_input_budget)
 
 
 def _public(candidate: ModelCandidate) -> dict[str, str]:
@@ -161,7 +146,8 @@ def _failure_from_error(error: Exception):
     return network_failure
 
 
-def _summarize_context(raw, view, input, files, kwargs, *, budget, state, control, estimated_total_tokens):
+def _summarize_context(raw, view, input, files, kwargs, *, budget, state, control, estimated_total_tokens,
+                       on_summary_attempt):
     from .summarizer import _call_summarizer_llm, summarize_model_history
 
     wrapped_input = isinstance(input, dict) and set(input) == {'input'}
@@ -180,7 +166,7 @@ def _summarize_context(raw, view, input, files, kwargs, *, budget, state, contro
     history, current = summarize_model_history(
         prior or [], current, budget=budget, estimated_total_tokens=estimated_total_tokens,
         summarizer=lambda system, user: _call_summarizer_llm(
-            raw, system, user, candidate_budget=budget, control=control),
+            raw, system, user, candidate_budget=budget, control=control, on_attempt=on_summary_attempt),
     )
     state.model_history = [*history, *current]
     state.current_message_count = len(current)
@@ -232,6 +218,15 @@ class FallbackLLM(ModuleBase, LLMBase):
             prior = [*(state.model_history or []), *history[source_count:]]
             current = list(kwargs.get('current_round_messages') or [])
             kwargs['tool_turns'] = describe_tool_turns(prior, current)
+            if state.call_control is not None:
+                # Resolve attachments with the SDK before ordinary compaction can
+                # call the summarizer. This local snapshot is never executed.
+                current_input = kwargs.get('current_input') or ''
+                if isinstance(current_input, (list, dict)):
+                    current_input = {'input': current_input}
+                request = state.raw_llm.share().prompt(None).prepare_request(
+                    current_input, llm_chat_history=model_facing_history([*prior, *current]))
+                state.call_requires_vision = request.requires_vision
             compacted_prior, compacted_current = invoke_history_compactor(compactor, prior, keep_full_turns, **kwargs)
             state.model_history = copy.deepcopy([*compacted_prior, *compacted_current])
             state.current_message_count = len(compacted_current)
@@ -241,9 +236,16 @@ class FallbackLLM(ModuleBase, LLMBase):
         return compact
 
     def begin_request(self):
+        self.state.call_requires_vision = False
+        self.state.call_started_at = time.monotonic()
         self.state.call_control = ModelCallControl(
-            time.monotonic() + max(0.001, float(config['model_fallback_timeout_seconds'])), self._check_cancel)
+            self.state.call_started_at + max(0.001, float(config['model_fallback_timeout_seconds'])), self._check_cancel)
         return self.state.call_control
+
+    def _candidate_control(self, control, count, started_at):
+        # Unused time remains available to later candidates. Summary and generation
+        # share a start time, including ordinary compaction before forward().
+        return ModelCallControl(started_at + (control.deadline - started_at) / count, self._check_cancel)
 
     def _check_cancel(self):
         if self._cancel_check is not None and self._cancel_check(None):
@@ -262,6 +264,12 @@ class FallbackLLM(ModuleBase, LLMBase):
         from .summarizer import _call_summarizer_llm
         control = self.state.call_control or ModelCallControl(
             time.monotonic() + max(0.001, float(config['model_fallback_timeout_seconds'])), self._check_cancel)
+        if self.state.call_control is not None:
+            count = 1 + sum(item.candidate_id != self.state.current.candidate_id
+                            for item in _ordered_candidates(self.state,
+                                                            requires_vision=self.state.call_requires_vision))
+            count = min(count, max(1, int(config['model_fallback_max_candidates'])))
+            control = self._candidate_control(control, count, self.state.call_started_at)
         return _call_summarizer_llm(
             self.state.raw_llm, system, user, candidate_budget=self.state.budget, control=control)
 
@@ -273,6 +281,8 @@ class FallbackLLM(ModuleBase, LLMBase):
                                  stream_output=stream_output, stream=stream, control=control, **kwargs)
         finally:
             self.state.call_control = None
+            self.state.call_started_at = None
+            self.state.call_requires_vision = False
 
     def _recover(self, input=None, *, llm_chat_history=None, lazyllm_files=None,
                  stream_output=None, stream=None, control=None, **kwargs):
@@ -289,7 +299,7 @@ class FallbackLLM(ModuleBase, LLMBase):
         stream = stream_output if stream_output is not None else stream
         stream = self._stream if stream is None else stream
         outer_sink = stream.get('_stream_sink') if isinstance(stream, dict) else getattr(self, '_stream_sink', None)
-        requires_vision = False
+        requires_vision = state.call_requires_vision
 
         def emit(event):
             try:
@@ -303,13 +313,15 @@ class FallbackLLM(ModuleBase, LLMBase):
 
         attempted = set()
         max_candidates = max(1, int(config['model_fallback_max_candidates']))
+        candidate_started_at = state.call_started_at
+
+        def summary_attempt():
+            nonlocal summary_attempted
+            summary_attempted = True
 
         def remaining_candidates():
-            candidates = [item for item in _ordered_candidates(state) if item.candidate_id not in attempted]
-            if requires_vision:
-                candidates = [item for item in candidates
-                              if (item.llm_config.get('llm') or {}).get('vision') is True
-                              or str((item.llm_config.get('llm') or {}).get('type') or '').lower() == 'vlm']
+            candidates = [item for item in _ordered_candidates(state, requires_vision=requires_vision)
+                          if item.candidate_id not in attempted]
             return candidates[:max(0, max_candidates - len(attempted))]
 
         while True:
@@ -360,29 +372,30 @@ class FallbackLLM(ModuleBase, LLMBase):
                 requires_vision = requires_vision or request.requires_vision
                 if requires_vision and request.model_type != 'VLM' and role_config.get('vision') is not True:
                     raise UnsupportedModelInput('The configured model does not support this image input.')
+                candidate_control = self._candidate_control(
+                    control, 1 + len(remaining_candidates()), candidate_started_at)
                 total_tokens = request_tokens(request)
                 if total_tokens > budget.effective_input_budget:
-                    larger_remaining = any(build_context_budget(item.max_input_tokens).effective_input_budget
-                                           > budget.effective_input_budget for item in remaining_candidates())
-                    if not config['context_compression_enabled'] or summary_attempted or larger_remaining:
+                    if not config['context_compression_enabled'] or summary_attempted:
                         raise ContextCapacityError('The complete request exceeds the configured input budget.')
-                    summary_attempted = preparing_context = True
+                    preparing_context = True
                     input, history = _summarize_context(
                         raw, view, input, files, call_kwargs, budget=budget,
-                        state=state, control=control, estimated_total_tokens=total_tokens,
+                        state=state, control=candidate_control, estimated_total_tokens=total_tokens,
+                        on_summary_attempt=summary_attempt,
                     )
                     context_compacted = True
                     request = prepare_model_call(view, input, history, files, call_kwargs, budget)
                     if request_tokens(request) > budget.effective_input_budget:
                         raise ContextCapacityError('The summarized request does not fit this candidate.')
                 preparing_context = False
-                control.check()
+                candidate_control.check()
                 state.model_output_index += 1
                 call_index = state.model_output_index
                 output_metadata['call_index'] = call_index
                 call_open = True
                 emit({'tag': 'model_output', 'model_output': {'call_index': call_index, 'phase': 'begin'}})
-                response = request.execute(control=control).value
+                response = request.execute(control=candidate_control).value
             except CancelledError:
                 rollback()
                 raise
@@ -425,6 +438,7 @@ class FallbackLLM(ModuleBase, LLMBase):
                         only_context_failures = False
                         continue
                     current = candidate
+                    candidate_started_at = time.monotonic()
                     break
                 else:
                     fallback_code = 'model_context_not_fit' if only_context_failures else 'model_fallback_exhausted'

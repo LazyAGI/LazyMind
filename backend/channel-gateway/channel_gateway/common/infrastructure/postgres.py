@@ -21,6 +21,13 @@ from channel_gateway.common.ports.providers import PayloadCipher
 
 
 _JSON_NUL_ESCAPE = re.compile(r'(?<!\\)((?:\\\\)*)\\u0000')
+WECHAT_TARGET_CHECK_COLUMNS = {
+    'connection_check_status': "TEXT NOT NULL DEFAULT 'unknown'",
+    'connection_checked_at': 'TIMESTAMPTZ',
+    'connection_check_started_at': 'TIMESTAMPTZ',
+    'connection_check_id': "TEXT NOT NULL DEFAULT ''",
+    'connection_error_code': "TEXT NOT NULL DEFAULT ''",
+}
 
 
 def decode_snapshot(value: Any) -> dict[str, Any]:
@@ -417,7 +424,19 @@ class GatewayStore:
             connection.execute('ALTER TABLE channel_accounts ADD COLUMN IF NOT EXISTS label_custom BOOLEAN '
                                'NOT NULL DEFAULT FALSE')
             connection.execute('ALTER TABLE channel_accounts ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ')
+            for name, definition in {
+                'connection_check_status': "TEXT NOT NULL DEFAULT 'unknown'",
+                'connection_checked_at': 'TIMESTAMPTZ',
+                'connection_check_started_at': 'TIMESTAMPTZ',
+                'connection_check_id': "TEXT NOT NULL DEFAULT ''",
+                'connection_error_code': "TEXT NOT NULL DEFAULT ''",
+                'connection_context_revision': 'BIGINT NOT NULL DEFAULT 0',
+            }.items():
+                connection.execute(f'ALTER TABLE channel_accounts ADD COLUMN IF NOT EXISTS {name} {definition}')
             self._initialize_notifications(connection)
+            for name, definition in WECHAT_TARGET_CHECK_COLUMNS.items():
+                connection.execute(f'ALTER TABLE channel_notification_targets ADD COLUMN IF NOT EXISTS '
+                                   f'{name} {definition}')
             connection.execute('ALTER TABLE channel_accounts ADD COLUMN IF NOT EXISTS default_recipient_id TEXT '
                                "NOT NULL DEFAULT ''")
             connection.execute('ALTER TABLE channel_notification_targets ADD COLUMN IF NOT EXISTS label TEXT '
@@ -622,12 +641,18 @@ class GatewayStore:
             raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '频道账号不存在')
         with self._connect() as connection:
             rows = connection.execute('''
-                SELECT recipient_id, context_ciphertext, label, kind FROM channel_notification_targets
+                SELECT * FROM channel_notification_targets
                 WHERE account_id = %s AND recipient_id > %s AND (%s = '' OR recipient_id = %s)
                 ORDER BY recipient_id LIMIT %s
             ''', (account_id, cursor, recipient_id, recipient_id, limit + 1)).fetchall()
         items = [{'recipient_id': row['recipient_id'], 'label': row['label'] or row['recipient_id'],
                   **({'kind': row['kind']} if row['kind'] in ('group', 'conversation') else {}),
+                  **({
+                      'connection_check_status': row.get('connection_check_status') or 'unknown',
+                      'connection_checked_at': row['connection_checked_at'].isoformat() if row.get(
+                          'connection_checked_at') else None,
+                      'connection_error_code': row.get('connection_error_code') or '',
+                  } if account['provider'] == 'wechat' else {}),
                   'available': account['status'] == 'connected' and bool(account['credentials_ciphertext'])
                   and (account['provider'] != 'wechat' or bool(row['context_ciphertext']))} for row in rows[:limit]]
         return {'provider': account['provider'], 'items': items,
@@ -698,7 +723,7 @@ class GatewayStore:
     def notification_context(self, owner, account_id, recipient_id, provider):
         with self._connect() as connection:
             row = connection.execute('''
-                SELECT target.context_ciphertext FROM channel_notification_targets target
+                SELECT target.context_ciphertext, account.credential_revision FROM channel_notification_targets target
                 JOIN channel_accounts account ON account.id = target.account_id
                 WHERE account.id = %s AND account.owner_user_id = %s AND account.provider = %s
                     AND account.status = 'connected' AND account.credentials_ciphertext <> ''
@@ -709,7 +734,178 @@ class GatewayStore:
             context = self._payload_cipher.decrypt(owner, row['context_ciphertext'])
         if not row or (provider == 'wechat' and not context.get('context_token')):
             raise GatewayError(422, 'NOTIFICATION_TARGET_UNAVAILABLE', '通知接收对象不可用，请重新连接并发送消息')
+        if provider == 'wechat':
+            # Internal delivery fences only; public account/recipient views do
+            # not return context. Re-encryption on every new inbox entry also
+            # changes this version when the platform reuses the same token.
+            context['_notification_context_version'] = hashlib.sha256(row['context_ciphertext'].encode()).hexdigest()
+            context['_notification_credential_revision'] = row['credential_revision']
         return context
+
+    def invalidate_wechat_notification_context(self, outbound: ClaimedOutbound, claim_owner: str) -> bool:
+        """Invalidate only the exact target context rejected by this leased send."""
+        context = outbound.provider_context
+        token = context.get('context_token')
+        version = context.get('_notification_context_version')
+        credential_revision = context.get('_notification_credential_revision')
+        owner = outbound.metadata.get('owner_user_id')
+        if (outbound.provider != 'wechat' or outbound.purpose != 'notification'
+                or not isinstance(owner, str) or not owner or not isinstance(token, str) or not token
+                or not isinstance(version, str) or not re.fullmatch(r'[a-f0-9]{64}', version)
+                or type(credential_revision) is not int):
+            return False
+        with self._connect() as connection:
+            # Match the account -> work -> target lock order. Reserve the
+            # account update lock now: this transaction updates its summary
+            # below, so a share-lock upgrade could deadlock with ingestion or
+            # another recipient's simultaneous rejection.
+            account = connection.execute('''
+                SELECT id FROM channel_accounts
+                WHERE id = %s AND owner_user_id = %s AND provider = 'wechat'
+                    AND status = 'connected' AND credentials_ciphertext <> ''
+                    AND archived_at IS NULL AND credential_revision = %s FOR UPDATE
+            ''', (outbound.account_id, owner, credential_revision)).fetchone()
+            if not account:
+                return False
+            claimed = connection.execute('''
+                SELECT id FROM channel_outbox
+                WHERE id = %s AND account_id = %s AND provider = 'wechat' AND recipient_id = %s
+                    AND purpose = 'notification' AND status = 'sending'
+                    AND lease_owner = %s AND lease_until >= CURRENT_TIMESTAMP FOR UPDATE
+            ''', (outbound.outbox_id, outbound.account_id, outbound.recipient_id, claim_owner)).fetchone()
+            if not claimed:
+                return False
+            target = connection.execute('''
+                SELECT context_ciphertext FROM channel_notification_targets
+                WHERE account_id = %s AND recipient_id = %s FOR UPDATE
+            ''', (outbound.account_id, outbound.recipient_id)).fetchone()
+            ciphertext = target['context_ciphertext'] if target else None
+            if not ciphertext or hashlib.sha256(ciphertext.encode()).hexdigest() != version:
+                return False
+            if self._payload_cipher.decrypt(owner, ciphertext).get('context_token') != token:
+                return False
+            invalidated = bool(connection.execute('''
+                UPDATE channel_notification_targets SET context_ciphertext = NULL, updated_at = CURRENT_TIMESTAMP,
+                    connection_check_status = 'activation_required', connection_check_id = '',
+                    connection_error_code = 'WECHAT_NOTIFICATION_CONTEXT_REQUIRED',
+                    connection_checked_at = CURRENT_TIMESTAMP
+                WHERE account_id = %s AND recipient_id = %s AND context_ciphertext = %s RETURNING account_id
+            ''', (outbound.account_id, outbound.recipient_id, ciphertext)).fetchone())
+            if invalidated:
+                connection.execute('''
+                    UPDATE channel_accounts SET connection_check_status = 'activation_required',
+                        connection_error_code = 'WECHAT_NOTIFICATION_CONTEXT_REQUIRED',
+                        connection_check_id = '', connection_checked_at = CURRENT_TIMESTAMP WHERE id = %s
+                ''', (outbound.account_id,))
+            return invalidated
+
+    def begin_wechat_connection_check(self, account, recipient_id, *, force=False):
+        """Reserve a bounded, deduplicated probe against one exact account/context."""
+        owner, account_id = account['owner_user_id'], account['id']
+        now = dt.datetime.now(dt.timezone.utc)
+        with self._connect() as connection:
+            current = connection.execute('''
+                SELECT * FROM channel_accounts WHERE id = %s AND owner_user_id = %s AND provider = 'wechat'
+                    AND status = 'connected' AND credentials_ciphertext <> '' AND archived_at IS NULL
+                    AND credential_revision = %s FOR UPDATE
+            ''', (account_id, owner, account['credential_revision'])).fetchone()
+            if not current:
+                return None
+            target = connection.execute('''
+                SELECT * FROM channel_notification_targets
+                WHERE account_id = %s AND recipient_id = %s FOR UPDATE
+            ''', (account_id, recipient_id)).fetchone()
+            if not target:
+                return None
+            started = target.get('connection_check_started_at')
+            if started and now - started < dt.timedelta(seconds=10 if force else 20 * 60):
+                return None
+            ciphertext = target['context_ciphertext']
+            context = self._payload_cipher.decrypt(owner, ciphertext) if ciphertext else {}
+            check_id = uuid.uuid4().hex
+            connection.execute('''
+                UPDATE channel_notification_targets SET connection_check_status = 'checking', connection_check_id = %s,
+                    connection_check_started_at = %s WHERE account_id = %s AND recipient_id = %s
+            ''', (check_id, now, account_id, recipient_id))
+            connection.execute('''
+                UPDATE channel_accounts SET connection_check_status = 'checking', connection_check_started_at = %s
+                WHERE id = %s
+            ''', (now, account_id))
+            return {
+                'owner_user_id': owner, 'account_id': account_id, 'recipient_id': recipient_id,
+                'credential_revision': current['credential_revision'], 'check_id': check_id,
+                'account_context_revision': current['connection_context_revision'],
+                'context_token': context.get('context_token') or '',
+                'context_version': hashlib.sha256(ciphertext.encode()).hexdigest() if ciphertext else '',
+            }
+
+    def finish_wechat_connection_check(self, snapshot, status, error_code=''):
+        if status not in {'connected', 'unavailable', 'activation_required'} or error_code not in {
+            '', 'WECHAT_CONNECTION_UNAVAILABLE', 'WECHAT_NOTIFICATION_CONTEXT_REQUIRED',
+            'WECHAT_REAUTHORIZATION_REQUIRED',
+        }:
+            raise ValueError('Invalid WeChat connection check result')
+        with self._connect() as connection:
+            account = connection.execute('''
+                SELECT id, connection_context_revision FROM channel_accounts
+                WHERE id = %s AND owner_user_id = %s AND provider = 'wechat'
+                    AND status = 'connected' AND credentials_ciphertext <> '' AND archived_at IS NULL
+                    AND credential_revision = %s FOR UPDATE
+            ''', (snapshot['account_id'], snapshot['owner_user_id'], snapshot['credential_revision'])).fetchone()
+            if not account:
+                return False
+            target = connection.execute('''
+                SELECT context_ciphertext FROM channel_notification_targets
+                WHERE account_id = %s AND recipient_id = %s AND connection_check_id = %s FOR UPDATE
+            ''', (snapshot['account_id'], snapshot['recipient_id'], snapshot['check_id'])).fetchone()
+            if not target:
+                return False
+            if (error_code == 'WECHAT_REAUTHORIZATION_REQUIRED'
+                    and account['connection_context_revision'] != snapshot['account_context_revision']):
+                # A newer authenticated inbound on any recipient disproves a
+                # late account-wide credential failure. Leave other targets'
+                # independent checks and contexts untouched.
+                connection.execute('''
+                    UPDATE channel_notification_targets SET connection_check_status = 'unknown', connection_check_id = ''
+                    WHERE account_id = %s AND recipient_id = %s AND connection_check_id = %s
+                ''', (snapshot['account_id'], snapshot['recipient_id'], snapshot['check_id']))
+                return False
+            ciphertext = target['context_ciphertext'] if target else None
+            version = hashlib.sha256(ciphertext.encode()).hexdigest() if ciphertext else ''
+            token = self._payload_cipher.decrypt(snapshot['owner_user_id'], ciphertext).get(
+                'context_token') if ciphertext else ''
+            if version != snapshot['context_version'] or token != snapshot['context_token']:
+                return False
+            if status == 'connected' and not token:
+                status, error_code = 'activation_required', 'WECHAT_NOTIFICATION_CONTEXT_REQUIRED'
+            if status == 'activation_required' and error_code == 'WECHAT_REAUTHORIZATION_REQUIRED':
+                # Authentication belongs to the account. Once a fenced probe
+                # explicitly rejects its credentials, no recipient may reuse
+                # that account's old contexts. A new authenticated inbound or
+                # credential renewal can establish readiness again.
+                connection.execute('''
+                    UPDATE channel_notification_targets SET context_ciphertext = NULL, updated_at = CURRENT_TIMESTAMP,
+                        connection_check_status = 'activation_required', connection_check_id = '',
+                        connection_error_code = 'WECHAT_REAUTHORIZATION_REQUIRED',
+                        connection_checked_at = CURRENT_TIMESTAMP
+                    WHERE account_id = %s
+                ''', (snapshot['account_id'],))
+            elif status == 'activation_required' and ciphertext:
+                connection.execute('''
+                    UPDATE channel_notification_targets SET context_ciphertext = NULL, updated_at = CURRENT_TIMESTAMP
+                    WHERE account_id = %s AND recipient_id = %s AND context_ciphertext = %s
+                ''', (snapshot['account_id'], snapshot['recipient_id'], ciphertext))
+            connection.execute('''
+                UPDATE channel_notification_targets SET connection_check_status = %s, connection_error_code = %s,
+                    connection_checked_at = CURRENT_TIMESTAMP, connection_check_id = ''
+                WHERE account_id = %s AND recipient_id = %s
+            ''', (status, error_code, snapshot['account_id'], snapshot['recipient_id']))
+            connection.execute('''
+                UPDATE channel_accounts SET connection_check_status = %s, connection_error_code = %s,
+                    connection_checked_at = CURRENT_TIMESTAMP, connection_check_id = '', updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+            ''', (status, error_code, snapshot['account_id']))
+            return True
 
     @staticmethod
     def _notification_id(owner, payload, retry_of='', idempotency_key=''):
@@ -2018,6 +2214,13 @@ class GatewayStore:
                     channel_notification_targets.context_ciphertext),
                 updated_at = CURRENT_TIMESTAMP
         ''', (envelope.account_id, envelope.recipient_id, ciphertext))
+        if envelope.provider == 'wechat':
+            connection.execute('''
+                UPDATE channel_notification_targets
+                SET connection_check_status = 'connected', connection_error_code = '',
+                    connection_check_id = '', connection_checked_at = CURRENT_TIMESTAMP
+                WHERE account_id = %s AND recipient_id = %s
+            ''', (envelope.account_id, envelope.recipient_id))
 
     def ingest_batch(
         self,
@@ -2102,6 +2305,20 @@ class GatewayStore:
                 """,
                 (account_id,),
             )
+            if account['provider'] == 'wechat':
+                # A successful receive recovers transient polling health.
+                connection.execute('''
+                    UPDATE channel_accounts SET runtime_status = 'running', last_error = NULL WHERE id = %s
+                ''', (account_id,))
+                if inserted:
+                    # A new authenticated inbound is the only event that
+                    # restores a rejected conversation context. It also
+                    # supersedes any older in-flight connection probe.
+                    connection.execute('''
+                        UPDATE channel_accounts SET connection_check_status = 'connected', connection_error_code = '',
+                            connection_check_id = '', connection_checked_at = CURRENT_TIMESTAMP,
+                            connection_context_revision = connection_context_revision + 1 WHERE id = %s
+                    ''', (account_id,))
         return inserted
 
     def find_inbound_by_provider_context(

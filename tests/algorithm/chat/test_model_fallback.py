@@ -53,7 +53,7 @@ class ModelFallbackHTTPTests(unittest.TestCase):
         )
         return FallbackLLM(create_fallback_state(llm, options))
 
-    def fail(self, model, *, code='model_not_found', status=404, type='invalid_request_error'):
+    def fail_model(self, model, *, code='model_not_found', status=404, type='invalid_request_error'):
         self.provider.script[model] = [{'error': code, 'status': status, 'type': type}]
 
     def succeed(self, model, content='done'):
@@ -67,12 +67,12 @@ class ModelFallbackHTTPTests(unittest.TestCase):
         self.assertEqual(factory.call_count, 0)
         self.assertEqual([item['model'] for item in self.provider.requests], ['model-a'])
 
-    def test_known_order_then_unknown_attempts_are_finite(self):
+    def test_effective_budget_order_and_unknown_attempts_are_finite(self):
         candidates = [self.candidate('unknown-1', None), self.candidate('long-2', 131072),
                       self.candidate('short', 16384), self.candidate('same', 32768),
                       self.candidate('long-1', 65536), self.candidate('unknown-2', None)]
         for candidate in [self.candidate('model-a'), *candidates]:
-            self.fail(candidate.model_id)
+            self.fail_model(candidate.model_id)
         from lazymind.config import config
         with config.temp('model_fallback_max_candidates', 7), \
                 patch.object(fallback_module.random, 'shuffle', side_effect=lambda values: values.reverse()) as shuffle:
@@ -81,12 +81,12 @@ class ModelFallbackHTTPTests(unittest.TestCase):
                 wrapper('start', stream=True)
         self.assertEqual(shuffle.call_count, 1)
         self.assertEqual([item['model'] for item in self.provider.requests],
-                         ['model-a', 'same', 'long-1', 'long-2', 'short', 'unknown-2', 'unknown-1'])
+                         ['model-a', 'long-2', 'unknown-2', 'unknown-1', 'long-1', 'same', 'short'])
         self.assertEqual(getattr(failure.exception, 'fallback_code', None), 'model_fallback_exhausted')
 
     def test_unknown_current_uses_known_windows_largest_first(self):
-        self.fail('model-a')
-        self.fail('long')
+        self.fail_model('model-a')
+        self.fail_model('long')
         self.succeed('small')
         wrapper = self.wrapper([self.candidate('small', 32768), self.candidate('long', 65536)],
                                current_window=None)
@@ -94,8 +94,8 @@ class ModelFallbackHTTPTests(unittest.TestCase):
         self.assertEqual([item['model'] for item in self.provider.requests], ['model-a', 'long', 'small'])
 
     def test_unknown_token_limit_is_excluded_without_compression_or_requeue(self):
-        self.fail('model-a')
-        self.fail('unknown-1', code='context_length_exceeded', status=400)
+        self.fail_model('model-a')
+        self.fail_model('unknown-1', code='context_length_exceeded', status=400)
         self.succeed('unknown-2')
         with patch.object(fallback_module.random, 'shuffle', return_value=None):
             wrapper = self.wrapper([self.candidate('unknown-1', None), self.candidate('unknown-2', None)])
@@ -138,7 +138,7 @@ class ModelFallbackHTTPTests(unittest.TestCase):
         from lazymind.chat.runtime_events import RunOutcome
         from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 
-        self.fail('model-a')
+        self.fail_model('model-a')
         candidate = self.candidate('model-b')
         candidate.llm_config['llm']['static_params'] = {'large_fixed_parameter': 'overflow ' * 100000}
         wrapper = self.wrapper([candidate])
@@ -155,13 +155,10 @@ class ModelFallbackHTTPTests(unittest.TestCase):
         self.assertEqual(translator.run.finish(outcome=RunOutcome.FAILED)['data']['code'], 'model_fallback_exhausted')
 
     def test_cancellation_stops_before_the_next_provider_request(self):
-        self.fail('model-a')
+        self.fail_model('model-a')
         wrapper = self.wrapper([self.candidate('model-b')])
-        checks = []
-
         def cancel(_output):
-            checks.append(None)
-            return len(checks) > 1
+            return bool(self.provider.requests)
 
         wrapper._cancel_check = cancel
         with self.assertRaises(asyncio.CancelledError):
@@ -169,7 +166,7 @@ class ModelFallbackHTTPTests(unittest.TestCase):
         self.assertEqual([item['model'] for item in self.provider.requests], ['model-a'])
 
     def test_files_and_history_are_explicitly_forwarded_to_the_new_module(self):
-        self.fail('model-a')
+        self.fail_model('model-a')
         self.succeed('model-b')
         current, alternative = self.candidate('model-a'), self.candidate('model-b')
         for candidate in (current, alternative):
@@ -197,7 +194,7 @@ class ModelFallbackHTTPTests(unittest.TestCase):
         self.assertEqual(history, [{'role': 'user', 'content': 'prior text'}])
 
     def test_unknown_candidate_preserves_input_and_remains_unknown_after_success(self):
-        self.fail('model-a')
+        self.fail_model('model-a')
         self.succeed('unknown')
         wrapper = self.wrapper([self.candidate('unknown', None)])
         history = [{'role': 'user', 'content': 'preserve me'}]
@@ -209,7 +206,7 @@ class ModelFallbackHTTPTests(unittest.TestCase):
     def test_dynamic_current_model_uses_the_existing_request_configuration(self):
         from lazyllm.module.llms.model_config_inject import inject_model_config
 
-        self.fail('model-a')
+        self.fail_model('model-a')
         self.succeed('model-b')
         config = lazyllm.globals['config']
         old_models, old_key = config.get('dynamic_model_configs'), config.get('openai_api_key')
@@ -227,7 +224,7 @@ class ModelFallbackHTTPTests(unittest.TestCase):
         self.assertEqual([item['model'] for item in self.provider.requests], ['model-a', 'model-b'])
 
     def test_visual_history_skips_text_only_candidates_while_text_attachments_do_not(self):
-        self.fail('model-a')
+        self.fail_model('model-a')
         self.succeed('text-only')
         self.succeed('visual')
         visual = self.candidate('visual')
@@ -243,7 +240,7 @@ class ModelFallbackHTTPTests(unittest.TestCase):
         self.assertEqual([item['model'] for item in self.provider.requests], ['model-a', 'text-only'])
 
     def test_new_visual_input_does_not_get_dropped_by_a_text_only_committed_model(self):
-        self.fail('model-a')
+        self.fail_model('model-a')
         self.succeed('text-only')
         self.succeed('visual')
         visual = self.candidate('visual')
@@ -256,7 +253,7 @@ class ModelFallbackHTTPTests(unittest.TestCase):
         self.assertEqual([item['model'] for item in self.provider.requests], ['model-a', 'text-only', 'visual'])
 
     def test_shared_views_keep_prompt_formatter_and_stream_independent(self):
-        self.fail('model-a')
+        self.fail_model('model-a')
         self.succeed('model-b', 'value')
         wrapper = self.wrapper([self.candidate('model-b')])
         first_events, second_events = [], []
@@ -287,7 +284,7 @@ class ModelFallbackHTTPTests(unittest.TestCase):
         self.assertIsNone(AgentExecutor._find_model_terminal(failure.exception))
 
     def test_formatter_and_success_sink_failures_do_not_publish_or_retry_success(self):
-        self.fail('model-a')
+        self.fail_model('model-a')
         self.succeed('model-b')
         wrapper = self.wrapper([self.candidate('model-b'), self.candidate('model-c')])
         events = []
@@ -304,7 +301,7 @@ class ModelFallbackHTTPTests(unittest.TestCase):
         self.assertEqual(wrapper.state.current.model_id, 'model-a')
 
     def test_success_event_sink_failure_does_not_retry_or_execute_tools(self):
-        self.fail('model-a')
+        self.fail_model('model-a')
         self.succeed('model-b')
         wrapper = self.wrapper([self.candidate('model-b'), self.candidate('model-c')])
 
@@ -318,7 +315,7 @@ class ModelFallbackHTTPTests(unittest.TestCase):
         self.assertEqual(EFFECT_RECEIPTS, [])
 
     def test_local_commit_failure_does_not_publish_success_or_try_another_candidate(self):
-        self.fail('model-a')
+        self.fail_model('model-a')
         self.succeed('model-b')
         wrapper = self.wrapper([self.candidate('model-b'), self.candidate('model-c')])
         events = []
@@ -353,11 +350,11 @@ class ModelFallbackHTTPTests(unittest.TestCase):
         self.assertEqual(terminal['data']['code'], 'runtime_failure')
 
     def test_raw_helper_uses_committed_model_without_consuming_candidates(self):
-        self.fail('model-a')
+        self.fail_model('model-a')
         self.succeed('model-b')
         wrapper = self.wrapper([self.candidate('model-b'), self.candidate('model-c')])
         self.assertEqual(wrapper('start'), 'done')
-        self.fail('model-b')
+        self.fail_model('model-b')
         with self.assertRaises(Exception):
             wrapper.auxiliary_call('summary system', 'summary input')
         self.assertEqual([item['model'] for item in self.provider.requests], ['model-a', 'model-b', 'model-b'])
@@ -440,7 +437,7 @@ class ModelFallbackHTTPTests(unittest.TestCase):
         self.assertEqual(EFFECT_RECEIPTS, [])
 
     def test_reusing_an_executor_creates_independent_run_state(self):
-        self.fail('model-a')
+        self.fail_model('model-a')
         self.succeed('model-b')
         current, candidate = self.candidate('model-a'), self.candidate('model-b')
         options = AgentExecutionOptions(
@@ -467,7 +464,7 @@ class ModelFallbackHTTPTests(unittest.TestCase):
                                ('unknown_auth_error', ['model-a', 'model-b'])]:
             with self.subTest(code=code):
                 self.provider.requests.clear()
-                self.fail('model-a', code=code, status=401, type='authentication_error')
+                self.fail_model('model-a', code=code, status=401, type='authentication_error')
                 self.succeed('model-b')
                 self.succeed('other')
                 wrapper = self.wrapper([self.candidate('model-b', group='model-a'), self.candidate('other')])
@@ -478,7 +475,7 @@ class ModelFallbackHTTPTests(unittest.TestCase):
         for code in ['unsupported_tools', 'tools_not_supported', 'unsupported_function_call', 'invalid_parameters']:
             with self.subTest(code=code):
                 self.provider.requests.clear()
-                self.fail('model-a', code=code, status=400)
+                self.fail_model('model-a', code=code, status=400)
                 self.succeed('model-b')
                 wrapper = self.wrapper([self.candidate('model-b')])
                 events = []

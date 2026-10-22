@@ -57,6 +57,118 @@ def history_with_pairs():
     ]
 
 
+@pytest.mark.parametrize('text_backups,cancelled', [
+    (0, False), (3, False), (3, True),
+])
+def test_default_summary_uses_image_compatible_candidate_deadline(
+    provider, tmp_path, monkeypatch, text_backups, cancelled,
+):
+    import threading
+    import time
+    from lazyllm.components.formatter.formatterbase import encode_query_with_filepaths
+    from lazyllm.module.llms.onlinemodule.base import PreparedModelRequest
+    from lazymind.chat.engine.agent_runtime.cancellation import UserCancelledError
+
+    a = candidate(provider, 'model-a', window=8192)
+    a.llm_config['llm']['vision'] = True
+    alternatives = [candidate(provider, f'text-{index}', window=8192) for index in range(text_backups)]
+    stop = threading.Event()
+
+    def respond(request):
+        summary = not request.get('stream')
+        time.sleep(0.7 if summary else 0.25)
+        if cancelled and summary:
+            stop.set()
+        return {'message': {'role': 'assistant', 'content': VALID_SUMMARY if summary else 'visual completed'}}
+
+    provider.on_request = respond
+    deadlines = []
+    execute = PreparedModelRequest.execute
+
+    def observe(request, *, control=None):
+        deadlines.append(control.deadline)
+        return execute(request, control=control)
+
+    monkeypatch.setattr(PreparedModelRequest, 'execute', observe)
+    image_data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jFZkAAAAASUVORK5CYII='
+    history = history_with_pairs()
+    image = tmp_path / 'input.png'
+    image.write_bytes(base64.b64decode(image_data))
+    query = encode_query_with_filepaths('continue', [str(image)])
+    before = copy.deepcopy(history)
+    options = AgentExecutionOptions(
+        llm_config=a.llm_config, max_input_tokens=a.max_input_tokens,
+        model_candidates=(a, *alternatives), current_model_candidate_id=a.candidate_id,
+        workspace=str(tmp_path), enable_builtin_tools=False, skills=False, keep_full_turns=1,
+        required_tool_names=('record_fallback_effect',), preload_all_tools=True,
+        extra_stop_condition=lambda _: stop.is_set(), workspace_permission=WorkspaceContext(local_runtime=False),
+    )
+    prompt = PromptBuilder.for_role(AgentRole.CHAT).system(
+        'fixed', 'Fixed constraints', 'Fixed task constraints. ' * 600, source='test',
+    ).input('continue', source='user').build()
+    plan = AgentRunPlan(role=AgentRole.CHAT, prompt=prompt, tools=[record_fallback_effect],
+                       history=history, execution_options=options)
+    raw = lazyllm.OnlineChatModule(source='openai', model='model-a', type='vlm',
+                                  url=provider.url, api_key='fixture-key', stream=False)
+    with compression_settings(), config.temp('model_fallback_timeout_seconds', 1.2), \
+            config.temp('agentic_workspace', str(tmp_path)):
+        agent = AgentExecutor().create_agent(raw, plan)
+        started = time.monotonic()
+        if cancelled:
+            with pytest.raises(UserCancelledError):
+                agent(query, llm_chat_history=plan.history)
+        else:
+            assert agent(query, llm_chat_history=plan.history) == 'visual completed'
+        elapsed = time.monotonic() - started
+    assert [request['model'] for request in provider.requests] == ['model-a'] * (1 if cancelled else 2)
+    assert [request['stream'] for request in provider.requests] == ([False] if cancelled else [False, True])
+    if not cancelled:
+        assert deadlines[0] == deadlines[1]
+        assert deadlines[0] - started <= 1.25
+        assert image_data in json.dumps(provider.requests[-1]['messages'])
+    assert elapsed < 1.4
+    assert history == before
+    assert EFFECT_RECEIPTS == []
+
+
+@pytest.mark.parametrize('has_image', [False, True])
+@pytest.mark.parametrize('fallback_enabled', [False, True])
+def test_precompression_snapshot_preserves_structured_agent_input(
+    provider, tmp_path, has_image, fallback_enabled,
+):
+    from fallback_test_support import succeed
+
+    a = candidate(provider, 'model-a')
+    a.llm_config['llm']['vision'] = True
+    succeed(provider, 'model-a')
+    content = [{'type': 'text', 'text': 'supported wrapped input'}]
+    if has_image:
+        content.append({'type': 'image_url', 'image_url': {'url': 'https://images.example/fixture.png'}})
+    query = {'input': [{'role': 'user', 'content': content}]}
+    before = copy.deepcopy(query)
+    options = AgentExecutionOptions(
+        llm_config=a.llm_config, max_input_tokens=a.max_input_tokens,
+        model_candidates=(a,) if fallback_enabled else (),
+        current_model_candidate_id=a.candidate_id if fallback_enabled else '',
+        workspace=str(tmp_path), enable_builtin_tools=False, skills=False, keep_full_turns=1,
+        preload_all_tools=True, workspace_permission=WorkspaceContext(local_runtime=False),
+    )
+    plan = AgentRunPlan(
+        role=AgentRole.CHAT,
+        prompt=PromptBuilder.for_role(AgentRole.CHAT).input('continue', source='user').build(),
+        tools=[record_fallback_effect], history=[], execution_options=options,
+    )
+    raw = lazyllm.OnlineChatModule(source='openai', model='model-a', type='vlm',
+                                  url=provider.url, api_key='fixture-key', stream=False)
+    with compression_settings(), config.temp('agentic_workspace', str(tmp_path)):
+        agent = AgentExecutor().create_agent(raw, plan)
+        assert agent(query, llm_chat_history=[]) == 'done:model-a'
+    assert len(provider.requests) == 1
+    assert provider.requests[0]['messages'][-1] == before['input'][0]
+    assert query == before
+    assert EFFECT_RECEIPTS == []
+
+
 @pytest.mark.parametrize('b_failure', ['invalid_summary', 'generation_failure'])
 def test_summary_preserves_images_tools_and_original_execution_records(provider, tmp_path, b_failure):
     a = candidate(provider, 'model-a', window=32768)
@@ -509,6 +621,85 @@ def test_larger_remaining_candidate_is_tried_without_a_summary(provider, tmp_pat
     assert history_state.model_history == before
 
 
+def test_small_candidate_can_summarize_after_larger_unknown_candidate_fails(provider, tmp_path):
+    a = candidate(provider, 'model-a')
+    b = candidate(provider, 'model-b', window=8192)
+    c = candidate(provider, 'model-c', window=None)
+    fail(provider, 'model-a')
+    fail(provider, 'model-c')
+    provider.script['model-b'] = [
+        {'message': {'role': 'assistant', 'content': VALID_SUMMARY}},
+        {'message': {'role': 'assistant', 'content': 'small candidate recovered'}},
+    ]
+    history = history_with_pairs()
+    before = copy.deepcopy(history)
+    with compression_settings():
+        wrapped, projected, _ = context_wrapper(
+            provider, tmp_path, history, [a, b, c], 'Fixed task constraints. ' * 600)
+        assert wrapped('continue', llm_chat_history=projected) == 'small candidate recovered'
+    assert [request['model'] for request in provider.requests] == ['model-a', 'model-c', 'model-b', 'model-b']
+    assert 'effect-receipt: once' in str(provider.requests[-1]['messages'])
+    assert history == before
+
+
+def test_original_model_can_summarize_even_with_a_larger_alternative(provider):
+    from fallback_test_support import wrapper
+
+    a = candidate(provider, 'model-a', window=8192)
+    c = candidate(provider, 'model-c', window=131072)
+    fail(provider, 'model-c')
+    provider.script['model-a'] = [
+        {'message': {'role': 'assistant', 'content': VALID_SUMMARY}},
+        {'message': {'role': 'assistant', 'content': 'original recovered'}},
+    ]
+    with compression_settings():
+        wrapped = wrapper(a, [c]).prompt('Fixed task constraints. ' * 600)
+        assert wrapped('continue', llm_chat_history=history_with_pairs()) == 'original recovered'
+    assert [request['model'] for request in provider.requests] == ['model-a', 'model-a']
+
+
+@pytest.mark.parametrize('window', [4096, 6144])
+def test_local_summary_preflight_does_not_consume_the_only_summary_attempt(provider, window):
+    from fallback_test_support import wrapper
+
+    a = candidate(provider, 'model-a', window=window)
+    b = candidate(provider, 'model-b', window=8192)
+    provider.script['model-b'] = [
+        {'message': {'role': 'assistant', 'content': VALID_SUMMARY}},
+        {'message': {'role': 'assistant', 'content': 'backup completed'}},
+    ]
+    with compression_settings():
+        wrapped = wrapper(a, [b]).prompt('Fixed task constraints. ' * 600)
+        assert wrapped('continue', llm_chat_history=history_with_pairs()) == 'backup completed'
+    assert [request['model'] for request in provider.requests] == ['model-b', 'model-b']
+
+
+def test_summary_and_slow_generation_leave_time_to_reuse_history_on_next_model(provider, tmp_path):
+    import threading
+
+    a = candidate(provider, 'model-a')
+    b, c = [candidate(provider, name, window=8192) for name in ('model-b', 'model-c')]
+    fail(provider, 'model-a')
+    provider.script['model-b'] = [{'message': {'role': 'assistant', 'content': VALID_SUMMARY}}]
+    provider.script['model-c'] = [{'message': {'role': 'assistant', 'content': 'reused after timeout'}}]
+    release = threading.Event()
+
+    def slow_generation(request):
+        if request['model'] == 'model-b' and sum(r['model'] == 'model-b' for r in provider.requests) == 2:
+            release.wait(2)
+
+    provider.on_request = slow_generation
+    try:
+        with compression_settings(), config.temp('model_fallback_timeout_seconds', 0.8):
+            wrapped, projected, _ = context_wrapper(
+                provider, tmp_path, history_with_pairs(), [a, b, c], 'Fixed task constraints. ' * 600)
+            assert wrapped('continue', llm_chat_history=projected) == 'reused after timeout'
+    finally:
+        release.set()
+    assert [request['model'] for request in provider.requests] == ['model-a', 'model-b', 'model-b', 'model-c']
+    assert provider.requests[2]['messages'] == provider.requests[3]['messages']
+
+
 @pytest.mark.parametrize('too_large', ['fixed', 'summary_input'])
 def test_unfit_fixed_or_summary_input_skips_candidate_without_http(provider, tmp_path, too_large):
     a = candidate(provider, 'model-a', window=131072)
@@ -678,7 +869,7 @@ def test_candidate_summary_length_is_unfit_but_generation_length_still_stops(pro
         assert switches(events) == []
 
 
-def test_short_order_precedes_unknown_and_exhaustion_is_finite(provider, tmp_path):
+def test_default_budget_orders_unknown_before_short_and_exhaustion_is_finite(provider, tmp_path):
     a = candidate(provider, 'model-a')
     candidates = [a, candidate(provider, 'unknown-one', window=None),
                   candidate(provider, 'short-small', window=8192), candidate(provider, 'same-window'),
@@ -695,7 +886,7 @@ def test_short_order_precedes_unknown_and_exhaustion_is_finite(provider, tmp_pat
             wrapped('continue', llm_chat_history=projected, stream={'_stream_sink': events.append})
     assert shuffle.call_count == 1
     assert [request['model'] for request in provider.requests] == [
-        'model-a', 'same-window', 'long-window', 'short-large', 'short-small', 'unknown-two', 'unknown-one',
+        'model-a', 'unknown-two', 'unknown-one', 'long-window', 'same-window', 'short-large', 'short-small',
     ]
     assert [event['fallback_code'] for event in events if event.get('tag') == 'model_fallback_failed'] == [
         'model_fallback_exhausted',
@@ -763,4 +954,5 @@ def test_summary_and_generation_share_deadline_without_consuming_another_candida
             provider, tmp_path, history_with_pairs(), [a, b], 'Fixed task constraints. ' * 600)
         assert model('continue', llm_chat_history=projected) == 'continued'
     assert [model for model, _ in observed] == ['model-a', 'model-b', 'model-b']
-    assert len({deadline for _, deadline in observed}) == 1
+    assert observed[0][1] < observed[1][1]
+    assert observed[1][1] == observed[2][1]

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -12,8 +13,10 @@ import (
 	"lazymind/core/acl"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/common/readonlyorm"
 	"lazymind/core/modelprovider"
 	"lazymind/core/store"
+	"lazymind/core/systemdeps"
 )
 
 const (
@@ -74,7 +77,7 @@ func capabilitiesForProcessingLevel(level string) DatasetCapabilities {
 }
 
 func datasetRequiresEmbedding(ds *orm.Dataset) bool {
-	return ds == nil || effectiveProcessingLevel(ds.ProcessingLevel) == ProcessingLevelIndexed
+	return systemdeps.PythonComponentActive("rag") && (ds == nil || effectiveProcessingLevel(ds.ProcessingLevel) == ProcessingLevelIndexed)
 }
 
 func newDocumentProcessingState(datasetID, documentID string, now time.Time) orm.DocumentProcessingState {
@@ -126,7 +129,7 @@ func ProcessingPreflight(w http.ResponseWriter, r *http.Request) {
 	if level != ProcessingLevelStored && !req.ReaderFallbackAccepted {
 		resp.Warnings = append(resp.Warnings, processingIssue{Code: "OCR_PROVIDER_NOT_CONFIGURED", Fallback: "builtin_pdf_reader", Message: "Scanned or image-only PDFs may not yield reliable text."})
 	}
-	if level == ProcessingLevelIndexed {
+	if level == ProcessingLevelIndexed && systemdeps.PythonComponentActive("rag") {
 		ready, checkErr := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embed_main")
 		if checkErr != nil {
 			common.ReplyErr(w, "algorithm service unavailable: cannot check embedding model", http.StatusBadGateway)
@@ -166,10 +169,16 @@ func UpdateProcessingLevel(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if level == ProcessingLevelIndexed && replyEmbedNotReady(w, r, userID) {
+	if systemdeps.PythonComponentActive("rag") && level == ProcessingLevelIndexed && replyEmbedNotReady(w, r, userID) {
 		return
 	}
-	updates := map[string]any{"processing_level": level, "processing_revision": ds.ProcessingRevision + 1, "transition_status": TransitionIdle, "updated_at": time.Now().UTC()}
+	if systemdeps.PythonComponentActive("rag") && level != ProcessingLevelStored && (effectiveProcessingLevel(ds.ProcessingLevel) == ProcessingLevelStored || parseDatasetAlgo(ds.Ext).AlgoID == "") {
+		if err := ensureDatasetRAG(r, ds); err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+	}
+	updates := map[string]any{"processing_level": level, "processing_revision": ds.ProcessingRevision + 1, "transition_status": TransitionIdle, "updated_at": time.Now().UTC(), "ext": ds.Ext}
 	if req.ReaderFallbackAccepted != nil {
 		updates["reader_fallback_accepted"] = *req.ReaderFallbackAccepted
 	}
@@ -178,6 +187,74 @@ func UpdateProcessingLevel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.ReplyJSON(w, map[string]any{"dataset_id": datasetID, "processing_level": level, "processing_revision": ds.ProcessingRevision + 1, "transition_status": TransitionIdle, "capabilities": capabilitiesForProcessingLevel(level)})
+}
+
+// Storage-only datasets may have been created before the optional RAG service
+// was installed. Provision their remote counterpart before enabling processing.
+func ensureDatasetRAG(r *http.Request, ds *orm.Dataset) error {
+	kbID := strings.TrimSpace(ds.KbID)
+	if kbID == "" {
+		kbID = ds.ID
+	}
+	endpoint := common.JoinURL(common.AlgoServiceEndpoint(), "/v1/kbs")
+	var remote struct {
+		Data struct {
+			AlgoIDs []string `json:"algo_ids"`
+		} `json:"data"`
+	}
+	setAlgo := func(id string) {
+		var ext map[string]any
+		_ = json.Unmarshal(ds.Ext, &ext)
+		if ext == nil {
+			ext = map[string]any{}
+		}
+		ext["algo_id"] = id
+		ds.Ext = mustJSON(ext)
+	}
+	err := common.ApiGet(r.Context(), endpoint+"/"+url.PathEscape(kbID), nil, &remote, 10*time.Second)
+	if err == nil {
+		if parseDatasetAlgo(ds.Ext).AlgoID == "" && len(remote.Data.AlgoIDs) == 1 {
+			setAlgo(remote.Data.AlgoIDs[0])
+		}
+		return nil
+	}
+	var httpErr *common.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusNotFound {
+		return err
+	}
+	req := kbCreateRequest{KbID: kbID, DisplayName: algoDatasetDisplayName(ds.CreateUserID, ds.DisplayName), OwnerID: ds.CreateUserID, AlgoID: parseDatasetAlgo(ds.Ext).AlgoID}
+	if req.AlgoID == "" {
+		var algorithms algoListResp
+		if err := common.ApiGet(r.Context(), common.JoinURL(common.AlgoServiceEndpoint(), "/v1/algo/list"), nil, &algorithms, 10*time.Second); err != nil {
+			return err
+		}
+		for _, algo := range algorithms.Data.Items {
+			if algo.AlgoID == "general_algo" || len(algorithms.Data.Items) == 1 {
+				req.AlgoID = algo.AlgoID
+				break
+			}
+		}
+		if req.AlgoID == "" {
+			return fmt.Errorf("algorithm_id required")
+		}
+	}
+	if err = common.ApiPost(r.Context(), endpoint, req, nil, nil, 10*time.Second); err != nil {
+		// Another request can provision the same KB concurrently.
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusConflict {
+			if err := common.ApiGet(r.Context(), endpoint+"/"+url.PathEscape(kbID), nil, &remote, 10*time.Second); err != nil {
+				return err
+			}
+			if len(remote.Data.AlgoIDs) == 1 {
+				setAlgo(remote.Data.AlgoIDs[0])
+			} else {
+				setAlgo(req.AlgoID)
+			}
+			return nil
+		}
+		return err
+	}
+	setAlgo(req.AlgoID)
+	return nil
 }
 
 func GetProcessingStatus(w http.ResponseWriter, r *http.Request) {
@@ -191,6 +268,7 @@ func GetProcessingStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	syncProcessingTaskStates(r, datasetID)
 	var total, failed, processing, available int64
 	db := store.DB().WithContext(r.Context())
 	_ = db.Model(&orm.Document{}).Where("dataset_id = ? AND deleted_at IS NULL", datasetID).Count(&total).Error
@@ -204,6 +282,72 @@ func GetProcessingStatus(w http.ResponseWriter, r *http.Request) {
 		_ = db.Model(&orm.DocumentProcessingState{}).Where("dataset_id = ? AND "+statusColumn+" = 'succeeded'", datasetID).Count(&available).Error
 	}
 	common.ReplyJSON(w, map[string]any{"dataset_id": datasetID, "processing_level": level, "processing_revision": ds.ProcessingRevision, "transition_status": effectiveTransitionStatus(ds.TransitionStatus), "capabilities": capabilitiesForProcessingLevel(level), "coverage": ProcessingCoverage{Available: available, Total: total, Failed: failed, Processing: processing}})
+}
+
+// Reconcile only tasks with a recorded submission level. A successful reader
+// request must never be mistaken for successful vector indexing.
+func syncProcessingTaskStates(r *http.Request, datasetID string) {
+	if !systemdeps.PythonComponentActive("rag") || store.LazyLLMDB() == nil {
+		return
+	}
+	var tasks []orm.Task
+	if err := store.DB().WithContext(r.Context()).Where("dataset_id = ? AND deleted_at IS NULL AND lazyllm_task_id <> ''", datasetID).Order("updated_at DESC").Find(&tasks).Error; err != nil {
+		return
+	}
+	seen := map[string]bool{}
+	for _, task := range tasks {
+		if seen[task.DocID] {
+			continue
+		}
+		seen[task.DocID] = true
+		var ext taskExt
+		if json.Unmarshal(task.Ext, &ext) != nil || ext.ProcessingLevel == "" {
+			continue
+		}
+		var doc orm.Document
+		if err := store.DB().WithContext(r.Context()).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", task.DocID, datasetID).Take(&doc).Error; err != nil {
+			continue
+		}
+		var remote readonlyorm.LazyLLMDocServiceTaskRow
+		if err := store.LazyLLMDB().WithContext(r.Context()).Where("task_id = ? AND doc_id = ? AND kb_id = ?", task.LazyllmTaskID, doc.LazyllmDocID, datasetKbIDByID(datasetID)).Take(&remote).Error; err != nil {
+			continue
+		}
+		status := "running"
+		switch NormalizeTaskStateForUI(remote.Status) {
+		case "SUCCESS":
+			status = "succeeded"
+		case "FAILED":
+			status = "failed"
+		case "CANCELED", "CANCELLED":
+			status = "pending"
+		case "WORKING", "WAITING":
+		default:
+			continue
+		}
+		updates := map[string]any{"parse_status": status, "updated_at": time.Now().UTC()}
+		if ext.ProcessingLevel == ProcessingLevelChunked || ext.ProcessingLevel == ProcessingLevelIndexed {
+			updates["chunk_status"] = status
+		}
+		if ext.ProcessingLevel == ProcessingLevelIndexed {
+			updates["index_status"] = status
+		}
+		var base orm.DocumentProcessingState
+		if store.DB().WithContext(r.Context()).Where("dataset_id = ? AND document_id = ?", datasetID, task.DocID).
+			Take(&base).Error == nil && base.ParseArtifactRef != "" {
+			if ext.ProcessingLevel == ProcessingLevelIndexed && base.IndexArtifactRef != "core-task:"+task.ID {
+				continue // A previous generation must not complete a newly prepared artifact.
+			}
+			// A vector failure must not erase independently usable native artifacts.
+			delete(updates, "parse_status")
+			delete(updates, "chunk_status")
+		}
+		query := store.DB().WithContext(r.Context()).Model(&orm.DocumentProcessingState{}).
+			Where("dataset_id = ? AND document_id = ?", datasetID, task.DocID)
+		if ext.ProcessingLevel == ProcessingLevelIndexed {
+			query = query.Where("index_status <> ?", status)
+		}
+		_ = query.Updates(updates).Error
+	}
 }
 
 // EnsureParsed upgrades one document on demand while preserving the

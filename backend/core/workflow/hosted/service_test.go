@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
@@ -77,17 +76,60 @@ func TestHostedSubmissionRejectsUndeclaredOutputBeforeWrite(t *testing.T) {
 	}
 }
 
+func TestHostedCompletionUpdatesTrackedTaskAndDesktopNotice(t *testing.T) {
+	for _, outcome := range []string{"succeeded", "failed"} {
+		t.Run(outcome, func(t *testing.T) {
+			service, db := hostedTestService(t)
+			if err := db.AutoMigrate(&orm.TaskCenterTask{}, &orm.UserNotificationPreferences{}, &orm.TaskNotification{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "session-1").Update("conversation_id", "conversation").Error; err != nil {
+				t.Fatal(err)
+			}
+			sessionID := "session-1"
+			task := orm.TaskCenterTask{ID: "workflow", UserID: "owner", ConversationID: "conversation", TaskType: "workflow_run", WorkflowSessionID: &sessionID, Status: "running"}
+			if err := db.Create(&task).Error; err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.Begin(t.Context(), "owner", sessionID, "attempt-1"); err != nil {
+				t.Fatal(err)
+			}
+			submission := Submission{Outcome: outcome, Summary: "private provider diagnostic"}
+			if outcome == "succeeded" {
+				submission.Artifacts = []executor.Artifact{{Slot: "report", ContentType: "text/plain", Seq: 1, Value: json.RawMessage(`{"text":"result"}`)}}
+			}
+			for range 2 {
+				if _, err := service.Submit(t.Context(), "owner", sessionID, "attempt-1", submission); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := db.First(&task, "id = ?", task.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if task.Status != outcome || task.FinishedAt == nil {
+				t.Fatalf("hosted completion left task active: %#v", task)
+			}
+			var notices []orm.TaskNotification
+			if err := db.Find(&notices).Error; err != nil {
+				t.Fatal(err)
+			}
+			if len(notices) != 1 || notices[0].TaskID != task.ID || notices[0].Channel != "desktop" || notices[0].Event != outcome {
+				t.Fatalf("hosted desktop completion notices=%#v", notices)
+			}
+		})
+	}
+}
+
 func hostedTestService(t *testing.T) (*Service, *gorm.DB) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := orm.OpenTestDB(t).DB
 	models := []any{
 		&orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowOutbox{}, &orm.WorkflowEvent{},
 		&orm.WorkflowCommand{}, &orm.WorkflowRevision{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{},
 		&orm.WorkflowAttemptInputBinding{}, &orm.WorkflowInputBinding{}, &orm.WorkflowSlotRevision{},
 		&orm.WorkflowHumanArtifact{}, &orm.WorkflowSlotOrder{}, &orm.WorkflowRouteDecision{}, &orm.SubAgentArtifact{},
+		&orm.WorkflowStepIntent{}, &orm.WorkflowApprovalPreference{},
+		&orm.UserSelectedModel{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{},
 	}
 	if err := db.AutoMigrate(models...); err != nil {
 		t.Fatal(err)

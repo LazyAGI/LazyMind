@@ -194,7 +194,7 @@ def test_success_index_counts_commits_and_does_not_expose_failed_attempts_as_swi
 
 
 @pytest.mark.parametrize('original_window', [32768, None])
-def test_bootstrap_uses_original_window_and_confirms_only_the_actual_success(provider, original_window):
+def test_bootstrap_orders_effective_budgets_and_preserves_original_switch_metadata(provider, original_window):
     b = candidate(provider, 'native-b', source='claude', window=65536)
     c = candidate(provider, 'model-c', window=32768)
     d = candidate(provider, 'model-d', window=131072)
@@ -206,7 +206,7 @@ def test_bootstrap_uses_original_window_and_confirms_only_the_actual_success(pro
                'from_max_input_tokens': original_window}
     events = []
     result = wrapper(b, [c, d], initial=initial)('start', stream={'_stream_sink': events.append})
-    expected = 'model-c' if original_window else 'model-d'
+    expected = 'model-d'
     assert result == 'done:' + expected
     assert [item['model'] for item in provider.requests] == ['native-b', expected]
     assert len(switches(events)) == 1

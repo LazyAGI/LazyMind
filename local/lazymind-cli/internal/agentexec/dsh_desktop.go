@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"lazymind/agentconnector/internal/connectorconfig"
 )
 
 // Desktop owns its profile while the application is open. The bundled CLI
@@ -42,10 +44,10 @@ func DSHDesktopRunning(ctx context.Context, cli string) (bool, error) {
 // FindDSHDesktopCLI resolves the launcher shipped by Desktop, never a similarly
 // named npm executable from PATH. The override also accepts the application bundle.
 func FindDSHDesktopCLI() (string, error) {
-	if value := strings.TrimSpace(os.Getenv("LAZYMIND_DSH_DESKTOP_PATH")); value != "" {
+	if value := strings.TrimSpace(connectorconfig.Value("LAZYMIND_DSH_DESKTOP_PATH")); value != "" {
 		return ResolveDSHDesktopCLI(value)
 	}
-	if value := strings.TrimSpace(os.Getenv("LAZYMIND_DSH_PATH")); value != "" {
+	if value := strings.TrimSpace(connectorconfig.Value("LAZYMIND_DSH_PATH")); value != "" {
 		if path, err := ResolveDSHDesktopCLI(value); err == nil {
 			return path, nil
 		}

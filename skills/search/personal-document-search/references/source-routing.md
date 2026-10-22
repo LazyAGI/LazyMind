@@ -17,6 +17,12 @@ Resume a pending Source only after a returned state change makes it ready.
 ## Local Files
 
 - Unknown location: `native_search(query, match="either", path="", kind="any", limit=30)`.
+  `query` is one literal term or contiguous phrase: spaces are literal, not OR.
+  Pick the most distinctive term first; if weak/empty, use one alternative term
+  as the Source's single refinement. For example, search `述职`, then `周报` if
+  needed; never combine alternatives as `述职 周报 月报`. Keep exact names such
+  as `Enterprise Search` intact. `match="either"` means filename OR content,
+  not any query word. Deduplicate returned paths before reading.
   `match`: name/content/either; `kind`: file/directory/any. Results are paths and
   metadata, not bodies. A known directory narrows `path`. Linux/container runtimes
   do not provide the host OS index; report that limitation.

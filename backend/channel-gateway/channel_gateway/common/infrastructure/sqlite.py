@@ -18,6 +18,7 @@ from channel_gateway.common.infrastructure.postgres import (
     GatewayStore,
     PostgresRuntimeLease,
     decode_snapshot,
+    WECHAT_TARGET_CHECK_COLUMNS,
 )
 from channel_gateway.common.ports.providers import PayloadCipher
 
@@ -487,6 +488,9 @@ class SQLiteGatewayStore(GatewayStore):
                 if name not in columns:
                     connection.execute(f'ALTER TABLE channel_notification_targets ADD COLUMN {name} '
                                        f"TEXT NOT NULL DEFAULT '{default}'")
+            for name, definition in WECHAT_TARGET_CHECK_COLUMNS.items():
+                if name not in columns:
+                    connection.execute(f'ALTER TABLE channel_notification_targets ADD COLUMN {name} {definition}')
 
     @staticmethod
     def _migrate_columns(connection: _SQLiteConnection) -> None:
@@ -496,6 +500,12 @@ class SQLiteGatewayStore(GatewayStore):
                 'label_custom': 'BOOLEAN NOT NULL DEFAULT FALSE',
                 'archived_at': 'TIMESTAMPTZ',
                 'default_recipient_id': "TEXT NOT NULL DEFAULT ''",
+                'connection_check_status': "TEXT NOT NULL DEFAULT 'unknown'",
+                'connection_checked_at': 'TIMESTAMPTZ',
+                'connection_check_started_at': 'TIMESTAMPTZ',
+                'connection_check_id': "TEXT NOT NULL DEFAULT ''",
+                'connection_error_code': "TEXT NOT NULL DEFAULT ''",
+                'connection_context_revision': 'INTEGER NOT NULL DEFAULT 0',
                 'runtime_status': "VARCHAR(32) NOT NULL DEFAULT 'stopped'",
                 'last_poll_at': 'TIMESTAMPTZ',
                 'last_message_at': 'TIMESTAMPTZ',

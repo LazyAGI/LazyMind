@@ -1,0 +1,21 @@
+# Local execution/configuration data and retired development tools.
+/private/
+/runs/
+/trial/
+/config.json
+/session.json
+*.session.json
+child-*.txt
+*.jsonl
+*.log
+/model-setup.json
+/verification.json
+/release-drafts.md
+/export_evidence.py
+/probe_runtime.py
+
+# Publish recordings as PR comment attachments, not repository assets.
+*.mp4
+*.mov
+*.gif
+*.webm

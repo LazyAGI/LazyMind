@@ -12,16 +12,17 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"lazymind/agentconnector/internal/coreapi"
 	"lazymind/agentconnector/internal/credentials"
 )
 
-func TestStateUsesEmbeddedPanelOnlyForCodex(t *testing.T) {
+func TestStateExposesPanelURLOnlyForCodex(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/core/workflow-sessions/test-session/projection" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
-		_, _ = w.Write([]byte(`{"session_id":"test-session"}`))
+		_, _ = w.Write([]byte(`{"session_id":"test-session","interaction_url":"https://stale.example/panel"}`))
 	}))
 	defer server.Close()
 	store, err := credentials.NewStore(t.TempDir(), "")
@@ -35,16 +36,17 @@ func TestStateUsesEmbeddedPanelOnlyForCodex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, provider := range []string{"codex", "deepseek-harness", ""} {
+	for _, provider := range []string{"codex", "workbuddy", "deepseek-harness", "cursor", ""} {
 		for _, base := range []string{"", "https://panel.example.test/"} {
-			client := &Client{api: api, HostProvider: provider, interactionBaseURL: base}
+			t.Setenv("LAZYMIND_WEB_URL", base)
+			client := &Client{api: api, HostProvider: provider}
 			state, err := client.State(context.Background(), "test-session")
 			if base == "" {
 				base = server.URL
 			}
-			want := strings.TrimRight(base, "/") + "/workflow-runs/test-session"
+			want := ""
 			if provider == "codex" {
-				want += "/embed"
+				want = strings.TrimRight(base, "/") + "/workflow-runs/test-session/embed"
 			}
 			if err != nil || state.InteractionURL != want {
 				t.Fatalf("provider=%q url=%q want=%q err=%v", provider, state.InteractionURL, want, err)
@@ -91,10 +93,16 @@ func TestWorkflowListPublishesObjectInputSchema(t *testing.T) {
 }
 
 func TestWorkflowToolDescriptionsMatchExecutionFlow(t *testing.T) {
+	for _, provider := range []string{"codex", "workbuddy", "deepseek-harness", "cursor", ""} {
+		t.Run(provider, func(t *testing.T) { testWorkflowToolDescriptions(t, provider) })
+	}
+}
+
+func testWorkflowToolDescriptions(t *testing.T, provider string) {
 	ctx := context.Background()
 	clientTransport, serverTransport := mcp.NewInMemoryTransports()
 	server := mcp.NewServer(&mcp.Implementation{Name: "schema-test", Version: "1"}, nil)
-	Register(server, &Client{})
+	Register(server, &Client{HostProvider: provider})
 	serverSession, err := server.Connect(ctx, serverTransport, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -114,8 +122,13 @@ func TestWorkflowToolDescriptionsMatchExecutionFlow(t *testing.T) {
 	for _, tool := range listed.Tools {
 		got[tool.Name] = tool.Description
 	}
-	if !containsAll(got["workflow.start"], "open_in_codex", "interaction_url", "placement=bottom", "workflow.step.begin", "workflow_id", "revision_id") {
+	if !containsAll(got["workflow.start"], "workflow.step.begin", "workflow_id", "revision_id") {
 		t.Fatalf("workflow.start description=%q", got["workflow.start"])
+	}
+	for _, hint := range []string{"interaction_url", "open_in_codex", "placement=bottom", "If the host tool is unavailable"} {
+		if strings.Contains(got["workflow.start"], hint) != (provider == "codex") {
+			t.Fatalf("incorrect Codex presentation scope for %q: %q", provider, got["workflow.start"])
+		}
 	}
 	if !containsAll(got["workflow.get"], "inspecting package scripts", "tool_scripts", "compiled_graph") {
 		t.Fatalf("workflow.get description=%q", got["workflow.get"])

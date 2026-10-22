@@ -61,7 +61,7 @@ def _llm_response_text(resp: Any) -> str:
 
 
 def _call_summarizer_llm(llm: Any, system_prompt: str, user_prompt: str, *,
-                         candidate_budget: Optional[ContextBudget] = None, control=None) -> str:
+                         candidate_budget: Optional[ContextBudget] = None, control=None, on_attempt=None) -> str:
     if llm is None:
         raise ValueError('summarizer llm is required')
     if candidate_budget is not None:
@@ -69,6 +69,10 @@ def _call_summarizer_llm(llm: Any, system_prompt: str, user_prompt: str, *,
         request = prepare_model_call(view, user_prompt, None, None, {'tools': [], 'max_retries': 1}, candidate_budget)
         if request_tokens(request) > candidate_budget.effective_input_budget:
             raise ContextCapacityError('The summary request does not fit this candidate.')
+        if on_attempt is not None:
+            if control is not None:
+                control.check()
+            on_attempt()
         try:
             return _llm_response_text(request.execute(control=control).value)
         except ModelCallError as exc:

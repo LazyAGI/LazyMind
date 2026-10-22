@@ -1,0 +1,131 @@
+locale: en-US
+classification:
+  category: Creative design
+  tags: [Landscape painting, Ink art, Postcards, Mix and match]
+presentation:
+  card:
+    title: Landscape ink art and postcards
+    description: Turn a complete landscape into ink art or a postcard. Choose the style, composition, and aspect ratio.
+    output_type: images
+    output_label: Ink art and postcards
+    cover_asset: cover
+    result_summary: Four source photos and eight results across painting, photo-and-art, torn edges, and two orientations
+  detail:
+    title: Landscape ink art and postcards
+    description: Turn a complete landscape into ink art or a postcard. Choose the style, composition, and aspect ratio.
+    attachment_hint: Upload one landscape photo to use the selected case directly; changes are optional
+tasks:
+  - id: ink-artwork
+    selector:
+      title: Create text-free ink art
+      description: Landscape 3:2 · Full ink painting · No text or symbols
+      output_label: Text-free ink art
+    launch:
+      prompt_short: Edit the image I uploaded to create one complete, text-free ink landscape.
+      prompt: >-
+        Edit the image I uploaded to create one complete, text-free ink landscape. Preserve the main composition, landmark silhouettes, spatial depth, and light and color relationships. Repaint the entire scene in softly colored ink washes, natural brushwork, gentle edges, and subtle paper texture. This case defaults to a complete painting with no photographic areas, lettering, inscriptions, numbers, seals, symbols, or postcard layout. If I explicitly request a different style or combination, follow that request rather than treating the case defaults as restrictions.
+
+        This one-click case uses landscape 3:2, full ink painting, no text or symbols. Keep this preset even if the uploaded photo has a different orientation. Do not ask me to choose the format, style, wording, or symbols, or to confirm a plan. Only explicit changes I volunteer override the preset. Deliver one complete image by default; the multiple preview images are optional combinations, not a request to generate them all. Reuse a photo already uploaded in this conversation. Only if none exists, ask for one landscape photo, without preference questions or plan confirmation. Once uploaded, call image_editor directly and deliver one image. Featured samples must not replace my input.
+    replay:
+      steps:
+        - title: Read the uploaded photo
+          description: Identify the scene, composition, and orientation; request an upload if missing
+        - title: Choose the combination
+          description: Default to text-free artwork while honoring my specified style, layout, and ratio
+        - title: Paint the ink landscape
+          description: Repaint the full scene in gentle colored washes and subtle paper texture
+        - title: Deliver the artwork
+          description: Deliver one image by default; custom ratios take priority over 3:2 or 2:3 defaults
+    result:
+      template: html_preview_v1
+      eyebrow: Text-free ink art · Before and after
+      title: Dawn clouds and autumn mountains
+      summary: Compare two source photos with landscape and portrait text-free ink paintings.
+      html_asset: ink_artwork_preview
+  - id: ink-postcard
+    selector:
+      title: Create an ink postcard
+      description: Portrait 2:3 · Full ink painting · Title, line, and small marker
+      output_label: Ink postcard
+    launch:
+      prompt_short: Create a portrait 2:3 ink postcard from my photo using the case’s full artwork, title, short line, and small marker.
+      prompt: >-
+        Edit the image I uploaded to create an ink landscape postcard. This case defaults to a fully repainted ink landscape. Preserve its main composition, landmarks, depth, and light and color relationships in gently colored ink washes with soft edges and warm ivory paper. If I request "photo and art" or "photo above, painting below," use the same scene as a photograph above and an ink reinterpretation below, adjusting artwork and negative space for the requested orientation. Do not label this split layout as a full painting. Honor any explicit request for torn edges or another style combination.
+
+        By default, write a brief English title, one short line, and a small number or letter marker appropriate to my actual uploaded scene. Keep the landscape dominant and the typography restrained, with a serif title and small sans-serif line if suitable. Do not pile on stamps or decorations. My exact supplied wording takes priority; honor no-text and no-symbol requests separately. Do not apply the sample's Blue Stillness wording to every photo.
+
+        This one-click case uses portrait 2:3, full ink painting, bottom English title, short line, and small marker. Keep this preset even if the uploaded photo has a different orientation. Do not ask me to choose the format, style, wording, or symbols, or to confirm a plan. Only explicit changes I volunteer override the preset. For landscape, use a broad composition with bottom or side space for text; for portrait, use vertical negative space. Keep the complete landscape and wording visible. Deliver one postcard image by default; previews show optional combinations, not all requested outputs. Reuse a photo already uploaded in this conversation. Only if none exists, ask me to upload one landscape photo without any preference questionnaire. Once available, call image_editor directly and deliver one image; do not delegate this single-image operation. Featured samples must not replace my input.
+    replay:
+      steps:
+        - title: Read the uploaded photo
+          description: Identify the scene, orientation, and wording; request an upload if missing
+        - title: Choose the layout
+          description: Default to full artwork; use photo-above-art or other combinations when requested
+        - title: Arrange text and markers
+          description: Write scene-specific short copy unless exact wording or no text is requested
+        - title: Adapt the format and deliver
+          description: Recompose text and negative space for the chosen ratio; deliver one image by default
+    result:
+      template: html_preview_v1
+      eyebrow: Ink postcards · Three source scenes
+      title: Three scenes, three postcard compositions
+      summary: Source photos become a portrait ink postcard, a landscape postcard, and a photo-above-art design.
+      html_asset: ink_postcard_preview
+  - id: torn-postcard
+    selector:
+      title: Create a torn-edge postcard
+      description: Landscape 3:2 · Same-scene photo and ink · Irregular torn edge
+      output_label: Torn-edge postcard
+    launch:
+      prompt_short: Edit the image I uploaded to create one torn-edge postcard joining photography with softly colored ink art.
+      prompt: >-
+        Edit the image I uploaded to create one torn-edge postcard. Identify the narrative focus and retain one photographic anchor from that same scene. Choose its area according to the subject instead of fixing it at 35% or 50%. Let the irregular tear follow an existing shoreline, waterline, tree canopy, ridge, or architectural structure. Join the photograph with a softly colored ink reinterpretation of the same landscape. Near the edge, preserve the original colors and gradually move into gentle ink washes and a little dry brush. Carry one scene-derived current, shoreline, or color path through both regions. Keep recognizable landmarks and light and color relationships. Avoid rectangular photo stickers, uniform white borders, digital masking, and unrelated scenes.
+
+        Use matte ivory paper and ample negative space, with the landscape dominant. By default, add a short English title, a short line, and one small number or letter marker appropriate to this scene. Honor exact user wording, no-text requests, and no-symbol requests first. Follow any explicit request for full artwork, photo-and-art, or another combination.
+
+        This one-click case uses landscape 3:2, torn-edge photo-and-ink postcard with English title, short line, and small marker. Keep this preset even if the uploaded photo has a different orientation. Do not ask me to choose the format, style, wording, or symbols, or to confirm a plan. Only explicit changes I volunteer override the preset. Design a broad tear path for landscape and vertical layers with text space for portrait instead of cropping one layout into the other. Deliver one complete postcard by default. Reuse a photo already uploaded in this conversation. Only if none exists, ask me to upload one landscape photo without any preference questionnaire. Once available, call image_editor directly and deliver one image; do not delegate this single-image operation. Featured samples must not replace my input.
+    replay:
+      steps:
+        - title: Find the narrative focus
+          description: Select a photographic anchor from my photo; request an upload if missing
+        - title: Follow natural structures
+          description: Let the tear follow water, trees, or architecture without rectangular stickers or uniform borders
+        - title: Join the same scene in ink
+          description: Carry the original colors and a continuous scene-derived path into gentle ink washes
+        - title: Finish the postcard
+          description: Arrange text and a small marker for the requested format; deliver one image by default
+    result:
+      template: html_preview_v1
+      eyebrow: Torn-edge postcard · Before and after
+      title: A coastline crossing from photo into ink
+      summary: Compare the coastal source photo with a torn-edge postcard joining same-scene photography and ink.
+      html_asset: torn_postcard_preview
+  - id: surreal-ink-artwork
+    selector:
+      title: Create surreal ink art
+      description: Landscape 3:2 · Full ink painting · One scene-derived giant · No text
+      output_label: Surreal ink art
+    launch:
+      prompt_short: Edit the image I uploaded to create one complete, text-free surreal landscape in ink.
+      prompt: >-
+        Edit the image I uploaded to create one surreal ink landscape. Combine ink as the main medium, surreal spatial expression, a complete painting, and no text or symbols. Repaint all photographic content in ink with no photographic cutouts. Keep the recognizable main landmarks, original palette, and light and color relationships. Use ivory paper, soft edges, transparent color washes, natural ink diffusion, and ample negative space.
+
+        Use surrealism only as a secondary expression of scale, suspension, and spatial relationships. Choose exactly one element that genuinely appears in the source photo and turn it into one impossible giant. By default keep only the objects already present in the source scene and this single giant. Add graduated miniature elements or arc accents only if I explicitly allow decorative symbols. Do not add unrelated ice cream, planets, or decorations, and do not make multiple elements giant. Ink remains the dominant style: do not impose hard-edged pop-art flat fills or rules that ban gradients or ink diffusion. Avoid photo collage, plastic-looking 3D forms, heavy outlines, and strong cast shadows. Include no lettering, numbers, letters, seals, signatures, or watermarks. If I explicitly request a postcard, text, or a different layout and style combination, follow that request.
+
+        This one-click case uses landscape 3:2, full surreal ink painting with one scene-derived giant, no text or symbols. Keep this preset even if the uploaded photo has a different orientation. Do not ask me to choose the format, style, wording, or symbols, or to confirm a plan. Only explicit changes I volunteer override the preset. Deliver one complete image by default; the multiple previews show optional combinations, not a request to generate them all. Reuse a photo already uploaded in this conversation. Only if none exists, ask for one landscape photo without additional questions. Once uploaded, call image_editor directly and deliver one image. Featured samples must not replace my input.
+    replay:
+      steps:
+        - title: Read the scene's visual elements
+          description: Identify landmarks, colors, and usable elements; request an upload if missing
+        - title: Design one surreal relationship
+          description: Enlarge one source element, preserve the scene relationships, and omit decorative miniatures by default
+        - title: Unify the ink painting
+          description: Repaint the whole scene with soft edges and washes, without photo cutouts or text
+        - title: Adapt the format and deliver
+          description: Arrange negative space for the orientation; honor custom ratios and deliver one image by default
+    result:
+      template: html_preview_v1
+      eyebrow: Surreal ink art · Two source scenes
+      title: Familiar landscapes, impossible trees
+      summary: Compare two source scenes with a single scene-derived giant tree in landscape and portrait ink paintings.
+      html_asset: surreal_ink_artwork_preview

@@ -20,14 +20,23 @@ func platformDesktopInstalled(spec DesktopApplication, _ bool) bool {
 }
 
 func platformDesktopApplication(spec DesktopApplication) string {
+	paths := platformDesktopApplications(spec)
+	if len(paths) > 0 {
+		return paths[0]
+	}
+	return ""
+}
+
+func platformDesktopApplications(spec DesktopApplication) []string {
+	var paths []string
 	for _, name := range spec.ExecutableNames {
 		if executable := appPath(name); executable != "" {
-			return executable
+			paths = append(paths, executable)
 		}
 	}
 	for _, protocol := range spec.Protocols {
 		if executable := registeredProtocolExecutable(protocol); executable != "" {
-			return executable
+			paths = append(paths, executable)
 		}
 	}
 	for _, application := range windowsInstalledApplications() {
@@ -35,17 +44,17 @@ func platformDesktopApplication(spec DesktopApplication) string {
 			continue
 		}
 		if fileExists(application.location) {
-			return filepath.Clean(application.location)
+			paths = append(paths, filepath.Clean(application.location))
 		}
 		if directoryExists(application.location) {
 			for _, name := range spec.ExecutableNames {
 				if executable := firstExecutablePath(filepath.Join(application.location, name), windowsPathExtensions()); executable != "" {
-					return executable
+					paths = append(paths, executable)
 				}
 			}
 		}
 	}
-	return ""
+	return uniqueWindowsPaths(paths)
 }
 
 func registeredProtocolExecutable(protocol string) string {
