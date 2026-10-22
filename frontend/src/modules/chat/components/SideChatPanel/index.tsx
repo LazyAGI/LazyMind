@@ -33,6 +33,7 @@ import UIUtils from "@/modules/chat/utils/ui";
 import {
   createSideChat,
   deleteSideChat,
+  patchSideChatSource,
   patchSideChatThinkingDepth,
   retainSideChat,
 } from "./api";
@@ -67,7 +68,7 @@ type SideChatPhase =
   | "closing"
   | "error";
 
-const DISCARD_RETRY_DELAYS_MS = [0, 100, 250, 500, 1_000, 2_000];
+const CONFLICT_RETRY_DELAYS_MS = [0, 100, 250, 500, 1_000, 2_000];
 
 function sideChatRequestId() {
   return globalThis.crypto?.randomUUID?.() ??
@@ -127,7 +128,6 @@ const SideChatPanel = forwardRef<SideChatPanelRef, SideChatPanelProps>(function 
   const thinkingSaveRef = useRef(0);
   const chatConfigRef = useRef<ChatConfig>({});
   const thinkingDepthRef = useRef<ThinkingDepth>("medium");
-  const warnedSourceKeyRef = useRef("");
 
   const [phase, setPhase] = useState<SideChatPhase>("idle");
   const [child, setChild] = useState<SideChatConversation | null>(null);
@@ -142,6 +142,8 @@ const SideChatPanel = forwardRef<SideChatPanelRef, SideChatPanelProps>(function 
   const [actionError, setActionError] = useState("");
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
+  const [sourceUpdating, setSourceUpdating] = useState(false);
+  const [failedSourceKey, setFailedSourceKey] = useState<string | null>(null);
 
   openRef.current = open;
   const requestedSourceKey = useMemo(() => sideChatSourceKey(source), [source]);
@@ -152,7 +154,7 @@ const SideChatPanel = forwardRef<SideChatPanelRef, SideChatPanelProps>(function 
     const request = (async () => {
       streamManager.closeAndCleanup(conversationId);
       let lastError: unknown;
-      for (const delay of DISCARD_RETRY_DELAYS_MS) {
+      for (const delay of CONFLICT_RETRY_DELAYS_MS) {
         if (delay > 0) await wait(delay);
         try {
           await deleteSideChat(conversationId);
@@ -178,6 +180,8 @@ const SideChatPanel = forwardRef<SideChatPanelRef, SideChatPanelProps>(function 
       const generation = ++requestGenerationRef.current;
       setPhase("creating");
       setActionError("");
+      setSourceUpdating(false);
+      setFailedSourceKey(null);
       setChild(null);
       childRef.current = null;
       retainedRef.current = false;
@@ -237,53 +241,65 @@ const SideChatPanel = forwardRef<SideChatPanelRef, SideChatPanelProps>(function 
       }
       childRef.current = null;
     };
-    // Source changes while the panel is open are handled separately so an
-    // unretained conversation is never silently replaced.
+    // Quote changes update the existing child separately from its lifecycle.
   }, [discardChild, open, parentConversationId, startCreate]);
 
   useEffect(() => {
-    if (!open || requestedSourceKey === activeSourceKeyRef.current) return;
-    if (streamingRef.current || requestPendingRef.current) {
-      if (warnedSourceKeyRef.current !== requestedSourceKey) {
-        warnedSourceKeyRef.current = requestedSourceKey;
-        message.warning(t("chat.sideChat.generatingUnavailable"));
-      }
+    const current = childRef.current;
+    if (failedSourceKey !== null && failedSourceKey !== requestedSourceKey) {
+      setFailedSourceKey(null);
+      setActionError("");
       return;
     }
-    if (hasMessagesRef.current && !retainedRef.current) {
-      if (warnedSourceKeyRef.current !== requestedSourceKey) {
-        warnedSourceKeyRef.current = requestedSourceKey;
-        message.warning(t("chat.sideChat.replaceBlocked"));
-      }
-      return;
-    }
-
+    if (
+      !open || !current || phase !== "ready" || sourceUpdating ||
+      streaming || requestPending ||
+      requestedSourceKey === activeSourceKeyRef.current || requestedSourceKey === failedSourceKey
+    ) return;
+    const generation = requestGenerationRef.current;
     const requestedSource = source ? { ...source } : null;
-    const replace = async () => {
-      const current = childRef.current;
-      requestGenerationRef.current += 1;
-      if (current && !retainedRef.current) {
-        try {
-          await discardChild(current.id);
-        } catch (error) {
-          setActionError(getLocalizedErrorMessage(error));
-          return;
+    setSourceUpdating(true);
+    setActionError("");
+    const update = async () => {
+      try {
+        let updated: SideChatConversation | undefined;
+        for (const delay of CONFLICT_RETRY_DELAYS_MS) {
+          if (delay > 0) await wait(delay);
+          if (generation !== requestGenerationRef.current || !openRef.current) return;
+          try {
+            updated = await patchSideChatSource(current.id, requestedSource);
+            break;
+          } catch (error) {
+            if (requestStatus(error) !== 409 || delay === CONFLICT_RETRY_DELAYS_MS.at(-1)) throw error;
+          }
         }
+        if (!updated) return;
+        if (generation !== requestGenerationRef.current || !openRef.current || childRef.current?.id !== current.id) return;
+        activeSourceKeyRef.current = requestedSourceKey;
+        activeSourceRef.current = requestedSource;
+        childRef.current = updated;
+        setChild(updated);
+        setActiveSource(requestedSource);
+        setFailedSourceKey(null);
+      } catch (error) {
+        if (generation !== requestGenerationRef.current || !openRef.current) return;
+        setFailedSourceKey(requestedSourceKey);
+        setActionError(getLocalizedErrorMessage(error));
+      } finally {
+        if (generation === requestGenerationRef.current) setSourceUpdating(false);
       }
-      activeSourceKeyRef.current = requestedSourceKey;
-      activeSourceRef.current = requestedSource;
-      warnedSourceKeyRef.current = "";
-      setActiveSource(requestedSource);
-      await startCreate(requestedSource);
     };
-    void replace();
+    void update();
   }, [
-    discardChild,
+    child?.id,
+    failedSourceKey,
     open,
+    phase,
+    requestPending,
     requestedSourceKey,
     source,
-    startCreate,
-    t,
+    sourceUpdating,
+    streaming,
   ]);
 
   const handleStreamingChange = useCallback((next: boolean) => {
@@ -476,8 +492,10 @@ const SideChatPanel = forwardRef<SideChatPanelRef, SideChatPanelProps>(function 
     phase === "clearing" ||
     phase === "retaining" ||
     phase === "closing" ||
+    sourceUpdating ||
     streaming ||
     requestPending;
+  const sourceChanged = requestedSourceKey !== activeSourceKeyRef.current;
   const sourceText = sideChatSourceText(activeSource, child);
   const closeLabel = t(retained ? "chat.sideChat.close" : "chat.sideChat.discard");
 
@@ -560,6 +578,7 @@ const SideChatPanel = forwardRef<SideChatPanelRef, SideChatPanelProps>(function 
         <div className="side-chat-panel">
           <section
             className="side-chat-source-card"
+            aria-busy={sourceChanged && failedSourceKey !== requestedSourceKey}
             aria-labelledby={`${titleId}-source`}
           >
             <div className="side-chat-source-label">
@@ -578,7 +597,7 @@ const SideChatPanel = forwardRef<SideChatPanelRef, SideChatPanelProps>(function 
               <p>{t("chat.sideChat.sourceUnavailable")}</p>
             )}
             <span className="side-chat-inherited-hint">
-              {t("chat.sideChat.inheritedContext")}
+              {t(sourceChanged && failedSourceKey !== requestedSourceKey ? "chat.sideChat.updatingSource" : "chat.sideChat.inheritedContext")}
             </span>
           </section>
 
@@ -589,12 +608,13 @@ const SideChatPanel = forwardRef<SideChatPanelRef, SideChatPanelProps>(function 
               showIcon
               message={actionError}
               action={
-                phase === "error" ? (
+                phase === "error" || failedSourceKey === requestedSourceKey ? (
                   <Button
                     type="text"
                     size="small"
                     icon={<ReloadOutlined />}
-                    onClick={() => void startCreate(activeSourceRef.current)}
+                    aria-label={t("chat.sideChat.retry")}
+                    onClick={() => phase === "error" ? void startCreate(activeSourceRef.current) : setFailedSourceKey(null)}
                   >
                     {t("chat.sideChat.retry")}
                   </Button>
@@ -622,7 +642,7 @@ const SideChatPanel = forwardRef<SideChatPanelRef, SideChatPanelProps>(function 
                 sessionId={child.id}
                 onOpenSources={onOpenSources}
                 concurrentStream
-                canChat={canChat && phase !== "clearing"}
+                canChat={canChat && phase !== "clearing" && !sourceChanged}
                 onOpenSSE={openSSE}
                 onOpenResumeSSE={openResumeSSE}
                 onConversationIdChange={() => undefined}

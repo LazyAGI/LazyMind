@@ -759,6 +759,12 @@ type createSidechatOpenAPIRequest struct {
 	ThinkingDepth   string `json:"thinking_depth,omitempty" enum:"low,medium,high,max"`
 }
 
+type updateSidechatSourceOpenAPIRequest struct {
+	SourceHistoryID string `json:"source_history_id,omitempty"`
+	SourceSeq       *int   `json:"source_seq,omitempty"`
+	SelectedText    string `json:"selected_text,omitempty"`
+}
+
 type sidechatPublicSourceContextOpenAPI struct {
 	Messages []map[string]any `json:"messages,omitempty"`
 }
@@ -4558,6 +4564,16 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  sidechatParentPathParams{},
 			RequestBody: jsonBodyOf(createSidechatOpenAPIRequest{}, false),
 			Responses:   map[int]openAPIResponse{200: resp("Created side conversation", sidechatConversationOpenAPIResponse{})},
+		},
+		{
+			Method:      "PATCH",
+			Path:        "/conversations/{child_id}/sidechat",
+			Summary:     "Update a side conversation's source",
+			Description: "Freezes the selected parent history boundary as the existing side conversation's read-only model context. Preserves its messages, identity, settings, and retained status. Rejects updates while the conversation is busy.",
+			Tags:        []string{"conversations"},
+			PathParams:  sidechatChildPathParams{},
+			RequestBody: jsonBodyOf(updateSidechatSourceOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Updated side conversation source", sidechatConversationOpenAPIResponse{})},
 		},
 		{
 			Method:      "POST",

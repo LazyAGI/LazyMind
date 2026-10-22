@@ -7012,6 +7012,11 @@ export interface UpdateServerRequest {
     'timeout'?: number;
     'url'?: string;
 }
+export interface UpdateSidechatSourceOpenAPIRequest {
+    'selected_text'?: string;
+    'source_history_id'?: string;
+    'source_seq'?: number;
+}
 export interface UpdateToolsRequest {
     'allowed_tools'?: Array<string>;
 }
@@ -11830,6 +11835,45 @@ export const ConversationsApiAxiosParamCreator = function (configuration?: Confi
             };
         },
         /**
+         * Freezes the selected parent history boundary as the existing side conversation\'s read-only model context. Preserves its messages, identity, settings, and retained status. Rejects updates while the conversation is busy.
+         * @summary Update a side conversation\'s source
+         * @param {string} childId
+         * @param {UpdateSidechatSourceOpenAPIRequest} updateSidechatSourceOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsChildIdSidechatPatch: async (childId: string, updateSidechatSourceOpenAPIRequest: UpdateSidechatSourceOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'childId' is not null or undefined
+            assertParamExists('apiCoreConversationsChildIdSidechatPatch', 'childId', childId)
+            // verify required parameter 'updateSidechatSourceOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreConversationsChildIdSidechatPatch', 'updateSidechatSourceOpenAPIRequest', updateSidechatSourceOpenAPIRequest)
+            const localVarPath = `/api/core/conversations/{child_id}/sidechat`
+                .replace(`{${"child_id"}}`, encodeURIComponent(String(childId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(updateSidechatSourceOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Uses expected_version for optimistic locking and rejects changes while chat generation, a Workflow, or a background task is active. Fixed mode affects only the llm role from the next request onward.
          * @summary Switch the conversation chat model
          * @param {string} conversationId
@@ -12129,6 +12173,20 @@ export const ConversationsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Freezes the selected parent history boundary as the existing side conversation\'s read-only model context. Preserves its messages, identity, settings, and retained status. Rejects updates while the conversation is busy.
+         * @summary Update a side conversation\'s source
+         * @param {string} childId
+         * @param {UpdateSidechatSourceOpenAPIRequest} updateSidechatSourceOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsChildIdSidechatPatch(childId: string, updateSidechatSourceOpenAPIRequest: UpdateSidechatSourceOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SidechatConversationOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsChildIdSidechatPatch(childId, updateSidechatSourceOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationsApi.apiCoreConversationsChildIdSidechatPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Uses expected_version for optimistic locking and rejects changes while chat generation, a Workflow, or a background task is active. Fixed mode affects only the llm role from the next request onward.
          * @summary Switch the conversation chat model
          * @param {string} conversationId
@@ -12263,6 +12321,16 @@ export const ConversationsApiFactory = function (configuration?: Configuration, 
             return localVarFp.apiCoreConversationsChildIdSidechatDelete(requestParameters.childId, options).then((request) => request(axios, basePath));
         },
         /**
+         * Freezes the selected parent history boundary as the existing side conversation\'s read-only model context. Preserves its messages, identity, settings, and retained status. Rejects updates while the conversation is busy.
+         * @summary Update a side conversation\'s source
+         * @param {ConversationsApiApiCoreConversationsChildIdSidechatPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsChildIdSidechatPatch(requestParameters: ConversationsApiApiCoreConversationsChildIdSidechatPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<SidechatConversationOpenAPIResponse> {
+            return localVarFp.apiCoreConversationsChildIdSidechatPatch(requestParameters.childId, requestParameters.updateSidechatSourceOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Uses expected_version for optimistic locking and rejects changes while chat generation, a Workflow, or a background task is active. Fixed mode affects only the llm role from the next request onward.
          * @summary Switch the conversation chat model
          * @param {ConversationsApiApiCoreConversationsConversationIdModelPatchRequest} requestParameters Request parameters.
@@ -12351,6 +12419,15 @@ export interface ConversationsApiApiCoreConversationsChildIdRetainPostRequest {
  */
 export interface ConversationsApiApiCoreConversationsChildIdSidechatDeleteRequest {
     readonly childId: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsChildIdSidechatPatch operation in ConversationsApi.
+ */
+export interface ConversationsApiApiCoreConversationsChildIdSidechatPatchRequest {
+    readonly childId: string
+
+    readonly updateSidechatSourceOpenAPIRequest: UpdateSidechatSourceOpenAPIRequest
 }
 
 /**
@@ -12458,6 +12535,17 @@ export class ConversationsApi extends BaseAPI {
      */
     public apiCoreConversationsChildIdSidechatDelete(requestParameters: ConversationsApiApiCoreConversationsChildIdSidechatDeleteRequest, options?: RawAxiosRequestConfig) {
         return ConversationsApiFp(this.configuration).apiCoreConversationsChildIdSidechatDelete(requestParameters.childId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Freezes the selected parent history boundary as the existing side conversation\'s read-only model context. Preserves its messages, identity, settings, and retained status. Rejects updates while the conversation is busy.
+     * @summary Update a side conversation\'s source
+     * @param {ConversationsApiApiCoreConversationsChildIdSidechatPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsChildIdSidechatPatch(requestParameters: ConversationsApiApiCoreConversationsChildIdSidechatPatchRequest, options?: RawAxiosRequestConfig) {
+        return ConversationsApiFp(this.configuration).apiCoreConversationsChildIdSidechatPatch(requestParameters.childId, requestParameters.updateSidechatSourceOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

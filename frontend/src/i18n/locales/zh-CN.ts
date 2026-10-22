@@ -2675,6 +2675,7 @@ const zhCN = {
       sourceFromConversation: "来自“{{name}}”",
       sourceUnavailable: "未选择具体内容，将继承当前对话上下文",
       inheritedContext: "已继承主对话的模型、思考强度和知识库",
+      updatingSource: "正在更新引用…",
       knowledgeInheritedOnly: "侧聊仅使用从主对话继承的知识库",
       loading: "正在创建侧聊",
       loadFailed: "暂时无法创建侧聊",
