@@ -54,7 +54,7 @@ func taskNotificationDefaults(defaults NotificationConfig) NotificationConfig {
 	channels := make(map[string]NotificationChannelRule, len(defaults.Channels))
 	for provider, channel := range defaults.Channels {
 		if provider != "desktop" {
-			channel = NotificationChannelRule{Enabled: false}
+			channel = NotificationChannelRule{Enabled: channel.Enabled}
 		}
 		channels[provider] = channel
 	}
@@ -143,6 +143,10 @@ func snapshotNotifications(ctx context.Context, db *gorm.DB, task *orm.TaskCente
 }
 
 func validateNotificationConfig(config NotificationConfig, defaults bool) error {
+	return validateNotificationConfigForUpdate(config, defaults, nil)
+}
+
+func validateNotificationConfigForUpdate(config NotificationConfig, defaults bool, preserved map[string]NotificationChannelRule) error {
 	invalid := func() error { return notificationProblem(422, "INVALID_REQUEST") }
 	if len(config.Events) != 3 || len(config.Channels) == 0 || len(config.Channels) > 4 {
 		return invalid()
@@ -168,7 +172,8 @@ func validateNotificationConfig(config NotificationConfig, defaults bool) error 
 			return invalid()
 		}
 		activeChannel = activeChannel || channel.Enabled
-		if !defaults && channel.Enabled && name != "desktop" && strings.TrimSpace(channel.AccountID) == "" {
+		_, keepPaused := preserved[name]
+		if !defaults && !keepPaused && channel.Enabled && name != "desktop" && strings.TrimSpace(channel.AccountID) == "" {
 			return notificationProblem(422, "NOTIFICATION_TARGET_REQUIRED")
 		}
 	}
@@ -207,6 +212,9 @@ type ScheduleNotificationUpdate struct {
 	prepared      bool
 	preparedOwner string
 	preparedValue any
+	preparedID    string
+	preparedNew   bool
+	preparedKeep  map[string]NotificationChannelRule
 }
 
 // UnmarshalJSON applies the same bounded, strict contract at every entrypoint.
@@ -226,7 +234,64 @@ func (update *ScheduleNotificationUpdate) UnmarshalJSON(raw []byte) error {
 // PrepareScheduleNotificationUpdate resolves external targets before opening a
 // database transaction. The frozen value cannot change during the CAS write.
 func PrepareScheduleNotificationUpdate(ctx context.Context, owner string, update ScheduleNotificationUpdate) (ScheduleNotificationUpdate, error) {
+	return prepareScheduleNotificationUpdate(ctx, owner, update, nil)
+}
 
+// PrepareScheduleNotificationUpdateForSchedule can preserve an unchanged paused
+// selection without asking the gateway about an account that may be offline.
+// Reads and any required gateway validation finish before the caller starts its
+// write transaction. An empty id is reserved for a new schedule's draft.
+func PrepareScheduleNotificationUpdateForSchedule(ctx context.Context, db *gorm.DB, owner, id string, update ScheduleNotificationUpdate) (ScheduleNotificationUpdate, error) {
+	keep := make(map[string]NotificationChannelRule)
+	if update.Config != nil {
+		prefs, err := ReadNotificationPreferences(ctx, db, owner)
+		if err != nil {
+			return update, err
+		}
+		var original NotificationConfig
+		if id != "" {
+			var schedule orm.UserSchedule
+			if err := db.WithContext(ctx).Select("notification_config", "notification_revision").Where("id = ? AND user_id = ?", id, owner).First(&schedule).Error; err != nil {
+				return update, err
+			}
+			if schedule.NotificationRevision != update.Revision {
+				return update, notificationProblem(409, "NOTIFICATION_CONFIG_CONFLICT")
+			}
+			if schedule.NotificationConfig != nil {
+				if err := json.Unmarshal([]byte(*schedule.NotificationConfig), &original); err != nil {
+					return update, err
+				}
+			}
+		}
+		for provider, channel := range update.Config.Channels {
+			if provider == "desktop" || !channel.Enabled || !notificationChannelPaused(prefs, provider) {
+				continue
+			}
+			if id == "" {
+				// New drafts may retain a selected but untargeted default after
+				// its global switch was closed. No account identity is accepted.
+				if channel.AccountID == "" && channel.RecipientID == "" {
+					keep[provider] = channel
+				}
+			} else if saved, ok := original.Channels[provider]; ok && saved == channel {
+				keep[provider] = channel
+			}
+		}
+	}
+	prepared, err := prepareScheduleNotificationUpdate(ctx, owner, update, keep)
+	if err != nil {
+		return update, err
+	}
+	prepared.preparedID, prepared.preparedNew = id, id == ""
+	return prepared, nil
+}
+
+func notificationChannelPaused(prefs orm.UserNotificationPreferences, provider string) bool {
+	reason := notificationBlockReason(prefs, provider)
+	return reason == "NOTIFICATIONS_DISABLED" || reason == "NOTIFICATION_CHANNEL_DISABLED"
+}
+
+func prepareScheduleNotificationUpdate(ctx context.Context, owner string, update ScheduleNotificationUpdate, keep map[string]NotificationChannelRule) (ScheduleNotificationUpdate, error) {
 	if update.Revision < 0 || (update.Config == nil && !update.Clear) || (update.Config != nil && update.Clear) {
 		return update, notificationProblem(422, "INVALID_REQUEST")
 	}
@@ -238,11 +303,14 @@ func PrepareScheduleNotificationUpdate(ctx context.Context, owner string, update
 			copied.Channels[name] = rule
 		}
 		update.Config = &copied
-		if err := validateNotificationConfig(*update.Config, false); err != nil {
+		if err := validateNotificationConfigForUpdate(*update.Config, false, keep); err != nil {
 			return update, err
 		}
 		for provider, channel := range update.Config.Channels {
 			if provider == "desktop" || !channel.Enabled {
+				continue
+			}
+			if _, preserved := keep[provider]; preserved {
 				continue
 			}
 			resolved, err := resolveNotificationTarget(ctx, owner, provider, channel)
@@ -258,6 +326,7 @@ func PrepareScheduleNotificationUpdate(ctx context.Context, owner string, update
 		value = string(raw)
 	}
 	update.prepared, update.preparedOwner, update.preparedValue = true, owner, value
+	update.preparedKeep = keep
 	return update, nil
 }
 
@@ -271,6 +340,41 @@ func SaveScheduleNotificationUpdate(ctx context.Context, tx *gorm.DB, owner, id 
 		}
 	}
 	value := update.preparedValue
+	if len(update.preparedKeep) > 0 {
+		// Recheck under the same preference lock used by global switch
+		// changes. A gate opened since preparation requires a fresh attempt;
+		// gateway calls here could deadlock its reference callback.
+		prefs, err := LoadNotificationPreferences(ctx, tx, owner)
+		if err != nil {
+			return err
+		}
+		var current orm.UserSchedule
+		if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("notification_config", "notification_revision").Where("id = ? AND user_id = ?", id, owner).First(&current).Error; err != nil {
+			return err
+		}
+		if current.NotificationRevision != update.Revision || !update.preparedNew && update.preparedID != id {
+			return notificationProblem(409, "NOTIFICATION_CONFIG_CONFLICT")
+		}
+		var saved NotificationConfig
+		if current.NotificationConfig != nil {
+			if err := json.Unmarshal([]byte(*current.NotificationConfig), &saved); err != nil {
+				return err
+			}
+		}
+		for provider, channel := range update.preparedKeep {
+			if !notificationChannelPaused(prefs, provider) {
+				return notificationProblem(409, "NOTIFICATION_CONFIG_CONFLICT")
+			}
+			if update.preparedNew {
+				if update.Revision != 1 || channel.AccountID != "" || channel.RecipientID != "" {
+					return notificationProblem(409, "NOTIFICATION_CONFIG_CONFLICT")
+				}
+			} else if original, ok := saved.Channels[provider]; !ok || original != channel {
+				return notificationProblem(409, "NOTIFICATION_CONFIG_CONFLICT")
+			}
+		}
+	}
 
 	result := tx.WithContext(ctx).Model(&orm.UserSchedule{}).Where("id = ? AND user_id = ? AND notification_revision = ?", id, owner, update.Revision).Updates(map[string]any{"notification_config": value, "notification_revision": update.Revision + 1})
 	if result.Error != nil {

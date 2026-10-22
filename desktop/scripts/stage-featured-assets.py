@@ -20,7 +20,7 @@ def encoded(value):
     return (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + '\n').encode()
 
 
-def stage(runtime, published, output=None, quiet=False):
+def stage(runtime, published, output=None, quiet=False, bundle_unpublished=False):
     from PIL import Image, ImageOps
     featured = runtime / 'featured-skills'
     assets = featured / 'assets'
@@ -81,6 +81,18 @@ def stage(runtime, published, output=None, quiet=False):
                          'fallbackUrl': 'https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/' + filename}
             else:
                 entry = expected['bundles'].get(key)
+                if entry is None and bundle_unpublished:
+                    # New upstream cases may not have a published ZIP yet. Keep
+                    # their verified source bytes locally, never invent a URL or
+                    # relax validation for an already-published case.
+                    for name, record in files.items():
+                        target = thumbnails / name
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copyfile(assets / name, target)
+                        result['local'][name] = record
+                    print(f'::warning::Featured assets not published for {key}; '
+                          'bundling verified local assets instead (non-blocking).')
+                    continue
                 if not entry or entry['filename'] != filename or entry['files'] != files:
                     raise ValueError(f'Featured assets changed: publish a new bundle for {key}')
             result['bundles'][key] = entry
@@ -101,7 +113,7 @@ def stage(runtime, published, output=None, quiet=False):
         (featured / 'downloads.json').write_bytes(encoded(result))
         if output:
             published.write_bytes(encoded(result))
-    report = {'beforeBytes': before, 'bundledThumbnailBytes': sum(x['sizeBytes'] for x in result['local'].values()),
+    report = {'beforeBytes': before, 'bundledLocalBytes': sum(x['sizeBytes'] for x in result['local'].values()),
               'remoteZipBytes': sum(x['sizeBytes'] for x in result['bundles'].values()),
               'bundles': len(result['bundles'])}
     if quiet:
@@ -116,5 +128,8 @@ if __name__ == '__main__':
     parser.add_argument('--published', type=Path, default=ROOT / 'desktop/featured-assets.json')
     parser.add_argument('--publish', type=Path, help='Generate reviewed ZIPs before staging (release author only)')
     parser.add_argument('--quiet', action='store_true', help='Omit size audit output')
+    parser.add_argument('--bundle-unpublished', action='store_true',
+                        help='Bundle new cases locally until their asset ZIPs are published')
     args = parser.parse_args()
-    stage(args.runtime, args.published, args.publish, quiet=args.quiet)
+    stage(args.runtime, args.published, args.publish, quiet=args.quiet,
+          bundle_unpublished=args.bundle_unpublished)

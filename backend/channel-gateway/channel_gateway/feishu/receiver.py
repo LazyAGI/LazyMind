@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import multiprocessing
 import logging
 import queue
@@ -6,6 +8,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict
+from typing import TYPE_CHECKING
 
 from channel_gateway.feishu.domain import (
     FeishuAppCredentials,
@@ -14,7 +17,8 @@ from channel_gateway.feishu.domain import (
     FeishuInboundMessage,
     FeishuRuntimeError,
 )
-from channel_gateway.feishu.sdk import LarkChannelClient
+if TYPE_CHECKING:
+    from channel_gateway.feishu.sdk import LarkChannelClient
 
 
 _ACK_TIMEOUT_SECONDS = 10
@@ -99,6 +103,10 @@ def _receiver_process_main(
     acknowledgements,
     stop_event,
 ) -> None:
+    # Load the channel SDK only in the receiver process. Importing it in the
+    # gateway process delays readiness even when no Feishu account is enabled.
+    from channel_gateway.feishu.sdk import LarkChannelClient
+
     credentials = FeishuAppCredentials(
         **credentials_payload
     )
@@ -318,4 +326,6 @@ class LarkChannelFactory:
         self,
         credentials: FeishuAppCredentials,
     ) -> LarkChannelClient:
+        from channel_gateway.feishu.sdk import LarkChannelClient
+
         return LarkChannelClient(credentials)

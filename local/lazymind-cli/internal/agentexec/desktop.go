@@ -58,6 +58,25 @@ func FindDesktopApplication(spec DesktopApplication) (string, error) {
 	return "", fmt.Errorf("desktop application is not installed")
 }
 
+// FindDesktopApplications honors a selected desktop installation; automatic
+// discovery considers matching coexisting applications such as ChatGPT and Codex.
+func FindDesktopApplications(spec DesktopApplication) ([]string, error) {
+	if spec.BindingTarget != "" {
+		path, found, err := ExecutableBinding(spec.BindingTarget)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			resolved, err := ResolveDesktopApplication(path)
+			if err != nil {
+				return nil, err
+			}
+			return []string{resolved}, nil
+		}
+	}
+	return platformDesktopApplications(spec), nil
+}
+
 func ResolveDesktopApplication(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {

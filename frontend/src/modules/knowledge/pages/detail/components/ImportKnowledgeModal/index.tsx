@@ -1,4 +1,5 @@
 import { Alert, Button, Form, message, Modal } from "antd";
+import { useRAGComponent } from "@/modules/modelProvider/contexts/RAGComponentContext";
 import { useTranslation } from "react-i18next";
 import {
   forwardRef,
@@ -48,6 +49,7 @@ export interface ImportTaskRef {
 }
 
 interface IProps {
+  storageOnly?: boolean;
   onOk: (payload?: { pId?: string; tasks?: ImportTaskRef[] }) => void;
   onParsingStart?: () => void;
   onParsingSettled?: () => void;
@@ -64,6 +66,8 @@ const InitData = {
 
 const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
   const { t } = useTranslation();
+  const { availability } = useRAGComponent();
+  const storageOnly = availability !== "ready" || props.storageOnly === true;
   const [data, setData] = useState<IData>(InitData);
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -151,14 +155,16 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
     try {
       const controller = new AbortController();
       runtimeWaitAbortRef.current = controller;
-      await waitForRuntimeCapability("parser", {
+      if (!storageOnly) await waitForRuntimeCapability("parser", {
         signal: controller.signal,
         onWaiting: () => setRuntimeWaiting(true),
       });
       setRuntimeWaiting(false);
 
       const tasks = await submitWithHashReuse(fileItems, values.tags, startMode);
-      message.success(t("knowledge.uploadCompleteParsingStarted"));
+      message.success(props.storageOnly ? "文件已保留在知识库内，未解析、未建立索引"
+        : availability !== "ready" ? "原文件、解析文本和基础切片已保存；组件及模型就绪后将自动建立索引"
+        : t("knowledge.uploadCompleteParsingStarted"));
       handleClose();
       onOk({ pId: data.p_id, tasks });
     } catch (err) {
@@ -257,7 +263,7 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
             onClick={() => form.submit()}
             style={{ marginLeft: 16 }}
           >
-            {isOnlyRead
+            {storageOnly ? "上传并保存" : isOnlyRead
               ? t("knowledge.uploadKnowledgeFile")
               : t("knowledge.parseAndImport")}
           </Button>
@@ -265,10 +271,15 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
       }
     >
       {importError && <Alert type="error" showIcon message={importError} style={{ marginBottom: 16, whiteSpace: "pre-wrap" }} />}
+      {storageOnly && (
+        <Alert type="info" showIcon style={{ marginBottom: 16 }}
+          message={props.storageOnly ? "文件将保留在知识库内，仅保存原文件，不解析、不建立索引。"
+            : "无需安装 RAG 即可保存解析文本和基础切片。安装组件并配置 embedding 后自动建立索引；扫描件需要 OCR。"} />
+      )}
       {loading && (
         <Alert
           message={
-            runtimeWaiting
+            storageOnly ? "正在上传并保存文件，请勿关闭页面" : runtimeWaiting
               ? t("runtime.aiServiceInitializingDocument")
               : t("knowledge.documentParsingKeepTabOpen")
           }
@@ -343,7 +354,7 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
                       )}
                       {t("knowledge.uploadLimitHint")}
                       <br />
-                      {t("knowledge.scannedPdfHint")}
+                      {!storageOnly && t("knowledge.scannedPdfHint")}
                     </>
                   }
                 />

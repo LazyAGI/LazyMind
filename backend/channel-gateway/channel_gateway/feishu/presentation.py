@@ -4,8 +4,6 @@ import re
 from dataclasses import replace
 from typing import Any
 
-from lark_channel import new_card
-
 from channel_gateway.common.domain.channel import (
     ClaimedOutbound,
     sanitize_channel_text,
@@ -459,6 +457,8 @@ class FeishuPresentationRenderer:
         omitted_image_count: int,
     ) -> dict[str, Any]:
         """Render the task state reported by Core without inferring a workflow."""
+        from lark_channel import new_card
+
         status = str(task.get('status') or 'pending')
         status_label, template = _task_status(status)
         title = presentable_feishu_text(
@@ -521,6 +521,8 @@ class FeishuPresentationRenderer:
 
     @staticmethod
     def task_replaced_card() -> dict[str, Any]:
+        from lark_channel import new_card
+
         return (
             new_card()
             .config(wide_screen_mode=True)

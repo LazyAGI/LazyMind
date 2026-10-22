@@ -48,6 +48,7 @@ from channel_gateway.feishu.runtime import FeishuRuntime
 from channel_gateway.feishu.accounts import FeishuAccountService
 from channel_gateway.feishu.task_monitor import FeishuTaskCardMonitor
 from channel_gateway.wechat.client import WeChatClient
+from channel_gateway.wechat.connection_probe import WeChatConnectionProbe
 from channel_gateway.wechat.domain import (
     WeChatAddressFactory,
     WeChatConfig,
@@ -212,12 +213,16 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
         resolved_settings.wechat_poll_timeout_seconds,
     )
     wechat_credentials = WeChatCredentialStore(store, cipher)
+    wechat_connection_probe = WeChatConnectionProbe(
+        store=store, credentials=wechat_credentials, client=wechat_client, core=lazymind,
+    )
     runtime = WeChatRuntime(
         config=wechat_config,
         store=store,
         credentials=wechat_credentials,
         client=wechat_client,
         addresses=WeChatAddressFactory(),
+        connection_probe=wechat_connection_probe,
     )
     wechat_connections = WeChatConnectionService(
         config=wechat_config,
@@ -226,6 +231,7 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
         client=wechat_client,
         on_account_connected=runtime.restart_account,
         on_account_disconnected=runtime.stop_account,
+        connection_probe=wechat_connection_probe,
     )
     feishu_credentials = FeishuCredentialStore(
         store=store,
@@ -323,7 +329,8 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
         messages=messages,
         streams=providers,
     )
-    notifications = NotificationService(store, lazymind, feishu_accounts, wecom)
+    notifications = NotificationService(store, lazymind, feishu_accounts, wecom,
+                                        wechat_probe=wechat_connection_probe)
     delivery_worker = DeliveryWorker(
         store=store,
         providers=providers,

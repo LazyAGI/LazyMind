@@ -15,6 +15,7 @@ import { isLocalSessionEnabled } from "@/runtime/localSession";
 import { isVocabularyEnabled } from "@/runtime/mode";
 import UserAgreementPage from "@/pages/UserAgreementPage";
 import SettingsPage from "@/modules/settings";
+import { RAGComponentProvider } from "@/modules/modelProvider/contexts/RAGComponentContext";
 
 const McpOAuthConnect = lazy(() => import("@/modules/modelProvider/pages/McpOAuthConnect"));
 const McpOAuthCallback = lazy(() => import("@/modules/modelProvider/pages/McpOAuthCallback"));
@@ -157,7 +158,14 @@ export default function AppRouter() {
           }
         />
         <Route path="/workflow-runs/:sessionId/embed" element={<WorkflowRunPage embedded />} />
-        <Route path="/" element={<MainLayout />}>
+        <Route
+          path="/"
+          element={(
+            <RAGComponentProvider>
+              <MainLayout />
+            </RAGComponentProvider>
+          )}
+        >
           <Route path="workflow-runs/:sessionId" element={<WorkflowRunPage />} />
           <Route index element={<Navigate to="/agent/chat" replace />} />
           <Route path="agent/chat" element={<ChatApp />}>

@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ConfigProvider } from "antd";
 
 import { createInstance } from "i18next";
 import zhCN from "@/i18n/locales/zh-CN";
@@ -49,7 +50,10 @@ vi.mock("./externalCapabilitiesApi", () => ({
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, options?: { defaultValue?: string; agent?: string; count?: number }) => {
-      if (key === "agentIntegration.retryDisconnection") return retryI18n.t(key);
+      if (key === "agentIntegration.retryDisconnection" || key.startsWith("agentIntegration.workbuddyInstallGuide.") || key.startsWith("agentIntegration.workbuddyErrors.") || key.startsWith("agentIntegration.loginStates.") ||
+        key.startsWith("agentIntegration.cliSources.") || ["agentIntegration.selectedCLI", "agentIntegration.reselectCLI"].includes(key)) {
+        return retryI18n.t(key);
+      }
       const agent = options?.agent || "Agent";
       const values: Record<string, string> = {
         "common.refresh": "刷新",
@@ -114,6 +118,9 @@ vi.mock("react-i18next", () => ({
         "agentIntegration.checkAgain": "重新检测",
         "agentIntegration.login": "登录",
         "agentIntegration.openLoginTerminal": "打开登录终端",
+        "agentIntegration.workbuddyModeTitle": "WorkBuddy 使用 LazyMind",
+        "agentIntegration.workbuddyModeDescription": "允许 WorkBuddy 调用 LazyMind",
+        "agentIntegration.workbuddyRestartHint": "启用时将重启 WorkBuddy",
         "agentIntegration.openWorkBuddy": "打开 WorkBuddy 登录",
         "agentIntegration.workbuddyRuntimeReady": "已自动识别 WorkBuddy 执行能力",
         "agentIntegration.workbuddyRuntimeMissing": "未找到 WorkBuddy 执行能力",
@@ -209,6 +216,7 @@ function expandAgent(id: string) {
 }
 
 describe("AgentIntegrationPage", () => {
+  afterEach(() => { vi.useRealTimers(); });
   beforeEach(async () => {
     await retryI18n.init({
       lng: "zh-CN", fallbackLng: false,
@@ -598,7 +606,153 @@ describe("AgentIntegrationPage", () => {
       installed: true, host_online: true, available: true, unavailable_reason: "",
     }] } } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: /reload刷新/ })));
-    await waitFor(() => expect(within(workbuddy).getByText("已自动复用 WorkBuddy 登录")).toBeInTheDocument());
+    await waitFor(() => expect(within(workbuddy).getByRole("switch", { name: "LazyMind 调用 WorkBuddy" })).toBeChecked());
+    expect(within(workbuddy).getByText("已自动复用 WorkBuddy 登录")).toBeInTheDocument();
+    expect(within(workbuddy).getByRole("switch", { name: "WorkBuddy 使用 LazyMind" })).toBeChecked();
+    expect(within(workbuddy).getByRole("switch", { name: "LazyMind 调用 WorkBuddy" })).toBeChecked();
+    expect(within(workbuddy).queryByText("启用时将重启 WorkBuddy")).not.toBeInTheDocument();
+    expect(within(workbuddy).getByText("已自动复用 WorkBuddy 登录")).toBeInTheDocument();
+  });
+
+  it.each([true, false])("requires confirmation before restarting WorkBuddy (expanded: %s)", async (expanded) => {
+    const status = { agent: "workbuddy", display_name: "WorkBuddy", state: "ready",
+      requirements: [{ id: "workbuddy_desktop", satisfied: true }, { id: "workbuddy_desktop_initialized", satisfied: true }] };
+    const installed = { ...status, state: "enabled", connection: { mcp_configured: true, control_ready: true, mcp_trusted: false, mcp_enabled: true, presentation_status: "mounted" } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: status } });
+    mocks.executors.mockResolvedValue({ data: { data: { executors: [{ id: "workbuddy", installed: true, host_online: true, available: true }] } } });
+    mocks.executorPolicies.mockResolvedValue({ ok: true, data: { workbuddy: { provider: "workbuddy", enabled: false, installed: true, ready: true } } });
+    mocks.action.mockResolvedValue({ ok: true, data: installed });
+    render(<ConfigProvider theme={{ token: { motion: false } }}><AgentIntegrationPage /></ConfigProvider>);
+    await waitFor(() => expect(screen.getByTestId("agent-panel-workbuddy")).toHaveTextContent("已安装"));
+    const card = expanded ? expandAgent("workbuddy") : screen.getByTestId("agent-panel-workbuddy");
+    fireEvent.click(within(card).getByRole("switch", { name: "WorkBuddy 使用 LazyMind" }));
+    let dialog = await screen.findByRole("dialog");
+    expect(mocks.action).not.toHaveBeenCalled();
+    expect(dialog).toHaveTextContent("即将重启 WorkBuddy，请先保存会话并结束运行中的任务。");
+    fireEvent.click(within(dialog).getByRole("button", { name: /取\s*消/ }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mocks.action).not.toHaveBeenCalled();
+    fireEvent.click(within(card).getByRole("switch", { name: "WorkBuddy 使用 LazyMind" }));
+    dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "已保存，继续" }));
+    await within(dialog).findByText("组件安装成功");
+    expect(mocks.action).toHaveBeenCalledTimes(1);
+    expect(mocks.action).toHaveBeenCalledWith("workbuddy", "connect");
+    fireEvent.click(within(dialog).getByRole("button", { name: "下一步：首次信任" }));
+    expect(within(dialog).getByRole("img", { name: /首次连接的信任按钮/ })).toHaveAttribute("src", "/installation-guides/workbuddy/trust.png");
+    fireEvent.click(within(dialog).getByRole("button", { name: "已信任或无需信任，继续" }));
+    expect(within(dialog).getByRole("img", { name: /开启位置/ })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "我已确认开启" }));
+    mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: installed } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "检查设置" }));
+    await within(dialog).findByText("设置尚未完成");
+    expect(within(dialog).queryByText("设置完成")).not.toBeInTheDocument();
+    mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: { ...installed, connection: { ...installed.connection, mcp_trusted: true, mcp_enabled: true } } } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "重新检查" }));
+    await within(dialog).findByText("设置完成");
+    fireEvent.click(within(dialog).getByRole("button", { name: /完\s*成/ }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expandAgent("workbuddy");
+    fireEvent.click(within(card).getByRole("button", { name: /安装引导/ }));
+    dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("组件安装成功");
+    expect(mocks.action).toHaveBeenCalledTimes(1);
+    expect(card).not.toHaveTextContent(/待完成信任|继续设置/);
+  });
+
+  it.each(["zh-CN", "en-US"])("checks WorkBuddy setup independently of live sessions (%s)", async (language) => {
+    await retryI18n.changeLanguage(language);
+    const tr = (key: string) => retryI18n.t(`agentIntegration.workbuddyInstallGuide.${key}`);
+    const status = { agent: "workbuddy", display_name: "WorkBuddy", state: "enabled",
+      requirements: [{ id: "workbuddy_desktop", satisfied: true }, { id: "workbuddy_desktop_initialized", satisfied: true }],
+      connection: { mcp_configured: true, mcp_trusted: false, mcp_enabled: false, control_ready: false, presentation_status: "host-offline" } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: status } });
+    render(<ConfigProvider theme={{ token: { motion: false } }}><AgentIntegrationPage /></ConfigProvider>);
+    const card = expandAgent("workbuddy");
+    fireEvent.click(await within(card).findByRole("button", { name: new RegExp(tr("entry")) }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: tr("next") }));
+    expect(dialog).toHaveTextContent(tr("trustDescription"));
+    fireEvent.click(within(dialog).getByRole("button", { name: tr("trustConfirmation") }));
+    fireEvent.click(within(dialog).getByRole("button", { name: tr("enabledConfirmation") }));
+    fireEvent.click(within(dialog).getByRole("button", { name: tr("check") }));
+    await within(dialog).findByText(tr("trustRequiredDescription"));
+    mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: { ...status, connection: { ...status.connection, mcp_trusted: true } } } });
+    fireEvent.click(within(dialog).getByRole("button", { name: tr("retryCheck") }));
+    await within(dialog).findByText(tr("enableRequiredDescription"));
+    mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: { ...status, connection: { ...status.connection, mcp_trusted: true, mcp_enabled: true } } } });
+    fireEvent.click(within(dialog).getByRole("button", { name: tr("retryCheck") }));
+    await within(dialog).findByText(tr("successTitle"));
+    expect(dialog).toHaveTextContent(tr("controlUnavailableTitle"));
+    expect(dialog).not.toHaveTextContent(tr("notReadyTitle"));
+    expect(mocks.action).not.toHaveBeenCalled();
+  });
+
+  it.each(["zh-CN", "en-US"])("keeps installation failure in the guide (%s)", async (language) => {
+    await retryI18n.changeLanguage(language);
+    const tr = (key: string) => retryI18n.t(`agentIntegration.workbuddyInstallGuide.${key}`);
+    const status = { agent: "workbuddy", display_name: "WorkBuddy", state: "ready", requirements: [{ id: "workbuddy_desktop", satisfied: true }, { id: "workbuddy_desktop_initialized", satisfied: true }] };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: status } });
+    mocks.action.mockResolvedValue({ ok: true, data: { ...status, state: "error", message: "Installation failed" } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent("workbuddy");
+    const toggle = await within(card).findByRole("switch", { name: "WorkBuddy 使用 LazyMind" });
+    fireEvent.click(toggle);
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent(tr("saveDescription"));
+    fireEvent.click(within(dialog).getByRole("button", { name: tr("saveAndContinue") }));
+    await within(dialog).findByText(tr("installFailedTitle"));
+    expect(dialog).toHaveTextContent("Installation failed");
+    expect(within(dialog).queryByText(tr("installedTitle"))).not.toBeInTheDocument();
+    expect(await within(dialog).findByRole("button", { name: tr("retryInstall") })).toBeEnabled();
+  });
+
+  it.each(["zh-CN", "en-US"])("explains WB version and capability failures and keeps cleanup available (%s)", async (language) => {
+    await retryI18n.changeLanguage(language);
+    const tr = (key: string) => retryI18n.t(`agentIntegration.workbuddyInstallGuide.${key}`);
+    const status = { agent: "workbuddy", display_name: "WorkBuddy", state: "ready", requirements: [{ id: "workbuddy_desktop", satisfied: true }, { id: "workbuddy_desktop_initialized", satisfied: true }] };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: status } });
+    mocks.action.mockResolvedValue({ ok: true, data: { ...status, state: "error", can_disconnect: true, issue: { code: "unsupported_version" }, message: "raw preflight details" } });
+    render(<ConfigProvider theme={{ token: { motion: false } }}><AgentIntegrationPage /></ConfigProvider>);
+    const card = expandAgent("workbuddy");
+    fireEvent.click(await within(card).findByRole("switch", { name: "WorkBuddy 使用 LazyMind" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: tr("saveAndContinue") }));
+    await within(dialog).findByText(retryI18n.t("agentIntegration.workbuddyErrors.unsupported_version"));
+    expect(dialog).not.toHaveTextContent("raw preflight details");
+    mocks.action.mockResolvedValue({ ok: true, data: { ...status, state: "error", can_disconnect: true, issue: { code: "capability_unavailable" }, message: "raw SDK details" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: tr("retryInstall") }));
+    await within(dialog).findByText(retryI18n.t("agentIntegration.workbuddyErrors.capability_unavailable"));
+    expect(dialog).not.toHaveTextContent("raw SDK details");
+    expect(dialog).not.toHaveTextContent("5.8.3");
+    fireEvent.click(within(dialog).getByRole("button", { name: tr("later") }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    const toggle = within(card).getByRole("switch", { name: "WorkBuddy 使用 LazyMind" });
+    expect(toggle).toBeEnabled();
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(toggle);
+    await waitFor(() => expect(mocks.action).toHaveBeenLastCalledWith("workbuddy", "disconnect"));
+  });
+
+  it.each([
+    { control_ready: true, presentation_status: "mounted", page_status: "loading" },
+    { control_ready: false, presentation_status: "host-offline" },
+  ])("keeps WorkBuddy runtime details out of setup: %j", async (connection) => {
+    const status = { agent: "workbuddy", display_name: "WorkBuddy", state: "enabled",
+      requirements: [{ id: "workbuddy_desktop", satisfied: true }, { id: "workbuddy_desktop_initialized", satisfied: true }],
+      connection: { mcp_configured: true, ...connection } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: status } });
+    mocks.executors.mockResolvedValue({ data: { data: { executors: [{ id: "workbuddy", installed: true, host_online: true, available: true }] } } });
+    mocks.executorPolicies.mockResolvedValue({ ok: true, data: { workbuddy: { provider: "workbuddy", enabled: false, installed: true, ready: true } } });
+    render(<AgentIntegrationPage />);
+    await screen.findByText("外部 Agent 集成");
+    const card = expandAgent("workbuddy");
+    const toggle = within(card).getByRole("switch", { name: "WorkBuddy 使用 LazyMind" });
+    expect(toggle).toBeChecked();
+    expect(toggle).not.toBeDisabled();
+    expect(card).not.toHaveTextContent(/待完成|修复连接|面板正在|会话控制|工作流工具|workbuddyConnection/);
+    expect(card.querySelector(".agent-integration-requirements")?.children).toHaveLength(2);
+    expect(mocks.action).not.toHaveBeenCalled();
   });
 
   it("retries a transient Assistant Bridge failure before showing an error", async () => {
@@ -898,6 +1052,190 @@ describe("AgentIntegrationPage", () => {
     await waitFor(() => expect(
       within(cursor).getByRole("switch", { name: "Cursor 桌面版 使用 LazyMind MCP" }),
     ).toBeChecked());
+  });
+
+  it.each([
+    ["failed", "登录失败"],
+    ["cancelled", "登录已取消"],
+    ["succeeded", "登录已完成"],
+  ])("shows %s login independently of enabled MCP configuration", async (state, label) => {
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: {
+      ...readyCodexStatus, state: "enabled", login: { state, message: "Login operation detail" },
+    } } });
+    render(<AgentIntegrationPage />);
+    const panel = await screen.findByTestId("agent-panel-codex");
+    expect(await within(panel).findByText(label)).toBeInTheDocument();
+    expect(within(panel).getByText("Login operation detail")).toBeInTheDocument();
+    expect(within(panel).getByRole("switch", { name: "Codex 桌面端 使用 LazyMind MCP" })).toBeChecked();
+    fireEvent.click(panel.querySelector<HTMLButtonElement>(".agent-integration-card-toggle")!);
+    expect(within(panel).getByText(label)).toBeInTheDocument();
+  });
+
+  it.each(["failed", "cancelled", "succeeded"])("stops polling when login is %s even when the executor is disabled", async (state) => {
+    mocks.executorPolicies.mockResolvedValue({ ok: true, data: { codex: {
+      provider: "codex", enabled: false, installed: true, ready: false,
+      unavailable_reason: "Codex CLI is not signed in",
+    } } });
+    mocks.action.mockResolvedValue({ ok: true, data: {
+      ...readyCodexStatus, login: { state: "running" },
+    } });
+    render(<AgentIntegrationPage />);
+    const panel = await screen.findByTestId("agent-panel-codex");
+    const login = await within(panel).findByRole("button", { name: /登录/ });
+    await waitFor(() => expect(screen.getByRole("button", { name: /刷\s*新/ })).toBeEnabled());
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.click(login); });
+    expect(within(panel).getByText("正在登录")).toBeInTheDocument();
+    expect(login).toBeDisabled();
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: {
+      ...readyCodexStatus, login: { state, message: "Terminal result" },
+    } } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(within(panel).getByText("Terminal result")).toBeInTheDocument();
+    const calls = mocks.statuses.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(180_000); });
+    expect(mocks.statuses).toHaveBeenCalledTimes(calls);
+    expect(login).toBeEnabled();
+  });
+
+  it("ignores an older terminal status response after login retry starts", async () => {
+    const previous = { ...readyCodexStatus, login: { state: "failed", message: "Previous failure" } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: previous } });
+    mocks.executorPolicies.mockResolvedValue({ ok: true, data: { codex: {
+      provider: "codex", enabled: false, installed: true, ready: false,
+      unavailable_reason: "Codex CLI is not signed in",
+    } } });
+    mocks.action.mockResolvedValue({ ok: true, data: { ...readyCodexStatus, login: { state: "running" } } });
+    render(<AgentIntegrationPage />);
+    const panel = await screen.findByTestId("agent-panel-codex");
+    const login = await within(panel).findByRole("button", { name: /登录/ });
+    const refreshButton = screen.getByRole("button", { name: /刷\s*新/ });
+    await waitFor(() => expect(refreshButton).toBeEnabled());
+    let finishOldRefresh!: (value: unknown) => void;
+    mocks.statuses.mockImplementationOnce(() => new Promise(resolve => { finishOldRefresh = resolve; }));
+    fireEvent.click(refreshButton);
+    await waitFor(() => expect(refreshButton).toBeDisabled());
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.click(login); });
+    expect(within(panel).getByText("正在登录")).toBeInTheDocument();
+    await act(async () => { finishOldRefresh({ ok: true, data: { codex: previous } }); });
+    expect(within(panel).queryByText("Previous failure")).not.toBeInTheDocument();
+    expect(within(panel).getByText("正在登录")).toBeInTheDocument();
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: {
+      ...readyCodexStatus, login: { state: "succeeded" },
+    } } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(within(panel).getByText("登录已完成")).toBeInTheDocument();
+  });
+
+  it("does not restore an older login failure after binding another CLI", async () => {
+    const previous = { ...readyCodexStatus, login: { state: "failed", message: "Previous binding failure" } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: previous } });
+    mocks.selectExecutable.mockResolvedValue("/new/codex");
+    mocks.bind.mockResolvedValue({ ok: true, data: { target: "codex-cli", configured: true } });
+    render(<AgentIntegrationPage />);
+    const panel = await screen.findByTestId("agent-panel-codex");
+    const refreshButton = screen.getByRole("button", { name: /刷\s*新/ });
+    await waitFor(() => expect(refreshButton).toBeEnabled());
+    let finishOldRefresh!: (value: unknown) => void;
+    mocks.statuses.mockImplementationOnce(() => new Promise(resolve => { finishOldRefresh = resolve; }));
+    fireEvent.click(refreshButton);
+    await waitFor(() => expect(refreshButton).toBeDisabled());
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: readyCodexStatus } });
+    mocks.executorPolicies.mockResolvedValue({ ok: true, data: { codex: {
+      provider: "codex", enabled: false, installed: true, ready: true, cli_path: "/new/codex", cli_source: "explicit",
+    } } });
+    await act(async () => { fireEvent.click(within(panel).getByRole("button", { name: /重新选择 CLI/ })); });
+    await act(async () => { finishOldRefresh({ ok: true, data: { codex: previous } }); });
+    expect(within(panel).queryByText("Previous binding failure")).not.toBeInTheDocument();
+    expect(await within(panel).findByText("/new/codex")).toBeInTheDocument();
+    expect(refreshButton).toBeEnabled();
+  });
+
+  it("resumes polling when returning to a login that is already running", async () => {
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: {
+      ...readyCodexStatus, login: { state: "running" },
+    } } });
+    vi.useFakeTimers();
+    await act(async () => { render(<AgentIntegrationPage />); });
+    const panel = screen.getByTestId("agent-panel-codex");
+    expect(within(panel).getByText("正在登录")).toBeInTheDocument();
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: {
+      ...readyCodexStatus, login: { state: "failed", message: "Login completed after navigation" },
+    } } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(within(panel).getByText("Login completed after navigation")).toBeInTheDocument();
+  });
+
+  it("keeps polling a running login after the initial recheck window", async () => {
+    mocks.executorPolicies.mockResolvedValue({ ok: true, data: { codex: {
+      provider: "codex", enabled: false, installed: true, ready: false,
+      unavailable_reason: "Codex CLI is not signed in",
+    } } });
+    const running = { ...readyCodexStatus, login: { state: "running" } };
+    mocks.action.mockResolvedValue({ ok: true, data: running });
+    render(<AgentIntegrationPage />);
+    const panel = await screen.findByTestId("agent-panel-codex");
+    const login = await within(panel).findByRole("button", { name: /登录/ });
+    await waitFor(() => expect(screen.getByRole("button", { name: /刷\s*新/ })).toBeEnabled());
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: running } });
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.click(login); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(130_000); });
+    const calls = mocks.statuses.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(mocks.statuses.mock.calls.length).toBeGreaterThan(calls);
+  });
+
+  it("retries failed login without retaining the previous failure", async () => {
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: {
+      ...readyCodexStatus, login: { state: "failed", message: "Previous login failure" },
+    } } });
+    mocks.executorPolicies.mockResolvedValue({ ok: true, data: { codex: {
+      provider: "codex", enabled: false, installed: true, ready: false,
+      unavailable_reason: "Codex CLI is not signed in",
+    } } });
+    mocks.action.mockResolvedValue({ ok: true, data: {
+      ...readyCodexStatus, login: { state: "running" },
+    } });
+    render(<AgentIntegrationPage />);
+    const panel = await screen.findByTestId("agent-panel-codex");
+    expect(await within(panel).findByText("Previous login failure")).toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole("button", { name: /登录/ }));
+    expect(await within(panel).findByText("正在登录")).toBeInTheDocument();
+    expect(within(panel).queryByText("Previous login failure")).not.toBeInTheDocument();
+  });
+
+  it("shows the selected CLI and lets users replace a detected but broken executable", async () => {
+    mocks.executorPolicies.mockResolvedValue({ ok: true, data: { codex: {
+      provider: "codex", enabled: false, installed: true, ready: false,
+      unavailable_reason: "Codex CLI failed to start: missing native dependency",
+      cli_path: "/broken/bin/codex", cli_source: "path",
+    } } });
+    mocks.selectExecutable.mockResolvedValue("/Applications/ChatGPT.app/Contents/Resources/codex");
+    let completeBinding!: (result: unknown) => void;
+    mocks.bind.mockImplementation(() => new Promise(resolve => { completeBinding = resolve; }));
+    render(<AgentIntegrationPage />);
+    const panel = await screen.findByTestId("agent-panel-codex");
+    expect(await within(panel).findByText("/broken/bin/codex")).toBeInTheDocument();
+    expect(within(panel).getByText("系统 PATH")).toBeInTheDocument();
+    expect(within(panel).getByText("Codex CLI failed to start: missing native dependency")).toBeInTheDocument();
+    fireEvent.click(panel.querySelector<HTMLButtonElement>(".agent-integration-card-toggle")!);
+    expect(within(panel).queryByText("CLI 未登录")).not.toBeInTheDocument();
+    expect(within(panel).getByText("登录状态检测失败")).toBeInTheDocument();
+    fireEvent.click(panel.querySelector<HTMLButtonElement>(".agent-integration-card-toggle")!);
+    const reselect = within(panel).getByRole("button", { name: /重新选择 CLI/ });
+    fireEvent.click(reselect);
+    await waitFor(() => expect(reselect).toBeDisabled());
+    expect(mocks.bind).toHaveBeenCalledWith("codex-cli", "/Applications/ChatGPT.app/Contents/Resources/codex");
+    mocks.executorPolicies.mockResolvedValue({ ok: true, data: { codex: {
+      provider: "codex", enabled: false, installed: true, ready: true,
+      cli_path: "/Applications/ChatGPT.app/Contents/Resources/codex", cli_source: "explicit",
+    } } });
+    await act(async () => { completeBinding({ ok: true, data: { target: "codex-cli", configured: true } }); });
+    expect(await within(panel).findByText("/Applications/ChatGPT.app/Contents/Resources/codex")).toBeInTheDocument();
+    expect(within(panel).getByText("手动指定")).toBeInTheDocument();
+    expect(reselect).toBeEnabled();
   });
 
   it("supports explicit CLI location without making it a separate permanent panel", async () => {

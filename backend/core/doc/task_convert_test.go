@@ -155,7 +155,7 @@ func TestParsePathForIngestionMacroPresentationSelfHostedMineru(t *testing.T) {
 	}
 }
 
-func TestLocalParseProfileOfficeWithOCRUsesFallbackForUnsupportedRawOffice(t *testing.T) {
+func TestLocalParseProfileOfficeWithOCRUsesNativeReader(t *testing.T) {
 	d := documentExt{
 		StoredPath:       "/data/demo.docx",
 		ParseStoredPath:  "/data/demo.pdf",
@@ -167,11 +167,41 @@ func TestLocalParseProfileOfficeWithOCRUsesFallbackForUnsupportedRawOffice(t *te
 		{"ocr_type": "mineru", "ocr_url": "http://local-mineru:8000/api/v1/pdf_parse"},
 		{"ocr_type": "paddleocr", "ocr_url": "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"},
 	} {
-		if got := needsOfficeConvertBeforeParse(d, cfg, documentParseProfileLocal); !got {
-			t.Fatalf("needsOfficeConvertBeforeParse() = false for cfg %#v, want true", cfg)
+		if got := needsOfficeConvertBeforeParse(d, cfg, documentParseProfileLocal); got {
+			t.Fatalf("needsOfficeConvertBeforeParse() = true for cfg %#v, want false", cfg)
 		}
-		if got := parsePathForIngestion(d, cfg, documentParseProfileLocal); got != "/data/demo.pdf" {
-			t.Fatalf("parsePathForIngestion() = %q, want converted pdf path", got)
+		if got := parsePathForIngestion(d, cfg, documentParseProfileLocal); got != "/data/demo.docx" {
+			t.Fatalf("parsePathForIngestion() = %q, want original docx path", got)
+		}
+	}
+}
+
+func TestDesktopOfficeDirectParseClearsLegacyConversionState(t *testing.T) {
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+	t.Setenv(documentParseProfileEnv, "cloud")
+	if resolveDocumentParseProfile() != documentParseProfileLocal {
+		t.Fatal("desktop must use native Office readers")
+	}
+	for _, suffix := range []string{".docx", ".pptx"} {
+		fresh := newDocumentExt("/data/new"+suffix, "new"+suffix, "new"+suffix, 100, "", "", nil)
+		if fresh.ConvertRequired || fresh.ConvertStatus != ConvertStatusNone {
+			t.Fatalf("desktop upload must not queue conversion: %#v", fresh)
+		}
+		d := documentExt{
+			StoredPath: "/data/demo" + suffix, ConvertRequired: true,
+			ConvertStatus: ConvertStatusFailed, ConvertError: "missing office",
+			ParseStoredPath: "/data/demo.pdf", ParseStoredName: "demo.pdf",
+			ParseContentType: "application/pdf", ParseFileSize: 100,
+		}
+		if !normalizeLocalOfficeDirectParse(&d, documentParseProfileLocal) {
+			t.Fatal("expected legacy conversion state to change")
+		}
+		if d.ConvertRequired || d.ConvertStatus != ConvertStatusNone || d.ConvertError != "" ||
+			d.ParseStoredPath != "" || d.ParseStoredName != "" || d.ParseContentType != "" || d.ParseFileSize != 0 {
+			t.Fatalf("stale conversion state: %#v", d)
+		}
+		if normalizeLocalOfficeDirectParse(&d, documentParseProfileLocal) {
+			t.Fatal("normalization must be idempotent")
 		}
 	}
 }

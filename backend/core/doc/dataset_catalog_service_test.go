@@ -64,6 +64,24 @@ func TestDatasetCatalogServiceListFiltersStatsAndPaginates(t *testing.T) {
 	}
 }
 
+func TestDatasetCatalogServiceListRetainsKnowledgeBasesWhenRAGIsInactive(t *testing.T) {
+	t.Setenv("LAZYMIND_RAG_ENABLED", "0")
+	db := newDocumentTestDB(t)
+	service := mustDatasetCatalogService(t, db.DB)
+	seedDatasetCatalogDataset(t, db, "ds-hidden", "user-1", "Hidden", "", nil, time.Now())
+
+	result, err := service.ListDatasets(context.Background(), DatasetListRequest{
+		UserID: "user-1",
+		Limit:  20,
+	})
+	if err != nil {
+		t.Fatalf("ListDatasets returned error: %v", err)
+	}
+	if len(result.Datasets) != 1 || result.TotalSize != 1 || result.HasMore {
+		t.Fatalf("result = %#v, want the retained knowledge-base catalog", result)
+	}
+}
+
 func TestDatasetCatalogServiceListDatasetUsageOrders(t *testing.T) {
 	db := newDocumentTestDB(t)
 	if err := db.AutoMigrate(&orm.DatasetUserState{}); err != nil {

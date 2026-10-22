@@ -62,9 +62,9 @@ func (s *Server) handleWorkflowHostBind(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "run_id and driver_session_id are required"})
 		return
 	}
-	cancellation := "session"
-	if pair.Provider == "codex" {
-		cancellation = "none"
+	cancellation := "none"
+	if pair.Provider == workflowhost.DSHProvider || pair.Provider == "workbuddy" {
+		cancellation = "session"
 	}
 	relayWorkflowHost(w, r, api, http.MethodPost, "/workflow-sessions/"+url.PathEscape(input.RunID)+"/host-binding", map[string]any{
 		"connector_id": pair.ConnectorID, "credential": pair.Token, "provider": pair.Provider,

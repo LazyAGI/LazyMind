@@ -52,6 +52,9 @@ func newDocumentExt(storedPath, storedName, originalFilename string, fileSize in
 		normalizeSpreadsheetDirectParse(&d)
 		return d
 	}
+	if normalizeLocalOfficeDirectParse(&d, resolveDocumentParseProfile()) {
+		return d
+	}
 	if isOfficeDocument(storedPath, contentType, originalFilename) {
 		d.ConvertRequired = true
 		d.ConvertStatus = ConvertStatusPending
@@ -119,6 +122,25 @@ func normalizeSpreadsheetDirectParse(d *documentExt) bool {
 	if d == nil || !isSpreadsheetDocument(d.StoredPath, d.ContentType, d.OriginalFilename) {
 		return false
 	}
+	return clearOfficeConversionState(d)
+}
+
+func isNativeOfficeDocument(d documentExt) bool {
+	switch strings.ToLower(filepath.Ext(d.StoredPath)) {
+	case ".docx", ".pptx":
+		return true
+	}
+	return false
+}
+
+func normalizeLocalOfficeDirectParse(d *documentExt, profile documentParseProfile) bool {
+	if d == nil || profile != documentParseProfileLocal || !isNativeOfficeDocument(*d) {
+		return false
+	}
+	return clearOfficeConversionState(d)
+}
+
+func clearOfficeConversionState(d *documentExt) bool {
 	changed := d.ConvertRequired || d.ConvertStatus != ConvertStatusNone ||
 		d.ConvertError != "" || d.ConvertProvider != "" || d.ParseStoredPath != "" ||
 		d.ParseStoredName != "" || d.ParseContentType != "" || d.ParseFileSize != 0
@@ -209,6 +231,10 @@ func isOfficialMinerU(ocrConfig map[string]any) bool {
 }
 
 func resolveDocumentParseProfile() documentParseProfile {
+	// Desktop never relies on a separately installed Office converter.
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")), "local") {
+		return documentParseProfileLocal
+	}
 	raw := strings.TrimSpace(os.Getenv(documentParseProfileEnv))
 	profile, ok := normalizeDocumentParseProfile(raw)
 	if !ok {
@@ -231,7 +257,7 @@ func normalizeDocumentParseProfile(raw string) (documentParseProfile, bool) {
 func documentParseStrategyName(profile documentParseProfile) string {
 	switch profile {
 	case documentParseProfileLocal:
-		return "ocr-first-with-local-office-fallback"
+		return "native-office-readers"
 	default:
 		return "office-preconvert"
 	}
@@ -242,6 +268,9 @@ func documentParseStrategyName(profile documentParseProfile) string {
 // DynamicPDFReader can route them to MineruPPTReader. PPTM is converted to PDF because
 // the official MinerU upload API does not accept macro-enabled PowerPoint files.
 func needsOfficeConvertBeforeParse(d documentExt, ocrConfig map[string]any, profile documentParseProfile) bool {
+	if profile == documentParseProfileLocal && isNativeOfficeDocument(d) {
+		return false
+	}
 	if !d.ConvertRequired {
 		return false
 	}

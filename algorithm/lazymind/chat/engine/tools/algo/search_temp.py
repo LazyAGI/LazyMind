@@ -4,14 +4,21 @@ Does not call knowledge-base context expansion.
 """
 from __future__ import annotations
 
+from collections import OrderedDict
+from functools import lru_cache
+from threading import RLock
 from typing import Any, List, Optional
 
 from lazyllm import AutoModel
 from lazyllm.tools.rag import Reranker, TempDocRetriever
 
 from lazymind.chat.engine.tools.algo.kb_adaptive_topk import AdaptiveKComponent
+from lazymind.chat.engine.tools.temporary_retrieval_session import (
+    initialize_temporary_retrieval,
+    temporary_retrieval_scope,
+)
 from lazymind.config import EMBED_MAIN
-from lazymind.model_config import get_dynamic_role_slot_map, is_model_role_available
+from lazymind.model_config import get_dynamic_role_slot_map
 from lazymind.parsing.engine.transform import GeneralParser
 
 _TEMP_NODE_GROUP_NAME = 'block'
@@ -20,13 +27,18 @@ _TEMP_NODE_GROUP_SPLIT_BY = '\n'
 _RERANKER_MODULE = 'ModuleReranker'
 _RERANKER_MODEL = 'reranker'
 
-_vector_retriever: Optional[TempDocRetriever] = None
-_bm25_retriever: Optional[TempDocRetriever] = None
-_adaptive_k = AdaptiveKComponent(
-    bias=2, gap_tau=0.2,
-    get_token_len=lambda n: max(1, len(getattr(n, 'text', '') or '') // 4),
-    max_tokens=2048,
-)
+_MAX_CACHED_CONVERSATIONS = 32
+_session_retrievers: OrderedDict[str, TempDocRetriever] = OrderedDict()
+_session_lock = RLock()
+
+
+class _ConversationTempDocRetriever(TempDocRetriever):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # LazyLLM's class-level lru_cache is shared across all instances, and
+        # its destructor clears that cache. Give each conversation its own.
+        self._get_retrievers = lru_cache(maxsize=8)(self._get_retrievers_impl)
+        self.retrieval_lock = RLock()
 
 
 def _is_reranker_enabled() -> bool:
@@ -54,15 +66,16 @@ def _pass_through_rerank(nodes):
             node.relevance_score = (
                 getattr(node, 'score', None) or getattr(node, 'similarity_score', None) or 0.0
             )
-    return nodes
+    return sorted(nodes or [], key=lambda node: node.relevance_score, reverse=True)
 
 
 def embed_available() -> bool:
-    return is_model_role_available('embed_main')
+    """Whether this conversation chose embedding, not the current model setting."""
+    return initialize_temporary_retrieval()
 
 
 def _make_retriever(*, use_embed: bool) -> TempDocRetriever:
-    retriever = TempDocRetriever(embed=AutoModel(model=EMBED_MAIN) if use_embed else None)
+    retriever = _ConversationTempDocRetriever(embed=AutoModel(model=EMBED_MAIN) if use_embed else None)
     retriever.create_node_group(
         name=_TEMP_NODE_GROUP_NAME,
         transform=GeneralParser(
@@ -77,15 +90,16 @@ def _make_retriever(*, use_embed: bool) -> TempDocRetriever:
     return retriever
 
 
-def _ensure_retriever(*, use_embed: bool) -> TempDocRetriever:
-    global _vector_retriever, _bm25_retriever
-    if use_embed:
-        if _vector_retriever is None:
-            _vector_retriever = _make_retriever(use_embed=True)
-        return _vector_retriever
-    if _bm25_retriever is None:
-        _bm25_retriever = _make_retriever(use_embed=False)
-    return _bm25_retriever
+def _ensure_retriever() -> TempDocRetriever:
+    scope = temporary_retrieval_scope()
+    with _session_lock:
+        retriever = _session_retrievers.pop(scope, None)
+        if retriever is None:
+            retriever = _make_retriever(use_embed=embed_available())
+        _session_retrievers[scope] = retriever
+        if len(_session_retrievers) > _MAX_CACHED_CONVERSATIONS:
+            _session_retrievers.popitem(last=False)
+        return retriever
 
 
 def retrieve_temp_nodes(
@@ -98,8 +112,14 @@ def retrieve_temp_nodes(
 ) -> List[Any]:
     if not files or not str(query or '').strip():
         return []
-    retriever = _ensure_retriever(use_embed=embed_available())
-    reranker = _build_reranker()
-    nodes = retriever(files, query, topk=retriever_topk)
-    ranked = reranker(nodes, query=query, topk=rerank_topk) if reranker else _pass_through_rerank(nodes)
-    return _adaptive_k(ranked or [], k_max=k_max)
+    retriever = _ensure_retriever()
+    with retriever.retrieval_lock:
+        reranker = _build_reranker()
+        nodes = retriever(files, query, topk=retriever_topk)
+        ranked = reranker(nodes, query=query, topk=rerank_topk) if reranker else _pass_through_rerank(nodes)
+        adaptive_k = AdaptiveKComponent(
+            bias=2, gap_tau=0.2,
+            get_token_len=lambda n: max(1, len(getattr(n, 'text', '') or '') // 4),
+            max_tokens=2048,
+        )
+        return adaptive_k(ranked or [], k_max=k_max)

@@ -70,6 +70,7 @@ import {
   effectiveProcessingLevel,
   type ProcessingLevel,
 } from "@/modules/knowledge/utils/processingLevel";
+import { useRAGComponent } from "@/modules/modelProvider/contexts/RAGComponentContext";
 
 import "./index.scss";
 import PaperLibrary from "@/modules/knowledge/paper/PaperLibrary";
@@ -123,6 +124,13 @@ async function writeTextToClipboard(text: string) {
 
 const Detail = () => {
   const { t } = useTranslation();
+  const { availability: ragAvailability } = useRAGComponent();
+  const ragReady = ragAvailability === "ready";
+  const ragUnavailableReason = ragAvailability === "checking"
+    ? "正在检查本地知识库组件状态"
+    : ragAvailability === "error"
+      ? "无法确认本地知识库组件状态，请重试"
+      : "请先安装本地知识库组件，并重启本地服务";
   const knowledgeListRef = useRef<IKnowledgeListRef>(null);
   const createFolderRef = useRef<RenameModalRef>(null);
   const importKnowledgeRef = useRef<IImportKnowledgeModalRef>();
@@ -452,15 +460,16 @@ const Detail = () => {
   }
 
   const isDocumentParsingUnavailable = documentParsingEnabled !== true;
-  const importDisabled =
-    isDocumentParsingUnavailable ||
-    embeddingReady === false ||
-    multimodalEmbeddingReady === false;
-  const importDisabledReason = isDocumentParsingUnavailable
-    ? documentParsingEnabled === false
-      ? "文档解析已暂停，请在设置中重新启用"
-      : "正在读取文档解析状态"
-    : undefined;
+  const storageOnly = !ragReady || detail?.processing_level === "stored";
+  const importDisabled = ragAvailability === "checking" || ragAvailability === "error" ||
+    (!storageOnly && (isDocumentParsingUnavailable || embeddingReady === false || multimodalEmbeddingReady === false));
+  const importDisabledReason = ragAvailability === "checking" || ragAvailability === "error"
+    ? ragUnavailableReason
+    : !storageOnly && isDocumentParsingUnavailable
+      ? documentParsingEnabled === false
+        ? "文档解析已暂停，请在设置中重新启用"
+        : "正在读取文档解析状态"
+      : undefined;
   const showDataSourceSync = isDatasetCreatedByDataSource(
     detail as DatasetWithDataSourceFlag | undefined,
   );
@@ -515,6 +524,7 @@ const Detail = () => {
             </>
           ) : null
         }
+
         breadcrumbs={[
           { title: <Link to={listUrl} onClick={(event: MouseEvent<HTMLAnchorElement>) => {
             if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -542,6 +552,13 @@ const Detail = () => {
               查看失败任务
             </Button>
           }
+        />
+      )}
+      {!paperLibrary && ragReady && detail?.processing_level === "stored" && (
+        <Alert
+          type="info"
+          showIcon
+          message={t("knowledge.storedModeRagReadyHint")}
         />
       )}
       {!paperLibrary && uploadingNoticeVisible && (
@@ -580,6 +597,7 @@ const Detail = () => {
               <KnowledgeBaseSyncNow
                 datasetId={detail.dataset_id}
                 documentParsingEnabled={documentParsingEnabled}
+                enabled={ragReady}
                 onSyncComplete={refreshKnowledgeAfterSync}
               />
             ) : null}
@@ -588,6 +606,8 @@ const Detail = () => {
                 color="primary"
                 variant="outlined"
                 ghost
+                disabled={!ragReady}
+                title={!ragReady ? ragUnavailableReason : undefined}
                 onClick={() => {
                   createFolderRef.current?.onOpen({
                     title: t("knowledge.createFolder"),
@@ -630,7 +650,7 @@ const Detail = () => {
               <Tooltip
                 title={
                   importDisabledReason ||
-                  (embeddingReady === false || multimodalEmbeddingReady === false ? (
+                  (!storageOnly && (embeddingReady === false || multimodalEmbeddingReady === false) ? (
                     isAdmin ? (
                       <span>
                         {embeddingReady === false
@@ -702,6 +722,7 @@ const Detail = () => {
                             )}
                           </>
                         ),
+                        disabled: !ragReady,
                       },
                     ],
                     onClick: ({ key }: { key: string }) => {
@@ -747,6 +768,7 @@ const Detail = () => {
                     {
                       key: "importPaperReferences",
                       label: "导入所选论文的参考文献",
+                      disabled: !ragReady,
                       onClick: () => {
                         knowledgeListRef.current?.importSelectedPaperReferences?.();
                       },
@@ -754,6 +776,7 @@ const Detail = () => {
                     {
                       key: "batchMove",
                       label: t("knowledge.batchMove"),
+                      disabled: !ragReady,
                       onClick: () => {
                         knowledgeListRef.current?.openBatchMove?.();
                       },
@@ -761,6 +784,7 @@ const Detail = () => {
                     {
                       key: "batchDelete",
                       label: t("knowledge.batchDelete"),
+                      disabled: !ragReady,
                       onClick: () => {
                         knowledgeListRef.current?.deleteKnowledge();
                       },
@@ -768,7 +792,7 @@ const Detail = () => {
                     {
                       key: "batchReparse",
                       label: t("knowledge.batchReparse"),
-                      disabled: isDocumentParsingUnavailable,
+                      disabled: !ragReady || isDocumentParsingUnavailable,
                       onClick: () => {
                         knowledgeListRef.current?.restartCheckedKnowledge();
                       },
@@ -817,6 +841,7 @@ const Detail = () => {
       />
 
       <ImportKnowledgeModal
+        storageOnly={detail?.processing_level === "stored"}
         ref={importKnowledgeRef}
         onParsingStart={() => setUploadingNoticeVisible(true)}
         onParsingSettled={() => setUploadingNoticeVisible(false)}

@@ -201,7 +201,9 @@ async function splitPythonComponents(runtimeRoot) {
       throw new Error(`Bundled Python architecture does not match native build: ${machine.trim()}`);
     }
     if (process.env.LAZYMIND_DESKTOP_DEFER_PYTHON !== "false") {
-      const rebuild = process.env.LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS === "true";
+      // A fixed published bundle may have been signed by another team (or ad-hoc).
+      // Developer ID builds must split the binaries signed above in this build.
+      const rebuild = macSigningMode === "developer-id" || process.env.LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS === "true";
       const published = componentArch === "arm64" && !rebuild;
       const componentArgs = [
         path.resolve(__dirname, published ? "../scripts/stage-published-python-components.py" : "../scripts/build-python-components.py"),
@@ -220,6 +222,7 @@ async function splitPythonComponents(runtimeRoot) {
           path.resolve(__dirname, "../scripts/verify-python-components.py"),
           "--runtime", stagedRuntime,
           "--bundle-dir", path.resolve(__dirname, `../dist/python-components/darwin-${componentArch}`),
+          ...(macSigningMode === "developer-id" ? ["--require-macos-team-id"] : []),
         ], { maxBuffer: 4 * 1024 * 1024 });
         console.log(verification);
       }
@@ -298,6 +301,12 @@ async function signAndStageEmbeddedRuntime(context) {
     return;
   }
 
+  // Sign optional native libraries before splitting them out of the application.
+  if (macSigningMode === "adhoc") {
+    for (const binary of collectRuntimeMachOBinaries(runtimeRoot)) {
+      await codesignWithRetry(["--force", "--sign", "-", "--timestamp=none", binary], binary);
+    }
+  }
   await splitPythonComponents(runtimeRoot);
   if (macSigningMode === "none") return;
 

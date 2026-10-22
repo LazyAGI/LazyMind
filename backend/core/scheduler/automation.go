@@ -307,7 +307,7 @@ func BatchCreateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	for i := range body.Tasks {
 		if body.Tasks[i].Notification != nil {
-			prepared, err := taskcenter.PrepareScheduleNotificationUpdate(r.Context(), userID, *body.Tasks[i].Notification)
+			prepared, err := taskcenter.PrepareScheduleNotificationUpdateForSchedule(r.Context(), db, userID, "", *body.Tasks[i].Notification)
 			if err != nil {
 				taskcenter.ReplyScheduleNotificationError(w, r, err)
 				return

@@ -31,7 +31,10 @@ async def _collect_streaming_response(response):
 
 @pytest.mark.parametrize('mcp_failure', [None, 'timeout', 'authorization', 'all_failed'])
 @pytest.mark.parametrize('directories_enabled', [True, False])
-def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch, mcp_failure, directories_enabled):
+def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch, mcp_failure, directories_enabled, tmp_path):
+    from lazymind.chat.engine.tools import temporary_retrieval_session as session
+    monkeypatch.setattr(session, 'workspace_for_request', lambda **kwargs: str(tmp_path))
+    monkeypatch.setattr(session, 'is_model_role_available', lambda role: False)
     agent_calls = []
     agent_queries = []
     agent_envs = []
@@ -153,6 +156,13 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch, mc
         return await _collect_streaming_response(response)
 
     body = asyncio.run(drive())
+
+    # An actual chat turn pins retrieval even without attachments. Configuring
+    # embedding later must not change this conversation's ingestion mode.
+    monkeypatch.setattr(session, 'is_model_role_available', lambda role: True)
+    assert session.initialize_temporary_retrieval({
+        'user_id': 'user-1', 'conversation_id': 'conversation-1',
+    }) is False
 
     if mcp_failure:
         status = 'needs_authorization' if mcp_failure == 'authorization' else 'unavailable'

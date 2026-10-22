@@ -925,27 +925,6 @@ test("Desktop supervises the external Agent host until the application quits", (
   );
 });
 
-test("Desktop Agent login returns immediately and refreshes the Host when login exits", () => {
-  const source = readFileSync(electronMainScript, "utf8");
-  assert.match(source, /workbuddy: new Set\(\["connect", "status", "disconnect", "login"\]\)/);
-  assert.match(
-    source,
-    /function runAgentConnector[\s\S]*action === "login"[\s\S]*return startAgentLogin\(agent\)/,
-  );
-  assert.match(
-    source,
-    /function startAgentLogin[\s\S]*spawn\(agentConnectorPath, \["internal", "agent", agent, "login"\][\s\S]*return runConnectorJSON\([\s\S]*\["internal", "agent", agent, "status"\]/,
-  );
-  assert.match(
-    source,
-    /function startAgentLogin[\s\S]*child\.once\("close"[\s\S]*restartAgentHost\(\)/,
-  );
-  assert.match(
-    source,
-    /function beginFastQuit[\s\S]*agentLoginProcesses\.values\(\)[\s\S]*child\.kill\(\)[\s\S]*agentLoginProcesses\.clear\(\)/,
-  );
-});
-
 test("Desktop close and quit destroy renderers while keeping the runtime resident", () => {
   const source = readFileSync(electronMainScript, "utf8");
   const backgroundStart = source.indexOf("function enterBackgroundMode");

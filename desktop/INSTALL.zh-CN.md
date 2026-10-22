@@ -1,5 +1,48 @@
 # Mac 本地构建、上传依赖与安装验证
 
+## Mac RAG 签名验证
+
+Developer ID 构建始终使用本次签名后的原生依赖重新生成 RAG ZIP，不能复用历史固定 ZIP。
+构建时检查 ZIP 内每个 Mach-O 的有效签名和 TeamIdentifier，要求与运行验证的 Python 一致；
+保留 Hardened Runtime、Library Validation 和 ZIP SHA-256 校验。
+官方发布必须配置 `HF_TOKEN`。DMG 安装测试使用安装后的 Python，从清单 URL 下载组件，
+再次检查 SHA、Team ID、RAG 导入及 Milvus 写入、重启和检索；报告保存为
+`macos-installed-rag-verification` artifact。该测试使用临时数据，不修改用户知识库，
+也不替代界面“安装组件”及服务重启的交互测试。
+个人仓库的 ad-hoc 开发构建仍可使用原有流程，但不证明官方 Developer ID 签名链路通过。
+
+## 临时附件检索基础依赖（2026-10-20）
+
+`bm25s`、`pystemmer` 保留在基础 Python 环境，未安装 RAG 也可以使用聊天附件的
+`kb_tmp_search`：每个 chat 首次实际请求时固定检索模式，未配置 embedding 则使用 BM25，
+已配置则使用向量检索；同一对话后续修改配置不切换模式，新对话独立选择。模式保存于该
+用户/对话工作区的 SQLite，临时 chunk/检索器缓存按对话隔离，沿用可选 rerank 和 adaptive-k。
+知识库后台入库与检索仍需启用 RAG。构建验证增加基础环境中的真实 BM25 召回检查。
+
+本次分包边界变更需要重新构建安装包和配套 RAG ZIP。Actions 已开启重新分包；本地 Mac
+构建须设置 `LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS=true`。旧固定 catalog 会被边界
+校验拒绝；新 ZIP 按同次构建清单发布，保留旧远端包供旧客户端使用。
+
+## Actions 自动发布 RAG（2026-10-16）
+
+macOS / Windows Actions 都生成与当前安装包配套的 RAG ZIP。设置 GitHub 仓库
+`Settings → Secrets and variables → Actions → New repository secret`，名称为 `HF_TOKEN`，
+值为拥有 Hugging Face dataset `LazyAGI/LazyMind` 写权限的 token。主发布 workflow 已继承 secrets。
+本地代理仅用于本地命令，无需配置到 Actions。
+
+如需发布到其他 dataset，可新增 Actions repository variable
+`LAZYMIND_HF_COMPONENT_REPO`（例如 `owner/dataset`）；token 的 fine-grained scope 必须包含该
+dataset 或所属组织的写权限。上传步骤显式关闭 Xet，使用普通 HTTP/LFS 通道，避免
+`xet-write-token` 授权与大文件上传链路不一致。
+
+有 token 时，构建校验 SHA-256 后自动上传 `RAG/<filename>.zip`，首次上传自动创建目录；
+缺少 token 时保留 GitHub artifact 并提示跳过上传。上传失败会使工作流失败。
+新文件名形如 `lazymind-win-amd64-rag-cp311-20261016T021500Z-<revision>.zip` 或
+`lazymind-mac-arm64-rag-cp311-20261016T021500Z-<revision>.zip`，时间为 UTC。
+安装器清单记录精确文件名、URL 和 SHA-256。旧包保留，以服务旧安装器。
+
+以下固定包/手动上传说明为历史流程；本地 Mac 默认仍可复用固定组件，Actions 已启用重新打包。
+
 适用于 **Apple Silicon Mac（M 系列，ARM64）**。2026-09-23 起，ARM64 默认使用已发布的固定 RAG 包，按“构建 → 自动校验固定组件 → 安装试用”执行，**不再每次构建生成或上传 RAG ZIP**。Workflow 演示案例仍在首次启动 warmup 时下载。
 
 ## Mac ARM64 固定云端版本（2026-09-24 更新）
@@ -386,7 +429,7 @@ Mac ARM64 已发布含 gRPC 的 RAG 组件：`lazymind-python-rag-darwin-arm64-c
 
 当前分支集成 PR #778，远端 Skill ZIP 不再进入 installer。构建以 `--catalog-only --frozen-lockfile` 生成预览目录；Skill 安装/使用请求才获取实际包。
 
-精选图片/HTML 使用 `desktop/featured-assets.json` 固定清单：46 个案例 ZIP、MS 主源和 HF 备用源、ZIP 及逐文件 SHA-256。`stage-featured-assets.py` 校验编译素材与发布清单一致，生成小封面缩略图后移出完整素材。素材变化时构建失败，必须显式重新发布对应资源，不能静默使用旧包。
+精选图片/HTML 使用 `desktop/featured-assets.json` 固定清单：46 个案例 ZIP、MS 主源和 HF 备用源、ZIP 及逐文件 SHA-256。`stage-featured-assets.py` 校验编译素材与发布清单一致，生成小封面缩略图后移出已发布完整素材。已发布素材变化时构建仍失败，必须显式重新发布，不能静默使用旧包。桌面构建启用 `--bundle-unpublished`：上游新增且尚无发布条目的案例保留完整本地素材，并在 `downloads.json` 的 `local` 中记录逐文件 SHA/大小；不生成未发布 URL，也不改云端清单。新案例正式发布后自动恢复远程分包。
 
 发布步骤：先用 `builtin-skill-bundle --catalog-only --frozen-lockfile` 生成完整 featured 目录，再运行 `stage-featured-assets.py <runtime> --publish <zip-output>`，上传输出 ZIP 到 HF 数据集 `featured-assets/` 目录，保留文件名，提交更新后的清单。正常构建不带 `--publish`，无需下载案例 ZIP。HTTP `/showcase-assets/` 在 desktop 通过 Core 提供缩略图或按案例缓存的资源；其他环境仍由原静态路由处理。
 

@@ -4,12 +4,14 @@ import { useTranslation } from 'react-i18next';
 import { channelAccountLabel, type ChannelAccount, type ChannelProvider } from '@/modules/channelGateway/api';
 import { ChannelConnectionPage } from '@/modules/channelGateway/pages/ChannelConnectionPage';
 import { getTargets, getGroups, type ChannelRule, type Target } from './api';
+import { wechatTargetStatus, wechatStatusLabel } from './wechatNotificationStatus';
 
-export default function TargetPicker({ provider, accounts, current, onSave, onClose, inline = false, disabled = false, onAccountConnected, onAuthorizationChange }: {
+export default function TargetPicker({ provider, accounts, current, onSave, onClose, inline = false, disabled = false, onAccountConnected, onAuthorizationChange, refreshKey }: {
   provider: ChannelProvider; accounts: ChannelAccount[]; current?: ChannelRule;
   onAccountConnected?: (account: ChannelAccount) => void;
   onAuthorizationChange?: (accountId: string, required: boolean) => void;
   onSave: (target: ChannelRule) => void; onClose: () => void; inline?: boolean; disabled?: boolean;
+  refreshKey?: string;
 }) {
   const { t } = useTranslation();
   const [accountId, setAccountId] = useState(current?.account_id);
@@ -69,13 +71,25 @@ export default function TargetPicker({ provider, accounts, current, onSave, onCl
       if (active) mergeFresh(page.items);
     }).catch(failure => { if (active) setError(targetLoadError(failure)); });
     return () => { active = false; requestGeneration.current += 1; };
-  }, [accountId, refresh, provider, targetScope, recipientId]);
+  }, [accountId, refresh, provider, targetScope, recipientId, refreshKey]);
   useEffect(() => { if (inline) { setAccountId(current?.account_id); setRecipientId(current?.recipient_id); } }, [inline, current?.account_id, current?.recipient_id]);
+  const targetLabel = (target: Target) => {
+    const label = target.kind === 'conversation' ? [t('notifications.directConversation'), target.label !== target.recipient_id ? target.label : ''].filter(Boolean).join(' · ') : target.label;
+    if (provider !== 'wechat') return label;
+    const status = wechatTargetStatus(accounts.find(account => account.id === accountId), target);
+    return status === 'connected' ? label : `${label} · ${t('notifications.' + wechatStatusLabel(status))}`;
+  };
+  const accountOptions = accounts.filter(account => account.status === 'connected' || provider === 'wechat' && account.id === accountId).map(account => {
+    const target = account.id === accountId ? targets.find(value => value.recipient_id === recipientId) : undefined;
+    const label = channelAccountLabel(account, accounts);
+    return { value: account.id, disabled: account.status !== 'connected',
+      label: provider === 'wechat' ? `${label} · ${t('notifications.' + wechatStatusLabel(target ? wechatTargetStatus(account, target) : 'unconfigured'))}` : label };
+  });
   const fields =     <div className="notification-target-picker">
-      <label className="notification-target-field">{t('notifications.account')}<Select className="notification-target-select" disabled={disabled || loading} aria-label={t('notifications.account')} value={provider === 'feishu' && !accounts.some(a => a.id === accountId && a.status === 'connected') ? undefined : accountId} placeholder={t('notifications.chooseAccount')} onChange={(value: string) => { setAccountId(value); setRecipientId(undefined); if (inline) onSave({ enabled: true, account_id: value }); }} options={accounts.filter(a => a.status === 'connected').map(a => ({ value: a.id, label: channelAccountLabel(a, accounts) }))} /></label>
-      <label className="notification-target-field">{t('notifications.recipient')}<Select className="notification-target-select" showSearch optionFilterProp="label" aria-label={t('notifications.recipient')} value={recipientId} placeholder={t('notifications.chooseRecipient')} loading={loading} disabled={disabled || !accountId} onOpenChange={(open: boolean) => { if (open && !loading) setRefresh(n => n + 1); }} onChange={(value: string) => { setRecipientId(value); if (inline) onSave({ enabled: true, account_id: accountId, recipient_id: value }); }} options={targets.map(target => ({ value: target.recipient_id, label: target.kind === 'conversation' ? [t('notifications.directConversation'), target.label !== target.recipient_id ? target.label : ''].filter(Boolean).join(' · ') : target.label, disabled: target.available === false }))} /></label>
+      <label className="notification-target-field">{t('notifications.account')}<Select className="notification-target-select" disabled={disabled || loading} aria-label={t('notifications.account')} value={provider === 'feishu' && !accounts.some(a => a.id === accountId && a.status === 'connected') ? undefined : accountId} placeholder={t('notifications.chooseAccount')} onChange={(value: string) => { setAccountId(value); setRecipientId(undefined); if (inline) onSave({ enabled: true, account_id: value }); }} options={accountOptions} /></label>
+      <label className="notification-target-field">{t('notifications.recipient')}<Select className="notification-target-select" showSearch optionFilterProp="label" aria-label={t('notifications.recipient')} value={recipientId} placeholder={t('notifications.chooseRecipient')} loading={loading} disabled={disabled || !accountId} onOpenChange={(open: boolean) => { if (open && !loading) setRefresh(n => n + 1); }} onChange={(value: string) => { setRecipientId(value); if (inline) onSave({ enabled: true, account_id: accountId, recipient_id: value }); }} options={targets.map(target => ({ value: target.recipient_id, label: targetLabel(target), disabled: provider !== 'wechat' && target.available === false }))} /></label>
       {groupLoading && <p>{t('notifications.loadingGroups')}</p>}
-      {!error && !loading && !groupLoading && accountId && !targets.some(target => target.available !== false) && <p>{t(provider === 'feishu' ? 'notifications.noGroups' : provider === 'wecom' ? 'notifications.noWecomTargets' : 'notifications.noTargets')}</p>}
+      {!error && !loading && !groupLoading && accountId && (provider === 'wechat' ? targets.length === 0 : !targets.some(target => target.available !== false)) && <p>{t(provider === 'feishu' ? 'notifications.noGroups' : provider === 'wecom' ? 'notifications.noWecomTargets' : 'notifications.noTargets')}</p>}
       {groupError && <Alert type="warning" message={t('notifications.groupPermissionHint')} />}
       {error && <Alert type="error" showIcon message={t(authorizationRequired ? 'notifications.wecomAuthorizationExpired' : 'notifications.' + error)} description={authorizationRequired ? <>{t('notifications.wecomReauthorizeHint')}{accounts.some(account => account.id !== accountId && account.status === 'connected') && <p>{t('notifications.wecomSwitchAccountHint')}</p>}</> : undefined} action={<Space direction="vertical"><Button disabled={disabled} type={authorizationRequired ? 'primary' : 'default'} onClick={() => authorizationRequired ? setReauthorizing(true) : setRefresh(n => n + 1)}>{t(authorizationRequired ? 'notifications.wecomRepairAuthorization' : 'notifications.retry')}</Button>{authorizationRequired && <Button disabled={disabled || loading} onClick={() => setRefresh(n => n + 1)}>{t('notifications.wecomRefreshAuthorization')}</Button>}</Space>} />}
       <Modal open={reauthorizing} destroyOnHidden width={760} title={t('notifications.wecomRepairAuthorization')} footer={null} zIndex={1600} onCancel={() => setReauthorizing(false)}>
@@ -92,6 +106,6 @@ export default function TargetPicker({ provider, accounts, current, onSave, onCl
       }}>{t('notifications.loadMore')}</Button>}
     </div>;
   if (inline) return fields;
-  return <Modal zIndex={1500} open title={`${t('notifications.configure')} · ${t('notifications.' + provider)}`} onCancel={onClose} onOk={() => onSave({ enabled: true, account_id: accountId, recipient_id: recipientId })} okText={t('notifications.save')} cancelText={t('notifications.cancel')} okButtonProps={{ disabled: disabled || loading || Boolean(error) || !accounts.some(a => a.id === accountId && a.status === 'connected') || !targets.some(target => target.recipient_id === recipientId && target.available !== false) }}>
+  return <Modal zIndex={1500} open title={`${t('notifications.configure')} · ${t('notifications.' + provider)}`} onCancel={onClose} onOk={() => onSave({ enabled: true, account_id: accountId, recipient_id: recipientId })} okText={t('notifications.save')} cancelText={t('notifications.cancel')} okButtonProps={{ disabled: disabled || loading || Boolean(error) || !accounts.some(a => a.id === accountId && a.status === 'connected') || !targets.some(target => target.recipient_id === recipientId && (provider === 'wechat' || target.available !== false)) }}>
 {fields}</Modal>;
 }

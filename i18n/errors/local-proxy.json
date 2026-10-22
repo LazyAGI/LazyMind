@@ -1,0 +1,10 @@
+{
+  "CHANNEL_GATEWAY_UNAVAILABLE": {
+    "en-US": "Notification and channel service is not ready. Please try again later; if the problem persists, restart the local service.",
+    "zh-CN": "通知与渠道服务暂未就绪，请稍后重试；若持续失败，请重启本地服务。"
+  },
+  "CHANNEL_GATEWAY_TIMEOUT": {
+    "en-US": "Notification and channel service timed out. Please try again later; if the problem persists, restart the local service.",
+    "zh-CN": "通知与渠道服务响应超时，请稍后重试；若持续失败，请重启本地服务。"
+  }
+}

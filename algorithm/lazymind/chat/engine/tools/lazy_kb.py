@@ -168,7 +168,7 @@ def kb_tmp_search(
         grep_patterns: Optional list of search strings (regex or literal).
         top_k: Maximum hits to return (default 10, max 30).
     """
-    from lazymind.chat.runtime_loader import ensure_rag_runtime
-    return ensure_rag_runtime().kb_tmp_search(
+    from lazymind.chat.engine.tools.temporary_files import kb_tmp_search as search_uploads
+    return search_uploads(
         semantic_query, grep_patterns, top_k,
     )

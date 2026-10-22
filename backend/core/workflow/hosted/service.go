@@ -11,6 +11,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	workflowcore "lazymind/core/workflow"
 	"lazymind/core/workflow/attempt"
@@ -227,6 +228,9 @@ func (s *Service) Submit(ctx context.Context, owner, sessionID, attemptID string
 			return SubmissionResult{}, &ProtocolError{Code: attempt.CodeAlreadyTerminal, Message: "hosted execution already has another terminal outcome"}
 		}
 		if err := workflowcore.FinalizeHostAttempt(ctx, s.DB, sessionID, row.StepID, attemptID, status); err != nil {
+			if common.IsSQLiteBusy(err) {
+				return SubmissionResult{}, err
+			}
 			return SubmissionResult{}, &ProtocolError{Code: "WORKFLOW_PROJECTION_FAILED", Message: "terminal execution could not update Workflow projection", Cause: err}
 		}
 		workflowcore.NotifyWorkflowRuntimeUpdated(ctx, s.DB, sessionID, attemptID, status)
@@ -279,6 +283,9 @@ func (s *Service) Submit(ctx context.Context, owner, sessionID, attemptID string
 		return SubmissionResult{}, &ProtocolError{Code: "ATTEMPT_TERMINAL_REJECTED", Message: "execution terminal result was rejected", Cause: err}
 	}
 	if err := workflowcore.FinalizeHostAttempt(ctx, s.DB, sessionID, row.StepID, attemptID, status); err != nil {
+		if common.IsSQLiteBusy(err) {
+			return SubmissionResult{}, err
+		}
 		return SubmissionResult{}, &ProtocolError{Code: "WORKFLOW_PROJECTION_FAILED", Message: "terminal execution could not update Workflow projection", Cause: err}
 	}
 	workflowcore.NotifyWorkflowRuntimeUpdated(ctx, s.DB, sessionID, attemptID, status)

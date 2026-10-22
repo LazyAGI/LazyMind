@@ -8,12 +8,14 @@ import { resolveScanSourceIdByDatasetId } from "@/modules/dataSource/utils/resol
 interface Props {
   datasetId: string;
   documentParsingEnabled: boolean | null;
+  enabled?: boolean;
   onSyncComplete?: () => void;
 }
 
 const KnowledgeBaseSyncNow: FC<Props> = ({
   datasetId,
   documentParsingEnabled,
+  enabled = true,
   onSyncComplete,
 }) => {
   const { t } = useTranslation();
@@ -21,6 +23,11 @@ const KnowledgeBaseSyncNow: FC<Props> = ({
   const [sourceResolving, setSourceResolving] = useState(true);
 
   useEffect(() => {
+    if (!enabled) {
+      setSourceId(undefined);
+      setSourceResolving(false);
+      return;
+    }
     let cancelled = false;
     setSourceResolving(true);
     setSourceId(undefined);
@@ -40,7 +47,7 @@ const KnowledgeBaseSyncNow: FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [datasetId]);
+  }, [datasetId, enabled]);
 
   const syncFlow = useScanSourceSyncFlow({
     t,
@@ -50,7 +57,7 @@ const KnowledgeBaseSyncNow: FC<Props> = ({
   });
   const isDocumentParsingUnavailable = documentParsingEnabled !== true;
 
-  if (!sourceResolving && !sourceId) {
+  if (!enabled || (!sourceResolving && !sourceId)) {
     return null;
   }
 

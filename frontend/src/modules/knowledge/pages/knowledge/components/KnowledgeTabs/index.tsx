@@ -17,6 +17,7 @@ import SummaryTab from "../SummaryTab";
 import QaTab from "../QaTab";
 import Rendering from "@/modules/knowledge/components/Rendering";
 import { isImageDocument } from "@/modules/knowledge/utils/document";
+import { useRAGComponent } from "@/modules/modelProvider/contexts/RAGComponentContext";
 import "./index.scss";
 
 const TAB_KEYS = {
@@ -49,6 +50,7 @@ const KnowledgeTabs = (props: {
     showSequence = true,
   } = props;
   const { t } = useTranslation();
+  const { availability } = useRAGComponent();
 
   const [internalActiveKey, setInternalActiveKey] = useState("");
   const [tabs, setTabs] = useState<TabsProps["items"]>([]);
@@ -64,6 +66,19 @@ const KnowledgeTabs = (props: {
   }, [knowledgeDetail.display_name]);
 
   useEffect(() => {
+    if (availability !== "ready") {
+      const key = `${TAB_KEYS.document}block`;
+      setTabs([{
+        key,
+        label: t("knowledge.segmentDocument"),
+        children: <SegmentTab detail={knowledgeDetail} type="block" names={["block"]}
+          editable={false} onGetItemInfo={onGetItemInfo} showSequence={showSequence} />,
+      }]);
+      setInternalActiveKey(key);
+      onActiveKeyChange?.(key);
+      setLoading(false);
+      return;
+    }
     if (imageOnly) {
       setTabs([createImageListTab()]);
       setInternalActiveKey(TAB_KEYS.imageList);
@@ -87,7 +102,7 @@ const KnowledgeTabs = (props: {
       .finally(() => {
         setLoading(false);
       });
-  }, [knowledgeDetail, imageOnly]);
+  }, [knowledgeDetail, imageOnly, availability]);
 
   function getSplitTypeLabel(splitType: string, splitCount = 1) {
     if (splitCount <= 1) {

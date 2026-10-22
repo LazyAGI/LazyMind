@@ -119,6 +119,9 @@ func (h *apiProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	proxy.FlushInterval = -1
 	proxy.ErrorHandler = h.errorHandler
+	if match.Route.Prefix == "/api/channel-gateway" {
+		proxy.ErrorHandler = channelGatewayErrorHandler
+	}
 	proxy.Director = func(outReq *http.Request) {
 		outReq.URL.Scheme = target.Scheme
 		outReq.URL.Host = target.Host
@@ -158,6 +161,23 @@ func (h *apiProxyHandler) errorHandler(w http.ResponseWriter, _ *http.Request, e
 
 	writeJSON(w, http.StatusBadGateway, map[string]string{
 		"error": "upstream unavailable",
+	})
+}
+
+func channelGatewayErrorHandler(w http.ResponseWriter, _ *http.Request, err error) {
+	status := http.StatusBadGateway
+	code := "CHANNEL_GATEWAY_UNAVAILABLE"
+	message := "Notification and channel service is not ready. Please try again later; if the problem persists, restart the local service."
+	if isTimeoutError(err) {
+		status = http.StatusGatewayTimeout
+		code = "CHANNEL_GATEWAY_TIMEOUT"
+		message = "Notification and channel service timed out. Please try again later; if the problem persists, restart the local service."
+	} else if isConnectionError(err) {
+		status = http.StatusServiceUnavailable
+	}
+	writeJSON(w, status, map[string]string{
+		"code":  code,
+		"error": message,
 	})
 }
 

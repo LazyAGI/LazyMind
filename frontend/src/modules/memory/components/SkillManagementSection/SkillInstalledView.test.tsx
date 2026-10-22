@@ -33,7 +33,8 @@ const translations: Record<string, string> = {
   "admin.memorySkillOriginBuiltin": "Builtin",
   "admin.memorySkillSourceInternal": "Internal",
   "admin.memorySkillSourceExternal": "External",
-  "admin.memorySkillLegacyCategoryFilter": "Legacy category",
+  "admin.memorySkillBatchManage": "Batch manage",
+  "admin.memorySkillBatchManageDone": "Done",
   "admin.memorySkillBatchSelected": "Selected",
   "admin.memorySkillBatchCallMode": "Set call mode",
   "admin.memorySkillClearSelection": "Clear selection",
@@ -64,13 +65,7 @@ const renderView = (
     loading={false}
     skillAssets={skills}
     dataSource={skills}
-    searchInput=""
-    onSearchInputChange={vi.fn()}
-    onSearch={vi.fn()}
     onCategoryChange={vi.fn()}
-    categories={[]}
-    categoriesLoading={false}
-    onReset={vi.fn()}
     organizeMode
     organizeDepth={depth}
     organizeLoading={false}
@@ -93,13 +88,7 @@ const renderViewWith = (overrides: Partial<React.ComponentProps<typeof SkillInst
     loading={false}
     skillAssets={skills}
     dataSource={skills}
-    searchInput=""
-    onSearchInputChange={vi.fn()}
-    onSearch={vi.fn()}
     onCategoryChange={vi.fn()}
-    categories={[]}
-    categoriesLoading={false}
-    onReset={vi.fn()}
     organizeMode={false}
     organizeDepth="light"
     organizeLoading={false}
@@ -179,13 +168,7 @@ describe("SkillInstalledView organize rules", () => {
         loading={false}
         skillAssets={skills}
         dataSource={skills}
-        searchInput=""
-        onSearchInputChange={vi.fn()}
-        onSearch={vi.fn()}
         onCategoryChange={vi.fn()}
-        categories={[]}
-        categoriesLoading={false}
-        onReset={vi.fn()}
         organizeMode
         organizeDepth="light"
         organizeLoading={false}
@@ -234,18 +217,36 @@ describe("SkillInstalledView source and normal selection", () => {
     expect(onCategoryChange).toHaveBeenCalledWith(undefined);
   });
 
-  it("keeps source tabs and passes a legacy category through unchanged", async () => {
-    const onCategoryChange = vi.fn();
+  it("hides call mode and actions while organizing", () => {
     renderViewWith({
-      categories: ["internal", "external", "learning", "design"],
-      onCategoryChange,
+      organizeMode: true,
+      columns: [
+        { key: "name", title: "Name", render: () => "skill-name" },
+        { key: "callMode", title: "Call mode", render: () => "On demand" },
+        { key: "actions", title: "Actions", render: () => "Edit" },
+      ],
+      onSkillSelectionChange: vi.fn(),
+      onClearSkillSelection: vi.fn(),
+      onBatchCallMode: vi.fn(),
     });
 
-    expect(screen.getByRole("tab", { name: "Internal" })).toBeVisible();
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Legacy category" }));
-    const learningOptions = await screen.findAllByText("learning");
-    fireEvent.click(learningOptions[learningOptions.length - 1]);
-    expect(onCategoryChange).toHaveBeenCalledWith("learning");
+    expect(screen.queryByRole("button", { name: "Batch manage" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Call mode")).not.toBeInTheDocument();
+    expect(screen.queryByText("Actions")).not.toBeInTheDocument();
+    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
+    expect(screen.getAllByText("skill-name").length).toBeGreaterThan(0);
+  });
+
+  it("does not show checkboxes until batch manage is turned on", () => {
+    renderViewWith({
+      onSkillSelectionChange: vi.fn(),
+      onClearSkillSelection: vi.fn(),
+      onBatchCallMode: vi.fn(),
+    });
+
+    expect(screen.queryByRole("checkbox", { name: "select internal-one" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Batch manage" }));
+    expect(screen.getByRole("checkbox", { name: "select internal-one" })).toBeInTheDocument();
   });
 
   it("keeps off-page IDs selected while reporting only the changed page row", () => {
@@ -259,6 +260,7 @@ describe("SkillInstalledView source and normal selection", () => {
       onBatchCallMode: vi.fn(),
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "Batch manage" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "select internal-one" }));
     expect(onSkillSelectionChange).toHaveBeenCalledWith([skills[0]], true);
     expect(screen.getByRole("checkbox", { name: "select internal-one" })).not.toBeChecked();
@@ -276,6 +278,7 @@ describe("SkillInstalledView source and normal selection", () => {
       onBatchCallMode: vi.fn(),
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "Batch manage" }));
     expect(screen.getByRole("checkbox", { name: "select internal-one" })).toBeDisabled();
   });
 
@@ -288,6 +291,7 @@ describe("SkillInstalledView source and normal selection", () => {
       onBatchCallMode: vi.fn(),
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "Batch manage" }));
     expect(screen.getByRole("checkbox", { name: "select internal-one" })).toBeDisabled();
   });
 
@@ -300,6 +304,7 @@ describe("SkillInstalledView source and normal selection", () => {
       onBatchCallMode,
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "Batch manage" }));
     fireEvent.click(screen.getByRole("button", { name: "Set call mode" }));
     fireEvent.click((await screen.findByText("Manual only")).closest("li")!);
     expect(onBatchCallMode).toHaveBeenCalledWith("manual");

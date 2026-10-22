@@ -101,6 +101,10 @@ vi.mock("@/modules/channelGateway/components/TerminalConnectionQuickPanel", () =
   default: () => null,
 }));
 
+vi.mock("@/modules/notifications/WeChatNotificationMonitor", () => ({
+  default: () => null,
+}));
+
 vi.mock("@/modules/chat/components/RecordList", async () => {
   const React = await import("react");
   const MockRecordList = React.forwardRef((props: any, ref) => {

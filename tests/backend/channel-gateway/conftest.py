@@ -28,6 +28,9 @@ class CoreEvents:
         self.events = []
         self.enabled = True
         self.error = None
+        self.wechat_targets = []
+        self.wechat_enabled = True
+        self.catalog_reads = 0
 
     def publish(self, payload, owner='owner'):
         event = {**copy.deepcopy(payload), 'status': 'pending',
@@ -45,7 +48,10 @@ class CoreEvents:
             return httpx.Response(status, json={'data': {'granted': self.enabled}}, request=httpx.Request(method, url))
         assert method == 'GET'
         if url.endswith('/user/notification-preferences'):
-            data = {'enabled': self.enabled}
+            data = {'enabled': self.enabled, 'defaults': {'channels': {'wechat': {'enabled': self.wechat_enabled}}}}
+        elif url.endswith('/user/wechat-notification-targets'):
+            self.catalog_reads += 1
+            data = {'items': [item for item in self.wechat_targets if item.get('owner', 'owner') == owner]}
         elif '/task-center/tasks/' in url and url.endswith('/notifications'):
             task_id = url.split('/tasks/', 1)[1].split('/')[0]
             data = {'items': [event for user, event in self.events if user == owner and event['task_id'] == task_id]}

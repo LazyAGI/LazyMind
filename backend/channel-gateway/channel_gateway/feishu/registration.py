@@ -3,19 +3,10 @@ from __future__ import annotations
 import json
 import threading
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-import lark_oapi
-from lark_oapi.api.application.v7 import (
-    AppAbilityBot,
-    BotMenuNode,
-    BotMenuUdIcon,
-    CreateApplicationPublishRequest,
-    CreateApplicationPublishRequestBody,
-    PatchApplicationAbilityRequest,
-    PatchApplicationAbilityRequestBody,
-)
-from lark_oapi.api.contact.v3 import GetUserRequest
+if TYPE_CHECKING:
+    from lark_oapi.api.application.v7 import BotMenuNode
 
 from channel_gateway.feishu.domain import (
     FeishuAppRegistration,
@@ -65,19 +56,22 @@ _PUBLISH_VERSION_EXISTS = 50516
 
 def _owner_name(app_id: str, app_secret: str, owner_open_id: str) -> str:
     """Resolve the authorized user's readable name without exposing open_id."""
-    client = (
-        lark_oapi.Client.builder()
-        .app_id(app_id)
-        .app_secret(app_secret)
-        .build()
-    )
-    request = (
-        GetUserRequest.builder()
-        .user_id_type('open_id')
-        .user_id(owner_open_id)
-        .build()
-    )
     try:
+        import lark_oapi
+        from lark_oapi.api.contact.v3 import GetUserRequest
+
+        client = (
+            lark_oapi.Client.builder()
+            .app_id(app_id)
+            .app_secret(app_secret)
+            .build()
+        )
+        request = (
+            GetUserRequest.builder()
+            .user_id_type('open_id')
+            .user_id(owner_open_id)
+            .build()
+        )
         response = client.contact.v3.user.get(request)
     except Exception:
         return ''
@@ -89,21 +83,23 @@ def _owner_name(app_id: str, app_secret: str, owner_open_id: str) -> str:
 
 def get_bot_name(app_id: str, app_secret: str) -> str:
     """Read the Feishu bot's display name, which register_app does not return."""
-    client = (
-        lark_oapi.Client.builder()
-        .app_id(app_id)
-        .app_secret(app_secret)
-        .timeout(5)
-        .build()
-    )
-    request = (
-        lark_oapi.BaseRequest.builder()
-        .http_method(lark_oapi.HttpMethod.GET)
-        .uri('/open-apis/bot/v3/info')
-        .token_types({lark_oapi.AccessTokenType.TENANT})
-        .build()
-    )
     try:
+        import lark_oapi
+
+        client = (
+            lark_oapi.Client.builder()
+            .app_id(app_id)
+            .app_secret(app_secret)
+            .timeout(5)
+            .build()
+        )
+        request = (
+            lark_oapi.BaseRequest.builder()
+            .http_method(lark_oapi.HttpMethod.GET)
+            .uri('/open-apis/bot/v3/info')
+            .token_types({lark_oapi.AccessTokenType.TENANT})
+            .build()
+        )
         response = client.request(request)
         if not response.success():
             return ''
@@ -120,6 +116,8 @@ def get_bot_name(app_id: str, app_secret: str) -> str:
 
 
 def _menu_payload() -> list[BotMenuNode]:
+    from lark_oapi.api.application.v7 import BotMenuNode, BotMenuUdIcon
+
     return [
         BotMenuNode.builder()
         .menu_id(event_key)
@@ -148,6 +146,15 @@ def configure_bot_menu(
     *,
     publish_version: str,
 ) -> None:
+    import lark_oapi
+    from lark_oapi.api.application.v7 import (
+        AppAbilityBot,
+        CreateApplicationPublishRequest,
+        CreateApplicationPublishRequestBody,
+        PatchApplicationAbilityRequest,
+        PatchApplicationAbilityRequestBody,
+    )
+
     client = (
         lark_oapi.Client.builder()
         .app_id(app_id)
@@ -228,6 +235,8 @@ class LarkAppRegistrar:
         create_new: bool = True,
         app_id: str | None = None,
     ) -> FeishuAppRegistration:
+        import lark_oapi
+
         def qr_callback(info: Any) -> None:
             payload = info if isinstance(info, dict) else {}
             url = str(payload.get('url') or '').strip()

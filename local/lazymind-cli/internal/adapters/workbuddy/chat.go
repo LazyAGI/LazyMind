@@ -13,6 +13,7 @@ import (
 	"lazymind/agentconnector/internal/agentcatalog"
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/chatagent"
+	"lazymind/agentconnector/internal/connectorconfig"
 )
 
 const maxEventBytes = 4 << 20
@@ -91,7 +92,7 @@ func findRuntime(configured, configDir string) (runtimeCommand, error) {
 	if value := strings.TrimSpace(configured); value != "" {
 		return configuredBinary(value)
 	}
-	if value := strings.TrimSpace(os.Getenv("LAZYMIND_WORKBUDDY_AGENT_BIN")); value != "" {
+	if value := strings.TrimSpace(connectorconfig.Value("LAZYMIND_WORKBUDDY_AGENT_BIN")); value != "" {
 		return configuredBinary(value)
 	}
 	application, err := agentexec.FindDesktopApplication(agentexec.DesktopApplication{

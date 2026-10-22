@@ -1601,6 +1601,9 @@
   "2002645": { "en-US": "Confirm removal of the embedding model and downgrade indexed knowledge bases to chunked", "zh-CN": "移除向量模型前需确认将所有向量索引知识库降级为解析并切片" },
   "2002646": { "en-US": "Vector rebuilding requires an indexed knowledge base", "zh-CN": "仅向量索引级别的知识库支持重建向量" },
   "2002647": { "en-US": "The artifact is in use by a running workflow attempt", "zh-CN": "该产物正在被运行中的工作流步骤使用" },
+  "2002648": { "en-US": "Only retained files support first ingestion; use reparse for registered documents", "zh-CN": "仅已储存文件支持首次入库；已有索引的文档请使用重新解析" },
+  "2002649": { "en-US": "Enable RAG and select a processing level above storage-only before ingesting retained files", "zh-CN": "请先启用 RAG，并在知识库编辑中将处理级别从仅储存提高后，再执行入库" },
+  "2002650": { "en-US": "Select an uploaded file or a retained document", "zh-CN": "请选择上传文件或已储存的文档" },
   "2002701": {"en-US": "A conversation group or directory project with this name already exists. Choose another name.", "zh-CN": "已有同名会话组或目录项目，请更换名称"},
   "2002702": {"en-US": "Conversation group not found", "zh-CN": "对话组不存在"},
   "2002703": {"en-US": "Conversation is being organized", "zh-CN": "对话正在整理中"},
@@ -1958,5 +1961,8 @@
   "2004932": { "en-US": "Invalid Zotero PDF upload; files must be valid PDFs up to 128 MiB", "zh-CN": "Zotero 上传无效，请选择不超过 128 MiB 的 PDF 文件" },
   "2004933": { "en-US": "Failed to store the Zotero attachment", "zh-CN": "Zotero 附件保存失败" },
   "2004934": { "en-US": "The library changed; the PDF is saved, retry linking it", "zh-CN": "论文库已发生变更，PDF 已保存，请重试关联" },
-  "2004935": { "en-US": "The attachment checksum changed; reload Zotero metadata and select the matching file", "zh-CN": "附件校验值已变更，请重新读取 Zotero 题录并选择对应文件" }
+  "2004935": { "en-US": "The attachment checksum changed; reload Zotero metadata and select the matching file", "zh-CN": "附件校验值已变更，请重新读取 Zotero 题录并选择对应文件" },
+"2003216": { "en-US": "Desktop does not support office conversion; upload docx, pptx or pdf instead", "zh-CN": "桌面版不支持 Office 格式转换，请改为上传 DOCX、PPTX 或 PDF 文件" },
+  "2003217": { "en-US": "Document changed; native parsing must be retried", "zh-CN": "文件已发生变化，请重新执行本地解析" },
+  "2003218": { "en-US": "Select a processing level before ingesting retained files", "zh-CN": "请先选择高于仅储存的处理级别，再对已储存文件执行入库" }
 }

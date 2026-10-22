@@ -27,13 +27,8 @@
     flex: 0 0 auto;
   }
 
-  .memory-filter-bar {
-    flex: 0 0 auto;
-  }
-
   .memory-list-content {
-    overflow-y: auto;
-    scrollbar-gutter: stable;
+    overflow: hidden;
   }
 }
 
@@ -61,9 +56,14 @@
 
 .memory-page-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
+
+  .admin-page-title {
+    font-size: 22px;
+    letter-spacing: -0.03em;
+  }
 }
 
 .memory-page-title-row {
@@ -105,70 +105,79 @@
 }
 
 .memory-tab-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: clamp(10px, 1.5vh, 16px);
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  min-height: 40px;
+  padding: 0 2px;
+  border-bottom: 1px solid #e5eaf2;
 }
 
 .memory-tab-card {
-  border: 1px solid #e5eaf2;
-  border-radius: 16px;
-  background:
-    radial-gradient(circle at top right, rgba(22, 119, 255, 0.14), transparent 38%),
-    linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
-  min-height: clamp(68px, 7vh, 88px);
-  padding: clamp(10px, 1.2vh, 14px) 16px;
+  position: relative;
+  border: 0;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  min-height: 40px;
+  padding: 8px 14px 10px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   text-align: left;
   cursor: pointer;
-  transition:
-    transform 0.2s ease,
-    box-shadow 0.2s ease,
-    border-color 0.2s ease;
+  color: #667085;
+  font: inherit;
+  transition: color 0.15s ease, background-color 0.15s ease;
 
   &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 18px 36px rgba(15, 23, 42, 0.08);
+    color: #1768db;
+    background: #f5f8fd;
   }
 
   &.is-active {
-    border-color: #1677ff;
-    box-shadow: 0 18px 36px rgba(22, 119, 255, 0.12);
+    color: #1768db;
+
+    &::after {
+      content: "";
+      position: absolute;
+      right: 14px;
+      bottom: -1px;
+      left: 14px;
+      height: 2px;
+      border-radius: 2px 2px 0 0;
+      background: #1768db;
+    }
   }
 }
 
 .memory-tab-icon {
-  width: 36px;
-  height: 36px;
+  width: 22px;
+  height: 22px;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 12px;
-  background: #eef4ff;
-  color: #1677ff;
-  font-size: 16px;
+  border-radius: 6px;
+  background: #eef3fa;
+  color: currentColor;
+  font-size: 13px;
 }
 
 .memory-tab-copy {
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
+  flex-direction: row;
+  align-items: center;
+  flex: 0 0 auto;
 
   strong {
-    color: #101828;
-    font-size: 15px;
-    font-weight: 700;
+    color: inherit;
+    font-size: 14px;
+    font-weight: 600;
   }
 
   span {
-    color: #667085;
-    font-size: 13px;
-    line-height: 1.35;
+    display: none;
   }
 }
 
@@ -188,11 +197,10 @@
 .memory-filter-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: clamp(10px, 1.4vh, 16px) 18px;
-  border: 1px solid #edf1f5;
-  border-radius: 18px;
-  background: #fbfcff;
+  gap: 8px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
 }
 
 .memory-filter-search {
@@ -1442,15 +1450,149 @@
   overflow-wrap: anywhere;
 }
 
+.memory-workspace-surface {
+  min-height: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #e5eaf2;
+  border-radius: 14px;
+  background: #fff;
+
+  &.is-experience {
+    overflow: auto;
+    padding: 20px 24px;
+
+    .memory-preference-section,
+    .memory-episode-section {
+      box-shadow: none;
+      border-color: #e5eaf2;
+    }
+  }
+
+  &.is-glossary {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+}
+
+.memory-glossary-shell {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+
+  .memory-skill-toolbar {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 20px 24px 16px;
+    border-bottom: 0;
+  }
+
+  .memory-skill-heading-group {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+
+    h2 {
+      margin: 0;
+      color: #101828;
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: -0.4px;
+    }
+  }
+
+  .memory-skill-toolbar-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    padding-bottom: 0;
+  }
+
+  .memory-skill-review-drafts {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #536177;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+
+    &:hover {
+      background: #f5f8fc;
+    }
+  }
+
+  .memory-skill-create-split__main {
+    font-size: 12px;
+  }
+
+  .memory-skill-installed-filters {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 24px 14px;
+    border-bottom: 1px solid #e5eaf2;
+  }
+
+  .memory-skill-source-tabs {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+
+    button {
+      padding: 7px 0;
+      border: 0;
+      background: transparent;
+      color: #667085;
+      font: inherit;
+      font-size: 13px;
+      white-space: nowrap;
+      cursor: pointer;
+
+      &:hover {
+        color: #1768db;
+      }
+
+      &.is-active {
+        color: #172a46;
+        font-weight: 600;
+      }
+    }
+  }
+
+  .memory-glossary-section {
+    padding: 12px 24px 16px;
+  }
+}
+
 .memory-glossary-batch-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 16px;
-  border: 1px solid #e5eaf2;
-  border-radius: 14px;
-  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  padding: 8px 4px 12px;
+  border: 0;
+  background: transparent;
   color: #475467;
   font-size: 13px;
 }
@@ -1464,6 +1606,30 @@
   overflow: hidden;
 }
 
+.memory-resource-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+
+  .ant-btn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    color: #667085;
+
+    &:hover {
+      color: #175cd3;
+      background: #f2f4f7;
+    }
+
+    &.ant-btn-dangerous:hover {
+      color: #d92d20;
+      background: #fff1f0;
+    }
+  }
+}
+
 .memory-table {
   min-height: 0;
   height: 100%;
@@ -1472,7 +1638,8 @@
   flex-direction: column;
 
   .ant-table {
-    border-radius: 16px;
+    border: 1px solid #eef1f6;
+    border-radius: 10px;
     overflow: hidden;
   }
 
@@ -1516,7 +1683,7 @@
 }
 
 .memory-glossary-table {
-  --memory-glossary-row-height: 112px;
+  --memory-glossary-row-height: 118px;
 
   padding-bottom: 8px;
   flex: 1;
@@ -1569,6 +1736,37 @@
 
   .ant-pagination {
     margin-bottom: 0;
+  }
+
+  &.memory-skill-installed-table {
+    .ant-table-thead > tr > th {
+      font-size: 13px;
+    }
+
+    .ant-table-tbody > tr > td {
+      font-size: 13px;
+    }
+
+    .memory-table-main-title,
+    .memory-term-link {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .memory-content-preview,
+    .memory-content-preview-glossary {
+      font-size: 13px;
+    }
+
+    .memory-tag-group .ant-tag,
+    .memory-protect-tag.ant-tag {
+      font-size: 12px;
+    }
+
+    .memory-origin-mark,
+    .memory-status-mark {
+      font-size: 12px;
+    }
   }
 }
 
@@ -2280,6 +2478,19 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.memory-skill-auto-update-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+  padding-top: 4px;
+
+  label {
+    margin-bottom: 0;
+  }
 }
 
 .memory-lock-toggle {
@@ -5437,10 +5648,6 @@
 }
 
 @media (max-width: 1200px) {
-  .memory-tab-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .memory-experience-detail-grid {
     grid-template-columns: 1fr;
   }
@@ -5454,9 +5661,22 @@
     overflow: visible;
   }
 
+  .memory-list-page.is-skills-tab,
+  .memory-list-page.is-glossary-tab {
+    height: calc(100vh - clamp(20px, 3vh, 32px));
+    max-height: calc(100vh - clamp(20px, 3vh, 32px));
+    overflow: hidden;
+  }
+
   .memory-list-content,
   .memory-glossary-section {
     overflow: visible;
+  }
+
+  .memory-list-page.is-skills-tab .memory-list-content,
+  .memory-list-page.is-glossary-tab .memory-list-content,
+  .memory-list-page.is-glossary-tab .memory-glossary-section {
+    overflow: hidden;
   }
 
   .memory-experience-overview {
@@ -5534,8 +5754,7 @@
   .memory-diff-change-grid,
   .memory-mcp-form-grid,
   .memory-child-skill-grid,
-  .memory-manual-skill-review-row,
-  .memory-tab-grid {
+  .memory-manual-skill-review-row {
     grid-template-columns: 1fr;
   }
 

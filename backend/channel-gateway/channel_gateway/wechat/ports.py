@@ -57,6 +57,7 @@ class WeChatDeliveryClient(Protocol):
         token: str,
         to_user_id: str,
         context_token: str,
+        timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
         ...
 

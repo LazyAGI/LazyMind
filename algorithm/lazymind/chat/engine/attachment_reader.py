@@ -17,7 +17,6 @@ from lazymind.chat.config import (
     IMAGE_EXTENSIONS,
 )
 from lazymind.chat.engine.prompts import VISION_EXTRACT_DEFAULT_INSTRUCTION
-from lazymind.config import config as _cfg
 from lazymind.vision_model import select_vision_model_role, VisionModelUnavailable
 
 _SUPPORTED_ATTACHMENT_LABEL = 'images, Office/PDF documents, spreadsheets, and common plain-text files'
@@ -36,15 +35,9 @@ def _sanitize_for_prompt_template(text: str) -> str:
 
 @lru_cache(maxsize=1)
 def _get_document_reader():
-    from lazymind.chat.runtime_loader import ensure_rag_runtime
-    ensure_rag_runtime()
-    from lazyllm.tools.rag.readers.ocrReader import DynamicPDFReader
+    from lazymind.chat.engine.document_extractor import LocalDocumentReader
 
-    return DynamicPDFReader(
-        ocr_url=str(_cfg['ocr_server_url'] or ''),
-        image_cache_dir=_cfg['ocr_cache_dir'],
-        timeout=3600,
-    )
+    return LocalDocumentReader()
 
 
 def _suffix(path: str) -> str:
@@ -121,18 +114,6 @@ def _log_parse_done(
 
 def read_chat_document_text(file_path: str) -> str:
     started_at = _log_parse_start(file_path, kind='document')
-    if _suffix(file_path) == '.docx':
-        try:
-            body = _read_docx_text(file_path)
-            if not body.strip():
-                raise ValueError('DOCX contains no locally extractable text')
-            _log_parse_done(file_path, kind='document-local-docx', started_at=started_at, body=body)
-            return body
-        except Exception as exc:
-            LOG.warning(
-                f'[AttachmentReader] local DOCX parse failed; falling back to OCR: '
-                f'file={Path(file_path).name} error={exc}'
-            )
     reader = _get_document_reader()
     nodes = reader(file_path)
     parts: List[str] = []
@@ -141,45 +122,12 @@ def read_chat_document_text(file_path: str) -> str:
         if text:
             parts.append(text)
     body = '\n\n'.join(parts)
+    if len(body) > _MAX_DOCUMENT_ATTACHMENT_CHARS:
+        body = (
+            body[:_MAX_DOCUMENT_ATTACHMENT_CHARS]
+            + f'\n\n[Attachment truncated after {_MAX_DOCUMENT_ATTACHMENT_CHARS} characters.]'
+        )
     _log_parse_done(file_path, kind='document', started_at=started_at, body=body)
-    return body
-
-
-def _read_docx_text(file_path: str, max_chars: int = _MAX_DOCUMENT_ATTACHMENT_CHARS) -> str:
-    from docx import Document
-    from docx.table import Table
-    from docx.text.paragraph import Paragraph
-
-    document = Document(file_path)
-    parts: List[str] = []
-    current_chars = 0
-
-    def append(value: str) -> bool:
-        nonlocal current_chars
-        text = str(value or '').strip()
-        if not text:
-            return False
-        remaining = max_chars - current_chars
-        if remaining <= 0:
-            return True
-        parts.append(text[:remaining])
-        current_chars += min(len(text), remaining)
-        return len(text) > remaining or current_chars >= max_chars
-
-    for child in document.element.body.iterchildren():
-        if child.tag.endswith('}p'):
-            if append(Paragraph(child, document).text):
-                break
-        elif child.tag.endswith('}tbl'):
-            table = Table(child, document)
-            for row in table.rows:
-                if append('\t'.join(cell.text.strip() for cell in row.cells)):
-                    break
-            if current_chars >= max_chars:
-                break
-    body = '\n'.join(parts)
-    if current_chars >= max_chars:
-        body += f'\n\n[Attachment truncated after {max_chars} characters.]'
     return body
 
 
@@ -222,7 +170,7 @@ def extract_image_description(
 
 
 def parse_attachment_content(file_path: str, *, priority: int = 0) -> str:
-    """Parse one chat attachment via VLM, OCR, or direct UTF-8 text reading."""
+    """Parse one chat attachment via VLM or the base document/text extractors."""
     path = str(Path(file_path).resolve())
     if not is_chat_attachment_file(path):
         raise ValueError(

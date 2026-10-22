@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"lazymind/agentconnector/internal/agentexec"
+	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/localfile"
 )
 
@@ -53,6 +52,15 @@ func writeManagedConfig(kind Kind, path, self, home, hostID string, controlled b
 	}
 	root, servers, err := readJSONConfig(path)
 	if err != nil {
+		return err
+	}
+	if raw := servers[serverName]; raw != nil {
+		var existing stdioMCPDefinition
+		if json.Unmarshal(raw, &existing) != nil || !stateForStdio(existing, self, home, hostID, kind).owned {
+			return errors.New("refusing to replace unmanaged LazyMind MCP entry")
+		}
+	}
+	if _, err := connectorconfig.Save(connectorconfig.Config{Home: home, Provider: string(kind), HostID: hostID, Controlled: kind == WorkBuddy}); err != nil {
 		return err
 	}
 	entry, err := json.Marshal(managedStdio(self, home, hostID, kind))
@@ -118,16 +126,7 @@ func readJSONConfig(path string) (rawMCPFile, map[string]json.RawMessage, error)
 }
 
 func managedStdio(self, home, hostID string, kind Kind) stdioMCPDefinition {
-	environment := map[string]string{
-		"LAZYMIND_AGENT_PROVIDER": string(kind), "LAZYMIND_AGENT_HOST_ID": hostID,
-	}
-	if webURL := strings.TrimSpace(os.Getenv("LAZYMIND_WEB_URL")); webURL != "" {
-		environment["LAZYMIND_WEB_URL"] = webURL
-	}
-	if home != "" {
-		environment["LAZYMIND_HOME"] = home
-	}
-	return stdioMCPDefinition{Type: "stdio", Command: self, Args: []string{"mcp", "proxy"}, Env: environment}
+	return stdioMCPDefinition{Type: "stdio", Command: self, Args: []string{"mcp", "proxy"}, Env: connectorconfig.Environment(connectorconfig.Path(home, string(kind), ""))}
 }
 
 func ownedStdio(entry stdioMCPDefinition, self, home string) bool {
@@ -135,6 +134,10 @@ func ownedStdio(entry stdioMCPDefinition, self, home string) bool {
 		!agentexec.SameExecutable(entry.Command, self) || len(entry.Args) != 2 ||
 		entry.Args[0] != "mcp" || entry.Args[1] != "proxy" {
 		return false
+	}
+	if path := entry.Env[connectorconfig.EnvironmentKey]; path != "" {
+		config, err := connectorconfig.Load(path)
+		return err == nil && filepath.Clean(config.Home) == filepath.Clean(home)
 	}
 	configuredHome := normalizedManagedHome(entry.Env["LAZYMIND_HOME"])
 	if configuredHome == home {
@@ -148,19 +151,40 @@ func ownedStdio(entry stdioMCPDefinition, self, home string) bool {
 }
 
 func currentStdio(entry stdioMCPDefinition, self, home, hostID string, kind Kind) bool {
-	return ownedStdio(entry, self, home) &&
-		entry.Env["LAZYMIND_AGENT_PROVIDER"] == string(kind) &&
-		entry.Env["LAZYMIND_AGENT_HOST_ID"] == hostID &&
-		normalizedManagedHome(entry.Env["LAZYMIND_HOME"]) == home
+	if !ownedStdio(entry, self, home) || len(entry.Env) != 1 {
+		return false
+	}
+	c, err := connectorconfig.Load(entry.Env[connectorconfig.EnvironmentKey])
+	return err == nil && c.Provider == string(kind) && c.HostID == hostID && (kind != WorkBuddy || c.Controlled)
 }
 
 func stateForStdio(entry stdioMCPDefinition, self, home, hostID string, kind Kind) managedConfigState {
 	owned := ownedStdio(entry, self, home)
+	if reference := entry.Env[connectorconfig.EnvironmentKey]; reference != "" && owned {
+		c, err := connectorconfig.Load(reference)
+		owned = err == nil && c.Provider == string(kind) && c.HostID == hostID
+	}
+	if kind == WorkBuddy && !owned {
+		owned = legacyWorkBuddyStdio(entry, home, hostID)
+	}
 	return managedConfigState{
 		configured: true, owned: owned,
 		current: currentStdio(entry, self, home, hostID, kind),
 		command: entry.Command, arguments: append([]string(nil), entry.Args...),
 	}
+}
+
+// Older desktop packages wrote their staging path into WB. Match the exact
+// managed invocation and local identity before relocating that entry.
+func legacyWorkBuddyStdio(entry stdioMCPDefinition, home, hostID string) bool {
+	command := filepath.ToSlash(entry.Command)
+	return filepath.IsAbs(entry.Command) &&
+		strings.HasSuffix(command, "/LazyMind.app/Contents/Resources/runtime/bin/lazymind") &&
+		(entry.Type == "" || entry.Type == "stdio") && len(entry.Args) == 2 &&
+		entry.Args[0] == "mcp" && entry.Args[1] == "proxy" &&
+		home != "" && normalizedManagedHome(entry.Env["LAZYMIND_HOME"]) == home &&
+		hostID != "" && entry.Env["LAZYMIND_AGENT_HOST_ID"] == hostID &&
+		entry.Env["LAZYMIND_AGENT_PROVIDER"] == "workbuddy"
 }
 
 func normalizedManagedHome(value string) string {
@@ -226,7 +250,14 @@ func readDSHConfig(path, self, home, hostID string) (managedConfigState, error) 
 		return managedConfigState{}, nil
 	}
 	stdio := decodeDSHStdio(entry)
-	return stateForStdio(stdio, self, home, hostID, DeepSeekHarness), nil
+	state := stateForStdio(stdio, self, home, hostID, DeepSeekHarness)
+	if reference := stdio.Env[connectorconfig.EnvironmentKey]; reference != "" {
+		c, err := connectorconfig.Load(reference)
+		if err != nil || c.Profile != filepath.Dir(path) {
+			state.owned, state.current = false, false
+		}
+	}
+	return state, nil
 }
 
 func writeDSHConfig(path, self, home, hostID string, controlled bool) error {
@@ -234,18 +265,16 @@ func writeDSHConfig(path, self, home, hostID string, controlled bool) error {
 	if err != nil {
 		return err
 	}
-	webURL := strings.TrimSpace(os.Getenv("LAZYMIND_WEB_URL"))
-	dshURL := strings.TrimSpace(os.Getenv("LAZYMIND_DSH_URL"))
-	if existing := findDSHEntry(document); existing != nil {
-		env := decodeDSHStdio(existing).Env
-		if webURL == "" {
-			webURL = strings.TrimSpace(env["LAZYMIND_WEB_URL"])
-		}
-		if dshURL == "" {
-			dshURL = strings.TrimSpace(env["LAZYMIND_DSH_URL"])
-		}
+	profile := filepath.Dir(path)
+	c := connectorconfig.Config{Home: home, Provider: string(DeepSeekHarness), HostID: hostID, Profile: profile, Controlled: controlled}
+	if previous, err := connectorconfig.Load(connectorconfig.Path(home, c.Provider, profile)); err == nil {
+		c.PairingFile = previous.PairingFile
 	}
-	entry, err := newDSHEntry(self, home, hostID, webURL, dshURL, controlled)
+	configPath, err := connectorconfig.Save(c)
+	if err != nil {
+		return err
+	}
+	entry, err := newDSHEntry(self, configPath)
 	if err != nil {
 		return err
 	}
@@ -351,27 +380,9 @@ func decodeDSHStdio(item *yaml.Node) stdioMCPDefinition {
 	return result
 }
 
-func newDSHEntry(self, home, hostID, webURL, dshURL string, controlled bool) (*yaml.Node, error) {
+func newDSHEntry(self, configPath string) (*yaml.Node, error) {
 	var document yaml.Node
-	environment := map[string]string{
-		"LAZYMIND_AGENT_PROVIDER": string(DeepSeekHarness), "LAZYMIND_AGENT_HOST_ID": hostID,
-	}
-	if controlled {
-		environment["LAZYMIND_WORKFLOW_HOST_CONTROL"] = "1"
-	}
-	if endpoint := strings.TrimSpace(dshURL); endpoint != "" {
-		if err := validateDSHEndpoint(endpoint); err != nil {
-			return nil, err
-		}
-		environment["LAZYMIND_DSH_URL"] = endpoint
-	}
-	if webURL = strings.TrimSpace(webURL); webURL != "" {
-		environment["LAZYMIND_WEB_URL"] = webURL
-	}
-	if home != "" {
-		environment["LAZYMIND_HOME"] = home
-	}
-	if err := yaml.Unmarshal([]byte(dshProfilePatch(self, environment)), &document); err != nil {
+	if err := yaml.Unmarshal([]byte(dshProfilePatch(self, connectorconfig.Environment(configPath))), &document); err != nil {
 		return nil, err
 	}
 	return document.Content[0].Content[0], nil
@@ -408,16 +419,4 @@ func encodeYAML(document *yaml.Node) ([]byte, error) {
 		return nil, err
 	}
 	return output.Bytes(), nil
-}
-
-func validateDSHEndpoint(raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || u.RawQuery != "" || (u.Path != "" && u.Path != "/") {
-		return errors.New("configure the DSH root URL without credentials")
-	}
-	ip := net.ParseIP(u.Hostname())
-	if u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "localhost" || (ip != nil && ip.IsLoopback()))) {
-		return errors.New("DSH requires HTTPS or a loopback HTTP address")
-	}
-	return nil
 }
