@@ -24,6 +24,31 @@
     > .anticon {
       margin-top: 3px;
     }
+
+    &-content {
+      flex: 1;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    &-close {
+      display: inline-flex;
+      flex: 0 0 24px;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+
+      &:hover { background: #fef3c7; }
+      &:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+      &:disabled { cursor: wait; opacity: 0.6; }
+    }
   }
 
   &--expanded {
@@ -4104,6 +4129,14 @@
   justify-content: space-between;
   gap: 20px;
 
+  .workflow-panel__provider-menu-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    small { color: #667085; font-size: 11px; }
+  }
+
   .workflow-panel__provider-settings-link {
     display: inline-flex;
     align-items: center;
@@ -4123,6 +4156,12 @@
       border-radius: 2px;
     }
   }
+}
+
+// A disabled publication target still needs an operable authorization shortcut.
+.ant-dropdown .ant-dropdown-menu-item-disabled .workflow-panel__provider-menu-label a.workflow-panel__provider-settings-link {
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 .workflow-writer-provider-picker__hint {

@@ -24,6 +24,7 @@ import (
 
 type uiPreferencesResponse struct {
 	ChatPreferenceNoticeDismissed bool   `json:"chat_preference_notice_dismissed"`
+	WorkflowTrustNoticeDismissed  bool   `json:"workflow_trust_notice_dismissed"`
 	DeveloperModeActive           bool   `json:"developer_mode_active"`
 	SensitiveWordFilterEnabled    bool   `json:"sensitive_word_filter_enabled"`
 	AcceptedUserAgreementVersion  string `json:"accepted_user_agreement_version"`
@@ -41,6 +42,7 @@ type uiPreferencesResponse struct {
 
 type uiPreferencesPatchRequest struct {
 	ChatPreferenceNoticeDismissed *bool   `json:"chat_preference_notice_dismissed"`
+	WorkflowTrustNoticeDismissed  *bool   `json:"workflow_trust_notice_dismissed"`
 	DeveloperModeActive           *bool   `json:"developer_mode_active"`
 	SensitiveWordFilterEnabled    *bool   `json:"sensitive_word_filter_enabled"`
 	AcceptedUserAgreementVersion  *string `json:"accepted_user_agreement_version"`
@@ -96,7 +98,8 @@ func PatchUIPreferences(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	if req.ChatPreferenceNoticeDismissed == nil &&
+	if req.WorkflowTrustNoticeDismissed == nil &&
+		req.ChatPreferenceNoticeDismissed == nil &&
 		req.DeveloperModeActive == nil &&
 		req.SensitiveWordFilterEnabled == nil &&
 		req.AcceptedUserAgreementVersion == nil &&
@@ -261,6 +264,9 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 		if req.ChatPreferenceNoticeDismissed != nil {
 			row.ChatPreferenceNoticeDismissed = *req.ChatPreferenceNoticeDismissed
 		}
+		if req.WorkflowTrustNoticeDismissed != nil {
+			row.WorkflowTrustNoticeDismissed = *req.WorkflowTrustNoticeDismissed
+		}
 		if req.DeveloperModeActive != nil {
 			row.DeveloperModeActive = *req.DeveloperModeActive
 		}
@@ -299,6 +305,7 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 		if err := db.WithContext(ctx).Model(&orm.UserUIPreferences{}).Create(map[string]any{
 			"user_id":                          row.UserID,
 			"chat_preference_notice_dismissed": row.ChatPreferenceNoticeDismissed,
+			"workflow_trust_notice_dismissed":  row.WorkflowTrustNoticeDismissed,
 			"developer_mode_active":            row.DeveloperModeActive,
 			"sensitive_word_filter_enabled":    row.SensitiveWordFilterEnabled,
 			"accepted_user_agreement_version":  row.AcceptedUserAgreementVersion,
@@ -325,6 +332,10 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 	if req.ChatPreferenceNoticeDismissed != nil {
 		updates["chat_preference_notice_dismissed"] = *req.ChatPreferenceNoticeDismissed
 		row.ChatPreferenceNoticeDismissed = *req.ChatPreferenceNoticeDismissed
+	}
+	if req.WorkflowTrustNoticeDismissed != nil {
+		updates["workflow_trust_notice_dismissed"] = *req.WorkflowTrustNoticeDismissed
+		row.WorkflowTrustNoticeDismissed = *req.WorkflowTrustNoticeDismissed
 	}
 	if req.DeveloperModeActive != nil {
 		updates["developer_mode_active"] = *req.DeveloperModeActive
@@ -406,6 +417,7 @@ func buildUIPreferencesResponse(row orm.UserUIPreferences, userPreferenceConfigu
 	}
 	return uiPreferencesResponse{
 		ChatPreferenceNoticeDismissed: row.ChatPreferenceNoticeDismissed,
+		WorkflowTrustNoticeDismissed:  row.WorkflowTrustNoticeDismissed,
 		DeveloperModeActive:           row.DeveloperModeActive,
 		SensitiveWordFilterEnabled:    row.SensitiveWordFilterEnabled,
 		AcceptedUserAgreementVersion:  row.AcceptedUserAgreementVersion,

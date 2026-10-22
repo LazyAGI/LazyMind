@@ -35,6 +35,10 @@ vi.mock('@/modules/chat/store/workflowPanel', async (original) => {
   return { ...actual, useWorkflowStore: Object.assign((selector?: (value: typeof state) => unknown) => selector ? selector(state) : state, { getState: () => state }) };
 });
 vi.mock('@/modules/chat/utils/request', () => ({ WorkflowSessionApi: () => ({ pauseSession: fixture.pause }) }));
+vi.mock('@/modules/user/uiPreferencesApi', () => ({
+  fetchUserUiPreferences: async () => ({ workflow_trust_notice_dismissed: false }),
+  USER_UI_PREFERENCES_CHANGED_EVENT: 'test:preferences-changed',
+}));
 vi.mock('@/components/StateGraphModal', () => ({ default: () => null }));
 vi.mock('./actions/WorkflowTabActions', () => ({ WorkflowTabActions: () => null }));
 vi.mock('./ppt/SlideThumb', () => ({ SlideThumb: () => null }));

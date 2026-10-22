@@ -5355,6 +5355,43 @@ components:
             required:
                 - providers
             type: object
+        DocumentPublicationGroupRequest:
+            properties:
+                base_draft_version:
+                    format: int64
+                    type: integer
+                base_revision:
+                    type: integer
+                idempotency_key:
+                    type: string
+                targets:
+                    items:
+                        $ref: '#/components/schemas/DocumentPublicationTargetInput'
+                    type: array
+            required:
+                - base_revision
+                - idempotency_key
+                - targets
+            type: object
+        DocumentPublicationGroupState:
+            properties:
+                current_hash:
+                    type: string
+                preferred_providers:
+                    items:
+                        type: string
+                    type: array
+                publication_id:
+                    type: string
+                targets:
+                    items:
+                        $ref: '#/components/schemas/DocumentPublicationTargetState'
+                    type: array
+            required:
+                - current_hash
+                - preferred_providers
+                - targets
+            type: object
         DocumentPublicationLookup:
             properties:
                 operation:
@@ -5417,6 +5454,48 @@ components:
                 - source_slot_id
                 - status
                 - updated_at
+            type: object
+        DocumentPublicationTargetInput:
+            properties:
+                connection_id:
+                    type: string
+                parent_uri:
+                    type: string
+                provider:
+                    type: string
+                retry_operation_id:
+                    type: string
+                title:
+                    type: string
+            required:
+                - provider
+            type: object
+        DocumentPublicationTargetState:
+            properties:
+                bound:
+                    type: boolean
+                connection_id:
+                    type: string
+                last_success_at:
+                    format: date-time
+                    type: string
+                last_success_hash:
+                    type: string
+                operation:
+                    $ref: '#/components/schemas/DocumentPublicationStatus'
+                operation_hash:
+                    type: string
+                parent_uri:
+                    type: string
+                provider:
+                    type: string
+                target_url:
+                    type: string
+                title:
+                    type: string
+            required:
+                - bound
+                - provider
             type: object
         DocumentPublishInput:
             properties:
@@ -12228,6 +12307,19 @@ components:
                 - data
                 - message
             type: object
+        documentPublicationGroupResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DocumentPublicationGroupState'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
         documentPublicationLookupResponse:
             properties:
                 code:
@@ -15797,6 +15889,8 @@ components:
                     type: string
                 user_preference_configured:
                     type: boolean
+                workflow_trust_notice_dismissed:
+                    type: boolean
                 workflows_enabled:
                     type: boolean
             required:
@@ -15813,6 +15907,7 @@ components:
                 - task_center_enabled
                 - updated_at
                 - user_preference_configured
+                - workflow_trust_notice_dismissed
                 - workflows_enabled
             type: object
         userUIPreferencesPatchOpenAPIRequest:
@@ -15838,6 +15933,8 @@ components:
                 skills_enabled:
                     type: boolean
                 task_center_enabled:
+                    type: boolean
+                workflow_trust_notice_dismissed:
                     type: boolean
                 workflows_enabled:
                     type: boolean
@@ -31905,6 +32002,71 @@ paths:
                                 $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
                     description: Artifact not found
             summary: Find the blocking or latest owned document publication
+            tags:
+                - workflow
+    /api/core/workflow-artifacts/{artifact_id}/publications:
+        get:
+            parameters:
+                - in: path
+                  name: artifact_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentPublicationGroupResponse'
+                    description: Publication targets
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Artifact not found
+            summary: Read current per-platform synchronization state and confirmed preferences
+            tags:
+                - workflow
+        post:
+            parameters:
+                - in: path
+                  name: artifact_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/DocumentPublicationGroupRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentPublicationGroupResponse'
+                    description: Accepted publication
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Invalid targets
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Document or publication changed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Target unsupported
+            summary: Confirm publication of the current saved document to independent targets
             tags:
                 - workflow
     /api/core/workflow-authoring/v1/drafts:

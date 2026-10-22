@@ -71,6 +71,7 @@ import {
   findAlignedCompositeRevision,
 } from './compositeArtifactLayout';
 import { linkedPageTabs, buildPageOrderChange } from './workflowPageGroup';
+import { WorkflowTrustNotice } from './WorkflowTrustNotice';
 import './WorkflowPanel.scss';
 
 const PageGroupContext = React.createContext<{ tabs: TabDef[]; pages: Record<string, number>; select: (group: string, page: number) => void }>({ tabs: [], pages: {}, select: () => {} });
@@ -2349,10 +2350,7 @@ export function WorkflowPanel({
 
       </div>
 
-      <div className='workflow-panel__trust-notice' role='note'>
-        <InfoCircleOutlined aria-hidden='true' />
-        <span>{t('chat.workflowFullTrustNotice')}</span>
-      </div>
+      <WorkflowTrustNotice />
 
       {!collapsed && externalPresentation && runningTasks.length > 0 && <div className='workflow-external-activity'>
         <div className='workflow-external-activity__text' role='status'>

@@ -127,6 +127,7 @@ ALTER TABLE user_ui_preferences
     ADD COLUMN IF NOT EXISTS sensitive_word_filter_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE user_ui_preferences
     ADD COLUMN IF NOT EXISTS performance_stats_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_ui_preferences ADD COLUMN IF NOT EXISTS workflow_trust_notice_dismissed BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE sub_agent_tasks
     ADD COLUMN IF NOT EXISTS sources JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE sub_agent_tasks
@@ -157,6 +158,7 @@ UPDATE user_ui_preferences SET document_directories_enabled = TRUE;
 ALTER TABLE user_ui_preferences ADD COLUMN document_directories_generation BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE user_ui_preferences ADD COLUMN sensitive_word_filter_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE user_ui_preferences ADD COLUMN performance_stats_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_ui_preferences ADD COLUMN workflow_trust_notice_dismissed BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE sub_agent_tasks ADD COLUMN sources JSON NOT NULL DEFAULT '[]';
 ALTER TABLE sub_agent_tasks ADD COLUMN writing_subtasks JSON NOT NULL DEFAULT '[]';
 
@@ -2651,6 +2653,7 @@ CREATE TABLE IF NOT EXISTS conversation_result_read_state (
 );
 -- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS document_publication_operations (
+ publication_id VARCHAR(64) NOT NULL DEFAULT '', connection_id VARCHAR(255) NOT NULL DEFAULT '',
  id VARCHAR(64) PRIMARY KEY, owner_user_id VARCHAR(255) NOT NULL,
  idempotency_key VARCHAR(128) NOT NULL, session_id VARCHAR(64) NOT NULL,
  slot_id VARCHAR(255) NOT NULL, item_index INTEGER NOT NULL,
@@ -2667,17 +2670,21 @@ CREATE TABLE IF NOT EXISTS document_publication_operations (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_document_publication_key ON document_publication_operations(owner_user_id,idempotency_key);
 CREATE INDEX IF NOT EXISTS idx_document_publication_session ON document_publication_operations(session_id);
+CREATE INDEX IF NOT EXISTS idx_document_publication_operations_publication_id ON document_publication_operations(publication_id);
 CREATE TABLE IF NOT EXISTS document_publication_bindings (
+ binding_scope VARCHAR(64) NOT NULL DEFAULT '', connection_id VARCHAR(255) NOT NULL DEFAULT '',
+ last_success_hash VARCHAR(64) NOT NULL DEFAULT '', last_operation_id VARCHAR(64) NOT NULL DEFAULT '', last_success_at TIMESTAMP,
  id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, slot_id VARCHAR(255) NOT NULL,
  item_index INTEGER NOT NULL, owner_user_id VARCHAR(255) NOT NULL,
  pending_operation_id VARCHAR(64) NOT NULL DEFAULT '', provider VARCHAR(64) NOT NULL DEFAULT '',
  target_document JSON, remote_value JSON, source_revision_id VARCHAR(64) NOT NULL DEFAULT '',
  result_revision_id VARCHAR(64) NOT NULL DEFAULT ''
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_document_publication_item ON document_publication_bindings(session_id,slot_id,item_index);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_document_publication_item ON document_publication_bindings(session_id,slot_id,item_index,binding_scope);
 
 -- +migrate Dialect sqlite
 CREATE TABLE IF NOT EXISTS document_publication_operations (
+ publication_id VARCHAR(64) NOT NULL DEFAULT '', connection_id VARCHAR(255) NOT NULL DEFAULT '',
  id VARCHAR(64) PRIMARY KEY, owner_user_id VARCHAR(255) NOT NULL,
  idempotency_key VARCHAR(128) NOT NULL, session_id VARCHAR(64) NOT NULL,
  slot_id VARCHAR(255) NOT NULL, item_index INTEGER NOT NULL,
@@ -2694,14 +2701,17 @@ CREATE TABLE IF NOT EXISTS document_publication_operations (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_document_publication_key ON document_publication_operations(owner_user_id,idempotency_key);
 CREATE INDEX IF NOT EXISTS idx_document_publication_session ON document_publication_operations(session_id);
+CREATE INDEX IF NOT EXISTS idx_document_publication_operations_publication_id ON document_publication_operations(publication_id);
 CREATE TABLE IF NOT EXISTS document_publication_bindings (
+ binding_scope VARCHAR(64) NOT NULL DEFAULT '', connection_id VARCHAR(255) NOT NULL DEFAULT '',
+ last_success_hash VARCHAR(64) NOT NULL DEFAULT '', last_operation_id VARCHAR(64) NOT NULL DEFAULT '', last_success_at TIMESTAMP,
  id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, slot_id VARCHAR(255) NOT NULL,
  item_index INTEGER NOT NULL, owner_user_id VARCHAR(255) NOT NULL,
  pending_operation_id VARCHAR(64) NOT NULL DEFAULT '', provider VARCHAR(64) NOT NULL DEFAULT '',
  target_document JSON, remote_value JSON, source_revision_id VARCHAR(64) NOT NULL DEFAULT '',
  result_revision_id VARCHAR(64) NOT NULL DEFAULT ''
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_document_publication_item ON document_publication_bindings(session_id,slot_id,item_index);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_document_publication_item ON document_publication_bindings(session_id,slot_id,item_index,binding_scope);
 
 -- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS user_environment_variables (

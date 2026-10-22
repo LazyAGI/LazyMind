@@ -508,6 +508,12 @@ export function WorkflowSessionApi() {
     publishDocument(artifactId: string, body: DocumentPublishRequest, options?: RawAxiosRequestConfig) {
       return axiosInstance.post<{ data: DocumentPublishResult }>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/document-actions:execute`, body, options);
     },
+    getPublicationTargets(artifactId: string, options?: PublicationRequestOptions) {
+      return axiosInstance.get<{ data: import('@/api/generated/core-client').DocumentPublicationGroupState }>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/publications`, options);
+    },
+    createPublicationGroup(artifactId: string, body: import('@/api/generated/core-client').DocumentPublicationGroupRequest, options?: PublicationRequestOptions) {
+      return axiosInstance.post<{ data: import('@/api/generated/core-client').DocumentPublicationGroupState }>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/publications`, body, options);
+    },
     getPublicationForArtifact(artifactId: string, options?: PublicationRequestOptions) {
       return axiosInstance.get<{ data: DocumentPublicationLookup }>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/publication`, options);
     },
