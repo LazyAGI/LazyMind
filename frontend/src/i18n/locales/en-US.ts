@@ -326,6 +326,8 @@ const enUS = {
     invalidEmail: "Invalid email format",
   },
   modelProvider: {
+    apiAddressLabel: "API Host",
+    apiKeyLabel: "API Key",
     "keyManager": {
       "manage": "API key management",
       "copy": "Copy key {{number}}",

@@ -88,7 +88,7 @@ describe("provider key controls", () => {
       screen.getByRole("button", { name: "modelProvider.keyManager.edit" }),
     );
     const dialog = within(await screen.findByRole("dialog"));
-    fireEvent.change(dialog.getByLabelText("API Key"), {
+    fireEvent.change(dialog.getByLabelText("modelProvider.apiKeyLabel"), {
       target: { value: "replacement-secret" },
     });
     fireEvent.click(dialog.getByRole("button", { name: "common.save" }));

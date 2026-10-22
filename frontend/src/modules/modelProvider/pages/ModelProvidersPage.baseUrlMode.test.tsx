@@ -102,7 +102,7 @@ async function renderPage(
       <ModelProviderPage />
     </ConfigProvider>,
   );
-  await screen.findByRole("textbox", { name: "API Host" });
+  await screen.findByRole("textbox", { name: "modelProvider.apiAddressLabel" });
 }
 
 beforeEach(() => {
@@ -141,7 +141,7 @@ describe("supplier endpoints and direct setup", () => {
 
   it("shows supplier settings directly without an instance selector", async () => {
     await renderPage();
-    expect(screen.getAllByRole("textbox", { name: "API Host" })).toHaveLength(
+    expect(screen.getAllByRole("textbox", { name: "modelProvider.apiAddressLabel" })).toHaveLength(
       1,
     );
     expect(screen.getByText("********1234")).toBeInTheDocument();
@@ -163,7 +163,7 @@ describe("supplier endpoints and direct setup", () => {
   });
   it("saves the endpoint through the supplier API and blocks key actions until saved", async () => {
     await renderPage();
-    const endpoint = screen.getByRole("textbox", { name: "API Host" });
+    const endpoint = screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" });
     fireEvent.change(endpoint, { target: { value: customUrl } });
     expect(
       screen.getByRole("button", {
@@ -188,7 +188,7 @@ describe("supplier endpoints and direct setup", () => {
 
   it("rejects invalid API hosts before sending an update", async () => {
     await renderPage();
-    fireEvent.change(screen.getByRole("textbox", { name: "API Host" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" }), {
       target: { value: "bad-url" },
     });
     fireEvent.click(

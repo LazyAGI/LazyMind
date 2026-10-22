@@ -616,7 +616,7 @@ export function ProviderWorkspace(props: Props) {
               <div className="provider-workspace-scroll">
                 <section
                   className="provider-workspace-api-keys"
-                  aria-label="API Key"
+                  aria-label={t("modelProvider.apiKeyLabel")}
                 >
                   <ProviderKeyManager
                     providerId={provider.id}
@@ -655,7 +655,7 @@ export function ProviderWorkspace(props: Props) {
                 >
                   <div className="provider-workspace-endpoint-row">
                     <Form.Item
-                      label="API Host"
+                      label={t("modelProvider.apiAddressLabel")}
                       name="baseUrl"
                       normalize={(value: string) => value.trim()}
                       rules={[
@@ -705,7 +705,7 @@ export function ProviderWorkspace(props: Props) {
                       ]}
                     >
                       <Input
-                        aria-label="API Host"
+                        aria-label={t("modelProvider.apiAddressLabel")}
                         disabled={Boolean(changingActiveKey)}
                         maxLength={512}
                         spellCheck={false}
@@ -908,7 +908,7 @@ export function ProviderWorkspace(props: Props) {
                 />
               </Form.Item>
               <Form.Item
-                label="API Host"
+                label={t("modelProvider.apiAddressLabel")}
                 name="baseUrl"
                 rules={[
                   {
@@ -954,7 +954,7 @@ export function ProviderWorkspace(props: Props) {
           onFinish={addKey}
         >
           <Form.Item
-            label="API Key"
+            label={t("modelProvider.apiKeyLabel")}
             name="apiKey"
             rules={[
               {

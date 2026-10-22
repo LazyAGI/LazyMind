@@ -231,7 +231,7 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
     <>
       <div className="provider-workspace-key-heading">
         <h3>
-          API Key{" "}
+          {t("modelProvider.apiKeyLabel")}{" "}
           <span className="provider-workspace-count">{props.keys.length}</span>
         </h3>
         <div className="provider-workspace-key-actions">
@@ -308,7 +308,7 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
           onFinish={save}
         >
           <Form.Item
-            label="API Key"
+            label={t("modelProvider.apiKeyLabel")}
             name="apiKey"
             extra={text("replaceHint")}
             rules={[

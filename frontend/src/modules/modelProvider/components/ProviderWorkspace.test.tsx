@@ -190,7 +190,7 @@ describe("compact provider workspace", () => {
         name: "modelProvider.workspace.saveEndpoint",
       }),
     ).not.toBeInTheDocument();
-    fireEvent.change(screen.getByRole("textbox", { name: "API Host" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" }), {
       target: { value: "https://api.example.test/v2" },
     });
     expect(
@@ -365,7 +365,7 @@ describe("compact provider workspace", () => {
       screen.getByRole("button", { name: "modelProvider.workspace.addKey" }),
     );
     const dialog = within(await screen.findByRole("dialog"));
-    fireEvent.change(dialog.getByLabelText("API Key"), {
+    fireEvent.change(dialog.getByLabelText("modelProvider.apiKeyLabel"), {
       target: { value: "secret-new-5678" },
     });
     fireEvent.click(
@@ -407,7 +407,7 @@ describe("compact provider workspace", () => {
   });
   it("resets a discarded endpoint before leaving supplier settings", async () => {
     setup({}, true);
-    const endpoint = screen.getByRole("textbox", { name: "API Host" });
+    const endpoint = screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" });
     fireEvent.change(endpoint, {
       target: { value: "https://unsaved.example.test/v1" },
     });
@@ -483,7 +483,7 @@ describe("compact provider workspace", () => {
       dialog.getByLabelText("modelProvider.workspace.supplierName"),
       { target: { value: "My gateway" } },
     );
-    fireEvent.change(dialog.getByRole("textbox", { name: "API Host" }), {
+    fireEvent.change(dialog.getByRole("textbox", { name: "modelProvider.apiAddressLabel" }), {
       target: { value: "https://custom.example.test/v1" },
     });
     fireEvent.mouseDown(dialog.getByRole("combobox"));
@@ -497,7 +497,7 @@ describe("compact provider workspace", () => {
         selector: ".ant-select-item-option-content",
       }),
     );
-    fireEvent.change(dialog.getByRole("textbox", { name: "API Host" }), {
+    fireEvent.change(dialog.getByRole("textbox", { name: "modelProvider.apiAddressLabel" }), {
       target: { value: "https://custom.example.test/v1" },
     });
     fireEvent.click(dialog.getByRole("button", { name: "common.save" }));
@@ -574,7 +574,7 @@ describe("compact provider workspace", () => {
     expect(
       dialog.queryByLabelText("modelProvider.groupName"),
     ).not.toBeInTheDocument();
-    fireEvent.change(dialog.getByLabelText("API Key"), {
+    fireEvent.change(dialog.getByLabelText("modelProvider.apiKeyLabel"), {
       target: { value: "first-key" },
     });
     fireEvent.click(
