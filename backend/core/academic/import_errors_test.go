@@ -7,9 +7,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -63,9 +63,6 @@ func TestMetadataResolversExposeProviderErrors(t *testing.T) {
 				return &http.Response{StatusCode: test.status, Body: io.NopCloser(strings.NewReader(test.body)), Header: make(http.Header), Request: r}, nil
 			})
 			t.Cleanup(func() { http.DefaultTransport = previous })
-			arxivRequestGate.Lock()
-			arxivRequestGate.next = time.Time{}
-			arxivRequestGate.Unlock()
 			if err := test.lookup(context.Background()); err == nil {
 				t.Fatal("provider failure was treated as an empty successful lookup")
 			}
@@ -297,7 +294,7 @@ func TestPaperImportJobReturnsFailureForFailedItems(t *testing.T) {
 
 func importErrorDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "-")+"?mode=memory&cache=shared"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "imports.db")), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,8 +304,5 @@ func importErrorDB(t *testing.T) *gorm.DB {
 	previous, previousLazy, previousState := store.DB(), store.LazyLLMDB(), store.State()
 	store.Init(db, db, previousState)
 	t.Cleanup(func() { store.Init(previous, previousLazy, previousState); sqlDB, _ := db.DB(); _ = sqlDB.Close() })
-	arxivRequestGate.Lock()
-	arxivRequestGate.next = time.Time{}
-	arxivRequestGate.Unlock()
 	return db
 }

@@ -5,7 +5,7 @@ from lazymind.chat.workflow.workflow_manager import _client
 def _call(method, path, payload=None):
     api = _client()
     response = api.transport.request(method, api.base_url + '/academic' + path,
-                                     headers=api._headers(), json=payload, timeout=30)
+                                     headers=api._headers(), json=payload, timeout=90)
     response.raise_for_status()
     data = response.json()
     return data.get('data', data)
@@ -17,14 +17,15 @@ def academic_expansion_context(expansion_id: str):
     return _call('GET', '/expansions/' + quote(expansion_id, safe=''))
 
 
-def academic_demo_papers():
-    """Get clearly labelled Mock discovery using real registered paper identities."""
-    return _call('GET', '/demo-papers')
+def academic_search_papers(expansion_id: str, query: str, max_results: int = 10):
+    """Discover external arXiv papers and save pinned revisions to this expansion."""
+    return _call('POST', '/papers:search', {'expansion_id': expansion_id, 'query': query, 'max_results': max_results})
 
 
-def academic_read_paper(paper_id: str, cursor: str = ''):
-    """Read actual full text without importing; processing/error states are authoritative."""
-    return _call('POST', '/paper-contents:read', {'cursor': cursor} if cursor else {'paper_id': paper_id})
+def academic_read_paper(expansion_id: str, paper_id: str = '', cursor: str = ''):
+    """Read a saved seed or external candidate within this collection's boundary."""
+    payload = {'expansion_id': expansion_id, 'cursor': cursor} if cursor else {'expansion_id': expansion_id, 'paper_id': paper_id}
+    return _call('POST', '/paper-contents:read', payload)
 
 
 def academic_validate_result(result: dict):

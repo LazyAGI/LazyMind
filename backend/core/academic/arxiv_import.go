@@ -187,6 +187,10 @@ func (s *arxivImportService) importPaper(ctx context.Context, input, datasetID, 
 	if err != nil {
 		return ArxivImportResult{}, err
 	}
+	return s.importResolvedPaper(ctx, paper, datasetID, userID, userName)
+}
+
+func (s *arxivImportService) importResolvedPaper(ctx context.Context, paper arxivsource.Metadata, datasetID, userID, userName string) (result ArxivImportResult, err error) {
 	// Trust provider metadata only, and pin the actual version before downloading.
 	identifier, err := arxivsource.Parse(paper.BaseID + paper.Version)
 	if err != nil || identifier.Version == "" || identifier.BaseID != paper.BaseID || strings.TrimSpace(paper.Title) == "" {
@@ -206,6 +210,31 @@ func (s *arxivImportService) importPaper(ctx context.Context, input, datasetID, 
 			err = cause
 		}
 	}()
+	// Earlier Workflow imports may already have a verified revision link but
+	// no direct-import marker. Recover that attachment through the same path
+	// instead of downloading another copy or admitting incomplete list metadata.
+	var existingWork orm.AcademicWork
+	if e := s.db.WithContext(ctx).Where("arxiv_id_base=?", paper.BaseID).Take(&existingWork).Error; e == nil {
+		var link orm.AcademicWorkDocument
+		e = s.db.WithContext(ctx).Where("academic_work_id=? AND dataset_id=? AND source_provider='arxiv' AND source_version=? AND document_id IN (?)", existingWork.ID, datasetID, paper.Version, s.db.Model(&orm.Document{}).Select("id").Where("dataset_id=? AND deleted_at IS NULL", datasetID)).Order("is_preferred_version DESC, updated_at DESC").Take(&link).Error
+		if e == nil {
+			var document orm.Document
+			if e = s.db.WithContext(ctx).Where("id=? AND dataset_id=? AND deleted_at IS NULL", link.DocumentID, datasetID).Take(&document).Error; e != nil {
+				return result, e
+			}
+			ext, _, available, fileErr := readArxivDocument(document)
+			if fileErr != nil {
+				return result, fileErr
+			}
+			if available && ext.Marker == nil {
+				return s.recoverSavedImport(ctx, paper, document, userID, userName, nil)
+			}
+		} else if !errors.Is(e, gorm.ErrRecordNotFound) {
+			return result, e
+		}
+	} else if !errors.Is(e, gorm.ErrRecordNotFound) {
+		return result, e
+	}
 	items, err := s.library(ctx, datasetID)
 	if err != nil {
 		return ArxivImportResult{}, err

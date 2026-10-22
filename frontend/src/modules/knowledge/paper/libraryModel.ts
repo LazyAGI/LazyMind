@@ -129,7 +129,7 @@ export function createNote(paperId: string, content = '', kind: NoteKind = 'note
 }
 
 export function asLegacyLibrary(data: PaperLibraryDataV3): PaperLibraryData {
-  return { folders: data.folders, papers: data.papers.map(({ metadata, attachmentIds, noteIds, annotationIds, collectionIds, relatedPaperIds, ...paper }) => paper) };
+  return { folders: data.folders, papers: data.papers.map(({ metadata, attachmentIds, noteIds, annotationIds, collectionIds, relatedPaperIds, ...paper }) => ({ ...paper, abstract: paper.abstract ?? metadata.abstract })) };
 }
 
 export function readingSummary(data: PaperLibraryDataV3, paperId: string) {

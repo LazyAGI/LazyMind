@@ -295,6 +295,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/academic/paper-selections:resolve", []string{"document.read"}, academic.ResolvePaperSelection)
 	handleAPI(r, "POST", "/academic/workflow-launches", []string{"qa.write"}, academic.LaunchPaperWorkflow)
 	handleAPI(r, "POST", "/academic/paper-contents:read", []string{"document.read"}, academic.ReadPaperContent)
+	handleAPI(r, "POST", "/academic/papers:search", []string{"document.read"}, academic.SearchPapers)
 	handleAPI(r, "POST", "/academic/paper-contents:retry", []string{"document.read"}, academic.RetryPaperContent)
 	handleAPI(r, "GET", "/academic/expansions", []string{"qa.read"}, academic.ListExpansions)
 	handleAPI(r, "GET", "/academic/expansions/{expansion_id}", []string{"qa.read"}, academic.GetExpansion)

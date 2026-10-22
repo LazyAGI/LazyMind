@@ -40,3 +40,52 @@ func TestAcademicWorkflowMigrationRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+func TestPaperSourceMigrationPreservesCachesAndRejectsLossyDown(t *testing.T) {
+	for _, driver := range []string{"sqlite", "postgres"} {
+		t.Run(driver, func(t *testing.T) {
+			var db *sql.DB
+			if driver == "sqlite" {
+				db = openRawSQLite(t, filepath.Join(t.TempDir(), "sources.db"))
+			} else {
+				dsn := os.Getenv(migrationPostgresDSNEnv)
+				if dsn == "" {
+					t.Skip("PostgreSQL integration DSN required")
+				}
+				db = createTemporaryPostgresDatabase(t, dsn, "paper_sources")
+			}
+			if _, err := db.Exec("CREATE TABLE datasets (id VARCHAR(255) PRIMARY KEY)"); err != nil {
+				t.Fatal(err)
+			}
+			execMigrationFileForDriver(t, db, "../migrations/dev_mode/v0_3/20261021091623_academic_workflows.up.sql", driver)
+			if _, err := db.Exec("INSERT INTO academic_paper_contents(id,user_id,paper_id,status,pages_json,updated_at) VALUES ('old','u','paper','ready','[]',CURRENT_TIMESTAMP)"); err != nil {
+				t.Fatal(err)
+			}
+			const base = "../migrations/dev_mode/v0_3/20261022072101_paper_sources"
+			execMigrationFileForDriver(t, db, base+".up.sql", driver)
+			var kind string
+			if err := db.QueryRow("SELECT source_kind FROM academic_paper_contents WHERE id='old'").Scan(&kind); err != nil || kind != "legacy" {
+				t.Fatal("old cache lost its provenance fence", kind, err)
+			}
+			if _, err := db.Exec("INSERT INTO academic_paper_contents(id,user_id,paper_id,status,pages_json,source_kind,source_key,source_version,updated_at) VALUES ('new','u','paper','ready','[]','external','arxiv-v2','v2',CURRENT_TIMESTAMP)"); err != nil {
+				t.Fatal(err)
+			}
+			// The first statement is intentionally the old unique constraint. It
+			// must fail before any source columns or cache records can be dropped.
+			if _, err := db.Exec("CREATE UNIQUE INDEX uk_academic_content_downgrade ON academic_paper_contents(user_id,paper_id,parser_version)"); err == nil {
+				t.Fatal("lossy downgrade accepted")
+			}
+			var count int
+			if err := db.QueryRow("SELECT COUNT(*) FROM academic_paper_contents").Scan(&count); err != nil || count != 2 {
+				t.Fatal("downgrade check lost data", count, err)
+			}
+			if _, err := db.Exec("DELETE FROM academic_paper_contents WHERE id='new'"); err != nil {
+				t.Fatal(err)
+			}
+			execMigrationFileForDriver(t, db, base+".down.sql", driver)
+			if err := db.QueryRow("SELECT COUNT(*) FROM academic_paper_contents WHERE id='old'").Scan(&count); err != nil || count != 1 {
+				t.Fatal("down lost legacy cache", count, err)
+			}
+		})
+	}
+}

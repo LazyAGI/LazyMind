@@ -814,6 +814,10 @@ func OnSubAgentDone(
 	}
 
 	if sessionCompleted {
+		// Route freezing can complete the session without UpdateSessionStatus.
+		// Publish the committed terminal state so domain projections (including
+		// paper expansion results) also catch up after a manual retry.
+		NotifyWorkflowRuntimeUpdated(ctx, db, pctx.SessionID, taskID, "completed")
 		_ = taskcenter.UpdateTaskStatusBySession(ctx, db, pctx.SessionID, "succeeded")
 		clearGeneratingChatStatus(ctx, stateStore, pctx.ConvID)
 		onSSE("workflow_completed", map[string]any{

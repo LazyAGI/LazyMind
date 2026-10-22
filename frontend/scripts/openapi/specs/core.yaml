@@ -47,13 +47,18 @@ components:
         AcademicContentRead:
             oneOf:
                 - properties:
+                    expansion_id:
+                        type: string
                     paper_id:
                         type: string
                   required:
+                    - expansion_id
                     - paper_id
                   type: object
                 - properties:
                     cursor:
+                        type: string
+                    expansion_id:
                         type: string
                   required:
                     - cursor
@@ -84,6 +89,14 @@ components:
                 paper:
                     $ref: '#/components/schemas/AcademicPaperRef'
                 parser_version:
+                    type: string
+                source_kind:
+                    enum:
+                        - kb
+                        - external
+                        - legacy
+                    type: string
+                source_version:
                     type: string
                 status:
                     enum:
@@ -135,6 +148,47 @@ components:
                 reidentify:
                     type: boolean
             type: object
+        AcademicDocumentState:
+            properties:
+                document_id:
+                    type: string
+                error:
+                    type: string
+                kind:
+                    enum:
+                        - paper
+                        - other
+                        - unknown
+                    type: string
+                manual:
+                    type: boolean
+                paper_id:
+                    type: string
+                revision:
+                    format: int64
+                    type: integer
+                status:
+                    type: string
+            type: object
+        AcademicDocumentStatus:
+            properties:
+                content_sha256:
+                    type: string
+                is_important:
+                    type: boolean
+                paper:
+                    $ref: '#/components/schemas/AcademicPaperRef'
+                processing_error:
+                    type: string
+                processing_status:
+                    type: string
+                source_provider:
+                    type: string
+                source_version:
+                    type: string
+                state:
+                    $ref: '#/components/schemas/AcademicDocumentState'
+            type: object
         AcademicExpansion:
             properties:
                 conversation_id:
@@ -143,6 +197,11 @@ components:
                     format: date-time
                     type: string
                 dataset_id:
+                    type: string
+                discovery_mode:
+                    enum:
+                        - external
+                        - legacy_mock
                     type: string
                 goal:
                     type: string
@@ -171,6 +230,57 @@ components:
                 - version
                 - result
             type: object
+        AcademicImportCandidate:
+            properties:
+                expected_mime:
+                    type: string
+                source_provider:
+                    type: string
+                source_type:
+                    type: string
+                url:
+                    type: string
+                version:
+                    type: string
+            type: object
+        AcademicImportCreate:
+            properties:
+                entry_type:
+                    enum:
+                        - single_reference
+                        - paper_references
+                        - collection_references
+                        - paper_link
+                    type: string
+                idempotency_key:
+                    type: string
+                items:
+                    items:
+                        $ref: '#/components/schemas/AcademicImportItem'
+                    type: array
+                source_document_ids:
+                    items:
+                        type: string
+                    type: array
+                target_dataset_id:
+                    type: string
+                target_pid:
+                    type: string
+            required:
+                - target_dataset_id
+                - items
+            type: object
+        AcademicImportItem:
+            properties:
+                candidate:
+                    $ref: '#/components/schemas/AcademicImportCandidate'
+                reference_ids:
+                    items:
+                        type: string
+                    type: array
+                work_id:
+                    type: string
+            type: object
         AcademicPaperRef:
             properties:
                 abstract:
@@ -182,6 +292,8 @@ components:
                     items:
                         type: string
                     type: array
+                document_id:
+                    type: string
                 doi:
                     type: string
                 paper_id:
@@ -189,6 +301,10 @@ components:
                 paper_url:
                     type: string
                 pdf_url:
+                    type: string
+                source_provider:
+                    type: string
+                source_version:
                     type: string
                 title:
                     type: string
@@ -199,6 +315,44 @@ components:
             required:
                 - paper_id
                 - abstract
+            type: object
+        AcademicPresence:
+            properties:
+                coverage_complete:
+                    type: boolean
+                current_dataset:
+                    items:
+                        $ref: '#/components/schemas/AcademicPresenceDocument'
+                    type: array
+                importing:
+                    type: boolean
+                metadata_only:
+                    type: boolean
+                other_datasets:
+                    items:
+                        $ref: '#/components/schemas/AcademicPresenceDocument'
+                    type: array
+                status:
+                    type: string
+                work_id:
+                    type: string
+            type: object
+        AcademicPresenceDocument:
+            properties:
+                content_sha256:
+                    type: string
+                dataset_id:
+                    type: string
+                dataset_name:
+                    type: string
+                document_id:
+                    type: string
+                document_name:
+                    type: string
+                source_provider:
+                    type: string
+                source_version:
+                    type: string
             type: object
         AcademicReviewInput:
             properties:
@@ -15628,8 +15782,7 @@ paths:
                                 properties:
                                     items:
                                         items:
-                                            properties: {}
-                                            type: object
+                                            $ref: '#/components/schemas/AcademicDocumentStatus'
                                         type: array
                                 type: object
                     description: Read document scholarly identity and current user's importance
@@ -15775,6 +15928,10 @@ paths:
                                         additionalProperties:
                                             type: boolean
                                         type: object
+                                    presence:
+                                        items:
+                                            $ref: '#/components/schemas/AcademicPresence'
+                                        type: array
                                     record:
                                         $ref: '#/components/schemas/AcademicExpansion'
                                     rounds:
@@ -15794,10 +15951,27 @@ paths:
                     description: OK
             summary: GET /academic/imports
         post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/AcademicImportCreate'
+                required: true
             responses:
                 "200":
-                    description: OK
-            summary: POST /academic/imports
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    batch_id:
+                                        type: string
+                                    status:
+                                        type: string
+                                type: object
+                    description: Queue version-aware paper link or reference imports
+            summary: Queue version-aware paper link or reference imports
+            tags:
+                - AcademicWorkflows
     /api/core/academic/imports/{batch_id}:
         get:
             parameters:
@@ -15836,10 +16010,56 @@ paths:
             summary: POST /academic/imports/{batch_id}:retry
     /api/core/academic/imports:preview:
         post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                expansion_id:
+                                    type: string
+                                identifier:
+                                    type: string
+                                reference_ids:
+                                    items:
+                                        type: string
+                                    type: array
+                                resolve_external:
+                                    type: boolean
+                                source_document_ids:
+                                    items:
+                                        type: string
+                                    type: array
+                                target_dataset_id:
+                                    type: string
+                                work_ids:
+                                    items:
+                                        type: string
+                                    type: array
+                                works:
+                                    items:
+                                        properties: {}
+                                        type: object
+                                    type: array
+                            required:
+                                - target_dataset_id
+                            type: object
+                required: true
             responses:
                 "200":
-                    description: OK
-            summary: POST /academic/imports:preview
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    items:
+                                        items:
+                                            properties: {}
+                                            type: object
+                                        type: array
+                                type: object
+                    description: Preview reference or identifier import into the current collection
+            summary: Preview reference or identifier import into the current collection
+            tags:
+                - AcademicWorkflows
     /api/core/academic/library:
         get:
             responses:
@@ -15918,9 +16138,12 @@ paths:
                     application/json:
                         schema:
                             properties:
+                                expansion_id:
+                                    type: string
                                 paper_id:
                                     type: string
                             required:
+                                - expansion_id
                                 - paper_id
                             type: object
                 required: true
@@ -16009,6 +16232,46 @@ paths:
                                 type: object
                     description: Set current user's personal importance
             summary: Set current user's personal importance
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/papers:search:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                expansion_id:
+                                    type: string
+                                max_results:
+                                    default: 10
+                                    maximum: 20
+                                    minimum: 1
+                                    type: integer
+                                query:
+                                    type: string
+                            required:
+                                - expansion_id
+                                - query
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    mock:
+                                        type: boolean
+                                    papers:
+                                        items:
+                                            $ref: '#/components/schemas/AcademicPaperRef'
+                                        type: array
+                                    source:
+                                        type: string
+                                type: object
+                    description: Search external arXiv candidates and pin their versions to an owned expansion
+            summary: Search external arXiv candidates and pin their versions to an owned expansion
             tags:
                 - AcademicWorkflows
     /api/core/academic/references:resolve:

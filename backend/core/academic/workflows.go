@@ -136,7 +136,14 @@ func resolvePaperSelection(r *http.Request, user, dataset string, ids []string) 
 		if err := store.DB().Where("user_id=? AND paper_id=?", user, work.ID).Take(&mark).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil, err
 		}
-		result = append(result, WorkflowPaper{Paper: documentPaperRef(paperRef(work), state.MetadataJSON), IsSeed: true, IsImportant: mark.IsImportant})
+		ref := documentPaperRef(paperRef(work), state.MetadataJSON)
+		ref.SourceDocumentID = id
+		var link orm.AcademicWorkDocument
+		if err := store.DB().Where("dataset_id=? AND document_id=? AND academic_work_id=?", dataset, id, work.ID).Take(&link).Error; err == nil {
+			ref.SourceVersion, ref.SourceProvider = link.SourceVersion, link.SourceProvider
+			pinPaperURLs(&ref)
+		}
+		result = append(result, WorkflowPaper{Paper: ref, IsSeed: true, IsImportant: mark.IsImportant})
 	}
 	return result, invalid, nil
 }
@@ -225,7 +232,11 @@ func LaunchPaperWorkflow(w http.ResponseWriter, r *http.Request) {
 			if e != nil {
 				return e
 			}
-			record := orm.AcademicExpansion{ID: uuid.NewString(), UserID: user, RequestOwner: user, RequestKey: req.RequestKey, DatasetID: req.DatasetID, ConversationID: convID, Title: instruction, Goal: req.Kind, Status: "pending", ResultJSON: marshal(input), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+			seeds, e := seedSources(tx, req.DatasetID, papers)
+			if e != nil {
+				return e
+			}
+			record := orm.AcademicExpansion{DiscoveryMode: "external", SeedSnapshotJSON: marshal(seeds), DiscoveryJSON: json.RawMessage(`[]`), ID: uuid.NewString(), UserID: user, RequestOwner: user, RequestKey: req.RequestKey, DatasetID: req.DatasetID, ConversationID: convID, Title: instruction, Goal: req.Kind, Status: "pending", ResultJSON: marshal(input), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 			if e = tx.Create(&record).Error; e != nil {
 				return e
 			}
@@ -389,18 +400,36 @@ func snapshotReview(ctx context.Context, tx *gorm.DB, user, dataset string, inpu
 		if err != nil {
 			return input, nil, err
 		}
+		ref.SourceDocumentID = p.Paper.SourceDocumentID
+		if p.Paper.SourceVersion != "" {
+			ref.SourceVersion, ref.SourceProvider = p.Paper.SourceVersion, p.Paper.SourceProvider
+			pinPaperURLs(&ref)
+		}
 		p.Paper = ref
 		var mark orm.AcademicUserPaperState
 		if err := tx.Where("user_id=? AND paper_id=?", user, work.ID).Take(&mark).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return input, nil, err
 		}
 		p.IsImportant = mark.IsImportant
-		var content orm.AcademicPaperContent
-		contentErr := tx.Where("user_id=? AND paper_id=? AND parser_version=?", user, work.ID, orm.AcademicPaperParserVersion).Take(&content).Error
+		source := paperSource{Paper: p.Paper, DatasetID: dataset}
+		if p.IsSeed {
+			seeds, e := seedSources(tx, dataset, []WorkflowPaper{p})
+			if e != nil {
+				return input, nil, e
+			}
+			source = seeds[0]
+		} else {
+			var sourceErr error
+			source, sourceErr = matchingLibrarySource(tx, source)
+			if sourceErr != nil {
+				return input, nil, sourceErr
+			}
+		}
+		content, contentErr := findSourceContent(tx, user, source)
 		available := false
 		if contentErr == nil {
 			contents = append(contents, content)
-			available = content.Status == "ready" && content.ContentHash != "" && len(content.PagesJSON) > 2 && paperContentAuthorized(ctx, user, content)
+			available = content.Status == "ready" && content.ContentHash != "" && len(content.PagesJSON) > 2
 			if available {
 				ready++
 			}
@@ -621,7 +650,7 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 		var failed orm.WorkflowSessionStep
 		if db.Where("session_id=? AND validity='effective'", session.ID).Order("created_at DESC").Take(&failed).Error == nil {
 			now := time.Now().UTC()
-			round := orm.AcademicExpansionRound{ID: uuid.NewString(), ExpansionID: record.ID, RequestKey: "failure:" + failed.ID + ":" + status, Status: status, Version: record.Version, InputJSON: record.ResultJSON, ResultJSON: marshal(progress), SessionID: session.ID, AttemptID: failed.ID, CreatedAt: failed.CreatedAt, UpdatedAt: now}
+			round := orm.AcademicExpansionRound{DiscoveryMode: record.DiscoveryMode, ID: uuid.NewString(), ExpansionID: record.ID, RequestKey: "failure:" + failed.ID + ":" + status, Status: status, Version: record.Version, InputJSON: record.ResultJSON, ResultJSON: marshal(progress), SessionID: session.ID, AttemptID: failed.ID, CreatedAt: failed.CreatedAt, UpdatedAt: now}
 			if e := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&round).Error; e != nil {
 				return asyncjob.Result{}, e
 			}
@@ -699,9 +728,15 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 				input.CandidateDirections = previous.CandidateDirections
 				input.SelectedDirections = previous.SelectedDirections
 			}
+			priorPapers := []WorkflowPaper{}
+			for _, p := range previous.Papers {
+				if _, e := expansionSource(tx, record, p.Paper.PaperID); e == nil {
+					priorPapers = append(priorPapers, p)
+				}
+			}
 			merged := map[string]WorkflowPaper{}
 			order := []string{}
-			for _, p := range append(previous.Papers, input.Papers...) {
+			for _, p := range append(priorPapers, input.Papers...) {
 				id := p.Paper.PaperID
 				if id == "" {
 					return errors.New("paper_id is required")
@@ -710,10 +745,12 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 				if e := tx.Where("id=?", id).Take(&work).Error; e != nil {
 					return e
 				}
-				p.Paper, err = datasetPaperRef(tx, record.DatasetID, work)
-				if err != nil {
-					return err
+				source, sourceErr := expansionSource(tx, record, id)
+				if sourceErr != nil {
+					return fmt.Errorf("%w: %v", errUnregisteredExpansionPaper, sourceErr)
 				}
+				p.Paper, p.IsSeed = source.Paper, source.IsSeed
+
 				var mark orm.AcademicUserPaperState
 				if e := tx.Where("user_id=? AND paper_id=?", record.UserID, id).Take(&mark).Error; e != nil && !errors.Is(e, gorm.ErrRecordNotFound) {
 					return e
@@ -752,17 +789,20 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 			input.UserInstruction = strings.Join(instructionParts, "\n\n")
 			version := record.Version + 1
 			now := time.Now().UTC()
-			round := orm.AcademicExpansionRound{ID: uuid.NewString(), ExpansionID: record.ID, RequestKey: artifact.ID, Status: "completed", Version: version, InputJSON: marshal(map[string]any{"workflow_input": roundInput, "user_updates": userUpdates, "interactions": interactions}), ResultJSON: marshal(input), SessionID: session.ID, AttemptID: step.ID, CreatedAt: artifact.CreatedAt, UpdatedAt: now}
+			round := orm.AcademicExpansionRound{DiscoveryMode: record.DiscoveryMode, ID: uuid.NewString(), ExpansionID: record.ID, RequestKey: artifact.ID, Status: "completed", Version: version, InputJSON: marshal(map[string]any{"workflow_input": roundInput, "user_updates": userUpdates, "interactions": interactions}), ResultJSON: marshal(input), SessionID: session.ID, AttemptID: step.ID, CreatedAt: artifact.CreatedAt, UpdatedAt: now}
 			if e := tx.Create(&round).Error; e != nil {
 				return e
 			}
 			return tx.Model(&record).Updates(map[string]any{"version": version, "result_json": marshal(input), "updated_at": now}).Error
 		})
 		if err != nil {
+			if errors.Is(err, errUnregisteredExpansionPaper) {
+				return rejectExpansionResult(db, record, session, artifact, err)
+			}
 			return asyncjob.Result{}, err
 		}
 	}
-	// Reading is real even when discovery recommendations are fixtures.
+	// Full text uses only the expansion sources verified above.
 	var latest orm.AcademicExpansion
 	if err = db.Where("id=? AND deleted_at IS NULL", record.ID).Take(&latest).Error; err != nil {
 		return asyncjob.Result{}, err
@@ -773,7 +813,11 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 	}
 	processing := false
 	for _, paper := range input.Papers {
-		content, e := ensurePaperContent(ctx, db, record.UserID, paper.Paper.PaperID)
+		source, e := expansionSource(db, latest, paper.Paper.PaperID)
+		if e != nil {
+			continue
+		} // Legacy histories remain visible; a continued round must discover candidates again.
+		content, e := ensurePaperContent(ctx, db, record.UserID, paper.Paper.PaperID, source)
 		if e != nil {
 			return asyncjob.Result{}, e
 		}
@@ -861,23 +905,36 @@ func GetExpansion(w http.ResponseWriter, r *http.Request) {
 	for _, p := range input.Papers {
 		ids = append(ids, p.Paper.PaperID)
 	}
-	if len(ids) > 0 {
-		if err := store.DB().Where("user_id=? AND paper_id IN ? AND parser_version=?", user, ids, orm.AcademicPaperParserVersion).Find(&contents).Error; err != nil {
-			replyError(w, 500, "READ_FAILED", err.Error())
+	for _, id := range ids {
+		source, e := expansionSource(store.DB(), record, id)
+		if e != nil {
+			continue
+		}
+		if content, e := findSourceContent(store.DB(), user, source); e == nil {
+			contents = append(contents, content)
+		} else if !errors.Is(e, gorm.ErrRecordNotFound) {
+			replyError(w, 500, "READ_FAILED", e.Error())
 			return
 		}
-		for i := range contents {
-			if contents[i].Status == "ready" && !paperContentAuthorized(r.Context(), user, contents[i]) {
-				contents[i].Status = "unavailable"
-				contents[i].Error = "原解析文档已不可访问"
-			}
-		}
 	}
-	presence, err := presenceForWorks(r.Context(), r, user, ids, record.DatasetID)
+
+	presence, err := presenceForWorks(r.Context(), r, user, ids, record.DatasetID, true)
 	if err != nil {
 		replyError(w, 500, "READ_FAILED", err.Error())
 		return
 	}
+	for i := range presence {
+		source, e := expansionSource(store.DB(), record, presence[i].WorkID)
+		if e != nil {
+			continue
+		}
+		presence[i].Importing, err = activePaperImport(r.Context(), user, record.DatasetID, presence[i].WorkID, source.Paper.SourceVersion)
+		if err != nil {
+			replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
+			return
+		}
+	}
+
 	var handoffs []orm.AcademicHandoff
 	if err := store.DB().Where("user_id=? AND expansion_id=?", user, record.ID).Order("created_at").Find(&handoffs).Error; err != nil {
 		replyError(w, 500, "READ_FAILED", err.Error())
@@ -1036,18 +1093,16 @@ func AcademicChatContext(w http.ResponseWriter, r *http.Request) {
 		for _, paper := range input.Papers {
 			ids = append(ids, paper.Paper.PaperID)
 		}
-		var contents []orm.AcademicPaperContent
-		if len(ids) > 0 {
-			if err := store.DB().Where("user_id=? AND paper_id IN ? AND parser_version=? AND status='ready'", user, ids, orm.AcademicPaperParserVersion).Find(&contents).Error; err != nil {
-				replyError(w, 500, "READ_FAILED", err.Error())
-				return
+		for _, id := range ids {
+			source, e := expansionSource(store.DB(), record, id)
+			if e != nil {
+				continue
 			}
-			for _, content := range contents {
-				if paperContentAuthorized(r.Context(), user, content) {
-					ready++
-				}
+			if content, e := findSourceContent(store.DB(), user, source); e == nil && content.Status == "ready" {
+				ready++
 			}
 		}
+
 		next := ""
 		if record.AutoReviewID != "" {
 			var handoff orm.AcademicHandoff

@@ -19,6 +19,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"lazymind/core/academic/arxivsource"
 	"lazymind/core/acl"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -484,6 +485,9 @@ func findOrCreateWork(ctx context.Context, tx *gorm.DB, in WorkInput) (orm.Acade
 	arxiv, _ := NormalizeArxivID(in.ArxivID)
 	var row orm.AcademicWork
 	if doi != "" && tx.WithContext(ctx).Where("doi_normalized = ?", doi).Take(&row).Error == nil {
+		if arxiv != "" && row.ArxivIDBase != "" && arxiv != row.ArxivIDBase {
+			return row, "", errors.New("conflicting paper identifiers")
+		}
 		updates := map[string]any{"updated_at": time.Now().UTC()}
 		if arxiv != "" && row.ArxivIDBase == "" {
 			updates["arxiv_id_base"] = arxiv
@@ -509,6 +513,9 @@ func findOrCreateWork(ctx context.Context, tx *gorm.DB, in WorkInput) (orm.Acade
 		return row, "doi", nil
 	}
 	if arxiv != "" && tx.WithContext(ctx).Where("arxiv_id_base = ?", arxiv).Take(&row).Error == nil {
+		if doi != "" && row.DOINormalized != "" && doi != row.DOINormalized {
+			return row, "", errors.New("conflicting paper identifiers")
+		}
 		if doi != "" && row.DOINormalized == "" {
 			if err := tx.WithContext(ctx).Model(&row).Updates(map[string]any{"doi_normalized": doi, "updated_at": time.Now().UTC()}).Error; err != nil {
 				return row, "", err
@@ -709,16 +716,44 @@ type presenceRequest struct {
 	CurrentDatasetID string      `json:"current_dataset_id,omitempty"`
 }
 
-func presenceForWorks(ctx context.Context, r *http.Request, userID string, workIDs []string, currentDatasetID string) ([]PresenceResult, error) {
-	visible, err := accessibleDatasets(ctx, r, userID)
-	if err != nil {
-		return nil, err
+func presenceForWorks(ctx context.Context, r *http.Request, userID string, workIDs []string, currentDatasetID string, currentOnly bool) ([]PresenceResult, error) {
+	visible := map[string]doc.Dataset{}
+	var err error
+	if currentOnly && currentDatasetID != "" {
+		var dataset orm.Dataset
+		if err := store.DB().WithContext(ctx).Where("id=?", currentDatasetID).Take(&dataset).Error; err != nil {
+			return nil, err
+		}
+		visible[currentDatasetID] = doc.Dataset{DatasetID: dataset.ID, DisplayName: dataset.DisplayName}
+	} else {
+		var err error
+		visible, err = accessibleDatasets(ctx, r, userID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var bibliography struct {
+		Papers []struct {
+			WorkID string `json:"academicWorkId"`
+			DOI    string `json:"doi"`
+			Arxiv  string `json:"arxiv"`
+		} `json:"papers"`
+	}
+	if currentDatasetID != "" {
+		var library orm.PaperLibrary
+		if e := store.DB().WithContext(ctx).Where("dataset_id=?", currentDatasetID).Take(&library).Error; e == nil {
+			if e = json.Unmarshal(library.DataJSON, &bibliography); e != nil {
+				return nil, e
+			}
+		} else if !errors.Is(e, gorm.ErrRecordNotFound) {
+			return nil, e
+		}
 	}
 	results := make([]PresenceResult, 0, len(workIDs))
 	for _, workID := range workIDs {
 		result := PresenceResult{WorkID: workID, Status: "absent", CoverageComplete: true, CurrentDataset: []PresenceDocument{}, OtherDatasets: []PresenceDocument{}}
 		var links []orm.AcademicWorkDocument
-		if err := store.DB().WithContext(ctx).Where("academic_work_id = ?", workID).Find(&links).Error; err != nil {
+		if err := store.DB().WithContext(ctx).Where("academic_work_id = ?", workID).Where("dataset_id IN ?", datasetKeys(visible)).Find(&links).Error; err != nil {
 			return nil, err
 		}
 		for _, link := range links {
@@ -730,22 +765,47 @@ func presenceForWorks(ctx context.Context, r *http.Request, userID string, workI
 			if store.DB().WithContext(ctx).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", link.DocumentID, link.DatasetID).Take(&document).Error != nil {
 				continue
 			}
-			item := PresenceDocument{DatasetID: link.DatasetID, DatasetName: dataset.DisplayName, DocumentID: link.DocumentID, DocumentName: document.DisplayName, SourceVersion: link.SourceVersion, ContentSHA256: link.ContentSHA256}
+			item := PresenceDocument{DatasetID: link.DatasetID, DatasetName: dataset.DisplayName, DocumentID: link.DocumentID, DocumentName: document.DisplayName, SourceProvider: link.SourceProvider, SourceVersion: link.SourceVersion, ContentSHA256: link.ContentSHA256}
 			if link.DatasetID == currentDatasetID {
 				result.CurrentDataset = append(result.CurrentDataset, item)
 			} else {
 				result.OtherDatasets = append(result.OtherDatasets, item)
 			}
 		}
-		var importing int64
-		_ = store.DB().WithContext(ctx).Table("paper_import_items pi").Joins("JOIN paper_import_batches pb ON pb.id = pi.batch_id").Where("pi.academic_work_id = ? AND pb.created_by = ? AND pi.status IN ?", workID, userID, []string{"pending", "running"}).Count(&importing).Error
-		result.Importing = importing > 0
+		if currentOnly {
+			result.Importing, err = activePaperImport(ctx, userID, currentDatasetID, workID, "")
+		} else {
+			var count int64
+			query := store.DB().WithContext(ctx).Table("paper_import_items pi").Joins("JOIN paper_import_batches pb ON pb.id=pi.batch_id").Where("pi.academic_work_id=? AND pb.created_by=? AND pi.status IN ?", workID, userID, []string{"pending", "running"})
+			if currentDatasetID != "" {
+				query = query.Where("pb.target_dataset_id=?", currentDatasetID)
+			}
+			err = query.Count(&count).Error
+			result.Importing = count > 0
+		}
+		if err != nil {
+			return nil, err
+		}
+
 		if len(result.CurrentDataset) > 0 {
 			result.Status = "current_dataset"
 		} else if len(result.OtherDatasets) > 0 {
 			result.Status = "other_dataset"
 		} else if result.Importing {
 			result.Status = "importing"
+		}
+		if len(result.CurrentDataset) == 0 {
+			var work orm.AcademicWork
+			if e := store.DB().WithContext(ctx).Where("id=?", workID).Take(&work).Error; e != nil {
+				return nil, e
+			}
+			for _, paper := range bibliography.Papers {
+				base, _ := NormalizeArxivID(paper.Arxiv)
+				if paper.WorkID == workID || (work.DOINormalized != "" && NormalizeDOI(paper.DOI) == work.DOINormalized) || (work.ArxivIDBase != "" && base == work.ArxivIDBase) {
+					result.MetadataOnly = true
+					break
+				}
+			}
 		}
 		results = append(results, result)
 	}
@@ -760,6 +820,10 @@ func CheckPresence(w http.ResponseWriter, r *http.Request) {
 	var req presenceRequest
 	if !parseJSON(r, &req) {
 		replyError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+		return
+	}
+	if req.CurrentDatasetID != "" && !doc.HasDatasetPermission(r, req.CurrentDatasetID, acl.PermissionDatasetRead) {
+		replyError(w, 403, "FORBIDDEN", "knowledge base unavailable")
 		return
 	}
 	workIDs := append([]string(nil), req.WorkIDs...)
@@ -783,7 +847,7 @@ func CheckPresence(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "INVALID_REQUEST", "1 to 500 works are required")
 		return
 	}
-	results, err := presenceForWorks(r.Context(), r, userID, workIDs, req.CurrentDatasetID)
+	results, err := presenceForWorks(r.Context(), r, userID, workIDs, req.CurrentDatasetID, false)
 	if err != nil {
 		replyError(w, http.StatusInternalServerError, "PRESENCE_QUERY_FAILED", err.Error())
 		return
@@ -818,6 +882,8 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
+		ExpansionID       string      `json:"expansion_id,omitempty"`
+		Identifier        string      `json:"identifier,omitempty"`
 		ReferenceIDs      []string    `json:"reference_ids"`
 		SourceDocumentIDs []string    `json:"source_document_ids"`
 		WorkIDs           []string    `json:"work_ids"`
@@ -834,7 +900,31 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusForbidden, "TARGET_DATASET_FORBIDDEN", "target knowledge base is not writable")
 		return
 	}
+	var linkInput *WorkInput
+	if strings.TrimSpace(req.Identifier) != "" {
+		work, err := lookupPaperLink(r.Context(), req.Identifier)
+		if err != nil {
+			replyError(w, 422, "RESOLUTION_FAILED", err.Error())
+			return
+		}
+		linkInput = &work
+		req.Works = append(req.Works, work)
+	}
+	var expansion *orm.AcademicExpansion
+	if req.ExpansionID != "" {
+		record, ok := ownedExpansion(w, r, userID, req.ExpansionID)
+		if !ok {
+			return
+		}
+		if record.DatasetID != req.TargetDatasetID {
+			replyError(w, 400, "INVALID_REQUEST", "target must be the expansion collection")
+			return
+		}
+		expansion = &record
+	}
 	referenceMap := map[string][]string{}
+	previewInputs := map[string]WorkInput{}
+	linkedWorkID := ""
 	resolveExternal := req.ResolveExternal == nil || *req.ResolveExternal
 	workIDs := append([]string(nil), req.WorkIDs...)
 	for _, documentID := range req.SourceDocumentIDs {
@@ -878,16 +968,24 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(req.Works) > 0 {
-		_ = store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-			for _, input := range req.Works {
+		err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+			for index, input := range req.Works {
 				work, _, err := findOrCreateWork(r.Context(), tx, input)
 				if err != nil {
 					return err
 				}
 				workIDs = append(workIDs, work.ID)
+				previewInputs[work.ID] = input
+				if linkInput != nil && index == len(req.Works)-1 {
+					linkedWorkID = work.ID
+				}
 			}
 			return nil
 		})
+		if err != nil {
+			replyError(w, 422, "RESOLUTION_FAILED", err.Error())
+			return
+		}
 	}
 	seen := map[string]bool{}
 	unique := workIDs[:0]
@@ -902,7 +1000,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnprocessableEntity, "UNRESOLVED_REFERENCES", "resolve references before creating an import preview")
 		return
 	}
-	presence, err := presenceForWorks(r.Context(), r, userID, workIDs, req.TargetDatasetID)
+	presence, err := presenceForWorks(r.Context(), r, userID, workIDs, req.TargetDatasetID, true)
 	if err != nil {
 		replyError(w, 500, "PRESENCE_QUERY_FAILED", err.Error())
 		return
@@ -919,7 +1017,62 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 	items := make([]PreviewItem, 0, len(works))
 	for _, work := range works {
 		p := presenceByID[work.ID]
+		ref := paperRef(work)
+		if work.ID == linkedWorkID {
+			ref = documentPaperRef(ref, marshal(*linkInput))
+			work.ProvenanceJSON = marshal(linkInput.Provenance)
+		}
 		candidates := candidatesForWork(work)
+		if work.ArxivIDBase != "" && (expansion == nil || expansion.DiscoveryMode != "external") {
+			var provenance map[string]any
+			_ = json.Unmarshal(work.ProvenanceJSON, &provenance)
+			version, _ := provenance["pdf_version"].(string)
+			if input, exists := previewInputs[work.ID]; exists {
+				if requested, ok := input.Provenance["pdf_version"].(string); ok && requested != "" {
+					version = requested
+				}
+			}
+			if work.ID != linkedWorkID {
+				metadata, e := arxivsource.NewClient().Lookup(r.Context(), work.ArxivIDBase+version)
+				if e != nil {
+					replyArxivImportError(w, ArxivImportResult{}, e)
+					return
+				}
+				ref = documentPaperRef(ref, marshal(arxivWorkInput(metadata)))
+				version = metadata.Version
+			}
+			ref.SourceVersion, ref.SourceProvider = version, "arxiv"
+			pinPaperURLs(&ref)
+			candidates = []FulltextCandidate{{URL: ref.PDFURL, SourceProvider: "arxiv", Version: version, SourceType: "official_pdf", ExpectedMIME: "application/pdf"}}
+		}
+		if expansion != nil && expansion.DiscoveryMode == "external" {
+			source, e := expansionSource(store.DB(), *expansion, work.ID)
+			if e != nil {
+				replyError(w, 422, "INVALID_SELECTION", e.Error())
+				return
+			}
+			if source.Paper.PDFURL != "" {
+				ref = source.Paper
+				candidates = []FulltextCandidate{{URL: source.Paper.PDFURL, SourceProvider: source.Paper.SourceProvider, Version: source.Paper.SourceVersion, SourceType: "official_pdf", ExpectedMIME: "application/pdf"}}
+			}
+		}
+		if len(candidates) > 0 && candidates[0].Version != "" {
+			matching := []PresenceDocument{}
+			for _, document := range p.CurrentDataset {
+				if document.SourceVersion == candidates[0].Version && document.SourceProvider == candidates[0].SourceProvider {
+					matching = append(matching, document)
+				}
+			}
+			p.CurrentDataset = matching
+		}
+
+		if len(candidates) > 0 {
+			p.Importing, err = activePaperImport(r.Context(), userID, req.TargetDatasetID, work.ID, candidates[0].Version)
+			if err != nil {
+				replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
+				return
+			}
+		}
 		disposition := "downloadable"
 		if len(p.CurrentDataset) > 0 {
 			disposition = "already_present"
@@ -928,7 +1081,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		} else if len(candidates) == 0 {
 			disposition = "metadata_only"
 		}
-		items = append(items, PreviewItem{WorkID: work.ID, ReferenceIDs: referenceMap[work.ID], Title: work.CanonicalTitle, DOI: work.DOINormalized, ArxivID: work.ArxivIDBase, Presence: p, Candidates: candidates, Disposition: disposition})
+		items = append(items, PreviewItem{Paper: ref, WorkID: work.ID, ReferenceIDs: referenceMap[work.ID], Title: ref.Title, DOI: work.DOINormalized, ArxivID: work.ArxivIDBase, Presence: p, Candidates: candidates, Disposition: disposition})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Title < items[j].Title })
 	common.ReplyJSON(w, map[string]any{"preview_token": uuid.NewString(), "target_dataset_id": req.TargetDatasetID, "items": items, "total": len(items)})
@@ -961,4 +1114,12 @@ func enrichWorkMissing(ctx context.Context, tx *gorm.DB, row *orm.AcademicWork, 
 	}
 	updates["updated_at"] = time.Now().UTC()
 	return tx.WithContext(ctx).Model(row).Updates(updates).Error
+}
+
+func datasetKeys(datasets map[string]doc.Dataset) []string {
+	keys := make([]string, 0, len(datasets))
+	for id := range datasets {
+		keys = append(keys, id)
+	}
+	return keys
 }

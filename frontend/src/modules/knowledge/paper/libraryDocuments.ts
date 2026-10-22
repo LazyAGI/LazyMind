@@ -55,7 +55,7 @@ export function mergeLibraryDocuments(current: PaperLibraryDataV3, source: Libra
       id: `document-${id}`, title: work?.title || document.display_name.replace(/\.pdf$/i, ''),
       authors: work?.authors?.join('、') || '', year: work?.year || 0, venue: work?.venue || '',
       doi: work?.doi, arxiv: work?.arxiv_id, abstract: work?.abstract || undefined,
-      academicWorkId: work?.paper_id, folderId: null, status: 'unread', important: false,
+      academicWorkId: work?.paper_id, arxivVersion: identity?.source_version, folderId: null, status: 'unread', important: false,
       tags: document.tags || [], source: 'local', parse: 'parsing',
       metadata: { abstract: work?.abstract || undefined, identifiers: { doi: work?.doi, arxiv: work?.arxiv_id }, confidence: {} },
       attachmentIds: [], noteIds: [], annotationIds: [], collectionIds: [], relatedPaperIds: [],
@@ -64,8 +64,11 @@ export function mergeLibraryDocuments(current: PaperLibraryDataV3, source: Libra
       || (work && papers.find(item => item.academicWorkId === work.paper_id))
       || duplicateOf(papers, draft) as PaperRecord | undefined;
     const paper = existing ? { ...existing } : draft;
-    if (work) Object.assign(paper, {
-      academicWorkId: work.paper_id, title: work.title || paper.title, authors: work.authors?.join('、') || paper.authors,
+    const incomingVersion = (Number(identity?.source_version?.replace(/^v/, '')) || 0);
+    const currentVersion = (Number(paper.arxivVersion?.replace(/^v/, '')) || 0);
+    const useMetadata = !!work && (!existing?.academicWorkId || incomingVersion >= currentVersion);
+    if (work && useMetadata) Object.assign(paper, {
+      academicWorkId: work.paper_id, arxivVersion: identity?.source_version || paper.arxivVersion, title: work.title || paper.title, authors: work.authors?.join('、') || paper.authors,
       year: work.year || paper.year, venue: work.venue || paper.venue, doi: work.doi, arxiv: work.arxiv_id,
       abstract: work.abstract || undefined,
       metadata: { ...paper.metadata, abstract: work.abstract || undefined, identifiers: { ...paper.metadata.identifiers, doi: work.doi, arxiv: work.arxiv_id } },
@@ -78,14 +81,16 @@ export function mergeLibraryDocuments(current: PaperLibraryDataV3, source: Libra
         paper.folderId = folderId;
       }
     }
-    const parseState = String(document.document_stage || '').toUpperCase();
-    if (attached?.source !== 'arxiv') {
-      paper.parse = parseState === 'DOCUMENT_PARSE_SUCCESSFULLY' ? 'ready' : parseState === 'DOCUMENT_PARSING_FAILED' ? 'failed' : 'parsing';
+    if (useMetadata || !existing) {
+      paper.parse = identity?.processing_status === 'ready' ? 'ready' : identity?.processing_status === 'failed' ? 'failed' : 'parsing';
+      paper.processingError = identity?.processing_error || undefined;
     }
     const attachmentId = attached?.id || `document-attachment-${id}`;
-    const attachment = { ...attached, id: attachmentId, paperId: paper.id, name: document.display_name,
-      kind: 'pdf' as const, source: attached?.source || 'local' as const, addedAt: attached?.addedAt || '',
-      contentRef: id, isPrimary: attached?.isPrimary ?? !paper.attachmentIds.length };
+    const promote = incomingVersion > currentVersion || !paper.attachmentIds.length;
+    if (promote) for (let i = 0; i < attachments.length; i++) { if (attachments[i].paperId === paper.id) attachments[i] = { ...attachments[i], isPrimary: false }; }
+    const attachment = { ...attached, sourceVersion: identity?.source_version, contentHash: identity?.content_sha256, id: attachmentId, paperId: paper.id, name: document.display_name,
+      kind: 'pdf' as const, source: attached?.source || (identity?.source_provider === 'arxiv' ? 'arxiv' as const : 'local' as const), addedAt: attached?.addedAt || '',
+      contentRef: id, isPrimary: promote || (attached?.isPrimary ?? false) };
     const attachmentIndex = attachments.findIndex(item => item.id === attachmentId);
     if (attachmentIndex < 0) attachments.push(attachment); else attachments[attachmentIndex] = attachment;
     paper.attachmentIds = [...new Set([...paper.attachmentIds, attachmentId])];
@@ -104,4 +109,17 @@ export function paperDocument(data: PaperLibraryDataV3, id: string, states: Docu
 
 export function personalLibrary(data: PaperLibraryDataV3, states: DocumentAcademic[]): PaperLibraryDataV3 {
   return { ...data, papers: data.papers.map(paper => ({ ...paper, important: !!paperDocument(data, paper.id, states)?.is_important })) };
+}
+
+export function restoreLibraryPaper(current: PaperLibraryDataV3, workId: string): PaperLibraryDataV3 {
+  const archived = current.hiddenArxivPapers?.find(paper => paper.academicWorkId === workId);
+  const documents = new Set(current.attachments.filter(item => item.paperId === archived?.id).map(item => item.contentRef));
+  return { ...current,
+    papers: archived && !current.papers.some(paper => paper.id === archived.id)
+      ? [...current.papers, { ...archived, folderId: current.folders.some(folder => folder.id === archived.folderId) ? archived.folderId : null, collectionIds: archived.collectionIds.filter(id => current.collections.some(collection => collection.id === id) || current.folders.some(folder => folder.id === id)) }]
+      : current.papers,
+    hiddenArxivWorkIds: current.hiddenArxivWorkIds?.filter(id => id !== workId),
+    hiddenArxivPapers: current.hiddenArxivPapers?.filter(paper => paper.academicWorkId !== workId),
+    hiddenDocumentIds: current.hiddenDocumentIds?.filter(id => !documents.has(id)),
+  };
 }

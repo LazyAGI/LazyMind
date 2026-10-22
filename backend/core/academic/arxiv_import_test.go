@@ -124,6 +124,41 @@ func TestArxivImportStoresParentAndVersionedAttachmentAndReusesIt(t *testing.T) 
 	}
 }
 
+func TestArxivImportRecoversVerifiedWorkflowAttachmentWithoutDownloading(t *testing.T) {
+	svc, downloads := arxivImportTestService(t)
+	first, err := svc.importPaper(context.Background(), "2404.06654v2", "dataset", "user", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document orm.Document
+	if err = svc.db.Where("id=?", first.DocumentID).Take(&document).Error; err != nil {
+		t.Fatal(err)
+	}
+	var ext map[string]json.RawMessage
+	if err = json.Unmarshal(document.Ext, &ext); err != nil {
+		t.Fatal(err)
+	}
+	delete(ext, "arxiv_import")
+	encoded, err := json.Marshal(ext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = svc.db.Model(&document).Update("ext", encoded).Error; err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.importPaper(context.Background(), "2404.06654v2", "dataset", "user", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.DocumentID != first.DocumentID || downloads.Load() != 1 {
+		t.Fatalf("verified Workflow file was downloaded again: %+v downloads=%d", second, downloads.Load())
+	}
+	items, err := svc.library(context.Background(), "dataset")
+	if err != nil || len(items) != 1 || items[0].SourceVersion != "v2" {
+		t.Fatal("recovery did not restore compatible metadata", items, err)
+	}
+}
+
 func TestArxivImportConcurrentSameVersionCreatesOneAttachment(t *testing.T) {
 	svc, count := arxivImportTestService(t)
 	var wg sync.WaitGroup

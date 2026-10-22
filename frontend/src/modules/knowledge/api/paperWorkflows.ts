@@ -5,6 +5,9 @@ function unwrap<T>(value: T | { data: T }): T {
   return value && typeof value === 'object' && 'data' in value ? (value as { data: T }).data : value as T;
 }
 export interface PaperRef {
+  document_id?: string;
+  source_version?: string;
+  source_provider?: string;
   paper_id: string;
   title?: string;
   authors?: string[];
@@ -31,6 +34,7 @@ export interface ReviewWorkflowInput {
   papers: WorkflowPaper[];
 }
 export interface Expansion {
+  discovery_mode?: string;
   progress?: Record<string, Partial<ReviewWorkflowInput>>;
   id: string;
   dataset_id: string;
@@ -54,14 +58,19 @@ export interface PaperContent {
 }
 export interface ExpansionDetail {
   record: Expansion;
-  rounds: Array<{ id: string; version: number; status: string; result: ReviewWorkflowInput }>;
+  rounds: Array<{ discovery_mode?: string; id: string; version: number; status: string; result: ReviewWorkflowInput }>;
   chat_status: 'available' | 'trashed' | 'deleted';
   contents: PaperContent[];
   paper_importance: Record<string, boolean>;
-  presence?: Array<{ work_id: string; current_dataset: ImportPreviewItem['presence']['current_dataset']; importing: boolean }>;
+  presence?: Array<{ work_id: string; metadata_only?: boolean; current_dataset: ImportPreviewItem['presence']['current_dataset']; importing: boolean }>;
   handoffs: Array<{ id: string; kind: string; conversation_id: string; version: number }>;
 }
 export interface DocumentAcademic {
+  source_version?: string;
+  source_provider?: string;
+  content_sha256?: string;
+  processing_status?: string;
+  processing_error?: string;
   state: { document_id: string; kind: 'paper' | 'other' | 'unknown'; status: string; paper_id: string; manual: boolean; error?: string };
   paper?: PaperRef;
   is_important: boolean;
@@ -112,6 +121,6 @@ export async function updatePaperIdentity(id: string, input: {
 }) {
   await axiosInstance.patch(`${core}/documents/${encodeURIComponent(id)}/identity`, input);
 }
-export async function retryPaperContent(id: string) {
-  await axiosInstance.post(`${core}/paper-contents:retry`, { paper_id: id });
+export async function retryPaperContent(id: string, expansionId: string) {
+  await axiosInstance.post(`${core}/paper-contents:retry`, { paper_id: id, expansion_id: expansionId });
 }

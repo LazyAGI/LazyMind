@@ -13,7 +13,7 @@ import (
 
 const fallbackCitation = "A. Author. 2024. A sufficiently long paper title."
 const fallbackOpenAlexMetadata = `{"results":[{"id":"https://openalex.org/W123","title":"A sufficiently long paper title","publication_year":2024,"doi":"https://doi.org/10.1234/example","ids":{},"best_oa_location":null}]}`
-const fallbackArxivMatch = `<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>https://arxiv.org/abs/2404.06654v1</id><title>A sufficiently long paper title</title><published>2024-04-10T00:00:00Z</published><author><name>A. Author</name></author></entry></feed>`
+const fallbackArxivMatch = `<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>https://arxiv.org/abs/2404.06654v1</id><title>A sufficiently long paper title</title><summary>A sufficiently complete abstract for a real external paper.</summary><published>2024-04-10T00:00:00Z</published><author><name>A. Author</name></author></entry></feed>`
 
 func TestReferenceResolutionFallsBackAfterOptionalProviderFailure(t *testing.T) {
 	for _, provider := range []string{"OpenAlex", "Unpaywall"} {

@@ -3250,6 +3250,9 @@ CREATE TABLE academic_user_paper_states (
   PRIMARY KEY (user_id, paper_id)
 );
 CREATE TABLE academic_expansions (
+ discovery_mode VARCHAR(32) NOT NULL DEFAULT 'legacy_mock',
+ seed_snapshot_json JSON NOT NULL DEFAULT '[]',
+ discovery_json JSON NOT NULL DEFAULT '[]',
  progress_json JSON NOT NULL DEFAULT '{}',
   id varchar(36) NOT NULL,
   user_id varchar(255) NOT NULL,
@@ -3274,6 +3277,7 @@ CREATE UNIQUE INDEX idx_academic_expansions_conversation_id ON academic_expansio
 CREATE UNIQUE INDEX uk_academic_expansion_request ON academic_expansions(request_key, request_owner);
 CREATE INDEX idx_academic_expansions_deleted_at ON academic_expansions(deleted_at);
 CREATE TABLE academic_expansion_rounds (
+ discovery_mode VARCHAR(32) NOT NULL DEFAULT 'legacy_mock',
   id varchar(36) NOT NULL,
   expansion_id varchar(36) NOT NULL,
   request_key varchar(128) NOT NULL,
@@ -3307,6 +3311,10 @@ CREATE TABLE academic_handoffs (
 CREATE UNIQUE INDEX uk_academic_handoff ON academic_handoffs(user_id, request_key);
 CREATE INDEX idx_academic_handoffs_expansion_id ON academic_handoffs(expansion_id);
 CREATE TABLE academic_paper_contents (
+ source_provider VARCHAR(64) NOT NULL DEFAULT '',
+ source_kind VARCHAR(16) NOT NULL DEFAULT 'legacy',
+ source_version VARCHAR(64) NOT NULL DEFAULT '',
+ source_key VARCHAR(128) NOT NULL DEFAULT 'legacy',
  parser_version VARCHAR(64) NOT NULL DEFAULT 'pdf-reader-v1',
  source_hash VARCHAR(64) NOT NULL DEFAULT '',
  source_dataset_id VARCHAR(255) NOT NULL DEFAULT '',
@@ -3321,7 +3329,7 @@ CREATE TABLE academic_paper_contents (
   updated_at TIMESTAMP NOT NULL,
   PRIMARY KEY (id)
 );
-CREATE UNIQUE INDEX uk_academic_content ON academic_paper_contents(user_id, paper_id, parser_version);
+CREATE UNIQUE INDEX uk_academic_content ON academic_paper_contents(user_id, paper_id, parser_version, source_key);
 -- Complete editable paper-library state and optimistic concurrency revision.
 -- +migrate Dialect postgres,sqlite
 CREATE TABLE paper_libraries (

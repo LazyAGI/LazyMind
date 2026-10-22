@@ -20,13 +20,12 @@ steps:
 
       所有产物必须用 save_artifacts 保存，参数形如 {"artifacts":[{"key":"输出槽名","value":{...},"content_type":"json"}]}。content_type 可显式为 json；省略时工具沿用声明类型。保存返回 ok 即完成，不得重复保存同一内容。candidate_directions 与 selected_directions 始终是字符串数组；方向依据等详细信息仅放 directions 数组。
 
-      先调用 academic_expansion_context 读取启动消息中的拓展记录 ID，保留完整原始指令和历史。调用 academic_demo_papers 获取本期固定真实样例；清楚标注推荐为
-      Mock，不声称完成全网检索。围绕用户要求归纳候选研究方向，每项包含依据、差异、代表论文；保存 direction_research JSON，包含 user_instruction、candidate_directions、selected_directions、needs_direction_selection、directions。范围已明确时
+      先调用 academic_expansion_context 读取启动消息中的拓展记录 ID，保留完整原始指令和历史。调用 academic_search_papers(expansion_id, query) 从 arXiv 实际搜索，保留来源、版本及查询结果；不从知识库搜索候选。围绕用户要求归纳候选研究方向，每项包含依据、差异、代表论文；保存 direction_research JSON，包含 user_instruction、candidate_directions、selected_directions、needs_direction_selection、directions。范围已明确时
       selected_directions 至少一项，needs_direction_selection=false；多个合理范围尚待选择时置 true、selected_directions=[]，由主
       Chat 在步骤完成后 ask_user，子步骤不得伪造用户选择或调用 ask_user。不要重复追问已知边界。'
     tools:
     - academic_expansion_context
-    - academic_demo_papers
+    - academic_search_papers
     - academic_read_paper
     - academic_validate_result
     inputs:
@@ -34,7 +33,7 @@ steps:
       required: true
     outputs:
     - material: direction_research
-    acceptance_criteria: 严格遵循用户的纳入、排除和新增限制；保留真实论文身份和完整用户要求；Mock 与实际全文读取状态如实区分。
+    acceptance_criteria: 严格遵循用户的纳入、排除和新增限制；保留真实论文身份和完整用户要求；外部搜索和实际全文读取状态如实展示，不编造候选或全文证据。
   prepare_seed_set:
     label: 准备种子论文
     prompt: '{{runtime_instruction}}
@@ -42,12 +41,12 @@ steps:
       所有产物必须用 save_artifacts 保存，参数形如 {"artifacts":[{"key":"输出槽名","value":{...},"content_type":"json"}]}。content_type 可显式为 json；省略时工具沿用声明类型。保存返回 ok 即完成，不得重复保存同一内容。candidate_directions 与 selected_directions 始终是字符串数组；方向依据等详细信息仅放 directions 数组。
 
       先调用 academic_expansion_context 读取当前记录的 interactions 与 user_updates，使用 answered=true 的实际 answers 中 value 数组作为用户方向选择；不能仅依据旧 result 的默认方向或自行揣测。结合方向调研和自定义方向。自定义方向先补充有依据的调研；selected_directions 必须是 candidate_directions
-      中的原字符串且至少一项。所有用户选择种子保留；方向入口可从明确标注的真实样例准备种子。保存 seed_set JSON：user_instruction、candidate_directions、selected_directions、papers；papers
+      中的原字符串且至少一项。所有用户选择种子保留；方向入口从外部搜索发现代表论文，is_seed=false；只有启动时用户选定的论文才是种子。保存 seed_set JSON：user_instruction、candidate_directions、selected_directions、papers；papers
       是 WorkflowPaper 数组，每项有 paper(PaperRef)、is_seed、is_important。paper_id 只能来自服务返回的真实身份。原始要求、追问回答、后续补充完整并入
       user_instruction。'
     tools:
     - academic_expansion_context
-    - academic_demo_papers
+    - academic_search_papers
     - academic_read_paper
     inputs:
     - material: expansion_id
@@ -56,18 +55,18 @@ steps:
       required: true
     outputs:
     - material: seed_set
-    acceptance_criteria: 严格遵循用户的纳入、排除和新增限制；保留真实论文身份和完整用户要求；Mock 与实际全文读取状态如实区分。
+    acceptance_criteria: 严格遵循用户的纳入、排除和新增限制；保留真实论文身份和完整用户要求；外部搜索和实际全文读取状态如实展示，不编造候选或全文证据。
   expand_and_screen:
     label: 拓展与筛选
     prompt: '{{runtime_instruction}}
 
       所有产物必须用 save_artifacts 保存，参数形如 {"artifacts":[{"key":"输出槽名","value":{...},"content_type":"json"}]}。content_type 可显式为 json；省略时工具沿用声明类型。保存返回 ok 即完成，不得重复保存同一内容。candidate_directions 与 selected_directions 始终是字符串数组；方向依据等详细信息仅放 directions 数组。
 
-      读取 seed_set.user_instruction 并严格执行用户的纳入、排除和新增限制。若用户要求只保留种子、不新增，则 papers 必须只保留原种子；不能为了展示 Mock 而添加额外论文。读取种子和已选方向，调用 academic_demo_papers 取得本期推荐样例，明确这是固定推荐 Mock。保留全部种子，去重并筛选最终保留论文；被淘汰的候选不得进入最终集合。保留每篇真实
+      读取 seed_set.user_instruction 并严格执行用户的纳入、排除和新增限制。若用户要求只保留种子、不新增，则 papers 必须只保留原种子；读取种子和已选方向，调用 academic_search_papers(expansion_id, query) 实际搜索外部候选，无结果时如实保存，不用本地论文或模型记忆补齐。保留全部种子，去重并筛选最终保留论文；被淘汰的候选不得进入最终集合。保留每篇真实
       paper_id，不编造 ID、元数据或下载链接。保存 expanded_papers JSON，沿用 seed_set 结构并包含最终 papers。没有新增论文时仍保存正常完成结果，综述是否可启动由服务端按至少两篇全文成功判断。'
     tools:
     - academic_expansion_context
-    - academic_demo_papers
+    - academic_search_papers
     - academic_read_paper
     inputs:
     - material: expansion_id
@@ -76,18 +75,17 @@ steps:
       required: true
     outputs:
     - material: expanded_papers
-    acceptance_criteria: 严格遵循用户的纳入、排除和新增限制；保留真实论文身份和完整用户要求；Mock 与实际全文读取状态如实区分。
+    acceptance_criteria: 严格遵循用户的纳入、排除和新增限制；保留真实论文身份和完整用户要求；外部搜索和实际全文读取状态如实展示，不编造候选或全文证据。
   analyze_relations:
     label: 研究关系分析
     prompt: '{{runtime_instruction}}
 
       所有产物必须用 save_artifacts 保存，参数形如 {"artifacts":[{"key":"输出槽名","value":{...},"content_type":"json"}]}。content_type 可显式为 json；省略时工具沿用声明类型。保存返回 ok 即完成，不得重复保存同一内容。candidate_directions 与 selected_directions 始终是字符串数组；方向依据等详细信息仅放 directions 数组。
 
-      逐篇调用 academic_read_paper；processing、failed、unavailable 时保留论文及真实状态，不把摘要当全文。只能对已读取内容作核验；推荐关系和贡献允许
-      Mock，必须明确标记为研究线索。保存 paper_relations JSON，沿用完整输入，按需添加 seed_relation、direction_relation、key_contribution，未能分析的字段省略。不要缩小为重点或已入库论文子集。'
+      逐篇调用 academic_read_paper(expansion_id, paper_id)，通过 next_cursor 读取完整正文；processing、failed、unavailable 时保留论文及真实状态，不把摘要当全文。只能对已读取内容作核验；关系和贡献必须根据实际材料分析；仅有摘要时说明依据摘要，无法分析时省略，不编造。保存 paper_relations JSON，沿用完整输入，按需添加 seed_relation、direction_relation、key_contribution，未能分析的字段省略。不要缩小为重点或已入库论文子集。'
     tools:
     - academic_expansion_context
-    - academic_demo_papers
+    - academic_search_papers
     - academic_read_paper
     inputs:
     - material: expansion_id
@@ -96,7 +94,7 @@ steps:
       required: true
     outputs:
     - material: paper_relations
-    acceptance_criteria: 严格遵循用户的纳入、排除和新增限制；保留真实论文身份和完整用户要求；Mock 与实际全文读取状态如实区分。
+    acceptance_criteria: 严格遵循用户的纳入、排除和新增限制；保留真实论文身份和完整用户要求；外部搜索和实际全文读取状态如实展示，不编造候选或全文证据。
   compose_result:
     label: 整理拓展成果
     prompt: '{{runtime_instruction}}
@@ -108,7 +106,7 @@ steps:
       save_artifacts 调用保存 JSON。最终步骤成功后服务会保存轮次、累计成果及取文状态，并按原请求决定是否创建另一个综述 Chat。当前 Chat 不执行综述。'
     tools:
     - academic_expansion_context
-    - academic_demo_papers
+    - academic_search_papers
     - academic_read_paper
     inputs:
     - material: expansion_id
@@ -117,4 +115,4 @@ steps:
       required: true
     outputs:
     - material: expansion_result
-    acceptance_criteria: 严格遵循用户的纳入、排除和新增限制；保留真实论文身份和完整用户要求；Mock 与实际全文读取状态如实区分。
+    acceptance_criteria: 严格遵循用户的纳入、排除和新增限制；保留真实论文身份和完整用户要求；外部搜索和实际全文读取状态如实展示，不编造候选或全文证据。

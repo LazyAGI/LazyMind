@@ -77,6 +77,12 @@ describe("paper library model", () => {
     expect(planned.skipped.map((item) => item.id)).toEqual(["p1", "p1"]);
     expect(planned.fresh).toHaveLength(1);
   });
+  it('does not merge conflicting identifiers or incomplete title-only matches', () => {
+    const paper = { ...sampleLibrary().papers[0], doi: '10.1234/a', arxiv: undefined };
+    expect(planImport([paper], [{ ...paper, id: 'different', doi: '10.1234/b' }]).fresh).toHaveLength(1);
+    expect(planImport([{ ...paper, doi: undefined, authors: '' }], [{ ...paper, id: 'incomplete', doi: undefined, authors: '' }]).fresh).toHaveLength(1);
+    expect(planImport([{ ...paper, doi: undefined }], [{ ...paper, id: 'same', doi: undefined }]).skipped).toHaveLength(1);
+  });
   it("moves, removes, and completes a record without creating a duplicate", () => {
     const papers = sampleLibrary().papers;
     expect(movePapers(papers, ["p5"], "eval").find((item) => item.id === "p5")?.folderId).toBe("eval");

@@ -177,19 +177,19 @@ export function classifyIdentifier(raw: string): { kind: "doi" | "arxiv"; value:
 }
 
 export function duplicateOf(existing: PaperItem[], item: PaperItem) {
-  const doi = item.doi ? normalizeDoi(item.doi) : "";
-  if (doi) {
-    const hit = existing.find((paper) => paper.doi && normalizeDoi(paper.doi) === doi);
-    if (hit) return hit;
-  }
-  const arxiv = item.arxiv ? normalizeArxiv(item.arxiv) : "";
-  if (arxiv) {
-    const hit = existing.find((paper) => paper.arxiv && normalizeArxiv(paper.arxiv) === arxiv);
-    if (hit) return hit;
-  }
+  const doi = item.doi ? normalizeDoi(item.doi) : '';
+  const arxiv = item.arxiv ? normalizeArxiv(item.arxiv) : '';
   const title = normalizeTitle(item.title);
-  if (!title) return undefined;
-  return existing.find((paper) => normalizeTitle(paper.title) === title && paper.year === item.year);
+  const firstAuthor = (value: string) => normalizeTitle(value.split(/[、;；]/)[0] || '');
+  return existing.find((paper) => {
+    const otherDoi = paper.doi ? normalizeDoi(paper.doi) : '';
+    const otherArxiv = paper.arxiv ? normalizeArxiv(paper.arxiv) : '';
+    if ((doi && otherDoi && doi !== otherDoi) || (arxiv && otherArxiv && arxiv !== otherArxiv)) return false;
+    if ((doi && doi === otherDoi) || (arxiv && arxiv === otherArxiv)) return true;
+    return !!title && !!firstAuthor(item.authors) && item.year > 0
+      && normalizeTitle(paper.title) === title && paper.year === item.year
+      && firstAuthor(paper.authors) === firstAuthor(item.authors);
+  });
 }
 
 export function planImport(existing: PaperItem[], incoming: PaperItem[]): ImportPlan {
@@ -276,6 +276,7 @@ export function removePapers(papers: PaperItem[], ids: string[]) {
 }
 
 export interface PaperEdits {
+  abstract?: string;
   title: string;
   authors: string;
   venue: string;
@@ -292,6 +293,7 @@ export function applyPaperEdits(item: PaperItem, edits: PaperEdits): PaperItem {
   return {
     ...item,
     title: title || item.title,
+    abstract: edits.abstract === undefined ? item.abstract : edits.abstract.trim() || undefined,
     authors: edits.authors.trim() || "佚名",
     venue: edits.venue.trim() || "未标注",
     year: Number.isFinite(edits.year) && edits.year > 0 ? Math.trunc(edits.year) : item.year,

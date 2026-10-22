@@ -101,13 +101,13 @@ func TestImportedIdentitySurvivesQueuedRecognitionAndManualMetadataCorrection(t 
 }
 func TestReviewGateFullManifestImportanceAndSeparateChat(t *testing.T) {
 	db := paperFixture(t)
-	input := ReviewWorkflowInput{UserInstruction: "agents", CandidateDirections: []string{"tools"}, SelectedDirections: []string{"tools"}, Papers: []WorkflowPaper{{Paper: PaperRef{PaperID: "a"}, IsSeed: true}, {Paper: PaperRef{PaperID: "b"}, IsSeed: true}, {Paper: PaperRef{PaperID: "a"}}}}
+	input := ReviewWorkflowInput{UserInstruction: "agents", CandidateDirections: []string{"tools"}, SelectedDirections: []string{"tools"}, Papers: []WorkflowPaper{{Paper: PaperRef{PaperID: "a", SourceVersion: "v1", SourceProvider: "arxiv"}, IsSeed: true}, {Paper: PaperRef{PaperID: "b", SourceVersion: "v1", SourceProvider: "arxiv"}, IsSeed: true}, {Paper: PaperRef{PaperID: "a", SourceVersion: "v1", SourceProvider: "arxiv"}}}}
 	if err := db.Create(&orm.AcademicUserPaperState{UserID: "u", PaperID: "a", IsImportant: true}).Error; err != nil {
 		t.Fatal(err)
 	}
 	db.Create(&orm.AcademicUserPaperState{UserID: "other", PaperID: "b", IsImportant: true})
 	for i, id := range []string{"a", "b"} {
-		content := orm.AcademicPaperContent{ID: "content-" + id, UserID: "u", PaperID: id, Status: "ready", ContentHash: "hash-" + id, PagesJSON: marshal([]ContentPage{{Page: 1, Text: "real parsed body"}})}
+		content := orm.AcademicPaperContent{SourceKind: "external", SourceProvider: "arxiv", SourceVersion: "v1", SourceKey: "test-external", ID: "content-" + id, UserID: "u", PaperID: id, Status: "ready", ContentHash: "hash-" + id, PagesJSON: marshal([]ContentPage{{Page: 1, Text: "real parsed body"}})}
 		if err := db.Create(&content).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -201,9 +201,15 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seed := WorkflowPaper{Paper: PaperRef{PaperID: "a"}, IsSeed: true}
-	input := ReviewWorkflowInput{UserInstruction: "agents", CandidateDirections: []string{"tools"}, SelectedDirections: []string{"tools"}, Papers: []WorkflowPaper{seed, {Paper: PaperRef{PaperID: "b"}}}}
+	seed := WorkflowPaper{Paper: PaperRef{PaperID: "a", SourceVersion: "v1", SourceProvider: "arxiv"}, IsSeed: true}
+	input := ReviewWorkflowInput{UserInstruction: "agents", CandidateDirections: []string{"tools"}, SelectedDirections: []string{"tools"}, Papers: []WorkflowPaper{seed, {Paper: PaperRef{PaperID: "b", SourceVersion: "v1", SourceProvider: "arxiv"}}}}
 	record := orm.AcademicExpansion{ID: "projection", UserID: "u", RequestOwner: "u", RequestKey: "start-projection", DatasetID: "papers", ConversationID: conversation, Title: "agents", Goal: "review", Status: "running", ResultJSON: marshal(ReviewWorkflowInput{UserInstruction: "agents", Papers: []WorkflowPaper{seed}})}
+	seeds, err := seedSources(db.DB, "papers", []WorkflowPaper{seed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.SeedSnapshotJSON = marshal(seeds)
+	record.DiscoveryJSON = marshal([]paperDiscovery{{Papers: []PaperRef{input.Papers[1].Paper}}})
 	if err = db.Create(&record).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +235,7 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"a", "b"} {
-		if err = db.Create(&orm.AcademicPaperContent{ID: "ready-" + id, UserID: "u", PaperID: id, Status: "ready", ContentHash: id, PagesJSON: marshal([]ContentPage{{Page: 1, Text: "body"}})}).Error; err != nil {
+		if err = db.Create(&orm.AcademicPaperContent{SourceKind: "external", SourceProvider: "arxiv", SourceVersion: "v1", SourceKey: "test-external", ID: "ready-" + id, UserID: "u", PaperID: id, Status: "ready", ContentHash: id, PagesJSON: marshal([]ContentPage{{Page: 1, Text: "body"}})}).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -281,7 +287,7 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 
 func TestMockAdapterFreezesOriginalPapers(t *testing.T) {
 	db := paperFixture(t)
-	input := ReviewWorkflowInput{UserInstruction: "agents", Papers: []WorkflowPaper{{Paper: PaperRef{PaperID: "a", Title: "original a"}, IsSeed: true}, {Paper: PaperRef{PaperID: "b"}}}}
+	input := ReviewWorkflowInput{UserInstruction: "agents", Papers: []WorkflowPaper{{Paper: PaperRef{PaperID: "a", Title: "original a"}, IsSeed: true}, {Paper: PaperRef{PaperID: "b", SourceVersion: "v1", SourceProvider: "arxiv"}}}}
 	handoff, err := createMockHandoff(t.Context(), db.DB, "u", "papers", "", 0, "ppt", "mock-adapter", input, nil, false)
 	if err != nil {
 		t.Fatal(err)
@@ -367,7 +373,7 @@ func TestFolderSelectionReadsAllPagesAndDeduplicatesVersions(t *testing.T) {
 
 func TestHistoryReviewUsesRequestedVersionAndPersonalImportance(t *testing.T) {
 	db := paperFixture(t)
-	oldInput := ReviewWorkflowInput{UserInstruction: "original", Papers: []WorkflowPaper{{Paper: PaperRef{PaperID: "a"}, IsSeed: true}, {Paper: PaperRef{PaperID: "b"}, IsSeed: true, IsImportant: true}}}
+	oldInput := ReviewWorkflowInput{UserInstruction: "original", Papers: []WorkflowPaper{{Paper: PaperRef{PaperID: "a", SourceVersion: "v1", SourceProvider: "arxiv"}, IsSeed: true}, {Paper: PaperRef{PaperID: "b", SourceVersion: "v1", SourceProvider: "arxiv"}, IsSeed: true, IsImportant: true}}}
 	newInput := oldInput
 	newInput.UserInstruction = "continued"
 	record := orm.AcademicExpansion{ID: "versioned", UserID: "u", RequestOwner: "u", RequestKey: "source", DatasetID: "papers", ConversationID: "source-chat", Title: "agents", Goal: "expansion", Status: "completed", Version: 2, ResultJSON: marshal(newInput)}
@@ -378,7 +384,7 @@ func TestHistoryReviewUsesRequestedVersionAndPersonalImportance(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"a", "b"} {
-		if err := db.Create(&orm.AcademicPaperContent{ID: "body-" + id, UserID: "u", PaperID: id, ParserVersion: orm.AcademicPaperParserVersion, Status: "ready", ContentHash: "hash-" + id, PagesJSON: marshal([]ContentPage{{Page: 1, Text: "parsed full text"}})}).Error; err != nil {
+		if err := db.Create(&orm.AcademicPaperContent{SourceKind: "external", SourceProvider: "arxiv", SourceVersion: "v1", SourceKey: "test-external", ID: "body-" + id, UserID: "u", PaperID: id, ParserVersion: orm.AcademicPaperParserVersion, Status: "ready", ContentHash: "hash-" + id, PagesJSON: marshal([]ContentPage{{Page: 1, Text: "parsed full text"}})}).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -500,7 +506,7 @@ func TestHistoryReviewSelectedPapersAndIdempotency(t *testing.T) {
 	if err := db.Create(&orm.AcademicWork{ID: "c", CanonicalTitle: "C", NormalizedTitle: "c", AuthorsJSON: marshal([]string{}), ExternalIDsJSON: marshal(map[string]string{}), ProvenanceJSON: marshal(map[string]string{})}).Error; err != nil {
 		t.Fatal(err)
 	}
-	input := ReviewWorkflowInput{UserInstruction: "compare methods", SelectedDirections: []string{"tools"}, Papers: []WorkflowPaper{{Paper: PaperRef{PaperID: "a"}, IsSeed: true}, {Paper: PaperRef{PaperID: "b"}}, {Paper: PaperRef{PaperID: "c"}}}}
+	input := ReviewWorkflowInput{UserInstruction: "compare methods", SelectedDirections: []string{"tools"}, Papers: []WorkflowPaper{{Paper: PaperRef{PaperID: "a", SourceVersion: "v1", SourceProvider: "arxiv"}, IsSeed: true}, {Paper: PaperRef{PaperID: "b", SourceVersion: "v1", SourceProvider: "arxiv"}}, {Paper: PaperRef{PaperID: "c", SourceVersion: "v1", SourceProvider: "arxiv"}}}}
 	old := input
 	old.Papers = input.Papers[:2]
 	record := orm.AcademicExpansion{ID: "selection", UserID: "u", RequestOwner: "u", RequestKey: "source", DatasetID: "papers", ConversationID: "source-chat", Title: "tools", Goal: "expansion", Status: "completed", Version: 2, ResultJSON: marshal(input)}
@@ -510,7 +516,7 @@ func TestHistoryReviewSelectedPapersAndIdempotency(t *testing.T) {
 		}
 	}
 	for _, id := range []string{"a", "b", "c"} {
-		if err := db.Create(&orm.AcademicPaperContent{ID: "selected-" + id, UserID: "u", PaperID: id, ParserVersion: orm.AcademicPaperParserVersion, Status: "ready", ContentHash: "hash-" + id, PagesJSON: marshal([]ContentPage{{Page: 1, Text: "full text"}})}).Error; err != nil {
+		if err := db.Create(&orm.AcademicPaperContent{SourceKind: "external", SourceProvider: "arxiv", SourceVersion: "v1", SourceKey: "test-external", ID: "selected-" + id, UserID: "u", PaperID: id, ParserVersion: orm.AcademicPaperParserVersion, Status: "ready", ContentHash: "hash-" + id, PagesJSON: marshal([]ContentPage{{Page: 1, Text: "full text"}})}).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -573,7 +579,7 @@ func TestHistoryReviewSelectedPapersAndIdempotency(t *testing.T) {
 	if err := json.Unmarshal(legacyHandoff.InputJSON, &snapshot); err != nil || len(snapshot.Papers) != 3 {
 		t.Fatal("legacy launch lost the full manifest", err)
 	}
-	if err := db.Model(&orm.AcademicPaperContent{}).Where("paper_id=?", "b").Updates(map[string]any{"source_document_id": "inaccessible", "source_dataset_id": "papers"}).Error; err != nil {
+	if err := db.Model(&orm.AcademicPaperContent{}).Where("paper_id=?", "b").Updates(map[string]any{"source_kind": "kb", "source_document_id": "inaccessible", "source_dataset_id": "papers"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	launch("inaccessible", 2, []string{"a", "b"}, 422)

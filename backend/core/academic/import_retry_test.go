@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +20,101 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
 )
+
+func TestLinkPreviewKeepsRequestedVersionWhenIdentityAlreadyExists(t *testing.T) {
+	db := paperFixture(t)
+	if err := db.Model(&orm.AcademicWork{}).Where("id=?", "a").Updates(map[string]any{"arxiv_id_base": "1706.03762", "metadata_provenance_json": marshal(map[string]string{"pdf_version": "v7"})}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.AcademicWorkDocument{AcademicWorkID: "a", DatasetID: "papers", DocumentID: "a", SourceProvider: "arxiv", SourceVersion: "v7"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	queries := []string{}
+	previous := http.DefaultTransport
+	http.DefaultTransport = importErrorTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "export.arxiv.org" {
+			return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{}`)), Header: make(http.Header), Request: r}, nil
+		}
+		queries = append(queries, r.URL.Query().Get("id_list"))
+		body := `<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>https://arxiv.org/abs/1706.03762v6</id><title>Version six title</title><summary>Version six abstract</summary><published>2017-01-01T00:00:00Z</published><author><name>A. Author</name></author></entry></feed>`
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header), Request: r}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = previous })
+	w := httptest.NewRecorder()
+	PreviewImport(w, paperRequest(`{"identifier":"https://arxiv.org/abs/1706.03762v6","target_dataset_id":"papers"}`))
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var result struct {
+		Items []PreviewItem `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || len(result.Items) != 1 {
+		t.Fatal("invalid preview", err, w.Body.String())
+	}
+	item := result.Items[0]
+	if item.Disposition != "downloadable" || len(item.Candidates) != 1 || item.Candidates[0].Version != "v6" || item.Paper.SourceVersion != "v6" || item.Paper.Title != "Version six title" {
+		t.Fatalf("existing shared identity replaced the requested attachment: %+v", item)
+	}
+	if len(queries) != 1 || queries[0] != "1706.03762v6" {
+		t.Fatalf("resolved the wrong version or queried link metadata twice: %v", queries)
+	}
+}
+
+func TestArxivBatchPinsRevisionBeforeDownloadAndKeepsItOnRetry(t *testing.T) {
+	svc, _ := arxivImportTestService(t)
+	work, _, err := findOrCreateWork(t.Context(), svc.db, WorkInput{Title: "Versioned paper", ArxivID: "2404.06654"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := orm.PaperImportBatch{ID: "pinned-batch", TargetDatasetID: "dataset", EntryType: "paper_link", CreatedBy: "user", Status: "pending", SourceDocumentIDsJSON: marshal([]string{}), PolicySnapshotJSON: marshal(map[string]string{})}
+	item := orm.PaperImportItem{ID: "pinned-item", BatchID: batch.ID, AcademicWorkID: work.ID, Status: "pending", ReferenceIDsJSON: marshal([]string{}), PresenceSnapshotJSON: marshal(map[string]string{}), ErrorDetailsJSON: marshal(map[string]string{}), SelectedCandidateJSON: marshal(FulltextCandidate{URL: "https://arxiv.org/pdf/2404.06654", SourceProvider: "arxiv", SourceType: "official_pdf"})}
+	for _, row := range []any{&batch, &item} {
+		if err = svc.db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	previous := http.DefaultTransport
+	queries := []string{}
+	http.DefaultTransport = importErrorTransport(func(r *http.Request) (*http.Response, error) {
+		id := r.URL.Query().Get("id_list")
+		queries = append(queries, id)
+		version := "v2"
+		if len(queries) > 1 && !strings.HasSuffix(id, "v2") {
+			version = "v3"
+		}
+		body := `<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>https://arxiv.org/abs/2404.06654` + version + `</id><title>Versioned paper</title><summary>Original abstract</summary><published>2024-01-01T00:00:00Z</published><author><name>A. Author</name></author></entry></feed>`
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header), Request: r}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = previous })
+	service := paperImportService{acquire: func(ctx context.Context, candidate FulltextCandidate) (string, int64, error) {
+		var saved orm.PaperImportItem
+		if err := svc.db.Where("id=?", item.ID).Take(&saved).Error; err != nil {
+			t.Fatal(err)
+		}
+		var selected FulltextCandidate
+		if err := json.Unmarshal(saved.SelectedCandidateJSON, &selected); err != nil {
+			t.Fatal(err)
+		}
+		if selected.Version != "v2" || candidate.Version != "v2" {
+			t.Fatalf("version was not durable before acquiring bytes: %+v %+v", selected, candidate)
+		}
+		return "", 0, errors.New("temporary PDF provider failure")
+	}, importFile: svc.importFile}
+	for attempt := 0; attempt < 2; attempt++ {
+		if _, err = service.handleItem(t.Context(), &batch, &item, paperImportPayload{UserID: "user", UserName: "User"}, importErrorReporter{}, 0, 1); err != nil {
+			t.Fatal(err)
+		}
+		if err = svc.db.Where("id=?", item.ID).Take(&item).Error; err != nil {
+			t.Fatal(err)
+		}
+		if item.Status != "failed" {
+			t.Fatalf("download failure was hidden: %+v", item)
+		}
+	}
+	if len(queries) != 2 || queries[0] != "2404.06654" || queries[1] != "2404.06654v2" {
+		t.Fatalf("retry changed the selected revision: %v", queries)
+	}
+}
 
 func paperImportRetryFixture(t *testing.T) (*gorm.DB, asyncjob.Job, orm.PaperImportItem) {
 	t.Helper()

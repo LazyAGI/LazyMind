@@ -80,6 +80,30 @@ def test_expansion_result_contract_rejects_nested_relation_metadata(tmp_path, mo
     assert module.academic_validate_result({'type': 'json', 'path': str(carrier)})['status'] == 'valid'
 
 
+def test_expansion_tools_forward_owned_task_and_pinned_candidate_context(monkeypatch):
+    import importlib.util
+    path = Path(__file__).resolve().parents[3] / 'workflows/paper_expansion/scripts/tools.py'
+    spec = importlib.util.spec_from_file_location('paper_expansion_transport', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    requests = []
+
+    def request(method, url, **kwargs):
+        requests.append((method, url, kwargs))
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'data': {'papers': []}})
+
+    monkeypatch.setattr(module, '_client', lambda: SimpleNamespace(base_url='http://core',
+                        transport=SimpleNamespace(request=request), _headers=lambda: {'X-User-Id': 'owner'}))
+    assert module.academic_search_papers('owned-expansion', 'all:agents') == {'papers': []}
+    assert requests[-1][1] == 'http://core/academic/papers:search'
+    assert requests[-1][2]['json'] == {'expansion_id': 'owned-expansion', 'query': 'all:agents', 'max_results': 10}
+    module.academic_read_paper('owned-expansion', 'discovered-paper')
+    assert requests[-1][2]['json'] == {'expansion_id': 'owned-expansion', 'paper_id': 'discovered-paper'}
+    module.academic_read_paper('owned-expansion', cursor='bound-cursor')
+    assert requests[-1][2]['json'] == {'expansion_id': 'owned-expansion', 'cursor': 'bound-cursor'}
+    assert requests[-1][2]['headers'] == {'X-User-Id': 'owner'}
+
+
 @pytest.mark.parametrize('package,slot', [('paper_workflow_mock', 'mock_feedback'),
                                         ('paper_ppt_with_reflection_mock', 'ppt_request')])
 def test_mock_publisher_preserves_authoritative_handoff(monkeypatch, package, slot):

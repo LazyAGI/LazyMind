@@ -101,17 +101,17 @@ describe('paper task startup routes', () => {
     });
 });
 describe('result paper title navigation', () => {
-    it('opens seeds in the reader and expanded papers at their original URL in new tabs', async () => {
-        const presence = input.papers.map(item => ({ work_id: item.paper.paper_id, importing: false, current_dataset: [{ dataset_id: 'd', dataset_name: 'Papers', document_id: `doc-${item.paper.paper_id}`, document_name: item.paper.title }] }));
+    it('opens seeds and matching imported candidates in the current collection reader', async () => {
+        const presence = input.papers.map(item => ({ work_id: item.paper.paper_id, importing: false, current_dataset: [{ dataset_id: 'd', dataset_name: 'Papers', document_id: `doc-${item.paper.paper_id}`, document_name: item.paper.title, source_version: 'v2', source_provider: 'arxiv' }] }));
         vi.mocked(getExpansion).mockResolvedValue({
             ...detail, presence,
-            record: { ...record, result: { ...input, papers: input.papers.map(item => ({ ...item, paper: { ...item.paper, paper_url: `https://arxiv.org/abs/${item.paper.paper_id}` } })) } },
+            record: { ...record, result: { ...input, papers: input.papers.map(item => ({ ...item, paper: { ...item.paper, source_version: 'v2', source_provider: 'arxiv', paper_url: `https://arxiv.org/abs/${item.paper.paper_id}` } })) } },
         });
         render(<I18nextProvider i18n={i18n}><MemoryRouter basename="/app" initialEntries={['/app/knowledge?expansion_id=r']}><ConfigProvider theme={{ token: { motion: false } }}><Harness /></ConfigProvider></MemoryRouter></I18nextProvider>);
         const seed = await screen.findByRole('link', { name: 'A' });
         const expanded = screen.getByRole('link', { name: 'B' });
         expect(seed).toHaveAttribute('href', '/app/lib/knowledge/knowledge/d/doc-a');
-        expect(expanded).toHaveAttribute('href', 'https://arxiv.org/abs/b');
+        expect(expanded).toHaveAttribute('href', '/app/lib/knowledge/knowledge/d/doc-b');
         for (const link of [seed, expanded]) {
             expect(link).toHaveAttribute('target', '_blank');
             expect(link).toHaveAttribute('rel', 'noopener noreferrer');
@@ -124,6 +124,17 @@ describe('result paper title navigation', () => {
         });
         mount(undefined, '?expansion_id=r');
         expect(await screen.findByRole('link', { name: 'B' })).toHaveAttribute('href', 'https://doi.org/10.1234/example');
+    });
+    it('keeps another version as an external candidate that can still be imported', async () => {
+        vi.mocked(getExpansion).mockResolvedValue({
+            ...detail,
+            presence: [{ work_id: 'b', importing: false, current_dataset: [{ dataset_id: 'd', dataset_name: 'Papers', document_id: 'old-b', document_name: 'B v1', source_provider: 'arxiv', source_version: 'v1' }] }],
+            record: { ...record, result: { ...input, papers: [{ ...input.papers[1], paper: { ...input.papers[1].paper, source_provider: 'arxiv', source_version: 'v2', paper_url: 'https://arxiv.org/abs/2205.14135v2' } }] } },
+        });
+        mount(undefined, '?expansion_id=r');
+        expect(await screen.findByRole('link', { name: 'B' })).toHaveAttribute('href', 'https://arxiv.org/abs/2205.14135v2');
+        expect(screen.getByText('已有其他版本')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '加入知识库' })).toBeEnabled();
     });
     it('keeps titles as text when the seed document is missing or the expanded URL is unsafe', async () => {
         vi.mocked(getExpansion).mockResolvedValue({

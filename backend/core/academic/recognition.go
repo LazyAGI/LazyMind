@@ -132,7 +132,7 @@ func runIdentify(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) (as
 				return e
 			}
 			workID = work.ID
-			link := orm.AcademicWorkDocument{AcademicWorkID: work.ID, DatasetID: row.DatasetID, DocumentID: row.ID, VersionKind: "unknown", SourceProvider: "upload", ContentSHA256: hex.EncodeToString(hash[:]), MatchMethod: method, MatchConfidence: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+			link := orm.AcademicWorkDocument{AcademicWorkID: work.ID, DatasetID: row.DatasetID, DocumentID: row.ID, VersionKind: "unknown", SourceProvider: "upload", ContentSHA256: documentFileHash(row), MatchMethod: method, MatchConfidence: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 			if err := saveDocumentWorkLink(tx, link); err != nil {
 				return err
 			}
@@ -231,6 +231,31 @@ func DocumentStates(w http.ResponseWriter, r *http.Request) {
 		if paper, ok := papers[state.PaperID]; ok {
 			item["paper"] = documentPaperRef(paper, state.MetadataJSON)
 		}
+		var document orm.Document
+		if err := store.DB().Where("id=? AND dataset_id=? AND deleted_at IS NULL", state.DocumentID, dataset).Take(&document).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			replyError(w, 500, "READ_FAILED", err.Error())
+			return
+		}
+		var link orm.AcademicWorkDocument
+		if err := store.DB().Where("dataset_id=? AND document_id=? AND academic_work_id=?", dataset, state.DocumentID, state.PaperID).Take(&link).Error; err == nil {
+			item["source_provider"], item["source_version"], item["content_sha256"] = link.SourceProvider, link.SourceVersion, link.ContentSHA256
+			if paper, ok := item["paper"].(PaperRef); ok {
+				paper.SourceProvider, paper.SourceVersion = link.SourceProvider, link.SourceVersion
+				pinPaperURLs(&paper)
+				item["paper"] = paper
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			replyError(w, 500, "READ_FAILED", err.Error())
+			return
+		}
+		_, status, message, err := newArxivImportService(store.DB()).processingStatus(r.Context(), document, nil)
+		if err != nil {
+			status, message = "unknown", err.Error()
+		}
+		item["processing_status"], item["processing_error"] = status, message
 		items = append(items, item)
 	}
 	common.ReplyJSON(w, map[string]any{"items": items})

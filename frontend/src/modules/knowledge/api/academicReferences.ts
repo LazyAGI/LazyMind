@@ -34,6 +34,7 @@ export interface FulltextCandidate {
 }
 
 export interface ImportPreviewItem {
+  paper?: import("./paperWorkflows").PaperRef;
   work_id: string;
   reference_ids?: string[];
   title: string;
@@ -42,8 +43,8 @@ export interface ImportPreviewItem {
   disposition: "already_present" | "downloadable" | "metadata_only" | "importing";
   presence: {
     status: string;
-    current_dataset: Array<{ dataset_id: string; dataset_name: string; document_id: string; document_name: string }>;
-    other_datasets: Array<{ dataset_id: string; dataset_name: string; document_id: string; document_name: string }>;
+    current_dataset: Array<{ dataset_id: string; dataset_name: string; document_id: string; document_name: string; source_provider?: string; source_version?: string; content_sha256?: string }>;
+    other_datasets: Array<{ dataset_id: string; dataset_name: string; document_id: string; document_name: string; source_provider?: string; source_version?: string; content_sha256?: string }>;
     importing: boolean;
     coverage_complete: boolean;
   };
@@ -149,12 +150,30 @@ export async function listAcademicImportQueue(targetDatasetId: string, sourceDoc
   return unwrap<{ items: AcademicImportQueueItem[] }>(response.data).items || [];
 }
 
-export async function previewPaperImport(workIds: string[], targetDatasetId: string): Promise<ImportPreviewItem[]> {
-  const response = await axiosInstance.post(`${core}/imports:preview`, { work_ids: workIds, target_dataset_id: targetDatasetId, resolve_external: false });
+export async function previewPaperImport(workIds: string[], targetDatasetId: string, expansionId?: string): Promise<ImportPreviewItem[]> {
+  const response = await axiosInstance.post(`${core}/imports:preview`, { work_ids: workIds, target_dataset_id: targetDatasetId, resolve_external: false, expansion_id: expansionId });
   return unwrap<{items: ImportPreviewItem[]}>(response.data).items || [];
 }
 
 export async function getPaperImportStatus(batchId: string): Promise<string> {
   const response = await axiosInstance.get(`${core}/imports/${encodeURIComponent(batchId)}`, { silentError: true } as never);
   return unwrap<{ batch: { Status: string } }>(response.data).batch.Status;
+}
+
+export async function previewPaperLink(identifier: string, targetDatasetId: string): Promise<ImportPreviewItem> {
+  const response = await axiosInstance.post(`${core}/imports:preview`, { identifier, target_dataset_id: targetDatasetId });
+  const item = unwrap<{ items: ImportPreviewItem[] }>(response.data).items?.[0];
+  if (!item) throw new Error('没有查询到有效文献');
+  return item;
+}
+export async function importPaperLink(targetDatasetId: string, item: ImportPreviewItem, idempotencyKey: string) {
+  const response = await axiosInstance.post(`${core}/imports`, {
+    entry_type: 'paper_link', target_dataset_id: targetDatasetId, idempotency_key: idempotencyKey,
+    items: [{ work_id: item.work_id, candidate: item.fulltext_candidates[0] }],
+  });
+  return unwrap<{ batch_id?: string; status?: string }>(response.data);
+}
+
+export async function retryAcademicImport(batchId: string) {
+  await axiosInstance.post(`${core}/imports/${encodeURIComponent(batchId)}:retry`, {});
 }

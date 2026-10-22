@@ -34,6 +34,14 @@ function distinctPapers(papers: WorkflowPaper[]) {
     }
     return [...result.values()];
 }
+function currentPaperDocument(detail: ExpansionDetail, item: WorkflowPaper) {
+    const documents = detail.presence?.find(entry => entry.work_id === item.paper.paper_id)?.current_dataset || [];
+    return documents.find(document => document.dataset_id === detail.record.dataset_id && document.document_id && (
+        item.paper.document_id ? document.document_id === item.paper.document_id : item.paper.source_version
+            ? document.source_version === item.paper.source_version && document.source_provider === item.paper.source_provider
+            : item.is_seed
+    ));
+}
 const stages = ['direction_research', 'seed_set', 'expanded_papers', 'paper_relations', 'expansion_result'];
 
 export default function PaperTasks({ dataset, mode, setMode, selected, selectionError, canImport, onImportSubmitted }: Props) {
@@ -163,7 +171,7 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
         const request = ++previewRequest.current;
         setOperation(current => current ? { ...current, previewStatus: 'loading', error: undefined } : current);
         try {
-            const items = await previewPaperImport(distinctPapers(source.record.result.papers || []).map(item => item.paper.paper_id), source.record.dataset_id);
+            const items = await previewPaperImport(distinctPapers(source.record.result.papers || []).map(item => item.paper.paper_id), source.record.dataset_id, source.record.id);
             if (request === previewRequest.current) setOperation(current => current ? { ...current, preview: items, previewStatus: 'ready' } : current);
         } catch {
             if (request === previewRequest.current) setOperation(current => current ? { ...current, previewStatus: 'error' } : current);
@@ -296,10 +304,9 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
                 <Table<WorkflowPaper> rowKey={(item: WorkflowPaper) => item.paper.paper_id} dataSource={distinctPapers(detail.record.result.papers || [])} pagination={false} columns={[
                     { title: t('paperTasks.paper'), width: 280, render: (_: unknown, item: WorkflowPaper) => {
                         const title = item.paper.title || item.paper.paper_id;
-                        if (item.is_seed) {
-                            const document = detail.presence?.find(entry => entry.work_id === item.paper.paper_id)?.current_dataset.find(entry => entry.dataset_id && entry.document_id);
-                            return document ? <Link to={`/lib/knowledge/knowledge/${encodeURIComponent(document.dataset_id)}/${encodeURIComponent(document.document_id)}`} target="_blank" rel="noopener noreferrer">{title}</Link> : title;
-                        }
+                        const document = currentPaperDocument(detail, item);
+                        if (document) return <Link to={`/lib/knowledge/knowledge/${encodeURIComponent(document.dataset_id)}/${encodeURIComponent(document.document_id)}`} target="_blank" rel="noopener noreferrer">{title}</Link>;
+                        if (item.is_seed) return title;
                         const { paper_url, doi, arxiv_id, pdf_url } = item.paper;
                         for (const candidate of [paper_url, doi && `https://doi.org/${doi}`, arxiv_id && `https://arxiv.org/abs/${arxiv_id}`, pdf_url]) {
                             if (!candidate) continue;
@@ -319,21 +326,23 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
                         const content = detail.contents.find(entry => entry.paper_id === item.paper.paper_id);
                         return <Space direction="vertical"><span>{contentStatus(detail, item.paper.paper_id)}</span>
                             {content?.error && <Typography.Text type="danger">{content.error}</Typography.Text>}
-                            {(content?.status === 'failed' || content?.status === 'unavailable') && <Button onClick={async () => { await retryPaperContent(item.paper.paper_id); await openDetail(detail.record.id); }}>{t('paperTasks.retryContent')}</Button>}
+                            {(content?.status === 'failed' || content?.status === 'unavailable') && <Button onClick={async () => { await retryPaperContent(item.paper.paper_id, detail.record.id); await openDetail(detail.record.id); }}>{t('paperTasks.retryContent')}</Button>}
                         </Space>;
                     } },
                     { title: t('paperTasks.importState'), width: 100, render: (_: unknown, item: WorkflowPaper) => {
                         const presence = detail.presence?.find(entry => entry.work_id === item.paper.paper_id);
-                        return t(`paperTasks.importStatus.${presence?.current_dataset.length ? 'already_present' : presence?.importing ? 'importing' : 'not_imported'}`);
+                        const documents = presence?.current_dataset || [];
+                        const matching = currentPaperDocument(detail, item);
+                        return matching ? '已在当前论文集' : documents.length ? '已有其他版本' : presence?.metadata_only ? '已收录，待补全文' : presence?.importing ? t('paperTasks.importStatus.importing') : t('paperTasks.importStatus.not_imported');
                     } },
-                    { title: <Space>{t('paperTasks.relations')}<Tag>{t('paperTasks.demo')}</Tag></Space>, render: (_: unknown, item: WorkflowPaper) => <Typography.Paragraph ellipsis={{ rows: 3, expandable: true, symbol: t('paperTasks.expand') }}>{[item.seed_relation, item.direction_relation, item.key_contribution].filter(Boolean).join('；')}</Typography.Paragraph> },
+                    { title: <Space>{t('paperTasks.relations')}{detail.record.discovery_mode !== 'external' && <Tag>{t('paperTasks.demo')}</Tag>}</Space>, render: (_: unknown, item: WorkflowPaper) => <Typography.Paragraph ellipsis={{ rows: 3, expandable: true, symbol: t('paperTasks.expand') }}>{[item.seed_relation, item.direction_relation, item.key_contribution].filter(Boolean).join('；')}</Typography.Paragraph> },
                 ]} />
                 <Typography.Title level={5}>{t('paperTasks.progress')}</Typography.Title>
                 <List dataSource={Object.entries(detail.record.progress || {}).filter(([key, value]) => stages.includes(key) && value && typeof value === 'object').sort(([a], [b]) => stages.indexOf(a) - stages.indexOf(b))}
                     renderItem={([key, value]) => <List.Item><List.Item.Meta title={t(`paperTasks.stage.${key}`)} description={<><div>{value.candidate_directions?.join('；')}</div><div>{value.papers?.map(item => item.paper.title).filter(Boolean).join('；')}</div></>} /></List.Item>} />
                 <Typography.Title level={5}>{t('paperTasks.rounds')}</Typography.Title>
                 <List dataSource={detail.rounds} renderItem={round => <List.Item><details>
-                    <summary>{t('paperTasks.round', { count: round.version })} · {statusLabel(round.status)} · {t('paperTasks.paperCount', { count: distinctPapers(round.result.papers || []).length })}</summary>
+                    <summary>{round.discovery_mode !== 'external' && <Tag>{t('paperTasks.demo')}</Tag>}{t('paperTasks.round', { count: round.version })} · {statusLabel(round.status)} · {t('paperTasks.paperCount', { count: distinctPapers(round.result.papers || []).length })}</summary>
                     <Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>{round.result.user_instruction}</Typography.Paragraph>
                     <Typography.Paragraph>{t('paperTasks.directions', { value: round.result.selected_directions?.join('；') })}</Typography.Paragraph>
                     <ul>{distinctPapers(round.result.papers || []).map(item => <li key={item.paper.paper_id}>{item.paper.title || item.paper.paper_id} {sourceTag(item)}</li>)}</ul>
