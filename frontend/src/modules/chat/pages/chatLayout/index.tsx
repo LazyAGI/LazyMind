@@ -1170,6 +1170,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
               parentConversationId={sessionId}
               source={sideChats[sessionId]}
               onClose={() => {
+                setIsTaskPanelCollapsed(true);
                 setPanelView("overview");
                 setSideChats((current) => {
                   const next = { ...current };

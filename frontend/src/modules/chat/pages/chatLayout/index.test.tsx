@@ -1235,13 +1235,15 @@ describe("ChatLayout conversation loading", () => {
     expect(mocks.sideChatMounted).toHaveBeenCalledTimes(2);
   });
 
-  it("returns to overview after discarding side chat", async () => {
+  it("closes the entire right panel after discarding side chat", async () => {
     render(<ChatLayout {...sidebarProps} />);
     await openOverview();
     fireEvent.click(screen.getByTestId("conversation-menu-sidechat"));
     fireEvent.click(screen.getByRole("button", { name: "Close side chat" }));
     expect(screen.queryByTestId("side-chat-panel")).not.toBeInTheDocument();
-    expect(screen.getByTestId("artifact-panel")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "chat.sidebar.open" })).toHaveAttribute("aria-expanded", "false");
+    expect(document.getElementById("conversation-context-panel")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.queryByTestId("artifact-panel")).not.toBeInTheDocument();
   });
 
   it("leaves references to message popovers without routing them into the sidebar", async () => {

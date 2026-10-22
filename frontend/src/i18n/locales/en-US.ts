@@ -2739,6 +2739,7 @@ const enUS = {
       clearDescription:
         "This side chat will be deleted and replaced with a new empty one.",
       clearFailed: "Could not clear the side chat. Try again.",
+      discard: "Discard",
       retain: "Keep",
       retained: "Kept",
       retainSuccess: "Side chat saved to conversation history",

@@ -10,14 +10,7 @@ import {
   type ComponentType,
   type ReactNode,
 } from "react";
-import {
-  CheckOutlined,
-  CloseOutlined,
-  DeleteOutlined,
-  LinkOutlined,
-  PushpinOutlined,
-  ReloadOutlined,
-} from "@ant-design/icons";
+import { ReloadOutlined } from "@ant-design/icons";
 import { Alert, Button, Drawer, Modal, Skeleton, Tooltip, message } from "antd";
 import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
@@ -486,6 +479,7 @@ const SideChatPanel = forwardRef<SideChatPanelRef, SideChatPanelProps>(function 
     streaming ||
     requestPending;
   const sourceText = sideChatSourceText(activeSource, child);
+  const closeLabel = t(retained ? "chat.sideChat.close" : "chat.sideChat.discard");
 
   return (
     <>
@@ -501,25 +495,18 @@ const SideChatPanel = forwardRef<SideChatPanelRef, SideChatPanelProps>(function 
         onClose={handleClose}
         title={
           <div className="side-chat-header">
-            <div className="side-chat-heading">
-              <span className="side-chat-heading-icon" aria-hidden="true">
-                <LinkOutlined />
-              </span>
-              <div>
-                <strong id={titleId}>{t("chat.sideChat.title")}</strong>
-                <span>{t("chat.sideChat.description")}</span>
-              </div>
-            </div>
+            <span id={titleId} hidden>{t("chat.sideChat.title")}</span>
             <div className="side-chat-header-actions">
               <Tooltip title={t("chat.sideChat.clear")}>
                 <Button
                   type="text"
                   size="small"
-                  icon={<DeleteOutlined />}
                   aria-label={t("chat.sideChat.clear")}
                   disabled={!child || busy}
                   onClick={() => setClearConfirmOpen(true)}
-                />
+                >
+                  {t("chat.sideChat.clear")}
+                </Button>
               </Tooltip>
               <Tooltip
                 title={
@@ -531,9 +518,8 @@ const SideChatPanel = forwardRef<SideChatPanelRef, SideChatPanelProps>(function 
                 }
               >
                 <Button
-                  type={retained ? "default" : "primary"}
+                  type="text"
                   size="small"
-                  icon={retained ? <CheckOutlined /> : <PushpinOutlined />}
                   aria-label={
                     retained
                       ? t("chat.sideChat.retained")
@@ -552,18 +538,18 @@ const SideChatPanel = forwardRef<SideChatPanelRef, SideChatPanelProps>(function 
                 title={
                   streaming || requestPending
                     ? t("chat.sideChat.generatingUnavailable")
-                    : t("chat.sideChat.close")
+                    : closeLabel
                 }
               >
                 <Button
                   type="text"
                   size="small"
-                  icon={embedded ? undefined : <CloseOutlined />}
-                  aria-label={t(embedded ? (retained ? "chat.contextPanel.endSideChat" : "chat.contextPanel.discardSideChat") : "chat.sideChat.close")}
+                  danger={!retained}
+                  aria-label={closeLabel}
                   disabled={requestPending || streaming || phase === "closing"}
                   onClick={handleClose}
                 >
-                  {embedded && t(retained ? "chat.contextPanel.endSideChat" : "chat.contextPanel.discardSideChat")}
+                  {closeLabel}
                 </Button>
               </Tooltip>
             </div>

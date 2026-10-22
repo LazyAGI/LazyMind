@@ -2683,6 +2683,7 @@ const zhCN = {
       clearTitle: "清空当前侧聊？",
       clearDescription: "当前侧聊内容将被删除，并重新创建一个空白侧聊。",
       clearFailed: "侧聊清空失败，请重试",
+      discard: "丢弃",
       retain: "保留",
       retained: "已保留",
       retainSuccess: "侧聊已保留到对话历史",

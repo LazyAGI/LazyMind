@@ -188,7 +188,7 @@ describe("SideChatPanel", () => {
 
   it.each([
     ["chat.sideChat.clear", "chat.sideChat.clearTitle"],
-    ["chat.sideChat.close", "chat.sideChat.closeConfirmTitle"],
+    ["chat.sideChat.discard", "chat.sideChat.closeConfirmTitle"],
   ])("hides the %s confirmation when its parent is not visible", async (action, title) => {
     const onClose = vi.fn();
     const props = { open: true, parentConversationId: "parent-1", onClose };
@@ -233,6 +233,7 @@ describe("SideChatPanel", () => {
       chatConfig: { knowledgeBaseId: ["kb-1"] },
     });
     expect(mocks.latestChatProps.setChatConfig).toBeUndefined();
+    expect(screen.getByRole("dialog", { name: "chat.sideChat.title" })).toBeVisible();
     expect(document.querySelector(".ant-drawer-mask")).toBeNull();
     expect(
       screen.getByRole("button", { name: "chat.sideChat.retain" }),
@@ -306,7 +307,7 @@ describe("SideChatPanel", () => {
     act(() => mocks.latestChatProps.onRequestPendingChange(true));
 
     expect(
-      screen.getByRole("button", { name: "chat.sideChat.close" }),
+      screen.getByRole("button", { name: "chat.sideChat.discard" }),
     ).toBeDisabled();
     expect(
       screen.getByRole("button", { name: "chat.sideChat.retain" }),
@@ -336,7 +337,7 @@ describe("SideChatPanel", () => {
     }
     const { onClose } = await renderSideChat();
 
-    fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.close" }));
+    fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.discard" }));
 
     const dialog = (await screen.findByText("chat.sideChat.closeConfirmTitle")).closest<HTMLElement>('[role="dialog"]')!;
     expect(deleteSideChat).not.toHaveBeenCalled();
@@ -351,7 +352,7 @@ describe("SideChatPanel", () => {
     const { onClose } = await renderSideChat();
     sendSideChatQuestion();
 
-    fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.close" }));
+    fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.discard" }));
     expect(screen.getByText("chat.sideChat.closeConfirmTitle")).toBeInTheDocument();
     expect(deleteSideChat).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
@@ -459,7 +460,7 @@ describe("SideChatPanel", () => {
     vi.mocked(retainSideChat).mockRejectedValue(new Error("failed"));
     const { onClose } = await renderSideChat();
     sendSideChatQuestion();
-    fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.close" }));
+    fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.discard" }));
     const dialog = (await screen.findByText("chat.sideChat.closeConfirmTitle")).closest<HTMLElement>('[role="dialog"]')!;
     fireEvent.click(within(dialog).getByRole("button", { name: "chat.sideChat.retain" }));
     await waitFor(() => expect(retainSideChat).toHaveBeenCalled());
