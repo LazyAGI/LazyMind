@@ -8,7 +8,6 @@ import (
 	"lazymind/core/common/orm"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -119,42 +118,4 @@ func installOriginalSourceTransport(t *testing.T) {
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.test")
-}
-
-func TestOriginalAttachmentUploadSessionOwnerExpiryAndCompleteness(t *testing.T) {
-	db := newDocumentTestDB(t)
-	if err := db.AutoMigrate(&orm.UploadSession{}); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("LAZYMIND_UPLOAD_ROOT", t.TempDir())
-	svc, _ := NewOriginalService(OriginalServiceDeps{DB: db.DB})
-	caller := DatasetCatalogCaller{UserID: "owner", TenantID: "tenant"}
-	now := time.Now().UTC()
-	dir := buildTempUploadFileDir("owner", "session")
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "note.txt"), []byte("attachment"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	row := orm.UploadSession{UploadID: "session", TenantID: "tenant", UploadState: string(TaskStateUploaded), Ext: mustJSON(uploadMeta{UploadScope: uploadScopeTemp, StoredName: "note.txt", OriginalFilename: "note.txt", FileSize: 10, ContentType: "text/plain"}), BaseModel: orm.BaseModel{CreateUserID: "owner", CreatedAt: now, UpdatedAt: now}}
-	if err := db.Create(&row).Error; err != nil {
-		t.Fatal(err)
-	}
-	ref, err := svc.AcquireUploadedOriginal(context.Background(), caller, row.UploadID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ref.FileRef == row.UploadID || ref.Size != 10 {
-		t.Fatalf("attachment did not become immutable ref: %+v", ref)
-	}
-	if _, err := svc.AcquireUploadedOriginal(context.Background(), DatasetCatalogCaller{UserID: "other", TenantID: "tenant"}, row.UploadID); err == nil {
-		t.Fatal("foreign attachment accepted")
-	}
-	if err := db.Model(&row).Update("upload_state", string(TaskStateCreating)).Error; err != nil {
-		t.Fatal(err)
-	}
-	if _, err := svc.AcquireUploadedOriginal(context.Background(), caller, row.UploadID); err == nil {
-		t.Fatal("incomplete attachment accepted")
-	}
 }

@@ -41,12 +41,11 @@ type OriginalRef struct {
 	Size          int64     `json:"size"`
 	ContentSHA256 string    `json:"content_sha256"`
 	FinalURL      string    `json:"final_url,omitempty"`
-	RevisionID    string    `json:"revision_id,omitempty"`
 	ExpiresAt     time.Time `json:"expires_at"`
 }
 type AcquireOriginalRequest struct {
-	Filename, ContentType, ContentSHA256, FinalURL, RevisionID string
-	Reader                                                     io.Reader
+	Filename, ContentType, ContentSHA256, FinalURL string
+	Reader                                         io.Reader
 }
 type AcquireRemoteOriginalRequest struct{ URL, DisplayName, ExpectedMIME string }
 type OriginalServiceDeps struct {
@@ -60,9 +59,8 @@ type OriginalService struct {
 }
 type originalMetadata struct {
 	uploadedFileExt
-	ExpiresAt  time.Time `json:"original_expires_at,omitempty"`
-	FinalURL   string    `json:"original_final_url,omitempty"`
-	RevisionID string    `json:"original_revision_id,omitempty"`
+	ExpiresAt time.Time `json:"original_expires_at,omitempty"`
+	FinalURL  string    `json:"original_final_url,omitempty"`
 }
 type ImportOriginalRequest struct {
 	DocumentID, TaskID, RelativePath                          string // Internal page request identity; not part of MCP upload schema.
@@ -160,7 +158,7 @@ func (s *OriginalService) AcquireOriginal(ctx context.Context, caller DatasetCat
 	}
 	now := s.now()
 	expires := now.Add(originalRetention)
-	meta := originalMetadata{uploadedFileExt: uploadedFileExt{StoredPath: path, StoredName: filepath.Base(path), OriginalFilename: name, FileSize: size, ContentType: mime}, ExpiresAt: expires, FinalURL: req.FinalURL, RevisionID: req.RevisionID}
+	meta := originalMetadata{uploadedFileExt: uploadedFileExt{StoredPath: path, StoredName: filepath.Base(path), OriginalFilename: name, FileSize: size, ContentType: mime}, ExpiresAt: expires, FinalURL: req.FinalURL}
 	row := orm.UploadedFile{UploadFileID: id, TenantID: caller.TenantID, ContentHash: hash, Status: UploadedFileStateUploaded, Ext: mustJSON(meta), BaseModel: orm.BaseModel{CreateUserID: caller.UserID, CreateUserName: firstNonEmpty(caller.UserName, caller.UserID), CreatedAt: now, UpdatedAt: now}}
 	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
 		return OriginalRef{}, err
@@ -169,7 +167,7 @@ func (s *OriginalService) AcquireOriginal(ctx context.Context, caller DatasetCat
 	return originalRef(row, meta), nil
 }
 func originalRef(row orm.UploadedFile, meta originalMetadata) OriginalRef {
-	return OriginalRef{FileRef: row.UploadFileID, Filename: meta.OriginalFilename, ContentType: meta.ContentType, Size: meta.FileSize, ContentSHA256: row.ContentHash, FinalURL: meta.FinalURL, RevisionID: meta.RevisionID, ExpiresAt: meta.ExpiresAt}
+	return OriginalRef{FileRef: row.UploadFileID, Filename: meta.OriginalFilename, ContentType: meta.ContentType, Size: meta.FileSize, ContentSHA256: row.ContentHash, FinalURL: meta.FinalURL, ExpiresAt: meta.ExpiresAt}
 }
 func (s *OriginalService) ResolveOriginal(ctx context.Context, caller DatasetCatalogCaller, id string) (OriginalRef, error) {
 	row, meta, err := s.resolve(ctx, s.db, caller, id)
@@ -614,61 +612,6 @@ func validateOriginalBytes(f *os.File, size int64, name, expectedMIME string) (s
 		return "", originalError(DatasetServiceInvalidArgument, fmt.Sprintf("original MIME mismatch: expected %s, got %s", expectedMIME, mime))
 	}
 	return mime, nil
-}
-
-// AcquireUploadedOriginal bridges existing complete attachment sessions to the
-// immutable UploadedFile contract. A conversation fr_ reference is not a session ID.
-func (s *OriginalService) AcquireUploadedOriginal(ctx context.Context, caller DatasetCatalogCaller, id string) (OriginalRef, error) {
-	var count int64
-	if err := s.db.WithContext(ctx).Model(&orm.UploadedFile{}).Where("upload_file_id = ?", id).Count(&count).Error; err != nil {
-		return OriginalRef{}, err
-	}
-	if count > 0 {
-		return s.ResolveOriginal(ctx, caller, id)
-	}
-	if err := validOriginalCaller(caller); err != nil {
-		return OriginalRef{}, err
-	}
-	if strings.HasPrefix(id, "fr_") || strings.TrimSpace(id) == "" {
-		return OriginalRef{}, originalError(DatasetServiceInvalidArgument, "controlled upload reference required")
-	}
-	var session orm.UploadSession
-	if err := s.db.WithContext(ctx).Where("upload_id = ? AND deleted_at IS NULL", id).Take(&session).Error; err != nil {
-		return OriginalRef{}, originalError(DatasetServiceNotFound, "upload original not found")
-	}
-	if session.CreateUserID != caller.UserID || resourceTenant(session.TenantID) != resourceTenant(caller.TenantID) {
-		return OriginalRef{}, originalError(DatasetServiceForbidden, "upload belongs to another owner or tenant")
-	}
-	if session.UploadState != string(TaskStateUploaded) {
-		return OriginalRef{}, originalError(DatasetServiceInvalidArgument, "upload is incomplete")
-	}
-	if !s.now().Before(session.CreatedAt.Add(originalRetention)) {
-		return OriginalRef{}, originalError("SOURCE_EXPIRED", "upload reference has expired")
-	}
-	var meta uploadMeta
-	if err := json.Unmarshal(session.Ext, &meta); err != nil {
-		return OriginalRef{}, err
-	}
-	if meta.UploadScope != uploadScopeTemp {
-		return OriginalRef{}, originalError(DatasetServiceInvalidArgument, "not a temporary upload")
-	}
-	if _, err := originalFilename(meta.StoredName); err != nil {
-		return OriginalRef{}, err
-	}
-	path := filepath.Join(buildTempUploadFileDir(session.CreateUserID, session.UploadID), meta.StoredName)
-	input, err := openControlledOriginal(path)
-	if err != nil {
-		return OriginalRef{}, err
-	}
-	defer input.Close()
-	info, err := input.Stat()
-	if err != nil {
-		return OriginalRef{}, err
-	}
-	if info.Size() != meta.FileSize {
-		return OriginalRef{}, originalError("SOURCE_CHANGED", "upload size changed")
-	}
-	return s.AcquireOriginal(ctx, caller, AcquireOriginalRequest{Filename: meta.OriginalFilename, ContentType: meta.ContentType, Reader: input})
 }
 
 // purgeExpiredOriginals bounds retention opportunistically when the same owner
