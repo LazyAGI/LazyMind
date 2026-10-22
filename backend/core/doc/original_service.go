@@ -49,21 +49,14 @@ type AcquireOriginalRequest struct {
 	Reader                                                     io.Reader
 }
 type AcquireRemoteOriginalRequest struct{ URL, DisplayName, ExpectedMIME string }
-type OriginalArtifact struct {
-	Reader                                           io.ReadCloser
-	Filename, ContentType, ContentSHA256, RevisionID string
-}
 type OriginalServiceDeps struct {
 	DB               *gorm.DB
 	SubmitProcessing func(context.Context, DatasetCatalogCaller, string, string) (StartTaskResult, error)
-	// Resolver belongs to the artifact module, which already depends on doc.
-	ResolveWorkArtifact func(context.Context, DatasetCatalogCaller, string, string) (OriginalArtifact, error)
 }
 type OriginalService struct {
-	db       *gorm.DB
-	submit   func(context.Context, DatasetCatalogCaller, string, string) (StartTaskResult, error)
-	artifact func(context.Context, DatasetCatalogCaller, string, string) (OriginalArtifact, error)
-	now      func() time.Time
+	db     *gorm.DB
+	submit func(context.Context, DatasetCatalogCaller, string, string) (StartTaskResult, error)
+	now    func() time.Time
 }
 type originalMetadata struct {
 	uploadedFileExt
@@ -114,7 +107,7 @@ func NewOriginalService(deps OriginalServiceDeps) (*OriginalService, error) {
 	if deps.DB == nil {
 		return nil, errors.New("original service requires database")
 	}
-	return &OriginalService{db: deps.DB, submit: deps.SubmitProcessing, artifact: deps.ResolveWorkArtifact, now: func() time.Time { return time.Now().UTC() }}, nil
+	return &OriginalService{db: deps.DB, submit: deps.SubmitProcessing, now: func() time.Time { return time.Now().UTC() }}, nil
 }
 func originalError(code DatasetServiceErrorCode, message string) error {
 	return &DatasetServiceError{Code: code, Message: message}
@@ -219,26 +212,6 @@ func (s *OriginalService) resolve(ctx context.Context, db *gorm.DB, caller Datas
 		}
 	}
 	return row, meta, nil
-}
-func (s *OriginalService) AcquireWorkOriginal(ctx context.Context, caller DatasetCatalogCaller, artifactID, revisionID string) (OriginalRef, error) {
-	if err := validOriginalCaller(caller); err != nil {
-		return OriginalRef{}, err
-	}
-	if s.artifact == nil {
-		return OriginalRef{}, originalError(DatasetServiceUnavailable, "work artifact resolver unavailable")
-	}
-	resolved, err := s.artifact(ctx, caller, artifactID, revisionID)
-	if err != nil {
-		return OriginalRef{}, err
-	}
-	if resolved.Reader == nil {
-		return OriginalRef{}, errors.New("artifact original unavailable")
-	}
-	defer resolved.Reader.Close()
-	if resolved.RevisionID == "" || (revisionID != "" && resolved.RevisionID != revisionID) {
-		return OriginalRef{}, errors.New("artifact revision was not fixed")
-	}
-	return s.AcquireOriginal(ctx, caller, AcquireOriginalRequest{Filename: resolved.Filename, ContentType: resolved.ContentType, ContentSHA256: resolved.ContentSHA256, RevisionID: resolved.RevisionID, Reader: resolved.Reader})
 }
 func (s *OriginalService) PrepareOriginalBinding(ctx context.Context, caller DatasetCatalogCaller, req ImportOriginalRequest) (*PreparedOriginalBinding, error) {
 	row, meta, err := s.resolve(ctx, s.db, caller, req.FileRef)

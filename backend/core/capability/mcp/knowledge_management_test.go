@@ -153,7 +153,7 @@ func TestPublicKnowledgeRegistryAndLocalPathContract(t *testing.T) {
 	}
 	for _, source := range []map[string]any{
 		{"kind": "remote_file", "url": "https://example.com/paper.pdf", "path": "/private/file"},
-		{"kind": "work_artifact", "artifact_id": "artifact"},
+		{"kind": "work_artifact", "artifact_id": "artifact", "revision_id": "published-revision"},
 		{"kind": "uploaded_file", "file_ref": ""},
 	} {
 		input := map[string]any{"knowledge_base_id": "kb", "files": []any{map[string]any{"source": source}}}

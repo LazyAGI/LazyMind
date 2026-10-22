@@ -107,7 +107,7 @@ func NewRuntime(config Config) (*Runtime, error) {
 	var managementPort capability.KnowledgeManager
 	var resources *doc.ResourceService
 	if config.EnableKnowledgeManagement {
-		originals, e := newCapabilityOriginalService(config.DB)
+		originals, e := doc.NewOriginalService(doc.OriginalServiceDeps{DB: config.DB})
 		if e != nil {
 			return nil, e
 		}
@@ -115,7 +115,7 @@ func NewRuntime(config Config) (*Runtime, error) {
 		if e != nil {
 			return nil, e
 		}
-		management = coreadapter.NewKnowledgeManagement(config.DB, lazyDB, resources, originals)
+		management = coreadapter.NewKnowledgeManagement(config.DB, lazyDB, resources)
 		managementPort = management
 	}
 	service, err := capability.NewService(capability.Dependencies{

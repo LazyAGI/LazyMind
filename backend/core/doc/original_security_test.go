@@ -125,26 +125,14 @@ func TestOriginalBindingUsesCallerTransactionAndRollsBack(t *testing.T) {
 		t.Fatal("staged copy retained")
 	}
 }
-func TestOriginalCancellationAndWorkRevision(t *testing.T) {
+func TestOriginalCancellation(t *testing.T) {
 	db := newDocumentTestDB(t)
 	t.Setenv("LAZYMIND_UPLOAD_ROOT", t.TempDir())
-	svc, _ := NewOriginalService(OriginalServiceDeps{DB: db.DB, ResolveWorkArtifact: func(context.Context, DatasetCatalogCaller, string, string) (OriginalArtifact, error) {
-		return OriginalArtifact{Reader: io.NopCloser(strings.NewReader("exact published bytes")), Filename: "note.md", RevisionID: "rev1"}, nil
-	}})
+	svc, _ := NewOriginalService(OriginalServiceDeps{DB: db.DB})
 	caller := DatasetCatalogCaller{UserID: "owner"}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := svc.AcquireOriginal(ctx, caller, AcquireOriginalRequest{Filename: "x.txt", Reader: strings.NewReader("hello")}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation ignored: %v", err)
-	}
-	if _, err := svc.AcquireWorkOriginal(context.Background(), caller, "artifact", "rev2"); err == nil {
-		t.Fatal("wrong artifact revision accepted")
-	}
-	ref, err := svc.AcquireWorkOriginal(context.Background(), caller, "artifact", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ref.RevisionID != "rev1" || ref.ContentSHA256 == "" {
-		t.Fatal("artifact revision/content not fixed")
 	}
 }

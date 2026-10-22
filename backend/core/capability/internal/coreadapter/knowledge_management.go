@@ -11,13 +11,12 @@ import (
 type KnowledgeManagement struct {
 	db, lazyDB   *gorm.DB
 	resources    *doc.ResourceService
-	originals    *doc.OriginalService
 	commitGuard  func(context.Context, *gorm.DB, capability.InvocationContext) error
 	beforeCommit func(context.Context, capability.InvocationContext) error
 }
 
-func NewKnowledgeManagement(db, lazyDB *gorm.DB, resources *doc.ResourceService, originals *doc.OriginalService) *KnowledgeManagement {
-	return &KnowledgeManagement{db: db, lazyDB: lazyDB, resources: resources, originals: originals}
+func NewKnowledgeManagement(db, lazyDB *gorm.DB, resources *doc.ResourceService) *KnowledgeManagement {
+	return &KnowledgeManagement{db: db, lazyDB: lazyDB, resources: resources}
 }
 func managementCaller(c capability.InvocationContext) doc.DatasetCatalogCaller {
 	p := make([]string, 0, len(c.Principal.Permissions))
