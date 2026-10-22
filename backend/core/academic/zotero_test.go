@@ -123,6 +123,82 @@ func TestZoteroLocalPreviewUsesUserZeroAndNeverSendsRemoteKey(t *testing.T) {
 	}
 }
 
+func TestZoteroLocalDockerConnectionUsesLoopbackHost(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		source   string
+		host     string
+		wantHost string
+		absolute bool
+	}{
+		{"docker relative redirect", "local", "host.docker.internal:23119", "localhost:23119", false},
+		{"docker absolute redirect", "local", "host.docker.internal:23119", "localhost:23119", true},
+		{"direct connection", "local", "127.0.0.1:23119", "127.0.0.1:23119", false},
+		{"WebDAV host unchanged", "webdav", "host.docker.internal:23119", "host.docker.internal:23119", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				// Zotero's HTTP server rejects Docker's network alias as a Host.
+				if r.Host != tc.wantHost {
+					http.Error(w, "Bad request", http.StatusBadRequest)
+					return
+				}
+				if tc.source == "local" && (r.Header.Get("Zotero-API-Key") != "" || r.Header.Get("Authorization") != "") {
+					t.Error("remote credentials sent to local Zotero")
+				}
+				if r.URL.Query().Get("redirected") == "" {
+					location := r.URL.Path + "?redirected=1"
+					if tc.absolute {
+						location = "http://" + tc.host + location
+					}
+					http.Redirect(w, r, location, http.StatusFound)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			defer server.Close()
+			config := zoteroConfig{Source: tc.source, LibraryID: "123", LocalURL: "http://" + tc.host + "/api", APIKey: "remote-secret"}
+			if tc.source == "webdav" {
+				config.WebDAV = &zoteroWebDAVConfig{URL: "http://" + tc.host + "/zotero", Username: "user", Password: "secret"}
+			}
+			client, err := newZoteroClient(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			routing := client.http.Transport.(*zoteroRoutingTransport)
+			defer routing.CloseIdleConnections()
+			routing.private.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+				if address != tc.host {
+					t.Errorf("dial target changed: got %s, want %s", address, tc.host)
+				}
+				return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+			}
+			client.http.Transport = importErrorTransport(func(r *http.Request) (*http.Response, error) {
+				originalHost := r.Host
+				response, err := routing.RoundTrip(r)
+				if r.Host != originalHost {
+					t.Error("transport mutated the caller's request")
+				}
+				return response, err
+			})
+			target := client.apiURL("collections")
+			if tc.source == "webdav" {
+				target = client.dav
+			}
+			body, _, err := client.request(context.Background(), target, 1024)
+			if err != nil || string(body) != `[]` || requests != 2 {
+				t.Fatalf("local HTTP host rejected: body=%s requests=%d error=%v", body, requests, err)
+			}
+			if target.Host != tc.host {
+				t.Fatal("request rewrote the destination URL")
+			}
+		})
+	}
+}
+
 func TestZoteroPDFDownloadStripsCredentialsAtStorageRedirect(t *testing.T) {
 	pdf := "%PDF-1.7\nlocal bytes"
 	hash := md5.Sum([]byte(pdf))

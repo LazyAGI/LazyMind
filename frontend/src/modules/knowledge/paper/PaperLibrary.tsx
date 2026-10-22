@@ -829,6 +829,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
             { key: "upload", icon: <UploadOutlined />, label: "直接上传", onClick: () => openImport("upload") },
             { key: "identifier", icon: <LinkOutlined />, label: "arXiv / DOI 链接", onClick: () => openImport("identifier") },
             { key: "bibliography", icon: <FileTextOutlined />, label: "BibTeX / RIS / CSV", onClick: () => openImport("bibliography") },
+            { type: "divider" },
             { key: "zotero", icon: <FolderOutlined />, label: "从 Zotero 导入", disabled: isDemo, onClick: () => setZoteroOpen(true) },
             { type: "divider" },
             { key: "folder", icon: <PlusOutlined />, label: "新建文件夹", onClick: () => openFolderDialog() },

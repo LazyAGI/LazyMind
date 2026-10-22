@@ -411,6 +411,11 @@ func (c *zoteroClient) preview(ctx context.Context) (zoteroPreview, error) {
 	if papers > 10000 {
 		return result, zoteroFailure(413, "ZOTERO_LIBRARY_TOO_LARGE", "单次最多导入 10000 篇文献，请分批导入")
 	}
+	if c.config.Source == "local" {
+		if err := c.normalizeTrashedCollections(ctx, &result); err != nil {
+			return result, err
+		}
+	}
 	result.SourceID = c.config.LibraryType + ":" + c.config.LibraryID
 	if c.config.Source == "local" {
 		identity := c.serverID

@@ -23,6 +23,16 @@
   .zotero-field-hint, .zotero-connection-hint { margin: 0; color: #8390a3; font-size: 11px; line-height: 1.7; }
   .zotero-field-hint a { color: #3975e8; }
   .zotero-connection-hint { padding: 10px 12px; border-radius: 8px; background: #f6f8fb; }
+  .zotero-setup-help {
+    padding: 0 12px; border-radius: 8px; background: #f6f8fb; color: #53647c; font-size: 12px; line-height: 1.7;
+    summary { padding: 11px 0; color: #394b63; font-weight: 600; cursor: pointer; }
+    summary:focus-visible { outline: 2px solid #759eff; outline-offset: 3px; border-radius: 3px; }
+    ol { margin: 0; padding: 0 0 0 20px; }
+    li { padding-left: 3px; margin-bottom: 9px; }
+    li span { display: block; color: #65758e; }
+    strong { color: #394b63; font-weight: 600; }
+    p { margin: 10px 0 0; padding: 10px 0 12px; border-top: 1px solid #e4eaf2; }
+  }
   .zotero-section-label { margin: 3px 0 -2px; color: #65758e; font-size: 11px; letter-spacing: .05em; }
   .zotero-file-picker { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; padding: 13px; border: 1px dashed #cbd7e9; border-radius: 9px; background: #fafcff; }
   .zotero-file-picker > span { color: #8290a5; font-size: 12px; overflow-wrap: anywhere; }

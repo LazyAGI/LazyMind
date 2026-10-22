@@ -120,7 +120,15 @@ export default function ZoteroImportModal({ open, datasetId, canWrite, initialFo
           <p className="zotero-field-hint">可使用 Zotero API 保存的 JSON，或 Better BibTeX 插件导出的 BetterBibTeX JSON。普通 CSL JSON 不包含完整的文件夹与附件关系。</p>
         </div> : <>
           <div className="zotero-field"><div className="zotero-field-label-row"><label htmlFor="zotero-local-url">本地 API 地址</label><Radio.Group size="small" value={config.local_url?.includes('host.docker.internal') ? 'docker' : config.local_url?.includes('localhost') || config.local_url?.includes('127.0.0.1') ? 'direct' : undefined} disabled={disabled} onChange={event => changeConfig({ local_url: event.target.value === 'docker' ? 'http://host.docker.internal:23119/api' : 'http://localhost:23119/api' })} aria-label="本地连接方式"><Radio.Button value="docker">Docker 连接</Radio.Button><Radio.Button value="direct">本机直连</Radio.Button></Radio.Group></div><Input id="zotero-local-url" value={config.local_url} disabled={disabled} onChange={event => changeConfig({ local_url: event.target.value })} /></div>
-          <p className="zotero-connection-hint">打开 Zotero，在设置 → 高级中允许其他应用连接。LazyMind 使用容器运行时选择 Docker 连接，直接运行时选择本机直连；远端部署请使用远端 Zotero 或 JSON 文件。</p>
+          <details className="zotero-setup-help">
+            <summary>首次连接：设置 Zotero</summary>
+            <ol>
+              <li>打开桌面版 Zotero 的设置。<span>macOS：顶部菜单「Zotero → 设置」（⌘ ,）；Windows / Linux：「编辑 → 设置」。</span></li>
+              <li>选择「高级」，在页面上方勾选<strong>「允许此计算机上的其他应用程序与 Zotero 通讯」</strong>。</li>
+              <li>保持 Zotero 运行，再回到此窗口点击「连接并预览」。<span>本地个人文献库的用户 ID 填 0，无需 API Key。</span></li>
+            </ol>
+            <p>LazyMind 使用容器运行时选择「Docker 连接」，直接运行时选择「本机直连」。远端部署请使用「远端 Zotero」或 JSON 文件。</p>
+          </details>
         </>}
       </>}
       {!isFile && <div className="zotero-form-row">
@@ -142,7 +150,7 @@ export default function ZoteroImportModal({ open, datasetId, canWrite, initialFo
       {config.source === 'local' && includeAttachments && <>
         <div className="zotero-file-picker"><Button size="small" icon={<FolderOpenOutlined />} disabled={disabled} onClick={() => folderPicker.current?.click()}>选择本地附件文件夹</Button><span>{localFiles.length ? `已选择 ${localFiles.length} 个文件` : '可选择 Zotero storage 或导出附件目录'}</span></div>
         <input {...directoryInput} ref={folderPicker} type="file" multiple hidden aria-label="本地 Zotero 附件目录" disabled={disabled} onChange={event => { setLocalFiles(Array.from(event.target.files || [])); setError(null); }} />
-        <p className="zotero-field-hint">本地 API 返回磁盘路径，浏览器不能直接读取。选择附件目录后，系统按 Zotero 附件标识匹配 PDF。</p>
+        <p className="zotero-field-hint">在 Zotero「设置 → 高级 → 文件和文件夹 → 打开数据文件夹」中找到 storage 文件夹，并在此选择。系统按附件标识匹配 PDF；选择 JSON 导入时，也可选择导出文件附带的附件目录。</p>
       </>}
     </div>
     {summary && <div className="zotero-preview" aria-label="导入预览">

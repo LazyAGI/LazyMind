@@ -96,7 +96,15 @@ type zoteroRoutingTransport struct {
 }
 
 func (t *zoteroRoutingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if (t.client.config.Source == "local" && sameZoteroOrigin(r.URL, t.client.base)) || (t.client.dav != nil && sameZoteroOrigin(r.URL, t.client.dav)) {
+	local := t.client.config.Source == "local" && sameZoteroOrigin(r.URL, t.client.base)
+	if local && r.URL.Hostname() == "host.docker.internal" {
+		// Zotero accepts only loopback Host values. Keep Docker's destination
+		// for dialing while using its accepted HTTP authority, including after
+		// same-origin redirects. Do not mutate the caller's request.
+		r = r.Clone(r.Context())
+		r.Host = "localhost:23119"
+	}
+	if local || (t.client.dav != nil && sameZoteroOrigin(r.URL, t.client.dav)) {
 		return t.private.RoundTrip(r)
 	}
 	return t.public.RoundTrip(r)
