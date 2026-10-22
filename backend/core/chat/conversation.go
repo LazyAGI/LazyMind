@@ -2386,8 +2386,7 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 		q = q.Where("conversations.id IN (?)", sourceIDs)
 	}
 	if keyword != "" {
-		pattern := "%" + keyword + "%"
-		q = q.Where("display_name LIKE ? OR source_display_name LIKE ? OR source_document_id LIKE ?", pattern, pattern, pattern)
+		q = q.Where("conversations.id IN (?)", common.ConversationKeywordIDs(db, userID, keyword))
 	}
 	if sourceType := strings.TrimSpace(r.URL.Query().Get("source_type")); sourceType != "" {
 		q = q.Where("source_type = ?", sourceType)
@@ -2408,6 +2407,10 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 	default:
 		// No filter param: show all conversations (both regular and task).
 		// This path is hit when the frontend selects both "普通对话" and "Task 对话".
+	}
+	if r.URL.Query().Get("selection_snapshot") == "true" {
+		listConversationSelection(w, r, q, userID)
+		return
 	}
 	var total int64
 	q.Count(&total)
