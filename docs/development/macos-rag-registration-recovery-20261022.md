@@ -222,7 +222,7 @@ lazyllm_waiting_task_queue    lazyllm_finished_task_queue
 2. **正式 wheel 路径**：`desktop/scripts/patch-reader-imports.py` 同时修补 pinned wheel 的 RAG 根包和 parsing_service 初始化器。否则仅更新子模块不能覆盖不打包源码的正式发行构建。
 3. **显式覆盖开关**：新增 `LAZYMIND_FORCE_ALGO_REGISTER`，这是布尔值；开启后最终注册策略为字符串 `force`。它优先于旧的 `LAZYLLM_ALGO_REGISTER_POLICY=none/update`，不是把 policy 设为字符串 `false`。
 4. **桌面运行时**：desktop profile 默认启用覆盖，避免同一显示版本的测试包重装仍受旧指纹影响；显式设置新开关为 `false` 可恢复原有策略选择。该开关为 true 时不受旧 policy 环境值影响。
-5. **本地开发**：新 `local/config.env.example` 启用此开关。已有的 gitignored 配置不自动修改，需手动添加。Make 配置加载顺序与 upstream 一致：local targets 先加载 `local/config.env`，`.env` 的同名配置随后覆盖它，命令行变量仍最高优先级。镜像文件按此顺序确定的 `MIRROR_PROFILE` 加载，不再在加载镜像文件后重新覆盖 profile。
+5. **本地开发**：`local/config.env.example` 中此开关默认 false，仅在需要覆盖注册时显式开启；只有 Desktop 默认 true。已有的 gitignored 配置不自动修改。Make 配置加载顺序与 upstream 一致：local targets 先加载 `local/config.env`，`.env` 的同名配置随后覆盖它，命令行变量仍最高优先级。镜像文件按此顺序确定的 `MIRROR_PROFILE` 加载，不再在加载镜像文件后重新覆盖 profile。
 6. **Compose**：将新开关传给 `lazyllm-algo`，默认 false，不强制改变所有服务端部署。算法构建入口在创建 Document 前更新 LazyLLM 配置和子进程环境，并记录 effective policy。即使容器原始旧 policy 仍为 none，新开关为 true 时最终业务注册使用 force。
 7. **CI Bash**：保留此前 `00a34711` 的非空验证参数数组修复，覆盖 ad-hoc 与正式签名两条路径。
 
@@ -230,7 +230,7 @@ lazyllm_waiting_task_queue    lazyllm_finished_task_queue
 
 ### 10.3 配置方式与生效检查
 
-本地开发的 `local/config.env`：
+本地开发默认关闭此开关。需要显式启用时，在 `local/config.env` 中配置：
 
 ```dotenv
 LAZYMIND_FORCE_ALGO_REGISTER=true

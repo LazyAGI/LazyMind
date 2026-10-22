@@ -50,6 +50,12 @@ def test_mirror_profile_matches_loaded_settings(tmp_path, local_profile, dotenv_
     assert f'PROFILE={expected} PIP=https://{expected}.example/simple' in result.stdout
 
 
+def test_local_example_defaults_force_override_to_false():
+    lines = (ROOT / 'local/config.env.example').read_text().splitlines()
+    assert 'LAZYMIND_FORCE_ALGO_REGISTER=false' in lines
+    assert 'LAZYMIND_FORCE_ALGO_REGISTER=true' not in lines
+
+
 def test_compose_passes_force_override_to_algorithm_service():
     compose = yaml.safe_load((ROOT / 'docker-compose.yml').read_text())
     environments = [service.get('environment', {}) for service in compose['services'].values()]

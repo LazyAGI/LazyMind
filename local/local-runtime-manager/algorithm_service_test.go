@@ -337,6 +337,20 @@ func TestDesktopAlgorithmRegistrationDefaultsToForceDespiteOldOverride(t *testin
 	}
 }
 
+func TestLocalAlgorithmRegistrationDefaultsWithoutForceOverride(t *testing.T) {
+	t.Setenv("LAZYMIND_FORCE_ALGO_REGISTER", "")
+	for _, policy := range []string{"", "none", "update"} {
+		t.Setenv("LAZYLLM_ALGO_REGISTER_POLICY", policy)
+		want := policy
+		if want == "" {
+			want = "update"
+		}
+		if got := algorithmRegisterPolicy(RuntimeConfig{Profile: "local"}, RuntimePaths{}); got != want {
+			t.Fatalf("policy = %q, want %q", got, want)
+		}
+	}
+}
+
 func TestAlgorithmServiceEnvDisablesRouter(t *testing.T) {
 	for _, profile := range []string{"local", "desktop"} {
 		t.Run(profile, func(t *testing.T) {
