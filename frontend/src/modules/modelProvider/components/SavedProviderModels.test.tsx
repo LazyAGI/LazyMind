@@ -81,7 +81,7 @@ describe("saved supplier models", () => {
       ],
     });
     fireEvent.click(
-      screen.getByRole("button", { name: "private-vlm", exact: true }),
+      screen.getByRole("button", { name: "private-vlm" }),
     );
     const context = await screen.findByText(
       "modelProvider.workspace.context: 200000",

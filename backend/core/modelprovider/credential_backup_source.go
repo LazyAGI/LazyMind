@@ -45,6 +45,18 @@ func (source CredentialBackupSource) LoadCredential(ctx context.Context, groupID
 		}
 		result = credentialvault.ProviderCredential{LocalProviderGroupID: group.ID, CredentialRevision: group.CredentialRevision,
 			ProviderCatalogKey: catalogKey, DisplayName: group.Name, BaseURL: group.BaseURL, APIKey: []byte(apiKey), RequestConfig: provider.RequestConfig}
+		if hasSharedProviderEndpoint(provider) && provider.ActiveKeyInitialized {
+			index := -1
+			if provider.ActiveKeyGroupID == group.ID {
+				for i, key := range splitAPIKeys(apiKey) {
+					if groupKeyID(group.ID, key) == provider.ActiveKeyID {
+						index = i
+						break
+					}
+				}
+			}
+			result.ActiveKeyIndex = &index
+		}
 		return nil
 	})
 	return result, err

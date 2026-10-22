@@ -571,17 +571,30 @@ func decodeRestoredProvider(plaintext []byte) (ProviderCredential, error) {
 	parsedURL, urlErr := url.Parse(baseURL)
 	if payload.SchemaVersion != 1 || providerKey == "" || len(providerKey) > 128 || displayName == "" || len(displayName) > 255 ||
 		len(baseURL) > 1024 || urlErr != nil || parsedURL.Host == "" || parsedURL.Scheme != "https" && parsedURL.Scheme != "http" ||
-		payload.CredentialType != "api_key" || !ValidAPIKeyPool([]byte(apiKey)) || len(payload.ProviderSpecificFields) > 1 {
+		payload.CredentialType != "api_key" || !ValidAPIKeyPool([]byte(apiKey)) || len(payload.ProviderSpecificFields) > 2 {
 		payload.APIKey = ""
 		return ProviderCredential{}, ErrInvalidContract
 	}
 	result := ProviderCredential{CredentialRevision: 1, ProviderCatalogKey: providerKey, DisplayName: displayName, BaseURL: baseURL, APIKey: []byte(apiKey)}
 	for key, value := range payload.ProviderSpecificFields {
-		if key != "request_config" || !ValidProviderRequestConfig(string(value)) {
+		switch key {
+		case "request_config":
+			if !ValidProviderRequestConfig(string(value)) {
+				clear(result.APIKey)
+				return ProviderCredential{}, ErrInvalidContract
+			}
+			result.RequestConfig = string(value)
+		case "active_key_index":
+			var index *int
+			if json.Unmarshal(value, &index) != nil || index == nil || !validProviderKeySelection(result.APIKey, index) {
+				clear(result.APIKey)
+				return ProviderCredential{}, ErrInvalidContract
+			}
+			result.ActiveKeyIndex = index
+		default:
 			clear(result.APIKey)
 			return ProviderCredential{}, ErrInvalidContract
 		}
-		result.RequestConfig = string(value)
 	}
 	payload.APIKey = ""
 	return result, nil

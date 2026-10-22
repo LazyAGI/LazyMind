@@ -246,8 +246,22 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 	binding.VaultID, binding.CloudRecordID, binding.LocalProviderGroupID = restored.VaultID, restored.RecordID, groupID
 	binding.LastCloudRevision, binding.LastLocalCredentialRevision = restored.Revision, localRevision
 	binding.LastETag, binding.BackupState, binding.UpdatedAt = restored.ETag, string(credentialvault.BackupSucceeded), now
-	if err := reconcileProviderActiveKey(tx, &provider); err != nil {
-		return err
+	if hasSharedProviderEndpoint(provider) && restored.Provider.ActiveKeyIndex != nil {
+		groupID, keyID := "", ""
+		if index := *restored.Provider.ActiveKeyIndex; index >= 0 {
+			keys := splitAPIKeys(string(restored.Provider.APIKey))
+			if index >= len(keys) {
+				return credentialvault.ErrInvalidContract
+			}
+			groupID, keyID = group.ID, groupKeyID(group.ID, keys[index])
+		}
+		if err := saveActiveProviderKey(tx, &provider, groupID, keyID, verified && keyID != "", now); err != nil {
+			return err
+		}
+	} else {
+		if err := reconcileProviderActiveKey(tx, &provider); err != nil {
+			return err
+		}
 	}
 	if err := tx.Save(&binding).Error; err != nil {
 		return err
@@ -357,7 +371,19 @@ func (sink *CredentialRestoreSink) TemporaryCredential(recordID string) (credent
 		}
 		result.BaseURL = connectionBaseURL(provider, result.BaseURL)
 		result.RequestConfig = provider.RequestConfig
-		result.APIKey = append([]byte(nil), value.provider.APIKey...)
+		index := 0
+		if value.provider.ActiveKeyIndex != nil {
+			index = *value.provider.ActiveKeyIndex
+		}
+		keys := splitAPIKeys(string(value.provider.APIKey))
+		if index < 0 || index >= len(keys) {
+			return credentialvault.ProviderCredential{}, false
+		}
+		result.APIKey = []byte(keys[index])
+		if result.ActiveKeyIndex != nil {
+			selected := 0
+			result.ActiveKeyIndex = &selected
+		}
 		found = true
 	}
 	return result, found

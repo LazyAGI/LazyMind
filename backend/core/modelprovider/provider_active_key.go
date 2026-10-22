@@ -123,7 +123,11 @@ func SetActiveProviderKey(w http.ResponseWriter, r *http.Request) {
 				return errConnectionChanged
 			}
 		}
-		return saveActiveProviderKey(tx, &parent, req.GroupID, req.KeyID, req.KeyID != "", time.Now())
+		now := time.Now()
+		if err := saveActiveProviderKey(tx, &parent, req.GroupID, req.KeyID, req.KeyID != "", now); err != nil {
+			return err
+		}
+		return refreshProviderSelectionBackup(tx, parent, now)
 	})
 	if err != nil {
 		if errors.Is(err, errConnectionChanged) {
@@ -158,6 +162,38 @@ func saveActiveProviderKey(tx *gorm.DB, parent *orm.UserModelProvider, groupID, 
 func setSupplierVerification(tx *gorm.DB, parent orm.UserModelProvider, verified bool, now time.Time) error {
 	return tx.Model(&orm.UserModelProviderGroup{}).Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, parent.CreateUserID).
 		Updates(map[string]any{"is_verified": verified, "updated_at": now}).Error
+}
+
+// Selection is part of the encrypted credential record. Advance its revision
+// and AAD together so a running older upload cannot consume this outbox update.
+func refreshProviderSelectionBackup(tx *gorm.DB, parent orm.UserModelProvider, now time.Time) error {
+	var groups []orm.UserModelProviderGroup
+	if err := tx.Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, parent.CreateUserID).Find(&groups).Error; err != nil {
+		return err
+	}
+	for i := range groups {
+		group := &groups[i]
+		pool, err := apiKeyForGroup(tx, group)
+		if err != nil {
+			return err
+		}
+		if err := validateSavedKeyPool(parent, group.Name, connectionBaseURL(parent, group.BaseURL), pool); err != nil {
+			return err
+		}
+		revision := max(group.CredentialRevision, 1) + 1
+		updates, err := encryptedAPIKeyUpdates(parent.CreateUserID, group.ID, revision, pool, group.CredentialVersion)
+		if err != nil {
+			return err
+		}
+		updates["updated_at"] = now
+		if err := tx.Model(group).Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := enqueueCredentialBackup(tx, group.ID, revision, credentialvault.BackupUpsert, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // initializeProviderActiveKey is called with the supplier locked. SQL cannot
@@ -453,7 +489,20 @@ func validateSavedKeyPool(parent orm.UserModelProvider, groupName, baseURL, pool
 	}
 	payload, err := credentialvault.EncodeProviderCredentialPayload(credentialvault.ProviderCredential{
 		ProviderCatalogKey: catalogKey, DisplayName: groupName, BaseURL: baseURL, APIKey: []byte(pool), RequestConfig: parent.RequestConfig,
+		ActiveKeyIndex: selectionMetadataCapacity(parent, pool),
 	})
 	clear(payload)
 	return err
+}
+
+func selectionMetadataCapacity(parent orm.UserModelProvider, pool string) *int {
+	if !hasSharedProviderEndpoint(parent) {
+		return nil
+	}
+	// Reserve enough payload space for either explicit disable or any key index.
+	index := -1
+	if count := len(splitAPIKeys(pool)); count > 100 {
+		index = count - 1
+	}
+	return &index
 }

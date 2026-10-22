@@ -82,12 +82,7 @@ func replyZoteroError(w http.ResponseWriter, err error) {
 
 func readZoteroRequest(w http.ResponseWriter, r *http.Request) (zoteroRequest, bool) {
 	var request zoteroRequest
-	_, canWrite, ok := paperLibraryAccess(w, r)
-	if !ok {
-		return request, false
-	}
-	if !canWrite {
-		replyZoteroError(w, zoteroFailure(403, "TARGET_DATASET_FORBIDDEN", "没有目标论文库的编辑权限"))
+	if _, ok := requireUser(w, r); !ok {
 		return request, false
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
@@ -101,6 +96,21 @@ func readZoteroRequest(w http.ResponseWriter, r *http.Request) (zoteroRequest, b
 	}
 	if err != nil {
 		replyZoteroError(w, zoteroFailure(400, "INVALID_ZOTERO_REQUEST", "Zotero 导入配置无效"))
+		return request, false
+	}
+	request.Source = strings.ToLower(strings.TrimSpace(request.Source))
+	// Destination write permission cannot authorize the Core host's private
+	// Zotero library. Reject that source before catalog/scan or source requests.
+	if err := authorizeLocalZoteroSource(r, request.Source); err != nil {
+		replyZoteroError(w, err)
+		return request, false
+	}
+	_, canWrite, ok := paperLibraryAccess(w, r)
+	if !ok {
+		return request, false
+	}
+	if !canWrite {
+		replyZoteroError(w, zoteroFailure(403, "TARGET_DATASET_FORBIDDEN", "没有目标论文库的编辑权限"))
 		return request, false
 	}
 	return request, true
@@ -166,6 +176,7 @@ type zoteroClient struct {
 }
 
 func newZoteroClient(config zoteroConfig) (*zoteroClient, error) {
+	config.Source = strings.ToLower(strings.TrimSpace(config.Source))
 	if config.Source != "local" && config.Source != "remote" && config.Source != "webdav" {
 		return nil, zoteroFailure(400, "INVALID_ZOTERO_SOURCE", "请选择本地 Zotero、远端 Zotero 或 WebDAV 来源")
 	}

@@ -33,6 +33,8 @@ func init() {
 		{2004935, http.StatusConflict, "The attachment checksum changed; reload Zotero metadata and select the matching file", []string{
 			"附件校验值与 zotero 题录不一致，请重新读取题录并选择对应文件",
 		}},
+		{2004936, http.StatusForbidden, "Local Zotero access requires the authenticated owner of a local desktop runtime", []string{"local zotero access requires the authenticated owner of a local desktop runtime"}},
+		{2004937, http.StatusServiceUnavailable, "Local Zotero owner authentication is unavailable", []string{"local zotero owner authentication is unavailable"}},
 	} {
 		for _, source := range group.sources {
 			if strings.Contains(source, "%") {

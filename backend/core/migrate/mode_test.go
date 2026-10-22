@@ -102,8 +102,13 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		v03.Aggregate == nil || v03.Aggregate.Version != 20260805000000 {
 		t.Fatalf("unexpected v0_3 mode: %#v", v03)
 	}
-	if len(v03.Dev) != 115 {
-		t.Fatalf("v0_3 dev migration count=%d, want 115", len(v03.Dev))
+	if len(v03.Dev) != 119 {
+		t.Fatalf("v0_3 dev migration count=%d, want 119", len(v03.Dev))
+	}
+	for _, version := range []uint64{20261022060632, 20261022065811, 20261022072824, 20261022092432} {
+		if !containsMigrationFileVersion(v03.Dev, version) {
+			t.Fatalf("v0_3 dev migrations are missing provider migration %d", version)
+		}
 	}
 	if !containsMigrationFileVersion(v03.Dev, 20261021105921) {
 		t.Fatal("v0_3 dev migrations are missing paper library persistence")
