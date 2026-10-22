@@ -1,0 +1,44 @@
+Model-brand SVG assets from Lobe Icons
+Source repository: https://github.com/lobehub/lobe-icons
+Retrieved: 2026-10-22
+The original SVGs are bundled without visual modification.
+
+hunyuan.svg: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/hunyuan-color.svg
+SHA256: 510e7bb438506b5aadfaf8b9551d1606efd5b4171161a64a64204c72a453658a
+gemini.svg: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/gemini-color.svg
+SHA256: 8ab0a9bafec11f7e69bcb9fc4ffd8f1bc927d1ddcbbb6ff36dee5ae8b5a9d602
+google.svg: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/google-color.svg
+SHA256: 4e6aa8892ef15a6b431f40f2c9045979bf7e2357524e7bbb89b353cf4f32a5ac
+meta.svg: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/meta-color.svg
+SHA256: adf9f2c1a646ccd3a37ca8c2e7e5985d64630cd633f4b95fba393d1d44e0578c
+mistral.svg: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/mistral-color.svg
+SHA256: 722f74b289d95486b43662fe24fa883b333701296f618406cd0ed502299170b6
+microsoft.svg: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/microsoft-color.svg
+SHA256: 5cfb0ffa3231313c2968b5e3fedfcce8e2e96c61bde4572384c3889a77a80350
+baai.svg: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/baai.svg
+SHA256: 9750791f6dd17af093c6682e03761667cab7e0f08566c79b3f54759b5f46d909
+bytedance.svg: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/bytedance-color.svg
+SHA256: 3d37647be262c79b044e293bb1a4993202537e9f9ffdbd2bbe7e9fc5378d1005
+
+MIT License
+
+Copyright (c) 2023 LobeHub
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+

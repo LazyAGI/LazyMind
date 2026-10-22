@@ -178,6 +178,27 @@ beforeEach(() => {
 });
 
 describe("compact provider workspace", () => {
+  it("places key controls before the API address and only shows save for an address draft", () => {
+    setup();
+    const keys = document.querySelector(".provider-workspace-api-keys")!;
+    const endpoint = document.querySelector(".provider-workspace-endpoint")!;
+    expect(
+      keys.compareDocumentPosition(endpoint) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", {
+        name: "modelProvider.workspace.saveEndpoint",
+      }),
+    ).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "API Host" }), {
+      target: { value: "https://api.example.test/v2" },
+    });
+    expect(
+      screen.getByRole("button", {
+        name: "modelProvider.workspace.saveEndpoint",
+      }),
+    ).toBeEnabled();
+  });
   it("pins custom suppliers and their manually added models before catalog entries", () => {
     const custom = {
       ...provider,
@@ -206,9 +227,7 @@ describe("compact provider workspace", () => {
     });
     const suppliers = document.querySelectorAll(".provider-workspace-provider");
     expect(suppliers[0]).toHaveTextContent("Zulu Custom");
-    const rows = document.querySelectorAll(
-      ".provider-workspace-model-row:not(.is-heading)",
-    );
+    const rows = document.querySelectorAll(".saved-provider-model-row");
     expect(rows[0]).toHaveTextContent("zulu-custom-model");
   });
   it("shows supplier settings directly without instance controls or explanatory clutter", () => {

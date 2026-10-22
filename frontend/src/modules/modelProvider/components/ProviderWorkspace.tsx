@@ -17,10 +17,8 @@ import {
   Form,
   Input,
   Modal,
-  Popconfirm,
   Select,
   Spin,
-  Tag,
   Tooltip,
   message,
 } from "antd";
@@ -42,14 +40,9 @@ import {
   withModelProviderJsonOptions,
 } from "../api";
 import { getProviderLogoUrl } from "../providerBranding";
-import {
-  isLlmChatCapability,
-  resolveLlmMaxInputTokens,
-} from "../maxInputTokens";
-import { ModelModalityMarks } from "./ModelModalityMarks";
+import { SavedProviderModels } from "./SavedProviderModels";
 import { ProviderKeyManager } from "./ProviderKeyManager";
 import { ProviderRequestConfigDrawer } from "./ProviderRequestConfigDrawer";
-import { sortCustomModelsFirst } from "../modelOrdering";
 import type {
   AddedProvider,
   ModelCapability,
@@ -441,7 +434,7 @@ export function ProviderWorkspace(props: Props) {
       (!configuredOnly || item.groups.length > 0) &&
       item.name.toLowerCase().includes(search.toLowerCase().trim()),
   );
-  const models = sortCustomModelsFirst(group?.models || []).filter(
+  const models = (group?.models || []).filter(
     (model) =>
       model.name.toLowerCase().includes(modelSearch.toLowerCase().trim()) &&
       (modelType === "all" || model.capability === modelType),
@@ -621,6 +614,38 @@ export function ProviderWorkspace(props: Props) {
                 </div>
               </header>
               <div className="provider-workspace-scroll">
+                <section
+                  className="provider-workspace-api-keys"
+                  aria-label="API Key"
+                >
+                  <ProviderKeyManager
+                    providerId={provider.id}
+                    providerName={provider.name}
+                    groupId={group?.id || ""}
+                    keys={group?.keys || []}
+                    disabled={endpointDirty || endpointSaving || keySaving}
+                    changingKey={changingActiveKey}
+                    removingKey={removingKey}
+                    onAdd={openAddKey}
+                    onDelete={deleteKey}
+                    onToggle={changeActiveKey}
+                    onReload={props.onReload}
+                    checkAction={
+                      <Button
+                        type="text"
+                        onClick={() => void withProviderModels(props.onCheck)}
+                        disabled={
+                          endpointDirty ||
+                          endpointSaving ||
+                          Boolean(changingActiveKey)
+                        }
+                        loading={initializing || props.checking[groupKey]}
+                      >
+                        {label("checkConnection")}
+                      </Button>
+                    }
+                  />
+                </section>
                 <Form
                   name="supplier-endpoint"
                   form={endpointForm}
@@ -628,9 +653,6 @@ export function ProviderWorkspace(props: Props) {
                   onFinish={saveEndpoint}
                   className="provider-workspace-endpoint"
                 >
-                  <div className="provider-workspace-section-heading">
-                    <h3>{label("endpoint")}</h3>
-                  </div>
                   <div className="provider-workspace-endpoint-row">
                     <Form.Item
                       label="API Host"
@@ -690,13 +712,15 @@ export function ProviderWorkspace(props: Props) {
                         autoComplete="off"
                       />
                     </Form.Item>
-                    <Button
-                      htmlType="submit"
-                      loading={endpointSaving}
-                      disabled={!endpointDirty || Boolean(changingActiveKey)}
-                    >
-                      {label("saveEndpoint")}
-                    </Button>
+                    {endpointDirty || endpointSaving ? (
+                      <Button
+                        htmlType="submit"
+                        loading={endpointSaving}
+                        disabled={!endpointDirty || Boolean(changingActiveKey)}
+                      >
+                        {label("saveEndpoint")}
+                      </Button>
+                    ) : null}
                     <Tooltip title={t("modelProvider.requestConfig.title")}>
                       <Button
                         type="text"
@@ -711,38 +735,6 @@ export function ProviderWorkspace(props: Props) {
                   </div>
                   {endpointDirty ? <p>{label("endpointHint")}</p> : null}
                 </Form>
-                <section
-                  className="provider-workspace-api-keys"
-                  aria-label="API Key"
-                >
-                  <ProviderKeyManager
-                    providerId={provider.id}
-                    providerName={provider.name}
-                    groupId={group?.id || ""}
-                    keys={group?.keys || []}
-                    disabled={endpointDirty || endpointSaving || keySaving}
-                    changingKey={changingActiveKey}
-                    removingKey={removingKey}
-                    onAdd={openAddKey}
-                    onDelete={deleteKey}
-                    onToggle={changeActiveKey}
-                    onReload={props.onReload}
-                    checkAction={
-                      <Button
-                        type="text"
-                        onClick={() => void withProviderModels(props.onCheck)}
-                        disabled={
-                          endpointDirty ||
-                          endpointSaving ||
-                          Boolean(changingActiveKey)
-                        }
-                        loading={initializing || props.checking[groupKey]}
-                      >
-                        {label("checkConnection")}
-                      </Button>
-                    }
-                  />
-                </section>
                 <section
                   className="provider-workspace-models"
                   aria-label={label("models")}
@@ -809,127 +801,21 @@ export function ProviderWorkspace(props: Props) {
                       ]}
                     />
                   </div>
-                  <div
-                    className="provider-workspace-model-table"
-                    role="table"
-                    aria-label={label("models")}
-                  >
-                    <div
-                      className="provider-workspace-model-row is-heading"
-                      role="row"
-                    >
-                      <span role="columnheader">{label("modelId")}</span>
-                      <span role="columnheader">{label("type")}</span>
-                      <span role="columnheader">{label("modalities")}</span>
-                      <span role="columnheader">{label("context")}</span>
-                      <span role="columnheader">{label("actions")}</span>
-                    </div>
-                    {props.modelsLoading[groupKey] ? (
-                      <div className="provider-workspace-empty">
-                        <Spin size="small" />
-                      </div>
-                    ) : (
-                      models.map((model) => (
-                        <div
-                          className="provider-workspace-model-row"
-                          role="row"
-                          key={model.id}
-                        >
-                          <span
-                            role="cell"
-                            className="provider-workspace-model-name"
-                            title={model.name}
-                          >
-                            {model.name}
-                            {!model.builtIn ? (
-                              <Tag>{t("modelProvider.custom")}</Tag>
-                            ) : null}
-                          </span>
-                          <span role="cell" className="provider-workspace-type">
-                            {props.capabilityLabel(model.capability)}
-                            {model.vision && model.capability === "LLM_CHAT" ? (
-                              <span title={t("modelProvider.visionSupported")}>
-                                {" "}
-                                · V
-                              </span>
-                            ) : null}
-                          </span>
-                          <span role="cell">
-                            <ModelModalityMarks
-                              providerName={
-                                provider.protocolName ||
-                                provider.source ||
-                                provider.name
-                              }
-                              modelName={model.name}
-                              compact
-                            />
-                          </span>
-                          <span
-                            role="cell"
-                            className="provider-workspace-context"
-                          >
-                            {isLlmChatCapability(model.capability)
-                              ? resolveLlmMaxInputTokens(model.maxInputTokens)
-                              : "—"}
-                          </span>
-                          <span
-                            role="cell"
-                            className="provider-workspace-model-actions"
-                          >
-                            <>
-                              {!model.builtIn &&
-                              isLlmChatCapability(model.capability) ? (
-                                <Button
-                                  type="text"
-                                  aria-label={t(
-                                    "modelProvider.editModelWindowAria",
-                                    { name: model.name },
-                                  )}
-                                  icon={<EditOutlined aria-hidden="true" />}
-                                  onClick={() =>
-                                    group &&
-                                    props.onEditModel(provider, group, model)
-                                  }
-                                />
-                              ) : null}
-                              <Popconfirm
-                                title={t("modelProvider.confirmDeleteModel", {
-                                  name: model.name,
-                                })}
-                                description={t(
-                                  model.capability === "EMBEDDING"
-                                    ? "modelProvider.confirmDeleteEmbeddingDesc"
-                                    : "modelProvider.confirmDeleteModelDesc",
-                                )}
-                                okButtonProps={{ danger: true }}
-                                okText={t("common.delete")}
-                                cancelText={t("common.cancel")}
-                                onConfirm={() =>
-                                  group &&
-                                  props.onDeleteModel(provider, group, model)
-                                }
-                              >
-                                <Button
-                                  type="text"
-                                  aria-label={t(
-                                    "modelProvider.deleteModelAria",
-                                    { name: model.name },
-                                  )}
-                                  icon={<DeleteOutlined aria-hidden="true" />}
-                                />
-                              </Popconfirm>
-                            </>
-                          </span>
-                        </div>
-                      ))
-                    )}
-                    {!props.modelsLoading[groupKey] && !models.length ? (
-                      <div className="provider-workspace-empty">
-                        {t("modelProvider.noModels")}
-                      </div>
-                    ) : null}
-                  </div>
+                  <SavedProviderModels
+                    models={models}
+                    loading={Boolean(props.modelsLoading[groupKey])}
+                    providerName={
+                      provider.protocolName || provider.source || provider.name
+                    }
+                    supplierName={provider.name}
+                    capabilityLabel={props.capabilityLabel}
+                    onEdit={(model) => {
+                      if (group) props.onEditModel(provider, group, model);
+                    }}
+                    onRemove={(model) => {
+                      if (group) props.onDeleteModel(provider, group, model);
+                    }}
+                  />
                 </section>
               </div>
             </>

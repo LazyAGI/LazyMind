@@ -1556,12 +1556,6 @@
     grid-template-columns: 184px minmax(0, 1fr);
   }
 }
-@media (min-width: 801px) and (max-width: 1040px) {
-  .settings-integrated-surface.is-models .provider-workspace-model-row {
-    grid-template-columns: minmax(80px, 1fr) 65px 72px 48px 50px;
-    gap: 6px;
-  }
-}
 .settings-model-defaults-page .model-provider-service-page { padding: 0; height: auto; min-height: 0; }
 .settings-model-defaults-page .default-services-grid { grid-template-columns: minmax(0, 1fr); }
 .settings-model-defaults-page .model-provider-config-panel {
