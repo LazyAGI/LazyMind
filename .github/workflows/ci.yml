@@ -28,6 +28,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.11'
+          cache-dependency-path: backend/core/go.sum
       - name: Test Skill lock verification selection
         run: python3 -m unittest discover -s scripts/tests -p test_skill_lock_verification_mode.py
       - name: Verify pinned SkillHub packages and lock artifacts
@@ -88,6 +89,14 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.25.11'
+          cache-dependency-path: |
+            backend/core/go.sum
+            backend/scan-control-plane/go.sum
+            backend/file-watcher/go.sum
+            local/local-proxy/go.sum
+            local/local-runtime-manager/go.sum
+            local/lazymind-cli/go.sum
+            tests/backend/core/go.sum
 
       - name: Lint
         run: make lint
@@ -109,7 +118,6 @@ jobs:
         run: pip install pytest && python -m pytest tests/doc_check/ -v
 
   test-frontend:
-    needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -172,7 +180,6 @@ jobs:
         run: pnpm test:workflow-panel
 
   test-local-runtime:
-    needs: [lint, doc_check]
     name: Test local runtime (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
@@ -187,6 +194,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.11'
+          cache-dependency-path: |
+            local/local-proxy/go.sum
+            local/local-runtime-manager/go.sum
+            local/lazymind-cli/go.sum
       - uses: pnpm/action-setup@v4
         if: runner.os == 'Linux'
         with:
@@ -218,7 +229,6 @@ jobs:
           git diff --exit-code -- lib ../../local/lazymind-cli/internal/adapters/mcpclient/assets/dsh-workflow.tgz
 
   test-desktop-shell:
-    needs: [lint, doc_check]
     name: Test desktop shell (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
@@ -251,7 +261,6 @@ jobs:
         run: node --test desktop/scripts/*.test.mjs
 
   test-auth-service:
-    needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -290,7 +299,6 @@ jobs:
         run: diff-cover coverage-auth.xml --compare-branch=origin/main --fail-under=0
 
   test-backend-core:
-    needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -317,28 +325,31 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.11'
+          cache-dependency-path: |
+            backend/core/go.sum
+            tests/backend/core/go.sum
 
       - name: Verify migration and target-upgrade paths
         env:
           MIGRATION_TEST_POSTGRES_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
         run: bash scripts/test_migration_upgrade.sh
 
-      - name: Test backend core (SQLite)
-        run: cd backend/core && go test ./... -v -timeout 40m
+      - name: Test backend core (SQLite) with coverage
+        run: cd backend/core && go test ./... -v -timeout 40m -coverprofile=coverage-core.out
 
       - name: Test backend core (PostgreSQL)
         env:
           TEST_DB_DRIVER: postgres
           TEST_DB_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
-        run: cd backend/core && go test ./... -v -timeout 40m
+        # Match SQLite instrumentation to reuse database-independent test results.
+        run: cd backend/core && go test ./... -v -timeout 40m -cover
 
       - name: Test backend core integration module
         run: cd tests/backend/core && go mod tidy && go test ./... -v -timeout 40m
 
-      - name: Generate coverage for backend-core
+      - name: Generate coverage reports for backend-core
         run: |
           cd backend/core
-          go test ./... -timeout 40m -coverprofile=coverage-core.out
           go tool cover -html=coverage-core.out -o coverage-core.html
           go tool cover -func=coverage-core.out
 
@@ -375,7 +386,6 @@ jobs:
           diff-cover coverage-core.xml --compare-branch=origin/main --fail-under=0
 
   test-evo-cli:
-    needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -418,7 +428,6 @@ jobs:
         run: diff-cover coverage-evo.xml --compare-branch=origin/main --fail-under=0
 
   test-algorithm:
-    needs: [lint, doc_check]
     name: Test algorithm (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -511,7 +520,6 @@ jobs:
         run: diff-cover coverage-algorithm.xml --compare-branch=origin/main --fail-under=0
   test-channel-gateway:
     name: Test channel gateway (${{ matrix.driver }})
-    needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
