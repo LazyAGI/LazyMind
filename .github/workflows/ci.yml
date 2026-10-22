@@ -118,6 +118,7 @@ jobs:
         run: pip install pytest && python -m pytest tests/doc_check/ -v
 
   test-frontend:
+    needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -180,6 +181,7 @@ jobs:
         run: pnpm test:workflow-panel
 
   test-local-runtime:
+    needs: [lint, doc_check]
     name: Test local runtime (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
@@ -229,6 +231,7 @@ jobs:
           git diff --exit-code -- lib ../../local/lazymind-cli/internal/adapters/mcpclient/assets/dsh-workflow.tgz
 
   test-desktop-shell:
+    needs: [lint, doc_check]
     name: Test desktop shell (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
@@ -261,6 +264,7 @@ jobs:
         run: node --test desktop/scripts/*.test.mjs
 
   test-auth-service:
+    needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -299,6 +303,7 @@ jobs:
         run: diff-cover coverage-auth.xml --compare-branch=origin/main --fail-under=0
 
   test-backend-core:
+    needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -386,6 +391,7 @@ jobs:
           diff-cover coverage-core.xml --compare-branch=origin/main --fail-under=0
 
   test-evo-cli:
+    needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -428,6 +434,7 @@ jobs:
         run: diff-cover coverage-evo.xml --compare-branch=origin/main --fail-under=0
 
   test-algorithm:
+    needs: [lint, doc_check]
     name: Test algorithm (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -520,6 +527,7 @@ jobs:
         run: diff-cover coverage-algorithm.xml --compare-branch=origin/main --fail-under=0
   test-channel-gateway:
     name: Test channel gateway (${{ matrix.driver }})
+    needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
