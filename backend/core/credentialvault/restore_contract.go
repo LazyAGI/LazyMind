@@ -549,13 +549,13 @@ func decodeRestoredProvider(plaintext []byte) (ProviderCredential, error) {
 	decoder := json.NewDecoder(bytes.NewReader(plaintext))
 	decoder.DisallowUnknownFields()
 	var payload struct {
-		SchemaVersion          int            `json:"schema_version"`
-		ProviderCatalogKey     string         `json:"provider_catalog_key"`
-		DisplayName            string         `json:"display_name"`
-		BaseURL                string         `json:"base_url"`
-		CredentialType         string         `json:"credential_type"`
-		APIKey                 string         `json:"api_key"`
-		ProviderSpecificFields map[string]any `json:"provider_specific_fields"`
+		SchemaVersion          int                        `json:"schema_version"`
+		ProviderCatalogKey     string                     `json:"provider_catalog_key"`
+		DisplayName            string                     `json:"display_name"`
+		BaseURL                string                     `json:"base_url"`
+		CredentialType         string                     `json:"credential_type"`
+		APIKey                 string                     `json:"api_key"`
+		ProviderSpecificFields map[string]json.RawMessage `json:"provider_specific_fields"`
 	}
 	if err := decoder.Decode(&payload); err != nil {
 		return ProviderCredential{}, ErrInvalidContract
@@ -571,11 +571,18 @@ func decodeRestoredProvider(plaintext []byte) (ProviderCredential, error) {
 	parsedURL, urlErr := url.Parse(baseURL)
 	if payload.SchemaVersion != 1 || providerKey == "" || len(providerKey) > 128 || displayName == "" || len(displayName) > 255 ||
 		len(baseURL) > 1024 || urlErr != nil || parsedURL.Host == "" || parsedURL.Scheme != "https" && parsedURL.Scheme != "http" ||
-		payload.CredentialType != "api_key" || !ValidAPIKeyPool([]byte(apiKey)) || len(payload.ProviderSpecificFields) != 0 {
+		payload.CredentialType != "api_key" || !ValidAPIKeyPool([]byte(apiKey)) || len(payload.ProviderSpecificFields) > 1 {
 		payload.APIKey = ""
 		return ProviderCredential{}, ErrInvalidContract
 	}
 	result := ProviderCredential{CredentialRevision: 1, ProviderCatalogKey: providerKey, DisplayName: displayName, BaseURL: baseURL, APIKey: []byte(apiKey)}
+	for key, value := range payload.ProviderSpecificFields {
+		if key != "request_config" || !ValidProviderRequestConfig(string(value)) {
+			clear(result.APIKey)
+			return ProviderCredential{}, ErrInvalidContract
+		}
+		result.RequestConfig = string(value)
+	}
 	payload.APIKey = ""
 	return result, nil
 }

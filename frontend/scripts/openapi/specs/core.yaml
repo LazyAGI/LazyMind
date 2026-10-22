@@ -12850,6 +12850,62 @@ components:
                 - is_favorite
                 - usage_count
             type: object
+        providerRequestConfigOpenAPIResponse:
+            properties:
+                default_protocol:
+                    enum:
+                        - openai
+                        - anthropic
+                    type: string
+                protocols:
+                    items:
+                        $ref: '#/components/schemas/providerRequestProtocolOpenAPIItem'
+                    type: array
+            required:
+                - default_protocol
+            type: object
+        providerRequestProtocolOpenAPIItem:
+            properties:
+                base_url:
+                    type: string
+                default_base_url:
+                    type: string
+                name:
+                    type: string
+                protocol:
+                    enum:
+                        - openai
+                        - anthropic
+                        - gemini
+                        - openai-responses
+                    type: string
+                supported:
+                    description: False when the current runtime has no adapter for this protocol.
+                    type: boolean
+            required:
+                - base_url
+                - default_base_url
+                - name
+                - protocol
+                - supported
+            type: object
+        replaceModelProviderKeyOpenAPIRequest:
+            properties:
+                api_key:
+                    type: string
+            required:
+                - api_key
+            type: object
+        replaceModelProviderKeyOpenAPIResponse:
+            properties:
+                enabled:
+                    type: boolean
+                key_id:
+                    type: string
+            required:
+                - enabled
+                - key_id
+            type: object
         resourceUpdateTaskOpenAPIResponse:
             properties:
                 attempt_count:
@@ -12901,6 +12957,14 @@ components:
                 - trigger_type
                 - updated_at
                 - user_id
+            type: object
+        revealModelProviderKeyOpenAPIResponse:
+            properties:
+                api_key:
+                    description: 'The selected saved secret, returned only by an explicit owner-authorized action with Cache-Control: no-store.'
+                    type: string
+            required:
+                - api_key
             type: object
         selectedModelOpenAPIItem:
             properties:
@@ -14797,6 +14861,21 @@ components:
             required:
                 - name
                 - verify
+            type: object
+        updateProviderRequestConfigOpenAPIRequest:
+            properties:
+                default_protocol:
+                    enum:
+                        - openai
+                        - anthropic
+                    type: string
+                endpoints:
+                    additionalProperties:
+                        type: string
+                    description: Optional OpenAI/Anthropic API-root overrides keyed by openai or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected.
+                    type: object
+            required:
+                - default_protocol
             type: object
         userChatSettingsOpenAPIResponse:
             properties:
@@ -26012,6 +26091,70 @@ paths:
                 "200":
                     description: OK
             summary: POST /model_providers/{model_provider_id}/groups/{group_id}/keys
+    /api/core/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}:
+        put:
+            description: Verifies a replacement before atomically updating the encrypted key pool. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Returns the new opaque key ID without plaintext.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: group_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: key_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/replaceModelProviderKeyOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/replaceModelProviderKeyOpenAPIResponse'
+                    description: Replaced key
+            summary: Replace one saved supplier API key
+            tags:
+                - model_providers
+    /api/core/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}/reveal:
+        post:
+            description: 'Owner-authorized explicit reveal for copy/view actions. Returns one saved secret with Cache-Control: no-store; list responses remain masked.'
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: group_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: key_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/revealModelProviderKeyOpenAPIResponse'
+                    description: Selected saved key
+            summary: Explicitly reveal one saved supplier API key
+            tags:
+                - model_providers
     /api/core/model_providers/{model_provider_id}/groups/{group_id}/models:
         get:
             description: Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.
@@ -26205,6 +26348,49 @@ paths:
                                 $ref: '#/components/schemas/setActiveModelProviderKeyOpenAPIResponse'
                     description: Supplier active key
             summary: Set the single enabled key for a model supplier
+            tags:
+                - model_providers
+    /api/core/model_providers/{model_provider_id}/request-config:
+        get:
+            description: Returns per-protocol API roots and the active default. Gemini and OpenAI Responses are listed with supported false until their runtime adapters are available.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/providerRequestConfigOpenAPIResponse'
+                    description: Supplier request configuration
+            summary: Get supplier request protocols and endpoint overrides
+            tags:
+                - model_providers
+        put:
+            description: Stores OpenAI/Anthropic endpoint overrides. Selecting a different default updates the effective runtime adapter and endpoint for existing model IDs, retains saved keys and default selections, and requires verification again. Anthropic defaults require chat/vision-only model lists. Unchanged saves preserve verification and native supplier adapters.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/updateProviderRequestConfigOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/providerRequestConfigOpenAPIResponse'
+                    description: Supplier request configuration
+            summary: Update supplier request configuration
             tags:
                 - model_providers
     /api/core/model_providers/features:

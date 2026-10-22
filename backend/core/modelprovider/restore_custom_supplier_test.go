@@ -86,7 +86,7 @@ func TestTemporaryCustomRestoreKeepsPayloadIdentityWithoutAddingSupplier(t *test
 
 func TestCustomBackupRestoresAcrossDifferentCatalogIDs(t *testing.T) {
 	source := setupListProviderTestDB(t)
-	p := orm.UserModelProvider{ID: "custom-source", DefaultModelProviderID: "source-installation-id", Name: "Portable Proxy", ProtocolName: "Fixture Provider", IsCustom: true, Category: "model", BaseURL: "https://portable.example/v1", BaseModel: orm.BaseModel{CreateUserID: "local-user"}}
+	p := orm.UserModelProvider{ID: "custom-source", DefaultModelProviderID: "source-installation-id", Name: "Portable Proxy", ProtocolName: "Fixture Provider", IsCustom: true, Category: "model", BaseURL: "https://portable.example/v1", RequestConfig: `{"default_protocol":"openai","endpoints":{"openai":"https://portable.example/v1","anthropic":"https://anthropic.example"},"defaults":{"openai":"https://portable.example/v1","anthropic":"https://portable.example"}}`, BaseModel: orm.BaseModel{CreateUserID: "local-user"}}
 	g := orm.UserModelProviderGroup{ID: "source-group", UserModelProviderID: p.ID, Name: p.Name, BaseURL: p.BaseURL, APIKey: "portable-key", CredentialRevision: 1, BaseModel: p.BaseModel}
 	for _, row := range []any{&p, &g} {
 		if err := source.Create(row).Error; err != nil {
@@ -109,7 +109,7 @@ func TestCustomBackupRestoresAcrossDifferentCatalogIDs(t *testing.T) {
 	}
 	var row orm.UserModelProvider
 	target.Where("is_custom = ?", true).Take(&row)
-	if row.DefaultModelProviderID != "fixture-provider" || row.Name != p.Name || row.ProtocolName != "Fixture Provider" {
+	if row.DefaultModelProviderID != "fixture-provider" || row.Name != p.Name || row.ProtocolName != "Fixture Provider" || row.RequestConfig != p.RequestConfig {
 		t.Fatal("restore did not resolve stable protocol to target catalog identity")
 	}
 }

@@ -36,6 +36,7 @@ type ProviderCredential struct {
 	ProviderCatalogKey   string
 	DisplayName          string
 	BaseURL              string
+	RequestConfig        string
 	APIKey               []byte `json:"-"`
 }
 

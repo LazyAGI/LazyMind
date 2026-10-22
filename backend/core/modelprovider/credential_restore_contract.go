@@ -356,6 +356,7 @@ func (sink *CredentialRestoreSink) TemporaryCredential(recordID string) (credent
 			return credentialvault.ProviderCredential{}, false
 		}
 		result.BaseURL = connectionBaseURL(provider, result.BaseURL)
+		result.RequestConfig = provider.RequestConfig
 		result.APIKey = append([]byte(nil), value.provider.APIKey...)
 		found = true
 	}
@@ -366,7 +367,7 @@ func validRestoredCredential(restored credentialvault.RestoredCredential) bool {
 	valid := restoreSinkUUID.MatchString(restored.RecordID) && restored.Revision > 0 && restoreSinkUUID.MatchString(restored.VaultID) &&
 		regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(restored.ETag) && strings.TrimSpace(restored.Provider.ProviderCatalogKey) != "" &&
 		len(restored.Provider.ProviderCatalogKey) <= 128 && strings.TrimSpace(restored.Provider.DisplayName) != "" && len(restored.Provider.DisplayName) <= 255 &&
-		strings.TrimSpace(restored.Provider.BaseURL) != "" && len(restored.Provider.BaseURL) <= 1024 && credentialvault.ValidAPIKeyPool(restored.Provider.APIKey)
+		strings.TrimSpace(restored.Provider.BaseURL) != "" && len(restored.Provider.BaseURL) <= 1024 && credentialvault.ValidAPIKeyPool(restored.Provider.APIKey) && credentialvault.ValidProviderRequestConfig(restored.Provider.RequestConfig)
 	if !valid {
 		return false
 	}

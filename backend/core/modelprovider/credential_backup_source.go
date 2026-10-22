@@ -17,31 +17,37 @@ func (source CredentialBackupSource) LoadCredential(ctx context.Context, groupID
 	if source.DB == nil || strings.TrimSpace(groupID) == "" {
 		return credentialvault.ProviderCredential{}, credentialvault.ErrInvalidContract
 	}
-	var group orm.UserModelProviderGroup
-	if err := source.DB.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", groupID).Take(&group).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return credentialvault.ProviderCredential{}, nil
+	var result credentialvault.ProviderCredential
+	err := source.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var group orm.UserModelProviderGroup
+		if err := tx.Where("id = ? AND deleted_at IS NULL", groupID).Take(&group).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
 		}
-		return credentialvault.ProviderCredential{}, err
-	}
-	apiKey, err := apiKeyForGroup(source.DB.WithContext(ctx), &group)
-	if err != nil {
-		return credentialvault.ProviderCredential{}, err
-	}
-	var provider orm.UserModelProvider
-	if err := source.DB.WithContext(ctx).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", group.UserModelProviderID, group.CreateUserID).Take(&provider).Error; err != nil {
-		return credentialvault.ProviderCredential{}, err
-	}
-	catalogKey := strings.TrimSpace(RuntimeProviderName(provider))
-	if catalogKey == "" {
-		catalogKey = strings.TrimSpace(provider.DefaultModelProviderID)
-	}
-	// The compatibility mirror is updated atomically with the key revision.
-	// Export that same row snapshot rather than pair it with a later supplier URL.
-	return credentialvault.ProviderCredential{
-		LocalProviderGroupID: group.ID, CredentialRevision: group.CredentialRevision,
-		ProviderCatalogKey: catalogKey, DisplayName: group.Name, BaseURL: group.BaseURL, APIKey: []byte(apiKey),
-	}, nil
+		provider := orm.UserModelProvider{ID: group.UserModelProviderID, BaseModel: orm.BaseModel{CreateUserID: group.CreateUserID}}
+		if err := lockProvider(tx, &provider); err != nil {
+			return err
+		}
+		// Re-read under the supplier lock: request metadata, endpoint and encrypted
+		// credential revision must come from one committed supplier snapshot.
+		if err := tx.Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, provider.ID, provider.CreateUserID).Take(&group).Error; err != nil {
+			return err
+		}
+		apiKey, err := apiKeyForGroup(tx, &group)
+		if err != nil {
+			return err
+		}
+		catalogKey := strings.TrimSpace(RuntimeProviderName(provider))
+		if catalogKey == "" {
+			catalogKey = strings.TrimSpace(provider.DefaultModelProviderID)
+		}
+		result = credentialvault.ProviderCredential{LocalProviderGroupID: group.ID, CredentialRevision: group.CredentialRevision,
+			ProviderCatalogKey: catalogKey, DisplayName: group.Name, BaseURL: group.BaseURL, APIKey: []byte(apiKey), RequestConfig: provider.RequestConfig}
+		return nil
+	})
+	return result, err
 }
 
 var _ credentialvault.ProviderCredentialSource = CredentialBackupSource{}

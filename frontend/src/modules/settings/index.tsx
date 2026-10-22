@@ -720,7 +720,7 @@ function SettingsPageContent() {
         )}
       </>;
     } else if (section === "models") {
-      content = integratedSurface(<ModelProvidersPage onConfigurationChanged={syncOverview} highlightProviderId={modelProviderTarget} onBack={() => selectSection("overview")} />, "is-models");
+      content = integratedSurface(<ModelProvidersPage onConfigurationChanged={syncOverview} highlightProviderId={modelProviderTarget} />, "is-models");
     } else if (section === "model_defaults") {
       content = <>
         <header className="settings-detail-header"><h1 ref={headingRef} tabIndex={-1}>{t("settingsPage.sections.defaultModels")}</h1></header>
@@ -951,9 +951,9 @@ function SettingsPageContent() {
     </section>;
   };
 
-  return <main className={`settings-reference${section === "models" ? " is-provider-workspace" : ""}`} aria-label={t("settingsPage.title")}>
+  return <main className="settings-reference" aria-label={t("settingsPage.title")}>
     {settingsChange.dialog}
-    {section !== "models" ? <aside className="settings-reference-sidebar">
+    <aside className="settings-reference-sidebar">
       <button className="settings-back-button" type="button" onClick={() => navigate(returnTo || CHAT_HOME_PATH)}>
         <ArrowLeftOutlined />{t(returnTo ? "settingsPage.backToConversation" : "settingsPage.backToHome")}
       </button>
@@ -976,6 +976,7 @@ function SettingsPageContent() {
                 key={item.id}
                 type="button"
                 className={section === item.id ? "is-active" : ""}
+                aria-current={section === item.id ? "page" : undefined}
                 onClick={() => selectSection(item.id)}
               >
                 <span className="settings-reference-nav-icon">{item.icon}</span>
@@ -990,7 +991,7 @@ function SettingsPageContent() {
         {filteredGroups.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("settingsPage.noMatch")} /> : null}
       </nav>
       <div className="settings-reference-sidebar-foot">LazyAGI/LazyMind<br />{t("settingsPage.sidebarFoot")}</div>
-    </aside> : null}
+    </aside>
     <section className="settings-reference-content" aria-busy={loading}>
       <div className="settings-reference-scroll">
         {loading ? (

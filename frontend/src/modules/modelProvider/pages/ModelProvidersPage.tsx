@@ -65,6 +65,8 @@ import {
   resolveLlmMaxInputTokens,
 } from "../maxInputTokens";
 import { ProviderWorkspace } from "../components/ProviderWorkspace";
+import { ProviderModelCatalogDrawer, type CatalogModelChoice } from "../components/ProviderModelCatalogDrawer";
+import { sortCustomModelsFirst } from "../modelOrdering";
 import "../index.scss";
 
 export type ModelCapability =
@@ -450,7 +452,7 @@ function mapApiGroup(
     verified: isApiGroup
       ? Boolean((group as ApiGroup).is_verified)
       : (group as ProviderConnectionGroup).verified,
-    models: models.map((model) => ({
+    models: sortCustomModelsFirst(models.map((model) => ({
       id: model.id,
       name: model.name,
       capability: mapModelTypeToCapability(model.model_type),
@@ -458,7 +460,7 @@ function mapApiGroup(
       builtIn: Boolean(model.is_default),
       enabled: true,
       maxInputTokens: model.max_input_tokens,
-    })),
+    }))),
   });
 }
 
@@ -546,6 +548,7 @@ export default function ModelProviderPage({
     useState<EditModelWindowModalState | null>(null);
   const [remoteModels, setRemoteModels] = useState<RemoteGroupModel[]>([]);
   const [remoteModelsLoading, setRemoteModelsLoading] = useState(false);
+  const [catalogTarget, setCatalogTarget] = useState<{ providerId: string; groupId: string } | null>(null);
   const [contextWindowMode, setContextWindowMode] = useState<"auto" | "manual">(
     "auto",
   );
@@ -1227,7 +1230,6 @@ export default function ModelProviderPage({
   const openCustomModelModal = (
     provider: AddedProvider,
     group: ProviderConnectionGroup,
-    fetchRemote = false,
   ) => {
     setContextWindowExpanded(false);
     setContextWindowMode("auto");
@@ -1241,15 +1243,32 @@ export default function ModelProviderPage({
       maxInputTokens: undefined,
     });
     customModelDraft.captureSavedValues();
-    if (fetchRemote) {
-      setRemoteModelsLoading(true);
-      void listRemoteGroupModels(provider.id, group.id)
-        .then((data) => setRemoteModels(data.models || []))
-        .catch(() =>
-          message.error(t("modelProvider.error.loadRemoteModelsFailed")),
-        )
-        .finally(() => setRemoteModelsLoading(false));
-    }
+  };
+
+  const addCatalogModel = async (providerId: string, groupId: string, choice: CatalogModelChoice) => {
+    const currentGroup = addedProviderListRef.current.find((provider) => provider.id === providerId)?.groups.find((group) => group.id === groupId);
+    if (!currentGroup) throw new Error(t("modelProvider.workspace.savedRefreshFailed"));
+    if (currentGroup.models.some((model) => normalizeModelName(model.name) === normalizeModelName(choice.name))) return;
+    const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPost({
+      modelProviderId: providerId,
+      groupId,
+      addModelProviderGroupModelOpenAPIRequest: {
+        name: choice.name.trim(),
+        model_type: choice.model_type,
+        vision: choice.model_type === "llm" && choice.vision === true,
+        ...(choice.max_input_tokens && choice.model_type === "llm" ? { max_input_tokens: choice.max_input_tokens } : {}),
+      },
+    });
+    const created = unwrapModelProviderData<ApiModel>(response.data);
+    appendGroupModel(providerId, groupId, {
+      id: created.id,
+      name: created.name,
+      capability: mapModelTypeToCapability(created.model_type || choice.model_type),
+      builtIn: Boolean(created.is_default),
+      vision: created.vision,
+      enabled: true,
+      maxInputTokens: created.max_input_tokens || choice.max_input_tokens,
+    });
   };
 
   const closeCustomModelModal = () => {
@@ -1414,6 +1433,7 @@ export default function ModelProviderPage({
     providerId: string,
     groupId: string,
     model: ProviderModel,
+    notify = true,
   ) => {
     try {
       await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(
@@ -1445,10 +1465,19 @@ export default function ModelProviderPage({
             : provider,
         ),
       );
-      message.success(t("modelProvider.message.modelDeleted"));
-      void onConfigurationChanged?.();
-    } catch (error) {}
+      if (notify) {
+        message.success(t("modelProvider.message.modelDeleted"));
+        void onConfigurationChanged?.();
+      }
+      return true;
+    } catch (error) {
+      if (notify) message.error(getLocalizedErrorMessage(error));
+      return false;
+    }
   };
+
+  const catalogProvider = addedProviderList.find((provider) => provider.id === catalogTarget?.providerId);
+  const catalogGroup = catalogProvider?.groups.find((group) => group.id === catalogTarget?.groupId);
 
   return (
     <div className="model-provider-page-content">
@@ -1469,7 +1498,10 @@ export default function ModelProviderPage({
         modelsLoading={loadingGroupModelIds}
         onAddModel={openCustomModelModal}
         onSyncModels={(provider, group) =>
-          openCustomModelModal(provider, group, true)
+          {
+            setCatalogTarget({ providerId: provider.id, groupId: group.id });
+            void loadGroupModels(provider.id, group.id);
+          }
         }
         onEditModel={openEditModelWindowModal}
         onDeleteModel={(provider, group, model) =>
@@ -1514,6 +1546,26 @@ export default function ModelProviderPage({
           </>
         }
       />
+
+      {catalogProvider && catalogGroup ? <ProviderModelCatalogDrawer
+        open={!!catalogTarget}
+        providerId={catalogProvider.id}
+        providerName={catalogProvider.name}
+        protocolName={catalogProvider.protocolName || catalogProvider.source}
+        groupId={catalogGroup.id}
+        models={catalogGroup.models}
+        modelsLoading={loadingGroupModelIds[`${catalogProvider.id}:${catalogGroup.id}`]}
+        requiresVerification={!catalogGroup.verified}
+        onCheckConnection={() => {
+          setCatalogTarget(null);
+          void verifyProviderGroup(catalogProvider, catalogGroup, "");
+        }}
+        onClose={() => setCatalogTarget(null)}
+        onRefreshModels={() => void loadGroupModels(catalogProvider.id, catalogGroup.id)}
+        onAdd={(model) => addCatalogModel(catalogProvider.id, catalogGroup.id, model)}
+        onRemove={(model) => deleteCustomModel(catalogProvider.id, catalogGroup.id, model, false)}
+        onChanged={() => void onConfigurationChanged?.()}
+      /> : null}
 
       <Modal
         centered

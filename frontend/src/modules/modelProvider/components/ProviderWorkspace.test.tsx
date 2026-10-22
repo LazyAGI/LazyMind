@@ -178,6 +178,39 @@ beforeEach(() => {
 });
 
 describe("compact provider workspace", () => {
+  it("pins custom suppliers and their manually added models before catalog entries", () => {
+    const custom = {
+      ...provider,
+      id: "custom-supplier",
+      name: "Zulu Custom",
+      isCustom: true,
+      groups: [
+        {
+          ...provider.groups[0],
+          models: [
+            ...provider.groups[0].models,
+            {
+              id: "custom-model",
+              name: "zulu-custom-model",
+              capability: "LLM_CHAT" as const,
+              builtIn: false,
+              enabled: true,
+            },
+          ],
+        },
+      ],
+    };
+    setup({
+      providers: [provider, custom],
+      configuredProviders: [provider, custom],
+    });
+    const suppliers = document.querySelectorAll(".provider-workspace-provider");
+    expect(suppliers[0]).toHaveTextContent("Zulu Custom");
+    const rows = document.querySelectorAll(
+      ".provider-workspace-model-row:not(.is-heading)",
+    );
+    expect(rows[0]).toHaveTextContent("zulu-custom-model");
+  });
   it("shows supplier settings directly without instance controls or explanatory clutter", () => {
     setup();
     expect(screen.getByText("********1234")).toBeInTheDocument();

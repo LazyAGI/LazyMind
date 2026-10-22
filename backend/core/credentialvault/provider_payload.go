@@ -30,14 +30,18 @@ func ValidAPIKeyPool(pool []byte) bool {
 // EncodeProviderCredentialPayload is shared by backup and local pool writes so
 // a locally accepted pool always fits the complete encrypted-record payload.
 func EncodeProviderCredentialPayload(credential ProviderCredential) ([]byte, error) {
-	if !ValidAPIKeyPool(credential.APIKey) {
+	if !ValidAPIKeyPool(credential.APIKey) || !ValidProviderRequestConfig(credential.RequestConfig) {
 		return nil, ErrInvalidContract
+	}
+	fields := map[string]any{}
+	if credential.RequestConfig != "" {
+		fields["request_config"] = json.RawMessage(credential.RequestConfig)
 	}
 	payload, err := json.Marshal(map[string]any{
 		"schema_version": 1, "provider_catalog_key": credential.ProviderCatalogKey,
 		"display_name": credential.DisplayName, "base_url": credential.BaseURL,
 		"credential_type": "api_key", "api_key": string(credential.APIKey),
-		"provider_specific_fields": map[string]any{},
+		"provider_specific_fields": fields,
 	})
 	if err != nil || len(payload) > MaximumPlaintextLength {
 		clear(payload)

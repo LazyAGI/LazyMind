@@ -3444,3 +3444,7 @@ ON CONFLICT (cloud_issuer, cloud_account_id, local_provider_group_id) DO UPDATE 
     local_credential_revision = excluded.local_credential_revision,
     operation = 'upsert', backup_state = 'pending', attempt_count = 0,
     next_attempt_at = CURRENT_TIMESTAMP, last_error_code = 0, updated_at = CURRENT_TIMESTAMP;
+
+-- Supplier request protocol overrides, PostgreSQL and SQLite.
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE user_model_providers ADD COLUMN request_config TEXT NOT NULL DEFAULT '';

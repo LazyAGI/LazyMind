@@ -8,6 +8,7 @@ import {
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import {
   Button,
@@ -19,7 +20,6 @@ import {
   Popconfirm,
   Select,
   Spin,
-  Switch,
   Tag,
   Tooltip,
   message,
@@ -47,6 +47,9 @@ import {
   resolveLlmMaxInputTokens,
 } from "../maxInputTokens";
 import { ModelModalityMarks } from "./ModelModalityMarks";
+import { ProviderKeyManager } from "./ProviderKeyManager";
+import { ProviderRequestConfigDrawer } from "./ProviderRequestConfigDrawer";
+import { sortCustomModelsFirst } from "../modelOrdering";
 import type {
   AddedProvider,
   ModelCapability,
@@ -113,6 +116,7 @@ export function ProviderWorkspace(props: Props) {
   const [modelType, setModelType] = useState<string>("all");
   const [configuredOnly, setConfiguredOnly] = useState(false);
   const [cloudOpen, setCloudOpen] = useState(false);
+  const [requestConfigOpen, setRequestConfigOpen] = useState(false);
   const [mobileDetail, setMobileDetail] = useState(false);
   const [endpointSaving, setEndpointSaving] = useState(false);
   const [keyOpen, setKeyOpen] = useState(false);
@@ -144,13 +148,20 @@ export function ProviderWorkspace(props: Props) {
   const loadedGroups = useRef(new Set<string>());
   const providers = useMemo(
     () =>
-      props.providers.map(
-        (provider): AddedProvider =>
-          props.configuredProviders.find((item) => item.id === provider.id) || {
-            ...provider,
-            groups: [],
-          },
-      ),
+      props.providers
+        .map(
+          (provider): AddedProvider =>
+            props.configuredProviders.find(
+              (item) => item.id === provider.id,
+            ) || {
+              ...provider,
+              groups: [],
+            },
+        )
+        .sort(
+          (left, right) =>
+            Number(Boolean(right.isCustom)) - Number(Boolean(left.isCustom)),
+        ),
     [props.providers, props.configuredProviders],
   );
   const provider =
@@ -430,7 +441,7 @@ export function ProviderWorkspace(props: Props) {
       (!configuredOnly || item.groups.length > 0) &&
       item.name.toLowerCase().includes(search.toLowerCase().trim()),
   );
-  const models = (group?.models || []).filter(
+  const models = sortCustomModelsFirst(group?.models || []).filter(
     (model) =>
       model.name.toLowerCase().includes(modelSearch.toLowerCase().trim()) &&
       (modelType === "all" || model.capability === modelType),
@@ -649,7 +660,9 @@ export function ProviderWorkspace(props: Props) {
                                 parsed.protocol,
                               ) &&
                                 !parsed.username &&
-                                !parsed.password
+                                !parsed.password &&
+                                !parsed.search &&
+                                !parsed.hash
                                 ? Promise.resolve()
                                 : Promise.reject(
                                     new Error(
@@ -684,6 +697,17 @@ export function ProviderWorkspace(props: Props) {
                     >
                       {label("saveEndpoint")}
                     </Button>
+                    <Tooltip title={t("modelProvider.requestConfig.title")}>
+                      <Button
+                        type="text"
+                        aria-label={t("modelProvider.requestConfig.title")}
+                        icon={<SettingOutlined />}
+                        disabled={endpointSaving || Boolean(changingActiveKey)}
+                        onClick={() =>
+                          confirmEndpointLeave(() => setRequestConfigOpen(true))
+                        }
+                      />
+                    </Tooltip>
                   </div>
                   {endpointDirty ? <p>{label("endpointHint")}</p> : null}
                 </Form>
@@ -691,14 +715,19 @@ export function ProviderWorkspace(props: Props) {
                   className="provider-workspace-api-keys"
                   aria-label="API Key"
                 >
-                  <div className="provider-workspace-key-heading">
-                    <h3>
-                      API Key{" "}
-                      <span className="provider-workspace-count">
-                        {group?.keys.length || 0}
-                      </span>
-                    </h3>
-                    <div className="provider-workspace-key-actions">
+                  <ProviderKeyManager
+                    providerId={provider.id}
+                    providerName={provider.name}
+                    groupId={group?.id || ""}
+                    keys={group?.keys || []}
+                    disabled={endpointDirty || endpointSaving || keySaving}
+                    changingKey={changingActiveKey}
+                    removingKey={removingKey}
+                    onAdd={openAddKey}
+                    onDelete={deleteKey}
+                    onToggle={changeActiveKey}
+                    onReload={props.onReload}
+                    checkAction={
                       <Button
                         type="text"
                         onClick={() => void withProviderModels(props.onCheck)}
@@ -711,75 +740,8 @@ export function ProviderWorkspace(props: Props) {
                       >
                         {label("checkConnection")}
                       </Button>
-                      <Button
-                        type="link"
-                        icon={<PlusOutlined aria-hidden="true" />}
-                        disabled={endpointDirty || Boolean(changingActiveKey)}
-                        onClick={openAddKey}
-                      >
-                        {label("addKey")}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="provider-workspace-keys">
-                    {group?.keys.length ? (
-                      group.keys.map((key, index) => (
-                        <div className="provider-workspace-key" key={key.id}>
-                          <span>
-                            {label("keyNumber", { number: index + 1 })}
-                          </span>
-                          <code>{key.masked}</code>
-                          <span
-                            className={`provider-workspace-key-state${key.enabled ? " is-enabled" : ""}`}
-                          >
-                            {label(key.enabled ? "keyEnabled" : "keyDisabled")}
-                          </span>
-                          <Switch
-                            size="small"
-                            aria-label={label("useKeyNumber", {
-                              number: index + 1,
-                            })}
-                            checked={key.enabled === true}
-                            loading={changingActiveKey === key.id}
-                            disabled={
-                              endpointDirty ||
-                              endpointSaving ||
-                              Boolean(changingActiveKey) ||
-                              Boolean(removingKey) ||
-                              keySaving
-                            }
-                            onChange={(enabled) =>
-                              void changeActiveKey(key.id, enabled)
-                            }
-                          />
-                          <Popconfirm
-                            title={label("deleteKey")}
-                            description={label("deleteKeyHint")}
-                            okText={t("common.delete")}
-                            cancelText={t("common.cancel")}
-                            okButtonProps={{ danger: true }}
-                            onConfirm={() => deleteKey(key.id)}
-                          >
-                            <Button
-                              type="text"
-                              aria-label={label("deleteKeyNumber", {
-                                number: index + 1,
-                              })}
-                              icon={<DeleteOutlined aria-hidden="true" />}
-                              loading={removingKey === key.id}
-                              disabled={Boolean(changingActiveKey)}
-                            />
-                          </Popconfirm>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="provider-workspace-key-empty">
-                        {group?.apiKeyConfigured
-                          ? label("keyStored")
-                          : label("noKeys")}
-                      </p>
-                    )}
-                  </div>
+                    }
+                  />
                 </section>
                 <section
                   className="provider-workspace-models"
@@ -982,6 +944,15 @@ export function ProviderWorkspace(props: Props) {
           )}
         </main>
       </div>
+      {provider ? (
+        <ProviderRequestConfigDrawer
+          providerId={provider.id}
+          providerName={provider.name}
+          open={requestConfigOpen}
+          onClose={() => setRequestConfigOpen(false)}
+          onSaved={props.onReload}
+        />
+      ) : null}
       <Drawer
         title={label("cloud")}
         open={cloudOpen}

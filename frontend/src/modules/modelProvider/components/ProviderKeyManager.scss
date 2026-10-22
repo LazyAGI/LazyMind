@@ -1,0 +1,72 @@
+.provider-key-row {
+  gap: 10px;
+  code {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .provider-key-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 0;
+  }
+  .provider-key-row-actions .ant-btn {
+    width: 26px;
+    min-width: 26px;
+    padding: 0;
+    height: 28px;
+    color: var(--provider-muted, #697586);
+  }
+}
+.provider-key-manager-drawer {
+  .ant-drawer-header {
+    padding: 20px 24px;
+  }
+  .ant-drawer-title {
+    font-size: 16px;
+  }
+  .provider-key-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 12px;
+    margin-bottom: 10px;
+    border: 1px solid #e6e9ef;
+    border-radius: 8px;
+    font-size: 12px;
+  }
+  .provider-key-row code {
+    flex-basis: 55%;
+  }
+  .provider-key-row-actions {
+    margin-left: auto;
+  }
+  .provider-workspace-key-state {
+    color: #697586;
+  }
+  .provider-workspace-key-state.is-enabled {
+    color: #168057;
+  }
+  button:focus-visible {
+    outline: 2px solid #2f6df6;
+    outline-offset: 2px;
+  }
+}
+.provider-key-manager-hint {
+  color: #697586;
+  font-size: 12px;
+  margin: 0 0 20px;
+}
+@media (max-width: 1050px) {
+  .provider-workspace .provider-key-row {
+    flex-wrap: wrap;
+  }
+  .provider-workspace .provider-key-row code {
+    flex-basis: 50%;
+  }
+  .provider-workspace .provider-key-row-actions {
+    margin-left: auto;
+  }
+}

@@ -452,7 +452,7 @@ func validateSavedKeyPool(parent orm.UserModelProvider, groupName, baseURL, pool
 		catalogKey = strings.TrimSpace(parent.DefaultModelProviderID)
 	}
 	payload, err := credentialvault.EncodeProviderCredentialPayload(credentialvault.ProviderCredential{
-		ProviderCatalogKey: catalogKey, DisplayName: groupName, BaseURL: baseURL, APIKey: []byte(pool),
+		ProviderCatalogKey: catalogKey, DisplayName: groupName, BaseURL: baseURL, APIKey: []byte(pool), RequestConfig: parent.RequestConfig,
 	})
 	clear(payload)
 	return err

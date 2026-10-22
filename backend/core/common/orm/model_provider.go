@@ -82,6 +82,7 @@ type UserModelProvider struct {
 	Name                   string `gorm:"column:name;type:varchar(255);not null"`
 	IsCustom               bool   `gorm:"column:is_custom;not null;default:false"`
 	ProtocolName           string `gorm:"column:protocol_name;type:varchar(255);not null;default:''"`
+	RequestConfig          string `gorm:"column:request_config;type:text;not null;default:''"`
 	Description            string `gorm:"column:description;type:text;not null"`
 	BaseURL                string `gorm:"column:base_url;type:varchar(1024);not null;default:''"`
 	ActiveKeyGroupID       string `gorm:"column:active_key_group_id;type:varchar(64);not null;default:''"`

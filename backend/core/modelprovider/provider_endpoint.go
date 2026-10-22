@@ -99,44 +99,59 @@ func setProviderEndpoint(ctx context.Context, db *gorm.DB, parent *orm.UserModel
 		if err := initializeProviderActiveKey(tx, parent); err != nil {
 			return err
 		}
-		changed := normalizeBaseURLForCompare(parent.BaseURL) != normalizeBaseURLForCompare(baseURL)
-		var groups []orm.UserModelProviderGroup
-		if err := tx.Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, parent.CreateUserID).
-			Order("created_at ASC, id ASC").Find(&groups).Error; err != nil {
-			return err
-		}
-		for i := range groups {
-			group := &groups[i]
-			// Repair a stale compatibility mirror even when the supplier URL is unchanged.
-			if !changed && normalizeBaseURLForCompare(group.BaseURL) == normalizeBaseURLForCompare(baseURL) {
-				continue
-			}
-			key, err := apiKeyForGroup(tx, group)
+		if parent.RequestConfig != "" {
+			config := savedRequestConfig(tx, *parent)
+			config.Endpoints[config.DefaultProtocol] = baseURL
+			encoded, err := json.Marshal(config)
 			if err != nil {
 				return err
 			}
-			if err := validateSavedKeyPool(*parent, group.Name, baseURL, key); err != nil {
-				return err
-			}
-			revision := max(group.CredentialRevision, 1) + 1
-			updates, err := encryptedAPIKeyUpdates(parent.CreateUserID, group.ID, revision, key, group.CredentialVersion)
-			if err != nil {
-				return err
-			}
-			updates["base_url"], updates["is_verified"], updates["updated_at"] = baseURL, false, now
-			if err := tx.Model(group).Updates(updates).Error; err != nil {
-				return err
-			}
-			if err := enqueueCredentialBackup(tx, group.ID, revision, credentialvault.BackupUpsert, now); err != nil {
-				return err
-			}
+			parent.RequestConfig = string(encoded)
 		}
-		if err := tx.Model(parent).Updates(map[string]any{"base_url": baseURL, "updated_at": now}).Error; err != nil {
-			return err
-		}
-		parent.BaseURL = baseURL
-		return nil
+		return updateProviderEndpointLocked(tx, parent, baseURL, now, false, false)
 	})
+}
+
+// The caller holds the supplier lock. A protocol/metadata update refreshes the
+// encrypted backup revision even when the active endpoint has not changed.
+func updateProviderEndpointLocked(tx *gorm.DB, parent *orm.UserModelProvider, baseURL string, now time.Time, refresh, invalidate bool) error {
+	changed := normalizeBaseURLForCompare(parent.BaseURL) != normalizeBaseURLForCompare(baseURL)
+	var groups []orm.UserModelProviderGroup
+	if err := tx.Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, parent.CreateUserID).
+		Order("created_at ASC, id ASC").Find(&groups).Error; err != nil {
+		return err
+	}
+	for i := range groups {
+		group := &groups[i]
+		mirrorChanged := normalizeBaseURLForCompare(group.BaseURL) != normalizeBaseURLForCompare(baseURL)
+		if !refresh && !changed && !mirrorChanged {
+			continue
+		}
+		key, err := apiKeyForGroup(tx, group)
+		if err != nil {
+			return err
+		}
+		if err := validateSavedKeyPool(*parent, group.Name, baseURL, key); err != nil {
+			return err
+		}
+		revision := max(group.CredentialRevision, 1) + 1
+		updates, err := encryptedAPIKeyUpdates(parent.CreateUserID, group.ID, revision, key, group.CredentialVersion)
+		if err != nil {
+			return err
+		}
+		updates["base_url"], updates["is_verified"], updates["updated_at"] = baseURL, group.IsVerified && !changed && !mirrorChanged && !invalidate, now
+		if err := tx.Model(group).Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := enqueueCredentialBackup(tx, group.ID, revision, credentialvault.BackupUpsert, now); err != nil {
+			return err
+		}
+	}
+	if err := tx.Model(parent).Updates(map[string]any{"base_url": baseURL, "request_config": parent.RequestConfig, "updated_at": now}).Error; err != nil {
+		return err
+	}
+	parent.BaseURL = baseURL
+	return nil
 }
 
 var errConnectionChanged = errors.New("connection changed; reload and retry")

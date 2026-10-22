@@ -987,6 +987,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PUT", "/model_providers/selected_providers", []string{"model.write"}, modelprovider.SetSelectedProvider)
 	handleAPI(r, "PUT", "/model_providers/selected_providers/share", []string{"model.write"}, modelprovider.SetSharedProvider)
 	handleAPI(r, "PUT", "/model_providers/{model_provider_id}/endpoint", []string{"model.write"}, modelprovider.UpdateProviderEndpoint)
+	handleAPI(r, "GET", "/model_providers/{model_provider_id}/request-config", []string{"model.read"}, modelprovider.GetProviderRequestConfig)
+	handleAPI(r, "PUT", "/model_providers/{model_provider_id}/request-config", []string{"model.write"}, modelprovider.SetProviderRequestConfig)
 	handleAPI(r, "PUT", "/model_providers/{model_provider_id}/keys/active", []string{"model.write"}, modelprovider.SetActiveProviderKey)
 	handleAPI(r, "GET", "/model_providers/{model_provider_id}/groups", []string{"model.read"}, modelprovider.ListGroups)
 	handleAPI(r, "POST", "/model_providers/{model_provider_id}/groups", []string{"model.write"}, modelprovider.CreateGroup)
@@ -999,6 +1001,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "DELETE", "/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}", []string{"model.write"}, modelprovider.DeleteGroupModel)
 	handleAPI(r, "POST", "/model_providers/{model_provider_id}/groups/{group_id}/keys", []string{"model.write"}, modelprovider.AddKey)
 	handleAPI(r, "DELETE", "/model_providers/{model_provider_id}/groups/{group_id}/keys", []string{"model.write"}, modelprovider.RemoveKey)
+	handleAPI(r, "PUT", "/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}", []string{"model.write"}, modelprovider.ReplaceKey)
+	handleAPI(r, "POST", "/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}/reveal", []string{"model.write"}, modelprovider.RevealKey)
 	handleAPI(r, "GET", "/translation/status", []string{"document.read"}, translation.Status)
 	handleAPI(r, "POST", "/translation:translate", []string{"document.read"}, translation.Translate)
 

@@ -342,7 +342,12 @@ func ListRemoteGroupModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Header.Set("Accept", "application/json")
-	if apiKey != "" {
+	if LazyLLMSource(RuntimeProviderName(parent)) == "claude" {
+		req.Header.Set("anthropic-version", "2023-06-01")
+		if apiKey != "" {
+			req.Header.Set("x-api-key", apiKey)
+		}
+	} else if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 

@@ -40,10 +40,17 @@ func restoredSupplier(tx *gorm.DB, userID string, payload credentialvault.Provid
 		return source, err
 	}
 	if count == 0 && resolution != credentialvault.ConflictSaveCopy && strings.EqualFold(name, source.Name) && normalizeBaseURLForCompare(payload.BaseURL) == normalizeBaseURLForCompare(source.BaseURL) {
+		if payload.RequestConfig != "" {
+			source.RequestConfig = payload.RequestConfig
+			if err := tx.Model(&source).Update("request_config", source.RequestConfig).Error; err != nil {
+				return source, err
+			}
+		}
 		return source, nil
 	}
 	row := source
 	row.ID, row.Name, row.IsCustom, row.ProtocolName = common.GenerateID(), name, true, RuntimeProviderName(source)
+	row.RequestConfig = payload.RequestConfig
 	row.BaseURL = LazyLLMBaseURL(row.ProtocolName, payload.BaseURL)
 	row.Capabilities = strings.Join(modelSupplierCapabilities(row.Capabilities), ",")
 	row.ActiveKeyGroupID, row.ActiveKeyID, row.ActiveKeyInitialized, row.ActiveKeyRevision = "", "", false, 0
@@ -76,6 +83,9 @@ func (sink *CredentialRestoreSink) temporarySupplier(ctx context.Context, scope 
 	if hasSharedProviderEndpoint(source) && strings.TrimSpace(payload.BaseURL) != "" && (strings.TrimSpace(payload.DisplayName) != "" && !strings.EqualFold(payload.DisplayName, source.Name) || normalizeBaseURLForCompare(payload.BaseURL) != normalizeBaseURLForCompare(source.BaseURL)) {
 		source.ProtocolName, source.Name, source.IsCustom = RuntimeProviderName(source), payload.DisplayName, true
 		source.BaseURL = LazyLLMBaseURL(source.ProtocolName, payload.BaseURL)
+	}
+	if hasSharedProviderEndpoint(source) {
+		source.RequestConfig = payload.RequestConfig
 	}
 	return source, nil
 }

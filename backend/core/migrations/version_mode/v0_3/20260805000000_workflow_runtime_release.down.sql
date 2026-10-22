@@ -1,3 +1,6 @@
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE user_model_providers DROP COLUMN request_config;
+
 -- Restore only migration-owned associations. New custom suppliers remain as
 -- independent legacy providers; their technical name is restored for old code,
 -- with their display name retained on the private credential/model store.

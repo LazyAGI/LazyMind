@@ -1214,6 +1214,43 @@ type modelProviderGroupByIDPathParams struct {
 	GroupID         string `path:"group_id"`
 }
 
+type modelProviderSavedKeyPathParams struct {
+	ModelProviderID string `path:"model_provider_id"`
+	GroupID         string `path:"group_id"`
+	KeyID           string `path:"key_id"`
+}
+
+type providerRequestProtocolOpenAPIItem struct {
+	Protocol       string `json:"protocol" enum:"openai,anthropic,gemini,openai-responses"`
+	Name           string `json:"name"`
+	BaseURL        string `json:"base_url"`
+	DefaultBaseURL string `json:"default_base_url"`
+	Supported      bool   `json:"supported" desc:"False when the current runtime has no adapter for this protocol."`
+}
+
+type providerRequestConfigOpenAPIResponse struct {
+	DefaultProtocol string                               `json:"default_protocol" enum:"openai,anthropic"`
+	Protocols       []providerRequestProtocolOpenAPIItem `json:"protocols"`
+}
+
+type updateProviderRequestConfigOpenAPIRequest struct {
+	DefaultProtocol string            `json:"default_protocol" enum:"openai,anthropic"`
+	Endpoints       map[string]string `json:"endpoints,omitempty" desc:"Optional OpenAI/Anthropic API-root overrides keyed by openai or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected."`
+}
+
+type replaceModelProviderKeyOpenAPIRequest struct {
+	APIKey string `json:"api_key"`
+}
+
+type replaceModelProviderKeyOpenAPIResponse struct {
+	KeyID   string `json:"key_id"`
+	Enabled bool   `json:"enabled"`
+}
+
+type revealModelProviderKeyOpenAPIResponse struct {
+	APIKey string `json:"api_key" desc:"The selected saved secret, returned only by an explicit owner-authorized action with Cache-Control: no-store."`
+}
+
 type createCustomModelProviderOpenAPIRequest struct {
 	Name             string `json:"name"`
 	SourceProviderID string `json:"source_provider_id" desc:"An owned model provider whose technical protocol is used for this custom supplier."`
@@ -4503,6 +4540,36 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  modelProviderGroupPathParams{},
 			RequestBody: jsonBodyOf(setActiveModelProviderKeyOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Supplier active key", setActiveModelProviderKeyOpenAPIResponse{})},
+		},
+		{
+			Method: "GET", Path: "/model_providers/{model_provider_id}/request-config",
+			Summary:     "Get supplier request protocols and endpoint overrides",
+			Description: "Returns per-protocol API roots and the active default. Gemini and OpenAI Responses are listed with supported false until their runtime adapters are available.",
+			Tags:        []string{"model_providers"}, PathParams: modelProviderGroupPathParams{},
+			Responses: map[int]openAPIResponse{200: resp("Supplier request configuration", providerRequestConfigOpenAPIResponse{})},
+		},
+		{
+			Method: "PUT", Path: "/model_providers/{model_provider_id}/request-config",
+			Summary:     "Update supplier request configuration",
+			Description: "Stores OpenAI/Anthropic endpoint overrides. Selecting a different default updates the effective runtime adapter and endpoint for existing model IDs, retains saved keys and default selections, and requires verification again. Anthropic defaults require chat/vision-only model lists. Unchanged saves preserve verification and native supplier adapters.",
+			Tags:        []string{"model_providers"}, PathParams: modelProviderGroupPathParams{},
+			RequestBody: jsonBodyOf(updateProviderRequestConfigOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Supplier request configuration", providerRequestConfigOpenAPIResponse{})},
+		},
+		{
+			Method: "PUT", Path: "/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}",
+			Summary:     "Replace one saved supplier API key",
+			Description: "Verifies a replacement before atomically updating the encrypted key pool. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Returns the new opaque key ID without plaintext.",
+			Tags:        []string{"model_providers"}, PathParams: modelProviderSavedKeyPathParams{},
+			RequestBody: jsonBodyOf(replaceModelProviderKeyOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Replaced key", replaceModelProviderKeyOpenAPIResponse{})},
+		},
+		{
+			Method: "POST", Path: "/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}/reveal",
+			Summary:     "Explicitly reveal one saved supplier API key",
+			Description: "Owner-authorized explicit reveal for copy/view actions. Returns one saved secret with Cache-Control: no-store; list responses remain masked.",
+			Tags:        []string{"model_providers"}, PathParams: modelProviderSavedKeyPathParams{},
+			Responses: map[int]openAPIResponse{200: resp("Selected saved key", revealModelProviderKeyOpenAPIResponse{})},
 		},
 		{
 			Method:      "GET",

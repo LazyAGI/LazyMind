@@ -39,10 +39,10 @@ vi.mock("@/modules/user/uiPreferencesApi", () => ({
   patchUserUiPreferences: vi.fn(),
 }));
 vi.mock("@/modules/modelProvider/pages/ModelProvidersPage", () => ({
-  default: ({ onBack }: { onBack: () => void }) => (
+  default: ({ onBack }: { onBack?: () => void }) => (
     <div>
       <nav aria-label="suppliers">Existing suppliers</nav>
-      <button onClick={onBack}>Back to settings</button>
+      {onBack ? <button onClick={onBack}>Back to settings</button> : null}
     </div>
   ),
 }));
@@ -77,7 +77,7 @@ describe("separate supplier and default model settings", () => {
         </MemoryRouter>
       </ConfigProvider>,
     );
-  it("keeps model services independent and returns to parallel settings entries", async () => {
+  it("embeds model services beside the persistent settings navigation", async () => {
     renderAt("/settings?section=models");
     expect(
       await screen.findByRole("navigation", { name: "suppliers" }),
@@ -86,13 +86,13 @@ describe("separate supplier and default model settings", () => {
     expect(
       screen.queryByRole("button", { name: "Default models" }),
     ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Back to settings" }));
     const nav = within(
-      await screen.findByRole("navigation", { name: "settingsPage.navAria" }),
+      screen.getByRole("navigation", { name: "settingsPage.navAria" }),
     );
     expect(
       nav.getByRole("button", { name: /settingsPage.sections.models/ }),
-    ).toBeInTheDocument();
+    ).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("button", {name: "Back to settings"})).not.toBeInTheDocument();
     fireEvent.click(
       nav.getByRole("button", { name: /settingsPage.sections.defaultModels/ }),
     );
