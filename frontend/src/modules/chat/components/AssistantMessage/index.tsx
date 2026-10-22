@@ -1353,6 +1353,7 @@ const AssistantMessage = (props: any) => {
           key={askPending.ask_id}
           askPending={askPending}
           disabled={isReadOnly}
+          answered={!!item.ask_answered}
           savedAnswers={item.ask_saved_answers}
           onAnswerChange={(idx, ans) => {
             const currentAnswers = {

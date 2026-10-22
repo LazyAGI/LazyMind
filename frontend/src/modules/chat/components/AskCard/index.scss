@@ -14,6 +14,36 @@
     opacity: 0.75;
   }
 
+  &__summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    width: 100%;
+    padding: 12px 20px;
+    border: 0;
+    background: #f7f9ff;
+    color: #4e6ef2;
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  &__summary-status {
+    flex-shrink: 0;
+    font-weight: 600;
+  }
+
+  &__summary-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #6b7a99;
+  }
+
   // ── Header ──────────────────────────────────────────────
   &__header {
     flex: 0 0 auto;

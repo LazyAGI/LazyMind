@@ -55,6 +55,8 @@ interface AskCardProps {
   /** Called with a payload containing the formatted text and full structured answers. */
   onSubmit: (payload: AskSubmitPayload) => void | boolean | Promise<void | boolean>;
   disabled?: boolean;
+  /** Persisted completion, distinct from a temporarily disabled or superseded card. */
+  answered?: boolean;
   /** Cached answers to pre-populate (index → serialized answer) */
   savedAnswers?: Record<number, AnswerState>;
   /** Called whenever an answer changes, for external caching */
@@ -187,6 +189,7 @@ export default function AskCard({
   askPending,
   onSubmit,
   disabled = false,
+  answered = false,
   savedAnswers,
   onAnswerChange,
 }: AskCardProps) {
@@ -222,10 +225,18 @@ export default function AskCard({
   );
   const [currentIndex, setCurrentIndex] = useState(0);
   const [submitted, setSubmitted] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [decisionFailed, setDecisionFailed] = useState(false);
   const submittingRef = useRef(false);
-  const isReadOnly = disabled || submitted || submitting;
+  const processed = answered || submitted;
+  const isReadOnly = disabled || processed || submitting;
+  const isConfirmation = !!(askPending.knowledge_management || askPending.user_env_delete);
+  const decision = answers[0]?.type === "boolean" ? answers[0].value : null;
+  const statusLabel = t(isConfirmation && decision === "__ask_user_yes__"
+    ? "chat.askCardConfirmed"
+    : isConfirmation && decision === "__ask_user_no__"
+      ? "chat.askCardCancelled" : "chat.askCardAnswered");
   const needsConfirmation = !!(askPending.user_env_delete || askPending.knowledge_management) && !(
     answers.length === 1 && answers[0]?.type === "boolean" &&
     ["__ask_user_yes__", "__ask_user_no__"].includes(answers[0].value ?? "")
@@ -318,6 +329,20 @@ export default function AskCard({
       className={`ask-wizard${isReadOnly ? " ask-wizard--disabled" : ""}`}
       aria-label={t("chat.askCardAria")}
     >
+      {processed && (
+        <button
+          type="button"
+          className="ask-wizard__summary"
+          aria-expanded={expanded}
+          onClick={() => setExpanded(!expanded)}
+        >
+          <span className="ask-wizard__summary-status">{statusLabel}</span>
+          <span className="ask-wizard__summary-title">{displayTitle}</span>
+          <span>{t(expanded ? "chat.askCardCollapse" : "chat.askCardExpand")}</span>
+          <RightOutlined rotate={expanded ? 90 : 0} />
+        </button>
+      )}
+      {(!processed || expanded) && <>
       {decisionFailed && <p role="alert">{t("chat.knowledgeConfirmationFailed")}</p>}
       {/* Header */}
       <div className="ask-wizard__header">
@@ -539,7 +564,7 @@ export default function AskCard({
               <RightOutlined />
             </Button>
           ) : (
-            !disabled && !submitted && (
+            !disabled && !processed && (
               <Button
                 type="primary"
                 onClick={handleSubmit}
@@ -572,6 +597,7 @@ export default function AskCard({
       {!isReadOnly && (
         <p className="ask-wizard__hint">{t("chat.askCardAutoSaveHint")}</p>
       )}
+      </>}
     </div>
   );
 }

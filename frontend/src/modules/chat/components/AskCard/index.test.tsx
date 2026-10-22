@@ -83,6 +83,7 @@ describe("AskCard read-only history", () => {
     fireEvent.click(screen.getByRole("button", { name: "chat.askCardSubmit" }));
     expect(onSubmit.mock.calls[0][0].structured.questions[0].answer).toBeNull();
     await waitFor(() => expect(screen.queryByRole("button", { name: "chat.askCardSubmit" })).toBeNull());
+    expect(screen.getByRole("button", { name: /chat.askCardAnswered/ })).toHaveAttribute("aria-expanded", "false");
   });
 
   it.each(["yes", "no"])("localizes boolean %s in the message but preserves its structured token", async (choice) => {
@@ -100,6 +101,12 @@ describe("AskCard read-only history", () => {
       })] }),
     }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "chat.askCardSubmit" })).toBeNull());
+  });
+
+  it("does not treat disabled unanswered cards as processed", () => {
+    render(<AskCard askPending={deletion} disabled onSubmit={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "common.yes" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /chat.askCardExpand/ })).toBeNull();
   });
 
   it("keeps answers immutable while allowing previous, next, and direct page navigation", () => {
@@ -198,6 +205,31 @@ describe("Knowledge management confirmation", () => {
     })));
     expect(axiosInstance.post).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByRole("button", { name: "chat.askCardSubmit" })).toBeNull());
+    const summary = screen.getByRole("button", { name: choice === "yes" ? /chat.askCardConfirmed/ : /chat.askCardCancelled/ });
+    expect(summary).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Delete Papers?")).toBeNull();
+    fireEvent.click(summary);
+    expect(summary).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: `common.${choice}` })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "chat.askCardSubmit" })).toBeNull();
+    fireEvent.click(summary);
+    expect(screen.queryByText("Delete Papers?")).toBeNull();
+  });
+
+  it.each(["yes", "no"])("restores a persisted %s decision collapsed with read-only details", (choice) => {
+    render(<AskCard askPending={{ ...pending, title: "Delete archive",
+      knowledge_management_preview: { resources: [{ name: "Archive", path: "Papers/Archive" }] },
+    }} answered savedAnswers={{ 0: { type: "boolean", value: `__ask_user_${choice}__` } }} onSubmit={vi.fn()} />);
+    const summary = screen.getByRole("button", { name: /chat.askCardExpand/ });
+    expect(summary).toHaveAttribute("aria-expanded", "false");
+    expect(summary).toHaveTextContent(choice === "yes" ? "chat.askCardConfirmed" : "chat.askCardCancelled");
+    expect(summary).toHaveTextContent("Delete archive");
+    expect(screen.queryByText(/Papers\/Archive/)).toBeNull();
+    fireEvent.click(summary);
+    expect(screen.getByText(/Papers\/Archive/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: `common.${choice}` })).toHaveClass("ant-btn-primary");
+    expect(screen.getByRole("button", { name: `common.${choice}` })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "chat.askCardSubmit" })).toBeNull();
   });
 
   it("retains the decision for retry when the business endpoint rejects the request", async () => {
@@ -208,6 +240,7 @@ describe("Knowledge management confirmation", () => {
     fireEvent.click(submit);
     await waitFor(() => expect(submit).toBeEnabled());
     expect(screen.getByRole("alert")).toHaveTextContent("chat.knowledgeConfirmationFailed");
+    expect(screen.queryByRole("button", { name: /chat.askCardExpand/ })).toBeNull();
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 });

@@ -918,6 +918,10 @@ describe("knowledge confirmation parent state", () => {
         ask_saved_answers: saved.ask_saved_answers,
       }])[1];
       render(<AssistantMessage {...props} item={restored} />);
+      const summary = screen.getByRole("button", { name: choice === "yes" ? /chat.askCardConfirmed/ : /chat.askCardCancelled/ });
+      expect(summary).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByText("Delete?")).toBeNull();
+      fireEvent.click(summary);
       expect(screen.getByRole("button", { name: `common.${choice}` })).toBeDisabled();
       expect(screen.queryByRole("button", { name: "chat.askCardSubmit" })).toBeNull();
     } finally {
