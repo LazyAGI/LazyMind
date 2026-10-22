@@ -1213,6 +1213,34 @@ type modelProviderGroupByIDPathParams struct {
 	GroupID         string `path:"group_id"`
 }
 
+type createCustomModelProviderOpenAPIRequest struct {
+	Name             string `json:"name"`
+	SourceProviderID string `json:"source_provider_id" desc:"An owned model provider whose technical protocol is used for this custom supplier."`
+	BaseURL          string `json:"base_url"`
+}
+
+type createCustomModelProviderOpenAPIResponse struct {
+	ID      string `json:"id"`
+	GroupID string `json:"group_id" desc:"Private credential/model storage ID retained for API compatibility."`
+}
+
+type updateCustomModelProviderOpenAPIRequest struct {
+	Name string `json:"name"`
+}
+
+type customModelProviderMutationOpenAPIResponse struct {
+	ID string `json:"id"`
+}
+
+type deleteCustomModelProviderQueryParams struct {
+	ConfirmIndexedDowngrade bool `query:"confirm_indexed_downgrade" desc:"Explicitly confirm knowledge-base index downgrade when deleting an embedding supplier."`
+}
+
+type deleteCustomModelProviderOpenAPIResponse struct {
+	ID                       string `json:"id"`
+	DowngradedKnowledgeBases int    `json:"downgraded_knowledge_bases"`
+}
+
 type updateModelProviderGroupOpenAPIRequest struct {
 	Name    string `json:"name"`
 	BaseURL string `json:"base_url,omitempty"`
@@ -1429,6 +1457,8 @@ type userModelProviderOpenAPIItem struct {
 	ID                     string                           `json:"id"`
 	DefaultModelProviderID string                           `json:"default_model_provider_id"`
 	Name                   string                           `json:"name"`
+	IsCustom               bool                             `json:"is_custom"`
+	ProtocolName           string                           `json:"protocol_name"`
 	Description            string                           `json:"description"`
 	BaseURL                string                           `json:"base_url"`
 	BaseURLPresets         []modelProviderBaseURLPresetItem `json:"base_url_presets,omitempty"`
@@ -4372,6 +4402,35 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:   map[int]openAPIResponse{200: resp("User model provider list", listUserModelProvidersOpenAPIResponse{})},
 		},
 		{
+			Method:      "POST",
+			Path:        "/model_providers",
+			Summary:     "Create a custom model supplier",
+			Description: "Creates an independent supplier with a display name, endpoint and technical protocol inherited from an owned source provider. Includes one private storage group; no credential is returned.",
+			Tags:        []string{"model_providers"},
+			RequestBody: jsonBodyOf(createCustomModelProviderOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Created custom supplier", createCustomModelProviderOpenAPIResponse{})},
+		},
+		{
+			Method:      "PATCH",
+			Path:        "/model_providers/{model_provider_id}",
+			Summary:     "Rename a custom model supplier",
+			Description: "Changes an owned custom supplier's display name without changing its technical protocol, credentials, model IDs or selections. Catalog suppliers cannot be renamed.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupPathParams{},
+			RequestBody: jsonBodyOf(updateCustomModelProviderOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Renamed custom supplier", customModelProviderMutationOpenAPIResponse{})},
+		},
+		{
+			Method:      "DELETE",
+			Path:        "/model_providers/{model_provider_id}",
+			Summary:     "Delete a custom model supplier",
+			Description: "Soft-deletes an owned custom supplier and its private models/credentials. Catalog suppliers cannot be deleted. Corresponding saved default selections are cleared.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupPathParams{},
+			QueryParams: deleteCustomModelProviderQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Deleted custom supplier", deleteCustomModelProviderOpenAPIResponse{})},
+		},
+		{
 			Method:      "GET",
 			Path:        "/model_providers:with_groups",
 			Summary:     "List user model providers that have groups",
@@ -4384,7 +4443,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}:check",
 			Summary:     "Check model provider connectivity",
-			Description: "Validates credentials. Model suppliers use their shared endpoint and the first stored key when api_key is omitted. Explicit empty api_key tests a keyless connection. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.",
+			Description: "Validates credentials. Model suppliers use their shared endpoint and the currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.",
 			Tags:        []string{"model_providers"},
 			RequestBody: jsonBodyOf(checkModelProviderOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("data: success and message from provider check", modelprovider.CheckModelProviderData{})},

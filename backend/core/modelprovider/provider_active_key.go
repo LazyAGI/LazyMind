@@ -87,7 +87,7 @@ func SetActiveProviderKey(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		checkedURL = connectionBaseURL(parent, checkedGroup.BaseURL)
-		result, err := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, checkedURL, checkedKey, "")
+		result, err := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), checkedURL, checkedKey, "")
 		if err != nil || result == nil || !result.Success {
 			msg := "verification failed"
 			if result != nil && strings.TrimSpace(result.Message) != "" {
@@ -384,7 +384,7 @@ func checkSharedProviderGroup(w http.ResponseWriter, r *http.Request, db *gorm.D
 		common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
 		return
 	}
-	result, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, key, strings.TrimSpace(req.Model))
+	result, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, key, strings.TrimSpace(req.Model))
 	verifiesCurrent := (selectedKey != "" && key == selectedKey) || (!storedKeys && key == "")
 	if !req.DryRun && verifiesCurrent {
 		err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
@@ -447,9 +447,9 @@ func validateSavedKeyPool(parent orm.UserModelProvider, groupName, baseURL, pool
 	if strings.TrimSpace(pool) == "" {
 		return nil
 	}
-	catalogKey := strings.TrimSpace(parent.DefaultModelProviderID)
+	catalogKey := strings.TrimSpace(RuntimeProviderName(parent))
 	if catalogKey == "" {
-		catalogKey = parent.Name
+		catalogKey = strings.TrimSpace(parent.DefaultModelProviderID)
 	}
 	payload, err := credentialvault.EncodeProviderCredentialPayload(credentialvault.ProviderCredential{
 		ProviderCatalogKey: catalogKey, DisplayName: groupName, BaseURL: baseURL, APIKey: []byte(pool),

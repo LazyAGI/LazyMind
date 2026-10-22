@@ -148,7 +148,7 @@ func TestRemoveKeyDoesNotReverifyConnectionAfterEndpointChange(t *testing.T) {
 	assertStoredEncryptedAPIKeys(t, db, group.ID, "keep-key", false)
 }
 
-func TestRestoreConnectionKeepsSupplierEndpointAndRequiresRecheck(t *testing.T) {
+func TestUnboundRestoreCreatesCustomSupplierWithoutChangingCatalogEndpoint(t *testing.T) {
 	sink, db, scope := newCredentialRestoreSinkFixture(t)
 	restored := credentialvault.RestoredCredential{
 		RecordID: "00000000-0000-7000-8000-000000000401", Revision: 7,
@@ -162,15 +162,21 @@ func TestRestoreConnectionKeepsSupplierEndpointAndRequiresRecheck(t *testing.T) 
 	if err := db.Take(&group).Error; err != nil {
 		t.Fatal(err)
 	}
-	if group.BaseURL != "https://provider.example.test" || group.IsVerified {
-		t.Fatalf("old backup changed shared endpoint/verification: %s %v", group.BaseURL, group.IsVerified)
+	if group.BaseURL != "https://discarded.example/v1" || !group.IsVerified {
+		t.Fatal("restored custom supplier lost its trusted endpoint")
+	}
+	var custom, original orm.UserModelProvider
+	db.First(&custom, "id = ?", group.UserModelProviderID)
+	db.First(&original, "id = ?", "restore-provider")
+	if !custom.IsCustom || custom.Name != "Backup connection" || original.BaseURL != "https://provider.example.test" {
+		t.Fatal("restore overwrote catalog supplier")
 	}
 	if key, err := apiKeyForGroup(db, &group); err != nil || key != "restored-key" {
 		t.Fatal("restored key unavailable", err)
 	}
 }
 
-func TestModelSupplierAllowsMultipleConnectionsAtSharedEndpoint(t *testing.T) {
+func TestModelSupplierRejectsSecondCanonicalCredentialGroup(t *testing.T) {
 	db := orm.MigrateAllModelsForTest(t)
 	store.Init(db.DB, db.DB, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -185,13 +191,17 @@ func TestModelSupplierAllowsMultipleConnectionsAtSharedEndpoint(t *testing.T) {
 		request = mux.SetURLVars(request, map[string]string{"model_provider_id": parent.ID})
 		recorder := httptest.NewRecorder()
 		CreateGroup(recorder, request)
-		if recorder.Code != http.StatusOK {
-			t.Fatalf("connection create: %d %s", recorder.Code, recorder.Body.String())
+		want := http.StatusOK
+		if name == "two" {
+			want = http.StatusConflict
+		}
+		if recorder.Code != want {
+			t.Fatalf("credential storage create: %d %s", recorder.Code, recorder.Body.String())
 		}
 	}
 	var groups []orm.UserModelProviderGroup
 	db.DB.Where("user_model_provider_id = ?", parent.ID).Find(&groups)
-	if len(groups) != 2 {
+	if len(groups) != 1 {
 		t.Fatalf("connections=%d", len(groups))
 	}
 	for _, group := range groups {

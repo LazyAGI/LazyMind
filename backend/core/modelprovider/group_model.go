@@ -93,6 +93,8 @@ func normalizeGroupModelType(modelType string) string {
 }
 
 // AddGroupModel inserts a user-defined model row under a connection group (custom model name and model_type).
+var errModelAlreadyExists = errors.New("model name already exists in this supplier")
+
 func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 	if db == nil {
@@ -162,74 +164,51 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var row orm.UserModelProviderGroupModel
-	err = db.WithContext(r.Context()).
-		Where(
-			"user_model_provider_group_id = ? AND create_user_id = ? AND name = ?",
-			group.ID, userID, name,
-		).
-		Take(&row).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		common.ReplyErr(w, "check existing model failed", http.StatusInternalServerError)
-		return
-	}
-	if err == nil && row.DeletedAt == nil {
-		common.ReplyErr(w, "model name already exists in this group", http.StatusConflict)
-		return
-	}
-
-	now := time.Now()
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		row = orm.UserModelProviderGroupModel{
-			ID:                       common.GenerateID(),
-			UserModelProviderID:      parent.ID,
-			UserModelProviderGroupID: group.ID,
-			ProviderName:             parent.Name,
-			Name:                     name,
-			ModelType:                modelType,
-			Vision:                   req.Vision && modelType == "llm",
-			MaxInputTokens:           maxInputTokens,
-			IsDefault:                false,
-			BaseModel: orm.BaseModel{
-				CreateUserID:   userID,
-				CreateUserName: userName,
-				CreatedAt:      now,
-				UpdatedAt:      now,
-				DeletedAt:      nil,
-			},
+	err = db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := lockProvider(tx, &parent); err != nil {
+			return errConnectionChanged
 		}
-		if err := db.WithContext(r.Context()).Create(&row).Error; err != nil {
-			common.ReplyErr(w, "create model failed", http.StatusInternalServerError)
-			return
+		if err := tx.Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", group.ID, parent.ID, userID).Take(&group).Error; err != nil {
+			return errConnectionChanged
 		}
-	} else {
-		result := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroupModel{}).
-			Where("id = ? AND create_user_id = ? AND deleted_at IS NOT NULL", row.ID, userID).
-			Updates(map[string]interface{}{
-				"user_model_provider_id": parent.ID,
-				"provider_name":          parent.Name,
-				"model_type":             modelType,
-				"vision":                 req.Vision && modelType == "llm",
-				"max_input_tokens":       maxInputTokens,
-				"is_default":             false,
-				"updated_at":             now,
-				"deleted_at":             nil,
-			})
+		err := tx.Where("user_model_provider_group_id = ? AND create_user_id = ? AND name = ?", group.ID, userID, name).Take(&row).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err == nil && row.DeletedAt == nil {
+			return errModelAlreadyExists
+		}
+		now := time.Now()
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			row = orm.UserModelProviderGroupModel{
+				ID: common.GenerateID(), UserModelProviderID: parent.ID, UserModelProviderGroupID: group.ID,
+				ProviderName: RuntimeProviderName(parent), Name: name, ModelType: modelType, Vision: req.Vision && modelType == "llm",
+				MaxInputTokens: maxInputTokens, IsDefault: false,
+				BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now},
+			}
+			return tx.Create(&row).Error
+		}
+		result := tx.Model(&orm.UserModelProviderGroupModel{}).Where("id = ? AND create_user_id = ? AND deleted_at IS NOT NULL", row.ID, userID).Updates(map[string]interface{}{
+			"user_model_provider_id": parent.ID, "provider_name": RuntimeProviderName(parent), "model_type": modelType,
+			"vision": req.Vision && modelType == "llm", "max_input_tokens": maxInputTokens, "is_default": false, "updated_at": now, "deleted_at": nil,
+		})
 		if result.Error != nil {
-			common.ReplyErr(w, "restore model failed", http.StatusInternalServerError)
-			return
+			return result.Error
 		}
 		if result.RowsAffected != 1 {
-			common.ReplyErr(w, "model name already exists in this group", http.StatusConflict)
+			return errModelAlreadyExists
+		}
+		row.UserModelProviderID, row.ProviderName, row.ModelType = parent.ID, RuntimeProviderName(parent), modelType
+		row.Vision, row.MaxInputTokens, row.IsDefault, row.UpdatedAt, row.DeletedAt = req.Vision && modelType == "llm", maxInputTokens, false, now, nil
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, errConnectionChanged) || errors.Is(err, errModelAlreadyExists) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
 			return
 		}
-		row.UserModelProviderID = parent.ID
-		row.ProviderName = parent.Name
-		row.ModelType = modelType
-		row.Vision = req.Vision && modelType == "llm"
-		row.MaxInputTokens = maxInputTokens
-		row.IsDefault = false
-		row.UpdatedAt = now
-		row.DeletedAt = nil
+		common.ReplyErr(w, "save model failed", http.StatusInternalServerError)
+		return
 	}
 
 	common.ReplyOK(w, addGroupModelResponse{

@@ -490,13 +490,18 @@ func TestCreateGroupVerifiesSubmittedAPIKeyBeforeSaving(t *testing.T) {
 		t.Fatal("replacing the enabled key must leave its successor inactive")
 	}
 
+	rejectedProvider := userProvider
+	rejectedProvider.ID, rejectedProvider.DefaultModelProviderID = "rejected-provider", "rejected-catalog"
+	if err := db.Create(&rejectedProvider).Error; err != nil {
+		t.Fatal(err)
+	}
 	failedReq := httptest.NewRequest(
 		http.MethodPost,
-		"/api/core/model_providers/user-qwen-create/groups",
+		"/api/core/model_providers/rejected-provider/groups",
 		strings.NewReader(`{"name":"Rejected","base_url":"https://dashscope.aliyuncs.com/","api_key":"rejected-key","verify":true}`),
 	)
 	failedReq.Header.Set("X-User-Id", "user-1")
-	failedReq = mux.SetURLVars(failedReq, map[string]string{"model_provider_id": userProvider.ID})
+	failedReq = mux.SetURLVars(failedReq, map[string]string{"model_provider_id": rejectedProvider.ID})
 	failedRec := httptest.NewRecorder()
 
 	CreateGroup(failedRec, failedReq)

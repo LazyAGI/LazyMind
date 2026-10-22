@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -33,7 +32,7 @@ func TestSupplierActiveKeyMigrationRoundTrip(t *testing.T) {
 					continue
 				}
 				for _, migration := range mode.Dev {
-					if !strings.Contains(migration.UpPath, activeKeyMigration) {
+					if migration.FileVersion < 20261022065811 {
 						execMigrationFileForDriver(t, db, migration.UpPath, driver)
 					}
 				}

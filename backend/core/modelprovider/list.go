@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -19,6 +20,8 @@ type listItem struct {
 	ID                     string              `json:"id"`
 	DefaultModelProviderID string              `json:"default_model_provider_id"`
 	Name                   string              `json:"name"`
+	IsCustom               bool                `json:"is_custom"`
+	ProtocolName           string              `json:"protocol_name"`
 	Description            string              `json:"description"`
 	BaseURL                string              `json:"base_url"`
 	BaseURLPresets         []baseURLPresetItem `json:"base_url_presets,omitempty"`
@@ -145,10 +148,15 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 	for i := range rows {
 		row := rows[i]
 		caps := splitCapabilities(row.Capabilities)
+		if hasSharedProviderEndpoint(row) {
+			caps = modelSupplierCapabilities(row.Capabilities)
+		}
 		out = append(out, listItem{
 			ID:                     row.ID,
 			DefaultModelProviderID: row.DefaultModelProviderID,
 			Name:                   row.Name,
+			IsCustom:               row.IsCustom,
+			ProtocolName:           RuntimeProviderName(row),
 			Description:            row.Description,
 			BaseURL:                row.BaseURL,
 			BaseURLPresets:         buildBaseURLPresets(row),
@@ -193,16 +201,9 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 			)
 		}
 	}
-	type configuredProviderRow struct {
-		UserModelProviderID string `gorm:"column:user_model_provider_id"`
-		BaseURL             string `gorm:"column:base_url"`
-		APIKey              string `gorm:"column:api_key"`
-		APIKeyCiphertext    string `gorm:"column:api_key_ciphertext"`
-	}
-	var configuredRows []configuredProviderRow
+	var configuredRows []orm.UserModelProviderGroup
 	if err := db.WithContext(ctx).
 		Model(&orm.UserModelProviderGroup{}).
-		Select("user_model_provider_id, base_url, api_key, api_key_ciphertext").
 		Where("user_model_provider_id IN ? AND deleted_at IS NULL AND is_verified = ?", providerIDs, true).
 		Find(&configuredRows).Error; err == nil {
 		defaultProviderIDByProviderID := make(map[string]string, len(out))
@@ -211,7 +212,7 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 		}
 		configuredProviderIDs := make(map[string]bool, len(configuredRows))
 		for _, row := range configuredRows {
-			row.APIKey, _ = ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
+			row.APIKey, _ = apiKeyForGroup(db.WithContext(ctx), &row)
 			if strings.TrimSpace(row.APIKey) != "" ||
 				isCustomBaseURL(ctx, db, defaultProviderIDByProviderID[row.UserModelProviderID], row.BaseURL) {
 				configuredProviderIDs[row.UserModelProviderID] = true
@@ -265,7 +266,7 @@ func selectLocalizedDescription(raw []byte, locale, fallback string) string {
 func syncUserProvidersFromDefaults(ctx context.Context, db *gorm.DB, userID, userName string) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var existing []orm.UserModelProvider
-		if err := tx.Where("create_user_id = ? AND deleted_at IS NULL", userID).Find(&existing).Error; err != nil {
+		if err := tx.Where("create_user_id = ? AND deleted_at IS NULL AND is_custom = ?", userID, false).Find(&existing).Error; err != nil {
 			return err
 		}
 		existingByDefault := make(map[string]*orm.UserModelProvider, len(existing))
@@ -313,7 +314,7 @@ func syncUserProvidersFromDefaults(ctx context.Context, db *gorm.DB, userID, use
 		if len(toCreate) == 0 {
 			return nil
 		}
-		return tx.Create(&toCreate).Error
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&toCreate).Error
 	})
 }
 
@@ -333,7 +334,7 @@ func splitCapabilities(caps string) []string {
 }
 
 func buildBaseURLPresets(row orm.UserModelProvider) []baseURLPresetItem {
-	if normalizeProviderName(row.Name) == "openai" {
+	if normalizeProviderName(RuntimeProviderName(row)) == "openai" {
 		required := true
 		return []baseURLPresetItem{
 			{Key: "official", Value: row.BaseURL, Label: "OpenAI", APIKeyRequired: &required},
@@ -342,7 +343,7 @@ func buildBaseURLPresets(row orm.UserModelProvider) []baseURLPresetItem {
 			{Key: "openrouter", Value: "https://openrouter.ai/api/v1", Label: "OpenRouter", APIKeyRequired: &required},
 		}
 	}
-	if normalizeProviderName(row.Name) != "mineru" {
+	if normalizeProviderName(RuntimeProviderName(row)) != "mineru" {
 		return nil
 	}
 
@@ -386,4 +387,14 @@ func isEnvEnabled(name string) bool {
 	default:
 		return false
 	}
+}
+
+func modelSupplierCapabilities(raw string) []string {
+	result := make([]string, 0)
+	for _, capability := range splitCapabilities(raw) {
+		if capability != "multi_group" {
+			result = append(result, capability)
+		}
+	}
+	return result
 }

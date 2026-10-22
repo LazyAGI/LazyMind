@@ -27,9 +27,9 @@ func hasSharedProviderEndpoint(provider orm.UserModelProvider) bool {
 // suppliers own the URL; connection instances only own their name and keys.
 func connectionBaseURL(provider orm.UserModelProvider, fallback string) string {
 	if hasSharedProviderEndpoint(provider) && strings.TrimSpace(provider.BaseURL) != "" {
-		return LazyLLMBaseURL(provider.Name, strings.TrimSpace(provider.BaseURL))
+		return LazyLLMBaseURL(RuntimeProviderName(provider), strings.TrimSpace(provider.BaseURL))
 	}
-	return LazyLLMBaseURL(provider.Name, strings.TrimSpace(fallback))
+	return LazyLLMBaseURL(RuntimeProviderName(provider), strings.TrimSpace(fallback))
 }
 
 func lockProvider(tx *gorm.DB, provider *orm.UserModelProvider) error {
@@ -79,11 +79,11 @@ func UpdateProviderEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 	baseURL := strings.TrimSpace(req.BaseURL)
 	parsed, err := url.Parse(baseURL)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || len(baseURL) > 1024 || hasOpenAIRequestPath(parent.Name, baseURL) {
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || len(baseURL) > 1024 || hasOpenAIRequestPath(RuntimeProviderName(parent), baseURL) {
 		common.ReplyErr(w, "base_url must be an HTTP(S) API root without credentials, query, fragment, or request path", http.StatusBadRequest)
 		return
 	}
-	baseURL = LazyLLMBaseURL(parent.Name, baseURL)
+	baseURL = LazyLLMBaseURL(RuntimeProviderName(parent), baseURL)
 	if err := setProviderEndpoint(r.Context(), db, &parent, baseURL, time.Now()); err != nil {
 		common.ReplyErr(w, "update model provider endpoint failed", http.StatusInternalServerError)
 		return

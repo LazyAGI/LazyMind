@@ -2157,6 +2157,21 @@ export const CreateChatExportRequestContentTypeEnum = {
 
 export type CreateChatExportRequestContentTypeEnum = typeof CreateChatExportRequestContentTypeEnum[keyof typeof CreateChatExportRequestContentTypeEnum];
 
+export interface CreateCustomModelProviderOpenAPIRequest {
+    'base_url': string;
+    'name': string;
+    /**
+     * An owned model provider whose technical protocol is used for this custom supplier.
+     */
+    'source_provider_id': string;
+}
+export interface CreateCustomModelProviderOpenAPIResponse {
+    /**
+     * Private credential/model storage ID retained for API compatibility.
+     */
+    'group_id': string;
+    'id': string;
+}
 export interface CreateEvalSetByImportRequest {
     'dataset_ids'?: Array<string>;
     'description': string;
@@ -2543,6 +2558,9 @@ export interface CurrentMemorySoulResponse {
     'data': CurrentMemorySoulData;
     'message': string;
 }
+export interface CustomModelProviderMutationOpenAPIResponse {
+    'id': string;
+}
 export interface DatabaseConnectionRequest {
     'database_name': string;
     'db_type': string;
@@ -2632,6 +2650,10 @@ export interface DatasetOptionsResponse {
 export interface DatasetRole {
     'display_name'?: string;
     'role'?: string;
+}
+export interface DeleteCustomModelProviderOpenAPIResponse {
+    'downgraded_knowledge_bases': number;
+    'id': string;
 }
 export interface DeleteDatabaseConnectionOpenAPIResponse {
     'deleted': boolean;
@@ -7022,6 +7044,9 @@ export interface UpdateACLRequest {
     'expires_at'?: string;
     'permission': string;
 }
+export interface UpdateCustomModelProviderOpenAPIRequest {
+    'name': string;
+}
 export interface UpdateDatabaseConnectionRequest {
     'database_name'?: string;
     'db_type'?: string;
@@ -7178,8 +7203,10 @@ export interface UserModelProviderOpenAPIItem {
     'description': string;
     'id': string;
     'is_configured': boolean;
+    'is_custom': boolean;
     'model_types'?: Array<string>;
     'name': string;
+    'protocol_name': string;
 }
 export interface UserUIPreferencesOpenAPIResponse {
     'accepted_user_agreement_version': string;
@@ -47658,6 +47685,45 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
+         * Soft-deletes an owned custom supplier and its private models/credentials. Catalog suppliers cannot be deleted. Corresponding saved default selections are cleared.
+         * @summary Delete a custom model supplier
+         * @param {string} modelProviderId
+         * @param {boolean} [confirmIndexedDowngrade] Explicitly confirm knowledge-base index downgrade when deleting an embedding supplier.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdDelete: async (modelProviderId: string, confirmIndexedDowngrade?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdDelete', 'modelProviderId', modelProviderId)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (confirmIndexedDowngrade !== undefined) {
+                localVarQueryParameter['confirm_indexed_downgrade'] = confirmIndexedDowngrade;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Updates the current user\'s model supplier endpoint and all its connection instances atomically. Keys and model IDs are retained; changing the endpoint invalidates connection verification. Other provider categories are not supported.
          * @summary Update a model supplier\'s shared endpoint
          * @param {string} modelProviderId
@@ -47731,7 +47797,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Validates credentials. Model suppliers use their shared endpoint and the first stored key when api_key is omitted. Explicit empty api_key tests a keyless connection. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
+         * Validates credentials. Model suppliers use their shared endpoint and the currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
          * @summary Check model provider connectivity
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48141,6 +48207,45 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
+         * Changes an owned custom supplier\'s display name without changing its technical protocol, credentials, model IDs or selections. Catalog suppliers cannot be renamed.
+         * @summary Rename a custom model supplier
+         * @param {string} modelProviderId
+         * @param {UpdateCustomModelProviderOpenAPIRequest} updateCustomModelProviderOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdPatch: async (modelProviderId: string, updateCustomModelProviderOpenAPIRequest: UpdateCustomModelProviderOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdPatch', 'modelProviderId', modelProviderId)
+            // verify required parameter 'updateCustomModelProviderOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdPatch', 'updateCustomModelProviderOpenAPIRequest', updateCustomModelProviderOpenAPIRequest)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(updateCustomModelProviderOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Merges non-deleted models from the current user\'s verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
          * @summary List current user\'s selectable models
          * @param {string} [modelType]
@@ -48169,6 +48274,41 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Creates an independent supplier with a display name, endpoint and technical protocol inherited from an owned source provider. Includes one private storage group; no credential is returned.
+         * @summary Create a custom model supplier
+         * @param {CreateCustomModelProviderOpenAPIRequest} createCustomModelProviderOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersPost: async (createCustomModelProviderOpenAPIRequest: CreateCustomModelProviderOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'createCustomModelProviderOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersPost', 'createCustomModelProviderOpenAPIRequest', createCustomModelProviderOpenAPIRequest)
+            const localVarPath = `/api/core/model_providers`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(createCustomModelProviderOpenAPIRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -48482,6 +48622,20 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Soft-deletes an owned custom supplier and its private models/credentials. Catalog suppliers cannot be deleted. Corresponding saved default selections are cleared.
+         * @summary Delete a custom model supplier
+         * @param {string} modelProviderId
+         * @param {boolean} [confirmIndexedDowngrade] Explicitly confirm knowledge-base index downgrade when deleting an embedding supplier.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdDelete(modelProviderId: string, confirmIndexedDowngrade?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DeleteCustomModelProviderOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdDelete(modelProviderId, confirmIndexedDowngrade, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Updates the current user\'s model supplier endpoint and all its connection instances atomically. Keys and model IDs are retained; changing the endpoint invalidates connection verification. Other provider categories are not supported.
          * @summary Update a model supplier\'s shared endpoint
          * @param {string} modelProviderId
@@ -48509,7 +48663,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Validates credentials. Model suppliers use their shared endpoint and the first stored key when api_key is omitted. Explicit empty api_key tests a keyless connection. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
+         * Validates credentials. Model suppliers use their shared endpoint and the currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
          * @summary Check model provider connectivity
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48655,6 +48809,20 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Changes an owned custom supplier\'s display name without changing its technical protocol, credentials, model IDs or selections. Catalog suppliers cannot be renamed.
+         * @summary Rename a custom model supplier
+         * @param {string} modelProviderId
+         * @param {UpdateCustomModelProviderOpenAPIRequest} updateCustomModelProviderOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdPatch(modelProviderId: string, updateCustomModelProviderOpenAPIRequest: UpdateCustomModelProviderOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CustomModelProviderMutationOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdPatch(modelProviderId, updateCustomModelProviderOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Merges non-deleted models from the current user\'s verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
          * @summary List current user\'s selectable models
          * @param {string} [modelType]
@@ -48665,6 +48833,19 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelsGet(modelType, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Creates an independent supplier with a display name, endpoint and technical protocol inherited from an owned source provider. Includes one private storage group; no credential is returned.
+         * @summary Create a custom model supplier
+         * @param {CreateCustomModelProviderOpenAPIRequest} createCustomModelProviderOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersPost(createCustomModelProviderOpenAPIRequest: CreateCustomModelProviderOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CreateCustomModelProviderOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersPost(createCustomModelProviderOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -48798,6 +48979,16 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersGet(requestParameters.category, requestParameters.excludeCategory, requestParameters.keyword, requestParameters.acceptLanguage, options).then((request) => request(axios, basePath));
         },
         /**
+         * Soft-deletes an owned custom supplier and its private models/credentials. Catalog suppliers cannot be deleted. Corresponding saved default selections are cleared.
+         * @summary Delete a custom model supplier
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdDelete(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<DeleteCustomModelProviderOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdDelete(requestParameters.modelProviderId, requestParameters.confirmIndexedDowngrade, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Updates the current user\'s model supplier endpoint and all its connection instances atomically. Keys and model IDs are retained; changing the endpoint invalidates connection verification. Other provider categories are not supported.
          * @summary Update a model supplier\'s shared endpoint
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdEndpointPutRequest} requestParameters Request parameters.
@@ -48818,7 +49009,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGet(requestParameters.modelProviderId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Validates credentials. Model suppliers use their shared endpoint and the first stored key when api_key is omitted. Explicit empty api_key tests a keyless connection. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
+         * Validates credentials. Model suppliers use their shared endpoint and the currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
          * @summary Check model provider connectivity
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdCheckPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -48918,6 +49109,16 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdKeysActivePut(requestParameters.modelProviderId, requestParameters.setActiveModelProviderKeyOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
+         * Changes an owned custom supplier\'s display name without changing its technical protocol, credentials, model IDs or selections. Catalog suppliers cannot be renamed.
+         * @summary Rename a custom model supplier
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdPatch(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<CustomModelProviderMutationOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdPatch(requestParameters.modelProviderId, requestParameters.updateCustomModelProviderOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Merges non-deleted models from the current user\'s verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
          * @summary List current user\'s selectable models
          * @param {ModelProvidersApiApiCoreModelProvidersModelsGetRequest} requestParameters Request parameters.
@@ -48926,6 +49127,16 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
          */
         apiCoreModelProvidersModelsGet(requestParameters: ModelProvidersApiApiCoreModelProvidersModelsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ListModelProviderGroupModelsOpenAPIResponse> {
             return localVarFp.apiCoreModelProvidersModelsGet(requestParameters.modelType, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Creates an independent supplier with a display name, endpoint and technical protocol inherited from an owned source provider. Includes one private storage group; no credential is returned.
+         * @summary Create a custom model supplier
+         * @param {ModelProvidersApiApiCoreModelProvidersPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersPost(requestParameters: ModelProvidersApiApiCoreModelProvidersPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<CreateCustomModelProviderOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersPost(requestParameters.createCustomModelProviderOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
          * Lists verified provider groups owned by the current user for the given non-model category (for example ocr or search). Shared provider groups are intentionally excluded from this selectable list.
@@ -49022,6 +49233,18 @@ export interface ModelProvidersApiApiCoreModelProvidersGetRequest {
      * Optional UI locale. zh and zh-* use zh-CN; en and en-* use en-US. Missing or unsupported values default to zh-CN.
      */
     readonly acceptLanguage?: string
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdDelete operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdDeleteRequest {
+    readonly modelProviderId: string
+
+    /**
+     * Explicitly confirm knowledge-base index downgrade when deleting an embedding supplier.
+     */
+    readonly confirmIndexedDowngrade?: boolean
 }
 
 /**
@@ -49143,10 +49366,26 @@ export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdKeysActive
 }
 
 /**
+ * Request parameters for apiCoreModelProvidersModelProviderIdPatch operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdPatchRequest {
+    readonly modelProviderId: string
+
+    readonly updateCustomModelProviderOpenAPIRequest: UpdateCustomModelProviderOpenAPIRequest
+}
+
+/**
  * Request parameters for apiCoreModelProvidersModelsGet operation in ModelProvidersApi.
  */
 export interface ModelProvidersApiApiCoreModelProvidersModelsGetRequest {
     readonly modelType?: string
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersPost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersPostRequest {
+    readonly createCustomModelProviderOpenAPIRequest: CreateCustomModelProviderOpenAPIRequest
 }
 
 /**
@@ -49220,6 +49459,17 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
+     * Soft-deletes an owned custom supplier and its private models/credentials. Catalog suppliers cannot be deleted. Corresponding saved default selections are cleared.
+     * @summary Delete a custom model supplier
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdDelete(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdDelete(requestParameters.modelProviderId, requestParameters.confirmIndexedDowngrade, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Updates the current user\'s model supplier endpoint and all its connection instances atomically. Keys and model IDs are retained; changing the endpoint invalidates connection verification. Other provider categories are not supported.
      * @summary Update a model supplier\'s shared endpoint
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdEndpointPutRequest} requestParameters Request parameters.
@@ -49242,7 +49492,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Validates credentials. Model suppliers use their shared endpoint and the first stored key when api_key is omitted. Explicit empty api_key tests a keyless connection. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
+     * Validates credentials. Model suppliers use their shared endpoint and the currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
      * @summary Check model provider connectivity
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdCheckPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49352,6 +49602,17 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
+     * Changes an owned custom supplier\'s display name without changing its technical protocol, credentials, model IDs or selections. Catalog suppliers cannot be renamed.
+     * @summary Rename a custom model supplier
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdPatch(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdPatch(requestParameters.modelProviderId, requestParameters.updateCustomModelProviderOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Merges non-deleted models from the current user\'s verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
      * @summary List current user\'s selectable models
      * @param {ModelProvidersApiApiCoreModelProvidersModelsGetRequest} requestParameters Request parameters.
@@ -49360,6 +49621,17 @@ export class ModelProvidersApi extends BaseAPI {
      */
     public apiCoreModelProvidersModelsGet(requestParameters: ModelProvidersApiApiCoreModelProvidersModelsGetRequest = {}, options?: RawAxiosRequestConfig) {
         return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelsGet(requestParameters.modelType, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Creates an independent supplier with a display name, endpoint and technical protocol inherited from an owned source provider. Includes one private storage group; no credential is returned.
+     * @summary Create a custom model supplier
+     * @param {ModelProvidersApiApiCoreModelProvidersPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersPost(requestParameters: ModelProvidersApiApiCoreModelProvidersPostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersPost(requestParameters.createCustomModelProviderOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

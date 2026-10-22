@@ -54,6 +54,29 @@ export async function updateProviderEndpoint(providerId: string, baseUrl: string
   return unwrapModelProviderData(response.data);
 }
 
+export async function createCustomProvider(input: {name: string; source_provider_id: string; base_url: string}): Promise<{id: string; group_id: string}> {
+  const response = await modelProvidersApi.apiCoreModelProvidersPost({
+    createCustomModelProviderOpenAPIRequest: input,
+  });
+  return unwrapModelProviderData(response.data);
+}
+
+export async function updateCustomProviderName(providerId: string, name: string): Promise<{id: string}> {
+  const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdPatch({
+    modelProviderId: providerId,
+    updateCustomModelProviderOpenAPIRequest: { name },
+  });
+  return unwrapModelProviderData(response.data);
+}
+
+export async function deleteCustomProvider(providerId: string, confirmIndexedDowngrade = false): Promise<{id: string; downgraded_knowledge_bases: number}> {
+  const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdDelete({
+    modelProviderId: providerId,
+    confirmIndexedDowngrade: confirmIndexedDowngrade || undefined,
+  });
+  return unwrapModelProviderData(response.data);
+}
+
 export async function setProviderActiveKey(providerId: string, groupId: string, keyId: string): Promise<{group_id: string; key_id: string}> {
   const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdKeysActivePut({
     modelProviderId: providerId,

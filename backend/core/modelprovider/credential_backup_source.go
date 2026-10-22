@@ -32,9 +32,9 @@ func (source CredentialBackupSource) LoadCredential(ctx context.Context, groupID
 	if err := source.DB.WithContext(ctx).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", group.UserModelProviderID, group.CreateUserID).Take(&provider).Error; err != nil {
 		return credentialvault.ProviderCredential{}, err
 	}
-	catalogKey := strings.TrimSpace(provider.DefaultModelProviderID)
+	catalogKey := strings.TrimSpace(RuntimeProviderName(provider))
 	if catalogKey == "" {
-		catalogKey = strings.TrimSpace(provider.Name)
+		catalogKey = strings.TrimSpace(provider.DefaultModelProviderID)
 	}
 	// The compatibility mirror is updated atomically with the key revision.
 	// Export that same row snapshot rather than pair it with a later supplier URL.

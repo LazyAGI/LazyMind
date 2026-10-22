@@ -215,7 +215,10 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "initialize enabled api key failed", http.StatusInternalServerError)
 		return
 	}
-	if hasOpenAIRequestPath(parent.Name, baseURL) {
+	if hasSharedProviderEndpoint(parent) {
+		name = parent.Name
+	}
+	if hasOpenAIRequestPath(RuntimeProviderName(parent), baseURL) {
 		common.ReplyErr(w, "base_url must be an API root without a request path", http.StatusBadRequest)
 		return
 	}
@@ -224,14 +227,14 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "base_url is required", http.StatusBadRequest)
 		return
 	}
-	if hasOpenAIRequestPath(parent.Name, baseURL) {
+	if hasOpenAIRequestPath(RuntimeProviderName(parent), baseURL) {
 		common.ReplyErr(w, "base_url must be an API root without a request path", http.StatusBadRequest)
 		return
 	}
-	baseURL = LazyLLMBaseURL(parent.Name, baseURL)
+	baseURL = LazyLLMBaseURL(RuntimeProviderName(parent), baseURL)
 
 	// Capability: single-group providers only allow one group per user.
-	if !hasSharedProviderEndpoint(parent) && !parent.HasCapability("multi_group") {
+	if hasSharedProviderEndpoint(parent) || !parent.HasCapability("multi_group") {
 		var count int64
 		if err := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroup{}).
 			Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, userID).
@@ -258,8 +261,8 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var checkData *CheckModelProviderData
-	if apiKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
-		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, apiKey, "")
+	if apiKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, RuntimeProviderName(parent)) {
+		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, apiKey, "")
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
 			checkMsg := msg
@@ -278,7 +281,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
 	}
 	if req.Verify && checkData == nil && apiKey != "" {
-		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, apiKey, "")
+		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, apiKey, "")
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
 			checkMsg := msg
@@ -322,6 +325,13 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 			if err := lockProvider(tx, &parent); err != nil {
 				return err
 			}
+			var existing int64
+			if err := tx.Model(&orm.UserModelProviderGroup{}).Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, userID).Count(&existing).Error; err != nil {
+				return err
+			}
+			if existing > 0 {
+				return errCanonicalGroupExists
+			}
 			if strings.TrimSpace(parent.BaseURL) == "" {
 				if err := tx.Model(&parent).Update("base_url", baseURL).Error; err != nil {
 					return err
@@ -344,7 +354,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 		if strings.EqualFold(strings.TrimSpace(parent.Category), defaultProviderCategory) {
 			autoSelection, err = autoSelectUnconfiguredProviderModels(
-				tx, userID, userName, parent.Name, baseURL, seededModels, now,
+				tx, userID, userName, RuntimeProviderName(parent), baseURL, seededModels, now,
 			)
 			if err != nil {
 				return err
@@ -356,6 +366,10 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		return enqueueCredentialBackup(tx, row.ID, row.CredentialRevision, credentialvault.BackupUpsert, now)
 	})
 	if err != nil {
+		if errors.Is(err, errCanonicalGroupExists) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, "create group failed", http.StatusInternalServerError)
 		return
 	}
@@ -472,7 +486,10 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query model provider failed", http.StatusInternalServerError)
 		return
 	}
-	if hasOpenAIRequestPath(parent.Name, baseURL) {
+	if hasSharedProviderEndpoint(parent) {
+		name = parent.Name
+	}
+	if hasOpenAIRequestPath(RuntimeProviderName(parent), baseURL) {
 		common.ReplyErr(w, "base_url must be an API root without a request path", http.StatusBadRequest)
 		return
 	}
@@ -481,11 +498,11 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "base_url is required", http.StatusBadRequest)
 		return
 	}
-	if hasOpenAIRequestPath(parent.Name, baseURL) {
+	if hasOpenAIRequestPath(RuntimeProviderName(parent), baseURL) {
 		common.ReplyErr(w, "base_url must be an API root without a request path", http.StatusBadRequest)
 		return
 	}
-	baseURL = LazyLLMBaseURL(parent.Name, baseURL)
+	baseURL = LazyLLMBaseURL(RuntimeProviderName(parent), baseURL)
 
 	if err := prepareProviderKeySelection(r.Context(), db, &parent); err != nil {
 		common.ReplyErr(w, "initialize enabled api key failed", http.StatusInternalServerError)
@@ -607,8 +624,8 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if !skipVerify && effectiveAPIKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
-		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey, "")
+	if !skipVerify && effectiveAPIKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, RuntimeProviderName(parent)) {
+		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, effectiveAPIKey, "")
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
 			checkMsg := msg
@@ -634,7 +651,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
 			return
 		}
-		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey, "")
+		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, effectiveAPIKey, "")
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
 			checkMsg := msg
@@ -902,7 +919,7 @@ func seedGroupModelsFromDefaults(
 	}
 
 	// Determine whether we use the new-platform subset or the full catalog.
-	useNewPlatform := strings.EqualFold(parent.Name, "SenseNova") &&
+	useNewPlatform := strings.EqualFold(RuntimeProviderName(*parent), "SenseNova") &&
 		normalizeBaseURLForCompare(requestBaseURL) == normalizeBaseURLForCompare(sensenovaNewPlatformBaseURL)
 
 	var catalog orm.DefaultModelProvider
@@ -936,7 +953,7 @@ func seedGroupModelsFromDefaults(
 
 	batch := make([]orm.UserModelProviderGroupModel, 0, len(defs))
 	for _, d := range defs {
-		if strings.EqualFold(parent.Name, "SenseNova") &&
+		if strings.EqualFold(RuntimeProviderName(*parent), "SenseNova") &&
 			!shouldSeedSenseNovaModel(d.Name, useNewPlatform) {
 			continue
 		}
@@ -1077,7 +1094,7 @@ func AddKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Verify the key before storing.
-	checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, connectionBaseURL(parent, row.BaseURL), newKey, "")
+	checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), connectionBaseURL(parent, row.BaseURL), newKey, "")
 	if checkErr != nil || checkResult == nil || !checkResult.Success {
 		msg := "verification failed"
 		if checkResult != nil && strings.TrimSpace(checkResult.Message) != "" {

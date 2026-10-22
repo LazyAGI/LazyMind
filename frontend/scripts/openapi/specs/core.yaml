@@ -11183,6 +11183,31 @@ components:
             required:
                 - conversation_id
             type: object
+        createCustomModelProviderOpenAPIRequest:
+            properties:
+                base_url:
+                    type: string
+                name:
+                    type: string
+                source_provider_id:
+                    description: An owned model provider whose technical protocol is used for this custom supplier.
+                    type: string
+            required:
+                - base_url
+                - name
+                - source_provider_id
+            type: object
+        createCustomModelProviderOpenAPIResponse:
+            properties:
+                group_id:
+                    description: Private credential/model storage ID retained for API compatibility.
+                    type: string
+                id:
+                    type: string
+            required:
+                - group_id
+                - id
+            type: object
         createModelProviderGroupOpenAPIRequest:
             properties:
                 api_key:
@@ -11233,6 +11258,23 @@ components:
                         - high
                         - max
                     type: string
+            type: object
+        customModelProviderMutationOpenAPIResponse:
+            properties:
+                id:
+                    type: string
+            required:
+                - id
+            type: object
+        deleteCustomModelProviderOpenAPIResponse:
+            properties:
+                downgraded_knowledge_bases:
+                    type: integer
+                id:
+                    type: string
+            required:
+                - downgraded_knowledge_bases
+                - id
             type: object
         deleteDatabaseConnectionOpenAPIResponse:
             properties:
@@ -14707,6 +14749,13 @@ components:
             required:
                 - configured
             type: object
+        updateCustomModelProviderOpenAPIRequest:
+            properties:
+                name:
+                    type: string
+            required:
+                - name
+            type: object
         updateModelProviderEndpointOpenAPIRequest:
             properties:
                 base_url:
@@ -14828,11 +14877,15 @@ components:
                     type: string
                 is_configured:
                     type: boolean
+                is_custom:
+                    type: boolean
                 model_types:
                     items:
                         type: string
                     type: array
                 name:
+                    type: string
+                protocol_name:
                     type: string
             required:
                 - base_url
@@ -14841,7 +14894,9 @@ components:
                 - description
                 - id
                 - is_configured
+                - is_custom
                 - name
+                - protocol_name
             type: object
         userUIPreferencesOpenAPIResponse:
             properties:
@@ -25733,6 +25788,73 @@ paths:
             summary: List user model providers
             tags:
                 - model_providers
+        post:
+            description: Creates an independent supplier with a display name, endpoint and technical protocol inherited from an owned source provider. Includes one private storage group; no credential is returned.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/createCustomModelProviderOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/createCustomModelProviderOpenAPIResponse'
+                    description: Created custom supplier
+            summary: Create a custom model supplier
+            tags:
+                - model_providers
+    /api/core/model_providers/{model_provider_id}:
+        delete:
+            description: Soft-deletes an owned custom supplier and its private models/credentials. Catalog suppliers cannot be deleted. Corresponding saved default selections are cleared.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+                - description: Explicitly confirm knowledge-base index downgrade when deleting an embedding supplier.
+                  in: query
+                  name: confirm_indexed_downgrade
+                  required: false
+                  schema:
+                    type: boolean
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/deleteCustomModelProviderOpenAPIResponse'
+                    description: Deleted custom supplier
+            summary: Delete a custom model supplier
+            tags:
+                - model_providers
+        patch:
+            description: Changes an owned custom supplier's display name without changing its technical protocol, credentials, model IDs or selections. Catalog suppliers cannot be renamed.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/updateCustomModelProviderOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/customModelProviderMutationOpenAPIResponse'
+                    description: Renamed custom supplier
+            summary: Rename a custom model supplier
+            tags:
+                - model_providers
     /api/core/model_providers/{model_provider_id}/endpoint:
         put:
             description: Updates the current user's model supplier endpoint and all its connection instances atomically. Keys and model IDs are retained; changing the endpoint invalidates connection verification. Other provider categories are not supported.
@@ -26029,7 +26151,7 @@ paths:
                 - model_providers
     /api/core/model_providers/{model_provider_id}/groups/{group_id}:check:
         post:
-            description: Validates credentials. Model suppliers use their shared endpoint and the first stored key when api_key is omitted. Explicit empty api_key tests a keyless connection. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
+            description: Validates credentials. Model suppliers use their shared endpoint and the currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
             parameters:
                 - in: path
                   name: model_provider_id

@@ -619,8 +619,8 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	// The provider in the path is authoritative. A custom Base URL may be an
 	// official API reverse proxy, so it must not change the provider source.
-	source := parent.Name
-	urlStr = LazyLLMBaseURL(parent.Name, urlStr)
+	source := RuntimeProviderName(parent)
+	urlStr = LazyLLMBaseURL(RuntimeProviderName(parent), urlStr)
 	var group orm.UserModelProviderGroup
 	if err := db.WithContext(r.Context()).
 		Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parentID, userID).

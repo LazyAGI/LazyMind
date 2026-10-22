@@ -156,7 +156,9 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 			return err
 		}
 	} else {
-		if err := tx.Where("create_user_id = ? AND deleted_at IS NULL AND (default_model_provider_id = ? OR LOWER(name) = LOWER(?))", sink.localUserID, restored.Provider.ProviderCatalogKey, restored.Provider.ProviderCatalogKey).Order("default_model_provider_id DESC").Take(&provider).Error; err != nil {
+		var err error
+		provider, err = restoredSupplier(tx, sink.localUserID, restored.Provider, resolution, now)
+		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return credentialvault.ErrLocalConflict
 			}
@@ -187,6 +189,9 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 			}
 			provider.BaseURL = restored.Provider.BaseURL
 		}
+	}
+	if hasSharedProviderEndpoint(provider) {
+		restored.Provider.DisplayName = provider.Name
 	}
 	// Restoring a connection never changes a model supplier's shared endpoint.
 	// A credential checked against a different old endpoint needs a new check.
@@ -264,8 +269,8 @@ func (sink *CredentialRestoreSink) ActivateTemporary(ctx context.Context, scope 
 	}
 	values := make(map[string]temporaryCredential, len(credentials))
 	for _, restored := range credentials {
-		var catalogProvider orm.UserModelProvider
-		if err := sink.db.WithContext(ctx).Where("create_user_id = ? AND deleted_at IS NULL AND (default_model_provider_id = ? OR LOWER(name) = LOWER(?))", sink.localUserID, restored.Provider.ProviderCatalogKey, restored.Provider.ProviderCatalogKey).Take(&catalogProvider).Error; err != nil {
+		catalogProvider, err := sink.temporarySupplier(ctx, scope, restored.RecordID, restored.Provider)
+		if err != nil {
 			clearTemporaryValues(values)
 			return credentialvault.ErrLocalConflict
 		}
@@ -346,8 +351,8 @@ func (sink *CredentialRestoreSink) TemporaryCredential(recordID string) (credent
 			return credentialvault.ProviderCredential{}, false
 		}
 		result = value.provider
-		var provider orm.UserModelProvider
-		if err := sink.db.Where("create_user_id = ? AND deleted_at IS NULL AND (default_model_provider_id = ? OR LOWER(name) = LOWER(?))", sink.localUserID, result.ProviderCatalogKey, result.ProviderCatalogKey).Take(&provider).Error; err != nil {
+		provider, err := sink.temporarySupplier(context.Background(), scope, recordID, result)
+		if err != nil {
 			return credentialvault.ProviderCredential{}, false
 		}
 		result.BaseURL = connectionBaseURL(provider, result.BaseURL)
