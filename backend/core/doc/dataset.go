@@ -21,6 +21,7 @@ import (
 	"lazymind/core/learning"
 	"lazymind/core/log"
 	corestore "lazymind/core/store"
+	"lazymind/core/systemdeps"
 
 	"gorm.io/gorm"
 )
@@ -268,7 +269,7 @@ func parseDatasetParsers(ext json.RawMessage) []ParserConfig {
 
 func fetchParsersByAlgoID(ctx context.Context, algoID string) []ParserConfig {
 	algoID = strings.TrimSpace(algoID)
-	if algoID == "" {
+	if algoID == "" || !systemdeps.PythonComponentActive("rag") {
 		return nil
 	}
 	url := common.JoinURL(common.AlgoServiceEndpoint(), "/v1/algo/"+algoID+"/groups")
@@ -909,7 +910,7 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	if body.ProcessingLevel == ProcessingLevelIndexed && replyEmbedNotReady(w, r, corestore.UserID(r)) {
+	if systemdeps.PythonComponentActive("rag") && body.ProcessingLevel == ProcessingLevelIndexed && replyEmbedNotReady(w, r, corestore.UserID(r)) {
 		return
 	}
 	service, op, err := resourcePageService(r)

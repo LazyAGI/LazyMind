@@ -305,6 +305,7 @@ else
   "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements.txt"
   "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements-local.txt"
 fi
+"${RUNTIME_ROOT}/deps/python/algorithm/bin/python" "${ROOT}/desktop/scripts/patch-reader-imports.py"
 make_python_venv_relocatable "${RUNTIME_ROOT}/deps/python/auth-service" "${PYTHON}"
 make_python_venv_relocatable "${RUNTIME_ROOT}/deps/python/channel-gateway" "${PYTHON}"
 make_python_venv_relocatable "${RUNTIME_ROOT}/deps/python/algorithm" "${PYTHON}"
@@ -393,7 +394,7 @@ BUILTIN_SKILL_BUNDLE_ARGS=(
 )
 (cd "${ROOT}/backend/core" && "${GO_BIN}" "${BUILTIN_SKILL_BUNDLE_ARGS[@]}")
 
-"${RUNTIME_ROOT}/deps/python/algorithm/bin/python" "${ROOT}/desktop/scripts/stage-featured-assets.py" "${RUNTIME_ROOT}"
+"${RUNTIME_ROOT}/deps/python/algorithm/bin/python" "${ROOT}/desktop/scripts/stage-featured-assets.py" "${RUNTIME_ROOT}" --bundle-unpublished
 
 echo "==> Preparing workflow example metadata (download during warmup by default)"
 node "${ROOT}/desktop/scripts/stage-history-injection-package.mjs" "${RUNTIME_ROOT}"

@@ -92,7 +92,7 @@ const AGENTS: AgentDefinition[] = [
 const EXECUTOR_SYNC_ATTEMPTS = 6;
 const EXECUTOR_SYNC_DELAY_MS = 500;
 const EXTERNAL_CONFIGURATION_RECHECK_DELAYS_MS = [1_500, 4_000, 10_000];
-const LOGIN_RECHECK_DELAYS_MS = [1_000, 2_500, 5_000, 10_000, 20_000, 40_000, 80_000, 120_000];
+const LOGIN_RECHECK_DELAYS_MS = [1_000, 2_500, 5_000, 10_000];
 const BRIDGE_RETRY_DELAYS_MS = [250, 750];
 
 type StatusMap = Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
@@ -149,6 +149,7 @@ export default function AgentIntegrationPage() {
   });
   const [externalConfigurationAgent, setExternalConfigurationAgent] = useState<DesktopAgent | null>(null);
   const [pendingLoginAgent, setPendingLoginAgent] = useState<DesktopAgent | null>(null);
+  const runningLoginAgent = Object.values(statuses).find((status) => status.login?.state === "running")?.agent;
   const refreshVersion = useRef(0);
   const refreshInFlight = useRef<Promise<void> | null>(null);
 
@@ -235,24 +236,37 @@ export default function AgentIntegrationPage() {
   }, [refresh]);
 
   useEffect(() => {
-    const pendingAgent = pendingLoginAgent || externalConfigurationAgent;
+    const loginAgent = pendingLoginAgent || runningLoginAgent;
+    const pendingAgent = loginAgent || externalConfigurationAgent;
     if (!pendingAgent) return undefined;
     const refreshAfterExternalAction = () => {
       if (document.visibilityState === "visible") void refresh();
     };
     window.addEventListener("focus", refreshAfterExternalAction);
     document.addEventListener("visibilitychange", refreshAfterExternalAction);
-    const delays = pendingLoginAgent
-      ? LOGIN_RECHECK_DELAYS_MS
-      : EXTERNAL_CONFIGURATION_RECHECK_DELAYS_MS;
-    const timers = delays.map((delay) =>
+    let stopped = false;
+    let loginTimer: number | undefined;
+    let loginAttempt = 0;
+    const pollLogin = async () => {
+      await refresh();
+      if (!stopped) {
+        loginAttempt = Math.min(loginAttempt + 1, LOGIN_RECHECK_DELAYS_MS.length - 1);
+        loginTimer = window.setTimeout(() => void pollLogin(), LOGIN_RECHECK_DELAYS_MS[loginAttempt]);
+      }
+    };
+    const timers = loginAgent ? [] : EXTERNAL_CONFIGURATION_RECHECK_DELAYS_MS.map((delay) =>
       window.setTimeout(() => void refresh(), delay));
+    if (loginAgent) {
+      loginTimer = window.setTimeout(() => void pollLogin(), LOGIN_RECHECK_DELAYS_MS[0]);
+    }
     return () => {
+      stopped = true;
+      window.clearTimeout(loginTimer);
       window.removeEventListener("focus", refreshAfterExternalAction);
       document.removeEventListener("visibilitychange", refreshAfterExternalAction);
       timers.forEach((timer) => window.clearTimeout(timer));
     };
-  }, [externalConfigurationAgent, pendingLoginAgent, refresh]);
+  }, [externalConfigurationAgent, pendingLoginAgent, runningLoginAgent, refresh]);
 
   useEffect(() => {
     if (externalConfigurationAgent &&
@@ -263,12 +277,20 @@ export default function AgentIntegrationPage() {
 
   useEffect(() => {
     if (!pendingLoginAgent) return;
+    const login = statuses[pendingLoginAgent]?.login;
     const policy = executorPolicies[pendingLoginAgent as DesktopExecutorProvider];
     const executor = executors.find((item) => item.id === pendingLoginAgent);
-    if (policy?.ready && executor?.host_online && executor.available) {
+    if (login ? login.state !== "running" : policy?.ready && executor?.host_online && (!policy.enabled || executor.available)) {
       setPendingLoginAgent(null);
     }
-  }, [executors, executorPolicies, pendingLoginAgent]);
+  }, [statuses, executors, executorPolicies, pendingLoginAgent]);
+
+  const invalidateRefresh = () => {
+    refreshVersion.current += 1;
+    refreshInFlight.current = null;
+    setLoading(false);
+    setRefreshing(false);
+  };
 
   const runAction = async (agent: DesktopAgent, nextAction: DesktopAgentIntegrationAction) => {
     if (pendingAgentActions.current.has(agent)) return;
@@ -281,6 +303,7 @@ export default function AgentIntegrationPage() {
         setError(agent === "deepseek-harness" ? t("agentIntegration.dshErrors.operation_failed") : result.error instanceof Error ? result.error.message : result.error ? String(result.error) : result.reason);
         return;
       }
+      invalidateRefresh();
       setStatuses((current) => ({ ...current, [agent]: result.data }));
       setError("");
       if (nextAction === "disconnect" && !result.data.can_disconnect && !["enabled", "error", "conflict"].includes(result.data.state)) {
@@ -288,10 +311,12 @@ export default function AgentIntegrationPage() {
       } else if (nextAction === "login") {
         const definition = AGENTS.find((item) => item.id === agent);
         const executorName = definition?.executorName || result.data.display_name;
-        message.info(t(definition?.executorLoginMode === "interactive"
-          ? "agentIntegration.interactiveLoginStarted"
-          : "agentIntegration.loginStarted", { agent: executorName }));
-        setPendingLoginAgent(agent);
+        if (!result.data.login || result.data.login.state === "running") {
+          message.info(t(definition?.executorLoginMode === "interactive"
+            ? "agentIntegration.interactiveLoginStarted"
+            : "agentIntegration.loginStarted", { agent: executorName }));
+          setPendingLoginAgent(agent);
+        }
       } else if (result.data.state === "enabled") {
         message.success(t("agentIntegration.enableSuccess", { agent: result.data.display_name }));
       }
@@ -310,6 +335,7 @@ export default function AgentIntegrationPage() {
       setError(result.error instanceof Error ? result.error.message : result.error ? String(result.error) : result.reason);
       return;
     }
+    invalidateRefresh();
     setExecutorPolicies((current) => ({ ...current, [provider]: result.data }));
     const agentName = AGENTS.find((agent) => agent.id === provider)?.executorName || provider;
     message.success(t(nextAction === "enable"
@@ -328,11 +354,14 @@ export default function AgentIntegrationPage() {
       setError(result.error instanceof Error ? result.error.message : result.reason);
       return;
     }
+    invalidateRefresh();
     message.success(t(path === undefined
       ? "agentIntegration.executableBindingCleared"
       : "agentIntegration.executableBindingSaved"));
     setManualBindingTarget(null);
     setManualBindingPath("");
+    setPendingLoginAgent((current) => current && (target.startsWith(`${current}-`) ||
+      (current === "workbuddy" && target === "codebuddy-cli")) ? null : current);
     await refresh();
   };
 
@@ -605,6 +634,16 @@ function AgentCard({
         </button>
       </div>
 
+      {mcpStatus?.login && (
+        <Alert
+          showIcon
+          type={mcpStatus.login.state === "failed" ? "error"
+            : mcpStatus.login.state === "cancelled" ? "warning"
+              : mcpStatus.login.state === "succeeded" ? "success" : "info"}
+          message={t(`agentIntegration.loginStates.${mcpStatus.login.state}`)}
+          description={mcpStatus.login.message}
+        />
+      )}
       {expanded && (
         <div className="agent-integration-card-detail">
           <AgentConfigurationFlow
@@ -676,7 +715,10 @@ function CollapsedDetectionSummary({
             : executorAuthenticationRequired(executorPolicy?.unavailable_reason)
               ? "agentIntegration.workbuddySignInRequired"
               : "agentIntegration.workbuddyRuntimeUnavailable")
-          : t(ready ? "agentIntegration.compactCLILoggedIn" : "agentIntegration.compactCLINotLoggedIn"),
+          : t(ready ? "agentIntegration.compactCLILoggedIn"
+            : executorAuthenticationRequired(executorPolicy?.unavailable_reason)
+              ? "agentIntegration.compactCLINotLoggedIn"
+              : "agentIntegration.executorStatusCheckFailed"),
         ready,
       });
     }
@@ -845,7 +887,7 @@ function AgentConfigurationFlow({
     if (!target) return null;
     return (
       <>
-        {missing && (
+        {(missing || target === "codex-cli") && (
           <Button
             size="small"
             icon={<FolderOpenOutlined />}
@@ -855,9 +897,11 @@ function AgentConfigurationFlow({
           >
             {t(manualExecutableBinding
               ? "agentIntegration.enterExecutablePath"
-              : target.endsWith("-cli")
-                ? "agentIntegration.locateCLI"
-                : "agentIntegration.locateApplication")}
+              : target === "codex-cli" && !missing
+                ? "agentIntegration.reselectCLI"
+                : target.endsWith("-cli")
+                  ? "agentIntegration.locateCLI"
+                  : "agentIntegration.locateApplication")}
           </Button>
         )}
         {configured && (
@@ -885,8 +929,8 @@ function AgentConfigurationFlow({
           size="small"
           type="primary"
           icon={<LoginOutlined />}
-          loading={busyAction === `${agent.id}:login`}
-          disabled={busyAction !== ""}
+          loading={busyAction === `${agent.id}:login` || mcpStatus?.login?.state === "running"}
+          disabled={busyAction !== "" || mcpStatus?.login?.state === "running"}
           onClick={() => void onMCPAction(agent.id, "login")}
         >
           {t("agentIntegration.login")}
@@ -931,8 +975,8 @@ function AgentConfigurationFlow({
             size="small"
             type="primary"
             icon={<LoginOutlined />}
-            loading={busyAction === `${agent.id}:login`}
-            disabled={busyAction !== ""}
+            loading={busyAction === `${agent.id}:login` || mcpStatus?.login?.state === "running"}
+            disabled={busyAction !== "" || mcpStatus?.login?.state === "running"}
             onClick={() => void onMCPAction(agent.id, "login")}
           >
             {t(agent.executorLoginMode === "interactive"
@@ -1035,6 +1079,16 @@ function AgentConfigurationFlow({
               },
             ]}
           />
+          {executorPolicy?.cli_path && (
+            <div className="agent-integration-stage-hint">
+              <span>{t("agentIntegration.selectedCLI")}</span>
+              <Typography.Text code>{executorPolicy.cli_path}</Typography.Text>
+              {executorPolicy.cli_source && <Tag>{t(`agentIntegration.cliSources.${executorPolicy.cli_source}`)}</Tag>}
+            </div>
+          )}
+          {!executorReady && executorPolicy?.unavailable_reason && (
+            <Typography.Paragraph type="secondary">{executorPolicy.unavailable_reason}</Typography.Paragraph>
+          )}
           {executorActions}
           {executorNeedsLogin && agent.executorLoginMode === "interactive" && (
             <div className="agent-integration-stage-hint">

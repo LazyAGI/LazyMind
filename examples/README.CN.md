@@ -20,3 +20,7 @@
 
 - [LazyMind v0.2 正式发布：让 AI 从“给出答案”走到“完成交付”](https://mp.weixin.qq.com/s/yoU7DZKkq_jw05695e36Qw)（2026-08-04，版本发布介绍）
 - [AI 干完活，怎么加班的还是我？](https://mp.weixin.qq.com/s/uj15cKnPNZpdrHWPuua2Tg)（2026-09-01，产品介绍）
+
+### 可运行实验
+
+- [Superpowers 派发可靠性](superpowers-workflow-reliability/README.CN.md)：从 Codex 体验原生 Brief Gate 与 Panel 产物；保留 Advanced Git/Coverage、已验证的 CLI 恢复，并明确原生恢复限制。

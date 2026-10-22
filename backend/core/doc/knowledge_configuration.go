@@ -16,6 +16,7 @@ import (
 	"lazymind/core/modelprovider"
 	"lazymind/core/settings"
 	"lazymind/core/store"
+	"lazymind/core/systemdeps"
 )
 
 func resourceScene(value string) (string, error) {
@@ -66,7 +67,7 @@ func knowledgeProcessingLevel(ctx context.Context, db *gorm.DB, user, requested 
 	if level != ProcessingLevelStored && !controls.DocumentParsingEnabled {
 		return "", resourceErr("UNAVAILABLE", "document parsing is disabled")
 	}
-	if level == ProcessingLevelIndexed {
+	if level == ProcessingLevelIndexed && systemdeps.PythonComponentActive("rag") {
 		ready, checkErr := modelprovider.IsModelReady(ctx, db, user, "embed_main")
 		if ready && checkErr == nil && modelprovider.GetCachedModelFeatures().ImageEmbedRequired {
 			ready, checkErr = modelprovider.IsModelReady(ctx, db, user, "embed_image")
@@ -82,6 +83,9 @@ func knowledgeProcessingLevel(ctx context.Context, db *gorm.DB, user, requested 
 }
 
 func knowledgeAlgorithms(ctx context.Context) ([]Algo, error) {
+	if !systemdeps.PythonComponentActive("rag") {
+		return []Algo{}, nil
+	}
 	var response algoListResp
 	if err := common.ApiGet(ctx, common.JoinURL(common.AlgoServiceEndpoint(), "/v1/algo/list"), nil, &response, 5*time.Second); err != nil {
 		return nil, err
@@ -97,6 +101,9 @@ func knowledgeAlgorithms(ctx context.Context) ([]Algo, error) {
 }
 
 func knowledgeAlgorithm(ctx context.Context, id string) (Algo, error) {
+	if !systemdeps.PythonComponentActive("rag") {
+		return Algo{AlgoID: strings.TrimSpace(id)}, nil
+	}
 	if strings.TrimSpace(id) == "" {
 		return Algo{AlgoID: defaultMarketAlgoID, DisplayName: defaultMarketAlgoName}, nil
 	}
@@ -250,12 +257,16 @@ func KnowledgeOptions(ctx context.Context, db *gorm.DB, user string) (map[string
 	for _, algorithm := range algorithms {
 		parsers[algorithm.AlgoID] = fetchParsersByAlgoID(ctx, algorithm.AlgoID)
 	}
+	defaultAlgoID := ""
+	if systemdeps.PythonComponentActive("rag") {
+		defaultAlgoID = defaultMarketAlgoID
+	}
 	return map[string]any{
 		"parsers_by_algorithm": parsers,
 		"scenes":               learning.BuiltinProfiles(), "profiles": profiles, "local_available": learning.LocalAvailable(),
 		"capabilities": learning.Capabilities(), "algorithms": algorithms,
 		"processing_levels": levels, "default_processing_level": level,
-		"default_scene": "general", "default_algo_id": defaultMarketAlgoID,
+		"default_scene": "general", "default_algo_id": defaultAlgoID,
 		"upload": map[string]any{"max_files": 20, "max_file_bytes": OriginalFileMaxBytes,
 			"max_batch_bytes": OriginalBatchMaxBytes, "file_types": KnowledgeFileTypes},
 	}, nil

@@ -13,7 +13,8 @@ _ATTACHMENT_READONLY_APPENDIX = {
         'Read attachments only when relevant to the current question. '
         'Use find_user_attachment for an exact filename from the attachment list and '
         'read_user_attachment for its content. For document passages, prefer '
-        'kb_tmp_search, search_file_resource, and read_file_resource. Preserve source citation refs.'
+        'search_file_resource and read_file_resource. Use kb_tmp_search only when it is '
+        'present in the available tools. Preserve source citation refs.'
     ),
 }
 

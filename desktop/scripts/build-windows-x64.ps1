@@ -405,7 +405,7 @@ function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind 
     Invoke-Native 'node.exe' @((Join-Path $repoRoot 'desktop\scripts\stage-pdf-font.mjs'), $runtimeRoot)
     Write-Host '==> Materializing locked Skill previews and featured catalog'
     Materialize-OfflineSkills
-    Invoke-Native (Join-Path $runtimeRoot 'deps\python\algorithm\Scripts\python.exe') @((Join-Path $repoRoot 'desktop\scripts\stage-featured-assets.py'), $runtimeRoot, '--quiet')
+    Invoke-Native (Join-Path $runtimeRoot 'deps\python\algorithm\Scripts\python.exe') @((Join-Path $repoRoot 'desktop\scripts\stage-featured-assets.py'), $runtimeRoot, '--quiet', '--bundle-unpublished')
     Write-Host '==> Preparing workflow example metadata (download during warmup by default)'
     Invoke-Native 'node.exe' @(
         (Join-Path $repoRoot 'desktop\scripts\stage-history-injection-package.mjs'),
@@ -571,6 +571,7 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
         '-r', (Join-Path $repoRoot 'algorithm\requirements-local.txt')
     )
     Invoke-Native $algorithmPython @('-c', "import importlib.metadata as m; assert m.version('lazyllm') == '$lazyLLMVersion'")
+    Invoke-Native $algorithmPython @((Join-Path $repoRoot 'desktop\scripts\patch-reader-imports.py'))
     Invoke-Native $algorithmPython @('-B', '-m', 'unittest', 'discover', '-s', (Join-Path $repoRoot 'tests'), '-p', 'test_desktop_windows_milvus.py', '-v')
     Write-Host '==> Applying the verified Windows Milvus storage fixes'
     Invoke-Native $algorithmPython @((Join-Path $repoRoot 'desktop\scripts\patch-windows-milvus.py'), $runtimeRoot)

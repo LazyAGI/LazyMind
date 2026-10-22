@@ -41,3 +41,61 @@ test("Windows uses stable packaging with functional gates and no size audit", ()
   assert.match(source, /--require-windows-milvus-patch/);
   assert.match(workflow, /windows-python-components/);
 });
+
+test("RAG publication uses ModelScope without advertising an unpublished HF mirror", () => {
+  for (const filename of ["macos-installer.yml", "windows-installer.yml"]) {
+    const workflow = readFileSync(path.join(root, ".github/workflows", filename), "utf8");
+    assert.match(workflow, /LAZYMIND_MS_COMPONENT_REPO: \$\{\{ vars\.LAZYMIND_MS_COMPONENT_REPO \|\| 'CarlosShaoting\/lazymind-cst' \}\}/);
+    const rag = workflow.split(/\n  publish-(?:macos|windows)-rag:/)[1].split(/\n  test-/)[0];
+    assert.doesNotMatch(rag, /Realease/);
+    assert.match(rag, /host: \[ms, hf\]/);
+    assert.match(rag, /fail-fast: false/);
+    assert.match(rag, /secrets\[matrix.host/);
+    assert.match(rag, /--host "\$\{MIRROR_HOST\}"/);
+    if (filename === "macos-installer.yml") {
+      assert.match(rag, /host: \[ms, hf\]/);
+      assert.match(rag, /signing_mode=adhoc/);
+      assert.doesNotMatch(rag.split('    steps:')[0], /official_release == 'true'/);
+    }
+  }
+});
+
+test("RAG publishes tag metadata to ModelScope and verifies Mac signatures before publishing", () => {
+  for (const filename of ["macos-installer.yml", "windows-installer.yml"]) {
+    const workflow = readFileSync(path.join(root, ".github/workflows", filename), "utf8");
+    assert.match(workflow, /MODELSCOPE_API_TOKEN:/);
+    assert.match(workflow, /LAZYMIND_MS_COMPONENT_REPO/);
+    assert.match(workflow, /publish-python-components\.py/);
+    assert.match(workflow, /--directory desktop\/dist\/python-components\//);
+  }
+  const mac = readFileSync(path.join(root, ".github/workflows/macos-installer.yml"), "utf8");
+  assert.match(mac, /publish-macos-rag:[\s\S]*installer_available == 'true'[\s\S]*--python/);
+  assert.match(mac, /--require-macos-team-id/);
+});
+
+test("Installer mirrors and RAG publication cannot block artifact download or installation tests", () => {
+  for (const platform of ["macos", "windows"]) {
+    const workflow = readFileSync(path.join(root, `.github/workflows/${platform}-installer.yml`), "utf8");
+    const build = workflow.split(`  build-${platform}-installer:`)[1].split(`  mirror-${platform}-installer:`)[0];
+    assert.doesNotMatch(build, /publish-python-components\.py|publish-installer-mirror\.py|secrets\.MODELSCOPE_API_TOKEN/);
+    assert.match(build, /archive: false/);
+    const testJob = workflow.split(`  test-${platform}-installer:`)[1];
+    assert.match(testJob, new RegExp(`needs: build-${platform}-installer`));
+    assert.doesNotMatch(testJob, /needs\.(mirror|publish)-/);
+    const mirror = workflow.split(`  mirror-${platform}-installer:`)[1].split(`  publish-${platform}-rag:`)[0];
+    assert.match(mirror, /host: \[ms, hf\]/);
+    assert.match(mirror, /fail-fast: false/);
+    assert.match(mirror, /Upload installer to Realease/);
+    assert.match(mirror, /secrets\[matrix.host/);
+    if (platform === "macos") assert.match(testJob, /--bundle-dir rag-under-test\/darwin-arm64/);
+  }
+  execFileSync(process.platform === "win32" ? "python" : "python3", [
+    "-m", "unittest", "discover", "-s", "tests", "-p", "test_desktop_installer_mirrors.py", "-v",
+  ], { cwd: root, stdio: "pipe" });
+});
+
+test("RAG online catalogs and publication fail-closed gates", () => {
+  execFileSync(process.platform === "win32" ? "python" : "python3", [
+    "-m", "unittest", "discover", "-s", "tests", "-p", "test_desktop_component_publication.py", "-v",
+  ], { cwd: root, stdio: "pipe" });
+});

@@ -29,7 +29,13 @@ type Issue struct {
 	Path string `json:"path,omitempty"`
 }
 
+type LoginStatus struct {
+	State   string `json:"state"`
+	Message string `json:"message,omitempty"`
+}
+
 type Status struct {
+	Login         *LoginStatus    `json:"login,omitempty"`
 	RetryAction   string          `json:"retry_action,omitempty"`
 	Issue         *Issue          `json:"issue,omitempty"`
 	CanConnect    bool            `json:"can_connect,omitempty"`

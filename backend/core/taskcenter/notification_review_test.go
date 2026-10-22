@@ -120,8 +120,12 @@ func TestNotificationReviewRecoveryAdvancesPastBrokenAndActiveLegacyRuns(t *test
 	if err := db.Model(&orm.TaskNotification{}).Count(&count).Error; err != nil {
 		t.Fatal(err)
 	}
-	if count != 0 {
-		t.Fatalf("legacy recovery backfilled %d notices", count)
+	if count != 1 {
+		t.Fatalf("legacy completion desktop notice count = %d, want 1", count)
+	}
+	var notice orm.TaskNotification
+	if err := db.First(&notice).Error; err != nil || notice.TaskID != task.ID || notice.Channel != "desktop" {
+		t.Fatalf("legacy completion used an external policy: notice=%#v err=%v", notice, err)
 	}
 }
 

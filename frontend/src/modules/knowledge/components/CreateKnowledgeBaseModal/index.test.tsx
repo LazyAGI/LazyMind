@@ -9,11 +9,12 @@ import { getKnowledgeOptions, type KnowledgeOptions } from "@/modules/knowledge/
 import { isDeveloperModeActive } from "@/utils/developerMode";
 
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+const rag = vi.hoisted(() => ({ availability: "ready" }));
+vi.mock("@/modules/modelProvider/contexts/RAGComponentContext", () => ({
+  useRAGComponent: () => ({ availability: rag.availability }),
+}));
 vi.mock("@/modules/dataSource/components/management/DataSourceProviderPicker", () => ({ default: () => null }));
 vi.mock("@/utils/developerMode", () => ({ isDeveloperModeActive: vi.fn() }));
-vi.mock("@/modules/user/uiPreferencesApi", () => ({
-  fetchUserUiPreferences: vi.fn().mockResolvedValue({ document_parsing_enabled: false }),
-}));
 vi.mock("@/modules/knowledge/utils/request", () => ({
   getKnowledgeOptions: vi.fn(),
   KnowledgeBaseServiceApi: () => ({
@@ -53,6 +54,7 @@ const options: KnowledgeOptions = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  rag.availability = "ready";
   vi.mocked(isDeveloperModeActive).mockReturnValue(false);
   vi.mocked(getKnowledgeOptions).mockResolvedValue(options);
   vi.mocked(saveKnowledgeBaseCapabilities).mockResolvedValue({});
@@ -108,6 +110,19 @@ describe("knowledge creation capability submission", () => {
       scene: "custom", profile_id: "preset-translation",
       reading_capabilities: [expect.objectContaining({ key: "general_translation", settings: { target_language: "en" } })],
     })));
+  });
+
+  it("preserves the indexing target for deferred ingestion without RAG", async () => {
+    rag.availability = "missing";
+    vi.mocked(getKnowledgeOptions).mockResolvedValue({
+      ...options, algorithms: [], default_algo_id: "",
+      processing_levels: ["stored", "parsed", "chunked", "indexed"], default_processing_level: "indexed",
+    });
+    const { onCreate } = await mountModal();
+    await fillRequiredFields();
+    expect(screen.getByRole("tab", { name: "knowledge.createFromCloudDisk" })).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ processing_level: "indexed" })));
   });
 
   it.each([false, true])("submits the general preset without opening advanced settings (developer=%s)", async (developer) => {

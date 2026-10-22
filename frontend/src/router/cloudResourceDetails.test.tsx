@@ -38,7 +38,10 @@ const files = Object.entries(bodies).map(([path, content]) => ({ path, size: Buf
 const treeHash = hash([...files].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0).map((file) => `${file.path}\0${file.size}\0${file.sha256}\x000\n`).join(""));
 const envelope = (data: unknown) => ({ data: { data }, headers: { etag: `"${treeHash}"` } });
 const isCloudRead = (url: unknown) => /\/api\/core\/cloud\/(skills|workflows)\//.test(String(url));
+const isRAGStatusRead = (url: unknown) => String(url).includes("/api/core/system-dependencies/python");
+const isExpectedRead = (url: unknown) => isCloudRead(url) || isRAGStatusRead(url);
 function serve(url: string, options?: { params?: { path?: string } }) {
+  if (isRAGStatusRead(url)) return envelope([{ id: "rag", installed: true, active: true }]);
   if (!isCloudRead(url)) throw new Error(`unexpected local content request: ${url}`);
   const kind = url.includes("/workflows/") ? "workflow" : "skill";
   if (url.endsWith("/tree")) return envelope({ resource_id: "cloud-fixture", resource_type: kind, content_hash: treeHash, entrypoint: kind === "skill" ? "SKILL.md" : "workflow.yaml", files });
@@ -60,7 +63,7 @@ describe("Desktop cloud resource detail routes", () => {
   it("opens a Cloud-only Skill directly and reads its document without a local skill", async () => {
     mount(); expect(await screen.findByText("云端独有的技能正文。", { exact: true }, { timeout: 5000 })).toBeVisible();
     expect(screen.getByRole("heading", { name: "云端文档标题" })).toBeVisible();
-    expect(mocks.get.mock.calls.every(([url]) => isCloudRead(url))).toBe(true); assertNoWrites();
+    expect(mocks.get.mock.calls.every(([url]) => isExpectedRead(url))).toBe(true); assertNoWrites();
     const read = mocks.get.mock.calls.find(([url]) => String(url).includes("/content"));
     expect(read?.[1]?.headers?.["If-Match"]).toBe(`"${treeHash}"`);
   });
@@ -75,7 +78,7 @@ describe("Desktop cloud resource detail routes", () => {
     mount("workflow");
     const graph = await screen.findByRole("region", { name: "工作流图" });
     expect(graph).toHaveAttribute("data-readonly", "true"); expect(graph).toHaveTextContent("云端工作流");
-    expect(mocks.get.mock.calls.every(([url]) => isCloudRead(url))).toBe(true); assertNoWrites();
+    expect(mocks.get.mock.calls.every(([url]) => isExpectedRead(url))).toBe(true); assertNoWrites();
   });
 
   it("renders HTML as text rather than executable content", async () => {

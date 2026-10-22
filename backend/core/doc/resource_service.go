@@ -13,6 +13,7 @@ import (
 	"lazymind/core/acl"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/systemdeps"
 	"strings"
 	"time"
 )
@@ -278,6 +279,9 @@ func lockResourceDataset(tx *gorm.DB, ds orm.Dataset) error {
 	return nil
 }
 func provisionResourceKnowledge(ctx context.Context, c DatasetCatalogCaller, ds *orm.Dataset) error {
+	if !systemdeps.PythonComponentActive("rag") {
+		return nil
+	}
 	var result map[string]any
 	req := kbCreateRequest{KbID: ds.ID, DisplayName: algoDatasetDisplayName(c.UserID, ds.DisplayName), OwnerID: c.UserID, AlgoID: parseDatasetAlgo(ds.Ext).AlgoID, Meta: map[string]any{"tags": parseDatasetTags(ds.Ext)}}
 	if ds.Desc != "" {
@@ -329,6 +333,9 @@ func (s *ResourceService) ReplayOperation(ctx context.Context, op ResourceOperat
 }
 
 func (s *ResourceService) syncKnowledgeMetadata(ctx context.Context, c DatasetCatalogCaller, id string, algorithmChanged bool) error {
+	if !systemdeps.PythonComponentActive("rag") {
+		return nil
+	}
 	var ds orm.Dataset
 	if err := s.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", id).Take(&ds).Error; err != nil {
 		return err

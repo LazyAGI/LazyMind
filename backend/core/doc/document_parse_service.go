@@ -97,6 +97,12 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 	if err != nil {
 		return EnsureDocumentParsedResult{}, err
 	}
+	// Native reader artifacts remain usable while deferred indexing runs or fails.
+	if artifact, err := readBaseArtifact(r.Context(), rec); err != nil {
+		return EnsureDocumentParsedResult{}, err
+	} else if artifact != nil {
+		return EnsureDocumentParsedResult{Status: "parsed"}, nil
+	}
 	if rec.processing.ParseStatus == "failed" || NormalizeTaskStateForUI(rec.taskStat) == "FAILED" {
 		diagnostic := rec.diagnostic
 		if diagnostic == nil {

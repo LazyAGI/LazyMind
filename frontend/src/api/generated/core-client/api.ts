@@ -519,6 +519,10 @@ export interface ApiCoreUserNotificationPreferencesGet200Response {
     'code'?: number;
     'data'?: NotificationPreferences;
 }
+export interface ApiCoreUserWechatNotificationTargetsGet200Response {
+    'code'?: number;
+    'data'?: WeChatNotificationTargets;
+}
 /**
  * @type ApiCoreWorkflowArtifactsArtifactIdDocumentActionsExecutePostRequest
  */
@@ -7279,6 +7283,13 @@ export interface VerifiedProviderOpenAPIResponse {
     'shared_by_id'?: string;
     'shared_by_name'?: string;
     'source'?: string;
+}
+export interface WeChatNotificationTargets {
+    'items': Array<WeChatNotificationTargetsItemsInner>;
+}
+export interface WeChatNotificationTargetsItemsInner {
+    'account_id': string;
+    'recipient_id': string;
 }
 export interface WordGroupConflictResponse {
     'created_at': string;
@@ -57055,6 +57066,36 @@ export const TaskNotificationsApiAxiosParamCreator = function (configuration?: C
                 options: localVarRequestOptions,
             };
         },
+        /**
+         * List unique confirmed WeChat recipients from owned saved schedule notification rules; does not check connectivity. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary List unique confirmed WeChat recipients from owned saved schedule notification rules; does not check connectivity
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserWechatNotificationTargetsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/user/wechat-notification-targets`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
     }
 };
 
@@ -57242,6 +57283,18 @@ export const TaskNotificationsApiFp = function(configuration?: Configuration) {
             const localVarOperationServerBasePath = operationServerMap['TaskNotificationsApi.apiCoreUserNotificationPreferencesPatch']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
+        /**
+         * List unique confirmed WeChat recipients from owned saved schedule notification rules; does not check connectivity. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary List unique confirmed WeChat recipients from owned saved schedule notification rules; does not check connectivity
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreUserWechatNotificationTargetsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreUserWechatNotificationTargetsGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserWechatNotificationTargetsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TaskNotificationsApi.apiCoreUserWechatNotificationTargetsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
     }
 };
 
@@ -57379,6 +57432,15 @@ export const TaskNotificationsApiFactory = function (configuration?: Configurati
          */
         apiCoreUserNotificationPreferencesPatch(requestParameters: TaskNotificationsApiApiCoreUserNotificationPreferencesPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreUserNotificationPreferencesGet200Response> {
             return localVarFp.apiCoreUserNotificationPreferencesPatch(requestParameters.notificationPreferencesPatch, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * List unique confirmed WeChat recipients from owned saved schedule notification rules; does not check connectivity. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+         * @summary List unique confirmed WeChat recipients from owned saved schedule notification rules; does not check connectivity
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserWechatNotificationTargetsGet(options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreUserWechatNotificationTargetsGet200Response> {
+            return localVarFp.apiCoreUserWechatNotificationTargetsGet(options).then((request) => request(axios, basePath));
         },
     };
 };
@@ -57631,6 +57693,16 @@ export class TaskNotificationsApi extends BaseAPI {
      */
     public apiCoreUserNotificationPreferencesPatch(requestParameters: TaskNotificationsApiApiCoreUserNotificationPreferencesPatchRequest, options?: RawAxiosRequestConfig) {
         return TaskNotificationsApiFp(this.configuration).apiCoreUserNotificationPreferencesPatch(requestParameters.notificationPreferencesPatch, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * List unique confirmed WeChat recipients from owned saved schedule notification rules; does not check connectivity. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
+     * @summary List unique confirmed WeChat recipients from owned saved schedule notification rules; does not check connectivity
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreUserWechatNotificationTargetsGet(options?: RawAxiosRequestConfig) {
+        return TaskNotificationsApiFp(this.configuration).apiCoreUserWechatNotificationTargetsGet(options).then((request) => request(this.axios, this.basePath));
     }
 }
 

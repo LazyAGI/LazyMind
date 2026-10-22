@@ -13,6 +13,15 @@ func platformDesktopInstalled(spec DesktopApplication, _ bool) bool {
 }
 
 func platformDesktopApplication(spec DesktopApplication) string {
+	paths := platformDesktopApplications(spec)
+	if len(paths) > 0 {
+		return paths[0]
+	}
+	return ""
+}
+
+func platformDesktopApplications(spec DesktopApplication) []string {
+	var paths []string
 	wanted := make(map[string]struct{}, len(spec.DisplayNames))
 	for _, name := range spec.DisplayNames {
 		name = strings.TrimSpace(strings.TrimSuffix(name, ".app"))
@@ -21,7 +30,7 @@ func platformDesktopApplication(spec DesktopApplication) string {
 		}
 	}
 	if len(wanted) == 0 {
-		return ""
+		return nil
 	}
 	for _, root := range darwinApplicationDirectories() {
 		entries, err := os.ReadDir(root)
@@ -37,11 +46,11 @@ func platformDesktopApplication(spec DesktopApplication) string {
 				continue
 			}
 			if info, err := os.Stat(filepath.Join(root, name)); err == nil && info.IsDir() {
-				return filepath.Join(root, name)
+				paths = append(paths, filepath.Join(root, name))
 			}
 		}
 	}
-	return ""
+	return paths
 }
 
 func darwinApplicationDirectories() []string {

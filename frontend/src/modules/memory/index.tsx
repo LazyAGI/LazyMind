@@ -2,16 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
 import {
   Button,
-  Dropdown,
   Input,
   Modal,
-  Space,
-  Switch,
   Tag,
   Tooltip,
   message,
 } from "antd";
 import SkillCallModeControl from "./components/SkillManagementSection/SkillCallModeControl";
+import {
+  OriginMark,
+  resolveSkillOriginKind,
+} from "./components/SkillManagementSection/OriginMark";
 import type { ColumnsType } from "antd/es/table";
 import {
   AppstoreOutlined,
@@ -24,7 +25,6 @@ import {
   HistoryOutlined,
   LinkOutlined,
   LockOutlined,
-  MoreOutlined,
 } from "@ant-design/icons";
 import {
   getLocalizedErrorMessage,
@@ -171,7 +171,7 @@ import "./index.scss";
 
 const backendSuggestionPageSize = 20;
 const defaultSkillListPageSize = 20;
-const defaultGlossaryListPageSize = 4;
+const defaultGlossaryListPageSize = 20;
 const showGlossaryInboxUi = true;
 const MERGED_GLOSSARY_GROUP_OPTION_ID = "__merged_glossary_group__";
 const MERGED_GLOSSARY_GROUP_OPTION_ID_PREFIX = `${MERGED_GLOSSARY_GROUP_OPTION_ID}:`;
@@ -288,9 +288,6 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   const [skillTags, setSkillTags] = useState<string[]>([]);
   const [skillTagsLoaded, setSkillTagsLoaded] = useState(false);
   const [skillTagsLoading, setSkillTagsLoading] = useState(false);
-  const [skillAutoEvoLoading, setSkillAutoEvoLoading] = useState<Set<string>>(
-    new Set(),
-  );
   const [skillEnableLoading, setSkillEnableLoading] = useState<Set<string>>(
     new Set(),
   );
@@ -2394,6 +2391,8 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
                   aliases: detail.aliases,
                   keywords: detail.keywords,
                   content: detail.content,
+                  autoEvo: detail.autoEvo,
+                  hasPendingRemoveSuggestion: previous.hasPendingRemoveSuggestion,
                 },
                 { stripFrontMatter: true },
               );
@@ -3925,6 +3924,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
               field: payload.field,
               aliases: payload.aliases,
               keywords: payload.keywords,
+              autoEvo: Boolean(draft.autoEvo) && !draft.hasPendingRemoveSuggestion,
             }),
           );
           setChangeProposals((previous) =>
@@ -4510,7 +4510,19 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       width: 110,
       render: (value: string, record) => (
         <div className="memory-skill-source">
-          <span>{record.originBuiltinSkillUid ? t("admin.memorySkillOriginBuiltin") : record.category === "external" || record.sourceRefType === "url" || record.sourceRefType === "upload" ? t("admin.memorySkillOriginExternal") : record.category === "internal" ? t("admin.memorySkillOriginInternal") : t("admin.memorySkillOriginUnknown")}</span>
+          <OriginMark kind={resolveSkillOriginKind(record)}>
+            {record.originBuiltinSkillUid
+              ? t("admin.memorySkillOriginBuiltin")
+              : record.cloudResourceId
+                ? t("admin.memoryResourceCloud")
+                : record.category === "external" ||
+                    record.sourceRefType === "url" ||
+                    record.sourceRefType === "upload"
+                  ? t("admin.memorySkillOriginExternal")
+                  : record.category === "internal"
+                    ? t("admin.memorySkillOriginInternal")
+                    : t("admin.memorySkillOriginUnknown")}
+          </OriginMark>
           {record.field || (value && !["internal", "external"].includes(value)) ? <small>{record.field || value}</small> : null}
         </div>
       ),
@@ -4656,87 +4668,84 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       },
     },
     {
-      title: t("admin.memoryAutoUpdate"),
-      key: "autoEvo",
-      width: 80,
-      render: (_value, record) => {
-        if (record.cloudResourceId) return null;
-        const disabledByRemoveSuggestion =
-          activeTab === "skills" && Boolean(record.hasPendingRemoveSuggestion);
-        const switchNode = (
-          <Switch
-            checked={Boolean(record.autoEvo) && !disabledByRemoveSuggestion}
-            disabled={disabledByRemoveSuggestion}
-            loading={skillAutoEvoLoading.has(record.id)}
-            onChange={(checked) => {
-              if (checked && record.hasPendingRemoveSuggestion) {
-                message.warning(t("admin.memorySkillAutoEvoDisabledByRemove"));
-                void refreshSkillAssets({ preserveChangeProposals: true });
-                return;
-              }
-              void (async () => {
-                setSkillAutoEvoLoading((prev) => new Set(prev).add(record.id));
-                try {
-                  await patchSkillAsset(
-                    record.id,
-                    buildSkillUpdatePayload({ autoEvo: checked }),
-                  );
-                  await refreshSkillAssets({ preserveChangeProposals: true });
-                } catch (error) {
-                  console.error("Toggle auto_evo failed:", error);
-                  await refreshSkillAssets({ preserveChangeProposals: true });
-                } finally {
-                  setSkillAutoEvoLoading((prev) => {
-                    const next = new Set(prev);
-                    next.delete(record.id);
-                    return next;
-                  });
-                }
-              })();
-            }}
-          />
-        );
-        return disabledByRemoveSuggestion ? (
-          <Tooltip title={t("admin.memorySkillAutoEvoDisabledByRemove")}>
-            {switchNode}
-          </Tooltip>
-        ) : (
-          switchNode
-        );
-      },
-    },
-    {
       title: t("admin.memoryOperations"),
       key: "actions",
-      width: 56,
+      width: 148,
       fixed: "right",
       render: (_value, record) => record.cloudResourceId ? (
-        <Space size={4}>
-          <Button type="text" icon={<EyeOutlined />} aria-label={t("admin.memoryCloudViewDetail")} onClick={() => navigate(`/memory-management/skills/cloud/${encodeURIComponent(record.cloudResourceId!)}`)} />
-          <Button type="text" icon={<CloudDownloadOutlined />} aria-label={t("admin.memoryCloudDownload")} disabled={!record.cloudDownloadable} loading={cloudSkillDownloading.has(record.id)} onClick={async () => {
-            if (cloudSkillDownloading.has(record.id)) return;
-            setCloudSkillDownloading((current) => new Set(current).add(record.id));
-            try {
-              await downloadCloudResource("skill", record.cloudResourceId!);
-              onCloudSkillUploaded();
-              await refreshSkillAssets();
-              message.success(t("admin.memoryCloudDownloadSuccess", { name: record.name }));
-            } catch { message.error(t("admin.memoryCloudDownloadFailed")) }
-            finally { setCloudSkillDownloading((current) => { const next = new Set(current); next.delete(record.id); return next }) }
-          }} />
-        </Space>
+        <div className="memory-resource-actions">
+          <Tooltip title={t("admin.memoryCloudViewDetail")}>
+            <Button type="text" size="small" icon={<EyeOutlined />} aria-label={t("admin.memoryCloudViewDetail")} onClick={() => navigate(`/memory-management/skills/cloud/${encodeURIComponent(record.cloudResourceId!)}`)} />
+          </Tooltip>
+          <Tooltip title={t("admin.memoryCloudDownload")}>
+            <Button type="text" size="small" icon={<CloudDownloadOutlined />} aria-label={t("admin.memoryCloudDownload")} disabled={!record.cloudDownloadable} loading={cloudSkillDownloading.has(record.id)} onClick={async () => {
+              if (cloudSkillDownloading.has(record.id)) return;
+              setCloudSkillDownloading((current) => new Set(current).add(record.id));
+              try {
+                await downloadCloudResource("skill", record.cloudResourceId!);
+                onCloudSkillUploaded();
+                await refreshSkillAssets();
+                message.success(t("admin.memoryCloudDownloadSuccess", { name: record.name }));
+              } catch { message.error(t("admin.memoryCloudDownloadFailed")) }
+              finally { setCloudSkillDownloading((current) => { const next = new Set(current); next.delete(record.id); return next }) }
+            }} />
+          </Tooltip>
+        </div>
       ) : (
-        <Dropdown
-          trigger={["click"]}
-          menu={{ items: [
-            ...(cloudSkills.available ? [{ key: "cloud", label: t("admin.memoryCloudUploadAction"), icon: <CloudUploadOutlined aria-hidden="true" />, disabled: cloudSkillUploading.has(record.id), onClick: () => void openCloudUploadConfirmation(record) }] : []),
-            { key: "edit", label: t("admin.memoryEditItem"), icon: <EditOutlined aria-hidden="true" />, onClick: () => openModal("edit", record) },
-            ...(!hideUserGroupSurfaces ? [{ key: "share", label: t("admin.memoryShareItem"), icon: <LinkOutlined aria-hidden="true" />, onClick: () => openShareModal("skills", record) }] : []),
-            { key: "delete", label: t("admin.memoryDeleteItem"), icon: <DeleteOutlined aria-hidden="true" />, danger: true, onClick: () => handleDelete(record) },
-          ] }}
-        >
-          <Button type="text" icon={<MoreOutlined />} aria-label={t("admin.memorySkillMoreActions", { name: record.name })} />
-        </Dropdown>
+        <div className="memory-resource-actions">
+          <Tooltip title={t("admin.memoryViewItem")}>
+            <Button
+              type="text"
+              size="small"
+              icon={<EyeOutlined />}
+              aria-label={t("admin.memoryViewItem")}
+              onClick={() => navigateToSkillDetail(record.id)}
+            />
+          </Tooltip>
+          <Tooltip title={t("admin.memoryEditItem")}>
+            <Button
+              type="text"
+              size="small"
+              icon={<EditOutlined />}
+              aria-label={t("admin.memoryEditItem")}
+              onClick={() => openModal("edit", record)}
+            />
+          </Tooltip>
+          {cloudSkills.available ? (
+            <Tooltip title={t("admin.memoryCloudUploadAction")}>
+              <Button
+                type="text"
+                size="small"
+                icon={<CloudUploadOutlined />}
+                aria-label={t("admin.memoryCloudUploadAction")}
+                loading={cloudSkillUploading.has(record.id)}
+                disabled={cloudSkillUploading.has(record.id)}
+                onClick={() => void openCloudUploadConfirmation(record)}
+              />
+            </Tooltip>
+          ) : null}
+          {!hideUserGroupSurfaces ? (
+            <Tooltip title={t("admin.memoryShareItem")}>
+              <Button
+                type="text"
+                size="small"
+                icon={<LinkOutlined />}
+                aria-label={t("admin.memoryShareItem")}
+                onClick={() => openShareModal("skills", record)}
+              />
+            </Tooltip>
+          ) : null}
+          <Tooltip title={t("admin.memoryDeleteItem")}>
+            <Button
+              type="text"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              aria-label={t("admin.memoryDeleteItem")}
+              onClick={() => handleDelete(record)}
+            />
+          </Tooltip>
+        </div>
       ),
     },
   ];
@@ -4782,9 +4791,9 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       key: "source",
       width: 150,
       render: (source: GlossarySource) => (
-        <Tag color={glossarySourceColorMap[source]}>
+        <OriginMark kind={source === "ai" ? "ai" : "internal"}>
           {glossarySourceLabelMap[source]}
-        </Tag>
+        </OriginMark>
       ),
     },
     {
@@ -4803,10 +4812,11 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       key: "actions",
       width: 170,
       render: (_value, record) => (
-        <Space size={4}>
+        <div className="memory-resource-actions">
           <Tooltip title={t("admin.memoryViewItem")}>
             <Button
               type="text"
+              size="small"
               icon={<EyeOutlined />}
               onClick={() => openGlossaryDetail(record)}
             />
@@ -4814,6 +4824,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
           <Tooltip title={t("admin.memoryEditItem")}>
             <Button
               type="text"
+              size="small"
               icon={<EditOutlined />}
               onClick={() => openModal("edit", record)}
             />
@@ -4821,12 +4832,13 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
           <Tooltip title={t("admin.memoryDeleteItem")}>
             <Button
               type="text"
+              size="small"
               danger
               icon={<DeleteOutlined />}
               onClick={() => handleDelete(record)}
             />
           </Tooltip>
-        </Space>
+        </div>
       ),
     },
   ];

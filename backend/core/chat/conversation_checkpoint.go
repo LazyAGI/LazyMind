@@ -12,6 +12,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/taskcenter"
 	"lazymind/core/tasktiming"
 )
 
@@ -32,6 +33,9 @@ func registerForkableHistoryRun(ctx context.Context, db *gorm.DB, convID, histor
 			}
 			if !target.IsRegeneration {
 				return forkFail("SOURCE_NOT_SETTLED")
+			}
+			if err := taskcenter.CaptureBackgroundExecution(ctx, tx, convID, history.ID, history.RunID); err != nil {
+				return err
 			}
 			return tx.Model(&history).Updates(map[string]any{"run_id": runID, "run_status": "generating", "run_terminal": nil, "ext": ext, "update_time": time.Now().UTC()}).Error
 		}

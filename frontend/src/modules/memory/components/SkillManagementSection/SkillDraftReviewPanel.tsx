@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Checkbox, Empty, Popconfirm, Spin, Tag } from "antd";
+import { Button, Checkbox, Empty, Popconfirm } from "antd";
 import { mapSkillDiffEntryLines } from "../skillPackage/skillDiffUtils";
 import {
   applySkillDraftBatch, draftReviewError, listPendingSkillDrafts, loadSkillDraftReview,
   rejectSkillDraft, type PendingSkillDraft, type SkillDraftReview,
 } from "./skillDraftReview";
+import { StatusMark, type StatusKind } from "./OriginMark";
+import SkillModuleState from "./SkillModuleState";
 import "./skillDraftReview.scss";
 
 interface Props {
@@ -16,6 +18,12 @@ interface Props {
   onApplyingChange?: (applying: boolean) => void;
 }
 interface ReviewRow { pending: PendingSkillDraft; preview?: SkillDraftReview; error?: string }
+
+const fileStatusKind = (status: string): StatusKind => {
+  if (status === "added") return "added";
+  if (status === "removed" || status === "deleted") return "removed";
+  return "modified";
+};
 
 export default function SkillDraftReviewPanel({t, onClose, onApplied, onPendingCountChange, onOpenSkill, onApplyingChange}: Props) {
   const [rows, setRows] = useState<ReviewRow[]>([]);
@@ -145,10 +153,11 @@ export default function SkillDraftReviewPanel({t, onClose, onApplied, onPendingC
         {t("admin.memorySkillDraftReviewApply", {count: chosen.length})}
       </Button>
     </div>
-    {error && <Alert type="error" showIcon message={translateError(error)} />}
-    {appliedCount !== null && <Alert type={Object.keys(failures).length ? "warning" : "success"} showIcon
-      message={t("admin.memorySkillDraftReviewResult", {succeeded: appliedCount, failed: Object.keys(failures).length})} />}
-    {loading && <div className="skill-draft-review__loading"><Spin size="small" /> {t("admin.memorySkillDraftReviewLoading")}</div>}
+    {error && <SkillModuleState tone="error">{translateError(error)}</SkillModuleState>}
+    {appliedCount !== null && <SkillModuleState tone={Object.keys(failures).length ? "warning" : "success"}>
+      {t("admin.memorySkillDraftReviewResult", {succeeded: appliedCount, failed: Object.keys(failures).length})}
+    </SkillModuleState>}
+    {loading && <SkillModuleState tone="loading">{t("admin.memorySkillDraftReviewLoading")}</SkillModuleState>}
     {!loading && !error && !rows.length && <Empty description={t("admin.memorySkillDraftReviewEmpty")} />}
     <div className="skill-draft-review__packages">
       {rows.map(row => {
@@ -161,7 +170,7 @@ export default function SkillDraftReviewPanel({t, onClose, onApplied, onPendingC
                 if (event.target.checked) next.add(id); else next.delete(id);
                 return next;
               })}>{row.pending.skill.name}</Checkbox>
-            <Tag>{t("admin.memorySkillDraftReviewPackage")}</Tag>
+            <StatusMark kind="pending">{t("admin.memorySkillDraftReviewPackage")}</StatusMark>
             <span>{row.pending.skill.category}</span>
             <Popconfirm
               title={t("admin.memorySkillDraftReviewRejectConfirmTitle")}
@@ -177,11 +186,12 @@ export default function SkillDraftReviewPanel({t, onClose, onApplied, onPendingC
               </Button>
             </Popconfirm>
           </header>
-          {failures[id] && <Alert type="error" message={translateError(failures[id])} />}
-          {row.error && <Alert type="error" message={translateError(row.error)}
-            action={onOpenSkill && <Button size="small" disabled={applying} onClick={() => onOpenSkill(id)}>{t("admin.memoryCloudViewDetail")}</Button>} />}
+          {failures[id] && <SkillModuleState tone="error">{translateError(failures[id])}</SkillModuleState>}
+          {row.error && <SkillModuleState tone="error">{translateError(row.error)}
+            {onOpenSkill ? <Button size="small" disabled={applying} onClick={() => onOpenSkill(id)}>{t("admin.memoryCloudViewDetail")}</Button> : null}
+          </SkillModuleState>}
           {row.preview?.files.map(file => <div className="skill-draft-review__file" key={file.path}>
-            <div className="skill-draft-review__file-title"><code>{file.path}</code><Tag>{t(`admin.memorySkillDraftReviewFile${file.status.charAt(0).toUpperCase()}${file.status.slice(1)}`)}</Tag></div>
+            <div className="skill-draft-review__file-title"><code>{file.path}</code><StatusMark kind={fileStatusKind(file.status)}>{t(`admin.memorySkillDraftReviewFile${file.status.charAt(0).toUpperCase()}${file.status.slice(1)}`)}</StatusMark></div>
             <pre aria-label={file.path}>{mapSkillDiffEntryLines(file.diffEntryLines).map((line, index) =>
               <div key={index} className={`skill-draft-review__line skill-draft-review__line--${line.type}`}>
                 <span aria-hidden="true">{line.type === "add" ? "+" : line.type === "remove" ? "−" : " "}</span><code>{line.text}</code>

@@ -36,8 +36,12 @@ class AccountApplicationService:
         self,
         owner_user_id: str,
         provider: str,
+        check_connection: bool = False,
     ) -> dict[str, Any]:
-        return self._adapter(provider).list_accounts(owner_user_id)
+        adapter = self._adapter(provider)
+        if check_connection and provider.strip().lower() == 'wechat':
+            adapter.check_connection(owner_user_id)
+        return adapter.list_accounts(owner_user_id)
 
     def disconnect_account(
         self,

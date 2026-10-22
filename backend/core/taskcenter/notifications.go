@@ -73,7 +73,13 @@ func persistTaskNotifications(ctx context.Context, tx *gorm.DB, id string) (resu
 	if err := tx.WithContext(ctx).First(&task, "id = ?", id).Error; err != nil {
 		return err
 	}
-	if task.TaskType != "scheduled" || task.ScheduleID == nil || task.NotificationConfig == nil || task.ArchivedAt != nil {
+	if task.ArchivedAt != nil {
+		return nil
+	}
+	if task.TaskType != "scheduled" || task.NotificationConfig == nil {
+		return persistDesktopTaskCompletion(ctx, tx, task)
+	}
+	if task.ScheduleID == nil || task.NotificationConfig == nil {
 		return nil
 	}
 	var config NotificationConfig
@@ -86,6 +92,10 @@ func persistTaskNotifications(ctx context.Context, tx *gorm.DB, id string) (resu
 		return nil
 	}
 	body, occurrence := "", event
+	eventAt := task.FinishedAt
+	if isTerminal(event) && eventAt != nil {
+		occurrence += ":" + eventAt.UTC().Format(time.RFC3339Nano)
+	}
 	switch event {
 	case "succeeded":
 		var output orm.TaskRunOutput
@@ -110,8 +120,9 @@ func persistTaskNotifications(ctx context.Context, tx *gorm.DB, id string) (resu
 		}
 	case "waiting":
 		var progress struct {
-			ActionID string `json:"pending_action_id"`
-			Action   string `json:"pending_action"`
+			ActionID string     `json:"pending_action_id"`
+			Action   string     `json:"pending_action"`
+			At       *time.Time `json:"pending_action_at"`
 		}
 		if err := json.Unmarshal(task.ProgressJSON, &progress); err != nil {
 			return nil
@@ -120,6 +131,7 @@ func persistTaskNotifications(ctx context.Context, tx *gorm.DB, id string) (resu
 			return nil
 		}
 		body, occurrence = progress.Action, "waiting:"+progress.ActionID
+		eventAt = progress.At
 	default:
 		return nil
 	}
@@ -154,14 +166,55 @@ func persistTaskNotifications(ctx context.Context, tx *gorm.DB, id string) (resu
 			Title: notificationPreview(title, 200), Body: content, Content: rule.Content, Status: "pending",
 			CreatedAt: now, UpdatedAt: now,
 		}
-		if reason := notificationBlockReason(prefs, channel); reason != "" {
+		if reason := completionNotificationBlockReason(prefs, channel, eventAt); reason != "" {
 			notice.Status, notice.Reason = "skipped", reason
+		} else if channel != "desktop" && (strings.TrimSpace(target.AccountID) == "" || strings.TrimSpace(target.RecipientID) == "") {
+			notice.Status, notice.Reason = "skipped", "NOTIFICATION_TARGET_REQUIRED"
 		}
 		if err := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&notice).Error; err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// Completions without a scheduled policy use the desktop gate only. Global
+// external defaults never select recipients for these tasks.
+func persistDesktopTaskCompletion(ctx context.Context, tx *gorm.DB, task orm.TaskCenterTask) error {
+	if (task.TaskType != "workflow_run" && task.TaskType != "background_chat" && task.TaskType != "scheduled") ||
+		(task.Status != "succeeded" && task.Status != "failed") {
+		return nil
+	}
+	prefs, err := LoadNotificationPreferences(ctx, tx, task.UserID)
+	if err != nil {
+		return err
+	}
+	title, body := "任务", "任务已完成，请打开任务查看结果。"
+	if task.Title != nil && strings.TrimSpace(*task.Title) != "" {
+		title = *task.Title
+	}
+	if task.Status == "failed" {
+		body = "任务执行失败，请打开任务查看详情。"
+	}
+	now := time.Now().UTC()
+	occurrence := task.Status
+	if task.FinishedAt != nil {
+		occurrence += ":" + task.FinishedAt.UTC().Format(time.RFC3339Nano)
+	}
+	notice := orm.TaskNotification{
+		ID:     notificationIdentity(task.ID, occurrence, "desktop", "", ""),
+		UserID: task.UserID, TaskID: task.ID, EventID: notificationIdentity(task.ID, occurrence),
+		Event: task.Status, Channel: "desktop", ConfigRevision: prefs.Revision,
+		Title: notificationPreview(title, 200), Body: body, Content: "summary", Status: "pending",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if task.ScheduleID != nil {
+		notice.ScheduleID = *task.ScheduleID
+	}
+	if reason := completionNotificationBlockReason(prefs, "desktop", task.FinishedAt); reason != "" {
+		notice.Status, notice.Reason = "skipped", reason
+	}
+	return tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&notice).Error
 }
 
 func notificationBlockReason(prefs orm.UserNotificationPreferences, channel string) string {
@@ -188,12 +241,24 @@ func safeScheduledFailure(reason string) bool {
 }
 
 func activeNotificationRuns(tx *gorm.DB, userID string) ([]string, error) {
+	prefs, err := ReadNotificationPreferences(tx.Statement.Context, tx, userID)
+	if err != nil {
+		return nil, err
+	}
+	desktopEnabled := notificationBlockReason(prefs, "desktop") == ""
 	var tasks []orm.TaskCenterTask
-	if err := tx.Where("user_id = ? AND task_type = 'scheduled' AND status IN ('pending','running','waiting','waiting_inputs') AND archived_at IS NULL AND notification_config IS NOT NULL", userID).Order("id").Find(&tasks).Error; err != nil {
+	if err := tx.Where("user_id = ? AND task_type IN ? AND status IN ('pending','running','waiting','waiting_inputs') AND archived_at IS NULL", userID,
+		[]string{"scheduled", "background_chat", "workflow_run"}).Order("id").Find(&tasks).Error; err != nil {
 		return nil, err
 	}
 	ids := []string{}
 	for _, task := range tasks {
+		if task.TaskType != "scheduled" || task.NotificationConfig == nil {
+			if desktopEnabled {
+				ids = append(ids, task.ID)
+			}
+			continue
+		}
 		config, err := notificationConfigValue(task.NotificationConfig)
 		if err != nil {
 			return nil, err
@@ -221,6 +286,13 @@ func notificationConfigValue(raw *string) (*NotificationConfig, error) {
 
 // WaitScheduledTask records only an explicit user action, never dependency or tool progress.
 func WaitScheduledTask(ctx context.Context, db *gorm.DB, taskID, actionID, action string) error {
+	return waitScheduledTaskAt(ctx, db, taskID, actionID, action, time.Now().UTC())
+}
+
+func waitScheduledTaskAt(ctx context.Context, db *gorm.DB, taskID, actionID, action string, occurredAt time.Time) error {
+	if occurredAt.IsZero() {
+		occurredAt = time.Now().UTC()
+	}
 	return notificationTx(ctx, db, func(tx *gorm.DB) error {
 		var task orm.TaskCenterTask
 		if err := tx.First(&task, "id = ?", taskID).Error; err != nil {
@@ -239,6 +311,7 @@ func WaitScheduledTask(ctx context.Context, db *gorm.DB, taskID, actionID, actio
 			return nil
 		}
 		progress["pending_action_id"], progress["pending_action"] = actionID, notificationPreview(action, 1000)
+		progress["pending_action_at"] = occurredAt
 		raw, err := json.Marshal(progress)
 		if err != nil {
 			return err

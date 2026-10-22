@@ -90,7 +90,7 @@ def _compose_parsed(pages: List[Tuple[int, str]]) -> str:
 def _ocr_type_from_runtime() -> Optional[str]:
     try:
         import lazyllm
-        cfg = lazyllm.globals.config.get('dynamic_ocr_configs') or {}
+        cfg = lazyllm.globals.config['dynamic_ocr_configs'] or {}
         if isinstance(cfg, dict):
             value = str(cfg.get('ocr_type') or '').strip()
             return value or None

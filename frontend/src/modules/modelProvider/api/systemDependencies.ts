@@ -179,6 +179,7 @@ export async function revokeBrowserDevice(deviceID: string) {
 
 export interface PythonComponentStatus {
   id: "rag";
+  installMethod?: "source";
   installed: boolean;
   active: boolean;
   restartRequired: boolean;

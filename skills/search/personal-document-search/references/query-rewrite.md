@@ -17,7 +17,7 @@ search entity even though this skill is named personal-document-search.
 
 | Source | Initial representation | Why |
 |---|---|---|
-| Local Files | `query="Enterprise Search 多来源检索"` | Short literal keywords. If a project path is already known, scoped grep/read instead of OS index rediscovery. |
+| Local Files | `query="Enterprise Search"` | One contiguous phrase; spaces are literal. If a project path is already known, scoped grep/read instead of OS index rediscovery. |
 | Agent Conversations | `query="Enterprise Search 多来源检索 最终设计"` using direct history-file search or an available history tool | Discussion/decision terms can help find conversations. Tool-specific project/session filters follow its actual schema. |
 | Feishu | `query="Enterprise Search 多来源检索", source_type="all"` | Topic query, Docs + Wiki unless the user narrows it. |
 | Notion | `query="Enterprise Search 多来源检索"` after official MCP preflight | Use available search mode and actual filter schema; retain exact project/entity names. |
@@ -27,6 +27,9 @@ search entity even though this skill is named personal-document-search.
 These are representations, not literal cross-provider tool calls. Inspect actual
 schemas and use only supported argument names. Keyword backend matching differs:
 if combined terms overconstrain recall, refine only that Source.
+In particular, native_search does not tokenize its query: do not join alternative
+document types or synonyms with spaces. For work-report discovery, start with
+`述职`; if weak/empty, refine once to `周报`. An exact multiword name remains intact.
 
 ## Filename, person and time constraints
 

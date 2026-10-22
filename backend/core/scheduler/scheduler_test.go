@@ -24,6 +24,7 @@ func newDependencyRuntimeTestDB(t *testing.T) *orm.DB {
 	return orm.MigrateTestDB(t,
 		&orm.UserSchedule{}, &orm.ScheduleDependency{}, &orm.TaskCenterTask{}, &orm.UserUIPreferences{},
 		&orm.TaskRunInput{}, &orm.Conversation{},
+		&orm.UserNotificationPreferences{}, &orm.TaskNotification{},
 	)
 }
 

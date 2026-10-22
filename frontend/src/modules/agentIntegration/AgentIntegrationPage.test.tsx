@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createInstance } from "i18next";
 import zhCN from "@/i18n/locales/zh-CN";
@@ -49,7 +49,10 @@ vi.mock("./externalCapabilitiesApi", () => ({
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, options?: { defaultValue?: string; agent?: string; count?: number }) => {
-      if (key === "agentIntegration.retryDisconnection") return retryI18n.t(key);
+      if (key === "agentIntegration.retryDisconnection" || key.startsWith("agentIntegration.loginStates.") ||
+        key.startsWith("agentIntegration.cliSources.") || ["agentIntegration.selectedCLI", "agentIntegration.reselectCLI"].includes(key)) {
+        return retryI18n.t(key);
+      }
       const agent = options?.agent || "Agent";
       const values: Record<string, string> = {
         "common.refresh": "刷新",
@@ -209,6 +212,7 @@ function expandAgent(id: string) {
 }
 
 describe("AgentIntegrationPage", () => {
+  afterEach(() => { vi.useRealTimers(); });
   beforeEach(async () => {
     await retryI18n.init({
       lng: "zh-CN", fallbackLng: false,
@@ -898,6 +902,190 @@ describe("AgentIntegrationPage", () => {
     await waitFor(() => expect(
       within(cursor).getByRole("switch", { name: "Cursor 桌面版 使用 LazyMind MCP" }),
     ).toBeChecked());
+  });
+
+  it.each([
+    ["failed", "登录失败"],
+    ["cancelled", "登录已取消"],
+    ["succeeded", "登录已完成"],
+  ])("shows %s login independently of enabled MCP configuration", async (state, label) => {
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: {
+      ...readyCodexStatus, state: "enabled", login: { state, message: "Login operation detail" },
+    } } });
+    render(<AgentIntegrationPage />);
+    const panel = await screen.findByTestId("agent-panel-codex");
+    expect(await within(panel).findByText(label)).toBeInTheDocument();
+    expect(within(panel).getByText("Login operation detail")).toBeInTheDocument();
+    expect(within(panel).getByRole("switch", { name: "Codex 桌面端 使用 LazyMind MCP" })).toBeChecked();
+    fireEvent.click(panel.querySelector<HTMLButtonElement>(".agent-integration-card-toggle")!);
+    expect(within(panel).getByText(label)).toBeInTheDocument();
+  });
+
+  it.each(["failed", "cancelled", "succeeded"])("stops polling when login is %s even when the executor is disabled", async (state) => {
+    mocks.executorPolicies.mockResolvedValue({ ok: true, data: { codex: {
+      provider: "codex", enabled: false, installed: true, ready: false,
+      unavailable_reason: "Codex CLI is not signed in",
+    } } });
+    mocks.action.mockResolvedValue({ ok: true, data: {
+      ...readyCodexStatus, login: { state: "running" },
+    } });
+    render(<AgentIntegrationPage />);
+    const panel = await screen.findByTestId("agent-panel-codex");
+    const login = await within(panel).findByRole("button", { name: /登录/ });
+    await waitFor(() => expect(screen.getByRole("button", { name: /刷\s*新/ })).toBeEnabled());
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.click(login); });
+    expect(within(panel).getByText("正在登录")).toBeInTheDocument();
+    expect(login).toBeDisabled();
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: {
+      ...readyCodexStatus, login: { state, message: "Terminal result" },
+    } } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(within(panel).getByText("Terminal result")).toBeInTheDocument();
+    const calls = mocks.statuses.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(180_000); });
+    expect(mocks.statuses).toHaveBeenCalledTimes(calls);
+    expect(login).toBeEnabled();
+  });
+
+  it("ignores an older terminal status response after login retry starts", async () => {
+    const previous = { ...readyCodexStatus, login: { state: "failed", message: "Previous failure" } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: previous } });
+    mocks.executorPolicies.mockResolvedValue({ ok: true, data: { codex: {
+      provider: "codex", enabled: false, installed: true, ready: false,
+      unavailable_reason: "Codex CLI is not signed in",
+    } } });
+    mocks.action.mockResolvedValue({ ok: true, data: { ...readyCodexStatus, login: { state: "running" } } });
+    render(<AgentIntegrationPage />);
+    const panel = await screen.findByTestId("agent-panel-codex");
+    const login = await within(panel).findByRole("button", { name: /登录/ });
+    const refreshButton = screen.getByRole("button", { name: /刷\s*新/ });
+    await waitFor(() => expect(refreshButton).toBeEnabled());
+    let finishOldRefresh!: (value: unknown) => void;
+    mocks.statuses.mockImplementationOnce(() => new Promise(resolve => { finishOldRefresh = resolve; }));
+    fireEvent.click(refreshButton);
+    await waitFor(() => expect(refreshButton).toBeDisabled());
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.click(login); });
+    expect(within(panel).getByText("正在登录")).toBeInTheDocument();
+    await act(async () => { finishOldRefresh({ ok: true, data: { codex: previous } }); });
+    expect(within(panel).queryByText("Previous failure")).not.toBeInTheDocument();
+    expect(within(panel).getByText("正在登录")).toBeInTheDocument();
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: {
+      ...readyCodexStatus, login: { state: "succeeded" },
+    } } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(within(panel).getByText("登录已完成")).toBeInTheDocument();
+  });
+
+  it("does not restore an older login failure after binding another CLI", async () => {
+    const previous = { ...readyCodexStatus, login: { state: "failed", message: "Previous binding failure" } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: previous } });
+    mocks.selectExecutable.mockResolvedValue("/new/codex");
+    mocks.bind.mockResolvedValue({ ok: true, data: { target: "codex-cli", configured: true } });
+    render(<AgentIntegrationPage />);
+    const panel = await screen.findByTestId("agent-panel-codex");
+    const refreshButton = screen.getByRole("button", { name: /刷\s*新/ });
+    await waitFor(() => expect(refreshButton).toBeEnabled());
+    let finishOldRefresh!: (value: unknown) => void;
+    mocks.statuses.mockImplementationOnce(() => new Promise(resolve => { finishOldRefresh = resolve; }));
+    fireEvent.click(refreshButton);
+    await waitFor(() => expect(refreshButton).toBeDisabled());
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: readyCodexStatus } });
+    mocks.executorPolicies.mockResolvedValue({ ok: true, data: { codex: {
+      provider: "codex", enabled: false, installed: true, ready: true, cli_path: "/new/codex", cli_source: "explicit",
+    } } });
+    await act(async () => { fireEvent.click(within(panel).getByRole("button", { name: /重新选择 CLI/ })); });
+    await act(async () => { finishOldRefresh({ ok: true, data: { codex: previous } }); });
+    expect(within(panel).queryByText("Previous binding failure")).not.toBeInTheDocument();
+    expect(await within(panel).findByText("/new/codex")).toBeInTheDocument();
+    expect(refreshButton).toBeEnabled();
+  });
+
+  it("resumes polling when returning to a login that is already running", async () => {
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: {
+      ...readyCodexStatus, login: { state: "running" },
+    } } });
+    vi.useFakeTimers();
+    await act(async () => { render(<AgentIntegrationPage />); });
+    const panel = screen.getByTestId("agent-panel-codex");
+    expect(within(panel).getByText("正在登录")).toBeInTheDocument();
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: {
+      ...readyCodexStatus, login: { state: "failed", message: "Login completed after navigation" },
+    } } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(within(panel).getByText("Login completed after navigation")).toBeInTheDocument();
+  });
+
+  it("keeps polling a running login after the initial recheck window", async () => {
+    mocks.executorPolicies.mockResolvedValue({ ok: true, data: { codex: {
+      provider: "codex", enabled: false, installed: true, ready: false,
+      unavailable_reason: "Codex CLI is not signed in",
+    } } });
+    const running = { ...readyCodexStatus, login: { state: "running" } };
+    mocks.action.mockResolvedValue({ ok: true, data: running });
+    render(<AgentIntegrationPage />);
+    const panel = await screen.findByTestId("agent-panel-codex");
+    const login = await within(panel).findByRole("button", { name: /登录/ });
+    await waitFor(() => expect(screen.getByRole("button", { name: /刷\s*新/ })).toBeEnabled());
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: running } });
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.click(login); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(130_000); });
+    const calls = mocks.statuses.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(mocks.statuses.mock.calls.length).toBeGreaterThan(calls);
+  });
+
+  it("retries failed login without retaining the previous failure", async () => {
+    mocks.statuses.mockResolvedValue({ ok: true, data: { codex: {
+      ...readyCodexStatus, login: { state: "failed", message: "Previous login failure" },
+    } } });
+    mocks.executorPolicies.mockResolvedValue({ ok: true, data: { codex: {
+      provider: "codex", enabled: false, installed: true, ready: false,
+      unavailable_reason: "Codex CLI is not signed in",
+    } } });
+    mocks.action.mockResolvedValue({ ok: true, data: {
+      ...readyCodexStatus, login: { state: "running" },
+    } });
+    render(<AgentIntegrationPage />);
+    const panel = await screen.findByTestId("agent-panel-codex");
+    expect(await within(panel).findByText("Previous login failure")).toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole("button", { name: /登录/ }));
+    expect(await within(panel).findByText("正在登录")).toBeInTheDocument();
+    expect(within(panel).queryByText("Previous login failure")).not.toBeInTheDocument();
+  });
+
+  it("shows the selected CLI and lets users replace a detected but broken executable", async () => {
+    mocks.executorPolicies.mockResolvedValue({ ok: true, data: { codex: {
+      provider: "codex", enabled: false, installed: true, ready: false,
+      unavailable_reason: "Codex CLI failed to start: missing native dependency",
+      cli_path: "/broken/bin/codex", cli_source: "path",
+    } } });
+    mocks.selectExecutable.mockResolvedValue("/Applications/ChatGPT.app/Contents/Resources/codex");
+    let completeBinding!: (result: unknown) => void;
+    mocks.bind.mockImplementation(() => new Promise(resolve => { completeBinding = resolve; }));
+    render(<AgentIntegrationPage />);
+    const panel = await screen.findByTestId("agent-panel-codex");
+    expect(await within(panel).findByText("/broken/bin/codex")).toBeInTheDocument();
+    expect(within(panel).getByText("系统 PATH")).toBeInTheDocument();
+    expect(within(panel).getByText("Codex CLI failed to start: missing native dependency")).toBeInTheDocument();
+    fireEvent.click(panel.querySelector<HTMLButtonElement>(".agent-integration-card-toggle")!);
+    expect(within(panel).queryByText("CLI 未登录")).not.toBeInTheDocument();
+    expect(within(panel).getByText("登录状态检测失败")).toBeInTheDocument();
+    fireEvent.click(panel.querySelector<HTMLButtonElement>(".agent-integration-card-toggle")!);
+    const reselect = within(panel).getByRole("button", { name: /重新选择 CLI/ });
+    fireEvent.click(reselect);
+    await waitFor(() => expect(reselect).toBeDisabled());
+    expect(mocks.bind).toHaveBeenCalledWith("codex-cli", "/Applications/ChatGPT.app/Contents/Resources/codex");
+    mocks.executorPolicies.mockResolvedValue({ ok: true, data: { codex: {
+      provider: "codex", enabled: false, installed: true, ready: true,
+      cli_path: "/Applications/ChatGPT.app/Contents/Resources/codex", cli_source: "explicit",
+    } } });
+    await act(async () => { completeBinding({ ok: true, data: { target: "codex-cli", configured: true } }); });
+    expect(await within(panel).findByText("/Applications/ChatGPT.app/Contents/Resources/codex")).toBeInTheDocument();
+    expect(within(panel).getByText("手动指定")).toBeInTheDocument();
+    expect(reselect).toBeEnabled();
   });
 
   it("supports explicit CLI location without making it a separate permanent panel", async () => {

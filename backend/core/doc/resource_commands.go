@@ -7,6 +7,7 @@ import (
 	"lazymind/core/acl"
 	"lazymind/core/common/orm"
 	"lazymind/core/learning"
+	"lazymind/core/systemdeps"
 	"strings"
 	"time"
 )
@@ -237,7 +238,8 @@ func (s *ResourceService) UpdateMetadata(ctx context.Context, op ResourceOperati
 	prepared := make([]ResourceMetadataChanges, len(req.Items))
 	for i, item := range req.Items {
 		c := item.Changes
-		if _, err := s.dataset(ctx, s.db, op, item.Target.KnowledgeBaseID, acl.PermissionDatasetWrite); err != nil {
+		ds, err := s.dataset(ctx, s.db, op, item.Target.KnowledgeBaseID, acl.PermissionDatasetWrite)
+		if err != nil {
 			return ResourceOperationResult{}, err
 		}
 		if c.ProcessingLevel != nil {
@@ -258,6 +260,22 @@ func (s *ResourceService) UpdateMetadata(ctx context.Context, op ResourceOperati
 			c.AlgoID = &algo.AlgoID
 			c.algorithm = &algo
 			c.parsers = fetchParsersByAlgoID(ctx, algo.AlgoID)
+		}
+		if item.Target.Kind == "knowledge_base" && c.ProcessingLevel != nil &&
+			*c.ProcessingLevel != ProcessingLevelStored && systemdeps.PythonComponentActive("rag") &&
+			(effectiveProcessingLevel(ds.ProcessingLevel) == ProcessingLevelStored || parseDatasetAlgo(ds.Ext).AlgoID == "") {
+			if c.AlgoID != nil {
+				ext := knowledgeExt(ds.Ext)
+				ext["algo_id"] = *c.AlgoID
+				ds.Ext = mustJSON(ext)
+			}
+			if err := ensureDatasetRAG(ctx, &ds); err != nil {
+				return ResourceOperationResult{}, resourceErr("UNAVAILABLE", err.Error())
+			}
+			if c.AlgoID == nil {
+				id := parseDatasetAlgo(ds.Ext).AlgoID
+				c.AlgoID = &id
+			}
 		}
 		if c.Description != nil {
 			if err := validateKnowledgeDescription(*c.Description); err != nil {

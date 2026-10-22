@@ -284,7 +284,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const isCloudArchiveView = sourceCategory === "cloudArchive";
   const isOfficialView = sourceCategory === "official";
   const { availability: ragAvailability } = useRAGComponent();
-  const createActionDisabled = ragAvailability !== "ready";
+  const createActionDisabled = ragAvailability === "checking" || ragAvailability === "error";
   const createActionDisabledTooltip = ragAvailability === "checking"
     ? "正在检查本地知识库组件状态"
     : ragAvailability === "error"
@@ -501,6 +501,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       selectedSort: KnowledgeMineSort = "all",
       selectedCloudSource: KnowledgeMineCloudSource = "all",
     ) => {
+      if (ragAvailability !== "ready") {
+        mineTableRequestSeqRef.current += 1;
+        setCloudSources([]);
+        setPagination((current) => ({ ...current, current: page, total: 0 }));
+        setLoading(false);
+        return;
+      }
       const requestSeq = mineTableRequestSeqRef.current + 1;
       mineTableRequestSeqRef.current = requestSeq;
       setLoading(true);
@@ -613,7 +620,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         }
       }
     },
-    [t, tableQueryKey, updateListState],
+    [ragAvailability, t, tableQueryKey, updateListState],
   );
 
   const resolveCloudArchiveDatasetId = useCallback((record: DataSourceItem) => {
@@ -634,6 +641,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
 
   const handleCloudArchiveEdit = useCallback(
     async (record: DataSourceItem) => {
+      if (createActionDisabled) {
+        message.warning(createActionDisabledTooltip);
+        return;
+      }
       const sourceId = `${record.id || ""}`.trim();
       if (!sourceId) {
         message.warning(t("admin.dataSourceDetailNotFound"));
@@ -663,7 +674,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         // API errors are reported by the shared request interceptor.
       }
     },
-    [syncCreateVm, t],
+    [createActionDisabled, createActionDisabledTooltip, syncCreateVm, t],
   );
 
   const handleCloudArchiveDelete = useCallback(
@@ -874,6 +885,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
 
   const handleOfficialInstall = useCallback(
     async (item: OfficialKnowledgeBase) => {
+      if (createActionDisabled) {
+        message.warning(createActionDisabledTooltip);
+        return;
+      }
       try {
         const task = await installKnowledgeMarketItem(item.id);
         trackMarketJob({
@@ -892,11 +907,15 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         // The shared request interceptor displays the localized error.
       }
     },
-    [loadKnowledgeMarket, t, taskNotification, trackMarketJob],
+    [createActionDisabled, createActionDisabledTooltip, loadKnowledgeMarket, t, taskNotification, trackMarketJob],
   );
 
   const handleOfficialUpdate = useCallback(
     async (item: OfficialKnowledgeBase) => {
+      if (createActionDisabled) {
+        message.warning(createActionDisabledTooltip);
+        return;
+      }
       try {
         const task = await updateKnowledgeMarketItem(item.id);
         trackMarketJob({
@@ -915,7 +934,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         // The shared request interceptor displays the localized error.
       }
     },
-    [loadKnowledgeMarket, t, taskNotification, trackMarketJob],
+    [createActionDisabled, createActionDisabledTooltip, loadKnowledgeMarket, t, taskNotification, trackMarketJob],
   );
 
   const handleOfficialOpen = useCallback(
@@ -1099,6 +1118,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   }, [mineOfficialTag, officialFilterTags, officialLoaded, sourceCategory, updateListState]);
 
   const handleUpdateAllOfficial = useCallback(async () => {
+    if (createActionDisabled) {
+      message.warning(createActionDisabledTooltip);
+      return;
+    }
     try {
       const task = await updateAllKnowledgeMarketItems();
       trackMarketJob({
@@ -1115,7 +1138,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     } catch {
       // The shared request interceptor displays the localized error.
     }
-  }, [availableUpdateCount, t, taskNotification, trackMarketJob]);
+  }, [availableUpdateCount, createActionDisabled, createActionDisabledTooltip, t, taskNotification, trackMarketJob]);
 
   useEffect(() => {
     const jobs = Object.values(trackedMarketJobs);
@@ -1846,6 +1869,8 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           onOpen={handleOfficialOpen}
           onQuery={handleOfficialQuery}
           onLoadDetail={handleOfficialLoadDetail}
+          actionDisabled={createActionDisabled}
+          actionDisabledReason={createActionDisabledTooltip}
         />
         </>
       ) : (
@@ -1863,6 +1888,11 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                   role="tab"
                   className={sourceCategory === value ? "is-active" : ""}
                   aria-selected={sourceCategory === value}
+                  aria-disabled={value === "cloudArchive" && createActionDisabled}
+                  disabled={value === "cloudArchive" && createActionDisabled}
+                  title={value === "cloudArchive" && createActionDisabled
+                    ? createActionDisabledTooltip
+                    : undefined}
                   onClick={() => {
                     setMineFilterOpen(false);
                     if (value === sourceCategory) return;
@@ -1901,6 +1931,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               <Button
                 type="primary"
                 disabled={
+                  createActionDisabled ||
                   availableUpdateCount === 0 ||
                   Object.values(trackedMarketJobs).some(
                     (job) => job.jobType === "updateAll",
