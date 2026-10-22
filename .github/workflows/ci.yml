@@ -217,8 +217,29 @@ jobs:
         working-directory: local/local-runtime-manager
         run: go test ./... -v
       - name: Test LazyMind Agent Connector
+        if: runner.os != 'Windows'
         working-directory: local/lazymind-cli
         run: go test ./... -v
+      - name: Test LazyMind Agent Connector with build diagnostics
+        if: runner.os == 'Windows'
+        working-directory: local/lazymind-cli
+        shell: pwsh
+        env:
+          GODEBUG: gocachetest=1
+        run: |
+          $diagnostics = Join-Path $env:RUNNER_TEMP 'go-cli-diagnostics'
+          New-Item -ItemType Directory -Force -Path $diagnostics | Out-Null
+          go test ./... -json "-debug-actiongraph=$diagnostics/actions.json" 2> "$diagnostics/cache.log" |
+            Tee-Object -FilePath "$diagnostics/tests.jsonl"
+          $testExitCode = $LASTEXITCODE
+          Get-Content "$diagnostics/cache.log"
+          exit $testExitCode
+      - name: Upload Windows Go diagnostics
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-cli-diagnostics-windows
+          path: ${{ runner.temp }}/go-cli-diagnostics
       - name: Test and verify the bundled DSH plugin
         if: runner.os == 'Linux'
         working-directory: integrations/dsh-workflow
@@ -543,7 +564,7 @@ jobs:
           import sys
 
           for arguments in [
-              ['run', '--source=algorithm', '-m', 'pytest', 'tests/algorithm/', '-v'],
+              ['run', '--source=algorithm', '-m', 'pytest', 'tests/algorithm/', '-v', '--durations=50'],
               ['html', '-d', 'htmlcov-algorithm'],
               ['xml', '-o', 'coverage-algorithm.xml'],
           ]:

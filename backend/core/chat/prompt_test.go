@@ -21,36 +21,7 @@ import (
 
 func newPromptTestDB(t *testing.T) *orm.DB {
 	t.Helper()
-
-	// Shared by conversation, model-selection, prompt and user-environment tests.
-	// Include their downstream tables so optional-table checks keep exercising
-	// the same behavior as a fully migrated application database.
-	return orm.MigrateTestDB(t,
-		&orm.Prompt{}, &orm.PromptCategory{}, &orm.PromptUserState{},
-		&orm.Conversation{}, &orm.ChatHistory{}, &orm.MultiAnswersChatHistory{}, &orm.ChatRunPerformance{},
-		&orm.ConversationForkOrigin{}, &orm.ConversationForkRequest{}, &orm.ConversationOpening{},
-		&orm.ConversationArchiveFolder{}, &orm.ConversationIdleEvent{},
-		&orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.ConversationGroupState{},
-		&orm.ConversationOrganizerRun{}, &orm.ConversationOrganizerSnapshotItem{},
-		&orm.LocalWorkspace{}, &orm.ConversationWorkspaceBinding{}, &orm.ConversationToolGrant{},
-		&orm.ExternalAgentBinding{}, &orm.ExternalAgentSession{},
-		&orm.ExternalChatRun{}, &orm.ExternalChatRunEvent{}, &orm.ExternalChatHost{},
-		&orm.SubAgentTask{}, &orm.SubAgentArtifact{}, &orm.AgentInvocation{},
-		&orm.ConversationArtifact{}, &orm.ArtifactV2{}, &orm.ArtifactBlob{}, &orm.ArtifactBinding{},
-		&orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowEvent{}, &orm.WorkflowTransitionCommand{},
-		&orm.WorkflowResource{}, &orm.WorkflowRevision{}, &orm.WorkflowHumanArtifact{}, &orm.WorkflowSlotRevision{},
-		&orm.TaskCenterTask{}, &orm.TaskExecutionTiming{}, &orm.TaskAttemptTiming{},
-		&orm.TaskNotification{}, &orm.UserNotificationPreferences{}, &orm.UserSchedule{},
-		&orm.TaskRunInput{}, &orm.TaskRunOutput{}, &orm.AsyncJob{},
-		&orm.UserModelProvider{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{},
-		&orm.UserSelectedModel{}, &orm.UserSelectedProvider{}, &orm.UserSelectedCloudModel{},
-		&orm.UserChatSettings{}, &orm.UserUIPreferences{}, &orm.UserEnvironmentVariable{},
-		&orm.UserPersonalizationSetting{}, &orm.UserWorkflowSetting{}, &orm.UserDisabledTool{},
-		&orm.MCPServer{}, &orm.SkillV2Skill{}, &orm.SkillV2Draft{}, &orm.EpisodeMemory{},
-		&orm.Dataset{}, &orm.DatasetUserState{}, &orm.Document{}, &orm.DocumentProcessingState{},
-		&orm.ACLModel{}, &orm.KBModel{}, &orm.UserGroupModel{}, &orm.VisibilityModel{},
-		&orm.UploadSession{}, &orm.UploadedFile{},
-	)
+	return orm.MigrateTestDB(t, &orm.Prompt{}, &orm.PromptCategory{}, &orm.PromptUserState{})
 }
 
 func TestPromptUsageUpsertQualifiesPostgresUsageCount(t *testing.T) {
@@ -87,7 +58,8 @@ func TestPromptUsageUpsertQualifiesPostgresUsageCount(t *testing.T) {
 }
 
 func TestPolishPromptCallsRewrite(t *testing.T) {
-	db := newPromptTestDB(t)
+	db := orm.MigrateTestDB(t, &orm.UserSelectedModel{}, &orm.UserSelectedCloudModel{},
+		&orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{})
 	corestore.Init(db.DB, nil, nil)
 	t.Cleanup(func() { corestore.Init(nil, nil, nil) })
 

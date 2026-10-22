@@ -72,7 +72,8 @@ func TestUniqueNonEmptyStrings_SingleElement(t *testing.T) {
 
 func newConversationSearchConfigTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db := newPromptTestDB(t)
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{},
+		&orm.Dataset{}, &orm.DatasetUserState{}, &orm.ACLModel{}, &orm.KBModel{}, &orm.UserGroupModel{}, &orm.VisibilityModel{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	return db.DB
