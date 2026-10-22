@@ -478,7 +478,11 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 		if modelType != EvoModelKey {
 			dbModelType = resolveModelType(r.Context(), modelType)
 		}
-		q = q.Where("user_model_provider_group_models.model_type IN ?", compatibleDBModelTypes(dbModelType))
+		if strings.EqualFold(dbModelType, "vlm") {
+			q = q.Where("(user_model_provider_group_models.model_type IN ? OR (user_model_provider_group_models.model_type = ? AND user_model_provider_group_models.vision = ?))", compatibleDBModelTypes(dbModelType), "llm", true)
+		} else {
+			q = q.Where("user_model_provider_group_models.model_type IN ?", compatibleDBModelTypes(dbModelType))
+		}
 	}
 	if keyword != "" {
 		like := "%" + keyword + "%"

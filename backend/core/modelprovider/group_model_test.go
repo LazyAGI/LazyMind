@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -484,5 +485,73 @@ func TestListUserModelsForEvoIncludesCustomChatModel(t *testing.T) {
 	}
 	if len(payload.Data.Models) != 1 || payload.Data.Models[0].ID != "custom-chat" {
 		t.Fatalf("expected only the custom chat model for Evo, got %#v", payload.Data.Models)
+	}
+}
+
+func TestListVisionChatInChatAndVisionSlotsKeepsTenantAndVerificationScope(t *testing.T) {
+	db := setupListProviderTestDB(t)
+	store.Init(db, db, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	algo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"role": r.URL.Query().Get("role"), "type": r.URL.Query().Get("role"), "source": "dynamic"})
+	}))
+	defer algo.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", algo.URL)
+	for _, userID := range []string{"user-1", "user-2"} {
+		base := orm.BaseModel{CreateUserID: userID}
+		providerID, groupID := "provider-"+userID, "group-"+userID
+		if err := db.Create(&orm.UserModelProvider{ID: providerID, DefaultModelProviderID: "default-openai", Name: "OpenAI", Capabilities: "has_models", BaseModel: base}).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&orm.UserModelProviderGroup{ID: groupID, UserModelProviderID: providerID, BaseURL: "https://api.openai.com/v1/", IsVerified: true, BaseModel: base}).Error; err != nil {
+			t.Fatal(err)
+		}
+		models := []orm.UserModelProviderGroupModel{
+			{ID: "vision-" + userID, UserModelProviderID: providerID, UserModelProviderGroupID: groupID, ProviderName: "OpenAI", Name: "vision", ModelType: "llm", Vision: true, BaseModel: base},
+			{ID: "text-" + userID, UserModelProviderID: providerID, UserModelProviderGroupID: groupID, ProviderName: "OpenAI", Name: "text", ModelType: "llm", BaseModel: base},
+			{ID: "legacy-" + userID, UserModelProviderID: providerID, UserModelProviderGroupID: groupID, ProviderName: "OpenAI", Name: "legacy", ModelType: "vlm", BaseModel: base},
+		}
+		if err := db.Create(&models).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := orm.BaseModel{CreateUserID: "user-1"}
+	if err := db.Create(&orm.UserModelProviderGroup{ID: "unverified", UserModelProviderID: "provider-user-1", BaseURL: "https://api.openai.com/v1/", BaseModel: base}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.UserModelProviderGroupModel{ID: "unverified-vision", UserModelProviderID: "provider-user-1", UserModelProviderGroupID: "unverified", Name: "unverified", ModelType: "llm", Vision: true, BaseModel: base}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		slot string
+		want []string
+	}{
+		{slot: "llm", want: []string{"text-user-1", "vision-user-1"}},
+		{slot: "vlm", want: []string{"legacy-user-1", "vision-user-1"}},
+		{slot: "evo_llm", want: []string{"legacy-user-1", "text-user-1", "vision-user-1"}},
+	} {
+		t.Run(tc.slot, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/core/model_providers/models?model_type="+tc.slot, nil)
+			req.Header.Set("X-User-Id", "user-1")
+			rec := httptest.NewRecorder()
+			ListUserModelsByModelType(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			var payload struct {
+				Data groupModelListResponse `json:"data"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			var ids []string
+			for _, model := range payload.Data.Models {
+				ids = append(ids, model.ID)
+			}
+			sort.Strings(ids)
+			if !reflect.DeepEqual(ids, tc.want) {
+				t.Fatalf("%s model IDs=%v, want %v", tc.slot, ids, tc.want)
+			}
+		})
 	}
 }
