@@ -10,8 +10,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize('override,expected', [([], 'force'), (['LAZYLLM_ALGO_REGISTER_POLICY=update'], 'update')])
-def test_local_config_overrides_dotenv_but_not_make_cli(tmp_path, override, expected):
+@pytest.mark.parametrize('override,expected', [([], 'none'), (['LAZYLLM_ALGO_REGISTER_POLICY=update'], 'update')])
+def test_dotenv_overrides_local_config_but_not_make_cli(tmp_path, override, expected):
     (tmp_path / '.env').write_text('LAZYLLM_ALGO_REGISTER_POLICY=none\n')
     (tmp_path / 'local').mkdir()
     (tmp_path / 'local/config.env').write_text('LAZYLLM_ALGO_REGISTER_POLICY=force\n')
@@ -24,6 +24,30 @@ def test_local_config_overrides_dotenv_but_not_make_cli(tmp_path, override, expe
                             cwd=tmp_path, env=env, text=True, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert f'POLICY={expected}' in result.stdout
+
+
+@pytest.mark.parametrize('local_profile,dotenv_profile,override,expected', [
+    ('intl', 'cn', [], 'cn'),
+    ('cn', 'intl', [], 'intl'),
+    ('intl', 'cn', ['MIRROR_PROFILE=intl'], 'intl'),
+])
+def test_mirror_profile_matches_loaded_settings(tmp_path, local_profile, dotenv_profile, override, expected):
+    (tmp_path / '.env').write_text(f'MIRROR_PROFILE={dotenv_profile}\n')
+    (tmp_path / 'local').mkdir()
+    (tmp_path / 'local/config.env').write_text(f'MIRROR_PROFILE={local_profile}\n')
+    for profile in ('cn', 'intl'):
+        (tmp_path / f'.env.mirrors.{profile}').write_text(f'PIP_INDEX_URL=https://{profile}.example/simple\n')
+    makefile = (ROOT / 'Makefile').read_text() + (
+        '\nprint-mirror:\n\t@echo PROFILE=$(MIRROR_PROFILE) PIP=$(PIP_INDEX_URL)\n'
+    )
+    (tmp_path / 'Makefile').write_text(makefile)
+    env = dict(os.environ)
+    for key in ('MIRROR_PROFILE', 'PIP_INDEX_URL', 'MAKEFLAGS', 'MAKEOVERRIDES'):
+        env.pop(key, None)
+    result = subprocess.run(['make', '--no-print-directory', 'print-mirror', 'MAKECMDGOALS=local-down', *override],
+                            cwd=tmp_path, env=env, text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert f'PROFILE={expected} PIP=https://{expected}.example/simple' in result.stdout
 
 
 def test_compose_passes_force_override_to_algorithm_service():
