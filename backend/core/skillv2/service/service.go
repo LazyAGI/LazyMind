@@ -1237,7 +1237,10 @@ func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, 
 		if downloaded.PathPrefix != nil {
 			prefix = *downloaded.PathPrefix
 		}
-		originalURL := source.SourceURL
+		originalURL := source.ResolvedSourceURL
+		if originalURL == "" {
+			originalURL = source.SourceURL
+		}
 		if originalURL == "" {
 			originalURL = source.URL
 		}
@@ -1261,8 +1264,8 @@ func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, 
 		if sourceRef == "" {
 			sourceRef = source.URL
 		}
-		canonicalName := ""
-		if parsed, parseErr := url.Parse(source.SourceURL); parseErr == nil {
+		canonicalName := source.CanonicalName
+		if parsed, parseErr := url.Parse(source.SourceURL); parseErr == nil && canonicalName == "" {
 			if resolution, matched, resolveErr := skillsourceurl.ResolveSkillHubPageURL(parsed); matched && resolveErr == nil && resolution.DownloadURL == source.URL {
 				canonicalName = path.Base(resolution.Coordinate)
 			}

@@ -48,7 +48,13 @@ func (d HTTPZipDownloader) DownloadSource(ctx context.Context, source SourceInpu
 	if err := ctx.Err(); err != nil {
 		return DownloadedZip{}, err
 	}
-	original := strings.TrimSpace(source.SourceURL)
+	if download, err := url.Parse(source.URL); err == nil && strings.EqualFold(strings.TrimPrefix(strings.ToLower(download.Hostname()), "www."), "clawhub.ai") && download.Path == "/api/v1/download" {
+		return d.downloadClawHubSource(ctx, source)
+	}
+	original := strings.TrimSpace(source.ResolvedSourceURL)
+	if original == "" {
+		original = strings.TrimSpace(source.SourceURL)
+	}
 	if original == "" {
 		original = source.URL
 	}

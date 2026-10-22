@@ -1706,49 +1706,10 @@ func (s skillSourceRequest) toServiceSource(ctx context.Context) (skillservice.S
 		if strings.TrimSpace(s.URL) == "" {
 			return skillservice.SourceInput{}, fmt.Errorf("url required")
 		}
-		downloadURL, pathPrefix, err := normalizeSkillImportURL(ctx, strings.TrimSpace(s.URL))
-		if err != nil {
-			return skillservice.SourceInput{}, err
-		}
-		return skillservice.SourceInput{Type: "url", URL: downloadURL, SourceURL: strings.TrimSpace(s.URL), PathPrefix: pathPrefix, PathPrefixResolved: true}, nil
+		return skillservice.ResolveURLSource(ctx, s.URL)
 	default:
 		return skillservice.SourceInput{}, fmt.Errorf("unsupported source type %q", sourceType)
 	}
-}
-
-func normalizeSkillImportURL(ctx context.Context, rawURL string) (string, string, error) {
-	return normalizeSkillImportURLWithResolver(ctx, rawURL, &http.Client{Timeout: 10 * time.Second}, skillurl.GitHubAPIBaseURL)
-}
-
-func normalizeSkillImportURLWithResolver(ctx context.Context, rawURL string, client *http.Client, apiBaseURL string) (string, string, error) {
-	parsed, err := url.ParseRequestURI(rawURL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return "", "", skillImportURLValidationError("invalid skill import URL")
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", "", skillImportURLValidationError("skill import URL must use HTTP or HTTPS")
-	}
-	resolution, matched, resolveErr := skillurl.ResolveSkillHubPageURL(parsed)
-	if resolveErr != nil {
-		return "", "", skillImportURLValidationError(resolveErr.Error())
-	}
-	if matched {
-		return resolution.DownloadURL, "", nil
-	}
-	githubResolution, matched, resolveErr := skillurl.ResolveGitHubImportURL(ctx, parsed, client, apiBaseURL)
-	if resolveErr != nil {
-		return "", "", skillImportURLValidationError(resolveErr.Error())
-	}
-	if matched {
-		return githubResolution.DownloadURL, githubResolution.PathPrefix, nil
-	}
-	return rawURL, "", nil
-}
-
-type skillImportURLValidationError string
-
-func (e skillImportURLValidationError) Error() string {
-	return string(e)
 }
 
 func createSkillSourceFromRequest(ctx context.Context, name, category, description, content string, children []legacyChildSkillInput, sourceReq skillSourceRequest) (skillservice.SourceInput, func(), error) {
@@ -2257,13 +2218,11 @@ type marketHTTPZipDownloader struct{}
 
 func (marketHTTPZipDownloader) Download(ctx context.Context, rawURL string) (string, error) {
 	rawURL = strings.TrimSpace(rawURL)
-	downloadURL, prefix, err := normalizeSkillImportURL(ctx, rawURL)
+	source, err := skillservice.ResolveURLSource(ctx, rawURL)
 	if err != nil {
 		return "", err
 	}
-	downloaded, err := (httpZipDownloader{}).DownloadSource(ctx, skillservice.SourceInput{
-		Type: "url", URL: downloadURL, SourceURL: rawURL, PathPrefix: prefix, PathPrefixResolved: true,
-	})
+	downloaded, err := (httpZipDownloader{}).DownloadSource(ctx, source)
 	if err != nil {
 		return "", err
 	}
@@ -2272,14 +2231,18 @@ func (marketHTTPZipDownloader) Download(ctx context.Context, rawURL string) (str
 	if downloaded.PathPrefix != nil {
 		return downloaded.Path, nil
 	}
-	parsed, err := url.Parse(rawURL)
+	upstream := source.ResolvedSourceURL
+	if upstream == "" {
+		upstream = rawURL
+	}
+	parsed, err := url.Parse(upstream)
 	if err != nil {
 		if downloaded.Cleanup != nil {
 			downloaded.Cleanup()
 		}
 		return "", err
 	}
-	resolution, github, err := skillurl.ResolveGitHubPageURLFromResolvedArchive(parsed, downloadURL)
+	resolution, github, err := skillurl.ResolveGitHubPageURLFromResolvedArchive(parsed, source.URL)
 	if err != nil {
 		if downloaded.Cleanup != nil {
 			downloaded.Cleanup()
@@ -2293,13 +2256,13 @@ func (marketHTTPZipDownloader) Download(ctx context.Context, rawURL string) (str
 		defer downloaded.Cleanup()
 	}
 	var pkg skillpackage.Package
-	if prefix == "" && resolution.ExplicitDirectory {
+	if source.PathPrefix == "" && resolution.ExplicitDirectory {
 		pkg, err = skillpackage.ReadZip(downloaded.Path)
 		if err == nil {
 			err = skillpackage.NormalizeSkillDocument(pkg.Files)
 		}
 	} else {
-		pkg, err = skillpackage.ReadGitHubZip(downloaded.Path, prefix)
+		pkg, err = skillpackage.ReadGitHubZip(downloaded.Path, source.PathPrefix)
 	}
 	if err != nil {
 		return "", err

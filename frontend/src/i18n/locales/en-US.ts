@@ -6790,10 +6790,10 @@ const enUS = {
     memorySkillCreateUploadTitle: "Upload skill",
     memorySkillCreateUploadDesc: "Upload a local file (.zip)",
     memorySkillCreateImportTitle: "Import from web",
-    memorySkillCreateImportDesc: "Import a GitHub repository, skill directory, SKILL.md, SkillHub page, or ZIP URL",
+    memorySkillCreateImportDesc: "Import a GitHub, skills.sh, SkillsMP, ClawHub, SkillHub, or ZIP URL",
     memorySkillCreateImportPlaceholder:
-      "Enter a GitHub repository, directory, SKILL.md, SkillHub page, or ZIP URL",
-    memorySkillImportUrlHelp: "Use a GitHub repository, skill directory, or SKILL.md link, a SkillHub skill page, or a direct HTTP(S) ZIP URL. Repositories with one skill are detected automatically. For repositories with multiple skills, provide a specific skill directory or SKILL.md link. Remote downloads support up to 100 MiB.",
+      "Enter a GitHub, skills.sh, SkillsMP, ClawHub, SkillHub, or ZIP URL",
+    memorySkillImportUrlHelp: "Use a skill detail page from skills.sh, SkillsMP, ClawHub, or SkillHub, a GitHub repository, directory, or SKILL.md link, or a direct HTTP(S) ZIP URL. Repositories with one skill are detected automatically. For repositories with multiple skills, provide a specific skill directory or SKILL.md link. Remote downloads support up to 100 MiB.",
     memorySkillImportTooLarge: "The skill package exceeds the import size limit. Provide a smaller skill directory link, or try installing it in chat.",
     memorySkillImportMultipleSkills: "This link contains multiple skills. Provide a specific skill directory or SKILL.md link.",
     memorySkillImportGoToChat: "Go to Chat to install",
@@ -6975,9 +6975,9 @@ const enUS = {
     memorySkillImportMethodLink: "Import from link",
     memorySkillImportMethodPackage: "Import from local package",
     memorySkillImportApply: "Import",
-    memorySkillUploadRepoLabel: "Repository link",
+    memorySkillUploadRepoLabel: "Skill link",
     memorySkillUploadRepoPlaceholder:
-      "https://github.com/org/my-ability or an internal repository link",
+      "A GitHub, skills.sh, SkillsMP, ClawHub, SkillHub, or ZIP URL",
     memorySkillUploadFileTitle: "Install from local package",
     memorySkillUploadFileHint:
       "Supports .zip, .tgz, or archives containing skill instruction files. Max 512 MiB per file.",

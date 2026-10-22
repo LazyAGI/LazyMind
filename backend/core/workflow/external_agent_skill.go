@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -161,11 +160,11 @@ func installExternalAgentSkillSource(ctx context.Context, db *gorm.DB, ownerUser
 	serviceSource := skillservice.SourceInput{}
 	switch source.SourceType {
 	case "url":
-		downloadURL, prefix, err := normalizeExternalSkillImportURL(ctx, source.SourceURL)
+		resolved, err := skillservice.ResolveURLSource(ctx, source.SourceURL)
 		if err != nil {
 			return "", err
 		}
-		serviceSource = skillservice.SourceInput{Type: "url", URL: downloadURL, SourceURL: source.SourceURL, PathPrefix: prefix, PathPrefixResolved: true}
+		serviceSource = resolved
 	case "zip":
 		zipPath, err := writeExternalAgentSkillZip(source.ZipContent)
 		if err != nil {
@@ -213,31 +212,6 @@ func recordExternalAgentSkillSource(ctx context.Context, db *gorm.DB, ownerUserI
 			"install_status": row.InstallStatus, "updated_at": row.UpdatedAt,
 		}),
 	}).Create(&row).Error
-}
-
-func normalizeExternalSkillImportURL(ctx context.Context, rawURL string) (string, string, error) {
-	parsed, err := url.ParseRequestURI(rawURL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return "", "", fmt.Errorf("invalid skill import URL")
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", "", fmt.Errorf("skill import URL must use HTTP or HTTPS")
-	}
-	resolution, matched, resolveErr := skillurl.ResolveSkillHubPageURL(parsed)
-	if resolveErr != nil {
-		return "", "", resolveErr
-	}
-	if matched {
-		return resolution.DownloadURL, "", nil
-	}
-	githubResolution, matched, resolveErr := skillurl.ResolveGitHubImportURL(ctx, parsed, &http.Client{Timeout: 10 * time.Second}, skillurl.GitHubAPIBaseURL)
-	if resolveErr != nil {
-		return "", "", resolveErr
-	}
-	if matched {
-		return githubResolution.DownloadURL, githubResolution.PathPrefix, nil
-	}
-	return rawURL, "", nil
 }
 
 func canonicalExternalSkillURL(rawURL string) string {

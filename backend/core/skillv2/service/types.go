@@ -66,6 +66,10 @@ type SourceInput struct {
 	URL        string
 	SourceURL  string
 	PathPrefix string
+	// Website adapters retain SourceURL as provenance while routing downloads
+	// through the concrete upstream GitHub directory.
+	ResolvedSourceURL string
+	CanonicalName     string
 	// True when URL resolution established the ref/path boundary, including
 	// repository roots on branches whose names contain slashes.
 	PathPrefixResolved bool

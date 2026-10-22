@@ -14,6 +14,7 @@ func TestImportSizeErrorsReturnPayloadTooLarge(t *testing.T) {
 		`skill package file "image.png" exceeds 33554432 bytes`,
 		"skill package exceeds 134217728 uncompressed bytes",
 		"skill package contains too many entries: 513 > 512",
+		"GitHub API rate limit reached; GitHub archive discovery failed: skill package download exceeds 104857600 bytes",
 	} {
 		t.Run(message, func(t *testing.T) {
 			err := fmt.Errorf("import package: %w", errors.New(message))
