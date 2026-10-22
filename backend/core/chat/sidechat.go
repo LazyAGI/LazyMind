@@ -584,6 +584,9 @@ func conversationRelationMetadata(c orm.Conversation, parentDisplayName string, 
 }
 
 func mergeConversationRelationMetadata(item map[string]any, c orm.Conversation, parentDisplayName string, includeContext bool) {
+	if c.SourceType == "academic" {
+		item["academic_task"] = true
+	}
 	for key, value := range conversationRelationMetadata(c, parentDisplayName, includeContext) {
 		item[key] = value
 	}

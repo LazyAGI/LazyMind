@@ -82,14 +82,6 @@ func accessibleDatasets(ctx context.Context, r *http.Request, userID string) (ma
 	return out, nil
 }
 
-func canWriteDataset(ctx context.Context, datasetID, userID string) bool {
-	var ds orm.Dataset
-	if err := store.DB().WithContext(ctx).Where("id = ? AND deleted_at IS NULL", datasetID).Take(&ds).Error; err != nil {
-		return false
-	}
-	return ds.CreateUserID == userID || acl.Can(userID, acl.ResourceTypeDB, datasetID, acl.PermissionDatasetUpload)
-}
-
 func documentDataset(ctx context.Context, documentID string) (string, error) {
 	var row orm.Document
 	err := store.DB().WithContext(ctx).Select("dataset_id").Where("id = ? AND deleted_at IS NULL", documentID).Take(&row).Error
@@ -509,12 +501,18 @@ func findOrCreateWork(ctx context.Context, tx *gorm.DB, in WorkInput) (orm.Acade
 			row.ProvenanceJSON = provenance
 		}
 		_ = tx.WithContext(ctx).Model(&row).Updates(updates).Error
+		if err := enrichWorkMissing(ctx, tx, &row, in); err != nil {
+			return row, "", err
+		}
 		return row, "doi", nil
 	}
 	if arxiv != "" && tx.WithContext(ctx).Where("arxiv_id_base = ?", arxiv).Take(&row).Error == nil {
 		if doi != "" && row.DOINormalized == "" {
 			_ = tx.WithContext(ctx).Model(&row).Updates(map[string]any{"doi_normalized": doi, "updated_at": time.Now().UTC()}).Error
 			row.DOINormalized = doi
+		}
+		if err := enrichWorkMissing(ctx, tx, &row, in); err != nil {
+			return row, "", err
 		}
 		return row, "arxiv", nil
 	}
@@ -530,7 +528,7 @@ func findOrCreateWork(ctx context.Context, tx *gorm.DB, in WorkInput) (orm.Acade
 	if len(in.Authors) > 0 {
 		firstAuthor = normalizeAuthor(in.Authors[0])
 	}
-	if doi == "" && arxiv == "" && normalizedTitle != "" {
+	if doi == "" && arxiv == "" && normalizedTitle != "" && firstAuthor != "" && in.Year > 0 {
 		q := tx.WithContext(ctx).Where("normalized_title = ?", normalizedTitle)
 		if firstAuthor != "" {
 			q = q.Where("first_author_normalized = ?", firstAuthor)
@@ -550,14 +548,23 @@ func findOrCreateWork(ctx context.Context, tx *gorm.DB, in WorkInput) (orm.Acade
 	row = orm.AcademicWork{ID: uuid.NewString(), CanonicalTitle: title, NormalizedTitle: normalizedTitle, AuthorsJSON: authors,
 		FirstAuthorNormalized: firstAuthor, PublicationYear: in.Year, Venue: in.Venue, Abstract: in.Abstract, DOINormalized: doi,
 		ArxivIDBase: arxiv, ExternalIDsJSON: external, ProvenanceJSON: provenance, ResolutionConfidence: 1, CreatedAt: now, UpdatedAt: now}
-	if err := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
-		return row, "", err
+	created := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
+	if created.Error != nil {
+		return row, "", created.Error
 	}
-	if doi != "" {
-		_ = tx.WithContext(ctx).Where("doi_normalized = ?", doi).Take(&row).Error
-	}
-	if arxiv != "" {
-		_ = tx.WithContext(ctx).Where("arxiv_id_base = ?", arxiv).Take(&row).Error
+	if created.RowsAffected == 0 {
+		row = orm.AcademicWork{}
+		query := tx.WithContext(ctx)
+		if doi != "" {
+			query = query.Where("doi_normalized=?", doi)
+		} else if arxiv != "" {
+			query = query.Where("arxiv_id_base=?", arxiv)
+		} else {
+			return row, "", errors.New("work identity conflict")
+		}
+		if err := query.Take(&row).Error; err != nil {
+			return row, "", err
+		}
 	}
 	return row, firstNonEmpty(map[bool]string{true: "doi", false: ""}[doi != ""], map[bool]string{true: "arxiv", false: ""}[arxiv != ""], "metadata"), nil
 }
@@ -795,7 +802,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "INVALID_REQUEST", "target_dataset_id is required")
 		return
 	}
-	if !canWriteDataset(r.Context(), req.TargetDatasetID, userID) {
+	if !doc.HasDatasetPermission(r, req.TargetDatasetID, acl.PermissionDatasetUpload) {
 		replyError(w, http.StatusForbidden, "TARGET_DATASET_FORBIDDEN", "target knowledge base is not writable")
 		return
 	}
@@ -897,4 +904,33 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Title < items[j].Title })
 	common.ReplyJSON(w, map[string]any{"preview_token": uuid.NewString(), "target_dataset_id": req.TargetDatasetID, "items": items, "total": len(items)})
+}
+
+// Shared identities only gain missing metadata; document-specific corrections
+// live in AcademicDocumentState and never overwrite another file's metadata.
+func enrichWorkMissing(ctx context.Context, tx *gorm.DB, row *orm.AcademicWork, in WorkInput) error {
+	updates := map[string]any{}
+	if row.Abstract == "" && in.Abstract != "" {
+		row.Abstract = in.Abstract
+		updates["abstract"] = in.Abstract
+	}
+	if row.PublicationYear == 0 && in.Year > 0 {
+		row.PublicationYear = in.Year
+		updates["publication_year"] = in.Year
+	}
+	if row.Venue == "" && in.Venue != "" {
+		row.Venue = in.Venue
+		updates["venue"] = in.Venue
+	}
+	if len(in.Authors) > 0 && (len(row.AuthorsJSON) == 0 || string(row.AuthorsJSON) == "null" || string(row.AuthorsJSON) == "[]") {
+		row.AuthorsJSON = marshal(in.Authors)
+		row.FirstAuthorNormalized = normalizeAuthor(in.Authors[0])
+		updates["authors_json"] = row.AuthorsJSON
+		updates["first_author_normalized"] = row.FirstAuthorNormalized
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	updates["updated_at"] = time.Now().UTC()
+	return tx.WithContext(ctx).Model(row).Updates(updates).Error
 }

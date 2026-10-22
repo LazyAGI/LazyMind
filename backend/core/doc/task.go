@@ -2145,6 +2145,8 @@ func bindExternalAddResults(datasetID string, baseTask orm.Task, baseDoc orm.Doc
 	return err
 }
 
+var OnAcademicDocumentSubmitted func(*gorm.DB, orm.Document) error
+
 func bindExternalBatchAddResults(datasetID string, baseTasks []orm.Task, baseDocs []orm.Document, baseDocExts []documentExt, results []addResultItem) ([]orm.Task, error) {
 	if len(baseTasks) == 0 || len(baseDocs) == 0 || len(baseDocExts) == 0 {
 		return nil, fmt.Errorf("empty base task/document set")
@@ -2180,6 +2182,12 @@ func bindExternalBatchAddResults(datasetID string, baseTasks []orm.Task, baseDoc
 			updatesTask := map[string]any{"lazyllm_task_id": newLazyllmTask, "display_name": displayName, "ext": mustJSON(ext), "updated_at": now}
 			if err := tx.Model(&orm.Task{}).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", baseTask.ID, datasetID).Updates(updatesTask).Error; err != nil {
 				return err
+			}
+			if OnAcademicDocumentSubmitted != nil {
+				baseDoc.DisplayName = displayName
+				if err := OnAcademicDocumentSubmitted(tx, baseDoc); err != nil {
+					return err
+				}
 			}
 			created = append(created, orm.Task{ID: baseTask.ID, LazyllmTaskID: newLazyllmTask, DocID: baseTask.DocID, KbID: baseTask.KbID, AlgoID: baseTask.AlgoID, DatasetID: datasetID, TaskType: baseTask.TaskType, DocumentPID: baseTask.DocumentPID, TargetPID: baseTask.TargetPID, TargetDatasetID: baseTask.TargetDatasetID, DisplayName: displayName, Ext: mustJSON(ext), BaseModel: orm.BaseModel{CreateUserID: baseTask.CreateUserID, CreateUserName: baseTask.CreateUserName, CreatedAt: baseTask.CreatedAt, UpdatedAt: now}})
 		}

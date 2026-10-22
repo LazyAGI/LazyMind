@@ -287,6 +287,20 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/datasets/{dataset}/processing-status", []string{"document.read"}, doc.GetProcessingStatus)
 
 	// ----- Academic references and paper imports -----
+	handleAPI(r, "POST", "/academic/mock-handoffs/{handoff_id}:submit", []string{"qa.write"}, academic.SubmitMockHandoff)
+	handleAPI(r, "GET", "/academic/chat-context", []string{"qa.read"}, academic.AcademicChatContext)
+	handleAPI(r, "GET", "/academic/document-states", []string{"document.read"}, academic.DocumentStates)
+	handleAPI(r, "PATCH", "/academic/documents/{document_id}/identity", []string{"document.write"}, academic.UpdateDocumentIdentity)
+	handleAPI(r, "PUT", "/academic/papers/{paper_id}/importance", []string{"document.read"}, academic.SetImportance)
+	handleAPI(r, "POST", "/academic/paper-selections:resolve", []string{"document.read"}, academic.ResolvePaperSelection)
+	handleAPI(r, "POST", "/academic/workflow-launches", []string{"qa.write"}, academic.LaunchPaperWorkflow)
+	handleAPI(r, "POST", "/academic/paper-contents:read", []string{"document.read"}, academic.ReadPaperContent)
+	handleAPI(r, "POST", "/academic/paper-contents:retry", []string{"document.read"}, academic.RetryPaperContent)
+	handleAPI(r, "GET", "/academic/expansions", []string{"qa.read"}, academic.ListExpansions)
+	handleAPI(r, "GET", "/academic/expansions/{expansion_id}", []string{"qa.read"}, academic.GetExpansion)
+	handleAPI(r, "DELETE", "/academic/expansions/{expansion_id}", []string{"qa.write"}, academic.DeleteExpansion)
+	handleAPI(r, "GET", "/academic/demo-papers", []string{"document.read"}, academic.DemoPapers)
+
 	handleAPI(r, "GET", "/academic/documents/{document_id}/references", []string{"document.read"}, academic.ListReferences)
 	handleAPI(r, "POST", "/academic/documents/{document_id}/references:extract", []string{"document.write"}, academic.ExtractReferences)
 	handleAPI(r, "POST", "/academic/references:resolve", []string{"document.write"}, academic.ResolveReferences)

@@ -43,6 +43,13 @@ var fuzzyPunctRe = regexp.MustCompile(`[._\-\s（）()]+`)
 // fuzzySearchMaxCandidates caps DB rows loaded for in-memory fuzzy scoring (avoids OOM).
 const fuzzySearchMaxCandidates = 5000
 
+// HasDatasetPermission applies the same dataset and cloud-source checks used by
+// document operations to features in other packages.
+func HasDatasetPermission(r *http.Request, datasetID, action string) bool {
+	_, _, ok := requireDatasetPermission(r, datasetID, action)
+	return ok
+}
+
 func requireDatasetPermission(r *http.Request, datasetID string, action string) (*orm.Dataset, string, bool) {
 	userID := strings.TrimSpace(store.UserID(r))
 	if userID == "" {

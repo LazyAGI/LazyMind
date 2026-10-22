@@ -1,0 +1,33 @@
+initial: __start__
+transitions:
+  __start__:
+  - to: reflection
+  reflection:
+  - to: ppt
+  ppt:
+  - to: __end__
+steps:
+  reflection:
+    tools:
+    - academic_mock_context
+    prompt: '{{runtime_instruction}}
+
+      先调用 academic_mock_context 读取完整原始交接（以此为准，不使用任务上下文的模型缩写），再根据原始交接中的论文清单、主题和受众，输出明确标注 Mock 的简短阅读心得正文，用于后续接口联调；不声称核验全文或生成正式心得。将正文保存为 reflection_markdown。'
+    outputs:
+    - material: reflection_markdown
+    inputs:
+    - material: task_context
+      required: true
+  ppt:
+    tools:
+    - academic_mock_submit
+    prompt: '{{runtime_instruction}}
+
+      调用 academic_mock_submit，它会读取服务端真实交接及已保存的 reflection_markdown，固定原始论文清单，并自动发布 ppt_request JSON。返回 artifact.status=ok 后立即完成，用简短中文反馈本次为 Mock、未生成真实 PPT 文件。不要重抄交接 JSON，不要再次 save_artifacts，不重新选择论文。'
+    inputs:
+    - material: task_context
+      required: true
+    - material: reflection_markdown
+      required: true
+    outputs:
+    - material: ppt_request

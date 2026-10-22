@@ -1,3 +1,4 @@
+import AcademicChatBanner from "@/modules/knowledge/components/PaperTasks/ChatBanner";
 import { FC, type ReactNode, type CSSProperties, useRef, useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { localizeErrorCode } from "@/components/request";
@@ -139,6 +140,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     initPendingConversationSettings,
   } = props;
   const [sessionId, setSessionId] = useState("");
+  const [academicTask, setAcademicTask] = useState(false);
+  const [waitingForAcademicLaunch, setWaitingForAcademicLaunch] = useState(false);
   const fork = useForkConversation(routeConversationId || sessionId);
   const location = useLocation();
   const anchorHistoryId = new URLSearchParams(location.search).get("anchor_history_id") || undefined;
@@ -790,6 +793,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       ]);
       if (requestId !== loadConversationRequestRef.current || owner !== AgentAppsAuth.getUserInfo()?.userId) return;
       const conversation = detailRes.data.conversation;
+      const isAcademicTask = Boolean((conversation as { academic_task?: boolean })?.academic_task);
       const relation = getConversationRelation(conversation);
       const depth = resolveConversationThinkingDepth(conversation);
       setForkThinkingDepth(relation?.relationType === "fork" ? depth : undefined);
@@ -810,6 +814,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       setKnowledgeRefreshKey((key) => key + 1);
       setConversationSettings(parseConversationRuntimeSettings(conversation));
       setIsTaskConversation(Boolean((conversation as { is_task_conv?: boolean })?.is_task_conv));
+      setAcademicTask(isAcademicTask);
+      setWaitingForAcademicLaunch(isAcademicTask && !historyRes.data.history?.length);
       revealChatConversation(conversation);
       setConversationRelation(getConversationRelation(conversation));
       setConversationId(conversationId);
@@ -837,6 +843,13 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       }
     }
   }, [setConversationId, setChatConfigFn, setIsChatContent, anchorHistoryId]);
+
+  // Paper tasks are queued before navigation; attach to their Chat once it starts.
+  useEffect(() => {
+    if (!waitingForAcademicLaunch || !routeConversationId || anchorHistoryId) return;
+    const timer = window.setInterval(() => void loadConversation(routeConversationId), 3000);
+    return () => window.clearInterval(timer);
+  }, [waitingForAcademicLaunch, routeConversationId, anchorHistoryId, loadConversation]);
 
   // Route changes own conversation loading, including browser reload/back/forward.
   useEffect(() => {
@@ -1034,6 +1047,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       <div className={`chat-conversation-pane${workflowPanelExpanded && expandedRailTab !== "chat" ? " chat-conversation-pane--hidden" : ""}${isTaskPanelRestoreVisible ? " chat-conversation-pane--task-restore-visible" : ""}`}>
         <ForkStatus fork={fork} source={sessionId} />
         <ConversationRelationBanner relation={conversationRelation} />
+        {academicTask && <AcademicChatBanner conversation={routeConversationId || sessionId} />}
         {loadError && <Alert type="error" message={t("chat.fork.historyLoadFailed")} action={<Button onClick={() => loadConversation(routeConversationId || sessionId)}>{t("chat.fork.retryRead")}</Button>} />}
         {anchorHistoryId && (historyWindow.older || historyWindow.newer) && <Space style={{ marginBottom: 12 }}>
           {historyWindow.older && <Button loading={windowLoading} onClick={() => loadWindowPage("older")}>{t("chat.fork.older")}</Button>}

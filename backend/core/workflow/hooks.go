@@ -22,6 +22,8 @@ import (
 	"lazymind/core/workflow/controlstore"
 )
 
+var OnAcademicRuntimeChanged func(context.Context, *gorm.DB, string)
+
 var chatCancelHTTPClient = &http.Client{Timeout: 5 * time.Second}
 
 // RegisterSubAgentHooks wires plugin lifecycle hooks into the subagent EventHooks.
@@ -102,6 +104,11 @@ func NotifyWorkflowArtifactUpdated(
 }
 
 func emitWorkflowArtifactUpdated(stateStore state.Store, conversationID string, payload map[string]any) {
+	if OnAcademicRuntimeChanged != nil {
+		if id, ok := payload["session_id"].(string); ok {
+			OnAcademicRuntimeChanged(context.Background(), store.DB(), id)
+		}
+	}
 	if subagent.EventHooks == nil || conversationID == "" {
 		return
 	}
@@ -117,7 +124,13 @@ func NotifyWorkflowRuntimeUpdated(
 	db *gorm.DB,
 	sessionID, attemptID, change string,
 ) {
-	if db == nil || subagent.EventHooks == nil {
+	if db == nil {
+		return
+	}
+	if OnAcademicRuntimeChanged != nil {
+		OnAcademicRuntimeChanged(ctx, db, sessionID)
+	}
+	if subagent.EventHooks == nil {
 		return
 	}
 	session, err := GetSession(ctx, db, sessionID)

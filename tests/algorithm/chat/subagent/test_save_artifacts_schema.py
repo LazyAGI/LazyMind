@@ -18,8 +18,7 @@ def _save_tool():
 
 def test_save_artifacts_schema_exposes_required_item_fields():
     schema = _save_tool().params_schema.model_json_schema()
-    item_ref = schema['properties']['artifacts']['items']['$ref']
-    item_schema = schema['$defs'][item_ref.rsplit('/', 1)[-1]]
+    item_schema = schema['properties']['artifacts']['items']
 
     assert item_schema['required'] == ['key', 'value']
     assert 'content' not in item_schema['properties']
@@ -48,6 +47,20 @@ def test_save_artifacts_runtime_rejects_missing_value():
             'key': 'preview_html',
             'content': '<html></html>',
         }])  # type: ignore[typeddict-item]
+
+
+def test_save_uses_declared_json_type_when_optional_type_is_omitted(tmp_path):
+    ctx = MagicMock()
+    ctx.params = {'output_slot_types': {'result': 'json'}}
+    ctx.output_slots = ['result']
+    ctx.workspace_path = str(tmp_path)
+    ctx.next_artifact_seq.return_value = 1
+    with patch('lazymind.chat.engine.subagent.tools.require_context', return_value=ctx):
+        result = save_artifacts([{'key': 'result', 'value': {'papers': []}}])
+    assert result['status'] == 'ok'
+    emitted = ctx.emit.call_args.args[0]
+    assert emitted['content_type'] == 'json'
+    assert emitted['value']['data'] == {'papers': []}
 
 
 def test_sort_order_uses_durable_slot_order_during_workflow_rewind():

@@ -239,7 +239,7 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
               options={PROCESSING_LEVEL_ORDER.map((level) => ({
                 value: level,
                 label: t(`knowledge.processing${level[0].toUpperCase()}${level.slice(1)}`),
-                disabled: level === "indexed" && embeddingReady === false,
+                disabled: (level === "indexed" && embeddingReady === false) || ((data as CoreDataset)?.scenario_key === "academic_papers" && level === "stored"),
               }))}
             />
           </Form.Item>

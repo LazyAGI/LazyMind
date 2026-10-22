@@ -309,7 +309,7 @@ func TestCreateDatasetUsesNamespacedAlgoDisplayName(t *testing.T) {
 	t.Cleanup(func() { http.DefaultTransport = prevTransport })
 	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
 
-	body := `{"display_name":"datasource-bendi","desc":"local data","algo":{"algo_id":"general_algo","display_name":"General"},"tags":["local"]}`
+	body := `{"display_name":"datasource-bendi","desc":"local data","scenario_key":"english_learning","algo":{"algo_id":"general_algo","display_name":"General"},"tags":["local"]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/core/datasets?dataset_id=ds_test", strings.NewReader(body))
 	req.Header.Set("X-User-Id", "user-123")
 	req.Header.Set("X-User-Name", "Alice")
@@ -336,6 +336,9 @@ func TestCreateDatasetUsesNamespacedAlgoDisplayName(t *testing.T) {
 	}
 	if row.KbID != "kb-returned" {
 		t.Fatalf("expected returned kb id to be stored, got %q", row.KbID)
+	}
+	if row.ScenarioKey != "english_learning" {
+		t.Fatalf("selected scenario was not persisted: %q", row.ScenarioKey)
 	}
 }
 
@@ -751,15 +754,23 @@ func TestDeleteDatasetContinuesWhenScanSourceMissing(t *testing.T) {
 
 func TestUpdateDatasetUsesNamespacedAlgoDisplayName(t *testing.T) {
 	db := newDocumentTestDB(t)
+	if err := db.AutoMigrate(&orm.UserUIPreferences{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{"user_id": "user-123", "document_parsing_enabled": false, "created_at": time.Now().UTC(), "updated_at": time.Now().UTC()}).Error; err != nil {
+		t.Fatal(err)
+	}
 	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
 	if err := db.Create(&orm.Dataset{
-		ID:           "ds-update",
-		KbID:         "kb-update",
-		DisplayName:  "old_name",
-		DatasetState: 0,
-		ShareType:    0,
-		Type:         1,
-		Ext:          json.RawMessage(`{}`),
+		ID:              "ds-update",
+		KbID:            "kb-update",
+		DisplayName:     "old_name",
+		ScenarioKey:     "academic_papers",
+		ProcessingLevel: ProcessingLevelParsed,
+		DatasetState:    0,
+		ShareType:       0,
+		Type:            1,
+		Ext:             json.RawMessage(`{}`),
 		BaseModel: orm.BaseModel{
 			CreateUserID:   "user-123",
 			CreateUserName: "Alice",
@@ -771,6 +782,7 @@ func TestUpdateDatasetUsesNamespacedAlgoDisplayName(t *testing.T) {
 	}
 
 	var got kbUpdateRequest
+	var updateCalls int
 	prevTransport := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.Method == http.MethodPost && r.URL.Path == "/api/scan/internal/source-access/by-dataset:batch" {
@@ -783,6 +795,7 @@ func TestUpdateDatasetUsesNamespacedAlgoDisplayName(t *testing.T) {
 			t.Errorf("unexpected algo request path %q", r.URL.Path)
 			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
 		}
+		updateCalls++
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
 			t.Errorf("decode kb update request: %v", err)
 			return testJSONResponse(http.StatusBadRequest, `{"message":"bad request"}`), nil
@@ -812,6 +825,34 @@ func TestUpdateDatasetUsesNamespacedAlgoDisplayName(t *testing.T) {
 	}
 	if row.DisplayName != "new_name" {
 		t.Fatalf("core dataset display name should stay unchanged, got %q", row.DisplayName)
+	}
+	// Parsing is paused, but metadata edits and an unchanged scene remain valid.
+	for _, scene := range []string{"academic_papers", "general"} {
+		before := updateCalls
+		name := "same_scene"
+		if scene == "general" {
+			name = "must_not_change"
+		}
+		req := httptest.NewRequest(http.MethodPatch, "/api/core/datasets/ds-update", strings.NewReader(`{"display_name":"`+name+`","scenario_key":"`+scene+`"}`))
+		req = mux.SetURLVars(req, map[string]string{"dataset": "ds-update"})
+		req.Header.Set("X-User-Id", "user-123")
+		response := httptest.NewRecorder()
+		UpdateDataset(response, req)
+		if scene == "academic_papers" {
+			if response.Code != http.StatusOK {
+				t.Fatalf("unchanged scene metadata update: %d %s", response.Code, response.Body.String())
+			}
+		} else {
+			if response.Code != http.StatusBadRequest || updateCalls != before {
+				t.Fatalf("scene mutation must fail before external updates: %d calls=%d", response.Code, updateCalls-before)
+			}
+		}
+	}
+	if err := db.First(&row, "id=?", "ds-update").Error; err != nil {
+		t.Fatal(err)
+	}
+	if row.ScenarioKey != "academic_papers" || row.DisplayName != "same_scene" {
+		t.Fatalf("immutable scene update changed data: %+v", row)
 	}
 }
 

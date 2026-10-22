@@ -4,6 +4,12 @@ import "lazymind/core/chat"
 
 func manualOpenAPISpec() map[string]any {
 	schemas, paths := manualSchemas(), manualPaths()
+	for name, schema := range academicWorkflowSchemas() {
+		schemas[name] = schema
+	}
+	for path, operation := range academicWorkflowPaths() {
+		paths[path] = operation
+	}
 	for name, schema := range documentDirectorySchemas() {
 		schemas[name] = schema
 	}
@@ -337,6 +343,7 @@ func manualSchemas() map[string]any {
 			prop("type", strSchema()),
 		),
 		"Dataset": obj(
+			prop("scenario_key", map[string]any{"type": "string", "maxLength": 64, "description": "Built-in scene key or the owner's custom capability profile ID. Set at creation; immutable on update. Omitted legacy values default to general."}),
 			prop("name", strSchema()),
 			prop("dataset_id", strSchema()),
 			prop("display_name", strSchema()),

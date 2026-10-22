@@ -44,6 +44,239 @@ components:
                 upload_state:
                     type: string
             type: object
+        AcademicContentRead:
+            oneOf:
+                - properties:
+                    paper_id:
+                        type: string
+                  required:
+                    - paper_id
+                  type: object
+                - properties:
+                    cursor:
+                        type: string
+                  required:
+                    - cursor
+                  type: object
+        AcademicContentResponse:
+            properties:
+                content_hash:
+                    type: string
+                content_level:
+                    enum:
+                        - none
+                        - fulltext
+                    type: string
+                next_cursor:
+                    type: string
+                pages:
+                    items:
+                        properties:
+                            page:
+                                type: integer
+                            text:
+                                type: string
+                        required:
+                            - page
+                            - text
+                        type: object
+                    type: array
+                paper:
+                    $ref: '#/components/schemas/AcademicPaperRef'
+                parser_version:
+                    type: string
+                status:
+                    enum:
+                        - processing
+                        - ready
+                        - unavailable
+                        - failed
+                    type: string
+                warnings:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - status
+                - paper
+                - content_level
+                - content_hash
+                - pages
+                - next_cursor
+                - warnings
+            type: object
+        AcademicDocumentIdentity:
+            properties:
+                kind:
+                    enum:
+                        - paper
+                        - other
+                        - unknown
+                    type: string
+                paper:
+                    properties:
+                        abstract:
+                            type: string
+                        arxiv_id:
+                            type: string
+                        authors:
+                            items:
+                                type: string
+                            type: array
+                        doi:
+                            type: string
+                        title:
+                            type: string
+                        venue:
+                            type: string
+                        year:
+                            type: integer
+                    type: object
+                reidentify:
+                    type: boolean
+            type: object
+        AcademicExpansion:
+            properties:
+                conversation_id:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                dataset_id:
+                    type: string
+                goal:
+                    type: string
+                id:
+                    type: string
+                progress:
+                    properties: {}
+                    type: object
+                result:
+                    $ref: '#/components/schemas/AcademicReviewInput'
+                status:
+                    type: string
+                title:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - id
+                - dataset_id
+                - conversation_id
+                - status
+                - version
+                - result
+            type: object
+        AcademicPaperRef:
+            properties:
+                abstract:
+                    nullable: true
+                    type: string
+                arxiv_id:
+                    type: string
+                authors:
+                    items:
+                        type: string
+                    type: array
+                doi:
+                    type: string
+                paper_id:
+                    type: string
+                paper_url:
+                    type: string
+                pdf_url:
+                    type: string
+                title:
+                    type: string
+                venue:
+                    type: string
+                year:
+                    type: integer
+            required:
+                - paper_id
+                - abstract
+            type: object
+        AcademicReviewInput:
+            properties:
+                candidate_directions:
+                    items:
+                        type: string
+                    type: array
+                papers:
+                    items:
+                        $ref: '#/components/schemas/AcademicWorkflowPaper'
+                    type: array
+                selected_directions:
+                    items:
+                        type: string
+                    type: array
+                user_instruction:
+                    type: string
+            required:
+                - user_instruction
+                - candidate_directions
+                - selected_directions
+                - papers
+            type: object
+        AcademicTaskLaunch:
+            properties:
+                dataset_id:
+                    type: string
+                direction:
+                    type: string
+                document_ids:
+                    items:
+                        type: string
+                    type: array
+                expansion_id:
+                    type: string
+                expansion_version:
+                    format: int64
+                    type: integer
+                kind:
+                    enum:
+                        - expansion
+                        - review
+                        - reflection
+                        - ppt
+                    type: string
+                paper_ids:
+                    items:
+                        type: string
+                    type: array
+                reflection_first:
+                    type: boolean
+                request_key:
+                    type: string
+                user_instruction:
+                    type: string
+            required:
+                - kind
+                - request_key
+            type: object
+        AcademicWorkflowPaper:
+            properties:
+                direction_relation:
+                    type: string
+                is_important:
+                    type: boolean
+                is_seed:
+                    type: boolean
+                key_contribution:
+                    type: string
+                paper:
+                    $ref: '#/components/schemas/AcademicPaperRef'
+                seed_relation:
+                    type: string
+            required:
+                - paper
+                - is_seed
+                - is_important
+            type: object
         AddACLData:
             properties:
                 acl_id:
@@ -636,14 +869,10 @@ components:
                     type: string
                 driver_session_id:
                     type: string
-                generation:
-                    format: int64
-                    type: integer
                 provider:
                     type: string
             required:
                 - bound
-                - generation
             type: object
         BulkUpdateServerEnabledRequest:
             properties:
@@ -3852,6 +4081,10 @@ components:
                     type: integer
                 reader_fallback_accepted:
                     type: boolean
+                scenario_key:
+                    description: Built-in scene key or the owner's custom capability profile ID. Set at creation; immutable on update. Omitted legacy values default to general.
+                    maxLength: 64
+                    type: string
                 segment_count:
                     format: int64
                     type: integer
@@ -10040,9 +10273,6 @@ components:
                 accepted_at:
                     format: date-time
                     type: string
-                binding_generation:
-                    format: int64
-                    type: integer
                 command_id:
                     type: string
                 connector_id:
@@ -10077,7 +10307,6 @@ components:
                     format: date-time
                     type: string
             required:
-                - binding_generation
                 - command_id
                 - connector_id
                 - created_at
@@ -10099,6 +10328,8 @@ components:
             type: object
         WorkflowHostBindingRequest:
             properties:
+                cancellation:
+                    type: string
                 connector_id:
                     type: string
                 credential:
@@ -13835,6 +14066,103 @@ components:
                 - code
                 - message
             type: object
+        skillOrganizeApprovalItemOpenAPIResponse:
+            properties:
+                content:
+                    type: string
+                delete_keys:
+                    items:
+                        type: string
+                    type: array
+                depends_on:
+                    items:
+                        type: string
+                    type: array
+                id:
+                    type: string
+                source_keys:
+                    items:
+                        type: string
+                    type: array
+                source_skill_ids:
+                    items:
+                        type: string
+                    type: array
+                status:
+                    type: string
+                target_name:
+                    type: string
+                target_skill_id:
+                    type: string
+                target_source_key:
+                    type: string
+                type:
+                    type: string
+            required:
+                - id
+                - status
+                - target_name
+                - target_skill_id
+                - target_source_key
+                - type
+            type: object
+        skillOrganizeApprovalListOpenAPIResponse:
+            properties:
+                tasks:
+                    items:
+                        $ref: '#/components/schemas/skillOrganizeApprovalTaskOpenAPIResponse'
+                    type: array
+            type: object
+        skillOrganizeApprovalResolveItemOpenAPIResponse:
+            properties:
+                error:
+                    type: string
+                id:
+                    type: string
+                status:
+                    type: string
+            required:
+                - id
+                - status
+            type: object
+        skillOrganizeApprovalResolveOpenAPIRequest:
+            properties:
+                action:
+                    enum:
+                        - accept
+                        - reject
+                        - revoke
+                    type: string
+                item_ids:
+                    items:
+                        type: string
+                    type: array
+                request_id:
+                    type: string
+            required:
+                - action
+                - request_id
+            type: object
+        skillOrganizeApprovalResolveOpenAPIResponse:
+            properties:
+                results:
+                    items:
+                        $ref: '#/components/schemas/skillOrganizeApprovalResolveItemOpenAPIResponse'
+                    type: array
+            type: object
+        skillOrganizeApprovalTaskOpenAPIResponse:
+            properties:
+                error:
+                    type: string
+                items:
+                    items:
+                        $ref: '#/components/schemas/skillOrganizeApprovalItemOpenAPIResponse'
+                    type: array
+                request_id:
+                    type: string
+            required:
+                - request_id
+            type: object
         skillOrganizeOpenAPIRequest:
             properties:
                 artifact_dir:
@@ -15180,6 +15508,121 @@ info:
     version: 0.1.0
 openapi: 3.0.3
 paths:
+    /api/core/academic/chat-context:
+        get:
+            parameters:
+                - in: query
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    dataset_id:
+                                        type: string
+                                    expansion_id:
+                                        type: string
+                                    kind:
+                                        type: string
+                                    next_conversation_id:
+                                        type: string
+                                    paper_count:
+                                        type: integer
+                                    ready_count:
+                                        type: integer
+                                    source_conversation_id:
+                                        type: string
+                                    status:
+                                        type: string
+                                    version:
+                                        format: int64
+                                        type: integer
+                                type: object
+                    description: Read owned academic Chat progress and handoff navigation
+            summary: Read owned academic Chat progress and handoff navigation
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/demo-papers:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    mock:
+                                        type: boolean
+                                    papers:
+                                        items:
+                                            $ref: '#/components/schemas/AcademicPaperRef'
+                                        type: array
+                                    warning:
+                                        type: string
+                                type: object
+                    description: Get explicitly mocked recommendations with real paper identities
+            summary: Get explicitly mocked recommendations with real paper identities
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/document-states:
+        get:
+            parameters:
+                - in: query
+                  name: dataset_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: document_ids
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    items:
+                                        items:
+                                            properties: {}
+                                            type: object
+                                        type: array
+                                type: object
+                    description: Read document scholarly identity and current user's importance
+            summary: Read document scholarly identity and current user's importance
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/documents/{document_id}/identity:
+        patch:
+            parameters:
+                - in: path
+                  name: document_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/AcademicDocumentIdentity'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    status:
+                                        type: string
+                                type: object
+                    description: Correct document identity or retry recognition
+            summary: Correct document identity or retry recognition
+            tags:
+                - AcademicWorkflows
     /api/core/academic/documents/{document_id}/references:
         get:
             parameters:
@@ -15204,6 +15647,106 @@ paths:
                 "200":
                     description: OK
             summary: POST /academic/documents/{document_id}/references:extract
+    /api/core/academic/expansions:
+        get:
+            parameters:
+                - in: query
+                  name: dataset_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    items:
+                                        items:
+                                            $ref: '#/components/schemas/AcademicExpansion'
+                                        type: array
+                                type: object
+                    description: List current user's expansion records
+            summary: List current user's expansion records
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/expansions/{expansion_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: expansion_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                confirm:
+                                    type: boolean
+                            required:
+                                - confirm
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    deleted:
+                                        type: boolean
+                                type: object
+                    description: Confirm deletion of results and trash/cancel the expansion Chat
+            summary: Confirm deletion of results and trash/cancel the expansion Chat
+            tags:
+                - AcademicWorkflows
+        get:
+            parameters:
+                - in: path
+                  name: expansion_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    chat_status:
+                                        enum:
+                                            - available
+                                            - trashed
+                                            - deleted
+                                        type: string
+                                    contents:
+                                        items:
+                                            properties: {}
+                                            type: object
+                                        type: array
+                                    handoffs:
+                                        items:
+                                            properties: {}
+                                            type: object
+                                        type: array
+                                    paper_importance:
+                                        additionalProperties:
+                                            type: boolean
+                                        type: object
+                                    record:
+                                        $ref: '#/components/schemas/AcademicExpansion'
+                                    rounds:
+                                        items:
+                                            properties: {}
+                                            type: object
+                                        type: array
+                                type: object
+                    description: Read saved rounds, cumulative papers, content states and Chat availability
+            summary: Read saved rounds, cumulative papers, content states and Chat availability
+            tags:
+                - AcademicWorkflows
     /api/core/academic/imports:
         get:
             responses:
@@ -15257,12 +15800,197 @@ paths:
                 "200":
                     description: OK
             summary: POST /academic/imports:preview
+    /api/core/academic/mock-handoffs/{handoff_id}:submit:
+        post:
+            parameters:
+                - in: path
+                  name: handoff_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                reflection_markdown:
+                                    type: string
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    feedback:
+                                        type: string
+                                    input:
+                                        $ref: '#/components/schemas/AcademicReviewInput'
+                                    kind:
+                                        type: string
+                                    mock:
+                                        type: boolean
+                                    papers:
+                                        items:
+                                            $ref: '#/components/schemas/AcademicPaperRef'
+                                        type: array
+                                    reflection_markdown:
+                                        type: string
+                                type: object
+                    description: Submit the frozen original request to the Mock adapter; PPT relay reads its saved reflection
+            summary: Submit the frozen original request to the Mock adapter; PPT relay reads its saved reflection
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/paper-contents:read:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/AcademicContentRead'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/AcademicContentResponse'
+                    description: Read real full text without importing; continue using cursor only
+            summary: Read real full text without importing; continue using cursor only
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/paper-contents:retry:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                paper_id:
+                                    type: string
+                            required:
+                                - paper_id
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    status:
+                                        type: string
+                                type: object
+                    description: Retry failed full text download and parsing
+            summary: Retry failed full text download and parsing
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/paper-selections:resolve:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                dataset_id:
+                                    type: string
+                                document_ids:
+                                    items:
+                                        type: string
+                                    type: array
+                            required:
+                                - dataset_id
+                                - document_ids
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    invalid:
+                                        items:
+                                            properties:
+                                                document_id:
+                                                    type: string
+                                                reason:
+                                                    type: string
+                                            type: object
+                                        type: array
+                                    papers:
+                                        items:
+                                            $ref: '#/components/schemas/AcademicWorkflowPaper'
+                                        type: array
+                                type: object
+                    description: Expand folders completely and resolve distinct confirmed papers
+            summary: Expand folders completely and resolve distinct confirmed papers
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/papers/{paper_id}/importance:
+        put:
+            parameters:
+                - in: path
+                  name: paper_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                is_important:
+                                    type: boolean
+                            required:
+                                - is_important
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    is_important:
+                                        type: boolean
+                                type: object
+                    description: Set current user's personal importance
+            summary: Set current user's personal importance
+            tags:
+                - AcademicWorkflows
     /api/core/academic/references:resolve:
         post:
             responses:
                 "200":
                     description: OK
             summary: POST /academic/references:resolve
+    /api/core/academic/workflow-launches:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/AcademicTaskLaunch'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    conversation_id:
+                                        type: string
+                                    expansion_id:
+                                        type: string
+                                    handoff_id:
+                                        type: string
+                                type: object
+                    description: Idempotently start expansion or a separate downstream Chat
+            summary: Idempotently start expansion or a separate downstream Chat
+            tags:
+                - AcademicWorkflows
     /api/core/academic/works:presence:
         post:
             responses:
@@ -23265,6 +23993,43 @@ paths:
             summary: List background knowledge market tasks
             tags:
                 - knowledge-market
+    /api/core/knowledge-market/tasks/{job_id}:
+        delete:
+            description: Deletes only the current user's terminal task record; keeps the knowledge base and documents. Active submissions or parsing return 409.
+            parameters:
+                - in: path
+                  name: job_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskDeletedOpenAPIResponse'
+                    description: Deleted task
+            summary: Delete terminal knowledge market task history
+            tags:
+                - knowledge-market
+        get:
+            description: Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.
+            parameters:
+                - in: path
+                  name: job_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskDetailOpenAPIResponse'
+                    description: Background install task detail
+            summary: Get background knowledge market task detail
+            tags:
+                - knowledge-market
     /api/core/knowledge-market/tasks/{job_id}/files:
         get:
             description: Returns the current user's job-owned file page and all four counts. Historical file snapshots are immutable. Unknown states are unfinished. Aggregate-only history reports file_details_available=false. Page numbers are clamped; page and page_size must be positive integers, page_size at most 100.
@@ -23304,43 +24069,6 @@ paths:
                                 $ref: '#/components/schemas/knowledgeMarketTaskFilesOpenAPIResponse'
                     description: Task file page
             summary: List files for one knowledge market task
-            tags:
-                - knowledge-market
-    /api/core/knowledge-market/tasks/{job_id}:
-        delete:
-            description: Deletes only the current user's terminal task record; keeps the knowledge base and documents. Active submissions or parsing return 409.
-            parameters:
-                - in: path
-                  name: job_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/knowledgeMarketTaskDeletedOpenAPIResponse'
-                    description: Deleted task
-            summary: Delete terminal knowledge market task history
-            tags:
-                - knowledge-market
-        get:
-            description: Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.
-            parameters:
-                - in: path
-                  name: job_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/knowledgeMarketTaskDetailOpenAPIResponse'
-                    description: Background install task detail
-            summary: Get background knowledge market task detail
             tags:
                 - knowledge-market
     /api/core/knowledge-market/tasks/{job_id}:cancel:
@@ -27598,6 +28326,38 @@ paths:
             summary: Submit skill organize task
             tags:
                 - skills
+    /api/core/skill_organize/approvals:
+        get:
+            description: Returns pending and accepted plan items after the organize task has finished writing. Items from a running task are omitted.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillOrganizeApprovalListOpenAPIResponse'
+                    description: Skill organize approvals
+            summary: List completed skill organize approvals
+            tags:
+                - skills
+    /api/core/skill_organize/approvals:resolve:
+        post:
+            description: Applies one plan item at a time. A merge updates the target skill and removes its source skills together. Reject discards a pending item. Revoke restores an accepted item when no later edit exists.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/skillOrganizeApprovalResolveOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillOrganizeApprovalResolveOpenAPIResponse'
+                    description: Skill organize approval results
+            summary: Accept, reject, or revoke skill organize items
+            tags:
+                - skills
     /api/core/skill_organize:cancel:
         post:
             responses:
@@ -31243,6 +32003,63 @@ paths:
                 "200":
                     description: OK
             summary: POST /workflow-sessions/{session_id}/input-bindings
+    /api/core/workflow-sessions/{session_id}/product-artifacts/{stage}:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: stage
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/product-artifacts/{stage}
+    /api/core/workflow-sessions/{session_id}/product-decisions/{decision_id}:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: decision_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/product-decisions/{decision_id}
+    /api/core/workflow-sessions/{session_id}/product-stage-relay:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/product-stage-relay
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/product-stage-relay
     /api/core/workflow-sessions/{session_id}/projection:
         get:
             description: view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.

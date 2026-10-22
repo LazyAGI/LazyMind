@@ -4,7 +4,7 @@ import { ConfigProvider, message } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import CreateKnowledgeBaseModal, { type CreateKnowledgeBaseModalRef } from "./index";
 import type { SyncKnowledgeBaseCreationVm } from "@/modules/knowledge/hooks/useSyncKnowledgeBaseCreation";
-import { getLearningCatalog, saveKnowledgeBaseCapabilities, type LearningCatalog } from "@/modules/learning/api";
+import { createCapabilityProfile, getLearningCatalog, listCapabilityProfiles, saveKnowledgeBaseCapabilities, type LearningCatalog } from "@/modules/learning/api";
 import { isDeveloperModeActive } from "@/utils/developerMode";
 
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
@@ -47,6 +47,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(isDeveloperModeActive).mockReturnValue(false);
   vi.mocked(getLearningCatalog).mockResolvedValue(catalog);
+  vi.mocked(listCapabilityProfiles).mockResolvedValue({ builtin: catalog.profiles, custom: [] });
   vi.mocked(saveKnowledgeBaseCapabilities).mockResolvedValue({});
 });
 afterEach(() => {
@@ -92,18 +93,20 @@ describe("knowledge creation capability submission", () => {
     await waitFor(() => expect(saveKnowledgeBaseCapabilities).toHaveBeenCalledWith("test-dataset",
       generalKeys.map((key, index) => ({ key, version: 1, enabled: true, display_order: index + 1, settings: {} })),
     ));
-    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ processing_level: "stored" }));
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ processing_level: "stored", scenario_key: "general" }));
+    expect(screen.queryByLabelText("使用场景")).not.toBeInTheDocument();
   });
 
   it.each([false, true])("submits a changed scenario's preset without opening advanced settings (developer=%s)", async (developer) => {
     vi.mocked(isDeveloperModeActive).mockReturnValue(developer);
-    await mountModal();
+    const { onCreate } = await mountModal();
     await fillRequiredFields();
     await selectEnglishProfile();
     fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
     await waitFor(() => expect(saveKnowledgeBaseCapabilities).toHaveBeenCalledWith("test-dataset",
       englishKeys.map((key, index) => ({ key, version: 1, enabled: true, display_order: index + 1, settings: {} })),
     ));
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ scenario_key: "english_learning" }));
   });
 
   it("preserves advanced edits after the panel is collapsed", async () => {
@@ -121,6 +124,31 @@ describe("knowledge creation capability submission", () => {
       expect.objectContaining({ key: "english_definition" }),
       expect.objectContaining({ key: "general_translation" }),
     ]));
+  });
+
+  it("persists an existing custom preset identity and its capabilities", async () => {
+    vi.mocked(listCapabilityProfiles).mockResolvedValue({ builtin: catalog.profiles, custom: [{ id: "custom-owned", custom_name: "My preset", description: "", capability_refs_json: JSON.stringify(englishKeys.map(key => ({ key }))) }] });
+    const { onCreate } = await mountModal();
+    await fillRequiredFields();
+    const profiles = screen.getByRole("combobox", { name: "learning.capabilityProfile" });
+    fireEvent.mouseDown(profiles);
+    fireEvent.click(screen.getByText("My preset"));
+    fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ scenario_key: "custom-owned" })));
+    expect(createCapabilityProfile).not.toHaveBeenCalled();
+    await waitFor(() => expect(saveKnowledgeBaseCapabilities).toHaveBeenCalledWith("test-dataset", englishKeys.map((key, index) => ({ key, version: 1, enabled: true, display_order: index + 1, settings: {} }))));
+  });
+
+  it("uses the saved identity when creating a custom preset", async () => {
+    vi.mocked(isDeveloperModeActive).mockReturnValue(true);
+    vi.mocked(createCapabilityProfile).mockResolvedValue({ id: "new-custom", custom_name: "New preset", description: "", capability_refs_json: "[]" });
+    const { onCreate } = await mountModal();
+    await fillRequiredFields();
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "learning.capabilityProfile" }));
+    fireEvent.click(screen.getByText("learning.customProfile"));
+    fireEvent.change(await screen.findByLabelText(/learning.customProfileName/), { target: { value: "New preset" } });
+    fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ scenario_key: "new-custom" })));
   });
 
   it("waits for the preset catalog before allowing creation", async () => {

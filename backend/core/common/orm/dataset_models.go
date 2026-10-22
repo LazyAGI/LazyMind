@@ -23,6 +23,7 @@ type Dataset struct {
 
 	DatasetInfo            json.RawMessage `gorm:"column:dataset_info;type:json"`
 	DatasetState           uint8           `gorm:"column:dataset_state;not null"`
+	ScenarioKey            string          `gorm:"column:scenario_key;type:varchar(64);not null;default:general"`
 	ProcessingLevel        string          `gorm:"column:processing_level;type:varchar(16);not null;default:'indexed';index"`
 	ProcessingRevision     int64           `gorm:"column:processing_revision;not null;default:1"`
 	TransitionStatus       string          `gorm:"column:transition_status;type:varchar(32);not null;default:'idle'"`

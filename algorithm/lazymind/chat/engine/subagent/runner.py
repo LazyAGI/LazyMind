@@ -1858,7 +1858,7 @@ def _evaluate_completion(
     force_text = str(force_result or '').strip()
     evidence = [
         {'key': artifact.get('slot'), 'content_type': artifact.get('content_type'),
-         'value': str(artifact.get('value') or {})[:2000]}
+         'value': json.dumps(artifact.get('value') or {}, ensure_ascii=False, default=str)[:2000]}
         for artifact in artifacts
     ]
 
@@ -1878,6 +1878,10 @@ def _evaluate_completion(
     prompt_lines += [
         '',
         'Evaluation rules:',
+        '- Saved artifact values use storage envelopes: JSON content is under data, '
+        'text content is under text, and large content uses a type/path reference. '
+        'These envelopes are not business output fields. Evidence previews may be truncated; '
+        'do not reject valid delivery merely for its storage envelope or preview truncation.',
         '- Decide from the objective whether delivery requires saved artifacts. PDF, image, '
         'document, or data-file generation requires the requested deliverable, not a textual '
         'claim, plan, placeholder, unrelated artifact, or description of a file.',

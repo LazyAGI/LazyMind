@@ -14,6 +14,7 @@ import (
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 
+	"lazymind/core/acl"
 	"lazymind/core/asyncjob"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -56,7 +57,7 @@ func CreateImport(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "INVALID_REQUEST", "target_dataset_id and 1 to 500 items are required")
 		return
 	}
-	if !canWriteDataset(r.Context(), req.TargetDatasetID, userID) {
+	if !doc.HasDatasetPermission(r, req.TargetDatasetID, acl.PermissionDatasetUpload) {
 		replyError(w, http.StatusForbidden, "TARGET_DATASET_FORBIDDEN", "target knowledge base is not writable")
 		return
 	}

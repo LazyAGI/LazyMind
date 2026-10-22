@@ -46,6 +46,13 @@ class ArtifactSaveItem(TypedDict):
     sort_order: NotRequired[int]
     caption: NotRequired[str]
 
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source, handler):
+        # Keep the item inline: some compatible model APIs cannot resolve $defs.
+        schema = handler(source)
+        schema.pop('ref', None)
+        return schema
+
 
 def _materialize_local_path(path: str) -> str:
     """Resolve Docker-canonical upload paths onto the real LAZYMIND_UPLOAD_ROOT.
@@ -555,7 +562,8 @@ def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
     Always pass a list, including when saving a single artifact. Every item MUST
     contain ``key`` and ``value``. The payload field is named ``value`` — never
     ``content`` or ``data``. Optional fields are content_type, source_tool,
-    sort_order, and caption. Batch all ready outputs (up to 50 entries per call),
+    sort_order, and caption. Omitted content_type uses the declared Workflow slot
+    type, or text for an ordinary task. Batch all ready outputs (up to 50 entries per call),
     including multiple items with the same key for a list slot. Keeping all writes
     in one model turn prevents a step with many outputs from exhausting the ReAct
     tool-turn budget.
@@ -572,6 +580,9 @@ def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
         if not request.managed_roots or os.path.realpath(require_context().workspace_path) != request.managed_roots[0]:
             raise ToolExecutionError('The artifact task workspace changed after file authorization.')
     _validate_artifact_batch(artifacts)
+    declared_types = require_context().params.get('output_slot_types') or {}
+    if not isinstance(declared_types, dict):
+        declared_types = {}
     slot_orders: Dict[str, List[int]] = {}
     # Complete validation/materialization before publishing any revision. A bad
     # later entry must not leave earlier entries saved and duplicated on retry.
@@ -580,7 +591,7 @@ def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
         _prepare_artifact(
             key=str(item['key']),
             value=item['value'],
-            content_type=str(item.get('content_type') or 'text'),
+            content_type=str(item.get('content_type') or declared_types.get(str(item['key'])) or 'text'),
             source_tool=item.get('source_tool'),
             sort_order=item.get('sort_order'),
             caption=item.get('caption'),

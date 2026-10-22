@@ -41,6 +41,7 @@ type ParserConfig struct {
 }
 
 type Dataset struct {
+	ScenarioKey            string              `json:"scenario_key,omitempty"`
 	Name                   string              `json:"name"`
 	DatasetID              string              `json:"dataset_id"`
 	DisplayName            string              `json:"display_name"`
@@ -926,10 +927,19 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body.Tags = normalizedTags
+	scenario, err := normalizeScenario(r.Context(), corestore.DB(), userID, body.ScenarioKey)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), 400)
+		return
+	}
 	processingLevelRequested := strings.TrimSpace(body.ProcessingLevel) != ""
 	processingLevel, err := normalizeProcessingLevel(body.ProcessingLevel)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := validateAcademicScenario(r.Context(), corestore.DB(), userID, scenario, processingLevel); err != nil {
+		common.ReplyErr(w, err.Error(), 400)
 		return
 	}
 	// Preserve the old client's creation contract: an omitted level still defaults
@@ -1037,6 +1047,7 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 		OssPath:                "",
 		DatasetInfo:            json.RawMessage(`{}`),
 		DatasetState:           0,
+		ScenarioKey:            scenario,
 		ProcessingLevel:        processingLevel,
 		ProcessingRevision:     1,
 		TransitionStatus:       TransitionIdle,
@@ -1089,6 +1100,7 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 		Type:                   datasetTypeToPB(ds.Type),
 		Tags:                   body.Tags,
 		DefaultDataset:         false,
+		ScenarioKey:            scenario,
 		ProcessingLevel:        processingLevel,
 		ProcessingRevision:     1,
 		TransitionStatus:       TransitionIdle,
@@ -1455,6 +1467,11 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	scenario := ds.ScenarioKey
+	if body.ScenarioKey != "" && body.ScenarioKey != effectiveScenario(scenario) {
+		common.ReplyErr(w, "knowledge base scenario cannot be changed after creation", http.StatusBadRequest)
+		return
+	}
 	newDisplay := strings.TrimSpace(body.DisplayName)
 	newDesc := strings.TrimSpace(body.Desc)
 	newCover := strings.TrimSpace(body.CoverImage)
@@ -1553,7 +1570,7 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 	ds.UpdatedAt = now
 	ds.CreateUserName = userName
 
-	if err := corestore.DB().Save(&ds).Error; err != nil {
+	if err := corestore.DB().WithContext(r.Context()).Save(&ds).Error; err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "update dataset failed", err), http.StatusInternalServerError)
 		return
 	}
@@ -1565,6 +1582,7 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 	common.ReplyJSON(w, Dataset{
 		Name:                "datasets/" + ds.ID,
 		DatasetID:           ds.ID,
+		ScenarioKey:         effectiveScenario(ds.ScenarioKey),
 		DisplayName:         ds.DisplayName,
 		Desc:                ds.Desc,
 		CoverImage:          ds.CoverImage,

@@ -115,12 +115,12 @@ export async function previewDocumentReferencesImport(sourceDocumentIds: string[
   return unwrap<{ items: ImportPreviewItem[] }>(response.data).items || [];
 }
 
-export async function startReferenceImport(targetDatasetId: string, sourceDocumentIds: string[], items: ImportPreviewItem[]): Promise<{ batch_id: string }> {
+export async function startReferenceImport(targetDatasetId: string, sourceDocumentIds: string[], items: ImportPreviewItem[], idempotencyKey: string = crypto.randomUUID()): Promise<{ batch_id: string }> {
   const response = await axiosInstance.post(`${core}/imports`, {
     entry_type: items.length === 1 ? "single_reference" : "paper_references",
     target_dataset_id: targetDatasetId,
     source_document_ids: sourceDocumentIds,
-    idempotency_key: crypto.randomUUID(),
+    idempotency_key: idempotencyKey,
     items: items.filter((item) => item.fulltext_candidates.length).map((item) => ({
       work_id: item.work_id,
       reference_ids: item.reference_ids || [],
@@ -147,4 +147,14 @@ export async function listAcademicImportQueue(targetDatasetId: string, sourceDoc
     silentError: true,
   } as never);
   return unwrap<{ items: AcademicImportQueueItem[] }>(response.data).items || [];
+}
+
+export async function previewPaperImport(workIds: string[], targetDatasetId: string): Promise<ImportPreviewItem[]> {
+  const response = await axiosInstance.post(`${core}/imports:preview`, { work_ids: workIds, target_dataset_id: targetDatasetId, resolve_external: false });
+  return unwrap<{items: ImportPreviewItem[]}>(response.data).items || [];
+}
+
+export async function getPaperImportStatus(batchId: string): Promise<string> {
+  const response = await axiosInstance.get(`${core}/imports/${encodeURIComponent(batchId)}`, { silentError: true } as never);
+  return unwrap<{ batch: { Status: string } }>(response.data).batch.Status;
 }
