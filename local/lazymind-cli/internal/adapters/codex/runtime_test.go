@@ -2,12 +2,14 @@ package codex
 
 import (
 	"context"
-	"lazymind/agentconnector/internal/agentexec"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"lazymind/agentconnector/internal/agentexec"
+	"lazymind/agentconnector/internal/connectorconfig"
 )
 
 func isolateCodexRuntime(t *testing.T) string {
@@ -17,6 +19,8 @@ func isolateCodexRuntime(t *testing.T) string {
 	t.Setenv("LAZYMIND_HOME", filepath.Join(root, "state"))
 	t.Setenv("CODEX_HOME", filepath.Join(root, "codex-home"))
 	t.Setenv("LAZYMIND_CODEX_BIN", "")
+	t.Setenv(connectorconfig.EnvironmentKey, "")
+	t.Setenv("LAZYMIND_RUNTIME_PROFILE", "")
 	t.Setenv("LAZYMIND_DESKTOP_APPLICATION_DIRS", filepath.Join(root, "Applications"))
 	t.Setenv("SHELL", "")
 	return root
@@ -82,7 +86,7 @@ func TestCodexRuntimeSkipsBrokenAutomaticCandidate(t *testing.T) {
 }
 
 func TestCodexRuntimeDoesNotReplaceBrokenExplicitOverride(t *testing.T) {
-	for _, source := range []string{"argument", "environment", "binding"} {
+	for _, source := range []string{"argument", "environment", "binding", "connection"} {
 		t.Run(source, func(t *testing.T) {
 			root := isolateCodexRuntime(t)
 			broken := runtimeFixture(t, root, "broken", "spawn vendor/codex ENOENT", "")
@@ -94,6 +98,12 @@ func TestCodexRuntimeDoesNotReplaceBrokenExplicitOverride(t *testing.T) {
 				argument = broken
 			case "environment":
 				t.Setenv("LAZYMIND_CODEX_BIN", broken)
+			case "connection":
+				path, err := connectorconfig.Save(connectorconfig.Config{Home: filepath.Join(root, "state"), Provider: "codex", HostID: "runtime-test", Overrides: map[string]string{"LAZYMIND_CODEX_BIN": broken}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv(connectorconfig.EnvironmentKey, path)
 			case "binding":
 				runtimeFixture(t, root, "broken", "", "")
 				if _, err := agentexec.SetExecutableBinding(agentexec.CodexCLI, broken); err != nil {
@@ -181,5 +191,35 @@ func TestCodexRuntimeFallsBackAfterVersionTimeout(t *testing.T) {
 	got, err := FindBinary("")
 	if err != nil || !agentexec.SameExecutable(got, want) {
 		t.Fatalf("timeout prevented fallback: %q %v", got, err)
+	}
+}
+
+func TestCodexManagedRuntimeIgnoresStaleEnvironmentAndReloadsBinding(t *testing.T) {
+	for _, mode := range []string{"connection", "desktop"} {
+		t.Run(mode, func(t *testing.T) {
+			root := isolateCodexRuntime(t)
+			if mode == "connection" {
+				path, err := connectorconfig.Save(connectorconfig.Config{Home: filepath.Join(root, "state"), Provider: "codex", HostID: "runtime-test"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv(connectorconfig.EnvironmentKey, path)
+			} else {
+				t.Setenv("LAZYMIND_RUNTIME_PROFILE", "desktop")
+			}
+			t.Setenv("LAZYMIND_CODEX_BIN", filepath.Join(root, "removed-cli"))
+			for _, name := range []string{"first", "updated"} {
+				want := runtimeFixture(t, root, name, "", "")
+				if _, err := agentexec.SetExecutableBinding(agentexec.CodexCLI, want); err != nil {
+					t.Fatal(err)
+				}
+				for _, discover := range []func(string) (string, error){findBinary, FindBinary} {
+					got, err := discover("")
+					if err != nil || !agentexec.SameExecutable(got, want) {
+						t.Fatalf("%s binding: got %q, %v; want %q", name, got, err, want)
+					}
+				}
+			}
+		})
 	}
 }

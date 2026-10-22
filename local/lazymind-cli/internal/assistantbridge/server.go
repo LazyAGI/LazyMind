@@ -22,9 +22,11 @@ import (
 	workbuddyadapter "lazymind/agentconnector/internal/adapters/workbuddy"
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
+	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/executorpolicy"
 	"lazymind/agentconnector/internal/mcpbridge"
+	"lazymind/agentconnector/internal/workbuddyhost"
 )
 
 const (
@@ -36,16 +38,17 @@ const (
 )
 
 type Server struct {
-	address       string
-	bridge        *mcpbridge.Bridge
-	executorProbe bridgeProber
-	store         *credentials.Store
-	policy        *executorpolicy.Store
-	mu            sync.Mutex
-	stop          context.CancelFunc
-	loginMu       sync.Mutex
-	logins        map[string]agentLogin
-	loginID       uint64
+	workbuddyIdentities workbuddyhost.Broker
+	address             string
+	bridge              *mcpbridge.Bridge
+	executorProbe       bridgeProber
+	store               *credentials.Store
+	policy              *executorpolicy.Store
+	mu                  sync.Mutex
+	stop                context.CancelFunc
+	loginMu             sync.Mutex
+	logins              map[string]agentLogin
+	loginID             uint64
 
 	loginOverride func(context.Context, string) error
 }
@@ -87,7 +90,7 @@ func Start(ctx context.Context, address string) (map[string]any, error) {
 		if err := validateBridgeIdentity(status, self); err != nil {
 			return nil, err
 		}
-		if status["version"] == "v2" {
+		if status["version"] == "v4" {
 			return status, nil
 		}
 		if err := Stop(ctx, address); err != nil {
@@ -108,6 +111,7 @@ func Start(ctx context.Context, address string) (map[string]any, error) {
 		return nil, err
 	}
 	command := exec.Command(self, "assistant", "serve", "--listen", address)
+	command.Env = connectorconfig.ServiceEnvironment(home)
 	command.SysProcAttr = detachedProcessAttributes()
 	command.Stdout = logFile
 	command.Stderr = logFile
@@ -207,7 +211,7 @@ func Health(ctx context.Context, address string) (map[string]any, error) {
 }
 
 func assistantHome() (string, error) {
-	if configured := strings.TrimSpace(os.Getenv("LAZYMIND_HOME")); configured != "" {
+	if configured := strings.TrimSpace(connectorconfig.Value("LAZYMIND_HOME")); configured != "" {
 		return filepath.Abs(configured)
 	}
 	home, err := os.UserHomeDir()
@@ -222,6 +226,12 @@ func (s *Server) Serve(ctx context.Context) error {
 	s.stop = cancel
 	defer cancel()
 	defer s.cancelAgentLogins()
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		workbuddyhost.Supervise(runCtx, s.store.Directory(), "http://"+s.address, s.store.AccountScope)
+	}()
+	defer func() { cancel(); <-workerDone }()
 	httpServer := &http.Server{
 		Addr:              s.address,
 		Handler:           s.routes(),
@@ -260,11 +270,16 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/health", func(writer http.ResponseWriter, _ *http.Request) {
 		executable, _ := os.Executable()
 		writeJSON(writer, http.StatusOK, map[string]any{
-			"ok": true, "pid": os.Getpid(), "version": "v2",
+			"ok": true, "pid": os.Getpid(), "version": "v4",
 			"platform": runtime.GOOS, "executable": executable,
 		})
 	})
 	mux.HandleFunc("POST /v1/workflow-runs/{session}/control", s.handleWorkflowControl)
+	mux.HandleFunc("GET /v1/workbuddy/presentation", s.handleWorkBuddyPresentation)
+	mux.HandleFunc("GET /v1/workbuddy/frame", s.handleWorkBuddyFrame)
+	mux.HandleFunc("POST /v1/workbuddy/resolve", s.handleWorkBuddyResolve)
+	mux.HandleFunc("GET /v1/workbuddy/identity-requests", s.handleWorkBuddyIdentities)
+	mux.HandleFunc("POST /v1/workbuddy/identity-receipts", s.handleWorkBuddyIdentityReceipt)
 	mux.HandleFunc("POST /v1/workflow-host/bind", s.handleWorkflowHostBind)
 	mux.HandleFunc("GET /v1/workflow-host/runs/{session}/control", s.handleWorkflowHostState)
 	mux.HandleFunc("GET /v1/workflow-host/actions", s.handleWorkflowHostActions)

@@ -1,7 +1,7 @@
 import type { TabDef, WorkflowSession } from '@/modules/chat/store/workflowPanel';
 import { resolvePendingApprovalStep } from './workflowApproval';
 
-/** Controlled panels use Core's allowed actions, not native auto-dispatch checkpoints. */
+/** Resolve the permitted protocol command after the shared UI checkpoint check. */
 export function resolveExternalContinueAction(
   control: { continuation: string; available_actions: string[]; admission?: { reason?: string } },
   completedStep?: string,

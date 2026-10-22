@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"lazymind/agentconnector/internal/agentexec"
+	"lazymind/agentconnector/internal/connectorconfig"
 )
 
 // RuntimeStatus describes CLI execution, independently of desktop/MCP setup.
@@ -27,7 +28,7 @@ type runtimeCandidate struct{ path, source string }
 func runtimeCandidates(configured string) ([]runtimeCandidate, error) {
 	explicit := strings.TrimSpace(configured)
 	if explicit == "" {
-		explicit = strings.TrimSpace(os.Getenv("LAZYMIND_CODEX_BIN"))
+		explicit = strings.TrimSpace(connectorconfig.Value("LAZYMIND_CODEX_BIN"))
 	}
 	if explicit == "" {
 		bound, found, err := agentexec.ExecutableBinding(agentexec.CodexCLI)

@@ -16,6 +16,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"lazymind/agentconnector/internal/connectorconfig"
 )
 
 type cappedBuffer struct {
@@ -442,7 +444,10 @@ func EnsureConversationWorkspace(conversationID string) (string, error) {
 }
 
 func lazyMindHome() (string, error) {
-	home := strings.TrimSpace(os.Getenv("LAZYMIND_HOME"))
+	if _, err := connectorconfig.Current(); err != nil {
+		return "", err
+	}
+	home := strings.TrimSpace(connectorconfig.Value("LAZYMIND_HOME"))
 	if home == "" {
 		userHome, err := os.UserHomeDir()
 		if err != nil {

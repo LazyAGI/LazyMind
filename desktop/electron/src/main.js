@@ -176,6 +176,7 @@ const agentConnectorActionTimeoutMs = 15 * 1000;
 const agentConnectorStatusTimeoutMs = 30 * 1000;
 const agentConnectorDisconnectTimeoutMs = 60 * 1000;
 const agentConnectorInstallTimeoutMs = 660 * 1000;
+const agentConnectorWorkBuddyInstallTimeoutMs = 120 * 1000;
 const agentConnectorBindingTimeoutMs = 30 * 1000;
 const agentConnectorLoginTimeoutMs = 2 * 60 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
@@ -396,6 +397,7 @@ function sidecarEnv() {
     PYTHONDONTWRITEBYTECODE: "1",
     LAZYMIND_FILE_WATCHER_EXTRA_ALLOWED_ROOTS_JSON: JSON.stringify(localFolderAccess.allowedRoots),
   };
+  delete env.LAZYMIND_CONNECTOR_CONFIG;
   Object.assign(
     env,
     buildObsidianRuntimeEnv(obsidianConfig.root, obsidianDisabledRoot),
@@ -722,16 +724,15 @@ function runAgentConnector(agent, action) {
   if (action === "login") {
     return startAgentLogin(agent);
   }
-  const installWorkflow = agent === "deepseek-harness" && action === "connect";
+  const installWorkflow = ["deepseek-harness", "workbuddy"].includes(agent) && action === "connect";
   const run = () => runConnectorJSON(
     ["internal", "agent", agent, action],
-    installWorkflow ? agentConnectorInstallTimeoutMs
+    installWorkflow ? (agent === "workbuddy" ? agentConnectorWorkBuddyInstallTimeoutMs : agentConnectorInstallTimeoutMs)
       : agent === "deepseek-harness" && action === "disconnect" ? agentConnectorDisconnectTimeoutMs
       : action === "status" ? agentConnectorStatusTimeoutMs : agentConnectorActionTimeoutMs,
   );
   if (installWorkflow) {
-    const address = new URL(process.env.LAZYMIND_ASSISTANT_BRIDGE_URL || "http://127.0.0.1:19091").host;
-    return runConnectorJSON(["assistant", "start", "--listen", address], agentConnectorActionTimeoutMs).then(run);
+    return runConnectorJSON(["assistant", "start"], agentConnectorActionTimeoutMs).then(run);
   }
   return run().then((result) => withAgentLoginStatus(agent, result));
 }

@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
+	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
 )
 
@@ -45,9 +47,14 @@ func New(store *credentials.Store) (*Client, error) {
 	}}}, nil
 }
 
+func (c *Client) AccountScope() (string, error) { return c.credentials.AccountScope() }
+
 func (c *Client) HTTPClient() *http.Client { return c.http }
 
 func (c *Client) ServerURL(ctx context.Context) (string, error) {
+	if _, err := connectorconfig.Current(); err != nil {
+		return "", err
+	}
 	server, err := c.credentials.ServerURL(ctx)
 	if err != nil {
 		return "", err
@@ -55,15 +62,20 @@ func (c *Client) ServerURL(ctx context.Context) (string, error) {
 	return strings.TrimRight(server, "/"), nil
 }
 
-func (c *Client) MCPURL(ctx context.Context) (string, error) {
-	if configured := strings.TrimSpace(os.Getenv("LAZYMIND_MCP_URL")); configured != "" {
-		return strings.TrimRight(configured, "/"), nil
-	}
+func (c *Client) WebURL(ctx context.Context) (string, error) {
 	server, err := c.ServerURL(ctx)
 	if err != nil {
 		return "", err
 	}
-	return server + "/api/core/mcp/capabilities/v1", nil
+	return connectorconfig.URL("LAZYMIND_WEB_URL", server)
+}
+
+func (c *Client) MCPURL(ctx context.Context) (string, error) {
+	server, err := c.ServerURL(ctx)
+	if err != nil {
+		return "", err
+	}
+	return connectorconfig.URL("LAZYMIND_MCP_URL", server+"/api/core/mcp/capabilities/v1")
 }
 
 func (c *Client) DoJSON(ctx context.Context, method, path string, input, output any) error {
@@ -182,6 +194,9 @@ func (t *authenticatedTransport) RoundTrip(request *http.Request) (*http.Respons
 	if err != nil {
 		return nil, err
 	}
+	if err := t.validateEndpoint(request); err != nil {
+		return nil, err
+	}
 	response, err := t.base.RoundTrip(cloneRequest(request, body, token))
 	if err != nil || response.StatusCode != http.StatusUnauthorized {
 		return response, err
@@ -190,6 +205,9 @@ func (t *authenticatedTransport) RoundTrip(request *http.Request) (*http.Respons
 	_ = response.Body.Close()
 	refreshed, err := t.credentials.ForceRefresh(request.Context(), token)
 	if err != nil {
+		return nil, err
+	}
+	if err := t.validateEndpoint(request); err != nil {
 		return nil, err
 	}
 	retry := cloneRequest(request, body, refreshed)
@@ -222,7 +240,7 @@ func cloneRequest(request *http.Request, body []byte, token string) *http.Reques
 	clone := request.Clone(request.Context())
 	clone.Header = request.Header.Clone()
 	clone.Header.Set("Authorization", "Bearer "+token)
-	if provider := strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_AGENT_PROVIDER"))); provider != "" {
+	if provider := strings.ToLower(strings.TrimSpace(connectorconfig.Value("LAZYMIND_AGENT_PROVIDER"))); provider != "" {
 		clone.Header.Set("X-LazyMind-Agent-Provider", provider)
 	}
 	externalRef := strings.TrimSpace(os.Getenv("LAZYMIND_EXTERNAL_REF"))
@@ -255,4 +273,24 @@ func cloneRequest(request *http.Request, body []byte, token string) *http.Reques
 		}
 	}
 	return clone
+}
+
+// A session may still have an old URL when credentials are handed off. Never send
+// the current credential to a server that is no longer configured, even on retry.
+func (t *authenticatedTransport) validateEndpoint(request *http.Request) error {
+	server, err := t.credentials.ServerURL(request.Context())
+	if err != nil {
+		return err
+	}
+	mcpURL, err := connectorconfig.URL("LAZYMIND_MCP_URL", server+"/api/core/mcp/capabilities/v1")
+	if err != nil {
+		return err
+	}
+	for _, raw := range []string{server, mcpURL} {
+		u, err := url.Parse(raw)
+		if err == nil && u.Scheme == request.URL.Scheme && u.Host == request.URL.Host {
+			return nil
+		}
+	}
+	return errors.New("LazyMind endpoint changed; reconnect before retrying this operation")
 }

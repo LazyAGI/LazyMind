@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
+	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/localfile"
 )
@@ -43,7 +45,7 @@ func (a *Adapter) desktopDSHMode() bool {
 	}
 	// Preserve an explicitly configured legacy CLI or existing Web installation.
 	// A new installation receives the Desktop prerequisites by default.
-	return strings.TrimSpace(os.Getenv("LAZYMIND_DSH_PATH")) == "" && !pathExists(filepath.Join(dshHome(), "profiles", "web", "package.json"))
+	return strings.TrimSpace(connectorconfig.Value("LAZYMIND_DSH_PATH")) == "" && !pathExists(filepath.Join(dshHome(), "profiles", "web", "package.json"))
 }
 
 func (a *Adapter) forDSHProfile(name, cli string) *Adapter {
@@ -133,12 +135,31 @@ func (a *Adapter) checkDSHOwnership() error {
 	for _, row := range yamlSequence(doc).Content {
 		if dshEntryID(row) == "mcp-lazymind" {
 			mcpCount++
+			if reference := decodeDSHStdio(row).Env[connectorconfig.EnvironmentKey]; reference != "" {
+				c, err := connectorconfig.Load(reference)
+				if err != nil {
+					return err
+				}
+				if c.Profile != filepath.Dir(path) {
+					return fmt.Errorf("MCP connection does not belong to %s", path)
+				}
+			}
 			if !stateForStdio(decodeDSHStdio(row), a.self, a.home, a.hostID, DeepSeekHarness).owned {
 				return fmt.Errorf("unmanaged LazyMind MCP entry in %s", path)
 			}
 		} else if scalarValue(row, "id") == dshWorkflowRow {
 			workflowCount++
 			file := scalarValue(mappingValue(row, "config"), "pairingFile")
+			if reference := scalarValue(mappingValue(row, "config"), "connectorConfig"); reference != "" {
+				connection, err := connectorconfig.Load(reference)
+				if err != nil {
+					return err
+				}
+				if connection.Home != a.home || connection.Provider != string(DeepSeekHarness) || connection.Profile != filepath.Dir(a.dshConfigPath()) {
+					return errors.New("DSH connection ownership mismatch")
+				}
+				file = connection.PairingFile
+			}
 			// A disabled row with no config is the tombstone left by disconnect.
 			if file == "" && scalarValue(row, "disabled") == "true" {
 				continue
@@ -365,7 +386,11 @@ func (a *Adapter) changeDSHProfile(ctx context.Context, connect bool) (err error
 	if err != nil {
 		return err
 	}
-	snapshots = []dshFileSnapshot{patch}
+	connection, err := snapshotDSHFile(connectorconfig.Path(a.home, string(DeepSeekHarness), filepath.Dir(a.dshConfigPath())))
+	if err != nil {
+		return err
+	}
+	snapshots = []dshFileSnapshot{patch, connection}
 	if connect {
 		store, e := credentials.NewStore(a.home, "")
 		if e != nil {
@@ -391,6 +416,16 @@ func (a *Adapter) changeDSHProfile(ctx context.Context, connect bool) (err error
 				continue
 			}
 			file := scalarValue(mappingValue(row, "config"), "pairingFile")
+			if reference := scalarValue(mappingValue(row, "config"), "connectorConfig"); reference != "" {
+				connection, err := connectorconfig.Load(reference)
+				if err != nil {
+					return err
+				}
+				if connection.Home != a.home || connection.Provider != string(DeepSeekHarness) || connection.Profile != filepath.Dir(a.dshConfigPath()) {
+					return errors.New("DSH connection ownership mismatch")
+				}
+				file = connection.PairingFile
+			}
 			if file != "" {
 				pair, e := snapshotDSHFile(file)
 				if e != nil {

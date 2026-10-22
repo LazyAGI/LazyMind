@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process'
 import { createDispatcher } from '../../workflow-agent-core/src/dispatcher'
 import { HostBridge } from '../../workflow-agent-core/src/transport'
 import { setTimeout as delay } from 'node:timers/promises'
-import { dispatcherLock, DispatcherBusy } from './runtime-lock'
+import { dispatcherLock, DispatcherBusy } from '../../workflow-agent-core/node/runtime-lock'
 import { CodexAdapter } from './adapter'
 
 const runFile = promisify(execFile)

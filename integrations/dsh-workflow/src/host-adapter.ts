@@ -9,7 +9,7 @@ import { object } from '../../workflow-agent-core/src/protocol'
 import { eventRun } from './events'
 
 /** DSH SDK translation only. Core owns execution admission; the shared coordinator gates automatic turns. */
-export function dshRuntime(ctx: Context, serverName: string): RuntimeAdapter<Agent> {
+export function dshRuntime(ctx: Context, serverName: string, webUrl: string): RuntimeAdapter<Agent> {
   let goals: GoalService | undefined
   ctx.inject(['goals'], goalCtx => {
     goals = goalCtx.goals
@@ -61,7 +61,7 @@ export function dshRuntime(ctx: Context, serverName: string): RuntimeAdapter<Age
     isLive: agent => ctx.agents.get(agent.session.id) === agent,
     isRunning: agent => agent.status === 'running',
     history: agent => [...agent.session.ownEvents()].map(event => ({
-      seq: event.seq, time: event.time, user: event.type === 'user/message', run: eventRun(event, serverName),
+      seq: event.seq, time: event.time, user: event.type === 'user/message', run: eventRun(event, serverName, webUrl),
     })),
     canReturnResult: agent => !!ctx.tools.get('structured_output', agent),
     goal: agent => goals?.get(agent),

@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"time"
 )
 
@@ -117,4 +119,29 @@ func (s *Store) RenewDesktopCandidate(ctx context.Context, expected Credentials,
 		return result, errors.New("DESKTOP_SESSION_RENEWAL_UNAVAILABLE")
 	}
 	return result, nil
+}
+
+// SaveDesktop binds a local session to the desktop data directory, whose identity
+// survives port allocation changes. Remote accounts retain exact server scope.
+// Called only by the desktop's session handoff, never inferred from a URL alone.
+func (s *Store) SaveDesktop(value Credentials, runtimeRoot string) error {
+	value.LocalRuntimeID = ""
+	if isLoopbackOrigin(value.ServerURL) {
+		if runtimeRoot == "" {
+			paths := runtimeStatePaths()
+			if len(paths) > 0 {
+				runtimeRoot = filepath.Dir(filepath.Dir(paths[0]))
+			}
+		}
+		if !filepath.IsAbs(runtimeRoot) {
+			return errors.New("desktop runtime root must be absolute")
+		}
+		sum := sha256.Sum256([]byte(filepath.Clean(runtimeRoot)))
+		value.LocalRuntimeID = hex.EncodeToString(sum[:])
+	}
+	return s.Save(value)
+}
+func isLoopbackOrigin(value string) bool {
+	u, err := url.Parse(value)
+	return err == nil && u.Scheme == "http" && u.User == nil && (u.Path == "" || u.Path == "/") && u.RawQuery == "" && u.Fragment == "" && (u.Hostname() == "localhost" || net.ParseIP(u.Hostname()).IsLoopback())
 }
