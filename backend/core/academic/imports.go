@@ -550,6 +550,9 @@ func finishPaperImportItem(ctx context.Context, batch *orm.PaperImportBatch, ite
 	if err := store.DB().WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&link).Error; err != nil {
 		return markItemFailed(ctx, item, "link_failed", err)
 	}
+	if err := bindImportedPaper(store.DB().WithContext(ctx), orm.Document{ID: imported.DocumentID, DatasetID: batch.TargetDatasetID}, orm.AcademicWork{ID: item.AcademicWorkID}); err != nil {
+		return err
+	}
 	return store.DB().WithContext(ctx).Model(item).Updates(map[string]any{
 		"status": "succeeded", "stage": "done", "error_code": "", "error_details_json": json.RawMessage(`{}`), "updated_at": now,
 	}).Error

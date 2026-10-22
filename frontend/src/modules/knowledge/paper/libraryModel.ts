@@ -87,6 +87,7 @@ export interface PaperLibraryDataV3 {
   annotations: Annotation[];
   relations: PaperRelation[];
   mergeSnapshots: MergeSnapshot[];
+  hiddenDocumentIds?: string[];
   hiddenArxivWorkIds?: string[];
   hiddenArxivPapers?: PaperRecord[];
   /** Original browser records retained on the server after legacy migration. */

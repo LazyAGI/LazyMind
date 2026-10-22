@@ -16,6 +16,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"lazymind/core/academic/arxivsource"
+	"lazymind/core/acl"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
 	"lazymind/core/doc"
@@ -87,7 +88,7 @@ func ImportArxiv(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.TargetDatasetID = strings.TrimSpace(req.TargetDatasetID)
-	if !canWriteDataset(r.Context(), req.TargetDatasetID, userID) {
+	if !doc.HasDatasetPermission(r, req.TargetDatasetID, acl.PermissionDatasetUpload) {
 		replyError(w, 403, "TARGET_DATASET_FORBIDDEN", "没有目标知识库的导入权限")
 		return
 	}
@@ -290,7 +291,7 @@ func (s *arxivImportService) recoverSavedImport(ctx context.Context, paper arxiv
 			return result, err
 		}
 	}
-	needsSubmission := strings.TrimSpace(task.LazyllmTaskID) == "" && strings.TrimSpace(control.State) == ""
+	needsSubmission := strings.TrimSpace(task.LazyllmTaskID) == "" && (strings.TrimSpace(control.State) == "" || control.State == "CREATING" || control.State == "FAILED")
 	if needsSubmission {
 		// A legacy task may have an authoritative parser record even without
 		// a Core binding. Do not submit that already accepted work twice.
@@ -415,7 +416,10 @@ func (s *arxivImportService) associate(ctx context.Context, paper arxivsource.Me
 		}
 		now := time.Now().UTC()
 		link = orm.AcademicWorkDocument{AcademicWorkID: work.ID, DatasetID: document.DatasetID, DocumentID: document.ID, VersionKind: "preprint", SourceProvider: "arxiv", SourceLocator: paper.PDFURL, SourceVersion: paper.Version, ContentSHA256: marker.ContentSHA256, MatchMethod: "arxiv_identifier", MatchConfidence: 1, IsPreferredVersion: true, CreatedAt: now, UpdatedAt: now}
-		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&link).Error
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&link).Error; err != nil {
+			return err
+		}
+		return bindImportedPaper(tx, document, work)
 	})
 	if err != nil {
 		return result, fmt.Errorf("PDF 已保存，文献关联保存失败，请重新导入以恢复：%w", err)

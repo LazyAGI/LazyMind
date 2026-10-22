@@ -947,8 +947,8 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if libraryKind == "" {
-		libraryKind = "document"
+	if body.ScenarioKey == "" && libraryKind == "paper" {
+		body.ScenarioKey = "academic_papers"
 	}
 	displayName := strings.TrimSpace(body.DisplayName)
 	desc := strings.TrimSpace(body.Desc)
@@ -967,6 +967,19 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		common.ReplyErr(w, err.Error(), 400)
 		return
+	}
+	if scenario == "academic_papers" {
+		if libraryKind == "document" {
+			common.ReplyErr(w, "academic_papers requires a paper library", http.StatusBadRequest)
+			return
+		}
+		libraryKind = "paper"
+	} else {
+		if libraryKind == "paper" {
+			common.ReplyErr(w, "paper library requires academic_papers scenario", http.StatusBadRequest)
+			return
+		}
+		libraryKind = "document"
 	}
 	processingLevelRequested := strings.TrimSpace(body.ProcessingLevel) != ""
 	processingLevel, err := normalizeProcessingLevel(body.ProcessingLevel)
@@ -1530,7 +1543,7 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	scenario := ds.ScenarioKey
+	scenario := datasetScenario(ds)
 	if body.ScenarioKey != "" && body.ScenarioKey != effectiveScenario(scenario) {
 		common.ReplyErr(w, "knowledge base scenario cannot be changed after creation", http.StatusBadRequest)
 		return
@@ -1625,12 +1638,18 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND deleted_at IS NULL", datasetID).First(&ds).Error; err != nil {
 			return err
 		}
-		libraryKind := parseDatasetLibraryKind(ds.Ext)
+		libraryKind := datasetLibraryKind(ds)
 		if requestedLibraryKind != "" {
 			if libraryKind != "" && libraryKind != requestedLibraryKind {
 				return errDatasetLibraryKindImmutable
 			}
 			libraryKind = requestedLibraryKind
+			if libraryKind == "paper" {
+				if err := validateAcademicScenario(r.Context(), tx, userID, "academic_papers", ds.ProcessingLevel); err != nil {
+					return err
+				}
+				ds.ScenarioKey = "academic_papers"
+			}
 		}
 		ext := map[string]any{}
 		_ = json.Unmarshal(ds.Ext, &ext)
@@ -1671,7 +1690,7 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 	common.ReplyJSON(w, Dataset{
 		Name:                "datasets/" + ds.ID,
 		DatasetID:           ds.ID,
-		ScenarioKey:         effectiveScenario(ds.ScenarioKey),
+		ScenarioKey:         datasetScenario(ds),
 		DisplayName:         ds.DisplayName,
 		Desc:                ds.Desc,
 		CoverImage:          ds.CoverImage,
@@ -1689,7 +1708,7 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 		Acl:                 datasetACL,
 		ShareType:           shareTypeToPB(ds.ShareType),
 		Type:                datasetTypeToPB(ds.Type),
-		LibraryKind:         parseDatasetLibraryKind(ds.Ext),
+		LibraryKind:         datasetLibraryKind(ds),
 		Tags:                parseDatasetTags(ds.Ext),
 		DefaultDataset:      isDefaultDatasetForUser(r.Context(), userID, ds.ID),
 		CreatedByDataSource: &createdByDataSource,

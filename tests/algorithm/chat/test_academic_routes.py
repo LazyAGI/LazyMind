@@ -8,6 +8,25 @@ from fastapi import HTTPException
 from lazymind.chat.api import academic_routes as ar
 
 
+def test_router_serves_authenticated_academic_bridge(monkeypatch):
+    import importlib
+    from fastapi.testclient import TestClient
+    from lazymind.config import config
+    from lazymind.chat.workflow import remote_executor
+
+    monkeypatch.setitem(config._impl, 'enable_router', True)
+    monkeypatch.setitem(config._impl, 'background_jobs_enabled', False)
+    monkeypatch.setitem(config._impl, 'core_internal_token', 'academic-test-token')
+    monkeypatch.setattr(remote_executor, 'start_remote_workflow_executor', lambda: None)
+    app = importlib.import_module('lazymind.chat.app').create_app()
+    client = TestClient(app)
+    payload = {'file_ref': 'missing.pdf', 'content_hash': '0' * 64}
+    assert client.post('/internal/academic/pdf:parse', json=payload).status_code == 401
+    response = client.post('/internal/academic/pdf:parse', json=payload,
+                           headers={'X-LazyMind-Internal-Token': 'academic-test-token'})
+    assert response.status_code == 422
+
+
 def test_pdf_bridge_validates_version_and_preserves_pages(tmp_path, monkeypatch):
     from lazymind.chat.engine.tools.file_resources import ingest
     monkeypatch.setattr(ar, 'require_internal_token', lambda token: token)

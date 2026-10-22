@@ -122,6 +122,7 @@ describe("knowledge creation capability submission", () => {
 
   it.each([false, true])("derives the paper kind only from the academic scenario (developer=%s)", async (developer) => {
     vi.mocked(isDeveloperModeActive).mockReturnValue(developer);
+    vi.mocked(fetchUserUiPreferences).mockResolvedValue({ document_parsing_enabled: true } as Awaited<ReturnType<typeof fetchUserUiPreferences>>);
     const { onCreate } = await mountModal();
     await fillRequiredFields();
     expect(screen.queryByText("资料库类型")).not.toBeInTheDocument();

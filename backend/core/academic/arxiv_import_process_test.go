@@ -26,7 +26,7 @@ type arxivProcessSpec struct {
 
 func newArxivProcessFixture(t *testing.T) (*gorm.DB, arxivProcessSpec) {
 	t.Helper()
-	db := orm.MigrateTestDB(t, &orm.Dataset{}, &orm.Document{}, &orm.Task{}, &orm.DocumentProcessingState{}, &orm.AcademicWork{}, &orm.AcademicWorkDocument{}).DB
+	db := orm.MigrateTestDB(t, &orm.Dataset{}, &orm.Document{}, &orm.Task{}, &orm.DocumentProcessingState{}, &orm.AcademicWork{}, &orm.AcademicWorkDocument{}, &orm.AcademicDocumentState{}).DB
 	if err := db.Create(&orm.Dataset{ID: "dataset", ProcessingLevel: "stored"}).Error; err != nil {
 		t.Fatal(err)
 	}

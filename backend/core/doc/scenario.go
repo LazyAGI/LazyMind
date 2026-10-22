@@ -6,8 +6,23 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
+	"lazymind/core/common/orm"
 	"lazymind/core/settings"
 )
+
+func datasetScenario(ds orm.Dataset) string {
+	if effectiveScenario(ds.ScenarioKey) == "general" && parseDatasetLibraryKind(ds.Ext) == "paper" {
+		return "academic_papers"
+	}
+	return effectiveScenario(ds.ScenarioKey)
+}
+
+func datasetLibraryKind(ds orm.Dataset) string {
+	if datasetScenario(ds) == "academic_papers" {
+		return "paper"
+	}
+	return parseDatasetLibraryKind(ds.Ext)
+}
 
 func effectiveScenario(value string) string {
 	if value == "" {

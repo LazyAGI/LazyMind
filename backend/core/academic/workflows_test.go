@@ -70,6 +70,35 @@ func TestPaperLaunchRoutesAndIdempotency(t *testing.T) {
 		t.Fatalf("reflection and ppt should have separate handoffs, got %d", count)
 	}
 }
+
+func TestImportedIdentitySurvivesQueuedRecognitionAndManualMetadataCorrection(t *testing.T) {
+	db := paperFixture(t)
+	link := orm.AcademicWorkDocument{AcademicWorkID: "a", DatasetID: "papers", DocumentID: "a", SourceProvider: "arxiv", SourceVersion: "v2", VersionKind: "preprint", ContentSHA256: "original-hash", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := db.Create(&link).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, err := runIdentify(t.Context(), asyncjob.Job{ResourceID: "a", CreateUserID: "u", PayloadJSON: marshal(map[string]any{"revision": 1})}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := mux.SetURLVars(paperRequest(`{"kind":"paper","paper":{"title":"Corrected title"}}`), map[string]string{"document_id": "a"})
+	w := httptest.NewRecorder()
+	UpdateDocumentIdentity(w, r)
+	if w.Code != 200 {
+		t.Fatalf("metadata correction: %d %s", w.Code, w.Body.String())
+	}
+	var saved orm.AcademicWorkDocument
+	if err := db.Where("document_id=?", "a").Take(&saved).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.SourceProvider != "arxiv" || saved.SourceVersion != "v2" || saved.ContentSHA256 != "original-hash" {
+		t.Fatalf("source identity lost: %+v", saved)
+	}
+	papers, invalid, err := resolvePaperSelection(r, "u", "papers", []string{"a"})
+	if err != nil || len(invalid) != 0 || len(papers) != 1 || papers[0].Paper.Title != "Corrected title" {
+		t.Fatalf("Workflow metadata did not follow correction: %+v %+v %v", papers, invalid, err)
+	}
+}
 func TestReviewGateFullManifestImportanceAndSeparateChat(t *testing.T) {
 	db := paperFixture(t)
 	input := ReviewWorkflowInput{UserInstruction: "agents", CandidateDirections: []string{"tools"}, SelectedDirections: []string{"tools"}, Papers: []WorkflowPaper{{Paper: PaperRef{PaperID: "a"}, IsSeed: true}, {Paper: PaperRef{PaperID: "b"}, IsSeed: true}, {Paper: PaperRef{PaperID: "a"}}}}

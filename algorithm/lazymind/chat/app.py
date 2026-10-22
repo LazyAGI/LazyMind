@@ -52,6 +52,7 @@ def register_chat_routers(app: FastAPI) -> FastAPI:
     app.include_router(agent_control_routes.router)
     app.include_router(mail_read_routes.router)
     app.include_router(directory_file_routes.router)
+    app.include_router(academic_routes.router)
     # Workflow actions, Writer sync, and LazyMind task cancellation callbacks.
     app.include_router(workflow_routes.router)
 
@@ -59,7 +60,6 @@ def register_chat_routers(app: FastAPI) -> FastAPI:
         app.include_router(chat_routes.router)
         app.include_router(knowledge_search_routes.router)
         app.include_router(document_routes.router)
-        app.include_router(academic_routes.router)
         app.include_router(subagent_routes.router)
 
     if not config['router_child_proxied_only']:

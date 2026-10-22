@@ -3,13 +3,15 @@ import { toBibTeX, toCSV, toRIS, type PaperItem, type PaperLibraryData } from '.
 import { loadPersistedPaperLibrary } from './store';
 import { listImportedArxivPapers } from './arxivImport';
 import { mergeArxivImports } from './arxivLibrary';
+import { loadLibraryDocuments, mergeLibraryDocuments, personalLibrary } from './libraryDocuments';
 
 export type PaperCitationFormat = 'bib' | 'ris' | 'csv';
 
 export async function loadPaperLibraryForExport(datasetId: string): Promise<PaperLibraryData> {
   const persisted = await loadPersistedPaperLibrary(datasetId);
   const imported = await listImportedArxivPapers(datasetId);
-  return asLegacyLibrary(mergeArxivImports(persisted.data, imported));
+  const documents = await loadLibraryDocuments(datasetId);
+  return asLegacyLibrary(personalLibrary(mergeLibraryDocuments(mergeArxivImports(persisted.data, imported), documents), documents.states));
 }
 
 export function downloadPaperCitations(library: PaperLibraryData, format: PaperCitationFormat, name = 'papers') {

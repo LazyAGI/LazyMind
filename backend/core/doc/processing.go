@@ -169,7 +169,7 @@ func UpdateProcessingLevel(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := validateAcademicScenario(r.Context(), store.DB(), userID, ds.ScenarioKey, level); err != nil {
+	if err := validateAcademicScenario(r.Context(), store.DB(), userID, datasetScenario(*ds), level); err != nil {
 		common.ReplyErr(w, err.Error(), 400)
 		return
 	}

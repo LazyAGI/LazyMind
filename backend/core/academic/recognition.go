@@ -30,13 +30,17 @@ func init() {
 		if err := tx.Where("id=?", row.DatasetID).Take(&ds).Error; err != nil {
 			return err
 		}
-		if ds.ScenarioKey != "academic_papers" || strings.ToLower(filepath.Ext(row.DisplayName)) != ".pdf" {
+		var classification struct {
+			LibraryKind string `json:"library_kind"`
+		}
+		_ = json.Unmarshal(ds.Ext, &classification)
+		if (ds.ScenarioKey != "academic_papers" && classification.LibraryKind != "paper") || strings.ToLower(filepath.Ext(row.DisplayName)) != ".pdf" {
 			return nil
 		}
-		return enqueueIdentify(context.Background(), tx, row)
+		return enqueueIdentify(context.Background(), tx, row, false)
 	}
 }
-func enqueueIdentify(ctx context.Context, tx *gorm.DB, row orm.Document) error {
+func enqueueIdentify(ctx context.Context, tx *gorm.DB, row orm.Document, force bool) error {
 	state := orm.AcademicDocumentState{DocumentID: row.ID, DatasetID: row.DatasetID, Kind: "unknown", Status: "pending", Revision: 1, UpdatedAt: time.Now().UTC()}
 	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&state).Error; err != nil {
 		return err
@@ -44,12 +48,21 @@ func enqueueIdentify(ctx context.Context, tx *gorm.DB, row orm.Document) error {
 	if err := tx.Where("document_id=?", row.ID).Take(&state).Error; err != nil {
 		return err
 	}
-	_, err := asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{JobType: "academic.identify", ResourceType: "document", ResourceID: row.ID, CreateUserID: row.CreateUserID, IdempotencyKey: row.ID + ":" + time.Now().UTC().Format(time.RFC3339Nano), Payload: map[string]any{"revision": state.Revision}, MaxAttempts: 5})
+	if force {
+		state.Revision++
+		if err := tx.Model(&state).Updates(map[string]any{"revision": state.Revision, "manual": false, "status": "pending", "error": ""}).Error; err != nil {
+			return err
+		}
+	} else if state.Manual || state.Kind == "paper" {
+		return nil
+	}
+	_, err := asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{JobType: "academic.identify", ResourceType: "document", ResourceID: row.ID, CreateUserID: row.CreateUserID, IdempotencyKey: row.ID + ":" + time.Now().UTC().Format(time.RFC3339Nano), Payload: map[string]any{"revision": state.Revision, "force": force}, MaxAttempts: 5})
 	return err
 }
 func runIdentify(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) (asyncjob.Result, error) {
 	var payload struct {
 		Revision int64 `json:"revision"`
+		Force    bool  `json:"force"`
 	}
 	if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil {
 		return asyncjob.Result{Permanent: true}, err
@@ -68,6 +81,18 @@ func runIdentify(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) (as
 	}
 	req, _ := http.NewRequestWithContext(ctx, "GET", "http://internal/", nil)
 	req.Header.Set("X-User-Id", job.CreateUserID)
+	if !payload.Force {
+		var known orm.AcademicWorkDocument
+		if err := db.Where("document_id=?", row.ID).Take(&known).Error; err == nil {
+			var work orm.AcademicWork
+			if err := db.Where("id=?", known.AcademicWorkID).Take(&work).Error; err != nil {
+				return asyncjob.Result{}, err
+			}
+			return asyncjob.Result{}, bindImportedPaper(db, row, work)
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return asyncjob.Result{}, err
+		}
+	}
 	text, err := documentText(ctx, req, job.CreateUserID, row.DatasetID, row.ID)
 	if err != nil {
 		return identifyFailure(db, state, job, err)
@@ -108,10 +133,7 @@ func runIdentify(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) (as
 			}
 			workID = work.ID
 			link := orm.AcademicWorkDocument{AcademicWorkID: work.ID, DatasetID: row.DatasetID, DocumentID: row.ID, VersionKind: "unknown", SourceProvider: "upload", ContentSHA256: hex.EncodeToString(hash[:]), MatchMethod: method, MatchConfidence: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
-			if err := tx.Where("document_id=?", row.ID).Delete(&orm.AcademicWorkDocument{}).Error; err != nil {
-				return err
-			}
-			if err := tx.Create(&link).Error; err != nil {
+			if err := saveDocumentWorkLink(tx, link); err != nil {
 				return err
 			}
 		}
@@ -246,7 +268,7 @@ func UpdateDocumentIdentity(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Reidentify {
 		row.CreateUserID = user
-		err := store.DB().Transaction(func(tx *gorm.DB) error { return enqueueIdentify(r.Context(), tx, row) })
+		err := store.DB().Transaction(func(tx *gorm.DB) error { return enqueueIdentify(r.Context(), tx, row, true) })
 		if err != nil {
 			replyError(w, 500, "QUEUE_FAILED", err.Error())
 			return
@@ -287,10 +309,8 @@ func UpdateDocumentIdentity(w http.ResponseWriter, r *http.Request) {
 				return e
 			}
 			workID = work.ID
-			if e := tx.Where("document_id=?", id).Delete(&orm.AcademicWorkDocument{}).Error; e != nil {
-				return e
-			}
-			if e := tx.Create(&orm.AcademicWorkDocument{AcademicWorkID: workID, DatasetID: row.DatasetID, DocumentID: id, VersionKind: "unknown", SourceProvider: "manual", MatchMethod: method, MatchConfidence: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}).Error; e != nil {
+			link := orm.AcademicWorkDocument{AcademicWorkID: workID, DatasetID: row.DatasetID, DocumentID: id, VersionKind: "unknown", SourceProvider: "manual", MatchMethod: method, MatchConfidence: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+			if e := saveDocumentWorkLink(tx, link); e != nil {
 				return e
 			}
 		} else {
@@ -330,4 +350,30 @@ func SetImportance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.ReplyJSON(w, map[string]bool{"is_important": req.IsImportant})
+}
+
+// Structured imports already bind a verified source identity; a queued PDF
+// recognizer must not replace that binding or its source/version information.
+func bindImportedPaper(tx *gorm.DB, document orm.Document, work orm.AcademicWork) error {
+	state := orm.AcademicDocumentState{DocumentID: document.ID, DatasetID: document.DatasetID, Kind: "paper", Status: "succeeded", PaperID: work.ID, Revision: 1, UpdatedAt: time.Now().UTC()}
+	return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "document_id"}}, DoUpdates: clause.Assignments(map[string]any{"kind": "paper", "status": "succeeded", "paper_id": work.ID, "error": "", "updated_at": time.Now().UTC()}), Where: clause.Where{Exprs: []clause.Expression{clause.Eq{Column: clause.Column{Table: "academic_document_states", Name: "manual"}, Value: false}}}}).Create(&state).Error
+}
+
+func saveDocumentWorkLink(tx *gorm.DB, link orm.AcademicWorkDocument) error {
+	var prior orm.AcademicWorkDocument
+	if err := tx.Where("document_id=?", link.DocumentID).Take(&prior).Error; err == nil {
+		link.SourceProvider = prior.SourceProvider
+		link.SourceLocator = prior.SourceLocator
+		link.SourceVersion = prior.SourceVersion
+		link.VersionKind = prior.VersionKind
+		link.ContentSHA256 = prior.ContentSHA256
+		link.IsPreferredVersion = prior.IsPreferredVersion
+		link.CreatedAt = prior.CreatedAt
+		if err := tx.Where("document_id=?", link.DocumentID).Delete(&orm.AcademicWorkDocument{}).Error; err != nil {
+			return err
+		}
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	return tx.Create(&link).Error
 }

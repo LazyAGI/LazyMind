@@ -66,5 +66,5 @@ export function mergeArxivImports(current: PaperLibraryDataV3, imports: ArxivImp
     const index = papers.findIndex((item) => item.id === paper.id);
     if (index >= 0) papers[index] = paper; else papers.unshift(paper);
   }
-  return { ...current, papers, attachments, hiddenArxivWorkIds: [...hiddenWorkIds], hiddenArxivPapers: hiddenPapers };
+  return { ...current, papers, attachments, hiddenDocumentIds: restoreRemoved ? current.hiddenDocumentIds?.filter(id => !imports.some(item => item.document_id === id)) : current.hiddenDocumentIds, hiddenArxivWorkIds: [...hiddenWorkIds], hiddenArxivPapers: hiddenPapers };
 }

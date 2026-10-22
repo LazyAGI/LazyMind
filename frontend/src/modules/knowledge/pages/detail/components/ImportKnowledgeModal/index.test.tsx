@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfigProvider, message } from "antd";
 
 const api = vi.hoisted(() => ({ build: vi.fn(), create: vi.fn(), start: vi.fn() }));
+vi.mock("@/modules/modelProvider/contexts/RAGComponentContext", () => ({ useRAGComponent: () => ({ availability: "ready" }) }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock("@/components/request", () => ({ localizeErrorCode: (_code: string, fallback = "") => fallback || "import failed" }));
 vi.mock("@/modules/knowledge/utils/request", () => ({

@@ -92,8 +92,26 @@ func ResumeLocalFileImport(ctx context.Context, input ResumeLocalFileImportReque
 		err = tasks.Order("created_at DESC").Take(&task).Error
 	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		task, err = createTaskFromExistingDocument(req, input.DatasetID, input.UserID, firstNonEmpty(input.UserName, input.UserID),
-			CreateTaskItem{Task: TaskPayload{DocumentID: input.DocumentID, DataSourceType: "ACADEMIC_PROVIDER"}}, string(TaskTypeParseUploaded))
+		var dataset orm.Dataset
+		if err = store.DB().WithContext(ctx).Where("id = ? AND deleted_at IS NULL", input.DatasetID).Take(&dataset).Error; err != nil {
+			return result, err
+		}
+		if effectiveProcessingLevel(dataset.ProcessingLevel) == ProcessingLevelStored {
+			// Recovery of an already retained file is a completed storage task,
+			// not a request to ingest it at a higher processing level.
+			task = orm.Task{ID: newTaskID(), DatasetID: dataset.ID, DocID: document.ID, KbID: dataset.KbID,
+				TaskType: string(TaskTypeParseUploaded), DisplayName: document.DisplayName,
+				Ext:       mustJSON(taskExt{TaskType: string(TaskTypeParseUploaded), TaskState: string(TaskStateSucceeded)}),
+				BaseModel: orm.BaseModel{CreateUserID: input.UserID, CreateUserName: input.UserName, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}}
+			err = store.DB().WithContext(ctx).Create(&task).Error
+		} else {
+			kind := TaskTypeParseUploaded
+			if document.LazyllmDocID != "" {
+				kind = TaskTypeReparse
+			}
+			task, err = createTaskFromExistingDocument(req, input.DatasetID, input.UserID, firstNonEmpty(input.UserName, input.UserID),
+				CreateTaskItem{Task: TaskPayload{DocumentID: input.DocumentID, DataSourceType: "ACADEMIC_PROVIDER"}}, string(kind))
+		}
 	}
 	if err != nil {
 		return result, fmt.Errorf("recover imported document task: %w", err)

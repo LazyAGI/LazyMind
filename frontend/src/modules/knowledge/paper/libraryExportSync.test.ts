@@ -1,3 +1,4 @@
+vi.mock('./libraryDocuments', async (original) => ({ ...await original<typeof import('./libraryDocuments')>(), loadLibraryDocuments: vi.fn().mockResolvedValue({ documents: [], states: [] }) }));
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ArxivImportResult } from "./arxivImport";
 import { loadPaperLibraryForExport } from "./exportLibrary";
@@ -44,7 +45,7 @@ describe("server synchronization before library export", () => {
     const library = await loadPaperLibraryForExport("library");
 
     expect(library.papers).toHaveLength(2);
-    expect(library.papers.find((paper) => paper.arxiv === "2404.06654")).toMatchObject({ title: "My edited title", folderId: "reading", tags: ["RAG"], important: true });
+    expect(library.papers.find((paper) => paper.arxiv === "2404.06654")).toMatchObject({ title: "My edited title", folderId: "reading", tags: ["RAG"], important: false });
     expect(library.papers.find((paper) => paper.arxiv === "2404.06655")?.title).toBe("Server Paper 2404.06655");
     expect(library.folders).toEqual([{ id: "reading", name: "My Reading" }]);
   });

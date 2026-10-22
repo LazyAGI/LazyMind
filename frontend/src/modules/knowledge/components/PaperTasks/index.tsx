@@ -14,6 +14,7 @@ interface Props {
     setMode: (mode: PaperTask | undefined) => void;
     selected: string[];
     canImport: boolean;
+    selectionError?: string;
     onImportSubmitted: () => void;
 }
 interface ResultOperation {
@@ -35,7 +36,7 @@ function distinctPapers(papers: WorkflowPaper[]) {
 }
 const stages = ['direction_research', 'seed_set', 'expanded_papers', 'paper_relations', 'expansion_result'];
 
-export default function PaperTasks({ dataset, mode, setMode, selected, canImport, onImportSubmitted }: Props) {
+export default function PaperTasks({ dataset, mode, setMode, selected, selectionError, canImport, onImportSubmitted }: Props) {
     const { t } = useTranslation();
     const navigate = useNavigate();
     const [params, setParams] = useSearchParams();
@@ -117,6 +118,7 @@ export default function PaperTasks({ dataset, mode, setMode, selected, canImport
     };
     const submit = async () => {
         if (!launch || busy) return;
+        if (!launch.direction && selectionError) { message.warning(selectionError); return; }
         if (launch.direction && !instruction.trim()) {
             message.warning(t('paperTasks.enterTopic'));
             return;
@@ -255,7 +257,7 @@ export default function PaperTasks({ dataset, mode, setMode, selected, canImport
         </Space>
         {mode && <Alert style={{ marginBottom: 12 }} type="info" message={<Space wrap>
             <span>{t('paperTasks.choosePapers', { task: taskLabel(mode), count: selected.length })}</span>
-            <Button type="primary" disabled={!selected.length} onClick={() => openLaunch(mode, false)}>{t('paperTasks.continue')}</Button>
+            <Button type="primary" disabled={!selected.length || !!selectionError} onClick={() => openLaunch(mode, false)}>{t('paperTasks.continue')}</Button>
             <Button onClick={() => setMode(undefined)}>{t('paperTasks.cancel')}</Button>
         </Space>} />}
         <Modal okText={t('paperTasks.start')} cancelText={t('paperTasks.cancel')} open={!!launch}

@@ -4069,9 +4069,6 @@ components:
                 is_owner:
                     type: boolean
                 library_kind:
-                    enum:
-                        - paper
-                        - document
                     type: string
                 name:
                     type: string
@@ -4456,6 +4453,8 @@ components:
                     type: integer
                 rel_path:
                     type: string
+                retained_only:
+                    type: boolean
                 tags:
                     items:
                         type: string
@@ -4482,6 +4481,7 @@ components:
                 - name
                 - p_id
                 - rel_path
+                - retained_only
                 - type
                 - update_time
                 - uri
@@ -15530,6 +15530,24 @@ info:
     version: 0.1.0
 openapi: 3.0.3
 paths:
+    /api/core/academic/arxiv/library:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /academic/arxiv/library
+    /api/core/academic/arxiv:import:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/arxiv:import
+    /api/core/academic/arxiv:lookup:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/arxiv:lookup
     /api/core/academic/chat-context:
         get:
             parameters:
@@ -15822,6 +15840,17 @@ paths:
                 "200":
                     description: OK
             summary: POST /academic/imports:preview
+    /api/core/academic/library:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /academic/library
+        put:
+            responses:
+                "200":
+                    description: OK
+            summary: PUT /academic/library
     /api/core/academic/mock-handoffs/{handoff_id}:submit:
         post:
             parameters:
@@ -30588,6 +30617,36 @@ paths:
             summary: Compare revision; closing requires the exact current affected run IDs
             tags:
                 - TaskNotifications
+    /api/core/user/ui-preferences:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/userUIPreferencesOpenAPIResponse'
+                    description: Current user's UI preferences
+            summary: Get current user's UI preferences
+            tags:
+                - user
+        patch:
+            description: Partial update. Every field inside the request body is optional; send only fields that should change. Updating schedules_enabled pauses or resumes scheduled execution; updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/userUIPreferencesPatchOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/userUIPreferencesOpenAPIResponse'
+                    description: Updated current user's UI preferences
+            summary: Partially update current user's UI preferences
+            tags:
+                - user
     /api/core/user/wechat-notification-targets:
         get:
             description: List unique confirmed WeChat recipients from owned saved schedule notification rules; does not check connectivity. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
@@ -30654,36 +30713,6 @@ paths:
             summary: List unique confirmed WeChat recipients from owned saved schedule notification rules; does not check connectivity
             tags:
                 - TaskNotifications
-    /api/core/user/ui-preferences:
-        get:
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/userUIPreferencesOpenAPIResponse'
-                    description: Current user's UI preferences
-            summary: Get current user's UI preferences
-            tags:
-                - user
-        patch:
-            description: Partial update. Every field inside the request body is optional; send only fields that should change. Updating schedules_enabled pauses or resumes scheduled execution; updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/userUIPreferencesPatchOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/userUIPreferencesOpenAPIResponse'
-                    description: Updated current user's UI preferences
-            summary: Partially update current user's UI preferences
-            tags:
-                - user
     /api/core/v1/internal/provider-connections/{auth_connection_id}/access-token:report:
         post:
             parameters:

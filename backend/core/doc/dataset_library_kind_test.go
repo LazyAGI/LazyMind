@@ -15,7 +15,7 @@ import (
 func libraryKindTestDB(t *testing.T) *orm.DB {
 	t.Helper()
 	db := newDocumentTestDB(t)
-	if err := db.AutoMigrate(&orm.ACLModel{}, &orm.KBModel{}, &orm.VisibilityModel{}); err != nil {
+	if err := db.AutoMigrate(&orm.ACLModel{}, &orm.KBModel{}, &orm.VisibilityModel{}, &orm.UserUIPreferences{}); err != nil {
 		t.Fatal(err)
 	}
 	acl.InitStore(db)
@@ -66,7 +66,11 @@ func TestDatasetLibraryKindCreationPersistsAcrossListAndDetail(t *testing.T) {
 	for _, test := range []struct{ input, want string }{{`"library_kind":"paper",`, "paper"}, {`"library_kind":"document",`, "document"}, {"", "document"}} {
 		t.Run(test.want+test.input, func(t *testing.T) {
 			db := libraryKindTestDB(t)
-			rec := libraryKindRequest(t, CreateDataset, "POST", "/api/core/datasets?dataset_id=ds-kind", `{`+test.input+`"display_name":"论文","processing_level":"stored","algo":{"algo_id":"general_algo"}}`, "owner")
+			level := "stored"
+			if test.want == "paper" {
+				level = "parsed"
+			}
+			rec := libraryKindRequest(t, CreateDataset, "POST", "/api/core/datasets?dataset_id=ds-kind", `{`+test.input+`"display_name":"论文","processing_level":"`+level+`","algo":{"algo_id":"general_algo"}}`, "owner")
 			if rec.Code != 200 {
 				t.Fatalf("create status=%d %s", rec.Code, rec.Body.String())
 			}

@@ -24,7 +24,7 @@ import (
 
 func arxivImportTestService(t *testing.T) (*arxivImportService, *atomic.Int32) {
 	t.Helper()
-	db := orm.MigrateTestDB(t, &orm.AcademicWork{}, &orm.AcademicWorkDocument{}, &orm.AcademicReference{}, &orm.PaperImportBatch{}, &orm.PaperImportItem{}, &orm.Dataset{}, &orm.Document{}, &orm.Task{}, &orm.DocumentProcessingState{}).DB
+	db := orm.MigrateTestDB(t, &orm.AcademicWork{}, &orm.AcademicWorkDocument{}, &orm.AcademicDocumentState{}, &orm.AcademicReference{}, &orm.PaperImportBatch{}, &orm.PaperImportItem{}, &orm.Dataset{}, &orm.Document{}, &orm.Task{}, &orm.DocumentProcessingState{}).DB
 	previous, previousLazy, previousState := store.DB(), store.LazyLLMDB(), store.State()
 	store.Init(db, db, previousState)
 	t.Cleanup(func() { store.Init(previous, previousLazy, previousState) })

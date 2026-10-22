@@ -507,7 +507,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       if (ragAvailability !== "ready") {
         mineTableRequestSeqRef.current += 1;
         setCloudSources([]);
-        setPagination((current) => ({ ...current, current: page, total: 0 }));
+        setTotal(0);
         setLoading(false);
         return;
       }

@@ -352,6 +352,9 @@ func validatePaperLibraryObject(value any, documents map[string]bool) error {
 			}
 		}
 	}
+	if err := paperStringArray(root, "hiddenDocumentIds", false); err != nil {
+		return err
+	}
 	return paperStringArray(root, "hiddenArxivWorkIds", false)
 }
 

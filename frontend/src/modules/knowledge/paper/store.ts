@@ -98,7 +98,7 @@ function validateLibrary(value: unknown): asserts value is PaperLibraryDataV3 {
     && ['attachmentIds', 'noteIds', 'annotationIds', 'collectionIds', 'relatedPaperIds'].every((key) => Array.isArray(item[key])))) {
     throw new Error('服务器文献条目格式无效，已停止加载以保护原数据');
   }
-  for (const key of ['hiddenArxivWorkIds', 'hiddenArxivPapers', 'migrationSnapshots']) {
+  for (const key of ['hiddenDocumentIds', 'hiddenArxivWorkIds', 'hiddenArxivPapers', 'migrationSnapshots']) {
     if (value[key] !== undefined && !Array.isArray(value[key])) throw new Error('服务器文献库关联数据格式无效');
   }
 }
@@ -178,6 +178,7 @@ function migrateBrowserCopy(server: PaperLibraryDataV3, legacy: PaperLibraryData
     annotations: unionRecords(server.annotations, legacy.annotations),
     relations: unionRecords(server.relations, legacy.relations),
     mergeSnapshots: unionRecords(server.mergeSnapshots, legacy.mergeSnapshots),
+    hiddenDocumentIds: [...new Set([...(server.hiddenDocumentIds || []), ...(legacy.hiddenDocumentIds || [])])],
     hiddenArxivWorkIds: [...new Set([...(server.hiddenArxivWorkIds || []), ...(legacy.hiddenArxivWorkIds || []).filter((workId) => !visibleWorks.has(workId))])],
     hiddenArxivPapers: unionRecords(server.hiddenArxivPapers || [], legacy.hiddenArxivPapers || []),
     migrationSnapshots: [...(server.migrationSnapshots || []), { id, createdAt: new Date().toISOString(), source: 'browser-local-v3', data: legacy }],
