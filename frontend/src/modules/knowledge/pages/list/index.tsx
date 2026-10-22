@@ -494,6 +494,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     mineCloudSource,
     page,
     pageSize,
+    ragAvailability,
   ]);
 
   const loadCloudSources = useCallback(
@@ -507,7 +508,9 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       if (ragAvailability !== "ready") {
         mineTableRequestSeqRef.current += 1;
         setCloudSources([]);
-        setPagination((current) => ({ ...current, current: page, total: 0 }));
+        setTotal(0);
+        setTableError(false);
+        setLoadedTableQuery(tableQueryKey);
         setLoading(false);
         return;
       }

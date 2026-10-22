@@ -284,13 +284,19 @@ func (s *arxivImportService) recoverSavedImport(ctx context.Context, paper arxiv
 	}
 	var control struct {
 		State string `json:"task_state"`
+		Error string `json:"error_message"`
 	}
 	if task.ID != "" {
 		if err := json.Unmarshal(task.Ext, &control); err != nil {
 			return result, err
 		}
 	}
-	needsSubmission := strings.TrimSpace(task.LazyllmTaskID) == "" && strings.TrimSpace(control.State) == ""
+	state := strings.ToUpper(strings.TrimSpace(control.State))
+	// New tasks explicitly start in CREATING, and a settings rejection now
+	// persists FAILED. Neither means that the parser accepted this attempt.
+	locallyUnsubmitted := state == "" || state == "CREATING" ||
+		(state == "FAILED" && control.Error == "document parsing is paused in settings")
+	needsSubmission := strings.TrimSpace(task.LazyllmTaskID) == "" && locallyUnsubmitted
 	if needsSubmission {
 		// A legacy task may have an authoritative parser record even without
 		// a Core binding. Do not submit that already accepted work twice.

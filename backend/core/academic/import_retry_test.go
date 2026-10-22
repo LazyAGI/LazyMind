@@ -371,5 +371,12 @@ func TestPaperImportRetrySubmitsRecoveredTaskForPreviouslyRegisteredDocument(t *
 		if item.Status != "failed" || item.DocumentTaskID == "" || !strings.Contains(string(item.ErrorDetailsJSON), "paused") {
 			t.Fatalf("recovered task was not submitted: %+v", item)
 		}
+		var task orm.Task
+		if err := db.Take(&task, "id = ?", item.DocumentTaskID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if task.TaskType != string(doc.TaskTypeReparse) {
+			t.Fatalf("registered document must recover a reparse task, got %s", task.TaskType)
+		}
 	}
 }

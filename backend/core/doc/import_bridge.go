@@ -95,8 +95,30 @@ func ResumeLocalFileImport(ctx context.Context, input ResumeLocalFileImportReque
 		err = tasks.Order("created_at DESC").Take(&task).Error
 	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		task, err = createTaskFromExistingDocument(req, input.DatasetID, input.UserID, firstNonEmpty(input.UserName, input.UserID),
-			CreateTaskItem{Task: TaskPayload{DocumentID: input.DocumentID, DataSourceType: "ACADEMIC_PROVIDER"}}, string(TaskTypeParseUploaded))
+		var dataset orm.Dataset
+		err = store.DB().WithContext(ctx).Where("id = ? AND deleted_at IS NULL", input.DatasetID).Take(&dataset).Error
+		if err == nil && effectiveProcessingLevel(dataset.ProcessingLevel) == ProcessingLevelStored {
+			// An interrupted import into a storage-only library needs a receipt,
+			// not an ingestion request. The public retained-file ingestion path
+			// deliberately requires a higher processing level.
+			now := time.Now().UTC()
+			task = orm.Task{ID: newTaskID(), DocID: document.ID, DatasetID: dataset.ID,
+				KbID: datasetKbIDByID(dataset.ID), AlgoID: datasetAlgoIDByID(dataset.ID),
+				TaskType: string(TaskTypeParseUploaded), DisplayName: document.DisplayName, DocumentPID: document.PID,
+				Ext: mustJSON(taskExt{TaskType: string(TaskTypeParseUploaded), TaskState: string(TaskStateCreating),
+					DisplayName: document.DisplayName, DocumentPID: document.PID, DataSourceType: "ACADEMIC_PROVIDER",
+					Files: []TaskFile{{StoredPath: ext.StoredPath, StoredName: ext.StoredName, DisplayName: document.DisplayName,
+						FileSize: ext.FileSize, ContentType: ext.ContentType}}}),
+				BaseModel: orm.BaseModel{CreateUserID: input.UserID, CreateUserName: firstNonEmpty(input.UserName, input.UserID), CreatedAt: now, UpdatedAt: now}}
+			err = store.DB().WithContext(ctx).Create(&task).Error
+		} else if err == nil {
+			taskType := TaskTypeParseUploaded
+			if strings.TrimSpace(document.LazyllmDocID) != "" {
+				taskType = TaskTypeReparse
+			}
+			task, err = createTaskFromExistingDocument(req, input.DatasetID, input.UserID, firstNonEmpty(input.UserName, input.UserID),
+				CreateTaskItem{Task: TaskPayload{DocumentID: input.DocumentID, DataSourceType: "ACADEMIC_PROVIDER"}}, string(taskType))
+		}
 	}
 	if err != nil {
 		return result, fmt.Errorf("recover imported document task: %w", err)
