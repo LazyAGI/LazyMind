@@ -1595,8 +1595,9 @@
   border-radius: 0;
   background: transparent;
 }
-.settings-model-defaults-drawer .model-provider-default-meta { min-height: 32px; }
-.settings-model-defaults-drawer .model-provider-default-title { font-size: 13px; font-weight: 600; }
+.settings-model-defaults-drawer .model-provider-default-meta { min-height: 32px; flex-wrap: wrap; row-gap: 4px; }
+.settings-model-defaults-drawer .model-provider-default-title { min-width: 100px; flex: 1; font-size: 13px; font-weight: 600; }
+.settings-model-defaults-drawer .model-provider-max-input-tokens { order: 1; flex-basis: 100%; white-space: nowrap; font-size: 11px; }
 .settings-model-defaults-drawer .model-provider-pending-description { display: none; }
 .settings-model-defaults-drawer .model-provider-configure-capability {
   justify-self: end;
