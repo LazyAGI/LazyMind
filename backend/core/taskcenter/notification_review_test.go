@@ -16,7 +16,7 @@ func TestNotificationReviewSessionLateUpdatePreservesTerminal(t *testing.T) {
 		for _, configured := range []bool{false, true} {
 			for _, late := range []string{"failed", "waiting"} {
 				t.Run(fmt.Sprintf("%s/configured=%v/late=%s", terminal, configured, late), func(t *testing.T) {
-					db := orm.MigrateAllModelsForTest(t).DB
+					db := newNotificationTestDB(t).DB
 					sessionID, scheduleID := "session", "schedule"
 					config := `{"events":{"failed":{"enabled":true,"content":"summary"}},"channels":{"desktop":{"enabled":true}}}`
 					task := orm.TaskCenterTask{ID: "run", UserID: "owner", TaskType: "scheduled", ConversationID: "conv", Status: "running", WorkflowSessionID: &sessionID, ScheduleID: &scheduleID}
@@ -86,7 +86,7 @@ func TestNotificationReviewSessionLateUpdatePreservesTerminal(t *testing.T) {
 }
 
 func TestNotificationReviewRecoveryAdvancesPastBrokenAndActiveLegacyRuns(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	missing := "missing-session"
 	now := time.Now().UTC()
 	for i := 0; i < 101; i++ {
@@ -130,7 +130,7 @@ func TestNotificationReviewRecoveryAdvancesPastBrokenAndActiveLegacyRuns(t *test
 }
 
 func TestNotificationDispatchDoesNotWaitForRecovery(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	entered := make(chan struct{})
