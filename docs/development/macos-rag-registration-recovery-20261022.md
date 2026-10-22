@@ -2,6 +2,8 @@
 
 日期：2026-10-22。本文记录一次 Mac ARM64 桌面客户端实测，供开发、测试和支持排障使用。
 
+> 下文第 1–9 节保留首次诊断与清库恢复的历史事实；后续代码修复、配置用法及新验证结果见第 10 节。清库不是新版本的默认解决方式。
+
 ## 1. 结论与适用范围
 
 本次有两个不同阶段，不能笼统称为“RAG 下载失败”：
@@ -203,3 +205,64 @@ lazyllm_waiting_task_queue    lazyllm_finished_task_queue
 - 本机日志：`~/Library/Logs/lazymind-desktop/desktop-startup.log`、`~/Library/Logs/LazyMind/lazyllm-algo.log`、`lazyllm-parse-server.log`。
 
 相关发布链路说明见 [macOS RAG 发布文档](macos-published-rag.md)。本文没有修改发布校验、签名策略、LazyLLM 子模块或产品运行逻辑。
+
+## 10. 后续修复：同名分支 `cst/sig_test_fix`
+
+### 10.1 新证据与结论修正
+
+同事报告验证版本 LazyMind `50c4e83f`、LazyLLM `6b6ac9bb`，并定位三项独立问题：DocServer 冷导入循环、旧节点组签名冲突、配置覆盖导致 force 未生效。本文作者的修复基于本地获取到的 LazyMind upstream `fed34309` 和 LazyLLM upstream `655cb3ba`，不声称复测了同事的两个具体提交。
+
+已在独立 Python 进程复现：`from lazyllm.tools.rag.doc_service import DocServer` 报 partially initialized module。链路为 `doc_service.base → parsing_service.__init__ → server → worker → doc_service.base`。导入 `parsing_service.base.TaskType` 之前会初始化包，旧初始化器立即加载 worker，后者读取尚未定义的 `DOC_NODE_GROUP_STATUS_TABLE_INFO`。
+
+代码也确认 `GeneralParser.sig_fields()` 现有实现包括 `embed_max_input_tokens` 与 `budget_version`；同事报告其新旧计算值对应此次 `block` 冲突。没有删除这些字段来伪装兼容：embedding 输入预算确实可能影响新文档切分，应保留这一配置事实。开发场景按用户指定策略接受新旧处理结果共存，显式覆盖注册，而不是自动清库。
+
+### 10.2 已实现的修复
+
+1. **LazyLLM 包导入**：`parsing_service/__init__.py` 改为与 RAG 根包一致的按需导出，保留 `_Processor`、`DocumentProcessor`、`DocumentProcessorWorker` API。只导入 TaskType 不加载 server/worker。
+2. **正式 wheel 路径**：`desktop/scripts/patch-reader-imports.py` 同时修补 pinned wheel 的 RAG 根包和 parsing_service 初始化器。否则仅更新子模块不能覆盖不打包源码的正式发行构建。
+3. **显式覆盖开关**：新增 `LAZYMIND_FORCE_ALGO_REGISTER`，这是布尔值；开启后最终注册策略为字符串 `force`。它优先于旧的 `LAZYLLM_ALGO_REGISTER_POLICY=none/update`，不是把 policy 设为字符串 `false`。
+4. **桌面运行时**：desktop profile 默认启用覆盖，避免同一显示版本的测试包重装仍受旧指纹影响；显式设置新开关为 `false` 可恢复原有策略选择。该开关为 true 时不受旧 policy 环境值影响。
+5. **本地开发**：新 `local/config.env.example` 启用此开关。已有的 gitignored 配置不自动修改，需手动添加。Make 的 local targets 最终在 `.env` 之后加载 `local/config.env`，命令行变量仍最高优先级。
+6. **Compose**：将新开关传给 `lazyllm-algo`，默认 false，不强制改变所有服务端部署。算法构建入口在创建 Document 前更新 LazyLLM 配置和子进程环境，并记录 effective policy。即使容器原始旧 policy 仍为 none，新开关为 true 时最终业务注册使用 force。
+7. **CI Bash**：保留此前 `00a34711` 的非空验证参数数组修复，覆盖 ad-hoc 与正式签名两条路径。
+
+两仓库使用同名分支。LazyMind 的 gitlink 固定到本次 LazyLLM 修复提交；在 SDK 修复尚未进入官方上游时，`.gitmodules` 指向 CarlosShaoting fork 和同名分支，保证 CI 能取到提交。SDK 上游合并后应切回官方 URL 并更新 gitlink，不长期依赖浮动分支。
+
+### 10.3 配置方式与生效检查
+
+本地开发的 `local/config.env`：
+
+```dotenv
+LAZYMIND_FORCE_ALGO_REGISTER=true
+LAZYLLM_ALGO_REGISTER_POLICY=update
+LAZYMIND_RESET_ALGO_ON_STARTUP=false
+LAZYMIND_RESET_ALL_ON_STARTUP=false
+```
+
+然后重启本地运行时。开关会令下游 `LAZYLLM_ALGO_REGISTER_POLICY` 实际变为 force。不要启用 reset 开关来替代 force；reset 会删除数据。
+
+Compose 不会因为文件叫 `local/config.env` 就自动加载它。部署者可以在实际使用的 `.env` 中设置新开关，或在已核对的 Compose 启动命令前传入：
+
+```bash
+LAZYMIND_FORCE_ALGO_REGISTER=true docker compose up -d --force-recreate lazyllm-algo
+```
+
+仍需使用自己环境的 Compose 文件、项目名和 env-file 参数。先检查 `docker compose config` 中 `lazyllm-algo.environment` 的两个变量，再检查新容器的环境和日志：
+
+```text
+[build_document] effective algorithm registration policy=force
+```
+
+不要只查看宿主 shell 的 `echo`，不要把整个 Compose 配置或容器环境贴到公开日志，以免暴露密钥。本次只执行 Compose 配置解析，并未重建用户 Docker 容器。
+
+桌面从 Finder 启动不继承任意终端 export；默认覆盖由运行时生成子进程环境，因此无需用户手工 export。高级用户若关闭新开关，原有版本升级逻辑仍保留：显式旧 policy 优先；没有旧 policy 时安装版本变化可触发 force、同版本使用 update。
+
+### 10.4 数据语义与测试边界
+
+force 更新旧算法注册 payload 及节点组指纹/配置，保留同名节点组 ID 和既有 lazy_mode；没有调用清表、删除向量或自动重新 embedding。它不解决 Team ID、SHA、云端 404 或模型更换造成的向量空间不兼容。
+
+新增 SQLite 保留数据测试：建立旧 `block` 指纹，先断言 update 拒绝，再 force 更新，检查节点组 ID、lazy_mode 及独立持久化文本/向量字节哨兵保持不变。该测试验证注册操作不清理持久化内容，**不是完整 Milvus 老知识库检索验收**。未将这次测试称为所有历史数据无损兼容保证。
+
+本轮测试：LazyLLM 冷导入、注册保留数据、DocServer 和 parsing chunks 共 42 项通过；LazyMind 配置优先级、真实环境子进程、独立 DocServer `--help` 冷入口、wheel 修补、算法构建和 GeneralParser 共 34 项通过；桌面 Node 测试 53 项通过。`local/local-runtime-manager` 下 `go test ./...` 全部通过。独立冷入口验证覆盖 import 阶段，不冒充完整独立 HTTP 服务启动测试。
+
+剩余验收：新 CI 安装包在保留旧知识库环境中启动，并实际检索旧文档、添加新文档及更新/删除文档。已有本机知识库已经按用户要求清空，因此不能用本机空库状态替代这一验收。历史记录中关于 UI 更精确错误展示、安全 reset 范围和退出残留的建议仍属后续任务，本次未扩大实现。

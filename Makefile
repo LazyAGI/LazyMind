@@ -88,6 +88,14 @@ endif
 ifneq (,$(wildcard .env))
 include .env
 endif
+# For local targets, local/config.env is the final file override, not .env.
+# Explicit make command-line assignments still have highest priority.
+ifneq (,$(_NEEDS_LOCAL_CONFIG))
+ifneq (,$(wildcard $(LOCAL_CONFIG_ENV)))
+include $(LOCAL_CONFIG_ENV)
+export $(shell sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' $(LOCAL_CONFIG_ENV))
+endif
+endif
 _ENV_EXPORT_VARS := $(filter MIRROR_PROFILE LAZYMIND_% LAZYLLM_% LANGFUSE_% OTEL_% PIP_% UV_% NPM_% ELECTRON_% DOCKER_% APT_% ALPINE_% GOPROXY GOSUMDB GITHUB_% MILVUS_% MINIO_% POSTGRES_% REDIS_% OPENSEARCH_%,$(.VARIABLES))
 export $(_ENV_EXPORT_VARS)
 

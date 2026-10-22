@@ -247,6 +247,7 @@ func TestAlgorithmServiceEnvDoesNotForceEditablePPT(t *testing.T) {
 }
 
 func TestDesktopAlgorithmRegisterPolicyForInstallVersion(t *testing.T) {
+	t.Setenv("LAZYMIND_FORCE_ALGO_REGISTER", "false")
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	cfg, paths, err := NewRuntimeConfig("desktop", repo)
@@ -276,6 +277,7 @@ func TestDesktopAlgorithmRegisterPolicyForInstallVersion(t *testing.T) {
 }
 
 func TestDesktopAlgorithmRegisterPolicyHonorsExplicitOverride(t *testing.T) {
+	t.Setenv("LAZYMIND_FORCE_ALGO_REGISTER", "false")
 	cfg := RuntimeConfig{Profile: "desktop"}
 	paths := RuntimePaths{StateDir: t.TempDir()}
 	t.Setenv(desktopAppVersionEnvVar, "1.2.3")
@@ -287,6 +289,7 @@ func TestDesktopAlgorithmRegisterPolicyHonorsExplicitOverride(t *testing.T) {
 }
 
 func TestDesktopAlgorithmRegisterPolicyWithoutVersionDefaultsToUpdate(t *testing.T) {
+	t.Setenv("LAZYMIND_FORCE_ALGO_REGISTER", "false")
 	cfg := RuntimeConfig{Profile: "desktop"}
 	paths := RuntimePaths{StateDir: t.TempDir()}
 	t.Setenv(desktopAppVersionEnvVar, "")
@@ -298,12 +301,39 @@ func TestDesktopAlgorithmRegisterPolicyWithoutVersionDefaultsToUpdate(t *testing
 }
 
 func TestLocalAlgorithmRegisterPolicyDefaultsToUpdate(t *testing.T) {
+	t.Setenv("LAZYMIND_FORCE_ALGO_REGISTER", "false")
 	cfg := RuntimeConfig{Profile: "local"}
 	paths := RuntimePaths{StateDir: t.TempDir()}
 	t.Setenv("LAZYLLM_ALGO_REGISTER_POLICY", "")
 
 	if got := algorithmRegisterPolicy(cfg, paths); got != "update" {
 		t.Fatalf("local registration policy = %q, want update", got)
+	}
+}
+
+func TestForceAlgorithmRegistrationReachesServiceEnvironment(t *testing.T) {
+	for _, profile := range []string{"desktop", "local"} {
+		t.Run(profile, func(t *testing.T) {
+			repo := t.TempDir()
+			writeComposeFixture(t, repo)
+			cfg, paths, err := NewRuntimeConfig(profile, repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("LAZYMIND_FORCE_ALGO_REGISTER", "true")
+			t.Setenv("LAZYLLM_ALGO_REGISTER_POLICY", "none")
+			for _, service := range []string{algoProcessName, processorServerProcessName, processorWorkerProcessName} {
+				assertEnvContains(t, algorithmServiceEnv(cfg, paths, service), "LAZYLLM_ALGO_REGISTER_POLICY=force")
+			}
+		})
+	}
+}
+
+func TestDesktopAlgorithmRegistrationDefaultsToForceDespiteOldOverride(t *testing.T) {
+	t.Setenv("LAZYMIND_FORCE_ALGO_REGISTER", "")
+	t.Setenv("LAZYLLM_ALGO_REGISTER_POLICY", "none")
+	if got := algorithmRegisterPolicy(RuntimeConfig{Profile: "desktop"}, RuntimePaths{}); got != "force" {
+		t.Fatalf("policy = %q, want force", got)
 	}
 }
 
