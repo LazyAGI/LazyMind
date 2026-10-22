@@ -28,9 +28,11 @@ type upstreamCatalogFile struct {
 
 type upstreamCatalogModel struct {
 	Name      string   `json:"name"`
+	ModelType string   `json:"model_type"`
 	Input     []string `json:"input"`
 	Output    []string `json:"output"`
 	Context   int      `json:"context"`
+	MaxInput  int      `json:"max_input"`
 	MaxOutput int      `json:"max_output"`
 }
 
@@ -53,12 +55,7 @@ func formatContextTokens(tokens int) string {
 	if tokens <= 0 {
 		return ""
 	}
-	if tokens%1_000_000 == 0 {
-		return fmt.Sprintf("%dM", tokens/1_000_000)
-	}
-	if tokens >= 1000 {
-		return fmt.Sprintf("%dK", tokens/1000)
-	}
+	// Runtime K/M suffixes use powers of 1024. Keep upstream limits exact.
 	return fmt.Sprintf("%d", tokens)
 }
 
@@ -99,25 +96,26 @@ func inferUpstreamCatalogModel(item upstreamCatalogModel) catalogModel {
 		}
 	case output["video"] && !output["text"]:
 		model.Type = "text2video"
-	case input["image"] || input["video"]:
-		model.Type = "vlm"
 	default:
+		// General chat stays available to the main LLM slot. Vision is a
+		// capability, rather than a separate runtime type, for these models.
 		model.Type = "llm"
 	}
-	if formatted := formatContextTokens(item.Context); formatted != "" && (model.Type == "llm" || model.Type == "vlm") {
-		if lookedUp, ok := lookupMaxInputTokens(name, model.Type); ok {
-			model.MaxInputTokensOverride = lookedUp
-		} else {
-			model.MaxInputTokensOverride = formatted
-		}
+	// The generator maps specialized catalog types to the existing runtime types.
+	// Modalities alone cannot distinguish embeddings or mixed text/image output.
+	if modelType := strings.TrimSpace(item.ModelType); modelType != "" {
+		model.Type = modelType
+	}
+	if formatted := formatContextTokens(item.MaxInput); formatted != "" {
+		model.MaxInputTokensOverride = formatted
+	} else if model.Type == "llm" || model.Type == "vlm" || model.Type == "embed" || model.Type == "multimodal_embedding" || model.Type == "rerank" {
+		model.MaxInputTokensOverride = formatContextTokens(item.Context)
 	}
 	return model
 }
 
 func applyYAMLCatalogMetadata(model catalogModel, yaml catalogModel) catalogModel {
-	if strings.TrimSpace(yaml.Type) != "" {
-		model.Type = yaml.Type
-	}
+	// Verified-free selection is local policy; model metadata comes from upstream.
 	model.FreeAutoSelectPriority = yaml.FreeAutoSelectPriority
 	model.FreeAutoSelectBaseURLs = append([]string(nil), yaml.FreeAutoSelectBaseURLs...)
 	return model
@@ -139,24 +137,14 @@ func yamlModelsByProvider(catalog modelCatalog) map[string]map[string]catalogMod
 	return indexed
 }
 
-// SeedUpstreamModelCatalog keeps provider rows from the YAML catalog, skips the
-// hardcoded model lists for providers present in the upstream file, and upserts
-// those models from models.dev + OpenRouter metadata.
+// SeedUpstreamModelCatalog keeps provider and non-model service rows from YAML,
+// skips every hardcoded model-provider list, and upserts models.dev + OpenRouter
+// templates. Existing user models and selections survive upstream removals.
 func SeedUpstreamModelCatalog(ctx context.Context, db *gorm.DB, yamlPath, upstreamPath string) error {
 	upstream, err := loadUpstreamCatalog(upstreamPath)
 	if err != nil {
 		return err
 	}
-	skip := make(map[string]struct{}, len(upstream.Providers))
-	for name, models := range upstream.Providers {
-		if len(models) > 0 {
-			skip[name] = struct{}{}
-		}
-	}
-	if err := SeedProviderCatalog(ctx, db, yamlPath, skip); err != nil {
-		return err
-	}
-
 	yamlBytes, err := os.ReadFile(yamlPath)
 	if err != nil {
 		return err
@@ -166,15 +154,16 @@ func SeedUpstreamModelCatalog(ctx context.Context, db *gorm.DB, yamlPath, upstre
 		return err
 	}
 	yamlModels := yamlModelsByProvider(yamlCatalog)
-	providerBaseURL := map[string]string{}
-	if section, ok := yamlCatalog["model_providers"]; ok {
-		for _, supplier := range section.Suppliers {
-			providerBaseURL[supplier.Name] = supplier.BaseURL
-		}
+	skip := make(map[string]struct{}, len(yamlModels))
+	for name := range yamlModels {
+		skip[name] = struct{}{}
 	}
 
 	now := time.Now().UTC()
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := SeedProviderCatalog(ctx, tx, yamlPath, skip); err != nil {
+			return err
+		}
 		for providerName, models := range upstream.Providers {
 			if len(models) == 0 {
 				continue
@@ -196,12 +185,27 @@ func SeedUpstreamModelCatalog(ctx context.Context, db *gorm.DB, yamlPath, upstre
 				}
 				catalogModels = append(catalogModels, model)
 			}
-			if err := reconcileCatalogScope(tx, provider.ID, providerName, providerBaseURL[providerName], catalogModels); err != nil {
+			if err := reconcileUpstreamCatalogTemplates(tx, provider.ID, catalogModels); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// Upstream catalogs can omit models that remain available at an existing user
+// endpoint. Retire only the templates used for creating new connections.
+func reconcileUpstreamCatalogTemplates(tx *gorm.DB, providerID string, models []catalogModel) error {
+	names := make([]string, 0, len(models))
+	for _, model := range models {
+		if name := strings.TrimSpace(model.Name); name != "" {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	return tx.Unscoped().Where("default_model_provider_id = ? AND name NOT IN ?", providerID, names).Delete(&orm.DefaultModel{}).Error
 }
 
 // MustSeedUpstreamModelCatalog seeds the upstream catalog or exits the process.

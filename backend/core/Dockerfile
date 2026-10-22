@@ -49,7 +49,7 @@ WORKDIR /app
 COPY --from=build /core /core
 # SQL migrations (read by MIGRATIONS_DIR, default /migrations in docker-compose)
 COPY --from=build /app/migrations /migrations
-# Model catalog YAML (seeded at startup from ./config/model_catalog.yaml)
+# Provider metadata, public model snapshot, and optional legacy YAML catalog.
 COPY --from=build /app/config /app/config
 # Built-in Workflow packages are imported into Core's revision store at startup.
 COPY workflows /app/workflows

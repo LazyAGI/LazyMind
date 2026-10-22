@@ -107,6 +107,23 @@ func (m *CoreServiceManager) buildCore(ctx context.Context, cfg RuntimeConfig, p
 		}
 		return fmt.Errorf("desktop core binary not found: %s", paths.CoreBin)
 	}
+	// Prepare catalog data before Core can start. Frontend builds also consume
+	// this snapshot, but run independently and may finish after Core starts.
+	uv, ok := uvCommand()
+	if !ok {
+		return fmt.Errorf("uv is required to prepare the model catalog; install uv or set %s", authServiceUVEnvVar)
+	}
+	if res, err := m.runner.Run(ctx, Command{
+		Name: uv,
+		Args: []string{"run", "--no-project", "--python", cfg.AuthService.PythonVersion, "python",
+			filepath.Join(paths.RepoRoot, "frontend", "scripts", "generate_upstream_model_catalog.py"),
+			"--backend-out", filepath.Join(paths.RepoRoot, coreSourceDirName, "config", "upstream_model_catalog.json"),
+			"--frontend-out", filepath.Join(paths.RepoRoot, "frontend", "src", "modules", "modelProvider", "upstreamModelCatalog.json")},
+		Dir: paths.RepoRoot,
+		Env: pythonRuntimeEnv(paths),
+	}); err != nil {
+		return fmt.Errorf("prepare model catalog failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
+	}
 	if err := os.MkdirAll(filepath.Dir(paths.CoreBin), 0o755); err != nil {
 		return err
 	}

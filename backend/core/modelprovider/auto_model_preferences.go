@@ -29,8 +29,11 @@ func preferredAutoModel(
 		typeSet[strings.ToLower(strings.TrimSpace(modelType))] = struct{}{}
 	}
 	candidates := make([]orm.UserModelProviderGroupModel, 0, len(models))
+	_, acceptsVisionChat := typeSet["vlm"]
 	for _, model := range models {
-		if _, ok := typeSet[strings.ToLower(strings.TrimSpace(model.ModelType))]; ok {
+		modelType := strings.ToLower(strings.TrimSpace(model.ModelType))
+		_, exactType := typeSet[modelType]
+		if exactType || (acceptsVisionChat && modelType == "llm" && model.Vision) {
 			candidates = append(candidates, model)
 		}
 	}

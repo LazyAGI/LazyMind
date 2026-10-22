@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ModelModalityMarks } from "./ModelModalityMarks";
 
@@ -6,23 +6,55 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
-describe("ModelModalityMarks", () => {
-  it("draws a distinct logo for each input and output modality", () => {
-    render(<ModelModalityMarks providerName="Claude" modelName="claude-opus-4-7" />);
+vi.mock("../upstreamCatalog", async () => {
+  const { createUpstreamCatalogIndex } = await import("../upstreamCatalogIndex");
+  const index = createUpstreamCatalogIndex({
+    generated_at: "2026-01-01T00:00:00Z",
+    providers: {
+      "Fixture Provider": [{
+        name: "all-modalities",
+        input: ["text", "image", "audio", "video", "file"],
+        output: ["text", "image", "audio", "video", "file"],
+        context: 32000,
+        max_output: 4000,
+      }],
+    },
+  });
+  return { lookupUpstreamModel: index.lookupModel };
+});
 
-    for (const label of [
-      "modelProvider.modality.text",
-      "modelProvider.modality.image",
-      "modelProvider.modality.file",
-    ]) {
-      const marks = screen.getAllByLabelText(label);
-      expect(marks.length).toBeGreaterThan(0);
-      for (const mark of marks) {
-        expect(mark.querySelector("svg")).not.toBeNull();
-        expect(mark).not.toHaveTextContent(/^[TIAVF]$/);
+describe("ModelModalityMarks", () => {
+  it("draws distinct glyphs with a color class for all five input and output modalities", () => {
+    render(<ModelModalityMarks providerName="Fixture Provider" modelName="all-modalities" />);
+
+    for (const direction of ["input", "output"]) {
+      const group = screen.getByLabelText(`modelProvider.modality.${direction}Aria`);
+      const drawings = [];
+      for (const modality of ["text", "image", "audio", "video", "file"]) {
+        const mark = within(group).getByLabelText(`modelProvider.modality.${modality}`);
+        expect(mark).toHaveClass(`is-${modality}`);
+        const svg = mark.querySelector("svg");
+        expect(svg).not.toBeNull();
+        expect(svg).toHaveAttribute("aria-hidden", "true");
+        drawings.push(svg?.innerHTML);
       }
+      expect(new Set(drawings).size).toBe(5);
     }
-    expect(screen.getByLabelText("modelProvider.modality.inputAria")).toBeInTheDocument();
-    expect(screen.getByLabelText("modelProvider.modality.outputAria")).toBeInTheDocument();
+  });
+
+  it("uses the compact layout for selector options", () => {
+    const { container } = render(
+      <ModelModalityMarks compact providerName="Fixture Provider" modelName="all-modalities" />,
+    );
+
+    expect(container.firstChild).toHaveClass("model-modality-marks", "is-compact");
+  });
+
+  it("leaves custom models without catalog metadata unmarked", () => {
+    const { container } = render(
+      <ModelModalityMarks providerName="Fixture Provider" modelName="custom-model" />,
+    );
+
+    expect(container).toBeEmptyDOMElement();
   });
 });
