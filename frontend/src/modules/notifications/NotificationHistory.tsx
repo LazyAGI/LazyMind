@@ -17,6 +17,7 @@ export default function NotificationHistory({ taskId }: { taskId: string }) {
           <strong>{t('notifications.' + row.channel)} · {row.recipient}</strong>
           <p>{row.createdAt} · {t('notifications.' + row.content)}</p>
           {row.reason && <small>{t('notifications.' + row.reason, { defaultValue: t('notifications.unavailable') })}</small>}
+          {row.channel === 'wechat' && row.status === 'deliveryFailed' && <small>{t('notifications.wechatRetryHint')}</small>}
           {row.retryOf && <small>{t('notifications.retryOf')} · {row.retryOf}</small>}
         </div>
         <Tag>{t('notifications.' + row.status, { defaultValue: t('notifications.status') })}</Tag>

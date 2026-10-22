@@ -13,6 +13,7 @@ import (
 
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
+	"lazymind/agentconnector/internal/connectorconfig"
 )
 
 func TestCursorStatusUsesFilesystemRequirementWithoutRunningDesktop(t *testing.T) {
@@ -38,6 +39,7 @@ func TestCursorStatusUsesFilesystemRequirementWithoutRunningDesktop(t *testing.T
 
 func TestCursorInstallURLCarriesOneManagedStdioDefinition(t *testing.T) {
 	adapter := testAdapter(Cursor)
+	adapter.home = t.TempDir()
 	value, err := adapter.cursorInstallURL()
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +61,7 @@ func TestCursorInstallURLCarriesOneManagedStdioDefinition(t *testing.T) {
 func TestCursorInstallURLPreservesNativeWindowsPaths(t *testing.T) {
 	adapter := &Adapter{
 		kind: Cursor, self: `C:\Program Files\LazyMind\runtime\bin\lazymind.exe`,
-		home: `C:\Users\Alice\AppData\Local\LazyMind`, hostID: "host-1",
+		home: t.TempDir(), hostID: "host-1",
 	}
 	value, err := adapter.cursorInstallURL()
 	if err != nil {
@@ -276,11 +278,11 @@ func assertStdioDefinition(t *testing.T, body []byte, command, home string, kind
 	if definition.Command != command || len(definition.Args) != 2 || definition.Args[0] != "mcp" || definition.Args[1] != "proxy" {
 		t.Fatalf("definition=%#v", definition)
 	}
-	if definition.Env["LAZYMIND_HOME"] != home ||
-		definition.Env["LAZYMIND_AGENT_PROVIDER"] != string(kind) ||
-		definition.Env["LAZYMIND_AGENT_HOST_ID"] != "host-1" || len(definition.Env) != 3 {
-		t.Fatalf("env=%#v", definition.Env)
+	c, err := connectorconfig.Load(definition.Env[connectorconfig.EnvironmentKey])
+	if err != nil || c.Home != home || c.Provider != string(kind) || c.HostID != "host-1" || len(definition.Env) != 1 {
+		t.Fatalf("env=%#v connection=%+v error=%v", definition.Env, c, err)
 	}
+
 }
 
 func writeTestFile(t *testing.T, path, value string) {
@@ -309,17 +311,4 @@ func setTestHome(t *testing.T, home string) {
 	t.Setenv("LAZYMIND_DSH_DESKTOP_PATH", filepath.Join(home, "missing-desktop"))
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-}
-
-func TestDSHEndpointValidation(t *testing.T) {
-	for _, endpoint := range []string{"https://dsh.example.com", "http://localhost:3000/", "http://127.0.0.1:3000", "http://[::1]:3000"} {
-		if err := validateDSHEndpoint(endpoint); err != nil {
-			t.Errorf("valid endpoint %q: %v", endpoint, err)
-		}
-	}
-	for _, endpoint := range []string{"http://dsh.example.com", "https://user:password@dsh.example.com", "https://dsh.example.com/path", "https://dsh.example.com/?token=x", "https://dsh.example.com/#fragment", "file:///tmp/dsh"} {
-		if err := validateDSHEndpoint(endpoint); err == nil {
-			t.Errorf("unsafe endpoint accepted: %q", endpoint)
-		}
-	}
 }

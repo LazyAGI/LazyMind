@@ -12,7 +12,7 @@ const outlineTab: TabDef = {
 };
 
 describe('Core-controlled continuation', () => {
-  it('offers Core continuation even without a native approval checkpoint', () => {
+  it('distinguishes protocol permission from a visible UI checkpoint', () => {
     expect(resolveWorkflowContinueAction(checkpoint(false), 'waiting')).toBeUndefined();
     expect(resolveExternalContinueAction({ continuation: 'continue', available_actions: ['save', 'continue'] })).toBe('continue');
   });

@@ -96,6 +96,11 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 	if err != nil {
 		return EnsureDocumentParsedResult{}, err
 	}
+	if artifact, err := readBaseArtifact(r.Context(), rec); err != nil {
+		return EnsureDocumentParsedResult{}, err
+	} else if artifact != nil {
+		return EnsureDocumentParsedResult{Status: "parsed"}, nil
+	}
 	if rec.lazy != nil {
 		status := strings.ToUpper(strings.TrimSpace(rec.lazy.UploadStatus))
 		taskStatus := strings.ToUpper(strings.TrimSpace(rec.taskStat))

@@ -13,7 +13,9 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
 	"lazymind/agentconnector/internal/agentexec"
+	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/coreapi"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/workflowhost"
@@ -77,7 +79,20 @@ func dshLocalExecutableCandidates() []string {
 }
 
 func dshExecutable() (string, error) {
-	if resolved, err := agentexec.FindBoundExecutable("", "LAZYMIND_DSH_PATH", agentexec.DeepSeekHarnessCLI, dshBinaryNames()); err == nil {
+	if override := connectorconfig.Value("LAZYMIND_DSH_PATH"); override != "" {
+		resolved, err := agentexec.ResolveExecutable(override)
+		if err != nil {
+			return "", fmt.Errorf("LAZYMIND_DSH_PATH: %w", err)
+		}
+		return resolved, nil
+	}
+	if binding, found, err := agentexec.ExecutableBinding(agentexec.DeepSeekHarnessCLI); err != nil {
+		return "", err
+	} else if found {
+		resolved, err := agentexec.ResolveExecutable(binding)
+		if err != nil {
+			return "", fmt.Errorf("saved DeepSeek Harness program binding: %w", err)
+		}
 		return resolved, nil
 	}
 	if resolved, err := agentexec.FindExecutable("", dshBinaryNames()); err == nil {
@@ -142,7 +157,7 @@ func runDSHPluginWith(ctx context.Context, runtime dshPluginRuntime, profile str
 	return nil
 }
 
-func configureDSHWorkflow(path, pairingFile, webURL, bridgeURL string, disabled bool) error {
+func configureDSHWorkflow(path, configPath, command string, disabled bool) error {
 	document, err := readYAMLDocument(path)
 	if err != nil {
 		return err
@@ -157,7 +172,7 @@ func configureDSHWorkflow(path, pairingFile, webURL, bridgeURL string, disabled 
 	}
 	value := map[string]any{"id": dshWorkflowRow, "disabled": disabled}
 	if !disabled {
-		value["config"] = map[string]string{"serverName": "lazymind", "pairingFile": pairingFile, "webUrl": webURL, "bridgeUrl": bridgeURL, "bundleHash": dshBundleHash()}
+		value["config"] = map[string]string{"connectorConfig": configPath, "command": command, "bundleHash": dshBundleHash()}
 	}
 	var replacement yaml.Node
 	if err := replacement.Encode(value); err != nil {
@@ -212,7 +227,8 @@ func (a *Adapter) dshWorkflowConfigured() bool {
 				active = true
 			}
 		}
-		if !active || decodeDSHStdio(findDSHEntry(document)).Env["LAZYMIND_WORKFLOW_HOST_CONTROL"] != "1" {
+		c, configErr := connectorconfig.Load(decodeDSHStdio(findDSHEntry(document)).Env[connectorconfig.EnvironmentKey])
+		if !active || configErr != nil || !c.Controlled {
 			return false
 		}
 	}
@@ -224,7 +240,11 @@ func (a *Adapter) dshWorkflowConfigured() bool {
 		if scalarValue(config, "bundleHash") != dshBundleHash() {
 			return false
 		}
-		file := scalarValue(config, "pairingFile")
+		c, err := connectorconfig.Load(scalarValue(config, "connectorConfig"))
+		if err != nil || c.Home != a.home || c.Provider != string(DeepSeekHarness) || c.Profile != filepath.Dir(a.dshConfigPath()) {
+			return false
+		}
+		file := c.PairingFile
 		id := strings.TrimSuffix(filepath.Base(file), ".json")
 		if filepath.Clean(file) != filepath.Join(a.home, "workflow-hosts", id+".json") {
 			return false
@@ -279,17 +299,6 @@ func (a *Adapter) installDSHWorkflow(ctx context.Context, beforePublish ...func(
 	if err != nil {
 		return false, err
 	}
-	webURL := strings.TrimSpace(os.Getenv("LAZYMIND_WEB_URL"))
-	if webURL == "" {
-		webURL, err = store.ServerURL(ctx)
-		if err != nil {
-			return false, err
-		}
-	}
-	bridgeURL := strings.TrimSpace(os.Getenv("LAZYMIND_ASSISTANT_BRIDGE_URL"))
-	if bridgeURL == "" {
-		bridgeURL = "http://127.0.0.1:19091"
-	}
 	archive := filepath.Join(a.home, "bundles", "dsh-workflow-"+dshBundleHash()[:16]+".tgz")
 	if err := os.MkdirAll(filepath.Dir(archive), 0700); err != nil {
 		return false, err
@@ -321,7 +330,11 @@ func (a *Adapter) installDSHWorkflow(ctx context.Context, beforePublish ...func(
 		return false, err
 	}
 	pairingFile := filepath.Join(a.home, "workflow-hosts", pair.ConnectorID+".json")
-	if err := configureDSHWorkflow(a.dshConfigPath(), pairingFile, webURL, bridgeURL, false); err != nil {
+	configPath, err := connectorconfig.Save(connectorconfig.Config{Home: a.home, Provider: string(DeepSeekHarness), HostID: a.hostID, Profile: profile, PairingFile: pairingFile, Controlled: true})
+	if err != nil {
+		return false, err
+	}
+	if err := configureDSHWorkflow(a.dshConfigPath(), configPath, a.self, false); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -336,14 +349,25 @@ func (a *Adapter) disconnectDSHWorkflow() error {
 		if scalarValue(item, "id") != dshWorkflowRow {
 			continue
 		}
-		file := scalarValue(mappingValue(item, "config"), "pairingFile")
+		config := mappingValue(item, "config")
+		file := scalarValue(config, "pairingFile") // Migration of the previous generated format.
+		if entry := scalarValue(config, "connectorConfig"); entry != "" {
+			c, err := connectorconfig.Load(entry)
+			if err != nil {
+				return err
+			}
+			if c.Home != a.home {
+				return errors.New("DSH connection belongs to another installation")
+			}
+			file = c.PairingFile
+		}
 		id := strings.TrimSuffix(filepath.Base(file), ".json")
 		if file != "" {
 			if err := workflowhost.Disable(a.home, id); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
 		}
-		return configureDSHWorkflow(a.dshConfigPath(), "", "", "", true)
+		return configureDSHWorkflow(a.dshConfigPath(), "", "", true)
 	}
 	return nil
 }

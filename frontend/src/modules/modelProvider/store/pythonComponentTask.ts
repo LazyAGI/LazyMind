@@ -31,16 +31,23 @@ export function runPythonComponentTask(id: PythonComponentStatus["id"], restartO
   usePythonComponentTask.setState({ id, error: "", phase: restartOnly ? "restarting" : "installing" });
   currentTask = (async () => {
     let restarting = false;
+    let installed: PythonComponentStatus | undefined;
     try {
       if (!restartOnly) {
         progress("installing", "正在后台下载并安装本地知识库组件，可以继续浏览其他页面。");
-        await installPythonComponent(id, controller.signal);
+        installed = await installPythonComponent(id, controller.signal);
       }
       download = undefined;
       setTransientRequestErrorsSuppressed(true);
       restarting = true;
       progress("restarting", "组件已安装，正在自动重启本地服务…");
       const result = await restartRuntime({ reload: false });
+      if (!result.ok && result.reason === "unavailable" && installed?.installMethod === "source") {
+        usePythonComponentTask.setState({ phase: "idle", error: "" });
+        window.dispatchEvent(new Event(PYTHON_COMPONENTS_CHANGED_EVENT));
+        message.info({ key: notificationKey, content: "RAG 依赖已安装。请执行 make local-down，再执行 make local-up LAZYMIND_RAG_ENABLED=false 完成启用。", duration: 12 });
+        return;
+      }
       if (!result.ok) throw result.error || new Error("无法自动重启本地服务，请重试启用组件。");
       progress("verifying", "本地服务已重启，正在确认知识库组件已启用…");
       const items = await getPythonComponents();

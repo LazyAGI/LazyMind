@@ -1,6 +1,7 @@
 import { TASKS_REMOVED_EVENT, type TasksRemovedDetail } from './events';
 import type { AxiosRequestConfig } from 'axios';
 import type { NotificationUpdate } from '@/modules/notifications/api';
+import { WECHAT_NOTIFICATION_CONFIG_CHANGED_EVENT, notificationEventScope, publishNotificationChange } from '@/modules/notifications/notificationEvents';
 import { Configuration, DefaultApi, TaskNotificationsApi, type TaskRemovalPreview } from '@/api/generated/core-client';
 import { axiosInstance, BASE_URL } from '@/components/request';
 
@@ -186,7 +187,9 @@ export async function listSchedules(includeDisabled = false): Promise<ScheduleLi
 }
 
 export async function createSchedule(req: CreateScheduleRequest): Promise<Schedule> {
+  const scope = notificationEventScope();
   const response = await notificationClient.apiCoreSchedulesPost({ apiCoreSchedulesPostRequest: req });
+  if (req.notification) publishNotificationChange(WECHAT_NOTIFICATION_CONFIG_CHANGED_EVENT, scope);
   return response.data;
 }
 
@@ -205,15 +208,19 @@ export async function runScheduleNow(id: string): Promise<{ task_id: string; con
 }
 
 export async function updateSchedule(id: string, req: Partial<CreateScheduleRequest>): Promise<Schedule> {
+  const scope = notificationEventScope();
   const response = await notificationClient.apiCoreSchedulesScheduleIdPut({
     scheduleId: id,
     apiCoreSchedulesPostRequest: req,
   });
+  if (req.notification) publishNotificationChange(WECHAT_NOTIFICATION_CONFIG_CHANGED_EVENT, scope);
   return response.data;
 }
 
 export async function deleteSchedule(id: string): Promise<void> {
+  const scope = notificationEventScope();
   await defaultClient.apiCoreSchedulesScheduleIdDelete({ scheduleId: id });
+  publishNotificationChange(WECHAT_NOTIFICATION_CONFIG_CHANGED_EVENT, scope);
 }
 
 export async function listScheduleTasks(

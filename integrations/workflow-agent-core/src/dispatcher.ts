@@ -6,6 +6,10 @@ import { BridgeError, type HostTransport, type HostAction } from './transport'
 export function createDispatcher<A>(runtime: RuntimeAdapter<A>, host: Pick<Coordinator<A>, 'cacheClaim' | 'cancelSession'> | undefined, bridge: HostTransport,
   instanceId: string, signal: AbortSignal) {
   async function deliver(action: HostAction) {
+    // Offline/busy hosts retain pending work without spending a delivery lease.
+    // Cancel never waits behind a continuation's readiness check.
+    if (action.status === 'pending' && action.kind === 'continue' && runtime.ready
+      && !await runtime.ready(action.native_session_id, signal)) return
     if (action.status !== 'pending') {
       // Reconcile delivery receipts, not Workflow execution eligibility.
       const current = await bridge.action(action.id, signal)
@@ -55,7 +59,7 @@ export function createDispatcher<A>(runtime: RuntimeAdapter<A>, host: Pick<Coord
         let after = ''
         do {
           const page = await bridge.actions(after, signal)
-          for (const action of page.actions) {
+          for (const action of [...page.actions].sort((a, b) => Number(b.kind === 'cancel') - Number(a.kind === 'cancel'))) {
             try { await deliver(action) }
             catch (error) {
               if (!(error instanceof BridgeError && ['DELIVERY_PENDING', 'ACTION_CONSUMED'].includes(error.code)) && !signal.aborted) runtime.warn(`lazymind-workflow: delivery pending: ${String(error)}`)

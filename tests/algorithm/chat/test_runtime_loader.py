@@ -43,8 +43,9 @@ def _run_probe(script: str, timeout: float = 35) -> dict:
             capture_output=True,
             text=True,
             timeout=timeout,
-            check=True,
+            check=False,
         )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
     return json.loads(completed.stdout.strip().splitlines()[-1])
 
 
@@ -315,34 +316,23 @@ dependency_gate.set()
     assert result['dependencies_released'] is False
 
 
-def test_temporary_attachment_retrieval_triggers_rag_immediately():
-    result = _run_probe('''
+def test_temporary_mode_persists_without_importing_rag(tmp_path):
+    script = r'''
+import importlib.abc
 import json
-import threading
-import time
-import lazymind.chat.runtime_loader as loader
-from lazymind.chat.engine.tools.lazy_kb import kb_tmp_search
-dependency_gate = threading.Event()
-loader._wait_for_kb_runtime = lambda: dependency_gate.wait(30)
-loader.start_background_chat_runtime_warmup()
-real_ensure = loader.ensure_rag_runtime
-def load_then_stop():
-    real_ensure()
-    raise RuntimeError("stop after loading")
-loader.ensure_rag_runtime = load_then_stop
-started = time.perf_counter()
-try:
-    kb_tmp_search("search attachment")
-except RuntimeError as exc:
-    assert str(exc) == "stop after loading"
-print(json.dumps({
-    "elapsed": time.perf_counter() - started,
-    "rag": loader.rag_runtime_status(),
-    "dependencies_released": dependency_gate.is_set(),
-}))
-dependency_gate.set()
-''')
-
-    assert result['elapsed'] < 30
-    assert result['rag'] == 'ready'
-    assert result['dependencies_released'] is False
+import sys
+class NoRAG(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == 'lazyllm.tools.rag' or fullname.startswith('lazyllm.tools.rag.'):
+            raise AssertionError('Session initialization imported RAG: ' + fullname)
+sys.meta_path.insert(0, NoRAG())
+from lazymind.chat.engine.tools import temporary_retrieval_session as session
+session.workspace_for_request = lambda **kwargs: TEST_ROOT
+session.is_model_role_available = lambda role: AVAILABLE
+mode = session.initialize_temporary_retrieval({'user_id': 'alice', 'conversation_id': 'chat'})
+assert 'lazyllm.tools.rag' not in sys.modules
+print(json.dumps({'use_embed': mode}))
+'''.replace('TEST_ROOT', repr(str(tmp_path)))
+    assert _run_probe(script.replace('AVAILABLE', 'False')) == {'use_embed': False}
+    # A fresh process and changed configuration still use the saved choice.
+    assert _run_probe(script.replace('AVAILABLE', 'True')) == {'use_embed': False}

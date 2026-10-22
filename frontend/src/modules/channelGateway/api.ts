@@ -26,6 +26,7 @@ const connectionSessionsApi = ConnectionSessionsApiFactory(
 );
 
 export type ChannelProvider = 'wechat' | 'feishu' | 'wecom';
+export const WECHAT_CONNECTION_CHECK_INTERVAL_MS = 20 * 60 * 1000;
 export type ConnectionSessionStatus = ConnectionSessionView['status'];
 export type ConnectionAllowedAction = ConnectionSessionView['allowed_actions'][number];
 export type ChannelAccount = AccountView & {
@@ -41,8 +42,12 @@ export type ConnectionSession = Omit<ConnectionSessionView, 'mode'> & { mode: 'q
 
 export async function listChannelAccounts(
   provider: ChannelProvider,
+  options?: { silentError?: boolean; checkConnection?: boolean },
 ): Promise<ChannelAccountList> {
-  const response = await channelAccountsApi.listChannelAccounts({ provider });
+  const requestOptions: RawAxiosRequestConfig & { silentError?: boolean } = {
+    silentError: options?.silentError,
+  };
+  const response = await channelAccountsApi.listChannelAccounts({ provider, checkConnection: options?.checkConnection }, requestOptions);
   return response.data;
 }
 

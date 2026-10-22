@@ -5,9 +5,53 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestResolveChatAttachmentFilesWithoutOfficeService(t *testing.T) {
+	t.Setenv("LAZYMIND_OFFICE_CONVERT_URL", "")
+	for _, ocrConfig := range []map[string]any{
+		nil,
+		{"ocr_type": "paddleocr"},
+		{"ocr_type": "mineru", "ocr_url": "http://local-mineru:8000"},
+	} {
+		for _, files := range []any{
+			[]string{"/tmp/native.docx", "/tmp/native.PPTX", "/tmp/native.pdf"},
+			[]any{"/tmp/native.docx", "/tmp/native.pptx"},
+			map[string]any{"1": []any{"/tmp/native.docx"}},
+			map[string][]string{"1": {"/tmp/native.pptx"}},
+		} {
+			got, err := resolveChatAttachmentFiles(context.Background(), files, ocrConfig)
+			if err != nil || !reflect.DeepEqual(got, files) {
+				t.Fatalf("native attachments: got %#v, err %v, want %#v", got, err, files)
+			}
+		}
+	}
+}
+
+func TestResolveChatAttachmentPathDoesNotHideConfiguredServiceFailure(t *testing.T) {
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "cloud")
+	t.Setenv("LAZYMIND_OFFICE_CONVERT_URL", "://invalid-url")
+	if _, err := resolveChatAttachmentPath(context.Background(), "/tmp/native.docx", nil); err == nil {
+		t.Fatal("expected configured conversion failure to remain visible")
+	}
+}
+
+func TestDesktopAttachmentsNeverInvokeOfficeService(t *testing.T) {
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+	t.Setenv("LAZYMIND_OFFICE_CONVERT_URL", "://invalid-url")
+	for _, path := range []string{"/tmp/native.docx", "/tmp/native.pptx"} {
+		got, err := resolveChatAttachmentPath(context.Background(), path, map[string]any{"ocr_type": "paddleocr"})
+		if err != nil || got != path {
+			t.Fatalf("desktop attachment: got %q, err %v", got, err)
+		}
+	}
+	if _, err := resolveChatAttachmentPath(context.Background(), "/tmp/legacy.doc", nil); err == nil {
+		t.Fatal("legacy Office files should request conversion by the user")
+	}
+}
 
 func TestChatAttachmentConversionReplyMessageHidesSidechatPath(t *testing.T) {
 	path := "/srv/lazymind/private/tenant-1/source.docx"

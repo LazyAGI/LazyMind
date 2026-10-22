@@ -69,8 +69,12 @@ function desktopDevRuntimeStatus(externalRuntimeURL) {
 }
 
 function desktopNotificationRuntimeReady(status, externalRuntimeDev = false) {
-  return status?.overallStatus === "ready"
-    && (status.ownerMatched === true || (externalRuntimeDev && status.externalRuntime === true));
+  if (!status || !(status.ownerMatched === true || (externalRuntimeDev && status.externalRuntime === true))
+    || !["ready", "running", "stale"].includes(status.overallStatus)) return false;
+  // Delivery uses only the local API and identity services. An unrelated RAG,
+  // chat or external channel outage must not block native completion notices.
+  return ["local-proxy", "auth-service", "core"].every(name =>
+    ["ready", "running"].includes(status.services?.[name]?.status));
 }
 
 function desktopNotificationAPIOrigin(status, externalRuntimeDev = false) {

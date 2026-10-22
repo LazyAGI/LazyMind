@@ -19,6 +19,7 @@ import (
 
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
+	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/mcpbridge"
 )
@@ -171,7 +172,11 @@ func TestDesktopPartialInstallRetryAndDisconnect(t *testing.T) {
 	for _, doc := range []*yaml.Node{desktopDoc, webDoc} {
 		for _, row := range yamlSequence(doc).Content {
 			if scalarValue(row, "id") == dshWorkflowRow {
-				pairFiles = append(pairFiles, scalarValue(mappingValue(row, "config"), "pairingFile"))
+				connection, err := connectorconfig.Load(scalarValue(mappingValue(row, "config"), "connectorConfig"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				pairFiles = append(pairFiles, connection.PairingFile)
 			}
 		}
 	}
@@ -241,7 +246,7 @@ func TestDesktopConfigFailureRestoresPairingAndAllowsRetry(t *testing.T) {
 	a.dshRunner = func(_ context.Context, name string, _ ...string) error {
 		installDSHFixture(t, name)
 		if name == "web" {
-			t.Setenv("LAZYMIND_DSH_URL", "file:///invalid-endpoint")
+			writeTestFile(t, connectorconfig.Path(a.home, string(DeepSeekHarness), filepath.Dir(path)), "{broken")
 		}
 		return nil
 	}
@@ -255,7 +260,9 @@ func TestDesktopConfigFailureRestoresPairingAndAllowsRetry(t *testing.T) {
 	if len(files) != 1 {
 		t.Fatalf("failed profile left a pairing: %v", files)
 	}
-	t.Setenv("LAZYMIND_DSH_URL", "")
+	if err := os.Remove(connectorconfig.Path(a.home, string(DeepSeekHarness), filepath.Dir(path))); err != nil {
+		t.Fatal(err)
+	}
 	a.dshRunner = func(_ context.Context, name string, _ ...string) error { installDSHFixture(t, name); return nil }
 	if s := a.Connect(context.Background()); s.State != agentintegration.Enabled {
 		t.Fatalf("repair: %+v", s)

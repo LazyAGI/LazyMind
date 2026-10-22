@@ -1946,8 +1946,7 @@ export function WorkflowPanel({
   const externalControl = controlAdapter?.control;
   const availableActions = new Set(externalControl?.available_actions ?? []);
   const pendingReview = externalControl?.reviews.find(review => review.status === 'pending');
-  const approvalStepId = resolvePendingApprovalStep(session, displayStatus)
-    ?? (externalControl?.continuation === 'awaiting_user' ? pendingReview?.step_id : undefined);
+  const approvalStepId = resolvePendingApprovalStep(session, displayStatus);
   const displayStatusKey = approvalStepId ? 'chat.workflowStatusWaiting'
     : displayStatus === 'waiting' && (session.projection?.blocked?.length ?? 0) > 0 ? 'chat.workflowStatusBlocked'
     : isWorkflowReadyToStart(
@@ -1969,9 +1968,10 @@ export function WorkflowPanel({
     tabs[visibleActiveTabIdx],
   );
   const continueAction = resolveWorkflowContinueAction(session, displayStatus, tabs[visibleActiveTabIdx]);
-  const showContinue = externalControl
-    ? Boolean(resolveExternalContinueAction(externalControl, completedContinueStepId))
-    : Boolean(continueAction);
+  // Control capabilities constrain an existing UI action; they must not invent
+  // a checkpoint/button that the native panel would not render for this run.
+  const showContinue = Boolean(continueAction) && (!externalControl
+    || Boolean(resolveExternalContinueAction(externalControl, completedContinueStepId)));
   const showStepRollback =
     (session.status === 'completed' || session.status === 'failed')
     && Boolean(session.steps && session.steps.length > 0)
@@ -2144,16 +2144,15 @@ export function WorkflowPanel({
               moreButtonRef.current?.focus();
             }} />}
           </div>
-          <button
+          {(!embedded || externalPresentation?.onToggleExpand) && <button
             type='button'
             className='workflow-panel__expand-btn'
-            hidden={embedded && !externalPresentation?.onToggleExpand}
             onClick={() => externalPresentation?.onToggleExpand ? externalPresentation.onToggleExpand() : setExpandedMode(!expanded)}
             aria-label={t((embedded ? externalPresentation?.expanded : expanded) ? 'chat.workflowPanelShrink' : 'chat.workflowPanelExpand')}
             title={t((embedded ? externalPresentation?.expanded : expanded) ? 'chat.workflowPanelShrink' : 'chat.workflowPanelExpand')}
           >
             {(embedded ? externalPresentation?.expanded : expanded) ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
-          </button>
+          </button>}
           {!embedded && !expanded && (
             <Tooltip
               title={anySlotEditing ? t('chat.workflowFinishEditingFirst') : undefined}

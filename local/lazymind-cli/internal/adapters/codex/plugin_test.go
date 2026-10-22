@@ -34,6 +34,7 @@ func TestPluginConnectOfflineMigrationFailureAndDisconnect(t *testing.T) {
 	node := writeExecutable(t, root, "node", "#!/bin/sh\necho v22.23.0\n")
 	t.Setenv("LAZYMIND_NODE_BIN", node)
 	binary := writeExecutable(t, root, "codex", `#!/bin/sh
+if [ "$1" = "--version" ]; then echo codex-cli 1.0.0; exit 0; fi
 if [ "$1" = "queue" ]; then exit 0; fi
 if [ "$1" = "plugin" ] && [ "$2" = "add" ]; then
  if [ -f "$CODEX_HOME/fail-install" ]; then echo install-failed >&2; exit 1; fi

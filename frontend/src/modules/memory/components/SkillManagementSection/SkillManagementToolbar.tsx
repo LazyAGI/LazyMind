@@ -55,6 +55,7 @@ interface SkillManagementToolbarProps {
   onNewWorkflow?: () => void;
   pendingDraftCount?: number;
   onReviewDrafts?: () => void;
+  headingExtra?: ReactNode;
 }
 
 function InsightCount({ count }: { count: number }) {
@@ -91,6 +92,7 @@ export default function SkillManagementToolbar({
   onNewWorkflow,
   pendingDraftCount = 0,
   onReviewDrafts,
+  headingExtra,
 }: SkillManagementToolbarProps) {
   const createMenuItems: MenuProps["items"] = [
     {
@@ -367,6 +369,7 @@ export default function SkillManagementToolbar({
     <div className="memory-skill-toolbar">
       <div className="memory-skill-heading-group">
         <h2>{t(skillView === "market" ? "admin.memorySkillViewMarket" : skillView === "workflows" ? "admin.memorySkillViewWorkflows" : "admin.memorySkillViewInstalled")}</h2>
+        {headingExtra}
       </div>
 
       <div className="memory-skill-toolbar-actions">{renderViewActions()}</div>

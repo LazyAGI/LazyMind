@@ -25,23 +25,40 @@ function interaction(value, trustedOrigin) {
 		return null;
 	}
 }
-function presentationRun(meta) {
-	const value = object(object(meta)?.lazymind_workflow);
-	if (!value) return null;
-	const run = interaction({ structuredContent: {
-		session_id: value.runId,
-		interaction_url: value.url
-	} });
-	return run ? {
-		...run,
-		...typeof value.hostSessionId === "string" ? { hostSessionId: value.hostSessionId } : {},
-		...typeof value.operation === "string" ? { operation: value.operation } : {},
-		...typeof value.executionId === "string" ? { executionId: value.executionId } : {}
-	} : null;
+function readControl(value) {
+	const fields = object(object(value)?.structuredContent);
+	const control = object(fields?.control) ?? object(object(fields?.state)?.control);
+	const admission = object(control?.admission);
+	if (control?.protocol !== "workflow.control.v1" || typeof control.session_id !== "string" || !Number.isSafeInteger(control.state_version) || typeof control.continuation !== "string" || typeof admission?.can_begin !== "boolean") return null;
+	return control;
 }
 
 //#endregion
 //#region src/events.ts
+function presentationLink(runId, webUrl) {
+	if (typeof runId !== "string" || !/^[a-zA-Z0-9_-]{1,256}$/.test(runId)) return null;
+	try {
+		const base = new URL(webUrl);
+		if (!["http:", "https:"].includes(base.protocol) || base.username || base.password || base.search || base.hash) return null;
+		return {
+			runId,
+			url: new URL(`workflow-runs/${encodeURIComponent(runId)}`, base.href.replace(/\/?$/, "/")).href
+		};
+	} catch {
+		return null;
+	}
+}
+function presentationRun(meta, webUrl) {
+	const value = object(object(meta)?.lazymind_workflow);
+	const run = presentationLink(value?.runId, webUrl);
+	if (!run || !value) return null;
+	return {
+		...run,
+		...typeof value.hostSessionId === "string" ? { hostSessionId: value.hostSessionId } : {},
+		...typeof value.operation === "string" ? { operation: value.operation } : {},
+		...typeof value.executionId === "string" ? { executionId: value.executionId } : {}
+	};
+}
 const OPERATIONS = new Set([
 	"list",
 	"get",
@@ -72,27 +89,30 @@ function visitTexts(value, into) {
 	if (typeof item.text === "string") into.push(item.text);
 	if (Array.isArray(item.content)) for (const child of item.content) visitTexts(child, into);
 }
-function runFromToolText(text) {
-	if (!(text.includes("\"interaction_url\"") && text.includes("\"session_id\"")) && text.length > 8192 || text.length > 512 * 1024) return null;
+function runFromToolText(text, webUrl) {
+	if (!(text.includes("\"session_id\"") || text.includes("\"lazymind_workflow\"")) && text.length > 8192 || text.length > 512 * 1024) return null;
 	try {
 		const parsed = JSON.parse(text);
-		return presentationRun(parsed) ?? interaction({ structuredContent: parsed }) ?? interaction({ structuredContent: object(parsed)?.state ?? object(parsed)?.result });
+		const value = { structuredContent: object(parsed)?.result ?? parsed };
+		const control = readControl(value);
+		return presentationRun(parsed, webUrl) ?? presentationLink(control?.session_id, webUrl) ?? interaction(value, webUrl);
 	} catch {
 		return null;
 	}
 }
 /** DSH web logs MCP JSON in tool-result message text. Meta is optional and often absent. */
-function eventRun(event, serverName) {
+function eventRun(event, serverName, webUrl) {
+	if (!presentationLink("config-check", webUrl)) return null;
 	const value = object(event);
 	const data = object(value?.data);
 	if (value?.type === "tool/result") {
-		const fromMeta = presentationRun(data?.meta);
+		const fromMeta = presentationRun(data?.meta, webUrl);
 		if (fromMeta) return fromMeta;
 		const texts = [];
 		visitTexts(object(data?.message), texts);
 		if (Array.isArray(data?.content)) for (const child of data.content) visitTexts(child, texts);
 		for (const text of texts.reverse()) {
-			const run = runFromToolText(text);
+			const run = runFromToolText(text, webUrl);
 			if (run) return run;
 		}
 		return null;
@@ -108,7 +128,7 @@ function eventRun(event, serverName) {
 	for (const raw of [...data.content].reverse()) {
 		const content = object(raw);
 		if (typeof content?.text !== "string") continue;
-		const run = runFromToolText(content.text);
+		const run = runFromToolText(content.text, webUrl);
 		if (run) return run;
 	}
 	return null;
@@ -192,25 +212,38 @@ function windowStore() {
 }
 
 //#endregion
+//#region src/presentation-config.ts
+const CONFIG_KEY = "__LAZYMIND_WORKFLOW_PRESENTATION__";
+function readPresentationConfig(scope) {
+	const value = object(object(scope)?.[CONFIG_KEY]);
+	if (typeof value?.serverName !== "string" || !value.serverName || typeof value.webUrl !== "string" || !presentationLink("config-check", value.webUrl)) throw new Error("Reconnect LazyMind Workflow and reload DSH to load its panel configuration");
+	return {
+		serverName: value.serverName,
+		webUrl: value.webUrl
+	};
+}
+
+//#endregion
 //#region src/client/index.tsx
 const interactiveRegion = { WebkitAppRegion: "no-drag" };
 const inject = ["uiConversation", "slots"];
-function apply(ctx, config = {}) {
+function apply(ctx) {
+	const config = readPresentationConfig(globalThis);
 	const windows = windowStore();
-	const serverName = config.serverName ?? "lazymind";
+	const serverName = config.serverName;
 	ctx.effect(() => () => windows.dispose());
 	const definition = {
 		kind: "lazymind-workflow",
 		target: "chat",
 		match(event) {
-			const run = eventRun(event, serverName);
+			const run = eventRun(event, serverName, config.webUrl);
 			return run ? {
 				id: `${run.runId}:${event.seq}`,
 				role: "start"
 			} : null;
 		},
 		start(_context, match) {
-			const run = eventRun(match.event, serverName);
+			const run = eventRun(match.event, serverName, config.webUrl);
 			if (!run) throw new Error("Workflow presentation requires a valid standard tool result");
 			return run;
 		},
@@ -357,7 +390,7 @@ function apply(ctx, config = {}) {
 			ref: anchor,
 			hidden: true
 		});
-		const url = new URL(`/workflow-runs/${encodeURIComponent(current.run.runId)}/embed`, origin);
+		const url = new URL(`${current.run.url.replace(/\/$/, "")}/embed`);
 		url.searchParams.set("hostOrigin", window.location.origin);
 		const panel = /* @__PURE__ */ (0, react_jsx_runtime.jsx)("section", {
 			"aria-label": "LazyMind Workflow",

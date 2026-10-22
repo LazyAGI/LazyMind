@@ -49,11 +49,13 @@ class WeChatRuntime:
         credentials: RuntimeCredentialStore,
         client: WeChatReceiverClient,
         addresses: WeChatAddressFactory,
+        connection_probe=None,
     ):
         self._config = config
         self._store = store
         self._credentials = credentials
         self._client = client
+        self._connection_probe = connection_probe
         self._shutdown = threading.Event()
         self._lock = threading.Lock()
         self._workers: dict[str, _AccountWorker] = {}
@@ -82,9 +84,13 @@ class WeChatRuntime:
         for account_id, revision in desired.items():
             if current.get(account_id) != revision:
                 self.start_account(account_id, revision=revision)
+        if self._connection_probe is not None:
+            self._connection_probe.check_accounts(accounts)
 
     def stop(self) -> None:
         self._shutdown.set()
+        if self._connection_probe is not None:
+            self._connection_probe.stop()
         with self._lock:
             workers = list(self._workers.values())
         for worker in workers:

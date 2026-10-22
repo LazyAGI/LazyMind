@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"gorm.io/gorm"
+
 	"lazymind/core/common/orm"
 )
 
@@ -28,10 +30,13 @@ func TestChatCompletionDoesNotFinishLinkedWorkflowTask(t *testing.T) {
 				t.Fatal(err)
 			}
 			if executor == "external" {
-				_, err := finalizeExternalChatHistory(db, &orm.ExternalChatRun{
-					ID: "run", HistoryID: "history", ConversationID: "conversation-1", ActorUserID: "user-1",
-					Status: "completed", Sequence: 1, HistoryExt: json.RawMessage(`{}`),
-				}, now)
+				err := db.Transaction(func(tx *gorm.DB) error {
+					_, err := finalizeExternalChatHistory(tx, &orm.ExternalChatRun{
+						ID: "run", HistoryID: "history", ConversationID: "conversation-1", ActorUserID: "user-1",
+						Status: "completed", Sequence: 1, HistoryExt: json.RawMessage(`{}`),
+					}, now)
+					return err
+				})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -55,6 +60,13 @@ func TestChatCompletionDoesNotFinishLinkedWorkflowTask(t *testing.T) {
 			}
 			if linked.Status != "running" || linked.FinishedAt != nil || plain.Status != "succeeded" || plain.FinishedAt == nil {
 				t.Fatalf("chat terminal overwrote workflow lifecycle: linked=%#v plain=%#v", linked, plain)
+			}
+			var notices []orm.TaskNotification
+			if err := db.Find(&notices).Error; err != nil {
+				t.Fatal(err)
+			}
+			if len(notices) != 1 || notices[0].TaskID != plain.ID || notices[0].Channel != "desktop" || notices[0].Event != "succeeded" {
+				t.Fatalf("plain background completion did not produce its desktop notice: %#v", notices)
 			}
 		})
 	}

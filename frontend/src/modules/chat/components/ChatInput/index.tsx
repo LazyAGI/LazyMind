@@ -79,6 +79,7 @@ import {
   listSkillLinkedWorkflows,
   type SkillLinkedWorkflow,
 } from "@/modules/workflow/workflowDraftApi";
+import { useRAGComponent } from "@/modules/modelProvider/contexts/RAGComponentContext";
 
 // Stable empty array reference — must NOT be inline `?? []` in a zustand selector
 // because a new array on every call triggers useSyncExternalStore to fire React error #185.
@@ -684,6 +685,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       onThinkingDepthChange ?? setThinkingDepth;
     const { setNewMessage } = useChatNewMessageStore();
     const { t } = useTranslation();
+    const { availability: ragAvailability } = useRAGComponent();
+    const ragReady = ragAvailability === "ready";
     const [recordingOpen, setRecordingOpen] = useState(false);
     const [text, setText] = useState("");
     const [featuredMentions, setFeaturedMentions] = useState<ChatMention[]>([]);
@@ -695,11 +698,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       if (!allowMentions) return [];
       const merged = new Map<string, ChatMention>();
       for (const mention of [...boundMentions, ...featuredMentions, ...mentions]) {
-        if (!allowKnowledgeBaseSelection && mention.type === "knowledge_base") continue;
+        if ((!allowKnowledgeBaseSelection || !ragReady) && mention.type === "knowledge_base") continue;
         merged.set(`${mention.type}:${mention.resource_id}`, mention);
       }
       return [...merged.values()];
-    }, [allowKnowledgeBaseSelection, allowMentions, boundMentions, featuredMentions, mentions]);
+    }, [allowKnowledgeBaseSelection, allowMentions, boundMentions, featuredMentions, mentions, ragReady]);
     const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialConversationSettings);
     const [contextUsageReset, setContextUsageReset] = useState(0);
     const [menuHeight, setMenuHeight] = useState(420);
@@ -844,12 +847,17 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       );
     }, [handleToolAvailabilityChanged, refreshKnowledgeToolAvailability]);
 
-    const knowledgeBaseEnabled = knowledgeToolsEnabled.kb !== false;
+    const knowledgeBaseEnabled = knowledgeToolsEnabled.kb !== false && ragReady;
     const knowledgeBaseSelectable =
       allowKnowledgeBaseSelection && knowledgeBaseEnabled;
-    const knowledgeBaseDisabledReason = allowKnowledgeBaseSelection
-      ? t("chat.knowledgeSearchDisabled")
-      : t("chat.sideChat.knowledgeInheritedOnly");
+    const knowledgeBaseDisabledReason = !ragReady
+      ? ragAvailability === "checking"
+        ? "正在检查本地知识库组件状态"
+        : "请先安装并启用本地知识库组件"
+      : allowKnowledgeBaseSelection
+        ? t("chat.knowledgeSearchDisabled")
+        : t("chat.sideChat.knowledgeInheritedOnly");
+    // Chat attachments use the independent reader, not knowledge-base indexing.
     const uploadTypes = allowedUploadTypes;
 
     const debouncedSaveInput = useMemo(
@@ -1212,9 +1220,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       const sendParams: SendMessageParams = {
         text: normalizedText,
         chatConfigSnapshot: {
-          knowledgeBaseId: [...(chatConfig?.knowledgeBaseId ?? [])],
-          creators: [...(chatConfig?.creators ?? [])],
-          tags: [...(chatConfig?.tags ?? [])],
+          knowledgeBaseId: ragReady ? [...(chatConfig?.knowledgeBaseId ?? [])] : [],
+          creators: ragReady ? [...(chatConfig?.creators ?? [])] : [],
+          tags: ragReady ? [...(chatConfig?.tags ?? [])] : [],
           databaseBaseId: chatConfig?.databaseBaseId,
         },
         thinking_depth: effectiveThinkingDepth,

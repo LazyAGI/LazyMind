@@ -17,46 +17,28 @@ import (
 const maxCodexEventBytes = 4 << 20
 
 type ChatRunner struct {
-	binary string
-	self   string
-	home   string
+	configured string
+	self       string
+	home       string
 }
 
 func NewChatRunner(binary string) (*ChatRunner, error) {
 	if err := CleanupLegacyControl(); err != nil {
 		return nil, fmt.Errorf("clean up legacy Codex control configuration: %w", err)
 	}
-	resolved, err := FindBinary(binary)
-	if err != nil {
+	if _, err := FindBinary(binary); err != nil {
 		return nil, err
 	}
 	self, home, err := agentexec.ConnectorRuntime()
 	if err != nil {
 		return nil, err
 	}
-	return &ChatRunner{binary: resolved, self: self, home: home}, nil
+	return &ChatRunner{configured: binary, self: self, home: home}, nil
 }
 
 func (r *ChatRunner) Availability() (bool, string) {
-	return availability(r.binary)
-}
-
-func Probe(binary string) (bool, bool, string) {
-	resolved, err := FindBinary(binary)
-	if err != nil {
-		return false, false, err.Error()
-	}
-	ready, reason := availability(resolved)
-	return true, ready, reason
-}
-
-func availability(binary string) (bool, string) {
-	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
-	defer cancel()
-	if _, err := agentexec.Run(ctx, binary, "login", "status"); err != nil {
-		return false, "Codex CLI is not signed in; run `codex login`"
-	}
-	return true, ""
+	status := Inspect(r.configured)
+	return status.Ready, status.Reason
 }
 
 func (r *ChatRunner) Sessions(ctx context.Context) ([]chatagent.NativeSession, error) {
@@ -64,8 +46,12 @@ func (r *ChatRunner) Sessions(ctx context.Context) ([]chatagent.NativeSession, e
 }
 
 func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chatagent.Event) error) error {
-	if r == nil || strings.TrimSpace(r.binary) == "" {
+	if r == nil {
 		return errors.New("Codex CLI is unavailable")
+	}
+	candidate, err := resolveRuntime(ctx, r.configured)
+	if err != nil {
+		return err
 	}
 	workspace, err := agentexec.EnsureConversationWorkspace(run.ConversationID)
 	if err != nil {
@@ -101,7 +87,7 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 	providerThreadID := strings.TrimSpace(run.ProviderThreadID)
 	sawTurnCompleted, sawMessage := false, false
 	err = (agentexec.StreamCommand{
-		Binary: r.binary, Arguments: arguments, Environment: agentexec.SafeEnvironment(
+		Binary: candidate.path, Arguments: arguments, Environment: agentexec.SafeEnvironment(
 			"LAZYMIND_EXTERNAL_REF="+run.RunID, "LAZYMIND_EXTERNAL_LEASE="+run.LeaseToken,
 			"LAZYMIND_EXTERNAL_HOST="+run.HostID,
 			"LAZYMIND_CONVERSATION_ID="+run.ConversationID),

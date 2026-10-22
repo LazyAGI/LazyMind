@@ -98,8 +98,7 @@ describe("Desktop 我的技能 local and Cloud integration", () => {
     } else {
       expect(screen.queryByText("cloud-only", { exact: true })).not.toBeInTheDocument();
       expect(mocks.list).not.toHaveBeenCalled();
-      fireEvent.click(screen.getByRole("button", { name: translation("admin.memorySkillMoreActions", { name: "local-only" }) }));
-      expect(screen.queryByRole("menuitem", { name: translation("admin.memoryCloudUploadAction") })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: translation("admin.memoryCloudUploadAction") })).not.toBeInTheDocument();
     }
     if (mode !== "desktop") expect(mocks.session).not.toHaveBeenCalled();
   });
@@ -129,8 +128,7 @@ describe("Desktop 我的技能 local and Cloud integration", () => {
     await act(async () => { window.dispatchEvent(new Event("lazymind:cloud-session-changed")); });
     await waitFor(() => expect(screen.queryByText("cloud-only", { exact: true })).not.toBeInTheDocument());
     expect(screen.getByText("local-only", { exact: true })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: translation("admin.memorySkillMoreActions", { name: "local-only" }) }));
-    expect(screen.queryByRole("menuitem", { name: translation("admin.memoryCloudUploadAction") })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: translation("admin.memoryCloudUploadAction") })).not.toBeInTheDocument();
   });
 
   it("shows builtin provenance before internal category while retaining unknown legacy sources", async () => {
@@ -151,20 +149,17 @@ describe("Desktop 我的技能 local and Cloud integration", () => {
     mount();
     expect(await screen.findByText("local-only", { exact: true })).toBeVisible();
     expect(await screen.findByText("cloud-only", { exact: true })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: translation("admin.memorySkillMoreActions", { name: "local-only" }) }));
-    await waitFor(() => expect(screen.getByRole("menuitem", { name: translation("admin.memoryCloudUploadAction") })).toBeVisible());
+    expect(screen.getByRole("button", { name: translation("admin.memoryCloudUploadAction") })).toBeVisible();
     expect(screen.getByRole("button", { name: "我的技能" })).toHaveAttribute("aria-current", "page");
     expect(mocks.upload).not.toHaveBeenCalled(); expect(mocks.download).not.toHaveBeenCalled();
   });
 
-  it("changing auto-update cannot overwrite a call mode changed by a batch", async () => {
+  it("keeps auto-update out of the installed skill table", async () => {
     mount();
     const name = await screen.findByText("local-only", { exact: true });
     const row = name.closest("tr")!;
-    fireEvent.click(within(row).getByRole("switch"));
-    await waitFor(() => expect(mocks.patch).toHaveBeenCalled());
-    expect(mocks.patch.mock.calls[0][0]).toBe("local-only");
-    expect(JSON.parse(JSON.stringify(mocks.patch.mock.calls[0][1]))).toEqual({ auto_evo: true });
+    expect(within(row).queryByRole("switch")).not.toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: translation("admin.memoryEditItem") })).toBeVisible();
   });
 
   it.each(["present_current", "local_modified", "cloud_updated", "diverged", "incompatible"])("keeps local identity when presence is %s", async (status) => {

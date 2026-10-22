@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/localfile"
 )
 
@@ -41,6 +42,7 @@ func IsAuthenticationRequired(err error) bool {
 }
 
 type Credentials struct {
+	LocalRuntimeID string  `json:"local_runtime_id,omitempty"`
 	ServerURL      string  `json:"server_url"`
 	Username       string  `json:"username,omitempty"`
 	AccessToken    string  `json:"access_token"`
@@ -68,7 +70,7 @@ func (e *apiError) Error() string {
 }
 
 func defaultHome() (string, error) {
-	if configured := strings.TrimSpace(os.Getenv("LAZYMIND_HOME")); configured != "" {
+	if configured := strings.TrimSpace(connectorconfig.Value("LAZYMIND_HOME")); configured != "" {
 		return filepath.Abs(configured)
 	}
 	home, err := os.UserHomeDir()
@@ -79,6 +81,11 @@ func defaultHome() (string, error) {
 }
 
 func NewStore(home, server string) (*Store, error) {
+	if c, err := connectorconfig.Current(); err != nil {
+		return nil, err
+	} else if c != nil && home != "" && filepath.Clean(home) != filepath.Clean(c.Home) {
+		return nil, errors.New("connection home changed; reconnect the Agent")
+	}
 	if strings.TrimSpace(home) == "" {
 		var err error
 		home, err = defaultHome()
@@ -103,6 +110,9 @@ func (s *Store) Directory() string { return s.home }
 // AccountScope changes on account/server switches, but not on access-token refresh.
 // It is a local pairing namespace, never an authorization decision.
 func (s *Store) AccountScope() (string, error) {
+	if err := s.validateConnection(); err != nil {
+		return "", err
+	}
 	var scope string
 	err := s.withLock(func() error {
 		value, err := s.loadUnlocked()
@@ -118,7 +128,11 @@ func (s *Store) AccountScope() (string, error) {
 				}
 			}
 		}
-		sum := sha256.Sum256([]byte(value.ServerURL + "\x00" + value.Username + "\x00" + value.TenantID + "\x00" + subject))
+		serverIdentity := value.ServerURL
+		if value.LocalRuntimeID != "" && isLoopbackOrigin(value.ServerURL) {
+			serverIdentity = "desktop:" + value.LocalRuntimeID
+		}
+		sum := sha256.Sum256([]byte(serverIdentity + "\x00" + value.Username + "\x00" + value.TenantID + "\x00" + subject))
 		scope = hex.EncodeToString(sum[:])
 		return nil
 	})
@@ -151,6 +165,9 @@ func (s *Store) Clear() error {
 }
 
 func (s *Store) AccessToken(ctx context.Context) (string, error) {
+	if err := s.validateConnection(); err != nil {
+		return "", err
+	}
 	var token string
 	err := s.withLock(func() error {
 		value, err := s.loadUnlocked()
@@ -215,6 +232,9 @@ func (s *Store) bootstrapLocalSessionForServerUnlocked(ctx context.Context, pref
 			Role:         session.Role,
 			TenantID:     session.TenantID,
 		}
+		if previous, err := s.loadUnlocked(); err == nil && previous.ServerURL == server {
+			value.LocalRuntimeID = previous.LocalRuntimeID
+		}
 		if err := s.saveUnlocked(value); err != nil {
 			return Credentials{}, fmt.Errorf("save local LazyMind session: %w", err)
 		}
@@ -245,13 +265,16 @@ func (s *Store) ForceRefresh(ctx context.Context, rejectedAccessToken string) (s
 }
 
 func (s *Store) ServerURL(ctx context.Context) (string, error) {
+	if err := s.validateConnection(); err != nil {
+		return "", err
+	}
 	if s.serverOverride != "" {
 		return s.serverOverride, nil
 	}
 	if value, err := s.loadUnlocked(); err == nil && normalizeServerURL(value.ServerURL) != "" {
 		return normalizeServerURL(value.ServerURL), nil
 	}
-	if configured := normalizeServerURL(os.Getenv("LAZYMIND_SERVER_URL")); configured != "" {
+	if configured := normalizeServerURL(connectorconfig.Value("LAZYMIND_SERVER_URL")); configured != "" {
 		return configured, nil
 	}
 	candidates := runtimeServerCandidates()
@@ -500,7 +523,7 @@ func runtimeServerCandidates() []string {
 		seen[value] = struct{}{}
 		result = append(result, value)
 	}
-	appendURL(os.Getenv("LAZYMIND_SERVER_URL"))
+	appendURL(connectorconfig.Value("LAZYMIND_SERVER_URL"))
 	for _, path := range runtimeStatePaths() {
 		body, err := os.ReadFile(path)
 		if err != nil {
@@ -531,7 +554,7 @@ func runtimeServerCandidates() []string {
 }
 
 func runtimeStatePaths() []string {
-	if configured := strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_STATE_FILE")); configured != "" {
+	if configured := strings.TrimSpace(connectorconfig.Value("LAZYMIND_RUNTIME_STATE_FILE")); configured != "" {
 		return []string{configured}
 	}
 	home, err := os.UserHomeDir()
@@ -556,4 +579,15 @@ func runtimeStatePaths() []string {
 		root = filepath.Join(root, "LazyMind")
 	}
 	return []string{filepath.Join(root, "state", "runtime-state.json")}
+}
+
+func (s *Store) validateConnection() error {
+	c, err := connectorconfig.Current()
+	if err != nil {
+		return err
+	}
+	if c != nil && filepath.Clean(c.Home) != s.home {
+		return errors.New("connection home changed; reconnect the Agent")
+	}
+	return nil
 }

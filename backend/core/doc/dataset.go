@@ -20,6 +20,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/log"
 	corestore "lazymind/core/store"
+	"lazymind/core/systemdeps"
 
 	"gorm.io/gorm"
 )
@@ -261,7 +262,7 @@ func parseDatasetParsers(ext json.RawMessage) []ParserConfig {
 
 func fetchParsersByAlgoID(ctx context.Context, algoID string) []ParserConfig {
 	algoID = strings.TrimSpace(algoID)
-	if algoID == "" {
+	if algoID == "" || !systemdeps.PythonComponentActive("rag") {
 		return nil
 	}
 	url := common.JoinURL(common.AlgoServiceEndpoint(), "/v1/algo/"+algoID+"/groups")
@@ -945,7 +946,7 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 	// Preserve the old client's creation contract: an omitted level still defaults
 	// to indexed, while readiness is enforced when a new client explicitly asks
 	// for indexed processing.
-	if processingLevelRequested && processingLevel == ProcessingLevelIndexed && replyEmbedNotReady(w, r, userID) {
+	if systemdeps.PythonComponentActive("rag") && processingLevelRequested && processingLevel == ProcessingLevelIndexed && replyEmbedNotReady(w, r, userID) {
 		return
 	}
 	// Provide explicit feedback for duplicate dataset names under the same user.
@@ -983,7 +984,12 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 	kbStart := time.Now()
 	// Accept flexible response shapes; we only need kb_id if provided.
 	var kbResp map[string]any
-	if err := common.ApiPost(r.Context(), kbURL, req, nil, &kbResp, kbTimeout); err != nil {
+	if err := func() error {
+		if !systemdeps.PythonComponentActive("rag") {
+			return nil
+		}
+		return common.ApiPost(r.Context(), kbURL, req, nil, &kbResp, kbTimeout)
+	}(); err != nil {
 		log.Logger.Error().
 			Err(err).
 			Str("kb_url", kbURL).
@@ -1022,7 +1028,8 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 		Str("user_id", userID).
 		Str("algo_id", algoID).
 		Dur("elapsed", time.Since(kbStart)).
-		Msg("kb service create ok")
+		Bool("rag_active", systemdeps.PythonComponentActive("rag")).
+		Msg("knowledge base creation prepared")
 
 	// 2) text datasets（text kb_id）
 	now := time.Now().UTC()

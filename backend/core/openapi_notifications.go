@@ -24,6 +24,7 @@ func notificationSchemas() map[string]any {
 			prop("data", obj(prop("detail", objReq([]string{"reason", "request_id"}, prop("reason", strSchema()), prop("request_id", strSchema()), prop("running_task_ids", array(strSchema()))))))),
 		"NotificationPreferences":      objReq([]string{"enabled", "revision", "defaults"}, prop("enabled", boolSchema()), prop("revision", int64Schema()), prop("defaults", refSchema("NotificationConfig"))),
 		"NotificationPreferencesPatch": strict(objReq([]string{"revision"}, prop("revision", int64Schema()), prop("enabled", boolSchema()), prop("defaults", refSchema("NotificationConfig")), prop("confirm_running_task_ids", array(strSchema())))),
+		"WeChatNotificationTargets":    objReq([]string{"items"}, prop("items", array(objReq([]string{"account_id", "recipient_id"}, prop("account_id", strSchema()), prop("recipient_id", strSchema()))))),
 		"ScheduleNotificationUpdate":   strict(objReq([]string{"revision"}, prop("revision", int64Schema()), prop("config", refSchema("NotificationConfig")), prop("clear", boolSchema()))),
 		"ScheduleNotificationReset":    strict(objReq([]string{"revision"}, prop("revision", int64Schema()))),
 		"ScheduleNotificationView":     objReq([]string{"configured", "revision", "config"}, prop("configured", boolSchema()), prop("revision", int64Schema()), prop("config", nullableSchema(refSchema("NotificationConfig"))), prop("availability", obj())),
@@ -47,6 +48,7 @@ func notificationPaths() map[string]any {
 	paths := map[string]any{}
 	for _, entry := range []struct{ Path, Method, Input, Output, Description string }{
 		{"/user/notification-preferences", "get", "", "NotificationPreferences", "Read scheduled-task notification defaults and global gate"},
+		{"/user/wechat-notification-targets", "get", "", "WeChatNotificationTargets", "List unique confirmed WeChat recipients from owned saved schedule notification rules; does not check connectivity"},
 		{"/user/notification-preferences", "patch", "NotificationPreferencesPatch", "NotificationPreferences", "Compare revision; closing requires the exact current affected run IDs"},
 		{"/schedules/{schedule_id}/notifications", "get", "", "ScheduleNotificationView", "Read configuration and current channel availability"},
 		{"/schedules/{schedule_id}/notifications", "put", "ScheduleNotificationUpdate", "ScheduleNotificationView", "Update next-run configuration with an independent revision"},

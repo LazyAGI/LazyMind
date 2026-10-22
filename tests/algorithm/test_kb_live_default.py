@@ -74,9 +74,10 @@ def test_kb_search_core_flow(monkeypatch):
 
 
 def test_kb_tmp_search_core_flow(monkeypatch, tmp_path):
+    from lazymind.chat.engine.tools import temporary_files
     notes = tmp_path / 'tmp-a.md'
     notes.write_text('omega clause\n', encoding='utf-8')
-    monkeypatch.setattr(kb, '_tmp_agentic_config', lambda: {
+    monkeypatch.setattr(temporary_files, '_tmp_agentic_config', lambda: {
         'user_id': 'user-007',
         'files': [str(notes)],
         'history_files_per_turn': {},
@@ -110,9 +111,7 @@ def test_temp_kb_runtime_registers_block_group(monkeypatch):
             return self
 
     monkeypatch.setattr(search_temp, 'AutoModel', lambda model: f'model:{model}')
-    monkeypatch.setattr(search_temp, 'TempDocRetriever', FakeTempDocRetriever)
-    monkeypatch.setattr(search_temp, '_vector_retriever', None)
-    monkeypatch.setattr(search_temp, '_bm25_retriever', None)
+    monkeypatch.setattr(search_temp, '_ConversationTempDocRetriever', FakeTempDocRetriever)
 
     search_temp._make_retriever(use_embed=True)
 

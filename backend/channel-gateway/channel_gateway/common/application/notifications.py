@@ -6,15 +6,22 @@ from channel_gateway.common.domain.channel import account_view
 
 class NotificationService:
     """Verify committed Core events, then reuse the shared channel outbox."""
-    def __init__(self, store, core, feishu_accounts=None, wecom=None):
+    def __init__(self, store, core, feishu_accounts=None, wecom=None, wechat_probe=None):
         self._store, self._core = store, core
         self._feishu = feishu_accounts
         self._wecom = wecom
+        self._wechat_probe = wechat_probe
 
-    def notification_targets(self, owner, account_id, cursor='', recipient_id='', limit=20):
+    def notification_targets(self, owner, account_id, cursor='', recipient_id='', limit=20, check_connection=False):
         account = self._store.get_account(owner, account_id)
         if not account:
             raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '频道账号不存在')
+        if check_connection:
+            if not recipient_id:
+                raise GatewayError(422, 'NOTIFICATION_TARGET_REQUIRED', '请先确认通知接收对象')
+            if account['provider'] != 'wechat' or self._wechat_probe is None:
+                raise GatewayError(422, 'PROVIDER_NOT_SUPPORTED', '此检测仅支持微信')
+            self._wechat_probe.check_target(owner, account_id, recipient_id)
         if account['provider'] == 'wecom' and not recipient_id:
             try:
                 self._wecom.sync_notification_targets(owner, account)

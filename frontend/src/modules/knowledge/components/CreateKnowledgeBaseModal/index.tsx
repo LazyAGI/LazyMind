@@ -1,3 +1,4 @@
+import { useRAGComponent } from "@/modules/modelProvider/contexts/RAGComponentContext";
 import {
   forwardRef,
   useCallback,
@@ -53,6 +54,8 @@ const CreateKnowledgeBaseModal = forwardRef<
   CreateKnowledgeBaseModalProps
 >(({ onCreate, syncCreateVm, embeddingReady }, ref) => {
   const { t } = useTranslation();
+  const { availability } = useRAGComponent();
+  const ragReady = availability === "ready";
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<CreateTab>("direct");
@@ -133,7 +136,7 @@ const CreateKnowledgeBaseModal = forwardRef<
         setTags(res.data.tags || []);
       });
 
-    const algorithmsRequest = KnowledgeBaseServiceApi()
+    const algorithmsRequest = ragReady ? KnowledgeBaseServiceApi()
       .datasetServiceListAlgos()
       .then((res) => {
         const list = res.data.algos;
@@ -144,7 +147,7 @@ const CreateKnowledgeBaseModal = forwardRef<
       })
       .catch((err) => {
         console.error("Failed to load algorithm list:", err);
-      });
+      }) : Promise.resolve();
 
     const preferencesRequest = fetchUserUiPreferences({ silentError: true } as never)
       .then((preferences) => preferences.document_parsing_enabled)
@@ -154,7 +157,7 @@ const CreateKnowledgeBaseModal = forwardRef<
       ([, documentParsingEnabled]) => {
         setParsingEnabled(documentParsingEnabled);
         form.setFieldsValue({
-          processing_level: highestSupportedProcessingLevel(
+          processing_level: !ragReady ? (documentParsingEnabled === false ? "stored" : "indexed") : highestSupportedProcessingLevel(
             documentParsingEnabled,
             embeddingReady,
           ),
@@ -164,7 +167,7 @@ const CreateKnowledgeBaseModal = forwardRef<
   }
 
   function onOpen(tab: CreateTab = "direct") {
-    setActiveTab(tab);
+    setActiveTab(ragReady ? tab : "direct");
     setHasTagLengthError(false);
     form.resetFields();
     loadFormData().then(() => {
@@ -390,10 +393,10 @@ const CreateKnowledgeBaseModal = forwardRef<
                         <Select options={PROCESSING_LEVEL_ORDER.map((level) => ({
                           value: level,
                           label: t(`knowledge.processing${level[0].toUpperCase()}${level.slice(1)}`),
-                          disabled: (level === "indexed" && embeddingReady !== true) || (scenario === "academic_papers" && level === "stored"),
+                          disabled: (ragReady && level === "indexed" && embeddingReady !== true) || (scenario === "academic_papers" && level === "stored"),
                         }))} />
                       </Form.Item>
-                      {algorithm.length !== 1 && (
+                      {ragReady && algorithm.length !== 1 && (
                         <Form.Item
                           name="algo_id"
                           label={t("knowledge.parseAlgorithm")}
@@ -422,6 +425,7 @@ const CreateKnowledgeBaseModal = forwardRef<
           },
           {
             key: "cloud",
+            disabled: !ragReady,
             label: t("knowledge.createFromCloudDisk"),
             children: (
               <div className="knowledge-create-modal-cloud">

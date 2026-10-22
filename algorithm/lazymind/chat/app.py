@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from lazymind.config import config
 from lazymind.chat.api import (
     agent_control_routes,
+    base_ingestion_routes,
     chat_routes,
     document_routes,
     academic_routes,
@@ -46,6 +47,7 @@ logging.getLogger('httpx').setLevel(logging.WARNING)
 def register_chat_routers(app: FastAPI) -> FastAPI:
     # health is always available for liveness probes.
     app.include_router(health_routes.router)
+    app.include_router(base_ingestion_routes.router)
     # Agent control callbacks must remain available in both direct and router modes.
     app.include_router(agent_control_routes.router)
     app.include_router(mail_read_routes.router)

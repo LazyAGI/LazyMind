@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
+
 	"lazymind/agentconnector/internal/agentexec"
+	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/localfile"
 	"lazymind/agentconnector/internal/workflowhost"
@@ -89,22 +91,21 @@ func Enabled(profile, marketplace string) (bool, error) {
 	return config.Plugins[Name+"@"+marketplace].Enabled, nil
 }
 
-func FindNode(ctx context.Context) (string, error) {
-	node, err := agentexec.FindExecutable(os.Getenv("LAZYMIND_NODE_BIN"), []string{"node"})
-	if err != nil {
-		return "", errors.New("Codex Workflow needs Node.js 22.19 or later")
+func FindNode(ctx context.Context) (string, error) { return findNode(ctx, "") }
+
+func findNode(ctx context.Context, preferred string) (string, error) {
+	if override := connectorconfig.Value("LAZYMIND_NODE_BIN"); override != "" {
+		node, err := agentexec.CompatibleNode(ctx, override)
+		if err != nil {
+			return "", fmt.Errorf("LAZYMIND_NODE_BIN: %w", err)
+		}
+		return node, nil
 	}
-	probe, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	version, err := agentexec.Run(probe, node, "--version")
-	if err != nil {
-		return "", err
+	candidates := []string{preferred}
+	if path, err := agentexec.FindExecutable("", []string{"node"}); err == nil {
+		candidates = append(candidates, path)
 	}
-	var major, minor int
-	if _, err := fmt.Sscanf(strings.TrimSpace(version), "v%d.%d", &major, &minor); err != nil || major < 22 || major == 22 && minor < 19 {
-		return "", errors.New("Codex Workflow needs Node.js 22.19 or later")
-	}
-	return node, nil
+	return agentexec.CompatibleNode(ctx, candidates...)
 }
 
 // Install uses the personal marketplace. The marker prevents replacing a
@@ -159,12 +160,11 @@ func Install(ctx context.Context, home, self, binary, profile, hostID string) (I
 	record := Installation{BuildID: BuildID(), Home: home, Self: self, Profile: profile, Binary: binary, Node: node,
 		Marketplace: market["name"].(string), ConnectorID: pair.ConnectorID,
 		PairingFile: filepath.Join(home, "workflow-hosts", pair.ConnectorID+".json")}
-	env := map[string]string{"LAZYMIND_HOME": home, "LAZYMIND_AGENT_PROVIDER": "codex", "LAZYMIND_AGENT_HOST_ID": hostID,
-		"LAZYMIND_WORKFLOW_HOST_CONTROL": "1", "LAZYMIND_WORKFLOW_PAIRING_FILE": record.PairingFile,
-		"LAZYMIND_CODEX_BIN": binary, "LAZYMIND_NODE_BIN": node, "CODEX_HOME": profile}
-	if web := os.Getenv("LAZYMIND_WEB_URL"); web != "" {
-		env["LAZYMIND_WEB_URL"] = web
+	configPath, err := connectorconfig.Save(connectorconfig.Config{Home: home, Provider: "codex", HostID: hostID, Profile: profile, PairingFile: record.PairingFile, Controlled: true})
+	if err != nil {
+		return Installation{}, err
 	}
+	env := connectorconfig.Environment(configPath)
 	mcp := map[string]any{"mcpServers": map[string]any{"lazymind": map[string]any{
 		"command": self, "args": []string{"mcp", "codex-workflow"}, "env": env}}}
 	mcpBytes, _ := json.MarshalIndent(mcp, "", "  ")
@@ -283,6 +283,7 @@ func writeAtomic(path string, data []byte) error {
 // cached plugin content when only instructions change.
 func BuildID() string {
 	hash := sha256.New()
+	hash.Write([]byte("connector-config-v1\x00"))
 	_ = fs.WalkDir(assets, "assets", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err

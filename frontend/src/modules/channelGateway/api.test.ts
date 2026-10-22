@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { cancelConnectionSession, createConnectionSession, refreshConnectionSession, submitConnectionChallenge, channelAccountLabel, type ChannelAccount } from './api';
+import { cancelConnectionSession, createConnectionSession, listChannelAccounts, refreshConnectionSession, submitConnectionChallenge, channelAccountLabel, type ChannelAccount } from './api';
 
 const http = vi.hoisted(() => ({ request: vi.fn(), post: vi.fn(), defaults: {} }));
 vi.mock('@/components/request', () => ({ BASE_URL: '', axiosInstance: http }));
@@ -42,6 +42,27 @@ it('passes quiet cleanup errors through the generated cancellation request', asy
   expect(http.request.mock.lastCall![0].silentError).toBe(true);
   await submitConnectionChallenge('session/a', '1234', 'numeric_code', { silentError: true });
   expect(http.request.mock.lastCall![0].silentError).toBe(true);
+});
+
+it('passes quiet activation checks through the generated account list request', async () => {
+  await listChannelAccounts('wechat', { silentError: true });
+  expect(http.request.mock.lastCall![0]).toMatchObject({
+    method: 'GET', url: '/api/channel-gateway/v1/channel-accounts?provider=wechat', silentError: true,
+  });
+  await listChannelAccounts('wechat');
+  expect(http.request.mock.lastCall![0].silentError).toBeUndefined();
+});
+
+it('serializes the read-only connection check through the generated account list contract', async () => {
+  await listChannelAccounts('wechat', { silentError: true, checkConnection: true });
+  expect(http.request.mock.lastCall![0]).toMatchObject({
+    method: 'GET', url: '/api/channel-gateway/v1/channel-accounts?provider=wechat&check_connection=true',
+    silentError: true,
+  });
+  expect(http.request.mock.lastCall![0]).not.toHaveProperty('checkConnection');
+  expect(http.request.mock.lastCall![0]).not.toHaveProperty('params');
+  await listChannelAccounts('wechat');
+  expect(http.request.mock.lastCall![0].url).not.toContain('check_connection');
 });
 
 it('lets the active panel own QR creation errors without a global navigation toast', async () => {

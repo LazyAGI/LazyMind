@@ -88,6 +88,11 @@ def account_view(row: dict[str, Any]) -> dict[str, Any]:
             'notification_ready': (row['provider'] != 'wechat'
                                    or bool(row.get('notification_ready'))),
             'media_delivery': row['provider'] != 'wecom',
+            **({
+                'connection_check_status': row.get('connection_check_status') or 'unknown',
+                'connection_checked_at': _iso(row.get('connection_checked_at')),
+                'connection_error_code': row.get('connection_error_code') or '',
+            } if row['provider'] == 'wechat' else {}),
         },
     }
 

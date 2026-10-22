@@ -74,7 +74,7 @@ def chat_runtime_status() -> str:
 
 
 def ensure_rag_runtime() -> ModuleType:
-    """Load the concrete KB, temp retriever, and document reader stack once."""
+    """Load the optional knowledge-base ingestion and retrieval stack once."""
     global _rag_module, _rag_loading, _rag_error
     require_component('rag')
     with _rag_condition:
