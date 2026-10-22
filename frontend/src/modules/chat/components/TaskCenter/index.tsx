@@ -30,6 +30,7 @@ import {
   TaskStatus,
   WritingSubtask,
   useTaskCenterStore,
+  sameTaskModelCall,
 } from "@/modules/chat/store/taskCenter";
 import {
   basenameFromPath,
@@ -56,7 +57,8 @@ import {
   type OrdinaryTaskState,
   type OrdinaryTaskTimeline,
 } from "./taskTimeline";
-import { TaskProcessTimeline } from "./TaskProcessTimeline";
+import { TaskModelSwitchSummary, TaskProcessTimeline } from "./TaskProcessTimeline";
+import { getChatConversationPath } from "@/modules/chat/constants/chat";
 import { TaskArtifactList } from "./TaskArtifactList";
 import type { OrdinaryCollection, OrdinaryRunView } from "@/modules/chat/types/ordinaryTask";
 import "./index.scss";
@@ -223,7 +225,7 @@ function ExecutionLog({ log, isRunning }: { log: TaskLogEntry[]; isRunning: bool
   // Merge consecutive same-type text/think entries to avoid per-token line breaks during streaming.
   const mergedLog = log.reduce<TaskLogEntry[]>((acc, entry) => {
     const prev = acc[acc.length - 1];
-    if (prev && (entry.type === "text" || entry.type === "think") && prev.type === entry.type) {
+    if (prev && (entry.type === "text" || entry.type === "think") && prev.type === entry.type && sameTaskModelCall(prev, entry)) {
       acc[acc.length - 1] = { ...prev, content: prev.content + entry.content };
       return acc;
     }
@@ -802,6 +804,14 @@ function OrdinaryTaskDetails({ item }: { item: OrdinaryTaskItem }) {
         {t("taskCenter.ordinaryLoadMore")}
       </button> : null;
   return <div className="ordinary-task-details" aria-busy={loadingCollection !== null}>
+    {view?.failure_code && ["model_fallback_exhausted", "model_context_not_fit"].includes(view.failure_code) && (
+      <div className="ordinary-stale-warning" role="alert">
+        <span>{t(`chat.runStatus.codes.${view.failure_code}`)}</span>
+        <a href={`/settings?${new URLSearchParams({ section: "models", view: "providers",
+          return_to: getChatConversationPath(view.conversation_id ?? item.task?.conversation_id ?? ""),
+        })}`}>{t("chat.checkModelSettings")}</a>
+      </div>
+    )}
     <TaskProcessTimeline steps={view?.process_steps ?? []} legacyPlan={view ? view.plan_steps : item.task?.plan_steps}
       state={item.state} progress={view ? view.progress_pct : item.task?.progress_pct} />
     {more("process_steps")}
@@ -852,6 +862,7 @@ function OrdinaryTaskCard({
               </Tooltip>
             )}
           </span>
+          {item.ordinary?.model_switch && <span className="ordinary-thinking-copy"><TaskModelSwitchSummary record={item.ordinary.model_switch} /></span>}
           <span className="ordinary-task-meta">
             {ordinaryTaskDurationSeconds(item) !== undefined && (
               <Tooltip title={t("taskCenter.ordinaryDurationExplanation")}>

@@ -25,6 +25,9 @@ func manualOpenAPISpec() map[string]any {
 	for name, schema := range ordinarySchemas {
 		schemas[name] = schema
 	}
+	for name, schema := range subagentModelSchemas() {
+		schemas[name] = schema
+	}
 	for path, operation := range ordinaryPaths {
 		paths[path] = operation
 	}
@@ -731,7 +734,7 @@ func manualSchemas() map[string]any {
 		"FailedRunAttempt": obj(
 			prop("result", strSchema()), prop("run_id", strSchema()),
 			prop("run_status", enumStringSchema("failed", "interrupted")),
-			prop("run_terminal", refSchema("RunTerminal")), prop("model_route", refSchema("ChatModelRoute")),
+			prop("run_terminal", refSchema("RunTerminal")), prop("model_route", refSchema("ChatModelRoute")), prop("model_switches", array(refSchema("ChatModelSwitchRecord"))),
 			prop("create_time", dateTimeSchema()),
 		),
 		"RunPerformanceMetrics": objReq(
@@ -761,14 +764,14 @@ func manualSchemas() map[string]any {
 		"ChatModelRoute": obj(
 			prop("mode", enumStringSchema("auto", "fixed")), prop("strategy", strSchema()),
 			prop("task_class", enumStringSchema("simple", "balanced", "complex", "long_context", "fixed", "auto")),
-			prop("reason", enumStringSchema("simple_task", "complex_task", "long_context", "session_sticky", "default_balanced", "retry_same_model", "fixed", "initial_selection", "model_unavailable")),
+			prop("reason", enumStringSchema("simple_task", "complex_task", "long_context", "session_sticky", "default_balanced", "retry_same_model", "fixed", "initial_selection", "model_unavailable", "model_fallback")),
 			prop("model_id", strSchema()), prop("provider_id", strSchema()), prop("provider_name", strSchema()),
 			prop("model_name", strSchema()), prop("source", enumStringSchema("own", "shared", "cloud")),
 			prop("selection_version", int64Schema()),
 		),
 		"ConversationHistoryItem": obj(prop("exports", array(refSchema("ChatExport"))),
 			prop("fork_read_only", boolSchema()),
-			prop("seq", intSchema()), prop("query", strSchema()), prop("result", strSchema()), prop("id", strSchema()), prop("feed_back", intSchema()), prop("sources", array(obj())), prop("input", array(obj())), prop("reasoning_content", strSchema()), prop("thinking_time_s", int64Schema()), prop("reason", strSchema()), prop("expected_answer", strSchema()), prop("create_time", strSchema()), prop("run_id", strSchema()), prop("run_status", strSchema()), prop("run_terminal", refSchema("RunTerminal")), prop("performance_metrics", refSchema("RunPerformanceMetrics")), prop("failed_attempts", array(refSchema("FailedRunAttempt"))), prop("execution", refSchema("ExternalExecutionProjection")), prop("model_route", refSchema("ChatModelRoute")),
+			prop("seq", intSchema()), prop("query", strSchema()), prop("result", strSchema()), prop("id", strSchema()), prop("feed_back", intSchema()), prop("sources", array(obj())), prop("input", array(obj())), prop("reasoning_content", strSchema()), prop("thinking_time_s", int64Schema()), prop("reason", strSchema()), prop("expected_answer", strSchema()), prop("create_time", strSchema()), prop("run_id", strSchema()), prop("run_status", strSchema()), prop("run_terminal", refSchema("RunTerminal")), prop("performance_metrics", refSchema("RunPerformanceMetrics")), prop("failed_attempts", array(refSchema("FailedRunAttempt"))), prop("execution", refSchema("ExternalExecutionProjection")), prop("model_route", refSchema("ChatModelRoute")), prop("model_switches", array(refSchema("ChatModelSwitchRecord"))), prop("model_output", refSchema("ChatModelOutput")),
 		),
 		"ConversationDetailResponse":      obj(prop("conversation", refSchema("ConversationDetailItem"))),
 		"ConversationHistoryListResponse": obj(prop("older_page_token", strSchema()), prop("newer_page_token", strSchema()), prop("conversation_id", strSchema()), prop("name", strSchema()), prop("history", array(refSchema("ConversationHistoryItem"))), prop("total_size", int64Schema()), prop("next_page_token", strSchema())),
@@ -833,8 +836,14 @@ func manualSchemas() map[string]any {
 			prop("diagnostic_id", strSchema()),
 			prop("transport_diagnostic", objReq([]string{"code"}, prop("code", enumStringSchema("upstream_stream_failed", "upstream_stream_timeout")))),
 		),
-		"ChatRuntimeEvent":            obj(prop("schema_version", intSchema()), prop("event_id", strSchema()), prop("run_id", strSchema()), prop("type", strSchema()), prop("data", obj())),
-		"ChatChunkResponse":           obj(prop("exports", array(refSchema("ChatExport"))), prop("conversation_id", strSchema()), prop("seq", intSchema()), prop("message", strSchema()), prop("delta", strSchema()), prop("delta_mode", enumStringSchema("append", "replace")), prop("history_id", strSchema()), prop("sources", array(obj())), prop("prompt_questions", array(strSchema())), prop("reasoning_content", strSchema()), prop("thinking_duration_s", int64Schema()), prop("capability_dependency", obj()), prop("runtime_event", refSchema("ChatRuntimeEvent")), prop("performance_metrics", refSchema("RunPerformanceMetrics")), prop("execution", refSchema("ExternalExecutionProjection")), prop("model_route", refSchema("ChatModelRoute"))),
+		"ChatModelSwitchIdentity": objReq([]string{"candidate_id", "source", "model_id", "provider_group_id"},
+			prop("candidate_id", strSchema()), prop("source", enumStringSchema("own", "shared", "cloud")), prop("model_id", strSchema()), prop("provider_group_id", strSchema()), prop("provider_name", strSchema()), prop("model_name", strSchema())),
+		"ChatModelSwitchedData":       modelSwitchDataSchema(),
+		"ChatModelOutput":             objReq([]string{"run_id", "call_index"}, prop("run_id", strSchema()), prop("call_index", map[string]any{"type": "integer", "minimum": 0, "description": "Monotonic within this run. Host model calls start at 1; Core uses a closed 0 cursor to bind a new run."}), prop("phase", map[string]any{"type": "string", "enum": []string{"begin", "commit", "rollback"}, "description": "Absent on model content. Boundaries checkpoint, commit, or restore the current call. Fenced delta_mode=replace snapshots replace body, reasoning_content, sources, and exports including explicit empty values. The first resume snapshot hydrates its cursor even when already closed."})),
+		"ChatModelSwitchRecord":       map[string]any{"allOf": []any{refSchema("ChatModelSwitchedData"), objReq([]string{"event_id"}, prop("event_id", strSchema()))}},
+		"ModelCallFinishedData":       objReq([]string{"model_call_id", "attempt_count", "kind", "has_semantic_output"}, prop("model_call_id", strSchema()), prop("attempt_count", intSchema()), prop("kind", enumStringSchema("finish", "failure")), prop("has_semantic_output", boolSchema()), prop("finish", strSchema()), prop("failure", obj(prop("origin", strSchema()), prop("code", strSchema()), prop("diagnostic_id", strSchema())))),
+		"ChatRuntimeEvent":            obj(prop("schema_version", intSchema()), prop("event_id", strSchema()), prop("run_id", strSchema()), prop("type", enumStringSchema("model_retry_scheduled", "model_call_finished", "model_switched", "run_finished")), prop("data", obj())),
+		"ChatChunkResponse":           obj(prop("exports", array(refSchema("ChatExport"))), prop("conversation_id", strSchema()), prop("seq", intSchema()), prop("message", strSchema()), prop("delta", strSchema()), prop("delta_mode", enumStringSchema("append", "replace")), prop("history_id", strSchema()), prop("sources", array(obj())), prop("prompt_questions", array(strSchema())), prop("reasoning_content", strSchema()), prop("thinking_duration_s", int64Schema()), prop("capability_dependency", obj()), prop("runtime_event", refSchema("ChatRuntimeEvent")), prop("performance_metrics", refSchema("RunPerformanceMetrics")), prop("execution", refSchema("ExternalExecutionProjection")), prop("model_route", refSchema("ChatModelRoute")), prop("model_switches", array(refSchema("ChatModelSwitchRecord"))), prop("model_output", refSchema("ChatModelOutput"))),
 		"ACLApiResponse":              obj(prop("code", intSchema()), prop("message", strSchema()), prop("data", obj())),
 		"AddACLRequest":               objReq([]string{"grantee_type", "grantee_id", "permission"}, prop("grantee_type", strSchema()), prop("grantee_id", strSchema()), prop("permission", strSchema()), prop("expires_at", dateTimeSchema())),
 		"UpdateACLRequest":            objReq([]string{"permission"}, prop("permission", strSchema()), prop("expires_at", dateTimeSchema())),
@@ -1589,4 +1598,13 @@ func op(summary string, params []map[string]any, body map[string]any, resp map[s
 		m["requestBody"] = body
 	}
 	return m
+}
+
+// A Host switch is a successful model change, independent of SDK lifecycle IDs.
+func modelSwitchDataSchema() map[string]any {
+	window := func() map[string]any {
+		return map[string]any{"type": "integer", "format": "int64", "minimum": 1, "nullable": true}
+	}
+	return objReq([]string{"switch_index", "from", "to", "reason_code", "from_max_input_tokens", "to_max_input_tokens", "context_compacted"},
+		prop("switch_index", map[string]any{"type": "integer", "minimum": 1}), prop("from", refSchema("ChatModelSwitchIdentity")), prop("to", refSchema("ChatModelSwitchIdentity")), prop("reason_code", strSchema()), prop("from_max_input_tokens", window()), prop("to_max_input_tokens", window()), prop("context_compacted", boolSchema()))
 }

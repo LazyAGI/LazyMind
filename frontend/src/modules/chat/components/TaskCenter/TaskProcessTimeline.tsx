@@ -3,6 +3,20 @@ import { useTranslation } from "react-i18next";
 import { BulbOutlined, CheckOutlined, CloseCircleFilled } from "@ant-design/icons";
 import type { PublicProcessStep } from "@/modules/chat/types/ordinaryTask";
 import type { OrdinaryTaskState } from "./taskTimeline";
+import type { ChatModelSwitchRecord } from "@/api/generated/core-client";
+import { formatModelSwitchLabel } from "@/modules/chat/utils/modelSwitchDisplay";
+
+export function TaskModelSwitchSummary({ record }: { record: ChatModelSwitchRecord }) {
+  const { t } = useTranslation();
+  const unknown = t("chat.modelFallbackWindowUnknown");
+  return <>
+    <span><span>{formatModelSwitchLabel(record.from, record.from_max_input_tokens, unknown)}</span>{" → "}
+      <span>{formatModelSwitchLabel(record.to, record.to_max_input_tokens, unknown)}</span></span>
+    <span>{record.reason_code === "model_config_unavailable" ? t("chat.modelFallbackReason.model_config_unavailable")
+      : t(`chat.runStatus.codes.${record.reason_code}`, { defaultValue: t("chat.modelFallbackReason.unknown") })}</span>
+    {record.context_compacted === true ? <span>{t("chat.modelFallbackContextAdapted")}</span> : null}
+  </>;
+}
 
 const statusClass = (status: string) => status === "succeeded" ? "complete"
   : status === "pending" ? "waiting" : status;
@@ -44,7 +58,7 @@ export function TaskProcessTimeline({ steps, legacyPlan = [], state, progress }:
               </span>
               <span className="ordinary-thinking-copy">
                 <strong>{step.title}</strong>
-                {step.summary && <span>{step.summary}</span>}
+                {step.model_switch ? <TaskModelSwitchSummary record={step.model_switch} /> : step.summary && <span>{step.summary}</span>}
                 <span className="ordinary-process-status">{labels[step.status] ?? t("taskCenter.statusPending")}</span>
               </span>
             </li>

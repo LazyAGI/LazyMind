@@ -21,6 +21,8 @@ func TestSubagentCreateAndResumePersistAuthoritativeWorkspaceParams(t *testing.T
 	t.Cleanup(server.Close)
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
 	db := orm.MigrateAllModelsForTest(t)
+	seedAvailableChatModel(t, db.DB, "owner", "provider-task", "group-task", "model-task", "OpenAI", "task", "gpt-task", "llm", true, "fixture-task")
+	seedSelectedChatModel(t, db.DB, "owner", "model-task", false)
 	stateStore, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +43,7 @@ func TestSubagentCreateAndResumePersistAuthoritativeWorkspaceParams(t *testing.T
 		t.Fatal(err)
 	}
 	event := &TaskCreatedEvent{TaskID: "child", AgentType: "research", Title: "child", Objective: "read", Params: map[string]any{"runtime_instruction": "base", "files": map[string]any{"1": []string{"a.txt"}}, "parent_agentic_config": map[string]any{"_core_workspace_context": map[string]any{"runtime_instruction": "forged"}}}}
-	if _, err := handleTaskCreated(t.Context(), db.DB, stateStore, "work", "history", "owner", event, nil, nil, "dynamic"); err != nil {
+	if _, err := handleTaskCreated(t.Context(), db.DB, stateStore, "work", "history", "owner", event, nil, nil, "dynamic", nil); err != nil {
 		t.Fatal(err)
 	}
 	var task orm.SubAgentTask
@@ -62,7 +64,7 @@ func TestSubagentCreateAndResumePersistAuthoritativeWorkspaceParams(t *testing.T
 	}
 	event.Resume = true
 	event.Params = map[string]any{"runtime_instruction": "attacker", "parent_agentic_config": map[string]any{"local_fs_sources": []any{map[string]any{"paths": []string{"/outside"}}}}}
-	if _, err := handleTaskCreated(t.Context(), db.DB, stateStore, "work", "history", "owner", event, nil, nil, "dynamic"); err != nil {
+	if _, err := handleTaskCreated(t.Context(), db.DB, stateStore, "work", "history", "owner", event, nil, nil, "dynamic", nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Where("id = ?", "child").First(&task).Error; err != nil {
@@ -75,7 +77,7 @@ func TestSubagentCreateAndResumePersistAuthoritativeWorkspaceParams(t *testing.T
 	if strings.Contains(instruction, "attacker") || strings.Count(instruction, "本任务的工作区：") != 1 || !strings.Contains(instruction, "allow_all") {
 		t.Fatalf("resume params=%v", params)
 	}
-	if _, err := handleTaskCreated(t.Context(), db.DB, stateStore, "work", "history", "other", event, nil, nil, "dynamic"); err == nil {
+	if _, err := handleTaskCreated(t.Context(), db.DB, stateStore, "work", "history", "other", event, nil, nil, "dynamic", nil); err == nil {
 		t.Fatal("cross-user resume accepted")
 	}
 	if task.WorkspacePath != subagent.WorkspacePath("owner", "child") {

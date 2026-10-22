@@ -133,6 +133,34 @@ function catalog(modelName = "DeepSeek-V3", version = 3): ChatModelCatalog {
 }
 
 describe("ChatModelSelector", () => {
+  it("reloads the authoritative selection after a main conversation fallback while disabled", async () => {
+    fetchCatalogMock.mockResolvedValue(catalog());
+    render(<ChatModelSelector conversationId="conversation-1" disabled />);
+    expect(await screen.findByRole("button", { name: "当前模型：DeepSeek · DeepSeek-V3" })).toBeInTheDocument();
+    const replacement = catalog();
+    replacement.selection = { ...replacement.selection, model_id: "gpt-4o", source: "shared", provider_name: "OpenAI", model_name: "GPT-4o" };
+    fetchCatalogMock.mockResolvedValue(replacement);
+    act(() => window.dispatchEvent(new CustomEvent("lazymind:chat-model-selection-changed", { detail: { conversationId: "other" } })));
+    expect(fetchCatalogMock).toHaveBeenCalledTimes(1);
+    act(() => window.dispatchEvent(new CustomEvent("lazymind:chat-model-selection-changed", { detail: { conversationId: "conversation-1" } })));
+    expect(await screen.findByRole("button", { name: "当前模型：OpenAI · GPT-4o" })).toBeInTheDocument();
+    expect(useModelSelectionStore.getState().selections["conversation-1"]).toMatchObject({ model_id: "gpt-4o", source: "shared" });
+    expect(updateSelectionMock).not.toHaveBeenCalled();
+    expect(useModelSelectionStore.getState().selections[NEW_CHAT_MODEL_SELECTION_KEY]).toBeUndefined();
+  });
+
+  it("does not replace a newer stored selection with an older catalog response", async () => {
+    let resolve!: (value: ChatModelCatalog) => void;
+    fetchCatalogMock.mockImplementationOnce(() => new Promise<ChatModelCatalog>(value => { resolve = value; }));
+    render(<ChatModelSelector conversationId="conversation-1" />);
+    useModelSelectionStore.getState().setSelection("conversation-1", {
+      ...catalog("Latest choice", 4).selection, model_id: "gpt-4o", source: "shared", provider_name: "OpenAI",
+    });
+    await act(async () => resolve(catalog("Stale choice", 3)));
+    expect(await screen.findByRole("button", { name: "当前模型：OpenAI · Latest choice" })).toBeInTheDocument();
+    expect(useModelSelectionStore.getState().selections["conversation-1"]).toMatchObject({ version: 4, model_id: "gpt-4o", source: "shared" });
+  });
+
   it('shows the provider brand beside each model instead of the group heading', async () => {
     fetchCatalogMock.mockResolvedValue(catalog());
     render(<ChatModelSelector />);

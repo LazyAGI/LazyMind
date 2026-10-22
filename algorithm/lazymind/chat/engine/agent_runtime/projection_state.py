@@ -99,11 +99,11 @@ def clone_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return copy.deepcopy(entries)
 
 
-def render_projection(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def render_projection(entries: list[dict[str, Any]], *, model_facing: bool = True) -> list[dict[str, Any]]:
     rendered: list[dict[str, Any]] = []
     for entry in entries:
         message = entry['message']
-        model_message = model_facing_message(message)
+        model_message = model_facing_message(message) if model_facing else message
         if len(model_message) == len(message):
             rendered.append(copy.deepcopy(message))
         else:
@@ -114,6 +114,8 @@ def render_projection(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def split_projection(
     entries: list[dict[str, Any]],
     prior_len: int,
+    *,
+    model_facing: bool = True,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     prior_entries: list[dict[str, Any]] = []
     current_entries: list[dict[str, Any]] = []
@@ -127,7 +129,8 @@ def split_projection(
             current_entries.append(entry)
         else:
             prior_entries.append(entry)
-    return render_projection(prior_entries), render_projection(current_entries)
+    return (render_projection(prior_entries, model_facing=model_facing),
+            render_projection(current_entries, model_facing=model_facing))
 
 
 def projection_fingerprint(entries: list[dict[str, Any]]) -> str:

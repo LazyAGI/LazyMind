@@ -89,7 +89,7 @@ func TestForkFirstActualRequestUsesNodeConfigurationAndOnlyItsPrefix(t *testing.
 			}
 		}
 		raw, _ := json.Marshal(request)
-		if request.Runtime.ThinkingDepth != "high" || request.Runtime.Reasoning || request.Conversation.Mode != "manual" || request.Runtime.LLMConfig["llm"].(map[string]any)["max_input_tokens"] != "4096" || request.Personalization.UseMemory || strings.Contains(string(raw), "FUTURE_") || strings.Contains(string(raw), "model-global") {
+		if request.Runtime.ThinkingDepth != "high" || request.Runtime.Reasoning || request.Conversation.Mode != "manual" || request.Runtime.LLMConfig["llm"].(map[string]any)["max_input_tokens"] != "4096" || request.Personalization.UseMemory || strings.Contains(string(raw), "FUTURE_") || request.Runtime.ModelFallbackCurrentID != "own:model-fork" || request.Runtime.LLMConfig["llm"].(map[string]any)["model"] != "A" {
 			t.Fatalf("wrong fork request: %s", raw)
 		}
 	case <-time.After(time.Second):

@@ -103,30 +103,33 @@ type ChatRetrievalOptions struct {
 }
 
 type ChatRuntimeOptions struct {
-	ToolPolicy                    string            `json:"tool_policy,omitempty"`
-	SourceReference               string            `json:"source_reference,omitempty"`
-	Debug                         bool              `json:"debug,omitempty"`
-	Reasoning                     bool              `json:"reasoning"`
-	ThinkingDepth                 string            `json:"thinking_depth,omitempty"`
-	Priority                      *int              `json:"priority,omitempty"`
-	Trace                         bool              `json:"trace,omitempty"`
-	EnvironmentContext            map[string]any    `json:"environment_context,omitempty"`
-	LLMConfig                     map[string]any    `json:"llm_config,omitempty"`
-	OCRConfig                     map[string]any    `json:"ocr_config,omitempty"`
-	ToolConfig                    map[string]any    `json:"tool_config,omitempty"`
-	MCPConfig                     []any             `json:"mcp_config,omitempty"`
-	MCPCapabilities               []any             `json:"mcp_capabilities,omitempty"`
-	SystemMCPConfig               []any             `json:"system_mcp_config,omitempty"`
-	ContextUsagePreview           bool              `json:"context_usage_preview,omitempty"`
-	ContextPromptExport           bool              `json:"context_prompt_export,omitempty"`
-	ContextPreviewAllowLLMRouting bool              `json:"context_preview_allow_llm_routing,omitempty"`
-	SkipSensitiveFilter           bool              `json:"skip_sensitive_filter,omitempty"`
-	MailDraftConfirmID            string            `json:"mail_draft_confirm_id,omitempty"`
-	MailDraftConfirmRevision      int               `json:"mail_draft_confirm_revision,omitempty"`
-	MailDraftPatch                map[string]any    `json:"mail_draft_patch,omitempty"`
-	MailMailboxConfirm            string            `json:"mail_mailbox_confirm,omitempty"`
-	MailMailboxConfirmDraftID     string            `json:"mail_mailbox_confirm_draft_id,omitempty"`
-	UserEnvVars                   map[string]string `json:"user_env_vars,omitempty"`
+	ModelFallbackInitialSwitch    *chatFallbackInitialSwitch       `json:"model_fallback_initial_switch,omitempty"`
+	ModelFallbackCurrentID        string                           `json:"model_fallback_current_id,omitempty"`
+	ModelFallbackCandidates       []modelconfig.ChatModelCandidate `json:"model_fallback_candidates,omitempty"`
+	ToolPolicy                    string                           `json:"tool_policy,omitempty"`
+	SourceReference               string                           `json:"source_reference,omitempty"`
+	Debug                         bool                             `json:"debug,omitempty"`
+	Reasoning                     bool                             `json:"reasoning"`
+	ThinkingDepth                 string                           `json:"thinking_depth,omitempty"`
+	Priority                      *int                             `json:"priority,omitempty"`
+	Trace                         bool                             `json:"trace,omitempty"`
+	EnvironmentContext            map[string]any                   `json:"environment_context,omitempty"`
+	LLMConfig                     map[string]any                   `json:"llm_config,omitempty"`
+	OCRConfig                     map[string]any                   `json:"ocr_config,omitempty"`
+	ToolConfig                    map[string]any                   `json:"tool_config,omitempty"`
+	MCPConfig                     []any                            `json:"mcp_config,omitempty"`
+	MCPCapabilities               []any                            `json:"mcp_capabilities,omitempty"`
+	SystemMCPConfig               []any                            `json:"system_mcp_config,omitempty"`
+	ContextUsagePreview           bool                             `json:"context_usage_preview,omitempty"`
+	ContextPromptExport           bool                             `json:"context_prompt_export,omitempty"`
+	ContextPreviewAllowLLMRouting bool                             `json:"context_preview_allow_llm_routing,omitempty"`
+	SkipSensitiveFilter           bool                             `json:"skip_sensitive_filter,omitempty"`
+	MailDraftConfirmID            string                           `json:"mail_draft_confirm_id,omitempty"`
+	MailDraftConfirmRevision      int                              `json:"mail_draft_confirm_revision,omitempty"`
+	MailDraftPatch                map[string]any                   `json:"mail_draft_patch,omitempty"`
+	MailMailboxConfirm            string                           `json:"mail_mailbox_confirm,omitempty"`
+	MailMailboxConfirmDraftID     string                           `json:"mail_mailbox_confirm_draft_id,omitempty"`
+	UserEnvVars                   map[string]string                `json:"user_env_vars,omitempty"`
 }
 
 type ChatPersonalizationOptions struct {
@@ -157,6 +160,7 @@ type ChatWorkflowOptions struct {
 
 // LazyChatData text data text。
 type LazyChatData struct {
+	ModelOutput              *ChatModelOutput               `json:"model_output,omitempty"`
 	Text                     string                         `json:"text"`
 	Sources                  []any                          `json:"sources"`
 	Status                   string                         `json:"status"`
@@ -440,6 +444,7 @@ func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStr
 
 // UpstreamStreamChunk text ChatConversations text，text LazyChatResponse.Data。
 type UpstreamStreamChunk struct {
+	ModelOutput              *ChatModelOutput               `json:"model_output,omitempty"`
 	Text                     string                         `json:"text"`
 	Think                    string                         `json:"think"`
 	Status                   string                         `json:"status"`
@@ -611,6 +616,11 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 		if len(envVars) > 0 {
 			req.Runtime.UserEnvVars = envVars
 		}
+	}
+	if fallback, ok := body[chatModelFallbackBodyKey].(*chatFallbackState); ok {
+		req.Runtime.ModelFallbackInitialSwitch = fallback.initialSwitch
+		req.Runtime.ModelFallbackCurrentID = fallback.currentID
+		req.Runtime.ModelFallbackCandidates = fallback.candidates
 	}
 	if llmConfig, ok := body["llm_config"].(map[string]any); ok {
 		req.Runtime.LLMConfig = llmConfig
@@ -1023,8 +1033,14 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 				continue
 			}
 			chunk := upstreamStreamChunkFromData(d.Resp.Data)
+			if chunk.ModelOutput != nil && chunk.ModelOutput.RunID != "" && chunk.ModelOutput.RunID != req.Conversation.RunID {
+				continue
+			}
+			if err := validateModelOutputChunk(chunk); err != nil {
+				chunk.Err, chunk.ErrKind = err, UpstreamStreamErrorProtocol
+			}
 			isTerminalFrame := false
-			if terminalSeen && (hasBusinessStreamPayload(chunk) || chunk.RuntimeEvent != nil) {
+			if terminalSeen && (hasBusinessStreamPayload(chunk) || chunk.ExportSnapshot != nil || chunk.ModelOutput != nil || chunk.RuntimeEvent != nil) {
 				chunk.Err = errors.New("algorithm emitted payload after run_finished")
 				chunk.ErrKind = UpstreamStreamErrorProtocol
 			}
@@ -1107,6 +1123,7 @@ func upstreamStreamErrorKind(kind lazyStreamErrorKind) UpstreamStreamErrorKind {
 
 func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {
 	return UpstreamStreamChunk{
+		ModelOutput:              data.ModelOutput,
 		Text:                     data.Text,
 		Think:                    data.ReasoningText,
 		Status:                   data.Status,

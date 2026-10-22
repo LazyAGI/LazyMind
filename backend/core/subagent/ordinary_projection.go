@@ -41,6 +41,9 @@ func OrdinaryTask(ctx context.Context, db *gorm.DB, task *orm.SubAgentTask) (tas
 		out.Title = fmt.Sprintf("子任务 %d", task.SeqInConversation)
 	}
 	out.Status = task.Status
+	if task.Status == StatusFailed && (task.CurrentPhase == "model_fallback_exhausted" || task.CurrentPhase == "model_context_not_fit") {
+		out.FailureCode = task.CurrentPhase
+	}
 	if task.Status == StatusFailed {
 		out.CapabilityDependency = taskdisplay.CapabilityRecovery(task.Summary)
 	}
@@ -68,6 +71,9 @@ func OrdinaryTask(ctx context.Context, db *gorm.DB, task *orm.SubAgentTask) (tas
 		}
 	}
 	for _, step := range steps {
+		if step.ModelSwitch != nil && (out.ModelSwitch == nil || step.ModelSwitch.SwitchIndex > out.ModelSwitch.SwitchIndex) {
+			out.ModelSwitch = step.ModelSwitch
+		}
 		out.ProcessSteps = append(out.ProcessSteps, step)
 	}
 	sort.Slice(out.ProcessSteps, func(i, j int) bool {

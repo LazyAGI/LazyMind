@@ -753,7 +753,9 @@ export interface ChatChunkResponse {
     'exports'?: Array<ChatExport>;
     'history_id'?: string;
     'message'?: string;
+    'model_output'?: ChatModelOutput;
     'model_route'?: ChatModelRoute;
+    'model_switches'?: Array<ChatModelSwitchRecord>;
     'performance_metrics'?: RunPerformanceMetrics;
     'prompt_questions'?: Array<string>;
     'reasoning_content'?: string;
@@ -927,6 +929,26 @@ export const ChatModelListOpenAPIItemSourceEnum = {
 
 export type ChatModelListOpenAPIItemSourceEnum = typeof ChatModelListOpenAPIItemSourceEnum[keyof typeof ChatModelListOpenAPIItemSourceEnum];
 
+export interface ChatModelOutput {
+    /**
+     * Monotonic within this run. Host model calls start at 1; Core uses a closed 0 cursor to bind a new run.
+     */
+    'call_index': number;
+    /**
+     * Absent on model content. Boundaries checkpoint, commit, or restore the current call. Fenced delta_mode=replace snapshots replace body, reasoning_content, sources, and exports including explicit empty values. The first resume snapshot hydrates its cursor even when already closed.
+     */
+    'phase'?: ChatModelOutputPhaseEnum;
+    'run_id': string;
+}
+
+export const ChatModelOutputPhaseEnum = {
+    Begin: 'begin',
+    Commit: 'commit',
+    Rollback: 'rollback'
+} as const;
+
+export type ChatModelOutputPhaseEnum = typeof ChatModelOutputPhaseEnum[keyof typeof ChatModelOutputPhaseEnum];
+
 export interface ChatModelProviderOpenAPIItem {
     'id': string;
     'models'?: Array<ChatModelListOpenAPIItem>;
@@ -970,7 +992,8 @@ export const ChatModelRouteReasonEnum = {
     RetrySameModel: 'retry_same_model',
     Fixed: 'fixed',
     InitialSelection: 'initial_selection',
-    ModelUnavailable: 'model_unavailable'
+    ModelUnavailable: 'model_unavailable',
+    ModelFallback: 'model_fallback'
 } as const;
 
 export type ChatModelRouteReasonEnum = typeof ChatModelRouteReasonEnum[keyof typeof ChatModelRouteReasonEnum];
@@ -1025,6 +1048,42 @@ export const ChatModelSelectionOpenAPISourceEnum = {
 
 export type ChatModelSelectionOpenAPISourceEnum = typeof ChatModelSelectionOpenAPISourceEnum[keyof typeof ChatModelSelectionOpenAPISourceEnum];
 
+export interface ChatModelSwitchIdentity {
+    'candidate_id': string;
+    'model_id': string;
+    'model_name'?: string;
+    'provider_group_id': string;
+    'provider_name'?: string;
+    'source': ChatModelSwitchIdentitySourceEnum;
+}
+
+export const ChatModelSwitchIdentitySourceEnum = {
+    Own: 'own',
+    Shared: 'shared',
+    Cloud: 'cloud'
+} as const;
+
+export type ChatModelSwitchIdentitySourceEnum = typeof ChatModelSwitchIdentitySourceEnum[keyof typeof ChatModelSwitchIdentitySourceEnum];
+
+export interface ChatModelSwitchRecord {
+    'context_compacted': boolean;
+    'from': ChatModelSwitchIdentity;
+    'from_max_input_tokens': number | null;
+    'reason_code': string;
+    'switch_index': number;
+    'to': ChatModelSwitchIdentity;
+    'to_max_input_tokens': number | null;
+    'event_id': string;
+}
+export interface ChatModelSwitchedData {
+    'context_compacted': boolean;
+    'from': ChatModelSwitchIdentity;
+    'from_max_input_tokens': number | null;
+    'reason_code': string;
+    'switch_index': number;
+    'to': ChatModelSwitchIdentity;
+    'to_max_input_tokens': number | null;
+}
 export interface ChatModelsOpenAPIResponse {
     'auto_available': boolean;
     'default_selection': ChatModelSelectionOpenAPI;
@@ -1047,8 +1106,18 @@ export interface ChatRuntimeEvent {
     'event_id'?: string;
     'run_id'?: string;
     'schema_version'?: number;
-    'type'?: string;
+    'type'?: ChatRuntimeEventTypeEnum;
 }
+
+export const ChatRuntimeEventTypeEnum = {
+    ModelRetryScheduled: 'model_retry_scheduled',
+    ModelCallFinished: 'model_call_finished',
+    ModelSwitched: 'model_switched',
+    RunFinished: 'run_finished'
+} as const;
+
+export type ChatRuntimeEventTypeEnum = typeof ChatRuntimeEventTypeEnum[keyof typeof ChatRuntimeEventTypeEnum];
+
 export interface CheckDatabaseConnectionResponse {
     'message': string;
     'success': boolean;
@@ -1749,7 +1818,9 @@ export interface ConversationHistoryItem {
     'fork_read_only'?: boolean;
     'id'?: string;
     'input'?: Array<object>;
+    'model_output'?: ChatModelOutput;
     'model_route'?: ChatModelRoute;
+    'model_switches'?: Array<ChatModelSwitchRecord>;
     'performance_metrics'?: RunPerformanceMetrics;
     'query'?: string;
     'reason'?: string;
@@ -3872,6 +3943,7 @@ export interface ExternalExecutionWorkflow {
 export interface FailedRunAttempt {
     'create_time'?: string;
     'model_route'?: ChatModelRoute;
+    'model_switches'?: Array<ChatModelSwitchRecord>;
     'result'?: string;
     'run_id'?: string;
     'run_status'?: FailedRunAttemptRunStatusEnum;
@@ -4834,6 +4906,27 @@ export const MissingCapabilityIdEnum = {
 
 export type MissingCapabilityIdEnum = typeof MissingCapabilityIdEnum[keyof typeof MissingCapabilityIdEnum];
 
+export interface ModelCallFinishedData {
+    'attempt_count': number;
+    'failure'?: ModelCallFinishedDataFailure;
+    'finish'?: string;
+    'has_semantic_output': boolean;
+    'kind': ModelCallFinishedDataKindEnum;
+    'model_call_id': string;
+}
+
+export const ModelCallFinishedDataKindEnum = {
+    Finish: 'finish',
+    Failure: 'failure'
+} as const;
+
+export type ModelCallFinishedDataKindEnum = typeof ModelCallFinishedDataKindEnum[keyof typeof ModelCallFinishedDataKindEnum];
+
+export interface ModelCallFinishedDataFailure {
+    'code'?: string;
+    'diagnostic_id'?: string;
+    'origin'?: string;
+}
 
 export const ModelFailureCode = {
     AuthenticationFailed: 'authentication_failed',
@@ -5021,6 +5114,8 @@ export interface OrdinaryTaskView {
     'conversation_id': string;
     'display_key': string;
     'execution_id': string;
+    'failure_code'?: OrdinaryTaskViewFailureCodeEnum;
+    'model_switch'?: ChatModelSwitchRecord;
     'order': number;
     'pages': Pages;
     'parallel_group_id': string | null;
@@ -5048,6 +5143,12 @@ export interface OrdinaryTaskView {
     'workflow_step_id': string | null;
 }
 
+export const OrdinaryTaskViewFailureCodeEnum = {
+    ModelFallbackExhausted: 'model_fallback_exhausted',
+    ModelContextNotFit: 'model_context_not_fit'
+} as const;
+
+export type OrdinaryTaskViewFailureCodeEnum = typeof OrdinaryTaskViewFailureCodeEnum[keyof typeof OrdinaryTaskViewFailureCodeEnum];
 export const OrdinaryTaskViewSchemaVersionEnum = {
     NUMBER_1: 1
 } as const;
@@ -5438,6 +5539,7 @@ export type PublicDisplayProgressSchemaVersionEnum = typeof PublicDisplayProgres
 export interface PublicProcessStep {
     'elapsed_ms': number | null;
     'finished_at': string | null;
+    'model_switch'?: ChatModelSwitchRecord;
     'order': number;
     'revision': number;
     'started_at': string | null;
@@ -6708,6 +6810,43 @@ export interface TaskDocumentInfo {
     'document_size'?: number;
     'document_state'?: string;
 }
+/**
+ * Ordinary task model_output uses execution_id as run_id. type=model_output carries pure begin/commit/rollback controls; only commit may include the Host model_switched fact. Model text/think carry run/call identity without phase. SDK observations and Chat run_finished are not Task events. Developer reconnect or execution changes begin with a Core-generated task_start with snapshot=true and committed DB entries retaining call identity, followed by one closed cursor (0 when none), current open cache preview and ordered live events. Only this DB section initializes authoritative hydration; live task_start is idempotent for an established execution. On ordinary tool_calls/tool_results, seq is the zero-based durable step sequence used to merge snapshot and live delivery once. Terminal restores any open preview before done/error.
+ */
+export interface TaskEvent {
+    'chunk_index'?: number;
+    'content_type'?: string;
+    'current_phase'?: string;
+    'delta'?: string;
+    'durable_tool_results'?: Array<object>;
+    'estimated_sec'?: number;
+    'event_id'?: string;
+    'execution_id'?: string;
+    'message'?: string;
+    'model_output'?: ChatModelOutput;
+    'process_step'?: PublicProcessStep;
+    'progress'?: number;
+    'runtime_event'?: TaskModelRuntimeEvent;
+    'scope_version'?: number;
+    'seq'?: number;
+    'slot'?: string;
+    'snapshot'?: boolean;
+    'sources'?: Array<object>;
+    'status'?: string;
+    'steps'?: Array<string>;
+    'stream_id'?: string;
+    'summary'?: string;
+    'task_id'?: string;
+    'text'?: string;
+    'think'?: string;
+    'tool_calls'?: Array<object>;
+    'tool_results'?: Array<object>;
+    'type': string;
+    'v2_artifact_id'?: string;
+    'v2_revision_id'?: string;
+    'value'?: object;
+    'writing_subtasks'?: Array<object>;
+}
 export interface TaskFile {
     'content_type'?: string;
     'display_name'?: string;
@@ -6727,6 +6866,25 @@ export interface TaskInfo {
     'total_document_count'?: number;
     'total_document_size'?: number;
 }
+export interface TaskModelRuntimeEvent {
+    'data': ChatModelSwitchedData;
+    'event_id': string;
+    'run_id': string;
+    'schema_version': TaskModelRuntimeEventSchemaVersionEnum;
+    'type': TaskModelRuntimeEventTypeEnum;
+}
+
+export const TaskModelRuntimeEventSchemaVersionEnum = {
+    NUMBER_1: 1
+} as const;
+
+export type TaskModelRuntimeEventSchemaVersionEnum = typeof TaskModelRuntimeEventSchemaVersionEnum[keyof typeof TaskModelRuntimeEventSchemaVersionEnum];
+export const TaskModelRuntimeEventTypeEnum = {
+    ModelSwitched: 'model_switched'
+} as const;
+
+export type TaskModelRuntimeEventTypeEnum = typeof TaskModelRuntimeEventTypeEnum[keyof typeof TaskModelRuntimeEventTypeEnum];
+
 export interface TaskNotification {
     'account_id'?: string;
     'app_name'?: string;

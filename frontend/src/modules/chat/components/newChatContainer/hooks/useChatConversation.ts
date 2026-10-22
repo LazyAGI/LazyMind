@@ -1,7 +1,9 @@
 import { emitConversationGroupsChanged } from "../../../conversationOrganizer/api";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { message, Modal } from "antd";
+import { message, Modal, notification } from "antd";
+import type { ChatModelSwitchRecord } from "@/api/generated/core-client";
+import { formatModelSwitchLabel } from "@/modules/chat/utils/modelSwitchDisplay";
 import { useNavigate } from "react-router-dom";
 import { requestConversationStatusRefresh } from "@/modules/chat/utils/conversationStatusEvents";
 import {
@@ -19,6 +21,9 @@ import {
   CHAT_AUTO_ADVANCE_EVENT,
   CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT,
   CHAT_MEDIA_CAPABILITY_MISSING_EVENT,
+  CHAT_MODEL_SWITCH_EVENT,
+  CHAT_MODEL_SELECTION_CHANGED_EVENT,
+  type ChatModelSwitchNoticeDetail,
   CHAT_WORKFLOW_STEP_FEEDBACK_EVENT,
   type ChatAutoAdvanceDetail,
   type ChatWorkflowStepFeedbackDetail,
@@ -40,7 +45,7 @@ import {
   stripAskUserReceipt,
 } from "@/modules/chat/utils/message";
 import { mergeChatStreamDelta } from "@/modules/chat/utils/streamDelta";
-import { splitThinkingContent } from "@/modules/chat/utils/thinking";
+import { splitModelOutputContent, splitThinkingContent } from "@/modules/chat/utils/thinking";
 import {
   buildCitedMessageText,
   MAX_CITE_MESSAGE_COUNT,
@@ -105,7 +110,7 @@ interface UseChatConversationOptions {
   isWorkspacePermissionSaving?: () => boolean;
   concurrentStream?: boolean;
   onRequestPendingChange?: (pending: boolean) => void;
-  t: (key: string) => string;
+  t: (key: string, values?: Record<string, unknown>) => string;
 }
 
 export function useChatConversation({
@@ -127,6 +132,12 @@ export function useChatConversation({
   t,
 }: UseChatConversationOptions) {
   const navigate = useNavigate();
+  const [modelFallbackNotification, modelFallbackNotificationHolder] = notification.useNotification({
+    placement: "bottomRight", duration: 0, pauseOnHover: false, stack: false,
+  });
+  const seenModelSwitchesRef = useRef(new Set<string>());
+  const lastMainSelectionSwitchRef = useRef("");
+  const modelFallbackTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const sseRef = useRef<any>(null);
   const activeStreamRef = useRef(false);
   const fileRef = useRef<any>(null);
@@ -261,6 +272,14 @@ export function useChatConversation({
       CHAT_MEDIA_CAPABILITY_MISSING_EVENT,
       handleMediaCapabilityMissing,
     );
+    const handleTaskModelSwitch = (event: Event) => {
+      const detail = (event as CustomEvent<ChatModelSwitchNoticeDetail>).detail;
+      if (detail?.conversationId !== currentConversationIdRef.current) return;
+      announceModelSwitch({ model_switches: [detail.record], ...(detail.live ? { runtime_event: {
+        type: "model_switched", run_id: detail.runId, event_id: detail.record.event_id,
+      } } : {}) });
+    };
+    window.addEventListener(CHAT_MODEL_SWITCH_EVENT, handleTaskModelSwitch);
     const inspectPersistedCapabilityFailures = () => {
       const taskState = useTaskCenterStore.getState();
       const conversationId = taskState.activeConversationId;
@@ -301,9 +320,12 @@ export function useChatConversation({
     const unsubscribeWorkflow = useWorkflowStore.subscribe(inspectPersistedCapabilityFailures);
     inspectPersistedCapabilityFailures();
     return () => {
+      for (const timer of modelFallbackTimersRef.current.values()) clearTimeout(timer);
+      modelFallbackTimersRef.current.clear();
       runtimeWaitAbortRef.current?.abort();
       unsubscribeTasks();
       unsubscribeWorkflow();
+      window.removeEventListener(CHAT_MODEL_SWITCH_EVENT, handleTaskModelSwitch);
       window.removeEventListener(
         CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT,
         showFFmpegDependencyPrompt,
@@ -840,6 +862,58 @@ export function useChatConversation({
     onError({ type: "error", data: e.data, status: 0 });
   }
 
+  function clearModelFallbackNotifications() {
+    for (const timer of modelFallbackTimersRef.current.values()) clearTimeout(timer);
+    modelFallbackTimersRef.current.clear();
+    modelFallbackNotification.destroy();
+  }
+
+  function announceModelSwitch(result: any) {
+    const records: ChatModelSwitchRecord[] = Array.isArray(result.model_switches) ? result.model_switches : [];
+    const event = result.runtime_event;
+    const record = event?.type === "model_switched"
+      ? records.find(item => item.event_id === event.event_id)
+      : undefined;
+    const alreadySeen = record && seenModelSwitchesRef.current.has(record.event_id);
+    for (const item of records) seenModelSwitchesRef.current.add(item.event_id);
+    if (event?.type === "run_finished" && event.data?.status !== "completed") {
+      const key = `model-fallback:${event.run_id}`;
+      const timer = modelFallbackTimersRef.current.get(key);
+      if (timer) clearTimeout(timer);
+      modelFallbackTimersRef.current.delete(key);
+      modelFallbackNotification.destroy(key);
+    }
+    // Snapshots hydrate silently; only a new successful Host event announces.
+    if (!record || !event.run_id || alreadySeen) return;
+    const unknownWindow = t("chat.modelFallbackWindowUnknown");
+    const reason = record.reason_code === "model_config_unavailable"
+      ? t("chat.modelFallbackReason.model_config_unavailable")
+      : t(`chat.runStatus.codes.${record.reason_code}`, { defaultValue: t("chat.modelFallbackReason.unknown") });
+    const key = `model-fallback:${event.run_id}`;
+    modelFallbackNotification.open({
+      key,
+      type: "success",
+      role: "status",
+      message: t("chat.modelFallbackSucceeded"),
+      description: [
+        t("chat.modelFallbackDescription", {
+          from: formatModelSwitchLabel(record.from, record.from_max_input_tokens, unknownWindow),
+          to: formatModelSwitchLabel(record.to, record.to_max_input_tokens, unknownWindow), reason,
+        }),
+        record.context_compacted === true ? t("chat.modelFallbackContextAdapted") : undefined,
+      ].filter(Boolean).join(" "),
+      style: { overflowWrap: "anywhere" },
+    });
+    // AntD keeps the old expiry when updating the same key without hover pause.
+    // Own this timer so each new successful switch is visible for five seconds.
+    const previousTimer = modelFallbackTimersRef.current.get(key);
+    if (previousTimer) clearTimeout(previousTimer);
+    modelFallbackTimersRef.current.set(key, setTimeout(() => {
+      modelFallbackTimersRef.current.delete(key);
+      modelFallbackNotification.destroy(key);
+    }, 5000));
+  }
+
   function onMessage(e: any) {
     const result = UIUtils.jsonParser(e.data)?.result;
     if (!result) {
@@ -1118,15 +1192,19 @@ export function useChatConversation({
 
       const previousRawDelta =
         assistantMessage.raw_delta || assistantMessage.delta || "";
+      const modelOutput = result.model_output || assistantMessage.model_output;
       const mergedRawDelta = mergeChatStreamDelta(
         previousRawDelta,
         result.delta || "",
         result.delta_mode,
       );
-      const splitResult = splitThinkingContent(
-        mergedRawDelta,
-        assistantMessage.reasoning_content || "",
-      );
+      const fencedReplacement = result.model_output && result.delta_mode === "replace";
+      let rawReasoningContent = assistantMessage.raw_reasoning_content || "";
+      if (fencedReplacement) rawReasoningContent = result.reasoning_content ?? "";
+      else if (modelOutput) rawReasoningContent += result.reasoning_content || "";
+      const splitResult = modelOutput
+        ? splitModelOutputContent(mergedRawDelta, rawReasoningContent)
+        : splitThinkingContent(mergedRawDelta, assistantMessage.reasoning_content || "");
 
       assistantMessage = {
         ...assistantMessage,
@@ -1147,13 +1225,14 @@ export function useChatConversation({
         run_status: finalRunTerminal?.status || assistantMessage.run_status,
         id: result.messageId,
         raw_delta: mergedRawDelta,
+        ...(modelOutput ? { raw_reasoning_content: rawReasoningContent } : {}),
         delta: stripAskUserReceipt(
           splitResult.content,
           !!(result.ask_pending || assistantMessage.ask_pending),
         ),
         reasoning_content: splitResult.reasoning_content,
         sources:
-          result.sources && result.sources.length > 0
+          fencedReplacement || result.sources?.length > 0
             ? result.sources
             : assistantMessage.sources,
         ask_pending: mergeAskPending(
@@ -1167,6 +1246,16 @@ export function useChatConversation({
     };
 
     if (isActiveConversation) {
+      const selectionSwitch = result.model_route && Array.isArray(result.model_switches) &&
+        result.model_switches.findLast((record: ChatModelSwitchRecord) =>
+          record.to.model_id === result.model_route.model_id && record.to.source === result.model_route.source);
+      announceModelSwitch(result);
+      if (selectionSwitch && lastMainSelectionSwitchRef.current !== selectionSwitch.event_id) {
+        lastMainSelectionSwitchRef.current = selectionSwitch.event_id;
+        window.dispatchEvent(new CustomEvent(CHAT_MODEL_SELECTION_CHANGED_EVENT, {
+          detail: { conversationId: messageConversationId || currentConversationIdAtStart },
+        }));
+      }
       const previous = messageListRef.current;
       const newList = updateMessageListInternal(previous);
       scroll.trackNewContent(previous, newList);
@@ -1943,6 +2032,7 @@ export function useChatConversation({
   function replaceMessageList(id: string, list: any[], preserveScroll = false) {
     const userEdit = getUserEdit();
     const previousConversationId = currentConversationIdRef.current;
+    if (previousConversationId !== id) clearModelFallbackNotifications();
     if (previousConversationId === id) scroll.trackNewContent(messageListRef.current, list);
     if (previousConversationId && previousConversationId !== id) {
       userEdit?.persistCurrentUserMessageEditDraft(previousConversationId);
@@ -2023,6 +2113,7 @@ export function useChatConversation({
   }
 
   function createNewChat() {
+    clearModelFallbackNotifications();
     chatInputRef.current?.clearFiles();
     setFileList([]);
     clearCiteMessages();
@@ -2311,6 +2402,7 @@ export function useChatConversation({
   }
 
   return {
+    modelFallbackNotificationHolder,
     creationError,
     draftWorkspace,
     messageList,

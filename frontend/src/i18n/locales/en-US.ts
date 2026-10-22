@@ -2802,7 +2802,17 @@ const enUS = {
       "Select an available model and keep the last model that responded successfully; switch only when it is unavailable or you change the selection",
     modelRouteAutoLabel: "Auto · {{model}}",
     modelRouteFixedLabel: "{{model}}",
+    modelFallbackSucceeded: "Model switched successfully",
+    modelFallbackDescription: "{{from}} → {{to}}. Reason: {{reason}}",
+    modelFallbackHistory: "Model switch history",
+    modelFallbackWindowUnknown: "window unknown",
+    modelFallbackContextAdapted: "Context adapted.",
+    modelFallbackReason: {
+      model_config_unavailable: "The original model configuration is unavailable.",
+      unknown: "The model service is temporarily unavailable.",
+    },
     modelRouteReason: {
+      model_fallback: "This task switched automatically to a replacement model that responded successfully",
       fork_selection: "Inherited the model used in the source reply",
       initial_selection: "An available model was selected for this conversation",
       model_unavailable: "The previous model was unavailable, so another available model was selected",
@@ -3028,6 +3038,8 @@ const enUS = {
         quota: "Model quota exhausted",
       },
       codes: {
+        model_fallback_exhausted: "No replacement models are available for this task. Choose a model or check model settings, then retry.",
+        model_context_not_fit: "No available model can fit the current task context. Choose a model with a longer context or check model settings.",
         invalid_request: "The model cannot process this request. Check the model settings or adjust the input.",
         authentication_failed: "Model authentication failed. Check whether the key in your model settings is valid.",
         model_configuration: "Model configuration is unavailable. Check the model settings or switch models.",

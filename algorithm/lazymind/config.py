@@ -277,6 +277,10 @@ config.add('url_fetch_max_length', int, 4000, 'URL_FETCH_MAX_LENGTH',
            description='Maximum readable text length returned by url_fetch.')
 config.add('url_fetch_pdf_max_bytes', int, 100 * 1024 * 1024, 'URL_FETCH_PDF_MAX_BYTES',
            description='Maximum PDF download size for url_fetch ingestion.')
+config.add('model_fallback_timeout_seconds', float, 180, 'MODEL_FALLBACK_TIMEOUT_SECONDS',
+           description='Shared seconds for one main model request, including recovery summaries and retries.')
+config.add('model_fallback_max_candidates', int, 4, 'MODEL_FALLBACK_MAX_CANDIDATES',
+           description='Maximum model candidates per main request, including its initial model.')
 config.add('max_retries', int, 20, 'MAX_RETRIES', description='Max retries for agentic function call loop.')
 config.add('agentic_max_rounds_low', int, 6, 'AGENTIC_MAX_ROUNDS_LOW',
            description='Maximum ChatAgent ReAct rounds in low thinking-depth mode.')

@@ -126,6 +126,81 @@ func TestNonStreamHTTPAndHistoryShareFailureTerminal(t *testing.T) {
 	}
 }
 
+func TestNonStreamTransientRequestFailureWritePreservesAcceptedTerminal(t *testing.T) {
+	for _, cancelRequest := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cancelled=%t", cancelRequest), func(t *testing.T) {
+			db := newPromptTestDB(t).DB
+			stateStore := newRunDecisionTestStore(t)
+			store.Init(db, nil, stateStore)
+			t.Cleanup(func() { store.Init(nil, nil, nil) })
+			conversation := orm.Conversation{ID: "request-write-contract", BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: time.Now(), UpdatedAt: time.Now()}}
+			if err := db.Create(&conversation).Error; err != nil {
+				t.Fatal(err)
+			}
+			var writes int
+			callback := "contract-transient-request-failure-write"
+			if err := db.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+				values, ok := tx.Statement.Dest.(map[string]any)
+				if !ok || tx.Statement.Table != "chat_histories" || values["run_terminal"] == nil {
+					return
+				}
+				writes++
+				if writes == 1 {
+					tx.AddError(errors.New("injected transient request failure write"))
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { db.Callback().Update().Remove(callback) })
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var calls atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if cancelRequest {
+					cancel()
+				}
+				http.Error(w, "fixture unavailable", http.StatusServiceUnavailable)
+			}))
+			defer upstream.Close()
+			response := httptest.NewRecorder()
+			handleNonStreamChat(response, ctx, db, stateStore, upstream.URL, map[string]any{"user_id": "user-1"}, conversation.ID, "test question", chatPersistTarget{Seq: 1, HistoryID: "request-write-history"}, nil)
+			if response.Code != http.StatusBadGateway {
+				t.Fatalf("HTTP=%d body=%s", response.Code, response.Body.String())
+			}
+			var payload struct {
+				Data struct {
+					RunTerminal *RunTerminal `json:"run_terminal"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			var history orm.ChatHistory
+			if err := db.Where("id = ?", "request-write-history").Take(&history).Error; err != nil {
+				t.Fatal(err)
+			}
+			stored, err := parseRunTerminal(history.RunTerminal)
+			if err != nil || stored == nil || !reflect.DeepEqual(stored, payload.Data.RunTerminal) || history.RunStatus != stored.Status {
+				t.Fatalf("HTTP/DB mismatch: HTTP=%+v DB=%s err=%v", payload.Data.RunTerminal, history.RunTerminal, err)
+			}
+			cached, err := getChatStatus(context.Background(), stateStore, conversation.ID, history.ID)
+			if err != nil || !reflect.DeepEqual(cached.RunTerminal, stored) || cached.Status != stored.Status {
+				t.Fatalf("cache/DB mismatch: cache=%+v DB=%+v err=%v", cached, stored, err)
+			}
+			if cancelRequest && (stored.Status != "cancelled" || stored.Reason != "user_cancelled" || stored.Code != "") {
+				t.Fatalf("invalid cancellation: %+v", stored)
+			}
+			if !cancelRequest && (stored.Status != "failed" || stored.Code != "upstream_request_failed" || stored.DiagnosticID == "") {
+				t.Fatalf("invalid request failure: %+v", stored)
+			}
+			if writes != 2 || calls.Load() != 1 {
+				t.Fatalf("writes=%d upstream calls=%d", writes, calls.Load())
+			}
+		})
+	}
+}
+
 func TestNonStreamTransientFinalWritePreservesAcceptedTerminal(t *testing.T) {
 	for _, terminal := range []RunTerminal{
 		{Status: "completed", Reason: "normal", PartialOutput: true},

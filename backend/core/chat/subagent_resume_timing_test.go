@@ -45,7 +45,7 @@ func TestResumedSubagentBelongsToNewChatRound(t *testing.T) {
 	if err := tasktiming.Begin(t.Context(), db.DB, "new-root", "new-history", "conv", "owner", start.Add(20*time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	notice, err := handleTaskCreated(t.Context(), db.DB, shared, "conv", "new-history", "owner", &TaskCreatedEvent{TaskID: task.ID, AgentType: "research", Resume: true}, nil, nil, "dynamic")
+	notice, err := handleTaskCreated(t.Context(), db.DB, shared, "conv", "new-history", "owner", &TaskCreatedEvent{TaskID: task.ID, AgentType: "research", Resume: true}, nil, nil, "dynamic", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,7 +1,7 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
-import { createRef } from "react";
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { createElement, createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { message, Modal } from "antd";
+import { ConfigProvider, message, Modal } from "antd";
 import {
   ChatConversationsRequestActionEnum,
   ChatConversationsResponseFinishReasonEnum,
@@ -15,6 +15,9 @@ import { ordinary } from "@/modules/chat/components/TaskCenter/ordinaryTestFixtu
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { streamManager } from "@/modules/chat/utils/StreamManager";
 import { emitConversationActivity, emitConversationListRefresh } from "@/modules/chat/utils/conversationActivity";
+import type { ChatModelSwitchRecord } from "@/api/generated/core-client";
+import zhCN from "@/i18n/locales/zh-CN";
+import enUS from "@/i18n/locales/en-US";
 
 const {
   listConversationsMock,
@@ -52,7 +55,9 @@ vi.mock("@/modules/memory/toolApi", () => ({
   listToolAssets: listToolAssetsMock,
 }));
 
-vi.mock("antd", () => ({
+vi.mock("antd", async (importOriginal) => ({
+  notification: (await importOriginal<typeof import("antd")>()).notification,
+  ConfigProvider: (await importOriginal<typeof import("antd")>()).ConfigProvider,
   Button: "button",
   message: {
     error: vi.fn(),
@@ -111,6 +116,26 @@ function createMockStream() {
     close: vi.fn(),
   };
   return { stream, listeners };
+}
+
+function modelSwitch(overrides: Partial<ChatModelSwitchRecord> = {}): ChatModelSwitchRecord {
+  return {
+    event_id: "switch-1", switch_index: 1,
+    reason_code: "rate_limited", context_compacted: false,
+    from_max_input_tokens: null, to_max_input_tokens: null,
+    from: { candidate_id: "own:a", source: "own", model_id: "a", model_name: "原模型 A", provider_group_id: "provider-a", provider_name: "服务 A" },
+    to: { candidate_id: "own:b", source: "own", model_id: "b", model_name: "替代模型 B", provider_group_id: "provider-b", provider_name: "服务 B" },
+    ...overrides,
+  };
+}
+
+function modelFallbackTranslate(messages: typeof zhCN | typeof enUS) {
+  return (key: string, values: Record<string, unknown> = {}) => {
+    const value = key.split(".").reduce<unknown>((result, part) =>
+      result && typeof result === "object" ? (result as Record<string, unknown>)[part] : undefined, messages);
+    return String(typeof value === "string" ? value : values.defaultValue ?? key)
+      .replace(/{{(\w+)}}/g, (_, name: string) => String(values[name] ?? ""));
+  };
 }
 
 function createPreparedStream(clientConversationId: string) {
@@ -228,6 +253,420 @@ describe("useChatConversation regeneration recovery", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it.each([zhCN, enUS])("reuses the five-second notice for live task switches without announcing snapshot history", async (messages) => {
+    vi.useFakeTimers();
+    const { result } = renderConversation({ t: modelFallbackTranslate(messages) });
+    render(createElement(ConfigProvider, { theme: { token: { motion: false } } }, result.current.modelFallbackNotificationHolder));
+    act(() => result.current.replaceMessageList("task-notice", []));
+    const emit = (record: ChatModelSwitchRecord, live: boolean, conversationId = "task-notice") =>
+      window.dispatchEvent(new CustomEvent("lazymind:chat-model-switch", { detail: { conversationId, runId: "execution", record, live } }));
+    const record = modelSwitch({ from_max_input_tokens: 131072, to_max_input_tokens: 65536, context_compacted: true });
+    act(() => { emit(record, false); emit(record, true); });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    const next = { ...record, event_id: "task-switch-2", switch_index: 2 };
+    act(() => { emit(next, true, "other-conversation"); });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    await act(async () => { emit(next, true); });
+    expect(screen.getByRole("status")).toHaveTextContent("原模型 A (128K)");
+    expect(screen.getByRole("status")).toHaveTextContent("替代模型 B (64K)");
+    expect(screen.getByRole("status")).toHaveTextContent(messages.chat.modelFallbackSucceeded);
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000); emit(next, true); emit(next, false); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(999); });
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    act(() => result.current.replaceMessageList("other-conversation", []));
+    act(() => { emit({ ...next, event_id: "late-task-switch" }, true); });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("keeps committed SDK thinking and tool previews consistent through rollback and export", async () => {
+    const live = createMockStream();
+    const cached = createMockStream();
+    const cold = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => live.stream),
+      onOpenResumeSSE: vi.fn().mockReturnValueOnce(cached.stream).mockReturnValueOnce(cold.stream) });
+    act(() => result.current.replaceMessageList("thinking-output", []));
+    await act(async () => { await result.current.sendMessage({ text: "task" }); });
+    const emit = (frame: object) => live.listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "thinking-output", history_id: "thinking-history", ...frame,
+    } }) });
+    const cursor = { run_id: "thinking-run", call_index: 1 };
+    const prefix = "KEPT PREFIX<tp>COMMITTED TOOL</tp><trp>COMMITTED RESULT</trp>";
+    await act(async () => {
+      emit({ model_output: { ...cursor, call_index: 0, phase: "commit" } });
+      emit({ model_output: { ...cursor, phase: "begin" } });
+      emit({ model_output: cursor, reasoning_content: "COMMITTED SDK THINK" });
+      emit({ model_output: cursor, delta: "KEPT PREFIX" });
+      emit({ model_output: { ...cursor, phase: "commit" } });
+      emit({ delta: "<tp>COMMITTED TOOL</tp><trp>COMMITTED RESULT</trp>\nKEPT BODY" });
+      emit({ model_output: { ...cursor, call_index: 2, phase: "begin" } });
+      emit({ model_output: { ...cursor, call_index: 2 }, reasoning_content: "BAD THINK", delta: "BAD BODY" });
+      emit({ model_output: { ...cursor, call_index: 2, phase: "rollback" }, delta_mode: "replace",
+        delta: prefix + "\nKEPT BODY", reasoning_content: "COMMITTED SDK THINK", sources: [], exports: [] });
+    });
+    expect(result.current.messageList[1].delta.trim()).toBe("KEPT BODY");
+    expect(result.current.messageList[1].reasoning_content).toContain("COMMITTED SDK THINK");
+    expect(result.current.messageList[1].reasoning_content).toContain("COMMITTED TOOL");
+    await act(async () => {
+      emit({ model_output: { ...cursor, call_index: 3, phase: "begin" } });
+      emit({ model_output: { ...cursor, call_index: 3 }, reasoning_content: "\nB SDK THINK" });
+      emit({ model_output: { ...cursor, call_index: 3 }, delta: " B BODY" });
+      emit({ model_output: { ...cursor, call_index: 3, phase: "commit" } });
+      emit({ reasoning_content: "\nFINAL THINK" });
+      emit({ delta_mode: "replace", delta: prefix + "FINAL BODY", exports: [] });
+    });
+    const finished = result.current.messageList[1];
+    expect(finished.delta).toBe("FINAL BODY");
+    expect(finished.reasoning_content).not.toContain("BAD");
+    for (const marker of ["COMMITTED SDK THINK", "B SDK THINK", "FINAL THINK", "COMMITTED TOOL", "COMMITTED RESULT"]) {
+      expect(finished.reasoning_content.split(marker)).toHaveLength(2);
+    }
+    const metadata = { ...cursor, call_index: 3, phase: "commit" as const };
+    const restored = buildChatMessageListFromHistory([{ id: "thinking-history", query: "task", result: prefix + "FINAL BODY",
+      reasoning_content: "COMMITTED SDK THINK\nB SDK THINK\nFINAL THINK", model_output: metadata, sources: [], exports: [] }]);
+    expect(finished.delta).toBe(restored[1].delta);
+    expect(finished.reasoning_content).toBe(restored[1].reasoning_content);
+    act(() => result.current.replaceMessageList("thinking-output", restored));
+    for (const resumed of [cached, cold]) {
+      await act(async () => { await result.current.openResumeSSE("thinking-output"); });
+      await act(async () => { resumed.listeners.get("message")?.({ data: JSON.stringify({ result: {
+        conversation_id: "thinking-output", history_id: "thinking-history", model_output: metadata, delta_mode: "replace",
+        delta: prefix + "FINAL BODY", reasoning_content: "COMMITTED SDK THINK\nB SDK THINK\nFINAL THINK", sources: [], exports: [],
+      } }) }); });
+      expect(result.current.messageList[1].delta).toBe(finished.delta);
+      expect(result.current.messageList[1].reasoning_content).toBe(finished.reasoning_content);
+    }
+  });
+
+  it("matches Core thinking block boundaries for think, text, then think within one Host call", async () => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList("thinking-blocks", []));
+    await act(async () => { await result.current.sendMessage({ text: "task" }); });
+    const cursor = { run_id: "thinking-run", call_index: 1 };
+    const emit = (frame: object) => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "thinking-blocks", history_id: "h", ...frame,
+    } }) });
+    await act(async () => {
+      emit({ model_output: { ...cursor, call_index: 0, phase: "commit" } });
+      emit({ model_output: { ...cursor, phase: "begin" } });
+      emit({ model_output: cursor, reasoning_content: "FIRST" });
+      emit({ model_output: cursor, reasoning_content: "  MORE" });
+      emit({ model_output: cursor, delta: "body" });
+      emit({ model_output: cursor, reasoning_content: "\nSECOND" });
+      emit({ model_output: cursor, reasoning_content: "  TAIL" });
+    });
+    expect(result.current.messageList[1].reasoning_content).toBe("FIRST  MORE\nSECOND  TAIL");
+  });
+
+  it.each(["  MORE", "\nSECOND"])("continues canonical thinking from an open snapshot without inferring block state (%j)", async (delta) => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenResumeSSE: vi.fn(() => stream) });
+    const metadata = { run_id: "thinking-run", call_index: 1, phase: "begin" as const };
+    act(() => result.current.replaceMessageList("thinking-resume", buildChatMessageListFromHistory([{
+      id: "h", query: "task", result: "body", reasoning_content: "FIRST", model_output: metadata,
+    }])));
+    await act(async () => { await result.current.openResumeSSE("thinking-resume"); });
+    const emit = (frame: object) => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "thinking-resume", history_id: "h", ...frame,
+    } }) });
+    await act(async () => {
+      emit({ model_output: metadata, delta_mode: "replace", delta: "body", reasoning_content: "FIRST", sources: [], exports: [] });
+      emit({ model_output: { run_id: metadata.run_id, call_index: 1 }, reasoning_content: delta });
+    });
+    expect(result.current.messageList[1].delta).toBe("body");
+    expect(result.current.messageList[1].raw_reasoning_content).toBe("FIRST" + delta);
+    expect(result.current.messageList[1].reasoning_content).toBe("FIRST" + delta);
+  });
+
+  it.each([false, true])("restores only the failed model projection and keeps committed tools and artifacts (%s)", async (hasCommittedOutput) => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    const artifact = { artifact_id: "real-artifact", history_id: "output-history", content_type: "text", value: { text: "saved tool result" } };
+    act(() => {
+      useTaskCenterStore.setState({ artifactsByConversation: { "output-conversation": [artifact as any] } });
+      result.current.replaceMessageList("output-conversation", []);
+    });
+    await act(async () => { await result.current.sendMessage({ text: "task" }); });
+    const emit = (frame: object) => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "output-conversation", history_id: "output-history", ...frame,
+    } }) });
+    const cursor = { run_id: "output-run", call_index: 1 };
+    const body = hasCommittedOutput ? "completed answer" : "";
+    const think = hasCommittedOutput ? "completed tool preview" : "";
+    const sources = hasCommittedOutput ? [{ title: "committed reference" }] : [];
+    await act(async () => {
+      emit({ model_output: { ...cursor, call_index: 0, phase: "commit" } });
+      if (hasCommittedOutput) emit({ delta: body, reasoning_content: think, sources });
+      emit({ model_output: { ...cursor, phase: "begin" } });
+      emit({ model_output: cursor, reasoning_content: "BAD THINK" });
+      emit({ model_output: cursor, delta: "BAD DRAFT [1](#source-bad)", sources: [{ title: "bad reference" }],
+        exports: [{ export_id: "bad-preview", start: 0, end: 3 }] });
+    });
+    expect(result.current.messageList[1].delta).toContain("BAD DRAFT");
+    const rollback = { model_output: { ...cursor, phase: "rollback" }, delta_mode: "replace", delta: body,
+      reasoning_content: think, sources, exports: [] };
+    await act(async () => { emit(rollback); });
+    expect(result.current.messageList[1]).toMatchObject({ raw_delta: body, delta: body, reasoning_content: think, sources, exports: [] });
+    await act(async () => {
+      emit({ delta: " tool fact" });
+      emit(rollback);
+      emit({ model_output: cursor, delta: "LATE OLD" });
+      emit({ model_output: { ...cursor, call_index: 2, phase: "begin" } });
+      emit({ model_output: { ...cursor, call_index: 2 }, reasoning_content: (think ? "\n" : "") + "replacement reasoning" });
+      emit({ model_output: { ...cursor, call_index: 2 }, delta: " replacement" });
+      emit({ model_output: { ...cursor, call_index: 2, phase: "commit" } });
+      emit(rollback);
+    });
+    expect(result.current.messageList[1]).toMatchObject({ delta: `${body} tool fact replacement`, reasoning_content: [think, "replacement reasoning"].filter(Boolean).join("\n"), sources, exports: [] });
+    const finalExports = [{ export_id: "committed-export", start: 0, end: 5 }];
+    await act(async () => { emit({ delta_mode: "replace", delta: "final committed export", exports: finalExports }); });
+    expect(result.current.messageList[1]).toMatchObject({ delta: "final committed export", exports: finalExports, sources });
+    expect(useTaskCenterStore.getState().artifactsByConversation["output-conversation"]).toEqual([artifact]);
+  });
+
+  it("keeps metadata-less replacement behavior on the legacy stream", async () => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList("legacy-output", [
+      { role: RoleTypes.USER, delta: "task", history_id: "h" },
+      { role: RoleTypes.ASSISTANT, delta: "old", raw_delta: "old", reasoning_content: "legacy reasoning", sources: [{ title: "legacy source" }] },
+    ]));
+    await act(async () => { await result.current.openSSE([], ChatConversationsRequestActionEnum.ChatActionNext); });
+    await act(async () => { listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "legacy-output", delta_mode: "replace", delta: "legacy replacement", sources: [], reasoning_content: "",
+    } }) }); });
+    expect(result.current.messageList[1]).toMatchObject({ delta: "legacy replacement", reasoning_content: "legacy reasoning", sources: [{ title: "legacy source" }] });
+  });
+
+  it("refreshes model selection only for a new successful main conversation switch", async () => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    render(createElement(ConfigProvider, { theme: { token: { motion: false } } }, result.current.modelFallbackNotificationHolder));
+    act(() => result.current.replaceMessageList("selection-sync", []));
+    await act(async () => { await result.current.sendMessage({ text: "task" }); });
+    const refreshed = vi.fn();
+    window.addEventListener("lazymind:chat-model-selection-changed", refreshed);
+    try {
+      const child = modelSwitch({ event_id: "child-switch" });
+      act(() => window.dispatchEvent(new CustomEvent("lazymind:chat-model-switch", {
+        detail: { conversationId: "selection-sync", runId: "child-run", record: child, live: true },
+      })));
+      expect(refreshed).not.toHaveBeenCalled();
+      const record = modelSwitch();
+      const emit = (type: string) => listeners.get("message")?.({ data: JSON.stringify({ result: {
+        conversation_id: "selection-sync", history_id: "history", model_route: { mode: "fixed", model_id: "a", source: "own", selection_version: 1 },
+        model_switches: [], runtime_event: { type, run_id: "run", event_id: record.event_id,
+          data: { model_call_id: "call-a", attempt_count: 1, kind: "finish", has_semantic_output: true, finish: "stop" } },
+      } }) });
+      await act(async () => { emit("model_call_finished"); });
+      expect(refreshed).not.toHaveBeenCalled();
+      const success = modelSwitch({ event_id: "main-success" });
+      const frame = { result: {
+        conversation_id: "selection-sync", history_id: "history", model_route: { mode: "fixed", model_id: "b", source: "own", selection_version: 1 },
+        model_switches: [success], runtime_event: { type: "model_switched", run_id: "run", event_id: success.event_id, data: success },
+      } };
+      await act(async () => {
+        listeners.get("message")?.({ data: JSON.stringify(frame) });
+        listeners.get("message")?.({ data: JSON.stringify(frame) });
+      });
+      expect(refreshed).toHaveBeenCalledTimes(1);
+      expect(refreshed.mock.calls[0][0].detail).toEqual({ conversationId: "selection-sync" });
+    } finally {
+      window.removeEventListener("lazymind:chat-model-selection-changed", refreshed);
+    }
+  });
+
+  it("refreshes a newly confirmed main selection from a silent resume snapshot once", async () => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenResumeSSE: vi.fn(() => stream) });
+    render(createElement(ConfigProvider, { theme: { token: { motion: false } } }, result.current.modelFallbackNotificationHolder));
+    act(() => result.current.replaceMessageList("selection-resume", [
+      { role: RoleTypes.USER, delta: "task", history_id: "history" },
+      { role: RoleTypes.ASSISTANT, delta: "partial", history_id: "history", model_switches: [modelSwitch()] },
+    ]));
+    await act(async () => { await result.current.openResumeSSE("selection-resume"); });
+    const refreshed = vi.fn();
+    window.addEventListener("lazymind:chat-model-selection-changed", refreshed);
+    try {
+      const frame = { result: { conversation_id: "selection-resume", history_id: "history", delta_mode: "replace", delta: "partial",
+        model_route: { mode: "fixed", model_id: "b", source: "own", selection_version: 1 }, model_switches: [modelSwitch()],
+      } };
+      await act(async () => {
+        listeners.get("message")?.({ data: JSON.stringify(frame) });
+        listeners.get("message")?.({ data: JSON.stringify(frame) });
+      });
+      expect(refreshed).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    } finally {
+      window.removeEventListener("lazymind:chat-model-selection-changed", refreshed);
+    }
+  });
+
+  it.each([zhCN, enUS])("announces only successful Host switches in one five-second notification", async (messages) => {
+    vi.useFakeTimers();
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream), t: modelFallbackTranslate(messages) });
+    render(createElement(ConfigProvider, { theme: { token: { motion: false } } }, result.current.modelFallbackNotificationHolder));
+    act(() => result.current.replaceMessageList("fallback-conversation", []));
+    await act(async () => { await result.current.sendMessage({ text: "continue the task" }); });
+    const emit = (frame: object) => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "fallback-conversation", history_id: "fallback-history", ...frame,
+    } }) });
+    const record = modelSwitch({ from_max_input_tokens: 131072, to_max_input_tokens: 65536, context_compacted: true });
+    const originalRoute = { mode: "fixed", model_id: "a", model_name: "原模型 A" };
+    await act(async () => { emit({ model_route: originalRoute, model_switches: [{ ...record, event_id: "saved-switch" }],
+      runtime_event: { type: "model_call_finished", run_id: "fallback-run", event_id: "sdk-finish", data: { model_call_id: "sdk-call", kind: "finish" } } }); });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(result.current.messageList[result.current.messageList.length - 1]?.model_route).toEqual(originalRoute);
+
+    const successfulRoute = { mode: "fixed", model_id: "b", model_name: "替代模型 B" };
+    const confirmed = { model_switches: [record], model_route: successfulRoute,
+      runtime_event: { type: "model_switched", run_id: "fallback-run", event_id: record.event_id, data: record } };
+    await act(async () => { emit(confirmed); });
+    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.messageList[result.current.messageList.length - 1]?.model_route).toEqual(successfulRoute);
+    expect(screen.getByRole("status")).toHaveTextContent(messages.chat.modelFallbackSucceeded);
+    expect(screen.getByRole("status").closest(".ant-notification-bottomRight")).not.toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("原模型 A");
+    expect(screen.getByRole("status")).toHaveTextContent("替代模型 B");
+    expect(screen.getByRole("status")).toHaveTextContent("原模型 A (128K)");
+    expect(screen.getByRole("status")).toHaveTextContent("替代模型 B (64K)");
+    const adaptedText = messages === zhCN ? "上下文已适配" : "Context adapted";
+    expect(screen.getByRole("status")).toHaveTextContent(adaptedText);
+    expect(screen.getByRole("status")).toHaveTextContent(messages.chat.runStatus.codes.rate_limited);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    const second = modelSwitch({ event_id: "switch-2", switch_index: 2, from: record.to,
+      from_max_input_tokens: 65536, to_max_input_tokens: 32768,
+      to: { candidate_id: "own:c", source: "own", model_id: "c", model_name: "替代模型 C", provider_group_id: "provider-c" } });
+    const nextSwitch = { model_switches: [record, second],
+      runtime_event: { type: "model_switched", run_id: "fallback-run", event_id: second.event_id, data: second } };
+    await act(async () => { emit(nextSwitch); });
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(screen.getByRole("status")).toHaveTextContent(messages.chat.modelFallbackSucceeded);
+    expect(screen.getByRole("status")).toHaveTextContent("替代模型 B");
+    expect(screen.getByRole("status")).toHaveTextContent("替代模型 C");
+    expect(screen.getByRole("status")).not.toHaveTextContent(adaptedText);
+    fireEvent.mouseEnter(screen.getByRole("status"));
+    await act(async () => { emit(confirmed); });
+    expect(screen.getByRole("status")).toHaveTextContent("替代模型 C");
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000); emit(nextSwitch); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(999); });
+    expect(screen.getByRole("status")).toHaveTextContent(messages.chat.modelFallbackSucceeded);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("restores history and snapshots silently and announces a new successful switch without SDK fields", async () => {
+    vi.useFakeTimers();
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenResumeSSE: vi.fn(() => stream), t: modelFallbackTranslate(zhCN) });
+    render(createElement(ConfigProvider, { theme: { token: { motion: false } } }, result.current.modelFallbackNotificationHolder));
+    const prior = modelSwitch({ from_max_input_tokens: 131072, to_max_input_tokens: 65536, context_compacted: true });
+    act(() => result.current.replaceMessageList("fallback-resume", [
+      { role: RoleTypes.USER, delta: "question", history_id: "history" },
+      { role: RoleTypes.ASSISTANT, delta: "partial", history_id: "history", model_switches: [prior] },
+    ]));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    await act(async () => { await result.current.openResumeSSE("fallback-resume"); });
+    const emit = (frame: object) => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "fallback-resume", history_id: "history", ...frame,
+    } }) });
+    await act(async () => { emit({ delta_mode: "replace", delta: "partial", model_switches: [prior] }); });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    await act(async () => { emit({ model_switches: [prior], runtime_event: {
+      type: "model_switched", run_id: "old-run", event_id: prior.event_id, data: prior,
+    } }); });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    const record = modelSwitch({ event_id: "initial-switch", reason_code: "model_config_unavailable",
+      from: { candidate_id: "own:removed", source: "own", model_id: "removed-model", provider_group_id: "" } });
+    await act(async () => { emit({ model_switches: [prior, record], runtime_event: {
+      type: "model_switched", run_id: "new-run", event_id: record.event_id, data: record,
+    } }); });
+    expect(result.current.isStreaming).toBe(true);
+    expect(screen.getByRole("status")).toHaveTextContent("removed-model");
+    expect(screen.getByRole("status")).toHaveTextContent(zhCN.chat.modelFallbackReason.model_config_unavailable);
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(screen.getByRole("status")).toHaveTextContent(zhCN.chat.modelFallbackSucceeded);
+  });
+
+  it.each([zhCN, enUS])("shows unknown and exact declared windows without claiming adaptation", async (messages) => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream), t: modelFallbackTranslate(messages) });
+    render(createElement(ConfigProvider, { theme: { token: { motion: false } } }, result.current.modelFallbackNotificationHolder));
+    act(() => result.current.replaceMessageList("window-conversation", []));
+    await act(async () => { await result.current.sendMessage({ text: "task" }); });
+    const unknown = messages === zhCN ? "窗口未知" : "window unknown";
+    const cases = [
+      { from: null, to: 65536, fromLabel: unknown, toLabel: "64K" },
+      { from: 131072, to: null, fromLabel: "128K", toLabel: unknown },
+      { from: undefined, to: undefined, fromLabel: unknown, toLabel: unknown },
+      { from: 131073, to: 65535, fromLabel: "131073", toLabel: "65535" },
+    ];
+    for (const [index, window] of cases.entries()) {
+      const record = modelSwitch({ event_id: `window-${index}`, switch_index: index + 1,
+        from_max_input_tokens: window.from, to_max_input_tokens: window.to });
+      await act(async () => { listeners.get("message")?.({ data: JSON.stringify({ result: {
+        conversation_id: "window-conversation", history_id: "history", model_switches: [record],
+        runtime_event: { type: "model_switched", run_id: "window-run", event_id: record.event_id, data: record },
+      } }) }); });
+      expect(screen.getByRole("status")).toHaveTextContent(`原模型 A (${window.fromLabel})`);
+      expect(screen.getByRole("status")).toHaveTextContent(`替代模型 B (${window.toLabel})`);
+      expect(screen.getByRole("status")).not.toHaveTextContent(messages === zhCN ? "上下文已适配" : "Context adapted");
+    }
+  });
+
+  it.each([false, true])("retains exhaustion after zero or more successful switches (%s)", async (hasSwitch) => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream), t: modelFallbackTranslate(zhCN) });
+    render(createElement(ConfigProvider, { theme: { token: { motion: false } } }, result.current.modelFallbackNotificationHolder));
+    act(() => result.current.replaceMessageList("exhausted-conversation", []));
+    await act(async () => { await result.current.sendMessage({ text: "task" }); });
+    const emit = (frame: object) => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "exhausted-conversation", history_id: "history", ...frame,
+    } }) });
+    const records = hasSwitch ? [modelSwitch()] : [];
+    if (hasSwitch) {
+      await act(async () => { emit({ model_switches: records, runtime_event: {
+        type: "model_switched", run_id: "run", event_id: records[0].event_id, data: records[0],
+      } }); });
+      expect(screen.getByRole("status")).toHaveTextContent(zhCN.chat.modelFallbackSucceeded);
+    }
+    await act(async () => { emit({ model_switches: records, runtime_event: {
+      type: "run_finished", run_id: "run", event_id: "exhausted", data: {
+        status: "failed", reason: "runtime_failure", code: "model_fallback_exhausted", partial_output: false,
+      },
+    } }); });
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.messageList[result.current.messageList.length - 1]).toMatchObject({
+      model_switches: records, run_terminal: { code: "model_fallback_exhausted" },
+    });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it.each([false, true])("clears the old notice and ignores late frames when switching conversations (%s)", async (newChat) => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream), t: modelFallbackTranslate(zhCN) });
+    render(createElement(ConfigProvider, { theme: { token: { motion: false } } }, result.current.modelFallbackNotificationHolder));
+    act(() => result.current.replaceMessageList("conversation-a", []));
+    await act(async () => { await result.current.sendMessage({ text: "task" }); });
+    const emit = (record: ChatModelSwitchRecord) => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "conversation-a", history_id: "history", model_switches: [record],
+      runtime_event: { type: "model_switched", run_id: "run-a", event_id: record.event_id, data: record },
+    } }) });
+    await act(async () => { emit(modelSwitch()); });
+    expect(screen.getByRole("status")).toHaveTextContent(zhCN.chat.modelFallbackSucceeded);
+    act(() => {
+      if (newChat) result.current.createNewChat();
+      else result.current.replaceMessageList("conversation-b", []);
+    });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    await act(async () => { emit(modelSwitch({ event_id: "late-switch" })); });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it.each([false, true])("restores the authoritative deletion decision (%s) after HTTP rejection", async (answered) => {
@@ -1330,6 +1769,7 @@ describe("useChatConversation regeneration recovery", () => {
   it("keeps the failed attempt visible while retrying the same user turn", async () => {
     const { stream } = createMockStream();
     const onOpenSSE = vi.fn(() => stream);
+    const switches = [modelSwitch()];
     const failedMessages = [
       {
         role: RoleTypes.USER,
@@ -1343,6 +1783,7 @@ describe("useChatConversation regeneration recovery", () => {
         history_id: "history-1",
         run_id: "run-failed-1",
         run_status: "failed",
+        model_switches: switches,
         run_terminal: {
           status: "failed",
           reason: "model_failure",
@@ -1367,6 +1808,7 @@ describe("useChatConversation regeneration recovery", () => {
       archived_failure: true,
       original_history_id: "history-1",
       run_status: "failed",
+      model_switches: switches,
     });
     expect(result.current.messageList[2]).toMatchObject({
       role: RoleTypes.ASSISTANT,
@@ -1374,6 +1816,14 @@ describe("useChatConversation regeneration recovery", () => {
       delta: "",
     });
     expect(result.current.messageList[2].run_status).toBeUndefined();
+    expect(result.current.messageList[2].model_switches).toBeUndefined();
+
+    act(() => result.current.replaceMessageList("conversation-1", buildChatMessageListFromHistory([{
+      id: "history-1", query: "hello", result: "retried answer",
+      failed_attempts: [{ result: "partial", run_id: "run-failed-1", run_status: "failed", model_switches: switches }],
+    }])));
+    expect(result.current.messageList[1]).toMatchObject({ archived_failure: true, model_switches: switches });
+    expect(result.current.messageList[2].model_switches).toBeUndefined();
   });
 
   it.each([
