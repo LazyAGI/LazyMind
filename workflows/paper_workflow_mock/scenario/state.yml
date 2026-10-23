@@ -1,0 +1,18 @@
+initial: __start__
+transitions:
+  __start__:
+  - to: acknowledge
+  acknowledge:
+  - to: __end__
+steps:
+  acknowledge:
+    prompt: '{{runtime_instruction}}
+
+      调用 academic_mock_submit，它会读取服务端真实交接，原样保存完整参数并自动发布 mock_feedback。返回 artifact.status=ok 后立即完成，仅用简短中文说明任务类型、论文数量和 Mock 反馈。不要重抄交接 JSON，不要再次调用 save_artifacts，不编造正式综述、心得正文、PPT 文件或已核验结论。阅读心得可独立结束。'
+    tools:
+    - academic_mock_submit
+    outputs:
+    - material: mock_feedback
+    inputs:
+    - material: task_context
+      required: true

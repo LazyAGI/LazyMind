@@ -1483,6 +1483,9 @@ func sanitizeMailDraftUploads(value any) []map[string]any {
 	return out
 }
 
+var AcademicConversationContext func(context.Context, *gorm.DB, string, string) string
+var AcademicConversationUpdated func(context.Context, *gorm.DB, string)
+
 func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, query string, histories []orm.ChatHistory, raw map[string]any, resourceContext *evolution.ChatResourceContext, userID string, currentSeq int) map[string]any {
 	if strings.TrimSpace(sessionID) == "" {
 		sessionID = upstreamSessionID(convID)
@@ -1580,6 +1583,11 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	}
 	if mentionContext := buildMentionResourceContext(ctx, db, userID, histories, raw); mentionContext != "" {
 		body["query"] = mentionContext + "\n\nUser query:\n" + query
+	}
+	if AcademicConversationContext != nil {
+		if reference := AcademicConversationContext(ctx, db, userID, convID); reference != "" {
+			body["query"] = reference + "\n\nUser query:\n" + fmt.Sprint(body["query"])
+		}
 	}
 	if environmentContext, ok := raw["environment_context"].(map[string]any); ok {
 		body["environment_context"] = environmentContext
@@ -2912,6 +2920,9 @@ func streamSingleAnswer(
 		}
 	}
 	finalStatus := runTerminal.Status
+	if persisted && AcademicConversationUpdated != nil {
+		AcademicConversationUpdated(persistCtx, db, convID)
+	}
 	if persisted {
 		if err := taskcenter.FinalizeScheduledConversation(persistCtx, db, convID); err != nil {
 			log.Logger.Warn().Str("conversation_id", convID).Msg("scheduled_result_finalization_failed")

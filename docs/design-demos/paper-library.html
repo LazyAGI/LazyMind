@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>论文集 · AI 论文</title>
+<style>
+  :root {
+    --ink: #1c2430;
+    --muted: #5c6778;
+    --faint: #8b95a5;
+    --line: #e4e7ee;
+    --line-strong: #d5dae3;
+    --page: #f3f4f6;
+    --panel: #ffffff;
+    --blue: #1d4ed8;
+    --blue-soft: #e8efff;
+    --amber: #8a5a00;
+    --amber-soft: #fbf3df;
+    --green: #0f7a45;
+    --green-soft: #e7f6ee;
+    --danger: #b42318;
+    --shadow: 0 18px 50px rgba(28, 36, 48, 0.16);
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Songti SC", "Noto Serif SC", serif;
+    --sans: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  button:focus-visible, input:focus-visible, select:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+
+  .shell { min-height: 100%; display: flex; flex-direction: column; }
+  .note {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px;
+    background: #111827;
+    color: #e5e7eb;
+    font-size: 13px;
+  }
+  .note strong { color: #fff; font-weight: 650; }
+  .note p { margin: 0; max-width: 820px; }
+  .switch { display: flex; background: #1f2937; border-radius: 8px; padding: 3px; flex: none; }
+  .switch button {
+    border: 0;
+    background: transparent;
+    color: #d1d5db;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 6px;
+  }
+  .switch button[aria-pressed="true"] { background: #fff; color: #111827; }
+
+  .page { padding: 18px 20px 96px; max-width: 1280px; margin: 0 auto; width: 100%; }
+  .head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+  .crumb { color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+  h1 { margin: 0; font-size: 28px; letter-spacing: -0.03em; font-weight: 650; }
+  .lead { margin: 6px 0 0; color: var(--muted); }
+  .head-actions { display: flex; gap: 8px; }
+  .btn {
+    height: 36px;
+    padding: 0 14px;
+    border-radius: 8px;
+    border: 1px solid var(--line-strong);
+    background: var(--panel);
+  }
+  .btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn.quiet { background: transparent; }
+
+  .layout { display: grid; grid-template-columns: 196px minmax(0, 1fr); gap: 14px; align-items: start; }
+  .rail, .board { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+  .rail { padding: 8px; position: sticky; top: 12px; }
+  .rail button {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border: 0;
+    background: transparent;
+    border-radius: 8px;
+    min-height: 38px;
+    padding: 0 10px;
+    text-align: left;
+  }
+  .rail button[aria-current="true"] { background: var(--blue-soft); color: var(--blue); }
+  .rail .count { color: var(--faint); font-variant-numeric: tabular-nums; }
+  .rail button[aria-current="true"] .count { color: var(--blue); }
+
+  .board { overflow: hidden; }
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    align-items: center;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .seg { display: flex; gap: 4px; }
+  .seg button, .chip {
+    border: 1px solid transparent;
+    background: #f3f4f6;
+    border-radius: 999px;
+    height: 30px;
+    padding: 0 10px;
+  }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: #fff; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; }
+  .chip button { border: 0; background: transparent; padding: 0; color: var(--muted); }
+  .grow { margin-left: auto; display: flex; gap: 12px; align-items: center; color: var(--muted); font-size: 13px; }
+  .grow label { display: inline-flex; gap: 6px; align-items: center; }
+
+  .cols {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) 92px 52px 168px 72px;
+    gap: 8px;
+    padding: 8px 14px;
+    color: var(--faint);
+    font-size: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .cols.slim { grid-template-columns: 28px minmax(0, 1fr) 168px 72px; }
+  .row {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) 92px 52px 168px 72px;
+    gap: 8px;
+    align-items: center;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line);
+    width: 100%;
+    background: transparent;
+    text-align: left;
+  }
+  .row.slim { grid-template-columns: 28px minmax(0, 1fr) 168px 72px; }
+  .row:last-child { border-bottom: 0; }
+  .row:hover { background: #fafbfc; }
+  .row.selected { background: #f5f8ff; }
+  .title {
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+  }
+  .cite { color: var(--muted); font-size: 13px; margin-top: 3px; }
+  .file { color: var(--faint); font-size: 12px; margin-top: 2px; }
+  .status {
+    height: 28px;
+    border-radius: 999px;
+    border: 1px solid var(--line-strong);
+    background: #fff;
+    padding: 0 8px;
+  }
+  .star {
+    width: 32px;
+    height: 32px;
+    border: 0;
+    background: transparent;
+    border-radius: 8px;
+    font-size: 18px;
+    color: #c5cad3;
+  }
+  .star.on { color: var(--amber); }
+  .tags { display: flex; flex-wrap: wrap; gap: 4px; }
+  .tag {
+    background: #f3f4f6;
+    border-radius: 6px;
+    padding: 2px 6px;
+    font-size: 12px;
+    color: #344054;
+    border: 0;
+  }
+  .source {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .warn { color: var(--danger); font-size: 12px; }
+  .empty { padding: 48px 20px; color: var(--muted); }
+
+  .bar {
+    position: fixed;
+    left: 50%;
+    bottom: 16px;
+    transform: translateX(-50%);
+    width: min(880px, calc(100% - 32px));
+    background: #111827;
+    color: #fff;
+    border-radius: 12px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 12px;
+    box-shadow: var(--shadow);
+  }
+  .bar .btn { background: transparent; color: #fff; border-color: #374151; }
+  .bar .btn.primary { background: #fff; color: #111827; border-color: #fff; }
+  .bar .hint { color: #d1d5db; margin-right: auto; font-size: 13px; }
+
+  .mask {
+    position: fixed;
+    inset: 0;
+    background: rgba(17, 24, 39, 0.38);
+    display: flex;
+    justify-content: flex-end;
+  }
+  .sheet {
+    width: min(460px, 100%);
+    height: 100%;
+    background: #fff;
+    padding: 22px 22px 28px;
+    overflow: auto;
+    box-shadow: var(--shadow);
+  }
+  .sheet h2 { margin: 0 0 6px; font-size: 22px; letter-spacing: -0.03em; }
+  .sheet .sub { color: var(--muted); margin: 0 0 18px; }
+  .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+  .field span { font-size: 13px; color: var(--muted); }
+  .field input, .field select, .field textarea {
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: #fff;
+  }
+  .choices { display: flex; flex-direction: column; gap: 8px; }
+  .choice {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    background: #fff;
+    text-align: left;
+  }
+  .choice[aria-pressed="true"] { border-color: var(--blue); background: var(--blue-soft); }
+  .choice b { display: block; }
+  .choice small { color: var(--muted); }
+  .item {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .sheet-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+  .legacy { width: 100%; border-collapse: collapse; background: #fff; }
+  .legacy th, .legacy td { border-bottom: 1px solid var(--line); padding: 10px 12px; text-align: left; font-size: 13px; white-space: nowrap; }
+  .legacy th { color: var(--faint); font-weight: 550; background: #fafbfc; }
+  .legacy-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; }
+    .rail { position: static; display: flex; gap: 4px; overflow: auto; }
+    .rail button { width: auto; }
+    .cols, .row, .row.slim, .cols.slim { grid-template-columns: 28px minmax(0, 1fr); }
+    .status, .star, .tags, .source, .cols span:nth-child(n+3) { display: none; }
+    .row .status, .row .star, .row .tags, .row .source { display: flex; }
+    .meta-line { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .note { align-items: flex-start; flex-direction: column; }
+    .head { flex-direction: column; align-items: flex-start; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="note">
+    <p><strong>方案稿。</strong> 只替换论文集知识库的列表。文件名、大小、更新人退到次要信息；题录、个人阅读状态和研究方向成为主体。单篇阅读对话不在这版里。</p>
+    <div class="switch" role="group" aria-label="界面对照">
+      <button type="button" id="show-next" aria-pressed="true">论文列表</button>
+      <button type="button" id="show-now" aria-pressed="false">当前文件表</button>
+    </div>
+  </div>
+  <div class="page" id="app"></div>
+</div>
+<script>
+const folders = [
+  { id: "all", name: "全部" },
+  { id: "ml", name: "机器学习" },
+  { id: "llm", name: "大模型" },
+  { id: "eval", name: "评测" }
+];
+
+const papers = [
+  { id: "p1", folder: "llm", title: "Attention Is All You Need", authors: "Vaswani 等", venue: "NeurIPS", year: 2017, pages: 15, status: "reading", important: true, tags: ["Transformer", "基线"], source: "zotero", parse: "ready", file: "1706.03762.pdf", size: "2.1 MB", updated: "10-18 14:20", editor: "程昊" },
+  { id: "p2", folder: "llm", title: "BERT: Pre-training of Deep Bidirectional Transformers", authors: "Devlin 等", venue: "NAACL", year: 2019, pages: 16, status: "read", important: true, tags: ["预训练"], source: "zotero", parse: "ready", file: "bert.pdf", size: "756 KB", updated: "10-12 09:04", editor: "程昊" },
+  { id: "p3", folder: "llm", title: "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks", authors: "Lewis 等", venue: "NeurIPS", year: 2020, pages: 12, status: "reading", important: false, tags: ["RAG", "检索"], source: "local", parse: "ready", file: "rag_lewis_2020.pdf", size: "1.4 MB", updated: "10-19 21:11", editor: "程昊" },
+  { id: "p4", folder: "llm", title: "Lost in the Middle: How Language Models Use Long Contexts", authors: "Liu 等", venue: "TACL", year: 2024, pages: 18, status: "unread", important: false, tags: ["长上下文"], source: "zotero", parse: "ready", file: "lost-in-the-middle.pdf", size: "980 KB", updated: "10-20 08:40", editor: "程昊" },
+  { id: "p5", folder: "llm", title: "LoRA: Low-Rank Adaptation of Large Language Models", authors: "Hu 等", venue: "ICLR", year: 2022, pages: 13, status: "unread", important: true, tags: ["微调"], source: "zotero", parse: "parsing", file: "lora.pdf", size: "1.1 MB", updated: "10-20 11:02", editor: "程昊" },
+  { id: "p6", folder: "llm", title: "Chain-of-Thought Prompting Elicits Reasoning in Large Language Models", authors: "Wei 等", venue: "NeurIPS", year: 2022, pages: 14, status: "reading", important: true, tags: ["推理"], source: "zotero", parse: "ready", file: "cot.pdf", size: "640 KB", updated: "10-16 19:33", editor: "程昊" },
+  { id: "p7", folder: "ml", title: "Deep Residual Learning for Image Recognition", authors: "He 等", venue: "CVPR", year: 2016, pages: 12, status: "read", important: false, tags: ["视觉"], source: "zotero", parse: "ready", file: "resnet.pdf", size: "1.6 MB", updated: "09-02 10:18", editor: "程昊" },
+  { id: "p8", folder: "ml", title: "Adam: A Method for Stochastic Optimization", authors: "Kingma、Ba", venue: "ICLR", year: 2015, pages: 15, status: "unread", important: false, tags: ["优化"], source: "local", parse: "ready", file: "adam_optimizer_final_v3.pdf", size: "520 KB", updated: "08-30 16:45", editor: "程昊" },
+  { id: "p9", folder: "eval", title: "Measuring Massive Multitask Language Understanding", authors: "Hendrycks 等", venue: "ICLR", year: 2021, pages: 20, status: "unread", important: false, tags: ["评测"], source: "local", parse: "failed", file: "mmlu_scan.pdf", size: "8.4 MB", updated: "10-11 13:09", editor: "程昊" },
+  { id: "p10", folder: "eval", title: "Training Verifiers to Solve Math Word Problems", authors: "Cobbe 等", venue: "arXiv", year: 2021, pages: 11, status: "read", important: false, tags: ["评测", "推理"], source: "zotero", parse: "ready", file: "gsm8k.pdf", size: "430 KB", updated: "10-01 09:22", editor: "程昊" }
+];
+
+const statusLabel = { unread: "未读", reading: "阅读中", read: "已读" };
+const parseLabel = { ready: "已解析", parsing: "解析中", failed: "解析失败" };
+const sourceLabel = { zotero: "Zotero", local: "本地" };
+
+const state = {
+  view: "next",
+  folder: "all",
+  status: "all",
+  showStatus: true,
+  showImportance: true,
+  selected: new Set(),
+  match: "all",
+  conditions: [],
+  sheet: null,
+  zoteroStep: "pick",
+  zoteroCollection: "llm-reading",
+  zoteroPicked: new Set(["z1", "z2"]),
+  reviewScope: "selected",
+  reviewTheme: "检索增强生成",
+  expandFocus: "后续改进"
+};
+
+const zoteroItems = [
+  { id: "z1", title: "Self-RAG: Learning to Retrieve, Generate, and Critique", meta: "Asai 等 · ICLR 2024", pdf: true, dup: false },
+  { id: "z2", title: "RAPTOR: Recursive Abstractive Processing for Tree-Organized Retrieval", meta: "Sarthi 等 · ICLR 2024", pdf: true, dup: false },
+  { id: "z3", title: "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks", meta: "Lewis 等 · NeurIPS 2020", pdf: true, dup: true }
+];
+
+function usable(paper) { return paper.parse === "ready"; }
+
+function matches(paper) {
+  if (state.folder !== "all" && paper.folder !== state.folder) return false;
+  if (state.status !== "all" && paper.status !== state.status) return false;
+  if (!state.conditions.length) return true;
+  const checks = state.conditions.map((cond) => {
+    if (cond.field === "tag") return paper.tags.includes(cond.value);
+    if (cond.field === "status") return paper.status === cond.value;
+    if (cond.field === "importance") return paper.important === (cond.value === "important");
+    if (cond.field === "parse") return paper.parse === cond.value;
+    return true;
+  });
+  return state.match === "all" ? checks.every(Boolean) : checks.some(Boolean);
+}
+
+function visiblePapers() { return papers.filter(matches); }
+
+function folderCount(id) {
+  return papers.filter((paper) => id === "all" || paper.folder === id).length;
+}
+
+function el(html) {
+  const node = document.createElement("template");
+  node.innerHTML = html.trim();
+  return node.content.firstElementChild;
+}
+
+function render() {
+  const root = document.getElementById("app");
+  root.replaceChildren();
+  if (state.view === "now") {
+    root.append(renderLegacy());
+    return;
+  }
+  root.append(renderHead(), renderBody());
+  const selected = papers.filter((paper) => state.selected.has(paper.id));
+  if (selected.length) root.append(renderBar(selected));
+  if (state.sheet) root.append(renderSheet());
+}
+
+function renderHead() {
+  return el(`<header class="head">
+    <div>
+      <div class="crumb">知识库 / 论文集</div>
+      <h1>AI 论文</h1>
+      <p class="lead">${papers.length} 篇。阅读状态只属于你，同库的其他人另记一份。</p>
+    </div>
+    <div class="head-actions">
+      <button class="btn primary" id="open-zotero" type="button">从 Zotero 导入</button>
+      <button class="btn" type="button">上传 PDF</button>
+    </div>
+  </header>`);
+}
+
+function renderBody() {
+  const layout = el(`<div class="layout"><nav class="rail" aria-label="研究方向"></nav><section class="board"></section></div>`);
+  const rail = layout.querySelector(".rail");
+  folders.forEach((folder) => {
+    const button = el(`<button type="button"><span>${folder.name}</span><span class="count">${folderCount(folder.id)}</span></button>`);
+    if (state.folder === folder.id) button.setAttribute("aria-current", "true");
+    button.onclick = () => { state.folder = folder.id; render(); };
+    rail.append(button);
+  });
+  const board = layout.querySelector(".board");
+  board.append(renderFilters());
+  const list = visiblePapers();
+  const slim = !state.showStatus && !state.showImportance;
+  const cols = el(`<div class="cols ${slim ? "slim" : ""}"><span></span><span>论文</span></div>`);
+  if (state.showStatus) cols.append(el("<span>阅读</span>"));
+  if (state.showImportance) cols.append(el("<span>重要</span>"));
+  cols.append(el("<span>标签</span>"), el("<span>来源</span>"));
+  board.append(cols);
+  if (!list.length) {
+    board.append(el(`<div class="empty">没有符合这些条件的论文。去掉一条筛选后再看。</div>`));
+  }
+  list.forEach((paper) => board.append(renderRow(paper, slim)));
+  return layout;
+}
+
+function renderFilters() {
+  const box = el(`<div class="filters"><div class="seg" role="group" aria-label="阅读状态"></div></div>`);
+  const seg = box.querySelector(".seg");
+  [["all", "全部"], ["unread", "未读"], ["reading", "阅读中"], ["read", "已读"]].forEach(([id, label]) => {
+    const count = id === "all"
+      ? papers.filter((paper) => state.folder === "all" || paper.folder === state.folder).length
+      : papers.filter((paper) => (state.folder === "all" || paper.folder === state.folder) && paper.status === id).length;
+    const button = el(`<button type="button" aria-pressed="${state.status === id}">${label} ${count}</button>`);
+    button.onclick = () => { state.status = id; render(); };
+    seg.append(button);
+  });
+  state.conditions.forEach((cond, index) => {
+    const chip = el(`<span class="chip">${cond.label}<button type="button" aria-label="移除条件">×</button></span>`);
+    chip.querySelector("button").onclick = () => { state.conditions.splice(index, 1); render(); };
+    box.append(chip);
+  });
+  const add = el(`<button class="btn quiet" type="button">添加筛选</button>`);
+  add.onclick = () => { state.sheet = "filter"; render(); };
+  box.append(add);
+  const grow = el(`<div class="grow">
+    <label><input type="checkbox" ${state.showStatus ? "checked" : ""}/> 阅读状态</label>
+    <label><input type="checkbox" ${state.showImportance ? "checked" : ""}/> 重要程度</label>
+  </div>`);
+  grow.querySelectorAll("input")[0].onchange = (event) => { state.showStatus = event.target.checked; render(); };
+  grow.querySelectorAll("input")[1].onchange = (event) => { state.showImportance = event.target.checked; render(); };
+  box.append(grow);
+  return box;
+}
+
+function renderRow(paper, slim) {
+  const row = el(`<div class="row ${slim ? "slim" : ""} ${state.selected.has(paper.id) ? "selected" : ""}"></div>`);
+  const check = el(`<input type="checkbox" aria-label="选择 ${paper.title}" ${state.selected.has(paper.id) ? "checked" : ""}/>`);
+  check.onchange = () => {
+    if (check.checked) state.selected.add(paper.id);
+    else state.selected.delete(paper.id);
+    render();
+  };
+  const main = el(`<div><div class="title"></div><div class="cite"></div><div class="file"></div></div>`);
+  main.querySelector(".title").textContent = paper.title;
+  main.querySelector(".cite").textContent = `${paper.authors} · ${paper.venue} ${paper.year}`;
+  const file = main.querySelector(".file");
+  if (paper.parse === "ready") file.remove();
+  else {
+    file.textContent = parseLabel[paper.parse];
+    file.classList.add("warn");
+  }
+  row.append(check, main);
+  if (state.showStatus) {
+    const select = el(`<select class="status" aria-label="${paper.title} 的阅读状态"></select>`);
+    Object.entries(statusLabel).forEach(([value, label]) => {
+      const option = el(`<option value="${value}">${label}</option>`);
+      if (paper.status === value) option.selected = true;
+      select.append(option);
+    });
+    select.onchange = () => { paper.status = select.value; render(); };
+    row.append(select);
+  }
+  if (state.showImportance) {
+    const star = el(`<button class="star ${paper.important ? "on" : ""}" type="button" aria-pressed="${paper.important}" aria-label="${paper.important ? "取消重要" : "标为重要"}">${paper.important ? "★" : "☆"}</button>`);
+    star.onclick = () => { paper.important = !paper.important; render(); };
+    row.append(star);
+  }
+  const tags = el(`<div class="tags"></div>`);
+  paper.tags.forEach((tag) => {
+    const button = el(`<button class="tag" type="button"></button>`);
+    button.textContent = tag;
+    button.onclick = () => {
+      if (!state.conditions.some((cond) => cond.field === "tag" && cond.value === tag)) {
+        state.conditions.push({ field: "tag", value: tag, label: `标签包含 ${tag}` });
+      }
+      render();
+    };
+    tags.append(button);
+  });
+  const source = el(`<div class="source"></div>`);
+  source.textContent = sourceLabel[paper.source];
+  row.append(tags, source);
+  return row;
+}
+
+function renderBar(selected) {
+  const ready = selected.filter(usable);
+  const bar = el(`<div class="bar" role="region" aria-label="已选论文"><div class="hint">已选 ${selected.length} 篇，可阅读 ${ready.length} 篇</div></div>`);
+  const review = el(`<button class="btn primary" type="button">生成综述（${ready.length}）</button>`);
+  review.disabled = ready.length < 2;
+  review.onclick = () => { state.sheet = "review"; render(); };
+  const expand = el(`<button class="btn" type="button">自动拓展（${ready.length}）</button>`);
+  expand.disabled = ready.length < 1;
+  expand.onclick = () => { state.sheet = "expand"; render(); };
+  const ppt = el(`<button class="btn" type="button">汇报 PPT（${ready.length}）</button>`);
+  ppt.disabled = ready.length < 1;
+  ppt.onclick = () => { state.sheet = "ppt"; render(); };
+  bar.append(review, expand, ppt);
+  return bar;
+}
+
+function renderSheet() {
+  const mask = el(`<div class="mask"><aside class="sheet" role="dialog" aria-modal="true"></aside></div>`);
+  mask.onclick = (event) => { if (event.target === mask) { state.sheet = null; render(); } };
+  const sheet = mask.querySelector(".sheet");
+  if (state.sheet === "zotero") sheet.append(zoteroSheet());
+  if (state.sheet === "filter") sheet.append(filterSheet());
+  if (state.sheet === "review") sheet.append(reviewSheet());
+  if (state.sheet === "expand") sheet.append(expandSheet());
+  if (state.sheet === "ppt") sheet.append(pptSheet());
+  return mask;
+}
+
+function closeButton() {
+  const button = el(`<button class="btn" type="button">关闭</button>`);
+  button.onclick = () => { state.sheet = null; render(); };
+  return button;
+}
+
+function zoteroSheet() {
+  const wrap = el(`<div><h2>从 Zotero 导入</h2><p class="sub">已连接个人库。导入后进入当前论文集，来源记为 Zotero，阅读状态为未读。</p></div>`);
+  const collections = el(`<div class="field"><span>文献集</span><select id="collection"><option value="llm-reading">LLM reading</option><option value="to-read">To read</option></select></div>`);
+  wrap.append(collections);
+  zoteroItems.forEach((item) => {
+    const row = el(`<label class="item"><input type="checkbox" ${state.zoteroPicked.has(item.id) ? "checked" : ""} ${item.dup ? "disabled" : ""}/><span><b></b><small></small></span></label>`);
+    row.querySelector("b").textContent = item.title;
+    row.querySelector("small").textContent = `${item.meta}${item.pdf ? " · 有 PDF" : " · 无全文"}${item.dup ? " · 库中已有" : ""}`;
+    row.querySelector("input").onchange = (event) => {
+      if (event.target.checked) state.zoteroPicked.add(item.id);
+      else state.zoteroPicked.delete(item.id);
+    };
+    wrap.append(row);
+  });
+  const actions = el(`<div class="sheet-actions"></div>`);
+  const go = el(`<button class="btn primary" type="button">导入所选</button>`);
+  go.onclick = () => {
+    state.zoteroPicked.forEach((id) => {
+      const item = zoteroItems.find((entry) => entry.id === id);
+      if (!item || item.dup || papers.some((paper) => paper.title === item.title)) return;
+      papers.unshift({
+        id, folder: "llm", title: item.title, authors: item.meta.split(" · ")[0], venue: item.meta.split(" · ")[1].split(" ")[0], year: 2024, pages: 12,
+        status: "unread", important: false, tags: ["RAG"], source: "zotero", parse: "parsing", file: `${id}.pdf`, size: "—", updated: "刚刚", editor: "程昊"
+      });
+    });
+    state.sheet = null;
+    state.zoteroPicked.clear();
+    render();
+  };
+  actions.append(closeButton(), go);
+  wrap.append(actions);
+  return wrap;
+}
+
+function filterSheet() {
+  const wrap = el(`<div><h2>筛选</h2><p class="sub">来源默认展示，不参与隐藏。条件可以要求全部满足，或任一满足。</p>
+    <div class="seg" role="group" aria-label="匹配方式">
+      <button type="button" id="match-all" aria-pressed="${state.match === "all"}">全部满足</button>
+      <button type="button" id="match-any" aria-pressed="${state.match === "any"}">任一满足</button>
+    </div></div>`);
+  wrap.querySelector("#match-all").onclick = () => { state.match = "all"; render(); };
+  wrap.querySelector("#match-any").onclick = () => { state.match = "any"; render(); };
+  const field = el(`<div class="field" style="margin-top:16px"><span>新增条件</span><select id="cond">
+    <option value="tag:RAG">标签包含 RAG</option>
+    <option value="tag:评测">标签包含 评测</option>
+    <option value="importance:important">重要程度为重要</option>
+    <option value="parse:failed">解析状态为失败</option>
+    <option value="status:unread">阅读状态为未读</option>
+  </select></div>`);
+  wrap.append(field);
+  const actions = el(`<div class="sheet-actions"></div>`);
+  const add = el(`<button class="btn primary" type="button">加上这条</button>`);
+  add.onclick = () => {
+    const [kind, value] = wrap.querySelector("#cond").value.split(":");
+    const label = wrap.querySelector("#cond").selectedOptions[0].textContent;
+    state.conditions.push({ field: kind, value, label });
+    state.sheet = null;
+    render();
+  };
+  actions.append(closeButton(), add);
+  wrap.append(actions);
+  return wrap;
+}
+
+function selectedReady() {
+  return papers.filter((paper) => state.selected.has(paper.id) && usable(paper));
+}
+
+function reviewSheet() {
+  const ready = selectedReady();
+  const skipped = papers.filter((paper) => state.selected.has(paper.id) && !usable(paper));
+  const wrap = el(`<div><h2>生成综述</h2><p class="sub">确认范围后交给学术研究与论文写作。这里不写综述正文。</p></div>`);
+  const list = el(`<div class="field"><span>将纳入 ${ready.length} 篇</span></div>`);
+  ready.forEach((paper) => list.append(el(`<div class="item"><span><b>${paper.title}</b><small>${paper.important ? "重要，综述时加重参考" : "普通参考"}</small></span></div>`)));
+  if (skipped.length) list.append(el(`<p class="warn">${skipped.map((paper) => paper.title).join("、")} 未解析完成，本次不纳入。</p>`));
+  wrap.append(list);
+  const theme = el(`<label class="field"><span>主题</span><input id="theme" value="${state.reviewTheme}"/></label>`);
+  wrap.append(theme);
+  const choices = el(`<div class="choices"></div>`);
+  [["selected", "只用已选论文", "不继续查找参考文献"], ["refs", "纳入参考文献", "只做去重和全文检查，不递归扩展，也不自动入库"]].forEach(([id, name, detail]) => {
+    const button = el(`<button class="choice" type="button" aria-pressed="${state.reviewScope === id}"><b>${name}</b><small>${detail}</small></button>`);
+    button.onclick = () => { state.reviewScope = id; render(); };
+    choices.append(button);
+  });
+  wrap.append(choices);
+  const actions = el(`<div class="sheet-actions"></div>`);
+  const go = el(`<button class="btn primary" type="button">进入综述</button>`);
+  go.disabled = ready.length < 2;
+  go.onclick = () => { state.sheet = null; state.selected.clear(); render(); };
+  actions.append(closeButton(), go);
+  wrap.append(actions);
+  return wrap;
+}
+
+function expandSheet() {
+  const ready = selectedReady();
+  const wrap = el(`<div><h2>自动拓展</h2><p class="sub">用已选论文识别方向。找到的文献先给你确认，不直接入库。</p></div>`);
+  ready.forEach((paper) => wrap.append(el(`<div class="item"><span><b>${paper.title}</b><small>种子论文</small></span></div>`)));
+  const choices = el(`<div class="choices"></div>`);
+  ["检索增强生成", "长上下文利用", "推理提示"].forEach((name) => {
+    const button = el(`<button class="choice" type="button" aria-pressed="${state.reviewTheme === name}"><b>${name}</b></button>`);
+    button.onclick = () => { state.reviewTheme = name; render(); };
+    choices.append(button);
+  });
+  wrap.append(el(`<div class="field" style="margin-top:14px"><span>方向</span></div>`), choices);
+  const focus = el(`<label class="field"><span>希望多找一些</span><input id="focus" value="${state.expandFocus}"/></label>`);
+  wrap.append(focus);
+  const actions = el(`<div class="sheet-actions"></div>`);
+  const go = el(`<button class="btn primary" type="button">开始拓展</button>`);
+  go.disabled = !ready.length;
+  go.onclick = () => { state.sheet = null; render(); };
+  actions.append(closeButton(), go);
+  wrap.append(actions);
+  return wrap;
+}
+
+function pptSheet() {
+  const ready = selectedReady();
+  const wrap = el(`<div><h2>汇报 PPT</h2><p class="sub">确认论文后转入科研 PPT。模板和版式不在这里做。</p></div>`);
+  ready.forEach((paper) => wrap.append(el(`<div class="item"><span><b>${paper.title}</b></span></div>`)));
+  const actions = el(`<div class="sheet-actions"></div>`);
+  const notes = el(`<button class="btn" type="button">先写阅读心得</button>`);
+  const direct = el(`<button class="btn primary" type="button">直接做 PPT</button>`);
+  notes.onclick = direct.onclick = () => { state.sheet = null; state.selected.clear(); render(); };
+  actions.append(closeButton(), notes, direct);
+  wrap.append(actions);
+  return wrap;
+}
+
+function renderLegacy() {
+  const wrap = el(`<div><header class="head"><div><div class="crumb">知识库 / 当前列表</div><h1>AI 论文</h1><p class="lead">现在这一屏在管理文件：名称、路径、解析、类型、大小、更新人和操作。论文题录要打开文件才看得到。</p></div></header><div class="legacy-wrap"><table class="legacy"><thead><tr><th>名称</th><th>标签</th><th>所在目录</th><th>解析状态</th><th>类型</th><th>大小</th><th>更新时间</th><th>更新人</th><th>操作</th></tr></thead><tbody></tbody></table></div></div>`);
+  const body = wrap.querySelector("tbody");
+  papers.forEach((paper) => {
+    const row = document.createElement("tr");
+    [paper.file, paper.tags.join("、"), folders.find((folder) => folder.id === paper.folder).name, parseLabel[paper.parse], "PDF", paper.size, paper.updated, paper.editor, "重命名 · 重解析"].forEach((text) => {
+      const cell = document.createElement("td");
+      cell.textContent = text;
+      row.append(cell);
+    });
+    body.append(row);
+  });
+  return wrap;
+}
+
+document.getElementById("show-next").onclick = () => {
+  state.view = "next";
+  document.getElementById("show-next").setAttribute("aria-pressed", "true");
+  document.getElementById("show-now").setAttribute("aria-pressed", "false");
+  render();
+};
+document.getElementById("show-now").onclick = () => {
+  state.view = "now";
+  document.getElementById("show-now").setAttribute("aria-pressed", "true");
+  document.getElementById("show-next").setAttribute("aria-pressed", "false");
+  render();
+};
+document.getElementById("app").addEventListener("click", (event) => {
+  if (event.target.id === "open-zotero") { state.sheet = "zotero"; render(); }
+});
+render();
+</script>
+</body>
+</html>

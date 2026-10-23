@@ -23,6 +23,7 @@ import (
 	"lazymind/core/systemdeps"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // DatasetService text，text。
@@ -42,6 +43,7 @@ type ParserConfig struct {
 }
 
 type Dataset struct {
+	ScenarioKey            string              `json:"scenario_key,omitempty"`
 	Name                   string              `json:"name"`
 	DatasetID              string              `json:"dataset_id"`
 	DisplayName            string              `json:"display_name"`
@@ -62,6 +64,7 @@ type Dataset struct {
 	Acl                    []string            `json:"acl"`
 	ShareType              string              `json:"share_type"`
 	Type                   string              `json:"type"`
+	LibraryKind            string              `json:"library_kind,omitempty"`
 	Tags                   []string            `json:"tags"`
 	DefaultDataset         bool                `json:"default_dataset"`
 	CreatedByDataSource    *bool               `json:"created_by_data_source,omitempty"`
@@ -225,6 +228,31 @@ func parseDatasetTags(ext json.RawMessage) []string {
 	}
 	return out
 }
+
+func validateDatasetLibraryKind(kind string) (string, error) {
+	kind = strings.TrimSpace(kind)
+	switch kind {
+	case "", "paper", "document":
+		return kind, nil
+	default:
+		return "", errors.New("library_kind must be paper or document")
+	}
+}
+
+// Older datasets have no library kind. Leave it unknown instead of inferring
+// a type from their name, capabilities, or learning profile.
+func parseDatasetLibraryKind(ext json.RawMessage) string {
+	var value struct {
+		LibraryKind string `json:"library_kind"`
+	}
+	if json.Unmarshal(ext, &value) != nil {
+		return ""
+	}
+	kind, _ := validateDatasetLibraryKind(value.LibraryKind)
+	return kind
+}
+
+var errDatasetLibraryKindImmutable = errors.New("library kind cannot be changed after it is set")
 
 func parseDatasetAlgo(ext json.RawMessage) Algo {
 	if len(ext) == 0 {
@@ -914,6 +942,14 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	libraryKind, err := validateDatasetLibraryKind(body.LibraryKind)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if body.ScenarioKey == "" && libraryKind == "paper" {
+		body.ScenarioKey = "academic_papers"
+	}
 	displayName := strings.TrimSpace(body.DisplayName)
 	desc := strings.TrimSpace(body.Desc)
 	cover := strings.TrimSpace(body.CoverImage)
@@ -927,10 +963,32 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body.Tags = normalizedTags
+	scenario, err := normalizeScenario(r.Context(), corestore.DB(), userID, body.ScenarioKey)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), 400)
+		return
+	}
+	if scenario == "academic_papers" {
+		if libraryKind == "document" {
+			common.ReplyErr(w, "academic_papers requires a paper library", http.StatusBadRequest)
+			return
+		}
+		libraryKind = "paper"
+	} else {
+		if libraryKind == "paper" {
+			common.ReplyErr(w, "paper library requires academic_papers scenario", http.StatusBadRequest)
+			return
+		}
+		libraryKind = "document"
+	}
 	processingLevelRequested := strings.TrimSpace(body.ProcessingLevel) != ""
 	processingLevel, err := normalizeProcessingLevel(body.ProcessingLevel)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := validateAcademicScenario(r.Context(), corestore.DB(), userID, scenario, processingLevel); err != nil {
+		common.ReplyErr(w, err.Error(), 400)
 		return
 	}
 	// Preserve the old client's creation contract: an omitted level still defaults
@@ -1025,10 +1083,11 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	parsers := fetchParsersByAlgoID(r.Context(), algoID)
 	extBytes, _ := json.Marshal(map[string]any{
-		"tags":      body.Tags,
-		"algo_id":   algoID,
-		"algo_name": body.Algo.DisplayName,
-		"parsers":   parsers,
+		"library_kind": libraryKind,
+		"tags":         body.Tags,
+		"algo_id":      algoID,
+		"algo_name":    body.Algo.DisplayName,
+		"parsers":      parsers,
 	})
 
 	ds := orm.Dataset{
@@ -1044,6 +1103,7 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 		OssPath:                "",
 		DatasetInfo:            json.RawMessage(`{}`),
 		DatasetState:           0,
+		ScenarioKey:            scenario,
 		ProcessingLevel:        processingLevel,
 		ProcessingRevision:     1,
 		TransitionStatus:       TransitionIdle,
@@ -1094,8 +1154,10 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 		Acl:                    []string{acl.PermissionDatasetRead, acl.PermissionDatasetWrite, acl.PermissionDatasetUpload},
 		ShareType:              "SHARE_TYPE_UNSPECIFIED",
 		Type:                   datasetTypeToPB(ds.Type),
+		LibraryKind:            libraryKind,
 		Tags:                   body.Tags,
 		DefaultDataset:         false,
+		ScenarioKey:            scenario,
 		ProcessingLevel:        processingLevel,
 		ProcessingRevision:     1,
 		TransitionStatus:       TransitionIdle,
@@ -1447,6 +1509,11 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
 		return
 	}
+	requestedLibraryKind, err := validateDatasetLibraryKind(body.LibraryKind)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	var ds orm.Dataset
 	if err := corestore.DB().
@@ -1461,7 +1528,26 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(common.ForbiddenBody))
 		return
 	}
+	if requestedLibraryKind != "" {
+		if !canAccessDataset(&ds, userID, acl.PermissionDatasetWrite) {
+			common.ReplyErr(w, "dataset write permission required", http.StatusForbidden)
+			return
+		}
+		if existingKind := parseDatasetLibraryKind(ds.Ext); existingKind != "" && existingKind != requestedLibraryKind {
+			common.ReplyErr(w, errDatasetLibraryKindImmutable.Error(), http.StatusConflict)
+			return
+		}
+		// An explicit assignment for an older library is a partial update.
+		if body.Tags == nil {
+			body.Tags = parseDatasetTags(ds.Ext)
+		}
+	}
 
+	scenario := datasetScenario(ds)
+	if body.ScenarioKey != "" && body.ScenarioKey != effectiveScenario(scenario) {
+		common.ReplyErr(w, "knowledge base scenario cannot be changed after creation", http.StatusBadRequest)
+		return
+	}
 	newDisplay := strings.TrimSpace(body.DisplayName)
 	newDesc := strings.TrimSpace(body.Desc)
 	newCover := strings.TrimSpace(body.CoverImage)
@@ -1501,13 +1587,6 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 	if len(parsers) == 0 {
 		parsers = fetchParsersByAlgoID(r.Context(), algoID)
 	}
-	extBytes, _ := json.Marshal(map[string]any{
-		"tags":      body.Tags,
-		"algo_id":   algoID,
-		"algo_name": algoName,
-		"parsers":   parsers,
-	})
-
 	// 1) text POST /v1/kbs/{kb_id}
 	kbID := ds.KbID
 	if strings.TrimSpace(kbID) == "" {
@@ -1553,14 +1632,53 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 		Msg("kb service update ok")
 
 	now := time.Now().UTC()
-	ds.DisplayName = newDisplay
-	ds.Desc = newDesc
-	ds.CoverImage = newCover
-	ds.Ext = extBytes
-	ds.UpdatedAt = now
-	ds.CreateUserName = userName
-
-	if err := corestore.DB().Save(&ds).Error; err != nil {
+	// Serialize the one-time legacy assignment with other updates so a rename
+	// cannot erase a type assigned by a concurrent request.
+	if err := corestore.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND deleted_at IS NULL", datasetID).First(&ds).Error; err != nil {
+			return err
+		}
+		libraryKind := datasetLibraryKind(ds)
+		if requestedLibraryKind != "" {
+			if libraryKind != "" && libraryKind != requestedLibraryKind {
+				return errDatasetLibraryKindImmutable
+			}
+			libraryKind = requestedLibraryKind
+			if libraryKind == "paper" {
+				if err := validateAcademicScenario(r.Context(), tx, userID, "academic_papers", ds.ProcessingLevel); err != nil {
+					return err
+				}
+				ds.ScenarioKey = "academic_papers"
+			}
+		}
+		ext := map[string]any{}
+		_ = json.Unmarshal(ds.Ext, &ext)
+		if ext == nil {
+			ext = map[string]any{}
+		}
+		ext["tags"] = body.Tags
+		ext["algo_id"] = algoID
+		ext["algo_name"] = algoName
+		ext["parsers"] = parsers
+		if libraryKind != "" {
+			ext["library_kind"] = libraryKind
+		}
+		extBytes, err := json.Marshal(ext)
+		if err != nil {
+			return err
+		}
+		ds.DisplayName = newDisplay
+		ds.Desc = newDesc
+		ds.CoverImage = newCover
+		ds.Ext = extBytes
+		ds.UpdatedAt = now
+		ds.CreateUserName = userName
+		return tx.Save(&ds).Error
+	}); err != nil {
+		if errors.Is(err, errDatasetLibraryKindImmutable) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "update dataset failed", err), http.StatusInternalServerError)
 		return
 	}
@@ -1572,6 +1690,7 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 	common.ReplyJSON(w, Dataset{
 		Name:                "datasets/" + ds.ID,
 		DatasetID:           ds.ID,
+		ScenarioKey:         datasetScenario(ds),
 		DisplayName:         ds.DisplayName,
 		Desc:                ds.Desc,
 		CoverImage:          ds.CoverImage,
@@ -1589,6 +1708,7 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 		Acl:                 datasetACL,
 		ShareType:           shareTypeToPB(ds.ShareType),
 		Type:                datasetTypeToPB(ds.Type),
+		LibraryKind:         datasetLibraryKind(ds),
 		Tags:                parseDatasetTags(ds.Ext),
 		DefaultDataset:      isDefaultDatasetForUser(r.Context(), userID, ds.ID),
 		CreatedByDataSource: &createdByDataSource,

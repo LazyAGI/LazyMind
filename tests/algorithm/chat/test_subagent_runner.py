@@ -1125,6 +1125,24 @@ def test_completion_review_keeps_reasoning_separate_from_json(monkeypatch, verdi
     enqueue.assert_not_called()
 
 
+def test_completion_review_preserves_json_artifact_evidence(monkeypatch):
+    content = {'user_instruction': "研究 O'Reilly 的方法", 'papers': []}
+
+    def review(_model, prompt):
+        line = next(line for line in prompt.splitlines() if line.startswith('Actually saved artifacts: '))
+        evidence = json.loads(line.split(': ', 1)[1])
+        assert json.loads(evidence[0]['value']) == {'data': content}
+        return json.dumps({'completed': True, 'requires_artifact': True,
+                           'artifact_keys': ['result'], 'reason': 'JSON result was saved.'})
+
+    monkeypatch.setattr(runner_mod, '_silent_background_model_call', review)
+    completed, _, phase = runner_mod._evaluate_completion(
+        object(), 'Save a JSON result', [],
+        [{'slot': 'result', 'content_type': 'json', 'value': {'data': content}}], 'Saved',
+    )
+    assert completed and phase == ''
+
+
 @pytest.mark.parametrize('during_evaluation', [False, True])
 def test_cancel_at_completion_boundary_cannot_be_revived(monkeypatch, completion_case, during_evaluation):
     canceled = not during_evaluation

@@ -306,7 +306,7 @@ func ListDismissedSessions(ctx context.Context, db *gorm.DB, conversationID stri
 
 // UpdateSessionStatus transitions a session to a new status.
 func UpdateSessionStatus(ctx context.Context, db *gorm.DB, sessionID, status string) error {
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		query := tx.Model(&orm.WorkflowSession{}).Where("id = ? AND status <> ?", sessionID, status)
 		if status == SessionStatusWaiting {
 			// Delayed pause callbacks cannot overwrite a terminal session or a
@@ -335,6 +335,10 @@ func UpdateSessionStatus(ctx context.Context, db *gorm.DB, sessionID, status str
 		payload, _ := json.Marshal(map[string]any{"status": status})
 		return appendSessionStateEvent(tx, session, "workflow.patch", payload)
 	})
+	if err == nil && OnAcademicRuntimeChanged != nil {
+		OnAcademicRuntimeChanged(ctx, db, sessionID)
+	}
+	return err
 }
 
 // UpdateSessionCurrentStep updates current_step_id for a session.

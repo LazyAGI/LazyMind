@@ -29,6 +29,7 @@ import {
 import "@/modules/dataSource/index.scss";
 import "./index.scss";
 import { createCapabilityProfile, getLearningCatalog, listCapabilityProfiles, saveKnowledgeBaseCapabilities, type CustomCapabilityProfile, type LearningCatalog } from "@/modules/learning/api";
+import { markPaperLibrary } from "@/modules/knowledge/paper/store";
 import CapabilitySettings, { capabilityRefsFromForm } from "@/modules/learning/CapabilitySettings";
 
 const { TextArea } = Input;
@@ -67,6 +68,8 @@ const CreateKnowledgeBaseModal = forwardRef<
   const [form] = Form.useForm();
   const pendingCloudTabRestoreRef = useRef(false);
   const developerModeActive = isDeveloperModeActive();
+  const scenario = Form.useWatch("learning_profile_key", form);
+  const [parsingEnabled, setParsingEnabled] = useState<boolean | null>(null);
 
   useImperativeHandle(ref, () => ({
     onOpen,
@@ -153,6 +156,7 @@ const CreateKnowledgeBaseModal = forwardRef<
 
     return Promise.all([algorithmsRequest, preferencesRequest, catalogRequest]).then(
       ([, documentParsingEnabled]) => {
+        setParsingEnabled(documentParsingEnabled);
         form.setFieldsValue({
           processing_level: !ragReady ? (documentParsingEnabled === false ? "stored" : "indexed") : highestSupportedProcessingLevel(
             documentParsingEnabled,
@@ -210,6 +214,10 @@ const CreateKnowledgeBaseModal = forwardRef<
     form.validateFields().then(async (values) => {
       // Preset fields may not be mounted inside the developer-only Collapse.
       const params = { ...form.getFieldsValue(true), ...values };
+      if (params.learning_profile_key === 'academic_papers' && (parsingEnabled !== true || params.processing_level === 'stored')) {
+        message.error('论文库需要开启文档解析，且处理等级至少为解析。请先在设置中开启解析并选择合适的处理等级。');
+        return;
+      }
       const selectedAlgoId =
         params.algo_id ||
         (algorithm.length === 1 ? algorithm[0]?.algo_id : undefined);
@@ -225,6 +233,8 @@ const CreateKnowledgeBaseModal = forwardRef<
 
       setLoading(true);
       try {
+        const libraryKind = params.learning_profile_key === "academic_papers" ? "paper" : "document";
+        params.library_kind = libraryKind;
         const capabilityKeys = params.learning_capability_keys || [];
         if (!capabilityKeys.length) {
           message.error(t("learning.selectCapabilities"));
@@ -237,10 +247,15 @@ const CreateKnowledgeBaseModal = forwardRef<
         delete params.learning_capability_settings;
         delete params.learning_profile_key;
         delete params.learning_profile_name;
-        if(profileKey==="custom"&&customProfileName) await createCapabilityProfile(customProfileName,"",capabilityKeys);
+        params.scenario_key = profileKey || 'general';
+        if (profileKey === "custom" && customProfileName) {
+          const profile = await createCapabilityProfile(customProfileName, "", capabilityKeys);
+          params.scenario_key = profile.id;
+        }
         const created = await onCreate(params);
         const datasetId = created?.dataset_id;
         if (datasetId) await saveKnowledgeBaseCapabilities(datasetId, capabilityRefsFromForm(capabilityKeys,capabilitySettings,learningCatalog?.capabilities));
+        if (datasetId && libraryKind === "paper") markPaperLibrary(datasetId);
         message.success(t("knowledge.createSuccess"));
         onCancel();
       } catch (error) {
@@ -382,7 +397,7 @@ const CreateKnowledgeBaseModal = forwardRef<
                         <Select options={PROCESSING_LEVEL_ORDER.map((level) => ({
                           value: level,
                           label: t(`knowledge.processing${level[0].toUpperCase()}${level.slice(1)}`),
-                          disabled: ragReady && level === "indexed" && embeddingReady !== true,
+                          disabled: (ragReady && level === "indexed" && embeddingReady !== true) || (scenario === "academic_papers" && level === "stored"),
                         }))} />
                       </Form.Item>
                       {ragReady && algorithm.length !== 1 && (

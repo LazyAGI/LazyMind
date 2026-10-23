@@ -1766,6 +1766,7 @@ async def _handle_chat_impl(
         },
         'request_tags': ['handle_chat'],
         'trace_metadata': {
+            'conversation_id': conversation_id,
             'task_profile_source': task_profile.source if task_profile else 'disabled',
             'task_profile': task_profile.to_trace_dict() if task_profile else {},
             'router_latency_ms': task_profile.router_latency_ms if task_profile else 0,

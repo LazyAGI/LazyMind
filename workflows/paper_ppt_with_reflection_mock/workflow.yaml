@@ -1,0 +1,34 @@
+id: paper_ppt_with_reflection_mock
+name: 阅读心得接续科研 PPT（Mock）
+description: 先模拟心得接口，再把心得正文和原论文清单交给科研 PPT Mock。
+when_to_use: 仅用于用户选择先生成心得再制作科研 PPT 的接口联调。
+steps:
+- id: reflection
+  label: 阅读心得（Mock）
+- id: ppt
+  label: 科研 PPT 交接（Mock）
+slots:
+- id: task_context
+  label: 任务上下文
+  type: text
+  cardinality: single
+  external: true
+  exposed: false
+- id: reflection_markdown
+  label: 心得正文（Mock）
+  type: text
+  cardinality: single
+- id: ppt_request
+  label: PPT 输入与反馈（Mock）
+  type: json
+  cardinality: single
+runtime:
+  publisher_owned_slots: [ppt_request]
+  trigger_inputs:
+  - task_context
+
+tool_scripts:
+- path: scripts/tools.py
+  functions:
+  - academic_mock_submit
+  - academic_mock_context

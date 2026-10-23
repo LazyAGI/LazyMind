@@ -65,6 +65,7 @@ class AgentExecutionOptions:
     max_retries: Optional[int] = None
     expanded_round_limit: Optional[int] = None
     tool_failure_limits: Optional[dict[str, int]] = None
+    argument_result_history: list[dict[str, Any]] = field(default_factory=list)
     tool_call_limits: Optional[dict[str, int]] = None
     llm_config: Optional[dict[str, Any]] = None
     max_input_tokens: Optional[Any] = None

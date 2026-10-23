@@ -1,3 +1,12 @@
+-- +migrate Dialect *
+DROP TABLE IF EXISTS academic_paper_contents;
+DROP TABLE IF EXISTS academic_handoffs;
+DROP TABLE IF EXISTS academic_expansion_rounds;
+DROP TABLE IF EXISTS academic_expansions;
+DROP TABLE IF EXISTS academic_user_paper_states;
+DROP TABLE IF EXISTS academic_document_states;
+ALTER TABLE datasets DROP COLUMN scenario_key;
+
 DROP TABLE IF EXISTS document_folder_nodes;
 DROP TABLE IF EXISTS document_folder_inventories;
 
@@ -6,6 +15,7 @@ DROP TABLE IF EXISTS task_attempt_timings;
 DROP TABLE IF EXISTS task_execution_timings;
 
 -- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS paper_libraries;
 DROP INDEX IF EXISTS idx_user_environment_variables_deleted_at;
 DROP INDEX IF EXISTS idx_user_env_user_enabled;
 DROP INDEX IF EXISTS idx_user_env_user_name_active;

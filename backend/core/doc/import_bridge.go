@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
@@ -36,6 +40,107 @@ type LocalFileImportResult struct {
 	TaskID        string
 	ContentSHA256 string
 	Start         StartTaskResult
+}
+
+// ErrImportedDocumentUnavailable permits acquisition of a replacement only
+// when the previous document or its stored file no longer exists.
+var ErrImportedDocumentUnavailable = errors.New("imported document file is unavailable")
+
+type ResumeLocalFileImportRequest struct {
+	DatasetID  string
+	DocumentID string
+	TaskID     string
+	UserID     string
+	UserName   string
+}
+
+// ResumeLocalFileImport retries processing of a saved import without copying
+// its file or creating another document. Missing tasks are rebuilt for that
+// same document; tasks already accepted by processing are left running.
+func ResumeLocalFileImport(ctx context.Context, input ResumeLocalFileImportRequest) (LocalFileImportResult, error) {
+	result := LocalFileImportResult{DocumentID: input.DocumentID, TaskID: input.TaskID}
+	var document orm.Document
+	err := store.DB().WithContext(ctx).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", input.DocumentID, input.DatasetID).Take(&document).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return result, ErrImportedDocumentUnavailable
+	}
+	if err != nil {
+		return result, err
+	}
+	var ext documentExt
+	if err := json.Unmarshal(document.Ext, &ext); err != nil {
+		return result, fmt.Errorf("read imported file metadata: %w", err)
+	}
+	info, err := os.Lstat(strings.TrimSpace(ext.StoredPath))
+	if os.IsNotExist(err) || (err == nil && !info.Mode().IsRegular()) {
+		return result, ErrImportedDocumentUnavailable
+	}
+	if err != nil {
+		return result, fmt.Errorf("read imported file: %w", err)
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "/internal/paper-import", nil)
+	req.Header.Set("X-User-Id", input.UserID)
+	req.Header.Set("X-User-Name", firstNonEmpty(input.UserName, input.UserID))
+	tasks := store.DB().WithContext(ctx).Where("dataset_id = ? AND doc_id = ? AND task_type IN ? AND deleted_at IS NULL",
+		input.DatasetID, input.DocumentID, []string{string(TaskTypeParse), string(TaskTypeParseUploaded), string(TaskTypeReparse)})
+	var task orm.Task
+	err = gorm.ErrRecordNotFound
+	if input.TaskID != "" {
+		err = tasks.Session(&gorm.Session{}).Where("id = ?", input.TaskID).Take(&task).Error
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		err = tasks.Order("created_at DESC").Take(&task).Error
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		var dataset orm.Dataset
+		if err = store.DB().WithContext(ctx).Where("id = ? AND deleted_at IS NULL", input.DatasetID).Take(&dataset).Error; err != nil {
+			return result, err
+		}
+		if effectiveProcessingLevel(dataset.ProcessingLevel) == ProcessingLevelStored {
+			// Recovery of an already retained file is a completed storage task,
+			// not a request to ingest it at a higher processing level.
+			task = orm.Task{ID: newTaskID(), DatasetID: dataset.ID, DocID: document.ID, KbID: dataset.KbID,
+				TaskType: string(TaskTypeParseUploaded), DisplayName: document.DisplayName,
+				Ext:       mustJSON(taskExt{TaskType: string(TaskTypeParseUploaded), TaskState: string(TaskStateSucceeded)}),
+				BaseModel: orm.BaseModel{CreateUserID: input.UserID, CreateUserName: input.UserName, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}}
+			err = store.DB().WithContext(ctx).Create(&task).Error
+		} else {
+			kind := TaskTypeParseUploaded
+			if document.LazyllmDocID != "" {
+				kind = TaskTypeReparse
+			}
+			task, err = createTaskFromExistingDocument(req, input.DatasetID, input.UserID, firstNonEmpty(input.UserName, input.UserID),
+				CreateTaskItem{Task: TaskPayload{DocumentID: input.DocumentID, DataSourceType: "ACADEMIC_PROVIDER"}}, string(kind))
+		}
+	}
+	if err != nil {
+		return result, fmt.Errorf("recover imported document task: %w", err)
+	}
+	result.TaskID = task.ID
+	var control taskExt
+	if err := json.Unmarshal(task.Ext, &control); err != nil {
+		return result, fmt.Errorf("read imported task metadata: %w", err)
+	}
+	// A document registration alone does not prove that this task was submitted.
+	// Recovered tasks have neither a remote task ID nor an explicit task state.
+	if task.LazyllmTaskID != "" || control.TaskState != "" {
+		state := buildTaskResponse(req, task).TaskState
+		if state == "SUCCESS" || state == "WORKING" || (state == "WAITING" && task.LazyllmTaskID != "") {
+			result.Start = StartTaskResult{TaskID: task.ID, DocumentID: document.ID, Status: "STARTED", SubmitStatus: "ACCEPTED"}
+			return result, nil
+		}
+	}
+	starts, startErr := startTasksInternal(req, input.DatasetID, []string{task.ID})
+	if len(starts) > 0 {
+		result.Start = starts[0]
+	}
+	if startErr != nil {
+		if result.Start.Message != "" {
+			startErr = fmt.Errorf("%s: %w", result.Start.Message, startErr)
+		}
+		return result, fmt.Errorf("document imported but processing did not start: %w", startErr)
+	}
+	return result, nil
 }
 
 func ImportLocalFile(ctx context.Context, input LocalFileImportRequest) (LocalFileImportResult, error) {

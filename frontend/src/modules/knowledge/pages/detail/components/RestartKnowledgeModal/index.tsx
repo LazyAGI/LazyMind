@@ -14,8 +14,8 @@ import type { ParserConfig } from "@/api/generated/knowledge-client";
 import { TaskServiceApi } from "@/modules/knowledge/utils/request";
 import { getLocalizedErrorMessage, localizeErrorCode } from "@/components/request";
 import { useRAGComponent } from "@/modules/modelProvider/contexts/RAGComponentContext";
+import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 import {
-  RuntimeReadinessError,
   waitForRuntimeCapability,
 } from "@/runtime/readiness";
 
@@ -183,9 +183,7 @@ const RestartKnowledgeModal = (
         return;
       }
       console.error(error);
-      if (error instanceof RuntimeReadinessError) {
-        message.error(getLocalizedErrorMessage(error));
-      }
+      message.error(getImportErrorMessage(error));
     } finally {
       runtimeWaitAbortRef.current = null;
       setRuntimeWaiting(false);

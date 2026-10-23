@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent } from 'react';
 import { ArrowLeftOutlined, FileTextOutlined, FolderOutlined, MoreOutlined, PushpinFilled, PushpinOutlined, SearchOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Drawer, Dropdown, Empty, Form, Input, Modal, message, Pagination, Select, Space, Spin, Switch, Table, Tabs, Tag, Tooltip, Typography, theme } from 'antd';
+import { Alert, Button, Card, Collapse, Drawer, Dropdown, Empty, Form, Input, Modal, message, Pagination, Select, Space, Spin, Switch, Table, Tabs, Tag, Tooltip, Typography, theme } from 'antd';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { DocumentDirectoryCommand } from '@/api/generated/core-client';
@@ -174,7 +174,8 @@ export default function DirectoryPage() {
     { title: t('directories.actions'), key: 'actions', width: 80, render: (_: unknown, e: DocumentDirectoryEntry) => <Button type="text" onClick={() => setSelectedEntry(e.id)}>{t('directories.details')}</Button> },
   ];
   const visibleBatches = latestDirectoryBatches(batches, directoryId);
-  const statusBatches = visibleBatches.filter(b => ['pending', 'running', 'failed', 'canceled'].includes(b.status));
+  const statusBatches = visibleBatches.filter(b => ['pending', 'running', 'canceled'].includes(b.status));
+  const failedBatches = visibleBatches.filter(b => b.status === 'failed');
   const acknowledging = useRef(new Set<string>());
   useEffect(() => {
     if (loading || document.hidden || directoryId && !detail) return;
@@ -205,9 +206,24 @@ export default function DirectoryPage() {
           ] }}><Button aria-label={t('directories.more')} icon={<MoreOutlined />} /></Dropdown>
         </> : !directoryId && <Button onClick={() => edit('create')}>{t('directories.create')}</Button>}</Space>
       </header>
-      {statusBatches.map(batch => <Alert key={batch.id} showIcon type={batch.status === 'failed' ? 'error' : 'info'}
-        message={<Space>{!directoryId && <span>{directories.find(x => x.id === batch.directory_id)?.name || String(batch.result?.directory_name || '')}</span>}{t(batch.status === 'canceled' ? 'directories.folderState_canceled' : batch.status === 'failed' ? 'directories.organizeFailed' : batch.status === 'pending' ? 'directories.organizePending' : 'directories.organizing')}{folderProgress(batch)}</Space>}
-        action={<Space><Button size="small" disabled={saving} onClick={() => run({ operation: ['failed', 'canceled'].includes(batch.status) ? 'retry' : 'cancel', batch_id: batch.id })}>{t(['failed', 'canceled'].includes(batch.status) ? 'directories.retry' : 'directories.cancel')}</Button>{['failed', 'canceled'].includes(batch.status) && <Button size="small" disabled={saving} onClick={() => run({ operation: 'acknowledge', batch_id: batch.id })}>{t('directories.dismissResult')}</Button>}</Space>} />)}
+      {failedBatches.length > 0 && <Collapse size="small" items={[{
+        key: 'failed',
+        label: <Typography.Text type="danger">{t('directories.failedResults', { count: failedBatches.length })}</Typography.Text>,
+        children: <div className="directory-failed-batches">{failedBatches.map(batch => <div key={batch.id} className="directory-failed-batch">
+          <div className="directory-failed-batch-copy">
+            <Typography.Text strong>{directories.find(x => x.id === batch.directory_id)?.name || String(batch.result?.directory_name || '') || t('directories.automaticOrganization')}</Typography.Text>
+            <Typography.Text type="secondary"><time dateTime={batch.created_at}>{t('directories.taskCreatedAt', { time: new Date(batch.created_at).toLocaleString() })}</time></Typography.Text>
+          </div>
+          <Space wrap>
+            <Button size="small" disabled={saving} onClick={() => run({ operation: 'retry', batch_id: batch.id })}>{t('directories.retry')}</Button>
+            <Button size="small" disabled={saving} onClick={() => run({ operation: 'acknowledge', batch_id: batch.id })}>{t('directories.dismissResult')}</Button>
+          </Space>
+          {folderProgress(batch)}
+        </div>)}</div>,
+      }]} />}
+      {statusBatches.map(batch => <Alert key={batch.id} showIcon type="info"
+        message={<Space>{!directoryId && <span>{directories.find(x => x.id === batch.directory_id)?.name || String(batch.result?.directory_name || '')}</span>}{t(batch.status === 'canceled' ? 'directories.folderState_canceled' : batch.status === 'pending' ? 'directories.organizePending' : 'directories.organizing')}{folderProgress(batch)}</Space>}
+        action={<Space><Button size="small" disabled={saving} onClick={() => run({ operation: batch.status === 'canceled' ? 'retry' : 'cancel', batch_id: batch.id })}>{t(batch.status === 'canceled' ? 'directories.retry' : 'directories.cancel')}</Button>{batch.status === 'canceled' && <Button size="small" disabled={saving} onClick={() => run({ operation: 'acknowledge', batch_id: batch.id })}>{t('directories.dismissResult')}</Button>}</Space>} />)}
       {folderBatch?.status === 'succeeded' && <Alert type="success" message={folderProgress(folderBatch)} />}
       {loading ? <div className="directory-loading"><Spin /></div> : !directoryId ? <>
         <Typography.Paragraph type="secondary">{t('directories.retention')}</Typography.Paragraph>

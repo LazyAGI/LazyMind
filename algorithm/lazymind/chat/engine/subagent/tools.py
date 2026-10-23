@@ -4,11 +4,12 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 from urllib.parse import urlparse
 
 from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools import fc_register
+from pydantic import Field
 from lazymind.chat.engine.tools.host_file_resolution import FileResolution, validate_storage_id, copy_artifact_input
 from typing_extensions import NotRequired, TypedDict
 from lazymind.chat.engine.attachment_reader import (
@@ -45,6 +46,13 @@ class ArtifactSaveItem(TypedDict):
     source_tool: NotRequired[str]
     sort_order: NotRequired[int]
     caption: NotRequired[str]
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source, handler):
+        # Keep the item inline: some compatible model APIs cannot resolve $defs.
+        schema = handler(source)
+        schema.pop('ref', None)
+        return schema
 
 
 def _materialize_local_path(path: str) -> str:
@@ -424,11 +432,11 @@ def _prepare_artifact(key: str, value: Any, content_type: str = 'text',
                       slot_orders: Optional[Dict[str, List[int]]] = None) -> _PreparedArtifact:
     """Validate and materialize an artifact without allocating a revision or emitting it."""
     ctx = require_context()
-    validate_storage_id(key)
     try:
+        validate_storage_id(key)
         ctx.draft_path(key)
     except ValueError as exc:
-        raise ToolExecutionError(str(exc)) from exc
+        raise ToolExecutionError('ARTIFACT_ARGUMENT_INVALID: ' + str(exc)) from exc
     policy = (ctx.params or {}).get('workflow_runtime') or {}
     publisher_owned_slots = {
         str(slot).strip()
@@ -443,17 +451,18 @@ def _prepare_artifact(key: str, value: Any, content_type: str = 'text',
         )
     if ctx.output_slots and key not in ctx.output_slots:
         raise ToolExecutionError(
-            f'Artifact key {key!r} is not declared for this step. '
+            f'ARTIFACT_ARGUMENT_INVALID: Artifact key {key!r} is not declared for this step. '
             f'Allowed keys: {", ".join(ctx.output_slots)}',
         )
     if content_type not in _CONTENT_TYPES:
         raise ToolExecutionError(
-            f'Unsupported content_type {content_type!r}; choose from {sorted(_CONTENT_TYPES)}.'
+            f'ARTIFACT_ARGUMENT_INVALID: Unsupported content_type {content_type!r}; '
+            f'choose from {sorted(_CONTENT_TYPES)}.'
         )
     ct = content_type
     contract_error = _validate_declared_artifact_type(ctx, key, ct)
     if contract_error:
-        raise ToolExecutionError(contract_error)
+        raise ToolExecutionError('ARTIFACT_ARGUMENT_INVALID: ' + contract_error)
     built, actual_ct = _build_artifact_value(value, ct)
     if source_tool:
         built['_source_tool'] = str(source_tool)
@@ -549,13 +558,14 @@ def resolve_artifact_files(arguments: dict) -> object:
 
 
 @fc_register(host_file=resolve_artifact_files)
-def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
+def save_artifacts(artifacts: Annotated[List[ArtifactSaveItem], Field(min_length=1, max_length=50)]) -> Dict[str, Any]:
     """Save one or more output artifacts in one tool call.
 
     Always pass a list, including when saving a single artifact. Every item MUST
     contain ``key`` and ``value``. The payload field is named ``value`` — never
     ``content`` or ``data``. Optional fields are content_type, source_tool,
-    sort_order, and caption. Batch all ready outputs (up to 50 entries per call),
+    sort_order, and caption. Omitted content_type uses the declared Workflow slot
+    type, or text for an ordinary task. Batch all ready outputs (up to 50 entries per call),
     including multiple items with the same key for a list slot. Keeping all writes
     in one model turn prevents a step with many outputs from exhausting the ReAct
     tool-turn budget.
@@ -572,6 +582,9 @@ def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
         if not request.managed_roots or os.path.realpath(require_context().workspace_path) != request.managed_roots[0]:
             raise ToolExecutionError('The artifact task workspace changed after file authorization.')
     _validate_artifact_batch(artifacts)
+    declared_types = require_context().params.get('output_slot_types') or {}
+    if not isinstance(declared_types, dict):
+        declared_types = {}
     slot_orders: Dict[str, List[int]] = {}
     # Complete validation/materialization before publishing any revision. A bad
     # later entry must not leave earlier entries saved and duplicated on retry.
@@ -580,7 +593,7 @@ def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
         _prepare_artifact(
             key=str(item['key']),
             value=item['value'],
-            content_type=str(item.get('content_type') or 'text'),
+            content_type=str(item.get('content_type') or declared_types.get(str(item['key'])) or 'text'),
             source_tool=item.get('source_tool'),
             sort_order=item.get('sort_order'),
             caption=item.get('caption'),
@@ -598,21 +611,22 @@ def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
 
 def _validate_artifact_batch(artifacts: Any) -> None:
     if not isinstance(artifacts, list) or not artifacts:
-        raise ToolExecutionError('artifacts must be a non-empty list.')
+        raise ToolExecutionError('ARTIFACT_ARGUMENT_INVALID: artifacts must be a non-empty list.')
     if len(artifacts) > 50:
-        raise ToolExecutionError('At most 50 artifacts may be saved at once.')
+        raise ToolExecutionError('ARTIFACT_ARGUMENT_INVALID: At most 50 artifacts may be saved at once.')
 
     for index, item in enumerate(artifacts):
         if not isinstance(item, dict):
-            raise ToolExecutionError(f'artifacts[{index}] must be an object.')
+            raise ToolExecutionError(f'ARTIFACT_ARGUMENT_INVALID: artifacts[{index}] must be an object.')
         if 'key' not in item or 'value' not in item:
             if 'key' in item and 'content' in item and 'value' not in item:
                 raise ToolExecutionError(
-                    f'artifacts[{index}] uses content, but the payload field must be named value. '
+                    f'ARTIFACT_ARGUMENT_INVALID: artifacts[{index}] uses content, '
+                    'but the payload field must be named value. '
                     'Use: {"artifacts":[{"key":"<output key>","value":"<actual content>"}]}',
                 )
             raise ToolExecutionError(
-                f'artifacts[{index}] requires key and value. '
+                f'ARTIFACT_ARGUMENT_INVALID: artifacts[{index}] requires key and value. '
                 'Use: {"artifacts":[{"key":"<output key>","value":"<actual content>"}]}',
             )
 
@@ -1091,8 +1105,8 @@ def _get_public_workflow_artifacts(
 
 def patch_artifact(
     key: str,
-    patch: str,
-    patch_type: str = 'str_replace',
+    patch: Union[Dict[str, Any], List[Dict[str, Any]], str],
+    patch_type: Literal['str_replace', 'json_merge', 'json_patch'] = 'str_replace',
     sort_order: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Apply a local patch to a previously saved artifact without committing a new revision.
@@ -1111,7 +1125,8 @@ def patch_artifact(
 
     Args:
         key (str): The artifact key to patch.
-        patch (str): A JSON-encoded patch payload whose decoded shape depends on patch_type:
+        patch (dict | list | str): Pass a native object or array. Legacy JSON strings
+            are also accepted. The shape depends on patch_type:
             - str_replace: {"old_str": "exact original text", "new_str": "replacement"}
             - json_merge:  {"field": "new_value", "obsolete": null}  (RFC 7396; null = delete)
             - json_patch:  [{"op": "replace", "path": "/items/0/status", "value": "done"}] (RFC 6902)
@@ -1126,7 +1141,8 @@ def patch_artifact(
 
     decoded_patch, decode_error = _decode_patch_payload(patch)
     if decode_error:
-        raise ToolExecutionError(f'Invalid patch payload: {decode_error}')
+        raise ToolExecutionError(f'ARTIFACT_ARGUMENT_INVALID: patch: {decode_error}')
+    _validate_patch_payload(decoded_patch, patch_type)
 
     # Resolve list_index from sort_order when provided.
     list_index: Optional[int] = None
@@ -1165,7 +1181,7 @@ def patch_artifact(
         )
 
     if err:
-        raise ToolExecutionError(f'Patch was rejected: {err}')
+        raise ToolExecutionError(f'ARTIFACT_ARGUMENT_INVALID: {err}')
 
     ctx.write_draft(key, original_type, new_content, list_index)
     lines_changed = abs(new_content.count('\n') - content.count('\n'))
@@ -1177,7 +1193,8 @@ def patch_artifact(
         'path': draft_path,
         'message': (
             f"Draft for '{key}' updated ({lines_changed} line(s) changed). "
-            'Keep patching, or call discard_draft to abandon the edits. '
+            'Finish when the requested edit is complete; batch related edits in one call. '
+            'Use discard_draft to abandon the edits. '
             'The framework will commit them at the normal step boundary. '
             'Read the workspace path instead of copying the draft body.'
         ),
@@ -1185,16 +1202,49 @@ def patch_artifact(
 
 
 def _decode_patch_payload(patch: Any) -> tuple[Any, Optional[str]]:
-    """Normalize the model-facing JSON string while tolerating native internal callers."""
+    """Normalize native tool input and legacy JSON strings."""
     if not isinstance(patch, str):
         return patch, None
     try:
         return json.loads(patch), None
     except json.JSONDecodeError as exc:
         return None, (
-            'patch must be valid JSON text encoding the object/list documented for patch_type: '
-            f'{exc.msg} at character {exc.pos}.'
+            f'invalid legacy JSON string: {exc.msg} at line {exc.lineno}, '
+            f'column {exc.colno} (character {exc.pos}). '
+            'Pass the object/array directly instead of JSON-encoding it.'
         )
+
+
+def _validate_patch_payload(patch: Any, patch_type: str) -> None:
+    def invalid(path: str, message: str) -> None:
+        raise ToolExecutionError(f'ARTIFACT_ARGUMENT_INVALID: {path}: {message}')
+
+    expected = list if patch_type == 'json_patch' else dict
+    if not isinstance(patch, expected):
+        invalid('patch', f'{patch_type} expects {expected.__name__}, got {type(patch).__name__}.')
+    if patch_type == 'str_replace':
+        for field in ('old_str', 'new_str'):
+            if not isinstance(patch.get(field), str):
+                invalid('patch.' + field,
+                        f'expected string, got {type(patch.get(field)).__name__}; provide both old_str and new_str.')
+        if not patch['old_str']:
+            invalid('patch.old_str', 'must not be empty.')
+    elif patch_type == 'json_patch':
+        for index, operation in enumerate(patch):
+            loc = f'patch[{index}]'
+            if not isinstance(operation, dict):
+                invalid(loc, f'expected operation object, got {type(operation).__name__}.')
+            name = operation.get('op')
+            if not isinstance(name, str) or name not in {'add', 'remove', 'replace', 'move', 'copy', 'test'}:
+                invalid(loc + '.op',
+                        f'expected add, remove, replace, move, copy, or test; got {type(name).__name__}.')
+            for field in ('path', 'from') if name in {'move', 'copy'} else ('path',):
+                path = operation.get(field)
+                if not isinstance(path, str) or not path.startswith('/'):
+                    invalid(loc + '.' + field,
+                            f'expected a non-root JSON pointer starting with /; got {type(path).__name__}.')
+            if name in {'add', 'replace', 'test'} and 'value' not in operation:
+                invalid(loc + '.value', f'required for {name}.')
 
 
 def _normalize_text(text: str) -> str:
@@ -1339,26 +1389,30 @@ def _json_patch_apply(obj: Any, ops: List[Any]) -> Any:
         else:
             del cur[last]
 
-    for op in ops:
+    for index, op in enumerate(ops):
         operation = op.get('op')
         path = op.get('path', '')
-        if operation == 'replace':
-            _set(obj, path, op['value'])
-        elif operation == 'add':
-            _set(obj, path, op['value'])
-        elif operation == 'remove':
-            _remove(obj, path)
-        elif operation == 'move':
-            val = _get(obj, op['from'])
-            _remove(obj, op['from'])
-            _set(obj, path, val)
-        elif operation == 'copy':
-            _set(obj, path, _get(obj, op['from']))
-        elif operation == 'test':
-            if _get(obj, path) != op['value']:
-                raise ValueError(f'test failed at {path}')
-        else:
-            raise ValueError(f'unsupported op: {operation}')
+        try:
+            if operation in {'replace', 'add'}:
+                _set(obj, path, op['value'])
+            elif operation == 'remove':
+                _remove(obj, path)
+            elif operation == 'move':
+                val = _get(obj, op['from'])
+                _remove(obj, op['from'])
+                _set(obj, path, val)
+            elif operation == 'copy':
+                _set(obj, path, _get(obj, op['from']))
+            elif operation == 'test':
+                if _get(obj, path) != op['value']:
+                    raise ValueError('test value does not match')
+            else:
+                raise ValueError(f'unsupported op: {operation}')
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            reason = ('parent/member does not exist; create the parent before editing its children'
+                      if isinstance(exc, KeyError) else 'array index is out of range'
+                      if isinstance(exc, IndexError) else str(exc))
+            raise ValueError(f'patch[{index}] ({operation}, path={path!r}): {reason}.') from None
     return obj
 
 

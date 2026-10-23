@@ -4,7 +4,7 @@ import { ConfigProvider, message } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import CreateKnowledgeBaseModal, { type CreateKnowledgeBaseModalRef } from "./index";
 import type { SyncKnowledgeBaseCreationVm } from "@/modules/knowledge/hooks/useSyncKnowledgeBaseCreation";
-import { getLearningCatalog, saveKnowledgeBaseCapabilities, type LearningCatalog } from "@/modules/learning/api";
+import { createCapabilityProfile, getLearningCatalog, listCapabilityProfiles, saveKnowledgeBaseCapabilities, type LearningCatalog } from "@/modules/learning/api";
 import { isDeveloperModeActive } from "@/utils/developerMode";
 import { fetchUserUiPreferences } from "@/modules/user/uiPreferencesApi";
 
@@ -39,6 +39,7 @@ const catalog: LearningCatalog = {
   profiles: [
     { key: "general", name_i18n_key: "General reading", description_i18n_key: "", capabilities: generalKeys },
     { key: "english_learning", name_i18n_key: "English learning", description_i18n_key: "", capabilities: englishKeys },
+    { key: "academic_papers", name_i18n_key: "Academic papers", description_i18n_key: "", capabilities: generalKeys },
   ],
   capabilities: generalKeys.map((key) => ({
     key, version: 1, name_i18n_key: key, description_i18n_key: "", local_only: true,
@@ -52,8 +53,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   rag.availability = "ready";
   vi.mocked(fetchUserUiPreferences).mockResolvedValue({ document_parsing_enabled: false } as Awaited<ReturnType<typeof fetchUserUiPreferences>>);
+  localStorage.clear();
   vi.mocked(isDeveloperModeActive).mockReturnValue(false);
   vi.mocked(getLearningCatalog).mockResolvedValue(catalog);
+  vi.mocked(listCapabilityProfiles).mockResolvedValue({ builtin: catalog.profiles, custom: [] });
   vi.mocked(saveKnowledgeBaseCapabilities).mockResolvedValue({});
 });
 afterEach(() => {
@@ -89,6 +92,11 @@ async function selectEnglishProfile() {
   fireEvent.keyDown(profiles, { key: "Enter", keyCode: 13 });
 }
 
+async function selectProfile(label: string) {
+  fireEvent.mouseDown(screen.getByRole("combobox", { name: "learning.capabilityProfile" }));
+  fireEvent.click(await screen.findByText(label, { selector: ".ant-select-item-option-content" }));
+}
+
 describe("knowledge creation capability submission", () => {
   it("preserves the indexing target for deferred ingestion without RAG", async () => {
     rag.availability = "missing";
@@ -109,18 +117,47 @@ describe("knowledge creation capability submission", () => {
     await waitFor(() => expect(saveKnowledgeBaseCapabilities).toHaveBeenCalledWith("test-dataset",
       generalKeys.map((key, index) => ({ key, version: 1, enabled: true, display_order: index + 1, settings: {} })),
     ));
-    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ processing_level: "stored" }));
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ processing_level: "stored", library_kind: "document", scenario_key: "general" }));
+  });
+
+  it.each([false, true])("derives the paper kind only from the academic scenario (developer=%s)", async (developer) => {
+    vi.mocked(isDeveloperModeActive).mockReturnValue(developer);
+    vi.mocked(fetchUserUiPreferences).mockResolvedValue({ document_parsing_enabled: true } as Awaited<ReturnType<typeof fetchUserUiPreferences>>);
+    const { onCreate } = await mountModal();
+    await fillRequiredFields();
+    expect(screen.queryByText("资料库类型")).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: "论文集" })).not.toBeInTheDocument();
+    vi.mocked(fetchUserUiPreferences).mockResolvedValue({ document_parsing_enabled: true } as Awaited<ReturnType<typeof fetchUserUiPreferences>>);
+    await selectProfile("Academic papers");
+    fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ library_kind: "paper" })));
+    expect(onCreate.mock.calls[0][0]).not.toHaveProperty("learning_profile_key");
+  });
+
+  it.each(["General reading", "English learning"])("creates a document library when switching from academic papers to %s", async (scenario) => {
+    const { onCreate } = await mountModal();
+    await fillRequiredFields();
+    vi.mocked(fetchUserUiPreferences).mockResolvedValue({ document_parsing_enabled: true } as Awaited<ReturnType<typeof fetchUserUiPreferences>>);
+    await selectProfile("Academic papers");
+    await selectProfile(scenario);
+    fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ library_kind: "document" })));
+    const keys = scenario === "English learning" ? englishKeys : generalKeys;
+    await waitFor(() => expect(saveKnowledgeBaseCapabilities).toHaveBeenCalledWith("test-dataset",
+      keys.map((key, index) => ({ key, version: 1, enabled: true, display_order: index + 1, settings: {} })),
+    ));
   });
 
   it.each([false, true])("submits a changed scenario's preset without opening advanced settings (developer=%s)", async (developer) => {
     vi.mocked(isDeveloperModeActive).mockReturnValue(developer);
-    await mountModal();
+    const { onCreate } = await mountModal();
     await fillRequiredFields();
     await selectEnglishProfile();
     fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
     await waitFor(() => expect(saveKnowledgeBaseCapabilities).toHaveBeenCalledWith("test-dataset",
       englishKeys.map((key, index) => ({ key, version: 1, enabled: true, display_order: index + 1, settings: {} })),
     ));
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ scenario_key: "english_learning" }));
   });
 
   it("preserves advanced edits after the panel is collapsed", async () => {
@@ -138,6 +175,31 @@ describe("knowledge creation capability submission", () => {
       expect.objectContaining({ key: "english_definition" }),
       expect.objectContaining({ key: "general_translation" }),
     ]));
+  });
+
+  it("persists an existing custom preset identity and its capabilities", async () => {
+    vi.mocked(listCapabilityProfiles).mockResolvedValue({ builtin: catalog.profiles, custom: [{ id: "custom-owned", custom_name: "My preset", description: "", capability_refs_json: JSON.stringify(englishKeys.map(key => ({ key }))) }] });
+    const { onCreate } = await mountModal();
+    await fillRequiredFields();
+    const profiles = screen.getByRole("combobox", { name: "learning.capabilityProfile" });
+    fireEvent.mouseDown(profiles);
+    fireEvent.click(screen.getByText("My preset"));
+    fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ scenario_key: "custom-owned" })));
+    expect(createCapabilityProfile).not.toHaveBeenCalled();
+    await waitFor(() => expect(saveKnowledgeBaseCapabilities).toHaveBeenCalledWith("test-dataset", englishKeys.map((key, index) => ({ key, version: 1, enabled: true, display_order: index + 1, settings: {} }))));
+  });
+
+  it("uses the saved identity when creating a custom preset", async () => {
+    vi.mocked(isDeveloperModeActive).mockReturnValue(true);
+    vi.mocked(createCapabilityProfile).mockResolvedValue({ id: "new-custom", custom_name: "New preset", description: "", capability_refs_json: "[]" });
+    const { onCreate } = await mountModal();
+    await fillRequiredFields();
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "learning.capabilityProfile" }));
+    fireEvent.click(screen.getByText("learning.customProfile"));
+    fireEvent.change(await screen.findByLabelText(/learning.customProfileName/), { target: { value: "New preset" } });
+    fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ scenario_key: "new-custom" })));
   });
 
   it("waits for the preset catalog before allowing creation", async () => {

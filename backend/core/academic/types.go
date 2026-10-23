@@ -26,15 +26,17 @@ type FulltextCandidate struct {
 }
 
 type PresenceDocument struct {
-	DatasetID     string `json:"dataset_id"`
-	DatasetName   string `json:"dataset_name"`
-	DocumentID    string `json:"document_id"`
-	DocumentName  string `json:"document_name"`
-	SourceVersion string `json:"source_version,omitempty"`
-	ContentSHA256 string `json:"content_sha256,omitempty"`
+	DatasetID      string `json:"dataset_id"`
+	DatasetName    string `json:"dataset_name"`
+	DocumentID     string `json:"document_id"`
+	DocumentName   string `json:"document_name"`
+	SourceProvider string `json:"source_provider,omitempty"`
+	SourceVersion  string `json:"source_version,omitempty"`
+	ContentSHA256  string `json:"content_sha256,omitempty"`
 }
 
 type PresenceResult struct {
+	MetadataOnly     bool               `json:"metadata_only"`
 	WorkID           string             `json:"work_id"`
 	Status           string             `json:"status"`
 	CurrentDataset   []PresenceDocument `json:"current_dataset"`
@@ -44,6 +46,7 @@ type PresenceResult struct {
 }
 
 type PreviewItem struct {
+	Paper        PaperRef            `json:"paper"`
 	WorkID       string              `json:"work_id"`
 	ReferenceIDs []string            `json:"reference_ids,omitempty"`
 	Title        string              `json:"title"`
@@ -55,15 +58,27 @@ type PreviewItem struct {
 }
 
 type ImportQueueItem struct {
-	ItemID       string    `json:"item_id"`
-	BatchID      string    `json:"batch_id"`
-	WorkID       string    `json:"work_id"`
-	Title        string    `json:"title"`
-	Status       string    `json:"status"`
-	Stage        string    `json:"stage"`
-	DocumentID   string    `json:"document_id,omitempty"`
-	ErrorCode    string    `json:"error_code,omitempty"`
-	ErrorMessage string    `json:"error_message,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	TargetDatasetID  string               `json:"target_dataset_id"`
+	SourceProvider   string               `json:"source_provider,omitempty"`
+	SourceVersion    string               `json:"source_version,omitempty"`
+	BatchStatus      string               `json:"batch_status"`
+	BatchFailedItems int                  `json:"batch_failed_items"`
+	CurrentDocument  *ImportQueueDocument `json:"current_document,omitempty" gorm:"-"`
+	ItemID           string               `json:"item_id"`
+	BatchID          string               `json:"batch_id"`
+	WorkID           string               `json:"work_id"`
+	Title            string               `json:"title"`
+	Status           string               `json:"status"`
+	Stage            string               `json:"stage"`
+	DocumentID       string               `json:"document_id,omitempty"`
+	ErrorCode        string               `json:"error_code,omitempty"`
+	ErrorMessage     string               `json:"error_message,omitempty"`
+	CreatedAt        time.Time            `json:"created_at"`
+	UpdatedAt        time.Time            `json:"updated_at"`
+}
+
+type ImportQueueDocument struct {
+	DocumentID       string `json:"document_id"`
+	ProcessingStatus string `json:"processing_status"`
+	ProcessingError  string `json:"processing_error,omitempty"`
 }

@@ -443,6 +443,15 @@ class OneShotNoticeBuffer:
         self._batch_ids = ()
 
 
+class ToolArgumentRetryExhausted(RuntimeError):
+    """Stop a real agent run after its bounded input-repair attempts fail."""
+
+
+def _explicit_argument_error(record: ToolExecutionRecord) -> bool:
+    return (isinstance(record.result, dict) and record.result.get('ok') is False
+            and str(record.result.get('value', '')).startswith('ARTIFACT_ARGUMENT_INVALID:'))
+
+
 class ToolExecutionMiddleware:
     """Coordinate cancellation, failure policy, telemetry, and one prepared execution."""
 
@@ -451,6 +460,7 @@ class ToolExecutionMiddleware:
                  repeat_monitor: ExactRepeatMonitor | None = None,
                  notice_buffer: OneShotNoticeBuffer | None = None,
                  call_quota: ToolCallQuota | None = None,
+                 argument_limits: dict[str, int] | None = None,
                  authorization_gate: Any = None,
                  workspace_permission=None, tool_context: ToolResolutionContext | None = None,
                  trusted_opaque_tools=(), directory_runtime=None):
@@ -458,6 +468,9 @@ class ToolExecutionMiddleware:
         self._directory_runtime = directory_runtime
         self._failure_policy = failure_policy or FailureRetryPolicy()
         self._call_quota = call_quota or ToolCallQuota()
+        self._argument_limits = {'save_artifacts': 3, 'patch_artifact': 3, **(argument_limits or {})}
+        self._argument_failures: Counter = Counter()
+        self.argument_failure = ''
         self._expanded_round_limit = expanded_round_limit
         self._cancel_check = cancel_check
         self._repeat_monitor = repeat_monitor
@@ -506,9 +519,43 @@ class ToolExecutionMiddleware:
                 f'tool round limit to {self._expanded_round_limit}.'
             )
 
+    def restore_argument_results(self, results):
+        for item in results:
+            result = item.get('result')
+            if isinstance(result, str):
+                try:
+                    result = json.loads(result)
+                except (TypeError, ValueError):
+                    continue
+            self._observe_argument_result(str(item.get('name') or ''), result, None)
+
+    def _observe_argument_result(self, name, result, allowed_tool_names):
+        if name not in self._argument_limits or name not in self.tools_info:
+            return
+        if allowed_tool_names is not None and name not in allowed_tool_names:
+            return
+        if not isinstance(result, dict):
+            return
+        detail = str(result.get('value', ''))
+        invalid = result.get('ok') is False and detail.startswith((
+            'Invalid arguments:', 'Invalid tool arguments.', 'Tool call format is invalid',
+            'ARTIFACT_ARGUMENT_INVALID:',
+        ))
+        if invalid:
+            self._argument_failures[name] += 1
+            if self._argument_failures[name] >= self._argument_limits[name]:
+                self.argument_failure = (
+                    f'TOOL_ARGUMENT_RETRY_EXHAUSTED: {name}: '
+                    f'{self._argument_failures[name]} consecutive invalid submissions. {detail}'
+                )
+        elif result.get('ok') is True:
+            self._argument_failures[name] = 0
+
     def execute_with_records(self, tools: Any, verbose: bool = False,
                              allowed_tool_names: set[str] | None = None):
         del verbose
+        if self.argument_failure:
+            raise ToolArgumentRetryExhausted(self.argument_failure)
         if self._cancel_check is not None:
             self._cancel_check(None)
         prepared_calls: list[PreparedToolCall] = []
@@ -644,13 +691,39 @@ class ToolExecutionMiddleware:
 
         try:
             indices = select(prepared_batch)
-            executed_batch = self._manager.execute_prepared(
-                prepared_batch, selected_indices=indices,
-                approved_indices=tuple(index for index in indices
-                                       if prepared_batch[index].ready
-                                       and prepared_batch[index].authorization is AuthorizationDecision.ASK),
-                execution_context=lambda item: self._execution_scope(permission, coordinator, item),
-            )
+            guarded_batch = any(item.tool_name in self._argument_limits for item in prepared_batch)
+            if guarded_batch:
+                # Artifact writes share a repair budget. Execute these batches in
+                # order so a fourth call cannot run behind three invalid calls.
+                executed_records = []
+                blocked = dict(decision.blocked_results)
+                for index in indices:
+                    if self.argument_failure:
+                        blocked[index] = tool_failure(self.argument_failure)
+                        continue
+                    batch = self._manager.execute_prepared(
+                        prepared_batch, selected_indices=(index,),
+                        approved_indices=((index,) if prepared_batch[index].authorization
+                                          is AuthorizationDecision.ASK else ()),
+                        execution_context=lambda item: self._execution_scope(permission, coordinator, item),
+                    )
+                    record = next(record for record in batch.records if record.index == index)
+                    self._observe_argument_result(record.tool_name, record.result, allowed_tool_names)
+                    executed_records.append(record)
+                decision = replace(decision, blocked_results=blocked)
+                executed_batch = ToolExecutionBatch(
+                    results=lazyllm.package([record.result for record in executed_records]),
+                    records=tuple(executed_records), duration_ms=0,
+                )
+            else:
+                executed_batch = self._manager.execute_prepared(
+                    prepared_batch, selected_indices=indices,
+                    approved_indices=tuple(index for index in indices
+                                           if prepared_batch[index].ready
+                                           and prepared_batch[index].authorization is AuthorizationDecision.ASK),
+                    execution_context=lambda item: self._execution_scope(permission, coordinator, item),
+                )
+
         finally:
             if coordinator is not None:
                 coordinator.close()
@@ -710,7 +783,11 @@ class ToolExecutionMiddleware:
             emit_tool_result(prepared_calls[index].tool_call, result)
         completed_records = [record for record in records if record is not None]
         self._capture_documents(completed_records)
-        self._failure_policy.observe(completed_records)
+        if not guarded_batch:
+            for record in completed_records:
+                self._observe_argument_result(record.tool_name, record.result, allowed_tool_names)
+        # Input repair has its own budget; execution failures retain their old policy.
+        self._failure_policy.observe([r for r in completed_records if not _explicit_argument_error(r)])
         self._call_quota.observe(completed_records)
         batch = ToolExecutionBatch(
             results=lazyllm.package(results),

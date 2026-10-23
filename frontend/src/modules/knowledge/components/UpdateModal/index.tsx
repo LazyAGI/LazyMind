@@ -23,6 +23,7 @@ import {
 } from "@/modules/knowledge/utils/processingLevel";
 import { getKnowledgeBaseCapabilities, getLearningCatalog, saveKnowledgeBaseCapabilities, type LearningCapability } from "@/modules/learning/api";
 import CapabilitySettings, { capabilityRefsFromForm, parseCapabilitySettings } from "@/modules/learning/CapabilitySettings";
+import { isPaperLibrary } from "@/modules/knowledge/paper/store";
 import "./index.scss";
 
 const { TextArea } = Input;
@@ -153,6 +154,9 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
         const learningCapabilitySettings = params.learning_capability_settings || {};
         delete params.learning_capability_keys;
         delete params.learning_capability_settings;
+        if (data?.library_kind === undefined && isPaperLibrary(data?.dataset_id)) {
+          params.library_kind = "paper";
+        }
         const selectedAlgoId =
           params.algo_id ||
           (algorithm.length === 1 ? algorithm[0]?.algo_id : undefined);
@@ -239,7 +243,7 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
               options={PROCESSING_LEVEL_ORDER.map((level) => ({
                 value: level,
                 label: t(`knowledge.processing${level[0].toUpperCase()}${level.slice(1)}`),
-                disabled: level === "indexed" && embeddingReady === false,
+                disabled: (level === "indexed" && embeddingReady === false) || ((data as CoreDataset)?.scenario_key === "academic_papers" && level === "stored"),
               }))}
             />
           </Form.Item>

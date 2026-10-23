@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+from dataclasses import replace
 import json
 import os
 import re
@@ -1405,6 +1406,14 @@ async def run_subagent_stream(
         step_seq = db.max_step_seq(task_id) + 1 if resume else 0
         resume_history = _rebuild_history_from_steps(db, task_id) if resume else None
         if resume:
+            # Use durable results, including malformed calls excluded from model
+            # history. Restarting a worker must not reset its input-repair budget.
+            argument_results = [
+                result for step in db.load_steps(task_id) if step.get('role') == 'tool'
+                for result in (step.get('content') or {}).get('tool_results', [])
+                if isinstance(result, dict)
+            ]
+            plan.execution_options = replace(plan.execution_options, argument_result_history=argument_results)
             objective_message = (
                 PromptBuilder.for_role(AgentRole.SUBAGENT)
                 .input(content=ctx.objective, source='task.objective')
@@ -1858,7 +1867,7 @@ def _evaluate_completion(
     force_text = str(force_result or '').strip()
     evidence = [
         {'key': artifact.get('slot'), 'content_type': artifact.get('content_type'),
-         'value': str(artifact.get('value') or {})[:2000]}
+         'value': json.dumps(artifact.get('value') or {}, ensure_ascii=False, default=str)[:2000]}
         for artifact in artifacts
     ]
 
@@ -1878,6 +1887,10 @@ def _evaluate_completion(
     prompt_lines += [
         '',
         'Evaluation rules:',
+        '- Saved artifact values use storage envelopes: JSON content is under data, '
+        'text content is under text, and large content uses a type/path reference. '
+        'These envelopes are not business output fields. Evidence previews may be truncated; '
+        'do not reject valid delivery merely for its storage envelope or preview truncation.',
         '- Decide from the objective whether delivery requires saved artifacts. PDF, image, '
         'document, or data-file generation requires the requested deliverable, not a textual '
         'claim, plan, placeholder, unrelated artifact, or description of a file.',

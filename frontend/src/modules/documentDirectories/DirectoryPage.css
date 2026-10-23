@@ -52,6 +52,10 @@
 .directory-card-heading > .ant-btn-link { padding: 0; text-align: left; height: auto; white-space: normal; flex: 1; font-weight: 600; color: inherit; }
 .directory-card-footer { color: var(--directory-muted); font-size: 12px; margin-top: 16px; }
 .directory-loading { text-align: center; padding: 80px; }
+.directory-failed-batches { display: flex; flex-direction: column; }
+.directory-failed-batch { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 0; }
+.directory-failed-batch + .directory-failed-batch { border-top: 1px solid var(--directory-border); }
+.directory-failed-batch-copy { display: flex; flex-direction: column; flex: 1; min-width: 180px; gap: 4px; overflow-wrap: anywhere; }
 @media (max-width: 1100px) {
   .directory-page { padding: 20px; }
   .directory-header { flex-direction: column; gap: 12px; }
